@@ -1,99 +1,129 @@
-// app/billing/page.tsx
 "use client";
 
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import TopNav from "@/app/components/TopNav";
 import { useAuth } from "@/context/AuthContext";
+
+type PlanId = "standard" | "professional";
 
 export default function BillingPage() {
   const { user, loading } = useAuth();
   const router = useRouter();
 
-  if (!loading && !user) {
-    router.replace("/signin");
+  const [selectedPlan, setSelectedPlan] = useState<PlanId>("professional");
+  const [infoMsg, setInfoMsg] = useState<string | null>(null);
+
+  // Proteger ruta
+  useEffect(() => {
+    if (!loading && !user) {
+      router.replace("/signin");
+    }
+  }, [loading, user, router]);
+
+  if (loading || !user) {
+    return (
+      <main className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center">
+        <p className="text-slate-400 text-sm">Loading billing…</p>
+      </main>
+    );
   }
 
-  const plan =
-    (user as any)?.plan || (user as any)?.subscriptionPlan || "standard";
+  const handleStandardClick = () => {
+    setSelectedPlan("standard");
+    // Aquí podrías guardar en Firestore / backend el plan elegido.
+    setInfoMsg(
+      "Standard plan selected. Stripe checkout is disabled in this version, you can keep using the free features."
+    );
+  };
 
-  function handleManageInStripe() {
-    // Aquí luego conectas el portal de facturación de Stripe:
-    // router.push("/api/stripe/customer-portal")
-    console.log("TODO: open Stripe customer portal");
-  }
-
-  function goToPricing() {
-    router.push("/pricing");
-  }
+  const handleProfessionalClick = () => {
+    setSelectedPlan("professional");
+    // IMPORTANTE: ya NO se llama a Stripe ni /api/checkout.
+    // Si quieres, lo mandamos al signup con el plan preseleccionado:
+    router.push("/signup?plan=professional");
+    // Si no quieres redirigir a ningún lado, comenta la línea de arriba y deja solo el mensaje:
+    // setInfoMsg("Professional plan selected. Stripe checkout will be added later.");
+  };
 
   return (
     <main className="min-h-screen bg-slate-950 text-slate-50">
       <TopNav />
-      <div className="max-w-4xl mx-auto px-6 md:px-8 py-8 space-y-8">
-        <header>
-          <p className="text-[11px] uppercase tracking-[0.25em] text-emerald-400">
-            Billing
-          </p>
-          <h1 className="text-3xl font-semibold mt-1">
-            Billing &amp; subscription
+
+      <div className="px-6 md:px-10 py-10 flex justify-center">
+        <div className="w-full max-w-3xl bg-slate-950/90 border border-slate-800 rounded-3xl p-8 shadow-2xl">
+          <h1 className="text-2xl md:text-3xl font-semibold mb-2">
+            Choose your plan
           </h1>
-          <p className="text-sm text-slate-400 mt-2">
-            Manage your Trading Journal Pro plan, payments and renewal.
+          <p className="text-sm text-slate-400 mb-6 max-w-2xl">
+            Select the subscription that best fits your trading process. For now,
+            payments via Stripe are disabled while the integration is in progress.
           </p>
-        </header>
 
-        {/* Current plan */}
-        <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5 flex flex-col md:flex-row justify-between gap-4">
-          <div>
-            <p className="text-xs text-slate-400 mb-1">Current plan</p>
-            <p className="text-lg font-semibold text-slate-100 capitalize">
-              {plan}
-            </p>
-            <p className="text-[11px] text-slate-500 mt-1">
-              In producción, estos datos se leerían directamente de Stripe
-              (subscription object).
-            </p>
-          </div>
-          <div className="flex flex-col items-start md:items-end gap-2">
+          <div className="grid md:grid-cols-2 gap-5 mb-4">
+            {/* Standard */}
             <button
               type="button"
-              onClick={goToPricing}
-              className="px-4 py-2 rounded-xl bg-emerald-400 text-slate-950 text-xs font-semibold hover:bg-emerald-300 transition"
+              onClick={handleStandardClick}
+              className={`text-left rounded-2xl border px-5 py-6 transition ${
+                selectedPlan === "standard"
+                  ? "border-emerald-400 bg-slate-900"
+                  : "border-slate-700 bg-slate-900/60 hover:border-emerald-400"
+              }`}
             >
-              Change / upgrade plan
+              <p className="text-[10px] tracking-[0.2em] text-slate-500 mb-1">
+                STARTER
+              </p>
+              <p className="text-lg font-semibold mb-1">Standard</p>
+              <p className="text-emerald-400 text-sm font-semibold mb-3">
+                $14.99 <span className="text-slate-400 text-xs">/ month</span>
+              </p>
+              <ul className="text-xs text-slate-300 space-y-1">
+                <li>• Daily P&amp;L tracking</li>
+                <li>• Basic analytics &amp; calendar</li>
+                <li>• Growth plan basics</li>
+              </ul>
             </button>
+
+            {/* Professional */}
             <button
               type="button"
-              onClick={handleManageInStripe}
-              className="px-4 py-2 rounded-xl border border-slate-700 text-xs text-slate-200 hover:border-emerald-400 hover:text-emerald-300 transition"
+              onClick={handleProfessionalClick}
+              className={`text-left rounded-2xl border px-5 py-6 transition relative overflow-hidden ${
+                selectedPlan === "professional"
+                  ? "border-emerald-400 bg-slate-900"
+                  : "border-emerald-500/60 bg-emerald-500/5 hover:border-emerald-400"
+              }`}
             >
-              Manage in Stripe portal
+              <div className="absolute right-4 top-4 text-[10px] px-2 py-0.5 rounded-full bg-emerald-400 text-slate-950 font-semibold">
+                Most popular
+              </div>
+              <p className="text-[10px] tracking-[0.2em] text-slate-500 mb-1">
+                FOR SERIOUS TRADERS
+              </p>
+              <p className="text-lg font-semibold mb-1">Professional</p>
+              <p className="text-emerald-400 text-sm font-semibold mb-3">
+                $24.99 <span className="text-slate-400 text-xs">/ month</span>
+              </p>
+              <ul className="text-xs text-slate-300 space-y-1">
+                <li>• Everything in Standard</li>
+                <li>• Advanced analytics &amp; breakdowns</li>
+                <li>• AI coaching &amp; mindset tools</li>
+                <li>• Priority improvements &amp; features</li>
+              </ul>
             </button>
           </div>
-        </section>
 
-        {/* Plan cards (resumen rápido) */}
-        <section className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
-            <p className="text-xs text-slate-400 mb-1">Standard</p>
-            <p className="text-lg font-semibold mb-1">$14.99 / month</p>
-            <ul className="text-[11px] text-slate-300 space-y-1">
-              <li>• Core journal & daily stats</li>
-              <li>• P&amp;L calendar and weekly summary</li>
-              <li>• Limited AI coaching</li>
-            </ul>
-          </div>
-          <div className="rounded-2xl border border-emerald-500/40 bg-emerald-500/5 p-5">
-            <p className="text-xs text-emerald-300 mb-1">Professional</p>
-            <p className="text-lg font-semibold mb-1">$24.99 / month</p>
-            <ul className="text-[11px] text-slate-300 space-y-1">
-              <li>• Everything in Standard</li>
-              <li>• Advanced analytics & tags</li>
-              <li>• Full AI coaching & experiments</li>
-              <li>• Priority support</li>
-            </ul>
-          </div>
-        </section>
+          {infoMsg && (
+            <p className="text-xs text-amber-300 mt-1">{infoMsg}</p>
+          )}
+
+          <p className="text-[11px] text-slate-500 mt-4">
+            Your subscription can unlock additional features like advanced
+            analytics, AI coaching and more. Payments will be enabled later once
+            Stripe is fully integrated.
+          </p>
+        </div>
       </div>
     </main>
   );
