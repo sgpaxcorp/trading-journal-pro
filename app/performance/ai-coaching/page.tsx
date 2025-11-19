@@ -546,7 +546,7 @@ export default function AiCoachingPage() {
               </div>
               {/* AQUÍ CAMBIÉ EL ROJO A AZUL */}
               <div className="rounded-xl border border-sky-800/60 bg-slate-950/60 p-3">
-                <p className="text-[11px] text-slate-400">Red</p>
+                <p className="text-[11px] text-slate-400">Blue</p>
                 <p className="text-xl font-semibold">
                   {snapshot?.redSessions ?? 0}
                 </p>
