@@ -7,48 +7,44 @@ const openai = new OpenAI({
 
 export async function POST(req: Request) {
   try {
+    // Seguridad básica: que exista la key
     if (!process.env.OPENAI_API_KEY) {
       return new Response(
-        JSON.stringify({
-          error:
-            "Missing OPENAI_API_KEY. Add it to your .env.local and Vercel project.",
-        }),
-        { status: 500 }
+        JSON.stringify({ error: "Server missing OPENAI_API_KEY." }),
+        { status: 500, headers: { "Content-Type": "application/json" } }
       );
     }
 
     const body = await req.json();
-    const question = (body?.question || "").toString().trim();
+    const message = (body?.message ?? "").toString().trim();
 
-    if (!question) {
+    if (!message) {
       return new Response(
-        JSON.stringify({ error: "Question is required." }),
-        { status: 400 }
+        JSON.stringify({ error: "Message is required." }),
+        { status: 400, headers: { "Content-Type": "application/json" } }
       );
     }
 
     const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      temperature: 0.4,
+      model: "gpt-4o-mini", // puedes cambiar de modelo si quieres
+      temperature: 0.7,
+      max_tokens: 400,
       messages: [
         {
           role: "system",
           content:
-            "You are the AI assistant for Trading Journal Pro, a web-based trading journal and performance platform. " +
-            "Answer user questions clearly and concisely. " +
-            "If they ask about the website, trading journal features, psychology, or how to use the app, explain it. " +
-            "If they ask general questions (definitions, concepts, etc.), answer them too, as long as it is safe and appropriate.",
+            "You are the Trading Journal Pro assistant. You help with questions about the platform, trading journaling, trading psychology, and any general definitions or concepts the user asks for. Answer in the same language as the user, be clear and concise.",
         },
         {
           role: "user",
-          content: question,
+          content: message,
         },
       ],
     });
 
     const answer =
       completion.choices[0]?.message?.content?.trim() ||
-      "I couldn't generate an answer. Please try again.";
+      "Lo siento, no pude generar una respuesta.";
 
     return new Response(JSON.stringify({ answer }), {
       status: 200,
@@ -58,9 +54,9 @@ export async function POST(req: Request) {
     console.error("[/api/ask] error:", err);
     return new Response(
       JSON.stringify({
-        error: "Something went wrong while contacting the AI service.",
+        error: "Error contacting the AI assistant.",
       }),
-      { status: 500 }
+      { status: 500, headers: { "Content-Type": "application/json" } }
     );
   }
 }
