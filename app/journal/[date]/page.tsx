@@ -309,7 +309,7 @@ export default function DailyJournalPage() {
     notes: "",
     emotion: "",
     tags: [],
-    respectedPlan: true,
+    respectedPlan: true, // puedes dejarlo, solo ya no hay UI
   });
 
   // P&L as string so user can delete 0 and type negatives
@@ -358,16 +358,7 @@ export default function DailyJournalPage() {
     [exitTrades]
   );
 
-  // Tags for analytics & AI
-  const tagListQuick = [
-    "A+ setup",
-    "Revenge trade",
-    "FOMO",
-    "Rule break",
-    "Well executed",
-    "Discipline",
-  ];
-
+  // SOLO dejamos probabilityTags (quick tags se eliminó)
   const probabilityTags = [
     "A+ playbook setup",
     "B-setup (secondary quality)",
@@ -628,7 +619,7 @@ export default function DailyJournalPage() {
         </div>
 
         {/* Compact summary */}
-        <section className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-5 text-sm">
+        <section className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-5 text-sm">
           {/* Day P&L */}
           <div className="bg-slate-900/95 border border-slate-800 rounded-2xl p-4 space-y-2">
             <label className="text-slate-400 text-xs uppercase tracking-wide">
@@ -697,32 +688,6 @@ export default function DailyJournalPage() {
                 SHORT
               </button>
             </div>
-          </div>
-
-          {/* Plan respect */}
-          <div className="bg-slate-900/95 border border-slate-800 rounded-2xl p-4 space-y-2">
-            <label className="text-slate-400 text-xs uppercase tracking-wide">
-              Plan respect
-            </label>
-            <div className="flex items-start gap-2 mt-1">
-              <input
-                type="checkbox"
-                checked={!!entry.respectedPlan}
-                onChange={(e) =>
-                  setEntry((p) => ({
-                    ...p,
-                    respectedPlan: e.target.checked,
-                  }))
-                }
-                className="mt-[3px] h-4 w-4 rounded border-slate-600 bg-slate-950"
-              />
-              <p className="text-[15px] text-slate-200">
-                I respected my trading plan and risk rules today.
-              </p>
-            </div>
-            <p className="text-xs text-slate-500">
-              This checkbox feeds your psychology & rules statistics.
-            </p>
           </div>
         </section>
 
@@ -1132,7 +1097,7 @@ export default function DailyJournalPage() {
 
             {/* Emotional + Strategy + Probability + Screenshots */}
             <section className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-              {/* Emotional & quick tags */}
+              {/* Emotional state */}
               <div className="bg-slate-900/95 border border-slate-800 rounded-2xl p-4">
                 <p className="text-slate-200 text-sm font-semibold mb-2">
                   Emotional state & impulses
@@ -1143,15 +1108,8 @@ export default function DailyJournalPage() {
                 </p>
 
                 <div className="grid grid-cols-1 gap-2 text-[13px] mb-4">
-                  {[
-                    "Calm & focused",
-                    "Greedy",
-                    "Desperate",
-                  ].map((t) => (
-                    <label
-                      key={t}
-                      className="inline-flex items-center gap-2"
-                    >
+                  {["Calm & focused", "Greedy", "Desperate"].map((t) => (
+                    <label key={t} className="inline-flex items-center gap-2">
                       <input
                         type="checkbox"
                         onChange={() => toggleTag(t)}
@@ -1192,35 +1150,6 @@ export default function DailyJournalPage() {
                     <span>Revenge impulse present</span>
                   </label>
                 </div>
-
-                <div className="border-t border-slate-800 pt-3">
-                  <p className="text-slate-200 text-sm font-semibold mb-2">
-                    Quick tags
-                  </p>
-                  <p className="text-[11px] text-slate-500 mb-2">
-                    One-tap shortcuts that also feed your Analytics & AI
-                    coaching.
-                  </p>
-                  <div className="flex flex-col gap-2 text-xs">
-                    {tagListQuick.map((tag) => {
-                      const active = entry.tags?.includes(tag);
-                      return (
-                        <button
-                          key={tag}
-                          type="button"
-                          onClick={() => toggleTag(tag)}
-                          className={`w-full text-left px-3 py-1.5 rounded-lg border text-xs ${
-                            active
-                              ? "bg-emerald-400/90 border-emerald-400 text-slate-950"
-                              : "bg-slate-950 border-slate-700 text-slate-300 hover:border-emerald-400"
-                          }`}
-                        >
-                          {tag}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
               </div>
 
               {/* Strategy & probability flags */}
@@ -1240,10 +1169,7 @@ export default function DailyJournalPage() {
                     "Risk-to-reward ≥ 2R (planned)",
                     "Risk-to-reward < 1.5R (tight)",
                   ].map((t) => (
-                    <label
-                      key={t}
-                      className="inline-flex items-center gap-2"
-                    >
+                    <label key={t} className="inline-flex items-center gap-2">
                       <input
                         type="checkbox"
                         onChange={() => toggleTag(t)}
