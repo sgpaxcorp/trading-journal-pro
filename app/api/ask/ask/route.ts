@@ -1,58 +1,65 @@
-import { NextRequest, NextResponse } from "next/server";
+// app/api/ask/route.ts
+import OpenAI from "openai";
 
-export async function POST(req: NextRequest) {
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
+
+export async function POST(req: Request) {
   try {
-    const { question } = await req.json();
-
-    if (!question || typeof question !== "string") {
-      return NextResponse.json(
-        { error: "Missing question" },
-        { status: 400 }
-      );
-    }
-
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) {
-      return NextResponse.json(
-        { error: "Missing OPENAI_API_KEY" },
+    if (!process.env.OPENAI_API_KEY) {
+      return new Response(
+        JSON.stringify({
+          error:
+            "Missing OPENAI_API_KEY. Add it to your .env.local and Vercel project.",
+        }),
         { status: 500 }
       );
     }
 
-    const systemPrompt = `
-You are the AI assistant of "Trading Journal Pro", a SaaS trading journal.
-Explain features clearly and help with concepts like journaling, risk management,
-and trading psychology. Do NOT give specific trade recommendations.
-`;
+    const body = await req.json();
+    const question = (body?.question || "").toString().trim();
 
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "gpt-4.1-mini",
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: question },
-        ],
-        temperature: 0.5,
-        max_tokens: 300,
-      }),
+    if (!question) {
+      return new Response(
+        JSON.stringify({ error: "Question is required." }),
+        { status: 400 }
+      );
+    }
+
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      temperature: 0.4,
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are the AI assistant for Trading Journal Pro, a web-based trading journal and performance platform. " +
+            "Answer user questions clearly and concisely. " +
+            "If they ask about the website, trading journal features, psychology, or how to use the app, explain it. " +
+            "If they ask general questions (definitions, concepts, etc.), answer them too, as long as it is safe and appropriate.",
+        },
+        {
+          role: "user",
+          content: question,
+        },
+      ],
     });
 
-    const data = await response.json();
+    const answer =
+      completion.choices[0]?.message?.content?.trim() ||
+      "I couldn't generate an answer. Please try again.";
 
-    const content =
-      data?.choices?.[0]?.message?.content ||
-      "Sorry, I couldn't generate a response. Please try again.";
-
-    return NextResponse.json({ answer: content });
-  } catch (error: any) {
-    console.error("Ask API error:", error);
-    return NextResponse.json(
-      { error: "Something went wrong generating the answer." },
+    return new Response(JSON.stringify({ answer }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  } catch (err) {
+    console.error("[/api/ask] error:", err);
+    return new Response(
+      JSON.stringify({
+        error: "Something went wrong while contacting the AI service.",
+      }),
       { status: 500 }
     );
   }
