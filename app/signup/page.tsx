@@ -1,18 +1,22 @@
 "use client";
 
-import { useState, FormEvent } from "react";
+import { useState, Suspense } from "react";
+import type { FormEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useAuth } from "@/context/AuthContext";
-import type { PlanId } from "@/lib/types";
 import Link from "next/link";
 
-export default function SignUpPage() {
+import { useAuth } from "@/context/AuthContext";
+import type { PlanId } from "@/lib/types";
+
+/* =========================
+   Inner component (usa useSearchParams)
+========================= */
+function SignUpPageInner() {
   const { signUp } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  const initialPlan =
-    (searchParams.get("plan") as PlanId) || "standard";
+  const initialPlan = (searchParams.get("plan") as PlanId) || "standard";
 
   const [plan, setPlan] = useState<PlanId>(initialPlan);
   const [name, setName] = useState("");
@@ -42,7 +46,8 @@ export default function SignUpPage() {
           Create your Trade Journal Pro account
         </h1>
         <p className="text-xs text-slate-400">
-          Choose your plan and start building a clear, data-backed trading routine.
+          Choose your plan and start building a clear, data-backed trading
+          routine.
         </p>
 
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -75,7 +80,7 @@ export default function SignUpPage() {
             />
           </div>
 
-          {/* Password (mock for now) */}
+          {/* Password */}
           <div>
             <label className="block text-[10px] text-slate-400 mb-1">
               Password
@@ -145,5 +150,22 @@ export default function SignUpPage() {
         </p>
       </div>
     </main>
+  );
+}
+
+/* =========================
+   Wrapper con Suspense (export default)
+========================= */
+export default function SignUpPage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center px-4">
+          <p className="text-xs text-slate-400">Loading sign up…</p>
+        </main>
+      }
+    >
+      <SignUpPageInner />
+    </Suspense>
   );
 }
