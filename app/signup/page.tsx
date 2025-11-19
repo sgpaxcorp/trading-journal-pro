@@ -24,6 +24,7 @@ function SignUpPageInner() {
     setLoading(true);
 
     try {
+      // Plan por defecto guardado en tu user (lo puedes cambiar luego en billing)
       const defaultPlan: PlanId = "standard";
 
       // 1) Crear cuenta
@@ -36,8 +37,8 @@ function SignUpPageInner() {
         body: JSON.stringify({ name, email }),
       }).catch(() => {});
 
-      // 3) Llevar a escoger plan y pagar
-      router.push("/plans");
+      // 3) Ir directo a la página "Start from here / Go to dashboard"
+      router.push("/start");
     } catch (err: any) {
       setError(err.message || "Something went wrong.");
     } finally {
@@ -52,8 +53,8 @@ function SignUpPageInner() {
           Create your Trading Journal Pro account
         </h1>
         <p className="text-xs text-slate-400">
-          First, create your account. Next, you&apos;ll choose a plan and complete
-          payment.
+          First, create your account. Next, you&apos;ll set up your growth plan and
+          access your dashboard.
         </p>
 
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -110,7 +111,7 @@ function SignUpPageInner() {
             disabled={loading}
             className="w-full mt-2 px-4 py-2.5 rounded-xl bg-emerald-400 text-slate-950 text-xs font-semibold hover:bg-emerald-300 transition shadow-lg shadow-emerald-500/20 disabled:opacity-60"
           >
-            {loading ? "Creating your account..." : "Continue to plan selection"}
+            {loading ? "Creating your account..." : "Go to setup & dashboard"}
           </button>
         </form>
 
