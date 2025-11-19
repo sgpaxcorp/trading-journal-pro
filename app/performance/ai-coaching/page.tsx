@@ -93,7 +93,7 @@ function buildSnapshot(entries: JournalEntry[]): Snapshot {
 
     if (result === "green" || result === "win" || result === "profit") {
       greenSessions++;
-    } else if (result === "red" || result === "loss" || result === "losses") {
+    } else if (result === "blue" || result === "lesson learned" || result === "lesson learned") {
       redSessions++;
     }
   }
@@ -438,7 +438,7 @@ export default function AiCoachingPage() {
 
               {coachState.error && (
                 <div className="flex justify-start">
-                  <div className="text-xs text-rose-400">
+                  <div className="text-xs text-sky-300">
                     {coachState.error}
                   </div>
                 </div>
@@ -544,7 +544,8 @@ export default function AiCoachingPage() {
                   {snapshot?.greenSessions ?? 0}
                 </p>
               </div>
-              <div className="rounded-xl border border-rose-800/60 bg-slate-950/60 p-3">
+              {/* AQUÍ CAMBIÉ EL ROJO A AZUL */}
+              <div className="rounded-xl border border-sky-800/60 bg-slate-950/60 p-3">
                 <p className="text-[11px] text-slate-400">Red</p>
                 <p className="text-xl font-semibold">
                   {snapshot?.redSessions ?? 0}

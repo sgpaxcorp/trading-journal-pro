@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useAuth } from "@/context/AuthContext";
 
 type NavItem = {
   id: string;
@@ -16,7 +18,7 @@ type DropdownProps = {
   items: NavItem[];
 };
 
-/* ========== Reusable Dropdown component ========== */
+/* ========== Reusable Dropdown component (main nav menus) ========== */
 function Dropdown({ title, items }: DropdownProps) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
@@ -95,13 +97,226 @@ function Dropdown({ title, items }: DropdownProps) {
   );
 }
 
-/* ========== Menu data ========== */
+/* ========== HELP MENU ( ? icon ) ========== */
+
+function HelpMenu() {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (!ref.current) return;
+      if (!ref.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    window.addEventListener("mousedown", handleClickOutside);
+    return () => window.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen((prev) => !prev)}
+        className="flex h-9 w-9 items-center justify-center rounded-full border border-slate-700 bg-slate-900 text-slate-300 text-sm hover:border-emerald-400 hover:text-emerald-300 transition"
+        aria-label="Help"
+      >
+        ?
+      </button>
+
+      {open && (
+        <div className="absolute right-0 mt-2 w-80 rounded-2xl border border-slate-800 bg-slate-950 shadow-xl shadow-slate-900/70 z-50 p-3">
+          <p className="text-sm font-semibold text-slate-100 mb-1">
+            Need help with this page?
+          </p>
+          <p className="text-[11px] text-slate-400 mb-3">
+            This dashboard is your central hub: you can see your P&amp;L
+            calendar, weekly summaries, streaks and daily targets. Use the
+            widgets to customize what matters most for your process.
+          </p>
+
+          <ul className="space-y-1.5 text-[11px] text-slate-300">
+            <li>• Click on any day in the calendar to open that journal.</li>
+            <li>• Use the widget toggles to show/hide blocks you care about.</li>
+            <li>• Edit your growth plan to update targets and calculations.</li>
+          </ul>
+
+          <div className="mt-3 flex flex-wrap gap-2 text-[11px]">
+            <Link
+              href="/help/getting-started"
+              className="px-2 py-1 rounded-lg border border-slate-700 text-slate-200 hover:border-emerald-400 hover:text-emerald-300 transition"
+            >
+              Getting started guide
+            </Link>
+            <Link
+              href="/help/dashboard"
+              className="px-2 py-1 rounded-lg border border-slate-700 text-slate-200 hover:border-emerald-400 hover:text-emerald-300 transition"
+            >
+              Dashboard tour
+            </Link>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ========== ACCOUNT MENU (avatar) ========== */
+
+function AccountMenu() {
+  const { user, signOut } = useAuth();
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement | null>(null);
+
+  const displayName =
+    (user as any)?.name ||
+    (user as any)?.displayName ||
+    (user as any)?.email?.split("@")[0] ||
+    "Trader";
+
+  const email = (user as any)?.email || "";
+  const plan = (user as any)?.plan || (user as any)?.subscriptionPlan || "—";
+  const photoURL = (user as any)?.photoURL || null;
+
+  const initials = displayName
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((s: string) => s[0]?.toUpperCase())
+    .join("");
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (!ref.current) return;
+      if (!ref.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    window.addEventListener("mousedown", handleClickOutside);
+    return () => window.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const handleSignOut = async () => {
+    try {
+      await signOut();
+    } catch {
+      // ignore for now
+    } finally {
+      router.push("/signin");
+    }
+  };
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen((prev) => !prev)}
+        className="flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-slate-100 hover:border-emerald-400 hover:text-emerald-300 transition"
+      >
+        <div className="h-7 w-7 rounded-full overflow-hidden bg-emerald-400 text-slate-950 flex items-center justify-center text-[11px] font-semibold">
+          {photoURL ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={photoURL}
+              alt={displayName}
+              className="h-full w-full object-cover"
+            />
+          ) : (
+            <span>{initials || "TJ"}</span>
+          )}
+        </div>
+        <div className="hidden sm:flex flex-col items-start leading-tight">
+          <span className="text-[11px] font-medium">{displayName}</span>
+          <span className="text-[10px] text-slate-400">Plan: {plan}</span>
+        </div>
+      </button>
+
+      {open && (
+        <div className="absolute right-0 mt-2 w-72 rounded-2xl border border-slate-800 bg-slate-950 shadow-xl shadow-slate-900/70 z-50">
+          <div className="border-b border-slate-800 px-3 py-3">
+            <p className="text-[13px] font-semibold text-slate-100">
+              {displayName}
+            </p>
+            {email && (
+              <p className="text-[11px] text-slate-400 truncate">{email}</p>
+            )}
+            <p className="mt-1 text-[11px] text-emerald-300">
+              {plan && plan !== "—" ? `Current plan: ${plan}` : "No plan set yet"}
+            </p>
+          </div>
+
+          <ul className="py-2 text-[12px] text-slate-200">
+            <li>
+              <Link
+                href="/account"
+                className="flex items-center justify-between px-3 py-2 hover:bg-slate-800 transition-colors"
+              >
+                <span>Account settings</span>
+                <span className="text-[10px] text-slate-400">
+                  Profile & photo
+                </span>
+              </Link>
+            </li>
+            <li>
+              <Link
+                href="/account/password"
+                className="flex items-center justify-between px-3 py-2 hover:bg-slate-800 transition-colors"
+              >
+                <span>Change password</span>
+                <span className="text-[10px] text-slate-400">
+                  Security
+                </span>
+              </Link>
+            </li>
+            <li>
+              <Link
+                href="/billing"
+                className="flex items-center justify-between px-3 py-2 hover:bg-slate-800 transition-colors"
+              >
+                <span>Billing & subscription</span>
+                <span className="text-[10px] text-emerald-300">
+                  Upgrade / cancel
+                </span>
+              </Link>
+            </li>
+            <li>
+              <Link
+                href="/billing/history"
+                className="flex items-center justify-between px-3 py-2 hover:bg-slate-800 transition-colors"
+              >
+                <span>Billing history</span>
+                <span className="text-[10px] text-slate-400">
+                  Invoices
+                </span>
+              </Link>
+            </li>
+          </ul>
+
+          <div className="border-t border-slate-800 px-3 py-2">
+            <button
+              type="button"
+              onClick={handleSignOut}
+              className="w-full rounded-xl bg-slate-900 text-[12px] text-slate-300 py-2 border border-slate-700 hover:border-red-400 hover:text-red-300 transition"
+            >
+              Sign out
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ========== Menu data (same as antes) ========== */
 
 const performance: NavItem[] = [
   {
     id: "balance-chart",
     title: "Balance chart",
-    description: "Evolution of your account and daily comparion vs. your target.",
+    description:
+      "Evolution of your account and daily comparion vs. your target.",
     href: "/performance/balance-chart",
   },
   {
@@ -251,8 +466,7 @@ const forum: NavItem[] = [
 export default function TopNav() {
   return (
     <nav className="w-full border-b border-slate-800 bg-slate-950/90 backdrop-blur">
-      {/* quitamos max-w-6xl para usar todo el ancho */}
-      <div className="flex items-center px-4 py-3 md:px-6 gap-8 w-full">
+      <div className="flex items-center px-4 py-3 md:px-6 gap-6 w-full">
         {/* Brand */}
         <div className="flex items-center gap-3">
           <div className="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-400 text-slate-950 text-sm font-semibold">
@@ -268,15 +482,21 @@ export default function TopNav() {
           </div>
         </div>
 
-        {/* Dropdown row: una sola línea, sin scroll */}
+        {/* Dropdown row */}
         <div className="flex items-center gap-4 text-[14px] whitespace-nowrap flex-1">
-          <Dropdown title="Performance" items={performance} />      
+          <Dropdown title="Performance" items={performance} />
           <Dropdown title="Notebook" items={notebook} />
           <Dropdown title="Back-Studying" items={backStudy} />
           <Dropdown title="Challenge & Rules" items={challenge} />
           <Dropdown title="Resources" items={resources} />
           <Dropdown title="Rules & Alarms" items={rules} />
           <Dropdown title="Forum" items={forum} />
+        </div>
+
+        {/* Right side: Help + Account */}
+        <div className="flex items-center gap-3">
+          <HelpMenu />
+          <AccountMenu />
         </div>
       </div>
     </nav>

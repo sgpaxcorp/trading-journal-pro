@@ -59,7 +59,7 @@ export default function PricingPage() {
                 Standard
               </h2>
               <p className="text-emerald-400 text-3xl font-semibold leading-none">
-                $19.99
+                $14.99
                 <span className="text-[9px] text-slate-400 font-normal">
                   {" "}
                   / month
@@ -114,7 +114,7 @@ export default function PricingPage() {
                   </span>
                 </div>
                 <p className="text-emerald-400 text-3xl font-semibold leading-none">
-                  $49.99
+                  $24.99
                   <span className="text-[9px] text-slate-400 font-normal">
                     {" "}
                     / month
