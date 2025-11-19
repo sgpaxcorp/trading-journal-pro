@@ -1,3 +1,4 @@
+// app/dashboard/page.tsx
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -81,9 +82,9 @@ const ALL_WIDGETS: { id: WidgetId; label: string }[] = [
 const TRADING_HOLIDAYS: string[] = [
   // "2025-01-01",
   // "2025-07-04",
-  // ...
 ];
 
+/* Helpers de fechas */
 function isWeekend(d: Date): boolean {
   const day = d.getDay();
   return day === 0 || day === 6;
@@ -256,9 +257,59 @@ export default function DashboardPage() {
   // Economic news selection
   const [ecoNewsCountry, setEcoNewsCountry] = useState("US");
 
+  // Flag para saber si ya cargamos widgets desde localStorage
+  const [widgetsLoaded, setWidgetsLoaded] = useState(false);
+
   // Freeze "today" and week of year for the lifetime of the component
   const [todayStr] = useState(() => formatDateYYYYMMDD(new Date()));
   const [currentWeekOfYear] = useState(() => getWeekOfYear(new Date()));
+
+  // ===== Persistencia de widgets por usuario =====
+  useEffect(() => {
+    if (!user) return;
+    if (typeof window === "undefined") return;
+
+    const storageKey =
+      (user as any).uid
+        ? `tjpro_dashboard_widgets_${(user as any).uid}`
+        : "tjpro_dashboard_widgets_default";
+
+    try {
+      const raw = window.localStorage.getItem(storageKey);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          const valid = parsed.filter((id: any) =>
+            ALL_WIDGETS.some((w) => w.id === id)
+          ) as WidgetId[];
+
+          if (valid.length > 0) {
+            setActiveWidgets(valid);
+          }
+        }
+      }
+    } catch (err) {
+      console.warn("[dashboard] error loading widget toggles", err);
+    } finally {
+      setWidgetsLoaded(true);
+    }
+  }, [user]);
+
+  useEffect(() => {
+    if (!user || !widgetsLoaded) return;
+    if (typeof window === "undefined") return;
+
+    const storageKey =
+      (user as any).uid
+        ? `tjpro_dashboard_widgets_${(user as any).uid}`
+        : "tjpro_dashboard_widgets_default";
+
+    try {
+      window.localStorage.setItem(storageKey, JSON.stringify(activeWidgets));
+    } catch (err) {
+      console.warn("[dashboard] error saving widget toggles", err);
+    }
+  }, [user, activeWidgets, widgetsLoaded]);
 
   // Protect route
   useEffect(() => {
@@ -600,8 +651,7 @@ export default function DashboardPage() {
             {plan && dailyCalcs.dailyTargetPct > 0 ? (
               <>
                 <p className="text-[13px] text-emerald-300 font-medium">
-                  Goal: {dailyCalcs.dailyTargetPct}% of start-of-day
-                  balance
+                  Goal: {dailyCalcs.dailyTargetPct}% of start-of-day balance
                 </p>
 
                 <p className="text-[14px] text-slate-300 mt-1">
@@ -689,8 +739,7 @@ export default function DashboardPage() {
               </>
             ) : (
               <p className="text-[13px] text-slate-400">
-                Set a daily % target in your growth plan to enable this
-                widget.
+                Set a daily % target in your growth plan to enable this widget.
               </p>
             )}
           </div>
