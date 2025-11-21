@@ -4,6 +4,12 @@ import type React from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
+
+import JournalGrid, {
+  type JournalWidgetId,
+  type JournalWidgetDef,
+} from "@/app/components/JournalGrid";
+
 import {
   JournalEntry,
   getJournalEntryByDate,
@@ -15,6 +21,7 @@ import {
   deleteJournalTemplate,
   JournalTemplate,
 } from "@/lib/journalTemplatesLocal";
+import { type InstrumentType } from "@/lib/journalNotes";
 
 /* =========================
    Helpers: editor / tables
@@ -27,9 +34,8 @@ function insertHtmlAtCaret(html: string) {
   const el = document.createElement("div");
   el.innerHTML = html;
   const frag = document.createDocumentFragment();
-  let node: ChildNode | null;
+  let node: ChildNode | null = null;
   let lastNode: ChildNode | null = null;
-  // eslint-disable-next-line no-cond-assign
   while ((node = el.firstChild)) lastNode = frag.appendChild(node);
   range.insertNode(frag);
   if (lastNode) {
@@ -69,10 +75,7 @@ function insertTable(rows: number, cols: number) {
         () =>
           `<tr>` +
           Array.from({ length: cols })
-            .map(
-              () =>
-                `<td class="border border-slate-800 px-2 py-1">Cell</td>`
-            )
+            .map(() => `<td class="border border-slate-800 px-2 py-1">Cell</td>`)
             .join("") +
           `</tr>`
       )
@@ -119,7 +122,7 @@ function addTableColumn() {
 }
 
 /* =========================
-   UI: 1–6 × 1–6 table picker
+   UI: Table Picker
 ========================= */
 function TablePicker({
   onPick,
@@ -207,7 +210,6 @@ function EditorToolbar({
           “ ”
         </button>
 
-        {/* Table */}
         <div className="relative">
           <button
             className={btn}
@@ -227,21 +229,10 @@ function EditorToolbar({
           )}
         </div>
 
-        {/* quick row/col */}
-        <button
-          className={btn}
-          type="button"
-          onClick={onAddRow}
-          title="Add row"
-        >
+        <button className={btn} type="button" onClick={onAddRow}>
           +row
         </button>
-        <button
-          className={btn}
-          type="button"
-          onClick={onAddCol}
-          title="Add column"
-        >
+        <button className={btn} type="button" onClick={onAddCol}>
           +col
         </button>
       </div>
@@ -252,38 +243,197 @@ function EditorToolbar({
 }
 
 /* =========================
-   Trade rows
+   Trades / DTE parsing
 ========================= */
+const KIND_OPTIONS: { value: InstrumentType; label: string }[] = [
+  { value: "stock", label: "Stocks" },
+  { value: "option", label: "Options" },
+  { value: "future", label: "Futures" },
+  { value: "crypto", label: "Crypto" },
+  { value: "forex", label: "Forex" },
+  { value: "other", label: "Other" },
+];
+
+type SideType = "long" | "short";
+
 type EntryTradeRow = {
   id: string;
-  asset: string;
+  symbol: string;
+  kind: InstrumentType;
+  side: SideType;
   price: string;
   quantity: string;
   time: string;
+  dte?: number | null;
+  expiry?: string | null; // YYYY-MM-DD
 };
 
 type ExitTradeRow = {
   id: string;
-  asset: string;
+  symbol: string;
+  kind: InstrumentType;
+  side: SideType;
   price: string;
   quantity: string;
   time: string;
+  dte?: number | null;
+  expiry?: string | null;
 };
 
-function computeAverages(trades: { asset: string; price: string }[]) {
-  const map: Record<string, { sum: number; count: number }> = {};
-  for (const t of trades) {
-    const asset = t.asset.trim().toUpperCase();
-    const price = parseFloat(t.price);
-    if (!asset || !Number.isFinite(price)) continue;
-    if (!map[asset]) map[asset] = { sum: 0, count: 0 };
-    map[asset].sum += price;
-    map[asset].count += 1;
+function nowTimeLabel() {
+  return new Date().toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function parseSPXOptionSymbol(raw: string) {
+  const s = (raw || "").trim().toUpperCase().replace(/^[\.\-]/, "");
+  // SPXW251121C6565  / SPX251121P6000
+  const m = s.match(/^([A-Z]+W?)(\d{6})([CP])(\d+(?:\.\d+)?)$/);
+  if (!m) return null;
+
+  const underlying = m[1]; // SPX / SPXW
+  const yy = Number(m[2].slice(0, 2));
+  const mm = Number(m[2].slice(2, 4));
+  const dd = Number(m[2].slice(4, 6));
+  const right = m[3] as "C" | "P";
+  const strike = Number(m[4]);
+
+  if (!yy || !mm || !dd) return null;
+
+  const year = 2000 + yy;
+  const expiry = new Date(year, mm - 1, dd);
+  if (Number.isNaN(expiry.getTime())) return null;
+
+  return { underlying, expiry, right, strike };
+}
+function calcDTE(entryDateYYYYMMDD: string, expiry: Date) {
+  try {
+    const [y, m, d] = entryDateYYYYMMDD.split("-").map(Number);
+
+    // 🔒 Normaliza a medianoche UTC para evitar inflar días por timezone
+    const entryUTC = Date.UTC(y, m - 1, d);
+    const expiryUTC = Date.UTC(
+      expiry.getFullYear(),
+      expiry.getMonth(),
+      expiry.getDate()
+    );
+
+    const msPerDay = 24 * 60 * 60 * 1000;
+
+    // ✅ diferencia simple en días calendario
+    const diffDays = Math.round((expiryUTC - entryUTC) / msPerDay);
+
+    // Si es el mismo día => 0DTE
+    if (diffDays === 0) return 0;
+
+    return diffDays >= 0 ? diffDays : null;
+  } catch {
+    return null;
   }
-  return Object.entries(map).map(([asset, { sum, count }]) => ({
-    asset,
-    avg: sum / count,
-  }));
+}
+
+
+
+function computeAverages(
+  trades: { symbol: string; kind: InstrumentType; price: string; quantity: string }[]
+) {
+  const map: Record<string, { sumPxQty: number; sumQty: number }> = {};
+  for (const t of trades) {
+    const symbol = (t.symbol || "").trim().toUpperCase();
+    if (!symbol) continue;
+    const kind = t.kind || "other";
+    const key = `${symbol}|${kind}`;
+    const px = parseFloat(t.price);
+    const qty = parseFloat(t.quantity);
+    if (!Number.isFinite(px) || !Number.isFinite(qty) || qty <= 0) continue;
+    if (!map[key]) map[key] = { sumPxQty: 0, sumQty: 0 };
+    map[key].sumPxQty += px * qty;
+    map[key].sumQty += qty;
+  }
+  return Object.entries(map).map(([key, v]) => {
+    const [symbol, kind] = key.split("|") as [string, InstrumentType];
+    return { symbol, kind, avg: v.sumPxQty / v.sumQty, qty: v.sumQty };
+  });
+}
+
+function computeAutoPnL(entries: EntryTradeRow[], exits: ExitTradeRow[]) {
+  const key = (s: string, k: InstrumentType, side: SideType) =>
+    `${s}|${k}|${side}`;
+
+  const entryAgg: Record<string, { sumPxQty: number; sumQty: number }> = {};
+  const exitAgg: Record<string, { sumPxQty: number; sumQty: number }> = {};
+
+  for (const e of entries) {
+    const sym = (e.symbol || "").trim().toUpperCase();
+    if (!sym) continue;
+    const k = key(sym, e.kind || "other", e.side || "long");
+    const px = parseFloat(e.price);
+    const qty = parseFloat(e.quantity);
+    if (!Number.isFinite(px) || !Number.isFinite(qty) || qty <= 0) continue;
+    entryAgg[k] ||= { sumPxQty: 0, sumQty: 0 };
+    entryAgg[k].sumPxQty += px * qty;
+    entryAgg[k].sumQty += qty;
+  }
+
+  for (const x of exits) {
+    const sym = (x.symbol || "").trim().toUpperCase();
+    if (!sym) continue;
+    const k = key(sym, x.kind || "other", x.side || "long");
+    const px = parseFloat(x.price);
+    const qty = parseFloat(x.quantity);
+    if (!Number.isFinite(px) || !Number.isFinite(qty) || qty <= 0) continue;
+    exitAgg[k] ||= { sumPxQty: 0, sumQty: 0 };
+    exitAgg[k].sumPxQty += px * qty;
+    exitAgg[k].sumQty += qty;
+  }
+
+  let total = 0;
+
+  for (const k of Object.keys(exitAgg)) {
+    const e = entryAgg[k];
+    const x = exitAgg[k];
+    if (!e || !x) continue;
+
+    const avgEntry = e.sumPxQty / e.sumQty;
+    const avgExit = x.sumPxQty / x.sumQty;
+    const closedQty = Math.min(e.sumQty, x.sumQty);
+
+    const [, , side] = k.split("|") as [string, string, SideType];
+    const sign = side === "short" ? -1 : 1;
+
+    total += (avgExit - avgEntry) * closedQty * sign;
+  }
+
+  return { total };
+}
+
+/* =========================
+   Widget shell (scroll-safe)
+========================= */
+function WidgetCard({
+  title,
+  children,
+  right,
+}: {
+  title: string;
+  children: React.ReactNode;
+  right?: React.ReactNode;
+}) {
+  return (
+    <div className="bg-slate-900/95 border border-slate-800 rounded-2xl h-full flex flex-col overflow-hidden shadow-sm min-h-0">
+      <div className="drag-handle cursor-move select-none flex items-center justify-between px-4 py-2 border-b border-slate-800 bg-slate-950/40">
+        <p className="text-slate-200 text-sm font-medium">{title}</p>
+        <div>{right}</div>
+      </div>
+
+      {/* ✅ permite achicar sin perder texto */}
+      <div className="p-4 flex-1 min-h-0 overflow-auto">
+        {children}
+      </div>
+    </div>
+  );
 }
 
 /* =========================
@@ -301,7 +451,7 @@ export default function DailyJournalPage() {
     date: dateParam || "",
     pnl: 0,
     instrument: "",
-    direction: undefined,
+    direction: "long",
     entryPrice: undefined,
     exitPrice: undefined,
     size: undefined,
@@ -309,10 +459,9 @@ export default function DailyJournalPage() {
     notes: "",
     emotion: "",
     tags: [],
-    respectedPlan: true, // puedes dejarlo, solo ya no hay UI
+    respectedPlan: true,
   });
 
-  // P&L as string so user can delete 0 and type negatives
   const [pnlInput, setPnlInput] = useState<string>("");
 
   const [templates, setTemplates] = useState<JournalTemplate[]>([]);
@@ -320,64 +469,85 @@ export default function DailyJournalPage() {
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState("");
 
-  // Rich text refs
   const preRef = useRef<HTMLDivElement | null>(null);
   const liveRef = useRef<HTMLDivElement | null>(null);
   const postRef = useRef<HTMLDivElement | null>(null);
 
-  // Dictation
   const [listening, setListening] = useState(false);
   const recognitionRef = useRef<any>(null);
 
-  // Trades
   const [entryTrades, setEntryTrades] = useState<EntryTradeRow[]>([]);
   const [exitTrades, setExitTrades] = useState<ExitTradeRow[]>([]);
-  const [newEntryTrade, setNewEntryTrade] = useState<
-    Omit<EntryTradeRow, "id">
-  >({
-    asset: "",
-    price: "",
-    quantity: "",
-    time: "",
-  });
-  const [newExitTrade, setNewExitTrade] = useState<
-    Omit<ExitTradeRow, "id">
-  >({
-    asset: "",
-    price: "",
-    quantity: "",
-    time: "",
-  });
 
-  const entryAverages = useMemo(
-    () => computeAverages(entryTrades),
-    [entryTrades]
-  );
-  const exitAverages = useMemo(
-    () => computeAverages(exitTrades),
-    [exitTrades]
-  );
-
-  // SOLO dejamos probabilityTags (quick tags se eliminó)
-  const probabilityTags = [
-    "A+ playbook setup",
-    "B-setup (secondary quality)",
-    "Exploratory / data-gathering trade",
-    "Trade aligned with my stats edge",
-    "Outside my proven statistics",
-    "Within high-probability session window",
-    "Outside my usual session window",
-  ];
-
-  const toggleTag = (tag: string) =>
-    setEntry((prev) => {
-      const current = prev.tags || [];
-      const exists = current.includes(tag);
-      const tags = exists
-        ? current.filter((t) => t !== tag)
-        : [...current, tag];
-      return { ...prev, tags };
+  const [newEntryTrade, setNewEntryTrade] =
+    useState<Omit<EntryTradeRow, "id">>({
+      symbol: "",
+      kind: "option",
+      side: "long",
+      price: "",
+      quantity: "",
+      time: nowTimeLabel(),
+      dte: null,
+      expiry: null,
     });
+
+  const [newExitTrade, setNewExitTrade] =
+    useState<Omit<ExitTradeRow, "id">>({
+      symbol: "",
+      kind: "option",
+      side: "long",
+      price: "",
+      quantity: "",
+      time: nowTimeLabel(),
+      dte: null,
+      expiry: null,
+    });
+
+  /* ---------------- Widgets active state ---------------- */
+  const ALL_WIDGETS: { id: JournalWidgetId; label: string; defaultOn: boolean }[] =
+    [
+      { id: "pnl", label: "Day P&L", defaultOn: true },
+      { id: "premarket", label: "Premarket Prep", defaultOn: true },
+      { id: "inside", label: "Inside the Trade", defaultOn: true },
+      { id: "after", label: "After-trade Analysis", defaultOn: true },
+      { id: "entries", label: "Entries", defaultOn: true },
+      { id: "exits", label: "Exits", defaultOn: true },
+      { id: "emotional", label: "Emotional State", defaultOn: true },
+      { id: "strategy", label: "Strategy / Probability", defaultOn: true },
+      { id: "screenshots", label: "Screenshots", defaultOn: true },
+      { id: "templates", label: "Templates", defaultOn: true },
+      { id: "actions", label: "Actions", defaultOn: true },
+    ];
+
+  const widgetsKey = "journal_widgets_active_v1";
+  const [activeWidgets, setActiveWidgets] = useState<JournalWidgetId[]>(() => {
+    if (typeof window === "undefined") {
+      return ALL_WIDGETS.filter((w) => w.defaultOn).map((w) => w.id);
+    }
+    try {
+      const raw = localStorage.getItem(widgetsKey);
+      if (!raw)
+        return ALL_WIDGETS.filter((w) => w.defaultOn).map((w) => w.id);
+      const parsed = JSON.parse(raw) as JournalWidgetId[];
+      return parsed.length
+        ? parsed
+        : ALL_WIDGETS.filter((w) => w.defaultOn).map((w) => w.id);
+    } catch {
+      return ALL_WIDGETS.filter((w) => w.defaultOn).map((w) => w.id);
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(widgetsKey, JSON.stringify(activeWidgets));
+    } catch {}
+  }, [activeWidgets]);
+
+  const toggleWidget = (id: JournalWidgetId) => {
+    setActiveWidgets((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  };
 
   // Load existing entry + templates
   useEffect(() => {
@@ -402,8 +572,7 @@ export default function DailyJournalPage() {
               postRef.current.innerHTML = parsed.post;
             if (Array.isArray(parsed.entries))
               setEntryTrades(parsed.entries);
-            if (Array.isArray(parsed.exits))
-              setExitTrades(parsed.exits);
+            if (Array.isArray(parsed.exits)) setExitTrades(parsed.exits);
           } else if (preRef.current && !preRef.current.innerHTML) {
             preRef.current.innerHTML = existing.notes;
           }
@@ -435,34 +604,208 @@ export default function DailyJournalPage() {
   }, [dateParam]);
 
   /* ---------- Toolbar helpers ---------- */
-  const exec = (cmd: string) => document.execCommand(cmd, false);
+  const execCmd = (cmd: string) => document.execCommand(cmd, false);
   const insertQuote = () =>
     insertHtmlAtCaret("<blockquote>Quote…</blockquote>");
 
-  /* ---------- Trades handlers ---------- */
+  /* ---------- Entries handlers ---------- */
   const handleAddEntryTrade = () => {
-    if (!newEntryTrade.asset.trim() || !newEntryTrade.price.trim()) return;
+    const symbol = newEntryTrade.symbol.trim().toUpperCase();
+    if (!symbol || !newEntryTrade.price.trim()) return;
+
+    let dte: number | null = null;
+    let expiryStr: string | null = null;
+
+    if (newEntryTrade.kind === "option") {
+      const parsed = parseSPXOptionSymbol(symbol);
+      if (parsed) {
+        dte = calcDTE(dateParam, parsed.expiry);
+        expiryStr = parsed.expiry.toISOString().slice(0, 10);
+      }
+    }
+
     setEntryTrades((prev) => [
       ...prev,
-      { id: crypto.randomUUID(), ...newEntryTrade },
+      {
+        id: crypto.randomUUID(),
+        ...newEntryTrade,
+        symbol,
+        time: nowTimeLabel(),
+        dte,
+        expiry: expiryStr,
+      },
     ]);
-    setNewEntryTrade({ asset: "", price: "", quantity: "", time: "" });
-  };
 
-  const handleAddExitTrade = () => {
-    if (!newExitTrade.asset.trim() || !newExitTrade.price.trim()) return;
-    setExitTrades((prev) => [
-      ...prev,
-      { id: crypto.randomUUID(), ...newExitTrade },
-    ]);
-    setNewExitTrade({ asset: "", price: "", quantity: "", time: "" });
+    setNewEntryTrade((p) => ({
+      ...p,
+      symbol: "",
+      price: "",
+      quantity: "",
+      time: nowTimeLabel(),
+      dte: null,
+      expiry: null,
+    }));
   };
 
   const handleDeleteEntryTrade = (id: string) =>
     setEntryTrades((prev) => prev.filter((t) => t.id !== id));
 
+  /* ---------- Open positions ---------- */
+  const openPositions = useMemo(() => {
+    const key = (s: string, k: InstrumentType, side: SideType) =>
+      `${s}|${k}|${side}`;
+    const totals: Record<
+      string,
+      {
+        symbol: string;
+        kind: InstrumentType;
+        side: SideType;
+        entryQty: number;
+        exitQty: number;
+      }
+    > = {};
+
+    for (const e of entryTrades) {
+      const sym = (e.symbol || "").trim().toUpperCase();
+      if (!sym) continue;
+      const k = key(sym, e.kind || "other", e.side || "long");
+      totals[k] ||= {
+        symbol: sym,
+        kind: e.kind || "other",
+        side: e.side || "long",
+        entryQty: 0,
+        exitQty: 0,
+      };
+      totals[k].entryQty += Number(e.quantity) || 0;
+    }
+
+    for (const x of exitTrades) {
+      const sym = (x.symbol || "").trim().toUpperCase();
+      if (!sym) continue;
+      const k = key(sym, x.kind || "other", x.side || "long");
+      totals[k] ||= {
+        symbol: sym,
+        kind: x.kind || "other",
+        side: x.side || "long",
+        entryQty: 0,
+        exitQty: 0,
+      };
+      totals[k].exitQty += Number(x.quantity) || 0;
+    }
+
+    return Object.values(totals)
+      .map((t) => ({ ...t, remainingQty: Math.max(0, t.entryQty - t.exitQty) }))
+      .filter((t) => t.remainingQty > 0);
+  }, [entryTrades, exitTrades]);
+
+  /* ---------- Exits handlers ---------- */
+  const handlePickOpenPosition = (posKey: string) => {
+    const [symbol, kind, side] = posKey.split("|") as [
+      string,
+      InstrumentType,
+      SideType
+    ];
+    const pos = openPositions.find(
+      (p) => p.symbol === symbol && p.kind === kind && p.side === side
+    );
+    if (!pos) return;
+
+    setNewExitTrade({
+      symbol: pos.symbol,
+      kind: pos.kind,
+      side: pos.side,
+      price: "",
+      quantity: String(pos.remainingQty),
+      time: nowTimeLabel(),
+      dte: null,
+      expiry: null,
+    });
+  };
+
+  const handleAddExitTrade = () => {
+    const symbol = newExitTrade.symbol.trim().toUpperCase();
+    if (!symbol || !newExitTrade.price.trim()) return;
+
+    let dte: number | null = null;
+    let expiryStr: string | null = null;
+
+    if (newExitTrade.kind === "option") {
+      const parsed = parseSPXOptionSymbol(symbol);
+      if (parsed) {
+        dte = calcDTE(dateParam, parsed.expiry);
+        expiryStr = parsed.expiry.toISOString().slice(0, 10);
+      }
+    }
+
+    setExitTrades((prev) => [
+      ...prev,
+      {
+        id: crypto.randomUUID(),
+        ...newExitTrade,
+        symbol,
+        time: nowTimeLabel(),
+        dte,
+        expiry: expiryStr,
+      },
+    ]);
+
+    setNewExitTrade((p) => ({
+      ...p,
+      price: "",
+      time: nowTimeLabel(),
+      dte: null,
+      expiry: null,
+    }));
+  };
+
   const handleDeleteExitTrade = (id: string) =>
     setExitTrades((prev) => prev.filter((t) => t.id !== id));
+
+  /* ---------- Averages ---------- */
+  const entryAverages = useMemo(
+    () => computeAverages(entryTrades),
+    [entryTrades]
+  );
+  const exitAverages = useMemo(() => computeAverages(exitTrades), [exitTrades]);
+
+  /* ---------- AUTO PNL local ---------- */
+  const pnlCalc = useMemo(
+    () => computeAutoPnL(entryTrades, exitTrades),
+    [entryTrades, exitTrades]
+  );
+
+  useEffect(() => {
+    const v = Number.isFinite(pnlCalc.total) ? pnlCalc.total : 0;
+    setEntry((p) => ({ ...p, pnl: v }));
+    setPnlInput(v.toFixed(2));
+  }, [pnlCalc.total]);
+
+  /* ---------- Tags ---------- */
+  const toggleTag = (tag: string) =>
+    setEntry((prev) => {
+      const current = prev.tags || [];
+      const exists = current.includes(tag);
+      const tags = exists ? current.filter((t) => t !== tag) : [...current, tag];
+      return { ...prev, tags };
+    });
+
+  const probabilityTags = [
+    "A+ playbook setup",
+    "B-setup (secondary quality)",
+    "Exploratory / data-gathering trade",
+    "Trade aligned with my stats edge",
+    "Outside my proven statistics",
+    "Within high-probability session window",
+    "Outside my usual session window",
+  ];
+
+  const exitReasonTags = [
+    "Stop Loss",
+    "Take Profit Hit",
+    "Manual Exit",
+    "Moved stop to profit",
+    "Stopped out (loss)",
+  ];
 
   /* ---------- Save ---------- */
   const handleSave = () => {
@@ -481,25 +824,13 @@ export default function DailyJournalPage() {
       exits: exitTrades,
     });
 
-    const parsedPnl = parseFloat(pnlInput);
-    const finalPnl = Number.isFinite(parsedPnl) ? parsedPnl : 0;
-
     const clean: JournalEntry = {
       ...entry,
       date: dateParam,
-      pnl: finalPnl,
-      entryPrice:
-        entry.entryPrice !== undefined && entry.entryPrice !== null
-          ? Number(entry.entryPrice)
-          : undefined,
-      exitPrice:
-        entry.exitPrice !== undefined && entry.exitPrice !== null
-          ? Number(entry.exitPrice)
-          : undefined,
+      pnl: Number.isFinite(entry.pnl) ? entry.pnl : 0,
       notes: notesPayload,
       screenshots: entry.screenshots || [],
       tags: entry.tags || [],
-      direction: entry.direction,
     };
 
     saveJournalEntry(clean);
@@ -590,15 +921,782 @@ export default function DailyJournalPage() {
     }
   };
 
-  /* ---------- Styles ---------- */
   const editorCls =
     "min-h-[280px] w-full rounded-xl bg-slate-950 border border-slate-800 px-3 py-2 text-[16px] text-slate-100 leading-relaxed focus:outline-none focus:border-emerald-400 overflow-auto";
+
+  /* =========================
+     Widgets definitions
+  ========================= */
+  const WIDGETS: JournalWidgetDef[] = [
+    {
+      id: "premarket",
+      title: "Premarket Prep",
+      defaultLayout: {
+        i: "premarket",
+        x: 0,
+        y: 0,
+        w: 7,
+        h: 8,
+        minW: 4,
+        minH: 6,
+      },
+      render: () => (
+        <WidgetCard
+          title="Premarket Prep"
+          right={
+            <EditorToolbar
+              onBold={() => execCmd("bold")}
+              onItalic={() => execCmd("italic")}
+              onUnderline={() => execCmd("underline")}
+              onUL={() => execCmd("insertUnorderedList")}
+              onOL={() => execCmd("insertOrderedList")}
+              onQuote={insertQuote}
+              onAddRow={addTableRow}
+              onAddCol={addTableColumn}
+              onInsertTable={insertTable}
+            />
+          }
+        >
+          <div
+            ref={preRef}
+            contentEditable
+            suppressContentEditableWarning
+            className={editorCls}
+          />
+        </WidgetCard>
+      ),
+    },
+
+    {
+      id: "pnl",
+      title: "Day P&L",
+      defaultLayout: { i: "pnl", x: 7, y: 0, w: 5, h: 3, minW: 3, minH: 2 },
+      render: () => (
+        <WidgetCard title="Day P&L">
+          <label className="text-slate-400 text-xs uppercase tracking-wide">
+            Day P&L (USD) — auto
+          </label>
+          <input
+            type="text"
+            value={pnlInput}
+            readOnly
+            className="mt-2 w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-slate-100 text-[16px] focus:outline-none focus:border-emerald-400 opacity-90"
+            placeholder="Auto-calculated"
+          />
+          <p className="text-xs text-slate-500 mt-2">
+            Calculated from Entries/Exits.
+          </p>
+        </WidgetCard>
+      ),
+    },
+
+    {
+      id: "entries",
+      title: "Entries",
+      defaultLayout: {
+        i: "entries",
+        x: 7,
+        y: 3,
+        w: 5,
+        h: 7,
+        minW: 4,
+        minH: 6,
+      },
+      render: () => (
+        <WidgetCard title="Entries">
+          <div className="grid grid-cols-1 md:grid-cols-6 gap-2 text-sm">
+            <div>
+              <label className="text-xs text-slate-400 block mb-1">
+                Symbol / Contract
+              </label>
+             <input
+  type="text"
+  value={newEntryTrade.symbol}
+  onChange={(e) => {
+    const up = e.target.value.toUpperCase();
+    setNewEntryTrade((p) => ({ ...p, symbol: up }));
+  }}
+  style={{ textTransform: "uppercase" }}
+  className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-[14px] text-slate-100 focus:outline-none focus:border-emerald-400 uppercase"
+  placeholder="SPXW251121C6565"
+/>
+
+            </div>
+
+            <div>
+              <label className="text-xs text-slate-400 block mb-1">Type</label>
+              <select
+                value={newEntryTrade.kind}
+                onChange={(e) =>
+                  setNewEntryTrade((p) => ({
+                    ...p,
+                    kind: e.target.value as InstrumentType,
+                  }))
+                }
+                className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-[14px] text-slate-100 focus:outline-none focus:border-emerald-400"
+              >
+                {KIND_OPTIONS.map((k) => (
+                  <option key={k.value} value={k.value}>
+                    {k.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="text-xs text-slate-400 block mb-1">Side</label>
+              <select
+                value={newEntryTrade.side}
+                onChange={(e) =>
+                  setNewEntryTrade((p) => ({
+                    ...p,
+                    side: e.target.value as SideType,
+                  }))
+                }
+                className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-[14px] text-slate-100 focus:outline-none focus:border-emerald-400"
+              >
+                <option value="long">LONG</option>
+                <option value="short">SHORT</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="text-xs text-slate-400 block mb-1">Price</label>
+              <input
+                type="number"
+                value={newEntryTrade.price}
+                onChange={(e) =>
+                  setNewEntryTrade((p) => ({ ...p, price: e.target.value }))
+                }
+                className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-[14px] text-slate-100 focus:outline-none focus:border-emerald-400"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs text-slate-400 block mb-1">
+                Quantity
+              </label>
+              <input
+                type="number"
+                value={newEntryTrade.quantity}
+                onChange={(e) =>
+                  setNewEntryTrade((p) => ({
+                    ...p,
+                    quantity: e.target.value,
+                  }))
+                }
+                className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-[14px] text-slate-100 focus:outline-none focus:border-emerald-400"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs text-slate-400 block mb-1">Time</label>
+              <input
+                type="text"
+                readOnly
+                value={newEntryTrade.time}
+                className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-[14px] text-slate-300"
+              />
+              <button
+                type="button"
+                className="text-[11px] text-emerald-300 mt-1"
+                onClick={() =>
+                  setNewEntryTrade((p) => ({ ...p, time: nowTimeLabel() }))
+                }
+              >
+                use current time
+              </button>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleAddEntryTrade}
+            className="mt-3 px-3 py-1.5 rounded-lg bg-emerald-400 text-slate-950 text-xs font-semibold hover:bg-emerald-300 transition"
+          >
+            Add entry
+          </button>
+
+          {entryTrades.length > 0 && (
+            <div className="space-y-2 text-xs mt-3">
+              <table className="w-full text-left text-[12px] border border-slate-800 rounded-lg overflow-hidden">
+                <thead className="bg-slate-900/80">
+                  <tr>
+                    <th className="px-2 py-1 border-b border-slate-800">Symbol</th>
+                    <th className="px-2 py-1 border-b border-slate-800">Type</th>
+                    <th className="px-2 py-1 border-b border-slate-800">Side</th>
+                    <th className="px-2 py-1 border-b border-slate-800">Price</th>
+                    <th className="px-2 py-1 border-b border-slate-800">Qty</th>
+                    <th className="px-2 py-1 border-b border-slate-800">Time</th>
+                    <th className="px-2 py-1 border-b border-slate-800">DTE</th>
+                    <th className="px-2 py-1 border-b border-slate-800 text-right">–</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {entryTrades.map((t) => (
+                    <tr key={t.id} className="border-t border-slate-800">
+                      <td className="px-2 py-1">{t.symbol}</td>
+                      <td className="px-2 py-1">{t.kind}</td>
+                      <td className="px-2 py-1">{t.side}</td>
+                      <td className="px-2 py-1">{t.price}</td>
+                      <td className="px-2 py-1">{t.quantity}</td>
+                      <td className="px-2 py-1">{t.time}</td>
+                      <td className="px-2 py-1">
+                        {t.kind === "option" ? (t.dte ?? "—") : "—"}
+                      </td>
+                      <td className="px-2 py-1 text-right">
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteEntryTrade(t.id)}
+                          className="text-slate-500 hover:text-red-400"
+                        >
+                          ✕
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+
+              <div className="pt-1 border-t border-slate-800 mt-1">
+                <p className="text-[11px] text-slate-400 mb-1">
+                  Average entry price per symbol/type
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {entryAverages.map((a) => (
+                    <span
+                      key={`${a.symbol}|${a.kind}`}
+                      className="px-2 py-1 rounded-full bg-slate-950 border border-slate-700 text-[11px]"
+                    >
+                      {a.symbol} ({a.kind}): {a.avg.toFixed(2)} · qty {a.qty}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+        </WidgetCard>
+      ),
+    },
+
+    {
+      id: "exits",
+      title: "Exits",
+      defaultLayout: {
+        i: "exits",
+        x: 7,
+        y: 10,
+        w: 5,
+        h: 6,
+        minW: 4,
+        minH: 5,
+      },
+      render: () => (
+        <WidgetCard title="Exits">
+          <div className="grid grid-cols-1 md:grid-cols-6 gap-2 text-sm">
+            <div>
+              <label className="text-xs text-slate-400 block mb-1">
+                Close position
+              </label>
+              <select
+                value={`${newExitTrade.symbol}|${newExitTrade.kind}|${newExitTrade.side}`}
+                onChange={(e) => handlePickOpenPosition(e.target.value)}
+                className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-[14px] text-slate-100 focus:outline-none focus:border-emerald-400"
+              >
+                <option value="">Select…</option>
+                {openPositions.map((p) => (
+                  <option
+                    key={`${p.symbol}|${p.kind}|${p.side}`}
+                    value={`${p.symbol}|${p.kind}|${p.side}`}
+                  >
+                    {p.symbol} ({p.kind}) {p.side.toUpperCase()} · rem{" "}
+                    {p.remainingQty}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="text-xs text-slate-400 block mb-1">Type</label>
+              <input
+                readOnly
+                value={newExitTrade.kind}
+                className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-[14px] text-slate-300"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs text-slate-400 block mb-1">Side</label>
+              <input
+                readOnly
+                value={newExitTrade.side}
+                className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-[14px] text-slate-300"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs text-slate-400 block mb-1">
+                Exit price
+              </label>
+              <input
+                type="number"
+                value={newExitTrade.price}
+                onChange={(e) =>
+                  setNewExitTrade((p) => ({ ...p, price: e.target.value }))
+                }
+                className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-[14px] text-slate-100 focus:outline-none focus:border-emerald-400"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs text-slate-400 block mb-1">
+                Qty to close
+              </label>
+              <input
+                type="number"
+                value={newExitTrade.quantity}
+                onChange={(e) =>
+                  setNewExitTrade((p) => ({
+                    ...p,
+                    quantity: e.target.value,
+                  }))
+                }
+                className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-[14px] text-slate-100 focus:outline-none focus:border-emerald-400"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs text-slate-400 block mb-1">Time</label>
+              <input
+                readOnly
+                value={newExitTrade.time}
+                className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-[14px] text-slate-300"
+              />
+              <button
+                type="button"
+                className="text-[11px] text-emerald-300 mt-1"
+                onClick={() =>
+                  setNewExitTrade((p) => ({ ...p, time: nowTimeLabel() }))
+                }
+              >
+                use current time
+              </button>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleAddExitTrade}
+            className="mt-3 px-3 py-1.5 rounded-lg bg-emerald-400 text-slate-950 text-xs font-semibold hover:bg-emerald-300 transition"
+          >
+            Add exit
+          </button>
+
+          {exitTrades.length > 0 && (
+            <div className="space-y-2 text-xs mt-3">
+              <table className="w-full text-left text-[12px] border border-slate-800 rounded-lg overflow-hidden">
+                <thead className="bg-slate-900/80">
+                  <tr>
+                    <th className="px-2 py-1 border-b border-slate-800">Symbol</th>
+                    <th className="px-2 py-1 border-b border-slate-800">Type</th>
+                    <th className="px-2 py-1 border-b border-slate-800">Side</th>
+                    <th className="px-2 py-1 border-b border-slate-800">Price</th>
+                    <th className="px-2 py-1 border-b border-slate-800">Qty</th>
+                    <th className="px-2 py-1 border-b border-slate-800">Time</th>
+                    <th className="px-2 py-1 border-b border-slate-800">DTE</th>
+                    <th className="px-2 py-1 border-b border-slate-800 text-right">–</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {exitTrades.map((t) => (
+                    <tr key={t.id} className="border-t border-slate-800">
+                      <td className="px-2 py-1">{t.symbol}</td>
+                      <td className="px-2 py-1">{t.kind}</td>
+                      <td className="px-2 py-1">{t.side}</td>
+                      <td className="px-2 py-1">{t.price}</td>
+                      <td className="px-2 py-1">{t.quantity}</td>
+                      <td className="px-2 py-1">{t.time}</td>
+                      <td className="px-2 py-1">
+                        {t.kind === "option" ? (t.dte ?? "—") : "—"}
+                      </td>
+                      <td className="px-2 py-1 text-right">
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteExitTrade(t.id)}
+                          className="text-slate-500 hover:text-red-400"
+                        >
+                          ✕
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+
+              <div className="pt-1 border-t border-slate-800 mt-1">
+                <p className="text-[11px] text-slate-400 mb-1">
+                  Average exit price per symbol/type
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {exitAverages.map((a) => (
+                    <span
+                      key={`${a.symbol}|${a.kind}`}
+                      className="px-2 py-1 rounded-full bg-slate-950 border border-slate-700 text-[11px]"
+                    >
+                      {a.symbol} ({a.kind}): {a.avg.toFixed(2)}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+        </WidgetCard>
+      ),
+    },
+
+    {
+      id: "inside",
+      title: "Inside the Trade",
+      defaultLayout: {
+        i: "inside",
+        x: 0,
+        y: 8,
+        w: 7,
+        h: 8,
+        minW: 4,
+        minH: 6,
+      },
+      render: () => (
+        <WidgetCard
+          title="Inside the Trade (mic dictation)"
+          right={
+            <EditorToolbar
+              onBold={() => execCmd("bold")}
+              onItalic={() => execCmd("italic")}
+              onUnderline={() => execCmd("underline")}
+              onUL={() => execCmd("insertUnorderedList")}
+              onOL={() => execCmd("insertOrderedList")}
+              onQuote={insertQuote}
+              onAddRow={addTableRow}
+              onAddCol={addTableColumn}
+              onInsertTable={insertTable}
+              extraRight={
+                <button
+                  type="button"
+                  onClick={toggleDictation}
+                  className={`px-2 py-1 rounded ${
+                    listening
+                      ? "bg-rose-500 text-white"
+                      : "bg-slate-800 text-slate-200"
+                  } text-xs hover:bg-slate-700`}
+                >
+                  {listening ? "● Stop dictation" : "Start dictation"}
+                </button>
+              }
+            />
+          }
+        >
+          <div
+            ref={liveRef}
+            contentEditable
+            suppressContentEditableWarning
+            className={editorCls}
+          />
+        </WidgetCard>
+      ),
+    },
+
+    {
+      id: "after",
+      title: "After-trade Analysis",
+      defaultLayout: {
+        i: "after",
+        x: 0,
+        y: 16,
+        w: 7,
+        h: 8,
+        minW: 4,
+        minH: 6,
+      },
+      render: () => (
+        <WidgetCard
+          title="After-trade Analysis"
+          right={
+            <EditorToolbar
+              onBold={() => execCmd("bold")}
+              onItalic={() => execCmd("italic")}
+              onUnderline={() => execCmd("underline")}
+              onUL={() => execCmd("insertUnorderedList")}
+              onOL={() => execCmd("insertOrderedList")}
+              onQuote={insertQuote}
+              onAddRow={addTableRow}
+              onAddCol={addTableColumn}
+              onInsertTable={insertTable}
+            />
+          }
+        >
+          <div
+            ref={postRef}
+            contentEditable
+            suppressContentEditableWarning
+            className={editorCls}
+          />
+        </WidgetCard>
+      ),
+    },
+
+    {
+      id: "emotional",
+      title: "Emotional state",
+      defaultLayout: {
+        i: "emotional",
+        x: 7,
+        y: 16,
+        w: 5,
+        h: 4,
+        minW: 3,
+        minH: 3,
+      },
+      render: () => (
+        <WidgetCard title="Emotional state & impulses">
+          <div className="grid grid-cols-1 gap-2 text-[13px] leading-snug">
+            {["Calm & focused", "Greedy", "Desperate", "FOMO", "Revenge trade"].map(
+              (t) => (
+                <label key={t} className="inline-flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    onChange={() => toggleTag(t)}
+                    checked={entry.tags?.includes(t)}
+                    className="h-4 w-4 rounded border-slate-600 bg-slate-950 shrink-0"
+                  />
+                  <span className="break-words">{t}</span>
+                </label>
+              )
+            )}
+          </div>
+        </WidgetCard>
+      ),
+    },
+
+    {
+      id: "strategy",
+      title: "Strategy / Probability",
+      defaultLayout: {
+        i: "strategy",
+        x: 7,
+        y: 20,
+        w: 5,
+        h: 6,
+        minW: 3,
+        minH: 3,
+      },
+      render: () => (
+        <WidgetCard title="Strategy checklist + Probability">
+          <div className="grid grid-cols-1 gap-2 text-[13px] leading-snug mb-4">
+            {[
+              "Respect Strategy",
+              "Planned stop was in place",
+              "Used planned position sizing",
+              "Risk-to-reward ≥ 2R (planned)",
+              "Risk-to-reward < 1.5R (tight)",
+            ].map((t) => (
+              <label key={t} className="inline-flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  onChange={() => toggleTag(t)}
+                  checked={entry.tags?.includes(t)}
+                  className="h-4 w-4 rounded border-slate-600 bg-slate-950 shrink-0"
+                />
+                <span className="break-words">{t}</span>
+              </label>
+            ))}
+          </div>
+
+          <div className="border-t border-slate-800 pt-3">
+            <p className="text-slate-200 text-sm font-semibold mb-2">
+              Exit / Stop-loss evidence
+            </p>
+            <div className="grid grid-cols-1 gap-2 text-[13px] leading-snug">
+              {exitReasonTags.map((t) => (
+                <label key={t} className="inline-flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    onChange={() => toggleTag(t)}
+                    checked={entry.tags?.includes(t)}
+                    className="h-4 w-4 rounded border-slate-600 bg-slate-950 shrink-0"
+                  />
+                  <span className="break-words">{t}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div className="border-t border-slate-800 pt-3 mt-3">
+            <p className="text-slate-200 text-sm font-semibold mb-2">
+              Probability & stats flags
+            </p>
+            <div className="grid grid-cols-1 gap-2 text-[13px] leading-snug">
+              {probabilityTags.map((t) => (
+                <label key={t} className="inline-flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    onChange={() => toggleTag(t)}
+                    checked={entry.tags?.includes(t)}
+                    className="h-4 w-4 rounded border-slate-600 bg-slate-950 shrink-0"
+                  />
+                  <span className="break-words">{t}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        </WidgetCard>
+      ),
+    },
+
+    {
+      id: "screenshots",
+      title: "Screenshots",
+      defaultLayout: {
+        i: "screenshots",
+        x: 0,
+        y: 24,
+        w: 12,
+        h: 6,
+        minW: 6,
+        minH: 5,
+      },
+      render: () => (
+        <WidgetCard title="Screenshots (links / notes)">
+          <textarea
+            rows={8}
+            value={(entry.screenshots || []).join("\n")}
+            onChange={(e) =>
+              setEntry((p) => ({
+                ...p,
+                screenshots: e.target.value
+                  .split("\n")
+                  .map((s) => s.trim())
+                  .filter(Boolean),
+              }))
+            }
+            className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-[15px] text-slate-100 focus:outline-none focus:border-emerald-400 resize-y"
+            placeholder="Paste here URLs/notes…"
+          />
+        </WidgetCard>
+      ),
+    },
+
+    {
+      id: "templates",
+      title: "Templates",
+      defaultLayout: {
+        i: "templates",
+        x: 0,
+        y: 30,
+        w: 12,
+        h: 5,
+        minW: 6,
+        minH: 4,
+      },
+      render: () => (
+        <WidgetCard title="Templates (Premarket + Inside + After)">
+          <div className="space-y-1 max-h-40 overflow-y-auto pr-1 mb-3">
+            {templates.map((tpl) => (
+              <div
+                key={tpl.id}
+                className="flex items-center justify-between gap-2 text-xs bg-slate-950/90 border border-slate-800 rounded-lg px-2 py-1"
+              >
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleApplyTemplate(tpl)}
+                    className="px-2 py-1 rounded bg-emerald-500/90 text-slate-950 text-[11px] font-semibold hover:bg-emerald-400"
+                  >
+                    Apply
+                  </button>
+                  <span className="text-slate-300">{tpl.name}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleDeleteTemplate(tpl.id)}
+                  className="text-slate-500 hover:text-red-400"
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-[1fr,auto] gap-2">
+            <input
+              type="text"
+              value={newTemplateName}
+              onChange={(e) => setNewTemplateName(e.target.value)}
+              placeholder="Template name"
+              className="w-full px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-xs text-slate-100 focus:outline-none focus:border-emerald-400"
+            />
+            <button
+              type="button"
+              onClick={handleSaveTemplate}
+              className="px-4 py-1.5 rounded-lg bg-emerald-400 text-slate-950 text-xs font-semibold hover:bg-emerald-300 transition"
+            >
+              Save current as template
+            </button>
+          </div>
+        </WidgetCard>
+      ),
+    },
+
+    {
+      id: "actions",
+      title: "Actions",
+      defaultLayout: {
+        i: "actions",
+        x: 0,
+        y: 35,
+        w: 12,
+        h: 4,
+        minW: 6,
+        minH: 3,
+      },
+      render: () => (
+        <WidgetCard title="Actions">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="text-[11px] text-slate-500">
+              {msg && <span className="text-emerald-400 mr-3">{msg}</span>}
+              Your structure, your rules.
+            </div>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={handleSave}
+                disabled={saving}
+                className="px-4 py-2 rounded-xl border border-slate-700 text-slate-200 text-xs hover:border-emerald-400 hover:text-emerald-300 transition disabled:opacity-50"
+              >
+                Save
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveAndBack}
+                disabled={saving}
+                className="px-6 py-2 rounded-xl bg-emerald-400 text-slate-950 text-sm font-semibold hover:bg-emerald-300 transition disabled:opacity-50"
+              >
+                Save & return to dashboard
+              </button>
+            </div>
+          </div>
+        </WidgetCard>
+      ),
+    },
+  ];
+
+  const layoutStorageKey = "journal_layout_v1";
 
   return (
     <main className="min-h-screen bg-slate-950 text-slate-50 px-4 md:px-8 py-6">
       <div className="mx-auto w-full max-w-[1440px] xl:max-w-[1600px]">
         {/* Top */}
-        <div className="flex items-start sm:items-center justify-between gap-4 mb-5">
+        <div className="flex items-start sm:items-center justify-between gap-4 mb-4">
           <div>
             <p className="text-emerald-400 text-xs uppercase tracking-[0.25em]">
               Daily Journal
@@ -618,714 +1716,39 @@ export default function DailyJournalPage() {
           </Link>
         </div>
 
-        {/* Compact summary */}
-        <section className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-5 text-sm">
-          {/* Day P&L */}
-          <div className="bg-slate-900/95 border border-slate-800 rounded-2xl p-4 space-y-2">
-            <label className="text-slate-400 text-xs uppercase tracking-wide">
-              Day P&L (USD)
-            </label>
-            <input
-              type="number"
-              value={pnlInput}
-              onChange={(e) => {
-                const value = e.target.value;
-                setPnlInput(value);
-                const parsed = parseFloat(value);
-                setEntry((prev) => ({
-                  ...prev,
-                  pnl: Number.isFinite(parsed) ? parsed : prev.pnl,
-                }));
-              }}
-              className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-slate-100 text-[16px] focus:outline-none focus:border-emerald-400"
-              placeholder="e.g. 250, -150, 0"
-            />
-            <p className="text-xs text-slate-500">
-              Flat days and small learning days are part of a healthy curve.
-            </p>
-          </div>
-
-          {/* Main instrument */}
-          <div className="bg-slate-900/95 border border-slate-800 rounded-2xl p-4 space-y-2">
-            <label className="text-slate-400 text-xs uppercase tracking-wide">
-              Main instrument
-            </label>
-            <input
-              type="text"
-              placeholder="e.g. NQ, ES, SPX, AAPL"
-              value={entry.instrument || ""}
-              onChange={(e) =>
-                setEntry((p) => ({ ...p, instrument: e.target.value }))
-              }
-              className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-slate-100 text-[16px] focus:outline-none focus:border-emerald-400"
-            />
-            <div className="flex gap-2 mt-2 items-center">
-              <span className="text-slate-400 text-xs">Direction</span>
-              <button
-                type="button"
-                onClick={() =>
-                  setEntry((p) => ({ ...p, direction: "long" }))
-                }
-                className={`px-3 py-1 rounded-full text-xs border ${
-                  entry.direction === "long"
-                    ? "bg-emerald-400 text-slate-950 border-emerald-400"
-                    : "bg-slate-900 text-slate-300 border-slate-700"
-                }`}
-              >
-                LONG
-              </button>
-              <button
-                type="button"
-                onClick={() =>
-                  setEntry((p) => ({ ...p, direction: "short" }))
-                }
-                className={`px-3 py-1 rounded-full text-xs border ${
-                  entry.direction === "short"
-                    ? "bg-sky-400 text-slate-950 border-sky-400"
-                    : "bg-slate-900 text-slate-300 border-slate-700"
-                }`}
-              >
-                SHORT
-              </button>
-            </div>
-          </div>
-        </section>
-
-        {/* ======= 2 columns layout ======= */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Left column: Premarket + Inside + After */}
-          <div className="flex flex-col gap-6">
-            {/* Premarket */}
-            <section>
-              <div className="bg-slate-900/95 border border-slate-800 rounded-2xl p-4">
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-slate-200 text-sm font-medium">
-                    Premarket Prep
-                  </p>
-                  <EditorToolbar
-                    onBold={() => exec("bold")}
-                    onItalic={() => exec("italic")}
-                    onUnderline={() => exec("underline")}
-                    onUL={() => exec("insertUnorderedList")}
-                    onOL={() => exec("insertOrderedList")}
-                    onQuote={insertQuote}
-                    onAddRow={addTableRow}
-                    onAddCol={addTableColumn}
-                    onInsertTable={(r, c) => insertTable(r, c)}
-                  />
-                </div>
-                <div
-                  ref={preRef}
-                  contentEditable
-                  suppressContentEditableWarning
-                  className={editorCls}
-                />
-                <p className="text-[11px] text-slate-500 mt-2">
-                  Use bullet lists, numbered lists and the ▦ button for tables
-                  (up to 6×6). +row/+col expand the nearest table.
-                </p>
-              </div>
-            </section>
-
-            {/* Inside the Trade */}
-            <section>
-              <div className="bg-slate-900/95 border border-slate-800 rounded-2xl p-4">
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-slate-200 text-sm font-medium">
-                    Inside the Trade (mic dictation)
-                  </p>
-                  <EditorToolbar
-                    onBold={() => exec("bold")}
-                    onItalic={() => exec("italic")}
-                    onUnderline={() => exec("underline")}
-                    onUL={() => exec("insertUnorderedList")}
-                    onOL={() => exec("insertOrderedList")}
-                    onQuote={insertQuote}
-                    onAddRow={addTableRow}
-                    onAddCol={addTableColumn}
-                    onInsertTable={(r, c) => insertTable(r, c)}
-                    extraRight={
-                      <button
-                        type="button"
-                        onClick={toggleDictation}
-                        className={`px-2 py-1 rounded ${
-                          listening
-                            ? "bg-rose-500 text-white"
-                            : "bg-slate-800 text-slate-200"
-                        } text-xs hover:bg-slate-700`}
-                      >
-                        {listening ? "● Stop dictation" : "Start dictation"}
-                      </button>
-                    }
-                  />
-                </div>
-                <div
-                  ref={liveRef}
-                  contentEditable
-                  suppressContentEditableWarning
-                  className={editorCls}
-                />
-              </div>
-            </section>
-
-            {/* After-trade */}
-            <section>
-              <div className="bg-slate-900/95 border border-slate-800 rounded-2xl p-4">
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-slate-200 text-sm font-medium">
-                    After-trade Analysis
-                  </p>
-                  <EditorToolbar
-                    onBold={() => exec("bold")}
-                    onItalic={() => exec("italic")}
-                    onUnderline={() => exec("underline")}
-                    onUL={() => exec("insertUnorderedList")}
-                    onOL={() => exec("insertOrderedList")}
-                    onQuote={insertQuote}
-                    onAddRow={addTableRow}
-                    onAddCol={addTableColumn}
-                    onInsertTable={(r, c) => insertTable(r, c)}
-                  />
-                </div>
-                <div
-                  ref={postRef}
-                  contentEditable
-                  suppressContentEditableWarning
-                  className={editorCls}
-                />
-              </div>
-            </section>
-          </div>
-
-          {/* Right column: Entries + Exits + Emotional / Screenshots */}
-          <div className="flex flex-col gap-6">
-            {/* Entries */}
-            <section>
-              <div className="bg-slate-900/95 border border-slate-800 rounded-2xl p-4 space-y-3">
-                <div className="flex items-center justify-between">
-                  <p className="text-slate-200 text-sm font-medium">Entries</p>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-2 text-sm">
-                  <div>
-                    <label className="text-xs text-slate-400 block mb-1">
-                      Symbol / Contract
-                    </label>
-                    <input
-                      type="text"
-                      value={newEntryTrade.asset}
-                      onChange={(e) =>
-                        setNewEntryTrade((p) => ({
-                          ...p,
-                          asset: e.target.value,
-                        }))
-                      }
-                      className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-[14px] text-slate-100 focus:outline-none focus:border-emerald-400"
-                      placeholder="SPX, AAPL, ESU5..."
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs text-slate-400 block mb-1">
-                      Price
-                    </label>
-                    <input
-                      type="number"
-                      value={newEntryTrade.price}
-                      onChange={(e) =>
-                        setNewEntryTrade((p) => ({
-                          ...p,
-                          price: e.target.value,
-                        }))
-                      }
-                      className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-[14px] text-slate-100 focus:outline-none focus:border-emerald-400"
-                      placeholder="e.g. 5120.5"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs text-slate-400 block mb-1">
-                      Quantity
-                    </label>
-                    <input
-                      type="number"
-                      value={newEntryTrade.quantity}
-                      onChange={(e) =>
-                        setNewEntryTrade((p) => ({
-                          ...p,
-                          quantity: e.target.value,
-                        }))
-                      }
-                      className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-[14px] text-slate-100 focus:outline-none focus:border-emerald-400"
-                      placeholder="Size"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs text-slate-400 block mb-1">
-                      Time
-                    </label>
-                    <input
-                      type="time"
-                      value={newEntryTrade.time}
-                      onChange={(e) =>
-                        setNewEntryTrade((p) => ({
-                          ...p,
-                          time: e.target.value,
-                        }))
-                      }
-                      className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-[14px] text-slate-100 focus:outline-none focus:border-emerald-400"
-                    />
-                  </div>
-                </div>
-
+        {/* Widget toggles */}
+        <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-3 mb-5">
+          <p className="text-xs text-slate-400 mb-2">
+            Customize this journal page: toggle widgets on/off.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {ALL_WIDGETS.map((w) => {
+              const on = activeWidgets.includes(w.id);
+              return (
                 <button
+                  key={w.id}
                   type="button"
-                  onClick={handleAddEntryTrade}
-                  className="mt-1 px-3 py-1.5 rounded-lg bg-emerald-400 text-slate-950 text-xs font-semibold hover:bg-emerald-300 transition"
+                  onClick={() => toggleWidget(w.id)}
+                  className={`px-3 py-1.5 rounded-full text-xs border transition ${
+                    on
+                      ? "bg-emerald-400 text-slate-950 border-emerald-400"
+                      : "bg-slate-950 text-slate-300 border-slate-700 hover:border-emerald-400"
+                  }`}
                 >
-                  Add entry
+                  {on ? "✓ " : "+ "}
+                  {w.label}
                 </button>
-
-                {entryTrades.length > 0 && (
-                  <div className="space-y-2 text-xs mt-3">
-                    <table className="w-full text-left text-[12px] border border-slate-800 rounded-lg overflow-hidden">
-                      <thead className="bg-slate-900/80">
-                        <tr>
-                          <th className="px-2 py-1 border-b border-slate-800">
-                            Symbol
-                          </th>
-                          <th className="px-2 py-1 border-b border-slate-800">
-                            Price
-                          </th>
-                          <th className="px-2 py-1 border-b border-slate-800">
-                            Qty
-                          </th>
-                          <th className="px-2 py-1 border-b border-slate-800">
-                            Time
-                          </th>
-                          <th className="px-2 py-1 border-b border-slate-800 text-right">
-                            –
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {entryTrades.map((t) => (
-                          <tr key={t.id} className="border-t border-slate-800">
-                            <td className="px-2 py-1">{t.asset}</td>
-                            <td className="px-2 py-1">{t.price}</td>
-                            <td className="px-2 py-1">{t.quantity}</td>
-                            <td className="px-2 py-1">{t.time}</td>
-                            <td className="px-2 py-1 text-right">
-                              <button
-                                type="button"
-                                onClick={() => handleDeleteEntryTrade(t.id)}
-                                className="text-slate-500 hover:text-red-400"
-                              >
-                                ✕
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-
-                    <div className="pt-1 border-t border-slate-800 mt-1">
-                      <p className="text-[11px] text-slate-400 mb-1">
-                        Average entry price per asset
-                      </p>
-                      <div className="flex flex-wrap gap-2">
-                        {entryAverages.map((a) => (
-                          <span
-                            key={a.asset}
-                            className="px-2 py-1 rounded-full bg-slate-950 border border-slate-700 text-[11px]"
-                          >
-                            {a.asset}: {a.avg.toFixed(2)}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </section>
-
-            {/* Exits */}
-            <section>
-              <div className="bg-slate-900/95 border border-slate-800 rounded-2xl p-4 space-y-3">
-                <div className="flex items-center justify-between">
-                  <p className="text-slate-200 text-sm font-medium">Exits</p>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-2 text-sm">
-                  <div>
-                    <label className="text-xs text-slate-400 block mb-1">
-                      Symbol / Contract
-                    </label>
-                    <input
-                      type="text"
-                      value={newExitTrade.asset}
-                      onChange={(e) =>
-                        setNewExitTrade((p) => ({
-                          ...p,
-                          asset: e.target.value,
-                        }))
-                      }
-                      className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-[14px] text-slate-100 focus:outline-none focus:border-emerald-400"
-                      placeholder="SPX, AAPL, ESU5..."
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs text-slate-400 block mb-1">
-                      Price
-                    </label>
-                    <input
-                      type="number"
-                      value={newExitTrade.price}
-                      onChange={(e) =>
-                        setNewExitTrade((p) => ({
-                          ...p,
-                          price: e.target.value,
-                        }))
-                      }
-                      className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-[14px] text-slate-100 focus:outline-none focus:border-emerald-400"
-                      placeholder="e.g. 5128.0"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs text-slate-400 block mb-1">
-                      Quantity
-                    </label>
-                    <input
-                      type="number"
-                      value={newExitTrade.quantity}
-                      onChange={(e) =>
-                        setNewExitTrade((p) => ({
-                          ...p,
-                          quantity: e.target.value,
-                        }))
-                      }
-                      className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-[14px] text-slate-100 focus:outline-none focus:border-emerald-400"
-                      placeholder="Size"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs text-slate-400 block mb-1">
-                      Time
-                    </label>
-                    <input
-                      type="time"
-                      value={newExitTrade.time}
-                      onChange={(e) =>
-                        setNewExitTrade((p) => ({
-                          ...p,
-                          time: e.target.value,
-                        }))
-                      }
-                      className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-[14px] text-slate-100 focus:outline-none focus:border-emerald-400"
-                    />
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={handleAddExitTrade}
-                  className="mt-1 px-3 py-1.5 rounded-lg bg-emerald-400 text-slate-950 text-xs font-semibold hover:bg-emerald-300 transition"
-                >
-                  Add exit
-                </button>
-
-                {exitTrades.length > 0 && (
-                  <div className="space-y-2 text-xs mt-3">
-                    <table className="w-full text-left text-[12px] border border-slate-800 rounded-lg overflow-hidden">
-                      <thead className="bg-slate-900/80">
-                        <tr>
-                          <th className="px-2 py-1 border-b border-slate-800">
-                            Symbol
-                          </th>
-                          <th className="px-2 py-1 border-b border-slate-800">
-                            Price
-                          </th>
-                          <th className="px-2 py-1 border-b border-slate-800">
-                            Qty
-                          </th>
-                          <th className="px-2 py-1 border-b border-slate-800">
-                            Time
-                          </th>
-                          <th className="px-2 py-1 border-b border-slate-800 text-right">
-                            –
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {exitTrades.map((t) => (
-                          <tr key={t.id} className="border-t border-slate-800">
-                            <td className="px-2 py-1">{t.asset}</td>
-                            <td className="px-2 py-1">{t.price}</td>
-                            <td className="px-2 py-1">{t.quantity}</td>
-                            <td className="px-2 py-1">{t.time}</td>
-                            <td className="px-2 py-1 text-right">
-                              <button
-                                type="button"
-                                onClick={() => handleDeleteExitTrade(t.id)}
-                                className="text-slate-500 hover:text-red-400"
-                              >
-                                ✕
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-
-                    <div className="pt-1 border-t border-slate-800 mt-1">
-                      <p className="text-[11px] text-slate-400 mb-1">
-                        Average exit price per asset
-                      </p>
-                      <div className="flex flex-wrap gap-2">
-                        {exitAverages.map((a) => (
-                          <span
-                            key={a.asset}
-                            className="px-2 py-1 rounded-full bg-slate-950 border border-slate-700 text-[11px]"
-                          >
-                            {a.asset}: {a.avg.toFixed(2)}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </section>
-
-            {/* Emotional + Strategy + Probability + Screenshots */}
-            <section className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-              {/* Emotional state */}
-              <div className="bg-slate-900/95 border border-slate-800 rounded-2xl p-4">
-                <p className="text-slate-200 text-sm font-semibold mb-2">
-                  Emotional state & impulses
-                </p>
-                <p className="text-[11px] text-slate-500 mb-3">
-                  Check what emotions and impulses were present during today&apos;s
-                  session.
-                </p>
-
-                <div className="grid grid-cols-1 gap-2 text-[13px] mb-4">
-                  {["Calm & focused", "Greedy", "Desperate"].map((t) => (
-                    <label key={t} className="inline-flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        onChange={() => toggleTag(t)}
-                        checked={entry.tags?.includes(t)}
-                        className="h-4 w-4 rounded border-slate-600 bg-slate-950"
-                      />
-                      <span>{t}</span>
-                    </label>
-                  ))}
-
-                  <label className="inline-flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      onChange={() => toggleTag("FOMO")}
-                      checked={entry.tags?.includes("FOMO")}
-                      className="h-4 w-4 rounded border-slate-600 bg-slate-950"
-                    />
-                    <span>FOMO (fear of missing out)</span>
-                  </label>
-
-                  <label className="inline-flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      onChange={() => toggleTag("Fear of being wrong")}
-                      checked={entry.tags?.includes("Fear of being wrong")}
-                      className="h-4 w-4 rounded border-slate-600 bg-slate-950"
-                    />
-                    <span>Fear of being wrong</span>
-                  </label>
-
-                  <label className="inline-flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      onChange={() => toggleTag("Revenge trade")}
-                      checked={entry.tags?.includes("Revenge trade")}
-                      className="h-4 w-4 rounded border-slate-600 bg-slate-950"
-                    />
-                    <span>Revenge impulse present</span>
-                  </label>
-                </div>
-              </div>
-
-              {/* Strategy & probability flags */}
-              <div className="bg-slate-900/95 border border-slate-800 rounded-2xl p-4">
-                <p className="text-slate-200 text-sm font-semibold mb-2">
-                  Strategy checklist
-                </p>
-                <p className="text-[11px] text-slate-500 mb-3">
-                  Track how well you executed your written plan and risk rules.
-                </p>
-
-                <div className="grid grid-cols-1 gap-2 text-[13px] mb-4">
-                  {[
-                    "Respect Strategy",
-                    "Planned stop was in place",
-                    "Used planned position sizing",
-                    "Risk-to-reward ≥ 2R (planned)",
-                    "Risk-to-reward < 1.5R (tight)",
-                  ].map((t) => (
-                    <label key={t} className="inline-flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        onChange={() => toggleTag(t)}
-                        checked={entry.tags?.includes(t)}
-                        className="h-4 w-4 rounded border-slate-600 bg-slate-950"
-                      />
-                      <span>{t}</span>
-                    </label>
-                  ))}
-                </div>
-
-                <div className="border-t border-slate-800 pt-3">
-                  <p className="text-slate-200 text-sm font-semibold mb-2">
-                    Probability & stats flags
-                  </p>
-                  <p className="text-[11px] text-slate-500 mb-3">
-                    Use these to mark if today&apos;s trades were aligned or not
-                    with your historical edge and usual trading windows.
-                  </p>
-
-                  <div className="grid grid-cols-1 gap-2 text-[13px]">
-                    {probabilityTags.map((t) => (
-                      <label
-                        key={t}
-                        className="inline-flex items-center gap-2"
-                      >
-                        <input
-                          type="checkbox"
-                          onChange={() => toggleTag(t)}
-                          checked={entry.tags?.includes(t)}
-                          className="h-4 w-4 rounded border-slate-600 bg-slate-950"
-                        />
-                        <span>{t}</span>
-                      </label>
-                    ))}
-                  </div>
-
-                  <p className="text-[11px] text-slate-500 mt-3">
-                    These flags are used by Analytics and AI suggestions to
-                    track high-probability vs exploratory sessions.
-                  </p>
-                </div>
-              </div>
-            </section>
-
-            {/* Screenshots textbox */}
-            <section>
-              <div className="bg-slate-900/95 border border-slate-800 rounded-2xl p-4">
-                <p className="text-slate-200 text-sm font-medium mb-2">
-                  Screenshots (links / notes, one per line)
-                </p>
-                <textarea
-                  rows={12}
-                  value={(entry.screenshots || []).join("\n")}
-                  onChange={(e) =>
-                    setEntry((p) => ({
-                      ...p,
-                      screenshots: e.target.value
-                        .split("\n")
-                        .map((s) => s.trim())
-                        .filter(Boolean),
-                    }))
-                  }
-                  className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-[15px] text-slate-100 focus:outline-none focus:border-emerald-400 resize-y"
-                  placeholder="Paste here URLs/notes for your images…"
-                />
-              </div>
-            </section>
+              );
+            })}
           </div>
         </div>
 
-        {/* Templates */}
-        <section className="mt-6">
-          <div className="bg-slate-900/95 border border-slate-800 rounded-2xl p-4">
-            <p className="text-slate-200 text-sm font-medium mb-3">
-              Templates (Premarket + Inside + After)
-            </p>
-
-            {templates.length === 0 && (
-              <p className="text-xs text-slate-500 mb-2">
-                No templates yet. Configure your blocks and save them as a
-                preset.
-              </p>
-            )}
-
-            <div className="space-y-1 max-h-40 overflow-y-auto pr-1 mb-3">
-              {templates.map((tpl) => (
-                <div
-                  key={tpl.id}
-                  className="flex items-center justify-between gap-2 text-xs bg-slate-950/90 border border-slate-800 rounded-lg px-2 py-1"
-                >
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => handleApplyTemplate(tpl)}
-                      className="px-2 py-1 rounded bg-emerald-500/90 text-slate-950 text-[11px] font-semibold hover:bg-emerald-400"
-                    >
-                      Apply
-                    </button>
-                    <span className="text-slate-300">{tpl.name}</span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => handleDeleteTemplate(tpl.id)}
-                    className="text-slate-500 hover:text-red-400"
-                  >
-                    ✕
-                  </button>
-                </div>
-              ))}
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-[1fr,auto] gap-2">
-              <input
-                type="text"
-                value={newTemplateName}
-                onChange={(e) => setNewTemplateName(e.target.value)}
-                placeholder="Template name (e.g. SPX London session)"
-                className="w-full px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-xs text-slate-100 focus:outline-none focus:border-emerald-400"
-              />
-              <button
-                type="button"
-                onClick={handleSaveTemplate}
-                className="px-4 py-1.5 rounded-lg bg-emerald-400 text-slate-950 text-xs font-semibold hover:bg-emerald-300 transition"
-              >
-                Save current as template
-              </button>
-            </div>
-          </div>
-        </section>
-
-        {/* Actions */}
-        <div className="flex flex-wrap items-center justify-between gap-3 mt-6">
-          <div className="text-[11px] text-slate-500">
-            {msg && <span className="text-emerald-400 mr-3">{msg}</span>}
-            Your structure, your rules.
-          </div>
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={handleSave}
-              disabled={saving}
-              className="px-4 py-2 rounded-xl border border-slate-700 text-slate-200 text-xs hover:border-emerald-400 hover:text-emerald-300 transition disabled:opacity-50"
-            >
-              Save
-            </button>
-            <button
-              type="button"
-              onClick={handleSaveAndBack}
-              disabled={saving}
-              className="px-6 py-2 rounded-xl bg-emerald-400 text-slate-950 text-sm font-semibold hover:bg-emerald-300 transition disabled:opacity-50"
-            >
-              Save & return to dashboard
-            </button>
-          </div>
-        </div>
+        {/* Grid */}
+        <JournalGrid
+          storageKey={layoutStorageKey}
+          widgets={WIDGETS}
+          activeIds={activeWidgets}
+        />
       </div>
     </main>
   );

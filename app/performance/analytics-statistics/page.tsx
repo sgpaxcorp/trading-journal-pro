@@ -1,55 +1,419 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import type React from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import dynamic from "next/dynamic";
 
-import { useAuth } from "@/context/AuthContext";
 import {
-  getAllJournalEntries,
-  type JournalEntry,
+  JournalEntry,
+  getJournalEntryByDate,
+  saveJournalEntry,
 } from "@/lib/journalLocal";
+import {
+  getJournalTemplates,
+  addJournalTemplate,
+  deleteJournalTemplate,
+  JournalTemplate,
+} from "@/lib/journalTemplatesLocal";
+import { useAuth } from "@/context/AuthContext";
 import TopNav from "@/app/components/TopNav";
+import DashboardGrid from "@/app/components/DashboardGrid";
 
-type AnalyticsGroupId =
-  | "overview"
-  | "day-of-week"
-  | "psychology"
-  | "instruments";
+/* =========================================================
+   Dynamic grid (same as dashboard, no SSR)
+========================================================= */
+const DynamicGrid = dynamic(() => Promise.resolve(DashboardGrid as any), {
+  ssr: false,
+}) as any;
 
-type DayOfWeekKey = 0 | 1 | 2 | 3 | 4 | 5 | 6;
+/* =========================================================
+   Helpers: editor / tables
+========================================================= */
+function insertHtmlAtCaret(html: string) {
+  const sel = window.getSelection?.();
+  if (!sel || sel.rangeCount === 0) return;
+  const range = sel.getRangeAt(0);
+  range.deleteContents();
+  const el = document.createElement("div");
+  el.innerHTML = html;
+  const frag = document.createDocumentFragment();
+  let node: ChildNode | null = null;
+  let lastNode: ChildNode | null = null;
+  while ((node = el.firstChild)) lastNode = frag.appendChild(node);
+  range.insertNode(frag);
+  if (lastNode) {
+    const newRange = range.cloneRange();
+    newRange.setStartAfter(lastNode);
+    newRange.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(newRange);
+  }
+}
 
-const DAY_LABELS: Record<DayOfWeekKey, string> = {
-  0: "Sunday",
-  1: "Monday",
-  2: "Tuesday",
-  3: "Wednesday",
-  4: "Thursday",
-  5: "Friday",
-  6: "Saturday",
+function closestTableFromSelection(): HTMLTableElement | null {
+  const sel = window.getSelection?.();
+  if (!sel || sel.rangeCount === 0) return null;
+  let node: Node | null = sel.anchorNode;
+  if (!node) return null;
+  if (node.nodeType === Node.TEXT_NODE) node = node.parentElement;
+  while (node && (node as HTMLElement).tagName !== "TABLE") {
+    node = (node as HTMLElement)?.parentElement ?? null;
+  }
+  return (node as HTMLTableElement) || null;
+}
+
+function insertTable(rows: number, cols: number) {
+  rows = Math.max(1, Math.min(6, rows));
+  cols = Math.max(1, Math.min(6, cols));
+  const head =
+    `<thead><tr>` +
+    Array.from({ length: cols })
+      .map(() => `<th class="border border-slate-700 px-2 py-1">Header</th>`)
+      .join("") +
+    `</tr></thead>`;
+  const body =
+    `<tbody>` +
+    Array.from({ length: rows })
+      .map(
+        () =>
+          `<tr>` +
+          Array.from({ length: cols })
+            .map(
+              () =>
+                `<td class="border border-slate-800 px-2 py-1">Cell</td>`
+            )
+            .join("") +
+          `</tr>`
+      )
+      .join("") +
+    `</tbody>`;
+
+  insertHtmlAtCaret(
+    `<table class="w-full border border-slate-700 text-left text-[15px]">${head}${body}</table>`
+  );
+}
+
+function addTableRow() {
+  const table = closestTableFromSelection();
+  if (!table) return;
+  const tbody = table.tBodies[0] || table.createTBody();
+  const cols =
+    table.tHead?.rows[0]?.cells.length || tbody.rows[0]?.cells.length || 2;
+  const tr = tbody.insertRow(-1);
+  for (let i = 0; i < cols; i++) {
+    const td = tr.insertCell(-1);
+    td.className = "border border-slate-800 px-2 py-1";
+    td.textContent = "Cell";
+  }
+}
+
+function addTableColumn() {
+  const table = closestTableFromSelection();
+  if (!table) return;
+  if (table.tHead && table.tHead.rows[0]) {
+    const th = document.createElement("th");
+    th.className = "border border-slate-700 px-2 py-1";
+    th.textContent = "Header";
+    table.tHead.rows[0].appendChild(th);
+  }
+  const tbody = table.tBodies[0];
+  if (tbody) {
+    Array.from(tbody.rows).forEach((row) => {
+      const td = document.createElement("td");
+      td.className = "border border-slate-800 px-2 py-1";
+      td.textContent = "Cell";
+      row.appendChild(td);
+    });
+  }
+}
+
+/* =========================================================
+   UI: 1–6 × 1–6 table picker
+========================================================= */
+function TablePicker({
+  onPick,
+}: {
+  onPick: (rows: number, cols: number) => void;
+}) {
+  const [hover, setHover] = useState<[number, number] | null>(null);
+  return (
+    <div className="absolute top-full left-0 mt-1 rounded-lg border border-slate-700 bg-slate-900 p-2 shadow-xl z-50">
+      <div className="text-[11px] text-slate-400 mb-2">
+        {hover ? `${hover[0]} × ${hover[1]}` : "Choose size (max 6×6)"}
+      </div>
+      <div className="grid grid-cols-6 gap-1">
+        {Array.from({ length: 36 }).map((_, i) => {
+          const r = Math.floor(i / 6) + 1;
+          const c = (i % 6) + 1;
+          const active =
+            hover && r <= hover[0] && c <= hover[1]
+              ? "bg-emerald-500/80"
+              : "bg-slate-800";
+          return (
+            <button
+              key={i}
+              type="button"
+              onMouseEnter={() => setHover([r, c])}
+              onMouseLeave={() => setHover(null)}
+              onClick={() => onPick(r, c)}
+              className={`h-6 w-6 rounded ${active}`}
+            />
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* =========================================================
+   Toolbar
+========================================================= */
+function EditorToolbar({
+  onBold,
+  onItalic,
+  onUnderline,
+  onUL,
+  onOL,
+  onQuote,
+  onAddRow,
+  onAddCol,
+  onInsertTable,
+  extraRight,
+}: {
+  onBold: () => void;
+  onItalic: () => void;
+  onUnderline: () => void;
+  onUL: () => void;
+  onOL: () => void;
+  onQuote: () => void;
+  onAddRow: () => void;
+  onAddCol: () => void;
+  onInsertTable: (rows: number, cols: number) => void;
+  extraRight?: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const btn =
+    "px-2 py-1 rounded bg-slate-800 text-slate-200 text-xs hover:bg-slate-700";
+  return (
+    <div className="relative flex items-center gap-1 w-full">
+      <div className="flex items-center gap-1">
+        <button className={btn} type="button" onClick={onBold}>
+          B
+        </button>
+        <button className={btn} type="button" onClick={onItalic}>
+          I
+        </button>
+        <button className={btn} type="button" onClick={onUnderline}>
+          U
+        </button>
+        <button className={btn} type="button" onClick={onUL}>
+          •
+        </button>
+        <button className={btn} type="button" onClick={onOL}>
+          1.
+        </button>
+        <button className={btn} type="button" onClick={onQuote}>
+          “ ”
+        </button>
+
+        <div className="relative">
+          <button
+            className={btn}
+            type="button"
+            onClick={() => setOpen((v) => !v)}
+            title="Insert table (1–6 × 1–6)"
+          >
+            ▦
+          </button>
+          {open && (
+            <TablePicker
+              onPick={(r, c) => {
+                onInsertTable(r, c);
+                setOpen(false);
+              }}
+            />
+          )}
+        </div>
+
+        <button className={btn} type="button" onClick={onAddRow}>
+          +row
+        </button>
+        <button className={btn} type="button" onClick={onAddCol}>
+          +col
+        </button>
+      </div>
+
+      <div className="ml-auto">{extraRight}</div>
+    </div>
+  );
+}
+
+/* =========================================================
+   Trading types / direction
+========================================================= */
+type TradeType = "stock" | "option" | "future" | "crypto" | "forex" | "other";
+type Direction = "long" | "short";
+
+const TYPE_LABEL: Record<TradeType, string> = {
+  stock: "Stocks",
+  option: "Options",
+  future: "Futures",
+  crypto: "Crypto",
+  forex: "Forex",
+  other: "Other",
 };
 
-const GROUPS: { id: AnalyticsGroupId; label: string; description: string }[] = [
-  {
-    id: "overview",
-    label: "Overview",
-    description: "Global performance, risk discipline and probabilities.",
-  },
-  {
-    id: "day-of-week",
-    label: "Day of week",
-    description: "How weekdays affect your results.",
-  },
-  {
-    id: "psychology",
-    label: "Psychology & Rules",
-    description: "FOMO, plan respect and learning patterns.",
-  },
-  {
-    id: "instruments",
-    label: "Instruments",
-    description: "Most supportive symbols and instruments to review.",
-  },
+const DIR_LABEL: Record<Direction, string> = {
+  long: "Long",
+  short: "Short",
+};
+
+/* =========================================================
+   Trade rows
+========================================================= */
+type EntryTradeRow = {
+  id: string;
+  symbol: string;
+  type: TradeType;
+  direction: Direction;
+  price: string;     // entry price
+  quantity: string;  // contracts/shares
+  time: string;      // HH:MM
+};
+
+type ExitTradeRow = {
+  id: string;
+  entryKey: string;  // link to entry group (symbol|type|direction)
+  symbol: string;
+  type: TradeType;
+  direction: Direction;
+  price: string;     // exit price
+  quantity: string;  // qty closed
+  time: string;
+};
+
+/* =========================================================
+   Time helpers
+========================================================= */
+function nowTimeHHMM() {
+  const d = new Date();
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  return `${hh}:${mm}`;
+}
+
+/* =========================================================
+   Averages / grouping
+========================================================= */
+function keyOf(symbol: string, type: TradeType, direction: Direction) {
+  return `${symbol.trim().toUpperCase()}|${type}|${direction}`;
+}
+
+function computeAvgByGroup(entries: EntryTradeRow[]) {
+  const map: Record<
+    string,
+    { symbol: string; type: TradeType; direction: Direction; sumPxQty: number; sumQty: number }
+  > = {};
+
+  for (const e of entries) {
+    const symbol = (e.symbol || "").trim().toUpperCase();
+    const qty = Number(e.quantity);
+    const px = Number(e.price);
+    if (!symbol || !Number.isFinite(qty) || !Number.isFinite(px) || qty <= 0) continue;
+
+    const k = keyOf(symbol, e.type, e.direction);
+    if (!map[k]) {
+      map[k] = { symbol, type: e.type, direction: e.direction, sumPxQty: 0, sumQty: 0 };
+    }
+    map[k].sumPxQty += px * qty;
+    map[k].sumQty += qty;
+  }
+
+  const groups = Object.entries(map).map(([k, v]) => ({
+    key: k,
+    symbol: v.symbol,
+    type: v.type,
+    direction: v.direction,
+    avgEntry: v.sumQty > 0 ? v.sumPxQty / v.sumQty : 0,
+    totalQty: v.sumQty,
+  }));
+
+  return groups;
+}
+
+/* =========================================================
+   PnL multipliers (simple safe defaults)
+   Puedes expandir luego.
+========================================================= */
+function futureMultiplier(symbol: string) {
+  const s = symbol.toUpperCase();
+  if (s.startsWith("ES") || s === "SPX") return 50;
+  if (s.startsWith("NQ")) return 20;
+  if (s.startsWith("MES")) return 5;
+  if (s.startsWith("MNQ")) return 2;
+  if (s.startsWith("CL")) return 1000;
+  if (s.startsWith("GC")) return 100;
+  return 1;
+}
+
+function multiplierFor(type: TradeType, symbol: string) {
+  if (type === "option") return 100;
+  if (type === "future") return futureMultiplier(symbol);
+  return 1;
+}
+
+function computePnL(entries: EntryTradeRow[], exits: ExitTradeRow[]) {
+  const groups = computeAvgByGroup(entries);
+  const groupMap = new Map(groups.map((g) => [g.key, g]));
+
+  let total = 0;
+
+  for (const x of exits) {
+    const g = groupMap.get(x.entryKey);
+    if (!g) continue;
+
+    const exitPx = Number(x.price);
+    const qty = Number(x.quantity);
+    if (!Number.isFinite(exitPx) || !Number.isFinite(qty) || qty <= 0) continue;
+
+    const dirSign = x.direction === "long" ? 1 : -1;
+    const mult = multiplierFor(x.type, x.symbol);
+    const pnlPerUnit = (exitPx - g.avgEntry) * dirSign;
+
+    total += pnlPerUnit * qty * mult;
+  }
+
+  return total;
+}
+
+/* =========================================================
+   Widgets
+========================================================= */
+type JournalWidgetId =
+  | "premarket"
+  | "inside"
+  | "after"
+  | "entries"
+  | "exits"
+  | "emotional"
+  | "strategy"
+  | "probability"
+  | "screenshots"
+  | "templates";
+
+const ALL_JOURNAL_WIDGETS: { id: JournalWidgetId; label: string }[] = [
+  { id: "premarket", label: "Premarket" },
+  { id: "inside", label: "Inside the Trade" },
+  { id: "after", label: "After-trade Analysis" },
+  { id: "entries", label: "Entries" },
+  { id: "exits", label: "Exits" },
+  { id: "emotional", label: "Emotional state" },
+  { id: "strategy", label: "Strategy checklist" },
+  { id: "probability", label: "Probability flags" },
+  { id: "screenshots", label: "Screenshots" },
+  { id: "templates", label: "Templates" },
 ];
 
 function formatDateFriendly(dateStr: string): string {
@@ -58,7 +422,7 @@ function formatDateFriendly(dateStr: string): string {
     const [y, m, d] = dateStr.split("-").map(Number);
     return new Date(y, m - 1, d).toLocaleDateString("en-US", {
       year: "numeric",
-      month: "short",
+      month: "long",
       day: "2-digit",
     });
   } catch {
@@ -66,483 +430,1136 @@ function formatDateFriendly(dateStr: string): string {
   }
 }
 
-export default function AnalyticsStatisticsPage() {
-  const { user, loading } = useAuth();
+/* =========================================================
+   PAGE
+========================================================= */
+export default function DailyJournalPage() {
+  const params = useParams();
   const router = useRouter();
+  const { user, loading } = useAuth();
 
-  const [entries, setEntries] = useState<JournalEntry[]>([]);
-  const [activeGroup, setActiveGroup] =
-    useState<AnalyticsGroupId>("overview");
+  const dateParam = Array.isArray(params?.date)
+    ? params.date[0]
+    : (params?.date as string);
 
-  // Protect route
+  /* ---------------- Core entry ---------------- */
+  const [entry, setEntry] = useState<JournalEntry>({
+    date: dateParam || "",
+    pnl: 0,
+    instrument: "",
+    direction: undefined,
+    entryPrice: undefined,
+    exitPrice: undefined,
+    size: undefined,
+    screenshots: [],
+    notes: "",
+    emotion: "",
+    tags: [],
+    respectedPlan: true,
+  });
+
+  const [pnlInput, setPnlInput] = useState<string>("");
+
+  /* ---------------- Templates ---------------- */
+  const [templates, setTemplates] = useState<JournalTemplate[]>([]);
+  const [newTemplateName, setNewTemplateName] = useState("");
+
+  /* ---------------- Saving ---------------- */
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState("");
+
+  /* ---------------- Editors refs ---------------- */
+  const preRef = useRef<HTMLDivElement | null>(null);
+  const liveRef = useRef<HTMLDivElement | null>(null);
+  const postRef = useRef<HTMLDivElement | null>(null);
+
+  /* ---------------- Dictation ---------------- */
+  const [listening, setListening] = useState(false);
+  const recognitionRef = useRef<any>(null);
+
+  /* ---------------- Entries / Exits ---------------- */
+  const [entryTrades, setEntryTrades] = useState<EntryTradeRow[]>([]);
+  const [exitTrades, setExitTrades] = useState<ExitTradeRow[]>([]);
+
+  const [newEntryTrade, setNewEntryTrade] = useState<Omit<EntryTradeRow, "id">>({
+    symbol: "",
+    type: "option",
+    direction: "long",
+    price: "",
+    quantity: "",
+    time: nowTimeHHMM(),
+  });
+
+  const [newExitTrade, setNewExitTrade] = useState<Omit<ExitTradeRow, "id">>({
+    entryKey: "",
+    symbol: "",
+    type: "option",
+    direction: "long",
+    price: "",
+    quantity: "",
+    time: nowTimeHHMM(),
+  });
+
+  /* ---------------- Widget library ---------------- */
+  const [activeWidgets, setActiveWidgets] = useState<JournalWidgetId[]>(
+    ALL_JOURNAL_WIDGETS.map((w) => w.id)
+  );
+  const [widgetsLoaded, setWidgetsLoaded] = useState(false);
+
+  /* ---------------- Auth guard ---------------- */
   useEffect(() => {
-    if (!loading && !user) {
-      router.replace("/signin");
-    }
+    if (!loading && !user) router.replace("/signin");
   }, [loading, user, router]);
 
-  // Load journal entries
+  /* ---------------- Load existing journal + templates ---------------- */
   useEffect(() => {
-    if (loading || !user) return;
-    const all = getAllJournalEntries();
-    setEntries(all);
-  }, [loading, user]);
+    if (!dateParam) return;
 
-  // Later you can filter this by growth-plan start date if needed
-  const usedEntries = entries;
+    const existing = getJournalEntryByDate(dateParam);
+    if (existing) {
+      setEntry((prev) => ({ ...prev, ...existing, date: dateParam }));
 
-  /* =========================
-     Basic stats & probabilities
-  ========================= */
-  const baseStats = useMemo(() => {
-    const totalSessions = usedEntries.length;
-    let greenSessions = 0;
-    let learningSessions = 0;
-    let flatSessions = 0;
-    let sumPnl = 0;
+      const existingPnl =
+        typeof existing.pnl === "number" ? String(existing.pnl) : "";
+      setPnlInput(existingPnl);
 
-    let bestDay: { date: string; pnl: number } | null = null;
-    let toughestDay: { date: string; pnl: number } | null = null;
-
-    usedEntries.forEach((e) => {
-      const pnl = e.pnl ?? 0;
-      sumPnl += pnl;
-
-      if (pnl > 0) greenSessions += 1;
-      else if (pnl < 0) learningSessions += 1;
-      else flatSessions += 1;
-
-      if (!bestDay || pnl > bestDay.pnl) {
-        bestDay = { date: e.date, pnl };
+      if (typeof existing.notes === "string") {
+        try {
+          const parsed = JSON.parse(existing.notes);
+          if (parsed && typeof parsed === "object") {
+            if (preRef.current && parsed.premarket)
+              preRef.current.innerHTML = parsed.premarket;
+            if (liveRef.current && parsed.live)
+              liveRef.current.innerHTML = parsed.live;
+            if (postRef.current && parsed.post)
+              postRef.current.innerHTML = parsed.post;
+            if (Array.isArray(parsed.entries))
+              setEntryTrades(parsed.entries);
+            if (Array.isArray(parsed.exits))
+              setExitTrades(parsed.exits);
+          } else if (preRef.current && !preRef.current.innerHTML) {
+            preRef.current.innerHTML = existing.notes;
+          }
+        } catch {
+          if (preRef.current && !preRef.current.innerHTML) {
+            preRef.current.innerHTML = existing.notes;
+          }
+        }
       }
-      if (!toughestDay || pnl < toughestDay.pnl) {
-        toughestDay = { date: e.date, pnl };
-      }
-    });
-
-    const greenRate =
-      totalSessions > 0 ? (greenSessions / totalSessions) * 100 : 0;
-    const avgPnl = totalSessions > 0 ? sumPnl / totalSessions : 0;
-
-    return {
-      totalSessions,
-      greenSessions,
-      learningSessions,
-      flatSessions,
-      greenRate,
-      avgPnl,
-      sumPnl,
-      bestDay,
-      toughestDay,
-    };
-  }, [usedEntries]);
-
-  const probabilityStats = useMemo(() => {
-    const total = usedEntries.length;
-    if (total === 0) {
-      return {
-        baseGreenRate: 0,
-        respectCount: 0,
-        respectGreen: 0,
-        respectLearning: 0,
-        pGreenRespect: 0,
-        pLearningRespect: 0,
-        fomoCount: 0,
-        fomoGreen: 0,
-        fomoLearning: 0,
-        pGreenFomo: 0,
-        pLearningFomo: 0,
-        revengeCount: 0,
-        revengeGreen: 0,
-        revengeLearning: 0,
-        pGreenRevenge: 0,
-        pLearningRevenge: 0,
-      };
+    } else {
+      setEntry((prev) => ({ ...prev, date: dateParam }));
+      setPnlInput("");
     }
 
-    let baseGreen = 0;
+    setTemplates(getJournalTemplates());
+  }, [dateParam]);
 
-    let respectCount = 0;
-    let respectGreen = 0;
-    let respectLearning = 0;
+  /* ---------------- Persist journal widgets per user ---------------- */
+  useEffect(() => {
+    if (!user || typeof window === "undefined") return;
 
-    let fomoCount = 0;
-    let fomoGreen = 0;
-    let fomoLearning = 0;
+    const storageKey =
+      (user as any).uid
+        ? `tjpro_journal_widgets_${(user as any).uid}`
+        : "tjpro_journal_widgets_default";
 
-    let revengeCount = 0;
-    let revengeGreen = 0;
-    let revengeLearning = 0;
-
-    usedEntries.forEach((e) => {
-      const pnl = e.pnl ?? 0;
-      const isGreen = pnl > 0;
-      const isLearning = pnl < 0;
-
-      const respectedPlan = !!(e as any).respectedPlan;
-      const tags = e.tags || [];
-      const hasFomo = tags.includes("FOMO");
-      const hasRevenge = tags.includes("Revenge trade");
-
-      if (isGreen) baseGreen++;
-
-      // Plan respect
-      if (respectedPlan) {
-        respectCount++;
-        if (isGreen) respectGreen++;
-        if (isLearning) respectLearning++;
+    try {
+      const raw = window.localStorage.getItem(storageKey);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          const valid = parsed.filter((id: any) =>
+            ALL_JOURNAL_WIDGETS.some((w) => w.id === id)
+          ) as JournalWidgetId[];
+          if (valid.length > 0) setActiveWidgets(valid);
+        }
       }
-
-      // FOMO
-      if (hasFomo) {
-        fomoCount++;
-        if (isGreen) fomoGreen++;
-        if (isLearning) fomoLearning++;
-      }
-
-      // Revenge trade
-      if (hasRevenge) {
-        revengeCount++;
-        if (isGreen) revengeGreen++;
-        if (isLearning) revengeLearning++;
-      }
-    });
-
-    const baseGreenRate = (baseGreen / total) * 100;
-
-    const pGreenRespect =
-      respectCount > 0 ? (respectGreen / respectCount) * 100 : 0;
-    const pLearningRespect =
-      respectCount > 0 ? (respectLearning / respectCount) * 100 : 0;
-
-    const pGreenFomo =
-      fomoCount > 0 ? (fomoGreen / fomoCount) * 100 : 0;
-    const pLearningFomo =
-      fomoCount > 0 ? (fomoLearning / fomoCount) * 100 : 0;
-
-    const pGreenRevenge =
-      revengeCount > 0 ? (revengeGreen / revengeCount) * 100 : 0;
-    const pLearningRevenge =
-      revengeCount > 0 ? (revengeLearning / revengeCount) * 100 : 0;
-
-    return {
-      baseGreenRate,
-      respectCount,
-      respectGreen,
-      respectLearning,
-      pGreenRespect,
-      pLearningRespect,
-      fomoCount,
-      fomoGreen,
-      fomoLearning,
-      pGreenFomo,
-      pLearningFomo,
-      revengeCount,
-      revengeGreen,
-      revengeLearning,
-      pGreenRevenge,
-      pLearningRevenge,
-    };
-  }, [usedEntries]);
-
-  /* =========================
-     Stop Loss / Breakeven stats
-  ========================= */
-  const riskStats = useMemo(() => {
-    const total = usedEntries.length;
-    if (total === 0) {
-      return {
-        total,
-        plannedStopSessions: 0,
-        stopTaggedSessions: 0,
-        breakEvenTaggedSessions: 0,
-        bothStopAndBreakEvenSessions: 0,
-        noStopEvidenceSessions: 0,
-        pPlannedStop: 0,
-        pStopTouched: 0,
-        pStopAndBE: 0,
-        pNoStop: 0,
-        stopTouchedGreen: 0,
-        stopTouchedLearning: 0,
-        pGreenWhenStopTouched: 0,
-        pLearningWhenStopTouched: 0,
-        breakEvenGreen: 0,
-        breakEvenLearning: 0,
-        pGreenWhenBE: 0,
-        pLearningWhenBE: 0,
-      };
+    } catch (err) {
+      console.warn("[journal] error loading widget toggles", err);
+    } finally {
+      setWidgetsLoaded(true);
     }
+  }, [user]);
 
-    let plannedStopSessions = 0;
-    let stopTaggedSessions = 0;
-    let breakEvenTaggedSessions = 0;
-    let bothStopAndBreakEvenSessions = 0;
-    let noStopEvidenceSessions = 0;
+  useEffect(() => {
+    if (!user || !widgetsLoaded || typeof window === "undefined") return;
 
-    let stopTouchedGreen = 0;
-    let stopTouchedLearning = 0;
+    const storageKey =
+      (user as any).uid
+        ? `tjpro_journal_widgets_${(user as any).uid}`
+        : "tjpro_journal_widgets_default";
 
-    let breakEvenGreen = 0;
-    let breakEvenLearning = 0;
+    try {
+      window.localStorage.setItem(storageKey, JSON.stringify(activeWidgets));
+    } catch (err) {
+      console.warn("[journal] error saving widget toggles", err);
+    }
+  }, [user, activeWidgets, widgetsLoaded]);
 
-    usedEntries.forEach((e) => {
-      const tags = e.tags || [];
-      const pnl = e.pnl ?? 0;
-      const isGreen = pnl > 0;
-      const isLearning = pnl < 0;
+  /* ---------------- Derived groups for exits dropdown ---------------- */
+  const entryGroups = useMemo(() => computeAvgByGroup(entryTrades), [entryTrades]);
 
-      const hasPlannedStop = tags.includes("Planned stop was in place");
-      const hasStopLoss = tags.includes("Stop Loss");
-      const hasBreakeven = tags.includes("Breakeven");
-      const hasAnyStopTag = hasPlannedStop || hasStopLoss || hasBreakeven;
+  const exitOptions = entryGroups.map((g) => ({
+    key: g.key,
+    label: `${g.symbol} (${TYPE_LABEL[g.type]} · ${DIR_LABEL[g.direction]}) · qty ${g.totalQty}`,
+    symbol: g.symbol,
+    type: g.type,
+    direction: g.direction,
+  }));
 
-      if (hasPlannedStop) plannedStopSessions++;
-      if (hasStopLoss) {
-        stopTaggedSessions++;
-        if (isGreen) stopTouchedGreen++;
-        else if (isLearning) stopTouchedLearning++;
-      }
-      if (hasBreakeven) {
-        breakEvenTaggedSessions++;
-        if (isGreen) breakEvenGreen++;
-        else if (isLearning) breakEvenLearning++;
-      }
-      if (hasStopLoss && hasBreakeven) {
-        bothStopAndBreakEvenSessions++;
-      }
-      if (!hasAnyStopTag) {
-        noStopEvidenceSessions++;
-      }
-    });
+  /* ---------------- Auto-PnL ---------------- */
+  const totalPnL = useMemo(
+    () => computePnL(entryTrades, exitTrades),
+    [entryTrades, exitTrades]
+  );
 
-    const pPlannedStop = (plannedStopSessions / total) * 100;
-    const pStopTouched = (stopTaggedSessions / total) * 100;
-    const pStopAndBE = (bothStopAndBreakEvenSessions / total) * 100;
-    const pNoStop = (noStopEvidenceSessions / total) * 100;
+  useEffect(() => {
+    const v = Number.isFinite(totalPnL) ? totalPnL : 0;
+    setEntry((p) => ({ ...p, pnl: v }));
+    setPnlInput(v.toFixed(2));
+  }, [totalPnL]);
 
-    const pGreenWhenStopTouched =
-      stopTaggedSessions > 0
-        ? (stopTouchedGreen / stopTaggedSessions) * 100
-        : 0;
-    const pLearningWhenStopTouched =
-      stopTaggedSessions > 0
-        ? (stopTouchedLearning / stopTaggedSessions) * 100
-        : 0;
+  /* ---------------- UI helpers ---------------- */
+  const execCmd = (cmd: string) => document.execCommand(cmd, false);
+  const insertQuote = () =>
+    insertHtmlAtCaret("<blockquote>Quote…</blockquote>");
 
-    const pGreenWhenBE =
-      breakEvenTaggedSessions > 0
-        ? (breakEvenGreen / breakEvenTaggedSessions) * 100
-        : 0;
-    const pLearningWhenBE =
-      breakEvenTaggedSessions > 0
-        ? (breakEvenLearning / breakEvenTaggedSessions) * 100
-        : 0;
+  const editorCls =
+    "min-h-[260px] w-full rounded-xl bg-slate-950 border border-slate-800 px-3 py-2 text-[16px] text-slate-100 leading-relaxed focus:outline-none focus:border-emerald-400 overflow-auto";
 
-    return {
-      total,
-      plannedStopSessions,
-      stopTaggedSessions,
-      breakEvenTaggedSessions,
-      bothStopAndBreakEvenSessions,
-      noStopEvidenceSessions,
-      pPlannedStop,
-      pStopTouched,
-      pStopAndBE,
-      pNoStop,
-      stopTouchedGreen,
-      stopTouchedLearning,
-      pGreenWhenStopTouched,
-      pLearningWhenStopTouched,
-      breakEvenGreen,
-      breakEvenLearning,
-      pGreenWhenBE,
-      pLearningWhenBE,
-    };
-  }, [usedEntries]);
+  const parsedDate = formatDateFriendly(dateParam);
 
-  /* =========================
-     Direction (LONG / SHORT) stats
-  ========================= */
-  const directionStats = useMemo(() => {
-    const total = usedEntries.length;
+  /* ---------------- Add / delete entries ---------------- */
+  const handleAddEntryTrade = () => {
+    const symbol = newEntryTrade.symbol.trim();
+    const price = newEntryTrade.price.trim();
+    if (!symbol || !price) return;
 
-    let longSessions = 0;
-    let longGreen = 0;
-    let longLearning = 0;
-
-    let shortSessions = 0;
-    let shortGreen = 0;
-    let shortLearning = 0;
-
-    usedEntries.forEach((e) => {
-      const dir = (e as any).direction;
-      const pnl = e.pnl ?? 0;
-      const isGreen = pnl > 0;
-      const isLearning = pnl < 0;
-
-      if (dir === "long") {
-        longSessions++;
-        if (isGreen) longGreen++;
-        else if (isLearning) longLearning++;
-      } else if (dir === "short") {
-        shortSessions++;
-        if (isGreen) shortGreen++;
-        else if (isLearning) shortLearning++;
-      }
-    });
-
-    const longWinRate =
-      longSessions > 0 ? (longGreen / longSessions) * 100 : 0;
-    const shortWinRate =
-      shortSessions > 0 ? (shortGreen / shortSessions) * 100 : 0;
-
-    return {
-      total,
-      longSessions,
-      longGreen,
-      longLearning,
-      longWinRate,
-      shortSessions,
-      shortGreen,
-      shortLearning,
-      shortWinRate,
-    };
-  }, [usedEntries]);
-
-  /* =========================
-     Day-of-week stats
-  ========================= */
-  const dayOfWeekStats = useMemo(() => {
-    const base: Record<
-      DayOfWeekKey,
+    setEntryTrades((prev) => [
+      ...prev,
       {
-        sessions: number;
-        green: number;
-        learning: number;
-        flat: number;
-        sumPnl: number;
-      }
-    > = {
-      0: { sessions: 0, green: 0, learning: 0, flat: 0, sumPnl: 0 },
-      1: { sessions: 0, green: 0, learning: 0, flat: 0, sumPnl: 0 },
-      2: { sessions: 0, green: 0, learning: 0, flat: 0, sumPnl: 0 },
-      3: { sessions: 0, green: 0, learning: 0, flat: 0, sumPnl: 0 },
-      4: { sessions: 0, green: 0, learning: 0, flat: 0, sumPnl: 0 },
-      5: { sessions: 0, green: 0, learning: 0, flat: 0, sumPnl: 0 },
-      6: { sessions: 0, green: 0, learning: 0, flat: 0, sumPnl: 0 },
-    };
-
-    usedEntries.forEach((e) => {
-      if (!e.date) return;
-      const d = new Date(e.date + "T00:00:00");
-      if (Number.isNaN(d.getTime())) return;
-      const dow = d.getDay() as DayOfWeekKey;
-      const pnl = e.pnl ?? 0;
-      const stats = base[dow];
-
-      stats.sessions += 1;
-      stats.sumPnl += pnl;
-
-      if (pnl > 0) stats.green += 1;
-      else if (pnl < 0) stats.learning += 1;
-      else stats.flat += 1;
-    });
-
-    const items = (Object.keys(base) as unknown as DayOfWeekKey[]).map(
-      (dow) => {
-        const s = base[dow];
-        const winRate =
-          s.sessions > 0 ? (s.green / s.sessions) * 100 : 0;
-        const avgPnl =
-          s.sessions > 0 ? s.sumPnl / s.sessions : 0;
-        return {
-          dow,
-          label: DAY_LABELS[dow],
-          ...s,
-          winRate,
-          avgPnl,
-        };
-      }
-    );
-
-    const withSessions = items.filter((i) => i.sessions > 0);
-    const best =
-      withSessions.length > 0
-        ? [...withSessions].sort((a, b) => b.winRate - a.winRate)[0]
-        : null;
-    const hardest =
-      withSessions.length > 0
-        ? [...withSessions].sort((a, b) => a.winRate - b.winRate)[0]
-        : null;
-
-    return { items, best, hardest };
-  }, [usedEntries]);
-
-  /* =========================
-     Instrument stats
-  ========================= */
-  const instrumentStats = useMemo(() => {
-    type InstrumentAgg = {
-      sessions: number;
-      green: number;
-      learning: number;
-      sumPnl: number;
-    };
-
-    const map: Record<string, InstrumentAgg> = {};
-
-    usedEntries.forEach((e) => {
-      const raw = (e.instrument || "").trim().toUpperCase();
-      if (!raw) return;
-
-      const pnl = e.pnl ?? 0;
-      const isGreen = pnl > 0;
-      const isLearning = pnl < 0;
-
-      if (!map[raw]) {
-        map[raw] = { sessions: 0, green: 0, learning: 0, sumPnl: 0 };
-      }
-
-      const s = map[raw];
-      s.sessions += 1;
-      s.sumPnl += pnl;
-      if (isGreen) s.green += 1;
-      else if (isLearning) s.learning += 1;
-    });
-
-    const items = Object.entries(map).map(([symbol, s]) => {
-      const winRate =
-        s.sessions > 0 ? (s.green / s.sessions) * 100 : 0;
-      const avgPnl =
-        s.sessions > 0 ? s.sumPnl / s.sessions : 0;
-      return {
+        id: crypto.randomUUID(),
+        ...newEntryTrade,
         symbol,
-        ...s,
-        winRate,
-        avgPnl,
+        time: newEntryTrade.time || nowTimeHHMM(),
+      },
+    ]);
+
+    setNewEntryTrade((p) => ({
+      ...p,
+      symbol: "",
+      price: "",
+      quantity: "",
+      time: nowTimeHHMM(),
+    }));
+  };
+
+  const handleDeleteEntryTrade = (id: string) =>
+    setEntryTrades((prev) => prev.filter((t) => t.id !== id));
+
+  /* ---------------- Add / delete exits ---------------- */
+  const handleAddExitTrade = () => {
+    if (!newExitTrade.entryKey || !newExitTrade.price.trim()) return;
+
+    setExitTrades((prev) => [
+      ...prev,
+      {
+        id: crypto.randomUUID(),
+        ...newExitTrade,
+        time: newExitTrade.time || nowTimeHHMM(),
+      },
+    ]);
+
+    setNewExitTrade((p) => ({
+      ...p,
+      entryKey: "",
+      symbol: "",
+      price: "",
+      quantity: "",
+      time: nowTimeHHMM(),
+    }));
+  };
+
+  const handleDeleteExitTrade = (id: string) =>
+    setExitTrades((prev) => prev.filter((t) => t.id !== id));
+
+  /* ---------------- Dictation ---------------- */
+  const toggleDictation = () => {
+    const w = window as any;
+    const SR = w.SpeechRecognition || w.webkitSpeechRecognition;
+    if (!SR) {
+      alert("SpeechRecognition is not available in this browser.");
+      return;
+    }
+    if (!recognitionRef.current) {
+      const rec = new SR();
+      rec.lang = "en-US";
+      rec.continuous = true;
+      rec.interimResults = true;
+      rec.onresult = (e: any) => {
+        let txt = "";
+        for (let i = e.resultIndex; i < e.results.length; i++) {
+          txt += e.results[i][0].transcript;
+        }
+        if (liveRef.current) {
+          liveRef.current.focus();
+          insertHtmlAtCaret(txt.replace(/\n/g, "<br/>") + " ");
+        }
       };
+      rec.onend = () => setListening(false);
+      recognitionRef.current = rec;
+    }
+    if (!listening) {
+      recognitionRef.current.start();
+      setListening(true);
+    } else {
+      recognitionRef.current.stop();
+      setListening(false);
+    }
+  };
+
+  /* ---------------- Tags (strategy / emotional / probability) ---------------- */
+  const probabilityTags = [
+    "A+ playbook setup",
+    "B-setup (secondary quality)",
+    "Exploratory / data-gathering trade",
+    "Trade aligned with my stats edge",
+    "Outside my proven statistics",
+    "Within high-probability session window",
+    "Outside my usual session window",
+  ];
+
+  const strategyTags = [
+    "Respect Strategy",
+    "Planned stop was in place",
+    "Stop Loss",
+    "Take Profit",
+    "Manual exit",
+    "Moved stop to BE (gain)",
+    "Stopped out (loss)",
+    "Used planned position sizing",
+    "Risk-to-reward ≥ 2R (planned)",
+    "Risk-to-reward < 1.5R (tight)",
+  ];
+
+  const toggleTag = (tag: string) =>
+    setEntry((prev) => {
+      const current = prev.tags || [];
+      const exists = current.includes(tag);
+      const tags = exists
+        ? current.filter((t) => t !== tag)
+        : [...current, tag];
+      return { ...prev, tags };
     });
 
-    const sortedByWinRate = [...items].sort(
-      (a, b) => b.winRate - a.winRate
+  /* ---------------- Save ---------------- */
+  const handleSave = () => {
+    setSaving(true);
+    setMsg("");
+
+    const preHtml = preRef.current?.innerHTML || "";
+    const liveHtml = liveRef.current?.innerHTML || "";
+    const postHtml = postRef.current?.innerHTML || "";
+
+    const notesPayload = JSON.stringify({
+      premarket: preHtml,
+      live: liveHtml,
+      post: postHtml,
+      entries: entryTrades,
+      exits: exitTrades,
+    });
+
+    const clean: JournalEntry = {
+      ...entry,
+      date: dateParam,
+      pnl: Number.isFinite(entry.pnl) ? entry.pnl : 0,
+      notes: notesPayload,
+      screenshots: entry.screenshots || [],
+      tags: entry.tags || [],
+    };
+
+    saveJournalEntry(clean);
+    setSaving(false);
+    setMsg("Session saved.");
+    setTimeout(() => setMsg(""), 2000);
+  };
+
+  const handleSaveAndBack = () => {
+    handleSave();
+    router.push("/dashboard");
+  };
+
+  /* ---------------- Templates ---------------- */
+  const handleSaveTemplate = () => {
+    if (!newTemplateName.trim()) return;
+    const preHtml = preRef.current?.innerHTML || "";
+    const liveHtml = liveRef.current?.innerHTML || "";
+    const postHtml = postRef.current?.innerHTML || "";
+
+    const payload = JSON.stringify({
+      premarket: preHtml,
+      live: liveHtml,
+      post: postHtml,
+    });
+
+    addJournalTemplate(newTemplateName.trim(), payload);
+    setTemplates(getJournalTemplates());
+    setNewTemplateName("");
+  };
+
+  const handleApplyTemplate = (tpl: JournalTemplate) => {
+    if (!tpl.content) return;
+    try {
+      const parsed = JSON.parse(tpl.content);
+      if (parsed && typeof parsed === "object") {
+        if (preRef.current && parsed.premarket)
+          preRef.current.innerHTML = parsed.premarket;
+        if (liveRef.current && parsed.live)
+          liveRef.current.innerHTML = parsed.live;
+        if (postRef.current && parsed.post)
+          postRef.current.innerHTML = parsed.post;
+        return;
+      }
+    } catch {
+      if (preRef.current) preRef.current.innerHTML = tpl.content;
+    }
+  };
+
+  const handleDeleteTemplate = (id: string) => {
+    deleteJournalTemplate(id);
+    setTemplates(getJournalTemplates());
+  };
+
+  /* ---------------- Layout storage key (per user) ---------------- */
+  const layoutStorageKey =
+    user && (user as any).uid
+      ? `tjpro_journal_layout_${(user as any).uid}`
+      : "tjpro_journal_layout_default";
+
+  /* =========================================================
+     Render widgets
+  ========================================================= */
+  const renderWidget = (id: JournalWidgetId) => {
+    if (id === "premarket") {
+      return (
+        <section className="h-full">
+          <div className="bg-slate-900/95 border border-slate-800 rounded-2xl p-4 h-full">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-slate-200 text-sm font-medium">
+                Premarket Prep
+              </p>
+              <EditorToolbar
+                onBold={() => execCmd("bold")}
+                onItalic={() => execCmd("italic")}
+                onUnderline={() => execCmd("underline")}
+                onUL={() => execCmd("insertUnorderedList")}
+                onOL={() => execCmd("insertOrderedList")}
+                onQuote={insertQuote}
+                onAddRow={addTableRow}
+                onAddCol={addTableColumn}
+                onInsertTable={insertTable}
+              />
+            </div>
+            <div
+              ref={preRef}
+              contentEditable
+              suppressContentEditableWarning
+              className={editorCls}
+            />
+            <p className="text-[11px] text-slate-500 mt-2">
+              Use bullet lists, numbered lists and the ▦ button for tables.
+            </p>
+          </div>
+        </section>
+      );
+    }
+
+    if (id === "inside") {
+      return (
+        <section className="h-full">
+          <div className="bg-slate-900/95 border border-slate-800 rounded-2xl p-4 h-full">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-slate-200 text-sm font-medium">
+                Inside the Trade (mic dictation)
+              </p>
+              <EditorToolbar
+                onBold={() => execCmd("bold")}
+                onItalic={() => execCmd("italic")}
+                onUnderline={() => execCmd("underline")}
+                onUL={() => execCmd("insertUnorderedList")}
+                onOL={() => execCmd("insertOrderedList")}
+                onQuote={insertQuote}
+                onAddRow={addTableRow}
+                onAddCol={addTableColumn}
+                onInsertTable={insertTable}
+                extraRight={
+                  <button
+                    type="button"
+                    onClick={toggleDictation}
+                    className={`px-2 py-1 rounded ${
+                      listening
+                        ? "bg-rose-500 text-white"
+                        : "bg-slate-800 text-slate-200"
+                    } text-xs hover:bg-slate-700`}
+                  >
+                    {listening ? "● Stop dictation" : "Start dictation"}
+                  </button>
+                }
+              />
+            </div>
+            <div
+              ref={liveRef}
+              contentEditable
+              suppressContentEditableWarning
+              className={editorCls}
+            />
+          </div>
+        </section>
+      );
+    }
+
+    if (id === "after") {
+      return (
+        <section className="h-full">
+          <div className="bg-slate-900/95 border border-slate-800 rounded-2xl p-4 h-full">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-slate-200 text-sm font-medium">
+                After-trade Analysis
+              </p>
+              <EditorToolbar
+                onBold={() => execCmd("bold")}
+                onItalic={() => execCmd("italic")}
+                onUnderline={() => execCmd("underline")}
+                onUL={() => execCmd("insertUnorderedList")}
+                onOL={() => execCmd("insertOrderedList")}
+                onQuote={insertQuote}
+                onAddRow={addTableRow}
+                onAddCol={addTableColumn}
+                onInsertTable={insertTable}
+              />
+            </div>
+            <div
+              ref={postRef}
+              contentEditable
+              suppressContentEditableWarning
+              className={editorCls}
+            />
+          </div>
+        </section>
+      );
+    }
+
+    if (id === "entries") {
+      const averages = entryGroups;
+
+      return (
+        <section className="h-full">
+          <div className="bg-slate-900/95 border border-slate-800 rounded-2xl p-4 space-y-3 h-full">
+            <p className="text-slate-200 text-sm font-medium">Entries</p>
+
+            <div className="grid grid-cols-1 md:grid-cols-6 gap-2 text-sm">
+              <div className="md:col-span-2">
+                <label className="text-xs text-slate-400 block mb-1">
+                  Symbol / Contract
+                </label>
+                <input
+                  type="text"
+                  value={newEntryTrade.symbol}
+                  onChange={(e) =>
+                    setNewEntryTrade((p) => ({
+                      ...p,
+                      symbol: e.target.value,
+                    }))
+                  }
+                  className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-[14px] text-slate-100 focus:outline-none focus:border-emerald-400"
+                  placeholder="SPX, TSLA, ESU5..."
+                />
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-400 block mb-1">
+                  Type
+                </label>
+                <select
+                  value={newEntryTrade.type}
+                  onChange={(e) =>
+                    setNewEntryTrade((p) => ({
+                      ...p,
+                      type: e.target.value as TradeType,
+                    }))
+                  }
+                  className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-[14px] text-slate-100 focus:outline-none focus:border-emerald-400"
+                >
+                  {(Object.keys(TYPE_LABEL) as TradeType[]).map((t) => (
+                    <option key={t} value={t}>
+                      {TYPE_LABEL[t]}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-400 block mb-1">
+                  Direction
+                </label>
+                <select
+                  value={newEntryTrade.direction}
+                  onChange={(e) =>
+                    setNewEntryTrade((p) => ({
+                      ...p,
+                      direction: e.target.value as Direction,
+                    }))
+                  }
+                  className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-[14px] text-slate-100 focus:outline-none focus:border-emerald-400"
+                >
+                  {(Object.keys(DIR_LABEL) as Direction[]).map((d) => (
+                    <option key={d} value={d}>
+                      {DIR_LABEL[d]}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-400 block mb-1">
+                  Price
+                </label>
+                <input
+                  type="number"
+                  value={newEntryTrade.price}
+                  onChange={(e) =>
+                    setNewEntryTrade((p) => ({
+                      ...p,
+                      price: e.target.value,
+                    }))
+                  }
+                  className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-[14px] text-slate-100 focus:outline-none focus:border-emerald-400"
+                  placeholder="e.g. 5120.5"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-400 block mb-1">
+                  Qty
+                </label>
+                <input
+                  type="number"
+                  value={newEntryTrade.quantity}
+                  onChange={(e) =>
+                    setNewEntryTrade((p) => ({
+                      ...p,
+                      quantity: e.target.value,
+                    }))
+                  }
+                  className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-[14px] text-slate-100 focus:outline-none focus:border-emerald-400"
+                  placeholder="Size"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-400 block mb-1">
+                  Time
+                </label>
+                <input
+                  type="time"
+                  value={newEntryTrade.time}
+                  onChange={(e) =>
+                    setNewEntryTrade((p) => ({
+                      ...p,
+                      time: e.target.value,
+                    }))
+                  }
+                  className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-[14px] text-slate-100 focus:outline-none focus:border-emerald-400"
+                />
+                <button
+                  type="button"
+                  onClick={() =>
+                    setNewEntryTrade((p) => ({
+                      ...p,
+                      time: nowTimeHHMM(),
+                    }))
+                  }
+                  className="text-[11px] text-emerald-300 mt-1 underline"
+                >
+                  use current time
+                </button>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleAddEntryTrade}
+              className="mt-1 px-3 py-1.5 rounded-lg bg-emerald-400 text-slate-950 text-xs font-semibold hover:bg-emerald-300 transition"
+            >
+              Add entry
+            </button>
+
+            {entryTrades.length > 0 && (
+              <div className="space-y-2 text-xs mt-3">
+                <table className="w-full text-left text-[12px] border border-slate-800 rounded-lg overflow-hidden">
+                  <thead className="bg-slate-900/80">
+                    <tr>
+                      <th className="px-2 py-1 border-b border-slate-800">Symbol</th>
+                      <th className="px-2 py-1 border-b border-slate-800">Type</th>
+                      <th className="px-2 py-1 border-b border-slate-800">Dir</th>
+                      <th className="px-2 py-1 border-b border-slate-800">Price</th>
+                      <th className="px-2 py-1 border-b border-slate-800">Qty</th>
+                      <th className="px-2 py-1 border-b border-slate-800">Time</th>
+                      <th className="px-2 py-1 border-b border-slate-800 text-right">–</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {entryTrades.map((t) => (
+                      <tr key={t.id} className="border-t border-slate-800">
+                        <td className="px-2 py-1">{t.symbol}</td>
+                        <td className="px-2 py-1">{TYPE_LABEL[t.type]}</td>
+                        <td className="px-2 py-1">{DIR_LABEL[t.direction]}</td>
+                        <td className="px-2 py-1">{t.price}</td>
+                        <td className="px-2 py-1">{t.quantity}</td>
+                        <td className="px-2 py-1">{t.time}</td>
+                        <td className="px-2 py-1 text-right">
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteEntryTrade(t.id)}
+                            className="text-slate-500 hover:text-red-400"
+                          >
+                            ✕
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+
+                <div className="pt-1 border-t border-slate-800 mt-1">
+                  <p className="text-[11px] text-slate-400 mb-1">
+                    Average entry price per symbol/type/direction
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {averages.map((a) => (
+                      <span
+                        key={a.key}
+                        className="px-2 py-1 rounded-full bg-slate-950 border border-slate-700 text-[11px]"
+                      >
+                        {a.symbol} ({a.type}/{a.direction}): {a.avgEntry.toFixed(2)} · qty {a.totalQty}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </section>
+      );
+    }
+
+    if (id === "exits") {
+      const averages = entryGroups;
+
+      return (
+        <section className="h-full">
+          <div className="bg-slate-900/95 border border-slate-800 rounded-2xl p-4 space-y-3 h-full">
+            <p className="text-slate-200 text-sm font-medium">Exits</p>
+
+            <div className="grid grid-cols-1 md:grid-cols-6 gap-2 text-sm">
+              <div className="md:col-span-2">
+                <label className="text-xs text-slate-400 block mb-1">
+                  Close position
+                </label>
+                <select
+                  value={newExitTrade.entryKey}
+                  onChange={(e) => {
+                    const key = e.target.value;
+                    const opt = exitOptions.find((x) => x.key === key);
+                    if (!opt) {
+                      setNewExitTrade((p) => ({ ...p, entryKey: "" }));
+                      return;
+                    }
+                    setNewExitTrade((p) => ({
+                      ...p,
+                      entryKey: opt.key,
+                      symbol: opt.symbol,
+                      type: opt.type,
+                      direction: opt.direction,
+                    }));
+                  }}
+                  className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-[14px] text-slate-100 focus:outline-none focus:border-emerald-400"
+                >
+                  <option value="">Select…</option>
+                  {exitOptions.map((o) => (
+                    <option key={o.key} value={o.key}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-400 block mb-1">Type</label>
+                <input
+                  value={newExitTrade.type ? TYPE_LABEL[newExitTrade.type] : ""}
+                  readOnly
+                  className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-[14px] text-slate-400"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-400 block mb-1">Dir</label>
+                <input
+                  value={newExitTrade.direction ? DIR_LABEL[newExitTrade.direction] : ""}
+                  readOnly
+                  className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-[14px] text-slate-400"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-400 block mb-1">
+                  Exit price
+                </label>
+                <input
+                  type="number"
+                  value={newExitTrade.price}
+                  onChange={(e) =>
+                    setNewExitTrade((p) => ({
+                      ...p,
+                      price: e.target.value,
+                    }))
+                  }
+                  className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-[14px] text-slate-100 focus:outline-none focus:border-emerald-400"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-400 block mb-1">
+                  Qty to close
+                </label>
+                <input
+                  type="number"
+                  value={newExitTrade.quantity}
+                  onChange={(e) =>
+                    setNewExitTrade((p) => ({
+                      ...p,
+                      quantity: e.target.value,
+                    }))
+                  }
+                  className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-[14px] text-slate-100 focus:outline-none focus:border-emerald-400"
+                  placeholder="Size"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-400 block mb-1">
+                  Time
+                </label>
+                <input
+                  type="time"
+                  value={newExitTrade.time}
+                  onChange={(e) =>
+                    setNewExitTrade((p) => ({
+                      ...p,
+                      time: e.target.value,
+                    }))
+                  }
+                  className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-[14px] text-slate-100 focus:outline-none focus:border-emerald-400"
+                />
+                <button
+                  type="button"
+                  onClick={() =>
+                    setNewExitTrade((p) => ({
+                      ...p,
+                      time: nowTimeHHMM(),
+                    }))
+                  }
+                  className="text-[11px] text-emerald-300 mt-1 underline"
+                >
+                  use current time
+                </button>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleAddExitTrade}
+              className="mt-1 px-3 py-1.5 rounded-lg bg-emerald-400 text-slate-950 text-xs font-semibold hover:bg-emerald-300 transition"
+            >
+              Add exit
+            </button>
+
+            {exitTrades.length > 0 && (
+              <div className="space-y-2 text-xs mt-3">
+                <table className="w-full text-left text-[12px] border border-slate-800 rounded-lg overflow-hidden">
+                  <thead className="bg-slate-900/80">
+                    <tr>
+                      <th className="px-2 py-1 border-b border-slate-800">Symbol</th>
+                      <th className="px-2 py-1 border-b border-slate-800">Type</th>
+                      <th className="px-2 py-1 border-b border-slate-800">Dir</th>
+                      <th className="px-2 py-1 border-b border-slate-800">Price</th>
+                      <th className="px-2 py-1 border-b border-slate-800">Qty</th>
+                      <th className="px-2 py-1 border-b border-slate-800">Time</th>
+                      <th className="px-2 py-1 border-b border-slate-800 text-right">–</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {exitTrades.map((t) => (
+                      <tr key={t.id} className="border-t border-slate-800">
+                        <td className="px-2 py-1">{t.symbol}</td>
+                        <td className="px-2 py-1">{TYPE_LABEL[t.type]}</td>
+                        <td className="px-2 py-1">{DIR_LABEL[t.direction]}</td>
+                        <td className="px-2 py-1">{t.price}</td>
+                        <td className="px-2 py-1">{t.quantity}</td>
+                        <td className="px-2 py-1">{t.time}</td>
+                        <td className="px-2 py-1 text-right">
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteExitTrade(t.id)}
+                            className="text-slate-500 hover:text-red-400"
+                          >
+                            ✕
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+
+                <div className="pt-1 border-t border-slate-800 mt-1">
+                  <p className="text-[11px] text-slate-400 mb-1">
+                    Average exit price per symbol/type/direction
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {averages.map((a) => {
+                      const xs = exitTrades.filter((x) => x.entryKey === a.key);
+                      if (xs.length === 0) return null;
+                      const sumPxQty = xs.reduce(
+                        (s, x) => s + Number(x.price || 0) * Number(x.quantity || 0),
+                        0
+                      );
+                      const sumQty = xs.reduce((s, x) => s + Number(x.quantity || 0), 0);
+                      const avgExit = sumQty > 0 ? sumPxQty / sumQty : 0;
+                      return (
+                        <span
+                          key={a.key}
+                          className="px-2 py-1 rounded-full bg-slate-950 border border-slate-700 text-[11px]"
+                        >
+                          {a.symbol} ({a.type}/{a.direction}): {avgExit.toFixed(2)}
+                        </span>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </section>
+      );
+    }
+
+    if (id === "emotional") {
+      return (
+        <section className="h-full">
+          <div className="bg-slate-900/95 border border-slate-800 rounded-2xl p-4 h-full">
+            <p className="text-slate-200 text-sm font-semibold mb-2">
+              Emotional state & impulses
+            </p>
+            <p className="text-[11px] text-slate-500 mb-3">
+              Check what emotions and impulses were present during today&apos;s session.
+            </p>
+
+            <div className="grid grid-cols-1 gap-2 text-[13px]">
+              {["Calm & focused", "Greedy", "Desperate"].map((t) => (
+                <label key={t} className="inline-flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    onChange={() => toggleTag(t)}
+                    checked={entry.tags?.includes(t)}
+                    className="h-4 w-4 rounded border-slate-600 bg-slate-950"
+                  />
+                  <span>{t}</span>
+                </label>
+              ))}
+
+              {[
+                "FOMO",
+                "Fear of being wrong",
+                "Revenge trade",
+              ].map((t) => (
+                <label key={t} className="inline-flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    onChange={() => toggleTag(t)}
+                    checked={entry.tags?.includes(t)}
+                    className="h-4 w-4 rounded border-slate-600 bg-slate-950"
+                  />
+                  <span>{t}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        </section>
+      );
+    }
+
+    if (id === "strategy") {
+      return (
+        <section className="h-full">
+          <div className="bg-slate-900/95 border border-slate-800 rounded-2xl p-4 h-full">
+            <p className="text-slate-200 text-sm font-semibold mb-2">
+              Strategy checklist
+            </p>
+            <p className="text-[11px] text-slate-500 mb-3">
+              Track execution, risk rules and exit outcome.
+            </p>
+
+            <div className="grid grid-cols-1 gap-2 text-[13px]">
+              {strategyTags.map((t) => (
+                <label key={t} className="inline-flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    onChange={() => toggleTag(t)}
+                    checked={entry.tags?.includes(t)}
+                    className="h-4 w-4 rounded border-slate-600 bg-slate-950"
+                  />
+                  <span>{t}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        </section>
+      );
+    }
+
+    if (id === "probability") {
+      return (
+        <section className="h-full">
+          <div className="bg-slate-900/95 border border-slate-800 rounded-2xl p-4 h-full">
+            <p className="text-slate-200 text-sm font-semibold mb-2">
+              Probability & stats flags
+            </p>
+            <p className="text-[11px] text-slate-500 mb-3">
+              Mark alignment with your historical edge.
+            </p>
+
+            <div className="grid grid-cols-1 gap-2 text-[13px]">
+              {probabilityTags.map((t) => (
+                <label key={t} className="inline-flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    onChange={() => toggleTag(t)}
+                    checked={entry.tags?.includes(t)}
+                    className="h-4 w-4 rounded border-slate-600 bg-slate-950"
+                  />
+                  <span>{t}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        </section>
+      );
+    }
+
+    if (id === "screenshots") {
+      return (
+        <section className="h-full">
+          <div className="bg-slate-900/95 border border-slate-800 rounded-2xl p-4 h-full">
+            <p className="text-slate-200 text-sm font-medium mb-2">
+              Screenshots (links / notes, one per line)
+            </p>
+            <textarea
+              rows={10}
+              value={(entry.screenshots || []).join("\n")}
+              onChange={(e) =>
+                setEntry((p) => ({
+                  ...p,
+                  screenshots: e.target.value
+                    .split("\n")
+                    .map((s) => s.trim())
+                    .filter(Boolean),
+                }))
+              }
+              className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-[15px] text-slate-100 focus:outline-none focus:border-emerald-400 resize-y"
+              placeholder="Paste here URLs/notes for your images…"
+            />
+          </div>
+        </section>
+      );
+    }
+
+    if (id === "templates") {
+      return (
+        <section className="h-full">
+          <div className="bg-slate-900/95 border border-slate-800 rounded-2xl p-4 h-full">
+            <p className="text-slate-200 text-sm font-medium mb-3">
+              Templates (Premarket + Inside + After)
+            </p>
+
+            {templates.length === 0 && (
+              <p className="text-xs text-slate-500 mb-2">
+                No templates yet.
+              </p>
+            )}
+
+            <div className="space-y-1 max-h-40 overflow-y-auto pr-1 mb-3">
+              {templates.map((tpl) => (
+                <div
+                  key={tpl.id}
+                  className="flex items-center justify-between gap-2 text-xs bg-slate-950/90 border border-slate-800 rounded-lg px-2 py-1"
+                >
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleApplyTemplate(tpl)}
+                      className="px-2 py-1 rounded bg-emerald-500/90 text-slate-950 text-[11px] font-semibold hover:bg-emerald-400"
+                    >
+                      Apply
+                    </button>
+                    <span className="text-slate-300">{tpl.name}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteTemplate(tpl.id)}
+                    className="text-slate-500 hover:text-red-400"
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-[1fr,auto] gap-2">
+              <input
+                type="text"
+                value={newTemplateName}
+                onChange={(e) => setNewTemplateName(e.target.value)}
+                placeholder="Template name"
+                className="w-full px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-xs text-slate-100 focus:outline-none focus:border-emerald-400"
+              />
+              <button
+                type="button"
+                onClick={handleSaveTemplate}
+                className="px-4 py-1.5 rounded-lg bg-emerald-400 text-slate-950 text-xs font-semibold hover:bg-emerald-300 transition"
+              >
+                Save current as template
+              </button>
+            </div>
+          </div>
+        </section>
+      );
+    }
+
+    return (
+      <div className="text-xs text-slate-400">
+        Unknown widget: {id}
+      </div>
     );
-    const mostSupportive = sortedByWinRate.slice(0, 5);
+  };
 
-    const sortedByHardest = [...items].sort(
-      (a, b) => a.winRate - b.winRate
-    );
-    const toReview = sortedByHardest.slice(0, 5);
-
-    return { items, mostSupportive, toReview };
-  }, [usedEntries]);
-
-  /* =========================
-     Rendering helpers
-  ========================= */
+  /* =========================================================
+     Render Page
+  ========================================================= */
   if (loading || !user) {
     return (
       <main className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center">
-        <p className="text-slate-400 text-sm">Loading analytics…</p>
+        <p className="text-slate-400 text-sm">Loading journal…</p>
       </main>
     );
   }
@@ -550,1056 +1567,129 @@ export default function AnalyticsStatisticsPage() {
   return (
     <main className="min-h-screen bg-slate-950 text-slate-50">
       <TopNav />
+
       <div className="px-4 md:px-8 py-6">
-        <div className="max-w-6xl mx-auto">
+        <div className="mx-auto w-full max-w-[1600px]">
           {/* Header */}
           <header className="flex flex-col md:flex-row justify-between gap-4 mb-6">
             <div>
               <p className="text-emerald-400 text-xs uppercase tracking-[0.25em]">
-                Performance · Analytics
+                Daily Journal
               </p>
-              <h1 className="text-3xl md:text-4xl font-semibold mt-1">
-                Analytics & Statistics
+              <h1 className="text-[28px] md:text-[32px] font-semibold mt-1">
+                {parsedDate} — session review
               </h1>
-              <p className="text-sm md:text-base text-slate-400 mt-2 max-w-2xl">
-                Visualize how your sessions behave over time: probabilities,
-                weekdays, psychology, instruments and risk discipline (Stop Loss,
-                Breakeven, LONG vs SHORT). All focused on learning, not punishment.
+              <p className="text-[15px] text-slate-400 mt-1">
+                Log trades, screenshots, emotions and rule compliance.
               </p>
             </div>
             <div className="flex flex-col items-start md:items-end gap-2">
               <Link
                 href="/dashboard"
-                className="px-3 py-2 rounded-xl border border-slate-700 text-slate-200 text-xs md:text-sm hover:border-emerald-400 hover:text-emerald-300 transition"
+                className="shrink-0 px-3 py-2 rounded-xl border border-slate-700 text-slate-300 text-sm hover:border-emerald-400 hover:text-emerald-300 transition"
               >
                 ← Back to dashboard
               </Link>
+
               <p className="text-[11px] text-slate-500">
-                Sessions analyzed:{" "}
-                <span className="text-emerald-300 font-semibold">
-                  {baseStats.totalSessions}
+                Auto P&amp;L:{" "}
+                <span
+                  className={
+                    entry.pnl >= 0
+                      ? "text-emerald-300 font-semibold"
+                      : "text-sky-300 font-semibold"
+                  }
+                >
+                  {entry.pnl >= 0 ? "+" : "-"}${Math.abs(entry.pnl).toFixed(2)}
                 </span>
               </p>
             </div>
           </header>
 
-          {baseStats.totalSessions === 0 ? (
-            <section className="mt-8 rounded-2xl border border-slate-800 bg-slate-900/70 px-4 py-6">
-              <p className="text-slate-200 text-sm font-medium mb-1">
-                No data yet
-              </p>
-              <p className="text-sm text-slate-400">
-                Start logging your trading sessions in the{" "}
-                <Link
-                  href="/dashboard"
-                  className="text-emerald-400 underline"
-                >
-                  dashboard journal
-                </Link>{" "}
-                to unlock analytics and probabilities.
-              </p>
-            </section>
-          ) : (
-            <>
-              {/* Group selector */}
-              <section className="mb-6">
-                <div className="flex flex-wrap gap-2">
-                  {GROUPS.map((g) => {
-                    const active = g.id === activeGroup;
-                    return (
-                      <button
-                        key={g.id}
-                        type="button"
-                        onClick={() => setActiveGroup(g.id)}
-                        className={`px-3 py-1.5 rounded-full text-xs md:text-sm border transition ${
-                          active
-                            ? "bg-emerald-400 text-slate-950 border-emerald-300"
-                            : "bg-slate-950 text-slate-200 border-slate-700 hover:border-emerald-400 hover:text-emerald-300"
-                        }`}
-                      >
-                        {g.label}
-                      </button>
-                    );
-                  })}
-                </div>
-                <p className="text-xs text-slate-500 mt-2">
-                  {
-                    GROUPS.find((g) => g.id === activeGroup)?.description
-                  }
-                </p>
-              </section>
+          {/* PnL box */}
+          <section className="mb-5 bg-slate-900/95 border border-slate-800 rounded-2xl p-4">
+            <label className="text-slate-400 text-xs uppercase tracking-wide">
+              Day P&amp;L (USD) — auto
+            </label>
+            <input
+              type="text"
+              value={pnlInput}
+              readOnly
+              className="mt-2 w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-slate-100 text-[16px] focus:outline-none focus:border-emerald-400 opacity-90"
+              placeholder="Auto-calculated from entries/exits"
+            />
+            <p className="text-xs text-slate-500 mt-2">
+              Calculated automatically per symbol/type/direction.
+            </p>
+          </section>
 
-              {/* Active group content */}
-              {activeGroup === "overview" && (
-                <OverviewSection
-                  baseStats={baseStats}
-                  probabilityStats={probabilityStats}
-                  riskStats={riskStats}
-                  directionStats={directionStats}
-                />
-              )}
+          {/* Widget Library / Picker */}
+          <section className="mb-6 rounded-xl border border-slate-800 bg-slate-900/60 p-4">
+            <p className="text-[13px] text-slate-400 mb-2">
+              Customize your journal: toggle widgets on/off.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {ALL_JOURNAL_WIDGETS.map((w) => {
+                const isActive = activeWidgets.includes(w.id);
+                return (
+                  <button
+                    key={w.id}
+                    type="button"
+                    onClick={() =>
+                      setActiveWidgets((prev) =>
+                        prev.includes(w.id)
+                          ? prev.filter((x) => x !== w.id)
+                          : [...prev, w.id]
+                      )
+                    }
+                    className={`px-3 py-1.5 rounded-full text-[12px] border transition ${
+                      isActive
+                        ? "bg-emerald-400 text-slate-950 border-emerald-300"
+                        : "bg-slate-950 text-slate-300 border-slate-700 hover:border-emerald-400 hover:text-emerald-300"
+                    }`}
+                  >
+                    {isActive ? "✓ " : "+ "}
+                    {w.label}
+                  </button>
+                );
+              })}
+            </div>
+          </section>
 
-              {activeGroup === "day-of-week" && (
-                <DayOfWeekSection stats={dayOfWeekStats} />
-              )}
+          {/* GRID of widgets */}
+          <DynamicGrid
+            items={activeWidgets as any}
+            renderItem={renderWidget as any}
+            storageKey={layoutStorageKey}
+          />
 
-              {activeGroup === "psychology" && (
-                <PsychologySection
-                  baseStats={baseStats}
-                  probabilityStats={probabilityStats}
-                />
-              )}
-
-              {activeGroup === "instruments" && (
-                <InstrumentsSection stats={instrumentStats} />
-              )}
-            </>
-          )}
+          {/* Actions */}
+          <div className="flex flex-wrap items-center justify-between gap-3 mt-6">
+            <div className="text-[11px] text-slate-500">
+              {msg && <span className="text-emerald-400 mr-3">{msg}</span>}
+              Your structure, your rules.
+            </div>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={handleSave}
+                disabled={saving}
+                className="px-4 py-2 rounded-xl border border-slate-700 text-slate-200 text-xs hover:border-emerald-400 hover:text-emerald-300 transition disabled:opacity-50"
+              >
+                Save
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveAndBack}
+                disabled={saving}
+                className="px-6 py-2 rounded-xl bg-emerald-400 text-slate-950 text-sm font-semibold hover:bg-emerald-300 transition disabled:opacity-50"
+              >
+                Save & return to dashboard
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     </main>
-  );
-}
-
-/* =========================
-   Sections
-========================= */
-
-function OverviewSection({
-  baseStats,
-  probabilityStats,
-  riskStats,
-  directionStats,
-}: {
-  baseStats: any;
-  probabilityStats: any;
-  riskStats: any;
-  directionStats: any;
-}) {
-  const {
-    totalSessions,
-    greenSessions,
-    learningSessions,
-    flatSessions,
-    greenRate,
-    avgPnl,
-    sumPnl,
-    bestDay,
-    toughestDay,
-  } = baseStats;
-
-  const {
-    baseGreenRate,
-    pGreenRespect,
-    pLearningRespect,
-  } = probabilityStats;
-
-  const {
-    pStopTouched,
-    pStopAndBE,
-    pNoStop,
-    pPlannedStop,
-    pGreenWhenStopTouched,
-    pLearningWhenStopTouched,
-    pGreenWhenBE,
-    pLearningWhenBE,
-  } = riskStats;
-
-  const {
-    longSessions,
-    longGreen,
-    longLearning,
-    longWinRate,
-    shortSessions,
-    shortGreen,
-    shortLearning,
-    shortWinRate,
-  } = directionStats;
-
-  const respectEdge = pGreenRespect - baseGreenRate;
-
-  return (
-    <section className="space-y-6">
-      {/* Top cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-4">
-          <p className="text-xs text-slate-400 mb-1">Total sessions</p>
-          <p className="text-3xl font-semibold text-slate-50">
-            {totalSessions}
-          </p>
-          <p className="text-[11px] text-slate-500 mt-2">
-            Each session is one day of trading in your journal.
-          </p>
-        </div>
-
-        <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-4">
-          <p className="text-xs text-emerald-300 mb-1">
-            Green sessions
-          </p>
-          <p className="text-3xl font-semibold text-emerald-400">
-            {greenSessions}
-          </p>
-          <p className="text-[11px] text-emerald-200 mt-1">
-            Win rate: {greenRate.toFixed(1)}%
-          </p>
-        </div>
-
-        <div className="rounded-2xl border border-sky-500/20 bg-sky-500/5 p-4">
-          <p className="text-xs text-sky-300 mb-1">
-            Learning sessions
-          </p>
-          <p className="text-3xl font-semibold text-sky-300">
-            {learningSessions}
-          </p>
-          <p className="text-[11px] text-slate-300 mt-1">
-            These days are raw material for rule upgrades.
-          </p>
-        </div>
-
-        <div className="rounded-2xl border border-slate-700 bg-slate-900/80 p-4">
-          <p className="text-xs text-slate-400 mb-1">
-            Average P&amp;L per session
-          </p>
-          <p
-            className={`text-3xl font-semibold ${
-              avgPnl >= 0 ? "text-emerald-300" : "text-sky-300"
-            }`}
-          >
-            {avgPnl >= 0 ? "+" : "-"}$
-            {Math.abs(avgPnl).toFixed(2)}
-          </p>
-          <p className="text-[11px] text-slate-500 mt-1">
-            Total P&amp;L:{" "}
-            <span
-              className={
-                sumPnl >= 0 ? "text-emerald-300" : "text-sky-300"
-              }
-            >
-              {sumPnl >= 0 ? "+" : "-"}$
-              {Math.abs(sumPnl).toFixed(2)}
-            </span>
-          </p>
-        </div>
-      </div>
-
-      {/* Best / toughest days */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-4">
-          <p className="text-xs text-emerald-300 mb-1">
-            Strongest day on record
-          </p>
-          {bestDay ? (
-            <>
-              <p className="text-lg font-semibold text-slate-50">
-                {formatDateFriendly(bestDay.date)}
-              </p>
-              <p className="text-sm text-emerald-300 mt-1">
-                Result: +${bestDay.pnl.toFixed(2)}
-              </p>
-              <p className="text-[11px] text-slate-400 mt-2">
-                Use this day as a case study: what rules and conditions
-                were present?
-              </p>
-            </>
-          ) : (
-            <p className="text-sm text-slate-400">
-              No sessions with P&amp;L yet.
-            </p>
-          )}
-        </div>
-
-        <div className="rounded-2xl border border-sky-500/30 bg-sky-500/5 p-4">
-          <p className="text-xs text-sky-300 mb-1">
-            Toughest day on record
-          </p>
-          {toughestDay ? (
-            <>
-              <p className="text-lg font-semibold text-slate-50">
-                {formatDateFriendly(toughestDay.date)}
-              </p>
-              <p className="text-sm text-sky-300 mt-1">
-                Result: -${Math.abs(toughestDay.pnl).toFixed(2)}
-              </p>
-              <p className="text-[11px] text-slate-200 mt-2">
-                This is a high-value learning day: what early signals
-                were ignored? What rule could have stopped the bleed?
-              </p>
-            </>
-          ) : (
-            <p className="text-sm text-slate-400">
-              No sessions with P&amp;L yet.
-            </p>
-          )}
-        </div>
-      </div>
-
-      {/* Probability metrics + Risk & Direction */}
-      <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-4 space-y-6">
-        {/* Performance probabilities */}
-        <div>
-          <p className="text-sm font-medium text-slate-100 mb-2">
-            Performance probabilities
-          </p>
-          <p className="text-xs text-slate-400 mb-4">
-            These are not guarantees, just a mirror of how your behavior
-            has translated into results so far.
-          </p>
-
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-sm">
-            <div>
-              <p className="text-[11px] text-slate-400 mb-1">
-                Base probability of a green session
-              </p>
-              <p className="text-2xl font-semibold text-emerald-300">
-                {probabilityStats.baseGreenRate.toFixed(1)}%
-              </p>
-              <p className="text-[11px] text-slate-500 mt-1">
-                Green sessions / total sessions.
-              </p>
-            </div>
-
-            <div>
-              <p className="text-[11px] text-slate-400 mb-1">
-                Probability of green when you respect your plan
-              </p>
-              <p className="text-2xl font-semibold text-emerald-300">
-                {probabilityStats.pGreenRespect.toFixed(1)}%
-              </p>
-              <p className="text-[11px] text-slate-500 mt-1">
-                Sessions where plan was respected and ended green, divided
-                by all sessions where plan was respected.
-              </p>
-            </div>
-
-            <div>
-              <p className="text-[11px] text-slate-400 mb-1">
-                Probability of landing on the learning side with FOMO
-              </p>
-              <p className="text-2xl font-semibold text-sky-300">
-                {probabilityStats.pLearningFomo.toFixed(1)}%
-              </p>
-              <p className="text-[11px] text-slate-500 mt-1">
-                Among sessions tagged with FOMO, how often they ended as
-                learning days.
-              </p>
-            </div>
-
-            <div>
-              <p className="text-[11px] text-slate-400 mb-1">
-                Plan respect “edge”
-              </p>
-              <p
-                className={`text-2xl font-semibold ${
-                  respectEdge >= 0
-                    ? "text-emerald-300"
-                    : "text-sky-300"
-                }`}
-              >
-                {respectEdge.toFixed(1)}%
-              </p>
-              <p className="text-[11px] text-slate-500 mt-1">
-                Difference between green rate with plan respect vs. overall
-                green rate.
-              </p>
-            </div>
-          </div>
-        </div>
-
-        {/* Risk: Stop Loss / Breakeven */}
-        <div className="border-t border-slate-800 pt-4">
-          <p className="text-sm font-medium text-slate-100 mb-2">
-            Stop Loss &amp; Breakeven discipline (per session)
-          </p>
-          <p className="text-xs text-slate-400 mb-4">
-            These metrics use the checklist tags:{" "}
-            <span className="text-slate-200">
-              “Planned stop was in place”, “Stop Loss”, “Breakeven”.
-            </span>
-          </p>
-
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-sm">
-            <div>
-              <p className="text-[11px] text-slate-400 mb-1">
-                % sessions with planned stop in place
-              </p>
-              <p className="text-2xl font-semibold text-emerald-300">
-                {pPlannedStop.toFixed(1)}%
-              </p>
-              <p className="text-[11px] text-slate-500 mt-1">
-                Sessions where you checked “Planned stop was in place”.
-              </p>
-            </div>
-
-            <div>
-              <p className="text-[11px] text-slate-400 mb-1">
-                % sessions where Stop Loss was hit
-              </p>
-              <p className="text-2xl font-semibold text-slate-100">
-                {pStopTouched.toFixed(1)}%
-              </p>
-              <p className="text-[11px] text-slate-500 mt-1">
-                Sessions with the “Stop Loss” tag.
-              </p>
-            </div>
-
-            <div>
-              <p className="text-[11px] text-slate-400 mb-1">
-                % sessions with Stop Loss + Breakeven
-              </p>
-              <p className="text-2xl font-semibold text-emerald-300">
-                {pStopAndBE.toFixed(1)}%
-              </p>
-              <p className="text-[11px] text-slate-500 mt-1">
-                You marked both “Stop Loss” and “Breakeven” (you moved
-                your stop and protected the trade).
-              </p>
-            </div>
-
-            <div>
-              <p className="text-[11px] text-slate-400 mb-1">
-                % sessions with no Stop Loss evidence
-              </p>
-              <p
-                className={`text-2xl font-semibold ${
-                  pNoStop > 0 ? "text-rose-300" : "text-emerald-300"
-                }`}
-              >
-                {pNoStop.toFixed(1)}%
-              </p>
-              <p className="text-[11px] text-slate-500 mt-1">
-                You did not check “Planned stop was in place”, “Stop Loss”
-                or “Breakeven”.
-              </p>
-            </div>
-          </div>
-
-          {/* Conditional probabilities for Stop / BE */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4 text-sm">
-            <div>
-              <p className="text-[11px] text-slate-400 mb-1">
-                When Stop Loss was hit
-              </p>
-              <p className="text-xs text-slate-300">
-                Green:{" "}
-                <span className="text-emerald-300 font-semibold">
-                  {pGreenWhenStopTouched.toFixed(1)}%
-                </span>{" "}
-                · Learning:{" "}
-                <span className="text-sky-300 font-semibold">
-                  {pLearningWhenStopTouched.toFixed(1)}%
-                </span>
-              </p>
-              <p className="text-[11px] text-slate-500 mt-1">
-                Shows whether respecting the stop still allows you to end
-                the day protected vs. turning into a deep learning day.
-              </p>
-            </div>
-
-            <div>
-              <p className="text-[11px] text-slate-400 mb-1">
-                When you tagged Breakeven
-              </p>
-              <p className="text-xs text-slate-300">
-                Green:{" "}
-                <span className="text-emerald-300 font-semibold">
-                  {pGreenWhenBE.toFixed(1)}%
-                </span>{" "}
-                · Learning:{" "}
-                <span className="text-sky-300 font-semibold">
-                  {pLearningWhenBE.toFixed(1)}%
-                </span>
-              </p>
-              <p className="text-[11px] text-slate-500 mt-1">
-                Tells you if moving your stop to BE is helping you survive
-                the day or if you are getting stopped out too early.
-              </p>
-            </div>
-          </div>
-        </div>
-
-        {/* Direction: LONG vs SHORT */}
-        <div className="border-t border-slate-800 pt-4">
-          <p className="text-sm font-medium text-slate-100 mb-2">
-            Directional performance (LONG vs SHORT)
-          </p>
-          <p className="text-xs text-slate-400 mb-4">
-            These metrics use the “Direction” field in your journal per
-            session.
-          </p>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-            {/* LONG */}
-            <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-4">
-              <p className="text-xs text-emerald-300 mb-1">
-                LONG sessions
-              </p>
-              <p className="text-sm text-slate-200 mb-1">
-                Sessions marked as LONG:{" "}
-                <span className="font-semibold text-emerald-200">
-                  {longSessions}
-                </span>
-              </p>
-              <p className="text-xs text-slate-300">
-                Times you win in LONG:{" "}
-                <span className="font-semibold text-emerald-300">
-                  {longGreen}
-                </span>
-              </p>
-              <p className="text-xs text-slate-300">
-                Times you lose in LONG:{" "}
-                <span className="font-semibold text-sky-300">
-                  {longLearning}
-                </span>
-              </p>
-              <p className="text-xs text-slate-300 mt-1">
-                LONG win rate:{" "}
-                <span className="font-semibold text-emerald-300">
-                  {longWinRate.toFixed(1)}%
-                </span>
-              </p>
-              <p className="text-[11px] text-slate-400 mt-2">
-                Use this to validate whether your natural edge is mainly
-                on the long side.
-              </p>
-            </div>
-
-            {/* SHORT */}
-            <div className="rounded-2xl border border-sky-500/30 bg-sky-500/5 p-4">
-              <p className="text-xs text-sky-300 mb-1">
-                SHORT sessions
-              </p>
-              <p className="text-sm text-slate-200 mb-1">
-                Sessions marked as SHORT:{" "}
-                <span className="font-semibold text-sky-100">
-                  {shortSessions}
-                </span>
-              </p>
-              <p className="text-xs text-slate-300">
-                Times you win in SHORT:{" "}
-                <span className="font-semibold text-emerald-300">
-                  {shortGreen}
-                </span>
-              </p>
-              <p className="text-xs text-slate-300">
-                Times you lose in SHORT:{" "}
-                <span className="font-semibold text-sky-300">
-                  {shortLearning}
-                </span>
-              </p>
-              <p className="text-xs text-slate-300 mt-1">
-                SHORT win rate:{" "}
-                <span className="font-semibold text-sky-300">
-                  {shortWinRate.toFixed(1)}%
-                </span>
-              </p>
-              <p className="text-[11px] text-slate-200 mt-2">
-                If SHORT performance is materially weaker, your system
-                may be primarily bullish; you can limit shorts to only
-                your A+ setups.
-              </p>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function DayOfWeekSection({
-  stats,
-}: {
-  stats: any;
-}) {
-  const { items, best, hardest } = stats;
-
-  return (
-    <section className="space-y-6">
-      <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-4">
-        <p className="text-sm font-medium text-slate-100 mb-3">
-          Day-of-week behavior
-        </p>
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs md:text-sm border border-slate-800 rounded-xl overflow-hidden">
-            <thead className="bg-slate-900">
-              <tr>
-                <th className="px-3 py-2 border-b border-slate-800">
-                  Day
-                </th>
-                <th className="px-3 py-2 border-b border-slate-800 text-right">
-                  Sessions
-                </th>
-                <th className="px-3 py-2 border-b border-slate-800 text-right">
-                  Green
-                </th>
-                <th className="px-3 py-2 border-b border-slate-800 text-right">
-                  Learning
-                </th>
-                <th className="px-3 py-2 border-b border-slate-800 text-right">
-                  Flat
-                </th>
-                <th className="px-3 py-2 border-b border-slate-800 text-right">
-                  Win rate
-                </th>
-                <th className="px-3 py-2 border-b border-slate-800 text-right">
-                  Avg P&amp;L
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((i: any) => (
-                <tr
-                  key={i.dow}
-                  className="border-t border-slate-800 bg-slate-950/60"
-                >
-                  <td className="px-3 py-2">{i.label}</td>
-                  <td className="px-3 py-2 text-right">
-                    {i.sessions}
-                  </td>
-                  <td className="px-3 py-2 text-right text-emerald-300">
-                    {i.green}
-                  </td>
-                  <td className="px-3 py-2 text-right text-sky-300">
-                    {i.learning}
-                  </td>
-                  <td className="px-3 py-2 text-right text-slate-300">
-                    {i.flat}
-                  </td>
-                  <td className="px-3 py-2 text-right">
-                    {i.winRate.toFixed(1)}%
-                  </td>
-                  <td className="px-3 py-2 text-right">
-                    {i.avgPnl >= 0 ? "+" : "-"}$
-                    {Math.abs(i.avgPnl).toFixed(2)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        <p className="text-[11px] text-slate-500 mt-2">
-          Based on your journal date and P&amp;L for each session.
-        </p>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-4">
-          <p className="text-xs text-emerald-300 mb-1">
-            Most supportive day of the week
-          </p>
-          {best && best.sessions > 0 ? (
-            <>
-              <p className="text-lg font-semibold text-slate-50">
-                {best.label}
-              </p>
-              <p className="text-sm text-emerald-300 mt-1">
-                Win rate: {best.winRate.toFixed(1)}% · Sessions:{" "}
-                {best.sessions}
-              </p>
-              <p className="text-[11px] text-slate-400 mt-2">
-                Consider planning your higher-quality playbook setups on
-                this day, keeping risk parameters constant.
-              </p>
-            </>
-          ) : (
-            <p className="text-sm text-slate-400">
-              No weekday has enough data yet.
-            </p>
-          )}
-        </div>
-
-        <div className="rounded-2xl border border-sky-500/30 bg-sky-500/5 p-4">
-          <p className="text-xs text-sky-300 mb-1">
-            Day to monitor closely
-          </p>
-          {hardest && hardest.sessions > 0 ? (
-            <>
-              <p className="text-lg font-semibold text-slate-50">
-                {hardest.label}
-              </p>
-              <p className="text-sm text-sky-300 mt-1">
-                Win rate: {hardest.winRate.toFixed(1)}% · Sessions:{" "}
-                {hardest.sessions}
-              </p>
-              <p className="text-[11px] text-slate-200 mt-2">
-                You can choose to reduce risk on this day, or only trade
-                your very best A+ setups.
-              </p>
-            </>
-          ) : (
-            <p className="text-sm text-slate-400">
-              No weekday has enough data yet.
-            </p>
-          )}
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function PsychologySection({
-  baseStats,
-  probabilityStats,
-}: {
-  baseStats: any;
-  probabilityStats: any;
-}) {
-  const {
-    totalSessions,
-    greenSessions,
-    learningSessions,
-  } = baseStats;
-
-  const {
-    respectCount,
-    respectGreen,
-    respectLearning,
-    pGreenRespect,
-    pLearningRespect,
-    fomoCount,
-    fomoGreen,
-    fomoLearning,
-    pGreenFomo,
-    pLearningFomo,
-    revengeCount,
-    revengeGreen,
-    revengeLearning,
-    pGreenRevenge,
-    pLearningRevenge,
-  } = probabilityStats;
-
-  return (
-    <section className="space-y-6">
-      {/* Summary */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-4">
-          <p className="text-xs text-slate-400 mb-1">
-            Sessions with plan respect checked
-          </p>
-          <p className="text-2xl font-semibold text-emerald-300">
-            {respectCount}
-          </p>
-          <p className="text-[11px] text-slate-500 mt-1">
-            Out of {totalSessions} total sessions (
-            {totalSessions > 0
-              ? ((respectCount / totalSessions) * 100).toFixed(1)
-              : "0"}
-            %).
-          </p>
-        </div>
-
-        <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-4">
-          <p className="text-xs text-slate-400 mb-1">
-            Sessions tagged with FOMO
-          </p>
-          <p className="text-2xl font-semibold text-sky-300">
-            {fomoCount}
-          </p>
-          <p className="text-[11px] text-slate-500 mt-1">
-            Based on the “FOMO” tag in your journal.
-          </p>
-        </div>
-
-        <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-4">
-          <p className="text-xs text-slate-400 mb-1">
-            Sessions tagged as revenge trade
-          </p>
-          <p className="text-2xl font-semibold text-sky-300">
-            {revengeCount}
-          </p>
-          <p className="text-[11px] text-slate-500 mt-1">
-            Based on the “Revenge trade” tag.
-          </p>
-        </div>
-      </div>
-
-      {/* Plan respect vs overall */}
-      <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-4">
-        <p className="text-sm font-medium text-slate-100 mb-2">
-          Plan respect vs overall performance
-        </p>
-        <p className="text-xs text-slate-400 mb-4">
-          How often sessions end on the green or learning side when you
-          check “I respected my rules and risk plan today”.
-        </p>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
-          <div>
-            <p className="text-[11px] text-slate-400 mb-1">
-              Overall distribution
-            </p>
-            <p className="text-xs text-slate-300">
-              Green sessions:{" "}
-              <span className="text-emerald-300 font-semibold">
-                {greenSessions}
-              </span>
-            </p>
-            <p className="text-xs text-slate-300">
-              Learning sessions:{" "}
-              <span className="text-sky-300 font-semibold">
-                {learningSessions}
-              </span>
-            </p>
-          </div>
-
-          <div>
-            <p className="text-[11px] text-slate-400 mb-1">
-              With plan respected
-            </p>
-            <p className="text-xs text-slate-300">
-              Green:{" "}
-              <span className="text-emerald-300 font-semibold">
-                {respectGreen}
-              </span>{" "}
-              ({pGreenRespect.toFixed(1)}%)
-            </p>
-            <p className="text-xs text-slate-300">
-              Learning:{" "}
-              <span className="text-sky-300 font-semibold">
-                {respectLearning}
-              </span>{" "}
-              ({pLearningRespect.toFixed(1)}%)
-            </p>
-          </div>
-
-          <div>
-            <p className="text-[11px] text-slate-400 mb-1">
-              Interpretation
-            </p>
-            <p className="text-[11px] text-slate-200">
-              If respecting your plan consistently leads to more green
-              sessions (and fewer learning sessions), your rules are
-              aligned with your edge. If not, it may be time to refine
-              the playbook.
-            </p>
-          </div>
-        </div>
-      </div>
-
-      {/* FOMO & revenge trade impact */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {/* FOMO */}
-        <div className="rounded-2xl border border-sky-500/30 bg-sky-500/5 p-4">
-          <p className="text-sm font-medium text-slate-100 mb-2">
-            FOMO impact
-          </p>
-          {fomoCount === 0 ? (
-            <p className="text-xs text-slate-300">
-              You don&apos;t have any sessions tagged with FOMO yet. Use
-              the “FOMO” tag when it appears so you can track its impact.
-            </p>
-          ) : (
-            <>
-              <p className="text-xs text-slate-300 mb-2">
-                Sessions with FOMO:{" "}
-                <span className="font-semibold text-sky-100">
-                  {fomoCount}
-                </span>
-              </p>
-              <p className="text-xs text-slate-300">
-                Green with FOMO:{" "}
-                <span className="text-emerald-300 font-semibold">
-                  {fomoGreen}
-                </span>{" "}
-                ({pGreenFomo.toFixed(1)}%)
-              </p>
-              <p className="text-xs text-slate-300">
-                Learning with FOMO:{" "}
-                <span className="text-sky-300 font-semibold">
-                  {fomoLearning}
-                </span>{" "}
-                ({pLearningFomo.toFixed(1)}%)
-              </p>
-              <p className="text-[11px] text-slate-200 mt-2">
-                If learning days dominate when FOMO is present, that is a
-                clear sign that “I only trade when the plan is there” is
-                not just a mantra, it&apos;s a risk rule.
-              </p>
-            </>
-          )}
-        </div>
-
-        {/* Revenge trade */}
-        <div className="rounded-2xl border border-rose-500/30 bg-rose-500/5 p-4">
-          <p className="text-sm font-medium text-slate-100 mb-2">
-            Revenge trade impact
-          </p>
-          {revengeCount === 0 ? (
-            <p className="text-xs text-slate-300">
-              No sessions are tagged as “Revenge trade” yet. When you
-              notice that behavior, tag it so you can quantify its cost.
-            </p>
-          ) : (
-            <>
-              <p className="text-xs text-slate-300 mb-2">
-                Sessions with revenge trade:{" "}
-                <span className="font-semibold text-rose-100">
-                  {revengeCount}
-                </span>
-              </p>
-              <p className="text-xs text-slate-300">
-                Green:{" "}
-                <span className="text-emerald-300 font-semibold">
-                  {revengeGreen}
-                </span>{" "}
-                ({pGreenRevenge.toFixed(1)}%)
-              </p>
-              <p className="text-xs text-slate-300">
-                Learning:{" "}
-                <span className="text-sky-300 font-semibold">
-                  {revengeLearning}
-                </span>{" "}
-                ({pLearningRevenge.toFixed(1)}%)
-              </p>
-              <p className="text-[11px] text-slate-200 mt-2">
-                If the probability of landing on the learning side
-                explodes when revenge trades appear, your rule is simple:
-                when frustration spikes, size and frequency must go to
-                minimum.
-              </p>
-            </>
-          )}
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function InstrumentsSection({
-  stats,
-}: {
-  stats: any;
-}) {
-  const { items, mostSupportive, toReview } = stats;
-
-  return (
-    <section className="space-y-6">
-      <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-4">
-        <p className="text-sm font-medium text-slate-100 mb-3">
-          Instrument statistics
-        </p>
-        {items.length === 0 ? (
-          <p className="text-sm text-slate-400">
-            No instruments recorded yet. Make sure you fill the “Main
-            instrument” field in your journal.
-          </p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs md:text-sm border border-slate-800 rounded-xl overflow-hidden">
-              <thead className="bg-slate-900">
-                <tr>
-                  <th className="px-3 py-2 border-b border-slate-800">
-                    Symbol
-                  </th>
-                  <th className="px-3 py-2 border-b border-slate-800 text-right">
-                    Sessions
-                  </th>
-                  <th className="px-3 py-2 border-b border-slate-800 text-right">
-                    Green
-                  </th>
-                  <th className="px-3 py-2 border-b border-slate-800 text-right">
-                    Learning
-                  </th>
-                  <th className="px-3 py-2 border-b border-slate-800 text-right">
-                    Win rate
-                  </th>
-                  <th className="px-3 py-2 border-b border-slate-800 text-right">
-                    Avg P&amp;L
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {items.map((i: any) => (
-                  <tr
-                    key={i.symbol}
-                    className="border-t border-slate-800 bg-slate-950/60"
-                  >
-                    <td className="px-3 py-2 font-mono text-xs">
-                      {i.symbol}
-                    </td>
-                    <td className="px-3 py-2 text-right">
-                      {i.sessions}
-                    </td>
-                    <td className="px-3 py-2 text-right text-emerald-300">
-                      {i.green}
-                    </td>
-                    <td className="px-3 py-2 text-right text-sky-300">
-                      {i.learning}
-                    </td>
-                    <td className="px-3 py-2 text-right">
-                      {i.winRate.toFixed(1)}%
-                    </td>
-                    <td className="px-3 py-2 text-right">
-                      {i.avgPnl >= 0 ? "+" : "-"}$
-                      {Math.abs(i.avgPnl).toFixed(2)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
-      {/* Best / review lists */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-4">
-          <p className="text-sm font-medium text-slate-100 mb-2">
-            Most supportive instruments
-          </p>
-          {mostSupportive.length === 0 ? (
-            <p className="text-xs text-slate-300">
-              Not enough instrument data yet.
-            </p>
-          ) : (
-            <ul className="space-y-1 text-xs text-slate-200">
-              {mostSupportive.map((i: any) => (
-                <li
-                  key={i.symbol}
-                  className="flex items-center justify-between"
-                >
-                  <span className="font-mono">{i.symbol}</span>
-                  <span>
-                    {i.winRate.toFixed(1)}% · {i.sessions} sessions
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-          <p className="text-[11px] text-slate-300 mt-2">
-            These instruments align more often with your current edge.
-          </p>
-        </div>
-
-        <div className="rounded-2xl border border-sky-500/30 bg-sky-500/5 p-4">
-          <p className="text-sm font-medium text-slate-100 mb-2">
-            Instruments to review
-          </p>
-          {toReview.length === 0 ? (
-            <p className="text-xs text-slate-300">
-              Not enough instrument data yet.
-            </p>
-          ) : (
-            <ul className="space-y-1 text-xs text-slate-200">
-              {toReview.map((i: any) => (
-                <li
-                  key={i.symbol}
-                  className="flex items-center justify-between"
-                >
-                  <span className="font-mono">{i.symbol}</span>
-                  <span>
-                    {i.winRate.toFixed(1)}% · {i.sessions} sessions
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-          <p className="text-[11px] text-slate-200 mt-2">
-            Either narrow your playbook for these symbols or consider
-            reducing risk until the data improves.
-          </p>
-        </div>
-      </div>
-    </section>
   );
 }
