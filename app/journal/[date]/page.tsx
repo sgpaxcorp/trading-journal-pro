@@ -1,3 +1,4 @@
+// app/journal/[date]/page.tsx
 "use client";
 
 import type React from "react";
@@ -138,7 +139,7 @@ function TablePicker({
       <div className="grid grid-cols-6 gap-1">
         {Array.from({ length: 36 }).map((_, i) => {
           const r = Math.floor(i / 6) + 1;
-          const c = (i % 6) + 1;
+          const c = i % 6 + 1;
           const active =
             hover && r <= hover[0] && c <= hover[1]
               ? "bg-emerald-500/80"
@@ -308,36 +309,73 @@ function parseSPXOptionSymbol(raw: string) {
 
   return { underlying, expiry, right, strike };
 }
+
 function calcDTE(entryDateYYYYMMDD: string, expiry: Date) {
   try {
     const [y, m, d] = entryDateYYYYMMDD.split("-").map(Number);
-
-    // 🔒 Normaliza a medianoche UTC para evitar inflar días por timezone
     const entryUTC = Date.UTC(y, m - 1, d);
     const expiryUTC = Date.UTC(
       expiry.getFullYear(),
       expiry.getMonth(),
       expiry.getDate()
     );
-
     const msPerDay = 24 * 60 * 60 * 1000;
-
-    // ✅ diferencia simple en días calendario
     const diffDays = Math.round((expiryUTC - entryUTC) / msPerDay);
-
-    // Si es el mismo día => 0DTE
     if (diffDays === 0) return 0;
-
     return diffDays >= 0 ? diffDays : null;
   } catch {
     return null;
   }
 }
 
+/* =========================
+   Contract multipliers
+========================= */
 
+// Futures point-value map (expand as you want)
+const FUTURES_MULTIPLIERS: Record<string, number> = {
+  ES: 50,   // E-mini S&P 500
+  MES: 5,   // Micro ES
+  NQ: 20,   // E-mini Nasdaq
+  MNQ: 2,   // Micro NQ
+  YM: 5,    // Dow
+  MYM: 0.5, // Micro YM
+  RTY: 50,  // Russell
+  M2K: 5,   // Micro Russell
+  CL: 1000, // Crude Oil
+  MCL: 100, // Micro Crude
+  GC: 100,  // Gold
+  MGC: 10,  // Micro Gold
+  SI: 5000, // Silver
+  HG: 25000 // Copper (rough)
+};
 
+function futureRoot(symbol: string) {
+  const s = (symbol || "").trim().toUpperCase().replace(/^\//, "");
+  const m = s.match(/^([A-Z]{1,4})/);
+  return m?.[1] ?? s;
+}
+
+function getContractMultiplier(kind: InstrumentType, symbol: string) {
+  if (kind === "option") return 100; // ✅ options contract size
+  if (kind === "future") {
+    const root = futureRoot(symbol);
+    return FUTURES_MULTIPLIERS[root] ?? 1;
+  }
+  // stocks, crypto, forex, other
+  return 1;
+}
+
+/* =========================
+   Averages (UI only)
+========================= */
 function computeAverages(
-  trades: { symbol: string; kind: InstrumentType; price: string; quantity: string }[]
+  trades: {
+    symbol: string;
+    kind: InstrumentType;
+    price: string;
+    quantity: string;
+  }[]
 ) {
   const map: Record<string, { sumPxQty: number; sumQty: number }> = {};
   for (const t of trades) {
@@ -358,12 +396,23 @@ function computeAverages(
   });
 }
 
+/* =========================
+   ✅ Correct AUTO PnL (FIFO + multipliers)
+========================= */
 function computeAutoPnL(entries: EntryTradeRow[], exits: ExitTradeRow[]) {
   const key = (s: string, k: InstrumentType, side: SideType) =>
     `${s}|${k}|${side}`;
 
-  const entryAgg: Record<string, { sumPxQty: number; sumQty: number }> = {};
-  const exitAgg: Record<string, { sumPxQty: number; sumQty: number }> = {};
+  type Lot = {
+    price: number;
+    qtyLeft: number;
+    symbol: string;
+    kind: InstrumentType;
+    side: SideType;
+  };
+
+  // Build FIFO queues of entry lots per key
+  const entryLots: Record<string, Lot[]> = {};
 
   for (const e of entries) {
     const sym = (e.symbol || "").trim().toUpperCase();
@@ -372,38 +421,48 @@ function computeAutoPnL(entries: EntryTradeRow[], exits: ExitTradeRow[]) {
     const px = parseFloat(e.price);
     const qty = parseFloat(e.quantity);
     if (!Number.isFinite(px) || !Number.isFinite(qty) || qty <= 0) continue;
-    entryAgg[k] ||= { sumPxQty: 0, sumQty: 0 };
-    entryAgg[k].sumPxQty += px * qty;
-    entryAgg[k].sumQty += qty;
-  }
 
-  for (const x of exits) {
-    const sym = (x.symbol || "").trim().toUpperCase();
-    if (!sym) continue;
-    const k = key(sym, x.kind || "other", x.side || "long");
-    const px = parseFloat(x.price);
-    const qty = parseFloat(x.quantity);
-    if (!Number.isFinite(px) || !Number.isFinite(qty) || qty <= 0) continue;
-    exitAgg[k] ||= { sumPxQty: 0, sumQty: 0 };
-    exitAgg[k].sumPxQty += px * qty;
-    exitAgg[k].sumQty += qty;
+    entryLots[k] ||= [];
+    entryLots[k].push({
+      price: px,
+      qtyLeft: qty,
+      symbol: sym,
+      kind: e.kind || "other",
+      side: e.side || "long",
+    });
   }
 
   let total = 0;
 
-  for (const k of Object.keys(exitAgg)) {
-    const e = entryAgg[k];
-    const x = exitAgg[k];
-    if (!e || !x) continue;
+  // Apply exits FIFO against entry lots
+  for (const x of exits) {
+    const sym = (x.symbol || "").trim().toUpperCase();
+    if (!sym) continue;
+    const k = key(sym, x.kind || "other", x.side || "long");
+    const exitPx = parseFloat(x.price);
+    let exitQty = parseFloat(x.quantity);
+    if (!Number.isFinite(exitPx) || !Number.isFinite(exitQty) || exitQty <= 0)
+      continue;
 
-    const avgEntry = e.sumPxQty / e.sumQty;
-    const avgExit = x.sumPxQty / x.sumQty;
-    const closedQty = Math.min(e.sumQty, x.sumQty);
+    const lots = entryLots[k];
+    if (!lots || lots.length === 0) continue;
 
-    const [, , side] = k.split("|") as [string, string, SideType];
-    const sign = side === "short" ? -1 : 1;
+    const [, kindStr, sideStr] = k.split("|") as [string, InstrumentType, SideType];
+    const sign = sideStr === "short" ? -1 : 1;
+    const mult = getContractMultiplier(kindStr, sym);
 
-    total += (avgExit - avgEntry) * closedQty * sign;
+    while (exitQty > 0 && lots.length > 0) {
+      const lot = lots[0];
+      const closeQty = Math.min(lot.qtyLeft, exitQty);
+
+      // ✅ core P/L formula
+      total += (exitPx - lot.price) * closeQty * sign * mult;
+
+      lot.qtyLeft -= closeQty;
+      exitQty -= closeQty;
+
+      if (lot.qtyLeft <= 0) lots.shift();
+    }
   }
 
   return { total };
@@ -428,10 +487,7 @@ function WidgetCard({
         <div>{right}</div>
       </div>
 
-      {/* ✅ permite achicar sin perder texto */}
-      <div className="p-4 flex-1 min-h-0 overflow-auto">
-        {children}
-      </div>
+      <div className="p-4 flex-1 min-h-0 overflow-auto">{children}</div>
     </div>
   );
 }
@@ -504,20 +560,23 @@ export default function DailyJournalPage() {
     });
 
   /* ---------------- Widgets active state ---------------- */
-  const ALL_WIDGETS: { id: JournalWidgetId; label: string; defaultOn: boolean }[] =
-    [
-      { id: "pnl", label: "Day P&L", defaultOn: true },
-      { id: "premarket", label: "Premarket Prep", defaultOn: true },
-      { id: "inside", label: "Inside the Trade", defaultOn: true },
-      { id: "after", label: "After-trade Analysis", defaultOn: true },
-      { id: "entries", label: "Entries", defaultOn: true },
-      { id: "exits", label: "Exits", defaultOn: true },
-      { id: "emotional", label: "Emotional State", defaultOn: true },
-      { id: "strategy", label: "Strategy / Probability", defaultOn: true },
-      { id: "screenshots", label: "Screenshots", defaultOn: true },
-      { id: "templates", label: "Templates", defaultOn: true },
-      { id: "actions", label: "Actions", defaultOn: true },
-    ];
+  const ALL_WIDGETS: {
+    id: JournalWidgetId;
+    label: string;
+    defaultOn: boolean;
+  }[] = [
+    { id: "pnl", label: "Day P&L", defaultOn: true },
+    { id: "premarket", label: "Premarket Prep", defaultOn: true },
+    { id: "inside", label: "Inside the Trade", defaultOn: true },
+    { id: "after", label: "After-trade Analysis", defaultOn: true },
+    { id: "entries", label: "Entries", defaultOn: true },
+    { id: "exits", label: "Exits", defaultOn: true },
+    { id: "emotional", label: "Emotional State", defaultOn: true },
+    { id: "strategy", label: "Strategy / Probability", defaultOn: true },
+    { id: "screenshots", label: "Screenshots", defaultOn: true },
+    { id: "templates", label: "Templates", defaultOn: true },
+    { id: "actions", label: "Actions", defaultOn: true },
+  ];
 
   const widgetsKey = "journal_widgets_active_v1";
   const [activeWidgets, setActiveWidgets] = useState<JournalWidgetId[]>(() => {
@@ -768,7 +827,7 @@ export default function DailyJournalPage() {
   );
   const exitAverages = useMemo(() => computeAverages(exitTrades), [exitTrades]);
 
-  /* ---------- AUTO PNL local ---------- */
+  /* ---------- ✅ AUTO PNL local ---------- */
   const pnlCalc = useMemo(
     () => computeAutoPnL(entryTrades, exitTrades),
     [entryTrades, exitTrades]
@@ -984,7 +1043,7 @@ export default function DailyJournalPage() {
             placeholder="Auto-calculated"
           />
           <p className="text-xs text-slate-500 mt-2">
-            Calculated from Entries/Exits.
+            Calculated from Entries/Exits (FIFO + multipliers).
           </p>
         </WidgetCard>
       ),
@@ -1009,18 +1068,17 @@ export default function DailyJournalPage() {
               <label className="text-xs text-slate-400 block mb-1">
                 Symbol / Contract
               </label>
-             <input
-  type="text"
-  value={newEntryTrade.symbol}
-  onChange={(e) => {
-    const up = e.target.value.toUpperCase();
-    setNewEntryTrade((p) => ({ ...p, symbol: up }));
-  }}
-  style={{ textTransform: "uppercase" }}
-  className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-[14px] text-slate-100 focus:outline-none focus:border-emerald-400 uppercase"
-  placeholder="SPXW251121C6565"
-/>
-
+              <input
+                type="text"
+                value={newEntryTrade.symbol}
+                onChange={(e) => {
+                  const up = e.target.value.toUpperCase();
+                  setNewEntryTrade((p) => ({ ...p, symbol: up }));
+                }}
+                style={{ textTransform: "uppercase" }}
+                className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-[14px] text-slate-100 focus:outline-none focus:border-emerald-400 uppercase"
+                placeholder="SPXW251121C6565"
+              />
             </div>
 
             <div>
@@ -1148,7 +1206,8 @@ export default function DailyJournalPage() {
                         <button
                           type="button"
                           onClick={() => handleDeleteEntryTrade(t.id)}
-                          className="text-slate-500 hover:text-red-400"
+                          className="text-slate-500 hover:text-sky-300"
+                          title="Delete entry"
                         >
                           ✕
                         </button>
@@ -1323,7 +1382,8 @@ export default function DailyJournalPage() {
                         <button
                           type="button"
                           onClick={() => handleDeleteExitTrade(t.id)}
-                          className="text-slate-500 hover:text-red-400"
+                          className="text-slate-500 hover:text-sky-300"
+                          title="Delete exit"
                         >
                           ✕
                         </button>
@@ -1386,7 +1446,7 @@ export default function DailyJournalPage() {
                   onClick={toggleDictation}
                   className={`px-2 py-1 rounded ${
                     listening
-                      ? "bg-rose-500 text-white"
+                      ? "bg-sky-500 text-white"
                       : "bg-slate-800 text-slate-200"
                   } text-xs hover:bg-slate-700`}
                 >
@@ -1460,19 +1520,23 @@ export default function DailyJournalPage() {
       render: () => (
         <WidgetCard title="Emotional state & impulses">
           <div className="grid grid-cols-1 gap-2 text-[13px] leading-snug">
-            {["Calm & focused", "Greedy", "Desperate", "FOMO", "Revenge trade"].map(
-              (t) => (
-                <label key={t} className="inline-flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    onChange={() => toggleTag(t)}
-                    checked={entry.tags?.includes(t)}
-                    className="h-4 w-4 rounded border-slate-600 bg-slate-950 shrink-0"
-                  />
-                  <span className="break-words">{t}</span>
-                </label>
-              )
-            )}
+            {[
+              "Calm & focused",
+              "Greedy",
+              "Desperate",
+              "FOMO",
+              "Revenge trade",
+            ].map((t) => (
+              <label key={t} className="inline-flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  onChange={() => toggleTag(t)}
+                  checked={entry.tags?.includes(t)}
+                  className="h-4 w-4 rounded border-slate-600 bg-slate-950 shrink-0"
+                />
+                <span className="break-words">{t}</span>
+              </label>
+            ))}
           </div>
         </WidgetCard>
       ),
@@ -1619,7 +1683,7 @@ export default function DailyJournalPage() {
                 <button
                   type="button"
                   onClick={() => handleDeleteTemplate(tpl.id)}
-                  className="text-slate-500 hover:text-red-400"
+                  className="text-slate-500 hover:text-sky-300"
                 >
                   ✕
                 </button>
