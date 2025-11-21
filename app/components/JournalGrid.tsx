@@ -49,38 +49,17 @@ function safeWriteJSON(key: string, value: any) {
   } catch {}
 }
 
-/**
- * Merge: mantiene tamaños/pos previos, mete nuevos widgets con defaults.
- */
-function mergeLayouts(
-  prev: Layout[],
-  incoming: Layout[],
-  activeIds: string[],
-  defaults: Layout[]
-) {
-  const byIdPrev = Object.fromEntries(prev.map((l) => [l.i, l]));
-  const byIdIncoming = Object.fromEntries(incoming.map((l) => [l.i, l]));
-
-  const merged: Layout[] = [];
-
-  for (const id of activeIds) {
-    const a = byIdIncoming[id];
-    const p = byIdPrev[id];
-    const d = defaults.find((x) => x.i === id);
-
-    merged.push({
-      ...(d || { i: id, x: 0, y: Infinity, w: 4, h: 4 }),
-      ...(p || {}),
-      ...(a || {}),
-      i: id,
-    });
-  }
-  return merged;
+/** ✅ mins 50% menor (y nunca menos de 1) */
+function halveMins(l: Layout): Layout {
+  const minW =
+    typeof l.minW === "number" ? Math.max(1, Math.ceil(l.minW / 2)) : 1;
+  const minH =
+    typeof l.minH === "number" ? Math.max(1, Math.ceil(l.minH / 2)) : 1;
+  return { ...l, minW, minH };
 }
 
 /**
- * Crea layouts "fallback" por breakpoint basado en lg.
- * Esto evita que responsive meta cosas raras al entrar por primera vez.
+ * Crea fallbacks por breakpoint desde lg.
  */
 function buildFallbackLayoutsFromLg(lg: Layout[]): Layouts {
   const clone = (colsFrom: number, colsTo: number) =>
@@ -88,6 +67,8 @@ function buildFallbackLayoutsFromLg(lg: Layout[]): Layouts {
       ...l,
       x: Math.round((l.x / colsFrom) * colsTo),
       w: Math.max(1, Math.round((l.w / colsFrom) * colsTo)),
+      minW: l.minW,
+      minH: l.minH,
     }));
 
   return {
@@ -97,6 +78,71 @@ function buildFallbackLayoutsFromLg(lg: Layout[]): Layouts {
     xs: clone(12, 4),
     xxs: clone(12, 2),
   };
+}
+
+/**
+ * ✅ Inyecta mins nuevos en TODOS los breakpoints,
+ * eliminando mins guardados viejos.
+ */
+function injectMinsAllBreakpoints(
+  layouts: Layouts,
+  defaultsAll: Layouts
+): Layouts {
+  const out: Layouts = { ...layouts };
+
+  (Object.keys(defaultsAll) as (keyof Layouts)[]).forEach((bp) => {
+    const defBp = (defaultsAll[bp] || []) as Layout[];
+    const curBp = (out[bp] || []) as Layout[];
+
+    out[bp] = curBp.map((l) => {
+      const d = defBp.find((x) => x.i === l.i);
+      if (!d) return { ...l, minW: 1, minH: 1 };
+      return {
+        ...l,
+        minW: d.minW ?? 1,
+        minH: d.minH ?? 1,
+      };
+    });
+  });
+
+  return out;
+}
+
+/**
+ * Merge por breakpoint sin perder posición/tamaño,
+ * pero respetando mins nuevos (ya halved).
+ */
+function mergeLayouts(
+  prev: Layout[],
+  incoming: Layout[],
+  activeIds: string[],
+  defaultsBp: Layout[]
+) {
+  const byIdPrev = Object.fromEntries(prev.map((l) => [l.i, l]));
+  const byIdIncoming = Object.fromEntries(incoming.map((l) => [l.i, l]));
+
+  const merged: Layout[] = [];
+
+  for (const id of activeIds) {
+    const a = byIdIncoming[id];
+    const p = byIdPrev[id];
+    const d = defaultsBp.find((x) => x.i === id);
+
+    const base =
+      d || ({ i: id, x: 0, y: Infinity, w: 4, h: 4, minW: 1, minH: 1 } as Layout);
+
+    merged.push({
+      ...base,
+      ...(p || {}),
+      ...(a || {}),
+      i: id,
+      // ✅ fuerza min actual, no el viejo
+      minW: base.minW,
+      minH: base.minH,
+    });
+  }
+
+  return merged;
 }
 
 export default function JournalGrid({
@@ -113,9 +159,16 @@ export default function JournalGrid({
     [widgets, activeIds]
   );
 
+  /** defaults lg con mins halved */
   const defaultLg = React.useMemo(
-    () => activeWidgets.map((w) => w.defaultLayout),
+    () => activeWidgets.map((w) => halveMins(w.defaultLayout)),
     [activeWidgets]
+  );
+
+  /** defaults para TODOS bp */
+  const defaultsAll = React.useMemo(
+    () => buildFallbackLayoutsFromLg(defaultLg),
+    [defaultLg]
   );
 
   const [breakpoint, setBreakpoint] =
@@ -124,49 +177,61 @@ export default function JournalGrid({
   const [layouts, setLayouts] = React.useState<Layouts>(() => {
     const saved = safeReadJSON<Layouts | null>(storageKey, null);
 
-    // Primera vez -> usa un layout bonito (lg) y genera fallbacks para otros bp.
     if (!saved || !saved.lg) {
-      const base = buildFallbackLayoutsFromLg(defaultLg);
+      const base = defaultsAll;
       safeWriteJSON(storageKey, base);
       return base;
     }
 
-    const savedLg = (saved.lg || []).filter((l) =>
-      activeIds.includes(l.i as JournalWidgetId)
-    );
-
-    const missing = activeWidgets
-      .filter((w) => !savedLg.find((l) => l.i === w.id))
-      .map((w) => w.defaultLayout);
-
-    const mergedLg = [...savedLg, ...missing];
-
-    const mergedAll: Layouts = {
-      ...saved,
-      ...buildFallbackLayoutsFromLg(mergedLg),
-      lg: mergedLg,
-    };
-
-    safeWriteJSON(storageKey, mergedAll);
-    return mergedAll;
-  });
-
-  // Si cambian widgets activos: NO resetea tamaños, solo añade/borra.
-  React.useEffect(() => {
-    setLayouts((prev) => {
-      const prevBp = (prev[breakpoint] || []) as Layout[];
-      const kept = prevBp.filter((l) =>
+    // 1) Filtra solo activos
+    const filtered: Layouts = { ...saved };
+    (Object.keys(filtered) as (keyof Layouts)[]).forEach((bp) => {
+      filtered[bp] = ((filtered[bp] || []) as Layout[]).filter((l) =>
         activeIds.includes(l.i as JournalWidgetId)
       );
-      const missing = activeWidgets
-        .filter((w) => !kept.find((l) => l.i === w.id))
-        .map((w) => w.defaultLayout);
+    });
 
-      const nextBp = [...kept, ...missing];
-      const next = { ...prev, [breakpoint]: nextBp };
+    // 2) Añade missing en lg (y luego fallbacks)
+    const savedLg = (filtered.lg || []) as Layout[];
+    const missingLg = activeWidgets
+      .filter((w) => !savedLg.find((l) => l.i === w.id))
+      .map((w) => halveMins(w.defaultLayout));
 
-      safeWriteJSON(storageKey, next);
-      return next;
+    const mergedLg = [...savedLg, ...missingLg];
+    const rebuiltAll = buildFallbackLayoutsFromLg(mergedLg);
+
+    // 3) ✅ inyecta nuevos mins en todos bp
+    const finalAll = injectMinsAllBreakpoints(rebuiltAll, defaultsAll);
+
+    safeWriteJSON(storageKey, finalAll);
+    return finalAll;
+  });
+
+  // ✅ cuando cambian widgets activos -> añade/borra y vuelve a inyectar mins
+  React.useEffect(() => {
+    setLayouts((prev) => {
+      const next: Layouts = { ...prev };
+
+      (Object.keys(next) as (keyof Layouts)[]).forEach((bp) => {
+        const prevBp = (next[bp] || []) as Layout[];
+        const kept = prevBp.filter((l) =>
+          activeIds.includes(l.i as JournalWidgetId)
+        );
+
+        const defBp = (defaultsAll[bp] || []) as Layout[];
+        const missing = activeWidgets
+          .filter((w) => !kept.find((l) => l.i === w.id))
+          .map((w) => {
+            const d = defBp.find((x) => x.i === w.id);
+            return d || halveMins(w.defaultLayout);
+          });
+
+        next[bp] = [...kept, ...missing];
+      });
+
+      const finalAll = injectMinsAllBreakpoints(next, defaultsAll);
+      safeWriteJSON(storageKey, finalAll);
+      return finalAll;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeIds.join("|")]);
@@ -174,27 +239,30 @@ export default function JournalGrid({
   const handleLayoutChange = (current: Layout[], all: Layouts) => {
     setLayouts((prev) => {
       const prevBp = (prev[breakpoint] || []) as Layout[];
+      const defaultsBp = (defaultsAll[breakpoint] || []) as Layout[];
+
       const mergedBp = mergeLayouts(
         prevBp,
         current,
         activeIds as string[],
-        defaultLg
+        defaultsBp
       );
 
-      const next = {
+      const next: Layouts = {
         ...prev,
         ...all,
         [breakpoint]: mergedBp,
       };
 
-      safeWriteJSON(storageKey, next);
-      return next;
+      const finalAll = injectMinsAllBreakpoints(next, defaultsAll);
+      safeWriteJSON(storageKey, finalAll);
+      return finalAll;
     });
   };
 
   return (
     <ResponsiveGridLayout
-      className="layout"
+      className="journal-layout"
       layouts={layouts}
       breakpoints={{ lg: 1200, md: 996, sm: 768, xs: 480, xxs: 0 }}
       cols={{ lg: 12, md: 10, sm: 6, xs: 4, xxs: 2 }}
@@ -203,23 +271,16 @@ export default function JournalGrid({
       containerPadding={[0, 0]}
       onBreakpointChange={(bp) => setBreakpoint(bp)}
       onLayoutChange={handleLayoutChange}
-
-      /** ✅ clave: compact vertical para que re-acomode */
       compactType="vertical"
       verticalCompact={true}
       preventCollision={false}
       isBounded={true}
-      draggableHandle=".widget-drag"
+      draggableHandle=".drag-handle"
+      resizeHandles={["se", "s", "e"]} // ✅ visible y consistente
     >
       {activeWidgets.map((w) => (
-        <div
-          key={w.id}
-          className="rounded-2xl border border-slate-800 bg-slate-900/95 overflow-hidden shadow-sm min-h-0"
-        >
-          <div className="widget-drag cursor-move px-3 py-2 text-xs text-slate-300 border-b border-slate-800 bg-slate-950/50">
-            {w.title}
-          </div>
-          <div className="p-3 min-h-0 h-full">{w.render()}</div>
+        <div key={w.id} className="min-h-0 h-full w-full flex flex-col">
+          {w.render()}
         </div>
       ))}
     </ResponsiveGridLayout>
