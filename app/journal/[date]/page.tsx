@@ -1642,7 +1642,7 @@ export default function DailyJournalPage() {
                     checked={entry.tags?.includes(t)}
                     className="h-4 w-4 rounded border-slate-600 bg-slate-950 shrink-0"
                   />
-                  <span className="wrap-break-word">{t}</span>
+                  <span className="break-words">{t}</span>
                 </label>
               ))}
             </div>
