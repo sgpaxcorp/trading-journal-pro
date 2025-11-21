@@ -329,6 +329,20 @@ function calcDTE(entryDateYYYYMMDD: string, expiry: Date) {
 }
 
 /* =========================
+   ✅ Detect option symbols + safe kind
+========================= */
+function looksLikeOptionContract(symbol: string) {
+  return !!parseSPXOptionSymbol(symbol);
+}
+
+function effectiveKind(kind: InstrumentType, symbol: string): InstrumentType {
+  if (kind === "option" && !looksLikeOptionContract(symbol)) {
+    return "stock";
+  }
+  return kind || "other";
+}
+
+/* =========================
    Contract multipliers
 ========================= */
 
@@ -397,7 +411,7 @@ function computeAverages(
 }
 
 /* =========================
-   ✅ Correct AUTO PnL (FIFO + multipliers)
+   ✅ Correct AUTO PnL (FIFO + SAFE multipliers)
 ========================= */
 function computeAutoPnL(entries: EntryTradeRow[], exits: ExitTradeRow[]) {
   const key = (s: string, k: InstrumentType, side: SideType) =>
@@ -411,13 +425,16 @@ function computeAutoPnL(entries: EntryTradeRow[], exits: ExitTradeRow[]) {
     side: SideType;
   };
 
-  // Build FIFO queues of entry lots per key
   const entryLots: Record<string, Lot[]> = {};
 
   for (const e of entries) {
     const sym = (e.symbol || "").trim().toUpperCase();
     if (!sym) continue;
-    const k = key(sym, e.kind || "other", e.side || "long");
+
+    const kEff = effectiveKind(e.kind || "other", sym);
+    const sideEff = e.side || "long";
+    const k = key(sym, kEff, sideEff);
+
     const px = parseFloat(e.price);
     const qty = parseFloat(e.quantity);
     if (!Number.isFinite(px) || !Number.isFinite(qty) || qty <= 0) continue;
@@ -427,18 +444,21 @@ function computeAutoPnL(entries: EntryTradeRow[], exits: ExitTradeRow[]) {
       price: px,
       qtyLeft: qty,
       symbol: sym,
-      kind: e.kind || "other",
-      side: e.side || "long",
+      kind: kEff,
+      side: sideEff,
     });
   }
 
   let total = 0;
 
-  // Apply exits FIFO against entry lots
   for (const x of exits) {
     const sym = (x.symbol || "").trim().toUpperCase();
     if (!sym) continue;
-    const k = key(sym, x.kind || "other", x.side || "long");
+
+    const kEff = effectiveKind(x.kind || "other", sym);
+    const sideEff = x.side || "long";
+    const k = key(sym, kEff, sideEff);
+
     const exitPx = parseFloat(x.price);
     let exitQty = parseFloat(x.quantity);
     if (!Number.isFinite(exitPx) || !Number.isFinite(exitQty) || exitQty <= 0)
@@ -447,15 +467,13 @@ function computeAutoPnL(entries: EntryTradeRow[], exits: ExitTradeRow[]) {
     const lots = entryLots[k];
     if (!lots || lots.length === 0) continue;
 
-    const [, kindStr, sideStr] = k.split("|") as [string, InstrumentType, SideType];
-    const sign = sideStr === "short" ? -1 : 1;
-    const mult = getContractMultiplier(kindStr, sym);
+    const sign = sideEff === "short" ? -1 : 1;
+    const mult = getContractMultiplier(kEff, sym);
 
     while (exitQty > 0 && lots.length > 0) {
       const lot = lots[0];
       const closeQty = Math.min(lot.qtyLeft, exitQty);
 
-      // ✅ core P/L formula
       total += (exitPx - lot.price) * closeQty * sign * mult;
 
       lot.qtyLeft -= closeQty;
@@ -672,10 +690,16 @@ export default function DailyJournalPage() {
     const symbol = newEntryTrade.symbol.trim().toUpperCase();
     if (!symbol || !newEntryTrade.price.trim()) return;
 
+    // ✅ Safe kind: if not contract, treat as stock
+    let finalKind: InstrumentType = newEntryTrade.kind;
+    if (finalKind === "option" && !looksLikeOptionContract(symbol)) {
+      finalKind = "stock";
+    }
+
     let dte: number | null = null;
     let expiryStr: string | null = null;
 
-    if (newEntryTrade.kind === "option") {
+    if (finalKind === "option") {
       const parsed = parseSPXOptionSymbol(symbol);
       if (parsed) {
         dte = calcDTE(dateParam, parsed.expiry);
@@ -688,6 +712,7 @@ export default function DailyJournalPage() {
       {
         id: crypto.randomUUID(),
         ...newEntryTrade,
+        kind: finalKind, // ✅ store safe kind
         symbol,
         time: nowTimeLabel(),
         dte,
@@ -727,10 +752,11 @@ export default function DailyJournalPage() {
     for (const e of entryTrades) {
       const sym = (e.symbol || "").trim().toUpperCase();
       if (!sym) continue;
-      const k = key(sym, e.kind || "other", e.side || "long");
+      const kEff = effectiveKind(e.kind || "other", sym);
+      const k = key(sym, kEff, e.side || "long");
       totals[k] ||= {
         symbol: sym,
-        kind: e.kind || "other",
+        kind: kEff,
         side: e.side || "long",
         entryQty: 0,
         exitQty: 0,
@@ -741,10 +767,11 @@ export default function DailyJournalPage() {
     for (const x of exitTrades) {
       const sym = (x.symbol || "").trim().toUpperCase();
       if (!sym) continue;
-      const k = key(sym, x.kind || "other", x.side || "long");
+      const kEff = effectiveKind(x.kind || "other", sym);
+      const k = key(sym, kEff, x.side || "long");
       totals[k] ||= {
         symbol: sym,
-        kind: x.kind || "other",
+        kind: kEff,
         side: x.side || "long",
         entryQty: 0,
         exitQty: 0,
@@ -785,10 +812,16 @@ export default function DailyJournalPage() {
     const symbol = newExitTrade.symbol.trim().toUpperCase();
     if (!symbol || !newExitTrade.price.trim()) return;
 
+    // ✅ Safe kind override
+    let finalKind: InstrumentType = newExitTrade.kind;
+    if (finalKind === "option" && !looksLikeOptionContract(symbol)) {
+      finalKind = "stock";
+    }
+
     let dte: number | null = null;
     let expiryStr: string | null = null;
 
-    if (newExitTrade.kind === "option") {
+    if (finalKind === "option") {
       const parsed = parseSPXOptionSymbol(symbol);
       if (parsed) {
         dte = calcDTE(dateParam, parsed.expiry);
@@ -801,6 +834,7 @@ export default function DailyJournalPage() {
       {
         id: crypto.randomUUID(),
         ...newExitTrade,
+        kind: finalKind, // ✅ store safe kind
         symbol,
         time: nowTimeLabel(),
         dte,
@@ -1258,7 +1292,7 @@ export default function DailyJournalPage() {
                 Close position
               </label>
               <select
-                value={`${newExitTrade.symbol}|${newExitTrade.kind}|${newExitTrade.side}`}
+                value={`${newExitTrade.symbol}|${effectiveKind(newExitTrade.kind, newExitTrade.symbol)}|${newExitTrade.side}`}
                 onChange={(e) => handlePickOpenPosition(e.target.value)}
                 className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-[14px] text-slate-100 focus:outline-none focus:border-emerald-400"
               >
@@ -1534,7 +1568,7 @@ export default function DailyJournalPage() {
                   checked={entry.tags?.includes(t)}
                   className="h-4 w-4 rounded border-slate-600 bg-slate-950 shrink-0"
                 />
-                <span className="break-words">{t}</span>
+                <span className="wrap-break-word">{t}</span>
               </label>
             ))}
           </div>
@@ -1571,7 +1605,7 @@ export default function DailyJournalPage() {
                   checked={entry.tags?.includes(t)}
                   className="h-4 w-4 rounded border-slate-600 bg-slate-950 shrink-0"
                 />
-                <span className="break-words">{t}</span>
+                <span className="wrap-break-word">{t}</span>
               </label>
             ))}
           </div>
@@ -1589,7 +1623,7 @@ export default function DailyJournalPage() {
                     checked={entry.tags?.includes(t)}
                     className="h-4 w-4 rounded border-slate-600 bg-slate-950 shrink-0"
                   />
-                  <span className="break-words">{t}</span>
+                  <span className="wrap-break-word">{t}</span>
                 </label>
               ))}
             </div>
@@ -1608,7 +1642,7 @@ export default function DailyJournalPage() {
                     checked={entry.tags?.includes(t)}
                     className="h-4 w-4 rounded border-slate-600 bg-slate-950 shrink-0"
                   />
-                  <span className="break-words">{t}</span>
+                  <span className="wrap-break-word">{t}</span>
                 </label>
               ))}
             </div>
