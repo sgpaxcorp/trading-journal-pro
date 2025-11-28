@@ -348,20 +348,20 @@ function effectiveKind(kind: InstrumentType, symbol: string): InstrumentType {
 
 // Futures point-value map (expand as you want)
 const FUTURES_MULTIPLIERS: Record<string, number> = {
-  ES: 50,   // E-mini S&P 500
-  MES: 5,   // Micro ES
-  NQ: 20,   // E-mini Nasdaq
-  MNQ: 2,   // Micro NQ
-  YM: 5,    // Dow
+  ES: 50, // E-mini S&P 500
+  MES: 5, // Micro ES
+  NQ: 20, // E-mini Nasdaq
+  MNQ: 2, // Micro NQ
+  YM: 5, // Dow
   MYM: 0.5, // Micro YM
-  RTY: 50,  // Russell
-  M2K: 5,   // Micro Russell
+  RTY: 50, // Russell
+  M2K: 5, // Micro Russell
   CL: 1000, // Crude Oil
   MCL: 100, // Micro Crude
-  GC: 100,  // Gold
-  MGC: 10,  // Micro Gold
+  GC: 100, // Gold
+  MGC: 10, // Micro Gold
   SI: 5000, // Silver
-  HG: 25000 // Copper (rough)
+  HG: 25000, // Copper (rough)
 };
 
 function futureRoot(symbol: string) {
@@ -1185,8 +1185,10 @@ export default function DailyJournalPage() {
               <label className="text-xs text-slate-400 block mb-1">Time</label>
               <input
                 type="text"
-                readOnly
                 value={newEntryTrade.time}
+                onChange={(e) =>
+                  setNewEntryTrade((p) => ({ ...p, time: e.target.value }))
+                }
                 className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-[14px] text-slate-300"
               />
               <button
@@ -1214,14 +1216,28 @@ export default function DailyJournalPage() {
               <table className="w-full text-left text-[12px] border border-slate-800 rounded-lg overflow-hidden">
                 <thead className="bg-slate-900/80">
                   <tr>
-                    <th className="px-2 py-1 border-b border-slate-800">Symbol</th>
-                    <th className="px-2 py-1 border-b border-slate-800">Type</th>
-                    <th className="px-2 py-1 border-b border-slate-800">Side</th>
-                    <th className="px-2 py-1 border-b border-slate-800">Price</th>
-                    <th className="px-2 py-1 border-b border-slate-800">Qty</th>
-                    <th className="px-2 py-1 border-b border-slate-800">Time</th>
+                    <th className="px-2 py-1 border-b border-slate-800">
+                      Symbol
+                    </th>
+                    <th className="px-2 py-1 border-b border-slate-800">
+                      Type
+                    </th>
+                    <th className="px-2 py-1 border-b border-slate-800">
+                      Side
+                    </th>
+                    <th className="px-2 py-1 border-b border-slate-800">
+                      Price
+                    </th>
+                    <th className="px-2 py-1 border-b border-slate-800">
+                      Qty
+                    </th>
+                    <th className="px-2 py-1 border-b border-slate-800">
+                      Time
+                    </th>
                     <th className="px-2 py-1 border-b border-slate-800">DTE</th>
-                    <th className="px-2 py-1 border-b border-slate-800 text-right">–</th>
+                    <th className="px-2 py-1 border-b border-slate-800 text-right">
+                      –
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1292,7 +1308,10 @@ export default function DailyJournalPage() {
                 Close position
               </label>
               <select
-                value={`${newExitTrade.symbol}|${effectiveKind(newExitTrade.kind, newExitTrade.symbol)}|${newExitTrade.side}`}
+                value={`${newExitTrade.symbol}|${effectiveKind(
+                  newExitTrade.kind,
+                  newExitTrade.symbol
+                )}|${newExitTrade.side}`}
                 onChange={(e) => handlePickOpenPosition(e.target.value)}
                 className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-[14px] text-slate-100 focus:outline-none focus:border-emerald-400"
               >
@@ -1361,8 +1380,11 @@ export default function DailyJournalPage() {
             <div>
               <label className="text-xs text-slate-400 block mb-1">Time</label>
               <input
-                readOnly
+                type="text"
                 value={newExitTrade.time}
+                onChange={(e) =>
+                  setNewExitTrade((p) => ({ ...p, time: e.target.value }))
+                }
                 className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-[14px] text-slate-300"
               />
               <button
@@ -1390,14 +1412,28 @@ export default function DailyJournalPage() {
               <table className="w-full text-left text-[12px] border border-slate-800 rounded-lg overflow-hidden">
                 <thead className="bg-slate-900/80">
                   <tr>
-                    <th className="px-2 py-1 border-b border-slate-800">Symbol</th>
-                    <th className="px-2 py-1 border-b border-slate-800">Type</th>
-                    <th className="px-2 py-1 border-b border-slate-800">Side</th>
-                    <th className="px-2 py-1 border-b border-slate-800">Price</th>
-                    <th className="px-2 py-1 border-b border-slate-800">Qty</th>
-                    <th className="px-2 py-1 border-b border-slate-800">Time</th>
+                    <th className="px-2 py-1 border-b border-slate-800">
+                      Symbol
+                    </th>
+                    <th className="px-2 py-1 border-b border-slate-800">
+                      Type
+                    </th>
+                    <th className="px-2 py-1 border-b border-slate-800">
+                      Side
+                    </th>
+                    <th className="px-2 py-1 border-b border-slate-800">
+                      Price
+                    </th>
+                    <th className="px-2 py-1 border-b border-slate-800">
+                      Qty
+                    </th>
+                    <th className="px-2 py-1 border-b border-slate-800">
+                      Time
+                    </th>
                     <th className="px-2 py-1 border-b border-slate-800">DTE</th>
-                    <th className="px-2 py-1 border-b border-slate-800 text-right">–</th>
+                    <th className="px-2 py-1 border-b border-slate-800 text-right">
+                      –
+                    </th>
                   </tr>
                 </thead>
                 <tbody>

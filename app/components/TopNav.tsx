@@ -309,7 +309,7 @@ function AccountMenu() {
   );
 }
 
-/* ========== Menu data (same as antes) ========== */
+/* ========== Menu data (dropdowns que sí se usan) ========== */
 
 const performance: NavItem[] = [
   {
@@ -331,48 +331,6 @@ const performance: NavItem[] = [
     description: "Coaching ideas based on your metrics.",
     href: "/performance/ai-coaching",
     badge: "AI",
-  },
-];
-
-const notebook: NavItem[] = [
-  {
-    id: "playbook",
-    title: "Playbook",
-    description: "Document your A+ setups.",
-    href: "/notebook/playbook",
-  },
-  {
-    id: "lessons",
-    title: "Lessons learned",
-    description: "Convert mistakes into rules.",
-    href: "/notebook/lessons",
-  },
-  {
-    id: "ideas",
-    title: "Ideas & notes",
-    description: "Free-form notes for your edge.",
-    href: "/notebook/ideas",
-  },
-];
-
-const backStudy: NavItem[] = [
-  {
-    id: "replays",
-    title: "Chart replays",
-    description: "Review past price action.",
-    href: "/back-study/replays",
-  },
-  {
-    id: "tags-study",
-    title: "Tag study",
-    description: "Study performance by tag.",
-    href: "/back-study/tags",
-  },
-  {
-    id: "scenarios",
-    title: "Scenarios",
-    description: "Practice specific market conditions.",
-    href: "/back-study/scenarios",
   },
 ];
 
@@ -482,11 +440,28 @@ export default function TopNav() {
           </div>
         </div>
 
-        {/* Dropdown row */}
+        {/* Nav row */}
         <div className="flex items-center gap-4 text-[14px] whitespace-nowrap flex-1">
+          {/* Performance (dropdown) */}
           <Dropdown title="Performance" items={performance} />
-          <Dropdown title="Notebook" items={notebook} />
-          <Dropdown title="Back-Studying" items={backStudy} />
+
+          {/* Notebook como botón directo */}
+          <Link
+            href="/notebook"
+            className="rounded-lg px-3 py-1.5 text-sm font-medium text-slate-200 hover:bg-slate-800 hover:text-slate-50 transition-colors"
+          >
+            Notebook
+          </Link>
+
+          {/* Back-Studying como botón directo */}
+          <Link
+            href="/back-study"
+            className="rounded-lg px-3 py-1.5 text-sm font-medium text-slate-200 hover:bg-slate-800 hover:text-slate-50 transition-colors"
+          >
+            Back-Studying
+          </Link>
+
+          {/* Resto de dropdowns */}
           <Dropdown title="Challenge & Rules" items={challenge} />
           <Dropdown title="Resources" items={resources} />
           <Dropdown title="Rules & Alarms" items={rules} />

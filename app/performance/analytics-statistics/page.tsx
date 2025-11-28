@@ -24,6 +24,7 @@ type AnalyticsGroupId =
   | "instruments";
 
 type DayOfWeekKey = 0 | 1 | 2 | 3 | 4 | 5 | 6;
+
 type SideType = "long" | "short";
 
 type EntryTradeRow = {
@@ -43,97 +44,9 @@ type ExitTradeRow = EntryTradeRow;
 type SessionWithTrades = JournalEntry & {
   entries: EntryTradeRow[];
   exits: ExitTradeRow[];
-  uniqueSymbols: string[];
-  uniqueKinds: InstrumentType[];
-  perSymbolPnL: Record<string, number>;
-};
-
-type BaseStats = {
-  totalSessions: number;
-  greenSessions: number;
-  learningSessions: number;
-  flatSessions: number;
-  greenRate: number;
-  avgPnl: number;
-  sumPnl: number;
-  bestDay: { date: string; pnl: number } | null;
-  toughestDay: { date: string; pnl: number } | null;
-};
-
-type ProbabilityStats = {
-  baseGreenRate: number;
-
-  respectCount: number;
-  respectGreen: number;
-  respectLearning: number;
-  pGreenRespect: number;
-  pLearningRespect: number;
-
-  fomoCount: number;
-  fomoGreen: number;
-  fomoLearning: number;
-  pGreenFomo: number;
-  pLearningFomo: number;
-
-  revengeCount: number;
-  revengeGreen: number;
-  revengeLearning: number;
-  pGreenRevenge: number;
-  pLearningRevenge: number;
-};
-
-type DayOfWeekItem = {
-  dow: DayOfWeekKey;
-  label: string;
-  sessions: number;
-  green: number;
-  learning: number;
-  flat: number;
-  sumPnl: number;
-  winRate: number;
-  avgPnl: number;
-};
-
-type DayOfWeekStats = {
-  items: DayOfWeekItem[];
-  best: DayOfWeekItem | null;
-  hardest: DayOfWeekItem | null;
-};
-
-type TickerAgg = {
-  symbol: string;
-  sessions: number;        // sessions where symbol traded
-  green: number;           // sessions green w/ this symbol
-  learning: number;        // sessions red w/ this symbol
-  flat: number;
-  tradesClosed: number;    // number of closed trades for symbol
-  netPnl: number;          // sum pnl for symbol (from entries/exits)
-  grossProfit: number;
-  grossLoss: number;       // negative number sum
-  winRate: number;
-  avgPnlPerSession: number;
-  bestDow: DayOfWeekKey | null;
-  worstDow: DayOfWeekKey | null;
-};
-
-type KindAgg = {
-  kind: InstrumentType;
-  sessions: number;
-  green: number;
-  learning: number;
-  flat: number;
-  sumPnl: number;
-  winRate: number;
-  avgPnlPerSession: number;
-};
-
-type InstrumentStats = {
-  tickers: TickerAgg[];
-  kinds: KindAgg[];
-  mostSupportive: TickerAgg[];
-  topEarners: TickerAgg[];
-  toReview: TickerAgg[];
-  kindByEdge: KindAgg[];
+  uniqueSymbols: string[]; // unique from entries+exits
+  uniqueKinds: InstrumentType[]; // unique kinds traded
+  perSymbolPnL: Record<string, number>; // symbol -> pnl within session
 };
 
 /* =========================
@@ -149,6 +62,11 @@ const DAY_LABELS: Record<DayOfWeekKey, string> = {
   5: "Friday",
   6: "Saturday",
 };
+
+function getDayLabel(dow: DayOfWeekKey | null): string {
+  if (dow == null) return "—";
+  return DAY_LABELS[dow];
+}
 
 const GROUPS: { id: AnalyticsGroupId; label: string; description: string }[] = [
   {
@@ -196,6 +114,7 @@ function safeUpper(s: string) {
 }
 
 function normalizeKind(k: any): InstrumentType {
+  // Ajusta "other" si tu union real es distinta (por ejemplo "stock")
   return (k || "other") as InstrumentType;
 }
 
@@ -230,7 +149,7 @@ function parseSPXOptionSymbol(raw: string) {
   const m = s.match(/^([A-Z]+W?)(\d{6})([CP])(\d+(?:\.\d+)?)$/);
   if (!m) return null;
 
-  const underlying = m[1];
+  const underlying = m[1]; // SPX / SPXW
   const yy = Number(m[2].slice(0, 2));
   const mm = Number(m[2].slice(2, 4));
   const dd = Number(m[2].slice(4, 6));
@@ -410,9 +329,9 @@ export default function AnalyticsStatisticsPage() {
   }, [usedEntries]);
 
   /* =========================
-     Basic stats
+     Basic stats & probabilities
   ========================= */
-  const baseStats: BaseStats = useMemo(() => {
+  const baseStats = useMemo(() => {
     const totalSessions = sessions.length;
     let greenSessions = 0;
     let learningSessions = 0;
@@ -452,7 +371,7 @@ export default function AnalyticsStatisticsPage() {
     };
   }, [sessions]);
 
-  const probabilityStats: ProbabilityStats = useMemo(() => {
+  const probabilityStats = useMemo(() => {
     const total = sessions.length;
     if (total === 0) {
       return {
@@ -497,10 +416,12 @@ export default function AnalyticsStatisticsPage() {
       const respectedPlan = !!(e as any).respectedPlan;
 
       const tagsRaw = e.tags || [];
-      const tagsUpper = tagsRaw.map((t: string) => safeUpper(t.trim()));
+      const tags = tagsRaw.map((t: string) => t.trim());
+      const tagsUpper = tags.map(safeUpper);
 
       const hasFomo = tagsUpper.includes("FOMO");
-      const hasRevenge = tagsUpper.includes("REVENGE TRADE");
+      const hasRevenge =
+        tagsUpper.includes("REVENGE TRADE");
 
       if (isGreen) baseGreen++;
 
@@ -562,7 +483,7 @@ export default function AnalyticsStatisticsPage() {
   /* =========================
      Day-of-week stats
   ========================= */
-  const dayOfWeekStats: DayOfWeekStats = useMemo(() => {
+  const dayOfWeekStats = useMemo(() => {
     const base: Record<
       DayOfWeekKey,
       { sessions: number; green: number; learning: number; flat: number; sumPnl: number }
@@ -592,7 +513,7 @@ export default function AnalyticsStatisticsPage() {
       else stats.flat += 1;
     });
 
-    const items: DayOfWeekItem[] = (Object.keys(base) as unknown as DayOfWeekKey[]).map((dow) => {
+    const items = (Object.keys(base) as unknown as DayOfWeekKey[]).map((dow) => {
       const s = base[dow];
       const winRate = s.sessions > 0 ? (s.green / s.sessions) * 100 : 0;
       const avgPnl = s.sessions > 0 ? s.sumPnl / s.sessions : 0;
@@ -615,7 +536,34 @@ export default function AnalyticsStatisticsPage() {
   /* =========================
      Instruments / Ticker stats
   ========================= */
-  const instrumentStats: InstrumentStats = useMemo(() => {
+  const instrumentStats = useMemo(() => {
+    type TickerAgg = {
+      symbol: string;
+      sessions: number;
+      green: number;
+      learning: number;
+      flat: number;
+      tradesClosed: number;
+      netPnl: number;
+      grossProfit: number;
+      grossLoss: number;
+      winRate: number;
+      avgPnlPerSession: number;
+      bestDow: DayOfWeekKey | null;
+      worstDow: DayOfWeekKey | null;
+    };
+
+    type KindAgg = {
+      kind: InstrumentType;
+      sessions: number;
+      green: number;
+      learning: number;
+      flat: number;
+      sumPnl: number;
+      winRate: number;
+      avgPnlPerSession: number;
+    };
+
     const tickerMap: Record<string, {
       symbol: string;
       sessions: number;
@@ -762,7 +710,6 @@ export default function AnalyticsStatisticsPage() {
     const byWinRate = [...tickers].sort((a, b) => b.winRate - a.winRate);
     const byNetPnl = [...tickers].sort((a, b) => b.netPnl - a.netPnl);
     const byLoss = [...tickers].sort((a, b) => a.netPnl - b.netPnl);
-    const kindByEdge = [...kinds].sort((a, b) => b.winRate - a.winRate);
 
     return {
       tickers,
@@ -770,7 +717,7 @@ export default function AnalyticsStatisticsPage() {
       mostSupportive: byWinRate.slice(0, 7),
       topEarners: byNetPnl.slice(0, 7),
       toReview: byLoss.slice(0, 7),
-      kindByEdge,
+      kindByEdge: [...kinds].sort((a, b) => b.winRate - a.winRate),
     };
   }, [sessions]);
 
@@ -928,8 +875,8 @@ function OverviewSection({
   baseStats,
   probabilityStats,
 }: {
-  baseStats: BaseStats;
-  probabilityStats: ProbabilityStats;
+  baseStats: any;
+  probabilityStats: any;
 }) {
   const {
     totalSessions,
@@ -1061,7 +1008,7 @@ function OverviewSection({
   );
 }
 
-function DayOfWeekSection({ stats }: { stats: DayOfWeekStats }) {
+function DayOfWeekSection({ stats }: { stats: any }) {
   const { items, best, hardest } = stats;
 
   return (
@@ -1084,7 +1031,7 @@ function DayOfWeekSection({ stats }: { stats: DayOfWeekStats }) {
               </tr>
             </thead>
             <tbody>
-              {items.map((i) => (
+              {items.map((i: any) => (
                 <tr key={i.dow} className="border-t border-slate-800 bg-slate-950/60">
                   <td className="px-3 py-2">{i.label}</td>
                   <td className="px-3 py-2 text-right">{i.sessions}</td>
@@ -1139,10 +1086,14 @@ function PsychologySection({
   baseStats,
   probabilityStats,
 }: {
-  baseStats: BaseStats;
-  probabilityStats: ProbabilityStats;
+  baseStats: any;
+  probabilityStats: any;
 }) {
-  const { totalSessions, greenSessions, learningSessions } = baseStats;
+  const {
+    totalSessions,
+    greenSessions,
+    learningSessions,
+  } = baseStats;
 
   const {
     respectCount,
@@ -1234,7 +1185,7 @@ function PsychologySection({
   );
 }
 
-function InstrumentsSection({ stats }: { stats: InstrumentStats }) {
+function InstrumentsSection({ stats }: { stats: any }) {
   const { tickers, kindByEdge, mostSupportive, topEarners, toReview } = stats;
 
   return (
@@ -1256,7 +1207,7 @@ function InstrumentsSection({ stats }: { stats: InstrumentStats }) {
               </tr>
             </thead>
             <tbody>
-              {kindByEdge.map((k) => (
+              {kindByEdge.map((k: any) => (
                 <tr key={k.kind} className="border-t border-slate-800 bg-slate-950/60">
                   <td className="px-3 py-2 font-mono">{k.kind}</td>
                   <td className="px-3 py-2 text-right">{k.sessions}</td>
@@ -1301,7 +1252,7 @@ function InstrumentsSection({ stats }: { stats: InstrumentStats }) {
                 </tr>
               </thead>
               <tbody>
-                {tickers.map((t) => (
+                {tickers.map((t: any) => (
                   <tr key={t.symbol} className="border-t border-slate-800 bg-slate-950/60">
                     <td className="px-3 py-2 font-mono">{t.symbol}</td>
                     <td className="px-3 py-2 text-right">{t.sessions}</td>
@@ -1314,10 +1265,10 @@ function InstrumentsSection({ stats }: { stats: InstrumentStats }) {
                       {t.avgPnlPerSession >= 0 ? "+" : "-"}${Math.abs(t.avgPnlPerSession).toFixed(2)}
                     </td>
                     <td className="px-3 py-2 text-right">
-                      {t.bestDow != null ? DAY_LABELS[t.bestDow] : "—"}
+                      {getDayLabel(t.bestDow)}
                     </td>
                     <td className="px-3 py-2 text-right">
-                      {t.worstDow != null ? DAY_LABELS[t.worstDow] : "—"}
+                      {getDayLabel(t.worstDow)}
                     </td>
                   </tr>
                 ))}
@@ -1333,7 +1284,7 @@ function InstrumentsSection({ stats }: { stats: InstrumentStats }) {
             Most supportive tickers (win-rate)
           </p>
           <ul className="space-y-1 text-xs text-slate-200">
-            {mostSupportive.map((i) => (
+            {mostSupportive.map((i: any) => (
               <li key={i.symbol} className="flex items-center justify-between">
                 <span className="font-mono">{i.symbol}</span>
                 <span>{i.winRate.toFixed(1)}% · {i.sessions} sess</span>
@@ -1347,7 +1298,7 @@ function InstrumentsSection({ stats }: { stats: InstrumentStats }) {
             Top earners (net P&L)
           </p>
           <ul className="space-y-1 text-xs text-slate-200">
-            {topEarners.map((i) => (
+            {topEarners.map((i: any) => (
               <li key={i.symbol} className="flex items-center justify-between">
                 <span className="font-mono">{i.symbol}</span>
                 <span className="text-emerald-300">
@@ -1363,7 +1314,7 @@ function InstrumentsSection({ stats }: { stats: InstrumentStats }) {
             Tickers to review
           </p>
           <ul className="space-y-1 text-xs text-slate-200">
-            {toReview.map((i) => (
+            {toReview.map((i: any) => (
               <li key={i.symbol} className="flex items-center justify-between">
                 <span className="font-mono">{i.symbol}</span>
                 <span className="text-sky-300">
