@@ -151,7 +151,7 @@ export default function RichNotebookEditor({
 
         <EditorContent
           editor={editor}
-          className="prose prose-invert max-w-none text-sm focus:outline-none [&_:focus-visible]:outline-none min-h-[140px]"
+          className="prose prose-invert max-w-none text-sm focus:outline-none **:focus-visible:outline-none min-h-[140px]"
         />
       </div>
     </div>
