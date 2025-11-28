@@ -3,7 +3,10 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { motion } from "framer-motion";
+
 import { loadPlanAndEntries } from "@/app/(shared)/stats";
+import RichNotebookEditor from "@/app/components/RichNotebookEditor";
 
 /* =========================
    Types & helpers
@@ -53,6 +56,7 @@ const MONTH_LABELS = [
 ];
 
 const NOTEBOOK_STORAGE_KEY = "tjp_notebooks_v1";
+const FREE_NOTES_STORAGE_KEY = "tjp_notebook_free_notes_v1";
 
 function toYMD(date: Date): string {
   const y = date.getFullYear();
@@ -118,6 +122,32 @@ function saveNotebookStorageSafe(data: NotebookStorage) {
   }
 }
 
+// Free notes por fecha
+function loadFreeNotesSafe(): Record<string, string> {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.localStorage.getItem(FREE_NOTES_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return {};
+    return parsed as Record<string, string>;
+  } catch {
+    return {};
+  }
+}
+
+function saveFreeNotesSafe(map: Record<string, string>) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(
+      FREE_NOTES_STORAGE_KEY,
+      JSON.stringify(map)
+    );
+  } catch {
+    // ignore
+  }
+}
+
 /** Helpers de holidays */
 
 function getNthWeekdayOfMonth(
@@ -144,10 +174,9 @@ function getLastWeekdayOfMonth(
   return new Date(year, month, day);
 }
 
-function getUsFederalHolidays(year: number): Holiday[] {
+function getUsFederalHolidays(year: number) {
   const holidays: Holiday[] = [];
 
-  // Fixed-date
   holidays.push(
     { date: toYMD(new Date(year, 0, 1)), label: "New Year's Day" },
     { date: toYMD(new Date(year, 5, 19)), label: "Juneteenth National Independence Day" },
@@ -156,37 +185,26 @@ function getUsFederalHolidays(year: number): Holiday[] {
     { date: toYMD(new Date(year, 11, 25)), label: "Christmas Day" }
   );
 
-  // MLK – 3rd Monday Jan
   holidays.push({
     date: toYMD(getNthWeekdayOfMonth(year, 0, 1, 3)),
     label: "Martin Luther King Jr. Day",
   });
-
-  // Presidents – 3rd Monday Feb
   holidays.push({
     date: toYMD(getNthWeekdayOfMonth(year, 1, 1, 3)),
     label: "Presidents' Day",
   });
-
-  // Memorial – last Monday May
   holidays.push({
     date: toYMD(getLastWeekdayOfMonth(year, 4, 1)),
     label: "Memorial Day",
   });
-
-  // Labor – 1st Monday Sep
   holidays.push({
     date: toYMD(getNthWeekdayOfMonth(year, 8, 1, 1)),
     label: "Labor Day",
   });
-
-  // Columbus / Indigenous – 2nd Monday Oct
   holidays.push({
     date: toYMD(getNthWeekdayOfMonth(year, 9, 1, 2)),
     label: "Columbus / Indigenous Peoples' Day",
   });
-
-  // Thanksgiving – 4th Thursday Nov
   holidays.push({
     date: toYMD(getNthWeekdayOfMonth(year, 10, 4, 4)),
     label: "Thanksgiving Day",
@@ -215,13 +233,11 @@ export default function NotebookPage() {
   const [view, setView] = useState<ViewMode>("notebook");
   const [subView, setSubView] = useState<NotebookSubView>("journal");
 
-  // 👇 evitar hydration mismatch
   const [hasHydrated, setHasHydrated] = useState(false);
   useEffect(() => {
     setHasHydrated(true);
   }, []);
 
-  // Journal notebook: selected page
   const [selectedJournalDate, setSelectedJournalDate] = useState<string | null>(
     null
   );
@@ -247,7 +263,7 @@ export default function NotebookPage() {
   const [activeNotebookId, setActiveNotebookId] = useState<string | null>(null);
   const [activePageId, setActivePageId] = useState<string | null>(null);
   const [newNotebookName, setNewNotebookName] = useState<string>("");
-  const [isLoaded, setIsLoaded] = useState(false);
+  const [isNbLoaded, setIsNbLoaded] = useState(false);
 
   useEffect(() => {
     const loaded = loadNotebookStorageSafe();
@@ -255,13 +271,30 @@ export default function NotebookPage() {
     if (loaded.notebooks.length > 0) {
       setActiveNotebookId(loaded.notebooks[0].id);
     }
-    setIsLoaded(true);
+    setIsNbLoaded(true);
   }, []);
 
   useEffect(() => {
-    if (!isLoaded) return;
+    if (!isNbLoaded) return;
     saveNotebookStorageSafe(nbData);
-  }, [nbData, isLoaded]);
+  }, [nbData, isNbLoaded]);
+
+  // Free notes por fecha (libreta rica)
+  const [freeNotesByDate, setFreeNotesByDate] = useState<Record<string, string>>(
+    {}
+  );
+  const [freeNotesLoaded, setFreeNotesLoaded] = useState(false);
+
+  useEffect(() => {
+    const loaded = loadFreeNotesSafe();
+    setFreeNotesByDate(loaded);
+    setFreeNotesLoaded(true);
+  }, []);
+
+  useEffect(() => {
+    if (!freeNotesLoaded) return;
+    saveFreeNotesSafe(freeNotesByDate);
+  }, [freeNotesByDate, freeNotesLoaded]);
 
   const todayStr = useMemo(() => toYMD(new Date()), []);
   const currentYear = useMemo(() => new Date().getFullYear(), []);
@@ -300,11 +333,66 @@ export default function NotebookPage() {
     return found || activeNotebookPages[0];
   }, [activeNotebookId, activeNotebookPages, activePageId]);
 
-  // Estado simple para el panel de AI del notebook (lado derecho)
+  // AI coach state
   const [aiQuestion, setAiQuestion] = useState("");
   const [aiAnswer, setAiAnswer] = useState<string | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
 
+  const selectedFreeNotes =
+    (selectedJournalDate && freeNotesByDate[selectedJournalDate]) || "";
+
+  const handleFreeNotesChange = (html: string) => {
+    if (!selectedJournalDate) return;
+    setFreeNotesByDate((prev) => ({
+      ...prev,
+      [selectedJournalDate]: html,
+    }));
+  };
+
+  const handleAskAi = async () => {
+    if (!selectedJournalEntry || !aiQuestion.trim()) return;
+    if (!selectedJournalDate) return;
+
+    setAiLoading(true);
+    setAiAnswer(null);
+
+    try {
+      const res = await fetch("/api/notebook-ai", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          question: aiQuestion,
+          journal: {
+            date: (selectedJournalEntry as any).date,
+            pnl: (selectedJournalEntry as any).pnl || 0,
+            entries: (selectedJournalEntry as any).entries ?? [],
+            exits: (selectedJournalEntry as any).exits ?? [],
+            notes: (selectedJournalEntry as any).notes ?? null,
+            freeNotes: selectedFreeNotes,
+          },
+        }),
+      });
+
+      if (!res.ok) {
+        throw new Error("Bad response");
+      }
+
+      const data = await res.json();
+      setAiAnswer(
+        data.answer ??
+          "The AI coach did not return a message. Please try again."
+      );
+    } catch (err) {
+      console.error(err);
+      setAiAnswer(
+        "There was an error talking to the AI coach. Please try again in a moment."
+      );
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  // acciones para custom notebooks
   const handleAddNotebook = () => {
     const name = newNotebookName.trim() || "Untitled notebook";
     const id = createId();
@@ -353,24 +441,6 @@ export default function NotebookPage() {
     }));
   };
 
-  // Stub de AI: aquí luego llamas a tu API real
-  const handleAskAi = async () => {
-    if (!selectedJournalEntry || !aiQuestion.trim()) return;
-    setAiLoading(true);
-    try {
-      // TODO: reemplazar por llamada real a tu endpoint de AI
-      setAiAnswer(
-        "This is a placeholder AI response. Here you will show smart coaching based on this day’s trades, notes and your question."
-      );
-    } finally {
-      setAiLoading(false);
-    }
-  };
-
-  /* =========================
-     RENDER – primer render
-  ========================= */
-
   if (!hasHydrated) {
     return (
       <main className="min-h-screen bg-slate-950 text-slate-50 px-6 md:px-10 py-8">
@@ -384,13 +454,9 @@ export default function NotebookPage() {
     );
   }
 
-  /* =========================
-     RENDER – UI completa
-  ========================= */
-
   return (
     <main className="min-h-screen bg-slate-950 text-slate-50 px-6 md:px-10 py-8">
-      {/* Header con botón Back + acción secundaria */}
+      {/* Header */}
       <header className="flex flex-col gap-3">
         <div className="flex items-center justify-between gap-3">
           <button
@@ -449,10 +515,9 @@ export default function NotebookPage() {
         </button>
       </div>
 
-      {/* CONTENIDO PRINCIPAL */}
       {view === "notebook" ? (
         <section className="mt-6 space-y-6">
-          {/* Sub-tabs: Journal / Custom */}
+          {/* Sub-tabs */}
           <div className="inline-flex rounded-full bg-slate-900/70 border border-slate-800 p-1">
             <button
               type="button"
@@ -478,20 +543,16 @@ export default function NotebookPage() {
             </button>
           </div>
 
-          {/* =======================
-              JOURNAL NOTEBOOK VIEW
-          ========================= */}
+          {/* ===== JOURNAL NOTEBOOK VIEW ===== */}
           {subView === "journal" && (
             <div className="space-y-4">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                    Journal notebook
-                  </p>
-                  <h2 className="text-xl font-semibold text-slate-50 mt-1">
-                    Daily pages with summaries and free-space notes
-                  </h2>
-                </div>
+              <div>
+                <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                  Journal notebook
+                </p>
+                <h2 className="text-xl font-semibold text-slate-50 mt-1">
+                  Daily pages with summaries and free-space notes
+                </h2>
               </div>
 
               {sorted.length === 0 ? (
@@ -499,289 +560,256 @@ export default function NotebookPage() {
                   You don&apos;t have journal pages yet.
                 </p>
               ) : (
-                <div className="grid gap-4 lg:grid-cols-[minmax(260px,320px),1fr]">
+                // 👇 Cambiamos a flex para que en lg+ sean dos columnas:
+                <div className="flex flex-col lg:flex-row gap-4">
                   {/* LISTA DE PÁGINAS A LA IZQUIERDA */}
-                  <aside className="rounded-3xl border border-slate-800 bg-slate-950/80 p-3 flex flex-col">
+                  <aside className="rounded-2xl border border-slate-800 bg-slate-950/80 p-3 flex flex-col lg:w-80 xl:w-96 lg:flex-none max-h-[560px]">
                     <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500 mb-2">
                       Pages
                     </p>
-                    <div className="relative flex-1">
-                      <div className="absolute inset-0 rounded-2xl border border-slate-800/60 bg-slate-950/80 overflow-hidden">
-                        {/* “anillo” de libreta (visual) */}
-                        <div className="absolute inset-y-0 left-0 w-1.5 bg-gradient-to-b from-slate-900 via-slate-800 to-slate-900 shadow-[4px_0_16px_rgba(0,0,0,0.8)]" />
-                        <div className="h-full pl-3 pr-1 py-2 overflow-y-auto space-y-1.5">
-                          {sorted.map((e: any) => {
-                            const isSelected =
-                              selectedJournalDate === e.date;
-                            const preview = getNotebookPreview(
-                              (e as any).notes
-                            );
+                    <div className="flex-1 overflow-y-auto space-y-2">
+                      {sorted.map((e: any) => {
+                        const isSelected =
+                          selectedJournalDate === e.date;
+                        const preview = getNotebookPreview(
+                          (e as any).notes
+                        );
 
-                            return (
-                              <button
-                                key={e.date}
-                                type="button"
-                                onClick={() =>
-                                  setSelectedJournalDate(e.date)
-                                }
-                                className={`w-full text-left rounded-xl px-3 py-2 text-xs border transition flex flex-col gap-1 ${
-                                  isSelected
-                                    ? "border-emerald-400/70 bg-emerald-500/10 text-emerald-50 shadow-[0_0_0_1px_rgba(16,185,129,0.3)]"
-                                    : "border-slate-800 bg-slate-900/70 text-slate-200 hover:border-emerald-400/40 hover:bg-slate-900"
-                                }`}
-                              >
-                                <div className="flex items-center justify-between gap-2">
-                                  <span className="font-medium truncate">
-                                    {formatShortDate(e.date)}
-                                  </span>
-                                  <span
-                                    className={`text-[11px] tabular-nums ${
-                                      (e.pnl || 0) >= 0
-                                        ? "text-emerald-300"
-                                        : "text-sky-300"
-                                    }`}
-                                  >
-                                    {(e.pnl || 0) >= 0 ? "+" : ""}
-                                    ${Number(e.pnl || 0).toFixed(0)}
-                                  </span>
-                                </div>
-                                <p className="text-[11px] text-slate-400 line-clamp-2">
-                                  {preview ??
-                                    "Tap to see this notebook page summary."}
-                                </p>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    </div>
-                  </aside>
-
-                  {/* PÁGINA / RESUMEN A LA DERECHA */}
-                  <section className="rounded-3xl border border-slate-800 bg-slate-900/80 p-4 md:p-6 relative overflow-hidden">
-                    {/* fondo tipo libreta */}
-                    <div className="pointer-events-none absolute inset-0 opacity-40 bg-[linear-gradient(to_bottom,rgba(148,163,184,0.18)_1px,transparent_1px)] bg-[length:100%_32px]" />
-                    <div className="relative space-y-5">
-                      {selectedJournalEntry ? (
-                        <>
-                          {/* header de la página */}
-                          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-                            <div>
-                              <p className="text-xs uppercase tracking-[0.16em] text-slate-400">
-                                Notebook page
-                              </p>
-                              <h3 className="text-2xl font-semibold text-slate-50">
-                                {formatShortDate(
-                                  (selectedJournalEntry as any).date
-                                )}
-                              </h3>
-                              <p className="text-[11px] text-slate-500 mt-1">
-                                Summary and free notes connected to your trading
-                                journal.
-                              </p>
-                            </div>
-                            <div className="text-right space-y-1">
-                              <p
-                                className={`text-2xl font-semibold tabular-nums ${
-                                  ((selectedJournalEntry as any).pnl ||
-                                    0) >= 0
+                        return (
+                          <motion.button
+                            key={e.date}
+                            type="button"
+                            whileHover={{ scale: 1.01 }}
+                            whileTap={{ scale: 0.985 }}
+                            onClick={() =>
+                              setSelectedJournalDate(e.date)
+                            }
+                            className={`w-full text-left rounded-xl px-3 py-2 text-xs border transition flex flex-col gap-1 ${
+                              isSelected
+                                ? "border-emerald-400/70 bg-emerald-500/10 text-emerald-50"
+                                : "border-slate-800 bg-slate-900/70 text-slate-200 hover:border-emerald-400/40 hover:bg-slate-900"
+                            }`}
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="font-medium truncate">
+                                {formatShortDate(e.date)}
+                              </span>
+                              <span
+                                className={`text-[11px] tabular-nums ${
+                                  (e.pnl || 0) >= 0
                                     ? "text-emerald-300"
                                     : "text-sky-300"
                                 }`}
                               >
-                                {((selectedJournalEntry as any).pnl ||
-                                  0) >= 0
-                                  ? "+"
-                                  : ""}
-                                $
-                                {Number(
-                                  (selectedJournalEntry as any).pnl || 0
-                                ).toFixed(2)}
-                              </p>
-                              <p className="text-[11px] text-slate-500">
-                                Day P&amp;L
-                              </p>
-                              <Link
-                                href={`/journal/${
-                                  (selectedJournalEntry as any).date
-                                }`}
-                                className="inline-flex items-center justify-center rounded-full border border-slate-700 bg-slate-950/80 px-3 py-1 text-[11px] font-medium text-slate-200 hover:border-emerald-400/60 hover:text-emerald-100 transition"
-                              >
-                                Open full journal page →
-                              </Link>
+                                {(e.pnl || 0) >= 0 ? "+" : ""}
+                                ${Number(e.pnl || 0).toFixed(0)}
+                              </span>
                             </div>
-                          </div>
-
-                          {/* resumen en tres columnas */}
-                          <div className="grid gap-4 md:grid-cols-3 text-sm text-slate-200">
-                            <div className="rounded-2xl bg-slate-950/70 border border-slate-800 p-3">
-                              <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
-                                Trades
+                            {preview && (
+                              <p className="text-[11px] text-slate-400 line-clamp-2">
+                                {preview}
                               </p>
-                              <p className="mt-2">
-                                Entries:{" "}
-                                <span className="font-semibold">
-                                  {Array.isArray(
-                                    (selectedJournalEntry as any).entries
-                                  )
-                                    ? (selectedJournalEntry as any).entries
-                                        .length
-                                    : 0}
-                                </span>
-                              </p>
-                              <p>
-                                Exits:{" "}
-                                <span className="font-semibold">
-                                  {Array.isArray(
-                                    (selectedJournalEntry as any).exits
-                                  )
-                                    ? (selectedJournalEntry as any).exits
-                                        .length
-                                    : 0}
-                                </span>
-                              </p>
-                            </div>
-
-                            <div className="rounded-2xl bg-slate-950/70 border border-slate-800 p-3">
-                              <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
-                                Notes blocks
-                              </p>
-                              <ul className="mt-2 space-y-1 text-sm">
-                                <li>
-                                  Premarket:{" "}
-                                  <span className="font-semibold">
-                                    {(selectedJournalEntry as any).premarket
-                                      ? "Written"
-                                      : "Empty"}
-                                  </span>
-                                </li>
-                                <li>
-                                  Live session:{" "}
-                                  <span className="font-semibold">
-                                    {(selectedJournalEntry as any).live
-                                      ? "Written"
-                                      : "Empty"}
-                                  </span>
-                                </li>
-                                <li>
-                                  Post-market:{" "}
-                                  <span className="font-semibold">
-                                    {(selectedJournalEntry as any).post
-                                      ? "Written"
-                                      : "Empty"}
-                                  </span>
-                                </li>
-                              </ul>
-                            </div>
-
-                            <div className="rounded-2xl bg-slate-950/70 border border-slate-800 p-3">
-                              <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
-                                Quick description
-                              </p>
-                              <p className="mt-2 text-sm text-slate-200">
-                                {getNotebookPreview(
-                                  (selectedJournalEntry as any).notes
-                                ) ??
-                                  "Write a short description in your journal notes to see it here as a quick summary."}
-                              </p>
-                            </div>
-                          </div>
-
-                          {/* FREE NOTEBOOK SPACE + AI PANEL */}
-                          <div className="grid gap-4 lg:grid-cols-[minmax(0,2fr),minmax(0,1.4fr)] mt-4">
-                            {/* área libre tipo libreta */}
-                            <div className="space-y-3">
-                              <div className="flex items-center justify-between gap-2">
-                                <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
-                                  Free notebook space
-                                </p>
-                                <p className="text-[11px] text-slate-500">
-                                  Emojis welcome ✨📈🧠
-                                </p>
-                              </div>
-
-                              <div className="rounded-[28px] border border-slate-700/80 bg-slate-950/90 shadow-inner shadow-slate-950/60 overflow-hidden">
-                                <textarea
-                                  placeholder="Write anything here: course notes, trading psychology, life reflections…"
-                                  className="w-full min-h-[260px] bg-transparent px-4 py-4 text-sm text-slate-100 resize-y focus:outline-none"
-                                />
-                              </div>
-
-                              <div className="grid gap-2 md:grid-cols-2">
-                                <textarea
-                                  placeholder="Key lessons from today…"
-                                  className="rounded-2xl border border-slate-800 bg-slate-950/80 px-3 py-2 text-xs text-slate-100 resize-y min-h-[80px] focus:outline-none focus:ring-1 focus:ring-emerald-400/60"
-                                />
-                                <textarea
-                                  placeholder="Action items for next session…"
-                                  className="rounded-2xl border border-slate-800 bg-slate-950/80 px-3 py-2 text-xs text-slate-100 resize-y min-h-[80px] focus:outline-none focus:ring-1 focus:ring-emerald-400/60"
-                                />
-                              </div>
-                            </div>
-
-                            {/* panel de AI coaching para esta página */}
-                            <div className="rounded-3xl border border-emerald-500/40 bg-gradient-to-br from-slate-950 via-slate-950 to-emerald-900/30 p-3 md:p-4 space-y-3">
-                              <div className="flex items-center justify-between gap-2">
-                                <div>
-                                  <p className="text-[11px] uppercase tracking-[0.18em] text-emerald-300">
-                                    AI coach
-                                  </p>
-                                  <p className="text-sm text-emerald-50 mt-0.5">
-                                    Ask about this specific day.
-                                  </p>
-                                </div>
-                              </div>
-
-                              <textarea
-                                value={aiQuestion}
-                                onChange={(e) =>
-                                  setAiQuestion(e.target.value)
-                                }
-                                placeholder="Example: What did I do well today and what should I adjust in my risk management?"
-                                className="w-full rounded-2xl border border-emerald-500/40 bg-slate-950/80 px-3 py-2 text-xs text-slate-100 resize-y min-h-[90px] focus:outline-none focus:ring-1 focus:ring-emerald-400/70"
-                              />
-
-                              <button
-                                type="button"
-                                onClick={handleAskAi}
-                                disabled={aiLoading || !aiQuestion.trim()}
-                                className="inline-flex items-center justify-center rounded-full bg-emerald-500 px-3 py-1.5 text-xs font-semibold text-slate-950 hover:bg-emerald-400 disabled:opacity-50 disabled:cursor-not-allowed transition"
-                              >
-                                {aiLoading ? "Thinking…" : "Ask AI about this page"}
-                              </button>
-
-                              {aiAnswer && (
-                                <div className="rounded-2xl border border-emerald-500/40 bg-slate-950/80 px-3 py-2 text-xs text-emerald-50 max-h-48 overflow-y-auto">
-                                  {aiAnswer}
-                                </div>
-                              )}
-
-                              {!aiAnswer && (
-                                <p className="text-[11px] text-emerald-200/80">
-                                  Later you can connect this to a server route
-                                  that sends the selected day&apos;s trades +
-                                  notes to your OpenAI endpoint for deep
-                                  coaching.
-                                </p>
-                              )}
-                            </div>
-                          </div>
-                        </>
-                      ) : (
-                        <p className="text-sm text-slate-500">
-                          Select a page on the left to see its summary.
-                        </p>
-                      )}
+                            )}
+                          </motion.button>
+                        );
+                      })}
                     </div>
+                  </aside>
+
+                  {/* PÁGINA / RESUMEN A LA DERECHA */}
+                  <section className="rounded-2xl border border-slate-800 bg-slate-900/80 p-4 md:p-6 space-y-5 flex-1">
+                    {selectedJournalEntry ? (
+                      <>
+                        {/* HEADER */}
+                        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                          <div>
+                            <p className="text-xs uppercase tracking-[0.16em] text-slate-400">
+                              Notebook page
+                            </p>
+                            <h3 className="text-2xl font-semibold text-slate-50">
+                              {formatShortDate(
+                                (selectedJournalEntry as any).date
+                              )}
+                            </h3>
+                            <p className="text-[11px] text-slate-500 mt-1">
+                              Summary and notes connected to your trading
+                              journal.
+                            </p>
+                          </div>
+                          <div className="text-right space-y-1">
+                            <p
+                              className={`text-2xl font-semibold tabular-nums ${
+                                ((selectedJournalEntry as any).pnl ||
+                                  0) >= 0
+                                  ? "text-emerald-300"
+                                  : "text-sky-300"
+                              }`}
+                            >
+                              {((selectedJournalEntry as any).pnl || 0) >= 0
+                                ? "+"
+                                : ""}
+                              $
+                              {Number(
+                                (selectedJournalEntry as any).pnl || 0
+                              ).toFixed(2)}
+                            </p>
+                            <p className="text-[11px] text-slate-500">
+                              Day P&amp;L
+                            </p>
+                            <Link
+                              href={`/journal/${
+                                (selectedJournalEntry as any).date
+                              }`}
+                              className="inline-flex items-center justify-center rounded-full border border-slate-700 bg-slate-950/80 px-3 py-1 text-[11px] font-medium text-slate-200 hover:border-emerald-400/60 hover:text-emerald-100 transition"
+                            >
+                              Open full journal page →
+                            </Link>
+                          </div>
+                        </div>
+
+                        {/* RESUMEN */}
+                        <div className="grid gap-4 md:grid-cols-3 text-sm text-slate-200">
+                          <div className="rounded-2xl bg-slate-950/70 border border-slate-800 p-3">
+                            <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
+                              Trades
+                            </p>
+                            <p className="mt-2">
+                              Entries:{" "}
+                              <span className="font-semibold">
+                                {Array.isArray(
+                                  (selectedJournalEntry as any).entries
+                                )
+                                  ? (selectedJournalEntry as any).entries
+                                      .length
+                                  : 0}
+                              </span>
+                            </p>
+                            <p>
+                              Exits:{" "}
+                              <span className="font-semibold">
+                                {Array.isArray(
+                                  (selectedJournalEntry as any).exits
+                                )
+                                  ? (selectedJournalEntry as any).exits.length
+                                  : 0}
+                              </span>
+                            </p>
+                          </div>
+
+                          <div className="rounded-2xl bg-slate-950/70 border border-slate-800 p-3">
+                            <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
+                              Notes blocks
+                            </p>
+                            <ul className="mt-2 space-y-1 text-sm">
+                              <li>
+                                Premarket:{" "}
+                                <span className="font-semibold">
+                                  {(selectedJournalEntry as any).premarket
+                                    ? "Written"
+                                    : "Empty"}
+                                </span>
+                              </li>
+                              <li>
+                                Live session:{" "}
+                                <span className="font-semibold">
+                                  {(selectedJournalEntry as any).live
+                                    ? "Written"
+                                    : "Empty"}
+                                </span>
+                              </li>
+                              <li>
+                                Post-market:{" "}
+                                <span className="font-semibold">
+                                  {(selectedJournalEntry as any).post
+                                    ? "Written"
+                                    : "Empty"}
+                                </span>
+                              </li>
+                            </ul>
+                          </div>
+
+                          <div className="rounded-2xl bg-slate-950/70 border border-slate-800 p-3">
+                            <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
+                              Quick description
+                            </p>
+                            <p className="mt-2 text-sm text-slate-200">
+                              {getNotebookPreview(
+                                (selectedJournalEntry as any).notes
+                              ) ??
+                                "Write a short description in your journal notes to see it here as a quick summary."}
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* FREE NOTES + AI */}
+                        <div className="grid gap-4 lg:grid-cols-[minmax(0,2fr),minmax(0,1.4fr)] mt-4">
+                          {/* FREE NOTES */}
+                          <div className="space-y-3">
+                            <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
+                              Free notebook space
+                            </p>
+
+                            <RichNotebookEditor
+                              value={selectedFreeNotes}
+                              onChange={handleFreeNotesChange}
+                              placeholder="Write anything here: study notes, psychology reflections, ideas for this day…"
+                              minHeight={260}
+                            />
+                          </div>
+
+                          {/* AI COACH */}
+                          <div className="rounded-3xl border border-emerald-500/40 bg-gradient-to-br from-slate-950 via-slate-950 to-emerald-900/30 p-3 md:p-4 space-y-3">
+                            <div>
+                              <p className="text-[11px] uppercase tracking-[0.18em] text-emerald-300">
+                                AI coach
+                              </p>
+                              <p className="text-sm text-emerald-50 mt-0.5">
+                                Ask a question about this day.
+                              </p>
+                            </div>
+
+                            <textarea
+                              value={aiQuestion}
+                              onChange={(e) =>
+                                setAiQuestion(e.target.value)
+                              }
+                              placeholder="Example: What did I do well today and what should I adjust in my risk management?"
+                              className="w-full rounded-2xl border border-emerald-500/40 bg-slate-950/80 px-3 py-2 text-xs text-slate-100 resize-y min-h-[90px] focus:outline-none focus:ring-1 focus:ring-emerald-400/70"
+                            />
+
+                            <button
+                              type="button"
+                              onClick={handleAskAi}
+                              disabled={
+                                aiLoading || !aiQuestion.trim()
+                              }
+                              className="inline-flex items-center justify-center rounded-full bg-emerald-500 px-3 py-1.5 text-xs font-semibold text-slate-950 hover:bg-emerald-400 disabled:opacity-50 disabled:cursor-not-allowed transition"
+                            >
+                              {aiLoading
+                                ? "Thinking…"
+                                : "Ask AI about this page"}
+                            </button>
+
+                            {aiAnswer && (
+                              <div className="rounded-2xl border border-emerald-500/40 bg-slate-950/80 px-3 py-2 text-xs text-emerald-50 max-h-48 overflow-y-auto">
+                                {aiAnswer}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </>
+                    ) : (
+                      <p className="text-sm text-slate-500">
+                        Select a page on the left to see its summary.
+                      </p>
+                    )}
                   </section>
                 </div>
               )}
             </div>
           )}
 
-          {/* =======================
-              CUSTOM NOTEBOOKS VIEW
-          ========================= */}
+          {/* ===== CUSTOM NOTEBOOKS VIEW ===== */}
           {subView === "custom" && (
             <div className="space-y-4">
               <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
@@ -944,7 +972,7 @@ export default function NotebookPage() {
       ) : (
         /* ===== CALENDAR VIEW ===== */
         <section className="mt-6">
-          <div className="rounded-3xl border border-slate-800 bg-slate-900/70 p-5 md:p-6 shadow-sm shadow-slate-950/40">
+          <div className="rounded-3xl border border-slate-800 bg-slate-900/70 p-5 md:px-6 md:py-6 shadow-sm shadow-slate-950/40">
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
               <div>
                 <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
