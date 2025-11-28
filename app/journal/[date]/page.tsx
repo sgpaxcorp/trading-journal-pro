@@ -139,7 +139,7 @@ function TablePicker({
       <div className="grid grid-cols-6 gap-1">
         {Array.from({ length: 36 }).map((_, i) => {
           const r = Math.floor(i / 6) + 1;
-          const c = i % 6 + 1;
+          const c = (i % 6) + 1;
           const active =
             hover && r <= hover[0] && c <= hover[1]
               ? "bg-emerald-500/80"
@@ -348,20 +348,20 @@ function effectiveKind(kind: InstrumentType, symbol: string): InstrumentType {
 
 // Futures point-value map (expand as you want)
 const FUTURES_MULTIPLIERS: Record<string, number> = {
-  ES: 50, // E-mini S&P 500
-  MES: 5, // Micro ES
-  NQ: 20, // E-mini Nasdaq
-  MNQ: 2, // Micro NQ
-  YM: 5, // Dow
-  MYM: 0.5, // Micro YM
-  RTY: 50, // Russell
-  M2K: 5, // Micro Russell
-  CL: 1000, // Crude Oil
-  MCL: 100, // Micro Crude
-  GC: 100, // Gold
-  MGC: 10, // Micro Gold
-  SI: 5000, // Silver
-  HG: 25000, // Copper (rough)
+  ES: 50,
+  MES: 5,
+  NQ: 20,
+  MNQ: 2,
+  YM: 5,
+  MYM: 0.5,
+  RTY: 50,
+  M2K: 5,
+  CL: 1000,
+  MCL: 100,
+  GC: 100,
+  MGC: 10,
+  SI: 5000,
+  HG: 25000,
 };
 
 function futureRoot(symbol: string) {
@@ -371,12 +371,11 @@ function futureRoot(symbol: string) {
 }
 
 function getContractMultiplier(kind: InstrumentType, symbol: string) {
-  if (kind === "option") return 100; // ✅ options contract size
+  if (kind === "option") return 100;
   if (kind === "future") {
     const root = futureRoot(symbol);
     return FUTURES_MULTIPLIERS[root] ?? 1;
   }
-  // stocks, crypto, forex, other
   return 1;
 }
 
@@ -500,8 +499,14 @@ function WidgetCard({
 }) {
   return (
     <div className="bg-slate-900/95 border border-slate-800 rounded-2xl h-full flex flex-col overflow-hidden shadow-sm min-h-0">
-      <div className="drag-handle cursor-move select-none flex items-center justify-between px-4 py-2 border-b border-slate-800 bg-slate-950/40">
-        <p className="text-slate-200 text-sm font-medium">{title}</p>
+      {/* Header: solo el pequeño handle es draggable */}
+      <div className="flex items-center justify-between px-4 py-2 border-b border-slate-800 bg-slate-950/40">
+        <div className="flex items-center gap-2">
+          <span className="drag-handle cursor-move select-none inline-flex items-center justify-center px-2 py-1 rounded-md border border-slate-700 text-[11px] text-slate-400">
+            ⇕
+          </span>
+          <p className="text-slate-200 text-sm font-medium">{title}</p>
+        </div>
         <div>{right}</div>
       </div>
 
@@ -690,7 +695,6 @@ export default function DailyJournalPage() {
     const symbol = newEntryTrade.symbol.trim().toUpperCase();
     if (!symbol || !newEntryTrade.price.trim()) return;
 
-    // ✅ Safe kind: if not contract, treat as stock
     let finalKind: InstrumentType = newEntryTrade.kind;
     if (finalKind === "option" && !looksLikeOptionContract(symbol)) {
       finalKind = "stock";
@@ -712,7 +716,7 @@ export default function DailyJournalPage() {
       {
         id: crypto.randomUUID(),
         ...newEntryTrade,
-        kind: finalKind, // ✅ store safe kind
+        kind: finalKind,
         symbol,
         time: nowTimeLabel(),
         dte,
@@ -812,7 +816,6 @@ export default function DailyJournalPage() {
     const symbol = newExitTrade.symbol.trim().toUpperCase();
     if (!symbol || !newExitTrade.price.trim()) return;
 
-    // ✅ Safe kind override
     let finalKind: InstrumentType = newExitTrade.kind;
     if (finalKind === "option" && !looksLikeOptionContract(symbol)) {
       finalKind = "stock";
@@ -834,7 +837,7 @@ export default function DailyJournalPage() {
       {
         id: crypto.randomUUID(),
         ...newExitTrade,
-        kind: finalKind, // ✅ store safe kind
+        kind: finalKind,
         symbol,
         time: nowTimeLabel(),
         dte,
@@ -878,7 +881,9 @@ export default function DailyJournalPage() {
     setEntry((prev) => {
       const current = prev.tags || [];
       const exists = current.includes(tag);
-      const tags = exists ? current.filter((t) => t !== tag) : [...current, tag];
+      const tags = exists
+        ? current.filter((t) => t !== tag)
+        : [...current, tag];
       return { ...prev, tags };
     });
 
@@ -1842,12 +1847,21 @@ export default function DailyJournalPage() {
               Log trades, screenshots, emotions and rule compliance.
             </p>
           </div>
-          <Link
-            href="/dashboard"
-            className="shrink-0 px-3 py-2 rounded-xl border border-slate-700 text-slate-300 text-sm hover:border-emerald-400 hover:text-emerald-300 transition"
-          >
-            ← Back to dashboard
-          </Link>
+          <div className="flex flex-col sm:flex-row gap-2">
+            <button
+              type="button"
+              onClick={() => router.back()}
+              className="shrink-0 px-3 py-2 rounded-xl border border-slate-700 text-slate-300 text-sm hover:border-emerald-400 hover:text-emerald-300 transition"
+            >
+              ← Back
+            </button>
+            <Link
+              href="/dashboard"
+              className="shrink-0 px-3 py-2 rounded-xl border border-slate-700 text-slate-300 text-sm hover:border-emerald-400 hover:text-emerald-300 transition"
+            >
+              ← Back to dashboard
+            </Link>
+          </div>
         </div>
 
         {/* Widget toggles */}
