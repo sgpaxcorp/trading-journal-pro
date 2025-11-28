@@ -1,7 +1,9 @@
+// app/back-study/page.tsx
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
+
 import TopNav from "@/app/components/TopNav";
 import { useAuth } from "@/context/AuthContext";
 import {
@@ -15,10 +17,12 @@ import {
   createSeriesMarkers,
 } from "lightweight-charts";
 
-/* ============= Tipos ============= */
+/* =========================
+   Types
+========================= */
 
 type Candle = {
-  time: number; // ms
+  time: number; // ms since epoch (Yahoo)
   open: number;
   high: number;
   low: number;
@@ -80,12 +84,28 @@ type ChartState = {
   candles: Candle[];
 };
 
-/* ============= Helpers ============= */
+/* =========================
+   Helpers
+========================= */
 
 function safeUpper(s: string | undefined | null): string {
   return (s || "").trim().toUpperCase();
 }
 
+// Offset actual de tu zona horaria (minutos que hay que restar a UTC para llegar a local)
+const LOCAL_TZ_OFFSET_MIN = new Date().getTimezoneOffset(); // p.ej. 300 en EST (UTC-5)
+
+function shiftMsToLocal(ms: number): number {
+  // Los timestamps de Yahoo vienen como UTC.
+  // Para que el chart y las comparaciones usen hora local (EST),
+  // restamos ese offset (en ms).
+  return ms - LOCAL_TZ_OFFSET_MIN * 60 * 1000;
+}
+
+/**
+ * Parse "9:56 AM", "09:56", "09:56:30" → minutos del día (hora local).
+ * NO hacemos conversión a UTC aquí; esto se interpreta como EST tal cual tú lo escribes.
+ */
 function parseTimeToMinutesFlexible(t: string): number | null {
   if (!t) return null;
   const cleaned = t.trim().toUpperCase();
@@ -100,17 +120,23 @@ function parseTimeToMinutesFlexible(t: string): number | null {
   const ampm = m[3];
 
   if (!Number.isFinite(hour) || !Number.isFinite(minutes)) return null;
+
   if (ampm === "AM" && hour === 12) hour = 0;
   if (ampm === "PM" && hour !== 12) hour += 12;
 
   if (hour < 0 || hour > 23 || minutes < 0 || minutes > 59) return null;
 
+  // Hora local en minutos (ej. 9:56 AM -> 596)
   return hour * 60 + minutes;
 }
 
-function minutesFromMs(ms: number): number {
-  const d = new Date(ms);
-  return d.getHours() * 60 + d.getMinutes();
+/**
+ * Convierte un timestamp de candle (UTC de Yahoo) a minutos del día
+ * en hora local (EST), usando el mismo shift que el chart.
+ */
+function minutesFromMsLocal(ms: number): number {
+  const d = new Date(shiftMsToLocal(ms));
+  return d.getUTCHours() * 60 + d.getUTCMinutes();
 }
 
 function parseNotesTrades(notesRaw: unknown): {
@@ -137,6 +163,7 @@ function parseNotesTrades(notesRaw: unknown): {
 
 function parseSPXOptionSymbol(raw: string) {
   const s = safeUpper(raw).replace(/^[\.\-]/, "");
+  // Example: SPXW251121C6565 / SPX251121P6000
   const m = s.match(/^([A-Z]+W?)(\d{6})([CP])(\d+(?:\.\d+)?)$/);
   if (!m) return null;
 
@@ -155,7 +182,71 @@ function parseSPXOptionSymbol(raw: string) {
   return { underlying, expiry, right, strike };
 }
 
-/* ============= Interactive chart ============= */
+/**
+ * Normalize symbols for Yahoo Finance:
+ * - SPX, NDX, RUT → ^SPX, ^NDX, ^RUT
+ * - Futures like ES, MES → ES=F, MES=F
+ * - Options SPXW/SPX: we use ^SPX as underlying when needed
+ */
+function normalizeSymbolForYahoo(
+  symbol: string,
+  kind?: InstrumentType
+): string {
+  const raw = safeUpper(symbol).replace(/\s+/g, "");
+  if (!raw) return raw;
+
+  let s = raw.replace(/^[\.\-]/, "").replace(/^\//, "");
+
+  if (kind === "option") {
+    const parsed = parseSPXOptionSymbol(s);
+    if (parsed) {
+      let base = parsed.underlying.replace(/W$/, ""); // SPXW → SPX
+      if (base === "SPX") return "^SPX";
+      if (base === "NDX") return "^NDX";
+      if (base === "RUT") return "^RUT";
+      return base;
+    }
+    return s;
+  }
+
+  const idxMap: Record<string, string> = {
+    SPX: "^SPX",
+    SP500: "^GSPC",
+    SP: "^GSPC",
+    GSPC: "^GSPC",
+    NDX: "^NDX",
+    RUT: "^RUT",
+    VIX: "^VIX",
+  };
+  if (idxMap[s]) return idxMap[s];
+
+  const FUT_ROOTS = [
+    "ES",
+    "MES",
+    "NQ",
+    "MNQ",
+    "YM",
+    "MYM",
+    "RTY",
+    "M2K",
+    "CL",
+    "MCL",
+    "GC",
+    "MGC",
+    "SI",
+  ];
+
+  if (kind === "future" || FUT_ROOTS.some((r) => s.startsWith(r))) {
+    if (!s.endsWith("=F")) return `${s}=F`;
+    return s;
+  }
+
+  return s;
+}
+
+/* =========================
+   Interactive chart
+========================= */
 
 type InteractiveCandleChartProps = {
   title: string;
@@ -200,6 +291,8 @@ function InteractiveCandleChart({
       },
       timeScale: {
         borderColor: "#1f2937",
+        timeVisible: true,
+        secondsVisible: false,
       },
       grid: {
         vertLines: { color: "#0f172a" },
@@ -208,9 +301,20 @@ function InteractiveCandleChart({
       width: containerRef.current.clientWidth,
       height: 320,
       crosshair: {
-        mode: 0,
+        mode: 1,
       },
-    });
+      handleScroll: {
+        mouseWheel: true,
+        pressedMouseMove: true,
+        horzTouchDrag: true,
+        vertTouchDrag: true,
+      },
+      handleScale: {
+        axisPressedMouseMove: { time: true, price: true },
+        mouseWheel: true,
+        pinch: true,
+      },
+    } as any);
 
     const series = chart.addSeries(CandlestickSeries, {
       upColor: "#22c55e",
@@ -221,7 +325,6 @@ function InteractiveCandleChart({
       wickDownColor: "#9ca3af",
     } as any);
 
-    // 👇 nuevo plugin para marcadores en v5
     const markersPlugin = createSeriesMarkers(series);
 
     chartRef.current = chart;
@@ -248,8 +351,9 @@ function InteractiveCandleChart({
   useEffect(() => {
     if (!seriesRef.current || !chartRef.current || !candles.length) return;
 
+    // Convertimos todos los candles a hora local (EST) para el chart
     const data = candles.map((c) => ({
-      time: Math.floor(c.time / 1000),
+      time: Math.floor(shiftMsToLocal(c.time) / 1000),
       open: c.open,
       high: c.high,
       low: c.low,
@@ -257,10 +361,22 @@ function InteractiveCandleChart({
     }));
 
     seriesRef.current.setData(data);
-    chartRef.current.timeScale().fitContent();
 
-    const entryMinutes = parseTimeToMinutesFlexible(entryTime);
-    const exitMinutes = parseTimeToMinutesFlexible(exitTime);
+    const timeScale = chartRef.current.timeScale();
+    const times = data.map((d) => d.time as number);
+
+    if (times.length) {
+      const last = times[times.length - 1];
+      const THREE_MONTHS_SEC = 60 * 60 * 24 * 90;
+      const from = last - THREE_MONTHS_SEC;
+      timeScale.setVisibleRange({ from, to: last });
+    } else {
+      timeScale.fitContent();
+    }
+
+    // --- Markers: matching por hora local (EST) ---
+    const entryMinutesLocal = parseTimeToMinutesFlexible(entryTime);
+    const exitMinutesLocal = parseTimeToMinutesFlexible(exitTime);
 
     let entryIdx: number | null = null;
     let exitIdx: number | null = null;
@@ -268,15 +384,16 @@ function InteractiveCandleChart({
     const filtered = candles
       .map((c, idx) => ({ c, idx }))
       .filter(({ c }) => {
-        const d = new Date(c.time);
-        return d.toISOString().slice(0, 10) === selectedDate;
+        const d = new Date(shiftMsToLocal(c.time));
+        const isoDay = d.toISOString().slice(0, 10);
+        return isoDay === selectedDate;
       });
 
-    if (entryMinutes != null) {
+    if (entryMinutesLocal != null) {
       let bestDiff = Infinity;
       filtered.forEach(({ c, idx }) => {
-        const mins = minutesFromMs(c.time);
-        const diff = Math.abs(mins - entryMinutes);
+        const mins = minutesFromMsLocal(c.time); // EST minutos del día
+        const diff = Math.abs(mins - entryMinutesLocal);
         if (diff < bestDiff) {
           bestDiff = diff;
           entryIdx = idx;
@@ -284,11 +401,11 @@ function InteractiveCandleChart({
       });
     }
 
-    if (exitMinutes != null) {
+    if (exitMinutesLocal != null) {
       let bestDiff = Infinity;
       filtered.forEach(({ c, idx }) => {
-        const mins = minutesFromMs(c.time);
-        const diff = Math.abs(mins - exitMinutes);
+        const mins = minutesFromMsLocal(c.time); // EST
+        const diff = Math.abs(mins - exitMinutesLocal);
         if (diff < bestDiff) {
           bestDiff = diff;
           exitIdx = idx;
@@ -301,7 +418,7 @@ function InteractiveCandleChart({
     if (entryIdx != null && entryIdx >= 0) {
       const c = candles[entryIdx];
       markers.push({
-        time: Math.floor(c.time / 1000),
+        time: Math.floor(shiftMsToLocal(c.time) / 1000),
         position: "belowBar",
         color: entryColor,
         shape: "arrowUp",
@@ -312,7 +429,7 @@ function InteractiveCandleChart({
     if (exitIdx != null && exitIdx >= 0) {
       const c = candles[exitIdx];
       markers.push({
-        time: Math.floor(c.time / 1000),
+        time: Math.floor(shiftMsToLocal(c.time) / 1000),
         position: "aboveBar",
         color: exitColor,
         shape: "arrowDown",
@@ -320,7 +437,6 @@ function InteractiveCandleChart({
       });
     }
 
-    // 👇 usar el plugin, no la serie directa
     if (markersPluginRef.current) {
       markersPluginRef.current.setMarkers(markers);
     }
@@ -335,34 +451,82 @@ function InteractiveCandleChart({
     exitColor,
   ]);
 
+  const handleZoomIn = () => {
+    const ts = chartRef.current?.timeScale();
+    if (!ts) return;
+    ts.zoomIn();
+  };
+
+  const handleZoomOut = () => {
+    const ts = chartRef.current?.timeScale();
+    if (!ts) return;
+    ts.zoomOut();
+  };
+
+  const handleReset = () => {
+    const ts = chartRef.current?.timeScale();
+    if (!ts) return;
+    ts.fitContent();
+  };
+
   return (
     <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-4 md:p-5">
-      <div className="flex items-center justify-between mb-3">
+      <div className="flex items-center justify-between mb-3 gap-3">
         <div>
           <p className="text-sm font-medium text-slate-100">{title}</p>
           <p className="text-xs text-slate-400 font-mono">{symbol}</p>
         </div>
-        <div className="flex items-center gap-3 text-[11px]">
-          <div className="flex items-center gap-1">
-            <span
-              className="inline-block h-2 w-4 rounded"
-              style={{ backgroundColor: entryColor }}
-            />
-            <span className="text-slate-300">Entry</span>
+
+        <div className="flex items-center gap-4">
+          <div className="hidden sm:flex items-center gap-3 text-[11px]">
+            <div className="flex items-center gap-1">
+              <span
+                className="inline-block h-2 w-4 rounded"
+                style={{ backgroundColor: entryColor }}
+              />
+              <span className="text-slate-300">Entry</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <span
+                className="inline-block h-2 w-4 rounded"
+                style={{ backgroundColor: exitColor }}
+              />
+              <span className="text-slate-300">Exit</span>
+            </div>
           </div>
-          <div className="flex items-center gap-1">
-            <span
-              className="inline-block h-2 w-4 rounded"
-              style={{ backgroundColor: exitColor }}
-            />
-            <span className="text-slate-300">Exit</span>
+
+          <div className="flex items-center gap-1 text-[11px]">
+            <button
+              type="button"
+              onClick={handleZoomIn}
+              className="px-2 py-1 rounded-md bg-slate-800 border border-slate-700 hover:border-emerald-400 hover:text-emerald-300"
+              title="Zoom in"
+            >
+              +
+            </button>
+            <button
+              type="button"
+              onClick={handleZoomOut}
+              className="px-2 py-1 rounded-md bg-slate-800 border border-slate-700 hover:border-emerald-400 hover:text-emerald-300"
+              title="Zoom out"
+            >
+              −
+            </button>
+            <button
+              type="button"
+              onClick={handleReset}
+              className="px-2 py-1 rounded-md bg-slate-800 border border-slate-700 hover:border-emerald-400 hover:text-emerald-300"
+              title="Reset zoom"
+            >
+              ⟳
+            </button>
           </div>
         </div>
       </div>
 
       {!candles.length ? (
         <p className="text-sm text-slate-400">
-          No data for this symbol/timeframe.
+          No chart data for this symbol/timeframe.
         </p>
       ) : (
         <div
@@ -374,7 +538,9 @@ function InteractiveCandleChart({
   );
 }
 
-/* ============= Página principal Back-Studying ============= */
+/* =========================
+   Main Back-Study page
+========================= */
 
 export default function BackStudyPage() {
   const { user, loading } = useAuth();
@@ -411,14 +577,25 @@ export default function BackStudyPage() {
       const ent = session.entries || [];
       const ex = session.exits || [];
 
-      const symSet = new Set<string>();
-      ent.forEach((t) => symSet.add(safeUpper(t.symbol)));
-      ex.forEach((t) => symSet.add(safeUpper(t.symbol)));
-      symSet.delete("");
+      const symKindSet = new Set<string>();
+      ent.forEach((t) =>
+        symKindSet.add(`${safeUpper(t.symbol)}|${t.kind || "stock"}`)
+      );
+      ex.forEach((t) =>
+        symKindSet.add(`${safeUpper(t.symbol)}|${t.kind || "stock"}`)
+      );
+      symKindSet.delete("|");
 
-      symSet.forEach((sym) => {
-        const entList = ent.filter((t) => safeUpper(t.symbol) === sym);
-        const exList = ex.filter((t) => safeUpper(t.symbol) === sym);
+      symKindSet.forEach((key) => {
+        const [sym, kindRaw] = key.split("|");
+        if (!sym) return;
+
+        const entList = ent.filter(
+          (t) => safeUpper(t.symbol) === sym && (t.kind || "stock") === kindRaw
+        );
+        const exList = ex.filter(
+          (t) => safeUpper(t.symbol) === sym && (t.kind || "stock") === kindRaw
+        );
         if (!entList.length && !exList.length) return;
 
         const entryRow = entList[0] || exList[0];
@@ -428,9 +605,9 @@ export default function BackStudyPage() {
           entryRow;
 
         const kind =
-          (entryRow?.kind ||
+          ((entryRow?.kind ||
             exList[0]?.kind ||
-            ("stock" as InstrumentType)) as InstrumentType;
+            "stock") as InstrumentType) || "stock";
 
         const entryTime = entryRow?.time || "09:30";
         const exitTime = exitRow?.time || entryTime;
@@ -459,7 +636,7 @@ export default function BackStudyPage() {
           }
         }
 
-        const id = `${session.date}-${sym}-${entryTime}-${exitTime}`;
+        const id = `${session.date}-${sym}-${kind}-${entryTime}-${exitTime}`;
 
         list.push({
           id,
@@ -513,31 +690,50 @@ export default function BackStudyPage() {
     candles: [],
   });
 
+  /* -------- Yahoo fetch (sin errores duros) -------- */
+
   const fetchCandles = async (
     symbol: string,
-    tfId: TimeframeId
+    tfId: TimeframeId,
+    kind?: InstrumentType
   ): Promise<Candle[]> => {
     const tf = TIMEFRAMES.find((t) => t.id === tfId)!;
+    const yfSymbol = normalizeSymbolForYahoo(symbol, kind);
+
     const url = `/api/yahoo-chart?symbol=${encodeURIComponent(
-      symbol
+      yfSymbol
     )}&interval=${encodeURIComponent(tf.interval)}&range=${encodeURIComponent(
       tf.range
     )}`;
 
-    const res = await fetch(url);
-    if (!res.ok) {
-      const text = await res.text();
-      console.error("Yahoo chart error", text);
-      throw new Error("Failed to fetch chart data");
+    try {
+      const res = await fetch(url);
+
+      if (!res.ok) {
+        let msg = "";
+        try {
+          msg = await res.text();
+        } catch {
+          // ignore
+        }
+        if (msg) {
+          console.warn("Yahoo chart warning:", msg);
+        }
+        return [];
+      }
+
+      const data = await res.json();
+      return Array.isArray((data as any).candles) ? (data as any).candles : [];
+    } catch (err) {
+      console.warn("Yahoo Finance request failed:", err);
+      return [];
     }
-    const data = await res.json();
-    return data.candles || [];
   };
 
   const loadReplay = async () => {
     if (!selectedTrade) return;
 
-    const { underlyingSymbol, contractSymbol } = selectedTrade;
+    const { underlyingSymbol, contractSymbol, kind } = selectedTrade;
 
     setUnderlyingState({ loading: true, error: null, candles: [] });
     setContractState({
@@ -546,27 +742,51 @@ export default function BackStudyPage() {
       candles: [],
     });
 
+    // Underlying
     try {
-      const uc = await fetchCandles(underlyingSymbol, timeframe);
-      setUnderlyingState({ loading: false, error: null, candles: uc });
-    } catch (err) {
-      console.error(err);
+      const uc = await fetchCandles(underlyingSymbol, timeframe, kind);
       setUnderlyingState({
         loading: false,
-        error: "Error loading underlying chart",
+        error: null,
+        candles: uc,
+      });
+    } catch (err) {
+      console.warn("Underlying chart error:", err);
+      setUnderlyingState({
+        loading: false,
+        error: "Could not load underlying chart.",
         candles: [],
       });
     }
 
+    // Contract
     if (contractSymbol) {
       try {
-        const cc = await fetchCandles(contractSymbol, timeframe);
-        setContractState({ loading: false, error: null, candles: cc });
+        const cc = await fetchCandles(contractSymbol, timeframe, "option");
+        if (cc.length) {
+          setContractState({
+            loading: false,
+            error: null,
+            candles: cc,
+          });
+        } else {
+          const fallback = await fetchCandles(
+            underlyingSymbol,
+            timeframe,
+            kind
+          );
+          setContractState({
+            loading: false,
+            error:
+              "No specific contract data found. Showing underlying instead.",
+            candles: fallback,
+          });
+        }
       } catch (err) {
-        console.error(err);
+        console.warn("Contract chart error:", err);
         setContractState({
           loading: false,
-          error: "Error loading contract chart",
+          error: "Could not load contract chart.",
           candles: [],
         });
       }
@@ -599,40 +819,50 @@ export default function BackStudyPage() {
       <TopNav />
       <div className="px-4 md:px-8 py-6">
         <div className="max-w-6xl mx-auto space-y-6">
+          {/* Header */}
           <header className="flex flex-col md:flex-row justify-between gap-4 mb-2">
             <div>
               <p className="text-emerald-400 text-xs uppercase tracking-[0.25em]">
                 Back-Studying
               </p>
               <h1 className="text-3xl md:text-4xl font-semibold mt-1">
-                Chart replays desde tu journal
+                Chart replays from your journal
               </h1>
               <p className="text-sm md:text-base text-slate-400 mt-2 max-w-xl">
-                Selecciona una sesión y un trade guardado en el journal para ver
-                el gráfico del activo y del contrato con la vela y el precio
-                exacto de entrada (flecha verde) y salida (flecha azul), usando
-                datos históricos de Yahoo Finance.
+                Each entry in the Entries/Exits widgets becomes a trade. The
+                chart marks the exact entry (green arrow) and exit (blue arrow)
+                using the times and prices you saved in the daily journal.
               </p>
             </div>
+
+            <button
+              type="button"
+              onClick={() => router.push("/dashboard")}
+              className="self-start md:self-center px-4 py-2 rounded-xl border border-slate-700 text-slate-200 text-sm hover:border-emerald-400 hover:text-emerald-300 transition"
+            >
+              ← Back to dashboard
+            </button>
           </header>
 
           {trades.length === 0 ? (
             <section className="rounded-2xl border border-slate-800 bg-slate-900/80 p-4 md:p-5">
               <p className="text-sm text-slate-200 mb-1">
-                No hay trades registrados.
+                No trades found for back-study.
               </p>
               <p className="text-sm text-slate-400">
-                Asegúrate de tener Entries/Exits guardados en el journal
-                (notes JSON) para poder hacer back-study.
+                Make sure you have Entries and Exits saved in the journal
+                (notes JSON) so they can be replayed here.
               </p>
             </section>
           ) : (
             <>
+              {/* Controls */}
               <section className="rounded-2xl border border-slate-800 bg-slate-900/80 p-4 md:p-5 shadow-[0_0_30px_rgba(15,23,42,0.8)]">
                 <form
                   onSubmit={handleLoad}
                   className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end"
                 >
+                  {/* Session selector */}
                   <div className="flex flex-col gap-1">
                     <label className="text-xs text-slate-400">Session</label>
                     <select
@@ -657,6 +887,7 @@ export default function BackStudyPage() {
                     </select>
                   </div>
 
+                  {/* Trade selector */}
                   <div className="flex flex-col gap-1 md:col-span-2">
                     <label className="text-xs text-slate-400">
                       Trade (symbol)
@@ -668,7 +899,7 @@ export default function BackStudyPage() {
                     >
                       {tradesForDate.map((t) => (
                         <option key={t.id} value={t.id}>
-                          {t.symbol} · {t.entryTime} → {t.exitTime}
+                          {t.symbol} ({t.kind}) · {t.entryTime} → {t.exitTime}
                         </option>
                       ))}
                     </select>
@@ -692,6 +923,7 @@ export default function BackStudyPage() {
                     )}
                   </div>
 
+                  {/* Timeframes + load */}
                   <div className="flex flex-col gap-2">
                     <div className="flex flex-wrap gap-1">
                       {TIMEFRAMES.map((tf) => {
@@ -722,8 +954,10 @@ export default function BackStudyPage() {
                 </form>
               </section>
 
+              {/* Charts */}
               {selectedTrade && (
                 <section className="space-y-4">
+                  {/* Underlying */}
                   <div>
                     {underlyingState.loading ? (
                       <p className="text-sm text-slate-400">
@@ -736,7 +970,10 @@ export default function BackStudyPage() {
                     ) : (
                       <InteractiveCandleChart
                         title="Underlying asset"
-                        symbol={selectedTrade.underlyingSymbol}
+                        symbol={normalizeSymbolForYahoo(
+                          selectedTrade.underlyingSymbol,
+                          selectedTrade.kind
+                        )}
                         candles={underlyingState.candles}
                         selectedDate={selectedTrade.date}
                         entryTime={selectedTrade.entryTime}
@@ -749,6 +986,7 @@ export default function BackStudyPage() {
                     )}
                   </div>
 
+                  {/* Contract */}
                   {selectedTrade.contractSymbol && (
                     <div>
                       {contractState.loading ? (
@@ -762,7 +1000,10 @@ export default function BackStudyPage() {
                       ) : (
                         <InteractiveCandleChart
                           title="Contract used"
-                          symbol={selectedTrade.contractSymbol}
+                          symbol={normalizeSymbolForYahoo(
+                            selectedTrade.contractSymbol,
+                            "option"
+                          )}
                           candles={contractState.candles}
                           selectedDate={selectedTrade.date}
                           entryTime={selectedTrade.entryTime}
