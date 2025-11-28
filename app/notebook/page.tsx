@@ -174,9 +174,10 @@ function getLastWeekdayOfMonth(
   return new Date(year, month, day);
 }
 
-function getUsFederalHolidays(year: number) {
+function getUsFederalHolidays(year: number): Holiday[] {
   const holidays: Holiday[] = [];
 
+  // Fixed-date
   holidays.push(
     { date: toYMD(new Date(year, 0, 1)), label: "New Year's Day" },
     { date: toYMD(new Date(year, 5, 19)), label: "Juneteenth National Independence Day" },
@@ -185,26 +186,37 @@ function getUsFederalHolidays(year: number) {
     { date: toYMD(new Date(year, 11, 25)), label: "Christmas Day" }
   );
 
+  // MLK – 3rd Monday Jan
   holidays.push({
     date: toYMD(getNthWeekdayOfMonth(year, 0, 1, 3)),
     label: "Martin Luther King Jr. Day",
   });
+
+  // Presidents – 3rd Monday Feb
   holidays.push({
     date: toYMD(getNthWeekdayOfMonth(year, 1, 1, 3)),
     label: "Presidents' Day",
   });
+
+  // Memorial – last Monday May
   holidays.push({
     date: toYMD(getLastWeekdayOfMonth(year, 4, 1)),
     label: "Memorial Day",
   });
+
+  // Labor – 1st Monday Sep
   holidays.push({
     date: toYMD(getNthWeekdayOfMonth(year, 8, 1, 1)),
     label: "Labor Day",
   });
+
+  // Columbus / Indigenous – 2nd Monday Oct
   holidays.push({
     date: toYMD(getNthWeekdayOfMonth(year, 9, 1, 2)),
     label: "Columbus / Indigenous Peoples' Day",
   });
+
+  // Thanksgiving – 4th Thursday Nov
   holidays.push({
     date: toYMD(getNthWeekdayOfMonth(year, 10, 4, 4)),
     label: "Thanksgiving Day",
@@ -254,6 +266,38 @@ export default function NotebookPage() {
       sorted.find((e: any) => e.date === selectedJournalDate) ?? null
     );
   }, [sorted, selectedJournalDate]);
+
+  // ---- NUEVO: estado de notas (premarket / live / post) ----
+  const notesStatus = useMemo(() => {
+    if (!selectedJournalEntry) return null;
+    const anyEntry = selectedJournalEntry as any;
+    const notes = anyEntry.notes || {};
+
+    const hasPremarket = Boolean(
+      notes.premarket ||
+        notes.preMarket ||
+        notes.pre ||
+        anyEntry.premarket
+    );
+    const hasLive = Boolean(
+      notes.live ||
+        notes.session ||
+        notes.during ||
+        anyEntry.live
+    );
+    const hasPost = Boolean(
+      notes.post ||
+        notes.postMarket ||
+        notes.after ||
+        anyEntry.post
+    );
+
+    return {
+      premarket: hasPremarket,
+      live: hasLive,
+      post: hasPost,
+    };
+  }, [selectedJournalEntry]);
 
   // Custom notebooks (localStorage)
   const [nbData, setNbData] = useState<NotebookStorage>({
@@ -560,7 +604,6 @@ export default function NotebookPage() {
                   You don&apos;t have journal pages yet.
                 </p>
               ) : (
-                // 👇 Cambiamos a flex para que en lg+ sean dos columnas:
                 <div className="flex flex-col lg:flex-row gap-4">
                   {/* LISTA DE PÁGINAS A LA IZQUIERDA */}
                   <aside className="rounded-2xl border border-slate-800 bg-slate-950/80 p-3 flex flex-col lg:w-80 xl:w-96 lg:flex-none max-h-[560px]">
@@ -696,6 +739,7 @@ export default function NotebookPage() {
                             </p>
                           </div>
 
+                          {/* ---- Tarjeta updateada: usa notesStatus ---- */}
                           <div className="rounded-2xl bg-slate-950/70 border border-slate-800 p-3">
                             <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
                               Notes blocks
@@ -704,7 +748,7 @@ export default function NotebookPage() {
                               <li>
                                 Premarket:{" "}
                                 <span className="font-semibold">
-                                  {(selectedJournalEntry as any).premarket
+                                  {notesStatus?.premarket
                                     ? "Written"
                                     : "Empty"}
                                 </span>
@@ -712,17 +756,13 @@ export default function NotebookPage() {
                               <li>
                                 Live session:{" "}
                                 <span className="font-semibold">
-                                  {(selectedJournalEntry as any).live
-                                    ? "Written"
-                                    : "Empty"}
+                                  {notesStatus?.live ? "Written" : "Empty"}
                                 </span>
                               </li>
                               <li>
                                 Post-market:{" "}
                                 <span className="font-semibold">
-                                  {(selectedJournalEntry as any).post
-                                    ? "Written"
-                                    : "Empty"}
+                                  {notesStatus?.post ? "Written" : "Empty"}
                                 </span>
                               </li>
                             </ul>
