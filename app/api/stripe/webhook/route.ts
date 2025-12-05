@@ -44,7 +44,7 @@ export async function POST(req: NextRequest) {
 
         let planId: PlanId = planIdMeta ?? "core";
 
-        // Fallback por priceID si hace falta
+        // Fallback por priceId si hace falta
         if (!planIdMeta && typeof subscriptionId === "string") {
           const subscription = await stripe.subscriptions.retrieve(
             subscriptionId
@@ -58,6 +58,7 @@ export async function POST(req: NextRequest) {
           }
         }
 
+        // 1) Actualiza la tabla profiles
         await supabaseAdmin
           .from("profiles")
           .update({
@@ -68,17 +69,17 @@ export async function POST(req: NextRequest) {
           })
           .eq("id", userId);
 
+        // 2) Actualiza también user_metadata para que el guard lo vea
         await supabaseAdmin.auth.admin.updateUserById(userId, {
           user_metadata: {
             plan: planId,
+            subscriptionStatus: "active",  // 👈 AQUÍ LA CLAVE
           },
         });
 
-        // Solo log por ahora, sin enviar emails extra
         console.log(
           `[WEBHOOK] Subscription active for user ${userId} with plan ${planId}.`
         );
-
         break;
       }
 
@@ -102,6 +103,12 @@ export async function POST(req: NextRequest) {
               subscription_status: status,
             })
             .eq("id", userId);
+
+          await supabaseAdmin.auth.admin.updateUserById(userId, {
+            user_metadata: {
+              subscriptionStatus: status,
+            },
+          });
         }
 
         break;
@@ -132,6 +139,12 @@ export async function POST(req: NextRequest) {
                 subscription_status: status,
               })
               .eq("id", userId);
+
+            await supabaseAdmin.auth.admin.updateUserById(userId, {
+              user_metadata: {
+                subscriptionStatus: status,
+              },
+            });
           }
         }
 

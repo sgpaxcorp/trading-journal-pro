@@ -80,9 +80,9 @@ export default function ConfirmedPage() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.55 }}
         >
-          From now on, every journal entry is a rep for your brain. You&apos;re not here
-          to gamble — you&apos;re here to train your nervous system to think, execute and
-          recover like a professional trader.
+          From now on, every journal entry is a rep for your brain. You&apos;re
+          not here to gamble — you&apos;re here to train your nervous system to
+          think, execute and recover like a professional trader.
         </motion.p>
 
         <motion.p
@@ -92,8 +92,8 @@ export default function ConfirmedPage() {
           transition={{ delay: 0.65 }}
         >
           This is Day 1 of your new routine: clear rules, defined risk and brutal
-          honesty with yourself. The journal will track your P&amp;L, but the real
-          edge we care about is your psychology.
+          honesty with yourself. The journal will track your P&amp;L, but the
+          real edge we care about is your psychology.
         </motion.p>
 
         <motion.div
@@ -102,9 +102,9 @@ export default function ConfirmedPage() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.8 }}
         >
-          {/* 👇 Aquí cambiamos el href para ir directo al step 2 */}
+          {/* Botón principal → Quick Tour */}
           <Link
-            href="/start?skipInfo=1"
+            href="/quick-tour"
             className="inline-flex px-6 py-2.5 rounded-xl bg-emerald-400 text-slate-950 text-xs md:text-sm font-semibold hover:bg-emerald-300 shadow-lg shadow-emerald-500/25"
           >
             Start the journey

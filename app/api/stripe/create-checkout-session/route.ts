@@ -4,7 +4,9 @@ import Stripe from "stripe";
 
 type PlanId = "core" | "advanced";
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string);
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {
+ 
+});
 
 // Price IDs from your Stripe Dashboard (env vars)
 const PRICE_IDS: Record<PlanId, string> = {
@@ -19,7 +21,7 @@ export async function POST(req: NextRequest) {
     const userId = body.userId as string | undefined;
     const email = body.email as string | undefined;
     const planId = body.planId as PlanId | undefined;
-    const couponCodeRaw = body.couponCode as string | undefined; // <- viene del frontend
+    const couponCodeRaw = body.couponCode as string | undefined; // opcional
 
     if (!userId || !email || !planId) {
       return NextResponse.json(
@@ -119,15 +121,21 @@ export async function POST(req: NextRequest) {
           quantity: 1,
         },
       ],
-      // usamos cupones manualmente; no necesitamos promo codes de Stripe
       discounts,
       allow_promotion_codes: false,
-      success_url: `${origin}/billing/success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${origin}/billing`,
+      success_url: `${origin}/confirmed?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${origin}/pricing`,
       metadata: {
         supabaseUserId: userId,
         planId,
         couponCode: couponCode ?? "",
+      },
+      subscription_data: {
+        metadata: {
+          supabaseUserId: userId,
+          planId,
+          couponCode: couponCode ?? "",
+        },
       },
     });
 

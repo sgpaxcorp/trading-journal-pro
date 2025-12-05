@@ -2,7 +2,7 @@
 
 import { useState, Suspense } from "react";
 import type { FormEvent } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 
 import { useAuth } from "@/context/AuthContext";
@@ -28,12 +28,60 @@ function validatePassword(password: string): string | null {
   return null;
 }
 
-type Step = "form" | "check-email";
+type StepUi = "form" | "created";
+
+function Stepper({
+  current,
+}: {
+  current: StepUi;
+}) {
+  // Para el wizard visual de 4 pasos
+  const stepIndex =
+    current === "form"
+      ? 1 // creando cuenta
+      : 2; // cuenta creada → siguiente: escoger plan
+
+  const base =
+    "flex-1 h-1 rounded-full transition-colors bg-slate-800";
+  const active = "bg-emerald-400";
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between text-[10px] text-slate-400 mb-1">
+        <span className={stepIndex >= 1 ? "text-emerald-300 font-semibold" : ""}>
+          1. Create account
+        </span>
+        <span className={stepIndex >= 2 ? "text-emerald-300 font-semibold" : ""}>
+          2. Choose plan
+        </span>
+        <span className={stepIndex >= 3 ? "text-emerald-300 font-semibold" : ""}>
+          3. Pay &amp; confirm
+        </span>
+        <span className={stepIndex >= 4 ? "text-emerald-300 font-semibold" : ""}>
+          4. Welcome
+        </span>
+      </div>
+      <div className="flex gap-2">
+        <div className={`${base} ${stepIndex >= 1 ? active : ""}`} />
+        <div className={`${base} ${stepIndex >= 2 ? active : ""}`} />
+        <div className={`${base} ${stepIndex >= 3 ? active : ""}`} />
+        <div className={`${base} ${stepIndex >= 4 ? active : ""}`} />
+      </div>
+    </div>
+  );
+}
 
 function SignUpPageInner() {
   const { signUp } = useAuth();
   const router = useRouter();
+  const searchParams = useSearchParams();
 
+  // Hint de plan desde el pricing (/signup?plan=core|advanced)
+  const planFromQuery = (searchParams.get("plan") as PlanId | null) ?? "core";
+
+  const [stepUi, setStepUi] = useState<StepUi>("form");
+
+  // Campos del formulario
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [email, setEmail] = useState("");
@@ -44,7 +92,6 @@ function SignUpPageInner() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [passwordError, setPasswordError] = useState("");
-  const [step, setStep] = useState<Step>("form");
   const [submittedEmail, setSubmittedEmail] = useState("");
 
   async function handleSubmit(e: FormEvent) {
@@ -56,7 +103,6 @@ function SignUpPageInner() {
     try {
       const normalizedEmail = email.trim().toLowerCase();
 
-      // 1) Validar password fuerte
       const pwError = validatePassword(password);
       if (pwError) {
         setPasswordError(pwError);
@@ -64,9 +110,9 @@ function SignUpPageInner() {
         return;
       }
 
-      const defaultPlan: PlanId = "standard";
+      // Este plan se guarda como intención inicial en metadata.
+      const planForMetadata: PlanId = planFromQuery;
 
-      // 2) Crear usuario + perfil en Supabase (AuthContext)
       await signUp({
         firstName,
         lastName,
@@ -74,10 +120,10 @@ function SignUpPageInner() {
         password,
         phone,
         address,
-        plan: defaultPlan,
+        plan: planForMetadata,
       });
 
-      // 3) (Opcional) notificar a soporte que hubo un nuevo registro
+      // Opcional: notificar a soporte
       fetch("/api/email/beta-request", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -87,9 +133,8 @@ function SignUpPageInner() {
         }),
       }).catch(() => {});
 
-      // 4) Mostrar pantalla de "check your email"
       setSubmittedEmail(normalizedEmail);
-      setStep("check-email");
+      setStepUi("created");
     } catch (err: any) {
       setError(err.message || "Something went wrong.");
     } finally {
@@ -97,66 +142,83 @@ function SignUpPageInner() {
     }
   }
 
-  // Paso 2: pantalla de "check your email"
-  if (step === "check-email") {
+  /* =========================
+     Step UI: cuenta creada
+  ========================== */
+
+  if (stepUi === "created") {
     return (
       <main className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center px-4">
-        <div className="w-full max-w-md bg-slate-900/90 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-5">
-          <h1 className="text-xl font-semibold text-slate-50">
-            Check your email ✉️
+        <div className="w-full max-w-lg bg-slate-900/90 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-5">
+          <Stepper current="created" />
+
+          <h1 className="text-xl font-semibold text-slate-50 mt-4">
+            Step 1 complete ✅
           </h1>
           <p className="text-xs text-slate-400">
-            We created your NeuroTrader Journal account and sent a confirmation
-            link to:
+            We created your NeuroTrader Journal account for:
           </p>
           <p className="text-xs font-semibold text-emerald-300 break-all">
             {submittedEmail}
           </p>
+
           <p className="text-xs text-slate-400">
-            1. Open the confirmation email and click the link to verify your
-            address.
-            <br />
-            2. After confirming, come back and log in with this email.
-            <br />
-            3. Once inside, you can choose your plan or use a promo code during
-            checkout.
+            We also sent you a confirmation email. You can confirm your email
+            now or after you finish paying.
           </p>
+
+          <div className="space-y-2 text-xs text-slate-300">
+            <p className="font-semibold">What&apos;s next?</p>
+            <ol className="space-y-1 list-decimal list-inside text-[11px]">
+              <li>Step 2: Choose your subscription plan.</li>
+              <li>Step 3: Complete payment in Stripe.</li>
+              <li>Step 4: We&apos;ll welcome you and take you to your dashboard.</li>
+            </ol>
+          </div>
 
           <button
             type="button"
-            onClick={() => router.push("/signin")}
+            onClick={() => router.push("/billing")}
             className="w-full mt-2 px-4 py-2.5 rounded-xl bg-emerald-400 text-slate-950 text-xs font-semibold hover:bg-emerald-300 transition shadow-lg shadow-emerald-500/20"
           >
-            Go to login
+            Go to Step 2 – Choose your plan
           </button>
 
           <p className="text-[9px] text-slate-500 text-center">
-            Didn&apos;t get the email? Check your spam folder or contact{" "}
-            <span className="text-emerald-300">
-              support@neurotrader-journal.com
-            </span>
-            .
+            Already paid before?{" "}
+            <button
+              type="button"
+              onClick={() => router.push("/signin")}
+              className="text-emerald-300 hover:text-emerald-200 underline-offset-2 hover:underline"
+            >
+              Go to login
+            </button>
           </p>
         </div>
       </main>
     );
   }
 
-  // Paso 1: formulario
+  /* =========================
+     Step UI: formulario (Step 1)
+  ========================== */
+
   return (
     <main className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center px-4">
       <div className="w-full max-w-md bg-slate-900/90 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-5">
-        <h1 className="text-xl font-semibold text-slate-50">
-          Create your NeuroTrader Journal account
+        <Stepper current="form" />
+
+        <h1 className="text-xl font-semibold text-slate-50 mt-4">
+          Step 1 · Create your account
         </h1>
         <p className="text-xs text-slate-400">
-          First create your account with a valid email. Then confirm your email
-          from your inbox and you&apos;ll be ready to log in, connect your plan
-          with Stripe, or use a promo code during checkout.
+          First create your NeuroTrader Journal account with a valid email.
+          After this, you&apos;ll go to Step 2 to choose your plan and pay
+          securely with Stripe.
         </p>
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          {/* First name */}
+          {/* First / last name */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <div>
               <label className="block text-[10px] text-slate-400 mb-1">
@@ -170,8 +232,6 @@ function SignUpPageInner() {
                 placeholder="John"
               />
             </div>
-
-            {/* Last name */}
             <div>
               <label className="block text-[10px] text-slate-400 mb-1">
                 Last name
@@ -216,7 +276,7 @@ function SignUpPageInner() {
             />
           </div>
 
-          {/* Postal address */}
+          {/* Address */}
           <div>
             <label className="block text-[10px] text-slate-400 mb-1">
               Mailing address
@@ -260,7 +320,7 @@ function SignUpPageInner() {
             disabled={loading}
             className="w-full mt-2 px-4 py-2.5 rounded-xl bg-emerald-400 text-slate-950 text-xs font-semibold hover:bg-emerald-300 transition shadow-lg shadow-emerald-500/20 disabled:opacity-60"
           >
-            {loading ? "Creating your account..." : "Create account"}
+            {loading ? "Creating your account…" : "Create account – go to Step 2"}
           </button>
         </form>
 

@@ -1,5 +1,5 @@
 // lib/types.ts
-export type PlanId = "standard" | "professional";
+export type PlanId = "core" | "advanced";
 
 export interface AppUser {
   id: string;

@@ -15,8 +15,8 @@ const PLAN_COPY: Record<
     features: string[];
   }
 > = {
-  standard: {
-    name: "Standard",
+  core: {
+    name: "Core",
     priceLabel: "$14.99 / month",
     description: "Core trading journal and essential performance stats.",
     features: [
@@ -25,13 +25,13 @@ const PLAN_COPY: Record<
       "Growth plan basics",
     ],
   },
-  professional: {
+  advanced: {
     name: "Professional",
     priceLabel: "$24.99 / month",
     description:
       "Advanced analytics, psychology tools and AI coaching for serious traders.",
     features: [
-      "Everything in Standard",
+      "Everything in Core",
       "Advanced analytics & breakdowns",
       "AI coaching & mindset tools",
       "Priority improvements & features",
@@ -43,7 +43,7 @@ export default function PlansPage() {
   const { user } = useAuth();
   const router = useRouter();
 
-  const [selectedPlan, setSelectedPlan] = useState<PlanId>("professional");
+  const [selectedPlan, setSelectedPlan] = useState<PlanId>("advanced");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -87,8 +87,8 @@ export default function PlansPage() {
     }
   }
 
-  const standard = PLAN_COPY.standard;
-  const professional = PLAN_COPY.professional;
+  const core = PLAN_COPY.core;
+  const professional = PLAN_COPY.advanced;
 
   return (
     <main className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center px-4">
@@ -102,12 +102,12 @@ export default function PlansPage() {
         </p>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-          {/* Standard card */}
+          {/* Core card */}
           <button
             type="button"
-            onClick={() => setSelectedPlan("standard")}
+            onClick={() => setSelectedPlan("core")}
             className={`text-left rounded-2xl border p-4 transition ${
-              selectedPlan === "standard"
+              selectedPlan === "core"
                 ? "border-emerald-400 bg-emerald-400/10 shadow-lg shadow-emerald-500/15"
                 : "border-slate-700 bg-slate-950/40 hover:border-emerald-400/80"
             }`}
@@ -116,16 +116,16 @@ export default function PlansPage() {
               Starter
             </p>
             <h2 className="text-lg font-semibold text-slate-50 mt-1">
-              {standard.name}
+              {core.name}
             </h2>
             <p className="text-sm text-emerald-300 mt-1">
-              {standard.priceLabel}
+              {core.priceLabel}
             </p>
             <p className="text-[11px] text-slate-400 mt-2">
-              {standard.description}
+              {core.description}
             </p>
             <ul className="mt-3 space-y-1 text-[11px] text-slate-200">
-              {standard.features.map((f) => (
+              {core.features.map((f) => (
                 <li key={f}>• {f}</li>
               ))}
             </ul>
@@ -134,9 +134,9 @@ export default function PlansPage() {
           {/* Professional card */}
           <button
             type="button"
-            onClick={() => setSelectedPlan("professional")}
+            onClick={() => setSelectedPlan("advanced")}
             className={`text-left rounded-2xl border p-4 transition relative overflow-hidden ${
-              selectedPlan === "professional"
+              selectedPlan === "advanced"
                 ? "border-emerald-400 bg-emerald-400/10 shadow-lg shadow-emerald-500/20"
                 : "border-slate-700 bg-slate-950/40 hover:border-emerald-400/80"
             }`}
