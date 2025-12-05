@@ -19,7 +19,7 @@ export default function Footer() {
         <div className="space-y-3">
           <div className="flex items-center gap-2">
             <div className="h-7 w-7 rounded-md bg-emerald-400/90 flex items-center justify-center text-slate-950 text-xs font-black">
-              TJ
+              NTJ
             </div>
             <span className="text-sm md:text-base font-semibold tracking-tight bg-linear-to-r from-emerald-400 via-sky-400 to-indigo-400 text-transparent bg-clip-text">
               Neuro Trader Journal
@@ -39,9 +39,6 @@ export default function Footer() {
           <div className="flex flex-col gap-2">
             <Link href="/signin" className="hover:text-emerald-400 transition">
               Log In
-            </Link>
-            <Link href="/features" className="hover:text-emerald-400 transition">
-              Features
             </Link>
             <Link href="/blog" className="hover:text-emerald-400 transition">
               Blog
@@ -65,6 +62,9 @@ export default function Footer() {
             </Link>
             <Link href="/terms" className="hover:text-emerald-400 transition">
               Terms &amp; Conditions
+            </Link>
+            <Link href="/terms" className="hover:text-emerald-400 transition">
+              About Us
             </Link>
           </div>
         </div>

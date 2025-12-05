@@ -285,7 +285,7 @@ function AccountMenu() {
               <Link
                 href="/billing/history"
                 className="flex items-center justify-between px-3 py-2 hover:bg-slate-800 transition-colors"
-                >
+              >
                 <span>Billing history</span>
                 <span className="text-[10px] text-slate-400">
                   Invoices
@@ -425,19 +425,14 @@ export default function TopNav() {
   return (
     <nav className="relative z-50 w-full border-b border-slate-800 bg-slate-950/90 backdrop-blur">
       <div className="flex items-center px-4 py-3 md:px-6 gap-6 w-full">
-        {/* Brand */}
-        <div className="flex items-center gap-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-400 text-slate-950 text-sm font-semibold">
-            TJ
+        {/* Brand con logo de Neuro Trader Journal */}
+        <div className="flex items-center gap-2">
+          <div className="h-7 w-7 rounded-md bg-emerald-400/90 flex items-center justify-center text-slate-950 text-xs font-black">
+            NTJ
           </div>
-          <div className="flex flex-col">
-            <span className="text-[13px] font-semibold text-slate-100">
-              Trading Journal Pro
-            </span>
-            <span className="text-[11px] text-slate-500">
-              Structured trading dashboard
-            </span>
-          </div>
+          <span className="text-sm md:text-base font-semibold tracking-tight bg-linear-to-r from-emerald-400 via-sky-400 to-indigo-400 text-transparent bg-clip-text">
+            Neuro Trader Journal
+          </span>
         </div>
 
         {/* Nav row */}

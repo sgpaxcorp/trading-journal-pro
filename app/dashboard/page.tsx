@@ -76,13 +76,11 @@ const ALL_WIDGETS: { id: WidgetId; label: string }[] = [
 ];
 
 // ===== Trading calendar / holidays =====
-// Aquí puedes añadir tus feriados de mercado (formato "YYYY-MM-DD")
 const TRADING_HOLIDAYS: string[] = [
   // "2025-01-01",
   // "2025-07-04",
 ];
 
-/* Helpers de fechas */
 function isWeekend(d: Date): boolean {
   const day = d.getDay();
   return day === 0 || day === 6;
@@ -109,11 +107,11 @@ function buildMonthCalendar(
   const daysInMonth = lastDay.getDate();
   const startWeekday = firstDay.getDay(); // 0 = Sun
 
-  const totalCells = 42; // 6 rows * 7 days (Sun..Sat)
+  const totalCells = 42; // 6 rows * 7 days
   const todayStr = formatDateYYYYMMDD(new Date());
 
   const monthEntries = entries.filter((e) => {
-    const d = new Date(e.date);
+    const d = new Date(e.date as any);
     return d.getFullYear() === year && d.getMonth() === month;
   });
 
@@ -145,7 +143,9 @@ function buildMonthCalendar(
       isToday = dateStr === todayStr;
 
       if (entry) {
-        weeks[weekIndex].pnl += entry.pnl || 0;
+        const pnl =
+          typeof entry.pnl === "number" ? entry.pnl : Number(entry.pnl) || 0;
+        weeks[weekIndex].pnl += pnl;
         weeks[weekIndex].daysWithTrades += 1;
       }
     }
@@ -162,10 +162,16 @@ function buildMonthCalendar(
 }
 
 function calcGreenStreak(entries: JournalEntry[]): number {
-  const sorted = [...entries].sort((a, b) => a.date.localeCompare(b.date));
+  const sorted = [...entries].sort((a, b) =>
+    String(a.date).localeCompare(String(b.date))
+  );
   let streak = 0;
   for (let i = sorted.length - 1; i >= 0; i--) {
-    if ((sorted[i].pnl ?? 0) > 0) streak++;
+    const pnl =
+      typeof sorted[i].pnl === "number"
+        ? sorted[i].pnl
+        : Number(sorted[i].pnl) || 0;
+    if (pnl > 0) streak++;
     else break;
   }
   return streak;
@@ -184,11 +190,10 @@ function calcTradingDayStats(entries: JournalEntry[]) {
   const year = today.getFullYear();
   const todayStr = formatDateYYYYMMDD(today);
 
-  // Fechas con journal en el año actual
   const tradedDatesSet = new Set(
     entries
-      .filter((e) => new Date(e.date).getFullYear() === year)
-      .map((e) => e.date)
+      .filter((e) => new Date(e.date as any).getFullYear() === year)
+      .map((e) => String(e.date))
   );
 
   const allTradingDays: string[] = [];
@@ -232,7 +237,6 @@ export default function DashboardPage() {
   // Core state
   const [plan, setPlan] = useState<GrowthPlan | null>(null);
   const [entries, setEntries] = useState<JournalEntry[]>([]);
-  const [usedEntries, setUsedEntries] = useState<JournalEntry[]>([]);
   const [viewDate, setViewDate] = useState<Date | null>(new Date());
 
   const [calendarCells, setCalendarCells] = useState<CalendarCell[]>([]);
@@ -252,13 +256,10 @@ export default function DashboardPage() {
     "economic-news",
   ]);
 
-  // Economic news selection
   const [ecoNewsCountry, setEcoNewsCountry] = useState("US");
-
-  // Flag para saber si ya cargamos widgets desde localStorage
   const [widgetsLoaded, setWidgetsLoaded] = useState(false);
 
-  // Freeze "today" and week of year for the lifetime of the component
+  // Freeze "today" and week of year for la vida del componente
   const [todayStr] = useState(() => formatDateYYYYMMDD(new Date()));
   const [currentWeekOfYear] = useState(() => getWeekOfYear(new Date()));
 
@@ -353,16 +354,6 @@ export default function DashboardPage() {
     };
   }, [loading, user]);
 
-  // Filter entries used for stats (from plan creation date)
-  useEffect(() => {
-    if (!plan) {
-      setUsedEntries(entries);
-      return;
-    }
-    const planDate = plan.createdAt.slice(0, 10); // "YYYY-MM-DD"
-    setUsedEntries(entries.filter((e) => e.date >= planDate));
-  }, [plan, entries]);
-
   // Rebuild calendar when entries or current month change
   useEffect(() => {
     if (!viewDate) return;
@@ -372,7 +363,7 @@ export default function DashboardPage() {
     setMonthLabel(monthLabel);
   }, [entries, viewDate]);
 
-  // Week number per calendar row (for the left column + weekly summary)
+  // Week number per calendar row
   const weekRowNumbers = useMemo(() => {
     const rows: (number | null)[] = [];
     for (let row = 0; row < 6; row++) {
@@ -385,14 +376,12 @@ export default function DashboardPage() {
         if (!cell || !cell.dateStr || cell.dayNumber === null) continue;
 
         const cellDate = new Date(cell.dateStr + "T00:00:00");
-        const dow = cellDate.getDay(); // 0=Sun, 1=Mon, ... 6=Sat
+        const dow = cellDate.getDay(); // 0=Sun..6=Sat
 
-        // First date in this row as fallback
         if (fallback === null) {
           fallback = getWeekOfYear(cellDate);
         }
 
-        // Prefer Monday for labeling the week
         if (dow === 1) {
           weekNo = getWeekOfYear(cellDate);
           break;
@@ -404,21 +393,62 @@ export default function DashboardPage() {
     return rows;
   }, [calendarCells]);
 
-  // Trading day stats for year
+  // Trading day stats (año completo)
   const tradingStats = useMemo(
     () => calcTradingDayStats(entries),
     [entries]
   );
 
-  // ===== Daily Target calculations (memoized) =====
+  // ===== Entradas filtradas por fecha del growth plan =====
+  const filteredEntries = useMemo(() => {
+    if (!plan || !plan.createdAt) return entries;
+
+    const planDateObj = new Date(plan.createdAt as any);
+    if (Number.isNaN(planDateObj.getTime())) return entries;
+
+    const planStartStr = formatDateYYYYMMDD(planDateObj);
+
+    const filtered = entries.filter((e) => {
+      if (!e.date) return false;
+      const d = new Date(e.date as any);
+      if (Number.isNaN(d.getTime())) return false;
+      const entryStr = formatDateYYYYMMDD(d);
+      return entryStr >= planStartStr;
+    });
+
+    return filtered.length > 0 ? filtered : entries;
+  }, [plan, entries]);
+
+  // ===== Fecha de referencia para Daily Target (último día con journal) =====
+  const sessionDateStr = useMemo(() => {
+    if (!filteredEntries.length) return todayStr;
+
+    const dated = filteredEntries.filter((e) => !!e.date);
+    if (!dated.length) return todayStr;
+
+    const sorted = [...dated].sort((a, b) =>
+      String(a.date).localeCompare(String(b.date))
+    );
+    const last = sorted[sorted.length - 1];
+
+    try {
+      const d = new Date(last.date as any);
+      if (!Number.isNaN(d.getTime())) return formatDateYYYYMMDD(d);
+    } catch {
+      /* ignore */
+    }
+    return String(last.date);
+  }, [filteredEntries, todayStr]);
+
+  // ===== Daily Target calculations (para sessionDateStr) =====
   const dailyCalcs = useMemo(() => {
     if (!plan) {
       return {
         dailyTargetPct: 0,
-        startOfTodayBalance: 0,
-        expectedTodayUSD: 0,
-        actualTodayUSD: 0,
-        diffTodayVsGoal: 0,
+        startOfSessionBalance: 0,
+        expectedSessionUSD: 0,
+        actualSessionUSD: 0,
+        diffSessionVsGoal: 0,
         goalMet: false,
         progressToGoal: 0,
       };
@@ -428,65 +458,75 @@ export default function DashboardPage() {
     const starting = plan.startingBalance ?? 0;
 
     const sumUpTo = (dateStr: string) =>
-      usedEntries
-        .filter((e) => e.date < dateStr)
-        .reduce((s, e) => s + (e.pnl || 0), 0);
+      filteredEntries
+        .filter((e) => String(e.date) < dateStr)
+        .reduce((s, e) => {
+          const entryPnl =
+            typeof e.pnl === "number" ? e.pnl : Number(e.pnl) || 0;
+          return s + entryPnl;
+        }, 0);
 
-    const startOfTodayBalance = starting + sumUpTo(todayStr);
+    const startOfSessionBalance = starting + sumUpTo(sessionDateStr);
 
-    const expectedTodayUSD =
-      dailyTargetPct > 0
-        ? startOfTodayBalance * (dailyTargetPct / 100)
+    const expectedSessionUSD =
+      dailyTargetPct !== 0
+        ? startOfSessionBalance * (dailyTargetPct / 100)
         : 0;
 
-    const todayEntry =
-      usedEntries.find((e) => e.date === todayStr) ?? null;
-    const actualTodayUSD = todayEntry?.pnl ?? 0;
+    const sessionEntry =
+      filteredEntries.find((e) => String(e.date) === sessionDateStr) ?? null;
+    const actualSessionUSD =
+      sessionEntry && typeof sessionEntry.pnl === "number"
+        ? sessionEntry.pnl
+        : sessionEntry
+        ? Number(sessionEntry.pnl) || 0
+        : 0;
 
-    const diffTodayVsGoal = actualTodayUSD - expectedTodayUSD;
+    const diffSessionVsGoal = actualSessionUSD - expectedSessionUSD;
 
-    const goalMet = expectedTodayUSD > 0 && actualTodayUSD >= expectedTodayUSD;
+    const goalMet =
+      expectedSessionUSD > 0 && actualSessionUSD >= expectedSessionUSD;
 
     const progressToGoal =
-      expectedTodayUSD > 0
+      expectedSessionUSD > 0
         ? Math.min(
             150,
-            Math.max(0, (actualTodayUSD / expectedTodayUSD) * 100)
+            Math.max(0, (actualSessionUSD / expectedSessionUSD) * 100)
           )
         : 0;
 
     return {
       dailyTargetPct,
-      startOfTodayBalance,
-      expectedTodayUSD,
-      actualTodayUSD,
-      diffTodayVsGoal,
+      startOfSessionBalance,
+      expectedSessionUSD,
+      actualSessionUSD,
+      diffSessionVsGoal,
       goalMet,
       progressToGoal,
     };
-  }, [plan, usedEntries, todayStr]);
+  }, [plan, filteredEntries, sessionDateStr]);
 
-  // ===== Save daily snapshot =====
+  // ===== Guardar snapshot de ese día de trading =====
   useEffect(() => {
     if (!plan) return;
-    if (dailyCalcs.dailyTargetPct <= 0) return;
+    if (dailyCalcs.dailyTargetPct === 0) return;
 
     try {
       upsertSnapshot({
-        date: todayStr,
-        startOfDayBalance: dailyCalcs.startOfTodayBalance,
-        expectedUSD: dailyCalcs.expectedTodayUSD,
-        realizedUSD: dailyCalcs.actualTodayUSD,
-        deltaUSD: dailyCalcs.diffTodayVsGoal,
+        date: sessionDateStr,
+        startOfDayBalance: dailyCalcs.startOfSessionBalance,
+        expectedUSD: dailyCalcs.expectedSessionUSD,
+        realizedUSD: dailyCalcs.actualSessionUSD,
+        deltaUSD: dailyCalcs.diffSessionVsGoal,
         goalMet: dailyCalcs.goalMet,
       });
     } catch (e) {
       console.warn("[snapshots] upsert error:", e);
     }
-  }, [plan, todayStr, dailyCalcs]);
+  }, [plan, sessionDateStr, dailyCalcs]);
 
-  // ===== Derived metrics =====
-  const name = user?.name || "Trader";
+  // ===== Derived metrics (usa filteredEntries) =====
+  const name = (user as any)?.name || "Trader";
 
   const {
     starting,
@@ -498,13 +538,14 @@ export default function DashboardPage() {
     const startingLocal = plan?.startingBalance ?? 0;
     const targetLocal = plan?.targetBalance ?? 0;
 
-    const totalPnlLocal = usedEntries.reduce(
-      (sum, e) => sum + (e.pnl || 0),
-      0
-    );
+    const totalPnlLocal = filteredEntries.reduce((sum, e) => {
+      const pnl =
+        typeof e.pnl === "number" ? e.pnl : Number(e.pnl) || 0;
+      return sum + pnl;
+    }, 0);
 
     const currentBalanceLocal =
-      plan && usedEntries.length > 0
+      plan && filteredEntries.length > 0
         ? startingLocal + totalPnlLocal
         : startingLocal;
 
@@ -530,11 +571,19 @@ export default function DashboardPage() {
       progressPct: progressPctLocal,
       clampedProgress: clampedProgressLocal,
     };
-  }, [plan, usedEntries]);
+  }, [plan, filteredEntries]);
 
-  const greenStreak = calcGreenStreak(usedEntries);
-  const greenDays = usedEntries.filter((e) => (e.pnl ?? 0) > 0).length;
-  const blueDays = usedEntries.filter((e) => (e.pnl ?? 0) < 0).length;
+  const greenStreak = calcGreenStreak(filteredEntries);
+  const greenDays = filteredEntries.filter((e) => {
+    const pnl =
+      typeof e.pnl === "number" ? e.pnl : Number(e.pnl) || 0;
+    return pnl > 0;
+  }).length;
+  const blueDays = filteredEntries.filter((e) => {
+    const pnl =
+      typeof e.pnl === "number" ? e.pnl : Number(e.pnl) || 0;
+    return pnl < 0;
+  }).length;
 
   // Month navigation
   const goPrevMonth = () => {
@@ -670,24 +719,32 @@ export default function DashboardPage() {
       );
     }
 
-    // ===== WIDGET: Daily Target =====
+    // ===== WIDGET: Daily Target (usa último día con journal) =====
     if (id === "daily-target") {
       return (
         <>
           <p className="text-slate-400 text-[14px] font-medium">
-            Daily Target (Start-of-Day)
+            Daily Target (Last Journal Day)
           </p>
           <div className="mt-2 rounded-xl border border-emerald-400/30 bg-emerald-400/10 p-3">
-            {plan && dailyCalcs.dailyTargetPct > 0 ? (
+            {plan && dailyCalcs.dailyTargetPct !== 0 ? (
               <>
                 <p className="text-[13px] text-emerald-300 font-medium">
-                  Goal: {dailyCalcs.dailyTargetPct}% of start-of-day balance
+                  Goal: {dailyCalcs.dailyTargetPct.toFixed(2)}% of
+                  start-of-day balance
+                </p>
+
+                <p className="text-[12px] text-slate-400 mt-1">
+                  Session date:{" "}
+                  <span className="text-slate-100 font-medium">
+                    {sessionDateStr}
+                  </span>
                 </p>
 
                 <p className="text-[14px] text-slate-300 mt-1">
                   Start-of-day:{" "}
                   <span className="font-semibold text-slate-50">
-                    ${dailyCalcs.startOfTodayBalance.toFixed(2)}
+                    ${dailyCalcs.startOfSessionBalance.toFixed(2)}
                   </span>
                 </p>
 
@@ -697,22 +754,22 @@ export default function DashboardPage() {
                       Expected (goal)
                     </p>
                     <p className="text-emerald-300 font-semibold">
-                      ${dailyCalcs.expectedTodayUSD.toFixed(2)}
+                      ${dailyCalcs.expectedSessionUSD.toFixed(2)}
                     </p>
                   </div>
                   <div>
                     <p className="text-[12px] text-slate-400">
-                      Realized today
+                      Realized this day
                     </p>
                     <p
                       className={
-                        dailyCalcs.actualTodayUSD >= 0
+                        dailyCalcs.actualSessionUSD >= 0
                           ? "text-emerald-300 font-semibold"
                           : "text-sky-300 font-semibold"
                       }
                     >
-                      {dailyCalcs.actualTodayUSD >= 0 ? "+" : "-"}$
-                      {Math.abs(dailyCalcs.actualTodayUSD).toFixed(2)}
+                      {dailyCalcs.actualSessionUSD >= 0 ? "+" : "-"}$
+                      {Math.abs(dailyCalcs.actualSessionUSD).toFixed(2)}
                     </p>
                   </div>
                   <div>
@@ -721,13 +778,13 @@ export default function DashboardPage() {
                     </p>
                     <p
                       className={
-                        dailyCalcs.diffTodayVsGoal >= 0
+                        dailyCalcs.diffSessionVsGoal >= 0
                           ? "text-emerald-400 font-semibold"
                           : "text-sky-400 font-semibold"
                       }
                     >
-                      {dailyCalcs.diffTodayVsGoal >= 0 ? "+" : "-"}$
-                      {Math.abs(dailyCalcs.diffTodayVsGoal).toFixed(2)}
+                      {dailyCalcs.diffSessionVsGoal >= 0 ? "+" : "-"}$
+                      {Math.abs(dailyCalcs.diffSessionVsGoal).toFixed(2)}
                     </p>
                   </div>
                 </div>
@@ -744,7 +801,7 @@ export default function DashboardPage() {
                   <p className="text-[11px] text-slate-400 mt-1">
                     {dailyCalcs.progressToGoal.toFixed(
                       1
-                    )}% of today&apos;s goal
+                    )}% of that day&apos;s goal
                   </p>
                 </div>
 
@@ -761,15 +818,16 @@ export default function DashboardPage() {
                 </div>
 
                 <Link
-                  href={`/journal/${todayStr}`}
+                  href={`/journal/${sessionDateStr}`}
                   className="inline-flex mt-3 px-3 py-1.5 rounded-lg bg-emerald-400 text-slate-950 text-[13px] font-semibold hover:bg-emerald-300 transition"
                 >
-                  Open today&apos;s journal
+                  Open that journal day
                 </Link>
               </>
             ) : (
               <p className="text-[13px] text-slate-400">
-                Set a daily % target in your growth plan to enable this widget.
+                Set a daily % target in your growth plan to enable this
+                widget.
               </p>
             )}
           </div>
@@ -780,12 +838,20 @@ export default function DashboardPage() {
     // ===== WIDGET: Mindset Ratio =====
     if (id === "mindset-ratio") {
       const lastN = 30;
-      const recent = [...usedEntries]
-        .sort((a, b) => b.date.localeCompare(a.date))
+      const recent = [...filteredEntries]
+        .sort((a, b) => String(b.date).localeCompare(String(a.date)))
         .slice(0, lastN);
 
-      const aligned = recent.filter((e) => (e.pnl ?? 0) > 0).length;
-      const learning = recent.filter((e) => (e.pnl ?? 0) <= 0).length;
+      const aligned = recent.filter((e) => {
+        const pnl =
+          typeof e.pnl === "number" ? e.pnl : Number(e.pnl) || 0;
+        return pnl > 0;
+      }).length;
+      const learning = recent.filter((e) => {
+        const pnl =
+          typeof e.pnl === "number" ? e.pnl : Number(e.pnl) || 0;
+        return pnl <= 0;
+      }).length;
       const total = recent.length || 1;
       const ratioPct = (aligned / total) * 100;
 
@@ -793,13 +859,25 @@ export default function DashboardPage() {
         arr.length ? arr.reduce((s, n) => s + n, 0) / arr.length : 0;
       const alignedAvg = avg(
         recent
-          .filter((e) => (e.pnl ?? 0) > 0)
-          .map((e) => e.pnl ?? 0)
+          .filter((e) => {
+            const pnl =
+              typeof e.pnl === "number" ? e.pnl : Number(e.pnl) || 0;
+            return pnl > 0;
+          })
+          .map((e) =>
+            typeof e.pnl === "number" ? e.pnl : Number(e.pnl) || 0
+          )
       );
       const learningAvg = avg(
         recent
-          .filter((e) => (e.pnl ?? 0) <= 0)
-          .map((e) => e.pnl ?? 0)
+          .filter((e) => {
+            const pnl =
+              typeof e.pnl === "number" ? e.pnl : Number(e.pnl) || 0;
+            return pnl <= 0;
+          })
+          .map((e) =>
+            typeof e.pnl === "number" ? e.pnl : Number(e.pnl) || 0
+          )
       );
 
       return (
@@ -968,7 +1046,7 @@ export default function DashboardPage() {
       );
     }
 
-    // ===== Calendar (Mon–Fri only + week numbers on the left) =====
+    // ===== Calendar (Mon–Fri + week numbers) =====
     if (id === "calendar") {
       return (
         <div className="h-full flex flex-col">
@@ -995,7 +1073,7 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* Week + weekday header (Mon–Fri) */}
+          {/* Week + weekday header */}
           <div className="grid grid-cols-[auto_repeat(5,minmax(0,1fr))] gap-2 mb-2 text-[12px] text-slate-500">
             <div className="text-left">Week</div>
             <div className="text-center">Mon</div>
@@ -1005,21 +1083,20 @@ export default function DashboardPage() {
             <div className="text-center">Fri</div>
           </div>
 
-          {/* Calendar rows: left = week number, right = Mon–Fri cells */}
           <div className="space-y-2 text-[14px]">
             {Array.from({ length: 6 }).map((_, rowIdx) => (
               <div
                 key={rowIdx}
                 className="grid grid-cols-[auto_repeat(5,minmax(0,1fr))] gap-2"
               >
-                {/* Week number of year */}
+                {/* Week number */}
                 <div className="flex items-center pl-1 text-[12px] text-emerald-300 font-semibold">
                   {weekRowNumbers[rowIdx]
                     ? `W${weekRowNumbers[rowIdx]}`
                     : ""}
                 </div>
 
-                {/* Mon–Fri cells (day-of-week 1..5, underlying grid is Sun..Sat) */}
+                {/* Mon–Fri cells */}
                 {[1, 2, 3, 4, 5].map((dow) => {
                   const idx = rowIdx * 7 + dow;
                   const cell = calendarCells[idx];
@@ -1030,7 +1107,11 @@ export default function DashboardPage() {
 
                   const hasDate =
                     cell.dateStr !== null && cell.dayNumber !== null;
-                  const pnl = cell.entry?.pnl ?? 0;
+                  const rawPnl = cell.entry?.pnl ?? 0;
+                  const pnl =
+                    typeof rawPnl === "number"
+                      ? rawPnl
+                      : Number(rawPnl) || 0;
 
                   let bg =
                     "bg-slate-950/90 border-slate-800 text-slate-600";
@@ -1105,7 +1186,7 @@ export default function DashboardPage() {
       );
     }
 
-    // ===== Weekly Summary (id "weekly") =====
+    // ===== Weekly Summary =====
     if (id === "weekly") {
       return (
         <>
