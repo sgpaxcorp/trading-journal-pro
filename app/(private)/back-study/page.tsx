@@ -557,7 +557,7 @@ function InteractiveCandleChart({
       ) : (
         <div
           ref={containerRef}
-          className="w-full h-[320px] rounded-xl border border-slate-800 bg-slate-950"
+          className="w-full h-80 rounded-xl border border-slate-800 bg-slate-950"
         />
       )}
     </div>

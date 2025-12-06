@@ -198,7 +198,7 @@ export default function PricingPage() {
 
             {/* ADVANCED (planId = "advanced") */}
             <div className="flex-1 max-w-sm mx-auto relative">
-              <div className="absolute -inset-0.5 rounded-3xl bg-gradient-to-br from-emerald-400/40 via-sky-400/25 to-transparent opacity-80 blur-xl" />
+              <div className="absolute -inset-0.5 rounded-3xl bg-linear-to-br from-emerald-400/40 via-sky-400/25 to-transparent opacity-80 blur-xl" />
               <div className="relative bg-slate-950/98 border border-emerald-500/60 rounded-2xl p-5 flex flex-col shadow-[0_15px_60px_rgba(15,23,42,0.9)] backdrop-blur-sm">
                 <div className="flex items-center justify-between">
                   <h2 className="text-sm font-semibold text-emerald-400">

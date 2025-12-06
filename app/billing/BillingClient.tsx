@@ -136,7 +136,7 @@ export default function BillingClient({ initialPlan }: BillingClientProps) {
           >
             <div className="flex items-center justify-between mb-1">
               <p className="text-xs font-semibold text-slate-100">Advanced</p>
-              <span className="rounded-full bg-emerald-500/10 border border-emerald-400/60 px-2 py-[2px] text-[9px] text-emerald-300 font-semibold">
+              <span className="rounded-full bg-emerald-500/10 border border-emerald-400/60 px-2 py-0.5 text-[9px] text-emerald-300 font-semibold">
                 Most popular
               </span>
             </div>
