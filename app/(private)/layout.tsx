@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { supabaseBrowser } from "@/lib/supaBaseClient";
+import CandleAssistant from "@/app/components/CandleAssistant";
 
 type PrivateLayoutProps = {
   children: React.ReactNode;
@@ -111,5 +112,8 @@ export default function PrivateLayout({ children }: PrivateLayoutProps) {
     router,
   ]);
 
-  return <>{children}</>;
+  return (<>{children}
+  <CandleAssistant /> 
+  </>
+  );
 }

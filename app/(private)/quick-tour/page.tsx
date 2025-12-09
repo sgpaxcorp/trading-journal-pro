@@ -250,7 +250,7 @@ export default function QuickTourPage() {
             <ul className="space-y-2 text-[11px] md:text-xs text-slate-300">
               {currentStep.body.map((line, i) => (
                 <li key={i} className="flex gap-2">
-                  <span className="mt-[2px] h-1.5 w-1.5 rounded-full bg-emerald-400/80" />
+                  <span className="mt-0.5 h-1.5 w-1.5 rounded-full bg-emerald-400/80" />
                   <span>{line}</span>
                 </li>
               ))}
