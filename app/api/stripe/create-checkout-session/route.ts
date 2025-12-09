@@ -5,8 +5,7 @@ import Stripe from "stripe";
 type PlanId = "core" | "advanced";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {
- 
-});
+  });
 
 // Price IDs from your Stripe Dashboard (env vars)
 const PRICE_IDS: Record<PlanId, string> = {
@@ -114,7 +113,7 @@ export async function POST(req: NextRequest) {
     // =====================================================
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
-      customer: customerId, // usar siempre un customer existente
+      customer: customerId, // ✅ usamos solo customer
       line_items: [
         {
           price: priceId,

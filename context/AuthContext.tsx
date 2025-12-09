@@ -31,7 +31,7 @@ type SignUpArgs = {
   password: string;
   phone: string;
   address: string; // dirección postal
-  plan: PlanId; // standard | professional
+  plan: PlanId; // core | advanced
 };
 
 type SignInArgs = {
@@ -57,7 +57,7 @@ function mapSupabaseUserToAppUser(sbUser: SupabaseUser | null): AppUser | null {
   if (!sbUser) return null;
 
   const plan =
-    (sbUser.user_metadata?.plan as PlanId | undefined) ?? ("standard" as PlanId);
+    (sbUser.user_metadata?.plan as PlanId | undefined) ?? ("core" as PlanId);
 
   const name =
     (sbUser.user_metadata?.full_name as string | undefined) ??
@@ -168,7 +168,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         throw new Error("User was not created correctly.");
       }
 
-      // 2) Crear/actualizar fila en public.profiles (ya sin is_approved)
+      // 2) Crear/actualizar fila en public.profiles
       const { error: profileError } = await supabaseBrowser
         .from("profiles")
         .upsert({
@@ -178,7 +178,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           last_name: lastName,
           phone,
           postal_address: address,
-          // is_approved: true, // si quieres mantener la columna, puedes dejarlo siempre en true
+
+          // 👇 NUEVOS CAMPOS PARA LA SUSCRIPCIÓN
+          plan,                           // core | advanced (PlanId)
+          subscription_status: "pending", // estado inicial hasta que Stripe confirme
+          stripe_customer_id: null,       // se llenará luego desde el webhook
+          stripe_subscription_id: null,   // se llenará luego desde el webhook
         });
 
       if (profileError) {

@@ -77,7 +77,9 @@ function SignUpPageInner() {
   const searchParams = useSearchParams();
 
   // Hint de plan desde el pricing (/signup?plan=core|advanced)
-  const planFromQuery = (searchParams.get("plan") as PlanId | null) ?? "core";
+  const planParam = searchParams.get("plan");
+  const planFromQuery: PlanId =
+    planParam === "advanced" ? "advanced" : "core";
 
   const [stepUi, setStepUi] = useState<StepUi>("form");
 

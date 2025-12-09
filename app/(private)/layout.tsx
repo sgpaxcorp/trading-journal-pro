@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
+import { supabaseBrowser } from "@/lib/supaBaseClient";
 
 type PrivateLayoutProps = {
   children: React.ReactNode;
@@ -11,43 +12,50 @@ type PrivateLayoutProps = {
 export default function PrivateLayout({ children }: PrivateLayoutProps) {
   const router = useRouter();
   const pathname = usePathname();
-  const { user, profile } = useAuth() as any;
+  const { user, loading } = useAuth() as any;
 
-  // 1) Si no hay user → fuera
+  // Estado local para status de suscripción,
+  // leído directamente desde la tabla profiles.
+  const [subscriptionStatus, setSubscriptionStatus] =
+    useState<string>("pending");
+
+  /* 1) Si no hay usuario y ya terminó de cargar → mandar a /signin */
   useEffect(() => {
-    if (!user) {
+    if (!loading && !user) {
       router.replace("/signin");
     }
-  }, [user, router]);
+  }, [loading, user, router]);
 
-  // 2) Derivar subscriptionStatus desde profile o metadata
-  const subscriptionStatusFromProfile =
-    (profile as any)?.subscription_status || (profile as any)?.subscriptionStatus;
-
-  const subscriptionStatusFromMetadata =
-    (user as any)?.subscriptionStatus ||
-    (user as any)?.user_metadata?.subscriptionStatus;
-
-  const subscriptionStatus =
-    subscriptionStatusFromProfile || subscriptionStatusFromMetadata || "pending";
-
-  // 3) Derivar onboardingCompleted desde metadata o profile
-  const onboardingCompletedFromMeta =
-    (user as any)?.onboardingCompleted ||
-    (user as any)?.user_metadata?.onboardingCompleted;
-
-  const onboardingCompletedFromProfile =
-    (profile as any)?.onboarding_completed ||
-    (profile as any)?.onboardingCompleted;
-
-  const onboardingCompleted =
-    onboardingCompletedFromMeta ?? onboardingCompletedFromProfile ?? false;
-
+  /* 2) Leer perfil más reciente desde Supabase (tabla profiles) */
   useEffect(() => {
-    // Hasta que no haya user, no hacemos más nada
-    if (!user) return;
+    if (loading || !user) return;
 
-    // Rutas que se permiten aunque la subscripción no esté activa
+    const fetchProfile = async () => {
+      const { data, error } = await supabaseBrowser
+        .from("profiles")
+        .select("subscription_status")
+        .eq("id", user.id)
+        .single();
+
+      if (error || !data) {
+        console.error("[PrivateLayout] Error loading profile:", error);
+        return;
+      }
+
+      setSubscriptionStatus(
+        (data.subscription_status as string) || "pending"
+      );
+    };
+
+    fetchProfile();
+  }, [loading, user]);
+
+  /* 3) Lógica de gating: suscripción */
+  useEffect(() => {
+    // Mientras está cargando o no hay user, no hacemos nada
+    if (loading || !user) return;
+
+    // Rutas permitidas aunque la suscripción no esté activa
     const allowWithoutActiveSub = [
       "/billing",
       "/billing/complete",
@@ -55,7 +63,7 @@ export default function PrivateLayout({ children }: PrivateLayoutProps) {
       "/confirmed",
     ];
 
-    // 1) Si la suscripción NO está activa → bloquear todo lo privado
+    // Si la suscripción NO está activa → mandar a pantalla de completar billing
     if (
       subscriptionStatus !== "active" &&
       !allowWithoutActiveSub.includes(pathname)
@@ -63,18 +71,8 @@ export default function PrivateLayout({ children }: PrivateLayoutProps) {
       router.replace("/billing/complete");
       return;
     }
+  }, [loading, user, subscriptionStatus, pathname, router]);
 
-    // 2) Si la suscripción está activa pero aún no completó onboarding → forzar quick-tour
-    if (
-      subscriptionStatus === "active" &&
-      !onboardingCompleted &&
-      pathname !== "/quick-tour"
-    ) {
-      router.replace("/quick-tour");
-      return;
-    }
-  }, [user, subscriptionStatus, onboardingCompleted, pathname, router]);
-
-  // Mientras resuelve redirecciones mostramos el contenido; el router se encarga de moverlo
+  // Mostramos children; el router se encargará de redirigir cuando toque
   return <>{children}</>;
 }

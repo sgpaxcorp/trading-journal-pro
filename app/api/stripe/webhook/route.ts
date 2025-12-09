@@ -5,7 +5,9 @@ import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 
 type PlanId = "core" | "advanced";
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string);
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {
+
+});
 const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET!;
 
 export async function POST(req: NextRequest) {
@@ -31,6 +33,8 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  console.log("[WEBHOOK] Received event:", event.type);
+
   try {
     switch (event.type) {
       case "checkout.session.completed": {
@@ -40,7 +44,10 @@ export async function POST(req: NextRequest) {
         const subscriptionId = session.subscription as string | undefined;
         const customerId = session.customer as string | undefined;
 
-        if (!userId) break;
+        if (!userId) {
+          console.warn("[WEBHOOK] checkout.session.completed without userId");
+          break;
+        }
 
         let planId: PlanId = planIdMeta ?? "core";
 
@@ -59,23 +66,40 @@ export async function POST(req: NextRequest) {
         }
 
         // 1) Actualiza la tabla profiles
-        await supabaseAdmin
+        const { error: profileError } = await supabaseAdmin
           .from("profiles")
           .update({
             plan: planId,
-            stripe_customer_id: customerId,
-            stripe_subscription_id: subscriptionId,
+            stripe_customer_id: customerId ?? null,
+            stripe_subscription_id: subscriptionId ?? null,
             subscription_status: "active",
           })
           .eq("id", userId);
 
+        if (profileError) {
+          console.error(
+            "[WEBHOOK] Error updating profiles for checkout.session.completed:",
+            profileError
+          );
+        }
+
         // 2) Actualiza también user_metadata para que el guard lo vea
-        await supabaseAdmin.auth.admin.updateUserById(userId, {
-          user_metadata: {
-            plan: planId,
-            subscriptionStatus: "active",  // 👈 AQUÍ LA CLAVE
-          },
-        });
+        const { error: metaError } = await supabaseAdmin.auth.admin.updateUserById(
+          userId,
+          {
+            user_metadata: {
+              plan: planId,
+              subscriptionStatus: "active", // 👈 AQUÍ LA CLAVE
+            },
+          }
+        );
+
+        if (metaError) {
+          console.error(
+            "[WEBHOOK] Error updating user_metadata in auth:",
+            metaError
+          );
+        }
 
         console.log(
           `[WEBHOOK] Subscription active for user ${userId} with plan ${planId}.`
@@ -97,18 +121,33 @@ export async function POST(req: NextRequest) {
         if (!error && rows && rows.length > 0) {
           const userId = rows[0].id as string;
 
-          await supabaseAdmin
+          const { error: profileError } = await supabaseAdmin
             .from("profiles")
             .update({
               subscription_status: status,
             })
             .eq("id", userId);
 
-          await supabaseAdmin.auth.admin.updateUserById(userId, {
-            user_metadata: {
-              subscriptionStatus: status,
-            },
-          });
+          if (profileError) {
+            console.error(
+              "[WEBHOOK] Error updating profiles on subscription.deleted:",
+              profileError
+            );
+          }
+
+          const { error: metaError } =
+            await supabaseAdmin.auth.admin.updateUserById(userId, {
+              user_metadata: {
+                subscriptionStatus: status,
+              },
+            });
+
+          if (metaError) {
+            console.error(
+              "[WEBHOOK] Error updating user_metadata on subscription.deleted:",
+              metaError
+            );
+          }
         }
 
         break;
@@ -133,18 +172,33 @@ export async function POST(req: NextRequest) {
           if (!error && rows && rows.length > 0) {
             const userId = rows[0].id as string;
 
-            await supabaseAdmin
+            const { error: profileError } = await supabaseAdmin
               .from("profiles")
               .update({
                 subscription_status: status,
               })
               .eq("id", userId);
 
-            await supabaseAdmin.auth.admin.updateUserById(userId, {
-              user_metadata: {
-                subscriptionStatus: status,
-              },
-            });
+            if (profileError) {
+              console.error(
+                "[WEBHOOK] Error updating profiles on subscription.updated:",
+                profileError
+              );
+            }
+
+            const { error: metaError } =
+              await supabaseAdmin.auth.admin.updateUserById(userId, {
+                user_metadata: {
+                  subscriptionStatus: status,
+                },
+              });
+
+            if (metaError) {
+              console.error(
+                "[WEBHOOK] Error updating user_metadata on subscription.updated:",
+                metaError
+              );
+            }
           }
         }
 
@@ -152,6 +206,7 @@ export async function POST(req: NextRequest) {
       }
 
       default:
+        // Otros eventos los ignoramos
         break;
     }
 
