@@ -19,6 +19,9 @@ export default function PrivateLayout({ children }: PrivateLayoutProps) {
   const [subscriptionStatus, setSubscriptionStatus] =
     useState<string>("pending");
 
+  // Para asegurarnos de que ya intentamos leer el perfil
+  const [profileChecked, setProfileChecked] = useState(false);
+
   /* 1) Si no hay usuario y ya terminó de cargar → mandar a /signin */
   useEffect(() => {
     if (!loading && !user) {
@@ -31,6 +34,8 @@ export default function PrivateLayout({ children }: PrivateLayoutProps) {
     if (loading || !user) return;
 
     const fetchProfile = async () => {
+      console.log("[PrivateLayout] Fetching profile for user:", user.id);
+
       const { data, error } = await supabaseBrowser
         .from("profiles")
         .select("subscription_status")
@@ -39,12 +44,17 @@ export default function PrivateLayout({ children }: PrivateLayoutProps) {
 
       if (error || !data) {
         console.error("[PrivateLayout] Error loading profile:", error);
+        setProfileChecked(true);
         return;
       }
 
-      setSubscriptionStatus(
-        (data.subscription_status as string) || "pending"
-      );
+      const status =
+        (data.subscription_status as string | undefined) ?? "pending";
+
+      console.log("[PrivateLayout] subscription_status from DB:", status);
+
+      setSubscriptionStatus(status);
+      setProfileChecked(true);
     };
 
     fetchProfile();
@@ -52,8 +62,15 @@ export default function PrivateLayout({ children }: PrivateLayoutProps) {
 
   /* 3) Lógica de gating: suscripción */
   useEffect(() => {
-    // Mientras está cargando o no hay user, no hacemos nada
-    if (loading || !user) return;
+    // Mientras está cargando, no hay user o todavía no leímos el perfil → no hacemos nada
+    if (loading || !user || !profileChecked) return;
+
+    console.log(
+      "[PrivateLayout] Gating with status:",
+      subscriptionStatus,
+      "pathname:",
+      pathname
+    );
 
     // Rutas permitidas aunque la suscripción no esté activa
     const allowWithoutActiveSub = [
@@ -71,7 +88,7 @@ export default function PrivateLayout({ children }: PrivateLayoutProps) {
       router.replace("/billing/complete");
       return;
     }
-  }, [loading, user, subscriptionStatus, pathname, router]);
+  }, [loading, user, profileChecked, subscriptionStatus, pathname, router]);
 
   // Mostramos children; el router se encargará de redirigir cuando toque
   return <>{children}</>;
