@@ -14,12 +14,10 @@ export default function PrivateLayout({ children }: PrivateLayoutProps) {
   const pathname = usePathname();
   const { user, loading } = useAuth() as any;
 
-  // Estado local para status de suscripción,
-  // leído directamente desde la tabla profiles.
   const [subscriptionStatus, setSubscriptionStatus] =
     useState<string>("pending");
-
-  // Para asegurarnos de que ya intentamos leer el perfil
+  const [onboardingCompleted, setOnboardingCompleted] =
+    useState<boolean>(false);
   const [profileChecked, setProfileChecked] = useState(false);
 
   /* 1) Si no hay usuario y ya terminó de cargar → mandar a /signin */
@@ -38,7 +36,7 @@ export default function PrivateLayout({ children }: PrivateLayoutProps) {
 
       const { data, error } = await supabaseBrowser
         .from("profiles")
-        .select("subscription_status")
+        .select("subscription_status, onboarding_completed")
         .eq("id", user.id)
         .single();
 
@@ -50,24 +48,29 @@ export default function PrivateLayout({ children }: PrivateLayoutProps) {
 
       const status =
         (data.subscription_status as string | undefined) ?? "pending";
+      const onboarding =
+        (data.onboarding_completed as boolean | undefined) ?? false;
 
-      console.log("[PrivateLayout] subscription_status from DB:", status);
+      console.log("[PrivateLayout] subscription_status:", status);
+      console.log("[PrivateLayout] onboarding_completed:", onboarding);
 
       setSubscriptionStatus(status);
+      setOnboardingCompleted(onboarding);
       setProfileChecked(true);
     };
 
     fetchProfile();
   }, [loading, user]);
 
-  /* 3) Lógica de gating: suscripción */
+  /* 3) Lógica de gating: suscripción + quick tour */
   useEffect(() => {
-    // Mientras está cargando, no hay user o todavía no leímos el perfil → no hacemos nada
     if (loading || !user || !profileChecked) return;
 
     console.log(
       "[PrivateLayout] Gating with status:",
       subscriptionStatus,
+      "onboardingCompleted:",
+      onboardingCompleted,
       "pathname:",
       pathname
     );
@@ -80,7 +83,7 @@ export default function PrivateLayout({ children }: PrivateLayoutProps) {
       "/confirmed",
     ];
 
-    // Si la suscripción NO está activa → mandar a pantalla de completar billing
+    // 3.1) Si la suscripción NO está activa → mandar a /billing/complete
     if (
       subscriptionStatus !== "active" &&
       !allowWithoutActiveSub.includes(pathname)
@@ -88,8 +91,25 @@ export default function PrivateLayout({ children }: PrivateLayoutProps) {
       router.replace("/billing/complete");
       return;
     }
-  }, [loading, user, profileChecked, subscriptionStatus, pathname, router]);
 
-  // Mostramos children; el router se encargará de redirigir cuando toque
+    // 3.2) Si la suscripción está activa pero no ha hecho quick tour → /quick-tour
+    if (
+      subscriptionStatus === "active" &&
+      !onboardingCompleted &&
+      pathname !== "/quick-tour"
+    ) {
+      router.replace("/quick-tour");
+      return;
+    }
+  }, [
+    loading,
+    user,
+    profileChecked,
+    subscriptionStatus,
+    onboardingCompleted,
+    pathname,
+    router,
+  ]);
+
   return <>{children}</>;
 }
