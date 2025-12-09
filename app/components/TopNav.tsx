@@ -461,6 +461,14 @@ export default function TopNav() {
           <Dropdown title="Resources" items={resources} />
           <Dropdown title="Rules & Alarms" items={rules} />
           <Dropdown title="Forum" items={forum} />
+
+          {/* Global Ranking */}
+          <Link
+            href="/globalranking"
+            className="rounded-lg px-3 py-1.5 text-sm font-medium text-slate-200 hover:bg-slate-800 hover:text-slate-50 transition-colors"
+          >
+            Global Ranking
+          </Link>
         </div>
 
         {/* Right side: Help + Account */}
