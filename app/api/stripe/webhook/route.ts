@@ -5,9 +5,7 @@ import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 
 type PlanId = "core" | "advanced";
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {
-
-});
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {});
 const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET!;
 
 export async function POST(req: NextRequest) {
@@ -26,7 +24,10 @@ export async function POST(req: NextRequest) {
   try {
     event = stripe.webhooks.constructEvent(rawBody, sig, webhookSecret);
   } catch (err: any) {
-    console.error("Stripe webhook signature verification failed:", err);
+    console.error(
+      "[WEBHOOK] Stripe webhook signature verification failed:",
+      err?.message
+    );
     return NextResponse.json(
       { error: `Webhook Error: ${err.message}` },
       { status: 400 }
@@ -39,31 +40,137 @@ export async function POST(req: NextRequest) {
     switch (event.type) {
       case "checkout.session.completed": {
         const session = event.data.object as Stripe.Checkout.Session;
-        const userId = session.metadata?.supabaseUserId as string | undefined;
-        const planIdMeta = session.metadata?.planId as PlanId | undefined;
+
+        // 🔹 Tomar userId de varias posibles keys
+        let userId =
+          (session.metadata?.supabaseUserId as string | undefined) ||
+          (session.metadata?.userId as string | undefined);
+
+        // 🔹 Tomar plan de varias posibles keys
+        let planIdMeta =
+          (session.metadata?.planId as PlanId | undefined) ||
+          (session.metadata?.plan as PlanId | undefined);
+
         const subscriptionId = session.subscription as string | undefined;
         const customerId = session.customer as string | undefined;
+        const email =
+          session.customer_email ??
+          session.customer_details?.email ??
+          null;
 
+        console.log("[WEBHOOK] checkout.session.completed raw metadata:", {
+          sessionMetadata: session.metadata,
+          subscriptionId,
+          customerId,
+          email,
+        });
+
+        // Fallback: buscar metadata en la suscripción si el userId / planId vienen vacíos
+        let subscription: Stripe.Subscription | null = null;
+        if ((!userId || !planIdMeta) && typeof subscriptionId === "string") {
+          subscription = await stripe.subscriptions.retrieve(subscriptionId);
+
+          userId =
+            userId ||
+            (subscription.metadata?.supabaseUserId as string | undefined) ||
+            (subscription.metadata?.userId as string | undefined);
+
+          planIdMeta =
+            planIdMeta ||
+            (subscription.metadata?.planId as PlanId | undefined) ||
+            (subscription.metadata?.plan as PlanId | undefined);
+
+          console.log("[WEBHOOK] subscription metadata fallback:", {
+            subscriptionMetadata: subscription.metadata,
+          });
+        }
+
+        // Si no logramos userId, intentamos actualizar por email
         if (!userId) {
-          console.warn("[WEBHOOK] checkout.session.completed without userId");
+          if (email) {
+            console.warn(
+              "[WEBHOOK] No userId in metadata, attempting update by email:",
+              email
+            );
+
+            let planId: PlanId = planIdMeta ?? "core";
+
+            // Fallback por priceId si aún no tenemos planId
+            if (!planIdMeta && subscriptionId) {
+              const subToInspect =
+                subscription ||
+                (await stripe.subscriptions.retrieve(subscriptionId));
+
+              const priceId = subToInspect.items.data[0]?.price?.id;
+              console.log("[WEBHOOK] priceId fallback (no userId):", priceId);
+
+              if (priceId === process.env.STRIPE_PRICE_ADVANCED_MONTHLY) {
+                planId = "advanced";
+              } else if (
+                priceId === process.env.STRIPE_PRICE_CORE_MONTHLY
+              ) {
+                planId = "core";
+              }
+            }
+
+            const { error: profileError } = await supabaseAdmin
+              .from("profiles")
+              .update({
+                plan: planId,
+                stripe_customer_id: customerId ?? null,
+                stripe_subscription_id: subscriptionId ?? null,
+                subscription_status: "active",
+              })
+              .eq("email", email.toLowerCase());
+
+            if (profileError) {
+              console.error(
+                "[WEBHOOK] Error updating profiles by email for checkout.session.completed:",
+                profileError
+              );
+            } else {
+              console.log(
+                "[WEBHOOK] profiles updated successfully by email",
+                email
+              );
+            }
+          } else {
+            console.warn(
+              "[WEBHOOK] checkout.session.completed without userId or email (session + subscription metadata were empty)"
+            );
+          }
           break;
         }
 
+        // 🔹 Si sí tenemos userId (flujo normal)
         let planId: PlanId = planIdMeta ?? "core";
 
-        // Fallback por priceId si hace falta
-        if (!planIdMeta && typeof subscriptionId === "string") {
-          const subscription = await stripe.subscriptions.retrieve(
-            subscriptionId
-          );
-          const priceId = subscription.items.data[0]?.price?.id;
+        // Fallback por priceId si aún no tenemos planId
+        if (!planIdMeta) {
+          const subToInspect =
+            subscription ||
+            (subscriptionId
+              ? await stripe.subscriptions.retrieve(subscriptionId)
+              : null);
+
+          const priceId = subToInspect?.items.data[0]?.price?.id;
+          console.log("[WEBHOOK] priceId fallback:", priceId);
 
           if (priceId === process.env.STRIPE_PRICE_ADVANCED_MONTHLY) {
             planId = "advanced";
-          } else if (priceId === process.env.STRIPE_PRICE_CORE_MONTHLY) {
+          } else if (
+            priceId === process.env.STRIPE_PRICE_CORE_MONTHLY
+          ) {
             planId = "core";
           }
         }
+
+        console.log("[WEBHOOK] Resolving user + plan:", {
+          userId,
+          planId,
+          customerId,
+          subscriptionId,
+        });
 
         // 1) Actualiza la tabla profiles
         const { error: profileError } = await supabaseAdmin
@@ -81,23 +188,31 @@ export async function POST(req: NextRequest) {
             "[WEBHOOK] Error updating profiles for checkout.session.completed:",
             profileError
           );
+        } else {
+          console.log(
+            "[WEBHOOK] profiles updated successfully for",
+            userId
+          );
         }
 
         // 2) Actualiza también user_metadata para que el guard lo vea
-        const { error: metaError } = await supabaseAdmin.auth.admin.updateUserById(
-          userId,
-          {
+        const { error: metaError } =
+          await supabaseAdmin.auth.admin.updateUserById(userId, {
             user_metadata: {
               plan: planId,
-              subscriptionStatus: "active", // 👈 AQUÍ LA CLAVE
+              subscriptionStatus: "active",
             },
-          }
-        );
+          });
 
         if (metaError) {
           console.error(
             "[WEBHOOK] Error updating user_metadata in auth:",
             metaError
+          );
+        } else {
+          console.log(
+            "[WEBHOOK] user_metadata updated successfully for",
+            userId
           );
         }
 
@@ -111,6 +226,12 @@ export async function POST(req: NextRequest) {
         const subscription = event.data.object as Stripe.Subscription;
         const customerId = subscription.customer as string;
         const status = subscription.status;
+
+        console.log(
+          "[WEBHOOK] customer.subscription.deleted:",
+          customerId,
+          status
+        );
 
         const { data: rows, error } = await supabaseAdmin
           .from("profiles")
@@ -157,6 +278,12 @@ export async function POST(req: NextRequest) {
         const subscription = event.data.object as Stripe.Subscription;
         const customerId = subscription.customer as string;
         const status = subscription.status;
+
+        console.log(
+          "[WEBHOOK] customer.subscription.updated:",
+          customerId,
+          status
+        );
 
         if (
           status === "canceled" ||
@@ -207,6 +334,7 @@ export async function POST(req: NextRequest) {
 
       default:
         // Otros eventos los ignoramos
+        console.log("[WEBHOOK] Ignoring event type:", event.type);
         break;
     }
 

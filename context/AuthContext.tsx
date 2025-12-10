@@ -39,10 +39,16 @@ type SignInArgs = {
   password: string;
 };
 
+type SignUpResult = {
+  userId: string;
+  email: string;
+  plan: PlanId;
+};
+
 type AuthContextValue = {
   user: AppUser | null;
   loading: boolean;
-  signUp: (args: SignUpArgs) => Promise<void>;
+  signUp: (args: SignUpArgs) => Promise<SignUpResult>;
   signIn: (args: SignInArgs) => Promise<void>;
   signOut: () => Promise<void>;
 };
@@ -53,7 +59,9 @@ const AuthContext = createContext<AuthContextValue | undefined>(undefined);
    Helpers
 ======================== */
 
-function mapSupabaseUserToAppUser(sbUser: SupabaseUser | null): AppUser | null {
+function mapSupabaseUserToAppUser(
+  sbUser: SupabaseUser | null
+): AppUser | null {
   if (!sbUser) return null;
 
   const plan =
@@ -130,7 +138,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     phone,
     address,
     plan,
-  }: SignUpArgs) => {
+  }: SignUpArgs): Promise<SignUpResult> => {
     setLoading(true);
     try {
       const normalizedEmail = email.trim().toLowerCase();
@@ -179,11 +187,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           phone,
           postal_address: address,
 
-          // 👇 NUEVOS CAMPOS PARA LA SUSCRIPCIÓN
-          plan,                           // core | advanced (PlanId)
-          subscription_status: "pending", // estado inicial hasta que Stripe confirme
-          stripe_customer_id: null,       // se llenará luego desde el webhook
-          stripe_subscription_id: null,   // se llenará luego desde el webhook
+          // Campos de suscripción
+          plan, // core | advanced (PlanId)
+          subscription_status: "pending", // hasta que Stripe confirme
+          stripe_customer_id: null, // se llenará luego desde el webhook
+          stripe_subscription_id: null, // se llenará luego desde el webhook
         });
 
       if (profileError) {
@@ -197,7 +205,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         sendSubscriptionReceiptEmail(appUser, plan).catch(() => {});
       }
 
-      // No hacemos setUser: que primero confirme email y luego haga login.
+      // 👉 devolvemos los datos mínimos para el step 2 (billing)
+      return {
+        userId: sbUser.id,
+        email: normalizedEmail,
+        plan,
+      };
     } finally {
       setLoading(false);
     }
@@ -225,7 +238,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         throw new Error("No user returned from Supabase.");
       }
 
-      // 🔑 Ya NO revisamos is_approved ni bloqueamos el acceso
       const appUser = mapSupabaseUserToAppUser(sbUser);
       setUser(appUser);
     } finally {
