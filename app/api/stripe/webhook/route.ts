@@ -2,6 +2,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
+import {
+  sendWelcomeEmailByEmail,
+  sendSubscriptionReceiptEmailByEmail,
+} from "@/lib/email";
 
 type PlanId = "core" | "advanced";
 
@@ -57,6 +61,11 @@ export async function POST(req: NextRequest) {
           session.customer_email ??
           session.customer_details?.email ??
           null;
+
+        const customerName = session.customer_details?.name ?? null;
+        const amountTotal = session.amount_total
+          ? session.amount_total / 100
+          : undefined;
 
         console.log("[WEBHOOK] checkout.session.completed raw metadata:", {
           sessionMetadata: session.metadata,
@@ -133,6 +142,26 @@ export async function POST(req: NextRequest) {
                 "[WEBHOOK] profiles updated successfully by email",
                 email
               );
+
+              // 🔔 Enviar emails DESPUÉS de marcar la suscripción como activa
+              try {
+                await sendWelcomeEmailByEmail(email, customerName);
+                await sendSubscriptionReceiptEmailByEmail({
+                  email,
+                  plan: planId,
+                  amount: amountTotal,
+                  subscriptionId: subscriptionId ?? undefined,
+                });
+                console.log(
+                  "[WEBHOOK] Welcome + receipt emails sent (by email branch) to",
+                  email
+                );
+              } catch (mailErr) {
+                console.error(
+                  "[WEBHOOK] Error sending emails (by email branch):",
+                  mailErr
+                );
+              }
             }
           } else {
             console.warn(
@@ -214,6 +243,28 @@ export async function POST(req: NextRequest) {
             "[WEBHOOK] user_metadata updated successfully for",
             userId
           );
+        }
+
+        // 3) Enviar emails si tenemos email
+        if (email) {
+          try {
+            await sendWelcomeEmailByEmail(email, customerName);
+            await sendSubscriptionReceiptEmailByEmail({
+              email,
+              plan: planId,
+              amount: amountTotal,
+              subscriptionId: subscriptionId ?? undefined,
+            });
+            console.log(
+              "[WEBHOOK] Welcome + receipt emails sent (userId branch) to",
+              email
+            );
+          } catch (mailErr) {
+            console.error(
+              "[WEBHOOK] Error sending emails (userId branch):",
+              mailErr
+            );
+          }
         }
 
         console.log(
