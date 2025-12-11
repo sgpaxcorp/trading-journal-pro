@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
+import { supabaseBrowser } from "@/lib/supaBaseClient";
 
 type NavItem = {
   id: string;
@@ -165,20 +166,43 @@ function HelpMenu() {
 /* ========== ACCOUNT MENU (avatar) ========== */
 
 function AccountMenu() {
-  const { user, signOut } = useAuth();
+  const { user, signOut } = useAuth() as any;
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
 
+  // Plan que viene de Supabase (profiles.plan)
+  const [profilePlan, setProfilePlan] = useState<string | null>(null);
+
+  // Nombre a mostrar (prioriza firstName/lastName si existen)
   const displayName =
-    (user as any)?.name ||
-    (user as any)?.displayName ||
-    (user as any)?.email?.split("@")[0] ||
+    [user?.firstName, user?.lastName].filter(Boolean).join(" ") ||
+    user?.name ||
+    user?.displayName ||
+    user?.email?.split("@")[0] ||
     "Trader";
 
-  const email = (user as any)?.email || "";
-  const plan = (user as any)?.plan || (user as any)?.subscriptionPlan || "—";
-  const photoURL = (user as any)?.photoURL || null;
+  const email = user?.email || "";
+
+  // Plan que viene del objeto de usuario (auth)
+  const rawPlanFromUser =
+    user?.plan ||
+    user?.subscriptionPlan ||
+    user?.user_metadata?.plan ||
+    "—";
+
+  // Plan efectivo: primero profiles.plan, luego auth, luego —
+  const rawPlan =
+    profilePlan && typeof profilePlan === "string"
+      ? profilePlan
+      : rawPlanFromUser;
+
+  const plan =
+    typeof rawPlan === "string" && rawPlan !== "—"
+      ? rawPlan.toLowerCase()
+      : "—";
+
+  const photoURL = user?.photoURL || null;
 
   const initials = displayName
     .split(" ")
@@ -186,6 +210,55 @@ function AccountMenu() {
     .slice(0, 2)
     .map((s: string) => s[0]?.toUpperCase())
     .join("");
+
+  // Estilos del pill según plan
+  const planLabel =
+    plan === "core"
+      ? "Core"
+      : plan === "advanced"
+      ? "Advanced"
+      : "No plan";
+
+  const planClasses =
+    plan === "core"
+      ? "bg-emerald-500/10 text-emerald-300 border-emerald-400/60"
+      : plan === "advanced"
+      ? "bg-violet-500/10 text-violet-200 border-violet-400/70"
+      : "bg-slate-800 text-slate-300 border-slate-600";
+
+  // Leer el plan más fresco desde profiles cuando haya user.id
+  useEffect(() => {
+    if (!user?.id) return;
+
+    let cancelled = false;
+
+    async function fetchProfilePlan() {
+      try {
+        const { data, error } = await supabaseBrowser
+          .from("profiles")
+          .select("plan")
+          .eq("id", user.id)
+          .single();
+
+        if (error) {
+          console.warn("[TopNav] Error loading profile plan:", error);
+          return;
+        }
+
+        if (!cancelled && data?.plan) {
+          setProfilePlan(data.plan as string);
+        }
+      } catch (err) {
+        console.error("[TopNav] Unexpected error fetching profile plan:", err);
+      }
+    }
+
+    fetchProfilePlan();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id]);
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -210,48 +283,67 @@ function AccountMenu() {
 
   return (
     <div className="relative" ref={ref}>
+      {/* BOTÓN SUPERIOR (avatar + nombre + plan) */}
       <button
         type="button"
         onClick={() => setOpen((prev) => !prev)}
-        className="flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-slate-100 hover:border-emerald-400 hover:text-emerald-300 transition"
+        className="group flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900/90 px-2.5 py-1.5 text-xs text-slate-100 hover:border-emerald-400 hover:text-emerald-300 hover:bg-slate-900 transition shadow-sm shadow-slate-900/40"
       >
-        <div className="h-7 w-7 rounded-full overflow-hidden bg-emerald-400 text-slate-950 flex items-center justify-center text-[11px] font-semibold">
-          {photoURL ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={photoURL}
-              alt={displayName}
-              className="h-full w-full object-cover"
-            />
-          ) : (
-            <span>{initials || "TJ"}</span>
-          )}
+        {/* Avatar con borde “neuro-glow” */}
+        <div className="relative">
+          <div className="absolute inset-0 rounded-full bg-emerald-400/40 blur-[6px] opacity-0 group-hover:opacity-100 transition-opacity" />
+          <div className="h-7 w-7 rounded-full overflow-hidden bg-emerald-400 text-slate-950 flex items-center justify-center text-[11px] font-semibold border border-emerald-300/80">
+            {photoURL ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={photoURL}
+                alt={displayName}
+                className="h-full w-full object-cover"
+              />
+            ) : (
+              <span>{initials || "TJ"}</span>
+            )}
+          </div>
         </div>
+
+        {/* Nombre + plan (solo en sm+) */}
         <div className="hidden sm:flex flex-col items-start leading-tight">
-          <span className="text-[11px] font-medium">{displayName}</span>
-          <span className="text-[10px] text-slate-400">Plan: {plan}</span>
+          <span className="text-[11px] font-medium truncate max-w-[120px]">
+            {displayName}
+          </span>
+          <span
+            className={`mt-[2px] inline-flex items-center gap-1 rounded-full border px-2 py-[1px] text-[10px] font-medium ${planClasses}`}
+          >
+            <span className="h-1.5 w-1.5 rounded-full bg-current opacity-80" />
+            {plan === "—" ? "No plan set" : `Plan: ${planLabel}`}
+          </span>
         </div>
       </button>
 
+      {/* DROPDOWN */}
       {open && (
-        <div className="absolute right-0 mt-2 w-72 rounded-2xl border border-slate-800 bg-slate-950 shadow-xl shadow-slate-900/70 z-50">
-          <div className="border-b border-slate-800 px-3 py-3">
-            <p className="text-[13px] font-semibold text-slate-100">
+        <div className="absolute right-0 mt-2 w-72 rounded-2xl border border-slate-800 bg-slate-950 shadow-xl shadow-slate-900/70 z-50 overflow-hidden">
+          {/* Header usuario */}
+          <div className="border-b border-slate-800 px-3 py-3 bg-gradient-to-r from-slate-950 via-slate-900 to-slate-950">
+            <p className="text-[13px] font-semibold text-slate-100 truncate">
               {displayName}
             </p>
             {email && (
               <p className="text-[11px] text-slate-400 truncate">{email}</p>
             )}
             <p className="mt-1 text-[11px] text-emerald-300">
-              {plan && plan !== "—" ? `Current plan: ${plan}` : "No plan set yet"}
+              {plan && plan !== "—"
+                ? `Current plan: ${planLabel}`
+                : "No subscription active"}
             </p>
           </div>
 
+          {/* Opciones */}
           <ul className="py-2 text-[12px] text-slate-200">
             <li>
               <Link
                 href="/account"
-                className="flex items-center justify-between px-3 py-2 hover:bg-slate-800 transition-colors"
+                className="flex items-center justify-between px-3 py-2 hover:bg-slate-900/80 transition-colors"
               >
                 <span>Account settings</span>
                 <span className="text-[10px] text-slate-400">
@@ -262,18 +354,16 @@ function AccountMenu() {
             <li>
               <Link
                 href="/account/password"
-                className="flex items-center justify-between px-3 py-2 hover:bg-slate-800 transition-colors"
+                className="flex items-center justify-between px-3 py-2 hover:bg-slate-900/80 transition-colors"
               >
                 <span>Change password</span>
-                <span className="text-[10px] text-slate-400">
-                  Security
-                </span>
+                <span className="text-[10px] text-slate-400">Security</span>
               </Link>
             </li>
             <li>
               <Link
                 href="/billing"
-                className="flex items-center justify-between px-3 py-2 hover:bg-slate-800 transition-colors"
+                className="flex items-center justify-between px-3 py-2 hover:bg-slate-900/80 transition-colors"
               >
                 <span>Billing & subscription</span>
                 <span className="text-[10px] text-emerald-300">
@@ -284,21 +374,20 @@ function AccountMenu() {
             <li>
               <Link
                 href="/billing/history"
-                className="flex items-center justify-between px-3 py-2 hover:bg-slate-800 transition-colors"
+                className="flex items-center justify-between px-3 py-2 hover:bg-slate-900/80 transition-colors"
               >
                 <span>Billing history</span>
-                <span className="text-[10px] text-slate-400">
-                  Invoices
-                </span>
+                <span className="text-[10px] text-slate-400">Invoices</span>
               </Link>
             </li>
           </ul>
 
-          <div className="border-t border-slate-800 px-3 py-2">
+          {/* Sign out */}
+          <div className="border-t border-slate-800 px-3 py-2 bg-slate-950/95">
             <button
               type="button"
               onClick={handleSignOut}
-              className="w-full rounded-xl bg-slate-900 text-[12px] text-slate-300 py-2 border border-slate-700 hover:border-red-400 hover:text-red-300 transition"
+              className="w-full rounded-xl bg-slate-900 text-[12px] text-slate-300 py-2 border border-slate-700 hover:border-red-400 hover:text-red-300 hover:bg-slate-900/80 transition"
             >
               Sign out
             </button>

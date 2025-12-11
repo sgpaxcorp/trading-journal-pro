@@ -1,13 +1,14 @@
 // app/account/password/page.tsx
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useState, type FormEvent, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import TopNav from "@/app/components/TopNav";
 import { useAuth } from "@/context/AuthContext";
+import { supabaseBrowser } from "@/lib/supaBaseClient";
 
 export default function ChangePasswordPage() {
-  const { user, loading } = useAuth();
+  const { user, loading } = useAuth() as any;
   const router = useRouter();
 
   const [currentPassword, setCurrentPassword] = useState("");
@@ -17,14 +18,29 @@ export default function ChangePasswordPage() {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  if (!loading && !user) {
-    router.replace("/signin");
-  }
+  /* ---------- Auth guard ---------- */
+  useEffect(() => {
+    if (!loading && !user) {
+      router.replace("/signin");
+    }
+  }, [loading, user, router]);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
     setMessage(null);
+
+    if (!user) return;
+
+    if (!currentPassword) {
+      setError("Please enter your current password.");
+      return;
+    }
+
+    if (newPassword.length < 8) {
+      setError("New password must be at least 8 characters.");
+      return;
+    }
 
     if (newPassword !== confirm) {
       setError("New password and confirmation do not match.");
@@ -33,23 +49,61 @@ export default function ChangePasswordPage() {
 
     setSaving(true);
     try {
-      // En producción: llamada real a backend (API /auth/change-password)
-      // await fetch("/api/account/password", { method: "POST", body: JSON.stringify({ currentPassword, newPassword }) })
-      await new Promise((res) => setTimeout(res, 600)); // mock
-      setMessage("Password updated successfully.");
+      const email = user.email as string | undefined;
+      if (!email) {
+        setError("We couldn't find your email. Please sign out and sign in again.");
+        return;
+      }
+
+      // 1) Verificar contraseña actual
+      const { error: signInError } = await supabaseBrowser.auth.signInWithPassword(
+        {
+          email,
+          password: currentPassword,
+        }
+      );
+
+      if (signInError) {
+        console.error("[ChangePassword] Wrong current password:", signInError);
+        setError("Current password is incorrect.");
+        return;
+      }
+
+      // 2) Actualizar a la nueva contraseña
+      const { error: updateError } = await supabaseBrowser.auth.updateUser({
+        password: newPassword,
+      });
+
+      if (updateError) {
+        console.error("[ChangePassword] Error updating password:", updateError);
+        setError(updateError.message || "We couldn't update your password.");
+        return;
+      }
+
+      setMessage("Your password has been updated successfully.");
       setCurrentPassword("");
       setNewPassword("");
       setConfirm("");
     } catch (err: any) {
-      setError(err.message || "Something went wrong.");
+      console.error("[ChangePassword] Unexpected error:", err);
+      setError(err.message || "Something went wrong while updating your password.");
     } finally {
       setSaving(false);
     }
   }
 
+  if (loading || !user) {
+    return (
+      <main className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center">
+        <p className="text-slate-400 text-sm">Loading…</p>
+      </main>
+    );
+  }
+
   return (
     <main className="min-h-screen bg-slate-950 text-slate-50">
       <TopNav />
+
       <div className="max-w-xl mx-auto px-6 md:px-8 py-8 space-y-6">
         <header>
           <p className="text-[11px] uppercase tracking-[0.25em] text-emerald-400">
@@ -103,8 +157,9 @@ export default function ChangePasswordPage() {
             </div>
 
             <p className="text-[10px] text-slate-500">
-              In producción real, aquí se haría la verificación usando un
-              backend seguro (hash de contraseñas, etc.).
+              We&apos;ll verify your current password and then update it securely
+              using Supabase Auth. If you forgot your password, use the
+              &quot;Forgot password?&quot; link on the sign in page instead.
             </p>
 
             <div className="flex items-center justify-between pt-2 border-t border-slate-800 mt-2">
