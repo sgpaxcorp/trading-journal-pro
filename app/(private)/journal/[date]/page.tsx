@@ -2157,6 +2157,14 @@ export default function DailyJournalPage() {
               >
                 Save
               </button>
+               <button
+                type="button"
+                onClick={handleSave}
+                disabled={saving}
+                className="px-4 py-2 rounded-xl border border-slate-700 text-slate-200 text-xs hover:border-emerald-400 hover:text-emerald-300 transition disabled:opacity-50"
+              >
+                Save
+              </button>
               <button
                 type="button"
                 onClick={handleSaveAndBack}
