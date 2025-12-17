@@ -13,6 +13,7 @@
     "@radix-ui/react-popover": "^1.1.15",
     "@radix-ui/react-scroll-area": "^1.2.10",
     "@supabase/auth-helpers-nextjs": "^0.15.0",
+    "@supabase/ssr": "^0.8.0",
     "@supabase/supabase-js": "^2.86.0",
     "@tiptap/core": "^3.11.1",
     "@tiptap/extension-character-count": "^3.11.1",

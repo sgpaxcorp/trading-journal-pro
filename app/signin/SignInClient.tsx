@@ -1,7 +1,7 @@
 // app/signin/SignInClient.tsx
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "@/lib/supaBaseClient";
@@ -10,33 +10,53 @@ type SignInClientProps = {
   nextPath: string;
 };
 
+function safeInternalPath(maybePath: string | undefined | null) {
+  if (!maybePath) return "/dashboard";
+  if (typeof maybePath !== "string") return "/dashboard";
+  // Solo rutas internas
+  if (!maybePath.startsWith("/")) return "/dashboard";
+  // Evita esquemas raros tipo //evil.com
+  if (maybePath.startsWith("//")) return "/dashboard";
+  return maybePath;
+}
+
 export default function SignInClient({ nextPath }: SignInClientProps) {
   const router = useRouter();
 
+  const safeNext = useMemo(() => safeInternalPath(nextPath), [nextPath]);
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
+    if (loading) return;
+
     setError(null);
+
+    const cleanEmail = email.trim().toLowerCase();
 
     try {
       setLoading(true);
+
       const { error } = await supabase.auth.signInWithPassword({
-        email,
+        email: cleanEmail,
         password,
       });
 
       if (error) {
         setError(error.message);
-        setLoading(false);
         return;
       }
 
-      // si todo fue bien, vamos a nextPath (ej: /start)
-      router.replace(nextPath || "/dashboard");
+      // Importantísimo en App Router:
+      // fuerza a que Server Components lean la nueva sesión (cookies).
+      router.refresh();
+
+      router.replace(safeNext);
     } catch (err: any) {
       console.error("Error on sign in:", err);
       setError(err?.message ?? "Something went wrong. Please try again.");
@@ -68,6 +88,8 @@ export default function SignInClient({ nextPath }: SignInClientProps) {
               onChange={(e) => setEmail(e.target.value)}
               className="w-full rounded-lg bg-slate-900/80 border border-slate-700 px-3 py-2 text-xs outline-none focus:border-emerald-400"
               placeholder="you@example.com"
+              autoComplete="email"
+              inputMode="email"
               required
             />
           </div>
@@ -80,6 +102,7 @@ export default function SignInClient({ nextPath }: SignInClientProps) {
               onChange={(e) => setPassword(e.target.value)}
               className="w-full rounded-lg bg-slate-900/80 border border-slate-700 px-3 py-2 text-xs outline-none focus:border-emerald-400"
               placeholder="Your password"
+              autoComplete="current-password"
               required
             />
           </div>
@@ -93,16 +116,25 @@ export default function SignInClient({ nextPath }: SignInClientProps) {
           </button>
         </form>
 
-        <p className="mt-4 text-[11px] text-slate-500">
-          Don&apos;t have an account yet?{" "}
+        <div className="mt-4 flex items-center justify-between">
+          <p className="text-[11px] text-slate-500">
+            Don&apos;t have an account yet?{" "}
+            <Link
+              href="/signup"
+              className="text-emerald-300 hover:text-emerald-200"
+            >
+              Create one
+            </Link>
+            .
+          </p>
+
           <Link
-            href="/signup"
-            className="text-emerald-300 hover:text-emerald-200"
+            href="/forgot-password"
+            className="text-[11px] text-slate-500 hover:text-slate-300"
           >
-            Create one
+            Forgot?
           </Link>
-          .
-        </p>
+        </div>
       </div>
     </main>
   );

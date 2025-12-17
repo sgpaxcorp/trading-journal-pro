@@ -10,12 +10,18 @@ export type InstrumentType =
 
 export type StoredTradeRow = {
   id: string;
-  symbol: string; // antes "asset"
+  symbol: string;
   kind: InstrumentType;
+
+  side?: "long" | "short";
+  premium?: "Debit" | "Credit";
+  strategy?: string;
+
   price: number;
   quantity: number;
-  time: string; // "HH:mm" o "HH:mm AM"
+  time: string;
 };
+
 
 export type TradesPayload = {
   premarket?: string;

@@ -6,14 +6,14 @@ type SearchParams = {
   [key: string]: string | string[] | undefined;
 };
 
-export default function SignInPage({
+export default async function SignInPage({
   searchParams,
 }: {
-  searchParams: SearchParams;
+  searchParams: Promise<SearchParams>;
 }) {
-  const rawNext = Array.isArray(searchParams.next)
-    ? searchParams.next[0]
-    : searchParams.next;
+  const sp = await searchParams;
+
+  const rawNext = Array.isArray(sp.next) ? sp.next[0] : sp.next;
 
   // solo permitimos rutas internas que empiecen con "/"
   const nextPath =

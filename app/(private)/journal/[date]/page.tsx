@@ -5,13 +5,16 @@ import type React from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
+import { saveJournalTradesForDay } from "@/lib/journalTradesSupabase";
+import { parseNotes } from "@/lib/journalNotes";
+
 
 import JournalGrid, {
   type JournalWidgetId,
   type JournalWidgetDef,
 } from "@/app/components/JournalGrid";
 
-import type { JournalEntry } from "@/lib/journalLocal";
+import type { JournalEntry } from "@/lib/journalTypes";
 import {
   getJournalEntryByDate,
   saveJournalEntry,
@@ -639,8 +642,8 @@ export default function DailyJournalPage() {
   const router = useRouter();
   const { user, loading: authLoading } = useAuth();
 
-  const userId =
-    (user as any)?.uid || (user as any)?.id || (user as any)?.email || "";
+const userId = user?.id ?? "";
+
 
   const dateParam = Array.isArray(params?.date)
     ? params.date[0]
@@ -1110,19 +1113,80 @@ export default function DailyJournalPage() {
       exits: exitTrades,
     });
 
-    const pnlToSave = Number.isFinite(pnlCalc.total) ? pnlCalc.total : 0;
+    const EMOTION_TAGS = [
+  "Calm & focused",
+  "Greedy",
+  "Desperate",
+  "FOMO",
+  "Revenge trade",
+];
 
-    const clean: JournalEntry = {
-      ...entry,
-      date: dateParam,
-      pnl: pnlToSave,
-      notes: notesPayload,
-      screenshots: entry.screenshots || [],
-      tags: entry.tags || [],
-    };
+const STRATEGY_CHECKLIST_TAGS = [
+  "Respect Strategy",
+  "Planned stop was in place",
+  "Used planned position sizing",
+  "Risk-to-reward ≥ 2R (planned)",
+  "Risk-to-reward < 1.5R (tight)",
+];
+
+
+    const pnlToSave = Number.isFinite(pnlCalc.total) ? pnlCalc.total : 0;
+// ✅ Derivados desde el payload de trades (tu notesPayload)
+const parsed = parseNotes(notesPayload); // notesPayload es string
+const firstEntry = parsed.entries?.[0];
+const firstExit = parsed.exits?.[0];
+
+const toNum = (v: any): number | undefined => {
+  if (v === null || v === undefined) return undefined;
+  const n = Number(String(v).trim());
+  return Number.isFinite(n) ? n : undefined;
+};
+
+// ✅ instrument / entryPrice / exitPrice / size
+const clean: JournalEntry = {
+  ...entry,
+
+  date: dateParam,
+  pnl: pnlToSave,
+
+  // 1) Instrument: prioridad = primer trade (si existe) -> si no, lo que ya tenga entry.instrument
+  instrument: (firstEntry?.symbol ?? entry.instrument ?? "").toString().trim(),
+
+  // 2) Entry/Exit/Size: prioridad = lo que ya tenga entry -> si no, lo derivamos del primer row
+  entryPrice:
+    typeof entry.entryPrice === "number" ? entry.entryPrice : toNum(firstEntry?.price),
+
+  exitPrice:
+    typeof entry.exitPrice === "number" ? entry.exitPrice : toNum(firstExit?.price),
+
+  size: typeof entry.size === "number" ? entry.size : toNum(firstEntry?.quantity),
+
+  notes: notesPayload,
+  screenshots: entry.screenshots || [],
+  tags: entry.tags || [],
+
+  respectedPlan:
+    typeof entry.respectedPlan === "boolean" ? entry.respectedPlan : true,
+};
+
+
 
     try {
+
+      console.log("SAVING:", {
+  instrument: clean.instrument,
+  entryPrice: clean.entryPrice,
+  exitPrice: clean.exitPrice,
+  size: clean.size,
+});
+
+      
       await saveJournalEntry(userId, clean);
+      const parsed = parseNotes(clean.notes);
+await saveJournalTradesForDay(userId, clean.date, parsed, 
+);
+
+
       setMsg("Session saved.");
       setTimeout(() => setMsg(""), 2000);
       return true;
