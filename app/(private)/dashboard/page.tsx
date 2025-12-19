@@ -311,9 +311,12 @@ export default function DashboardPage() {
   }, [user, activeWidgets, widgetsLoaded]);
 
   // Protect route
+  // Protect route
   useEffect(() => {
-    if (!loading && !user) router.replace("/signin");
+    if (loading) return;
+    if (!user) router.replace("/signin");
   }, [loading, user, router]);
+
 
   // Load growth plan + journal (Supabase)
   useEffect(() => {
@@ -321,11 +324,8 @@ export default function DashboardPage() {
 
     setPlan(getGrowthPlan() || null);
 
-    const userId =
-      (user as any)?.uid ||
-      (user as any)?.id ||
-      (user as any)?.email ||
-      "";
+        const userId = (user as any)?.uid || (user as any)?.id || "";
+
 
     if (!userId) {
       setEntries([]);
@@ -1262,7 +1262,9 @@ export default function DashboardPage() {
   };
 
   /* ========== Render Page ========== */
-  if (loading || !user || !viewDate) {
+    /* ========== Render Page ========== */
+  // 1) Solo mostramos loading mientras auth está cargando o viewDate no existe
+  if (loading || !viewDate) {
     return (
       <main className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center">
         <p className="text-base text-slate-400">
@@ -1271,6 +1273,18 @@ export default function DashboardPage() {
       </main>
     );
   }
+
+  // 2) Si loading ya terminó y todavía no hay user -> no te quedes en spinner infinito
+  if (!user) {
+    return (
+      <main className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center">
+        <p className="text-base text-slate-400">
+          Redirecting to sign in...
+        </p>
+      </main>
+    );
+  }
+
 
   return (
     <main className="min-h-screen bg-slate-950 text-slate-50">
