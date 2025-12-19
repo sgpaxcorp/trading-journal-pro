@@ -139,54 +139,172 @@ function parseDateTime(dateVal: any, timeVal: any): string {
 }
 
 /* =========================
-   Parse TOS Description (basic)
+   Instrument formatting
 ========================= */
-function parseTOSDescription(descRaw: string) {
-  const s = descRaw.trim();
+
+// "YYYY-MM-DD" -> "yymmdd"
+function toYYMMDD(expiration: string | null): string | null {
+  if (!expiration) return null;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(expiration)) return null;
+  return expiration.slice(2, 4) + expiration.slice(5, 7) + expiration.slice(8, 10);
+}
+
+// strike to compact: 470 -> "470", 470.5 -> "4705"
+function strikeCompact(strike: number | null): string | null {
+  if (strike == null || !Number.isFinite(strike)) return null;
+  const s = String(strike);
+  if (!s.includes(".")) return s;
+  const [a, b] = s.split(".");
+  return `${a}${b}`;
+}
+
+// SPX stays SPX unless "(Weeklys)" appears, then SPXW.
+// (No forcing SPXW for non-weekly.)
+function inferOptionRoot(underlying: string | null, desc: string): string | null {
+  if (!underlying) return null;
+  const u = underlying.toUpperCase();
+
+  const isWeeklys =
+    /\(WEEKLYS\)/i.test(desc) ||
+    /\bWEEKLYS\b/i.test(desc) ||
+    /\bWEEKLY\b/i.test(desc);
+
+  if (u === "SPX" && isWeeklys) return "SPXW";
+  return u;
+}
+
+/* =========================
+   Parse TOS Description (PRO)
+   - Options: ROOTyymmddC/Pstrike  (SPXW251219C6782)
+   - Stocks:  TSLA
+========================= */
+type ParsedInstrument = {
+  instrument_type: "option" | "stock" | "unknown";
+  side: "buy" | "sell" | null;
+  qty: number | null;
+
+  // Always keep underlying_symbol for both stock/option
+  underlying_symbol: string | null;
+
+  // Desired normalized ID (options: ROOTyymmddCstrike; stocks: ticker)
+  instrument_symbol: string | null;
+
+  // option details (if option)
+  option_root: string | null;
+  expiration: string | null; // YYYY-MM-DD
+  strike: number | null;
+  option_right: "CALL" | "PUT" | null;
+
+  // pricing / venue
+  price: number | null;
+  exchange: string | null;
+};
+
+function parseTOSDescription(descRaw: string): ParsedInstrument {
+  const s = String(descRaw ?? "").trim();
 
   const side = s.startsWith("BOT") ? "buy" : s.startsWith("SOLD") ? "sell" : null;
 
   const qtyMatch = s.match(/\b(BOT|SOLD)\s+([+-]?\d+)\b/i);
   const qty = qtyMatch ? Math.abs(Number(qtyMatch[2])) : null;
 
-  const tokens = s.split(/\s+/);
-  const underlying = tokens.length >= 3 ? tokens[2] : null;
-
-  const expMatch = s.match(
-    /\b(\d{1,2})\s+(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\s+(\d{2})\b/i
-  );
-  let expiration: string | null = null;
-  if (expMatch) {
-    const day = expMatch[1].padStart(2, "0");
-    const mon = expMatch[2].toUpperCase();
-    const yy = expMatch[3];
-    const monthMap: Record<string, string> = {
-      JAN: "01",
-      FEB: "02",
-      MAR: "03",
-      APR: "04",
-      MAY: "05",
-      JUN: "06",
-      JUL: "07",
-      AUG: "08",
-      SEP: "09",
-      OCT: "10",
-      NOV: "11",
-      DEC: "12",
-    };
-    expiration = `20${yy}-${monthMap[mon]}-${day}`;
-  }
-
-  const rightMatch = s.match(/\b(\d+(?:\.\d+)?)\s+(CALL|PUT)\b/i);
-  const strike = rightMatch ? Number(rightMatch[1]) : null;
-  const option_right = rightMatch ? rightMatch[2].toUpperCase() : null;
+  const tokens = s.split(/\s+/).filter(Boolean);
+  const exchange = tokens.length ? tokens[tokens.length - 1] : null;
 
   const priceMatch = s.match(/@(\d+(?:\.\d+)?)/);
   const price = priceMatch ? Number(priceMatch[1]) : null;
 
-  const exchange = tokens.length ? tokens[tokens.length - 1] : null;
+  const hasRight = /\b(CALL|PUT)\b/i.test(s);
+  const hasMonth = /\b(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\b/i.test(s);
 
-  return { side, qty, underlying, expiration, strike, option_right, price, exchange };
+  // OPTION parse
+  if (hasRight && hasMonth) {
+    const underlying = tokens.length >= 3 ? tokens[2]?.toUpperCase() : null;
+
+    const expMatch = s.match(
+      /\b(\d{1,2})\s+(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\s+(\d{2})\b/i
+    );
+
+    let expiration: string | null = null;
+    if (expMatch) {
+      const day = expMatch[1].padStart(2, "0");
+      const mon = expMatch[2].toUpperCase();
+      const yy = expMatch[3];
+      const monthMap: Record<string, string> = {
+        JAN: "01",
+        FEB: "02",
+        MAR: "03",
+        APR: "04",
+        MAY: "05",
+        JUN: "06",
+        JUL: "07",
+        AUG: "08",
+        SEP: "09",
+        OCT: "10",
+        NOV: "11",
+        DEC: "12",
+      };
+      expiration = `20${yy}-${monthMap[mon]}-${day}`;
+    }
+
+    const rightMatch = s.match(/\b(\d+(?:\.\d+)?)\s+(CALL|PUT)\b/i);
+    const strike = rightMatch ? Number(rightMatch[1]) : null;
+    const option_right = rightMatch ? (rightMatch[2].toUpperCase() as "CALL" | "PUT") : null;
+
+    const root = inferOptionRoot(underlying, s);
+    const yymmdd = toYYMMDD(expiration);
+    const cp = option_right === "CALL" ? "C" : option_right === "PUT" ? "P" : null;
+    const k = strikeCompact(strike);
+
+    const instrument_symbol = root && yymmdd && cp && k ? `${root}${yymmdd}${cp}${k}` : null;
+
+    return {
+      instrument_type: "option",
+      side,
+      qty,
+      underlying_symbol: underlying,
+      instrument_symbol,
+      option_root: root,
+      expiration,
+      strike,
+      option_right,
+      price,
+      exchange,
+    };
+  }
+
+  // STOCK fallback
+  const maybeSym = tokens.length >= 3 ? tokens[2] : null;
+  if (maybeSym && /^[A-Z.\-]{1,10}$/i.test(maybeSym)) {
+    const sym = maybeSym.toUpperCase();
+    return {
+      instrument_type: "stock",
+      side,
+      qty,
+      underlying_symbol: sym,
+      instrument_symbol: sym,
+      option_root: null,
+      expiration: null,
+      strike: null,
+      option_right: null,
+      price,
+      exchange,
+    };
+  }
+
+  return {
+    instrument_type: "unknown",
+    side,
+    qty,
+    underlying_symbol: null,
+    instrument_symbol: null,
+    option_root: null,
+    expiration: null,
+    strike: null,
+    option_right: null,
+    price,
+    exchange,
+  };
 }
 
 /* =========================
@@ -316,11 +434,15 @@ export async function POST(req: NextRequest) {
 
       const det = parseTOSDescription(description);
 
+      // IMPORTANT: use instrument_symbol when possible (SPXW251219C6782),
+      // but keep underlying_symbol as "symbol"
       const trade_hash = sha256(
         [
           userId,
           broker,
-          det.underlying ?? "",
+          det.instrument_type,
+          det.underlying_symbol ?? "",
+          det.instrument_symbol ?? "",
           det.expiration ?? "",
           String(det.strike ?? ""),
           det.option_right ?? "",
@@ -352,19 +474,33 @@ export async function POST(req: NextRequest) {
       tradeRowsAll.push({
         user_id: userId,
         broker,
-        asset_type: "option",
-        underlying: det.underlying,
-        symbol: det.underlying, // base (luego refinamos ticker real si TOS lo trae)
+
+        // if you have asset_type, keep it compatible
+        asset_type: det.instrument_type === "option" ? "option" : det.instrument_type,
+
+        // ✅ ALWAYS underlying here (what you asked)
+        symbol: det.underlying_symbol,
+
+        // ✅ NEW normalized identifiers
+        instrument_type: det.instrument_type,
+        underlying_symbol: det.underlying_symbol,
+        instrument_symbol: det.instrument_symbol,
+
+        // option fields
+        option_root: det.option_root,
+        option_expiration: det.expiration, // date column can accept "YYYY-MM-DD"
+        option_strike: det.strike,
+        option_right: det.option_right,
+
         side: det.side,
         qty: det.qty,
         price: det.price,
         executed_at,
-        expiration: det.expiration,
-        strike: det.strike,
-        option_right: det.option_right,
+
         exchange: det.exchange,
         commissions: commissions_fees,
         fees: misc_fees,
+
         trade_hash,
         raw: { description, parsed: det, sourceRow: r },
         import_batch_id: batchId,
@@ -398,7 +534,6 @@ export async function POST(req: NextRequest) {
 
     /* =========================================================
        DEDUPE TRADES: pre-check existing trade_hash
-       (this fixes your unique constraint issue cleanly)
     ========================================================= */
     const tradeHashes = Array.from(new Set(tradeRowsAll.map((x) => x.trade_hash).filter(Boolean)));
     const existingTradeHash = new Set<string>();
