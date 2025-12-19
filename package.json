@@ -39,7 +39,8 @@
     "resend": "^6.6.0",
     "slate": "^0.118.1",
     "slate-react": "^0.119.0",
-    "stripe": "^20.0.0"
+    "stripe": "^20.0.0",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import TopNav from "@/app/components/TopNav";
 import { supabase } from "@/lib/supaBaseClient";
+import { useRouter } from "next/navigation";
+import { ArrowLeft } from "lucide-react";
 
 type BrokerId =
   | "thinkorswim"
@@ -88,6 +90,8 @@ export default function ImportPage() {
 
   const brokerMeta = useMemo(() => BROKERS.find((b) => b.id === broker), [broker]);
 
+  const router = useRouter();
+
   async function getToken(): Promise<string | null> {
     const { data, error } = await supabase.auth.getSession();
     if (error) return null;
@@ -100,7 +104,7 @@ export default function ImportPage() {
 
       const token = await getToken();
 
-      const res = await fetch("/api/trades/import/history", {
+      const res = await fetch("/api/broker-import/history", {
         method: "GET",
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
@@ -124,8 +128,12 @@ export default function ImportPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // ✅ FIX: si escoges el MISMO file, el input no dispara onChange.
+  // Reseteamos el value ANTES del click.
   function onPickFileClick() {
-    fileInputRef.current?.click();
+    if (!fileInputRef.current) return;
+    fileInputRef.current.value = ""; // ✅ permite volver a seleccionar el mismo file
+    fileInputRef.current.click();
   }
 
   function acceptFile(f: File | null) {
@@ -133,6 +141,13 @@ export default function ImportPage() {
     setStatusMsg(null);
     if (!f) return;
     setFile(f);
+  }
+
+  function onClearFile() {
+    setFile(null);
+    setErrorMsg(null);
+    setStatusMsg(null);
+    if (fileInputRef.current) fileInputRef.current.value = ""; // ✅ limpia el input
   }
 
   function onDrop(e: React.DragEvent<HTMLDivElement>) {
@@ -185,7 +200,7 @@ export default function ImportPage() {
       form.append("comment", comment.trim());
       form.append("file", file);
 
-      const res = await fetch("/api/trades/import", {
+      const res = await fetch("/api/broker-import", {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -216,6 +231,9 @@ export default function ImportPage() {
       setErrorMsg(err?.message ?? "Import failed.");
     } finally {
       setImporting(false);
+
+      // ✅ FIX: deja listo para volver a escoger el MISMO archivo
+      if (fileInputRef.current) fileInputRef.current.value = "";
     }
   }
 
@@ -225,17 +243,39 @@ export default function ImportPage() {
 
       <main className="min-h-screen bg-slate-950 text-slate-50">
         <div className="mx-auto max-w-6xl px-4 py-8">
-          <div className="mb-6">
-            <div className="text-[11px] uppercase tracking-[0.28em] text-emerald-300/80">
-              Import
+          <div className="mb-6 flex items-start justify-between gap-3">
+            <div>
+              <div className="text-[11px] uppercase tracking-[0.28em] text-emerald-300/80">Import</div>
+
+              <h1 className="mt-2 text-3xl font-semibold leading-tight">Import trades</h1>
+
+              <p className="mt-2 max-w-2xl text-sm text-slate-400">
+                Choose your broker, upload your export file, and we’ll import everything automatically — no column
+                editing, no manual mapping.
+              </p>
             </div>
-            <h1 className="mt-2 text-3xl font-semibold leading-tight">
-              Import trades
-            </h1>
-            <p className="mt-2 max-w-2xl text-sm text-slate-400">
-              Choose your broker, upload your export file, and we’ll import everything automatically —
-              no column editing, no manual mapping.
-            </p>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => router.back()}
+                className="inline-flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-950/30 px-3 py-2 text-xs font-semibold text-slate-100 transition hover:border-emerald-500/60 hover:bg-emerald-500/10 hover:text-emerald-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
+                aria-label="Back"
+              >
+                <ArrowLeft className="h-4 w-4" />
+                Back
+              </button>
+
+              <button
+                type="button"
+                onClick={() => router.push("/dashboard")}
+                className="inline-flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-950/30 px-3 py-2 text-xs font-semibold text-slate-100 transition hover:border-emerald-500/60 hover:bg-emerald-500/10 hover:text-emerald-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
+                aria-label="Back to dashboard"
+              >
+                <ArrowLeft className="h-4 w-4" />
+                Back to dashboard
+              </button>
+            </div>
           </div>
 
           <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
@@ -244,9 +284,7 @@ export default function ImportPage() {
               <div className="grid gap-4">
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div>
-                    <label className="text-xs font-semibold text-slate-200">
-                      Broker
-                    </label>
+                    <label className="text-xs font-semibold text-slate-200">Broker</label>
                     <select
                       value={broker}
                       onChange={(e) => setBroker(e.target.value as BrokerId)}
@@ -259,15 +297,11 @@ export default function ImportPage() {
                         </option>
                       ))}
                     </select>
-                    <p className="mt-2 text-[11px] text-slate-400">
-                      {brokerMeta?.hint}
-                    </p>
+                    <p className="mt-2 text-[11px] text-slate-400">{brokerMeta?.hint}</p>
                   </div>
 
                   <div>
-                    <label className="text-xs font-semibold text-slate-200">
-                      Comment (optional)
-                    </label>
+                    <label className="text-xs font-semibold text-slate-200">Comment (optional)</label>
                     <input
                       value={comment}
                       onChange={(e) => setComment(e.target.value)}
@@ -276,9 +310,7 @@ export default function ImportPage() {
                       maxLength={140}
                       disabled={importing}
                     />
-                    <p className="mt-2 text-[11px] text-slate-400">
-                      One-line note saved with the import batch.
-                    </p>
+                    <p className="mt-2 text-[11px] text-slate-400">One-line note saved with the import batch.</p>
                   </div>
                 </div>
 
@@ -288,18 +320,12 @@ export default function ImportPage() {
                   onDragLeave={onDragLeave}
                   className={[
                     "rounded-2xl border-2 border-dashed p-6 transition",
-                    dragOver
-                      ? "border-emerald-400/60 bg-emerald-400/5"
-                      : "border-slate-700 bg-slate-950/20",
+                    dragOver ? "border-emerald-400/60 bg-emerald-400/5" : "border-slate-700 bg-slate-950/20",
                   ].join(" ")}
                 >
                   <div className="flex flex-col items-center gap-2 text-center">
-                    <div className="text-sm font-semibold text-slate-100">
-                      Drag & drop your file here
-                    </div>
-                    <div className="text-[11px] text-slate-400">
-                      Supported: CSV, XLS, XLSX
-                    </div>
+                    <div className="text-sm font-semibold text-slate-100">Drag & drop your file here</div>
+                    <div className="text-[11px] text-slate-400">Supported: CSV, XLS, XLSX</div>
 
                     <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
                       <button
@@ -314,7 +340,7 @@ export default function ImportPage() {
                       {file ? (
                         <button
                           type="button"
-                          onClick={() => setFile(null)}
+                          onClick={onClearFile}
                           className="rounded-xl border border-slate-700 bg-slate-950/30 px-4 py-2 text-xs font-semibold text-slate-100 hover:bg-slate-950/50 disabled:opacity-60"
                           disabled={importing}
                         >
@@ -335,9 +361,7 @@ export default function ImportPage() {
                       <div className="mt-4 w-full rounded-xl border border-slate-800 bg-slate-950/30 px-3 py-2 text-left">
                         <div className="text-[11px] text-slate-400">Selected file</div>
                         <div className="mt-1 flex items-center justify-between gap-2">
-                          <div className="truncate text-xs font-semibold text-slate-100">
-                            {file.name}
-                          </div>
+                          <div className="truncate text-xs font-semibold text-slate-100">{file.name}</div>
                           <div className="shrink-0 text-[11px] text-slate-400">
                             {(file.size / 1024).toFixed(1)} KB
                           </div>
@@ -395,54 +419,46 @@ export default function ImportPage() {
               ) : history.length === 0 ? (
                 <div className="text-xs text-slate-400">No history yet.</div>
               ) : (
-                <div className="space-y-3">
-                  {history.slice(0, 10).map((h) => (
-                    <div
-                      key={h.id}
-                      className="rounded-xl border border-slate-800 bg-slate-950/20 p-3"
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0">
-                          <div className="truncate text-xs font-semibold text-slate-100">
-                            {h.broker}
+                // ✅ FIX: scrollable history panel (no page stretching)
+                <div className="mt-3 max-h-[520px] overflow-y-auto pr-2">
+                  <div className="space-y-3">
+                    {history.slice(0, 10).map((h) => (
+                      <div key={h.id} className="rounded-xl border border-slate-800 bg-slate-950/20 p-3">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <div className="truncate text-xs font-semibold text-slate-100">{h.broker}</div>
+                            <div className="mt-0.5 text-[11px] text-slate-400">
+                              {formatDateTime(h.started_at)}
+                              {h.finished_at ? ` • ${formatDuration(h.duration_ms)}` : ""}
+                            </div>
                           </div>
-                          <div className="mt-0.5 text-[11px] text-slate-400">
-                            {formatDateTime(h.started_at)}
-                            {h.finished_at ? ` • ${formatDuration(h.duration_ms)}` : ""}
+                          <StatusPill status={h.status} />
+                        </div>
+
+                        <div className="mt-2 grid grid-cols-2 gap-2 text-[11px]">
+                          <div className="rounded-lg border border-slate-800 bg-slate-950/30 px-2 py-1">
+                            <div className="text-slate-400">Rows</div>
+                            <div className="font-semibold text-slate-100">{h.imported_rows ?? "—"}</div>
+                          </div>
+                          <div className="rounded-lg border border-slate-800 bg-slate-950/30 px-2 py-1">
+                            <div className="text-slate-400">Duplicates</div>
+                            <div className="font-semibold text-slate-100">{h.duplicates ?? "—"}</div>
                           </div>
                         </div>
-                        <StatusPill status={h.status} />
+
+                        {h.comment ? (
+                          <div className="mt-2 text-[11px] text-slate-300">
+                            <span className="font-semibold text-slate-200">Note: </span>
+                            {h.comment}
+                          </div>
+                        ) : null}
+
+                        {h.filename ? (
+                          <div className="mt-1 truncate text-[11px] text-slate-400">File: {h.filename}</div>
+                        ) : null}
                       </div>
-
-                      <div className="mt-2 grid grid-cols-2 gap-2 text-[11px]">
-                        <div className="rounded-lg border border-slate-800 bg-slate-950/30 px-2 py-1">
-                          <div className="text-slate-400">Rows</div>
-                          <div className="font-semibold text-slate-100">
-                            {h.imported_rows ?? "—"}
-                          </div>
-                        </div>
-                        <div className="rounded-lg border border-slate-800 bg-slate-950/30 px-2 py-1">
-                          <div className="text-slate-400">Duplicates</div>
-                          <div className="font-semibold text-slate-100">
-                            {h.duplicates ?? "—"}
-                          </div>
-                        </div>
-                      </div>
-
-                      {h.comment ? (
-                        <div className="mt-2 text-[11px] text-slate-300">
-                          <span className="font-semibold text-slate-200">Note: </span>
-                          {h.comment}
-                        </div>
-                      ) : null}
-
-                      {h.filename ? (
-                        <div className="mt-1 truncate text-[11px] text-slate-400">
-                          File: {h.filename}
-                        </div>
-                      ) : null}
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
               )}
             </aside>
