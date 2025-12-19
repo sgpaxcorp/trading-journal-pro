@@ -6,14 +6,20 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
 import TopNav from "@/app/components/TopNav";
+import { useAuth } from "@/context/AuthContext";
+
 import {
   CHALLENGES,
   type ChallengeDefinition,
   type ChallengeProgress,
   getChallengeProgress,
   startChallenge,
-} from "@/lib/challengesLocal";
-import { getProfileGamification } from "@/lib/profileGamificationLocal";
+} from "@/lib/challengesSupabase";
+
+import {
+  getProfileGamification,
+  type ProfileGamification,
+} from "@/lib/profileGamificationSupabase";
 
 type RouteParams = {
   id: string;
@@ -22,33 +28,91 @@ type RouteParams = {
 export default function ChallengeDetailPage() {
   const router = useRouter();
   const params = useParams() as unknown as RouteParams;
+  const { user, loading } = useAuth() as any;
+
+  const userId = useMemo(() => user?.id || "", [user]);
 
   const [definition, setDefinition] = useState<ChallengeDefinition | null>(null);
   const [progress, setProgress] = useState<ChallengeProgress | null>(null);
+  const [gamification, setGamification] = useState<ProfileGamification>({
+    xp: 0,
+    level: 1,
+    tier: "Bronze",
+    badges: [],
+  });
 
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Auth guard
+  useEffect(() => {
+    if (!loading && !user) router.replace("/signin");
+  }, [loading, user, router]);
+
+  // Load definition + progress + gamification
   useEffect(() => {
     if (!params?.id) return;
+
     const def = CHALLENGES.find((c) => c.id === params.id);
     if (!def) {
       router.push("/challenges");
       return;
     }
+
     setDefinition(def);
-    setProgress(getChallengeProgress(def.id));
-  }, [params?.id, router]);
 
-  const gamification = useMemo(() => getProfileGamification(), []);
+    // Cargar progress/gamification desde DB
+    const run = async () => {
+      try {
+        if (!userId) return;
 
-  if (!definition) {
-    return null;
-  }
+        setError(null);
 
-  const statusLabel =
-    progress?.status?.replace("-", " ") ?? "not started";
+        const [p, g] = await Promise.all([
+          getChallengeProgress(userId, def.id),
+          getProfileGamification(userId, {
+            syncToDb: true,
+            fallbackToDbCache: true,
+          }),
+        ]);
 
-  const handleStart = () => {
-    const updated = startChallenge(definition.id);
-    setProgress(updated);
+        setProgress(p);
+        setGamification(g);
+      } catch (e: any) {
+        console.error("[ChallengeDetailPage] load error:", e);
+        setError(e?.message ?? "Failed to load challenge.");
+      }
+    };
+
+    void run();
+  }, [params?.id, router, userId]);
+
+  if (!definition) return null;
+
+  const statusLabel = (progress?.status ?? "not_started").replace("-", " ");
+
+  const handleStart = async () => {
+    try {
+      if (!userId) return;
+
+      setSaving(true);
+      setError(null);
+
+      const updated = await startChallenge(userId, definition.id);
+      setProgress(updated);
+
+      // refrescar gamification (opcional)
+      const g = await getProfileGamification(userId, {
+        syncToDb: true,
+        fallbackToDbCache: true,
+      });
+      setGamification(g);
+    } catch (e: any) {
+      console.error("[ChallengeDetailPage] start error:", e);
+      setError(e?.message ?? "Failed to start challenge.");
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -71,11 +135,22 @@ export default function ChallengeDetailPage() {
           <button
             type="button"
             onClick={handleStart}
-            className="rounded-full bg-emerald-400 px-4 py-2 text-xs font-semibold text-slate-950 hover:bg-emerald-300 transition"
+            disabled={saving || !userId}
+            className="rounded-full bg-emerald-400 px-4 py-2 text-xs font-semibold text-slate-950 hover:bg-emerald-300 transition disabled:opacity-60"
           >
-            {progress ? "Restart challenge" : "Start challenge"}
+            {saving
+              ? "Starting..."
+              : progress
+              ? "Restart challenge"
+              : "Start challenge"}
           </button>
         </div>
+
+        {error && (
+          <div className="mb-5 rounded-2xl border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+            {error}
+          </div>
+        )}
 
         <section className="grid gap-4 md:grid-cols-[2fr,1.2fr] mb-8">
           <article className="rounded-2xl border border-emerald-500/30 bg-slate-900/70 p-5">
@@ -100,9 +175,8 @@ export default function ChallengeDetailPage() {
             </ul>
 
             <p className="mt-5 text-[11px] text-slate-400">
-              Tip: track your process score each day (rules, risk and
-              journaling). The more process-green days you stack, the faster
-              you level up.
+              Tip: track your process score each day (rules, risk and journaling).
+              The more process-green days you stack, the faster you level up.
             </p>
           </article>
 
@@ -142,8 +216,8 @@ export default function ChallengeDetailPage() {
 
               {!progress && (
                 <p className="mt-3 text-xs text-slate-400">
-                  You have not started this challenge yet. When you start,
-                  your daily process scores will update this card.
+                  You have not started this challenge yet. When you start, your
+                  daily process scores will update this card.
                 </p>
               )}
             </div>
@@ -153,14 +227,8 @@ export default function ChallengeDetailPage() {
                 Profile snapshot
               </p>
               <p className="mt-1 text-sm text-slate-200">
-                Level{" "}
-                <span className="font-semibold">
-                  {gamification.level}
-                </span>{" "}
-                • Tier{" "}
-                <span className="font-semibold">
-                  {gamification.tier}
-                </span>
+                Level <span className="font-semibold">{gamification.level}</span>{" "}
+                • Tier <span className="font-semibold">{gamification.tier}</span>
               </p>
               <p className="mt-1 text-xs text-emerald-300">
                 {gamification.xp.toLocaleString()} XP total
@@ -190,8 +258,8 @@ export default function ChallengeDetailPage() {
             ← Back to all challenges
           </Link>
           <p>
-            Your AI coach will read this challenge and your progress to
-            personalize suggestions.
+            Your AI coach will read this challenge and your progress to personalize
+            suggestions.
           </p>
         </div>
       </main>

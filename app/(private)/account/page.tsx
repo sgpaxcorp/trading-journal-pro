@@ -14,7 +14,7 @@ import { supabaseBrowser } from "@/lib/supaBaseClient";
 import {
   getProfileGamification,
   type ProfileGamification,
-} from "@/lib/profileGamificationLocal";
+} from "@/lib/profileGamificationSupabase";
 
 type ProfileState = {
   firstName: string;
@@ -81,32 +81,22 @@ export default function AccountPage() {
           .eq("id", user.id)
           .maybeSingle();
 
+        // Si supabase devuelve error, lo tiramos para que caiga al catch y use fallback
+        if (error) throw error;
+
         const meta = user.user_metadata || {};
         const authEmail = (user.email as string | null) ?? "";
 
-        const derivedEmail =
-          (data as any)?.email ?? authEmail;
+        const derivedEmail = (data as any)?.email ?? authEmail;
 
         const derivedFirstName =
-          (data as any)?.first_name ??
-          meta.first_name ??
-          meta.firstName ??
-          "";
+          (data as any)?.first_name ?? meta.first_name ?? meta.firstName ?? "";
         const derivedLastName =
-          (data as any)?.last_name ??
-          meta.last_name ??
-          meta.lastName ??
-          "";
+          (data as any)?.last_name ?? meta.last_name ?? meta.lastName ?? "";
         const derivedPhone =
-          (data as any)?.phone ??
-          meta.phone ??
-          meta.phoneNumber ??
-          "";
+          (data as any)?.phone ?? meta.phone ?? meta.phoneNumber ?? "";
         const derivedAddress =
-          (data as any)?.postal_address ??
-          meta.postal_address ??
-          meta.address ??
-          "";
+          (data as any)?.postal_address ?? meta.postal_address ?? meta.address ?? "";
 
         if (!cancelled) {
           setProfile({
@@ -115,12 +105,13 @@ export default function AccountPage() {
             email: derivedEmail,
             phone: derivedPhone,
             address: derivedAddress,
-            avatarUrl: null, // si luego quieres, lo puedes sacar de user_metadata
+            avatarUrl: null,
           });
           setLoadingProfile(false);
         }
       } catch (err) {
         console.warn("[Account] Unexpected profile load error:", err);
+
         const meta = user.user_metadata || {};
         const authEmail = (user.email as string | null) ?? "";
 
@@ -148,15 +139,31 @@ export default function AccountPage() {
     };
   }, [user?.id, user?.email]);
 
-  /* ---------- Load gamification snapshot (local util) ---------- */
+  /* ---------- Load gamification snapshot (Supabase async) ---------- */
   useEffect(() => {
-    try {
-      const g = getProfileGamification();
-      setGamification(g);
-    } catch {
-      // ignore
+    if (!user?.id) return;
+
+    let cancelled = false;
+
+    async function loadGamification() {
+      try {
+        const g = await getProfileGamification(user.id, {
+          syncToDb: true,
+          fallbackToDbCache: true,
+        });
+        if (!cancelled) setGamification(g);
+      } catch (e) {
+        // no bloqueamos la página si falla gamification
+        console.warn("[Account] Gamification load error:", e);
+      }
     }
-  }, []);
+
+    void loadGamification();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id]);
 
   if (loading || !user) {
     return (
@@ -195,12 +202,11 @@ export default function AccountPage() {
     try {
       const payload = {
         id: user.id,
-        email: profile.email || user.email, // por si acaso
+        email: profile.email || user.email,
         first_name: profile.firstName || null,
         last_name: profile.lastName || null,
         phone: profile.phone || null,
         postal_address: profile.address || null,
-        // NO tocamos: plan, subscription_status, stripe_customer_id, etc.
       };
 
       const { error: upsertError } = await supabaseBrowser
@@ -215,6 +221,17 @@ export default function AccountPage() {
         );
       } else {
         setMessage("Profile updated successfully.");
+
+        // refresca gamification por si cambias algo y quieres re-render limpio
+        try {
+          const g = await getProfileGamification(user.id, {
+            syncToDb: true,
+            fallbackToDbCache: true,
+          });
+          setGamification(g);
+        } catch {
+          // ignore
+        }
       }
     } catch (err: any) {
       console.error("[Account] Unexpected error saving profile:", err);
@@ -270,7 +287,6 @@ export default function AccountPage() {
         return;
       }
 
-      // Solo lo usamos en el UI (no hay columna avatar_url en profiles)
       setProfile((prev) => ({
         ...prev,
         avatarUrl: publicUrl,
@@ -299,9 +315,7 @@ export default function AccountPage() {
             <p className="text-[11px] uppercase tracking-[0.25em] text-emerald-400">
               Account
             </p>
-            <h1 className="text-3xl font-semibold mt-1">
-              Account settings
-            </h1>
+            <h1 className="text-3xl font-semibold mt-1">Account settings</h1>
             <p className="text-sm text-slate-400 mt-2 max-w-xl">
               Update your identity, contact information and see your gamification
               progress inside NeuroTrader Journal.
@@ -309,9 +323,7 @@ export default function AccountPage() {
           </div>
 
           <div className="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-4 py-2 text-xs text-emerald-200">
-            <span className="font-semibold text-emerald-100">
-              Current plan:
-            </span>{" "}
+            <span className="font-semibold text-emerald-100">Current plan:</span>{" "}
             {planLabel}
           </div>
         </header>
@@ -522,9 +534,9 @@ export default function AccountPage() {
 
             {!gamification && (
               <p className="mt-3 text-xs text-slate-400">
-                Once you start challenges, your XP, level and tier will
-                appear here. Complete process-green days and finish
-                challenges to earn rewards.
+                Once you start challenges, your XP, level and tier will appear
+                here. Complete process-green days and finish challenges to earn
+                rewards.
               </p>
             )}
 
@@ -576,8 +588,7 @@ export default function AccountPage() {
                       })()}
                     </div>
                     <p className="mt-1 text-[11px] text-slate-500">
-                      XP comes from process-green days and completed
-                      challenges.
+                      XP comes from process-green days and completed challenges.
                     </p>
                   </div>
                 </div>
@@ -588,7 +599,7 @@ export default function AccountPage() {
                       Badges unlocked
                     </p>
                     <div className="flex flex-wrap gap-1.5">
-                      {gamification.badges.map((b) => (
+                      {gamification.badges.map((b: string) => (
                         <span
                           key={b}
                           className="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-200"
@@ -601,9 +612,8 @@ export default function AccountPage() {
                 )}
 
                 <p className="mt-3 text-[11px] text-slate-500">
-                  Your AI coach and global rankings will use this profile
-                  (level, tier, XP and badges) to adjust feedback and
-                  rewards.
+                  Your AI coach and global rankings will use this profile (level,
+                  tier, XP and badges) to adjust feedback and rewards.
                 </p>
               </>
             )}

@@ -9,18 +9,18 @@ import ReactMarkdown from "react-markdown";
 import { useAuth } from "@/context/AuthContext";
 import TopNav from "@/app/components/TopNav";
 
-import type { JournalEntry } from "@/lib/journalLocal";
+import type { JournalEntry } from "@/lib/journalTypes";
 import { getAllJournalEntries } from "@/lib/journalSupabase";
 
 import { getGrowthPlan, type GrowthPlan } from "@/lib/growthPlanLocal";
 import {
   buildAiCoachSnapshot,
   type AiCoachSnapshot,
-} from "@/lib/aiCoachSnapshotLocal";
+} from "@/lib/aiCoachSnapshotSupabase";
 import {
   getProfileGamification,
   type ProfileGamification,
-} from "@/lib/profileGamificationLocal";
+} from "@/lib/profileGamificationSupabase";
 
 /* =========================
    Tipos
@@ -503,11 +503,12 @@ function AiCoachingPageInner() {
         const p = getGrowthPlan();
         setPlan(p || null);
 
-        // Snapshot completo con journal + analytics + widgets + challenges + rules/alarms + resources
-        const full = buildAiCoachSnapshot();
+        // ✅ Snapshot completo desde Supabase (ANTES era local)
+        const full = await buildAiCoachSnapshot(userId);
         setFullSnapshot(full);
 
-        const g = getProfileGamification();
+        // ✅ Gamificación desde Supabase (ANTES era local)
+        const g = await getProfileGamification(userId);
         setGamification(g);
       } catch (err) {
         console.error("[AI Coaching] Error loading data:", err);
@@ -1076,7 +1077,7 @@ function AiCoachingPageInner() {
                 <p className="text-[11px] text-slate-400">
                   Total XP: {gamification.xp.toLocaleString()}
                 </p>
-                {gamification.badges.length > 0 && (
+                {Array.isArray(gamification.badges) && gamification.badges.length > 0 && (
                   <div className="mt-2 flex flex-wrap gap-1.5">
                     {gamification.badges.map((b) => (
                       <span

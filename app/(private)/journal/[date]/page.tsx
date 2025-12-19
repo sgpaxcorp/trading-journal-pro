@@ -1084,7 +1084,7 @@ const userId = user?.id ?? "";
   ];
 
   const exitReasonTags = [
-    "Stop Loss",
+    "Stop Loss Placed",
     "Take Profit Hit",
     "Manual Exit",
     "Moved stop to profit",
@@ -1983,11 +1983,12 @@ await saveJournalTradesForDay(userId, clean.date, parsed,
         <WidgetCard title="Emotional state & impulses">
           <div className="flex flex-wrap gap-2 text-[13px] leading-snug">
             {[
-              "Calm & focused",
+              "Calm",
               "Greedy",
               "Desperate",
               "FOMO",
               "Revenge trade",
+              "Focus",
             ].map((t) => (
               <label
                 key={t}
@@ -2029,6 +2030,8 @@ await saveJournalTradesForDay(userId, clean.date, parsed,
             <div className="flex flex-wrap gap-2 text-[13px] leading-snug">
               {[
                 "Respect Strategy",
+                "Not follow my plan",
+                "No respect my plan",
                 "Planned stop was in place",
                 "Used planned position sizing",
                 "Risk-to-reward ≥ 2R (planned)",

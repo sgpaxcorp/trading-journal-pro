@@ -1,29 +1,32 @@
 // app/challenges/page.tsx
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
 import TopNav from "@/app/components/TopNav";
+import { useAuth } from "@/context/AuthContext";
+
 import {
   CHALLENGES,
   type ChallengeId,
   type ChallengeDefinition,
   type ChallengeProgress,
   getChallengeProgress,
+  getAllChallengeProgress,
   startChallenge,
-} from "@/lib/challengesLocal";
+} from "@/lib/challengesSupabase";
+
 import {
   getProfileGamification,
   type ProfileGamification,
-} from "@/lib/profileGamificationLocal";
+} from "@/lib/profileGamificationSupabase";
 
 /* =========================
    Tipos locales
 ========================= */
 
 type ProgressMap = Partial<Record<ChallengeId, ChallengeProgress | null>>;
-
 type DialogMode = "start" | "restart" | null;
 
 /* =========================
@@ -51,6 +54,10 @@ function getStatusColorClasses(status?: string | null) {
 ========================= */
 
 export default function ChallengesPage() {
+  const { user, loading } = useAuth() as any;
+
+  const userId = useMemo(() => user?.id || "", [user]);
+
   const [progressMap, setProgressMap] = useState<ProgressMap>({});
   const [profile, setProfile] = useState<ProfileGamification | null>(null);
 
@@ -59,31 +66,48 @@ export default function ChallengesPage() {
   const [selectedChallenge, setSelectedChallenge] =
     useState<ChallengeDefinition | null>(null);
 
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
   /* ---------- Cargar progreso y perfil ---------- */
   useEffect(() => {
-    const map: ProgressMap = {};
-    for (const c of CHALLENGES) {
-      map[c.id] = getChallengeProgress(c.id);
-    }
-    setProgressMap(map);
+    if (loading || !userId) return;
 
-    // snapshot de gamificación para mostrar arriba
-    try {
-      const g = getProfileGamification();
-      setProfile(g);
-    } catch {
-      // ignore
-    }
-  }, []);
+    const run = async () => {
+      try {
+        setError(null);
 
-  function refreshProgress(id: ChallengeId) {
-    setProgressMap((prev) => ({
-      ...prev,
-      [id]: getChallengeProgress(id),
-    }));
+        // Cargar todos los progress de DB
+        const all = await getAllChallengeProgress(userId);
+
+        const map: ProgressMap = {};
+        for (const c of CHALLENGES) map[c.id] = null;
+        for (const p of all) map[p.challengeId] = p;
+
+        setProgressMap(map);
+
+        // snapshot gamification
+        const g = await getProfileGamification(userId, {
+          syncToDb: true,
+          fallbackToDbCache: true,
+        });
+        setProfile(g);
+      } catch (e: any) {
+        console.error("[ChallengesPage] load error:", e);
+        setError(e?.message ?? "Failed to load challenges.");
+      }
+    };
+
+    void run();
+  }, [loading, userId]);
+
+  async function refreshProgress(id: ChallengeId) {
+    if (!userId) return;
+    const p = await getChallengeProgress(userId, id);
+    setProgressMap((prev) => ({ ...prev, [id]: p }));
   }
 
-  /* ---------- Handlers para Start / Restart ---------- */
+  /* ---------- Dialog handlers ---------- */
 
   function openDialog(challenge: ChallengeDefinition, mode: DialogMode) {
     setSelectedChallenge(challenge);
@@ -97,16 +121,35 @@ export default function ChallengesPage() {
     setSelectedChallenge(null);
   }
 
-  function handleConfirmChallenge() {
-    if (!selectedChallenge || !dialogMode) return;
-    // startChallenge también sirve como restart (resetea progreso)
-    const updated = startChallenge(selectedChallenge.id);
-    setProgressMap((prev) => ({
-      ...prev,
-      [selectedChallenge.id]: updated,
-    }));
-    setDialogOpen(false);
-    setDialogMode(null);
+  async function handleConfirmChallenge() {
+    if (!selectedChallenge || !dialogMode || !userId) return;
+
+    try {
+      setBusy(true);
+      setError(null);
+
+      // startChallenge sirve como restart
+      const updated = await startChallenge(userId, selectedChallenge.id);
+
+      setProgressMap((prev) => ({
+        ...prev,
+        [selectedChallenge.id]: updated,
+      }));
+
+      // refresca gamification
+      const g = await getProfileGamification(userId, {
+        syncToDb: true,
+        fallbackToDbCache: true,
+      });
+      setProfile(g);
+
+      closeDialog();
+    } catch (e: any) {
+      console.error("[ChallengesPage] confirm error:", e);
+      setError(e?.message ?? "Failed to start challenge.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -116,9 +159,7 @@ export default function ChallengesPage() {
         {/* Header */}
         <header className="mb-8 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
           <div>
-            <h1 className="text-3xl font-semibold tracking-tight">
-              Challenges
-            </h1>
+            <h1 className="text-3xl font-semibold tracking-tight">Challenges</h1>
             <p className="mt-2 max-w-2xl text-sm text-slate-400">
               Structured missions to build consistency, discipline, and risk
               control. Win by following your rules, not chasing P&amp;L.
@@ -138,12 +179,18 @@ export default function ChallengesPage() {
                 </span>
               </p>
               <p className="mt-1">
-                {profile.xp.toLocaleString()} XP •{" "}
-                {profile.badges.length} badges unlocked
+                {profile.xp.toLocaleString()} XP • {profile.badges.length} badges
+                unlocked
               </p>
             </div>
           )}
         </header>
+
+        {error && (
+          <div className="mb-6 rounded-2xl border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+            {error}
+          </div>
+        )}
 
         {/* Cards */}
         <section className="grid gap-6 md:grid-cols-2">
@@ -153,10 +200,9 @@ export default function ChallengesPage() {
 
             const greenDays = progress?.processGreenDays ?? 0;
             const targetDays = c.durationDays;
+
             const pct =
-              targetDays > 0
-                ? Math.min(100, (greenDays / targetDays) * 100)
-                : 0;
+              targetDays > 0 ? Math.min(100, (greenDays / targetDays) * 100) : 0;
 
             const statusLabel = getStatusLabel(status);
             const statusClasses = getStatusColorClasses(status);
@@ -173,9 +219,7 @@ export default function ChallengesPage() {
                   <h2 className="text-xl font-semibold text-slate-50">
                     {c.title}
                   </h2>
-                  <p className="text-sm text-slate-300">
-                    {c.shortDescription}
-                  </p>
+                  <p className="text-sm text-slate-300">{c.shortDescription}</p>
 
                   <p className="mt-3 text-[11px] font-semibold text-emerald-400">
                     DURATION: {c.durationDays} DAYS
@@ -199,9 +243,7 @@ export default function ChallengesPage() {
                   </div>
 
                   <div className="text-right space-y-1">
-                    <p className="text-[11px] text-slate-400">
-                      Process-green days
-                    </p>
+                    <p className="text-[11px] text-slate-400">Process-green days</p>
                     <p className="text-sm font-semibold text-slate-100">
                       {greenDays} / {targetDays}
                     </p>
@@ -217,8 +259,8 @@ export default function ChallengesPage() {
                     />
                   </div>
                   <p className="mt-1 text-[10px] text-slate-500">
-                    Each process-green day (respecting rules + journaling)
-                    advances this bar.
+                    Each process-green day (respecting rules + journaling) advances
+                    this bar.
                   </p>
                 </div>
 
@@ -226,10 +268,9 @@ export default function ChallengesPage() {
                 <div className="mt-5 flex items-center justify-between">
                   <button
                     type="button"
-                    onClick={() =>
-                      openDialog(c, isActive ? "restart" : "start")
-                    }
-                    className="rounded-full bg-emerald-400 px-4 py-1.5 text-xs font-semibold text-slate-950 hover:bg-emerald-300 transition"
+                    onClick={() => openDialog(c, isActive ? "restart" : "start")}
+                    className="rounded-full bg-emerald-400 px-4 py-1.5 text-xs font-semibold text-slate-950 hover:bg-emerald-300 transition disabled:opacity-60"
+                    disabled={busy || !userId}
                   >
                     {isActive ? "Restart" : "Start challenge"}
                   </button>
@@ -246,11 +287,9 @@ export default function ChallengesPage() {
           })}
         </section>
 
-        {/* Hint */}
         <p className="mt-6 text-[11px] text-slate-500">
-          Tip: your challenges are stored locally in this browser. When you
-          journal and respect your rules, you can wire your journal save logic
-          to update challenge progress automatically.
+          Tip: challenges are stored in your Supabase account. Journaling + respecting
+          rules can automatically update challenge progress.
         </p>
       </main>
 
@@ -276,8 +315,8 @@ export default function ChallengesPage() {
             <ul className="mb-3 list-disc space-y-1 pl-5 text-xs text-slate-200">
               <li>
                 Each trading day counts as{" "}
-                <span className="font-semibold">process-green</span> only if
-                you respect your risk rules and complete your journal.
+                <span className="font-semibold">process-green</span> only if you
+                respect your risk rules and complete your journal.
               </li>
               <li>
                 The goal is to reach{" "}
@@ -288,15 +327,15 @@ export default function ChallengesPage() {
                 progress.
               </li>
               <li>
-                The AI coach will use your challenge progress to give you
-                tailored feedback on consistency and risk.
+                The AI coach will use your challenge progress to give you tailored
+                feedback on consistency and risk.
               </li>
             </ul>
 
             <p className="mb-4 text-[11px] text-slate-400">
               By continuing, you agree to focus on{" "}
-              <span className="font-semibold">process over P&amp;L</span> for
-              the duration of this challenge.
+              <span className="font-semibold">process over P&amp;L</span> for the
+              duration of this challenge.
             </p>
 
             <div className="flex items-center justify-end gap-2 text-xs">
@@ -304,15 +343,19 @@ export default function ChallengesPage() {
                 type="button"
                 onClick={closeDialog}
                 className="rounded-full border border-slate-700 px-3 py-1 text-slate-300 hover:bg-slate-800"
+                disabled={busy}
               >
                 Cancel
               </button>
               <button
                 type="button"
                 onClick={handleConfirmChallenge}
-                className="rounded-full bg-emerald-400 px-4 py-1 font-semibold text-slate-950 hover:bg-emerald-300"
+                className="rounded-full bg-emerald-400 px-4 py-1 font-semibold text-slate-950 hover:bg-emerald-300 disabled:opacity-60"
+                disabled={busy}
               >
-                {dialogMode === "start"
+                {busy
+                  ? "Working..."
+                  : dialogMode === "start"
                   ? "I understand, start"
                   : "I understand, restart"}
               </button>
