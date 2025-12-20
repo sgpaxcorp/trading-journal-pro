@@ -7,6 +7,12 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { saveJournalTradesForDay } from "@/lib/journalTradesSupabase";
 import { parseNotes } from "@/lib/journalNotes";
+import { supabaseBrowser } from "@/lib/supaBaseClient";
+
+import { getJournalTradesForDay } from "@/lib/journalTradesSupabase";
+
+
+
 
 
 import JournalGrid, {
@@ -298,6 +304,59 @@ const STRATEGY_OPTIONS: { value: OptionStrategy; label: string }[] = [
   { value: "cash_secured_put", label: "Cash-secured put" },
   { value: "other", label: "Other option strategy" },
 ];
+// ✅ Normalizadores para adaptar StoredTradeRow -> EntryTradeRow/ExitTradeRow
+
+function toSideType(raw: any): SideType {
+  const s = String(raw ?? "").toLowerCase();
+
+  // si ya viene correcto
+  if (s === "short") return "short";
+  if (s === "long") return "long";
+
+  // si llega BUY/SELL de import, default long
+  if (s.includes("short")) return "short";
+  return "long";
+}
+
+function toPremiumSide(raw: any): PremiumSide {
+  const s = String(raw ?? "").toLowerCase();
+  if (s.includes("credit")) return "credit";
+  if (s.includes("debit")) return "debit";
+  if (s === "none" || s === "—" || s === "-") return "none";
+  return "debit";
+}
+
+function toOptionStrategy(raw: any): OptionStrategy {
+  const s = String(raw ?? "").toLowerCase().trim();
+
+  const allowed: OptionStrategy[] = [
+    "single",
+    "vertical_spread",
+    "iron_condor",
+    "iron_butterfly",
+    "straddle",
+    "strangle",
+    "calendar",
+    "diagonal",
+    "covered_call",
+    "cash_secured_put",
+    "other",
+  ];
+  if ((allowed as string[]).includes(s)) return s as OptionStrategy;
+
+  if (s.includes("single")) return "single";
+  if (s.includes("vertical")) return "vertical_spread";
+  if (s.includes("condor")) return "iron_condor";
+  if (s.includes("butterfly")) return "iron_butterfly";
+  if (s.includes("straddle")) return "straddle";
+  if (s.includes("strangle")) return "strangle";
+  if (s.includes("calendar")) return "calendar";
+  if (s.includes("diagonal")) return "diagonal";
+  if (s.includes("covered")) return "covered_call";
+  if (s.includes("cash")) return "cash_secured_put";
+
+  return "single";
+}
 
 type EntryTradeRow = {
   id: string;
@@ -327,6 +386,49 @@ type ExitTradeRow = {
   dte?: number | null;
   expiry?: string | null;
 };
+/* =========================
+   UI -> StoredTradeRow (DB)
+========================= */
+import type { StoredTradeRow } from "@/lib/journalNotes";
+
+function toNum(v: any): number {
+  const n = Number(String(v ?? "").trim());
+  return Number.isFinite(n) ? n : 0;
+}
+
+function entryRowToStored(r: EntryTradeRow): StoredTradeRow {
+  return {
+    id: (r as any).id,
+    symbol: String(r.symbol ?? "").trim(),
+    kind: (r.kind ?? "other") as any,
+    side: r.side,
+    premiumSide: (r as any).premiumSide,
+    optionStrategy: (r as any).optionStrategy,
+    price: toNum(r.price),
+    quantity: toNum(r.quantity),
+    time: String(r.time ?? ""),
+    dte: (r as any).dte ?? undefined,
+    emotions: (r as any).emotions ?? undefined,
+    strategyChecklist: (r as any).strategyChecklist ?? undefined,
+  } as any;
+}
+
+function exitRowToStored(r: ExitTradeRow): StoredTradeRow {
+  return {
+    id: (r as any).id,
+    symbol: String(r.symbol ?? "").trim(),
+    kind: (r.kind ?? "other") as any,
+    side: r.side,
+    premiumSide: (r as any).premiumSide,
+    optionStrategy: (r as any).optionStrategy,
+    price: toNum(r.price),
+    quantity: toNum(r.quantity),
+    time: String(r.time ?? ""),
+    dte: (r as any).dte ?? undefined,
+    emotions: (r as any).emotions ?? undefined,
+    strategyChecklist: (r as any).strategyChecklist ?? undefined,
+  } as any;
+}
 
 function nowTimeLabel() {
   return new Date().toLocaleTimeString([], {
@@ -663,6 +765,7 @@ const userId = user?.id ?? "";
     tags: [],
     respectedPlan: true,
   });
+
 
   const [pnlInput, setPnlInput] = useState<string>("");
 
@@ -1113,6 +1216,42 @@ const userId = user?.id ?? "";
       exits: exitTrades,
     });
 
+      // ✅ 1) arma el entry a guardar usando notesPayload
+  const entryToSave = {
+    ...entry,
+    user_id: userId,
+    date: dateParam, // o entry.date si ya es el mismo
+    notes: notesPayload,
+    // ✅ si pnl lo tienes en input/string, fuerza número aquí
+    pnl: Number.isFinite(Number(pnlInput)) ? Number(pnlInput) : (entry as any).pnl ?? 0,
+  };
+
+  try {
+    // ✅ 2) guarda journal_entries
+    await saveJournalEntry(userId, entryToSave as any);
+
+    // ✅ 3) guarda journal_trades (filas) desde el STATE actual, no desde notes parseadas
+  const storedEntries = entryTrades.map(entryRowToStored);
+const storedExits = exitTrades.map(exitRowToStored);
+
+await saveJournalTradesForDay(userId, dateParam, {
+  entries: storedEntries,
+  exits: storedExits,
+});
+
+
+    setMsg("Saved ✅");
+    setTimeout(() => setMsg(""), 2000);
+    return true;
+  } catch (err: any) {
+    console.error(err);
+    setMsg(err?.message ?? "Save failed");
+    return false;
+  } finally {
+    setSaving(false);
+  }
+
+
     const EMOTION_TAGS = [
   "Calm & focused",
   "Greedy",
@@ -1183,7 +1322,7 @@ const clean: JournalEntry = {
       
       await saveJournalEntry(userId, clean);
       const parsed = parseNotes(clean.notes);
-await saveJournalTradesForDay(userId, clean.date, parsed, 
+      await saveJournalTradesForDay(userId, clean.date, parsed, 
 );
 
 
@@ -1202,30 +1341,155 @@ await saveJournalTradesForDay(userId, clean.date, parsed,
     }
   };
 
-  const handleSaveAndBack = async () => {
-    const ok = await handleSave();
-    if (ok) {
-      router.push("/dashboard");
-    }
+const handleSaveAndBack = async () => {
+  const ok = await handleSave();
+  if (!ok) return; // ✅ si falló, NO navegues
+  router.push("/dashboard");
+};
+
+
+  /* =========================
+     Import / Sync buttons
+  ========================= */
+  const [syncing, setSyncing] = useState(false);
+
+  // ✅ Ajusta esta ruta si tu import page se llama distinto (ej: "/import3")
+  const IMPORT_PATH = "/import";
+
+  const handleGoToImport = () => {
+    router.push(IMPORT_PATH);
   };
 
-  /* ---------- Templates ---------- */
-  const handleSaveTemplate = () => {
-    if (!newTemplateName.trim()) return;
-    const preHtml = preRef.current?.innerHTML || "";
-    const liveHtml = liveRef.current?.innerHTML || "";
-    const postHtml = postRef.current?.innerHTML || "";
+  const handleSyncFromImport = async () => {
+  if (!userId || !dateParam) {
+    setMsg("Cannot sync: missing user/date.");
+    return;
+  }
 
-    const payload = JSON.stringify({
-      premarket: preHtml,
-      live: liveHtml,
-      post: postHtml,
+  setSyncing(true);
+  setMsg("");
+
+  try {
+    // ✅ TOKEN CORRECTO
+    const {
+      data: { session },
+      error: sessionErr,
+    } = await supabaseBrowser.auth.getSession();
+
+    if (sessionErr || !session?.access_token) {
+      setMsg("Cannot sync: not authenticated.");
+      return;
+    }
+
+    const res = await fetch("/api/journal/sync", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify({ date: dateParam }),
     });
 
-    addJournalTemplate(newTemplateName.trim(), payload);
-    setTemplates(getJournalTemplates());
-    setNewTemplateName("");
-  };
+    const json = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+      setMsg(json?.error ? `Sync error: ${json.error}` : "Sync error.");
+      return;
+    }
+
+    const found = json?.trades_found ?? 0;
+    const groups = json?.groups ?? 0;
+    const updated = json?.updated ?? 0;
+
+      setMsg(`Synced ${found} trades → ${groups} groups (${updated} updated).`);
+    setTimeout(() => setMsg(""), 2500);
+
+   // ✅ REHIDRATAR ESTADO DESDE SUPABASE (NO router.refresh)
+const freshEntry = await getJournalEntryByDate(userId, dateParam);
+if (freshEntry) {
+  setEntry((prev) => ({ ...prev, ...freshEntry, date: dateParam }));
+}
+
+   const freshTrades = await getJournalTradesForDay(userId, dateParam);
+
+// ✅ convertir rows de Supabase (StoredTradeRow) al shape del UI
+const normEntry: EntryTradeRow[] = (freshTrades.entries ?? []).map((r: any) => ({
+  id: String(r.id ?? crypto.randomUUID()),
+  symbol: String(r.symbol ?? "").toUpperCase(),
+  kind: (r.kind ?? "other") as InstrumentType,
+
+  side: toSideType(r.side),
+  premiumSide: toPremiumSide(r.premiumSide ?? r.premium),
+  optionStrategy: toOptionStrategy(r.optionStrategy ?? r.strategy),
+
+  price: r.price != null ? String(r.price) : "",
+  quantity: r.quantity != null ? String(r.quantity) : "",
+  time: String(r.time ?? ""),
+
+  dte: r.dte ?? null,
+  expiry: (r as any).expiry ?? null,
+}));
+
+const normExit: ExitTradeRow[] = (freshTrades.exits ?? []).map((r: any) => ({
+  id: String(r.id ?? crypto.randomUUID()),
+  symbol: String(r.symbol ?? "").toUpperCase(),
+  kind: (r.kind ?? "other") as InstrumentType,
+
+  side: toSideType(r.side),
+  premiumSide: toPremiumSide(r.premiumSide ?? r.premium),
+  optionStrategy: toOptionStrategy(r.optionStrategy ?? r.strategy),
+
+  price: r.price != null ? String(r.price) : "",
+  quantity: r.quantity != null ? String(r.quantity) : "",
+  time: String(r.time ?? ""),
+
+  dte: r.dte ?? null,
+  expiry: (r as any).expiry ?? null,
+}));
+
+setEntryTrades(normEntry);
+setExitTrades(normExit);
+
+    // ✅ si tu entry trae pnl ya guardado, úsalo
+const freshPnl =
+  freshEntry && typeof (freshEntry as any).pnl === "number"
+    ? (freshEntry as any).pnl
+    : Number((freshEntry as any)?.pnl) || 0;
+
+// ✅ tu page no tiene setPnl; usa setEntry + setPnlInput
+setEntry((prev) => ({ ...prev, pnl: freshPnl }));
+setPnlInput(freshPnl ? freshPnl.toFixed(2) : "");
+
+
+  } catch (err) {
+    console.error(err);
+    setMsg("Error syncing trades.");
+  } finally {
+    setSyncing(false);
+  }
+};
+
+
+ 
+  /* ---------- Templates ---------- */
+const handleSaveTemplate = () => {
+  if (!newTemplateName.trim()) return;
+
+  const preHtml = preRef.current?.innerHTML || "";
+  const liveHtml = liveRef.current?.innerHTML || "";
+  const postHtml = postRef.current?.innerHTML || "";
+
+  const payload = JSON.stringify({
+    premarket: preHtml,
+    live: liveHtml,
+    post: postHtml,
+  });
+
+  addJournalTemplate(newTemplateName.trim(), payload);
+  setTemplates(getJournalTemplates());
+  setNewTemplateName("");
+};
+
 
   const handleApplyTemplate = (tpl: JournalTemplate) => {
     if (!tpl.content) return;
@@ -2209,7 +2473,7 @@ await saveJournalTradesForDay(userId, clean.date, parsed,
         minH: 3,
       },
       render: () => (
-        <WidgetCard title="Actions">
+          <WidgetCard title="Actions">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="text-[11px] text-slate-500">
               {msg && <span className="text-emerald-400 mr-3">{msg}</span>}
@@ -2218,13 +2482,30 @@ await saveJournalTradesForDay(userId, clean.date, parsed,
             <div className="flex gap-2">
               <button
                 type="button"
+                onClick={handleGoToImport}
+                className="px-4 py-2 rounded-xl border border-slate-700 text-slate-200 text-xs hover:border-sky-400 hover:text-sky-300 transition"
+              >
+                Import
+              </button>
+
+              <button
+                type="button"
+                onClick={handleSyncFromImport}
+                disabled={syncing}
+                className="px-4 py-2 rounded-xl border border-slate-700 text-slate-200 text-xs hover:border-amber-400 hover:text-amber-300 transition disabled:opacity-50"
+              >
+                {syncing ? "Syncing…" : "Sync"}
+              </button>
+
+              <button
+                type="button"
                 onClick={handleSave}
                 disabled={saving}
                 className="px-4 py-2 rounded-xl border border-slate-700 text-slate-200 text-xs hover:border-emerald-400 hover:text-emerald-300 transition disabled:opacity-50"
               >
                 Save
               </button>
-       
+
               <button
                 type="button"
                 onClick={handleSaveAndBack}
