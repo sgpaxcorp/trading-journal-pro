@@ -21,8 +21,9 @@ type ImportHistoryItem = {
   filename: string | null;
   comment: string | null;
   status: "success" | "failed" | "processing";
-  imported_rows: number | null;
-  duplicates: number | null;
+  imported_rows: number | null; // inserted
+  updated_rows: number | null;  // ✅ NEW
+  duplicates: number | null;    // skipped (ledger)
   started_at: string; // ISO
   finished_at: string | null; // ISO
   duration_ms: number | null;
@@ -129,10 +130,9 @@ export default function ImportPage() {
   }, []);
 
   // ✅ FIX: si escoges el MISMO file, el input no dispara onChange.
-  // Reseteamos el value ANTES del click.
   function onPickFileClick() {
     if (!fileInputRef.current) return;
-    fileInputRef.current.value = ""; // ✅ permite volver a seleccionar el mismo file
+    fileInputRef.current.value = "";
     fileInputRef.current.click();
   }
 
@@ -147,7 +147,7 @@ export default function ImportPage() {
     setFile(null);
     setErrorMsg(null);
     setStatusMsg(null);
-    if (fileInputRef.current) fileInputRef.current.value = ""; // ✅ limpia el input
+    if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
   function onDrop(e: React.DragEvent<HTMLDivElement>) {
@@ -215,14 +215,17 @@ export default function ImportPage() {
         return;
       }
 
-      const count = typeof data?.count === "number" ? data.count : null;
+      // ✅ NEW response: inserted/updated/duplicates
+      const inserted = typeof data?.inserted === "number" ? data.inserted : null;
+      const updated = typeof data?.updated === "number" ? data.updated : null;
       const duplicates = typeof data?.duplicates === "number" ? data.duplicates : null;
 
-      setStatusMsg(
-        count !== null
-          ? `Imported ${count} rows${duplicates !== null ? ` (${duplicates} duplicates skipped)` : ""}.`
-          : "Import completed."
-      );
+      const parts: string[] = [];
+      if (inserted !== null) parts.push(`Imported ${inserted} rows`);
+      if (duplicates !== null) parts.push(`${duplicates} duplicates skipped`);
+      if (updated !== null) parts.push(`${updated} updated`);
+
+      setStatusMsg(parts.length ? `${parts.join(" (").replace(/\)\s\(/g, ", ")}).`.replace(/\(\)/g, "") : "Import completed.");
 
       setFile(null);
       setComment("");
@@ -231,8 +234,6 @@ export default function ImportPage() {
       setErrorMsg(err?.message ?? "Import failed.");
     } finally {
       setImporting(false);
-
-      // ✅ FIX: deja listo para volver a escoger el MISMO archivo
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
   }
@@ -419,7 +420,6 @@ export default function ImportPage() {
               ) : history.length === 0 ? (
                 <div className="text-xs text-slate-400">No history yet.</div>
               ) : (
-                // ✅ FIX: scrollable history panel (no page stretching)
                 <div className="mt-3 max-h-[520px] overflow-y-auto pr-2">
                   <div className="space-y-3">
                     {history.slice(0, 10).map((h) => (
@@ -435,11 +435,18 @@ export default function ImportPage() {
                           <StatusPill status={h.status} />
                         </div>
 
-                        <div className="mt-2 grid grid-cols-2 gap-2 text-[11px]">
+                        {/* ✅ 3 tiles */}
+                        <div className="mt-2 grid grid-cols-3 gap-2 text-[11px]">
                           <div className="rounded-lg border border-slate-800 bg-slate-950/30 px-2 py-1">
-                            <div className="text-slate-400">Rows</div>
+                            <div className="text-slate-400">Imported</div>
                             <div className="font-semibold text-slate-100">{h.imported_rows ?? "—"}</div>
                           </div>
+
+                          <div className="rounded-lg border border-slate-800 bg-slate-950/30 px-2 py-1">
+                            <div className="text-slate-400">Updated</div>
+                            <div className="font-semibold text-slate-100">{h.updated_rows ?? "—"}</div>
+                          </div>
+
                           <div className="rounded-lg border border-slate-800 bg-slate-950/30 px-2 py-1">
                             <div className="text-slate-400">Duplicates</div>
                             <div className="font-semibold text-slate-100">{h.duplicates ?? "—"}</div>
