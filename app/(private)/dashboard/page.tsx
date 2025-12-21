@@ -1046,6 +1046,8 @@ export default function DashboardPage() {
       );
     }
 
+    
+
     // ===== Calendar (Mon–Fri + week numbers) =====
     if (id === "calendar") {
       return (

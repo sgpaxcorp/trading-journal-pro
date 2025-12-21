@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
+import { onNeuroPush, type NeuroPush } from "@/app/components/neuroEventBus";
 
 type AssistantState = "idle" | "thinking" | "talking";
 type Lang = "en" | "es";
 type ChatMessage = { role: "user" | "assistant"; text: string };
-
 type AvatarState = "idle" | "thinking" | "speaking" | "happy" | "error";
 
 const AVATAR_SRC: Record<AvatarState, { webm?: string; mp4: string }> = {
@@ -17,10 +17,10 @@ const AVATAR_SRC: Record<AvatarState, { webm?: string; mp4: string }> = {
   error: { webm: "/ai-avatar/idle.webm", mp4: "/ai-avatar/idle.mp4" },
 };
 
-function CandleAvatarButton({
+function NeuroAvatarButton({
   state,
   open,
-  size = 220,
+  size = 168, // ✅ 30% menos (de 240)
   onToggle,
 }: {
   state: AvatarState;
@@ -38,6 +38,7 @@ function CandleAvatarButton({
   const isHappy = state === "happy";
   const isThinking = state === "thinking";
 
+  // ✅ deps constante: evita el error de React
   useEffect(() => {
     const nextToTop = !fadeTop;
     if (nextToTop) setTopState(state);
@@ -66,15 +67,14 @@ function CandleAvatarButton({
   const top = AVATAR_SRC[topState];
   const bottom = AVATAR_SRC[bottomState];
 
-  // ✅ halo según estado (más “vivo” como tu imagen)
   const halo =
     state === "happy"
       ? "rgba(34,197,94,0.55)"
       : state === "thinking"
       ? "rgba(16,185,129,0.55)"
       : open
-      ? "rgba(16,185,129,0.50)"
-      : "rgba(16,185,129,0.35)";
+      ? "rgba(16,185,129,0.45)"
+      : "rgba(16,185,129,0.28)";
 
   return (
     <button
@@ -84,47 +84,45 @@ function CandleAvatarButton({
         bottomRef.current?.play?.().catch(() => {});
         onToggle();
       }}
-      aria-label="Open Candle Assistant"
+      aria-label="Open Neuro Assistant"
       className="fixed bottom-4 right-4 z-40 select-none"
       style={{ width: size, height: size }}
     >
       <div className={["relative w-full h-full", pulse].join(" ")}>
-        {/* ✅ HALO radial (gradiente) como tu referencia */}
+        {/* ✅ Halo más fuerte, bordes más transparentes */}
         <div
           className="absolute inset-0 rounded-full"
           style={{
             background: `radial-gradient(circle at 50% 50%,
-              rgba(0,0,0,0) 35%,
-              ${halo} 65%,
-              rgba(16,185,129,0.10) 78%,
+              ${halo} 0%,
+              rgba(16,185,129,0.35) 28%,
+              rgba(16,185,129,0.18) 50%,
+              rgba(16,185,129,0.08) 68%,
               rgba(0,0,0,0) 100%)`,
-            filter: "blur(10px)",
-            transform: "scale(1.15)",
+            filter: "blur(18px)",
+            transform: "scale(1.45)",
             pointerEvents: "none",
           }}
         />
 
-        {/* ✅ círculo real con viñeta interior */}
         <div
           className="absolute inset-0 rounded-full overflow-hidden"
           style={{
-            // ring suave
-            boxShadow: "0 0 0 1px rgba(16,185,129,0.20)",
+            boxShadow: "0 0 0 1px rgba(16,185,129,0.16)",
             pointerEvents: "none",
           }}
         >
-          {/* ✅ mask/viñeta para esconder “bordes del cuadrado” */}
+          {/* ✅ vignette suave */}
           <div
             className="absolute inset-0"
             style={{
               background:
-                "radial-gradient(circle at 50% 50%, rgba(0,0,0,0) 45%, rgba(0,0,0,0.45) 78%, rgba(0,0,0,0.70) 100%)",
+                "radial-gradient(circle at 50% 45%, rgba(0,0,0,0) 52%, rgba(0,0,0,0.22) 78%, rgba(0,0,0,0.45) 100%)",
               pointerEvents: "none",
               zIndex: 3,
             }}
           />
 
-          {/* Video bottom */}
           <video
             ref={bottomRef}
             autoPlay
@@ -137,17 +135,12 @@ function CandleAvatarButton({
               "transition-opacity duration-200",
               fadeTop ? "opacity-0" : "opacity-100",
             ].join(" ")}
-            style={{
-              // ✅ framing: más “libre”, sin encajonar
-              transform: "scale(1.28)",
-              objectPosition: "50% 38%",
-            }}
+            style={{ transform: "scale(1.28)", objectPosition: "50% 38%" }}
           >
             {bottom.webm ? <source src={bottom.webm} type="video/webm" /> : null}
             <source src={bottom.mp4} type="video/mp4" />
           </video>
 
-          {/* Video top */}
           <video
             ref={topRef}
             autoPlay
@@ -160,10 +153,7 @@ function CandleAvatarButton({
               "transition-opacity duration-200",
               fadeTop ? "opacity-100" : "opacity-0",
             ].join(" ")}
-            style={{
-              transform: "scale(1.28)",
-              objectPosition: "50% 38%",
-            }}
+            style={{ transform: "scale(1.28)", objectPosition: "50% 38%" }}
           >
             {top.webm ? <source src={top.webm} type="video/webm" /> : null}
             <source src={top.mp4} type="video/mp4" />
@@ -174,7 +164,7 @@ function CandleAvatarButton({
   );
 }
 
-export default function CandleAssistant() {
+export default function NeuroAssistant() {
   const pathname = usePathname();
 
   const [open, setOpen] = useState(false);
@@ -184,6 +174,53 @@ export default function CandleAssistant() {
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [lang, setLang] = useState<Lang>("en");
+
+  // ✅ Auto-scroll al final
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const endRef = useRef<HTMLDivElement | null>(null);
+
+  // ✅ Chat pegado al avatar (sin taparlo)
+  const AVATAR_SIZE = 168;
+  const RIGHT_OFFSET = useMemo(() => {
+    const rightPadding = 16; // right-4
+    const gap = -32; // espacio entre chat y muñeco
+    return `calc(${rightPadding}px + ${AVATAR_SIZE}px + ${gap}px)`;
+  }, []);
+
+  useEffect(() => {
+    const off = onNeuroPush((p: NeuroPush) => {
+      if (p.kind === "neuro_open") {
+        setOpen(true);
+        return;
+      }
+
+      if (p.kind === "neuro_push") {
+        setOpen(true);
+        setMessages((prev) => [...prev, { role: "assistant", text: p.text }]);
+
+        setState("talking");
+        setAvatarState("speaking");
+        window.setTimeout(() => setAvatarState("happy"), 450);
+        window.setTimeout(() => {
+          setAvatarState("idle");
+          setState("idle");
+        }, 1100);
+      }
+    });
+
+    return off;
+  }, []);
+
+  // ✅ Siempre ver el último mensaje
+  useEffect(() => {
+    if (!open) return;
+    const id = window.requestAnimationFrame(() => {
+      endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+      const el = scrollRef.current;
+      if (el) el.scrollTop = el.scrollHeight;
+    });
+    return () => window.cancelAnimationFrame(id);
+  }, [open, messages, state]);
 
   async function handleSend() {
     if (!input.trim()) return;
@@ -196,13 +233,17 @@ export default function CandleAssistant() {
     setAvatarState("thinking");
 
     try {
-      const res = await fetch("/api/candle-assistant", {
+      const res = await fetch("/api/neuro-assistant", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          // ✅ ayuda extra (no rompe nada) para que el server respete el idioma
+          "Accept-Language": lang === "en" ? "en" : "es",
+        },
         body: JSON.stringify({
           question,
           contextPath: pathname,
-          lang,
+          lang, // ✅ este es el que usa tu route.ts
         }),
       });
 
@@ -213,7 +254,7 @@ export default function CandleAssistant() {
         data.answer ||
         (lang === "es"
           ? "Estoy aquí para ayudarte, pero algo falló. Intenta de nuevo en un momento."
-          : "I'm here to help, but I got stuck. Try again in a moment.");
+          : "I’m here to help, but something failed. Please try again in a moment.");
 
       setMessages((prev) => [...prev, { role: "assistant", text: answer }]);
 
@@ -226,7 +267,7 @@ export default function CandleAssistant() {
         setState("idle");
       }, 1400);
     } catch (err) {
-      console.error("[CandleAssistant] Error:", err);
+      console.error("[NeuroAssistant] Error:", err);
       setMessages((prev) => [
         ...prev,
         {
@@ -234,7 +275,7 @@ export default function CandleAssistant() {
           text:
             lang === "es"
               ? "Hubo un problema al generar la respuesta. Intenta de nuevo en un momento."
-              : "Something went wrong while answering. Try again in a moment.",
+              : "Something went wrong while answering. Please try again in a moment.",
         },
       ]);
 
@@ -248,27 +289,27 @@ export default function CandleAssistant() {
 
   return (
     <>
-      {/* Avatar */}
-      <CandleAvatarButton
+      <NeuroAvatarButton
         state={avatarState}
         open={open}
-        size={240} // ✅ más grande como tu referencia
+        size={AVATAR_SIZE}
         onToggle={() => setOpen((o) => !o)}
       />
 
-      {/* ✅ Panel tipo “bubble” conectado al avatar */}
       {open && (
-        <div className="fixed bottom-40 right-56 z-40 w-96 max-w-[92vw]">
-          {/* tail / colita apuntando al muñequito */}
+        <div
+          className="fixed bottom-40 z-40 w-96 max-w-[92vw]"
+          style={{ right: RIGHT_OFFSET }}
+        >
           <div className="absolute -right-3 bottom-10 h-6 w-6 rotate-45 rounded-sm border border-slate-800 bg-slate-900/95 shadow-xl shadow-emerald-500/30 backdrop-blur" />
 
           <div className="rounded-2xl border border-slate-800 bg-slate-900/95 p-4 shadow-xl shadow-emerald-500/30 backdrop-blur max-h-[70vh] flex flex-col">
             <div className="mb-3 flex items-center justify-between text-xs text-slate-300">
               <div className="flex items-center gap-2">
                 <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-emerald-400/90 text-sm">
-                  📈
+                  🧠
                 </span>
-                <span className="font-semibold">NeuroCandle – in–app guide</span>
+                <span className="font-semibold">Neuro – Neuro Trader Guide</span>
               </div>
 
               <div className="flex items-center gap-2">
@@ -307,12 +348,15 @@ export default function CandleAssistant() {
               </div>
             </div>
 
-            <div className="mb-3 max-h-80 overflow-y-auto space-y-2 text-sm">
+            <div
+              ref={scrollRef}
+              className="mb-3 max-h-80 overflow-y-auto space-y-2 text-sm"
+            >
               {messages.length === 0 && (
                 <p className="rounded-lg bg-slate-800/70 px-3 py-2 text-slate-200">
                   {lang === "es"
                     ? "Pregúntame cómo llenar esta página, cómo escribir en tu journal o cómo usar un widget. Siempre sé en qué sección estás."
-                    : "Ask me what you should write on this page, how to journal, or how to use a widget. I always know which section you're on."}
+                    : "Ask me how to fill out this page, what to write in your journal, or how to use a widget. I always know which section you’re on."}
                 </p>
               )}
 
@@ -332,13 +376,11 @@ export default function CandleAssistant() {
               {state === "thinking" && (
                 <div className="flex items-center gap-2 text-xs text-slate-400">
                   <span className="inline-block h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
-                  <span>
-                    {lang === "es"
-                      ? "Pensando..."
-                      : "Thinking…"}
-                  </span>
+                  <span>{lang === "es" ? "Pensando..." : "Thinking…"}</span>
                 </div>
               )}
+
+              <div ref={endRef} />
             </div>
 
             <div className="mt-1 flex gap-2">

@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { supabaseBrowser } from "@/lib/supaBaseClient";
-import CandleAssistant from "@/app/components/CandleAssistant";
+import CandleAssistant from "@/app/components/NeuroAssistant";
 
 type PrivateLayoutProps = {
   children: React.ReactNode;

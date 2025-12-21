@@ -46,9 +46,7 @@ export default function Footer() {
             <Link href="/pricing" className="hover:text-emerald-400 transition">
               Pricing
             </Link>
-            <Link href="/brokers" className="hover:text-emerald-400 transition">
-              Supported Brokers *Coming Soon*
-            </Link>
+            
             <Link href="/partners" className="hover:text-emerald-400 transition">
               Become a Partner *Coming Soon*
             </Link>
