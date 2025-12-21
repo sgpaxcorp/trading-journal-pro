@@ -21,6 +21,7 @@
     "@tiptap/extension-placeholder": "^3.11.1",
     "@tiptap/react": "^3.11.1",
     "@tiptap/starter-kit": "^3.11.1",
+    "ffmpeg": "^0.0.4",
     "framer-motion": "^12.23.24",
     "jspdf": "^3.0.3",
     "jspdf-autotable": "^5.0.2",
