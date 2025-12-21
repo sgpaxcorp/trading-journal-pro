@@ -808,7 +808,7 @@ export default function GrowthPlanPage() {
             {/* ✅ Neuro language toggle (saved to Supabase inside plan) */}
             <div className="flex items-center gap-2">
               <span className="text-xs text-slate-400">Neuro:</span>
-              <div className="inline-flex items-center rounded-full border border-slate-700 bg-slate-950/70 p-[2px] text-[11px]">
+              <div className="inline-flex items-center rounded-full border border-slate-700 bg-slate-950/70 p-0.5 text-[11px]">
                 <button
                   type="button"
                   onClick={() => {
@@ -1122,11 +1122,11 @@ export default function GrowthPlanPage() {
                       <div className="text-slate-100">
                         {r.label}{" "}
                         {r.isSuggested ? (
-                          <span className="text-[10px] ml-2 text-emerald-300/90 border border-emerald-500/20 px-2 py-[1px] rounded-full">
+                          <span className="text-[10px] ml-2 text-emerald-300/90 border border-emerald-500/20 px-2 py-px rounded-full">
                             suggested
                           </span>
                         ) : (
-                          <span className="text-[10px] ml-2 text-slate-400 border border-slate-700 px-2 py-[1px] rounded-full">
+                          <span className="text-[10px] ml-2 text-slate-400 border border-slate-700 px-2 py-px rounded-full">
                             custom
                           </span>
                         )}
