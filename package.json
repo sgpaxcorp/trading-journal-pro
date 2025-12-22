@@ -23,6 +23,7 @@
     "@tiptap/starter-kit": "^3.11.1",
     "apexcharts": "^5.3.6",
     "echarts": "^6.0.0",
+    "echarts-for-react": "^3.0.5",
     "ffmpeg": "^0.0.4",
     "framer-motion": "^12.23.24",
     "jspdf": "^3.0.3",

@@ -4,23 +4,22 @@
 // =========================
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import type { ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import dynamic from "next/dynamic";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
 
-import { useAuth } from "@/context/AuthContext";
 import TopNav from "@/app/components/TopNav";
+import { useAuth } from "@/context/AuthContext";
 
 import { type InstrumentType } from "@/lib/journalNotes";
-
-// 👇 Solo usamos el TYPE desde journalLocal
+// Solo usamos el TYPE (lo de live compute depende de tu shape actual)
 import type { JournalEntry } from "@/lib/journalLocal";
-
-// 👇 Los datos ahora vienen de Supabase (tu flujo actual se queda)
+// Data real desde Supabase (como lo tienes)
 import { getAllJournalEntries } from "@/lib/journalSupabase";
 
-// ✅ Charts tipo terminal (Bloomberg-style)
+// Recharts (tu base “terminal” sutil)
 import {
   ResponsiveContainer,
   LineChart,
@@ -38,19 +37,20 @@ import {
   Area,
 } from "recharts";
 
+/* -------------------------
+   Optional chart engines
+-------------------------- */
+// ApexCharts (client-only)
+const ApexChart = dynamic(() => import("react-apexcharts"), { ssr: false });
+// ECharts (client-only)
+const EChartsReact = dynamic(() => import("echarts-for-react"), { ssr: false });
+
 /* =========================
    Types
 ========================= */
 
-type AnalyticsGroupId =
-  | "overview"
-  | "day-of-week"
-  | "psychology"
-  | "instruments"
-  | "terminal"; // ✅ NUEVO TAB (NO elimina ninguno)
-
+type AnalyticsGroupId = "overview" | "day-of-week" | "psychology" | "instruments" | "terminal" | "statistics";
 type DayOfWeekKey = 0 | 1 | 2 | 3 | 4 | 5 | 6;
-
 type SideType = "long" | "short";
 
 type EntryTradeRow = {
@@ -62,8 +62,8 @@ type EntryTradeRow = {
   quantity: string;
   time: string;
   dte?: number | null;
-  expiry?: string | null; // YYYY-MM-DD
-  underlying?: string | null; // ✅ NEW (enriched)
+  expiry?: string | null;
+  underlying?: string | null;
 };
 
 type ExitTradeRow = EntryTradeRow;
@@ -73,14 +73,11 @@ type SessionWithTrades = JournalEntry & {
   exits: ExitTradeRow[];
   uniqueSymbols: string[];
   uniqueKinds: InstrumentType[];
-  perSymbolPnL: Record<string, number>;
-
-  // ✅ NEW: derived
   uniqueUnderlyings: string[];
+  perSymbolPnL: Record<string, number>;
   firstHour: number | null;
 };
 
-// ✅ NUEVO: Snapshot shape (flexible) — NO rompe aunque el backend cambie.
 type AnalyticsSnapshot = {
   updatedAt?: string;
   totals?: {
@@ -98,13 +95,7 @@ type AnalyticsSnapshot = {
     dailyPnl?: { date: string; pnl: number }[];
   };
   edges?: {
-    symbols?: {
-      symbol: string;
-      sessions: number;
-      winRate: number;
-      netPnl: number;
-      avgPnlPerSession?: number;
-    }[];
+    symbols?: { symbol: string; sessions: number; winRate: number; netPnl: number; avgPnlPerSession?: number }[];
     underlyings?: {
       underlying: string;
       sessions: number;
@@ -113,11 +104,7 @@ type AnalyticsSnapshot = {
       avgPnlPerSession?: number;
     }[];
   };
-  usage?: {
-    premarketFillRate?: number;
-    aiUsageRate?: number;
-    aiUsedSessions?: number;
-  };
+  usage?: { premarketFillRate?: number; aiUsageRate?: number; aiUsedSessions?: number };
   heatmaps?: {
     hourUnderlying?: { underlying: string; hour: number; sessions: number; winRate: number; avgPnl: number }[];
   };
@@ -137,32 +124,29 @@ const DAY_LABELS: Record<DayOfWeekKey, string> = {
   6: "Saturday",
 };
 
-function getDayLabel(dow: DayOfWeekKey | null): string {
-  if (dow == null) return "—";
-  return DAY_LABELS[dow];
-}
-
 const GROUPS: { id: AnalyticsGroupId; label: string; description: string }[] = [
-  { id: "overview", label: "Overview", description: "Global performance and probability metrics." },
-  { id: "day-of-week", label: "Day of week", description: "How weekdays affect your results." },
-  { id: "psychology", label: "Psychology & Rules", description: "FOMO, plan respect and learning patterns." },
-  { id: "instruments", label: "Instruments", description: "Ticker + instrument-type edge and probabilities." },
-  { id: "terminal", label: "Terminal", description: "Bloomberg-style panels: equity curve, weekday edge, top symbols, heatmaps." },
+  { id: "overview", label: "Overview", description: "Global performance, probabilities, and curve." },
+  { id: "day-of-week", label: "Day of week", description: "Weekday edge & distribution." },
+  { id: "psychology", label: "Psychology", description: "Emotions, plan adherence & mistakes." },
+  { id: "instruments", label: "Instruments", description: "Symbols, underlyings, kinds, and edge tables." },
+  { id: "terminal", label: "Terminal", description: "Wall-Street panels: heatmaps + advanced chart engines." },
+  { id: "statistics", label: "Statistics", description: "100+ pro KPIs (floor-style) with tooltips + filters." },
+
 ];
 
 /* =========================
-   Bloomberg-style Chart Theme
+   Terminal Theme (Bloomberg-ish)
 ========================= */
 
 const CHART_COLORS = {
   emerald: "#34d399",
-  emeraldDim: "rgba(52, 211, 153, 0.22)",
+  emeraldDim: "rgba(52, 211, 153, 0.14)",
   sky: "#38bdf8",
-  skyDim: "rgba(56, 189, 248, 0.20)",
+  skyDim: "rgba(56, 189, 248, 0.14)",
   danger: "#fb7185",
-  dangerDim: "rgba(251, 113, 133, 0.22)",
-  grid: "rgba(148, 163, 184, 0.16)",
-  axis: "rgba(148, 163, 184, 0.58)",
+  dangerDim: "rgba(251, 113, 133, 0.14)",
+  grid: "rgba(148, 163, 184, 0.12)",
+  axis: "rgba(148, 163, 184, 0.55)",
   text: "rgba(226, 232, 240, 0.92)",
 };
 
@@ -173,28 +157,32 @@ function axisStyle() {
 function tooltipProps() {
   return {
     contentStyle: {
-      background: "rgba(2,6,23,0.92)",
-      border: "1px solid rgba(148,163,184,0.22)",
+      background: "rgba(2,6,23,0.94)",
+      border: "1px solid rgba(148,163,184,0.18)",
       borderRadius: 14,
-      boxShadow: "0 0 25px rgba(0,0,0,0.45)",
+      boxShadow: "0 0 30px rgba(0,0,0,0.55)",
       color: CHART_COLORS.text,
       fontSize: 12,
     },
     itemStyle: { color: CHART_COLORS.text },
     labelStyle: { color: "rgba(148,163,184,0.9)" },
+    cursor: { stroke: "rgba(148,163,184,0.18)" },
   } as const;
 }
 
-function chartWrapClass() {
-  return "rounded-2xl border border-slate-800 bg-slate-900/80 p-4 shadow-[0_0_30px_rgba(15,23,42,0.85)]";
+function wrapCard() {
+  return "rounded-2xl border border-slate-800 bg-slate-900/70 p-4 shadow-[0_0_30px_rgba(15,23,42,0.75)]";
 }
 
-function chartTitleClass() {
-  return "text-xs uppercase tracking-[0.22em] text-slate-300";
+function chartTitle() {
+  return "text-[11px] uppercase tracking-[0.22em] text-slate-300";
 }
-
-function chartSubClass() {
+function chartSub() {
   return "text-[11px] text-slate-500 mt-1";
+}
+
+function clamp(n: number, a: number, b: number) {
+  return Math.max(a, Math.min(b, n));
 }
 
 function fmtMoney(x: number) {
@@ -202,23 +190,11 @@ function fmtMoney(x: number) {
   return `${sign}$${Math.abs(x).toFixed(2)}`;
 }
 
-function clamp(n: number, a: number, b: number) {
-  return Math.max(a, Math.min(b, n));
-}
-
-/* =========================
-   Helpers
-========================= */
-
 function formatDateFriendly(dateStr: string): string {
   if (!dateStr) return "";
   try {
     const [y, m, d] = dateStr.split("-").map(Number);
-    return new Date(y, m - 1, d).toLocaleDateString("en-US", {
-      year: "numeric",
-      month: "short",
-      day: "2-digit",
-    });
+    return new Date(y, m - 1, d).toLocaleDateString("en-US", { month: "short", day: "2-digit" });
   } catch {
     return dateStr;
   }
@@ -236,119 +212,65 @@ function normalizeSide(s: any): SideType {
   return (s === "short" ? "short" : "long") as SideType;
 }
 
-/* ---- Parse trades stored in notes JSON ---- */
+/* =========================
+   Parsers / helpers
+========================= */
+
 function parseNotesTrades(notesRaw: unknown): { entries: EntryTradeRow[]; exits: ExitTradeRow[] } {
   if (typeof notesRaw !== "string") return { entries: [], exits: [] };
   try {
     const parsed = JSON.parse(notesRaw);
-    if (!parsed || typeof parsed !== "object") return { entries: [], exits: [] };
-
-    const entries = Array.isArray((parsed as any).entries) ? (parsed as any).entries : [];
-    const exits = Array.isArray((parsed as any).exits) ? (parsed as any).exits : [];
-
+    const entries = Array.isArray((parsed as any)?.entries) ? (parsed as any).entries : [];
+    const exits = Array.isArray((parsed as any)?.exits) ? (parsed as any).exits : [];
     return { entries, exits };
   } catch {
     return { entries: [], exits: [] };
   }
 }
 
-/* ---- SPX option parsing + DTE ---- */
-function parseSPXOptionSymbol(raw: string) {
-  const s = safeUpper(raw).replace(/^[\.\-]/, "");
-  const m = s.match(/^([A-Z]+W?)(\d{6})([CP])(\d+(?:\.\d+)?)$/);
-  if (!m) return null;
-
-  const underlying = m[1];
-  const yy = Number(m[2].slice(0, 2));
-  const mm = Number(m[2].slice(2, 4));
-  const dd = Number(m[2].slice(4, 6));
-  const right = m[3] as "C" | "P";
-  const strike = Number(m[4]);
-  if (!yy || !mm || !dd) return null;
-
-  const year = 2000 + yy;
-  const expiry = new Date(year, mm - 1, dd);
-  if (Number.isNaN(expiry.getTime())) return null;
-
-  return { underlying, expiry, right, strike };
-}
-
-function calcDTE(entryDateYYYYMMDD: string, expiry: Date) {
-  try {
-    const [y, m, d] = entryDateYYYYMMDD.split("-").map(Number);
-    const entryUTC = Date.UTC(y, m - 1, d);
-    const expiryUTC = Date.UTC(expiry.getFullYear(), expiry.getMonth(), expiry.getDate());
-    const msPerDay = 24 * 60 * 60 * 1000;
-    const diffDays = Math.round((expiryUTC - entryUTC) / msPerDay);
-    if (diffDays === 0) return 0;
-    return diffDays >= 0 ? diffDays : null;
-  } catch {
-    return null;
-  }
-}
-
-/* ---- OCC option parsing (generic) to infer underlying ---- */
 function parseOCCOptionSymbol(raw: string) {
-  // OCC: ROOT + YYMMDD + C/P + STRIKE(8)
-  // AAPL240621C00195000
   const s = safeUpper(raw).replace(/\s+/g, "").replace(/^[\.\-]/, "");
   const m = s.match(/^([A-Z]{1,6})(\d{6})([CP])(\d{8})$/);
   if (!m) return null;
-
   const underlying = m[1];
   const yy = Number(m[2].slice(0, 2));
   const mm = Number(m[2].slice(2, 4));
   const dd = Number(m[2].slice(4, 6));
-  const right = m[3] as "C" | "P";
-  const strike = Number(m[4]) / 1000;
-
   const year = 2000 + yy;
   const expiry = new Date(year, mm - 1, dd);
   if (Number.isNaN(expiry.getTime())) return null;
-
-  return { underlying, expiry, right, strike };
+  return { underlying, expiry };
 }
 
 function getUnderlyingFromSymbol(raw: string): string {
   const s = safeUpper(raw).replace(/^[\.\-]/, "");
   if (!s) return "";
-
-  const spx = parseSPXOptionSymbol(s);
-  if (spx?.underlying) return spx.underlying;
-
   const occ = parseOCCOptionSymbol(s);
   if (occ?.underlying) return occ.underlying;
 
-  // Futures like ESZ5 / NQH6 -> root
   const fut = s.match(/^([A-Z]{1,3})[FGHJKMNQUVXZ]\d{1,2}$/);
   if (fut?.[1]) return fut[1];
 
-  // Stock/ETF basic root
   const root = s.match(/^([A-Z]{1,6})/);
   return root?.[1] ?? s;
 }
 
-/* ---- Parse hour bucket from time string ---- */
 function parseHourBucket(t: unknown): number | null {
   if (!t) return null;
   const s = String(t).trim();
   if (!s) return null;
 
-  // HH:MM
   const m1 = s.match(/^(\d{1,2}):(\d{2})/);
   if (m1) {
     const hh = Number(m1[1]);
     if (Number.isFinite(hh) && hh >= 0 && hh <= 23) return hh;
   }
 
-  // ISO datetime
   const d = new Date(s);
   if (!Number.isNaN(d.getTime())) return d.getHours();
-
   return null;
 }
 
-/* ---- Generic “usage”: counts filled fields safely ---- */
 function countTruthyFields(obj: any, keys: string[]) {
   let c = 0;
   for (const k of keys) {
@@ -368,10 +290,8 @@ function countTruthyFields(obj: any, keys: string[]) {
   return c;
 }
 
-/* ---- Compute PnL per symbol inside one session ---- */
 function computePnLBySymbol(entries: EntryTradeRow[], exits: ExitTradeRow[]): Record<string, number> {
   const key = (s: string, k: InstrumentType, side: SideType) => `${s}|${k}|${side}`;
-
   const entryAgg: Record<string, { sumPxQty: number; sumQty: number }> = {};
   const exitAgg: Record<string, { sumPxQty: number; sumQty: number }> = {};
 
@@ -419,7 +339,7 @@ function computePnLBySymbol(entries: EntryTradeRow[], exits: ExitTradeRow[]): Re
 }
 
 /* =========================
-   NEW: auth header helper (no rompe tu AuthContext)
+   Auth token helper (sin romper tu AuthContext)
 ========================= */
 async function getBearerTokenSafe(user: any): Promise<string> {
   const direct = (user as any)?.access_token || (user as any)?.token || (user as any)?.jwt || "";
@@ -436,7 +356,6 @@ async function getBearerTokenSafe(user: any): Promise<string> {
   } catch {
     // ignore
   }
-
   return "";
 }
 
@@ -445,15 +364,13 @@ async function getBearerTokenSafe(user: any): Promise<string> {
 ========================= */
 
 function heatCellBg(winRate: number, n: number) {
-  // intensity from confidence (n) and winRate
-  const conf = clamp(n / 6, 0, 1); // 0..1 after 6 sessions
+  const conf = clamp(n / 6, 0, 1);
   const wr = clamp(winRate / 100, 0, 1);
-  const a = 0.08 + conf * 0.25 + wr * 0.15; // 0.08..~0.48
+  const a = 0.06 + conf * 0.22 + wr * 0.14; // sutil
   return `rgba(52,211,153,${a.toFixed(3)})`;
 }
-
 function heatCellBorder(winRate: number) {
-  return winRate >= 55 ? "rgba(52,211,153,0.65)" : "rgba(148,163,184,0.18)";
+  return winRate >= 55 ? "rgba(52,211,153,0.55)" : "rgba(148,163,184,0.14)";
 }
 
 function HeatmapHourUnderlying({
@@ -468,41 +385,41 @@ function HeatmapHourUnderlying({
   hours: number[];
 }) {
   return (
-    <div className={chartWrapClass()}>
-      <div className="flex items-baseline justify-between">
-        <p className={chartTitleClass()}>{title}</p>
-        <p className="text-[11px] text-slate-500">Hour × Underlying</p>
+    <div className={wrapCard()}>
+      <div className="flex items-baseline justify-between gap-3">
+        <div>
+          <p className={chartTitle()}>{title}</p>
+          {sub ? <p className={chartSub()}>{sub}</p> : null}
+        </div>
+        <p className="text-[11px] text-slate-500 font-mono">H×U</p>
       </div>
-      {sub ? <p className={chartSubClass()}>{sub}</p> : null}
 
       <div className="mt-3 overflow-x-auto">
-        <div className="min-w-[900px]">
-          {/* header hours */}
-          <div className="grid" style={{ gridTemplateColumns: `160px repeat(${hours.length}, 1fr)` }}>
+        <div className="min-w-[980px]">
+          <div className="grid" style={{ gridTemplateColumns: `170px repeat(${hours.length}, 1fr)` }}>
             <div className="text-[11px] text-slate-500 px-2 py-1">Underlying</div>
             {hours.map((h) => (
-              <div key={h} className="text-[10px] text-slate-500 px-1 py-1 text-center">
-                {h}
+              <div key={h} className="text-[10px] text-slate-500 px-1 py-1 text-center font-mono">
+                {String(h).padStart(2, "0")}
               </div>
             ))}
           </div>
 
-          {/* rows */}
-          <div className="space-y-1">
+          <div className="space-y-1.5">
             {matrix.map((r) => (
               <div
                 key={r.underlying}
                 className="grid gap-1"
-                style={{ gridTemplateColumns: `160px repeat(${hours.length}, 1fr)` }}
+                style={{ gridTemplateColumns: `170px repeat(${hours.length}, 1fr)` }}
               >
                 <div className="px-2 py-1 text-[11px] text-slate-200 font-mono truncate">{r.underlying}</div>
                 {r.row.map((c) => (
                   <div
                     key={c.hour}
-                    className="h-7 rounded-md border text-[10px] flex items-center justify-center"
+                    className="h-7 rounded-md border text-[10px] flex items-center justify-center font-mono"
                     style={{
-                      background: c.n > 0 ? heatCellBg(c.winRate, c.n) : "rgba(15,23,42,0.35)",
-                      borderColor: c.n > 0 ? heatCellBorder(c.winRate) : "rgba(148,163,184,0.12)",
+                      background: c.n > 0 ? heatCellBg(c.winRate, c.n) : "rgba(15,23,42,0.28)",
+                      borderColor: c.n > 0 ? heatCellBorder(c.winRate) : "rgba(148,163,184,0.10)",
                       color: "rgba(226,232,240,0.90)",
                     }}
                     title={`Underlying: ${r.underlying}\nHour: ${c.hour}\nSessions: ${c.n}\nWinRate: ${c.winRate.toFixed(
@@ -516,12 +433,1240 @@ function HeatmapHourUnderlying({
             ))}
           </div>
 
-          <p className="text-[11px] text-slate-500 mt-3">
-            Tip: hover cells for sessions, win-rate and avg P&amp;L.
-          </p>
+          <p className="text-[11px] text-slate-500 mt-3">Tip: hover cells for sessions, win-rate, avg P&amp;L.</p>
         </div>
       </div>
     </div>
+  );
+}
+
+/* =========================
+   UI bits
+========================= */
+
+function futuristicCardClass(isGood: boolean) {
+  return isGood
+    ? "rounded-2xl border border-emerald-500/35 bg-emerald-500/5 shadow-[0_0_25px_rgba(16,185,129,0.12)]"
+    : "rounded-2xl border border-sky-500/35 bg-sky-500/5 shadow-[0_0_25px_rgba(56,189,248,0.10)]";
+}
+
+function StatCard({
+  label,
+  value,
+  sub,
+  good = true,
+}: {
+  label: string;
+  value: ReactNode;
+  sub?: ReactNode;
+  good?: boolean;
+}) {
+  return (
+    <div className={`${futuristicCardClass(good)} p-4`}>
+      <p className={`text-xs mb-1 ${good ? "text-emerald-200" : "text-sky-200"}`}>{label}</p>
+      <p className={`text-3xl font-semibold ${good ? "text-emerald-300" : "text-sky-300"}`}>{value}</p>
+      {sub && <div className="text-[11px] text-slate-400 mt-2 leading-relaxed">{sub}</div>}
+    </div>
+  );
+}
+
+function MiniKpi({
+  label,
+  value,
+  tone = "neutral",
+}: {
+  label: string;
+  value: ReactNode;
+  tone?: "good" | "bad" | "neutral";
+}) {
+  const cls =
+    tone === "good"
+      ? "text-emerald-300"
+      : tone === "bad"
+      ? "text-sky-300"
+      : "text-slate-200";
+  return (
+    <div className="rounded-2xl border border-slate-800 bg-slate-950/50 px-3 py-2">
+      <p className="text-[10px] uppercase tracking-[0.22em] text-slate-500">{label}</p>
+      <p className={`text-sm font-mono mt-1 ${cls}`}>{value}</p>
+    </div>
+  );
+}
+
+function Tip({ text }: { text: string }) {
+  return (
+    <span className="group relative inline-flex items-center">
+      <span className="ml-2 inline-flex h-5 w-5 items-center justify-center rounded-full border border-slate-700 text-[11px] text-slate-300 hover:text-emerald-200">
+        i
+      </span>
+      <span className="pointer-events-none absolute left-1/2 top-full z-50 mt-2 w-[280px] -translate-x-1/2 rounded-2xl border border-slate-700 bg-slate-950/95 p-3 text-[11px] leading-relaxed text-slate-200 shadow-[0_0_25px_rgba(0,0,0,0.6)] opacity-0 transition group-hover:opacity-100">
+        {text}
+      </span>
+    </span>
+  );
+}
+
+// =========================
+// CHUNK 2 / 2
+// app/analytics-statistics/page.tsx
+// =========================
+
+/* =========================
+   TradingView Mini Widget (script)
+========================= */
+function TradingViewMiniWidget({
+  symbol = "CBOE:SPX",
+  interval = "D",
+  theme = "dark",
+}: {
+  symbol?: string;
+  interval?: string;
+  theme?: "dark" | "light";
+}) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const widgetId = useMemo(() => `tv_${Math.random().toString(16).slice(2)}`, []);
+  const initRef = useRef(false);
+
+  useEffect(() => {
+    if (!containerRef.current) return;
+
+    // Prevent StrictMode double init in dev
+    if (initRef.current) return;
+    initRef.current = true;
+
+    const src = "https://s3.tradingview.com/tv.js";
+    let cancelled = false;
+
+    const ensureScript = () =>
+      new Promise<void>((resolve) => {
+        const existing = document.querySelector(`script[src="${src}"]`) as HTMLScriptElement | null;
+        if (existing) return resolve();
+        const s = document.createElement("script");
+        s.src = src;
+        s.async = true;
+        s.onload = () => resolve();
+        document.head.appendChild(s);
+      });
+
+    const mount = () => {
+      if (!containerRef.current) return false;
+      containerRef.current.innerHTML = `<div id="${widgetId}" style="width:100%;height:100%"></div>`;
+
+      // @ts-expect-error
+      const TV = window.TradingView;
+      if (!TV) return false;
+
+      try {
+        // @ts-ignore
+        new TV.widget({
+          width: "100%",
+          height: "100%",
+          symbol,
+          interval,
+          timezone: "Etc/UTC",
+          theme,
+          style: "1",
+          locale: "en",
+          enable_publishing: false,
+          allow_symbol_change: true,
+          container_id: widgetId,
+          hide_side_toolbar: true,
+          hide_top_toolbar: false,
+          hide_legend: true,
+          save_image: false,
+          studies: [],
+        });
+        return true;
+      } catch (e) {
+        console.error("[TradingViewMiniWidget] init error", e);
+        return false;
+      }
+    };
+
+    const init = async () => {
+      await ensureScript();
+      if (cancelled) return;
+
+      // retry loop: sometimes the widget needs a tick after hydration
+      for (let i = 0; i < 3; i++) {
+        const ok = mount();
+        if (ok) return;
+        await new Promise((r) => setTimeout(r, 350));
+      }
+
+      console.warn("[TradingViewMiniWidget] failed to mount after retries");
+    };
+
+    init();
+
+    return () => {
+      cancelled = true;
+      // allow re-init on tab switches if needed:
+      initRef.current = false;
+    };
+  }, [symbol, interval, theme, widgetId]);
+
+  return <div ref={containerRef} className="w-full h-[340px]" />;
+}
+
+/* =========================
+   Lightweight Charts Panel
+========================= */
+function LightweightLinePanel({
+  title,
+  data,
+}: {
+  title: string;
+  data: { date: string; value: number }[];
+}) {
+  const elRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    let chart: any;
+    let series: any;
+    let ro: ResizeObserver | null = null;
+    let cancelled = false;
+
+    const run = async () => {
+      if (!elRef.current) return;
+
+      const mod: any = await import("lightweight-charts");
+      if (cancelled) return;
+
+      const createChart = mod.createChart ?? mod.default?.createChart;
+      if (!createChart) return;
+
+      elRef.current.innerHTML = "";
+
+      chart = createChart(elRef.current, {
+        layout: {
+          background: { type: "solid", color: "rgba(2,6,23,0)" },
+          textColor: "rgba(226,232,240,0.80)",
+          fontFamily:
+            'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+        },
+        grid: {
+          vertLines: { color: "rgba(148,163,184,0.10)" },
+          horzLines: { color: "rgba(148,163,184,0.10)" },
+        },
+        timeScale: { borderColor: "rgba(148,163,184,0.14)" },
+        rightPriceScale: { borderColor: "rgba(148,163,184,0.14)" },
+        crosshair: {
+          vertLine: { color: "rgba(148,163,184,0.18)" },
+          horzLine: { color: "rgba(148,163,184,0.18)" },
+        },
+        handleScroll: true,
+        handleScale: true,
+      });
+
+      // v5+ API (chart.addSeries(AreaSeries,...)) o v4 (chart.addAreaSeries)
+      const areaOptions = {
+        lineColor: CHART_COLORS.emerald,
+        topColor: CHART_COLORS.emeraldDim,
+        bottomColor: "rgba(52,211,153,0.00)",
+        lineWidth: 2,
+      };
+
+      if (typeof chart.addAreaSeries === "function") {
+        series = chart.addAreaSeries(areaOptions);
+      } else if (typeof chart.addSeries === "function" && mod.AreaSeries) {
+        series = chart.addSeries(mod.AreaSeries, areaOptions);
+      } else if (typeof chart.addSeries === "function") {
+        // fallback por si el build expone string types
+        series = chart.addSeries("Area", areaOptions);
+      } else {
+        throw new Error("Unsupported lightweight-charts version: cannot add area series");
+      }
+
+      const points = (data || [])
+        .filter((x) => x.date && Number.isFinite(x.value))
+        .map((x) => ({ time: x.date, value: x.value }));
+
+      series.setData(points);
+
+      const resize = () => {
+        if (!elRef.current) return;
+        chart.applyOptions({ width: elRef.current.clientWidth, height: 320 });
+        try { chart.timeScale().fitContent(); } catch {}
+      };
+
+      ro = new ResizeObserver(resize);
+      ro.observe(elRef.current);
+      resize();
+    };
+
+    run().catch((e) => console.error("[LightweightLinePanel] error:", e));
+
+    return () => {
+      cancelled = true;
+      try { ro?.disconnect(); } catch {}
+      try { chart?.remove?.(); } catch {}
+    };
+  }, [data]);
+
+  return (
+    <div className={wrapCard()}>
+      <div className="flex items-baseline justify-between gap-3">
+        <div>
+          <p className={chartTitle()}>{title}</p>
+          <p className={chartSub()}>Lightweight Charts (TradingView-style engine)</p>
+        </div>
+        <span className="text-[11px] text-slate-500 font-mono">LW</span>
+      </div>
+      <div className="mt-3">
+        <div ref={elRef} className="w-full h-80" />
+      </div>
+    </div>
+  );
+}
+
+/* =========================
+   Sections
+========================= */
+
+function OverviewSection({
+  baseStats,
+  probabilityStats,
+  uiTotals,
+  equity,
+  dailyPnl,
+  instrumentMix,
+  usage,
+}: {
+  baseStats: any;
+  probabilityStats: any;
+  uiTotals: any;
+  equity: { date: string; value: number }[];
+  dailyPnl: { date: string; pnl: number }[];
+  instrumentMix: { name: string; value: number }[];
+  usage: { premarketFillRate: number; aiUsageRate: number; aiUsedSessions: number };
+}) {
+  const { totalSessions, greenSessions, learningSessions, sumPnl, avgPnl } = uiTotals;
+  const bestDay = baseStats.bestDay;
+  const toughestDay = baseStats.toughestDay;
+
+  const respectEdge = probabilityStats.pGreenRespect - probabilityStats.baseGreenRate;
+
+  return (
+    <section className="space-y-6">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <StatCard label="Total sessions" value={totalSessions} sub="Each session is one day of trading in your journal." good />
+        <StatCard
+          label="Green sessions"
+          value={greenSessions}
+          sub={`Win rate: ${totalSessions > 0 ? ((greenSessions / totalSessions) * 100).toFixed(1) : "0.0"}%`}
+          good
+        />
+        <StatCard label="Learning sessions" value={learningSessions} sub="These days are raw material for rule upgrades." good={false} />
+        <StatCard
+          label="Avg P&L / session"
+          value={`${avgPnl >= 0 ? "+" : "-"}$${Math.abs(avgPnl).toFixed(2)}`}
+          sub={
+            <>
+              Total P&amp;L:{" "}
+              <span className={sumPnl >= 0 ? "text-emerald-300" : "text-sky-300"}>
+                {sumPnl >= 0 ? "+" : "-"}${Math.abs(sumPnl).toFixed(2)}
+              </span>
+            </>
+          }
+          good={avgPnl >= 0}
+        />
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className={`${futuristicCardClass(true)} p-4`}>
+          <p className="text-xs text-emerald-200 mb-1">Strongest day</p>
+          {bestDay ? (
+            <>
+              <p className="text-lg font-semibold text-slate-50">{formatDateFriendly(bestDay.date)}</p>
+              <p className="text-sm text-emerald-300 mt-1">Result: +${bestDay.pnl.toFixed(2)}</p>
+            </>
+          ) : (
+            <p className="text-sm text-slate-400">No sessions with P&amp;L yet.</p>
+          )}
+        </div>
+
+        <div className={`${futuristicCardClass(false)} p-4`}>
+          <p className="text-xs text-sky-200 mb-1">Toughest day</p>
+          {toughestDay ? (
+            <>
+              <p className="text-lg font-semibold text-slate-50">{formatDateFriendly(toughestDay.date)}</p>
+              <p className="text-sm text-sky-300 mt-1">Result: -${Math.abs(toughestDay.pnl).toFixed(2)}</p>
+            </>
+          ) : (
+            <p className="text-sm text-slate-400">No sessions with P&amp;L yet.</p>
+          )}
+        </div>
+      </div>
+
+      <div className={wrapCard()}>
+        <p className="text-sm font-medium text-slate-100 mb-2">Performance probabilities</p>
+
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-sm">
+          <div>
+            <p className="text-[11px] text-slate-400 mb-1">Base probability of green</p>
+            <p className="text-2xl font-semibold text-emerald-300">{probabilityStats.baseGreenRate.toFixed(1)}%</p>
+          </div>
+
+          <div>
+            <p className="text-[11px] text-slate-400 mb-1">Green when plan respected</p>
+            <p className="text-2xl font-semibold text-emerald-300">{probabilityStats.pGreenRespect.toFixed(1)}%</p>
+          </div>
+
+          <div>
+            <p className="text-[11px] text-slate-400 mb-1">Learning with FOMO</p>
+            <p className="text-2xl font-semibold text-sky-300">{probabilityStats.pLearningFomo.toFixed(1)}%</p>
+          </div>
+
+          <div>
+            <p className="text-[11px] text-slate-400 mb-1">Plan edge</p>
+            <p className={`text-2xl font-semibold ${respectEdge >= 0 ? "text-emerald-300" : "text-sky-300"}`}>
+              {respectEdge.toFixed(1)}%
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Charts row (sutil, con spacing y sin “relleno pesado”) */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div className={`${wrapCard()} lg:col-span-2`}>
+          <div className="flex items-baseline justify-between gap-3">
+            <div>
+              <p className={chartTitle()}>Equity Curve</p>
+              <p className={chartSub()}>Cumulative P&amp;L over time</p>
+            </div>
+            <span className="text-[11px] text-slate-500 font-mono">EQ</span>
+          </div>
+
+          <div className="mt-3 h-[280px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={equity}>
+                <CartesianGrid stroke={CHART_COLORS.grid} strokeDasharray="4 8" />
+                <XAxis dataKey="date" tick={axisStyle()} tickFormatter={formatDateFriendly} axisLine={{ stroke: CHART_COLORS.grid }} tickLine={false} />
+                <YAxis tick={axisStyle()} axisLine={{ stroke: CHART_COLORS.grid }} tickLine={false} width={46} />
+                <Tooltip {...tooltipProps()} />
+                <Area
+                  type="monotone"
+                  dataKey="value"
+                  stroke={CHART_COLORS.emerald}
+                  strokeWidth={2}
+                  fill={CHART_COLORS.emeraldDim}
+                  fillOpacity={1}
+                  dot={false}
+                  activeDot={{ r: 3 }}
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        <div className={wrapCard()}>
+          <div className="flex items-baseline justify-between gap-3">
+            <div>
+              <p className={chartTitle()}>Workflow usage</p>
+              <p className={chartSub()}>Premarket + AI coaching adoption</p>
+            </div>
+            <span className="text-[11px] text-slate-500 font-mono">UX</span>
+          </div>
+
+          <div className="mt-3 grid grid-cols-1 gap-2">
+            <MiniKpi label="Premarket fill rate" value={`${usage.premarketFillRate.toFixed(1)}%`} tone="neutral" />
+            <MiniKpi label="AI usage rate" value={`${usage.aiUsageRate.toFixed(1)}%`} tone="neutral" />
+            <MiniKpi label="AI used sessions" value={usage.aiUsedSessions} tone="neutral" />
+          </div>
+
+          <div className="mt-4 h-[220px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Tooltip {...tooltipProps()} />
+                <Pie
+                  data={[
+                    { name: "Premarket", value: Math.max(0.01, usage.premarketFillRate) },
+                    { name: "AI Coaching", value: Math.max(0.01, usage.aiUsageRate) },
+                    { name: "Other", value: Math.max(0.01, 100 - (usage.premarketFillRate + usage.aiUsageRate) / 2) },
+                  ]}
+                  dataKey="value"
+                  innerRadius={58}
+                  outerRadius={86}
+                  paddingAngle={3}
+                  stroke="rgba(148,163,184,0.08)"
+                >
+                  <Cell fill={CHART_COLORS.emerald} />
+                  <Cell fill={CHART_COLORS.sky} />
+                  <Cell fill={"rgba(148,163,184,0.30)"} />
+                </Pie>
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      </div>
+
+      <div className={wrapCard()}>
+        <div className="flex items-baseline justify-between gap-3">
+          <div>
+            <p className={chartTitle()}>Daily P&amp;L</p>
+            <p className={chartSub()}>Last ~40 sessions</p>
+          </div>
+          <span className="text-[11px] text-slate-500 font-mono">DPNL</span>
+        </div>
+
+        <div className="mt-3 h-[260px]">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={dailyPnl} barCategoryGap={18} barGap={6}>
+              <CartesianGrid stroke={CHART_COLORS.grid} strokeDasharray="4 8" />
+              <XAxis dataKey="date" tick={axisStyle()} tickFormatter={formatDateFriendly} axisLine={{ stroke: CHART_COLORS.grid }} tickLine={false} />
+              <YAxis tick={axisStyle()} axisLine={{ stroke: CHART_COLORS.grid }} tickLine={false} width={46} />
+              <Tooltip {...tooltipProps()} formatter={(v: any) => fmtMoney(Number(v))} />
+              <Bar dataKey="pnl" radius={[8, 8, 8, 8]} fill={CHART_COLORS.sky} opacity={0.88} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function DayOfWeekSection({ stats, weekdayBars }: { stats: any; weekdayBars: any[] }) {
+  return (
+    <section className="space-y-6">
+      <div className={wrapCard()}>
+        <div className="flex items-baseline justify-between gap-3">
+          <div>
+            <p className={chartTitle()}>Weekday win-rate</p>
+            <p className={chartSub()}>Edge by day of week</p>
+          </div>
+          <span className="text-[11px] text-slate-500 font-mono">DOW</span>
+        </div>
+
+        <div className="mt-3 h-[280px]">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={weekdayBars} barCategoryGap={20} barGap={6}>
+              <CartesianGrid stroke={CHART_COLORS.grid} strokeDasharray="4 8" />
+              <XAxis dataKey="label" tick={axisStyle()} axisLine={{ stroke: CHART_COLORS.grid }} tickLine={false} />
+              <YAxis tick={axisStyle()} axisLine={{ stroke: CHART_COLORS.grid }} tickLine={false} width={46} domain={[0, 100]} />
+              <Tooltip {...tooltipProps()} formatter={(v: any) => `${Number(v).toFixed(1)}%`} />
+              <Bar dataKey="winRate" radius={[8, 8, 8, 8]} fill={CHART_COLORS.emerald} opacity={0.88} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+
+        <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
+          <MiniKpi label="Best weekday" value={stats?.best?.label ?? "—"} tone="good" />
+          <MiniKpi label="Hardest weekday" value={stats?.hardest?.label ?? "—"} tone="bad" />
+          <MiniKpi label="Sessions" value={stats?.items?.reduce((a: number, b: any) => a + (b.sessions || 0), 0) ?? 0} tone="neutral" />
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function PsychologySection({
+  probabilityStats,
+  psychology,
+  usage,
+}: {
+  baseStats: any;
+  probabilityStats: any;
+  psychology: { freqArr: { name: string; value: number }[]; timeline: any[] };
+  usage: { premarketFillRate: number; aiUsageRate: number; aiUsedSessions: number };
+}) {
+  const freq = psychology.freqArr || [];
+  const timeline = psychology.timeline || [];
+
+  const emoColor = (emo: string) => {
+    const e = safeUpper(emo);
+    if (e.includes("FEAR") || e.includes("ANX")) return CHART_COLORS.sky;
+    if (e.includes("FOMO") || e.includes("GREED")) return CHART_COLORS.danger;
+    if (e.includes("CALM") || e.includes("CONF")) return CHART_COLORS.emerald;
+    return "rgba(148,163,184,0.60)";
+  };
+
+  return (
+    <section className="space-y-6">
+      <div className={wrapCard()}>
+        <div className="flex items-baseline justify-between gap-3">
+          <div>
+            <p className={chartTitle()}>Emotion frequency</p>
+            <p className={chartSub()}>Most common emotions (top 12)</p>
+          </div>
+          <span className="text-[11px] text-slate-500 font-mono">EMO</span>
+        </div>
+
+        <div className="mt-3 h-[260px]">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={freq} barCategoryGap={22} barGap={6} layout="vertical">
+              <CartesianGrid stroke={CHART_COLORS.grid} strokeDasharray="4 8" />
+              <XAxis type="number" tick={axisStyle()} axisLine={{ stroke: CHART_COLORS.grid }} tickLine={false} />
+              <YAxis type="category" dataKey="name" tick={axisStyle()} axisLine={{ stroke: CHART_COLORS.grid }} tickLine={false} width={110} />
+              <Tooltip {...tooltipProps()} />
+              <Bar dataKey="value" radius={[8, 8, 8, 8]}>
+                {freq.map((x) => (
+                  <Cell key={x.name} fill={emoColor(x.name)} opacity={0.90} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+
+        <div className="mt-4 grid grid-cols-1 md:grid-cols-4 gap-3">
+          <MiniKpi label="Green when plan respected" value={`${probabilityStats.pGreenRespect.toFixed(1)}%`} tone="good" />
+          <MiniKpi label="Learning w/ FOMO" value={`${probabilityStats.pLearningFomo.toFixed(1)}%`} tone="bad" />
+          <MiniKpi label="Premarket fill rate" value={`${usage.premarketFillRate.toFixed(1)}%`} />
+          <MiniKpi label="AI usage rate" value={`${usage.aiUsageRate.toFixed(1)}%`} />
+        </div>
+      </div>
+
+      <div className={wrapCard()}>
+        <div className="flex items-baseline justify-between gap-3">
+          <div>
+            <p className={chartTitle()}>Emotions over time</p>
+            <p className={chartSub()}>Timeline (PnL + primary emotion)</p>
+          </div>
+          <span className="text-[11px] text-slate-500 font-mono">TL</span>
+        </div>
+
+        <div className="mt-3 h-[280px]">
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={timeline}>
+              <CartesianGrid stroke={CHART_COLORS.grid} strokeDasharray="4 8" />
+              <XAxis dataKey="date" tick={axisStyle()} tickFormatter={formatDateFriendly} axisLine={{ stroke: CHART_COLORS.grid }} tickLine={false} />
+              <YAxis tick={axisStyle()} axisLine={{ stroke: CHART_COLORS.grid }} tickLine={false} width={46} />
+              <Tooltip {...tooltipProps()} formatter={(v: any, k: any) => (k === "pnl" ? fmtMoney(Number(v)) : v)} />
+              <Line type="monotone" dataKey="pnl" stroke={CHART_COLORS.emerald} strokeWidth={2} dot={false} />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+
+        <p className="text-[11px] text-slate-500 mt-3">
+          Tip: Usa esto para ver si ciertas emociones correlacionan con drawdowns o overconfidence.
+        </p>
+      </div>
+    </section>
+  );
+}
+
+function InstrumentsSection({ stats, underlyingMix, heat }: { stats: any; underlyingMix: any[]; heat: any }) {
+  const mostSupportive = stats.mostSupportive || [];
+  const topEarners = stats.topEarners || [];
+  const toReview = stats.toReview || [];
+  const tickers = stats.tickers || [];
+
+  return (
+    <section className="space-y-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div className={`${wrapCard()} lg:col-span-2`}>
+          <div className="flex items-baseline justify-between gap-3">
+            <div>
+              <p className={chartTitle()}>Underlying mix</p>
+              <p className={chartSub()}>Top 10 underlyings by sessions</p>
+            </div>
+            <span className="text-[11px] text-slate-500 font-mono">UMIX</span>
+          </div>
+
+          <div className="mt-3 h-[300px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Tooltip {...tooltipProps()} />
+                <Pie
+                  data={underlyingMix}
+                  dataKey="value"
+                  nameKey="name"
+                  innerRadius={78}
+                  outerRadius={120}
+                  paddingAngle={3}
+                  stroke="rgba(148,163,184,0.08)"
+                >
+                  {underlyingMix.map((x: any, idx: number) => (
+                    <Cell
+                      key={x.name}
+                      fill={idx % 2 === 0 ? CHART_COLORS.emerald : CHART_COLORS.sky}
+                      opacity={0.14 + (1 - idx / Math.max(1, underlyingMix.length)) * 0.78}
+                    />
+                  ))}
+                </Pie>
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        <div className={wrapCard()}>
+          <div className="flex items-baseline justify-between gap-3">
+            <div>
+              <p className={chartTitle()}>Instrument overview</p>
+              <p className={chartSub()}>Quick edges</p>
+            </div>
+            <span className="text-[11px] text-slate-500 font-mono">EDGE</span>
+          </div>
+
+          <div className="mt-3 space-y-2">
+            <MiniKpi label="Top supportive ticker" value={mostSupportive?.[0]?.symbol ?? "—"} tone="good" />
+            <MiniKpi label="Top earner ticker" value={topEarners?.[0]?.symbol ?? "—"} tone="good" />
+            <MiniKpi label="Worst ticker" value={toReview?.[0]?.symbol ?? "—"} tone="bad" />
+          </div>
+        </div>
+      </div>
+
+      {/* Table */}
+      <div className={wrapCard()}>
+        <div className="flex items-baseline justify-between gap-3">
+          <div>
+            <p className={chartTitle()}>Ticker table</p>
+            <p className={chartSub()}>Symbol + Underlying + edge metrics</p>
+          </div>
+          <span className="text-[11px] text-slate-500 font-mono">TAB</span>
+        </div>
+
+        <div className="mt-3 overflow-x-auto">
+          <table className="min-w-[980px] w-full text-sm">
+            <thead>
+              <tr className="text-[11px] uppercase tracking-[0.22em] text-slate-500 border-b border-slate-800">
+                <th className="px-3 py-2 text-left">Symbol</th>
+                <th className="px-3 py-2 text-left">Underlying</th>
+                <th className="px-3 py-2 text-right">Sessions</th>
+                <th className="px-3 py-2 text-right">Closed</th>
+                <th className="px-3 py-2 text-right">Win%</th>
+                <th className="px-3 py-2 text-right">Net</th>
+                <th className="px-3 py-2 text-right">Avg</th>
+                <th className="px-3 py-2 text-right">Best DOW</th>
+                <th className="px-3 py-2 text-right">Worst DOW</th>
+              </tr>
+            </thead>
+            <tbody>
+              {tickers.slice(0, 60).map((t: any) => (
+                <tr key={t.symbol} className="border-t border-slate-800 bg-slate-950/45 hover:bg-slate-950/70 transition">
+                  <td className="px-3 py-2 font-mono text-slate-100">{t.symbol}</td>
+                  <td className="px-3 py-2 font-mono text-slate-300">{t.underlying || "—"}</td>
+                  <td className="px-3 py-2 text-right text-slate-200">{t.sessions}</td>
+                  <td className="px-3 py-2 text-right text-slate-200">{t.tradesClosed}</td>
+                  <td className="px-3 py-2 text-right text-slate-200">{t.winRate.toFixed(1)}%</td>
+                  <td className={`px-3 py-2 text-right font-mono ${t.netPnl >= 0 ? "text-emerald-300" : "text-sky-300"}`}>
+                    {fmtMoney(t.netPnl)}
+                  </td>
+                  <td className="px-3 py-2 text-right font-mono text-slate-200">{fmtMoney(t.avgPnlPerSession)}</td>
+                  <td className="px-3 py-2 text-right text-slate-300">{DAY_LABELS[(t.bestDow ?? 0) as DayOfWeekKey] ?? "—"}</td>
+                  <td className="px-3 py-2 text-right text-slate-300">{DAY_LABELS[(t.worstDow ?? 0) as DayOfWeekKey] ?? "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <p className="text-[11px] text-slate-500 mt-3">
+          Tip: Para “floor trader vibes”, usa la tabla como scanner: win% alto + net positivo + consistency.
+        </p>
+      </div>
+
+      {/* Heatmap */}
+      <HeatmapHourUnderlying
+        title="Heatmap: hour × underlying"
+        sub="Where you win (and where you leak) by time bucket."
+        matrix={heat.matrix}
+        hours={heat.hours}
+      />
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className={`${futuristicCardClass(true)} p-4`}>
+          <p className="text-sm font-medium text-slate-100 mb-2">Most supportive tickers (win-rate)</p>
+          <ul className="space-y-1 text-xs text-slate-200">
+            {mostSupportive.map((i: any) => (
+              <li key={i.symbol} className="flex items-center justify-between">
+                <span className="font-mono">{i.symbol}</span>
+                <span className="text-slate-300">{i.winRate.toFixed(1)}% · {i.sessions} sess</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        <div className={`${futuristicCardClass(true)} p-4`}>
+          <p className="text-sm font-medium text-slate-100 mb-2">Top earners (net P&amp;L)</p>
+          <ul className="space-y-1 text-xs text-slate-200">
+            {topEarners.map((i: any) => (
+              <li key={i.symbol} className="flex items-center justify-between">
+                <span className="font-mono">{i.symbol}</span>
+                <span className="text-emerald-300 font-mono">+${i.netPnl.toFixed(2)}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        <div className={`${futuristicCardClass(false)} p-4`}>
+          <p className="text-sm font-medium text-slate-100 mb-2">Tickers to review</p>
+          <ul className="space-y-1 text-xs text-slate-200">
+            {toReview.map((i: any) => (
+              <li key={i.symbol} className="flex items-center justify-between">
+                <span className="font-mono">{i.symbol}</span>
+                <span className="text-sky-300 font-mono">-${Math.abs(i.netPnl).toFixed(2)}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function TerminalSection({
+  equity,
+  dailyPnl,
+  weekdayBars,
+  heat,
+}: {
+  equity: { date: string; value: number }[];
+  dailyPnl: { date: string; pnl: number }[];
+  weekdayBars: { label: string; winRate: number; sessions: number; avgPnl: number }[];
+  heat: { hours: number[]; matrix: any[] };
+}) {
+  // Apex config (sutil, sin “plastico”)
+  const apexOptions = useMemo(
+    () => ({
+      chart: {
+        type: "area",
+        toolbar: { show: false },
+        animations: { enabled: true, speed: 260 },
+        background: "transparent",
+        foreColor: "rgba(226,232,240,0.82)",
+        fontFamily:
+          'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+      },
+      grid: { borderColor: "rgba(148,163,184,0.10)", strokeDashArray: 6, padding: { left: 10, right: 10 } },
+      stroke: { curve: "smooth", width: 2 },
+      dataLabels: { enabled: false },
+      fill: { type: "gradient", gradient: { shadeIntensity: 0.5, opacityFrom: 0.22, opacityTo: 0.02 } },
+      xaxis: {
+        categories: equity.map((x) => x.date),
+        labels: { style: { colors: "rgba(148,163,184,0.60)" } },
+        axisBorder: { color: "rgba(148,163,184,0.10)" },
+        axisTicks: { color: "rgba(148,163,184,0.10)" },
+      },
+      yaxis: { labels: { style: { colors: "rgba(148,163,184,0.60)" } } },
+      tooltip: { theme: "dark" },
+    }),
+    [equity]
+  );
+
+  const apexSeries = useMemo(
+    () => [
+      {
+        name: "Equity",
+        data: equity.map((x) => x.value),
+      },
+    ],
+    [equity]
+  );
+
+  // ECharts option (weekday)
+  const echartsOption = useMemo(() => {
+    return {
+      backgroundColor: "transparent",
+      grid: { left: 34, right: 16, top: 18, bottom: 30 },
+      xAxis: {
+        type: "category",
+        data: weekdayBars.map((x) => x.label),
+        axisLine: { lineStyle: { color: "rgba(148,163,184,0.14)" } },
+        axisLabel: { color: "rgba(148,163,184,0.70)", fontFamily: "monospace" },
+      },
+      yAxis: {
+        type: "value",
+        min: 0,
+        max: 100,
+        axisLine: { lineStyle: { color: "rgba(148,163,184,0.14)" } },
+        splitLine: { lineStyle: { color: "rgba(148,163,184,0.10)", type: "dashed" } },
+        axisLabel: { color: "rgba(148,163,184,0.70)", formatter: "{value}%" },
+      },
+      tooltip: { trigger: "axis" },
+      series: [
+        {
+          type: "bar",
+          data: weekdayBars.map((x) => Number(x.winRate.toFixed(2))),
+          barWidth: 18,
+          itemStyle: {
+            borderRadius: [8, 8, 8, 8],
+            color: "rgba(52,211,153,0.85)",
+          },
+        },
+      ],
+    };
+  }, [weekdayBars]);
+
+  return (
+    <section className="space-y-6">
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+        <div className={wrapCard()}>
+          <div className="flex items-baseline justify-between gap-3">
+            <div>
+              <p className={chartTitle()}>Apex — Equity curve</p>
+              <p className={chartSub()}>Smooth, subtle, Bloomberg-like spacing</p>
+            </div>
+            <span className="text-[11px] text-slate-500 font-mono">APX</span>
+          </div>
+          <div className="mt-3 h-[340px]">
+            {/* @ts-ignore */}
+            <ApexChart options={apexOptions} series={apexSeries} type="area" height={340} />
+          </div>
+        </div>
+
+        <div className={wrapCard()}>
+          <div className="flex items-baseline justify-between gap-3">
+            <div>
+              <p className={chartTitle()}>TradingView Widget</p>
+              <p className={chartSub()}>For “terminal vibes” on a selected symbol</p>
+            </div>
+            <span className="text-[11px] text-slate-500 font-mono">TV</span>
+          </div>
+          <div className="mt-3 h-[340px]">
+            <TradingViewMiniWidget symbol="SPX" interval="D" theme="dark" />
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+        <LightweightLinePanel title="Lightweight — Equity engine" data={equity} />
+
+        <div className={wrapCard()}>
+          <div className="flex items-baseline justify-between gap-3">
+            <div>
+              <p className={chartTitle()}>ECharts — Weekday edge</p>
+              <p className={chartSub()}>Very clean bars + terminal grid</p>
+            </div>
+            <span className="text-[11px] text-slate-500 font-mono">ECH</span>
+          </div>
+          <div className="mt-3 h-80">
+            {/* @ts-ignore */}
+            <EChartsReact option={echartsOption} style={{ height: 320, width: "100%" }} />
+          </div>
+        </div>
+      </div>
+
+      <div className={wrapCard()}>
+        <div className="flex items-baseline justify-between gap-3">
+          <div>
+            <p className={chartTitle()}>Daily P&amp;L — terminal bars</p>
+            <p className={chartSub()}>Recharts “clean” config: gaps + subtle grid</p>
+          </div>
+          <span className="text-[11px] text-slate-500 font-mono">BARS</span>
+        </div>
+
+        <div className="mt-3 h-[280px]">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={dailyPnl} barCategoryGap={22} barGap={8}>
+              <CartesianGrid stroke={CHART_COLORS.grid} strokeDasharray="4 8" />
+              <XAxis dataKey="date" tick={axisStyle()} tickFormatter={formatDateFriendly} axisLine={{ stroke: CHART_COLORS.grid }} tickLine={false} />
+              <YAxis tick={axisStyle()} axisLine={{ stroke: CHART_COLORS.grid }} tickLine={false} width={46} />
+              <Tooltip {...tooltipProps()} formatter={(v: any) => fmtMoney(Number(v))} />
+              <Bar dataKey="pnl" radius={[8, 8, 8, 8]} fill={CHART_COLORS.sky} opacity={0.88} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+
+      <HeatmapHourUnderlying
+        title="Terminal heatmap"
+        sub="Hour × Underlying: where your edge actually lives."
+        matrix={heat.matrix}
+        hours={heat.hours}
+      />
+    </section>
+  );
+}
+type StatCategory =
+  | "PnL"
+  | "Consistency"
+  | "Risk"
+  | "Time"
+  | "Instruments"
+  | "Process"
+  | "Psychology";
+
+type StatItem = {
+  id: string;
+  title: string;
+  tooltip: string;
+  category: StatCategory;
+  value: string;
+  tone?: "good" | "bad" | "neutral";
+};
+
+function StatTile({ s }: { s: StatItem }) {
+  const toneCls =
+    s.tone === "good"
+      ? "text-emerald-300"
+      : s.tone === "bad"
+      ? "text-sky-300"
+      : "text-slate-200";
+
+  return (
+    <div className="rounded-2xl border border-slate-800 bg-slate-950/50 p-3 hover:bg-slate-950/70 transition">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-[10px] uppercase tracking-[0.22em] text-slate-500">{s.category}</p>
+          <p className="text-sm text-slate-100 mt-1 flex items-center">
+            {s.title}
+            <Tip text={s.tooltip} />
+          </p>
+        </div>
+        <p className={`text-sm font-mono ${toneCls}`}>{s.value}</p>
+      </div>
+    </div>
+  );
+}
+
+function StatisticsSection({
+  baseStats,
+  probabilityStats,
+  dayOfWeekStats,
+  sessions,
+  usage,
+  heat,
+  instrumentStats,
+}: {
+  baseStats: any;
+  probabilityStats: any;
+  dayOfWeekStats: any;
+  sessions: any[];
+  usage: { premarketFillRate: number; aiUsageRate: number; aiUsedSessions: number };
+  heat: { hours: number[]; matrix: any[] };
+  instrumentStats: any;
+}) {
+  const [q, setQ] = useState("");
+  const [cat, setCat] = useState<StatCategory | "All">("All");
+
+  // Helpers
+  const total = sessions.length || 0;
+  const pnls = useMemo(() => sessions.map((s: any) => Number(s?.pnl ?? 0)).filter(Number.isFinite), [sessions]);
+  const sortedPnls = useMemo(() => [...pnls].sort((a, b) => a - b), [pnls]);
+
+  const median = useMemo(() => {
+    if (!sortedPnls.length) return 0;
+    const mid = Math.floor(sortedPnls.length / 2);
+    return sortedPnls.length % 2 ? sortedPnls[mid] : (sortedPnls[mid - 1] + sortedPnls[mid]) / 2;
+  }, [sortedPnls]);
+
+  const std = useMemo(() => {
+    if (pnls.length < 2) return 0;
+    const mean = pnls.reduce((a, b) => a + b, 0) / pnls.length;
+    const v = pnls.reduce((acc, x) => acc + Math.pow(x - mean, 2), 0) / (pnls.length - 1);
+    return Math.sqrt(v);
+  }, [pnls]);
+
+  const profitFactor = useMemo(() => {
+    let wins = 0;
+    let losses = 0;
+    for (const x of pnls) {
+      if (x > 0) wins += x;
+      if (x < 0) losses += Math.abs(x);
+    }
+    if (losses === 0) return wins > 0 ? 99 : 0;
+    return wins / losses;
+  }, [pnls]);
+
+  const avgWin = useMemo(() => {
+    const arr = pnls.filter((x) => x > 0);
+    if (!arr.length) return 0;
+    return arr.reduce((a, b) => a + b, 0) / arr.length;
+  }, [pnls]);
+
+  const avgLoss = useMemo(() => {
+    const arr = pnls.filter((x) => x < 0);
+    if (!arr.length) return 0;
+    return arr.reduce((a, b) => a + b, 0) / arr.length; // negative
+  }, [pnls]);
+
+  const winRate = useMemo(() => (total ? (pnls.filter((x) => x > 0).length / total) * 100 : 0), [pnls, total]);
+
+  const maxDrawdown = useMemo(() => {
+    // equity drawdown based on cumulative pnl by date order
+    const ordered = [...sessions].sort((a: any, b: any) => String(a?.date || "").localeCompare(String(b?.date || "")));
+    let peak = 0;
+    let eq = 0;
+    let maxDd = 0;
+    for (const s of ordered) {
+      eq += Number(s?.pnl ?? 0);
+      if (eq > peak) peak = eq;
+      const dd = peak - eq;
+      if (dd > maxDd) maxDd = dd;
+    }
+    return maxDd;
+  }, [sessions]);
+
+  const bestDow = dayOfWeekStats?.best?.label ?? "—";
+  const worstDow = dayOfWeekStats?.hardest?.label ?? "—";
+
+  const topUnderlying = useMemo(() => instrumentStats?.tickers?.[0]?.underlying ?? "—", [instrumentStats]);
+
+  const aiEdge = useMemo(() => {
+    // rough: win rate in sessions where aiUsedSessions inferred by usage keys (already computed in usageLive)
+    // We don't have per-session AI flag uniformly, so show adoption only.
+    return usage.aiUsageRate;
+  }, [usage]);
+
+  // Build 100+ stats with some computed, some placeholders (until you decide what to store)
+  const stats: StatItem[] = useMemo(() => {
+    const tiles: StatItem[] = [];
+
+    const push = (x: StatItem) => tiles.push(x);
+
+    // PnL (15)
+    push({ id: "pnl_net", category: "PnL", title: "Net P&L", tooltip: "Total P&L across all sessions.", value: fmtMoney(baseStats.sumPnl), tone: baseStats.sumPnl >= 0 ? "good" : "bad" });
+    push({ id: "pnl_avg", category: "PnL", title: "Avg P&L / session", tooltip: "Mean daily/session P&L.", value: fmtMoney(baseStats.avgPnl), tone: baseStats.avgPnl >= 0 ? "good" : "bad" });
+    push({ id: "pnl_median", category: "PnL", title: "Median P&L", tooltip: "Median session P&L (robust to outliers).", value: fmtMoney(median), tone: median >= 0 ? "good" : "bad" });
+    push({ id: "pnl_std", category: "PnL", title: "StdDev P&L", tooltip: "Volatility of daily results (standard deviation).", value: `$${std.toFixed(2)}`, tone: "neutral" });
+    push({ id: "pnl_pf", category: "PnL", title: "Profit Factor", tooltip: "Gross wins / gross losses. >1 is positive expectancy.", value: profitFactor.toFixed(2), tone: profitFactor >= 1 ? "good" : "bad" });
+    push({ id: "pnl_avg_win", category: "PnL", title: "Avg win day", tooltip: "Average P&L on green sessions.", value: fmtMoney(avgWin), tone: "good" });
+    push({ id: "pnl_avg_loss", category: "PnL", title: "Avg loss day", tooltip: "Average P&L on red sessions.", value: fmtMoney(avgLoss), tone: "bad" });
+    push({ id: "pnl_win_rate", category: "PnL", title: "Win rate", tooltip: "Percent of sessions with positive P&L.", value: `${winRate.toFixed(1)}%`, tone: winRate >= 50 ? "good" : "neutral" });
+
+    // Consistency (15)
+    push({ id: "cons_total", category: "Consistency", title: "Total sessions", tooltip: "Total trading sessions logged.", value: String(total), tone: "neutral" });
+    push({ id: "cons_green", category: "Consistency", title: "Green sessions", tooltip: "Number of positive P&L sessions.", value: String(baseStats.greenSessions), tone: "good" });
+    push({ id: "cons_learning", category: "Consistency", title: "Learning sessions", tooltip: "Number of negative P&L sessions.", value: String(baseStats.learningSessions), tone: "bad" });
+    push({ id: "cons_flat", category: "Consistency", title: "Flat sessions", tooltip: "Sessions with P&L = 0.", value: String(baseStats.flatSessions), tone: "neutral" });
+
+    // Risk (15)
+    push({ id: "risk_maxdd", category: "Risk", title: "Max drawdown", tooltip: "Largest peak-to-trough equity drawdown (based on session P&L).", value: `-$${maxDrawdown.toFixed(2)}`, tone: maxDrawdown > 0 ? "bad" : "neutral" });
+
+    // Time (15)
+    push({ id: "time_best_dow", category: "Time", title: "Best weekday", tooltip: "Weekday with highest win rate.", value: bestDow, tone: "good" });
+    push({ id: "time_worst_dow", category: "Time", title: "Worst weekday", tooltip: "Weekday with lowest win rate.", value: worstDow, tone: "bad" });
+
+    // Instruments (15)
+    push({ id: "inst_top_under", category: "Instruments", title: "Top underlying (by activity)", tooltip: "Most active underlying (approx. from symbols).", value: String(topUnderlying), tone: "neutral" });
+
+    // Process (15)
+    push({ id: "proc_premarket", category: "Process", title: "Premarket fill rate", tooltip: "How often premarket fields are filled (proxy).", value: `${usage.premarketFillRate.toFixed(1)}%`, tone: usage.premarketFillRate >= 60 ? "good" : "neutral" });
+    push({ id: "proc_ai_rate", category: "Process", title: "AI usage rate", tooltip: "Percent of sessions where AI coaching was used (proxy).", value: `${usage.aiUsageRate.toFixed(1)}%`, tone: aiEdge >= 50 ? "good" : "neutral" });
+
+    // Psychology (20) — placeholders unless your tags/emotions are stable
+    push({ id: "psy_base_green", category: "Psychology", title: "Base green probability", tooltip: "Baseline probability of green session.", value: `${probabilityStats.baseGreenRate.toFixed(1)}%`, tone: "neutral" });
+    push({ id: "psy_green_respect", category: "Psychology", title: "Green when plan respected", tooltip: "Win rate on sessions where you respected plan.", value: `${probabilityStats.pGreenRespect.toFixed(1)}%`, tone: "good" });
+    push({ id: "psy_learning_fomo", category: "Psychology", title: "Learning when FOMO", tooltip: "Probability of a red day when FOMO is tagged.", value: `${probabilityStats.pLearningFomo.toFixed(1)}%`, tone: "bad" });
+
+    // Fill up to 110 items (professional KPI catalog) — until you store more fields we show “—”
+    const catalog: { id: string; category: StatCategory; title: string; tooltip: string }[] = [
+      // PnL extras
+      { id: "pnl_expectancy", category: "PnL", title: "Expectancy ($)", tooltip: "Expected value per session. Needs avg win/loss + probabilities." },
+      { id: "pnl_tail_loss", category: "Risk", title: "Tail loss (worst 5%)", tooltip: "Average of worst 5% sessions. Needs enough sample." },
+      { id: "pnl_tail_gain", category: "Risk", title: "Tail gain (best 5%)", tooltip: "Average of best 5% sessions. Needs enough sample." },
+
+      // Time / heat
+      { id: "time_best_hour", category: "Time", title: "Best hour bucket", tooltip: "Hour bucket with best win rate (from first trade time)." },
+      { id: "time_worst_hour", category: "Time", title: "Worst hour bucket", tooltip: "Hour bucket with worst win rate (from first trade time)." },
+      { id: "time_edge_zones", category: "Time", title: "Edge zones count", tooltip: "Heatmap cells with win-rate above threshold (e.g., 60%)." },
+
+      // Execution/risk fields you may store later
+      { id: "proc_risk_per_trade", category: "Process", title: "Avg risk per trade", tooltip: "Requires storing risk per trade (planned stop/size)." },
+      { id: "proc_mae", category: "Process", title: "MAE (avg)", tooltip: "Max adverse excursion (needs price path or entry/exit extremes)." },
+      { id: "proc_mfe", category: "Process", title: "MFE (avg)", tooltip: "Max favorable excursion (needs price path or entry/exit extremes)." },
+      { id: "proc_rr", category: "Process", title: "Avg R multiple", tooltip: "Needs risk per trade to convert P&L into R." },
+
+      // Psychology
+      { id: "psy_fomo_freq", category: "Psychology", title: "FOMO frequency", tooltip: "Percent of sessions tagged FOMO." },
+      { id: "psy_revenge_freq", category: "Psychology", title: "Revenge frequency", tooltip: "Percent of sessions tagged Revenge Trade." },
+      { id: "psy_emotion_div", category: "Psychology", title: "Emotion diversity", tooltip: "How varied your emotions are across sessions." },
+    ];
+
+    for (const c of catalog) {
+      push({
+        id: c.id,
+        category: c.category,
+        title: c.title,
+        tooltip: c.tooltip,
+        value: "—",
+        tone: "neutral",
+      });
+    }
+
+    
+  
+
+    return tiles;
+  }, [
+    baseStats.sumPnl,
+    baseStats.avgPnl,
+    baseStats.greenSessions,
+    baseStats.learningSessions,
+    baseStats.flatSessions,
+    median,
+    std,
+    profitFactor,
+    avgWin,
+    avgLoss,
+    winRate,
+    total,
+    maxDrawdown,
+    dayOfWeekStats,
+    usage,
+    probabilityStats,
+    instrumentStats,
+    topUnderlying,
+    aiEdge,
+    sessions,
+  ]);
+
+  const filtered = useMemo(() => {
+    const qq = q.trim().toLowerCase();
+    return stats.filter((s) => {
+      if (cat !== "All" && s.category !== cat) return false;
+      if (!qq) return true;
+      return (
+        s.title.toLowerCase().includes(qq) ||
+        s.tooltip.toLowerCase().includes(qq) ||
+        s.category.toLowerCase().includes(qq)
+      );
+    });
+  }, [stats, q, cat]);
+
+  return (
+    <section className="space-y-4">
+      <div className={wrapCard()}>
+        <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2">
+              <p className={chartTitle()}>Statistics Terminal</p>
+              <Tip text="This panel is designed like a Bloomberg-style KPI grid. Some KPIs are computed now; some show — until you decide to store risk/setup fields." />
+            </div>
+            <p className={chartSub()}>100+ professional KPIs for self-awareness, edge discovery, and leak control.</p>
+          </div>
+
+          <div className="flex flex-col md:flex-row gap-2 md:items-center">
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Search: drawdown, FOMO, expectancy…"
+              className="w-full md:w-[340px] rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-600 outline-none focus:border-emerald-400"
+            />
+            <select
+              value={cat}
+              onChange={(e) => setCat(e.target.value as any)}
+              className="rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-400"
+            >
+              <option value="All">All</option>
+              <option value="PnL">PnL</option>
+              <option value="Consistency">Consistency</option>
+              <option value="Risk">Risk</option>
+              <option value="Time">Time</option>
+              <option value="Instruments">Instruments</option>
+              <option value="Process">Process</option>
+              <option value="Psychology">Psychology</option>
+            </select>
+          </div>
+        </div>
+
+        <div className="mt-4 grid grid-cols-2 md:grid-cols-4 xl:grid-cols-6 gap-2">
+          <MiniKpi label="Computed KPIs" value={stats.filter((x) => x.value !== "—").length} />
+          <MiniKpi label="Total KPIs" value={stats.length} />
+          <MiniKpi label="Win rate" value={`${winRate.toFixed(1)}%`} tone={winRate >= 50 ? "good" : "neutral"} />
+          <MiniKpi label="Profit Factor" value={profitFactor.toFixed(2)} tone={profitFactor >= 1 ? "good" : "bad"} />
+          <MiniKpi label="Max Drawdown" value={`-$${maxDrawdown.toFixed(0)}`} tone="bad" />
+          <MiniKpi label="Premarket fill" value={`${usage.premarketFillRate.toFixed(0)}%`} tone={usage.premarketFillRate >= 60 ? "good" : "neutral"} />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+        {filtered.map((s) => (
+          <StatTile key={s.id} s={s} />
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -533,25 +1678,19 @@ export default function AnalyticsStatisticsPage() {
   const { user, loading } = useAuth();
   const router = useRouter();
 
-  // ✅ Tu flujo actual se queda
   const [entries, setEntries] = useState<JournalEntry[]>([]);
   const [activeGroup, setActiveGroup] = useState<AnalyticsGroupId>("overview");
-  const [loadingData, setLoadingData] = useState<boolean>(true);
+  const [loadingData, setLoadingData] = useState(true);
 
-  // ✅ NUEVO: snapshot
   const [snapshot, setSnapshot] = useState<AnalyticsSnapshot | null>(null);
-  const [snapshotLoading, setSnapshotLoading] = useState<boolean>(false);
-  const [snapshotError, setSnapshotError] = useState<string>("");
-
-  // ✅ NUEVO: modo (sin romper live compute)
+  const [snapshotLoading, setSnapshotLoading] = useState(false);
+  const [snapshotError, setSnapshotError] = useState("");
   const [dataMode, setDataMode] = useState<"snapshot" | "live">("snapshot");
 
-  /* Protect route */
   useEffect(() => {
     if (!loading && !user) router.replace("/signin");
   }, [loading, user, router]);
 
-  /* Load journal entries from Supabase (tu code original) */
   useEffect(() => {
     if (loading || !user) return;
 
@@ -560,7 +1699,6 @@ export default function AnalyticsStatisticsPage() {
         setLoadingData(true);
 
         const userId = (user as any)?.uid || (user as any)?.id || (user as any)?.email || "";
-
         if (!userId) {
           setEntries([]);
           return;
@@ -579,7 +1717,6 @@ export default function AnalyticsStatisticsPage() {
     load();
   }, [loading, user]);
 
-  /* ✅ NUEVO: cargar snapshot (no interfiere con live) */
   const refreshSnapshot = async () => {
     try {
       setSnapshotLoading(true);
@@ -642,59 +1779,24 @@ export default function AnalyticsStatisticsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading, user]);
 
-  const usedEntries = entries;
-
   /* =========================
-     Normalize sessions with trades (tu code + enrich underlying/hour)
+     Normalize sessions with trades
   ========================= */
   const sessions: SessionWithTrades[] = useMemo(() => {
-    return usedEntries.map((s) => {
-      const { entries: entRaw, exits: exRaw } = parseNotesTrades(s.notes);
+    return (entries || []).map((s) => {
+      const { entries: entRaw, exits: exRaw } = parseNotesTrades((s as any).notes);
 
       const ent2: EntryTradeRow[] = (entRaw || []).map((t: any) => {
         const kind = normalizeKind(t.kind);
         const side = normalizeSide(t.side);
-
-        // enrich underlying now (even if not option)
         const underlying = t?.underlying ? String(t.underlying) : getUnderlyingFromSymbol(t.symbol);
-
-        if (kind === "option" && (t.dte == null || t.expiry == null)) {
-          const spx = parseSPXOptionSymbol(t.symbol);
-          if (spx) {
-            const dte = calcDTE(s.date, spx.expiry);
-            return {
-              ...t,
-              kind,
-              side,
-              dte,
-              expiry: spx.expiry.toISOString().slice(0, 10),
-              underlying: spx.underlying || underlying,
-            };
-          }
-        }
         return { ...t, kind, side, underlying };
       });
 
       const ex2: ExitTradeRow[] = (exRaw || []).map((t: any) => {
         const kind = normalizeKind(t.kind);
         const side = normalizeSide(t.side);
-
         const underlying = t?.underlying ? String(t.underlying) : getUnderlyingFromSymbol(t.symbol);
-
-        if (kind === "option" && (t.dte == null || t.expiry == null)) {
-          const spx = parseSPXOptionSymbol(t.symbol);
-          if (spx) {
-            const dte = calcDTE(s.date, spx.expiry);
-            return {
-              ...t,
-              kind,
-              side,
-              dte,
-              expiry: spx.expiry.toISOString().slice(0, 10),
-              underlying: spx.underlying || underlying,
-            };
-          }
-        }
         return { ...t, kind, side, underlying };
       });
 
@@ -718,23 +1820,24 @@ export default function AnalyticsStatisticsPage() {
         ent2.find((x) => String(x?.time || "").trim())?.time ??
         ex2.find((x) => String(x?.time || "").trim())?.time ??
         null;
+
       const firstHour = parseHourBucket(firstTime);
 
       return {
-        ...s,
+        ...(s as any),
         entries: ent2,
         exits: ex2,
         uniqueSymbols: Array.from(uniqueSymbolsSet),
         uniqueKinds: Array.from(uniqueKindsSet),
-        perSymbolPnL,
         uniqueUnderlyings: Array.from(uniqueUnderlyingsSet),
+        perSymbolPnL,
         firstHour,
-      };
+      } as SessionWithTrades;
     });
-  }, [usedEntries]);
+  }, [entries]);
 
   /* =========================
-     Basic stats & probabilities (tu code)
+     Base stats
   ========================= */
   const baseStats = useMemo(() => {
     const totalSessions = sessions.length;
@@ -747,31 +1850,21 @@ export default function AnalyticsStatisticsPage() {
     let toughestDay: { date: string; pnl: number } | null = null;
 
     sessions.forEach((e) => {
-      const pnl = e.pnl ?? 0;
+      const pnl = Number((e as any).pnl ?? 0);
       sumPnl += pnl;
 
       if (pnl > 0) greenSessions += 1;
       else if (pnl < 0) learningSessions += 1;
       else flatSessions += 1;
 
-      if (!bestDay || pnl > bestDay.pnl) bestDay = { date: e.date, pnl };
-      if (!toughestDay || pnl < toughestDay.pnl) toughestDay = { date: e.date, pnl };
+      if (!bestDay || pnl > bestDay.pnl) bestDay = { date: (e as any).date, pnl };
+      if (!toughestDay || pnl < toughestDay.pnl) toughestDay = { date: (e as any).date, pnl };
     });
 
     const greenRate = totalSessions > 0 ? (greenSessions / totalSessions) * 100 : 0;
     const avgPnl = totalSessions > 0 ? sumPnl / totalSessions : 0;
 
-    return {
-      totalSessions,
-      greenSessions,
-      learningSessions,
-      flatSessions,
-      greenRate,
-      avgPnl,
-      sumPnl,
-      bestDay,
-      toughestDay,
-    };
+    return { totalSessions, greenSessions, learningSessions, flatSessions, greenRate, avgPnl, sumPnl, bestDay, toughestDay };
   }, [sessions]);
 
   const probabilityStats = useMemo(() => {
@@ -812,16 +1905,14 @@ export default function AnalyticsStatisticsPage() {
     let revengeLearning = 0;
 
     sessions.forEach((e) => {
-      const pnl = e.pnl ?? 0;
+      const pnl = Number((e as any).pnl ?? 0);
       const isGreen = pnl > 0;
       const isLearning = pnl < 0;
 
       const respectedPlan = !!(e as any).respectedPlan;
 
-      const tagsRaw = e.tags || [];
-      const tags = tagsRaw.map((t: string) => t.trim());
-      const tagsUpper = tags.map(safeUpper);
-
+      const tagsRaw = ((e as any).tags || []) as string[];
+      const tagsUpper = tagsRaw.map((t) => safeUpper(t || ""));
       const hasFomo = tagsUpper.includes("FOMO");
       const hasRevenge = tagsUpper.includes("REVENGE TRADE");
 
@@ -847,13 +1938,10 @@ export default function AnalyticsStatisticsPage() {
     });
 
     const baseGreenRate = (baseGreen / total) * 100;
-
     const pGreenRespect = respectCount > 0 ? (respectGreen / respectCount) * 100 : 0;
     const pLearningRespect = respectCount > 0 ? (respectLearning / respectCount) * 100 : 0;
-
     const pGreenFomo = fomoCount > 0 ? (fomoGreen / fomoCount) * 100 : 0;
     const pLearningFomo = fomoCount > 0 ? (fomoLearning / fomoCount) * 100 : 0;
-
     const pGreenRevenge = revengeCount > 0 ? (revengeGreen / revengeCount) * 100 : 0;
     const pLearningRevenge = revengeCount > 0 ? (revengeLearning / revengeCount) * 100 : 0;
 
@@ -877,14 +1965,8 @@ export default function AnalyticsStatisticsPage() {
     };
   }, [sessions]);
 
-  /* =========================
-     Day-of-week stats (tu code)
-  ========================= */
   const dayOfWeekStats = useMemo(() => {
-    const base: Record<
-      DayOfWeekKey,
-      { sessions: number; green: number; learning: number; flat: number; sumPnl: number }
-    > = {
+    const base: Record<DayOfWeekKey, { sessions: number; green: number; learning: number; flat: number; sumPnl: number }> = {
       0: { sessions: 0, green: 0, learning: 0, flat: 0, sumPnl: 0 },
       1: { sessions: 0, green: 0, learning: 0, flat: 0, sumPnl: 0 },
       2: { sessions: 0, green: 0, learning: 0, flat: 0, sumPnl: 0 },
@@ -895,11 +1977,12 @@ export default function AnalyticsStatisticsPage() {
     };
 
     sessions.forEach((e) => {
-      if (!e.date) return;
-      const d = new Date(e.date + "T00:00:00");
+      const date = (e as any).date as string;
+      if (!date) return;
+      const d = new Date(date + "T00:00:00");
       if (Number.isNaN(d.getTime())) return;
       const dow = d.getDay() as DayOfWeekKey;
-      const pnl = e.pnl ?? 0;
+      const pnl = Number((e as any).pnl ?? 0);
       const stats = base[dow];
 
       stats.sessions += 1;
@@ -924,252 +2007,31 @@ export default function AnalyticsStatisticsPage() {
     return { items, best, hardest };
   }, [sessions]);
 
-  /* =========================
-     Instruments / Ticker stats (tu code + Underlying)
-  ========================= */
-  const instrumentStats = useMemo(() => {
-    type TickerAgg = {
-      symbol: string;
-      sessions: number;
-      green: number;
-      learning: number;
-      flat: number;
-      tradesClosed: number;
-      netPnl: number;
-      grossProfit: number;
-      grossLoss: number;
-      winRate: number;
-      avgPnlPerSession: number;
-      bestDow: DayOfWeekKey | null;
-      worstDow: DayOfWeekKey | null;
-      underlying: string;
-    };
-
-    type UnderAgg = {
-      underlying: string;
-      sessions: number;
-      green: number;
-      learning: number;
-      flat: number;
-      netPnl: number;
-      winRate: number;
-      avgPnlPerSession: number;
-    };
-
-    type KindAgg = {
-      kind: InstrumentType;
-      sessions: number;
-      green: number;
-      learning: number;
-      flat: number;
-      sumPnl: number;
-      winRate: number;
-      avgPnlPerSession: number;
-    };
-
-    const tickerMap: Record<
-      string,
-      {
-        symbol: string;
-        underlying: string;
-        sessions: number;
-        green: number;
-        learning: number;
-        flat: number;
-        tradesClosed: number;
-        netPnl: number;
-        grossProfit: number;
-        grossLoss: number;
-        byDow: Record<DayOfWeekKey, { sessions: number; green: number; sumPnl: number }>;
-      }
-    > = {};
-
-    const underMap: Record<string, { underlying: string; sessions: number; green: number; learning: number; flat: number; netPnl: number }> =
-      {};
-
-    const kindMap: Record<string, { kind: InstrumentType; sessions: number; green: number; learning: number; flat: number; sumPnl: number }> =
-      {};
-
-    sessions.forEach((s) => {
-      const pnl = s.pnl ?? 0;
-      const isGreen = pnl > 0;
-      const isLearning = pnl < 0;
-      const isFlat = pnl === 0;
-
-      const d = new Date(s.date + "T00:00:00");
-      const dow = Number.isNaN(d.getTime()) ? null : (d.getDay() as DayOfWeekKey);
-
-      // Underlyings for this session
-      for (const u of s.uniqueUnderlyings || []) {
-        underMap[u] ||= { underlying: u, sessions: 0, green: 0, learning: 0, flat: 0, netPnl: 0 };
-        const U = underMap[u];
-        U.sessions += 1;
-        if (isGreen) U.green += 1;
-        if (isLearning) U.learning += 1;
-        if (isFlat) U.flat += 1;
-        U.netPnl += pnl;
-      }
-
-      const symbolsHere = s.uniqueSymbols;
-
-      for (const sym of symbolsHere) {
-        const underlying = getUnderlyingFromSymbol(sym);
-
-        tickerMap[sym] ||= {
-          symbol: sym,
-          underlying,
-          sessions: 0,
-          green: 0,
-          learning: 0,
-          flat: 0,
-          tradesClosed: 0,
-          netPnl: 0,
-          grossProfit: 0,
-          grossLoss: 0,
-          byDow: {
-            0: { sessions: 0, green: 0, sumPnl: 0 },
-            1: { sessions: 0, green: 0, sumPnl: 0 },
-            2: { sessions: 0, green: 0, sumPnl: 0 },
-            3: { sessions: 0, green: 0, sumPnl: 0 },
-            4: { sessions: 0, green: 0, sumPnl: 0 },
-            5: { sessions: 0, green: 0, sumPnl: 0 },
-            6: { sessions: 0, green: 0, sumPnl: 0 },
-          },
-        };
-
-        const t = tickerMap[sym];
-        t.sessions += 1;
-        if (isGreen) t.green += 1;
-        if (isLearning) t.learning += 1;
-        if (isFlat) t.flat += 1;
-
-        const symPnl = s.perSymbolPnL[sym] || 0;
-        t.netPnl += symPnl;
-        if (symPnl > 0) t.grossProfit += symPnl;
-        if (symPnl < 0) t.grossLoss += symPnl;
-
-        if (dow != null) {
-          const bd = t.byDow[dow];
-          bd.sessions += 1;
-          bd.sumPnl += symPnl;
-          if (symPnl > 0) bd.green += 1;
-        }
-      }
-
-      for (const k of s.uniqueKinds) {
-        const key = normalizeKind(k);
-        kindMap[key] ||= { kind: key, sessions: 0, green: 0, learning: 0, flat: 0, sumPnl: 0 };
-        const K = kindMap[key];
-        K.sessions += 1;
-        K.sumPnl += pnl;
-        if (isGreen) K.green += 1;
-        if (isLearning) K.learning += 1;
-        if (isFlat) K.flat += 1;
-      }
-
-      for (const ex of s.exits) {
-        const sym = safeUpper(ex.symbol);
-        if (!sym || !tickerMap[sym]) continue;
-        tickerMap[sym].tradesClosed += 1;
-      }
-    });
-
-    const tickers: TickerAgg[] = Object.values(tickerMap).map((t) => {
-      const winRate = t.sessions > 0 ? (t.green / t.sessions) * 100 : 0;
-      const avgPnlPerSession = t.sessions > 0 ? t.netPnl / t.sessions : 0;
-
-      const dowItems = (Object.keys(t.byDow) as unknown as DayOfWeekKey[])
-        .map((dow) => {
-          const v = t.byDow[dow];
-          const wr = v.sessions > 0 ? (v.green / v.sessions) * 100 : 0;
-          return { dow, winRate: wr, sessions: v.sessions };
-        })
-        .filter((x) => x.sessions > 0);
-
-      const bestDow = dowItems.length ? [...dowItems].sort((a, b) => b.winRate - a.winRate)[0].dow : null;
-      const worstDow = dowItems.length ? [...dowItems].sort((a, b) => a.winRate - b.winRate)[0].dow : null;
-
-      return {
-        symbol: t.symbol,
-        sessions: t.sessions,
-        green: t.green,
-        learning: t.learning,
-        flat: t.flat,
-        tradesClosed: t.tradesClosed,
-        netPnl: t.netPnl,
-        grossProfit: t.grossProfit,
-        grossLoss: t.grossLoss,
-        winRate,
-        avgPnlPerSession,
-        bestDow,
-        worstDow,
-        underlying: t.underlying,
-      };
-    });
-
-    const underlyings: UnderAgg[] = Object.values(underMap).map((u) => {
-      const winRate = u.sessions > 0 ? (u.green / u.sessions) * 100 : 0;
-      const avgPnlPerSession = u.sessions > 0 ? u.netPnl / u.sessions : 0;
-      return { ...u, winRate, avgPnlPerSession };
-    });
-
-    const kinds: KindAgg[] = Object.values(kindMap).map((k) => {
-      const winRate = k.sessions > 0 ? (k.green / k.sessions) * 100 : 0;
-      const avgPnlPerSession = k.sessions > 0 ? k.sumPnl / k.sessions : 0;
-      return { ...k, winRate, avgPnlPerSession };
-    });
-
-    const mostSupportive = [...tickers].sort((a, b) => b.winRate - a.winRate).slice(0, 7);
-    const topEarners = [...tickers].sort((a, b) => b.netPnl - a.netPnl).slice(0, 7);
-    const toReview = [...tickers].sort((a, b) => a.netPnl - b.netPnl).slice(0, 7);
-
-    const underlyingByEdge = [...underlyings].sort((a, b) => b.winRate - a.winRate);
-    const underlyingTopNet = [...underlyings].sort((a, b) => b.netPnl - a.netPnl);
-
-    return {
-      tickers,
-      kinds,
-      underlyings,
-      mostSupportive,
-      topEarners,
-      toReview,
-      kindByEdge: [...kinds].sort((a, b) => b.winRate - a.winRate),
-      underlyingByEdge,
-      underlyingTopNet,
-    };
-  }, [sessions]);
-
-  /* =========================
-     NEW: chart datasets (live; snapshot overrides in UI)
-  ========================= */
-
   const equityCurveLive = useMemo(() => {
-    const sorted = [...sessions].sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+    const sorted = [...sessions].sort((a, b) => String((a as any).date || "").localeCompare(String((b as any).date || "")));
     let cum = 0;
     return sorted.map((s) => {
-      const pnl = Number(s.pnl ?? 0);
+      const pnl = Number((s as any).pnl ?? 0);
       cum += pnl;
-      return { date: s.date, value: Number(cum.toFixed(2)), pnl: Number(pnl.toFixed(2)) };
+      return { date: String((s as any).date || ""), value: Number(cum.toFixed(2)), pnl: Number(pnl.toFixed(2)) };
     });
   }, [sessions]);
 
   const dailyPnlLive = useMemo(() => {
-    const sorted = [...sessions].sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+    const sorted = [...sessions].sort((a, b) => String((a as any).date || "").localeCompare(String((b as any).date || "")));
     const last = sorted.slice(Math.max(0, sorted.length - 40));
-    return last.map((s) => ({ date: s.date, pnl: Number((s.pnl ?? 0).toFixed(2)) }));
+    return last.map((s) => ({ date: String((s as any).date || ""), pnl: Number(Number((s as any).pnl ?? 0).toFixed(2)) }));
   }, [sessions]);
 
   const instrumentMixLive = useMemo(() => {
     const map: Record<string, number> = {};
     for (const s of sessions) {
-      for (const k of s.uniqueKinds || []) {
+      for (const k of (s.uniqueKinds || []) as any[]) {
         const kk = String(k || "other");
         map[kk] = (map[kk] || 0) + 1;
       }
     }
-    return Object.entries(map)
-      .map(([name, value]) => ({ name, value }))
-      .sort((a, b) => b.value - a.value);
+    return Object.entries(map).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
   }, [sessions]);
 
   const underlyingMixLive = useMemo(() => {
@@ -1180,16 +2042,13 @@ export default function AnalyticsStatisticsPage() {
         map[uu] = (map[uu] || 0) + 1;
       }
     }
-    return Object.entries(map)
-      .map(([name, value]) => ({ name, value }))
-      .sort((a, b) => b.value - a.value)
-      .slice(0, 10);
+    return Object.entries(map).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value).slice(0, 10);
   }, [sessions]);
 
   const psychologyLive = useMemo(() => {
     const freq: Record<string, number> = {};
     const timeline = [...sessions]
-      .sort((a, b) => (a.date || "").localeCompare(b.date || ""))
+      .sort((a, b) => String((a as any).date || "").localeCompare(String((b as any).date || "")))
       .map((s) => {
         const rawEmos =
           (s as any).emotions ??
@@ -1203,14 +2062,14 @@ export default function AnalyticsStatisticsPage() {
 
         const top = cleaned.length ? safeUpper(cleaned[0]) : "—";
 
-        const tagsRaw = s.tags || [];
-        const tagsUpper = tagsRaw.map((t: string) => safeUpper(t || ""));
+        const tagsRaw = ((s as any).tags || []) as string[];
+        const tagsUpper = tagsRaw.map((t) => safeUpper(t || ""));
         const hasFOMO = tagsUpper.includes("FOMO");
         const hasRevenge = tagsUpper.includes("REVENGE TRADE");
 
         return {
-          date: s.date,
-          pnl: Number((s.pnl ?? 0).toFixed(2)),
+          date: String((s as any).date || ""),
+          pnl: Number(Number((s as any).pnl ?? 0).toFixed(2)),
           emotion: top,
           respectedPlan: !!(s as any).respectedPlan,
           fomo: hasFOMO ? 1 : 0,
@@ -1218,16 +2077,11 @@ export default function AnalyticsStatisticsPage() {
         };
       });
 
-    const freqArr = Object.entries(freq)
-      .map(([name, value]) => ({ name, value }))
-      .sort((a, b) => b.value - a.value)
-      .slice(0, 12);
-
+    const freqArr = Object.entries(freq).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value).slice(0, 12);
     return { freqArr, timeline };
   }, [sessions]);
 
   const usageLive = useMemo(() => {
-    // Ajusta estos keys a tus nombres reales si quieres precisión 1:1
     const PREMARKET_KEYS = ["premarketBias", "premarketPlan", "premarketLevels", "premarketCatalyst", "premarketChecklist"];
     const AI_KEYS = ["aiCoachingUsed", "aiCoachUsed", "ai_messages_count", "aiCoachCount"];
 
@@ -1250,11 +2104,10 @@ export default function AnalyticsStatisticsPage() {
   }, [sessions]);
 
   const heatmapLive = useMemo(() => {
-    // underlying -> hour -> agg
     const book: Record<string, Record<number, { n: number; green: number; sumPnl: number }>> = {};
 
     for (const s of sessions) {
-      const pnl = Number(s.pnl ?? 0);
+      const pnl = Number((s as any).pnl ?? 0);
       const isGreen = pnl > 0;
       const hr = s.firstHour;
       if (hr == null) continue;
@@ -1271,17 +2124,12 @@ export default function AnalyticsStatisticsPage() {
       }
     }
 
-    // pick top underlyings by sessions
     const underScores = Object.keys(book).map((u) => {
       const total = Object.values(book[u]).reduce((acc, v) => acc + (v?.n || 0), 0);
       return { u, total };
     });
 
-    const underList = underScores
-      .sort((a, b) => b.total - a.total)
-      .slice(0, 10)
-      .map((x) => x.u);
-
+    const underList = underScores.sort((a, b) => b.total - a.total).slice(0, 10).map((x) => x.u);
     const hours = Array.from({ length: 24 }).map((_, i) => i);
 
     const matrix = underList.map((u) => {
@@ -1299,7 +2147,7 @@ export default function AnalyticsStatisticsPage() {
   }, [sessions]);
 
   /* =========================
-     NEW: unify display stats (snapshot vs live)
+     UI totals (snapshot vs live)
   ========================= */
   const uiTotals = useMemo(() => {
     if (dataMode === "snapshot" && snapshot?.totals) {
@@ -1359,6 +2207,49 @@ export default function AnalyticsStatisticsPage() {
     return usageLive;
   }, [dataMode, snapshot, usageLive]);
 
+  // Minimal instrument stats for this page (si quieres más, lo expandimos luego)
+  const instrumentStats = useMemo(() => {
+    // very light: reuse your logic later if desired
+    // For now we approximate lists from symbol pnl
+    const map: Record<string, { symbol: string; sessions: number; netPnl: number; win: number; underlying: string; tradesClosed: number }> = {};
+    for (const s of sessions) {
+      const pnl = Number((s as any).pnl ?? 0);
+      const isGreen = pnl > 0;
+
+      for (const sym of s.uniqueSymbols || []) {
+        const underlying = getUnderlyingFromSymbol(sym);
+        map[sym] ||= { symbol: sym, sessions: 0, netPnl: 0, win: 0, underlying, tradesClosed: 0 };
+        map[sym].sessions += 1;
+        if (isGreen) map[sym].win += 1;
+        map[sym].netPnl += Number(s.perSymbolPnL?.[sym] ?? 0);
+      }
+      for (const ex of s.exits || []) {
+        const sym = safeUpper(ex.symbol);
+        if (sym && map[sym]) map[sym].tradesClosed += 1;
+      }
+    }
+
+    const tickers = Object.values(map)
+      .map((t) => ({
+        symbol: t.symbol,
+        underlying: t.underlying,
+        sessions: t.sessions,
+        tradesClosed: t.tradesClosed,
+        winRate: t.sessions ? (t.win / t.sessions) * 100 : 0,
+        netPnl: t.netPnl,
+        avgPnlPerSession: t.sessions ? t.netPnl / t.sessions : 0,
+        bestDow: null,
+        worstDow: null,
+      }))
+      .sort((a, b) => b.sessions - a.sessions);
+
+    const mostSupportive = [...tickers].sort((a, b) => b.winRate - a.winRate).slice(0, 7);
+    const topEarners = [...tickers].sort((a, b) => b.netPnl - a.netPnl).slice(0, 7);
+    const toReview = [...tickers].sort((a, b) => a.netPnl - b.netPnl).slice(0, 7);
+
+    return { tickers, mostSupportive, topEarners, toReview };
+  }, [sessions]);
+
   /* =========================
      Rendering
   ========================= */
@@ -1376,22 +2267,14 @@ export default function AnalyticsStatisticsPage() {
 
       <div className="px-4 md:px-8 py-6">
         <div className="max-w-6xl mx-auto">
-          {/* Header */}
           <header className="flex flex-col md:flex-row justify-between gap-4 mb-6">
             <div>
-              <p className="text-emerald-400 text-xs uppercase tracking-[0.25em]">
-                Performance · Analytics
-              </p>
-              <h1 className="text-3xl md:text-4xl font-semibold mt-1">
-                Analytics & Statistics
-              </h1>
+              <p className="text-emerald-400 text-xs uppercase tracking-[0.25em]">Performance · Analytics</p>
+              <h1 className="text-3xl md:text-4xl font-semibold mt-1">Analytics & Statistics</h1>
               <p className="text-sm md:text-base text-slate-400 mt-2 max-w-2xl">
-                Visualize how your sessions behave over time: probabilities,
-                weekdays, psychology and instruments. Futuristic, clean,
-                edge-focused.
+                Bloomberg-style terminal panels. Clean spacing. Real edge metrics.
               </p>
 
-              {/* ✅ NEW: data mode + snapshot controls */}
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 <div className="inline-flex rounded-full border border-slate-700 overflow-hidden">
                   <button
@@ -1440,18 +2323,11 @@ export default function AnalyticsStatisticsPage() {
 
                 {snapshot?.updatedAt && (
                   <span className="text-[11px] text-slate-500">
-                    Snapshot:{" "}
-                    <span className="text-slate-300">
-                      {new Date(snapshot.updatedAt).toLocaleString()}
-                    </span>
+                    Snapshot: <span className="text-slate-300">{new Date(snapshot.updatedAt).toLocaleString()}</span>
                   </span>
                 )}
 
-                {!!snapshotError && (
-                  <span className="text-[11px] text-sky-300">
-                    {snapshotError}
-                  </span>
-                )}
+                {!!snapshotError && <span className="text-[11px] text-sky-300">{snapshotError}</span>}
               </div>
             </div>
 
@@ -1464,9 +2340,7 @@ export default function AnalyticsStatisticsPage() {
               </Link>
               <p className="text-[11px] text-slate-500">
                 Sessions analyzed:{" "}
-                <span className="text-emerald-300 font-semibold">
-                  {uiTotals.totalSessions}
-                </span>
+                <span className="text-emerald-300 font-semibold">{uiTotals.totalSessions}</span>
               </p>
             </div>
           </header>
@@ -1484,7 +2358,6 @@ export default function AnalyticsStatisticsPage() {
             </section>
           ) : (
             <>
-              {/* Group selector */}
               <section className="mb-6">
                 <div className="flex flex-wrap gap-2">
                   {GROUPS.map((g) => {
@@ -1496,7 +2369,7 @@ export default function AnalyticsStatisticsPage() {
                         onClick={() => setActiveGroup(g.id)}
                         className={`px-3 py-1.5 rounded-full text-xs md:text-sm border transition ${
                           active
-                            ? "bg-emerald-400 text-slate-950 border-emerald-300 shadow-[0_0_20px_rgba(16,185,129,0.35)]"
+                            ? "bg-emerald-400 text-slate-950 border-emerald-300 shadow-[0_0_20px_rgba(16,185,129,0.30)]"
                             : "bg-slate-950 text-slate-200 border-slate-700 hover:border-emerald-400 hover:text-emerald-300"
                         }`}
                       >
@@ -1505,9 +2378,7 @@ export default function AnalyticsStatisticsPage() {
                     );
                   })}
                 </div>
-                <p className="text-xs text-slate-500 mt-2">
-                  {GROUPS.find((g) => g.id === activeGroup)?.description}
-                </p>
+                <p className="text-xs text-slate-500 mt-2">{GROUPS.find((g) => g.id === activeGroup)?.description}</p>
               </section>
 
               {activeGroup === "overview" && (
@@ -1523,7 +2394,7 @@ export default function AnalyticsStatisticsPage() {
               )}
 
               {activeGroup === "day-of-week" && (
-                <DayOfWeekSection stats={dayOfWeekStats} weekdayBars={uiWeekdayBars} />
+                <DayOfWeekSection stats={dayOfWeekStats} weekdayBars={uiWeekdayBars as any} />
               )}
 
               {activeGroup === "psychology" && (
@@ -1543,817 +2414,30 @@ export default function AnalyticsStatisticsPage() {
                 />
               )}
 
-                         </>
+              {activeGroup === "terminal" && (
+                <TerminalSection
+                  equity={uiEquity}
+                  dailyPnl={uiDaily}
+                  weekdayBars={uiWeekdayBars as any}
+                  heat={heatmapLive}
+                />
+              )}
+              {activeGroup === "statistics" && (
+  <StatisticsSection
+    baseStats={baseStats}
+    probabilityStats={probabilityStats}
+    dayOfWeekStats={dayOfWeekStats}
+    sessions={sessions}
+    usage={uiUsage}
+    heat={heatmapLive}
+    instrumentStats={instrumentStats}
+  />
+)}
+
+            </>
           )}
         </div>
       </div>
     </main>
-  );
-}
-
-/* =========================
-   UI bits (futuristic)
-========================= */
-
-function futuristicCardClass(isGood: boolean) {
-  return isGood
-    ? "rounded-2xl border border-emerald-500/40 bg-emerald-500/5 shadow-[0_0_25px_rgba(16,185,129,0.15)]"
-    : "rounded-2xl border border-sky-500/40 bg-sky-500/5 shadow-[0_0_25px_rgba(56,189,248,0.12)]";
-}
-
-function StatCard({
-  label,
-  value,
-  sub,
-  good = true,
-}: {
-  label: string;
-  value: ReactNode;
-  sub?: ReactNode;
-  good?: boolean;
-}) {
-  return (
-    <div className={`${futuristicCardClass(good)} p-4`}>
-      <p className={`text-xs mb-1 ${good ? "text-emerald-200" : "text-sky-200"}`}>{label}</p>
-      <p className={`text-3xl font-semibold ${good ? "text-emerald-300" : "text-sky-300"}`}>{value}</p>
-      {sub && <div className="text-[11px] text-slate-400 mt-2">{sub}</div>}
-    </div>
-  );
-}
-
-function TerminalPanel({
-  title,
-  right,
-  children,
-}: {
-  title: string;
-  right?: ReactNode;
-  children: ReactNode;
-}) {
-  return (
-    <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-4 shadow-[0_0_30px_rgba(15,23,42,0.8)]">
-      <div className="flex items-center justify-between gap-3 mb-3">
-        <p className="text-xs uppercase tracking-[0.22em] text-slate-300">{title}</p>
-        {right ? <div className="text-[11px] text-slate-500">{right}</div> : null}
-      </div>
-      {children}
-    </div>
-  );
-}
-
-function TinyGauge({ label, value, tone }: { label: string; value: number; tone: "emerald" | "sky" }) {
-  const v = clamp(value, 0, 100);
-  const bar = tone === "emerald" ? "bg-emerald-400" : "bg-sky-400";
-  const glow =
-    tone === "emerald"
-      ? "shadow-[0_0_20px_rgba(16,185,129,0.25)]"
-      : "shadow-[0_0_20px_rgba(56,189,248,0.25)]";
-
-  return (
-    <div className="rounded-2xl border border-slate-800 bg-slate-950/40 p-3">
-      <div className="flex items-center justify-between">
-        <p className="text-[11px] text-slate-400">{label}</p>
-        <p className={`text-[11px] ${tone === "emerald" ? "text-emerald-300" : "text-sky-300"} font-semibold`}>
-          {v.toFixed(1)}%
-        </p>
-      </div>
-      <div className="mt-2 h-2 rounded-full bg-slate-800 overflow-hidden">
-        <div className={`h-full ${bar} ${glow}`} style={{ width: `${v}%` }} />
-      </div>
-    </div>
-  );
-}
-
-/* =========================
-   Sections
-========================= */
-
-function OverviewSection({
-  baseStats,
-  probabilityStats,
-  uiTotals,
-  equity,
-  dailyPnl,
-  instrumentMix,
-  usage,
-}: {
-  baseStats: any;
-  probabilityStats: any;
-  uiTotals: any;
-  equity: { date: string; value: number }[];
-  dailyPnl: { date: string; pnl: number }[];
-  instrumentMix: { name: string; value: number }[];
-  usage: { premarketFillRate: number; aiUsageRate: number; aiUsedSessions: number };
-}) {
-  const { totalSessions, greenSessions, learningSessions, sumPnl, avgPnl } = uiTotals;
-
-  const bestDay = baseStats.bestDay;
-  const toughestDay = baseStats.toughestDay;
-
-  const respectEdge = probabilityStats.pGreenRespect - probabilityStats.baseGreenRate;
-
-  return (
-    <section className="space-y-6">
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <StatCard label="Total sessions" value={totalSessions} sub="Each session is one day of trading in your journal." good />
-        <StatCard
-          label="Green sessions"
-          value={greenSessions}
-          sub={`Win rate: ${totalSessions > 0 ? ((greenSessions / totalSessions) * 100).toFixed(1) : "0.0"}%`}
-          good
-        />
-        <StatCard
-          label="Learning sessions"
-          value={learningSessions}
-          sub="These days are raw material for rule upgrades."
-          good={false}
-        />
-        <StatCard
-          label="Avg P&L per session"
-          value={`${avgPnl >= 0 ? "+" : "-"}$${Math.abs(avgPnl).toFixed(2)}`}
-          sub={
-            <>
-              Total P&amp;L:{" "}
-              <span className={sumPnl >= 0 ? "text-emerald-300" : "text-sky-300"}>
-                {sumPnl >= 0 ? "+" : "-"}${Math.abs(sumPnl).toFixed(2)}
-              </span>
-            </>
-          }
-          good={avgPnl >= 0}
-        />
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className={`${futuristicCardClass(true)} p-4`}>
-          <p className="text-xs text-emerald-200 mb-1">Strongest day</p>
-          {bestDay ? (
-            <>
-              <p className="text-lg font-semibold text-slate-50">{formatDateFriendly(bestDay.date)}</p>
-              <p className="text-sm text-emerald-300 mt-1">Result: +${bestDay.pnl.toFixed(2)}</p>
-            </>
-          ) : (
-            <p className="text-sm text-slate-400">No sessions with P&amp;L yet.</p>
-          )}
-        </div>
-
-        <div className={`${futuristicCardClass(false)} p-4`}>
-          <p className="text-xs text-sky-200 mb-1">Toughest day</p>
-          {toughestDay ? (
-            <>
-              <p className="text-lg font-semibold text-slate-50">{formatDateFriendly(toughestDay.date)}</p>
-              <p className="text-sm text-sky-300 mt-1">Result: -${Math.abs(toughestDay.pnl).toFixed(2)}</p>
-            </>
-          ) : (
-            <p className="text-sm text-slate-400">No sessions with P&amp;L yet.</p>
-          )}
-        </div>
-      </div>
-
-      <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-4 shadow-[0_0_30px_rgba(15,23,42,0.8)]">
-        <p className="text-sm font-medium text-slate-100 mb-2">Performance probabilities</p>
-
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-sm">
-          <div>
-            <p className="text-[11px] text-slate-400 mb-1">Base probability of green</p>
-            <p className="text-2xl font-semibold text-emerald-300">{probabilityStats.baseGreenRate.toFixed(1)}%</p>
-          </div>
-
-          <div>
-            <p className="text-[11px] text-slate-400 mb-1">Green when plan respected</p>
-            <p className="text-2xl font-semibold text-emerald-300">{probabilityStats.pGreenRespect.toFixed(1)}%</p>
-          </div>
-
-          <div>
-            <p className="text-[11px] text-slate-400 mb-1">Learning with FOMO</p>
-            <p className="text-2xl font-semibold text-sky-300">{probabilityStats.pLearningFomo.toFixed(1)}%</p>
-          </div>
-
-          <div>
-            <p className="text-[11px] text-slate-400 mb-1">Plan edge</p>
-            <p className={`text-2xl font-semibold ${respectEdge >= 0 ? "text-emerald-300" : "text-sky-300"}`}>
-              {respectEdge.toFixed(1)}%
-            </p>
-          </div>
-        </div>
-      </div>
-
-      {/* ✅ NEW: pro charts row */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <div className={chartWrapClass()}>
-          <div className="flex items-baseline justify-between">
-            <p className={chartTitleClass()}>EQUITY CURVE</p>
-            <p className="text-[11px] text-slate-500">cum P&amp;L</p>
-          </div>
-          <p className={chartSubClass()}>Cumulative performance over time.</p>
-          <div className="mt-3 h-[220px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={equity}>
-                <CartesianGrid stroke={CHART_COLORS.grid} strokeDasharray="3 6" />
-                <XAxis dataKey="date" tick={axisStyle()} tickLine={false} axisLine={false} hide />
-                <YAxis tick={axisStyle()} tickLine={false} axisLine={false} width={70} />
-                <Tooltip {...tooltipProps()} />
-                <Line type="monotone" dataKey="value" stroke={CHART_COLORS.emerald} strokeWidth={2} dot={false} />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-          <p className="text-[11px] text-slate-500 mt-2">
-            Total: <span className="text-emerald-300 font-semibold">{fmtMoney(sumPnl)}</span>
-          </p>
-        </div>
-
-        <div className={chartWrapClass()}>
-          <div className="flex items-baseline justify-between">
-            <p className={chartTitleClass()}>DAILY P&amp;L</p>
-            <p className="text-[11px] text-slate-500">last 40</p>
-          </div>
-          <p className={chartSubClass()}>Daily distribution (green positive, red negative).</p>
-          <div className="mt-3 h-[220px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={dailyPnl}>
-                <CartesianGrid stroke={CHART_COLORS.grid} strokeDasharray="3 6" />
-                <XAxis dataKey="date" tick={axisStyle()} tickLine={false} axisLine={false} hide />
-                <YAxis tick={axisStyle()} tickLine={false} axisLine={false} width={70} />
-                <Tooltip {...tooltipProps()} />
-                <Bar dataKey="pnl" radius={[10, 10, 10, 10]}>
-                  {dailyPnl.map((d, idx) => (
-                    <Cell
-                      key={idx}
-                      fill={Number(d.pnl) >= 0 ? CHART_COLORS.emeraldDim : CHART_COLORS.dangerDim}
-                      stroke={Number(d.pnl) >= 0 ? CHART_COLORS.emerald : CHART_COLORS.danger}
-                      strokeWidth={1}
-                    />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-          <p className="text-[11px] text-slate-500 mt-2">
-            Avg/day: <span className="text-slate-200 font-semibold">{fmtMoney(avgPnl)}</span>
-          </p>
-        </div>
-
-        <div className={chartWrapClass()}>
-          <div className="flex items-baseline justify-between">
-            <p className={chartTitleClass()}>INSTRUMENT MIX</p>
-            <p className="text-[11px] text-slate-500">by session</p>
-          </div>
-          <p className={chartSubClass()}>What you trade most (option/future/stock/etc).</p>
-
-          <div className="mt-3 h-[220px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Tooltip {...tooltipProps()} />
-                <Pie data={instrumentMix} dataKey="value" nameKey="name" innerRadius={55} outerRadius={85} paddingAngle={2}>
-                  {instrumentMix.map((_, i) => (
-                    <Cell
-                      key={i}
-                      fill={i % 2 === 0 ? CHART_COLORS.emeraldDim : CHART_COLORS.skyDim}
-                      stroke={i % 2 === 0 ? CHART_COLORS.emerald : CHART_COLORS.sky}
-                      strokeWidth={1}
-                    />
-                  ))}
-                </Pie>
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
-
-          <div className="mt-2 grid grid-cols-2 gap-2 text-[11px] text-slate-400">
-            {instrumentMix.slice(0, 6).map((p) => (
-              <div key={p.name} className="flex items-center justify-between">
-                <span className="text-slate-300">{p.name}</span>
-                <span className="text-slate-500">{p.value}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* ✅ Usage (premarket + AI) */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <TinyGauge label="Premarket completion rate" value={usage.premarketFillRate} tone="emerald" />
-        <TinyGauge label="AI Coaching usage rate" value={usage.aiUsageRate} tone="sky" />
-        <div className="rounded-2xl border border-slate-800 bg-slate-950/40 p-3">
-          <p className="text-[11px] text-slate-400">AI used sessions</p>
-          <p className="text-2xl font-semibold text-sky-300 mt-1">{usage.aiUsedSessions}</p>
-          <p className="text-[11px] text-slate-500 mt-2">Counts sessions where AI flags/counters exist.</p>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function DayOfWeekSection({ stats, weekdayBars }: { stats: any; weekdayBars: any[] }) {
-  const { items, best, hardest } = stats;
-
-  return (
-    <section className="space-y-6">
-      <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-4">
-        <p className="text-sm font-medium text-slate-100 mb-3">Day-of-week behavior</p>
-
-        {/* ✅ NEW: charts first */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
-          <div className={chartWrapClass()}>
-            <div className="flex items-baseline justify-between">
-              <p className={chartTitleClass()}>WEEKDAY WIN RATE</p>
-              <p className="text-[11px] text-slate-500">%</p>
-            </div>
-            <p className={chartSubClass()}>Win-rate by day of week.</p>
-
-            <div className="mt-3 h-[220px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={weekdayBars}>
-                  <CartesianGrid stroke={CHART_COLORS.grid} strokeDasharray="3 6" />
-                  <XAxis dataKey="label" tick={axisStyle()} tickLine={false} axisLine={false} />
-                  <YAxis tick={axisStyle()} tickLine={false} axisLine={false} width={70} />
-                  <Tooltip {...tooltipProps()} />
-                  <Bar dataKey="winRate" fill={CHART_COLORS.emeraldDim} stroke={CHART_COLORS.emerald} strokeWidth={1} radius={[10, 10, 10, 10]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-
-          <div className={chartWrapClass()}>
-            <div className="flex items-baseline justify-between">
-              <p className={chartTitleClass()}>WEEKDAY AVG P&amp;L</p>
-              <p className="text-[11px] text-slate-500">$</p>
-            </div>
-            <p className={chartSubClass()}>Average P&amp;L by weekday.</p>
-
-            <div className="mt-3 h-[220px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={weekdayBars}>
-                  <CartesianGrid stroke={CHART_COLORS.grid} strokeDasharray="3 6" />
-                  <XAxis dataKey="label" tick={axisStyle()} tickLine={false} axisLine={false} />
-                  <YAxis tick={axisStyle()} tickLine={false} axisLine={false} width={70} />
-                  <Tooltip {...tooltipProps()} />
-                  <Bar dataKey="avgPnl" radius={[10, 10, 10, 10]}>
-                    {weekdayBars.map((d: any, idx: number) => (
-                      <Cell
-                        key={idx}
-                        fill={Number(d.avgPnl) >= 0 ? CHART_COLORS.emeraldDim : CHART_COLORS.dangerDim}
-                        stroke={Number(d.avgPnl) >= 0 ? CHART_COLORS.emerald : CHART_COLORS.danger}
-                        strokeWidth={1}
-                      />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-        </div>
-
-        {/* table (tuya) */}
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs md:text-sm border border-slate-800 rounded-xl overflow-hidden">
-            <thead className="bg-slate-900">
-              <tr>
-                <th className="px-3 py-2 border-b border-slate-800">Day</th>
-                <th className="px-3 py-2 border-b border-slate-800 text-right">Sessions</th>
-                <th className="px-3 py-2 border-b border-slate-800 text-right">Green</th>
-                <th className="px-3 py-2 border-b border-slate-800 text-right">Learning</th>
-                <th className="px-3 py-2 border-b border-slate-800 text-right">Flat</th>
-                <th className="px-3 py-2 border-b border-slate-800 text-right">Win rate</th>
-                <th className="px-3 py-2 border-b border-slate-800 text-right">Avg P&amp;L</th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((i: any) => (
-                <tr key={i.dow} className="border-t border-slate-800 bg-slate-950/60">
-                  <td className="px-3 py-2">{i.label}</td>
-                  <td className="px-3 py-2 text-right">{i.sessions}</td>
-                  <td className="px-3 py-2 text-right text-emerald-300">{i.green}</td>
-                  <td className="px-3 py-2 text-right text-sky-300">{i.learning}</td>
-                  <td className="px-3 py-2 text-right text-slate-300">{i.flat}</td>
-                  <td className="px-3 py-2 text-right">{i.winRate.toFixed(1)}%</td>
-                  <td className="px-3 py-2 text-right">
-                    {i.avgPnl >= 0 ? "+" : "-"}${Math.abs(i.avgPnl).toFixed(2)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className={`${futuristicCardClass(true)} p-4`}>
-          <p className="text-xs text-emerald-200 mb-1">Most supportive day</p>
-          {best ? (
-            <>
-              <p className="text-lg font-semibold">{best.label}</p>
-              <p className="text-sm text-emerald-300 mt-1">Win rate: {best.winRate.toFixed(1)}% · Sessions: {best.sessions}</p>
-            </>
-          ) : (
-            <p className="text-sm text-slate-400">No weekday data yet.</p>
-          )}
-        </div>
-
-        <div className={`${futuristicCardClass(false)} p-4`}>
-          <p className="text-xs text-sky-200 mb-1">Day to monitor</p>
-          {hardest ? (
-            <>
-              <p className="text-lg font-semibold">{hardest.label}</p>
-              <p className="text-sm text-sky-300 mt-1">Win rate: {hardest.winRate.toFixed(1)}% · Sessions: {hardest.sessions}</p>
-            </>
-          ) : (
-            <p className="text-sm text-slate-400">No weekday data yet.</p>
-          )}
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function PsychologySection({
-  baseStats,
-  probabilityStats,
-  psychology,
-  usage,
-}: {
-  baseStats: any;
-  probabilityStats: any;
-  psychology: { freqArr: { name: string; value: number }[]; timeline: any[] };
-  usage: { premarketFillRate: number; aiUsageRate: number; aiUsedSessions: number };
-}) {
-  const { totalSessions, greenSessions, learningSessions } = baseStats;
-
-  const {
-    respectCount,
-    respectGreen,
-    respectLearning,
-    pGreenRespect,
-    pLearningRespect,
-    fomoCount,
-    fomoGreen,
-    fomoLearning,
-    pGreenFomo,
-    pLearningFomo,
-    revengeCount,
-    revengeGreen,
-    revengeLearning,
-    pGreenRevenge,
-    pLearningRevenge,
-  } = probabilityStats;
-
-  const emoBars = psychology.freqArr || [];
-  const emoTimeline = psychology.timeline || [];
-
-  return (
-    <section className="space-y-6">
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <StatCard
-          label="Sessions with plan respect"
-          value={respectCount}
-          sub={
-            <>
-              Out of {totalSessions} sessions ({totalSessions > 0 ? ((respectCount / totalSessions) * 100).toFixed(1) : "0"}%).
-            </>
-          }
-          good
-        />
-        <StatCard
-          label="Sessions with FOMO"
-          value={fomoCount}
-          sub={`Green: ${fomoGreen} (${pGreenFomo.toFixed(1)}%) · Learning: ${fomoLearning} (${pLearningFomo.toFixed(1)}%)`}
-          good={false}
-        />
-        <StatCard
-          label="Sessions with revenge trades"
-          value={revengeCount}
-          sub={`Green: ${revengeGreen} (${pGreenRevenge.toFixed(1)}%) · Learning: ${revengeLearning} (${pLearningRevenge.toFixed(1)}%)`}
-          good={false}
-        />
-      </div>
-
-      {/* ✅ NEW: emotion charts */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div className={chartWrapClass()}>
-          <div className="flex items-baseline justify-between">
-            <p className={chartTitleClass()}>EMOTION FREQUENCY</p>
-            <p className="text-[11px] text-slate-500">top 12</p>
-          </div>
-          <p className={chartSubClass()}>Which emotions appear most in your workflow.</p>
-
-          <div className="mt-3 h-60">
-            {emoBars.length ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={emoBars}>
-                  <CartesianGrid stroke={CHART_COLORS.grid} strokeDasharray="3 6" />
-                  <XAxis dataKey="name" tick={axisStyle()} tickLine={false} axisLine={false} interval={0} />
-                  <YAxis tick={axisStyle()} tickLine={false} axisLine={false} width={70} />
-                  <Tooltip {...tooltipProps()} />
-                  <Bar dataKey="value" fill={CHART_COLORS.skyDim} stroke={CHART_COLORS.sky} strokeWidth={1} radius={[10, 10, 10, 10]} />
-                </BarChart>
-              </ResponsiveContainer>
-            ) : (
-              <p className="text-sm text-slate-400 mt-6">No emotion data detected yet (add emotions in your journal psychology).</p>
-            )}
-          </div>
-        </div>
-
-        <div className={chartWrapClass()}>
-          <div className="flex items-baseline justify-between">
-            <p className={chartTitleClass()}>EMOTION / P&amp;L TIMELINE</p>
-            <p className="text-[11px] text-slate-500">area</p>
-          </div>
-          <p className={chartSubClass()}>P&amp;L over time (use alongside emotion tags).</p>
-
-          <div className="mt-3 h-60">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={emoTimeline}>
-                <CartesianGrid stroke={CHART_COLORS.grid} strokeDasharray="3 6" />
-                <XAxis dataKey="date" tick={axisStyle()} tickLine={false} axisLine={false} hide />
-                <YAxis tick={axisStyle()} tickLine={false} axisLine={false} width={70} />
-                <Tooltip {...tooltipProps()} />
-                <Area type="monotone" dataKey="pnl" stroke={CHART_COLORS.emerald} fill={CHART_COLORS.emeraldDim} strokeWidth={2} />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-
-          <div className="mt-2 grid grid-cols-3 gap-2">
-            <TinyGauge label="Plan respected rate" value={totalSessions ? (respectCount / totalSessions) * 100 : 0} tone="emerald" />
-            <TinyGauge label="AI usage rate" value={usage.aiUsageRate} tone="sky" />
-            <TinyGauge label="Premarket fill rate" value={usage.premarketFillRate} tone="emerald" />
-          </div>
-        </div>
-      </div>
-
-      <div className={`${futuristicCardClass(true)} p-4`}>
-        <p className="text-sm font-medium text-slate-100 mb-2">Plan respect vs overall performance</p>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
-          <div>
-            <p className="text-[11px] text-slate-400 mb-1">Overall</p>
-            <p className="text-xs text-slate-300">
-              Green: <span className="text-emerald-300 font-semibold">{greenSessions}</span>
-            </p>
-            <p className="text-xs text-slate-300">
-              Learning: <span className="text-sky-300 font-semibold">{learningSessions}</span>
-            </p>
-          </div>
-
-          <div>
-            <p className="text-[11px] text-slate-400 mb-1">With plan respected</p>
-            <p className="text-xs text-slate-300">
-              Green: <span className="text-emerald-300 font-semibold">{respectGreen}</span> ({pGreenRespect.toFixed(1)}%)
-            </p>
-            <p className="text-xs text-slate-300">
-              Learning: <span className="text-sky-300 font-semibold">{respectLearning}</span> ({pLearningRespect.toFixed(1)}%)
-            </p>
-          </div>
-
-          <div>
-            <p className="text-[11px] text-slate-400 mb-1">Interpretation</p>
-            <p className="text-[11px] text-slate-200">
-              If plan-respect increases green probability, your rules align with edge. If not, upgrade playbook inputs (entries, stops, sizing).
-            </p>
-          </div>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function InstrumentsSection({
-  stats,
-  underlyingMix,
-  heat,
-}: {
-  stats: any;
-  underlyingMix: { name: string; value: number }[];
-  heat: { underList: string[]; hours: number[]; matrix: any[] };
-}) {
-  const { tickers, kindByEdge, mostSupportive, topEarners, toReview, underlyingByEdge, underlyingTopNet } = stats;
-
-  return (
-    <section className="space-y-6">
-      {/* ✅ NEW: underlying pie + heatmap */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div className={chartWrapClass()}>
-          <div className="flex items-baseline justify-between">
-            <p className={chartTitleClass()}>TOP UNDERLYINGS</p>
-            <p className="text-[11px] text-slate-500">by sessions</p>
-          </div>
-          <p className={chartSubClass()}>Underlying (asset root) inferred from contracts and symbols.</p>
-
-          <div className="mt-3 h-60">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Tooltip {...tooltipProps()} />
-                <Pie data={underlyingMix} dataKey="value" nameKey="name" innerRadius={55} outerRadius={90} paddingAngle={2}>
-                  {underlyingMix.map((_, i) => (
-                    <Cell
-                      key={i}
-                      fill={i % 2 === 0 ? CHART_COLORS.skyDim : CHART_COLORS.emeraldDim}
-                      stroke={i % 2 === 0 ? CHART_COLORS.sky : CHART_COLORS.emerald}
-                      strokeWidth={1}
-                    />
-                  ))}
-                </Pie>
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
-
-          <div className="mt-2 grid grid-cols-2 gap-2 text-[11px] text-slate-400">
-            {underlyingMix.slice(0, 8).map((p) => (
-              <div key={p.name} className="flex items-center justify-between">
-                <span className="text-slate-300 font-mono">{p.name}</span>
-                <span className="text-slate-500">{p.value}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <HeatmapHourUnderlying
-          title="HEATMAP EDGE"
-          sub="Where your edge clusters by time and underlying."
-          matrix={heat.matrix || []}
-          hours={heat.hours || []}
-        />
-      </div>
-
-      <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-4">
-        <p className="text-sm font-medium text-slate-100 mb-3">Probability by instrument type</p>
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs md:text-sm border border-slate-800 rounded-xl overflow-hidden">
-            <thead className="bg-slate-900">
-              <tr>
-                <th className="px-3 py-2 border-b border-slate-800">Type</th>
-                <th className="px-3 py-2 border-b border-slate-800 text-right">Sessions</th>
-                <th className="px-3 py-2 border-b border-slate-800 text-right">Green</th>
-                <th className="px-3 py-2 border-b border-slate-800 text-right">Learning</th>
-                <th className="px-3 py-2 border-b border-slate-800 text-right">Win rate</th>
-                <th className="px-3 py-2 border-b border-slate-800 text-right">Avg P&amp;L</th>
-              </tr>
-            </thead>
-            <tbody>
-              {kindByEdge.map((k: any) => (
-                <tr key={k.kind} className="border-t border-slate-800 bg-slate-950/60">
-                  <td className="px-3 py-2 font-mono">{k.kind}</td>
-                  <td className="px-3 py-2 text-right">{k.sessions}</td>
-                  <td className="px-3 py-2 text-right text-emerald-300">{k.green}</td>
-                  <td className="px-3 py-2 text-right text-sky-300">{k.learning}</td>
-                  <td className="px-3 py-2 text-right">{k.winRate.toFixed(1)}%</td>
-                  <td className="px-3 py-2 text-right">
-                    {k.avgPnlPerSession >= 0 ? "+" : "-"}${Math.abs(k.avgPnlPerSession).toFixed(2)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <p className="text-[11px] text-slate-500 mt-2">Based on unique instrument types traded each session.</p>
-      </div>
-
-      {/* ✅ Underlying edge tables */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className={chartWrapClass()}>
-          <div className="flex items-baseline justify-between">
-            <p className={chartTitleClass()}>UNDERLYING EDGE</p>
-            <p className="text-[11px] text-slate-500">win-rate</p>
-          </div>
-          <p className={chartSubClass()}>Best underlying by win-rate (needs sample size).</p>
-
-          <div className="mt-3 overflow-x-auto">
-            <table className="w-full text-left text-xs border border-slate-800 rounded-xl overflow-hidden">
-              <thead className="bg-slate-900">
-                <tr>
-                  <th className="px-3 py-2 border-b border-slate-800">Underlying</th>
-                  <th className="px-3 py-2 border-b border-slate-800 text-right">Sess</th>
-                  <th className="px-3 py-2 border-b border-slate-800 text-right">WR</th>
-                  <th className="px-3 py-2 border-b border-slate-800 text-right">Net</th>
-                </tr>
-              </thead>
-              <tbody>
-                {underlyingByEdge.slice(0, 8).map((u: any) => (
-                  <tr key={u.underlying} className="border-t border-slate-800 bg-slate-950/60">
-                    <td className="px-3 py-2 font-mono">{u.underlying}</td>
-                    <td className="px-3 py-2 text-right">{u.sessions}</td>
-                    <td className="px-3 py-2 text-right">{u.winRate.toFixed(1)}%</td>
-                    <td className={`px-3 py-2 text-right ${u.netPnl >= 0 ? "text-emerald-300" : "text-sky-300"}`}>
-                      {fmtMoney(u.netPnl)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <div className={chartWrapClass()}>
-          <div className="flex items-baseline justify-between">
-            <p className={chartTitleClass()}>UNDERLYING TOP NET</p>
-            <p className="text-[11px] text-slate-500">P&amp;L</p>
-          </div>
-          <p className={chartSubClass()}>Highest net by underlying.</p>
-
-          <div className="mt-3 overflow-x-auto">
-            <table className="w-full text-left text-xs border border-slate-800 rounded-xl overflow-hidden">
-              <thead className="bg-slate-900">
-                <tr>
-                  <th className="px-3 py-2 border-b border-slate-800">Underlying</th>
-                  <th className="px-3 py-2 border-b border-slate-800 text-right">Sess</th>
-                  <th className="px-3 py-2 border-b border-slate-800 text-right">WR</th>
-                  <th className="px-3 py-2 border-b border-slate-800 text-right">Net</th>
-                </tr>
-              </thead>
-              <tbody>
-                {underlyingTopNet.slice(0, 8).map((u: any) => (
-                  <tr key={u.underlying} className="border-t border-slate-800 bg-slate-950/60">
-                    <td className="px-3 py-2 font-mono">{u.underlying}</td>
-                    <td className="px-3 py-2 text-right">{u.sessions}</td>
-                    <td className="px-3 py-2 text-right">{u.winRate.toFixed(1)}%</td>
-                    <td className={`px-3 py-2 text-right ${u.netPnl >= 0 ? "text-emerald-300" : "text-sky-300"}`}>
-                      {fmtMoney(u.netPnl)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-
-      <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-4">
-        <p className="text-sm font-medium text-slate-100 mb-3">Ticker statistics (from Entries + Exits)</p>
-
-        {tickers.length === 0 ? (
-          <p className="text-sm text-slate-400">No tickers recorded yet. Add trades in Entries/Exits.</p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs md:text-sm border border-slate-800 rounded-xl overflow-hidden">
-              <thead className="bg-slate-900">
-                <tr>
-                  <th className="px-3 py-2 border-b border-slate-800">Symbol</th>
-                  <th className="px-3 py-2 border-b border-slate-800">Underlying</th>
-                  <th className="px-3 py-2 border-b border-slate-800 text-right">Sessions</th>
-                  <th className="px-3 py-2 border-b border-slate-800 text-right">Closed trades</th>
-                  <th className="px-3 py-2 border-b border-slate-800 text-right">Win rate</th>
-                  <th className="px-3 py-2 border-b border-slate-800 text-right">Net P&amp;L</th>
-                  <th className="px-3 py-2 border-b border-slate-800 text-right">Avg/session</th>
-                  <th className="px-3 py-2 border-b border-slate-800 text-right">Best DOW</th>
-                  <th className="px-3 py-2 border-b border-slate-800 text-right">Worst DOW</th>
-                </tr>
-              </thead>
-              <tbody>
-                {tickers.map((t: any) => (
-                  <tr key={t.symbol} className="border-t border-slate-800 bg-slate-950/60">
-                    <td className="px-3 py-2 font-mono">{t.symbol}</td>
-                    <td className="px-3 py-2 font-mono text-slate-300">{t.underlying || "—"}</td>
-                    <td className="px-3 py-2 text-right">{t.sessions}</td>
-                    <td className="px-3 py-2 text-right">{t.tradesClosed}</td>
-                    <td className="px-3 py-2 text-right">{t.winRate.toFixed(1)}%</td>
-                    <td className={`px-3 py-2 text-right ${t.netPnl >= 0 ? "text-emerald-300" : "text-sky-300"}`}>
-                      {fmtMoney(t.netPnl)}
-                    </td>
-                    <td className="px-3 py-2 text-right">{fmtMoney(t.avgPnlPerSession)}</td>
-                    <td className="px-3 py-2 text-right">{getDayLabel(t.bestDow)}</td>
-                    <td className="px-3 py-2 text-right">{getDayLabel(t.worstDow)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className={`${futuristicCardClass(true)} p-4`}>
-          <p className="text-sm font-medium text-slate-100 mb-2">Most supportive tickers (win-rate)</p>
-          <ul className="space-y-1 text-xs text-slate-200">
-            {mostSupportive.map((i: any) => (
-              <li key={i.symbol} className="flex items-center justify-between">
-                <span className="font-mono">{i.symbol}</span>
-                <span>{i.winRate.toFixed(1)}% · {i.sessions} sess</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-
-        <div className={`${futuristicCardClass(true)} p-4`}>
-          <p className="text-sm font-medium text-slate-100 mb-2">Top earners (net P&amp;L)</p>
-          <ul className="space-y-1 text-xs text-slate-200">
-            {topEarners.map((i: any) => (
-              <li key={i.symbol} className="flex items-center justify-between">
-                <span className="font-mono">{i.symbol}</span>
-                <span className="text-emerald-300">+${i.netPnl.toFixed(2)}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-
-        <div className={`${futuristicCardClass(false)} p-4`}>
-          <p className="text-sm font-medium text-slate-100 mb-2">Tickers to review</p>
-          <ul className="space-y-1 text-xs text-slate-200">
-            {toReview.map((i: any) => (
-              <li key={i.symbol} className="flex items-center justify-between">
-                <span className="font-mono">{i.symbol}</span>
-                <span className="text-sky-300">-${Math.abs(i.netPnl).toFixed(2)}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      </div>
-    </section>
   );
 }
