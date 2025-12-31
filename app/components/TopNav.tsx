@@ -151,7 +151,7 @@ function HelpMenu() {
               Getting started guide
             </Link>
             <Link
-              href="/help/dashboard"
+              href="/quick-tour/page/dashboard"
               className="px-2 py-1 rounded-lg border border-slate-700 text-slate-200 hover:border-emerald-400 hover:text-emerald-300 transition"
             >
               Dashboard tour
@@ -312,7 +312,7 @@ function AccountMenu() {
             {displayName}
           </span>
           <span
-            className={`mt-[2px] inline-flex items-center gap-1 rounded-full border px-2 py-[1px] text-[10px] font-medium ${planClasses}`}
+            className={`mt-0.5 inline-flex items-center gap-1 rounded-full border px-2 py-px text-[10px] font-medium ${planClasses}`}
           >
             <span className="h-1.5 w-1.5 rounded-full bg-current opacity-80" />
             {plan === "—" ? "No plan set" : `Plan: ${planLabel}`}
@@ -324,7 +324,7 @@ function AccountMenu() {
       {open && (
         <div className="absolute right-0 mt-2 w-72 rounded-2xl border border-slate-800 bg-slate-950 shadow-xl shadow-slate-900/70 z-50 overflow-hidden">
           {/* Header usuario */}
-          <div className="border-b border-slate-800 px-3 py-3 bg-gradient-to-r from-slate-950 via-slate-900 to-slate-950">
+          <div className="border-b border-slate-800 px-3 py-3 bg-linear-to-r from-slate-950 via-slate-900 to-slate-950">
             <p className="text-[13px] font-semibold text-slate-100 truncate">
               {displayName}
             </p>

@@ -7,8 +7,10 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
+
+
 
 import TopNav from "@/app/components/TopNav";
 import { useAuth } from "@/context/AuthContext";
@@ -18,6 +20,7 @@ import { type InstrumentType } from "@/lib/journalNotes";
 import type { JournalEntry } from "@/lib/journalLocal";
 // Data real desde Supabase (como lo tienes)
 import { getAllJournalEntries } from "@/lib/journalSupabase";
+import { listDailySnapshots, type DailySnapshotRow } from "@/lib/snapshotSupabase";
 
 // Recharts (tu base “terminal” sutil)
 import {
@@ -40,8 +43,6 @@ import {
 /* -------------------------
    Optional chart engines
 -------------------------- */
-// ApexCharts (client-only)
-const ApexChart = dynamic(() => import("react-apexcharts"), { ssr: false });
 // ECharts (client-only)
 const EChartsReact = dynamic(() => import("echarts-for-react"), { ssr: false });
 
@@ -75,6 +76,13 @@ type SessionWithTrades = JournalEntry & {
   uniqueKinds: InstrumentType[];
   uniqueUnderlyings: string[];
   perSymbolPnL: Record<string, number>;
+  perUnderlyingPnL: Record<string, number>;
+  pnlComputed: number;
+  feesUsd: number;
+  pnlNet: number;
+  isGreenComputed: boolean;
+  isLearningComputed: boolean;
+  isFlatComputed: boolean;
   firstHour: number | null;
 };
 
@@ -331,11 +339,93 @@ function computePnLBySymbol(entries: EntryTradeRow[], exits: ExitTradeRow[]): Re
 
     const [symbol, , side] = k.split("|") as [string, string, SideType];
     const sign = side === "short" ? -1 : 1;
-    const pnl = (avgExit - avgEntry) * closedQty * sign;
+        const kindStr = String(k.split("|")[1] || "").toLowerCase();
+    const multiplier = kindStr.includes("opt") ? 100 : 1;
+    const pnl = (avgExit - avgEntry) * closedQty * sign * multiplier;
 
     out[symbol] = (out[symbol] || 0) + pnl;
   }
-  return out;
+  
+/* =========================
+   Fees / commissions helpers
+========================= */
+
+return out;
+}
+
+
+/* =========================
+   Fees / Commissions helpers
+   - Supports fees at session-level and trade-level
+========================= */
+
+function toNumberMaybe(v: unknown): number {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (typeof v === "string") {
+    const n = parseFloat(v.replace(/[^0-9.\-]/g, ""));
+    if (Number.isFinite(n)) return n;
+  }
+  return 0;
+}
+
+function extractSessionFeesUsd(session: any): number {
+  if (!session || typeof session !== "object") return 0;
+  const keys = [
+    "feesUsd",
+    "fees_usd",
+    "feesUSD",
+    "fees",
+    "fee",
+    "commissionUsd",
+    "commission_usd",
+    "commissionsUsd",
+    "commissions_usd",
+    "commission",
+    "commissions",
+    "totalFees",
+    "totalFeesUsd",
+    "totalCommission",
+    "totalCommissions",
+  ];
+  for (const k of keys) {
+    if (k in session) {
+      const n = toNumberMaybe((session as any)[k]);
+      if (n !== 0) return n;
+    }
+  }
+  return 0;
+}
+
+function sumFeesFromTrades(entries: EntryTradeRow[], exits: ExitTradeRow[]): number {
+  const keys = [
+    "feesUsd",
+    "fees_usd",
+    "fees",
+    "fee",
+    "commissionUsd",
+    "commission_usd",
+    "commissionsUsd",
+    "commissions_usd",
+    "commission",
+    "commissions",
+  ];
+
+  let total = 0;
+
+  const addFrom = (t: any) => {
+    if (!t || typeof t !== "object") return;
+    for (const k of keys) {
+      if (k in t) {
+        const n = toNumberMaybe(t[k]);
+        if (Number.isFinite(n) && n !== 0) total += n;
+      }
+    }
+  };
+
+  for (const e of entries || []) addFrom(e);
+  for (const x of exits || []) addFrom(x);
+
+  return total;
 }
 
 /* =========================
@@ -426,7 +516,7 @@ function HeatmapHourUnderlying({
                       1
                     )}%\nAvgPnL: ${fmtMoney(c.avgPnl)}`}
                   >
-                    {c.n > 0 ? `${Math.round(c.winRate)}%` : "—"}
+                    {c.n > 0 ? `${c.n}` : ""}
                   </div>
                 ))}
               </div>
@@ -510,215 +600,6 @@ function Tip({ text }: { text: string }) {
 // CHUNK 2 / 2
 // app/analytics-statistics/page.tsx
 // =========================
-
-/* =========================
-   TradingView Mini Widget (script)
-========================= */
-function TradingViewMiniWidget({
-  symbol = "CBOE:SPX",
-  interval = "D",
-  theme = "dark",
-}: {
-  symbol?: string;
-  interval?: string;
-  theme?: "dark" | "light";
-}) {
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const widgetId = useMemo(() => `tv_${Math.random().toString(16).slice(2)}`, []);
-  const initRef = useRef(false);
-
-  useEffect(() => {
-    if (!containerRef.current) return;
-
-    // Prevent StrictMode double init in dev
-    if (initRef.current) return;
-    initRef.current = true;
-
-    const src = "https://s3.tradingview.com/tv.js";
-    let cancelled = false;
-
-    const ensureScript = () =>
-      new Promise<void>((resolve) => {
-        const existing = document.querySelector(`script[src="${src}"]`) as HTMLScriptElement | null;
-        if (existing) return resolve();
-        const s = document.createElement("script");
-        s.src = src;
-        s.async = true;
-        s.onload = () => resolve();
-        document.head.appendChild(s);
-      });
-
-    const mount = () => {
-      if (!containerRef.current) return false;
-      containerRef.current.innerHTML = `<div id="${widgetId}" style="width:100%;height:100%"></div>`;
-
-      // @ts-expect-error
-      const TV = window.TradingView;
-      if (!TV) return false;
-
-      try {
-        // @ts-ignore
-        new TV.widget({
-          width: "100%",
-          height: "100%",
-          symbol,
-          interval,
-          timezone: "Etc/UTC",
-          theme,
-          style: "1",
-          locale: "en",
-          enable_publishing: false,
-          allow_symbol_change: true,
-          container_id: widgetId,
-          hide_side_toolbar: true,
-          hide_top_toolbar: false,
-          hide_legend: true,
-          save_image: false,
-          studies: [],
-        });
-        return true;
-      } catch (e) {
-        console.error("[TradingViewMiniWidget] init error", e);
-        return false;
-      }
-    };
-
-    const init = async () => {
-      await ensureScript();
-      if (cancelled) return;
-
-      // retry loop: sometimes the widget needs a tick after hydration
-      for (let i = 0; i < 3; i++) {
-        const ok = mount();
-        if (ok) return;
-        await new Promise((r) => setTimeout(r, 350));
-      }
-
-      console.warn("[TradingViewMiniWidget] failed to mount after retries");
-    };
-
-    init();
-
-    return () => {
-      cancelled = true;
-      // allow re-init on tab switches if needed:
-      initRef.current = false;
-    };
-  }, [symbol, interval, theme, widgetId]);
-
-  return <div ref={containerRef} className="w-full h-[340px]" />;
-}
-
-/* =========================
-   Lightweight Charts Panel
-========================= */
-function LightweightLinePanel({
-  title,
-  data,
-}: {
-  title: string;
-  data: { date: string; value: number }[];
-}) {
-  const elRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    let chart: any;
-    let series: any;
-    let ro: ResizeObserver | null = null;
-    let cancelled = false;
-
-    const run = async () => {
-      if (!elRef.current) return;
-
-      const mod: any = await import("lightweight-charts");
-      if (cancelled) return;
-
-      const createChart = mod.createChart ?? mod.default?.createChart;
-      if (!createChart) return;
-
-      elRef.current.innerHTML = "";
-
-      chart = createChart(elRef.current, {
-        layout: {
-          background: { type: "solid", color: "rgba(2,6,23,0)" },
-          textColor: "rgba(226,232,240,0.80)",
-          fontFamily:
-            'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-        },
-        grid: {
-          vertLines: { color: "rgba(148,163,184,0.10)" },
-          horzLines: { color: "rgba(148,163,184,0.10)" },
-        },
-        timeScale: { borderColor: "rgba(148,163,184,0.14)" },
-        rightPriceScale: { borderColor: "rgba(148,163,184,0.14)" },
-        crosshair: {
-          vertLine: { color: "rgba(148,163,184,0.18)" },
-          horzLine: { color: "rgba(148,163,184,0.18)" },
-        },
-        handleScroll: true,
-        handleScale: true,
-      });
-
-      // v5+ API (chart.addSeries(AreaSeries,...)) o v4 (chart.addAreaSeries)
-      const areaOptions = {
-        lineColor: CHART_COLORS.emerald,
-        topColor: CHART_COLORS.emeraldDim,
-        bottomColor: "rgba(52,211,153,0.00)",
-        lineWidth: 2,
-      };
-
-      if (typeof chart.addAreaSeries === "function") {
-        series = chart.addAreaSeries(areaOptions);
-      } else if (typeof chart.addSeries === "function" && mod.AreaSeries) {
-        series = chart.addSeries(mod.AreaSeries, areaOptions);
-      } else if (typeof chart.addSeries === "function") {
-        // fallback por si el build expone string types
-        series = chart.addSeries("Area", areaOptions);
-      } else {
-        throw new Error("Unsupported lightweight-charts version: cannot add area series");
-      }
-
-      const points = (data || [])
-        .filter((x) => x.date && Number.isFinite(x.value))
-        .map((x) => ({ time: x.date, value: x.value }));
-
-      series.setData(points);
-
-      const resize = () => {
-        if (!elRef.current) return;
-        chart.applyOptions({ width: elRef.current.clientWidth, height: 320 });
-        try { chart.timeScale().fitContent(); } catch {}
-      };
-
-      ro = new ResizeObserver(resize);
-      ro.observe(elRef.current);
-      resize();
-    };
-
-    run().catch((e) => console.error("[LightweightLinePanel] error:", e));
-
-    return () => {
-      cancelled = true;
-      try { ro?.disconnect(); } catch {}
-      try { chart?.remove?.(); } catch {}
-    };
-  }, [data]);
-
-  return (
-    <div className={wrapCard()}>
-      <div className="flex items-baseline justify-between gap-3">
-        <div>
-          <p className={chartTitle()}>{title}</p>
-          <p className={chartSub()}>Lightweight Charts (TradingView-style engine)</p>
-        </div>
-        <span className="text-[11px] text-slate-500 font-mono">LW</span>
-      </div>
-      <div className="mt-3">
-        <div ref={elRef} className="w-full h-80" />
-      </div>
-    </div>
-  );
-}
 
 /* =========================
    Sections
@@ -950,9 +831,7 @@ function DayOfWeekSection({ stats, weekdayBars }: { stats: any; weekdayBars: any
           </ResponsiveContainer>
         </div>
 
-        <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
-          <MiniKpi label="Best weekday" value={stats?.best?.label ?? "—"} tone="good" />
-          <MiniKpi label="Hardest weekday" value={stats?.hardest?.label ?? "—"} tone="bad" />
+        <div className="mt-4 grid grid-cols-1 md:grid-cols-1 gap-3">
           <MiniKpi label="Sessions" value={stats?.items?.reduce((a: number, b: any) => a + (b.sessions || 0), 0) ?? 0} tone="neutral" />
         </div>
       </div>
@@ -1127,9 +1006,7 @@ function InstrumentsSection({ stats, underlyingMix, heat }: { stats: any; underl
                 <th className="px-3 py-2 text-right">Win%</th>
                 <th className="px-3 py-2 text-right">Net</th>
                 <th className="px-3 py-2 text-right">Avg</th>
-                <th className="px-3 py-2 text-right">Best DOW</th>
-                <th className="px-3 py-2 text-right">Worst DOW</th>
-              </tr>
+</tr>
             </thead>
             <tbody>
               {tickers.slice(0, 60).map((t: any) => (
@@ -1143,9 +1020,7 @@ function InstrumentsSection({ stats, underlyingMix, heat }: { stats: any; underl
                     {fmtMoney(t.netPnl)}
                   </td>
                   <td className="px-3 py-2 text-right font-mono text-slate-200">{fmtMoney(t.avgPnlPerSession)}</td>
-                  <td className="px-3 py-2 text-right text-slate-300">{DAY_LABELS[(t.bestDow ?? 0) as DayOfWeekKey] ?? "—"}</td>
-                  <td className="px-3 py-2 text-right text-slate-300">{DAY_LABELS[(t.worstDow ?? 0) as DayOfWeekKey] ?? "—"}</td>
-                </tr>
+</tr>
               ))}
             </tbody>
           </table>
@@ -1158,8 +1033,8 @@ function InstrumentsSection({ stats, underlyingMix, heat }: { stats: any; underl
 
       {/* Heatmap */}
       <HeatmapHourUnderlying
-        title="Heatmap: hour × underlying"
-        sub="Where you win (and where you leak) by time bucket."
+        title="Time HeatMap"
+        sub="Intensity by time bucket (hover for win-rate + avg P&L)."
         matrix={heat.matrix}
         hours={heat.hours}
       />
@@ -1190,7 +1065,10 @@ function InstrumentsSection({ stats, underlyingMix, heat }: { stats: any; underl
         </div>
 
         <div className={`${futuristicCardClass(false)} p-4`}>
-          <p className="text-sm font-medium text-slate-100 mb-2">Tickers to review</p>
+          <p className="text-sm font-medium text-slate-100 mb-2">Tickers to review (only losers)</p>
+          {toReview.length === 0 ? (
+            <p className="text-xs text-slate-400">No losing tickers (net &lt; 0) with at least 2 sessions.</p>
+          ) : (
           <ul className="space-y-1 text-xs text-slate-200">
             {toReview.map((i: any) => (
               <li key={i.symbol} className="flex items-center justify-between">
@@ -1199,6 +1077,7 @@ function InstrumentsSection({ stats, underlyingMix, heat }: { stats: any; underl
               </li>
             ))}
           </ul>
+          )}
         </div>
       </div>
     </section>
@@ -1216,45 +1095,9 @@ function TerminalSection({
   weekdayBars: { label: string; winRate: number; sessions: number; avgPnl: number }[];
   heat: { hours: number[]; matrix: any[] };
 }) {
-  // Apex config (sutil, sin “plastico”)
-  const apexOptions = useMemo(
-    () => ({
-      chart: {
-        type: "area",
-        toolbar: { show: false },
-        animations: { enabled: true, speed: 260 },
-        background: "transparent",
-        foreColor: "rgba(226,232,240,0.82)",
-        fontFamily:
-          'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-      },
-      grid: { borderColor: "rgba(148,163,184,0.10)", strokeDashArray: 6, padding: { left: 10, right: 10 } },
-      stroke: { curve: "smooth", width: 2 },
-      dataLabels: { enabled: false },
-      fill: { type: "gradient", gradient: { shadeIntensity: 0.5, opacityFrom: 0.22, opacityTo: 0.02 } },
-      xaxis: {
-        categories: equity.map((x) => x.date),
-        labels: { style: { colors: "rgba(148,163,184,0.60)" } },
-        axisBorder: { color: "rgba(148,163,184,0.10)" },
-        axisTicks: { color: "rgba(148,163,184,0.10)" },
-      },
-      yaxis: { labels: { style: { colors: "rgba(148,163,184,0.60)" } } },
-      tooltip: { theme: "dark" },
-    }),
-    [equity]
-  );
+  // NOTE: equity se mantiene en props (para compatibilidad), pero aquí NO renderizamos curves duplicadas.
+  // La única Equity Curve se queda en Overview (Recharts AreaChart).
 
-  const apexSeries = useMemo(
-    () => [
-      {
-        name: "Equity",
-        data: equity.map((x) => x.value),
-      },
-    ],
-    [equity]
-  );
-
-  // ECharts option (weekday)
   const echartsOption = useMemo(() => {
     return {
       backgroundColor: "transparent",
@@ -1294,37 +1137,6 @@ function TerminalSection({
         <div className={wrapCard()}>
           <div className="flex items-baseline justify-between gap-3">
             <div>
-              <p className={chartTitle()}>Apex — Equity curve</p>
-              <p className={chartSub()}>Smooth, subtle, Bloomberg-like spacing</p>
-            </div>
-            <span className="text-[11px] text-slate-500 font-mono">APX</span>
-          </div>
-          <div className="mt-3 h-[340px]">
-            {/* @ts-ignore */}
-            <ApexChart options={apexOptions} series={apexSeries} type="area" height={340} />
-          </div>
-        </div>
-
-        <div className={wrapCard()}>
-          <div className="flex items-baseline justify-between gap-3">
-            <div>
-              <p className={chartTitle()}>TradingView Widget</p>
-              <p className={chartSub()}>For “terminal vibes” on a selected symbol</p>
-            </div>
-            <span className="text-[11px] text-slate-500 font-mono">TV</span>
-          </div>
-          <div className="mt-3 h-[340px]">
-            <TradingViewMiniWidget symbol="SPX" interval="D" theme="dark" />
-          </div>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-        <LightweightLinePanel title="Lightweight — Equity engine" data={equity} />
-
-        <div className={wrapCard()}>
-          <div className="flex items-baseline justify-between gap-3">
-            <div>
               <p className={chartTitle()}>ECharts — Weekday edge</p>
               <p className={chartSub()}>Very clean bars + terminal grid</p>
             </div>
@@ -1335,27 +1147,33 @@ function TerminalSection({
             <EChartsReact option={echartsOption} style={{ height: 320, width: "100%" }} />
           </div>
         </div>
-      </div>
 
-      <div className={wrapCard()}>
-        <div className="flex items-baseline justify-between gap-3">
-          <div>
-            <p className={chartTitle()}>Daily P&amp;L — terminal bars</p>
-            <p className={chartSub()}>Recharts “clean” config: gaps + subtle grid</p>
+        <div className={wrapCard()}>
+          <div className="flex items-baseline justify-between gap-3">
+            <div>
+              <p className={chartTitle()}>Daily P&amp;L — terminal bars</p>
+              <p className={chartSub()}>Recharts “clean” config: gaps + subtle grid</p>
+            </div>
+            <span className="text-[11px] text-slate-500 font-mono">BARS</span>
           </div>
-          <span className="text-[11px] text-slate-500 font-mono">BARS</span>
-        </div>
 
-        <div className="mt-3 h-[280px]">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={dailyPnl} barCategoryGap={22} barGap={8}>
-              <CartesianGrid stroke={CHART_COLORS.grid} strokeDasharray="4 8" />
-              <XAxis dataKey="date" tick={axisStyle()} tickFormatter={formatDateFriendly} axisLine={{ stroke: CHART_COLORS.grid }} tickLine={false} />
-              <YAxis tick={axisStyle()} axisLine={{ stroke: CHART_COLORS.grid }} tickLine={false} width={46} />
-              <Tooltip {...tooltipProps()} formatter={(v: any) => fmtMoney(Number(v))} />
-              <Bar dataKey="pnl" radius={[8, 8, 8, 8]} fill={CHART_COLORS.sky} opacity={0.88} />
-            </BarChart>
-          </ResponsiveContainer>
+          <div className="mt-3 h-[280px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={dailyPnl} barCategoryGap={22} barGap={8}>
+                <CartesianGrid stroke={CHART_COLORS.grid} strokeDasharray="4 8" />
+                <XAxis
+                  dataKey="date"
+                  tick={axisStyle()}
+                  tickFormatter={formatDateFriendly}
+                  axisLine={{ stroke: CHART_COLORS.grid }}
+                  tickLine={false}
+                />
+                <YAxis tick={axisStyle()} axisLine={{ stroke: CHART_COLORS.grid }} tickLine={false} width={46} />
+                <Tooltip {...tooltipProps()} formatter={(v: any) => fmtMoney(Number(v))} />
+                <Bar dataKey="pnl" radius={[8, 8, 8, 8]} fill={CHART_COLORS.sky} opacity={0.88} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
         </div>
       </div>
 
@@ -1487,9 +1305,46 @@ function StatisticsSection({
     }
     return maxDd;
   }, [sessions]);
+  const dowAgg = useMemo(() => {
+    const base: Record<number, { dow: number; label: string; sessions: number; wins: number; sumPnl: number }> = {
+      0: { dow: 0, label: DAY_LABELS[0], sessions: 0, wins: 0, sumPnl: 0 },
+      1: { dow: 1, label: DAY_LABELS[1], sessions: 0, wins: 0, sumPnl: 0 },
+      2: { dow: 2, label: DAY_LABELS[2], sessions: 0, wins: 0, sumPnl: 0 },
+      3: { dow: 3, label: DAY_LABELS[3], sessions: 0, wins: 0, sumPnl: 0 },
+      4: { dow: 4, label: DAY_LABELS[4], sessions: 0, wins: 0, sumPnl: 0 },
+      5: { dow: 5, label: DAY_LABELS[5], sessions: 0, wins: 0, sumPnl: 0 },
+      6: { dow: 6, label: DAY_LABELS[6], sessions: 0, wins: 0, sumPnl: 0 },
+    };
 
-  const bestDow = dayOfWeekStats?.best?.label ?? "—";
-  const worstDow = dayOfWeekStats?.hardest?.label ?? "—";
+    for (const s of sessions || []) {
+      const d = (s as any)?.date ? new Date(String((s as any).date)) : null;
+      if (!d || Number.isNaN(d.getTime())) continue;
+      const dow = d.getDay();
+      const pnl = Number((s as any).pnlNet ?? (s as any).pnlComputed ?? (s as any).pnl ?? 0);
+      const row = base[dow];
+      row.sessions += 1;
+      row.sumPnl += pnl;
+      if (pnl > 0) row.wins += 1;
+    }
+
+    const items = Object.values(base).map((x) => {
+      const winRate = x.sessions ? (x.wins / x.sessions) * 100 : 0;
+      const avgPnl = x.sessions ? x.sumPnl / x.sessions : 0;
+      return { ...x, winRate, avgPnl };
+    });
+
+    const best = items
+      .filter((x) => x.sessions > 0)
+      .sort((a, b) => b.avgPnl - a.avgPnl || b.winRate - a.winRate || b.sessions - a.sessions)[0];
+    const worst = items
+      .filter((x) => x.sessions > 0)
+      .sort((a, b) => a.avgPnl - b.avgPnl || a.winRate - b.winRate || b.sessions - a.sessions)[0];
+
+    return { items, best, worst };
+  }, [sessions]);
+
+  const bestDow = dowAgg.best?.label ?? "—";
+  const worstDow = dowAgg.worst?.label ?? "—";
 
   const topUnderlying = useMemo(() => instrumentStats?.tickers?.[0]?.underlying ?? "—", [instrumentStats]);
 
@@ -1683,13 +1538,37 @@ export default function AnalyticsStatisticsPage() {
   const [loadingData, setLoadingData] = useState(true);
 
   const [snapshot, setSnapshot] = useState<AnalyticsSnapshot | null>(null);
-  const [snapshotLoading, setSnapshotLoading] = useState(false);
-  const [snapshotError, setSnapshotError] = useState("");
-  const [dataMode, setDataMode] = useState<"snapshot" | "live">("snapshot");
+  const [dailySnaps, setDailySnaps] = useState<DailySnapshotRow[]>([]);
+  const [dataMode] = useState<"snapshot" | "live">("snapshot");
 
   useEffect(() => {
     if (!loading && !user) router.replace("/signin");
   }, [loading, user, router]);
+
+  // Daily snapshots = fuente de verdad para escala (50K+ usuarios)
+  useEffect(() => {
+    let alive = true;
+    const run = async () => {
+      const userId = (user as any)?.id;
+      if (!userId) return;
+      try {
+        const end = new Date();
+        const start = new Date(end);
+        start.setDate(end.getDate() - 120);
+        const to = end.toISOString().slice(0, 10);
+        const from = start.toISOString().slice(0, 10);
+        const rows = await listDailySnapshots(userId, from, to);
+        if (!alive) return;
+        setDailySnaps(rows);
+      } catch (e) {
+        console.error("[daily_snapshots] load error", e);
+        if (alive) setDailySnaps([]);
+      }
+    };
+    run();
+    return () => { alive = false; };
+  }, [user]);
+
 
   useEffect(() => {
     if (loading || !user) return;
@@ -1717,65 +1596,10 @@ export default function AnalyticsStatisticsPage() {
     load();
   }, [loading, user]);
 
-  const refreshSnapshot = async () => {
-    try {
-      setSnapshotLoading(true);
-      setSnapshotError("");
 
-      const token = await getBearerTokenSafe(user);
-      const res = await fetch("/api/analytics/snapshot", {
-        method: "GET",
-        headers: token ? { authorization: `Bearer ${token}` } : {},
-      });
-
-      if (!res.ok) {
-        const txt = await res.text().catch(() => "");
-        throw new Error(txt || `Snapshot error (${res.status})`);
-      }
-
-      const json = (await res.json()) as AnalyticsSnapshot;
-      setSnapshot(json || null);
-    } catch (e: any) {
-      console.error("[AnalyticsStatisticsPage] snapshot error:", e);
-      setSnapshot(null);
-      setSnapshotError(e?.message || "Failed to load snapshot");
-    } finally {
-      setSnapshotLoading(false);
-    }
-  };
-
-  const rebuildAnalytics = async () => {
-    try {
-      setSnapshotLoading(true);
-      setSnapshotError("");
-
-      const token = await getBearerTokenSafe(user);
-      const res = await fetch("/api/analytics/rebuild", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          ...(token ? { authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify({}),
-      });
-
-      if (!res.ok) {
-        const txt = await res.text().catch(() => "");
-        throw new Error(txt || `Rebuild error (${res.status})`);
-      }
-
-      await refreshSnapshot();
-    } catch (e: any) {
-      console.error("[AnalyticsStatisticsPage] rebuild error:", e);
-      setSnapshotError(e?.message || "Failed to rebuild analytics");
-    } finally {
-      setSnapshotLoading(false);
-    }
-  };
 
   useEffect(() => {
     if (loading || !user) return;
-    refreshSnapshot();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading, user]);
 
@@ -1816,6 +1640,44 @@ export default function AnalyticsStatisticsPage() {
 
       const perSymbolPnL = computePnLBySymbol(ent2, ex2);
 
+      // Map symbol -> underlying (best-effort) and aggregate PnL by underlying too
+      const symToUnd: Record<string, string> = {};
+      for (const t of ent2) {
+        const sym = safeUpper(t.symbol);
+        if (!sym) continue;
+        symToUnd[sym] = safeUpper(String(t.underlying || getUnderlyingFromSymbol(sym)));
+      }
+      for (const t of ex2) {
+        const sym = safeUpper(t.symbol);
+        if (!sym) continue;
+        symToUnd[sym] = safeUpper(String(t.underlying || getUnderlyingFromSymbol(sym)));
+      }
+
+      const perUnderlyingPnL: Record<string, number> = {};
+      for (const [sym, pnl] of Object.entries(perSymbolPnL || {})) {
+        const und = symToUnd[sym] || getUnderlyingFromSymbol(sym);
+        const u = safeUpper(und);
+        if (!u) continue;
+        perUnderlyingPnL[u] = (perUnderlyingPnL[u] || 0) + (Number(pnl) || 0);
+      }
+
+      // Prefer journal's stored PnL if valid; else use computed from trades
+      const pnlStored = Number((s as any)?.pnl);
+      const pnlComputed = Number.isFinite(pnlStored)
+        ? pnlStored
+        : Object.values(perSymbolPnL || {}).reduce((a, v) => a + (Number(v) || 0), 0);
+
+      // Fees: prefer session-level if present; otherwise sum per-trade fees if present
+      const feesSession = extractSessionFeesUsd(s as any);
+      const feesTrades = sumFeesFromTrades(ent2 as any[], ex2 as any[]);
+      const feesUsd = feesSession !== 0 ? feesSession : feesTrades;
+
+      // Net PnL after fees
+      const pnlNet = pnlComputed - (Number.isFinite(feesUsd) ? feesUsd : 0);
+      const isGreenComputed = pnlNet > 0;
+      const isLearningComputed = pnlNet < 0;
+      const isFlatComputed = pnlNet === 0;
+
       const firstTime =
         ent2.find((x) => String(x?.time || "").trim())?.time ??
         ex2.find((x) => String(x?.time || "").trim())?.time ??
@@ -1831,10 +1693,79 @@ export default function AnalyticsStatisticsPage() {
         uniqueKinds: Array.from(uniqueKindsSet),
         uniqueUnderlyings: Array.from(uniqueUnderlyingsSet),
         perSymbolPnL,
+        perUnderlyingPnL,
+        pnlComputed,
+        feesUsd,
+        pnlNet,
+        isGreenComputed,
+        isLearningComputed,
+        isFlatComputed,
         firstHour,
       } as SessionWithTrades;
     });
   }, [entries]);
+
+  // Build "snapshot" local from Supabase daily_snapshots + journal sessions (NO manual buttons)
+  useEffect(() => {
+    const snaps = [...(dailySnaps || [])].sort((a, b) => (a.date < b.date ? -1 : 1));
+    const equityCurve = snaps.map((s) => ({ date: s.date, value: (Number(s.start_of_day_balance) || 0) + (Number(s.realized_usd) || 0) }));
+    const dailyPnl = snaps.map((s) => ({ date: s.date, pnl: Number(s.realized_usd) || 0 }));
+
+    const totalSessions = sessions.length;
+    const greenSessions = sessions.filter((s) => s.isGreenComputed).length;
+    const learningSessions = sessions.filter((s) => s.isLearningComputed).length;
+    const flatSessions = sessions.filter((s) => s.isFlatComputed).length;
+    const sumPnl = sessions.reduce((a, s) => a + (Number((s as any).pnlNet ?? (s as any).pnlComputed ?? 0) || 0), 0);
+    const avgPnl = totalSessions ? sumPnl / totalSessions : 0;
+    const baseGreenRate = totalSessions ? (greenSessions / totalSessions) * 100 : 0;
+
+    const symAgg: Record<string, { sessions: number; greens: number; sumPnl: number }> = {};
+    const undAgg: Record<string, { sessions: number; greens: number; sumPnl: number }> = {};
+    for (const s of sessions) {
+      for (const sym of s.uniqueSymbols || []) {
+        const k = safeUpper(sym);
+        if (!k) continue;
+        symAgg[k] ||= { sessions: 0, greens: 0, sumPnl: 0 };
+        symAgg[k].sessions++;
+        symAgg[k].greens += s.isGreenComputed ? 1 : 0;
+        symAgg[k].sumPnl += Number(s.perSymbolPnL?.[k] ?? 0);
+      }
+      for (const und of s.uniqueUnderlyings || []) {
+        const k = safeUpper(und);
+        if (!k) continue;
+        undAgg[k] ||= { sessions: 0, greens: 0, sumPnl: 0 };
+        undAgg[k].sessions++;
+        undAgg[k].greens += s.isGreenComputed ? 1 : 0;
+        undAgg[k].sumPnl += Number(s.perUnderlyingPnL?.[k] ?? 0);
+      }
+    }
+    const symbols = Object.entries(symAgg)
+      .map(([symbol, v]) => ({
+        symbol,
+        sessions: v.sessions,
+        winRate: v.sessions ? (v.greens / v.sessions) * 100 : 0,
+        netPnl: v.sumPnl,
+        avgPnlPerSession: v.sessions ? v.sumPnl / v.sessions : 0,
+      }))
+      .sort((a, b) => b.netPnl - a.netPnl);
+    const underlyings = Object.entries(undAgg)
+      .map(([underlying, v]) => ({
+        underlying,
+        sessions: v.sessions,
+        winRate: v.sessions ? (v.greens / v.sessions) * 100 : 0,
+        netPnl: v.sumPnl,
+        avgPnlPerSession: v.sessions ? v.sumPnl / v.sessions : 0,
+      }))
+      .sort((a, b) => b.netPnl - a.netPnl);
+
+    setSnapshot({
+      updatedAt: new Date().toISOString(),
+      totals: { totalSessions, greenSessions, learningSessions, flatSessions, sumPnl, avgPnl, baseGreenRate },
+      series: { equityCurve, dailyPnl },
+      edges: { symbols, underlyings },
+    });
+  }, [dailySnaps, sessions]);
+
 
   /* =========================
      Base stats
@@ -1850,7 +1781,7 @@ export default function AnalyticsStatisticsPage() {
     let toughestDay: { date: string; pnl: number } | null = null;
 
     sessions.forEach((e) => {
-      const pnl = Number((e as any).pnl ?? 0);
+      const pnl = Number((e as any).pnlNet ?? (e as any).pnlComputed ?? (e as any).pnl ?? 0);
       sumPnl += pnl;
 
       if (pnl > 0) greenSessions += 1;
@@ -1905,7 +1836,7 @@ export default function AnalyticsStatisticsPage() {
     let revengeLearning = 0;
 
     sessions.forEach((e) => {
-      const pnl = Number((e as any).pnl ?? 0);
+      const pnl = Number((e as any).pnlNet ?? (e as any).pnlComputed ?? (e as any).pnl ?? 0);
       const isGreen = pnl > 0;
       const isLearning = pnl < 0;
 
@@ -1982,7 +1913,7 @@ export default function AnalyticsStatisticsPage() {
       const d = new Date(date + "T00:00:00");
       if (Number.isNaN(d.getTime())) return;
       const dow = d.getDay() as DayOfWeekKey;
-      const pnl = Number((e as any).pnl ?? 0);
+      const pnl = Number((e as any).pnlNet ?? (e as any).pnlComputed ?? (e as any).pnl ?? 0);
       const stats = base[dow];
 
       stats.sessions += 1;
@@ -2245,7 +2176,7 @@ export default function AnalyticsStatisticsPage() {
 
     const mostSupportive = [...tickers].sort((a, b) => b.winRate - a.winRate).slice(0, 7);
     const topEarners = [...tickers].sort((a, b) => b.netPnl - a.netPnl).slice(0, 7);
-    const toReview = [...tickers].sort((a, b) => a.netPnl - b.netPnl).slice(0, 7);
+    const toReview = tickers.filter((t) => t.sessions >= 2 && t.netPnl < 0).sort((a, b) => a.netPnl - b.netPnl).slice(0, 7);
 
     return { tickers, mostSupportive, topEarners, toReview };
   }, [sessions]);
@@ -2279,7 +2210,6 @@ export default function AnalyticsStatisticsPage() {
                 <div className="inline-flex rounded-full border border-slate-700 overflow-hidden">
                   <button
                     type="button"
-                    onClick={() => setDataMode("snapshot")}
                     className={`px-3 py-1.5 text-xs transition ${
                       dataMode === "snapshot"
                         ? "bg-emerald-400 text-slate-950"
@@ -2287,11 +2217,9 @@ export default function AnalyticsStatisticsPage() {
                     }`}
                     title="Use server snapshot (recommended for scale)"
                   >
-                    Snapshot (API)
                   </button>
                   <button
                     type="button"
-                    onClick={() => setDataMode("live")}
                     className={`px-3 py-1.5 text-xs transition ${
                       dataMode === "live"
                         ? "bg-emerald-400 text-slate-950"
@@ -2299,14 +2227,12 @@ export default function AnalyticsStatisticsPage() {
                     }`}
                     title="Compute in the browser (dev / small data)"
                   >
-                    Live compute
                   </button>
                 </div>
 
                 <button
                   type="button"
-                  onClick={refreshSnapshot}
-                  disabled={snapshotLoading}
+                 
                   className="px-3 py-1.5 rounded-full text-xs border border-slate-700 hover:border-emerald-400 hover:text-emerald-300 transition disabled:opacity-60"
                 >
                   Refresh snapshot
@@ -2314,8 +2240,7 @@ export default function AnalyticsStatisticsPage() {
 
                 <button
                   type="button"
-                  onClick={rebuildAnalytics}
-                  disabled={snapshotLoading}
+                 
                   className="px-3 py-1.5 rounded-full text-xs border border-slate-700 hover:border-sky-400 hover:text-sky-300 transition disabled:opacity-60"
                 >
                   Rebuild analytics
@@ -2327,7 +2252,7 @@ export default function AnalyticsStatisticsPage() {
                   </span>
                 )}
 
-                {!!snapshotError && <span className="text-[11px] text-sky-300">{snapshotError}</span>}
+
               </div>
             </div>
 
