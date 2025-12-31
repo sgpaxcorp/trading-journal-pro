@@ -7,7 +7,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, Fragment } from "react";
 import type { ReactNode } from "react";
 
 
@@ -540,6 +540,161 @@ function futuristicCardClass(isGood: boolean) {
     : "rounded-2xl border border-sky-500/35 bg-sky-500/5 shadow-[0_0_25px_rgba(56,189,248,0.10)]";
 }
 
+/* =========================
+   Terminal Time HeatMap (DOW × Hour) — GLOBAL (no ticker/underlying)
+   Shows win-rate (%) per hour bucket across all sessions (net P&L after fees)
+========================= */
+
+type TimeHeatCell = { dow: DayOfWeekKey; hour: number; n: number; wins: number; avgNet: number; winRate: number };
+type TimeHeatMapData = { hours: number[]; rows: { label: string; cells: TimeHeatCell[] }[] };
+
+function buildDowHourTimeHeat(sessions: SessionWithTrades[], hours: number[] = DEFAULT_HOURS): TimeHeatMapData {
+  const map = new Map<string, { n: number; wins: number; sumNet: number }>();
+
+  for (const s of sessions) {
+    const dt = safeDateFromSession(s);
+    const dow = (dt ? (dt.getDay() as DayOfWeekKey) : 0) as DayOfWeekKey;
+
+    // We use the *firstHour* computed earlier if present; otherwise try to infer from time fields.
+    const hourRaw = typeof s.firstHour === "number" && Number.isFinite(s.firstHour) ? s.firstHour : inferFirstHourFromSession(s);
+    if (hourRaw == null) continue;
+
+    // bucket to nearest hour among our defined hours (clamp)
+    const hour = clampToHours(hourRaw, hours);
+    const key = `${dow}|${hour}`;
+
+    const net = Number((s as any).pnlNet ?? (s as any).pnlComputed ?? (s as any).pnl ?? 0);
+    const cur = map.get(key) ?? { n: 0, wins: 0, sumNet: 0 };
+    cur.n += 1;
+    if (net > 0) cur.wins += 1;
+    cur.sumNet += net;
+    map.set(key, cur);
+  }
+
+  const rows = (Object.keys(DAY_LABELS) as unknown as DayOfWeekKey[])
+    .sort((a, b) => Number(a) - Number(b))
+    .map((dow) => {
+      const cells: TimeHeatCell[] = hours.map((hour) => {
+        const key = `${dow}|${hour}`;
+        const v = map.get(key) ?? { n: 0, wins: 0, sumNet: 0 };
+        const avgNet = v.n ? v.sumNet / v.n : 0;
+        const winRate = v.n ? (v.wins / v.n) * 100 : 0;
+        return { dow, hour, n: v.n, wins: v.wins, avgNet, winRate };
+      });
+      return { label: DAY_LABELS[dow], cells };
+    });
+
+  return { hours, rows };
+}
+
+function clampToHours(h: number, hours: number[]) {
+  if (!hours.length) return h;
+  let best = hours[0];
+  let bestD = Math.abs(h - best);
+  for (const x of hours) {
+    const d = Math.abs(h - x);
+    if (d < bestD) {
+      bestD = d;
+      best = x;
+    }
+  }
+  return best;
+}
+
+function inferFirstHourFromSession(s: any): number | null {
+  // Try common fields: created_at, date, sessionDate, timestamp, entries[0].time
+  const candidates: string[] = [];
+  if (typeof s?.created_at === "string") candidates.push(s.created_at);
+  if (typeof s?.date === "string") candidates.push(s.date);
+  if (typeof s?.sessionDate === "string") candidates.push(s.sessionDate);
+  if (typeof s?.timestamp === "string") candidates.push(s.timestamp);
+
+  for (const c of candidates) {
+    const d = new Date(c);
+    if (!Number.isNaN(d.getTime())) return d.getHours();
+  }
+
+  const t = s?.entries?.[0]?.time;
+  if (typeof t === "string" && t.includes(":")) {
+    const hh = Number(t.split(":")[0]);
+    if (Number.isFinite(hh)) return hh;
+  }
+  return null;
+}
+
+function safeDateFromSession(s: any): Date | null {
+  const cands = [s?.date, s?.sessionDate, s?.created_at, s?.updated_at, s?.timestamp].filter((x: any) => typeof x === "string");
+  for (const c of cands) {
+    const d = new Date(c);
+    if (!Number.isNaN(d.getTime())) return d;
+  }
+  return null;
+}
+
+const DEFAULT_HOURS = [6,7,8,9,10,11,12,13,14,15,16,17];
+
+function TimeHeatMap({
+  title,
+  sub,
+  data,
+}: {
+  title: string;
+  sub?: string;
+  data: TimeHeatMapData;
+}) {
+  return (
+    <div className={wrapCard()}>
+      <div className="flex items-baseline justify-between gap-3">
+        <div>
+          <p className={chartTitle()}>{title}</p>
+          {sub ? <p className={chartSub()}>{sub}</p> : null}
+        </div>
+        <span className="text-[11px] text-slate-500 font-mono">HEAT</span>
+      </div>
+
+      <div className="mt-3 overflow-x-auto">
+        <div className="min-w-[760px]">
+          <div className="grid" style={{ gridTemplateColumns: `120px repeat(${data.hours.length}, minmax(42px, 1fr))` }}>
+            <div className="text-[10px] uppercase tracking-[0.18em] text-slate-500 py-2">Day</div>
+            {data.hours.map((h) => (
+              <div key={h} className="text-[10px] uppercase tracking-[0.18em] text-slate-500 py-2 text-center">
+                {String(h).padStart(2, "0")}
+              </div>
+            ))}
+
+            {data.rows.map((r) => (
+              <Fragment key={r.label}>
+                <div className="py-2 pr-2 text-xs text-slate-200 font-mono">{r.label}</div>
+                {r.cells.map((c) => {
+                  const intensity = c.n ? Math.min(1, c.winRate / 100) : 0;
+                  return (
+                    <div
+                      key={`${c.dow}-${c.hour}`}
+                      className="h-10 rounded-xl border border-slate-800/80 flex items-center justify-center text-[11px] font-mono"
+                      style={{
+                        background: c.n
+                          ? `rgba(52,211,153,${0.10 + intensity * 0.40})`
+                          : "rgba(15,23,42,0.25)",
+                      }}
+                      title={`${r.label} @ ${c.hour}:00 — ${c.n} sess • win ${c.winRate.toFixed(1)}% • avg ${fmtMoney(c.avgNet)}`}
+                    >
+                      {c.n ? `${c.winRate.toFixed(0)}%` : "—"}
+                    </div>
+                  );
+                })}
+              </Fragment>
+            ))}
+          </div>
+
+          <p className="mt-3 text-[11px] text-slate-500">
+            This is *global* win-rate by time bucket (net P&amp;L after fees). Hover cells for sample size and avg net.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function StatCard({
   label,
   value,
@@ -1030,15 +1185,6 @@ function InstrumentsSection({ stats, underlyingMix, heat }: { stats: any; underl
           Tip: Para “floor trader vibes”, usa la tabla como scanner: win% alto + net positivo + consistency.
         </p>
       </div>
-
-      {/* Heatmap */}
-      <HeatmapHourUnderlying
-        title="Time HeatMap"
-        sub="Intensity by time bucket (hover for win-rate + avg P&L)."
-        matrix={heat.matrix}
-        hours={heat.hours}
-      />
-
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className={`${futuristicCardClass(true)} p-4`}>
           <p className="text-sm font-medium text-slate-100 mb-2">Most supportive tickers (win-rate)</p>
@@ -1088,16 +1234,47 @@ function TerminalSection({
   equity,
   dailyPnl,
   weekdayBars,
-  heat,
+  sessions,
 }: {
   equity: { date: string; value: number }[];
   dailyPnl: { date: string; pnl: number }[];
   weekdayBars: { label: string; winRate: number; sessions: number; avgPnl: number }[];
-  heat: { hours: number[]; matrix: any[] };
+  sessions: SessionWithTrades[];
 }) {
-  // NOTE: equity se mantiene en props (para compatibilidad), pero aquí NO renderizamos curves duplicadas.
-  // La única Equity Curve se queda en Overview (Recharts AreaChart).
+  // =========
+  // Filters
+  // =========
+  type RangeKey = "ALL" | "30D" | "90D" | "YTD";
+  const [range, setRange] = useState<RangeKey>("ALL");
+  const [minSessionsCell, setMinSessionsCell] = useState(1);
 
+  const filteredSessions = useMemo(() => {
+    const arr = [...(sessions ?? [])];
+
+    const now = new Date();
+    let start: Date | null = null;
+    if (range === "30D") start = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    if (range === "90D") start = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+    if (range === "YTD") start = new Date(now.getFullYear(), 0, 1);
+
+    return arr.filter((s) => {
+      if (!start) return true;
+      const d = safeDateFromSession(s);
+      return d ? d >= start! : true;
+    });
+  }, [sessions, range]);
+
+  const timeHeat = useMemo(() => {
+    const raw = buildDowHourTimeHeat(filteredSessions, DEFAULT_HOURS);
+    // Apply min sample per cell (hide low-N)
+    const rows = raw.rows.map((r) => ({
+      ...r,
+      cells: r.cells.map((c) => (c.n >= minSessionsCell ? c : { ...c, n: 0, wins: 0, avgNet: 0, winRate: 0 })),
+    }));
+    return { ...raw, rows };
+  }, [filteredSessions, minSessionsCell]);
+
+  // ECharts option (weekday edge) — KEEP (asombroso + limpio)
   const echartsOption = useMemo(() => {
     return {
       backgroundColor: "transparent",
@@ -1133,12 +1310,54 @@ function TerminalSection({
 
   return (
     <section className="space-y-6">
+      {/* Terminal filters */}
+      <div className={wrapCard()}>
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+          <div>
+            <p className={chartTitle()}>Terminal Filters</p>
+            <p className={chartSub()}>Tune the terminal view without touching Instruments. Heatmap is global (all tickers).</p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] text-slate-500 font-mono">RANGE</span>
+              <select
+                value={range}
+                onChange={(e) => setRange(e.target.value as any)}
+                className="rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-400"
+              >
+                <option value="ALL">All</option>
+                <option value="30D">Last 30D</option>
+                <option value="90D">Last 90D</option>
+                <option value="YTD">YTD</option>
+              </select>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] text-slate-500 font-mono">MIN-N</span>
+              <input
+                type="number"
+                min={1}
+                max={50}
+                value={minSessionsCell}
+                onChange={(e) => setMinSessionsCell(Math.max(1, Number(e.target.value) || 1))}
+                className="w-20 rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-400"
+              />
+            </div>
+
+            <div className="rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-2 text-xs text-slate-300">
+              <span className="font-mono">{filteredSessions.length}</span> sessions
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
         <div className={wrapCard()}>
           <div className="flex items-baseline justify-between gap-3">
             <div>
               <p className={chartTitle()}>ECharts — Weekday edge</p>
-              <p className={chartSub()}>Very clean bars + terminal grid</p>
+              <p className={chartSub()}>Win-rate by weekday (net).</p>
             </div>
             <span className="text-[11px] text-slate-500 font-mono">ECH</span>
           </div>
@@ -1152,7 +1371,7 @@ function TerminalSection({
           <div className="flex items-baseline justify-between gap-3">
             <div>
               <p className={chartTitle()}>Daily P&amp;L — terminal bars</p>
-              <p className={chartSub()}>Recharts “clean” config: gaps + subtle grid</p>
+              <p className={chartSub()}>Clean, tight, and readable.</p>
             </div>
             <span className="text-[11px] text-slate-500 font-mono">BARS</span>
           </div>
@@ -1177,11 +1396,11 @@ function TerminalSection({
         </div>
       </div>
 
-      <HeatmapHourUnderlying
-        title="Terminal heatmap"
-        sub="Hour × Underlying: where your edge actually lives."
-        matrix={heat.matrix}
-        hours={heat.hours}
+      {/* Terminal Time HeatMap (global) */}
+      <TimeHeatMap
+        title="Time HeatMap"
+        sub="Global win-rate by day-of-week × hour bucket (net after fees)."
+        data={timeHeat}
       />
     </section>
   );
@@ -2344,7 +2563,7 @@ export default function AnalyticsStatisticsPage() {
                   equity={uiEquity}
                   dailyPnl={uiDaily}
                   weekdayBars={uiWeekdayBars as any}
-                  heat={heatmapLive}
+                  sessions={sessions}
                 />
               )}
               {activeGroup === "statistics" && (
