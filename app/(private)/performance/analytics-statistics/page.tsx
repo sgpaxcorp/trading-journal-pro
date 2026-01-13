@@ -48,6 +48,7 @@ type AnalyticsGroupId =
   | "statistics";
 type DayOfWeekKey = 0 | 1 | 2 | 3 | 4 | 5 | 6;
 type SideType = "long" | "short";
+type PremiumSide = "none" | "debit" | "credit";
 
 type EntryTradeRow = {
   id?: string;
@@ -60,6 +61,10 @@ type EntryTradeRow = {
   dte?: number | null;
   expiry?: string | null;
   underlying?: string | null;
+
+  premiumSide?: PremiumSide | string;
+  optionStrategy?: string | null;
+
   // optional fee fields (broker imports)
   feesUsd?: number | string;
   fees_usd?: number | string;
@@ -71,6 +76,10 @@ type EntryTradeRow = {
   commissions?: number | string;
   commissionsUsd?: number | string;
   commissions_usd?: number | string;
+
+  // optional future KPIs (if you later persist them)
+  riskPct?: number | string;
+  rewardPct?: number | string;
 };
 
 type ExitTradeRow = EntryTradeRow;
@@ -141,9 +150,48 @@ type AnalyticsSnapshot = {
    Constants
 ========================= */
 
-/* =========================
-   KPI Tag Dictionaries
-========================= */
+const DAY_LABELS: Record<DayOfWeekKey, string> = {
+  0: "Sunday",
+  1: "Monday",
+  2: "Tuesday",
+  3: "Wednesday",
+  4: "Thursday",
+  5: "Friday",
+  6: "Saturday",
+};
+
+const GROUPS: { id: AnalyticsGroupId; label: string; description: string }[] = [
+  {
+    id: "overview",
+    label: "Overview",
+    description: "Global performance, probabilities, and curve.",
+  },
+  {
+    id: "day-of-week",
+    label: "Day of week",
+    description: "Weekday edge & distribution.",
+  },
+  {
+    id: "psychology",
+    label: "Psychology",
+    description: "Emotions, plan adherence & mistakes (from Journal tags).",
+  },
+  {
+    id: "instruments",
+    label: "Instruments",
+    description: "Symbols, underlyings, kinds, and edge tables.",
+  },
+  {
+    id: "terminal",
+    label: "Terminal",
+    description: "Terminal panels: heatmaps + advanced chart engines.",
+  },
+  {
+    id: "statistics",
+    label: "Statistics",
+    description: "Wall-Street style KPI terminal with strategy split + filters.",
+  },
+];
 
 const STRATEGY_TAGS = [
   "News-driven trade",
@@ -172,55 +220,14 @@ const PSYCHOLOGY_TAGS = [
   "Overconfident",
 ] as const;
 
-type StrategyTag = (typeof STRATEGY_TAGS)[number];
-type PsychologyTag = (typeof PSYCHOLOGY_TAGS)[number];
-
-/** Options premium handling (matches your Journal Date logic) */
-type PremiumSide = "none" | "debit" | "credit";
-
-
-const DAY_LABELS: Record<DayOfWeekKey, string> = {
-  0: "Sunday",
-  1: "Monday",
-  2: "Tuesday",
-  3: "Wednesday",
-  4: "Thursday",
-  5: "Friday",
-  6: "Saturday",
-};
-
-const GROUPS: { id: AnalyticsGroupId; label: string; description: string }[] = [
-  {
-    id: "overview",
-    label: "Overview",
-    description: "Global performance, probabilities, and curve.",
-  },
-  {
-    id: "day-of-week",
-    label: "Day of week",
-    description: "Weekday edge & distribution.",
-  },
-  {
-    id: "psychology",
-    label: "Psychology",
-    description: "Emotions, plan adherence & mistakes.",
-  },
-  {
-    id: "instruments",
-    label: "Instruments",
-    description: "Symbols, underlyings, kinds, and edge tables.",
-  },
-  {
-    id: "terminal",
-    label: "Terminal",
-    description: "Terminal panels: heatmaps + advanced chart engines.",
-  },
-  {
-    id: "statistics",
-    label: "Statistics",
-    description: "KPI grid with search + filters.",
-  },
-];
+type KpiCategory =
+  | "Trades"
+  | "P&L"
+  | "Costs"
+  | "Streaks"
+  | "Risk & RRR"
+  | "Time"
+  | "Account";
 
 /* =========================
    Terminal Theme
@@ -299,7 +306,9 @@ function normalizeKind(k: any): InstrumentType {
 }
 
 function normalizeSide(s: any): SideType {
-  return (s === "short" ? "short" : "long") as SideType;
+  const v = String(s ?? "").toLowerCase().trim();
+  if (v === "short") return "short";
+  return "long";
 }
 
 /* =========================
@@ -346,8 +355,6 @@ function computePreset(preset: Exclude<RangePreset, "CUSTOM">) {
 ========================= */
 
 // FIX: supports notes as string OR jsonb/object.
-
-
 function parseNotesTrades(
   notesRaw: unknown
 ): { entries: EntryTradeRow[]; exits: ExitTradeRow[] } {
@@ -394,6 +401,20 @@ function parseOCCOptionSymbol(raw: string) {
   const expiry = new Date(year, mm - 1, dd);
   if (Number.isNaN(expiry.getTime())) return null;
   return { underlying, expiry };
+}
+
+function parseSPXLikeOptionExpiryIso(raw: string): string | null {
+  const s = safeUpper(raw).replace(/\s+/g, "").replace(/^[\.\-]/, "");
+  // SPXW251121C6565 / SPX251121P6000
+  const m = s.match(/^([A-Z]+W?)(\d{6})([CP])(\d+(?:\.\d+)?)$/);
+  if (!m) return null;
+  const yy = Number(m[2].slice(0, 2));
+  const mm = Number(m[2].slice(2, 4));
+  const dd = Number(m[2].slice(4, 6));
+  const year = 2000 + yy;
+  const expiry = new Date(year, mm - 1, dd);
+  if (Number.isNaN(expiry.getTime())) return null;
+  return isoDate(expiry);
 }
 
 function getUnderlyingFromSymbol(raw: string): string {
@@ -564,7 +585,6 @@ function computePnLBySymbol(
     const [symbol, kind, side] = k.split("|") as [string, string, SideType];
     const sign = side === "short" ? -1 : 1;
 
-    // mild improvement: options multiplier based on normalized kind string
     const kindStr = String(kind || "").toLowerCase();
     const multiplier = kindStr.includes("opt") || kindStr.includes("option") ? 100 : 1;
 
@@ -591,651 +611,6 @@ function safeDateFromSession(s: any): Date | null {
 }
 
 const DEFAULT_HOURS = [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17];
-
-/* =========================
-   Trade Ledger (FIFO across date range)
-   - Supports options premiumSide (credit/debit)
-   - Supports futures multipliers
-   - Produces per-exit "closed trade" PnL + hold time
-========================= */
-
-const FUTURES_MULTIPLIERS: Record<string, number> = {
-  ES: 50,
-  MES: 5,
-  NQ: 20,
-  MNQ: 2,
-  YM: 5,
-  MYM: 0.5,
-  RTY: 50,
-  M2K: 5,
-  CL: 1000,
-  MCL: 100,
-  GC: 100,
-  MGC: 10,
-  SI: 5000,
-  HG: 25000,
-};
-
-function futureRoot(symbol: string) {
-  const s = (symbol || "").trim().toUpperCase().replace(/^\//, "");
-  const m = s.match(/^([A-Z]{1,4})/);
-  return m?.[1] ?? s;
-}
-
-function normalizePremiumSide(kind: InstrumentType, raw?: any): PremiumSide {
-  const s = String(raw ?? "").toLowerCase().trim();
-  if (kind === "option") {
-    if (s.includes("credit")) return "credit";
-    if (s.includes("debit")) return "debit";
-    // default for option if missing
-    return "debit";
-  }
-  return "none";
-}
-
-/**
- * Sign rules (matches your Journal Date Page):
- * - options: credit => profit if exit < entry (sign -1), debit => sign +1
- * - linear: short => sign -1, long => sign +1
- */
-function pnlSign(kind: InstrumentType, side: SideType, premiumSide: PremiumSide): number {
-  if (kind === "option") {
-    return premiumSide === "credit" ? -1 : 1;
-  }
-  return side === "short" ? -1 : 1;
-}
-
-function getContractMultiplier(kind: InstrumentType, symbol: string): number {
-  if (kind === "option") return 100;
-  if (kind === "future") {
-    const root = futureRoot(symbol);
-    return FUTURES_MULTIPLIERS[root] ?? 1;
-  }
-  return 1;
-}
-
-function looksLikeYYYYMMDD(s: string) {
-  return /^\d{4}-\d{2}-\d{2}$/.test(s);
-}
-
-function sessionDateIsoKey(s: any): string {
-  const raw = String(s?.date ?? s?.sessionDate ?? "").slice(0, 10);
-  if (looksLikeYYYYMMDD(raw)) return raw;
-  const d = safeDateFromSession(s);
-  return d ? isoDate(d) : "";
-}
-
-function parseTimeOnDate(dateIso: string, timeRaw: unknown): Date | null {
-  if (!dateIso || !looksLikeYYYYMMDD(dateIso) || !timeRaw) return null;
-  const t = String(timeRaw).trim();
-  if (!t) return null;
-
-  // if it's an ISO-ish datetime, try direct
-  const direct = new Date(t);
-  if (!Number.isNaN(direct.getTime())) return direct;
-
-  // HH:MM(:SS)? (AM|PM)?
-  const m = t.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?$/i);
-  if (!m) return null;
-
-  let hh = Number(m[1]);
-  const mm = Number(m[2]);
-  const ss = Number(m[3] ?? "0");
-  const ap = (m[4] ?? "").toUpperCase();
-
-  if (!Number.isFinite(hh) || !Number.isFinite(mm) || !Number.isFinite(ss)) return null;
-  if (mm < 0 || mm > 59 || ss < 0 || ss > 59) return null;
-
-  if (ap === "AM") {
-    if (hh === 12) hh = 0;
-  } else if (ap === "PM") {
-    if (hh < 12) hh += 12;
-  }
-
-  if (hh < 0 || hh > 23) return null;
-
-  const hh2 = String(hh).padStart(2, "0");
-  const mm2 = String(mm).padStart(2, "0");
-  const ss2 = String(ss).padStart(2, "0");
-
-  // local time is OK for duration computations
-  const dt = new Date(`${dateIso}T${hh2}:${mm2}:${ss2}`);
-  return Number.isNaN(dt.getTime()) ? null : dt;
-}
-
-function tagsUpperFromSession(s: any): string[] {
-  const raw = Array.isArray(s?.tags) ? s.tags : [];
-  return raw.map((t: any) => safeUpper(String(t ?? ""))).filter(Boolean);
-}
-
-function hasTagUpper(tagsUpper: string[], tag: string): boolean {
-  const t = safeUpper(tag);
-  return tagsUpper.includes(t);
-}
-
-type TradeClose = {
-  id: string; // exit id
-  symbol: string;
-  kind: InstrumentType;
-  side: SideType;
-  premiumSide: PremiumSide;
-  optionStrategy?: string | null;
-  qty: number;
-  pnl: number;
-  holdMin: number | null;
-  entryDateIso: string;
-  exitDateIso: string;
-  tagsUpper: string[]; // from ENTRY session (strategy classification)
-};
-
-type OpenPosition = {
-  key: string;
-  symbol: string;
-  kind: InstrumentType;
-  side: SideType;
-  premiumSide: PremiumSide;
-  optionStrategy?: string | null;
-  qty: number;
-  tagsUpper: string[]; // from ENTRY session
-};
-
-type TradeEvent =
-  | {
-      type: "entry";
-      dt: Date | null;
-      dateIso: string;
-      tagsUpper: string[];
-      row: EntryTradeRow;
-      idx: number;
-    }
-  | {
-      type: "exit";
-      dt: Date | null;
-      dateIso: string;
-      tagsUpper: string[]; // exit session tags (not used for classification here)
-      row: ExitTradeRow;
-      idx: number;
-    };
-
-function effectiveKind(kind: InstrumentType, symbol: string): InstrumentType {
-  // keep your existing behavior if needed; here we trust stored kind.
-  return kind || "other";
-}
-
-function buildTradeLedgerFIFO(sessions: SessionWithTrades[]) {
-  // Build ordered events
-  const events: TradeEvent[] = [];
-  let ei = 0;
-
-  for (const s of sessions) {
-    const dateIso = sessionDateIsoKey(s);
-    const tagsUpper = tagsUpperFromSession(s);
-
-    for (const r of (s.entries || []) as EntryTradeRow[]) {
-      const dt = parseTimeOnDate(dateIso, (r as any).time);
-      events.push({ type: "entry", dt, dateIso, tagsUpper, row: r, idx: ei++ });
-    }
-    for (const r of (s.exits || []) as ExitTradeRow[]) {
-      const dt = parseTimeOnDate(dateIso, (r as any).time);
-      events.push({ type: "exit", dt, dateIso, tagsUpper, row: r, idx: ei++ });
-    }
-  }
-
-  // Sort chronologically; stable fallback; entries first when same timestamp
-  events.sort((a, b) => {
-    const ta = a.dt?.getTime() ?? 0;
-    const tb = b.dt?.getTime() ?? 0;
-    if (ta !== tb) return ta - tb;
-    if (a.type !== b.type) return a.type === "entry" ? -1 : 1;
-    return a.idx - b.idx;
-  });
-
-  type Lot = {
-    symbol: string;
-    kind: InstrumentType;
-    side: SideType;
-    premiumSide: PremiumSide;
-    optionStrategy?: string | null;
-    price: number;
-    qtyLeft: number;
-    entryDt: Date | null;
-    entryDateIso: string;
-    tagsUpper: string[]; // from ENTRY session
-  };
-
-  const keyOf = (
-    symbol: string,
-    kind: InstrumentType,
-    side: SideType,
-    premiumSide: PremiumSide,
-    optionStrategy?: string | null
-  ) => `${symbol}|${kind}|${side}|${premiumSide}|${optionStrategy ?? "—"}`;
-
-  const lotsByKey: Record<string, Lot[]> = {};
-  const closed: TradeClose[] = [];
-
-  let fallbackExitId = 0;
-
-  for (const ev of events) {
-    if (ev.type === "entry") {
-      const sym = safeUpper(ev.row.symbol);
-      if (!sym) continue;
-
-      const kind = effectiveKind(normalizeKind((ev.row as any).kind), sym);
-      const side = normalizeSide((ev.row as any).side);
-      const prem = normalizePremiumSide(kind, (ev.row as any).premiumSide);
-      const optStrat = (ev.row as any).optionStrategy ?? null;
-
-      const px = toNumberMaybe((ev.row as any).price);
-      const qty = toNumberMaybe((ev.row as any).quantity);
-      if (!Number.isFinite(px) || !Number.isFinite(qty) || qty <= 0) continue;
-
-      const k = keyOf(sym, kind, side, prem, optStrat);
-      lotsByKey[k] ||= [];
-      lotsByKey[k].push({
-        symbol: sym,
-        kind,
-        side,
-        premiumSide: prem,
-        optionStrategy: optStrat,
-        price: px,
-        qtyLeft: qty,
-        entryDt: ev.dt,
-        entryDateIso: ev.dateIso,
-        tagsUpper: ev.tagsUpper,
-      });
-      continue;
-    }
-
-    // exit
-    const sym = safeUpper(ev.row.symbol);
-    if (!sym) continue;
-
-    const kind = effectiveKind(normalizeKind((ev.row as any).kind), sym);
-    const side = normalizeSide((ev.row as any).side);
-    const prem = normalizePremiumSide(kind, (ev.row as any).premiumSide);
-    const optStrat = (ev.row as any).optionStrategy ?? null;
-
-    const exitPx = toNumberMaybe((ev.row as any).price);
-    let exitQty = toNumberMaybe((ev.row as any).quantity);
-    if (!Number.isFinite(exitPx) || !Number.isFinite(exitQty) || exitQty <= 0) continue;
-
-    const k = keyOf(sym, kind, side, prem, optStrat);
-    const lots = lotsByKey[k];
-    if (!lots || lots.length === 0) continue;
-
-    const sign = pnlSign(kind, side, prem);
-    const mult = getContractMultiplier(kind, sym);
-
-    let pnlSum = 0;
-    let qtySum = 0;
-
-    // weighted hold time by qty
-    let holdQtyKnown = 0;
-    let holdWeighted = 0;
-
-    const exitDt = ev.dt;
-
-    while (exitQty > 0 && lots.length > 0) {
-      const lot = lots[0];
-      const closeQty = Math.min(lot.qtyLeft, exitQty);
-
-      const pnlSeg = (exitPx - lot.price) * closeQty * sign * mult;
-      pnlSum += pnlSeg;
-      qtySum += closeQty;
-
-      if (lot.entryDt && exitDt) {
-        const hm = (exitDt.getTime() - lot.entryDt.getTime()) / 60000;
-        if (Number.isFinite(hm) && hm >= 0) {
-          holdQtyKnown += closeQty;
-          holdWeighted += hm * closeQty;
-        }
-      }
-
-      lot.qtyLeft -= closeQty;
-      exitQty -= closeQty;
-
-      if (lot.qtyLeft <= 0) lots.shift();
-    }
-
-    const exitId = String((ev.row as any).id ?? `exit-${fallbackExitId++}`);
-    // IMPORTANT: classification tags from entry lots (first lot used)
-    const tagsUpper = lotsByKey[k]?.[0]?.tagsUpper ?? []; // fallback if still has lots
-    const entryDateIso = lotsByKey[k]?.[0]?.entryDateIso ?? ev.dateIso;
-
-    closed.push({
-      id: exitId,
-      symbol: sym,
-      kind,
-      side,
-      premiumSide: prem,
-      optionStrategy: optStrat,
-      qty: qtySum,
-      pnl: Number(pnlSum.toFixed(2)),
-      holdMin: holdQtyKnown > 0 ? holdWeighted / holdQtyKnown : null,
-      entryDateIso,
-      exitDateIso: ev.dateIso,
-      tagsUpper: tagsUpper.length ? tagsUpper : ev.tagsUpper, // fallback to exit session tags
-    });
-  }
-
-  // Open positions (aggregate remaining qty by key)
-  const openPositions: OpenPosition[] = [];
-  for (const [k, lots] of Object.entries(lotsByKey)) {
-    const qtyLeft = lots.reduce((a, l) => a + (Number(l.qtyLeft) || 0), 0);
-    if (qtyLeft <= 0) continue;
-    const first = lots[0];
-    openPositions.push({
-      key: k,
-      symbol: first.symbol,
-      kind: first.kind,
-      side: first.side,
-      premiumSide: first.premiumSide,
-      optionStrategy: first.optionStrategy ?? null,
-      qty: qtyLeft,
-      tagsUpper: first.tagsUpper,
-    });
-  }
-
-  return { closedTrades: closed, openPositions };
-}
-
-/* =========================
-   KPI Aggregation
-========================= */
-
-function fmtPct(x: number, digits = 1) {
-  if (!Number.isFinite(x)) return "—";
-  return `${x.toFixed(digits)}%`;
-}
-
-function fmtDurationMin(min: number | null | undefined) {
-  if (min == null || !Number.isFinite(min)) return "—";
-  const m = Math.max(0, Math.round(min));
-  const h = Math.floor(m / 60);
-  const mm = m % 60;
-  if (h <= 0) return `${mm}m`;
-  if (mm === 0) return `${h}h`;
-  return `${h}h ${mm}m`;
-}
-
-function mean(nums: number[]) {
-  const a = nums.filter((n) => Number.isFinite(n));
-  if (!a.length) return 0;
-  return a.reduce((x, y) => x + y, 0) / a.length;
-}
-
-function longestStreak(sessions: SessionWithTrades[], pred: (net: number) => boolean) {
-  const sorted = [...sessions].sort((a, b) => {
-    const da = sessionDateIsoKey(a);
-    const db = sessionDateIsoKey(b);
-    return da < db ? -1 : da > db ? 1 : 0;
-  });
-
-  let best = 0;
-  let cur = 0;
-  for (const s of sorted) {
-    const net = sessionNet(s);
-    if (pred(net)) {
-      cur += 1;
-      best = Math.max(best, cur);
-    } else {
-      cur = 0;
-    }
-  }
-  return best;
-}
-
-function inferPlannedRrrFromTags(tagsUpper: string[]): number | null {
-  // allow variants like >= 2R / ≥ 2R
-  const joined = tagsUpper.join(" | ");
-  if (joined.includes("RISK-TO-REWARD") && (joined.includes("≥ 2R") || joined.includes(">= 2R"))) return 2.0;
-  if (joined.includes("RISK-TO-REWARD") && (joined.includes("< 1.5R") || joined.includes("<1.5R"))) return 1.5;
-
-  if (tagsUpper.includes("GOOD RISK-REWARD")) return 2.0;
-  if (tagsUpper.includes("POOR RISK-REWARD")) return 1.0;
-
-  return null;
-}
-
-function extractRiskRewardPctFromTrades(sessions: SessionWithTrades[]) {
-  const risk: number[] = [];
-  const reward: number[] = [];
-
-  const pickPct = (v: any): number | null => {
-    const n = toNumberMaybe(v);
-    if (!Number.isFinite(n)) return null;
-    // heuristic: assume 0..100 is percent
-    if (n < 0 || n > 100) return null;
-    return n;
-  };
-
-  for (const s of sessions) {
-    for (const t of (s.entries || []) as any[]) {
-      const r = pickPct(t?.riskPct ?? t?.risk_percent ?? t?.riskPercent ?? t?.risk_pct);
-      const w = pickPct(t?.rewardPct ?? t?.reward_percent ?? t?.rewardPercent ?? t?.reward_pct);
-      if (r != null) risk.push(r);
-      if (w != null) reward.push(w);
-    }
-  }
-
-  return {
-    avgRiskPct: risk.length ? mean(risk) : null,
-    avgRewardPct: reward.length ? mean(reward) : null,
-  };
-}
-
-function disciplineScore0to10(s: any): number | null {
-  // Prefer explicit numeric rating if you later add it
-  const direct =
-    (typeof s?.disciplineRating === "number" && s.disciplineRating) ||
-    (typeof s?.psychology?.disciplineRating === "number" && s.psychology.disciplineRating) ||
-    null;
-
-  if (direct != null && Number.isFinite(direct)) return clamp(direct, 0, 10);
-
-  // Heuristic fallback (deterministic, based on tags + respectedPlan)
-  const tagsUpper = tagsUpperFromSession(s);
-  let score = (s?.respectedPlan === false || tagsUpper.includes("NOT FOLLOW MY PLAN") || tagsUpper.includes("NO RESPECT MY PLAN"))
-    ? 4
-    : 10;
-
-  if (tagsUpper.includes("FOMO")) score -= 1.5;
-  if (tagsUpper.includes("REVENGE TRADE")) score -= 2.0;
-  if (tagsUpper.includes("OVERCONFIDENT")) score -= 1.0;
-
-  if (tagsUpper.includes("DISCIPLINE")) score += 0.5;
-  if (tagsUpper.includes("PATIENCE")) score += 0.3;
-  if (tagsUpper.includes("FOCUS")) score += 0.3;
-
-  return clamp(score, 0, 10);
-}
-
-type StatsAgg = {
-  totalClosedTrades: number;
-  totalOpenTrades: number;
-
-  totalWinningTrades: number;
-  totalLosingTrades: number;
-  totalBreakEvenTrades: number;
-
-  tradeWinRate: number;
-
-  avgWinningTrade: number;
-  avgLosingTrade: number;
-
-  largestWinningTrade: number;
-  largestLosingTrade: number;
-
-  longestWinningStreak: number; // sessions-based
-  longestLosingStreak: number; // sessions-based
-
-  totalTradeCosts: number; // fees
-  totalPL: number; // net (after fees)
-
-  accountGrowthPct: number | null;
-
-  avgRiskPct: number | null;
-  avgRewardPct: number | null;
-
-  tradeExpectancy: number;
-
-  avgPlannedRRR: number | null;
-  avgAchievedRRR: number | null;
-
-  avgHoldMin: number | null;
-  avgHoldMinWinners: number | null;
-  avgHoldMinLosers: number | null;
-
-  totalDeposits: number | null;
-  totalWithdrawals: number | null;
-
-  disciplineAvg: number | null;
-};
-
-function sumFromDailySnaps(rows: DailySnapshotRow[], keys: string[]) {
-  let total = 0;
-  let seen = false;
-  for (const r of rows || []) {
-    for (const k of keys) {
-      if ((r as any)?.[k] != null) {
-        const n = toNumberMaybe((r as any)[k]);
-        if (Number.isFinite(n)) {
-          total += n;
-          seen = true;
-        }
-      }
-    }
-  }
-  return seen ? total : null;
-}
-
-function computeStatsAgg(params: {
-  sessions: SessionWithTrades[];
-  ledgerClosedTrades: TradeClose[];
-  ledgerOpenPositions: OpenPosition[];
-  dailySnaps: DailySnapshotRow[];
-}): StatsAgg {
-  const { sessions, ledgerClosedTrades, ledgerOpenPositions, dailySnaps } = params;
-
-  // P&L + fees from sessions (authoritative, already netted with fees in your sessionNet)
-  const totalPL = sessions.reduce((a, s) => a + sessionNet(s), 0);
-  const totalTradeCosts = sessions.reduce((a, s) => a + (Number(s?.feesUsd) || 0), 0);
-
-  // Trades classification (per-exit close)
-  const EPS = 1e-9;
-  const pnlList = ledgerClosedTrades.map((t) => Number(t.pnl) || 0);
-
-  const winners = pnlList.filter((x) => x > EPS);
-  const losers = pnlList.filter((x) => x < -EPS);
-  const breakeven = pnlList.filter((x) => Math.abs(x) <= EPS);
-
-  const totalClosedTrades = pnlList.length;
-  const totalWinningTrades = winners.length;
-  const totalLosingTrades = losers.length;
-  const totalBreakEvenTrades = breakeven.length;
-
-  const tradeWinRate = totalClosedTrades ? (totalWinningTrades / totalClosedTrades) * 100 : 0;
-
-  const avgWinningTrade = winners.length ? mean(winners) : 0;
-  const avgLosingTrade = losers.length ? mean(losers) : 0;
-
-  const largestWinningTrade = pnlList.length ? Math.max(...pnlList) : 0;
-  const largestLosingTrade = pnlList.length ? Math.min(...pnlList) : 0;
-
-  const tradeExpectancy = totalClosedTrades ? mean(pnlList) : 0;
-
-  const avgAchievedRRR =
-    losers.length && avgWinningTrade !== 0
-      ? Math.abs(avgWinningTrade) / Math.max(1e-9, Math.abs(avgLosingTrade))
-      : null;
-
-  // Planned RRR from tags (session-level flags)
-  const planned: number[] = [];
-  for (const s of sessions) {
-    const tagsUpper = tagsUpperFromSession(s);
-    const r = inferPlannedRrrFromTags(tagsUpper);
-    if (r != null) planned.push(r);
-  }
-  const avgPlannedRRR = planned.length ? mean(planned) : null;
-
-  // Hold time metrics
-  const holds = ledgerClosedTrades.map((t) => (t.holdMin == null ? null : Number(t.holdMin))).filter((x): x is number => x != null && Number.isFinite(x));
-  const holdW = ledgerClosedTrades
-    .filter((t) => t.pnl > EPS && t.holdMin != null)
-    .map((t) => Number(t.holdMin))
-    .filter((x) => Number.isFinite(x));
-  const holdL = ledgerClosedTrades
-    .filter((t) => t.pnl < -EPS && t.holdMin != null)
-    .map((t) => Number(t.holdMin))
-    .filter((x) => Number.isFinite(x));
-
-  const avgHoldMin = holds.length ? mean(holds) : null;
-  const avgHoldMinWinners = holdW.length ? mean(holdW) : null;
-  const avgHoldMinLosers = holdL.length ? mean(holdL) : null;
-
-  // Open trades: count open position keys
-  const totalOpenTrades = ledgerOpenPositions.length;
-
-  // Streaks (sessions-based)
-  const longestWinningStreak = longestStreak(sessions, (net) => net > 0);
-  const longestLosingStreak = longestStreak(sessions, (net) => net < 0);
-
-  // Account growth from snapshots (if available)
-  let accountGrowthPct: number | null = null;
-  const snaps = [...(dailySnaps || [])].sort((a, b) => (a.date < b.date ? -1 : 1));
-  if (snaps.length >= 1) {
-    const startBal = toNumberMaybe((snaps[0] as any).start_of_day_balance);
-    const last = snaps[snaps.length - 1];
-    const endBal = toNumberMaybe((last as any).start_of_day_balance) + toNumberMaybe((last as any).realized_usd);
-    if (Number.isFinite(startBal) && startBal > 0 && Number.isFinite(endBal)) {
-      accountGrowthPct = ((endBal - startBal) / startBal) * 100;
-    }
-  }
-
-  // Deposits/withdrawals (optional columns in snapshots)
-  const totalDeposits = sumFromDailySnaps(snaps, ["deposits_usd", "depositsUsd", "deposits"]);
-  const totalWithdrawals = sumFromDailySnaps(snaps, ["withdrawals_usd", "withdrawalsUsd", "withdrawals"]);
-
-  // Risk/Reward % (only if stored)
-  const { avgRiskPct, avgRewardPct } = extractRiskRewardPctFromTrades(sessions);
-
-  // Discipline avg
-  const discVals = sessions
-    .map((s) => disciplineScore0to10(s))
-    .filter((x): x is number => x != null && Number.isFinite(x));
-  const disciplineAvg = discVals.length ? mean(discVals) : null;
-
-  return {
-    totalClosedTrades,
-    totalOpenTrades,
-    totalWinningTrades,
-    totalLosingTrades,
-    totalBreakEvenTrades,
-    tradeWinRate,
-    avgWinningTrade,
-    avgLosingTrade,
-    largestWinningTrade,
-    largestLosingTrade,
-    longestWinningStreak,
-    longestLosingStreak,
-    totalTradeCosts,
-    totalPL,
-    accountGrowthPct,
-    avgRiskPct,
-    avgRewardPct,
-    tradeExpectancy,
-    avgPlannedRRR,
-    avgAchievedRRR,
-    avgHoldMin,
-    avgHoldMinWinners,
-    avgHoldMinLosers,
-    totalDeposits,
-    totalWithdrawals,
-    disciplineAvg,
-  };
-}
-
 
 /* =========================
    UI bits
@@ -1287,7 +662,7 @@ function MiniKpi({
       ? "text-sky-300"
       : "text-slate-200";
   return (
-    <div className="rounded-2xl border border-slate-800 bg-slate-950/50 px-3 py-2">
+    <div className="rounded-2xl border border-slate-800 bg-slate-950/50 px-3 py-2 hover:border-slate-700 transition">
       <p className="text-[10px] uppercase tracking-[0.22em] text-slate-500">
         {label}
       </p>
@@ -1302,7 +677,7 @@ function Tip({ text }: { text: string }) {
       <span className="ml-2 inline-flex h-5 w-5 items-center justify-center rounded-full border border-slate-700 text-[11px] text-slate-300 hover:text-emerald-200">
         i
       </span>
-      <span className="pointer-events-none absolute left-1/2 top-full z-50 mt-2 w-[280px] -translate-x-1/2 rounded-2xl border border-slate-700 bg-slate-950/95 p-3 text-[11px] leading-relaxed text-slate-200 shadow-[0_0_25px_rgba(0,0,0,0.6)] opacity-0 transition group-hover:opacity-100">
+      <span className="pointer-events-none absolute left-1/2 top-full z-50 mt-2 w-[300px] -translate-x-1/2 rounded-2xl border border-slate-700 bg-slate-950/95 p-3 text-[11px] leading-relaxed text-slate-200 shadow-[0_0_25px_rgba(0,0,0,0.6)] opacity-0 transition group-hover:opacity-100">
         {text}
       </span>
     </span>
@@ -1471,7 +846,762 @@ function TimeHeatMap({
 }
 
 /* =========================
-   Sections (kept similar, but now consistent P&L)
+   Trade Ledger (FIFO across date range)
+   - Closes trades when exits exist
+   - Auto-closes expired CREDIT options (no exit) at 0.00
+========================= */
+
+const FUTURES_MULTIPLIERS: Record<string, number> = {
+  ES: 50,
+  MES: 5,
+  NQ: 20,
+  MNQ: 2,
+  YM: 5,
+  MYM: 0.5,
+  RTY: 50,
+  M2K: 5,
+  CL: 1000,
+  MCL: 100,
+  GC: 100,
+  MGC: 10,
+  SI: 5000,
+  HG: 25000,
+};
+
+function futureRoot(symbol: string) {
+  const s = (symbol || "").trim().toUpperCase().replace(/^\//, "");
+  const m = s.match(/^([A-Z]{1,4})/);
+  return m?.[1] ?? s;
+}
+
+function normalizePremiumSide(kind: InstrumentType, raw?: any, side?: any): PremiumSide {
+  const s = String(raw ?? "").toLowerCase().trim();
+
+  if (kind !== "option") return "none";
+
+  if (s.includes("credit")) return "credit";
+  if (s.includes("debit")) return "debit";
+
+  // If missing premiumSide, infer from side when possible
+  const sideStr = String(side ?? "").toLowerCase().trim();
+  if (sideStr === "short") return "credit";
+
+  // Default option behavior (Journal default): debit
+  return "debit";
+}
+
+function pnlSign(kind: InstrumentType, side: SideType, premiumSide: PremiumSide): number {
+  if (kind === "option") return premiumSide === "credit" ? -1 : 1;
+  return side === "short" ? -1 : 1;
+}
+
+function getContractMultiplier(kind: InstrumentType, symbol: string): number {
+  if (kind === "option") return 100;
+  if (kind === "future") {
+    const root = futureRoot(symbol);
+    return FUTURES_MULTIPLIERS[root] ?? 1;
+  }
+  return 1;
+}
+
+function looksLikeYYYYMMDD(s: string) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(s);
+}
+
+function sessionDateIsoKey(s: any): string {
+  const raw = String(s?.date ?? s?.sessionDate ?? "").slice(0, 10);
+  if (looksLikeYYYYMMDD(raw)) return raw;
+  const d = safeDateFromSession(s);
+  return d ? isoDate(d) : "";
+}
+
+function parseTimeOnDate(dateIso: string, timeRaw: unknown): Date | null {
+  if (!dateIso || !looksLikeYYYYMMDD(dateIso) || !timeRaw) return null;
+  const t = String(timeRaw).trim();
+  if (!t) return null;
+
+  // if it's an ISO-ish datetime, try direct
+  const direct = new Date(t);
+  if (!Number.isNaN(direct.getTime())) return direct;
+
+  // HH:MM(:SS)? (AM|PM)?
+  const m = t.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?$/i);
+  if (!m) return null;
+
+  let hh = Number(m[1]);
+  const mm = Number(m[2]);
+  const ss = Number(m[3] ?? "0");
+  const ap = (m[4] ?? "").toUpperCase();
+
+  if (!Number.isFinite(hh) || !Number.isFinite(mm) || !Number.isFinite(ss)) return null;
+  if (mm < 0 || mm > 59 || ss < 0 || ss > 59) return null;
+
+  if (ap === "AM") {
+    if (hh === 12) hh = 0;
+  } else if (ap === "PM") {
+    if (hh < 12) hh += 12;
+  }
+
+  if (hh < 0 || hh > 23) return null;
+
+  const hh2 = String(hh).padStart(2, "0");
+  const mm2 = String(mm).padStart(2, "0");
+  const ss2 = String(ss).padStart(2, "0");
+
+  // local time is OK for duration computations
+  const dt = new Date(`${dateIso}T${hh2}:${mm2}:${ss2}`);
+  return Number.isNaN(dt.getTime()) ? null : dt;
+}
+
+function tagsUpperFromSession(s: any): string[] {
+  const raw = Array.isArray(s?.tags) ? s.tags : [];
+  return raw.map((t: any) => safeUpper(String(t ?? ""))).filter(Boolean);
+}
+
+function inferOptionExpiryIso(row: any): string | null {
+  const exp = String(row?.expiry ?? "").slice(0, 10);
+  if (looksLikeYYYYMMDD(exp)) return exp;
+
+  const sym = safeUpper(row?.symbol ?? "");
+  if (!sym) return null;
+
+  const spx = parseSPXLikeOptionExpiryIso(sym);
+  if (spx) return spx;
+
+  const occ = parseOCCOptionSymbol(sym);
+  if (occ?.expiry) return isoDate(occ.expiry);
+
+  return null;
+}
+
+type TradeClose = {
+  id: string; // exit id (or synthetic)
+  symbol: string;
+  kind: InstrumentType;
+  side: SideType;
+  premiumSide: PremiumSide;
+  qty: number;
+  pnl: number;
+  holdMin: number | null;
+  entryDateIso: string;
+  exitDateIso: string;
+  tagsUpper: string[]; // from ENTRY session (strategy classification)
+  synthetic?: boolean;
+};
+
+type OpenPosition = {
+  key: string;
+  symbol: string;
+  kind: InstrumentType;
+  side: SideType;
+  premiumSide: PremiumSide;
+  qty: number;
+  tagsUpper: string[]; // from ENTRY session
+  expiryIso?: string | null;
+};
+
+type TradeEvent =
+  | {
+      type: "entry";
+      dt: Date | null;
+      dateIso: string;
+      tagsUpper: string[];
+      row: EntryTradeRow;
+      idx: number;
+    }
+  | {
+      type: "exit";
+      dt: Date | null;
+      dateIso: string;
+      tagsUpper: string[];
+      row: ExitTradeRow;
+      idx: number;
+    };
+
+function buildTradeLedgerFIFO(
+  sessions: SessionWithTrades[],
+  rangeEndIso?: string
+): { closedTrades: TradeClose[]; openPositions: OpenPosition[] } {
+  // Build ordered events
+  const events: TradeEvent[] = [];
+  let ei = 0;
+
+  for (const s of sessions) {
+    const dateIso = sessionDateIsoKey(s);
+    const tagsUpper = tagsUpperFromSession(s);
+
+    for (const r of (s.entries || []) as EntryTradeRow[]) {
+      const dt = parseTimeOnDate(dateIso, (r as any).time);
+      events.push({ type: "entry", dt, dateIso, tagsUpper, row: r, idx: ei++ });
+    }
+    for (const r of (s.exits || []) as ExitTradeRow[]) {
+      const dt = parseTimeOnDate(dateIso, (r as any).time);
+      events.push({ type: "exit", dt, dateIso, tagsUpper, row: r, idx: ei++ });
+    }
+  }
+
+  // Sort chronologically; stable fallback; entries first when same timestamp
+  events.sort((a, b) => {
+    const ta = a.dt?.getTime() ?? 0;
+    const tb = b.dt?.getTime() ?? 0;
+    if (ta !== tb) return ta - tb;
+    if (a.type !== b.type) return a.type === "entry" ? -1 : 1;
+    return a.idx - b.idx;
+  });
+
+  type Lot = {
+    symbol: string;
+    kind: InstrumentType;
+    side: SideType;
+    premiumSide: PremiumSide;
+    price: number;
+    qtyLeft: number;
+    entryDt: Date | null;
+    entryDateIso: string;
+    expiryIso?: string | null;
+    tagsUpper: string[]; // from ENTRY session
+  };
+
+  const keyOf = (symbol: string, kind: InstrumentType, side: SideType, premiumSide: PremiumSide) => {
+    // Make matching more resilient:
+    // - Options: ignore side in key (premiumSide defines the economics)
+    // - Linear: ignore premiumSide
+    if (kind === "option") return `${symbol}|${kind}|${premiumSide}`;
+    return `${symbol}|${kind}|${side}`;
+  };
+
+  const lotsByKey: Record<string, Lot[]> = {};
+  const closed: TradeClose[] = [];
+
+  let fallbackExitId = 0;
+
+  for (const ev of events) {
+    if (ev.type === "entry") {
+      const sym = safeUpper(ev.row.symbol);
+      if (!sym) continue;
+
+      const kind = normalizeKind((ev.row as any).kind);
+      const side = normalizeSide((ev.row as any).side);
+      const prem = normalizePremiumSide(kind, (ev.row as any).premiumSide, (ev.row as any).side);
+
+      const px = toNumberMaybe((ev.row as any).price);
+      const qty = toNumberMaybe((ev.row as any).quantity);
+      if (!Number.isFinite(px) || !Number.isFinite(qty) || qty <= 0) continue;
+
+      const expiryIso = kind === "option" ? inferOptionExpiryIso(ev.row) : null;
+
+      const k = keyOf(sym, kind, side, prem);
+      lotsByKey[k] ||= [];
+      lotsByKey[k].push({
+        symbol: sym,
+        kind,
+        side,
+        premiumSide: prem,
+        price: px,
+        qtyLeft: qty,
+        entryDt: ev.dt,
+        entryDateIso: ev.dateIso,
+        expiryIso,
+        tagsUpper: ev.tagsUpper,
+      });
+      continue;
+    }
+
+    // exit
+    const sym = safeUpper(ev.row.symbol);
+    if (!sym) continue;
+
+    const kind = normalizeKind((ev.row as any).kind);
+    const side = normalizeSide((ev.row as any).side);
+    const prem = normalizePremiumSide(kind, (ev.row as any).premiumSide, (ev.row as any).side);
+
+    const exitPx = toNumberMaybe((ev.row as any).price);
+    let exitQty = toNumberMaybe((ev.row as any).quantity);
+    if (!Number.isFinite(exitPx) || !Number.isFinite(exitQty) || exitQty <= 0) continue;
+
+    const picked = (() => {
+      const exact = keyOf(sym, kind, side, prem);
+      const cands: string[] = [exact];
+
+      // If data is missing or inconsistent, fall back to a more tolerant match.
+      // This prevents false "open trades" when exits exist but legacy rows omit side/premium fields.
+      if (kind === "option") {
+        cands.push(keyOf(sym, kind, side, prem === "credit" ? "debit" : "credit"));
+      }
+      cands.push(keyOf(sym, kind, side === "long" ? "short" : "long", prem));
+      if (kind === "option") {
+        cands.push(keyOf(sym, kind, side === "long" ? "short" : "long", prem === "credit" ? "debit" : "credit"));
+      }
+
+      // Ultimate fallback: any open lot for this symbol+kind.
+      // Prefer earliest lot (FIFO) by entry date/time when multiple keys are open.
+      let bestKey: string | null = null;
+      let bestTime = Number.POSITIVE_INFINITY;
+
+      const tryKey = (kk: string) => {
+        const lots = lotsByKey[kk];
+        if (!lots || lots.length === 0) return;
+        const t0 = lots[0]?.entryDt?.getTime?.() ?? 0;
+        if (t0 < bestTime) {
+          bestTime = t0;
+          bestKey = kk;
+        }
+      };
+
+      for (const kk of cands) tryKey(kk);
+
+      if (!bestKey) {
+        const prefix = `${sym}|${kind}|`;
+        for (const kk of Object.keys(lotsByKey)) {
+          if (!kk.startsWith(prefix)) continue;
+          tryKey(kk);
+        }
+      }
+
+      if (!bestKey) return null;
+      return { k: bestKey, lots: lotsByKey[bestKey] as Lot[] };
+    })();
+
+    if (!picked || !picked.lots || picked.lots.length === 0) continue;
+
+    const k = picked.k;
+    const lots = picked.lots;
+
+    // IMPORTANT: compute economics from the OPEN LOT (position), not from the exit row.
+    const sign = pnlSign(lots[0].kind, lots[0].side, lots[0].premiumSide);
+    const mult = getContractMultiplier(lots[0].kind, sym);
+
+    let pnlSum = 0;
+    let qtySum = 0;
+
+    // weighted hold time by qty
+    let holdQtyKnown = 0;
+    let holdWeighted = 0;
+
+    const exitDt = ev.dt;
+
+    // IMPORTANT: classification tags from first lot used
+    const tagsUpperForTrade = lots[0]?.tagsUpper ?? ev.tagsUpper;
+    const entryDateIso = lots[0]?.entryDateIso ?? ev.dateIso;
+
+    while (exitQty > 0 && lots.length > 0) {
+      const lot = lots[0];
+      const closeQty = Math.min(lot.qtyLeft, exitQty);
+
+      const pnlSeg = (exitPx - lot.price) * closeQty * sign * mult;
+      pnlSum += pnlSeg;
+      qtySum += closeQty;
+
+      if (lot.entryDt && exitDt) {
+        const hm = (exitDt.getTime() - lot.entryDt.getTime()) / 60000;
+        if (Number.isFinite(hm) && hm >= 0) {
+          holdQtyKnown += closeQty;
+          holdWeighted += hm * closeQty;
+        }
+      }
+
+      lot.qtyLeft -= closeQty;
+      exitQty -= closeQty;
+
+      if (lot.qtyLeft <= 0) lots.shift();
+    }
+
+    const exitId = String((ev.row as any).id ?? `exit-${fallbackExitId++}`);
+
+    closed.push({
+      id: exitId,
+      symbol: sym,
+      kind,
+      side,
+      premiumSide: prem,
+      qty: qtySum,
+      pnl: Number(pnlSum.toFixed(2)),
+      holdMin: holdQtyKnown > 0 ? holdWeighted / holdQtyKnown : null,
+      entryDateIso,
+      exitDateIso: ev.dateIso,
+      tagsUpper: tagsUpperForTrade,
+      synthetic: false,
+    });
+  }
+
+  // Auto-close expired CREDIT options (no exit) at 0.00 to reflect premium win at expiry.
+  // This prevents credit strategies from showing as "open forever" in analytics.
+  const todayIso = isoDate(new Date());
+  const endIso = looksLikeYYYYMMDD(String(rangeEndIso ?? "")) ? String(rangeEndIso) : todayIso;
+  const cutoffIso = endIso < todayIso ? endIso : todayIso;
+
+  for (const [k, lots] of Object.entries(lotsByKey)) {
+    if (!lots?.length) continue;
+
+    for (const lot of lots) {
+      if (lot.qtyLeft <= 0) continue;
+      if (lot.kind !== "option") continue;
+      if (lot.premiumSide !== "credit") continue;
+
+      const expIso = lot.expiryIso;
+      if (!expIso || !looksLikeYYYYMMDD(expIso)) continue;
+
+      // close only if expiration already passed within the chosen end range
+      if (expIso > cutoffIso) continue;
+
+      const exitPx = 0;
+      const sign = pnlSign(lot.kind, lot.side, lot.premiumSide);
+      const mult = getContractMultiplier(lot.kind, lot.symbol);
+
+      const closeQty = lot.qtyLeft;
+      const pnl = (exitPx - lot.price) * closeQty * sign * mult;
+
+      const exitDt = parseTimeOnDate(expIso, "16:00") ?? new Date(`${expIso}T16:00:00`);
+      let holdMin: number | null = null;
+      if (lot.entryDt && exitDt && Number.isFinite(exitDt.getTime())) {
+        const hm = (exitDt.getTime() - lot.entryDt.getTime()) / 60000;
+        holdMin = Number.isFinite(hm) && hm >= 0 ? hm : null;
+      }
+
+      closed.push({
+        id: `expiry-${lot.symbol}-${expIso}-${Math.random().toString(16).slice(2)}`,
+        symbol: lot.symbol,
+        kind: lot.kind,
+        side: lot.side,
+        premiumSide: lot.premiumSide,
+        qty: closeQty,
+        pnl: Number(pnl.toFixed(2)),
+        holdMin,
+        entryDateIso: lot.entryDateIso,
+        exitDateIso: expIso,
+        tagsUpper: lot.tagsUpper,
+        synthetic: true,
+      });
+
+      lot.qtyLeft = 0;
+    }
+
+    // remove emptied lots
+    lotsByKey[k] = lots.filter((x) => x.qtyLeft > 0);
+  }
+
+  // Open positions (aggregate remaining qty by key)
+  const openPositions: OpenPosition[] = [];
+  for (const [k, lots] of Object.entries(lotsByKey)) {
+    if (!lots?.length) continue;
+    const qtyLeft = lots.reduce((a, l) => a + (Number(l.qtyLeft) || 0), 0);
+    if (qtyLeft <= 0) continue;
+    const first = lots[0];
+    openPositions.push({
+      key: k,
+      symbol: first.symbol,
+      kind: first.kind,
+      side: first.side,
+      premiumSide: first.premiumSide,
+      qty: qtyLeft,
+      tagsUpper: first.tagsUpper,
+      expiryIso: first.expiryIso ?? null,
+    });
+  }
+
+  return { closedTrades: closed, openPositions };
+}
+
+/* =========================
+   KPI Aggregation
+========================= */
+
+function fmtPct(x: number, digits = 1) {
+  if (!Number.isFinite(x)) return "—";
+  return `${x.toFixed(digits)}%`;
+}
+
+function fmtDurationMin(min: number | null | undefined) {
+  if (min == null || !Number.isFinite(min)) return "—";
+  const m = Math.max(0, Math.round(min));
+  const h = Math.floor(m / 60);
+  const mm = m % 60;
+  if (h <= 0) return `${mm}m`;
+  if (mm === 0) return `${h}h`;
+  return `${h}h ${mm}m`;
+}
+
+function mean(nums: number[]) {
+  const a = nums.filter((n) => Number.isFinite(n));
+  if (!a.length) return 0;
+  return a.reduce((x, y) => x + y, 0) / a.length;
+}
+
+function longestStreak(sessions: SessionWithTrades[], pred: (net: number) => boolean) {
+  const sorted = [...sessions].sort((a, b) => {
+    const da = sessionDateIsoKey(a);
+    const db = sessionDateIsoKey(b);
+    return da < db ? -1 : da > db ? 1 : 0;
+  });
+
+  let best = 0;
+  let cur = 0;
+  for (const s of sorted) {
+    const net = sessionNet(s);
+    if (pred(net)) {
+      cur += 1;
+      best = Math.max(best, cur);
+    } else {
+      cur = 0;
+    }
+  }
+  return best;
+}
+
+function inferPlannedRrrFromTags(tagsUpper: string[]): number | null {
+  const joined = tagsUpper.join(" | ");
+
+  if (joined.includes("RISK-TO-REWARD") && (joined.includes("≥ 2R") || joined.includes(">= 2R"))) return 2.0;
+  if (joined.includes("RISK-TO-REWARD") && (joined.includes("< 1.5R") || joined.includes("<1.5R"))) return 1.5;
+
+  if (tagsUpper.includes("GOOD RISK-REWARD")) return 2.0;
+  if (tagsUpper.includes("POOR RISK-REWARD")) return 1.0;
+
+  return null;
+}
+
+function extractRiskRewardPctFromTrades(sessions: SessionWithTrades[]) {
+  const risk: number[] = [];
+  const reward: number[] = [];
+
+  const pickPct = (v: any): number | null => {
+    const n = toNumberMaybe(v);
+    if (!Number.isFinite(n)) return null;
+    if (n < 0 || n > 100) return null;
+    return n;
+  };
+
+  for (const s of sessions) {
+    for (const t of (s.entries || []) as any[]) {
+      const r = pickPct(t?.riskPct ?? t?.risk_percent ?? t?.riskPercent ?? t?.risk_pct);
+      const w = pickPct(t?.rewardPct ?? t?.reward_percent ?? t?.rewardPercent ?? t?.reward_pct);
+      if (r != null) risk.push(r);
+      if (w != null) reward.push(w);
+    }
+  }
+
+  return {
+    avgRiskPct: risk.length ? mean(risk) : null,
+    avgRewardPct: reward.length ? mean(reward) : null,
+  };
+}
+
+function disciplineScore0to10(s: any): number | null {
+  const direct =
+    (typeof s?.disciplineRating === "number" && s.disciplineRating) ||
+    (typeof s?.psychology?.disciplineRating === "number" && s.psychology.disciplineRating) ||
+    null;
+
+  if (direct != null && Number.isFinite(direct)) return clamp(direct, 0, 10);
+
+  const tagsUpper = tagsUpperFromSession(s);
+  let score =
+    (s?.respectedPlan === false || tagsUpper.includes("NOT FOLLOW MY PLAN") || tagsUpper.includes("NO RESPECT MY PLAN"))
+      ? 4
+      : 10;
+
+  if (tagsUpper.includes("FOMO")) score -= 1.5;
+  if (tagsUpper.includes("REVENGE TRADE")) score -= 2.0;
+  if (tagsUpper.includes("OVERCONFIDENT")) score -= 1.0;
+
+  if (tagsUpper.includes("DISCIPLINE")) score += 0.5;
+  if (tagsUpper.includes("PATIENCE")) score += 0.3;
+  if (tagsUpper.includes("FOCUS")) score += 0.3;
+
+  return clamp(score, 0, 10);
+}
+
+type StatsAgg = {
+  totalClosedTrades: number;
+  totalOpenTrades: number;
+
+  totalWinningTrades: number;
+  totalLearnedTrades: number;
+  totalBreakEvenTrades: number;
+
+  tradeWinRate: number;
+
+  avgWinningTrade: number;
+  avgLearnedTrade: number;
+
+  largestWinningTrade: number;
+  largestLearnedTrade: number;
+
+  longestWinningStreak: number; // sessions-based
+  longestLearnedStreak: number; // sessions-based
+
+  totalTradeCosts: number; // fees
+  totalPL: number; // net (after fees)
+
+  accountGrowthPct: number | null;
+
+  avgRiskPct: number | null;
+  avgRewardPct: number | null;
+
+  tradeExpectancy: number;
+
+  avgPlannedRRR: number | null;
+  avgAchievedRRR: number | null;
+
+  avgHoldMin: number | null;
+  avgHoldMinWinners: number | null;
+  avgHoldMinLearned: number | null;
+
+  totalDeposits: number | null;
+  totalWithdrawals: number | null;
+
+  disciplineAvg: number | null;
+};
+
+function sumFromDailySnaps(rows: DailySnapshotRow[], keys: string[]) {
+  let total = 0;
+  let seen = false;
+  for (const r of rows || []) {
+    for (const k of keys) {
+      if ((r as any)?.[k] != null) {
+        const n = toNumberMaybe((r as any)[k]);
+        if (Number.isFinite(n)) {
+          total += n;
+          seen = true;
+        }
+      }
+    }
+  }
+  return seen ? total : null;
+}
+
+function computeStatsAgg(params: {
+  sessions: SessionWithTrades[];
+  ledgerClosedTrades: TradeClose[];
+  ledgerOpenPositions: OpenPosition[];
+  dailySnaps: DailySnapshotRow[];
+}): StatsAgg {
+  const { sessions, ledgerClosedTrades, ledgerOpenPositions, dailySnaps } = params;
+
+  // P&L + fees from sessions (authoritative, net after fees)
+  const totalPL = sessions.reduce((a, s) => a + sessionNet(s), 0);
+  const totalTradeCosts = sessions.reduce((a, s) => a + (Number(s?.feesUsd) || 0), 0);
+
+  // Trades classification (per-exit close)
+  const EPS = 1e-9;
+  const pnlList = ledgerClosedTrades.map((t) => Number(t.pnl) || 0);
+
+  const winners = pnlList.filter((x) => x > EPS);
+  const learned = pnlList.filter((x) => x < -EPS);
+  const breakeven = pnlList.filter((x) => Math.abs(x) <= EPS);
+
+  const totalClosedTrades = pnlList.length;
+  const totalWinningTrades = winners.length;
+  const totalLearnedTrades = learned.length;
+  const totalBreakEvenTrades = breakeven.length;
+
+  const tradeWinRate = totalClosedTrades ? (totalWinningTrades / totalClosedTrades) * 100 : 0;
+
+  const avgWinningTrade = winners.length ? mean(winners) : 0;
+  const avgLearnedTrade = learned.length ? mean(learned) : 0;
+
+  const largestWinningTrade = pnlList.length ? Math.max(...pnlList) : 0;
+  const largestLearnedTrade = pnlList.length ? Math.min(...pnlList) : 0;
+
+  const tradeExpectancy = totalClosedTrades ? mean(pnlList) : 0;
+
+  const avgAchievedRRR =
+    learned.length && avgWinningTrade !== 0
+      ? Math.abs(avgWinningTrade) / Math.max(1e-9, Math.abs(avgLearnedTrade))
+      : null;
+
+  // Planned RRR from tags (session-level flags)
+  const planned: number[] = [];
+  for (const s of sessions) {
+    const tagsUpper = tagsUpperFromSession(s);
+    const r = inferPlannedRrrFromTags(tagsUpper);
+    if (r != null) planned.push(r);
+  }
+  const avgPlannedRRR = planned.length ? mean(planned) : null;
+
+  // Hold time metrics
+  const holds = ledgerClosedTrades
+    .map((t) => (t.holdMin == null ? null : Number(t.holdMin)))
+    .filter((x): x is number => x != null && Number.isFinite(x));
+
+  const holdW = ledgerClosedTrades
+    .filter((t) => t.pnl > EPS && t.holdMin != null)
+    .map((t) => Number(t.holdMin))
+    .filter((x) => Number.isFinite(x));
+
+  const holdL = ledgerClosedTrades
+    .filter((t) => t.pnl < -EPS && t.holdMin != null)
+    .map((t) => Number(t.holdMin))
+    .filter((x) => Number.isFinite(x));
+
+  const avgHoldMin = holds.length ? mean(holds) : null;
+  const avgHoldMinWinners = holdW.length ? mean(holdW) : null;
+  const avgHoldMinLearned = holdL.length ? mean(holdL) : null;
+
+  // Open trades: number of remaining open position keys (after credit-expiry auto-close)
+  const totalOpenTrades = ledgerOpenPositions.length;
+
+  // Streaks (sessions-based)
+  const longestWinningStreak = longestStreak(sessions, (net) => net > 0);
+  const longestLearnedStreak = longestStreak(sessions, (net) => net < 0);
+
+  // Account growth from snapshots (if available)
+  let accountGrowthPct: number | null = null;
+  const snaps = [...(dailySnaps || [])].sort((a, b) => (a.date < b.date ? -1 : 1));
+  if (snaps.length >= 1) {
+    const startBal = toNumberMaybe((snaps[0] as any).start_of_day_balance);
+    const last = snaps[snaps.length - 1];
+    const endBal = toNumberMaybe((last as any).start_of_day_balance) + toNumberMaybe((last as any).realized_usd);
+    if (Number.isFinite(startBal) && startBal > 0 && Number.isFinite(endBal)) {
+      accountGrowthPct = ((endBal - startBal) / startBal) * 100;
+    }
+  }
+
+  // Deposits/withdrawals (optional columns in snapshots)
+  const totalDeposits = sumFromDailySnaps(snaps, ["deposits_usd", "depositsUsd", "deposits"]);
+  const totalWithdrawals = sumFromDailySnaps(snaps, ["withdrawals_usd", "withdrawalsUsd", "withdrawals"]);
+
+  // Risk/Reward % (only if stored)
+  const { avgRiskPct, avgRewardPct } = extractRiskRewardPctFromTrades(sessions);
+
+  // Discipline avg
+  const discVals = sessions
+    .map((s) => disciplineScore0to10(s))
+    .filter((x): x is number => x != null && Number.isFinite(x));
+  const disciplineAvg = discVals.length ? mean(discVals) : null;
+
+  return {
+    totalClosedTrades,
+    totalOpenTrades,
+    totalWinningTrades,
+    totalLearnedTrades,
+    totalBreakEvenTrades,
+    tradeWinRate,
+    avgWinningTrade,
+    avgLearnedTrade,
+    largestWinningTrade,
+    largestLearnedTrade,
+    longestWinningStreak,
+    longestLearnedStreak,
+    totalTradeCosts,
+    totalPL,
+    accountGrowthPct,
+    avgRiskPct,
+    avgRewardPct,
+    tradeExpectancy,
+    avgPlannedRRR,
+    avgAchievedRRR,
+    avgHoldMin,
+    avgHoldMinWinners,
+    avgHoldMinLearned,
+    totalDeposits,
+    totalWithdrawals,
+    disciplineAvg,
+  };
+}
+
+/* =========================
+   Sections
 ========================= */
 
 function OverviewSection({
@@ -1688,6 +1818,10 @@ function DayOfWeekSection({ weekdayBars }: { weekdayBars: any[] }) {
   );
 }
 
+/* =========================
+   Psychology (from Journal tags)
+========================= */
+
 function PsychologySection({
   probabilityStats,
   psychology,
@@ -1712,18 +1846,62 @@ function PsychologySection({
     return "rgba(148,163,184,0.60)";
   };
 
+  const groupAgg = useMemo(() => {
+    const pos = ["CALM", "FOCUS", "PATIENCE", "DISCIPLINE"];
+    const neg = ["FOMO", "GREEDY", "DESPERATE", "ANXIETY", "REVENGE TRADE", "OVERCONFIDENT"];
+
+    const map = new Map(kpis.map((k) => [safeUpper(k.tag), k]));
+    const sum = (keys: string[]) => {
+      let c = 0;
+      let wins = 0;
+      let sumPnl = 0;
+      for (const k of keys) {
+        const r = map.get(k);
+        if (!r) continue;
+        c += r.count;
+        wins += (r.winRate / 100) * r.count;
+        sumPnl += r.avgPnl * r.count;
+      }
+      const winRate = c ? (wins / c) * 100 : 0;
+      const avgPnl = c ? sumPnl / c : 0;
+      return { c, winRate, avgPnl };
+    };
+
+    return { positive: sum(pos), highRisk: sum(neg) };
+  }, [kpis]);
+
   return (
     <section className="space-y-6">
-      <div className={wrapCard()}>
+      <div className={`${wrapCard()} bg-linear-to-br from-slate-900/70 via-slate-900/60 to-slate-950/70`}>
         <div className="flex items-baseline justify-between gap-3">
           <div>
-            <p className={chartTitle()}>Psychology KPIs (from Journal tags)</p>
-            <p className={chartSub()}>Frequency + win-rate + avg P&amp;L when tag is present</p>
+            <p className={chartTitle()}>Psychology KPIs</p>
+            <p className={chartSub()}>
+              Impact analysis (counts, win-rate, and average P&amp;L when the tag is present).
+            </p>
           </div>
           <span className="text-[11px] text-slate-500 font-mono">PSY</span>
         </div>
 
-        <div className="mt-3 overflow-x-auto">
+        <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
+          <MiniKpi
+            label="High-performance states (Calm/Focus/Patience/Discipline)"
+            value={`${groupAgg.positive.c} events · ${groupAgg.positive.winRate.toFixed(1)}% · ${fmtMoney(groupAgg.positive.avgPnl)}`}
+            tone={groupAgg.positive.avgPnl >= 0 ? "good" : "neutral"}
+          />
+          <MiniKpi
+            label="High-risk states (FOMO/Greedy/Desperate/Anxiety/Revenge/Overconf.)"
+            value={`${groupAgg.highRisk.c} events · ${groupAgg.highRisk.winRate.toFixed(1)}% · ${fmtMoney(groupAgg.highRisk.avgPnl)}`}
+            tone={groupAgg.highRisk.avgPnl < 0 ? "bad" : "neutral"}
+          />
+          <MiniKpi
+            label="Plan edge"
+            value={`${(probabilityStats.pGreenRespect - probabilityStats.baseGreenRate).toFixed(1)}%`}
+            tone={probabilityStats.pGreenRespect >= probabilityStats.baseGreenRate ? "good" : "neutral"}
+          />
+        </div>
+
+        <div className="mt-4 overflow-x-auto">
           <table className="min-w-[920px] w-full text-sm">
             <thead>
               <tr className="text-[11px] uppercase tracking-[0.22em] text-slate-500 border-b border-slate-800">
@@ -1735,7 +1913,10 @@ function PsychologySection({
             </thead>
             <tbody>
               {kpis.map((r) => (
-                <tr key={r.tag} className="border-t border-slate-800 bg-slate-950/45 hover:bg-slate-950/70 transition">
+                <tr
+                  key={r.tag}
+                  className="border-t border-slate-800 bg-slate-950/45 hover:bg-slate-950/70 transition"
+                >
                   <td className="px-3 py-2 font-mono text-slate-100">{r.tag}</td>
                   <td className="px-3 py-2 text-right text-slate-200">{r.count}</td>
                   <td className="px-3 py-2 text-right text-slate-200">{r.winRate.toFixed(1)}%</td>
@@ -1806,7 +1987,6 @@ function PsychologySection({
   );
 }
 
-
 function InstrumentsSection({ stats, underlyingMix }: { stats: any; underlyingMix: any[] }) {
   const mostSupportive = stats.mostSupportive || [];
   const topEarners = stats.topEarners || [];
@@ -1863,7 +2043,7 @@ function InstrumentsSection({ stats, underlyingMix }: { stats: any; underlyingMi
           <div className="mt-3 space-y-2">
             <MiniKpi label="Top supportive ticker" value={mostSupportive?.[0]?.symbol ?? "—"} tone="good" />
             <MiniKpi label="Top earner ticker" value={topEarners?.[0]?.symbol ?? "—"} tone="good" />
-            <MiniKpi label="Worst ticker" value={toReview?.[0]?.symbol ?? "—"} tone="bad" />
+            <MiniKpi label="Review ticker" value={toReview?.[0]?.symbol ?? "—"} tone="bad" />
           </div>
         </div>
       </div>
@@ -2022,21 +2202,8 @@ function TerminalSection({
 }
 
 /* =========================
-   Page
+   Statistics Section (Wall Street KPI Terminal)
 ========================= */
-
-/* =========================
-   Statistics Section (KPI Grid + Strategy Split + Filters)
-========================= */
-
-type KpiCategory =
-  | "Trades"
-  | "P&L"
-  | "Costs"
-  | "Streaks"
-  | "Risk & RRR"
-  | "Time"
-  | "Account";
 
 type KpiItem = {
   id: string;
@@ -2048,25 +2215,29 @@ type KpiItem = {
 };
 
 function KpiCard({ kpi }: { kpi: KpiItem }) {
+  const tone =
+    kpi.tone === "good"
+      ? "text-emerald-300"
+      : kpi.tone === "bad"
+      ? "text-sky-300"
+      : "text-slate-200";
+
   return (
-    <div className="rounded-2xl border border-slate-800 bg-slate-950/50 px-4 py-3">
-      <div className="flex items-start justify-between gap-2">
-        <p className="text-[10px] uppercase tracking-[0.22em] text-slate-500">
-          {kpi.label}
+    <div className="group relative overflow-hidden rounded-2xl border border-slate-800/90 bg-slate-950/55 px-4 py-3 shadow-[0_0_25px_rgba(0,0,0,0.35)] hover:border-slate-700 hover:bg-slate-950/70 transition">
+      <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition pointer-events-none"
+        style={{ background: "radial-gradient(600px circle at 20% 0%, rgba(52,211,153,0.10), transparent 40%), radial-gradient(600px circle at 80% 120%, rgba(56,189,248,0.10), transparent 40%)" }}
+      />
+      <div className="relative">
+        <div className="flex items-start justify-between gap-2">
+          <p className="text-[10px] uppercase tracking-[0.22em] text-slate-500">
+            {kpi.label}
+          </p>
+          {kpi.description ? <Tip text={kpi.description} /> : null}
+        </div>
+        <p className={`mt-2 text-[22px] leading-[1.2] font-mono ${tone}`}>
+          {kpi.value}
         </p>
-        {kpi.description ? <Tip text={kpi.description} /> : null}
       </div>
-      <p
-        className={`mt-2 text-lg font-mono ${
-          kpi.tone === "good"
-            ? "text-emerald-300"
-            : kpi.tone === "bad"
-            ? "text-sky-300"
-            : "text-slate-200"
-        }`}
-      >
-        {kpi.value}
-      </p>
     </div>
   );
 }
@@ -2074,18 +2245,18 @@ function KpiCard({ kpi }: { kpi: KpiItem }) {
 function StatisticsSection({
   sessions,
   dailySnaps,
+  rangeEndIso,
 }: {
   sessions: SessionWithTrades[];
   dailySnaps: DailySnapshotRow[];
+  rangeEndIso: string;
 }) {
   const [strategy, setStrategy] = useState<string>("ALL");
   const [category, setCategory] = useState<string>("ALL");
   const [query, setQuery] = useState<string>("");
 
-  // Build ledger once for range (FIFO)
-  const ledgerAll = useMemo(() => buildTradeLedgerFIFO(sessions), [sessions]);
+  const ledgerAll = useMemo(() => buildTradeLedgerFIFO(sessions, rangeEndIso), [sessions, rangeEndIso]);
 
-  // Map by strategy (sessions + trades + open positions)
   const byStrategy = useMemo(() => {
     const map: Record<string, {
       tag: string;
@@ -2107,20 +2278,19 @@ function StatisticsSection({
       };
     }
 
-    // sessions
     for (const s of sessions) {
       const tagsU = tagsUpperFromSession(s);
+
       for (const t of STRATEGY_TAGS) {
         const tu = safeUpper(t);
         if (tagsU.includes(tu)) {
           map[tu].sessions.push(s);
           map[tu].sumPnl += sessionNet(s);
-          map[tu].sumFees += Number(s?.feesUsd) || 0;
+          map[tu].sumFees += Number((s as any)?.feesUsd) || 0;
         }
       }
     }
 
-    // closed trades (classified by entry tagsUpper inside ledger)
     for (const tr of ledgerAll.closedTrades) {
       for (const t of STRATEGY_TAGS) {
         const tu = safeUpper(t);
@@ -2130,7 +2300,6 @@ function StatisticsSection({
       }
     }
 
-    // open positions (classified by entry tagsUpper)
     for (const op of ledgerAll.openPositions) {
       for (const t of STRATEGY_TAGS) {
         const tu = safeUpper(t);
@@ -2175,13 +2344,15 @@ function StatisticsSection({
         category: "Trades",
         label: "Total Number of Closed Trades",
         value: agg.totalClosedTrades,
+        description: "Counts trade-closes (exits) + synthetic closes for expired CREDIT options.",
       },
       {
         id: "open_trades",
         category: "Trades",
         label: "Total Number of Open Trades",
         value: agg.totalOpenTrades,
-        description: "Open positions remaining (FIFO ledger across selected range).",
+        description:
+          "Open positions remaining after FIFO matching. CREDIT options with expiration in range are auto-closed at 0.00.",
       },
       {
         id: "win_trades",
@@ -2191,11 +2362,12 @@ function StatisticsSection({
         tone: "good",
       },
       {
-        id: "lose_trades",
+        id: "learned_trades",
         category: "Trades",
-        label: "Total Number of Losing Trades",
-        value: agg.totalLosingTrades,
-        tone: agg.totalLosingTrades > 0 ? "bad" : "neutral",
+        label: "Total Number of Learned Trades",
+        value: agg.totalLearnedTrades,
+        tone: agg.totalLearnedTrades > 0 ? "bad" : "neutral",
+        description: "We avoid 'loss' terminology. Learned trades are trades with negative realized P&L.",
       },
       {
         id: "be_trades",
@@ -2228,11 +2400,11 @@ function StatisticsSection({
         tone: "good",
       },
       {
-        id: "avg_lose_trade",
+        id: "avg_learned_trade",
         category: "P&L",
-        label: "Average Losing Trade",
-        value: fmtMoney(agg.avgLosingTrade),
-        tone: agg.avgLosingTrade < 0 ? "bad" : "neutral",
+        label: "Average Learned Trade",
+        value: fmtMoney(agg.avgLearnedTrade),
+        tone: agg.avgLearnedTrade < 0 ? "bad" : "neutral",
       },
       {
         id: "largest_win_trade",
@@ -2242,11 +2414,11 @@ function StatisticsSection({
         tone: "good",
       },
       {
-        id: "largest_lose_trade",
+        id: "largest_learned_trade",
         category: "P&L",
-        label: "Largest Losing Trade",
-        value: fmtMoney(agg.largestLosingTrade),
-        tone: agg.largestLosingTrade < 0 ? "bad" : "neutral",
+        label: "Largest Learned Trade",
+        value: fmtMoney(agg.largestLearnedTrade),
+        tone: agg.largestLearnedTrade < 0 ? "bad" : "neutral",
       },
       {
         id: "expectancy",
@@ -2275,12 +2447,12 @@ function StatisticsSection({
         tone: "good",
       },
       {
-        id: "loss_streak",
+        id: "learned_streak",
         category: "Streaks",
-        label: "Longest Losing Streak",
-        value: agg.longestLosingStreak,
-        description: "Measured as consecutive red sessions (net < 0).",
-        tone: agg.longestLosingStreak >= 3 ? "bad" : "neutral",
+        label: "Longest Learned Streak",
+        value: agg.longestLearnedStreak,
+        description: "Measured as consecutive learning sessions (net < 0).",
+        tone: agg.longestLearnedStreak >= 3 ? "bad" : "neutral",
       },
 
       // Risk & RRR
@@ -2310,7 +2482,7 @@ function StatisticsSection({
         category: "Risk & RRR",
         label: "Avg Achieved RRR (risk reward ratio)",
         value: agg.avgAchievedRRR == null ? "—" : agg.avgAchievedRRR.toFixed(2),
-        description: "Computed as avgWinner / abs(avgLoser) from closed trades.",
+        description: "Computed as avgWinner / abs(avgLearnedTrade) from closed trades.",
       },
 
       // Time
@@ -2328,10 +2500,10 @@ function StatisticsSection({
         value: fmtDurationMin(agg.avgHoldMinWinners),
       },
       {
-        id: "hold_loss",
+        id: "hold_learned",
         category: "Time",
-        label: "Average trade hold time for losers",
-        value: fmtDurationMin(agg.avgHoldMinLosers),
+        label: "Average trade hold time for learned trades",
+        value: fmtDurationMin(agg.avgHoldMinLearned),
       },
 
       // Account
@@ -2416,12 +2588,13 @@ function StatisticsSection({
 
   return (
     <section className="space-y-6">
-      <div className={wrapCard()}>
+      {/* Command header */}
+      <div className={`${wrapCard()} bg-linear-to-br from-slate-900/70 via-slate-950/65 to-slate-950/80`}>
         <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-3">
           <div>
-            <p className={chartTitle()}>Statistics</p>
+            <p className={chartTitle()}>KPI Terminal</p>
             <p className={chartSub()}>
-              KPI grid with Strategy split + Category filter + Search (data from Journal Date Page: tags + entries/exits).
+              Strategy split + KPI categories + search (built for scale, consistent trade closure logic).
             </p>
           </div>
 
@@ -2477,12 +2650,12 @@ function StatisticsSection({
         </div>
       </div>
 
-      {/* Strategy breakdown table */}
+      {/* Strategy breakdown */}
       <div className={wrapCard()}>
         <div className="flex items-baseline justify-between gap-3">
           <div>
             <p className={chartTitle()}>Strategy breakdown</p>
-            <p className={chartSub()}>Click a strategy to filter the KPI grid.</p>
+            <p className={chartSub()}>Click a strategy to filter all KPIs.</p>
           </div>
           <span className="text-[11px] text-slate-500 font-mono">STRAT</span>
         </div>
@@ -2555,9 +2728,15 @@ function StatisticsSection({
         <div className="mt-4 space-y-6">
           {Object.entries(grouped).map(([cat, arr]) => (
             <div key={cat}>
-              <p className="text-[11px] uppercase tracking-[0.22em] text-slate-400 mb-3">
-                {cat}
-              </p>
+              <div className="flex items-center justify-between gap-3 mb-3">
+                <p className="text-[11px] uppercase tracking-[0.22em] text-slate-400">
+                  {cat}
+                </p>
+                <span className="text-[11px] text-slate-600 font-mono">
+                  {arr.length}
+                </span>
+              </div>
+
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                 {arr.map((k) => (
                   <KpiCard key={k.id} kpi={k} />
@@ -2566,17 +2745,25 @@ function StatisticsSection({
             </div>
           ))}
         </div>
+
+        <div className="mt-4 text-[11px] text-slate-500">
+          Note: CREDIT option positions with no exit are auto-closed at expiry price 0.00 when the expiry date is within the selected range.
+          This prevents "phantom opens" in statistics.
+        </div>
       </div>
     </section>
   );
 }
 
+/* =========================
+   Page
+========================= */
 
 export default function AnalyticsStatisticsPage() {
   const { user, loading } = useAuth();
   const router = useRouter();
 
-  // FIX: range presets + calendar
+  // range presets + calendar
   const [preset, setPreset] = useState<RangePreset>("YTD");
   const initial = useMemo(() => computePreset("YTD"), []);
   const [startIso, setStartIso] = useState<string>(initial.startIso);
@@ -2608,10 +2795,10 @@ export default function AnalyticsStatisticsPage() {
     return { startIso, endIso, start, end };
   }, [startIso, endIso]);
 
-  // FIX: unified userId (Supabase UUID) everywhere
+  // unified userId (Supabase UUID) everywhere
   const userId = (user as any)?.id as string | undefined;
 
-  // Load journal entries (all-time; we filter in-memory by selected range)
+  // Load journal entries (all-time; filter in-memory by selected range)
   useEffect(() => {
     if (loading || !userId) return;
 
@@ -2656,7 +2843,7 @@ export default function AnalyticsStatisticsPage() {
   }, [userId, dateRange.startIso, dateRange.endIso]);
 
   /* =========================
-     Normalize sessions with trades (FIXED parseNotesTrades + pnlNet)
+     Normalize sessions with trades (parseNotesTrades + pnlNet)
   ========================= */
   const sessionsAll: SessionWithTrades[] = useMemo(() => {
     return (entries || []).map((s) => {
@@ -2772,12 +2959,11 @@ export default function AnalyticsStatisticsPage() {
   // Build snapshot-like object for UI (based on filtered sessions + filtered daily snaps)
   useEffect(() => {
     const snaps = [...(dailySnaps || [])].sort((a, b) => (a.date < b.date ? -1 : 1));
-    // equity from snapshots (if you store balances, use them here; this is kept as your current logic)
     const equityCurve = snaps.map((s) => ({
       date: s.date,
-      value: (Number(s.start_of_day_balance) || 0) + (Number(s.realized_usd) || 0),
+      value: (Number((s as any).start_of_day_balance) || 0) + (Number((s as any).realized_usd) || 0),
     }));
-    const dailyPnl = snaps.map((s) => ({ date: s.date, pnl: Number(s.realized_usd) || 0 }));
+    const dailyPnl = snaps.map((s) => ({ date: s.date, pnl: Number((s as any).realized_usd) || 0 }));
 
     const totalSessions = sessions.length;
     const greenSessions = sessions.filter((s) => s.isGreenComputed).length;
@@ -2849,7 +3035,7 @@ export default function AnalyticsStatisticsPage() {
   }, [dailySnaps, sessions]);
 
   /* =========================
-     Probability stats (FIX: always use sessionNet)
+     Probability stats (always use sessionNet)
   ========================= */
   const probabilityStats = useMemo(() => {
     const total = sessions.length;
@@ -2875,8 +3061,7 @@ export default function AnalyticsStatisticsPage() {
       const isLearning = pnl < 0;
 
       const respectedPlan = !!(e as any).respectedPlan;
-      const tagsRaw = ((e as any).tags || []) as string[];
-      const tagsUpper = tagsRaw.map((t) => safeUpper(t || ""));
+      const tagsUpper = tagsUpperFromSession(e);
       const hasFomo = tagsUpper.includes("FOMO");
 
       if (isGreen) baseGreen++;
@@ -2904,7 +3089,7 @@ export default function AnalyticsStatisticsPage() {
   }, [sessions]);
 
   /* =========================
-     Day of week (FIX: sessionNet)
+     Day of week (sessionNet)
   ========================= */
   const uiWeekdayBars = useMemo(() => {
     const base: Record<DayOfWeekKey, { sessions: number; wins: number; sum: number }> = {
@@ -2937,7 +3122,6 @@ export default function AnalyticsStatisticsPage() {
 
   /* =========================
      Live series (fallback if snapshots absent)
-     (FIX: sessionNet used)
   ========================= */
   const equityCurveLive = useMemo(() => {
     const sorted = [...sessions].sort((a, b) => {
@@ -2982,7 +3166,7 @@ export default function AnalyticsStatisticsPage() {
   }, [snapshot, dailyPnlLive]);
 
   /* =========================
-     Usage (unchanged logic, but filtered sessions)
+     Usage
   ========================= */
   const uiUsage = useMemo(() => {
     const PREMARKET_KEYS = ["premarketBias", "premarketPlan", "premarketLevels", "premarketCatalyst", "premarketChecklist"];
@@ -3007,7 +3191,7 @@ export default function AnalyticsStatisticsPage() {
   }, [sessions]);
 
   /* =========================
-     Instruments stats (FIX: green/red uses sessionNet)
+     Instruments stats
   ========================= */
   const underlyingMix = useMemo(() => {
     const map: Record<string, number> = {};
@@ -3070,68 +3254,67 @@ export default function AnalyticsStatisticsPage() {
   }, [sessions]);
 
   /* =========================
-     Psychology (FIX: uses sessionNet)
+     Psychology: read from session tags
   ========================= */
-const psychologyLive = useMemo(() => {
-  const freq: Record<string, number> = {};
+  const psychologyLive = useMemo(() => {
+    const freq: Record<string, number> = {};
 
-  // KPI: por tag de psicología -> count, winRate, avgPnL
-  const emoAgg: Record<string, { n: number; wins: number; sum: number }> = {};
-  for (const t of PSYCHOLOGY_TAGS) {
-    emoAgg[safeUpper(t)] = { n: 0, wins: 0, sum: 0 };
-  }
+    const emoAgg: Record<string, { n: number; wins: number; sum: number }> = {};
+    for (const t of PSYCHOLOGY_TAGS) {
+      emoAgg[safeUpper(t)] = { n: 0, wins: 0, sum: 0 };
+    }
 
-  const timeline = [...sessions]
-    .sort((a, b) => {
-      const da = safeDateFromSession(a);
-      const db = safeDateFromSession(b);
-      return (da?.getTime() ?? 0) - (db?.getTime() ?? 0);
-    })
-    .map((s) => {
-      const tagsUpper = tagsUpperFromSession(s);
+    const timeline = [...sessions]
+      .sort((a, b) => {
+        const da = safeDateFromSession(a);
+        const db = safeDateFromSession(b);
+        return (da?.getTime() ?? 0) - (db?.getTime() ?? 0);
+      })
+      .map((s) => {
+        const tagsUpper = tagsUpperFromSession(s);
 
-      const emos = (PSYCHOLOGY_TAGS as readonly string[])
-        .map((t) => safeUpper(t))
-        .filter((u) => tagsUpper.includes(u));
+        const emos = (PSYCHOLOGY_TAGS as readonly string[])
+          .map((t) => safeUpper(t))
+          .filter((u) => tagsUpper.includes(u));
 
-      for (const e of emos) {
-        freq[e] = (freq[e] || 0) + 1;
-      }
+        for (const e of emos) {
+          freq[e] = (freq[e] || 0) + 1;
+        }
 
-      const pnl = Number(sessionNet(s).toFixed(2));
-      const isGreen = pnl > 0;
+        const pnl = Number(sessionNet(s).toFixed(2));
+        const isGreen = pnl > 0;
 
-      for (const e of emos) {
-        emoAgg[e].n += 1;
-        emoAgg[e].wins += isGreen ? 1 : 0;
-        emoAgg[e].sum += pnl;
-      }
+        for (const e of emos) {
+          emoAgg[e].n += 1;
+          emoAgg[e].wins += isGreen ? 1 : 0;
+          emoAgg[e].sum += pnl;
+        }
 
-      const top = emos.length ? emos[0] : "—";
-      const d = safeDateFromSession(s);
-      const dateKey = d ? isoDate(d) : String((s as any).date || "");
+        const top = emos.length ? emos[0] : "—";
+        const d = safeDateFromSession(s);
+        const dateKey = d ? isoDate(d) : String((s as any).date || "");
 
-      return { date: dateKey, pnl, emotion: top };
+        return { date: dateKey, pnl, emotion: top };
+      });
+
+    const freqArr = Object.entries(freq)
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 12);
+
+    const kpis = (PSYCHOLOGY_TAGS as readonly string[]).map((t) => {
+      const k = safeUpper(t);
+      const v = emoAgg[k] || { n: 0, wins: 0, sum: 0 };
+      return {
+        tag: t,
+        count: v.n,
+        winRate: v.n ? (v.wins / v.n) * 100 : 0,
+        avgPnl: v.n ? v.sum / v.n : 0,
+      };
     });
 
-  const freqArr = Object.entries(freq)
-    .map(([name, value]) => ({ name, value }))
-    .sort((a, b) => b.value - a.value)
-    .slice(0, 12);
-
-  const kpis = (PSYCHOLOGY_TAGS as readonly string[]).map((t) => {
-    const k = safeUpper(t);
-    const v = emoAgg[k] || { n: 0, wins: 0, sum: 0 };
-    return {
-      tag: t,
-      count: v.n,
-      winRate: v.n ? (v.wins / v.n) * 100 : 0,
-      avgPnl: v.n ? v.sum / v.n : 0,
-    };
-  });
-
-  return { freqArr, timeline, kpis };
-}, [sessions]);
+    return { freqArr, timeline, kpis };
+  }, [sessions]);
 
   /* =========================
      Totals (selected range)
@@ -3145,7 +3328,6 @@ const psychologyLive = useMemo(() => {
     const avgPnl = totalSessions ? sumPnl / totalSessions : 0;
     const baseGreenRate = totalSessions ? (greenSessions / totalSessions) * 100 : 0;
 
-    // prefer snapshot totals if present (but they are already computed with filtered sessions in this file)
     const t = snapshot?.totals;
     if (t) {
       return {
@@ -3207,7 +3389,7 @@ const psychologyLive = useMemo(() => {
               </div>
             </div>
 
-            {/* Date Range Controls (NEW) */}
+            {/* Date Range Controls */}
             <div className={wrapCard()}>
               <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-3">
                 <div>
@@ -3351,12 +3533,9 @@ const psychologyLive = useMemo(() => {
                 />
               )}
 
-              {/* Statistics group: you can re-add your full KPI grid here.
-                  Kept out to keep this file manageable, but all fixes are applied (sessionNet + range). */}
-             {activeGroup === "statistics" && (
-  <StatisticsSection sessions={sessions} dailySnaps={dailySnaps} />
-)}
-
+              {activeGroup === "statistics" && (
+                <StatisticsSection sessions={sessions} dailySnaps={dailySnaps} rangeEndIso={dateRange.endIso} />
+              )}
             </>
           )}
         </div>

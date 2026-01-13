@@ -482,7 +482,7 @@ const rules: NavItem[] = [
     id: "alarms",
     title: "Alarms",
     description: "Notifications for breaking rules.",
-    href: "/rules/alarms",
+    href: "/rules-alarms/alarms",
     badge: "NEW",
   },
 ];
