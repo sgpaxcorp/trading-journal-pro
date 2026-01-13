@@ -467,23 +467,17 @@ const resources: NavItem[] = [
 
 const rules: NavItem[] = [
   {
-    id: "risk-rules",
-    title: "Risk rules",
-    description: "Max loss, size, and circuit breakers.",
-    href: "/rules/risk",
+    id: "alerts",
+    title: "Important Alerts",
+    description: "Alerts that you need when somethin happens.",
+    href: "/rules-alarms/alerts",
   },
-  {
-    id: "behavior-rules",
-    title: "Behavior rules",
-    description: "What you do before, during and after trading.",
-    href: "/rules/behavior",
-  },
+
   {
     id: "alarms",
     title: "Alarms",
     description: "Notifications for breaking rules.",
     href: "/rules-alarms/alarms",
-    badge: "NEW",
   },
 ];
 
