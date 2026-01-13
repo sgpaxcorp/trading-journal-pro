@@ -141,6 +141,44 @@ type AnalyticsSnapshot = {
    Constants
 ========================= */
 
+/* =========================
+   KPI Tag Dictionaries
+========================= */
+
+const STRATEGY_TAGS = [
+  "News-driven trade",
+  "Momentum trade",
+  "Trend Follow Trade",
+  "Reversal trade",
+  "Scalping trade",
+  "Swing trade",
+  "Options trade",
+  "Stock trade",
+  "Futures Trade",
+  "Forex Trade",
+  "Crypto Trade",
+] as const;
+
+const PSYCHOLOGY_TAGS = [
+  "Calm",
+  "Greedy",
+  "Desperate",
+  "FOMO",
+  "Revenge trade",
+  "Focus",
+  "Patience",
+  "Discipline",
+  "Anxiety",
+  "Overconfident",
+] as const;
+
+type StrategyTag = (typeof STRATEGY_TAGS)[number];
+type PsychologyTag = (typeof PSYCHOLOGY_TAGS)[number];
+
+/** Options premium handling (matches your Journal Date logic) */
+type PremiumSide = "none" | "debit" | "credit";
+
+
 const DAY_LABELS: Record<DayOfWeekKey, string> = {
   0: "Sunday",
   1: "Monday",
@@ -308,6 +346,8 @@ function computePreset(preset: Exclude<RangePreset, "CUSTOM">) {
 ========================= */
 
 // FIX: supports notes as string OR jsonb/object.
+
+
 function parseNotesTrades(
   notesRaw: unknown
 ): { entries: EntryTradeRow[]; exits: ExitTradeRow[] } {
@@ -551,6 +591,651 @@ function safeDateFromSession(s: any): Date | null {
 }
 
 const DEFAULT_HOURS = [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17];
+
+/* =========================
+   Trade Ledger (FIFO across date range)
+   - Supports options premiumSide (credit/debit)
+   - Supports futures multipliers
+   - Produces per-exit "closed trade" PnL + hold time
+========================= */
+
+const FUTURES_MULTIPLIERS: Record<string, number> = {
+  ES: 50,
+  MES: 5,
+  NQ: 20,
+  MNQ: 2,
+  YM: 5,
+  MYM: 0.5,
+  RTY: 50,
+  M2K: 5,
+  CL: 1000,
+  MCL: 100,
+  GC: 100,
+  MGC: 10,
+  SI: 5000,
+  HG: 25000,
+};
+
+function futureRoot(symbol: string) {
+  const s = (symbol || "").trim().toUpperCase().replace(/^\//, "");
+  const m = s.match(/^([A-Z]{1,4})/);
+  return m?.[1] ?? s;
+}
+
+function normalizePremiumSide(kind: InstrumentType, raw?: any): PremiumSide {
+  const s = String(raw ?? "").toLowerCase().trim();
+  if (kind === "option") {
+    if (s.includes("credit")) return "credit";
+    if (s.includes("debit")) return "debit";
+    // default for option if missing
+    return "debit";
+  }
+  return "none";
+}
+
+/**
+ * Sign rules (matches your Journal Date Page):
+ * - options: credit => profit if exit < entry (sign -1), debit => sign +1
+ * - linear: short => sign -1, long => sign +1
+ */
+function pnlSign(kind: InstrumentType, side: SideType, premiumSide: PremiumSide): number {
+  if (kind === "option") {
+    return premiumSide === "credit" ? -1 : 1;
+  }
+  return side === "short" ? -1 : 1;
+}
+
+function getContractMultiplier(kind: InstrumentType, symbol: string): number {
+  if (kind === "option") return 100;
+  if (kind === "future") {
+    const root = futureRoot(symbol);
+    return FUTURES_MULTIPLIERS[root] ?? 1;
+  }
+  return 1;
+}
+
+function looksLikeYYYYMMDD(s: string) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(s);
+}
+
+function sessionDateIsoKey(s: any): string {
+  const raw = String(s?.date ?? s?.sessionDate ?? "").slice(0, 10);
+  if (looksLikeYYYYMMDD(raw)) return raw;
+  const d = safeDateFromSession(s);
+  return d ? isoDate(d) : "";
+}
+
+function parseTimeOnDate(dateIso: string, timeRaw: unknown): Date | null {
+  if (!dateIso || !looksLikeYYYYMMDD(dateIso) || !timeRaw) return null;
+  const t = String(timeRaw).trim();
+  if (!t) return null;
+
+  // if it's an ISO-ish datetime, try direct
+  const direct = new Date(t);
+  if (!Number.isNaN(direct.getTime())) return direct;
+
+  // HH:MM(:SS)? (AM|PM)?
+  const m = t.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?$/i);
+  if (!m) return null;
+
+  let hh = Number(m[1]);
+  const mm = Number(m[2]);
+  const ss = Number(m[3] ?? "0");
+  const ap = (m[4] ?? "").toUpperCase();
+
+  if (!Number.isFinite(hh) || !Number.isFinite(mm) || !Number.isFinite(ss)) return null;
+  if (mm < 0 || mm > 59 || ss < 0 || ss > 59) return null;
+
+  if (ap === "AM") {
+    if (hh === 12) hh = 0;
+  } else if (ap === "PM") {
+    if (hh < 12) hh += 12;
+  }
+
+  if (hh < 0 || hh > 23) return null;
+
+  const hh2 = String(hh).padStart(2, "0");
+  const mm2 = String(mm).padStart(2, "0");
+  const ss2 = String(ss).padStart(2, "0");
+
+  // local time is OK for duration computations
+  const dt = new Date(`${dateIso}T${hh2}:${mm2}:${ss2}`);
+  return Number.isNaN(dt.getTime()) ? null : dt;
+}
+
+function tagsUpperFromSession(s: any): string[] {
+  const raw = Array.isArray(s?.tags) ? s.tags : [];
+  return raw.map((t: any) => safeUpper(String(t ?? ""))).filter(Boolean);
+}
+
+function hasTagUpper(tagsUpper: string[], tag: string): boolean {
+  const t = safeUpper(tag);
+  return tagsUpper.includes(t);
+}
+
+type TradeClose = {
+  id: string; // exit id
+  symbol: string;
+  kind: InstrumentType;
+  side: SideType;
+  premiumSide: PremiumSide;
+  optionStrategy?: string | null;
+  qty: number;
+  pnl: number;
+  holdMin: number | null;
+  entryDateIso: string;
+  exitDateIso: string;
+  tagsUpper: string[]; // from ENTRY session (strategy classification)
+};
+
+type OpenPosition = {
+  key: string;
+  symbol: string;
+  kind: InstrumentType;
+  side: SideType;
+  premiumSide: PremiumSide;
+  optionStrategy?: string | null;
+  qty: number;
+  tagsUpper: string[]; // from ENTRY session
+};
+
+type TradeEvent =
+  | {
+      type: "entry";
+      dt: Date | null;
+      dateIso: string;
+      tagsUpper: string[];
+      row: EntryTradeRow;
+      idx: number;
+    }
+  | {
+      type: "exit";
+      dt: Date | null;
+      dateIso: string;
+      tagsUpper: string[]; // exit session tags (not used for classification here)
+      row: ExitTradeRow;
+      idx: number;
+    };
+
+function effectiveKind(kind: InstrumentType, symbol: string): InstrumentType {
+  // keep your existing behavior if needed; here we trust stored kind.
+  return kind || "other";
+}
+
+function buildTradeLedgerFIFO(sessions: SessionWithTrades[]) {
+  // Build ordered events
+  const events: TradeEvent[] = [];
+  let ei = 0;
+
+  for (const s of sessions) {
+    const dateIso = sessionDateIsoKey(s);
+    const tagsUpper = tagsUpperFromSession(s);
+
+    for (const r of (s.entries || []) as EntryTradeRow[]) {
+      const dt = parseTimeOnDate(dateIso, (r as any).time);
+      events.push({ type: "entry", dt, dateIso, tagsUpper, row: r, idx: ei++ });
+    }
+    for (const r of (s.exits || []) as ExitTradeRow[]) {
+      const dt = parseTimeOnDate(dateIso, (r as any).time);
+      events.push({ type: "exit", dt, dateIso, tagsUpper, row: r, idx: ei++ });
+    }
+  }
+
+  // Sort chronologically; stable fallback; entries first when same timestamp
+  events.sort((a, b) => {
+    const ta = a.dt?.getTime() ?? 0;
+    const tb = b.dt?.getTime() ?? 0;
+    if (ta !== tb) return ta - tb;
+    if (a.type !== b.type) return a.type === "entry" ? -1 : 1;
+    return a.idx - b.idx;
+  });
+
+  type Lot = {
+    symbol: string;
+    kind: InstrumentType;
+    side: SideType;
+    premiumSide: PremiumSide;
+    optionStrategy?: string | null;
+    price: number;
+    qtyLeft: number;
+    entryDt: Date | null;
+    entryDateIso: string;
+    tagsUpper: string[]; // from ENTRY session
+  };
+
+  const keyOf = (
+    symbol: string,
+    kind: InstrumentType,
+    side: SideType,
+    premiumSide: PremiumSide,
+    optionStrategy?: string | null
+  ) => `${symbol}|${kind}|${side}|${premiumSide}|${optionStrategy ?? "—"}`;
+
+  const lotsByKey: Record<string, Lot[]> = {};
+  const closed: TradeClose[] = [];
+
+  let fallbackExitId = 0;
+
+  for (const ev of events) {
+    if (ev.type === "entry") {
+      const sym = safeUpper(ev.row.symbol);
+      if (!sym) continue;
+
+      const kind = effectiveKind(normalizeKind((ev.row as any).kind), sym);
+      const side = normalizeSide((ev.row as any).side);
+      const prem = normalizePremiumSide(kind, (ev.row as any).premiumSide);
+      const optStrat = (ev.row as any).optionStrategy ?? null;
+
+      const px = toNumberMaybe((ev.row as any).price);
+      const qty = toNumberMaybe((ev.row as any).quantity);
+      if (!Number.isFinite(px) || !Number.isFinite(qty) || qty <= 0) continue;
+
+      const k = keyOf(sym, kind, side, prem, optStrat);
+      lotsByKey[k] ||= [];
+      lotsByKey[k].push({
+        symbol: sym,
+        kind,
+        side,
+        premiumSide: prem,
+        optionStrategy: optStrat,
+        price: px,
+        qtyLeft: qty,
+        entryDt: ev.dt,
+        entryDateIso: ev.dateIso,
+        tagsUpper: ev.tagsUpper,
+      });
+      continue;
+    }
+
+    // exit
+    const sym = safeUpper(ev.row.symbol);
+    if (!sym) continue;
+
+    const kind = effectiveKind(normalizeKind((ev.row as any).kind), sym);
+    const side = normalizeSide((ev.row as any).side);
+    const prem = normalizePremiumSide(kind, (ev.row as any).premiumSide);
+    const optStrat = (ev.row as any).optionStrategy ?? null;
+
+    const exitPx = toNumberMaybe((ev.row as any).price);
+    let exitQty = toNumberMaybe((ev.row as any).quantity);
+    if (!Number.isFinite(exitPx) || !Number.isFinite(exitQty) || exitQty <= 0) continue;
+
+    const k = keyOf(sym, kind, side, prem, optStrat);
+    const lots = lotsByKey[k];
+    if (!lots || lots.length === 0) continue;
+
+    const sign = pnlSign(kind, side, prem);
+    const mult = getContractMultiplier(kind, sym);
+
+    let pnlSum = 0;
+    let qtySum = 0;
+
+    // weighted hold time by qty
+    let holdQtyKnown = 0;
+    let holdWeighted = 0;
+
+    const exitDt = ev.dt;
+
+    while (exitQty > 0 && lots.length > 0) {
+      const lot = lots[0];
+      const closeQty = Math.min(lot.qtyLeft, exitQty);
+
+      const pnlSeg = (exitPx - lot.price) * closeQty * sign * mult;
+      pnlSum += pnlSeg;
+      qtySum += closeQty;
+
+      if (lot.entryDt && exitDt) {
+        const hm = (exitDt.getTime() - lot.entryDt.getTime()) / 60000;
+        if (Number.isFinite(hm) && hm >= 0) {
+          holdQtyKnown += closeQty;
+          holdWeighted += hm * closeQty;
+        }
+      }
+
+      lot.qtyLeft -= closeQty;
+      exitQty -= closeQty;
+
+      if (lot.qtyLeft <= 0) lots.shift();
+    }
+
+    const exitId = String((ev.row as any).id ?? `exit-${fallbackExitId++}`);
+    // IMPORTANT: classification tags from entry lots (first lot used)
+    const tagsUpper = lotsByKey[k]?.[0]?.tagsUpper ?? []; // fallback if still has lots
+    const entryDateIso = lotsByKey[k]?.[0]?.entryDateIso ?? ev.dateIso;
+
+    closed.push({
+      id: exitId,
+      symbol: sym,
+      kind,
+      side,
+      premiumSide: prem,
+      optionStrategy: optStrat,
+      qty: qtySum,
+      pnl: Number(pnlSum.toFixed(2)),
+      holdMin: holdQtyKnown > 0 ? holdWeighted / holdQtyKnown : null,
+      entryDateIso,
+      exitDateIso: ev.dateIso,
+      tagsUpper: tagsUpper.length ? tagsUpper : ev.tagsUpper, // fallback to exit session tags
+    });
+  }
+
+  // Open positions (aggregate remaining qty by key)
+  const openPositions: OpenPosition[] = [];
+  for (const [k, lots] of Object.entries(lotsByKey)) {
+    const qtyLeft = lots.reduce((a, l) => a + (Number(l.qtyLeft) || 0), 0);
+    if (qtyLeft <= 0) continue;
+    const first = lots[0];
+    openPositions.push({
+      key: k,
+      symbol: first.symbol,
+      kind: first.kind,
+      side: first.side,
+      premiumSide: first.premiumSide,
+      optionStrategy: first.optionStrategy ?? null,
+      qty: qtyLeft,
+      tagsUpper: first.tagsUpper,
+    });
+  }
+
+  return { closedTrades: closed, openPositions };
+}
+
+/* =========================
+   KPI Aggregation
+========================= */
+
+function fmtPct(x: number, digits = 1) {
+  if (!Number.isFinite(x)) return "—";
+  return `${x.toFixed(digits)}%`;
+}
+
+function fmtDurationMin(min: number | null | undefined) {
+  if (min == null || !Number.isFinite(min)) return "—";
+  const m = Math.max(0, Math.round(min));
+  const h = Math.floor(m / 60);
+  const mm = m % 60;
+  if (h <= 0) return `${mm}m`;
+  if (mm === 0) return `${h}h`;
+  return `${h}h ${mm}m`;
+}
+
+function mean(nums: number[]) {
+  const a = nums.filter((n) => Number.isFinite(n));
+  if (!a.length) return 0;
+  return a.reduce((x, y) => x + y, 0) / a.length;
+}
+
+function longestStreak(sessions: SessionWithTrades[], pred: (net: number) => boolean) {
+  const sorted = [...sessions].sort((a, b) => {
+    const da = sessionDateIsoKey(a);
+    const db = sessionDateIsoKey(b);
+    return da < db ? -1 : da > db ? 1 : 0;
+  });
+
+  let best = 0;
+  let cur = 0;
+  for (const s of sorted) {
+    const net = sessionNet(s);
+    if (pred(net)) {
+      cur += 1;
+      best = Math.max(best, cur);
+    } else {
+      cur = 0;
+    }
+  }
+  return best;
+}
+
+function inferPlannedRrrFromTags(tagsUpper: string[]): number | null {
+  // allow variants like >= 2R / ≥ 2R
+  const joined = tagsUpper.join(" | ");
+  if (joined.includes("RISK-TO-REWARD") && (joined.includes("≥ 2R") || joined.includes(">= 2R"))) return 2.0;
+  if (joined.includes("RISK-TO-REWARD") && (joined.includes("< 1.5R") || joined.includes("<1.5R"))) return 1.5;
+
+  if (tagsUpper.includes("GOOD RISK-REWARD")) return 2.0;
+  if (tagsUpper.includes("POOR RISK-REWARD")) return 1.0;
+
+  return null;
+}
+
+function extractRiskRewardPctFromTrades(sessions: SessionWithTrades[]) {
+  const risk: number[] = [];
+  const reward: number[] = [];
+
+  const pickPct = (v: any): number | null => {
+    const n = toNumberMaybe(v);
+    if (!Number.isFinite(n)) return null;
+    // heuristic: assume 0..100 is percent
+    if (n < 0 || n > 100) return null;
+    return n;
+  };
+
+  for (const s of sessions) {
+    for (const t of (s.entries || []) as any[]) {
+      const r = pickPct(t?.riskPct ?? t?.risk_percent ?? t?.riskPercent ?? t?.risk_pct);
+      const w = pickPct(t?.rewardPct ?? t?.reward_percent ?? t?.rewardPercent ?? t?.reward_pct);
+      if (r != null) risk.push(r);
+      if (w != null) reward.push(w);
+    }
+  }
+
+  return {
+    avgRiskPct: risk.length ? mean(risk) : null,
+    avgRewardPct: reward.length ? mean(reward) : null,
+  };
+}
+
+function disciplineScore0to10(s: any): number | null {
+  // Prefer explicit numeric rating if you later add it
+  const direct =
+    (typeof s?.disciplineRating === "number" && s.disciplineRating) ||
+    (typeof s?.psychology?.disciplineRating === "number" && s.psychology.disciplineRating) ||
+    null;
+
+  if (direct != null && Number.isFinite(direct)) return clamp(direct, 0, 10);
+
+  // Heuristic fallback (deterministic, based on tags + respectedPlan)
+  const tagsUpper = tagsUpperFromSession(s);
+  let score = (s?.respectedPlan === false || tagsUpper.includes("NOT FOLLOW MY PLAN") || tagsUpper.includes("NO RESPECT MY PLAN"))
+    ? 4
+    : 10;
+
+  if (tagsUpper.includes("FOMO")) score -= 1.5;
+  if (tagsUpper.includes("REVENGE TRADE")) score -= 2.0;
+  if (tagsUpper.includes("OVERCONFIDENT")) score -= 1.0;
+
+  if (tagsUpper.includes("DISCIPLINE")) score += 0.5;
+  if (tagsUpper.includes("PATIENCE")) score += 0.3;
+  if (tagsUpper.includes("FOCUS")) score += 0.3;
+
+  return clamp(score, 0, 10);
+}
+
+type StatsAgg = {
+  totalClosedTrades: number;
+  totalOpenTrades: number;
+
+  totalWinningTrades: number;
+  totalLosingTrades: number;
+  totalBreakEvenTrades: number;
+
+  tradeWinRate: number;
+
+  avgWinningTrade: number;
+  avgLosingTrade: number;
+
+  largestWinningTrade: number;
+  largestLosingTrade: number;
+
+  longestWinningStreak: number; // sessions-based
+  longestLosingStreak: number; // sessions-based
+
+  totalTradeCosts: number; // fees
+  totalPL: number; // net (after fees)
+
+  accountGrowthPct: number | null;
+
+  avgRiskPct: number | null;
+  avgRewardPct: number | null;
+
+  tradeExpectancy: number;
+
+  avgPlannedRRR: number | null;
+  avgAchievedRRR: number | null;
+
+  avgHoldMin: number | null;
+  avgHoldMinWinners: number | null;
+  avgHoldMinLosers: number | null;
+
+  totalDeposits: number | null;
+  totalWithdrawals: number | null;
+
+  disciplineAvg: number | null;
+};
+
+function sumFromDailySnaps(rows: DailySnapshotRow[], keys: string[]) {
+  let total = 0;
+  let seen = false;
+  for (const r of rows || []) {
+    for (const k of keys) {
+      if ((r as any)?.[k] != null) {
+        const n = toNumberMaybe((r as any)[k]);
+        if (Number.isFinite(n)) {
+          total += n;
+          seen = true;
+        }
+      }
+    }
+  }
+  return seen ? total : null;
+}
+
+function computeStatsAgg(params: {
+  sessions: SessionWithTrades[];
+  ledgerClosedTrades: TradeClose[];
+  ledgerOpenPositions: OpenPosition[];
+  dailySnaps: DailySnapshotRow[];
+}): StatsAgg {
+  const { sessions, ledgerClosedTrades, ledgerOpenPositions, dailySnaps } = params;
+
+  // P&L + fees from sessions (authoritative, already netted with fees in your sessionNet)
+  const totalPL = sessions.reduce((a, s) => a + sessionNet(s), 0);
+  const totalTradeCosts = sessions.reduce((a, s) => a + (Number(s?.feesUsd) || 0), 0);
+
+  // Trades classification (per-exit close)
+  const EPS = 1e-9;
+  const pnlList = ledgerClosedTrades.map((t) => Number(t.pnl) || 0);
+
+  const winners = pnlList.filter((x) => x > EPS);
+  const losers = pnlList.filter((x) => x < -EPS);
+  const breakeven = pnlList.filter((x) => Math.abs(x) <= EPS);
+
+  const totalClosedTrades = pnlList.length;
+  const totalWinningTrades = winners.length;
+  const totalLosingTrades = losers.length;
+  const totalBreakEvenTrades = breakeven.length;
+
+  const tradeWinRate = totalClosedTrades ? (totalWinningTrades / totalClosedTrades) * 100 : 0;
+
+  const avgWinningTrade = winners.length ? mean(winners) : 0;
+  const avgLosingTrade = losers.length ? mean(losers) : 0;
+
+  const largestWinningTrade = pnlList.length ? Math.max(...pnlList) : 0;
+  const largestLosingTrade = pnlList.length ? Math.min(...pnlList) : 0;
+
+  const tradeExpectancy = totalClosedTrades ? mean(pnlList) : 0;
+
+  const avgAchievedRRR =
+    losers.length && avgWinningTrade !== 0
+      ? Math.abs(avgWinningTrade) / Math.max(1e-9, Math.abs(avgLosingTrade))
+      : null;
+
+  // Planned RRR from tags (session-level flags)
+  const planned: number[] = [];
+  for (const s of sessions) {
+    const tagsUpper = tagsUpperFromSession(s);
+    const r = inferPlannedRrrFromTags(tagsUpper);
+    if (r != null) planned.push(r);
+  }
+  const avgPlannedRRR = planned.length ? mean(planned) : null;
+
+  // Hold time metrics
+  const holds = ledgerClosedTrades.map((t) => (t.holdMin == null ? null : Number(t.holdMin))).filter((x): x is number => x != null && Number.isFinite(x));
+  const holdW = ledgerClosedTrades
+    .filter((t) => t.pnl > EPS && t.holdMin != null)
+    .map((t) => Number(t.holdMin))
+    .filter((x) => Number.isFinite(x));
+  const holdL = ledgerClosedTrades
+    .filter((t) => t.pnl < -EPS && t.holdMin != null)
+    .map((t) => Number(t.holdMin))
+    .filter((x) => Number.isFinite(x));
+
+  const avgHoldMin = holds.length ? mean(holds) : null;
+  const avgHoldMinWinners = holdW.length ? mean(holdW) : null;
+  const avgHoldMinLosers = holdL.length ? mean(holdL) : null;
+
+  // Open trades: count open position keys
+  const totalOpenTrades = ledgerOpenPositions.length;
+
+  // Streaks (sessions-based)
+  const longestWinningStreak = longestStreak(sessions, (net) => net > 0);
+  const longestLosingStreak = longestStreak(sessions, (net) => net < 0);
+
+  // Account growth from snapshots (if available)
+  let accountGrowthPct: number | null = null;
+  const snaps = [...(dailySnaps || [])].sort((a, b) => (a.date < b.date ? -1 : 1));
+  if (snaps.length >= 1) {
+    const startBal = toNumberMaybe((snaps[0] as any).start_of_day_balance);
+    const last = snaps[snaps.length - 1];
+    const endBal = toNumberMaybe((last as any).start_of_day_balance) + toNumberMaybe((last as any).realized_usd);
+    if (Number.isFinite(startBal) && startBal > 0 && Number.isFinite(endBal)) {
+      accountGrowthPct = ((endBal - startBal) / startBal) * 100;
+    }
+  }
+
+  // Deposits/withdrawals (optional columns in snapshots)
+  const totalDeposits = sumFromDailySnaps(snaps, ["deposits_usd", "depositsUsd", "deposits"]);
+  const totalWithdrawals = sumFromDailySnaps(snaps, ["withdrawals_usd", "withdrawalsUsd", "withdrawals"]);
+
+  // Risk/Reward % (only if stored)
+  const { avgRiskPct, avgRewardPct } = extractRiskRewardPctFromTrades(sessions);
+
+  // Discipline avg
+  const discVals = sessions
+    .map((s) => disciplineScore0to10(s))
+    .filter((x): x is number => x != null && Number.isFinite(x));
+  const disciplineAvg = discVals.length ? mean(discVals) : null;
+
+  return {
+    totalClosedTrades,
+    totalOpenTrades,
+    totalWinningTrades,
+    totalLosingTrades,
+    totalBreakEvenTrades,
+    tradeWinRate,
+    avgWinningTrade,
+    avgLosingTrade,
+    largestWinningTrade,
+    largestLosingTrade,
+    longestWinningStreak,
+    longestLosingStreak,
+    totalTradeCosts,
+    totalPL,
+    accountGrowthPct,
+    avgRiskPct,
+    avgRewardPct,
+    tradeExpectancy,
+    avgPlannedRRR,
+    avgAchievedRRR,
+    avgHoldMin,
+    avgHoldMinWinners,
+    avgHoldMinLosers,
+    totalDeposits,
+    totalWithdrawals,
+    disciplineAvg,
+  };
+}
+
 
 /* =========================
    UI bits
@@ -1008,16 +1693,22 @@ function PsychologySection({
   psychology,
 }: {
   probabilityStats: any;
-  psychology: { freqArr: { name: string; value: number }[]; timeline: any[] };
+  psychology: {
+    freqArr: { name: string; value: number }[];
+    timeline: any[];
+    kpis: { tag: string; count: number; winRate: number; avgPnl: number }[];
+  };
 }) {
   const freq = psychology.freqArr || [];
   const timeline = psychology.timeline || [];
+  const kpis = psychology.kpis || [];
 
   const emoColor = (emo: string) => {
     const e = safeUpper(emo);
-    if (e.includes("FEAR") || e.includes("ANX")) return CHART_COLORS.sky;
-    if (e.includes("FOMO") || e.includes("GREED")) return CHART_COLORS.danger;
-    if (e.includes("CALM") || e.includes("CONF")) return CHART_COLORS.emerald;
+    if (e.includes("ANXI") || e.includes("DESPER")) return CHART_COLORS.sky;
+    if (e.includes("FOMO") || e.includes("GREED") || e.includes("REVENGE")) return CHART_COLORS.danger;
+    if (e.includes("CALM") || e.includes("FOCUS") || e.includes("PATIENCE") || e.includes("DISCIPLINE"))
+      return CHART_COLORS.emerald;
     return "rgba(148,163,184,0.60)";
   };
 
@@ -1026,26 +1717,35 @@ function PsychologySection({
       <div className={wrapCard()}>
         <div className="flex items-baseline justify-between gap-3">
           <div>
-            <p className={chartTitle()}>Emotion frequency</p>
-            <p className={chartSub()}>Most common emotions (top 12)</p>
+            <p className={chartTitle()}>Psychology KPIs (from Journal tags)</p>
+            <p className={chartSub()}>Frequency + win-rate + avg P&amp;L when tag is present</p>
           </div>
-          <span className="text-[11px] text-slate-500 font-mono">EMO</span>
+          <span className="text-[11px] text-slate-500 font-mono">PSY</span>
         </div>
 
-        <div className="mt-3 h-[260px]">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={freq} barCategoryGap={22} barGap={6} layout="vertical">
-              <CartesianGrid stroke={CHART_COLORS.grid} strokeDasharray="4 8" />
-              <XAxis type="number" tick={axisStyle()} axisLine={{ stroke: CHART_COLORS.grid }} tickLine={false} />
-              <YAxis type="category" dataKey="name" tick={axisStyle()} axisLine={{ stroke: CHART_COLORS.grid }} tickLine={false} width={110} />
-              <Tooltip {...tooltipProps()} />
-              <Bar dataKey="value" radius={[8, 8, 8, 8]}>
-                {freq.map((x) => (
-                  <Cell key={x.name} fill={emoColor(x.name)} opacity={0.90} />
-                ))}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
+        <div className="mt-3 overflow-x-auto">
+          <table className="min-w-[920px] w-full text-sm">
+            <thead>
+              <tr className="text-[11px] uppercase tracking-[0.22em] text-slate-500 border-b border-slate-800">
+                <th className="px-3 py-2 text-left">Tag</th>
+                <th className="px-3 py-2 text-right">Count</th>
+                <th className="px-3 py-2 text-right">Win%</th>
+                <th className="px-3 py-2 text-right">Avg P&amp;L</th>
+              </tr>
+            </thead>
+            <tbody>
+              {kpis.map((r) => (
+                <tr key={r.tag} className="border-t border-slate-800 bg-slate-950/45 hover:bg-slate-950/70 transition">
+                  <td className="px-3 py-2 font-mono text-slate-100">{r.tag}</td>
+                  <td className="px-3 py-2 text-right text-slate-200">{r.count}</td>
+                  <td className="px-3 py-2 text-right text-slate-200">{r.winRate.toFixed(1)}%</td>
+                  <td className={`px-3 py-2 text-right font-mono ${r.avgPnl >= 0 ? "text-emerald-300" : "text-sky-300"}`}>
+                    {fmtMoney(r.avgPnl)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
 
         <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -1058,8 +1758,34 @@ function PsychologySection({
       <div className={wrapCard()}>
         <div className="flex items-baseline justify-between gap-3">
           <div>
-            <p className={chartTitle()}>Emotions over time</p>
-            <p className={chartSub()}>Timeline (net PnL + primary emotion)</p>
+            <p className={chartTitle()}>Emotion frequency</p>
+            <p className={chartSub()}>Most common psychology tags (top 12)</p>
+          </div>
+          <span className="text-[11px] text-slate-500 font-mono">EMO</span>
+        </div>
+
+        <div className="mt-3 h-[260px]">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={freq} barCategoryGap={22} barGap={6} layout="vertical">
+              <CartesianGrid stroke={CHART_COLORS.grid} strokeDasharray="4 8" />
+              <XAxis type="number" tick={axisStyle()} axisLine={{ stroke: CHART_COLORS.grid }} tickLine={false} />
+              <YAxis type="category" dataKey="name" tick={axisStyle()} axisLine={{ stroke: CHART_COLORS.grid }} tickLine={false} width={140} />
+              <Tooltip {...tooltipProps()} />
+              <Bar dataKey="value" radius={[8, 8, 8, 8]}>
+                {freq.map((x) => (
+                  <Cell key={x.name} fill={emoColor(x.name)} opacity={0.90} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+
+      <div className={wrapCard()}>
+        <div className="flex items-baseline justify-between gap-3">
+          <div>
+            <p className={chartTitle()}>Psychology over time</p>
+            <p className={chartSub()}>Timeline (net PnL + first detected psychology tag)</p>
           </div>
           <span className="text-[11px] text-slate-500 font-mono">TL</span>
         </div>
@@ -1079,6 +1805,7 @@ function PsychologySection({
     </section>
   );
 }
+
 
 function InstrumentsSection({ stats, underlyingMix }: { stats: any; underlyingMix: any[] }) {
   const mostSupportive = stats.mostSupportive || [];
@@ -1297,6 +2024,553 @@ function TerminalSection({
 /* =========================
    Page
 ========================= */
+
+/* =========================
+   Statistics Section (KPI Grid + Strategy Split + Filters)
+========================= */
+
+type KpiCategory =
+  | "Trades"
+  | "P&L"
+  | "Costs"
+  | "Streaks"
+  | "Risk & RRR"
+  | "Time"
+  | "Account";
+
+type KpiItem = {
+  id: string;
+  category: KpiCategory;
+  label: string;
+  value: ReactNode;
+  description?: string;
+  tone?: "good" | "bad" | "neutral";
+};
+
+function KpiCard({ kpi }: { kpi: KpiItem }) {
+  return (
+    <div className="rounded-2xl border border-slate-800 bg-slate-950/50 px-4 py-3">
+      <div className="flex items-start justify-between gap-2">
+        <p className="text-[10px] uppercase tracking-[0.22em] text-slate-500">
+          {kpi.label}
+        </p>
+        {kpi.description ? <Tip text={kpi.description} /> : null}
+      </div>
+      <p
+        className={`mt-2 text-lg font-mono ${
+          kpi.tone === "good"
+            ? "text-emerald-300"
+            : kpi.tone === "bad"
+            ? "text-sky-300"
+            : "text-slate-200"
+        }`}
+      >
+        {kpi.value}
+      </p>
+    </div>
+  );
+}
+
+function StatisticsSection({
+  sessions,
+  dailySnaps,
+}: {
+  sessions: SessionWithTrades[];
+  dailySnaps: DailySnapshotRow[];
+}) {
+  const [strategy, setStrategy] = useState<string>("ALL");
+  const [category, setCategory] = useState<string>("ALL");
+  const [query, setQuery] = useState<string>("");
+
+  // Build ledger once for range (FIFO)
+  const ledgerAll = useMemo(() => buildTradeLedgerFIFO(sessions), [sessions]);
+
+  // Map by strategy (sessions + trades + open positions)
+  const byStrategy = useMemo(() => {
+    const map: Record<string, {
+      tag: string;
+      sessions: SessionWithTrades[];
+      closedTrades: TradeClose[];
+      openPositions: OpenPosition[];
+      sumPnl: number;
+      sumFees: number;
+    }> = {};
+
+    for (const t of STRATEGY_TAGS) {
+      map[safeUpper(t)] = {
+        tag: t,
+        sessions: [],
+        closedTrades: [],
+        openPositions: [],
+        sumPnl: 0,
+        sumFees: 0,
+      };
+    }
+
+    // sessions
+    for (const s of sessions) {
+      const tagsU = tagsUpperFromSession(s);
+      for (const t of STRATEGY_TAGS) {
+        const tu = safeUpper(t);
+        if (tagsU.includes(tu)) {
+          map[tu].sessions.push(s);
+          map[tu].sumPnl += sessionNet(s);
+          map[tu].sumFees += Number(s?.feesUsd) || 0;
+        }
+      }
+    }
+
+    // closed trades (classified by entry tagsUpper inside ledger)
+    for (const tr of ledgerAll.closedTrades) {
+      for (const t of STRATEGY_TAGS) {
+        const tu = safeUpper(t);
+        if (tr.tagsUpper.includes(tu)) {
+          map[tu].closedTrades.push(tr);
+        }
+      }
+    }
+
+    // open positions (classified by entry tagsUpper)
+    for (const op of ledgerAll.openPositions) {
+      for (const t of STRATEGY_TAGS) {
+        const tu = safeUpper(t);
+        if (op.tagsUpper.includes(tu)) {
+          map[tu].openPositions.push(op);
+        }
+      }
+    }
+
+    return map;
+  }, [sessions, ledgerAll]);
+
+  const selected = useMemo(() => {
+    if (strategy === "ALL") {
+      return {
+        sessions,
+        closedTrades: ledgerAll.closedTrades,
+        openPositions: ledgerAll.openPositions,
+      };
+    }
+    const k = safeUpper(strategy);
+    const row = byStrategy[k];
+    return row
+      ? { sessions: row.sessions, closedTrades: row.closedTrades, openPositions: row.openPositions }
+      : { sessions: [], closedTrades: [], openPositions: [] };
+  }, [strategy, sessions, ledgerAll, byStrategy]);
+
+  const agg = useMemo(() => {
+    return computeStatsAgg({
+      sessions: selected.sessions,
+      ledgerClosedTrades: selected.closedTrades,
+      ledgerOpenPositions: selected.openPositions,
+      dailySnaps,
+    });
+  }, [selected, dailySnaps]);
+
+  const kpis: KpiItem[] = useMemo(() => {
+    const items: KpiItem[] = [
+      // Trades
+      {
+        id: "closed_trades",
+        category: "Trades",
+        label: "Total Number of Closed Trades",
+        value: agg.totalClosedTrades,
+      },
+      {
+        id: "open_trades",
+        category: "Trades",
+        label: "Total Number of Open Trades",
+        value: agg.totalOpenTrades,
+        description: "Open positions remaining (FIFO ledger across selected range).",
+      },
+      {
+        id: "win_trades",
+        category: "Trades",
+        label: "Total Number of Winning Trades",
+        value: agg.totalWinningTrades,
+        tone: "good",
+      },
+      {
+        id: "lose_trades",
+        category: "Trades",
+        label: "Total Number of Losing Trades",
+        value: agg.totalLosingTrades,
+        tone: agg.totalLosingTrades > 0 ? "bad" : "neutral",
+      },
+      {
+        id: "be_trades",
+        category: "Trades",
+        label: "Total Number of Break Even Trades",
+        value: agg.totalBreakEvenTrades,
+      },
+      {
+        id: "trade_win_rate",
+        category: "Trades",
+        label: "Trade Win Rate",
+        value: fmtPct(agg.tradeWinRate),
+        tone: agg.tradeWinRate >= 50 ? "good" : "neutral",
+      },
+
+      // P&L
+      {
+        id: "total_pl",
+        category: "P&L",
+        label: "Total P/L",
+        value: fmtMoney(agg.totalPL),
+        tone: agg.totalPL >= 0 ? "good" : "bad",
+        description: "Sum of session net P&L (after fees) for selected range/strategy.",
+      },
+      {
+        id: "avg_win_trade",
+        category: "P&L",
+        label: "Average Winning Trade",
+        value: fmtMoney(agg.avgWinningTrade),
+        tone: "good",
+      },
+      {
+        id: "avg_lose_trade",
+        category: "P&L",
+        label: "Average Losing Trade",
+        value: fmtMoney(agg.avgLosingTrade),
+        tone: agg.avgLosingTrade < 0 ? "bad" : "neutral",
+      },
+      {
+        id: "largest_win_trade",
+        category: "P&L",
+        label: "Largest Winning Trade",
+        value: fmtMoney(agg.largestWinningTrade),
+        tone: "good",
+      },
+      {
+        id: "largest_lose_trade",
+        category: "P&L",
+        label: "Largest Losing Trade",
+        value: fmtMoney(agg.largestLosingTrade),
+        tone: agg.largestLosingTrade < 0 ? "bad" : "neutral",
+      },
+      {
+        id: "expectancy",
+        category: "P&L",
+        label: "Trade Expectancy (Average P/L)",
+        value: fmtMoney(agg.tradeExpectancy),
+        tone: agg.tradeExpectancy >= 0 ? "good" : "bad",
+      },
+
+      // Costs
+      {
+        id: "trade_costs",
+        category: "Costs",
+        label: "Total Trade Costs",
+        value: fmtMoney(agg.totalTradeCosts),
+        description: "Aggregated fees/commissions found in session or trade rows.",
+      },
+
+      // Streaks
+      {
+        id: "win_streak",
+        category: "Streaks",
+        label: "Longest Winning Streak",
+        value: agg.longestWinningStreak,
+        description: "Measured as consecutive green sessions (net > 0).",
+        tone: "good",
+      },
+      {
+        id: "loss_streak",
+        category: "Streaks",
+        label: "Longest Losing Streak",
+        value: agg.longestLosingStreak,
+        description: "Measured as consecutive red sessions (net < 0).",
+        tone: agg.longestLosingStreak >= 3 ? "bad" : "neutral",
+      },
+
+      // Risk & RRR
+      {
+        id: "avg_risk_pct",
+        category: "Risk & RRR",
+        label: "Average % Risk Per Trade",
+        value: agg.avgRiskPct == null ? "—" : fmtPct(agg.avgRiskPct, 2),
+        description: "Requires riskPct fields stored on trades. If not present, shows —.",
+      },
+      {
+        id: "avg_reward_pct",
+        category: "Risk & RRR",
+        label: "Average % Reward Per Trade",
+        value: agg.avgRewardPct == null ? "—" : fmtPct(agg.avgRewardPct, 2),
+        description: "Requires rewardPct fields stored on trades. If not present, shows —.",
+      },
+      {
+        id: "planned_rrr",
+        category: "Risk & RRR",
+        label: "Avg Planned RRR (risk reward ratio)",
+        value: agg.avgPlannedRRR == null ? "—" : agg.avgPlannedRRR.toFixed(2),
+        description: "Derived from session tags like 'Risk-to-reward ≥ 2R (planned)' / '< 1.5R (tight)'.",
+      },
+      {
+        id: "achieved_rrr",
+        category: "Risk & RRR",
+        label: "Avg Achieved RRR (risk reward ratio)",
+        value: agg.avgAchievedRRR == null ? "—" : agg.avgAchievedRRR.toFixed(2),
+        description: "Computed as avgWinner / abs(avgLoser) from closed trades.",
+      },
+
+      // Time
+      {
+        id: "hold_avg",
+        category: "Time",
+        label: "Average trade hold time (total)",
+        value: fmtDurationMin(agg.avgHoldMin),
+        description: "Computed from entry/exit times stored on trades.",
+      },
+      {
+        id: "hold_win",
+        category: "Time",
+        label: "Average trade hold time for winners",
+        value: fmtDurationMin(agg.avgHoldMinWinners),
+      },
+      {
+        id: "hold_loss",
+        category: "Time",
+        label: "Average trade hold time for losers",
+        value: fmtDurationMin(agg.avgHoldMinLosers),
+      },
+
+      // Account
+      {
+        id: "growth",
+        category: "Account",
+        label: "Account Growth (%)",
+        value: agg.accountGrowthPct == null ? "—" : fmtPct(agg.accountGrowthPct, 2),
+        description: "Uses daily snapshots start_of_day_balance + realized_usd. If snapshots missing, shows —.",
+        tone: agg.accountGrowthPct != null && agg.accountGrowthPct >= 0 ? "good" : "neutral",
+      },
+      {
+        id: "deposits",
+        category: "Account",
+        label: "Total deposits",
+        value: agg.totalDeposits == null ? "—" : fmtMoney(agg.totalDeposits),
+        description: "Requires deposits columns on daily snapshots (deposits_usd / depositsUsd / deposits).",
+      },
+      {
+        id: "withdrawals",
+        category: "Account",
+        label: "Total withdrawals",
+        value: agg.totalWithdrawals == null ? "—" : fmtMoney(agg.totalWithdrawals),
+        description: "Requires withdrawals columns on daily snapshots (withdrawals_usd / withdrawalsUsd / withdrawals).",
+      },
+      {
+        id: "discipline",
+        category: "Account",
+        label: "Discipline rating average (out of 10)",
+        value: agg.disciplineAvg == null ? "—" : agg.disciplineAvg.toFixed(2),
+        description: "Uses disciplineRating if present; else a deterministic heuristic based on tags + respectedPlan.",
+        tone: agg.disciplineAvg != null && agg.disciplineAvg >= 7 ? "good" : "neutral",
+      },
+    ];
+
+    return items;
+  }, [agg]);
+
+  const categories = useMemo(() => {
+    const set = new Set<string>(kpis.map((k) => k.category));
+    return ["ALL", ...Array.from(set)];
+  }, [kpis]);
+
+  const kpisFiltered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return kpis.filter((k) => {
+      if (category !== "ALL" && k.category !== category) return false;
+      if (!q) return true;
+      const hay = `${k.label} ${k.description ?? ""}`.toLowerCase();
+      return hay.includes(q);
+    });
+  }, [kpis, category, query]);
+
+  const grouped = useMemo(() => {
+    const map: Record<string, KpiItem[]> = {};
+    for (const k of kpisFiltered) {
+      map[k.category] ||= [];
+      map[k.category].push(k);
+    }
+    return map;
+  }, [kpisFiltered]);
+
+  const strategyRows = useMemo(() => {
+    return (STRATEGY_TAGS as readonly string[]).map((t) => {
+      const r = byStrategy[safeUpper(t)];
+      const closed = r?.closedTrades ?? [];
+      const pnlList = closed.map((x) => Number(x.pnl) || 0);
+      const winRate = pnlList.length ? (pnlList.filter((x) => x > 0).length / pnlList.length) * 100 : 0;
+      const expectancy = pnlList.length ? mean(pnlList) : 0;
+
+      return {
+        tag: t,
+        sessions: r?.sessions.length ?? 0,
+        closedTrades: pnlList.length,
+        openTrades: r?.openPositions.length ?? 0,
+        winRate,
+        expectancy,
+        net: r?.sumPnl ?? 0,
+      };
+    });
+  }, [byStrategy]);
+
+  return (
+    <section className="space-y-6">
+      <div className={wrapCard()}>
+        <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-3">
+          <div>
+            <p className={chartTitle()}>Statistics</p>
+            <p className={chartSub()}>
+              KPI grid with Strategy split + Category filter + Search (data from Journal Date Page: tags + entries/exits).
+            </p>
+          </div>
+
+          <div className="flex flex-col md:flex-row md:items-end gap-2">
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] text-slate-500 font-mono">STRATEGY</span>
+              <select
+                value={strategy}
+                onChange={(e) => setStrategy(e.target.value)}
+                className="rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-400"
+              >
+                <option value="ALL">All strategies</option>
+                {STRATEGY_TAGS.map((t) => (
+                  <option key={t} value={t}>
+                    {t}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] text-slate-500 font-mono">CATEGORY</span>
+              <select
+                value={category}
+                onChange={(e) => setCategory(e.target.value)}
+                className="rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-400"
+              >
+                {categories.map((c) => (
+                  <option key={c} value={c}>
+                    {c === "ALL" ? "All categories" : c}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] text-slate-500 font-mono">SEARCH</span>
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search KPI…"
+                className="w-60 rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-400"
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-4 grid grid-cols-1 md:grid-cols-4 gap-3">
+          <MiniKpi label="Selected sessions" value={selected.sessions.length} />
+          <MiniKpi label="Closed trades" value={agg.totalClosedTrades} />
+          <MiniKpi label="Trade win rate" value={fmtPct(agg.tradeWinRate)} tone={agg.tradeWinRate >= 50 ? "good" : "neutral"} />
+          <MiniKpi label="Total P/L" value={fmtMoney(agg.totalPL)} tone={agg.totalPL >= 0 ? "good" : "bad"} />
+        </div>
+      </div>
+
+      {/* Strategy breakdown table */}
+      <div className={wrapCard()}>
+        <div className="flex items-baseline justify-between gap-3">
+          <div>
+            <p className={chartTitle()}>Strategy breakdown</p>
+            <p className={chartSub()}>Click a strategy to filter the KPI grid.</p>
+          </div>
+          <span className="text-[11px] text-slate-500 font-mono">STRAT</span>
+        </div>
+
+        <div className="mt-3 overflow-x-auto">
+          <table className="min-w-[980px] w-full text-sm">
+            <thead>
+              <tr className="text-[11px] uppercase tracking-[0.22em] text-slate-500 border-b border-slate-800">
+                <th className="px-3 py-2 text-left">Strategy</th>
+                <th className="px-3 py-2 text-right">Sessions</th>
+                <th className="px-3 py-2 text-right">Closed</th>
+                <th className="px-3 py-2 text-right">Open</th>
+                <th className="px-3 py-2 text-right">Win%</th>
+                <th className="px-3 py-2 text-right">Expectancy</th>
+                <th className="px-3 py-2 text-right">Net</th>
+              </tr>
+            </thead>
+            <tbody>
+              {strategyRows.map((r) => {
+                const active = strategy !== "ALL" && safeUpper(strategy) === safeUpper(r.tag);
+                return (
+                  <tr
+                    key={r.tag}
+                    className={`border-t border-slate-800 transition cursor-pointer ${
+                      active ? "bg-emerald-500/10" : "bg-slate-950/45 hover:bg-slate-950/70"
+                    }`}
+                    onClick={() => setStrategy(r.tag)}
+                    title="Click to filter KPIs by this strategy"
+                  >
+                    <td className="px-3 py-2 font-mono text-slate-100">{r.tag}</td>
+                    <td className="px-3 py-2 text-right text-slate-200">{r.sessions}</td>
+                    <td className="px-3 py-2 text-right text-slate-200">{r.closedTrades}</td>
+                    <td className="px-3 py-2 text-right text-slate-200">{r.openTrades}</td>
+                    <td className="px-3 py-2 text-right text-slate-200">{r.winRate.toFixed(1)}%</td>
+                    <td className={`px-3 py-2 text-right font-mono ${r.expectancy >= 0 ? "text-emerald-300" : "text-sky-300"}`}>
+                      {fmtMoney(r.expectancy)}
+                    </td>
+                    <td className={`px-3 py-2 text-right font-mono ${r.net >= 0 ? "text-emerald-300" : "text-sky-300"}`}>
+                      {fmtMoney(r.net)}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => setStrategy("ALL")}
+          className="mt-3 px-3 py-2 rounded-xl border border-slate-700 text-slate-200 text-xs hover:border-emerald-400 hover:text-emerald-300 transition"
+        >
+          Reset strategy filter
+        </button>
+      </div>
+
+      {/* KPI grid */}
+      <div className={wrapCard()}>
+        <div className="flex items-baseline justify-between gap-3">
+          <div>
+            <p className={chartTitle()}>KPI Grid</p>
+            <p className={chartSub()}>
+              Showing: <span className="text-slate-200 font-mono">{strategy === "ALL" ? "ALL" : strategy}</span>{" "}
+              · {category === "ALL" ? "All categories" : category} · {kpisFiltered.length} KPIs
+            </p>
+          </div>
+          <span className="text-[11px] text-slate-500 font-mono">KPI</span>
+        </div>
+
+        <div className="mt-4 space-y-6">
+          {Object.entries(grouped).map(([cat, arr]) => (
+            <div key={cat}>
+              <p className="text-[11px] uppercase tracking-[0.22em] text-slate-400 mb-3">
+                {cat}
+              </p>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                {arr.map((k) => (
+                  <KpiCard key={k.id} kpi={k} />
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 
 export default function AnalyticsStatisticsPage() {
   const { user, loading } = useAuth();
@@ -1798,43 +3072,66 @@ export default function AnalyticsStatisticsPage() {
   /* =========================
      Psychology (FIX: uses sessionNet)
   ========================= */
-  const psychologyLive = useMemo(() => {
-    const freq: Record<string, number> = {};
-    const timeline = [...sessions]
-      .sort((a, b) => {
-        const da = safeDateFromSession(a);
-        const db = safeDateFromSession(b);
-        return (da?.getTime() ?? 0) - (db?.getTime() ?? 0);
-      })
-      .map((s) => {
-        const rawEmos =
-          (s as any).emotions ??
-          (s as any).psychology?.emotions ??
-          (s as any).psychologyEmotions ??
-          ((s as any).emotionPrimary ? [(s as any).emotionPrimary] : []);
+const psychologyLive = useMemo(() => {
+  const freq: Record<string, number> = {};
 
-        const arr = Array.isArray(rawEmos) ? rawEmos : [];
-        const cleaned = arr.map((x: any) => String(x || "").trim()).filter(Boolean);
-        for (const e of cleaned) freq[safeUpper(e)] = (freq[safeUpper(e)] || 0) + 1;
+  // KPI: por tag de psicología -> count, winRate, avgPnL
+  const emoAgg: Record<string, { n: number; wins: number; sum: number }> = {};
+  for (const t of PSYCHOLOGY_TAGS) {
+    emoAgg[safeUpper(t)] = { n: 0, wins: 0, sum: 0 };
+  }
 
-        const top = cleaned.length ? safeUpper(cleaned[0]) : "—";
-        const d = safeDateFromSession(s);
-        const dateKey = d ? isoDate(d) : String((s as any).date || "");
+  const timeline = [...sessions]
+    .sort((a, b) => {
+      const da = safeDateFromSession(a);
+      const db = safeDateFromSession(b);
+      return (da?.getTime() ?? 0) - (db?.getTime() ?? 0);
+    })
+    .map((s) => {
+      const tagsUpper = tagsUpperFromSession(s);
 
-        return {
-          date: dateKey,
-          pnl: Number(sessionNet(s).toFixed(2)),
-          emotion: top,
-        };
-      });
+      const emos = (PSYCHOLOGY_TAGS as readonly string[])
+        .map((t) => safeUpper(t))
+        .filter((u) => tagsUpper.includes(u));
 
-    const freqArr = Object.entries(freq)
-      .map(([name, value]) => ({ name, value }))
-      .sort((a, b) => b.value - a.value)
-      .slice(0, 12);
+      for (const e of emos) {
+        freq[e] = (freq[e] || 0) + 1;
+      }
 
-    return { freqArr, timeline };
-  }, [sessions]);
+      const pnl = Number(sessionNet(s).toFixed(2));
+      const isGreen = pnl > 0;
+
+      for (const e of emos) {
+        emoAgg[e].n += 1;
+        emoAgg[e].wins += isGreen ? 1 : 0;
+        emoAgg[e].sum += pnl;
+      }
+
+      const top = emos.length ? emos[0] : "—";
+      const d = safeDateFromSession(s);
+      const dateKey = d ? isoDate(d) : String((s as any).date || "");
+
+      return { date: dateKey, pnl, emotion: top };
+    });
+
+  const freqArr = Object.entries(freq)
+    .map(([name, value]) => ({ name, value }))
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 12);
+
+  const kpis = (PSYCHOLOGY_TAGS as readonly string[]).map((t) => {
+    const k = safeUpper(t);
+    const v = emoAgg[k] || { n: 0, wins: 0, sum: 0 };
+    return {
+      tag: t,
+      count: v.n,
+      winRate: v.n ? (v.wins / v.n) * 100 : 0,
+      avgPnl: v.n ? v.sum / v.n : 0,
+    };
+  });
+
+  return { freqArr, timeline, kpis };
+}, [sessions]);
 
   /* =========================
      Totals (selected range)
@@ -2056,24 +3353,10 @@ export default function AnalyticsStatisticsPage() {
 
               {/* Statistics group: you can re-add your full KPI grid here.
                   Kept out to keep this file manageable, but all fixes are applied (sessionNet + range). */}
-              {activeGroup === "statistics" && (
-                <div className={wrapCard()}>
-                  <p className={chartTitle()}>Statistics</p>
-                  <p className={chartSub()}>
-                    Your KPI grid can be plugged back in here. The important fixes are already applied:
-                    unified userId, notes(jsonb) parsing, and sessionNet consistency + date range filtering.
-                  </p>
-                  <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3">
-                    <MiniKpi label="Sessions" value={uiTotals.totalSessions} />
-                    <MiniKpi label="Net P&L" value={fmtMoney(uiTotals.sumPnl)} tone={uiTotals.sumPnl >= 0 ? "good" : "bad"} />
-                    <MiniKpi label="Win rate" value={`${uiTotals.baseGreenRate.toFixed(1)}%`} tone={uiTotals.baseGreenRate >= 50 ? "good" : "neutral"} />
-                  </div>
-                  <p className="mt-4 text-[11px] text-slate-500">
-                    Si quieres, en el próximo mensaje integro tu StatisticsSection completo dentro de esta misma
-                    versión ya corregida (queda largo, pero totalmente posible).
-                  </p>
-                </div>
-              )}
+             {activeGroup === "statistics" && (
+  <StatisticsSection sessions={sessions} dailySnaps={dailySnaps} />
+)}
+
             </>
           )}
         </div>
