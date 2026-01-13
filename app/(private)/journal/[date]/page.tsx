@@ -1177,13 +1177,19 @@ const userId = user?.id ?? "";
     });
 
   const probabilityTags = [
-    "A+ playbook setup",
-    "B-setup (secondary quality)",
-    "Exploratory / data-gathering trade",
-    "Trade aligned with my stats edge",
-    "Outside my proven statistics",
-    "Within high-probability session window",
-    "Outside my usual session window",
+     "Exploratory Trade",
+     "50% Probability",
+     "Trade with Edge",
+     "High Probability",
+     "Low Probability",
+     "Setup not perfect",
+     "Good Risk-Reward",
+     "Poor Risk-Reward",
+     "Followed Plan",
+     "Deviated from Plan",
+     "Clear Setup",
+     "Unclear Setup",
+                
   ];
 
   const exitReasonTags = [
@@ -1192,6 +1198,7 @@ const userId = user?.id ?? "";
     "Manual Exit",
     "Moved stop to profit",
     "Stopped out (loss)",
+    "Move stop to breakeven",
   ];
 
   /* ---------- Save (Supabase) ---------- */
@@ -1253,19 +1260,41 @@ await saveJournalTradesForDay(userId, dateParam, {
 
 
     const EMOTION_TAGS = [
-  "Calm & focused",
+  "Calm",
   "Greedy",
   "Desperate",
   "FOMO",
   "Revenge trade",
+  "Focus",
+  "Patience",
+  "Discipline",
+  "Anxiety",
+  "Overconfident",
 ];
 
 const STRATEGY_CHECKLIST_TAGS = [
-  "Respect Strategy",
-  "Planned stop was in place",
-  "Used planned position sizing",
-  "Risk-to-reward ≥ 2R (planned)",
-  "Risk-to-reward < 1.5R (tight)",
+   "Respect Strategy",
+                "Not follow my plan",
+                "No respect my plan",
+                "Planned stop was in place",
+                "Used planned position sizing",
+                "Risk-to-reward ≥ 2R (planned)",
+                "Risk-to-reward < 1.5R (tight)",
+                "Is Vix high?",
+                "Is Vix low?",
+                "Earnings play",
+                "News-driven trade",
+                "Momentum trade",
+                "Trend Follow Trade",
+                "Reversal trade",
+                "Scalping trade",
+                "swing trade",
+                "Options trade",
+                "Stock trade",
+                "Futures Trade",
+                "Forex Trade",
+                " Crypto Trade",
+                
 ];
 
 
@@ -2247,12 +2276,16 @@ const handleSaveTemplate = () => {
         <WidgetCard title="Emotional state & impulses">
           <div className="flex flex-wrap gap-2 text-[13px] leading-snug">
             {[
-              "Calm",
-              "Greedy",
-              "Desperate",
-              "FOMO",
-              "Revenge trade",
-              "Focus",
+             "Calm",
+  "Greedy",
+  "Desperate",
+  "FOMO",
+  "Revenge trade",
+  "Focus",
+  "Patience",
+  "Discipline",
+  "Anxiety",
+  "Overconfident",
             ].map((t) => (
               <label
                 key={t}
@@ -2300,6 +2333,14 @@ const handleSaveTemplate = () => {
                 "Used planned position sizing",
                 "Risk-to-reward ≥ 2R (planned)",
                 "Risk-to-reward < 1.5R (tight)",
+                "Is Vix high?",
+                "Is Vix low?",
+                "Earnings play",
+                "News-driven trade",
+                "Momentum trade",
+                "Reversal trade",
+                "Scalping trade",
+                
               ].map((t) => (
                 <label
                   key={t}

@@ -1,556 +1,281 @@
+// app/api/broker-import/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import * as XLSX from "xlsx";
-import crypto from "crypto";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
+import * as XLSX from "xlsx";
+import { createHash } from "crypto";
 
 export const runtime = "nodejs";
 
-/* =========================
-   Broker config (Supabase)
-========================= */
+/**
+ * Thinkorswim Broker Import — v12.4 (Option A / consistent history)
+ * - Writes to: trades
+ * - Uses: qty (NOT quantity)
+ * - ALWAYS finalizes batch row:
+ *    status: "success" | "failed"
+ *    imported_rows, updated_rows, duplicates, finished_at, duration_ms, error (optional)
+ * - Dedupe:
+ *    * In-memory dedupe by trade_hash (prevents ON CONFLICT affecting same row twice)
+ *    * DB-level upsert by trade_hash
+ */
 
-type BrokerConfig = {
-  broker: string;
-  timezone: string;
-  weekly_keywords: string[];
-  option_weekly_roots: Record<string, string>;
-  contract_templates: {
-    option?: string;  // "{root}{yymmdd}{cp}{strike}"
-    stock?: string;   // "{symbol}"
-    futures?: string; // "{contract}"
-    forex?: string;   // "{base}{quote}"
-    crypto?: string;  // "{base}{quote}"
-  };
-};
+type AnyRow = any[];
+type Broker = "thinkorswim";
 
-type InstrumentPattern = {
-  id: string;
-  name: string;
-  instrument_type: "stock" | "option" | "futures" | "forex" | "crypto";
-  regex: string;
-  flags: string;
-  priority: number;
-  is_active: boolean;
-};
-
-const DEFAULT_CONFIG: BrokerConfig = {
-  broker: "default",
-  timezone: "UTC",
-  weekly_keywords: ["(Weeklys)", "Weeklys", "Weekly", "WEEKLY"],
-  option_weekly_roots: {},
-  contract_templates: {
-    option: "{root}{yymmdd}{cp}{strike}",
-    stock: "{symbol}",
-    futures: "{contract}",
-    forex: "{base}{quote}",
-    crypto: "{base}{quote}",
-  },
-};
-
-async function loadBrokerConfig(broker: string): Promise<BrokerConfig> {
-  const { data, error } = await supabaseAdmin
-    .from("broker_configs")
-    .select("broker, timezone, weekly_keywords, option_weekly_roots, contract_templates")
-    .eq("broker", broker)
-    .maybeSingle();
-
-  if (error || !data) return { ...DEFAULT_CONFIG, broker };
-
-  const wk = Array.isArray(data.weekly_keywords) ? data.weekly_keywords : null;
-
-  return {
-    broker: data.broker ?? broker,
-    timezone: data.timezone ?? "UTC",
-    weekly_keywords: (wk ?? DEFAULT_CONFIG.weekly_keywords).map((x: any) => String(x)),
-    option_weekly_roots: (data.option_weekly_roots ?? {}) as any,
-    contract_templates: (data.contract_templates ?? DEFAULT_CONFIG.contract_templates) as any,
-  };
+/* -------------------- helpers -------------------- */
+function sha256(s: string) {
+  return createHash("sha256").update(s).digest("hex");
 }
-
-async function loadInstrumentPatterns(broker: string): Promise<InstrumentPattern[]> {
-  const { data, error } = await supabaseAdmin
-    .from("broker_instrument_patterns")
-    .select("id, name, instrument_type, regex, flags, priority, is_active")
-    .eq("broker", broker)
-    .eq("is_active", true)
-    .order("priority", { ascending: true });
-
-  if (error) return [];
-  return (data ?? []) as any;
-}
-
-function applyTemplate(tpl: string, vars: Record<string, string>) {
-  return tpl.replace(/\{(\w+)\}/g, (_, k) => vars[k] ?? "");
-}
-
-function escapeRegExp(s: string) {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function isWeeklyByConfig(cfg: BrokerConfig, desc: string): boolean {
-  const keywords = cfg.weekly_keywords?.length ? cfg.weekly_keywords : DEFAULT_CONFIG.weekly_keywords;
-  const d = desc.toLowerCase();
-
-  for (const kw of keywords) {
-    const k = String(kw ?? "").trim();
-    if (!k) continue;
-    if (d.includes(k.toLowerCase())) return true;
-  }
-
-  for (const kw of keywords) {
-    const k = String(kw ?? "").trim();
-    if (!k) continue;
-    const re = new RegExp(escapeRegExp(k), "i");
-    if (re.test(desc)) return true;
-  }
-
-  return false;
-}
-
-/* =========================
-   Utils
-========================= */
-
-function sha256(input: string) {
-  return crypto.createHash("sha256").update(input).digest("hex");
-}
-
-function normalizeHeader(h: any) {
-  return String(h ?? "")
-    .trim()
-    .replace(/\s+/g, " ")
-    .toUpperCase();
-}
-
-function headerIndex(headers: string[], ...candidates: string[]) {
-  for (const c of candidates) {
-    const idx = headers.findIndex((x) => x === c);
-    if (idx >= 0) return idx;
-  }
-  return -1;
-}
-
-function parseNumber(v: any): number | null {
-  if (v === null || v === undefined || v === "") return null;
-  const n = Number(String(v).replace(/[$,]/g, "").trim());
-  return Number.isFinite(n) ? n : null;
-}
-
-function calcDTE(executedAtISO: string, expirationISO: string | null): number | null {
-  if (!expirationISO) return null;
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(expirationISO)) return null;
-
-  const tradeDay = executedAtISO.slice(0, 10);
-  const t = Date.parse(`${tradeDay}T00:00:00Z`);
-  const e = Date.parse(`${expirationISO}T00:00:00Z`);
-  if (!Number.isFinite(t) || !Number.isFinite(e)) return null;
-
-  return Math.round((e - t) / (24 * 60 * 60 * 1000));
-}
-
-/* =========================
-   Detect headers (TOS)
-========================= */
-
-type DetectedCols = {
-  date: number;
-  time: number;
-  type: number;
-  ref: number;
-  desc: number;
-  miscFees: number;
-  commFees: number;
-  amount: number;
-  balance: number;
-};
-
-function findHeaderRow(rows: any[][]): { headerRowIdx: number; cols: DetectedCols } | null {
-  for (let i = 0; i < Math.min(rows.length, 80); i++) {
-    const r = rows[i] || [];
-    const headers = r.map(normalizeHeader);
-
-    const date = headerIndex(headers, "DATE");
-    const time = headerIndex(headers, "TIME");
-    const type = headerIndex(headers, "TYPE");
-    const ref = headerIndex(headers, "REF #", "REF#", "REF", "REFERENCE", "REFERENCE #");
-    const desc = headerIndex(headers, "DESCRIPTION");
-    const miscFees = headerIndex(headers, "MISC FEES", "MISC. FEES", "MISC FEES (USD)");
-    const commFees = headerIndex(headers, "COMMISSIONS & FEES", "COMMISSIONS AND FEES", "COMMISSION & FEES");
-    const amount = headerIndex(headers, "AMOUNT", "NET AMOUNT", "AMOUNT (USD)");
-    const balance = headerIndex(headers, "BALANCE", "CASH BALANCE");
-
-    if (date >= 0 && time >= 0 && type >= 0 && desc >= 0 && amount >= 0) {
-      return { headerRowIdx: i, cols: { date, time, type, ref, desc, miscFees, commFees, amount, balance } };
-    }
-  }
-  return null;
-}
-
-/* =========================
-   Parse Date+Time to ISO (UTC)
-========================= */
-function parseDateTime(dateVal: any, timeVal: any): string {
-  let yyyy: number | null = null;
-  let mm: number | null = null;
-  let dd: number | null = null;
-
-  if (typeof dateVal === "number" && Number.isFinite(dateVal)) {
-    const dc = (XLSX as any).SSF?.parse_date_code?.(dateVal);
-    if (dc?.y && dc?.m && dc?.d) {
-      yyyy = dc.y;
-      mm = dc.m;
-      dd = dc.d;
-    }
-  }
-
-  if (yyyy === null && dateVal instanceof Date && !Number.isNaN(dateVal.getTime())) {
-    yyyy = dateVal.getFullYear();
-    mm = dateVal.getMonth() + 1;
-    dd = dateVal.getDate();
-  }
-
-  if (yyyy === null) {
-    const s = String(dateVal ?? "").trim();
-    const m2 = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2}|\d{4})$/);
-    if (m2) {
-      mm = Number(m2[1]);
-      dd = Number(m2[2]);
-      const yRaw = m2[3];
-      const yNum = Number(yRaw);
-      yyyy = yRaw.length === 2 ? (yNum >= 70 ? 1900 + yNum : 2000 + yNum) : yNum;
-    }
-  }
-
-  if (yyyy === null || mm === null || dd === null) {
-    throw new Error(`Invalid date value in file: "${String(dateVal)}"`);
-  }
-
-  let hh = 0, mi = 0, ss = 0;
-
-  if (typeof timeVal === "number" && Number.isFinite(timeVal)) {
-    const totalSeconds = Math.round(timeVal * 24 * 60 * 60);
-    hh = Math.floor(totalSeconds / 3600);
-    mi = Math.floor((totalSeconds % 3600) / 60);
-    ss = totalSeconds % 60;
-  } else {
-    const t = String(timeVal ?? "").trim();
-    const mt = t.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
-    if (mt) {
-      hh = Number(mt[1]);
-      mi = Number(mt[2]);
-      ss = mt[3] ? Number(mt[3]) : 0;
-    }
-  }
-
-  return new Date(Date.UTC(yyyy, mm - 1, dd, hh, mi, ss)).toISOString();
-}
-
-/* =========================
-   Instrument helpers
-========================= */
-
-function toYYMMDD(expiration: string | null): string | null {
-  if (!expiration) return null;
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(expiration)) return null;
-  return expiration.slice(2, 4) + expiration.slice(5, 7) + expiration.slice(8, 10);
-}
-
-function strikeCompact(strike: number | null): string | null {
-  if (strike == null || !Number.isFinite(strike)) return null;
-  const s = String(strike);
-  if (!s.includes(".")) return s;
-  const [a, b] = s.split(".");
-  return `${a}${b}`;
-}
-
-function inferOptionRoot(cfg: BrokerConfig, underlying: string | null, desc: string): string | null {
-  if (!underlying) return null;
-  const u = underlying.toUpperCase();
-
-  if (isWeeklyByConfig(cfg, desc)) {
-    const mapped = cfg.option_weekly_roots?.[u];
-    if (mapped) return String(mapped).toUpperCase();
-  }
-  return u;
-}
-
-/* =========================
-   Parsed Instrument
-========================= */
-type ParsedInstrument = {
-  instrument_type: "option" | "stock" | "futures" | "forex" | "crypto" | "unknown";
-  side: "buy" | "sell" | null;
-  qty: number | null;
-
-  underlying_symbol: string | null;   // e.g. SPX, AAPL, /ES, EURUSD, BTCUSD
-  instrument_symbol: string | null;   // contract code / canonical symbol
-
-  option_root: string | null;
-  expiration: string | null;
-  strike: number | null;
-  option_right: "CALL" | "PUT" | null;
-
-  base: string | null;  // forex/crypto
-  quote: string | null; // forex/crypto
-
-  price: number | null;
-  exchange: string | null;
-};
-
-/* =========================
-   1) Parse options (TOS)
-========================= */
-function parseTOSOption(cfg: BrokerConfig, descRaw: string): ParsedInstrument | null {
-  const s = String(descRaw ?? "").trim();
-
-  const side = s.startsWith("BOT") ? "buy" : s.startsWith("SOLD") ? "sell" : null;
-  const qtyMatch = s.match(/\b(BOT|SOLD)\s+([+-]?\d+)\b/i);
-  const qty = qtyMatch ? Math.abs(Number(qtyMatch[2])) : null;
-
-  const tokens = s.split(/\s+/).filter(Boolean);
-  const exchange = tokens.length ? tokens[tokens.length - 1] : null;
-
-  const priceMatch = s.match(/@(\d+(?:\.\d+)?)/);
-  const price = priceMatch ? Number(priceMatch[1]) : null;
-
-  const hasRight = /\b(CALL|PUT)\b/i.test(s);
-  const hasMonth = /\b(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\b/i.test(s);
-
-  if (!(hasRight && hasMonth)) return null;
-
-  const optMain = s.match(
-    /\b(BOT|SOLD)\s+[+-]?\d+\s+([A-Z.]+)\s+\d+\s+(?:\([^)]+\)\s+)?(\d{1,2})\s+(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\s+(\d{2})\s+(\d+(?:\.\d+)?)\s+(CALL|PUT)\b/i
-  );
-
-  const optFallback = s.match(
-    /\b([A-Z.]+)\s+\d+\s+(?:\([^)]+\)\s+)?(\d{1,2})\s+(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\s+(\d{2})\s+(\d+(?:\.\d+)?)\s+(CALL|PUT)\b/i
-  );
-
-  const m = optMain ?? optFallback;
-  if (!m) return null;
-
-  const monthMap: Record<string, string> = {
-    JAN: "01", FEB: "02", MAR: "03", APR: "04", MAY: "05", JUN: "06",
-    JUL: "07", AUG: "08", SEP: "09", OCT: "10", NOV: "11", DEC: "12",
-  };
-
-  const isMain = m === optMain;
-
-  const underlying = (isMain ? m[2] : m[1])?.toUpperCase() ?? null;
-
-  const day = (isMain ? m[3] : m[2])?.padStart(2, "0") ?? null;
-  const mon = (isMain ? m[4] : m[3])?.toUpperCase() ?? null;
-  const yy = (isMain ? m[5] : m[4]) ?? null;
-
-  let expiration: string | null = null;
-  if (day && mon && yy && monthMap[mon]) expiration = `20${yy}-${monthMap[mon]}-${day}`;
-
-  let strike = Number(isMain ? m[6] : m[5]);
-  if (!Number.isFinite(strike)) strike = null as any;
-
-  const option_right = ((isMain ? m[7] : m[6])?.toUpperCase() as "CALL" | "PUT") ?? null;
-
-  const root = inferOptionRoot(cfg, underlying, s);
-  const yymmdd = toYYMMDD(expiration);
-  const cp = option_right === "CALL" ? "C" : option_right === "PUT" ? "P" : null;
-  const k = strikeCompact(strike);
-
-  const optionTpl = cfg.contract_templates?.option ?? DEFAULT_CONFIG.contract_templates.option!;
-  const instrument_symbol =
-    root && yymmdd && cp && k ? applyTemplate(optionTpl, { root, yymmdd, cp, strike: k }) : null;
-
-  return {
-    instrument_type: "option",
-    side,
-    qty,
-    underlying_symbol: underlying,
-    instrument_symbol,
-    option_root: root,
-    expiration,
-    strike,
-    option_right,
-    base: null,
-    quote: null,
-    price,
-    exchange,
-  };
-}
-
-/* =========================
-   2) Parse non-options using DB patterns
-========================= */
-function parseByPatterns(cfg: BrokerConfig, patterns: InstrumentPattern[], descRaw: string): ParsedInstrument | null {
-  const s = String(descRaw ?? "").trim();
-
-  const side = s.startsWith("BOT") ? "buy" : s.startsWith("SOLD") ? "sell" : null;
-  const qtyMatch = s.match(/\b(BOT|SOLD)\s+([+-]?\d+)\b/i);
-  const qty = qtyMatch ? Math.abs(Number(qtyMatch[2])) : null;
-
-  const tokens = s.split(/\s+/).filter(Boolean);
-  const exchange = tokens.length ? tokens[tokens.length - 1] : null;
-
-  const priceMatch = s.match(/@(\d+(?:\.\d+)?)/);
-  const price = priceMatch ? Number(priceMatch[1]) : null;
-
-  for (const p of patterns) {
-    try {
-      const re = new RegExp(p.regex, p.flags || "i");
-      const m = re.exec(s);
-      if (!m) continue;
-
-      const g = (m as any).groups ?? {};
-
-      // FUTURES: root + code => canonical like "/ESZ5"
-      if (p.instrument_type === "futures") {
-        const root = String(g.root ?? "").toUpperCase();
-        const code = String(g.code ?? "").toUpperCase();
-        if (!root || !code) continue;
-
-        const underlying_symbol = `/${root}`;
-        const contract = `/${root}${code}`;
-
-        const tpl = cfg.contract_templates?.futures ?? DEFAULT_CONFIG.contract_templates.futures!;
-        const instrument_symbol = applyTemplate(tpl, { contract });
-
-        return {
-          instrument_type: "futures",
-          side,
-          qty,
-          underlying_symbol,
-          instrument_symbol,
-          option_root: null,
-          expiration: null,
-          strike: null,
-          option_right: null,
-          base: null,
-          quote: null,
-          price,
-          exchange,
-        };
-      }
-
-      // FOREX / CRYPTO: base+quote => "EURUSD" / "BTCUSD"
-      if (p.instrument_type === "forex" || p.instrument_type === "crypto") {
-        const base = String(g.base ?? "").toUpperCase();
-        const quote = String(g.quote ?? "").toUpperCase();
-        if (!base || !quote) continue;
-
-        const pair = `${base}${quote}`;
-        const tpl =
-          p.instrument_type === "forex"
-            ? (cfg.contract_templates?.forex ?? DEFAULT_CONFIG.contract_templates.forex!)
-            : (cfg.contract_templates?.crypto ?? DEFAULT_CONFIG.contract_templates.crypto!);
-
-        const instrument_symbol = applyTemplate(tpl, { base, quote });
-
-        return {
-          instrument_type: p.instrument_type,
-          side,
-          qty,
-          underlying_symbol: pair,
-          instrument_symbol,
-          option_root: null,
-          expiration: null,
-          strike: null,
-          option_right: null,
-          base,
-          quote,
-          price,
-          exchange,
-        };
-      }
-
-      // STOCK: (rarely needed here, but supported)
-      if (p.instrument_type === "stock") {
-        const symbol = String(g.symbol ?? "").toUpperCase();
-        if (!symbol) continue;
-
-        const tpl = cfg.contract_templates?.stock ?? DEFAULT_CONFIG.contract_templates.stock!;
-        return {
-          instrument_type: "stock",
-          side,
-          qty,
-          underlying_symbol: symbol,
-          instrument_symbol: applyTemplate(tpl, { symbol }),
-          option_root: null,
-          expiration: null,
-          strike: null,
-          option_right: null,
-          base: null,
-          quote: null,
-          price,
-          exchange,
-        };
-      }
-    } catch {
-      // ignore bad regex row
-    }
-  }
-
-  return null;
-}
-
-/* =========================
-   3) Stock fallback (simple)
-========================= */
-function parseStockFallback(descRaw: string): ParsedInstrument {
-  const s = String(descRaw ?? "").trim();
-
-  const side = s.startsWith("BOT") ? "buy" : s.startsWith("SOLD") ? "sell" : null;
-  const qtyMatch = s.match(/\b(BOT|SOLD)\s+([+-]?\d+)\b/i);
-  const qty = qtyMatch ? Math.abs(Number(qtyMatch[2])) : null;
-
-  const tokens = s.split(/\s+/).filter(Boolean);
-  const exchange = tokens.length ? tokens[tokens.length - 1] : null;
-
-  const priceMatch = s.match(/@(\d+(?:\.\d+)?)/);
-  const price = priceMatch ? Number(priceMatch[1]) : null;
-
-  const maybeSym = tokens.length >= 3 ? tokens[2] : null;
-  const sym = maybeSym && /^[A-Z.\-]{1,10}$/i.test(maybeSym) ? maybeSym.toUpperCase() : null;
-
-  return {
-    instrument_type: sym ? "stock" : "unknown",
-    side,
-    qty,
-    underlying_symbol: sym,
-    instrument_symbol: sym,
-    option_root: null,
-    expiration: null,
-    strike: null,
-    option_right: null,
-    base: null,
-    quote: null,
-    price,
-    exchange,
-  };
-}
-
-/* =========================
-   File readers
-========================= */
-
-function rowsFromCsvText(csvText: string): any[][] {
-  const wb = XLSX.read(csvText, { type: "string" });
-  const ws = wb.Sheets[wb.SheetNames[0]];
-  return XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" }) as any[][];
-}
-
-function rowsFromExcelBuffer(buf: Buffer): any[][] {
-  const wb = XLSX.read(buf, { type: "buffer" });
-  const ws = wb.Sheets[wb.SheetNames[0]];
-  return XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" }) as any[][];
-}
-
 function chunk<T>(arr: T[], size: number) {
   const out: T[][] = [];
   for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
   return out;
 }
+function safeStr(v: unknown) {
+  return String(v ?? "").trim();
+}
+function normalizeRefNum(v: unknown): string {
+  const s0 = String(v ?? "").trim();
+  if (!s0) return "";
+  const m = s0.match(/^=\"?([^\"]+)\"?$/); // handles ="123"
+  const core = (m?.[1] ?? s0).trim();
+  return core.replace(/^=/, "").trim();
+}
+function parseNumber(v: unknown): number {
+  if (v == null) return 0;
+  if (typeof v === "number") return Number.isFinite(v) ? v : 0;
+  const s = String(v).trim();
+  if (!s) return 0;
+  const neg = /^\(.*\)$/.test(s);
+  const cleaned = s.replace(/[(),$]/g, "").replace(/\s+/g, "");
+  const n = Number(cleaned);
+  if (!Number.isFinite(n)) return 0;
+  return neg ? -n : n;
+}
 
-/* =========================
-   POST /api/broker-import
-========================= */
+/* -------------------- CSV / Excel -------------------- */
+function parseCsvLine(line: string): string[] {
+  const out: string[] = [];
+  let cur = "";
+  let inQ = false;
+
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') {
+      if (inQ && line[i + 1] === '"') {
+        cur += '"';
+        i++;
+      } else {
+        inQ = !inQ;
+      }
+      continue;
+    }
+    if (ch === "," && !inQ) {
+      out.push(cur);
+      cur = "";
+      continue;
+    }
+    cur += ch;
+  }
+  out.push(cur);
+  return out.map((s) => s.trim());
+}
+function rowsFromCsvText(csv: string): AnyRow[] {
+  const lines = csv.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+  const out: AnyRow[] = [];
+  for (const ln of lines) {
+    if (!ln || !ln.trim()) continue;
+    out.push(parseCsvLine(ln));
+  }
+  return out;
+}
+function rowsFromExcelBuffer(buf: Buffer): AnyRow[] {
+  const wb = XLSX.read(buf, { type: "buffer" });
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  return XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" }) as AnyRow[];
+}
+
+/* -------------------- datetime -------------------- */
+function parseDateTime(dateRaw: unknown, timeRaw: unknown): string {
+  const ds = String(dateRaw ?? "").trim();
+  const ts = String(timeRaw ?? "").trim();
+
+  const md = ds.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2})$/);
+  const mt = ts.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+
+  if (!md) return new Date().toISOString();
+  const mm = Number(md[1]);
+  const dd = Number(md[2]);
+  const yy = 2000 + Number(md[3]);
+
+  const hh = mt ? Number(mt[1]) : 0;
+  const mi = mt ? Number(mt[2]) : 0;
+  const ss = mt && mt[3] ? Number(mt[3]) : 0;
+
+  return new Date(Date.UTC(yy, mm - 1, dd, hh, mi, ss)).toISOString();
+}
+
+/* -------------------- header detection -------------------- */
+function findHeaderRow(rows: AnyRow[]) {
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i] || [];
+    const header = r.map((x) => String(x ?? "").trim().toUpperCase());
+    if (!header.length) continue;
+
+    const idx = (name: string) => header.indexOf(name.toUpperCase());
+
+    const date = idx("DATE");
+    const time = idx("TIME");
+    const type = idx("TYPE");
+    const desc = idx("DESCRIPTION");
+    const amount = idx("AMOUNT");
+
+    if (date >= 0 && time >= 0 && type >= 0 && desc >= 0 && amount >= 0) {
+      return {
+        headerRowIdx: i,
+        cols: {
+          date,
+          time,
+          type,
+          desc,
+          amount,
+          ref: idx("REF #"),
+          balance: idx("BALANCE"),
+          miscFees: idx("MISC FEES"),
+          commFees: idx("COMMISSIONS & FEES"),
+        },
+      };
+    }
+  }
+  return null;
+}
+
+/* -------------------- concurrency helper -------------------- */
+async function parallelLimit<T>(
+  items: T[],
+  limit: number,
+  fn: (item: T, idx: number) => Promise<void>
+) {
+  let i = 0;
+  const workers = new Array(Math.max(1, limit)).fill(0).map(async () => {
+    while (true) {
+      const idx = i++;
+      if (idx >= items.length) return;
+      await fn(items[idx], idx);
+    }
+  });
+  await Promise.all(workers);
+}
+
+/* ============================================================
+   CONTRACT CODE helpers (your exact format expectation)
+============================================================ */
+function tosYYMMDDCompact(expiryISO: string) {
+  const yy = expiryISO.slice(2, 4);
+  const mm = expiryISO.slice(5, 7);
+  const dd = expiryISO.slice(8, 10);
+  return `${yy}${mm}${dd}`;
+}
+
+function formatContractCodeSimple(opts: {
+  root: string;        // SPX o SPXW
+  expiryISO: string;   // YYYY-MM-DD
+  right: "C" | "P";
+  strike: number;      // 6985
+}) {
+  const datePart = tosYYMMDDCompact(opts.expiryISO);
+  const strikePart = Number.isInteger(opts.strike)
+    ? String(opts.strike)
+    : String(opts.strike).replace(/\.0+$/, "");
+  return `${opts.root}${datePart}${opts.right}${strikePart}`;
+}
+
+/* ============================================================
+   Thinkorswim parsing
+============================================================ */
+function parseTosExpiryToISO(raw: string): string | null {
+  const m = raw.trim().match(/^(\d{1,2})\s+([A-Z]{3})\s+(\d{2})$/i);
+  if (!m) return null;
+
+  const day = m[1].padStart(2, "0");
+  const monthMap: Record<string, string> = {
+    JAN: "01", FEB: "02", MAR: "03", APR: "04",
+    MAY: "05", JUN: "06", JUL: "07", AUG: "08",
+    SEP: "09", OCT: "10", NOV: "11", DEC: "12",
+  };
+  const mm = monthMap[m[2].toUpperCase()];
+  if (!mm) return null;
+
+  const yyyy = `20${m[3]}`;
+  return `${yyyy}-${mm}-${day}`;
+}
+function normalizeOptionRoot(root: string, description: string): string {
+  if (root.toUpperCase() === "SPX" && /(WEEKLY|WEEKLYS)/i.test(description)) return "SPXW";
+  return root.toUpperCase();
+}
+function normalizeSideFromDesc(desc: string): "BOT" | "SOLD" | "BUY" | "SELL" | null {
+  const d = desc.toUpperCase();
+  if (d.includes("BOT")) return "BOT";
+  if (d.includes("SOLD")) return "SOLD";
+  if (/\bBUY\b/.test(d)) return "BUY";
+  if (/\bSELL\b/.test(d)) return "SELL";
+  return null;
+}
+function parseQtyFromDesc(desc: string): number | null {
+  const d = desc.toUpperCase();
+  const m = d.match(/\b(BOT|SOLD|BUY|SELL)\s+([+-]?\d+)\b/);
+  if (!m) return null;
+  const q = Number(m[2]);
+  if (!Number.isFinite(q)) return null;
+  const qty = Math.abs(q);
+  if (qty === 100) return null;
+  return qty;
+}
+function parsePriceFromDesc(desc: string): number | null {
+  const m = desc.match(/@\s*([0-9]+(?:\.[0-9]+)?)/i);
+  if (!m) return null;
+  const p = Number(m[1]);
+  return Number.isFinite(p) ? p : null;
+}
+function parseOptionFromDesc(desc: string) {
+  const U = desc.toUpperCase();
+
+  const rootMatch = U.match(/\b(SPXW|SPX|NDX|RUT|QQQ|SPY)\b/);
+  const rawRoot = rootMatch?.[1] ?? null;
+  if (!rawRoot) return null;
+
+  const right: "C" | "P" | null = U.includes("PUT") ? "P" : U.includes("CALL") ? "C" : null;
+  if (!right) return null;
+
+  const strikeCandidates = (U.match(/\b\d{3,5}(?:\.\d+)?\b/g) ?? [])
+    .map((s) => Number(s))
+    .filter((n) => Number.isFinite(n) && n !== 100);
+
+  if (!strikeCandidates.length) return null;
+  const strike = [...strikeCandidates].sort((a, b) => b - a)[0];
+  if (strike == null) return null;
+
+  const mdy = U.match(/\b(\d{1,2})\/(\d{1,2})\/(\d{2})\b/);
+  let expiryISO: string | null = null;
+  if (mdy) {
+    const mm = mdy[1].padStart(2, "0");
+    const dd = mdy[2].padStart(2, "0");
+    const yyyy = `20${mdy[3]}`;
+    expiryISO = `${yyyy}-${mm}-${dd}`;
+  } else {
+    const dmy = U.match(/\b(\d{1,2}\s+[A-Z]{3}\s+\d{2})\b/);
+    if (dmy) expiryISO = parseTosExpiryToISO(dmy[1]);
+  }
+  if (!expiryISO) return null;
+
+  const root = normalizeOptionRoot(rawRoot, desc);
+  const contract_code = formatContractCodeSimple({ root, expiryISO, right, strike });
+
+  return { root, expiryISO, right, strike, contract_code, underlying: root };
+}
+
+/* ============================================================
+   ROUTE
+============================================================ */
 export async function POST(req: NextRequest) {
   const startedAt = Date.now();
 
@@ -563,14 +288,14 @@ export async function POST(req: NextRequest) {
   const userId = authData.user.id;
 
   const form = await req.formData();
-  const broker = String(form.get("broker") ?? "").trim() || "thinkorswim";
+  const brokerRaw = String(form.get("broker") ?? "").trim() || "thinkorswim";
+  const broker: Broker = brokerRaw.toLowerCase() === "thinkorswim" ? "thinkorswim" : "thinkorswim";
   const comment = String(form.get("comment") ?? "").trim() || null;
+
   const file = form.get("file");
   if (!(file instanceof File)) return NextResponse.json({ error: "Missing file" }, { status: 400 });
 
-  const cfg = await loadBrokerConfig(broker);
-  const patterns = await loadInstrumentPatterns(broker);
-
+  // 1) Create batch
   const { data: batch, error: batchErr } = await supabaseAdmin
     .from("trade_import_batches")
     .insert({
@@ -580,6 +305,9 @@ export async function POST(req: NextRequest) {
       comment,
       status: "processing",
       started_at: new Date().toISOString(),
+      imported_rows: 0,
+      updated_rows: 0,
+      duplicates: 0,
     })
     .select("id")
     .single();
@@ -587,8 +315,23 @@ export async function POST(req: NextRequest) {
   if (batchErr || !batch?.id) {
     return NextResponse.json({ error: batchErr?.message ?? "Failed to create batch" }, { status: 500 });
   }
-
   const batchId = batch.id as string;
+
+  // counters (for product UX)
+  let rowsRead = 0;
+  let trdSeen = 0;
+  let trdParsed = 0;
+  let trdSkipped = 0;
+
+  let tradeDuplicatesInFile = 0;
+  let ledgerDuplicatesInFile = 0;
+
+  // final counters
+  let tradeInserted = 0;
+  let tradeUpdated = 0;
+  let ledgerInserted = 0;
+  let ledgerUpdated = 0;
+  let ledgerDuplicates = 0;
 
   try {
     const name = (file.name ?? "").toLowerCase();
@@ -606,178 +349,293 @@ export async function POST(req: NextRequest) {
     const { headerRowIdx, cols } = detected;
     const dataRows = rows.slice(headerRowIdx + 1);
 
+    // Build ledger rows + trade rows
     const txnRowsAll: any[] = [];
-    const tradeRowsAll: any[] = [];
+    const tradeByHash = new Map<string, any>();
 
     for (const r of dataRows) {
-      const txnType = String(r[cols.type] ?? "").trim().toUpperCase();
-      if (txnType !== "TRD") continue;
+      rowsRead++;
 
-      const description = String(r[cols.desc] ?? "").trim();
-      if (!description) continue;
+      const dateCell = safeStr(r[cols.date]);
+      if (!/^\d{1,2}\/\d{1,2}\/\d{2}$/.test(dateCell)) continue;
 
+      const txnType = safeStr(r[cols.type]).toUpperCase();
+      const description = safeStr(r[cols.desc]);
       const executed_at = parseDateTime(r[cols.date], r[cols.time]);
 
-      const misc_fees = cols.miscFees >= 0 ? parseNumber(r[cols.miscFees]) : null;
-      const commissions_fees = cols.commFees >= 0 ? parseNumber(r[cols.commFees]) : null;
+      const misc_fees_raw = cols.miscFees >= 0 ? parseNumber(r[cols.miscFees]) : null;
+      const commissions_fees_raw = cols.commFees >= 0 ? parseNumber(r[cols.commFees]) : null;
+
+      // store costs as positive
+      const misc_fees = misc_fees_raw == null ? null : Math.abs(misc_fees_raw);
+      const commissions_fees = commissions_fees_raw == null ? null : Math.abs(commissions_fees_raw);
+
       const amount = parseNumber(r[cols.amount]);
       const balance = cols.balance >= 0 ? parseNumber(r[cols.balance]) : null;
-      const ref_num = cols.ref >= 0 ? String(r[cols.ref] ?? "").trim() : null;
+
+      const ref_num_raw = cols.ref >= 0 ? r[cols.ref] : null;
+      const ref_num_norm = normalizeRefNum(ref_num_raw);
+      const ref_num = ref_num_norm ? ref_num_norm : null;
 
       const row_hash = sha256(
-        [broker, userId, String(r[cols.date] ?? ""), String(r[cols.time] ?? ""), ref_num ?? "", description, String(amount ?? ""), String(balance ?? "")]
-          .join("|")
-      );
-
-      // ✅ instrument parse order:
-      // 1) option parser
-      // 2) patterns (futures/forex/crypto)
-      // 3) stock fallback
-      const opt = parseTOSOption(cfg, description);
-      const parsed =
-        opt ??
-        parseByPatterns(cfg, patterns, description) ??
-        parseStockFallback(description);
-
-      const option_dte =
-        parsed.instrument_type === "option" ? calcDTE(executed_at, parsed.expiration) : null;
-
-      const trade_hash = sha256(
-        [
-          userId,
-          broker,
-          parsed.instrument_type,
-          parsed.underlying_symbol ?? "",
-          parsed.instrument_symbol ?? "",
-          parsed.expiration ?? "",
-          String(parsed.strike ?? ""),
-          parsed.option_right ?? "",
-          parsed.side ?? "",
-          String(parsed.qty ?? ""),
-          String(parsed.price ?? ""),
-          executed_at,
-        ].join("|")
+        [broker, userId, dateCell, safeStr(r[cols.time]), ref_num ?? "", txnType, description.slice(0, 240), String(amount)].join("|")
       );
 
       txnRowsAll.push({
         user_id: userId,
         broker,
-        txn_type: txnType,
-        ref_num: ref_num || null,
-        description,
+        txn_type: txnType || null,
+        ref_num,
+        description: description || null,
         misc_fees,
         commissions_fees,
-        amount,
-        balance,
+        amount: Number.isFinite(amount) ? amount : 0,
+        balance: Number.isFinite(balance) ? balance : null,
         executed_at,
         row_hash,
-        raw: { row: r, detectedHeadersAtRow: headerRowIdx, broker_config: cfg, patterns },
+        raw: { row: r, detectedHeadersAtRow: headerRowIdx },
         import_batch_id: batchId,
       });
 
-      // ✅ contract_code: always the canonical instrument_symbol if present
-      const contract_code = parsed.instrument_symbol ?? parsed.underlying_symbol;
+      if (txnType === "TRD") {
+        trdSeen++;
 
-      tradeRowsAll.push({
-        user_id: userId,
-        broker,
+        const side = normalizeSideFromDesc(description);
+        const qty = parseQtyFromDesc(description);
+        const price = parsePriceFromDesc(description);
 
-        asset_type: parsed.instrument_type === "option" ? "option" : parsed.instrument_type,
-        symbol: parsed.underlying_symbol,
+        if (!side || !qty || !price) {
+          trdSkipped++;
+          continue;
+        }
 
-        instrument_type: parsed.instrument_type,
-        underlying_symbol: parsed.underlying_symbol,
-        instrument_symbol: parsed.instrument_symbol,
-        contract_code,
+        const opt = parseOptionFromDesc(description);
+        const instrument_type = opt ? "option" : "stock";
+        const symbol = opt?.underlying ?? (description.toUpperCase().match(/\b[A-Z]{1,6}\b/)?.[0] ?? "UNKNOWN");
+        const contract_code = opt?.contract_code ?? symbol;
 
-        option_root: parsed.option_root,
-        option_expiration: parsed.expiration,
-        option_strike: parsed.strike,
-        option_right: parsed.option_right,
-        option_dte,
+        const trade_hash = ref_num
+          ? sha256([userId, broker, "REF", ref_num].join("|"))
+          : sha256([userId, broker, "NREF", contract_code, executed_at, side, String(qty), String(price)].join("|"));
 
-        base: parsed.base,
-        quote: parsed.quote,
+        if (tradeByHash.has(trade_hash)) {
+          tradeDuplicatesInFile++;
+          continue;
+        }
 
-        side: parsed.side,
-        qty: parsed.qty,
-        price: parsed.price,
-        executed_at,
+        trdParsed++;
 
-        exchange: parsed.exchange,
-        commissions: commissions_fees,
-        fees: misc_fees,
+        tradeByHash.set(trade_hash, {
+          user_id: userId,
+          broker,
 
-        trade_hash,
-        raw: { description, parsed, sourceRow: r, broker_config: cfg },
-        import_batch_id: batchId,
+          asset_type: instrument_type === "option" ? "option" : instrument_type,
+          symbol,
+
+          instrument_type,
+          underlying_symbol: symbol,
+          instrument_symbol: contract_code,
+          contract_code,
+
+          option_root: opt?.root ?? null,
+          option_expiration: opt?.expiryISO ?? null,
+          option_strike: opt?.strike ?? null,
+          option_right: opt?.right ?? null,
+          option_dte: null,
+
+          side,
+          qty,
+          price,
+          executed_at,
+
+          exchange: null,
+          commissions: commissions_fees,
+          fees: misc_fees,
+
+          trade_hash,
+          raw: { description, parsed: opt, sourceRow: r, ref_num },
+          import_batch_id: batchId,
+        });
+      }
+    }
+
+    /* broker_transactions upsert-like */
+    const refMap = new Map<string, any>();
+    const noRefRows: any[] = [];
+
+    for (const row of txnRowsAll) {
+      const rn = String(row.ref_num ?? "").trim();
+      if (rn) {
+        if (refMap.has(rn)) ledgerDuplicatesInFile++;
+        refMap.set(rn, row);
+      } else {
+        noRefRows.push(row);
+      }
+    }
+
+    const refRows = Array.from(refMap.values());
+    const refNums = refRows.map((x) => String(x.ref_num)).filter(Boolean);
+
+    const existingRefSet = new Set<string>();
+    if (refNums.length) {
+      for (const part of chunk(refNums, 800)) {
+        const { data, error } = await supabaseAdmin
+          .from("broker_transactions")
+          .select("ref_num")
+          .eq("user_id", userId)
+          .eq("broker", broker)
+          .in("ref_num", part);
+
+        if (error) throw new Error(error.message ?? "Failed to query existing ref_num");
+        for (const it of data ?? []) {
+          const rn = String((it as any).ref_num ?? "").trim();
+          if (rn) existingRefSet.add(rn);
+        }
+      }
+    }
+
+    const toInsertRef = refRows.filter((r) => !existingRefSet.has(String(r.ref_num)));
+    const toUpdateRef = refRows.filter((r) => existingRefSet.has(String(r.ref_num)));
+
+    if (toInsertRef.length) {
+      for (const part of chunk(toInsertRef, 500)) {
+        const { error } = await supabaseAdmin.from("broker_transactions").insert(part);
+        if (error) throw new Error(error.message ?? "Insert failed (broker_transactions ref)");
+        ledgerInserted += part.length;
+      }
+    }
+
+    if (toUpdateRef.length) {
+      await parallelLimit(toUpdateRef, 12, async (row) => {
+        const rn = String(row.ref_num ?? "").trim();
+        if (!rn) return;
+
+        const patch = {
+          txn_type: row.txn_type,
+          description: row.description,
+          misc_fees: row.misc_fees,
+          commissions_fees: row.commissions_fees,
+          amount: row.amount,
+          balance: row.balance,
+          executed_at: row.executed_at,
+          row_hash: row.row_hash,
+          raw: row.raw,
+          import_batch_id: row.import_batch_id,
+        };
+
+        const { error } = await supabaseAdmin
+          .from("broker_transactions")
+          .update(patch)
+          .eq("user_id", userId)
+          .eq("broker", broker)
+          .eq("ref_num", rn);
+
+        if (error) throw new Error(error.message ?? "Update failed (broker_transactions ref)");
+        ledgerUpdated += 1;
       });
     }
 
-    // ledger dedupe
-    const rowHashes = Array.from(new Set(txnRowsAll.map((x) => x.row_hash).filter(Boolean)));
-    const existingRowHash = new Set<string>();
+    let ledgerDuplicatesNoRef = 0;
+    if (noRefRows.length) {
+      const rowHashes = Array.from(new Set(noRefRows.map((x) => x.row_hash).filter(Boolean)));
+      const existingHashSet = new Set<string>();
 
-    for (const part of chunk(rowHashes, 800)) {
-      const { data, error } = await supabaseAdmin
-        .from("broker_transactions")
-        .select("row_hash")
-        .eq("user_id", userId)
-        .in("row_hash", part);
+      for (const part of chunk(rowHashes, 800)) {
+        const { data, error } = await supabaseAdmin
+          .from("broker_transactions")
+          .select("row_hash")
+          .eq("user_id", userId)
+          .eq("broker", broker)
+          .in("row_hash", part);
 
-      if (error) throw error;
-      for (const it of data ?? []) existingRowHash.add(it.row_hash);
+        if (error) throw new Error(error.message ?? "Failed to query existing row_hash");
+        for (const it of data ?? []) {
+          const h = String((it as any).row_hash ?? "").trim();
+          if (h) existingHashSet.add(h);
+        }
+      }
+
+      const toInsert = noRefRows.filter((x) => !existingHashSet.has(String(x.row_hash)));
+      ledgerDuplicatesNoRef = noRefRows.length - toInsert.length;
+
+      for (const part of chunk(toInsert, 500)) {
+        const { error } = await supabaseAdmin.from("broker_transactions").insert(part);
+        if (error) throw new Error(error.message ?? "Insert failed (broker_transactions no-ref)");
+        ledgerInserted += part.length;
+      }
     }
 
-    const txnRowsNew = txnRowsAll.filter((x) => !existingRowHash.has(x.row_hash));
-    const duplicates = txnRowsAll.length - txnRowsNew.length;
+    ledgerDuplicates = ledgerDuplicatesInFile + ledgerDuplicatesNoRef;
 
-    if (txnRowsNew.length) {
-      const { error } = await supabaseAdmin.from("broker_transactions").insert(txnRowsNew);
-      if (error) throw error;
-    }
+    /* trades upsert with counts */
+    const tradeRowsAll = Array.from(tradeByHash.values());
+    const tradeHashes = tradeRowsAll.map((x) => x.trade_hash).filter(Boolean);
 
-    // trades inserted vs updated + upsert
-    const tradeHashes = Array.from(new Set(tradeRowsAll.map((x) => x.trade_hash).filter(Boolean)));
     const existingTradeHash = new Set<string>();
+    if (tradeHashes.length) {
+      for (const part of chunk(tradeHashes, 800)) {
+        const { data, error } = await supabaseAdmin
+          .from("trades")
+          .select("trade_hash")
+          .eq("user_id", userId)
+          .in("trade_hash", part);
 
-    for (const part of chunk(tradeHashes, 800)) {
-      const { data, error } = await supabaseAdmin
-        .from("trades")
-        .select("trade_hash")
-        .eq("user_id", userId)
-        .in("trade_hash", part);
-
-      if (error) throw error;
-      for (const it of data ?? []) existingTradeHash.add(it.trade_hash);
+        if (error) throw new Error(error.message ?? "Failed to query existing trade_hash");
+        for (const it of data ?? []) existingTradeHash.add((it as any).trade_hash);
+      }
     }
 
-    const inserted = tradeRowsAll.filter((x) => !existingTradeHash.has(x.trade_hash)).length;
-    const updated = tradeRowsAll.length - inserted;
+    tradeInserted = tradeRowsAll.filter((x) => !existingTradeHash.has(x.trade_hash)).length;
+    tradeUpdated = tradeRowsAll.length - tradeInserted;
 
     if (tradeRowsAll.length) {
       const { error } = await supabaseAdmin.from("trades").upsert(tradeRowsAll, {
         onConflict: "trade_hash",
         ignoreDuplicates: false,
       });
-      if (error) throw error;
+      if (error) throw new Error(error.message ?? "Trades upsert failed");
     }
 
     const durationMs = Date.now() - startedAt;
+    const duplicatesForHistory = tradeDuplicatesInFile + ledgerDuplicates;
 
-    await supabaseAdmin
+    // 2) Finalize batch — SUCCESS
+    const { error: updErr } = await supabaseAdmin
       .from("trade_import_batches")
       .update({
         status: "success",
-        imported_rows: inserted,
-        updated_rows: updated,
-        duplicates,
+        imported_rows: tradeInserted,
+        updated_rows: tradeUpdated,
+        duplicates: duplicatesForHistory,
         finished_at: new Date().toISOString(),
         duration_ms: durationMs,
       })
       .eq("id", batchId);
 
-    return NextResponse.json({ batchId, inserted, updated, duplicates });
+    if (updErr) {
+      return NextResponse.json(
+        {
+          ok: true,
+          batchId,
+          broker,
+          warning: `Import done but failed to finalize batch: ${updErr.message}`,
+          message: `Import complete — ${tradeInserted} new, ${tradeUpdated} updated, ${tradeDuplicatesInFile} duplicates skipped.`,
+        },
+        { status: 200 }
+      );
+    }
+
+    return NextResponse.json(
+      {
+        ok: true,
+        batchId,
+        broker,
+        message:
+          `Import complete — ${tradeInserted} new, ${tradeUpdated} updated, ` +
+          `${tradeDuplicatesInFile} duplicates skipped. Ledger: ${ledgerInserted} new, ${ledgerUpdated} updated, ${ledgerDuplicates} duplicates skipped.`,
+      },
+      { status: 200 }
+    );
   } catch (e: any) {
     const durationMs = Date.now() - startedAt;
 
@@ -785,12 +643,15 @@ export async function POST(req: NextRequest) {
       .from("trade_import_batches")
       .update({
         status: "failed",
-        error: e?.message ?? "Import failed",
+        imported_rows: tradeInserted || 0,
+        updated_rows: tradeUpdated || 0,
+        duplicates: (tradeDuplicatesInFile || 0) + (ledgerDuplicates || 0),
         finished_at: new Date().toISOString(),
         duration_ms: durationMs,
+        error: e?.message ?? "Import failed",
       })
       .eq("id", batchId);
 
-    return NextResponse.json({ error: e?.message ?? "Import failed", batchId }, { status: 400 });
+    return NextResponse.json({ ok: false, error: e?.message ?? "Import failed", batchId }, { status: 400 });
   }
 }

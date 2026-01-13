@@ -1,8 +1,13 @@
+// app/api/broker-import/history/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 
 export const runtime = "nodejs";
 
+/**
+ * Import History (Option A consistency)
+ * Reads: imported_rows, updated_rows, duplicates
+ */
 export async function GET(req: NextRequest) {
   try {
     const authHeader = req.headers.get("authorization") || "";
@@ -17,11 +22,11 @@ export async function GET(req: NextRequest) {
     const { data, error } = await supabaseAdmin
       .from("trade_import_batches")
       .select(
-        "id, broker, filename, comment, status, imported_rows, duplicates, started_at, finished_at, duration_ms"
+        "id, broker, filename, comment, status, imported_rows, updated_rows, duplicates, started_at, finished_at, duration_ms, error"
       )
       .eq("user_id", userId)
       .order("started_at", { ascending: false })
-      .limit(10); // ✅ últimos 10
+      .limit(10);
 
     if (error) {
       return NextResponse.json(
