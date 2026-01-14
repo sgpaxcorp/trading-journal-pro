@@ -467,10 +467,10 @@ const resources: NavItem[] = [
 
 const rules: NavItem[] = [
   {
-    id: "alerts",
-    title: "Important Alerts",
-    description: "Alerts that you need when somethin happens.",
-    href: "/rules-alarms/alerts",
+    id: "reminders",
+    title: "Reminders",
+    description: "Reminders that you need when somethin happens.",
+    href: "/rules-alarms/reminders",
   },
 
   {

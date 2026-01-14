@@ -845,7 +845,7 @@ function ConfirmModal({
 }) {
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-[500] flex items-center justify-center">
+    <div className="fixed inset-0 z-500 flex items-center justify-center">
       <div className="absolute inset-0 bg-black/60" onClick={busy ? undefined : onCancel} />
       <div className="relative w-[92vw] max-w-[640px] rounded-2xl border border-slate-800 bg-slate-950 p-5 shadow-[0_0_40px_rgba(0,0,0,0.75)]">
         <p className="text-slate-100 text-lg font-semibold">{title}</p>
