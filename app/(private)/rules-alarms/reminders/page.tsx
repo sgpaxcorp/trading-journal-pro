@@ -112,6 +112,8 @@ type AlertEventRow = {
 const RULES_TABLE = "ntj_alert_rules";
 const EVENTS_TABLE = "ntj_alert_events";
 
+
+
 const EMOTION_TAGS = [
   "Calm",
   "Greedy",
@@ -564,7 +566,7 @@ function Modal({
   const c = accent ? sevColor(accent) : CHART_COLORS.sky;
 
   return (
-    <div className="fixed inset-0 z-[80] flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-80 flex items-center justify-center p-4">
       <div
         className="absolute inset-0 bg-black/60 backdrop-blur-sm"
         onClick={onClose}
@@ -612,6 +614,47 @@ function isTableMissingError(e: any) {
   const msg = String(e?.message ?? "").toLowerCase();
   return msg.includes("does not exist") || msg.includes("relation") || msg.includes("404");
 }
+
+function isRlsDeniedError(e: any) {
+  const msg = String(e?.message ?? "").toLowerCase();
+  const code = String(e?.code ?? "");
+  return code === "42501" || msg.includes("row-level security") || msg.includes("violates row-level security");
+}
+
+function isMissingOnConflictConstraintError(e: any) {
+  const msg = String(e?.message ?? "").toLowerCase();
+  return msg.includes("no unique") && msg.includes("on conflict");
+}
+
+function formatSupaError(e: any): string {
+  const msg =
+    e?.message ??
+    e?.error_description ??
+    e?.details ??
+    (typeof e === "string" ? e : "") ??
+    "Unknown error";
+
+  const code = e?.code ? ` [${String(e.code)}]` : "";
+  const details = e?.details ? ` — ${String(e.details)}` : "";
+  return `${String(msg)}${code}${details}`.trim();
+}
+
+function logSupaError(prefix: string, e: any) {
+  // PostgrestError has non-enumerable fields sometimes; log explicitly
+  console.error(prefix, {
+    code: e?.code,
+    message: e?.message,
+    details: e?.details,
+    hint: e?.hint,
+    status: e?.status,
+  });
+}
+
+function isBackendMisconfigured(e: any) {
+  return isTableMissingError(e) || isRlsDeniedError(e) || isMissingOnConflictConstraintError(e);
+}
+
+
 
 async function safeSelect<T>(query: PromiseLike<any>): Promise<{ data: T[]; error: any | null }> {
   try {
@@ -887,6 +930,22 @@ export function ReminderPopupListener({
       .sort((a, b) => (a.triggered_at < b.triggered_at ? 1 : -1));
   }, [events]);
 
+  const enabledRules = useMemo(() => {
+    return (rules || []).filter((r) => !!r.enabled);
+  }, [rules]);
+
+  const enabledRulesSorted = useMemo(() => {
+    const arr = [...enabledRules];
+    arr.sort((a, b) => {
+      const ds = severityRank(normalizeSeverity(b.severity)) - severityRank(normalizeSeverity(a.severity));
+      if (ds !== 0) return ds;
+      // created_at asc for stability
+      return (a.created_at || "") < (b.created_at || "") ? -1 : 1;
+    });
+    return arr;
+  }, [enabledRules]);
+
+
   const loadRules = async () => {
     const { data, error } = await safeSelect<AlertRuleRow>(
       supabaseBrowser.from(RULES_TABLE).select("*").eq("user_id", userId).order("created_at", { ascending: true })
@@ -1112,12 +1171,6 @@ useEffect(() => {
 
   return (
     <div className={className}>
-      {!backendOk ? (
-        <div className="rounded-2xl border border-amber-400/30 bg-amber-400/10 px-4 py-3 text-sm text-amber-200">
-          Reminder backend tables not found. Create <span className="font-mono">{RULES_TABLE}</span> and{" "}
-          <span className="font-mono">{EVENTS_TABLE}</span> in Supabase to enable pop-ups.
-        </div>
-      ) : null}
 
       <Modal
         open={!!popupEvent && !!popupRule}
@@ -1273,6 +1326,23 @@ export default function RemindersPage() {
       .sort((a, b) => (a.triggered_at < b.triggered_at ? 1 : -1));
   }, [events]);
 
+  const enabledRules = useMemo(() => {
+    return (rules || []).filter((r) => !!r.enabled);
+  }, [rules]);
+
+  const enabledRulesSorted = useMemo(() => {
+    const arr = [...enabledRules];
+    arr.sort((a, b) => {
+      const ds =
+        severityRank(normalizeSeverity(b.severity)) -
+        severityRank(normalizeSeverity(a.severity));
+      if (ds !== 0) return ds;
+      return (a.created_at || "") < (b.created_at || "") ? -1 : 1;
+    });
+    return arr;
+  }, [enabledRules]);
+
+
   const ruleById = useMemo(() => {
     const m = new Map<string, AlertRuleRow>();
     for (const r of rules) m.set(r.id, r);
@@ -1357,10 +1427,11 @@ export default function RemindersPage() {
 
       setToast("Template added.");
       await loadRules();
-      setActiveTab("catalog");
+      setActiveTab("active");
     } catch (e: any) {
-      console.error("[RemindersPage] createFromTemplate error", e);
-      setToast("Could not add template (backend missing?).");
+      logSupaError("[RemindersPage] createFromTemplate error", e);
+      if (isBackendMisconfigured(e)) setBackendOk(false);
+      setToast(`Could not add template: ${formatSupaError(e)}`);
     } finally {
       setBusy(false);
     }
@@ -1381,7 +1452,8 @@ export default function RemindersPage() {
       setRules((prev) => prev.map((r) => (r.id === ruleId ? { ...r, ...patch } : r)));
       setToast("Saved.");
     } catch (e: any) {
-      console.error("[RemindersPage] updateRule error", e);
+      logSupaError("[RemindersPage] updateRule error", e);
+      if (isBackendMisconfigured(e)) setBackendOk(false);
       setToast("Save failed.");
     } finally {
       setBusy(false);
@@ -1403,7 +1475,8 @@ export default function RemindersPage() {
       if (selectedRuleId === ruleId) setSelectedRuleId(null);
       setToast("Deleted.");
     } catch (e: any) {
-      console.error("[RemindersPage] deleteRule error", e);
+      logSupaError("[RemindersPage] deleteRule error", e);
+      if (isBackendMisconfigured(e)) setBackendOk(false);
       setToast("Delete failed.");
     } finally {
       setBusy(false);
@@ -1499,7 +1572,7 @@ export default function RemindersPage() {
                 <p className="text-[11px] text-slate-500">
                   Backend:{" "}
                   <span className={backendOk ? "text-emerald-300" : "text-amber-300"}>
-                    {backendOk ? "OK" : "Tables missing"}
+                    {backendOk ? " OK" : "Tables missing"}
                   </span>
                 </p>
               </div>
@@ -1513,9 +1586,7 @@ export default function RemindersPage() {
 
             {!backendOk ? (
               <div className="rounded-2xl border border-amber-400/30 bg-amber-400/10 px-4 py-3 text-sm text-amber-200">
-                Supabase tables for reminders are not provisioned yet. Create{" "}
-                <span className="font-mono">{RULES_TABLE}</span> and{" "}
-                <span className="font-mono">{EVENTS_TABLE}</span> (see SQL at the top of this file).
+                Reminders are temporarily unavailable. Please try again later.
               </div>
             ) : null}
 
@@ -1539,8 +1610,8 @@ export default function RemindersPage() {
             ) : null}
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <Stat label="Active reminders" value={activeEvents.length} />
-              <Stat label="Rules enabled" value={rules.filter((r) => r.enabled).length} />
+              <Stat label="Enabled reminders" value={enabledRules.length} />
+              <Stat label="Triggered alerts" value={activeEvents.length} />
               <Stat
                 label="Templates available"
                 value={TEMPLATES.length}
@@ -1591,56 +1662,158 @@ export default function RemindersPage() {
                   </p>
                 </div>
                 <span className="text-[11px] text-slate-500 font-mono">
-                  {activeEvents.length} ACTIVE
+                  {activeEvents.length} TRIGGERED · {enabledRules.length} ENABLED
                 </span>
               </div>
 
-              <div className="mt-4 space-y-2">
-                {activeEvents.length === 0 ? (
-                  <div className="rounded-2xl border border-slate-800 bg-slate-950/45 px-4 py-6">
-                    <p className="text-slate-200 text-sm font-medium">No active alerts</p>
-                    <p className="text-sm text-slate-500 mt-1">
-                      When a rule triggers, it will appear here and may also fire a pop-up.
+              <div className="mt-4 space-y-4">
+                {/* Triggered alerts */}
+                <div>
+                  <div className="flex items-center justify-between gap-3 mb-2">
+                    <p className="text-[10px] uppercase tracking-[0.22em] text-slate-500">
+                      Triggered
                     </p>
+                    <span className="text-[10px] text-slate-500 font-mono">
+                      {activeEvents.length}
+                    </span>
                   </div>
-                ) : (
-                  activeEvents.map((ev) => {
-                    const r = ruleById.get(ev.rule_id);
-                    const sev = r?.severity ?? "info";
-                    const selected = selectedEventId === ev.id;
-                    return (
-                      <button
-                        key={ev.id}
-                        type="button"
-                        onClick={() => setSelectedEventId(ev.id)}
-                        className={`w-full text-left rounded-2xl border px-4 py-3 transition ${
-                          selected
-                            ? "border-emerald-400/40 bg-emerald-500/10"
-                            : "border-slate-800 bg-slate-950/45 hover:bg-slate-950/70"
-                        }`}
-                      >
-                        <div className="flex items-start justify-between gap-3">
-                          <div>
-                            <p className="text-sm text-slate-100 font-semibold">
-                              {r?.title ?? "Reminder"}
-                            </p>
-                            <p className="text-[12px] text-slate-400 mt-1 line-clamp-2">
-                              {r?.message ?? ""}
-                            </p>
-                          </div>
-                          <div className="flex flex-col items-end gap-2">
-                            <span className={`inline-flex items-center rounded-full border px-2 py-1 text-[11px] ${pillTone(sev)}`}>
-                              {sev.toUpperCase()}
-                            </span>
-                            <span className="text-[10px] text-slate-500 font-mono">
-                              {new Date(ev.triggered_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                            </span>
-                          </div>
-                        </div>
-                      </button>
-                    );
-                  })
-                )}
+
+                  {activeEvents.length === 0 ? (
+                    <div className="rounded-2xl border border-slate-800 bg-slate-950/45 px-4 py-6">
+                      <p className="text-slate-200 text-sm font-medium">
+                        No triggered alerts
+                      </p>
+                      <p className="text-sm text-slate-500 mt-1">
+                        When a rule triggers, it will appear here and may also fire a pop-up.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {activeEvents.map((ev) => {
+                        const r = ruleById.get(ev.rule_id);
+                        const sev = r?.severity ?? "info";
+                        const selected = selectedEventId === ev.id;
+                        return (
+                          <button
+                            key={ev.id}
+                            type="button"
+                            onClick={() => setSelectedEventId(ev.id)}
+                            className={`w-full text-left rounded-2xl border px-4 py-3 transition ${
+                              selected
+                                ? "border-emerald-400/40 bg-emerald-500/10"
+                                : "border-slate-800 bg-slate-950/45 hover:bg-slate-950/70"
+                            }`}
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <p className="text-sm text-slate-100 font-semibold">
+                                  {r?.title ?? "Reminder"}
+                                </p>
+                                <p className="text-[12px] text-slate-400 mt-1 line-clamp-2">
+                                  {r?.message ?? ""}
+                                </p>
+                              </div>
+                              <div className="flex flex-col items-end gap-2">
+                                <span
+                                  className={`inline-flex items-center rounded-full border px-2 py-1 text-[11px] ${pillTone(
+                                    sev
+                                  )}`}
+                                >
+                                  {sev.toUpperCase()}
+                                </span>
+                                <span className="text-[10px] text-slate-500 font-mono">
+                                  {new Date(ev.triggered_at).toLocaleTimeString([], {
+                                    hour: "2-digit",
+                                    minute: "2-digit",
+                                  })}
+                                </span>
+                              </div>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* Enabled reminders */}
+                <div className="pt-4 border-t border-slate-800/80">
+                  <div className="flex items-center justify-between gap-3 mb-2">
+                    <p className="text-[10px] uppercase tracking-[0.22em] text-slate-500">
+                      Enabled reminders
+                    </p>
+                    <span className="text-[10px] text-slate-500 font-mono">
+                      {enabledRules.length}
+                    </span>
+                  </div>
+
+                  {enabledRules.length === 0 ? (
+                    <div className="rounded-2xl border border-slate-800 bg-slate-950/45 px-4 py-6">
+                      <p className="text-slate-200 text-sm font-medium">
+                        No enabled reminders
+                      </p>
+                      <p className="text-sm text-slate-500 mt-1">
+                        Add a template from the catalog to start monitoring.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {enabledRulesSorted.map((r) => {
+                        const sev = r?.severity ?? "info";
+                        const selected = selectedRuleId === r.id;
+                        const chans = Array.isArray(r.channels) ? r.channels : [];
+                        const chLabel =
+                          [
+                            chans.includes("popup") ? "POPUP" : null,
+                            chans.includes("inapp") ? "INAPP" : null,
+                            chans.includes("voice") ? "VOICE" : null,
+                          ]
+                            .filter(Boolean)
+                            .join("+") || "—";
+
+                        return (
+                          <button
+                            key={r.id}
+                            type="button"
+                            onClick={() => {
+                              setSelectedRuleId(r.id);
+                              setSelectedEventId(null);
+                              setActiveTab("catalog");
+                            }}
+                            className={`w-full text-left rounded-2xl border px-4 py-3 transition ${
+                              selected
+                                ? "border-emerald-400/40 bg-emerald-500/10"
+                                : "border-slate-800 bg-slate-950/45 hover:bg-slate-950/70"
+                            }`}
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <p className="text-sm text-slate-100 font-semibold">
+                                  {r.title}
+                                </p>
+                                <p className="text-[12px] text-slate-400 mt-1 line-clamp-2">
+                                  {r.message}
+                                </p>
+                              </div>
+                              <div className="flex flex-col items-end gap-2">
+                                <span
+                                  className={`inline-flex items-center rounded-full border px-2 py-1 text-[11px] ${pillTone(
+                                    sev
+                                  )}`}
+                                >
+                                  {sev.toUpperCase()}
+                                </span>
+                                <span className="text-[10px] text-slate-500 font-mono">
+                                  {chLabel}
+                                </span>
+                              </div>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
               </div>
             </section>
 

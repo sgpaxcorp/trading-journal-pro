@@ -19,42 +19,145 @@ import {
 import { useAuth } from "@/context/AuthContext";
 import TopNav from "@/app/components/TopNav";
 
-import { getGrowthPlan, type GrowthPlan } from "@/lib/growthPlanLocal";
+import { supabaseBrowser } from "@/lib/supaBaseClient";
 import { getAllJournalEntries } from "@/lib/journalSupabase";
 import type { JournalEntry } from "@/lib/journalLocal";
 
-/* ========== Utils ========== */
+/* =========================
+   Types (DB + view)
+========================= */
 
-function formatDateYYYYMMDD(d: Date): string {
+type DbGrowthPlanRow = {
+  id: string;
+  user_id: string;
+
+  starting_balance: unknown;
+  target_balance: unknown;
+
+  daily_target_pct: unknown;
+  daily_goal_percent: unknown;
+
+  max_daily_loss_percent: unknown;
+  loss_days_per_week: unknown;
+  trading_days: unknown;
+
+  selected_plan: string | null;
+
+  created_at: string | null;
+  updated_at: string | null;
+};
+
+type GrowthPlan = {
+  id: string;
+  userId: string;
+
+  startingBalance: number;
+  targetBalance: number;
+
+  dailyTargetPct: number; // preferred
+  dailyGoalPercent: number; // legacy/compat
+
+  maxDailyLossPercent: number;
+  lossDaysPerWeek: number;
+  tradingDays: number;
+
+  selectedPlan: string | null;
+
+  createdAtIso: string;
+  updatedAtIso: string;
+};
+
+type ChartPoint = {
+  date: string; // YYYY-MM-DD
+  actual: number;
+  projected: number;
+  dayPnl: number;
+};
+
+/* =========================
+   Utils
+========================= */
+
+function toNum(x: unknown, fb = 0): number {
+  const n = Number(x);
+  return Number.isFinite(n) ? n : fb;
+}
+
+function isoDate(d: Date): string {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
 }
 
-function parseDateYYYYMMDD(dateStr: string): Date {
+function parseISODateYYYYMMDD(dateStr: string): Date {
   const [y, m, d] = dateStr.split("-").map(Number);
   return new Date(y, m - 1, d);
 }
 
 function getDailyTargetPct(plan: GrowthPlan | null): number {
   if (!plan) return 0;
-  const p: any = plan;
-  const raw = p.dailyTargetPct ?? p.dailyGoalPercent ?? 0;
-  return Number(raw) || 0;
+  // Prefer daily_target_pct, fallback to daily_goal_percent
+  return plan.dailyTargetPct > 0 ? plan.dailyTargetPct : plan.dailyGoalPercent;
 }
 
-type ChartPoint = {
-  date: string;
-  actual: number;
-  projected: number;
-  dayPnl: number;
-};
+async function fetchLatestGrowthPlan(userId: string): Promise<GrowthPlan | null> {
+  if (!userId) return null;
 
-/* ========== Page ========== */
+    // IMPORTANT:
+    // Supabase's typed `select()` parser needs a string literal to infer row types.
+    // Using an array + `.join(',')` turns the argument into a generic `string`, which
+    // makes the inferred row type become `GenericStringError` (TS2352) in strict TS setups.
+    const SELECT_GROWTH_PLAN =
+      "id,user_id,starting_balance,target_balance,daily_target_pct,daily_goal_percent,max_daily_loss_percent,loss_days_per_week,trading_days,selected_plan,created_at,updated_at" as const;
+
+
+  try {
+    const { data, error } = await supabaseBrowser
+      .from("growth_plans")
+      .select(SELECT_GROWTH_PLAN)
+      .eq("user_id", userId)
+      .order("updated_at", { ascending: false })
+      .order("created_at", { ascending: false })
+      .limit(1);
+
+    if (error) {
+      console.error("[BalanceChartPage] growth_plans fetch error:", error);
+      return null;
+    }
+
+    const row = data?.[0] ?? undefined;
+    if (!row) return null;
+
+    const createdAtIso = row.created_at || row.updated_at || new Date().toISOString();
+    const updatedAtIso = row.updated_at || row.created_at || new Date().toISOString();
+
+    return {
+      id: row.id,
+      userId: row.user_id,
+      startingBalance: toNum(row.starting_balance, 0),
+      targetBalance: toNum(row.target_balance, 0),
+      dailyTargetPct: toNum(row.daily_target_pct, 0),
+      dailyGoalPercent: toNum(row.daily_goal_percent, 0),
+      maxDailyLossPercent: toNum(row.max_daily_loss_percent, 0),
+      lossDaysPerWeek: Math.max(0, Math.min(5, Math.floor(toNum(row.loss_days_per_week, 0)))),
+      tradingDays: Math.max(0, Math.floor(toNum(row.trading_days, 0))),
+      selectedPlan: row.selected_plan ?? null,
+      createdAtIso,
+      updatedAtIso,
+    };
+  } catch (err) {
+    console.error("[BalanceChartPage] growth_plans fetch exception:", err);
+    return null;
+  }
+}
+
+/* =========================
+   Page
+========================= */
 
 export default function BalanceChartPage() {
-  const { user, loading } = useAuth();
+  const { user, loading } = useAuth() as any;
   const router = useRouter();
 
   const [plan, setPlan] = useState<GrowthPlan | null>(null);
@@ -63,37 +166,34 @@ export default function BalanceChartPage() {
 
   // Protect route
   useEffect(() => {
-    if (!loading && !user) {
-      router.replace("/signin");
-    }
+    if (!loading && !user) router.replace("/signin");
   }, [loading, user, router]);
 
-  // Load plan + journal entries from Supabase
+  // Load plan (Supabase) + journal entries (Supabase)
   useEffect(() => {
     if (loading || !user) return;
 
     const load = async () => {
+      setLoadingData(true);
       try {
-        setLoadingData(true);
-
-        // Growth plan: sigue viniendo de localStorage
-        const gp = getGrowthPlan() || null;
-        setPlan(gp);
-
-        // Journals: ahora desde Supabase
-        const userId =
+        const planUserId = (user as any)?.id || (user as any)?.uid || "";
+        const journalUserId =
           (user as any)?.uid || (user as any)?.id || (user as any)?.email || "";
 
-        if (!userId) {
+        const gp = await fetchLatestGrowthPlan(planUserId);
+        setPlan(gp);
+
+        if (!journalUserId) {
           setEntries([]);
           return;
         }
 
-        const all = await getAllJournalEntries(userId);
-        setEntries(all);
+        const all = await getAllJournalEntries(journalUserId);
+        setEntries(all ?? []);
       } catch (err) {
         console.error("[BalanceChartPage] error loading data:", err);
         setEntries([]);
+        setPlan(null);
       } finally {
         setLoadingData(false);
       }
@@ -129,20 +229,16 @@ export default function BalanceChartPage() {
 
     const starting = plan.startingBalance ?? 0;
 
-    // Intentamos usar createdAt, si no, startDate, y si no, hoy
-    const createdOrStart =
-      (plan as any).createdAt ??
-      (plan as any).startDate ??
-      new Date().toISOString();
-    const planDateStr = String(createdOrStart).slice(0, 10);
+    // Plan start date: prefer created_at, fallback to updated_at, fallback to today
+    const planDateStr = String(plan.createdAtIso || new Date().toISOString()).slice(0, 10);
 
     const dailyTargetPct = getDailyTargetPct(plan);
-    const lossDaysPerWeek = (plan as any).lossDaysPerWeek ?? 0;
-    const maxDailyLossPct = (plan as any).maxDailyLossPercent ?? 0;
-    const planTradingDays = (plan as any).tradingDays ?? 0;
+    const lossDaysPerWeek = plan.lossDaysPerWeek ?? 0;
+    const maxDailyLossPct = plan.maxDailyLossPercent ?? 0;
+    const planTradingDays = plan.tradingDays ?? 0;
 
     // Journal entries from plan start
-    const filtered = entries
+    const filtered = (entries ?? [])
       .filter((e) => e.date >= planDateStr)
       .sort((a, b) => a.date.localeCompare(b.date));
 
@@ -163,13 +259,13 @@ export default function BalanceChartPage() {
     const firstTradingDateStr = filtered[0].date;
     const lastTradingDateStr = filtered[filtered.length - 1].date;
 
-    const firstDate = parseDateYYYYMMDD(firstTradingDateStr);
-    const lastDate = parseDateYYYYMMDD(lastTradingDateStr);
+    const firstDate = parseISODateYYYYMMDD(firstTradingDateStr);
+    const lastDate = parseISODateYYYYMMDD(lastTradingDateStr);
 
     // Aggregate P&L by date
     const pnlByDate = new Map<string, number>();
     filtered.forEach((e) => {
-      const dayPnl = e.pnl || 0;
+      const dayPnl = toNum((e as any).pnl, 0);
       pnlByDate.set(e.date, (pnlByDate.get(e.date) ?? 0) + dayPnl);
     });
 
@@ -180,7 +276,7 @@ export default function BalanceChartPage() {
     while (cursor <= lastDate) {
       const dow = cursor.getDay(); // 0 Sun, 6 Sat
       if (dow !== 0 && dow !== 6) {
-        allTradingDates.push(formatDateYYYYMMDD(cursor));
+        allTradingDates.push(isoDate(cursor));
       }
       cursor.setDate(cursor.getDate() + 1);
     }
@@ -205,7 +301,7 @@ export default function BalanceChartPage() {
       };
     }
 
-    const chartData: ChartPoint[] = [];
+    const out: ChartPoint[] = [];
     let cumPnl = 0;
     let projBalance = starting;
 
@@ -221,7 +317,7 @@ export default function BalanceChartPage() {
       let projectedForDay = projBalance;
 
       if (dailyTargetPct > 0) {
-        // Use weekly pattern of loss days (Mon–Fri → 0..4)
+        // Weekly pattern of loss days (Mon–Fri → 0..4)
         const dayInWeek = i % 5;
         const isLossDay =
           lossDaysPerWeek > 0 &&
@@ -241,7 +337,7 @@ export default function BalanceChartPage() {
         projectedForDay = starting;
       }
 
-      chartData.push({
+      out.push({
         date: dateStr,
         actual: actualBalance,
         projected: projectedForDay,
@@ -249,14 +345,14 @@ export default function BalanceChartPage() {
       });
     }
 
-    const lastPoint = chartData[chartData.length - 1];
+    const lastPoint = out[out.length - 1];
     const currentBalance = lastPoint.actual;
     const projectedBalance = lastPoint.projected;
     const diff = currentBalance - projectedBalance;
-    const totalPnl = cumPnl; // suma total de P&L
+    const totalPnl = cumPnl;
 
     return {
-      chartData,
+      chartData: out,
       tradingDays: effectiveTradingDays,
       currentBalance,
       projectedBalance,
@@ -271,9 +367,7 @@ export default function BalanceChartPage() {
   if (loading || !user || loadingData) {
     return (
       <main className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center">
-        <p className="text-base text-slate-400">
-          Loading your balance chart...
-        </p>
+        <p className="text-base text-slate-400">Loading your balance chart...</p>
       </main>
     );
   }
@@ -290,7 +384,7 @@ export default function BalanceChartPage() {
             <div>
               <h1 className="text-3xl font-semibold">Balance chart</h1>
               <p className="text-sm text-slate-400 mt-1">
-                Actual account balance vs projected balance based on your growth plan.
+                Actual account balance vs projected balance based on your growth plan (loaded from Supabase).
               </p>
             </div>
             <Link
@@ -304,15 +398,14 @@ export default function BalanceChartPage() {
 
         {!plan && (
           <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4 text-sm text-slate-300">
-            You don&apos;t have a growth plan yet. Create one first so we can
-            project your balance over time.
+            We couldn&apos;t find a Growth Plan in Supabase for your account yet. Create one first so we can project
+            your balance over time.
           </div>
         )}
 
         {plan && !hasData && (
           <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4 text-sm text-slate-300">
-            We haven&apos;t found any trading days in this plan yet. Log your trades
-            to see your balance evolution.
+            We haven&apos;t found any trading days in this plan yet. Log/import trades to see your balance evolution.
           </div>
         )}
 
@@ -326,10 +419,10 @@ export default function BalanceChartPage() {
                     Account balance over time
                   </h2>
                   <p className="text-xs text-slate-500 mt-1">
-                    Trading days only (Mon–Fri), from your first trading day in this
-                    plan to your latest trading day.
+                    Trading days only (Mon–Fri), from your first trading day in this plan to your latest trading day.
                   </p>
                 </div>
+
                 <div className="text-right text-xs text-slate-400 space-y-1">
                   <div>
                     Current balance:{" "}
@@ -439,16 +532,13 @@ export default function BalanceChartPage() {
 
               {diff >= 0 ? (
                 <p className="text-emerald-300">
-                  You are on track with your plan. Keep respecting your rules,
-                  protecting your downside, and reviewing your statistics to refine
-                  your technique.
+                  You are on track with your plan. Keep respecting your rules, protecting your downside, and reviewing
+                  your statistics to refine your technique.
                 </p>
               ) : (
                 <p className="text-slate-300">
-                  You are currently below the projected curve, but you are still in
-                  the game. You are doing well—stay on track with your rules and
-                  review your statistics so you can find specific areas to improve
-                  your technique.
+                  You are currently below the projected curve, but you are still in the game. Stay aligned with your
+                  rules and use your stats to find specific, controllable improvements.
                 </p>
               )}
             </section>
@@ -461,8 +551,7 @@ export default function BalanceChartPage() {
                     Growth plan schedule
                   </h2>
                   <p className="text-[11px] text-slate-500">
-                    Trading days only, from your first trading day in this plan to
-                    your current trading day.
+                    Trading days only, from your first trading day in this plan to your current trading day.
                   </p>
                 </div>
                 <div className="text-[11px] text-slate-400 md:text-right">

@@ -1,0 +1,731 @@
+// app/(private)/plan/page.tsx
+"use client";
+
+/**
+ * Purpose
+ * - Show the active Growth Plan (from Supabase table: public.growth_plans)
+ * - Track Deposits/Withdrawals in a separate ledger (Supabase table: public.cashflows)
+ * - Keep trading statistics clean: cashflows never count as P&L.
+ *
+ * Route
+ * - /plan
+ *
+ * Dependencies
+ * - Growth plan table exists: public.growth_plans (your current schema)
+ * - Cashflows table exists: public.cashflows (see SQL migration file provided)
+ */
+
+import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+
+import TopNav from "@/app/components/TopNav";
+import { useAuth } from "@/context/AuthContext";
+
+import { supabaseBrowser } from "@/lib/supaBaseClient";
+import { getAllJournalEntries } from "@/lib/journalSupabase";
+import type { JournalEntry } from "@/lib/journalLocal";
+
+import {
+  createCashflow,
+  deleteCashflow,
+  listCashflows,
+  signedCashflowAmount,
+  type Cashflow,
+  type CashflowType,
+} from "@/lib/cashflowsSupabase";
+
+/* =========================
+   Types + helpers
+========================= */
+
+type DbGrowthPlanRow = {
+  id: string;
+  user_id: string;
+
+  starting_balance: unknown;
+  target_balance: unknown;
+
+  daily_target_pct: unknown;
+  daily_goal_percent: unknown;
+
+  max_daily_loss_percent: unknown;
+  loss_days_per_week: unknown;
+  trading_days: unknown;
+
+  selected_plan: string | null;
+
+  created_at: string | null;
+  updated_at: string | null;
+};
+
+type GrowthPlan = {
+  id: string;
+  userId: string;
+
+  startingBalance: number;
+  targetBalance: number;
+
+  dailyTargetPct: number;
+  dailyGoalPercent: number;
+
+  maxDailyLossPercent: number;
+  lossDaysPerWeek: number;
+  tradingDays: number;
+
+  selectedPlan: string | null;
+
+  createdAtIso: string;
+  updatedAtIso: string;
+};
+
+function toNum(x: unknown, fb = 0): number {
+  const n = Number(x);
+  return Number.isFinite(n) ? n : fb;
+}
+
+function clampInt(n: number, lo = 0, hi = 999999): number {
+  const v = Math.floor(Number.isFinite(n) ? n : 0);
+  return Math.max(lo, Math.min(hi, v));
+}
+
+function isoToday(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function currency(n: number): string {
+  const v = Number.isFinite(n) ? n : 0;
+  return v.toLocaleString(undefined, { style: "currency", currency: "USD" });
+}
+
+function getPlanUserId(user: any): string {
+  // growth_plans.user_id is UUID
+  return String(user?.id || user?.uid || "");
+}
+
+function getJournalUserId(user: any): string {
+  // keep compatibility with your existing journal storage
+  return String(user?.uid || user?.id || user?.email || "");
+}
+
+function dailyTargetPct(plan: GrowthPlan | null): number {
+  if (!plan) return 0;
+  return plan.dailyTargetPct > 0 ? plan.dailyTargetPct : plan.dailyGoalPercent;
+}
+
+async function fetchLatestGrowthPlan(userId: string): Promise<GrowthPlan | null> {
+  if (!userId) return null;
+
+    // IMPORTANT:
+    // Supabase's typed `select()` parser needs a string literal to infer row types.
+    // Avoid building the select string dynamically (e.g., array.join), otherwise strict TS may infer
+    // the result as `GenericStringError` (TS2352).
+    const SELECT_GROWTH_PLAN =
+      "id,user_id,starting_balance,target_balance,daily_target_pct,daily_goal_percent,max_daily_loss_percent,loss_days_per_week,trading_days,selected_plan,created_at,updated_at" as const;
+
+
+  try {
+    const { data, error } = await supabaseBrowser
+      .from("growth_plans")
+      .select(SELECT_GROWTH_PLAN)
+      .eq("user_id", userId)
+      .order("updated_at", { ascending: false })
+      .order("created_at", { ascending: false })
+      .limit(1);
+
+    if (error) {
+      console.error("[PlanPage] growth_plans fetch error:", error);
+      return null;
+    }
+
+    const row = data?.[0] ?? undefined;
+    if (!row) return null;
+
+    const createdAtIso = row.created_at || row.updated_at || new Date().toISOString();
+    const updatedAtIso = row.updated_at || row.created_at || new Date().toISOString();
+
+    return {
+      id: row.id,
+      userId: row.user_id,
+
+      startingBalance: toNum(row.starting_balance, 0),
+      targetBalance: toNum(row.target_balance, 0),
+
+      dailyTargetPct: toNum(row.daily_target_pct, 0),
+      dailyGoalPercent: toNum(row.daily_goal_percent, 0),
+
+      maxDailyLossPercent: toNum(row.max_daily_loss_percent, 0),
+      lossDaysPerWeek: Math.max(0, Math.min(5, clampInt(toNum(row.loss_days_per_week, 0), 0, 5))),
+      tradingDays: Math.max(0, clampInt(toNum(row.trading_days, 0), 0, 10000)),
+
+      selectedPlan: row.selected_plan ?? null,
+
+      createdAtIso,
+      updatedAtIso,
+    };
+  } catch (err) {
+    console.error("[PlanPage] growth_plans fetch exception:", err);
+    return null;
+  }
+}
+
+/* =========================
+   Page
+========================= */
+
+export default function PlanPage() {
+  const { user, loading } = useAuth() as any;
+  const router = useRouter();
+
+  const planUserId = useMemo(() => getPlanUserId(user), [user]);
+  const journalUserId = useMemo(() => getJournalUserId(user), [user]);
+
+  const [plan, setPlan] = useState<GrowthPlan | null>(null);
+  const [entries, setEntries] = useState<JournalEntry[]>([]);
+  const [cashflows, setCashflows] = useState<Cashflow[]>([]);
+  const [loadingData, setLoadingData] = useState(true);
+
+  // form
+  const [cfType, setCfType] = useState<CashflowType>("deposit");
+  const [cfDate, setCfDate] = useState<string>(isoToday());
+  const [cfAmount, setCfAmount] = useState<string>("");
+  const [cfNote, setCfNote] = useState<string>("");
+
+  const [saving, setSaving] = useState(false);
+  const [cashflowTableMissing, setCashflowTableMissing] = useState(false);
+
+  useEffect(() => {
+    if (!loading && !user) router.replace("/signin");
+  }, [loading, user, router]);
+
+  async function reloadAll() {
+    if (loading || !user) return;
+    if (!planUserId) return;
+
+    setLoadingData(true);
+    setCashflowTableMissing(false);
+
+    try {
+      const gp = await fetchLatestGrowthPlan(planUserId);
+      setPlan(gp);
+
+      // journal entries (for trading P&L)
+      if (journalUserId) {
+        const all = await getAllJournalEntries(journalUserId);
+        setEntries(all ?? []);
+      } else {
+        setEntries([]);
+      }
+
+      // cashflows ledger (deposits/withdrawals)
+      try {
+        const fromDate = gp ? String(gp.createdAtIso).slice(0, 10) : undefined;
+        const cf = await listCashflows(planUserId, fromDate ? { fromDate, throwOnError: true } : { throwOnError: true });
+        setCashflows(cf);
+      } catch (err: any) {
+        console.error("[PlanPage] cashflows load error:", err);
+        // Common setup issue: missing table
+        setCashflows([]);
+        setCashflowTableMissing(true);
+      }
+    } finally {
+      setLoadingData(false);
+    }
+  }
+
+  useEffect(() => {
+    if (loading || !user) return;
+    reloadAll();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, planUserId, journalUserId]);
+
+  const planStartDate = useMemo(() => {
+    if (!plan) return "";
+    return String(plan.createdAtIso || plan.updatedAtIso || "").slice(0, 10);
+  }, [plan]);
+
+  const totalTradingPnl = useMemo(() => {
+    if (!planStartDate) return 0;
+    return (entries ?? [])
+      .filter((e) => e.date >= planStartDate)
+      .reduce((acc, e) => acc + toNum((e as any).pnl, 0), 0);
+  }, [entries, planStartDate]);
+
+  const cashflowNet = useMemo(() => {
+    return (cashflows ?? []).reduce((acc, cf) => acc + signedCashflowAmount(cf), 0);
+  }, [cashflows]);
+
+  const cashflowDeposits = useMemo(() => {
+    return (cashflows ?? [])
+      .filter((c) => c.type === "deposit")
+      .reduce((acc, c) => acc + Math.abs(toNum(c.amount, 0)), 0);
+  }, [cashflows]);
+
+  const cashflowWithdrawals = useMemo(() => {
+    return (cashflows ?? [])
+      .filter((c) => c.type === "withdrawal")
+      .reduce((acc, c) => acc + Math.abs(toNum(c.amount, 0)), 0);
+  }, [cashflows]);
+
+  const balances = useMemo(() => {
+    const starting = plan?.startingBalance ?? 0;
+
+    const tradingEquity = starting + totalTradingPnl; // PURE trading (no deposits/withdrawals)
+    const accountEquity = tradingEquity + cashflowNet; // real account equity after cashflows
+
+    const pct = dailyTargetPct(plan);
+    const dailyGoalUsd = accountEquity * (pct / 100);
+    const maxLossUsd = accountEquity * ((plan?.maxDailyLossPercent ?? 0) / 100);
+
+    return {
+      starting,
+      tradingEquity,
+      accountEquity,
+      pct,
+      dailyGoalUsd,
+      maxLossUsd,
+    };
+  }, [plan, totalTradingPnl, cashflowNet]);
+
+  const progress = useMemo(() => {
+    const target = plan?.targetBalance ?? 0;
+    if (!plan || target <= 0) {
+      return { tradingPct: 0, accountPct: 0 };
+    }
+
+    const tradingPct = balances.tradingEquity / target;
+    const accountPct = balances.accountEquity / target;
+
+    return {
+      tradingPct: Math.max(0, Math.min(1.25, tradingPct)),
+      accountPct: Math.max(0, Math.min(1.25, accountPct)),
+    };
+  }, [plan, balances.tradingEquity, balances.accountEquity]);
+
+  async function onAddCashflow() {
+    if (!planUserId) return;
+    if (!cfDate) return;
+
+    const amount = Number(String(cfAmount).replace(/[^\d.]/g, ""));
+    if (!Number.isFinite(amount) || amount <= 0) return;
+
+    setSaving(true);
+    try {
+      await createCashflow({
+        userId: planUserId,
+        date: cfDate,
+        type: cfType,
+        amount,
+        note: cfNote?.trim() ? cfNote.trim() : null,
+      });
+
+      setCfAmount("");
+      setCfNote("");
+
+      // reload ledger only (cheaper), but keep it simple: reload everything
+      await reloadAll();
+    } catch (err) {
+      console.error("[PlanPage] createCashflow error:", err);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function onDeleteCashflow(id: string) {
+    if (!planUserId) return;
+
+    const ok = window.confirm("Delete this cashflow record? This does NOT delete any trades, only this deposit/withdrawal row.");
+    if (!ok) return;
+
+    setSaving(true);
+    try {
+      await deleteCashflow(planUserId, id);
+      await reloadAll();
+    } catch (err) {
+      console.error("[PlanPage] deleteCashflow error:", err);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (loading || !user || loadingData) {
+    return (
+      <main className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center">
+        <p className="text-base text-slate-400">Loading your plan...</p>
+      </main>
+    );
+  }
+
+  return (
+    <main className="min-h-screen bg-slate-950 text-slate-50">
+      <TopNav />
+
+      <div className="px-6 md:px-10 py-8 max-w-7xl mx-auto">
+        <header className="mb-6">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h1 className="text-3xl font-semibold">Plan</h1>
+              <p className="text-sm text-slate-400 mt-1">
+                Deposits/withdrawals live here so your trading statistics stay clean. This page updates your goal dollars automatically based on account equity.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Link
+                href="/growth-plan"
+                className="inline-flex items-center rounded-xl border border-slate-700 px-3 py-1.5 text-xs font-medium text-slate-200 hover:border-emerald-400 hover:text-emerald-300 transition"
+              >
+                Growth plan wizard →
+              </Link>
+
+              <Link
+                href="/balance-chart"
+                className="inline-flex items-center rounded-xl border border-slate-700 px-3 py-1.5 text-xs font-medium text-slate-200 hover:border-emerald-400 hover:text-emerald-300 transition"
+              >
+                Balance chart →
+              </Link>
+
+              <button
+                type="button"
+                onClick={() => reloadAll()}
+                className="inline-flex items-center rounded-xl border border-slate-700 px-3 py-1.5 text-xs font-medium text-slate-200 hover:border-slate-500 hover:text-slate-100 transition"
+              >
+                Refresh
+              </button>
+            </div>
+          </div>
+        </header>
+
+        {!plan ? (
+          <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5 text-sm text-slate-300">
+            No Growth Plan found yet (table: <span className="text-slate-100 font-semibold">growth_plans</span>). Create one in{" "}
+            <Link className="text-emerald-300 hover:text-emerald-200 underline" href="/growth-plan">
+              Growth Plan Wizard
+            </Link>
+            .
+          </div>
+        ) : (
+          <>
+            {/* KPI row */}
+            <section className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+              <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
+                <div className="text-[11px] text-slate-500 tracking-widest uppercase">Starting balance</div>
+                <div className="mt-1 text-2xl font-semibold">{currency(balances.starting)}</div>
+                <div className="mt-1 text-xs text-slate-400">
+                  Plan created: <span className="text-slate-200">{planStartDate || "—"}</span>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
+                <div className="text-[11px] text-slate-500 tracking-widest uppercase">Trading equity</div>
+                <div className="mt-1 text-2xl font-semibold">{currency(balances.tradingEquity)}</div>
+                <div className="mt-1 text-xs text-slate-400">
+                  P&amp;L (trading only):{" "}
+                  <span className={totalTradingPnl >= 0 ? "text-emerald-300 font-semibold" : "text-sky-300 font-semibold"}>
+                    {totalTradingPnl >= 0 ? "+" : "-"}{currency(Math.abs(totalTradingPnl))}
+                  </span>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
+                <div className="text-[11px] text-slate-500 tracking-widest uppercase">Account equity</div>
+                <div className="mt-1 text-2xl font-semibold">{currency(balances.accountEquity)}</div>
+                <div className="mt-1 text-xs text-slate-400">
+                  Net cashflow:{" "}
+                  <span className={cashflowNet >= 0 ? "text-emerald-300 font-semibold" : "text-sky-300 font-semibold"}>
+                    {cashflowNet >= 0 ? "+" : "-"}{currency(Math.abs(cashflowNet))}
+                  </span>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
+                <div className="text-[11px] text-slate-500 tracking-widest uppercase">Today&apos;s thresholds</div>
+                <div className="mt-1 text-sm text-slate-200 space-y-1">
+                  <div>
+                    Daily goal:{" "}
+                    <span className="text-emerald-300 font-semibold">
+                      {currency(balances.dailyGoalUsd)}
+                    </span>{" "}
+                    <span className="text-slate-500">({balances.pct.toFixed(3)}%)</span>
+                  </div>
+                  <div>
+                    Max daily loss:{" "}
+                    <span className="text-sky-300 font-semibold">
+                      {currency(balances.maxLossUsd)}
+                    </span>{" "}
+                    <span className="text-slate-500">({(plan.maxDailyLossPercent ?? 0).toFixed(2)}%)</span>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            {/* Progress bars */}
+            <section className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+              <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
+                <div className="flex items-center justify-between">
+                  <div className="text-[11px] text-slate-500 tracking-widest uppercase">Progress vs target</div>
+                  <div className="text-xs text-slate-400">
+                    Target: <span className="text-slate-100 font-semibold">{currency(plan.targetBalance ?? 0)}</span>
+                  </div>
+                </div>
+
+                <div className="mt-3 space-y-3">
+                  <div>
+                    <div className="flex items-center justify-between text-xs text-slate-300 mb-1">
+                      <span>Trading only</span>
+                      <span className="text-slate-200 font-semibold">{(progress.tradingPct * 100).toFixed(1)}%</span>
+                    </div>
+                    <div className="h-2 rounded-full bg-slate-950 border border-slate-800 overflow-hidden">
+                      <div
+                        className="h-full bg-emerald-400/70"
+                        style={{ width: `${Math.min(100, progress.tradingPct * 100)}%` }}
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="flex items-center justify-between text-xs text-slate-300 mb-1">
+                      <span>Including cashflows</span>
+                      <span className="text-slate-200 font-semibold">{(progress.accountPct * 100).toFixed(1)}%</span>
+                    </div>
+                    <div className="h-2 rounded-full bg-slate-950 border border-slate-800 overflow-hidden">
+                      <div
+                        className="h-full bg-sky-400/70"
+                        style={{ width: `${Math.min(100, progress.accountPct * 100)}%` }}
+                      />
+                    </div>
+                  </div>
+
+                  <p className="text-[11px] text-slate-500">
+                    Cashflows do not count as trading performance. They only adjust account equity and goal dollars.
+                  </p>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
+                <div className="text-[11px] text-slate-500 tracking-widest uppercase">Plan snapshot</div>
+                <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
+                  <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
+                    <div className="text-[11px] text-slate-500">Trading days</div>
+                    <div className="mt-1 text-slate-100 font-semibold">{plan.tradingDays ?? 0}</div>
+                  </div>
+                  <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
+                    <div className="text-[11px] text-slate-500">Loss days/week</div>
+                    <div className="mt-1 text-slate-100 font-semibold">{plan.lossDaysPerWeek ?? 0}</div>
+                  </div>
+                  <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
+                    <div className="text-[11px] text-slate-500">Selected plan</div>
+                    <div className="mt-1 text-slate-100 font-semibold">{plan.selectedPlan || "—"}</div>
+                  </div>
+                  <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
+                    <div className="text-[11px] text-slate-500">Daily target %</div>
+                    <div className="mt-1 text-emerald-300 font-semibold">{balances.pct.toFixed(3)}%</div>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            {/* Two-column layout: Ledger + Add */}
+            <section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Ledger */}
+              <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <h2 className="text-base font-semibold text-slate-50">Cashflow ledger</h2>
+                    <p className="text-xs text-slate-500 mt-1">
+                      Deposits & withdrawals tracked separately from trading stats.
+                    </p>
+                  </div>
+
+                  <div className="text-right text-xs text-slate-400 space-y-1">
+                    <div>
+                      Deposits: <span className="text-emerald-300 font-semibold">{currency(cashflowDeposits)}</span>
+                    </div>
+                    <div>
+                      Withdrawals: <span className="text-sky-300 font-semibold">{currency(cashflowWithdrawals)}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {cashflowTableMissing ? (
+                  <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-4 text-sm text-slate-300">
+                    Cashflow module is not enabled yet (table <span className="text-slate-100 font-semibold">cashflows</span> not found or blocked by RLS).
+                    <div className="text-xs text-slate-500 mt-2">
+                      If you&apos;re the developer: run the cashflows migration SQL and confirm RLS policies.
+                    </div>
+                  </div>
+                ) : cashflows.length === 0 ? (
+                  <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-4 text-sm text-slate-300">
+                    No cashflows yet.
+                    <div className="text-xs text-slate-500 mt-1">
+                      Add a deposit or withdrawal on the right.
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {cashflows.map((cf) => {
+                      const signed = signedCashflowAmount(cf);
+                      const isDeposit = cf.type === "deposit";
+                      return (
+                        <div
+                          key={cf.id}
+                          className="rounded-xl border border-slate-800 bg-slate-950/40 px-4 py-3 flex items-start justify-between gap-3"
+                        >
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs text-slate-400 font-mono">{cf.date}</span>
+                              <span
+                                className={[
+                                  "text-[10px] px-2 py-0.5 rounded-full border",
+                                  isDeposit
+                                    ? "border-emerald-500/30 text-emerald-300 bg-emerald-500/10"
+                                    : "border-sky-500/30 text-sky-300 bg-sky-500/10",
+                                ].join(" ")}
+                              >
+                                {isDeposit ? "DEPOSIT" : "WITHDRAWAL"}
+                              </span>
+                            </div>
+
+                            <div className="mt-1 text-sm text-slate-100 font-semibold">
+                              {signed >= 0 ? "+" : "-"}
+                              {currency(Math.abs(signed))}
+                            </div>
+
+                            {cf.note ? (
+                              <div className="mt-1 text-xs text-slate-400 wrap-break-word">
+                                {cf.note}
+                              </div>
+                            ) : null}
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => onDeleteCashflow(cf.id)}
+                            disabled={saving}
+                            className="shrink-0 rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:border-red-400/60 hover:text-red-300 transition disabled:opacity-60"
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Add form */}
+              <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <h2 className="text-base font-semibold text-slate-50">Add cashflow</h2>
+                    <p className="text-xs text-slate-500 mt-1">
+                      This updates goal dollars automatically, without changing win-rate or P&amp;L stats.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="md:col-span-2">
+                    <label className="block text-xs text-slate-400 mb-1">Type</label>
+                    <div className="inline-flex rounded-xl border border-slate-800 bg-slate-950/60 p-1">
+                      <button
+                        type="button"
+                        onClick={() => setCfType("deposit")}
+                        className={[
+                          "px-3 py-1.5 text-xs rounded-lg transition",
+                          cfType === "deposit"
+                            ? "bg-emerald-400 text-slate-950 font-semibold"
+                            : "text-slate-300 hover:text-slate-50",
+                        ].join(" ")}
+                      >
+                        Deposit
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setCfType("withdrawal")}
+                        className={[
+                          "px-3 py-1.5 text-xs rounded-lg transition",
+                          cfType === "withdrawal"
+                            ? "bg-sky-400 text-slate-950 font-semibold"
+                            : "text-slate-300 hover:text-slate-50",
+                        ].join(" ")}
+                      >
+                        Withdrawal
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs text-slate-400 mb-1">Date</label>
+                    <input
+                      type="date"
+                      value={cfDate}
+                      onChange={(e) => setCfDate(e.target.value)}
+                      className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-400"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs text-slate-400 mb-1">Amount (USD)</label>
+                    <input
+                      inputMode="decimal"
+                      value={cfAmount}
+                      onChange={(e) => setCfAmount(e.target.value.replace(/[^\d.]/g, ""))}
+                      placeholder="1000"
+                      className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-400"
+                    />
+                  </div>
+
+                  <div className="md:col-span-2">
+                    <label className="block text-xs text-slate-400 mb-1">Note (optional)</label>
+                    <input
+                      value={cfNote}
+                      onChange={(e) => setCfNote(e.target.value)}
+                      placeholder="e.g., Added margin / New deposit / Withdrew profits"
+                      className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-400"
+                    />
+                  </div>
+                </div>
+
+                <div className="mt-4 flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={onAddCashflow}
+                    disabled={saving || cashflowTableMissing}
+                    className="rounded-xl bg-emerald-400 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-emerald-300 disabled:opacity-60"
+                  >
+                    Add
+                  </button>
+
+                  <div className="text-xs text-slate-500">
+                    After saving, your <span className="text-slate-200">daily goal $</span> and <span className="text-slate-200">max loss $</span> update based on account equity.
+                  </div>
+                </div>
+
+                <div className="mt-6 rounded-xl border border-slate-800 bg-slate-950/40 p-4 text-xs text-slate-400 space-y-2">
+                  <div className="text-slate-200 font-semibold">How this works</div>
+                  <ul className="list-disc pl-5 space-y-1">
+                    <li>
+                      Trading P&amp;L is calculated only from your journal/trade imports.
+                    </li>
+                    <li>
+                      Deposits/withdrawals are stored in <span className="font-mono">cashflows</span> and never counted as P&amp;L.
+                    </li>
+                    <li>
+                      Goal dollars (and max-loss dollars) are computed from your <span className="text-slate-200">account equity</span> = trading equity + net cashflows.
+                    </li>
+                  </ul>
+                </div>
+              </div>
+            </section>
+          </>
+        )}
+      </div>
+    </main>
+  );
+}
+3

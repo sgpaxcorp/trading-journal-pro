@@ -446,18 +446,6 @@ const challenges: NavItem[] = [
 
 const resources: NavItem[] = [
   {
-    id: "checklists",
-    title: "Checklists",
-    description: "Pre-market, during-session, post-market.",
-    href: "/resources/checklists",
-  },
-  {
-    id: "templates",
-    title: "Templates",
-    description: "Ready-made journal and plan templates.",
-    href: "/resources/templates",
-  },
-  {
     id: "library",
     title: "Library",
     description: "Hand-picked books and videos.",
@@ -488,18 +476,7 @@ const forum: NavItem[] = [
     description: "Share progress with other traders.",
     href: "/forum/feed",
   },
-  {
-    id: "qa",
-    title: "Q&A",
-    description: "Ask questions and get feedback.",
-    href: "/forum/qa",
-  },
-  {
-    id: "accountability",
-    title: "Accountability groups",
-    description: "Small groups to stay consistent.",
-    href: "/forum/accountability",
-  },
+ 
 ];
 
 /* ========== TopNav ========== */

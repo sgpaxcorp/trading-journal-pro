@@ -7,7 +7,7 @@ import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 
 import { useAuth } from "@/context/AuthContext";
-import type { JournalEntry } from "@/lib/journalLocal";
+import type { JournalEntry } from "@/lib/journalTypes";
 import { getAllJournalEntries } from "@/lib/journalSupabase";
 import RichNotebookEditor from "@/app/components/RichNotebookEditor";
 
