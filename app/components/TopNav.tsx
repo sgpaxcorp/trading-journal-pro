@@ -421,6 +421,12 @@ const performance: NavItem[] = [
     href: "/performance/ai-coaching",
     badge: "AI",
   },
+  {
+    id: "plan",
+    title: "Cash Flow Plan",
+    description: "Track your deposits and withdrawals plan.",
+    href: "/performance/plan",
+  },
 ];
 
 const challenges: NavItem[] = [

@@ -368,7 +368,7 @@ export default function PlanPage() {
         <header className="mb-6">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <h1 className="text-3xl font-semibold">Plan</h1>
+              <h1 className="text-3xl font-semibold">Cash Flow Tracking</h1>
               <p className="text-sm text-slate-400 mt-1">
                 Deposits/withdrawals live here so your trading statistics stay clean. This page updates your goal dollars automatically based on account equity.
               </p>
