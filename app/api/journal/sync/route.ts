@@ -488,15 +488,15 @@ export async function POST(req: NextRequest) {
     });
 
     /* ---------- upsert journal_entries ---------- */
-    // IMPORTANT: pnl is stored as GROSS (before commissions) to match the UI auto-PnL.
-    // Net is still preserved in notes.pnl.net.
+    // ✅ IMPORTANT: store NET PnL in journal_entries.pnl so analytics & summaries match the broker.
+    // Gross is still preserved in notes.pnl.gross for display if you want it.
     await supabaseAdmin
       .from("journal_entries")
       .upsert(
         {
           user_id: userId,
           date,
-          pnl: pnlGross,
+          pnl: pnlNet,
           instrument: entries[0]?.symbol ?? "UNKNOWN",
           direction: (entries[0]?.side ?? "long") as any,
           entry_price: entries[0]?.price ? safeNum(entries[0].price) : null,
