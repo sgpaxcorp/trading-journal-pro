@@ -5,6 +5,7 @@ import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 import { useAuth } from "@/context/AuthContext";
 import TopNav from "@/app/components/TopNav";
@@ -174,6 +175,73 @@ function makeId() {
   return Math.random().toString(36).slice(2);
 }
 
+
+/* =========================
+   Markdown rendering (coach output)
+   - Styled bullets + tables (GFM) + code blocks
+   - Keeps output clean and "Wall Street terminal" readable
+========================= */
+
+const COACH_MD_COMPONENTS: any = {
+  h1: (props: any) => <h2 className="text-base font-semibold text-slate-100 mt-3 mb-2" {...props} />,
+  h2: (props: any) => <h3 className="text-sm font-semibold text-slate-100 mt-3 mb-2" {...props} />,
+  h3: (props: any) => <h4 className="text-sm font-semibold text-slate-100 mt-3 mb-2" {...props} />,
+  p: (props: any) => <p className="text-sm leading-relaxed my-2 text-slate-100" {...props} />,
+  ul: (props: any) => <ul className="list-disc pl-5 my-2 space-y-1 text-slate-100" {...props} />,
+  ol: (props: any) => <ol className="list-decimal pl-5 my-2 space-y-1 text-slate-100" {...props} />,
+  li: (props: any) => <li className="leading-relaxed" {...props} />,
+  strong: (props: any) => <strong className="text-slate-50 font-semibold" {...props} />,
+  em: (props: any) => <em className="text-slate-200" {...props} />,
+  a: (props: any) => (
+    <a
+      className="text-emerald-300 underline underline-offset-2 hover:text-emerald-200"
+      target="_blank"
+      rel="noreferrer"
+      {...props}
+    />
+  ),
+  code: ({ inline, className, children, ...props }: any) => {
+    if (inline) {
+      return (
+        <code className="rounded bg-slate-950/70 px-1 py-0.5 text-[12px] text-emerald-200" {...props}>
+          {children}
+        </code>
+      );
+    }
+    return (
+      <code className={className} {...props}>
+        {children}
+      </code>
+    );
+  },
+  pre: (props: any) => (
+    <pre className="my-3 overflow-x-auto rounded-xl border border-slate-700 bg-slate-950/60 p-3 text-[12px] leading-relaxed text-slate-100" {...props} />
+  ),
+  table: ({ children, ...props }: any) => (
+    <div className="my-3 overflow-x-auto rounded-xl border border-slate-700 bg-slate-950/40">
+      <table className="w-full border-collapse text-[12px]" {...props}>
+        {children}
+      </table>
+    </div>
+  ),
+  thead: (props: any) => <thead className="bg-slate-950/60" {...props} />,
+  tbody: (props: any) => <tbody {...props} />,
+  tr: (props: any) => <tr className="border-t border-slate-700/70" {...props} />,
+  th: (props: any) => <th className="px-3 py-2 text-left text-[11px] uppercase tracking-[0.18em] text-slate-300" {...props} />,
+  td: (props: any) => <td className="px-3 py-2 text-slate-100 align-top" {...props} />,
+  hr: (props: any) => <hr className="my-3 border-slate-700/70" {...props} />,
+  blockquote: (props: any) => (
+    <blockquote className="my-3 border-l-2 border-emerald-500/60 pl-3 text-slate-200" {...props} />
+  ),
+};
+
+function CoachMarkdown({ text }: { text: string }) {
+  return (
+    <ReactMarkdown remarkPlugins={[remarkGfm]} components={COACH_MD_COMPONENTS}>
+      {text}
+    </ReactMarkdown>
+  );
+}
 function safeUpper(s: string | null | undefined): string {
   return (s || "").trim().toUpperCase();
 }
@@ -1096,10 +1164,10 @@ function AiCoachingPageInner() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100">
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
       <TopNav />
 
-      <main className="max-w-6xl mx-auto px-4 py-6 space-y-6">
+      <main className="flex-1 min-h-0 w-full px-4 md:px-8 py-6 flex flex-col gap-6">
         {/* Header */}
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
@@ -1169,9 +1237,9 @@ function AiCoachingPageInner() {
           </div>
         )}
 
-        <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] gap-4">
+        <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)] gap-4 flex-1 min-h-0">
           {/* Chat panel */}
-          <section className="rounded-2xl border border-slate-800 bg-slate-900/70 flex flex-col max-h-[72vh]">
+          <section className="rounded-2xl border border-slate-800 bg-slate-900/70 flex flex-col min-h-0">
             {/* Chat header */}
             <div className="border-b border-slate-800 px-4 py-3 flex items-center justify-between gap-3">
               <div>
@@ -1205,7 +1273,7 @@ function AiCoachingPageInner() {
             </div>
 
             {/* Messages */}
-            <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
+            <div className="flex-1 min-h-0 overflow-y-auto px-4 py-3 space-y-3">
               {!messages.length && !coachState.error && (
                 <p className="text-xs text-slate-500">
                   Start by typing a question (example:{" "}
@@ -1228,7 +1296,7 @@ function AiCoachingPageInner() {
                         : "bg-slate-800 text-slate-100 rounded-bl-sm"
                     }`}
                   >
-                    {msg.role === "coach" ? <ReactMarkdown>{msg.text}</ReactMarkdown> : msg.text}
+                    {msg.role === "coach" ? <CoachMarkdown text={msg.text} /> : msg.text}
                   </div>
                 </div>
               ))}
@@ -1324,7 +1392,7 @@ function AiCoachingPageInner() {
           </section>
 
           {/* Side panel */}
-          <section className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4 space-y-4">
+          <section className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4 space-y-4 min-h-0 overflow-y-auto">
             <h2 className="text-sm font-medium text-slate-200 flex items-center justify-between">
               Snapshot
               <span className="text-[10px] text-slate-400">Last {recentSessions.length} sessions</span>

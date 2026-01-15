@@ -41,6 +41,7 @@
     "react-markdown": "^10.1.0",
     "react-resizable": "^3.0.5",
     "recharts": "^3.6.0",
+    "remark-gfm": "^4.0.1",
     "resend": "^6.6.0",
     "slate": "^0.118.1",
     "slate-react": "^0.119.0",

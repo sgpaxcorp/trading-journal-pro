@@ -2,19 +2,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
 
-/**
- * AI Coach API
- * - Accepts a compact context from the client (already derived from Supabase reads).
- * - Returns a short, high-signal coaching message (Markdown).
- *
- * NOTE:
- * - ChatGPT subscriptions (Plus/Pro/Team) are separate from API billing.
- * - This route uses your OpenAI API key from OPENAI_API_KEY env var.
- */
-
 export const runtime = "nodejs";
+// Keep it snappy but allow enough time for vision + long context
+export const maxDuration = 45;
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
 
 type UserProfileForCoach = {
   id: string;
@@ -31,96 +25,98 @@ type ChatHistoryItem = {
 };
 
 type AiCoachRequestBody = {
-  threadId?: string | null;
-  chatHistory?: ChatHistoryItem[];
+  threadId?: string;
 
-  // Question + modalities
+  // User input
   question?: string;
   screenshotBase64?: string | null;
-  language?: "es" | "en" | "auto" | null;
-  backStudyContext?: string | null;
+  languageHint?: "es" | "en" | "auto" | null;
 
   // Context
-  snapshot?: any;
-  analyticsSummary?: any;
-  recentSessions?: any[];
-  relevantSessions?: any[];
-  planSnapshot?: any | null;
-  growthPlan?: any | null;
-  cashflowsSummary?: any | null;
-  gamification?: any | null;
-  fullSnapshot?: any;
   userProfile?: UserProfileForCoach | null;
+  chatHistory?: ChatHistoryItem[];
+  relevantSessions?: any[];
+  fullSnapshot?: any;
+  analyticsSummary?: any;
+  planSnapshot?: any | null;
+  gamification?: any | null;
+  backStudyContext?: string | null;
 
-  // Style hints
-  stylePreset?: {
-    mode?: string;
-    askFollowupQuestion?: boolean;
-    shortSegments?: boolean;
-  };
-  coachingFocus?: Record<string, any>;
+  // Hints (optional)
+  stylePreset?: any;
+  coachingFocus?: any;
 };
 
-const DEFAULT_QUESTION =
-  "What is the single most important thing I should change in my risk, psychology or process based on these stats?";
+const DEFAULT_QUESTION_EN =
+  "Based on my data, what is the single most important thing I should change in risk, psychology, or process?";
+const DEFAULT_QUESTION_ES =
+  "Basado en mis datos, ¿cuál es la cosa más importante que debo cambiar en riesgo, psicología o proceso?";
 
-/** Backup language detection */
-function detectLanguage(text: string): "es" | "en" {
-  const s = (text || "").toLowerCase();
-  if (!s.trim()) return "en";
-
-  const hasSpanishChars = /[áéíóúñü¿¡]/.test(s);
-  const spanishWords =
-    /\b(qué|como|cómo|porque|por qué|cuál|días|semanas|meses|ganancia|pérdida|plan|riesgo|psicología|diario|journal)\b/.test(
-      s
-    );
-
-  if (hasSpanishChars || spanishWords) return "es";
-  return "en";
+function clampText(s: unknown, max = 2000) {
+  const t = (s ?? "").toString();
+  return t.length > max ? t.slice(0, max) + "…[truncated]" : t;
 }
 
-/** Defensive compaction to keep payload size reasonable */
-function compact(value: any, depth = 0): any {
-  const MAX_DEPTH = 6;
-  const MAX_ARRAY = 35;
-  const MAX_KEYS = 80;
-  const MAX_STR = 1200;
-
-  if (value == null) return value;
-
-  if (typeof value === "string") {
-    return value.length > MAX_STR ? value.slice(0, MAX_STR) + "…" : value;
-  }
-
-  if (typeof value === "number" || typeof value === "boolean") return value;
-
-  if (Array.isArray(value)) {
-    const arr = value.slice(0, MAX_ARRAY);
-    return depth >= MAX_DEPTH ? arr.slice(0, 8) : arr.map((v) => compact(v, depth + 1));
-  }
-
-  if (typeof value === "object") {
-    if (depth >= MAX_DEPTH) return "[Object]";
-    const out: Record<string, any> = {};
-    const keys = Object.keys(value).slice(0, MAX_KEYS);
-    for (const k of keys) out[k] = compact((value as any)[k], depth + 1);
-    return out;
-  }
-
-  return String(value);
-}
-
-function safeJsonStringify(obj: any): string {
+function safeJson(obj: unknown, maxChars = 16000) {
   try {
-    return JSON.stringify(obj);
+    const s = JSON.stringify(obj ?? {});
+    return s.length > maxChars ? s.slice(0, maxChars) + "…[truncated]" : s;
   } catch {
     return "{}";
   }
 }
 
+function detectLanguage(text: string, userLocale?: string | null): "es" | "en" {
+  const s = (text || "").toLowerCase();
+  if (!s.trim()) {
+    if (userLocale && userLocale.toLowerCase().startsWith("es")) return "es";
+    return "en";
+  }
+
+  const hasSpanishChars = /[áéíóúñü¿¡]/.test(s);
+  const spanishWords =
+    /\b(qué|como|cómo|porque|por qué|cuál|plan|riesgo|psicología|diario|journal|pérdida|ganancia|entré|salí|vela|velas|15m|minutos)\b/.test(
+      s
+    );
+
+  if (hasSpanishChars || spanishWords) return "es";
+  if (userLocale && userLocale.toLowerCase().startsWith("es")) return "es";
+  return "en";
+}
+
+function pickModel(opts: { hasImage: boolean; question: string }) {
+  // You cannot "use all models" at once. You pick ONE model per request.
+  // This helper lets you route between models automatically.
+  const fast = process.env.AI_COACH_MODEL_FAST || process.env.AI_COACH_MODEL || "gpt-4o-mini";
+  const smart = process.env.AI_COACH_MODEL_SMART || process.env.AI_COACH_MODEL || "gpt-4o-mini";
+  const vision = process.env.AI_COACH_MODEL_VISION || smart;
+
+  if (opts.hasImage) return vision;
+
+  // Heuristic: long question → smarter model (if configured)
+  const qLen = (opts.question || "").length;
+  if (qLen > 700) return smart;
+
+  return fast;
+}
+
+function buildConversationTranscript(history?: ChatHistoryItem[], maxItems = 10) {
+  if (!Array.isArray(history) || history.length === 0) return "";
+  const last = history.slice(-maxItems);
+
+  const lines: string[] = [];
+  for (const m of last) {
+    const role = m.role === "coach" ? "Coach" : "User";
+    const text = clampText(m.text, 600);
+    lines.push(`${role}: ${text}`);
+  }
+  return lines.join("\n");
+}
+
 /* =========================
    GET (healthcheck)
 ========================= */
+
 export async function GET() {
   return NextResponse.json({
     status: "ok",
@@ -129,168 +125,166 @@ export async function GET() {
 }
 
 /* =========================
-   POST (main)
+   POST
 ========================= */
+
 export async function POST(req: NextRequest) {
   try {
     if (!process.env.OPENAI_API_KEY) {
-      throw new Error("OPENAI_API_KEY is not set on the server.");
+      return NextResponse.json(
+        { error: "OPENAI_API_KEY is not set on the server." },
+        { status: 500 }
+      );
     }
 
     const body = (await req.json()) as AiCoachRequestBody;
 
-    const {
-      chatHistory,
-      snapshot,
-      analyticsSummary,
-      recentSessions,
-      relevantSessions,
-      planSnapshot,
-      growthPlan,
-      cashflowsSummary,
-      gamification,
-      fullSnapshot,
+    const userProfile = body.userProfile ?? null;
+    const firstName =
+      (userProfile?.firstName || userProfile?.displayName || "Trader").toString();
+
+    // Prefer explicit question; else use last user message; else default
+    const chatTranscript = buildConversationTranscript(body.chatHistory, 12);
+    const lastUserMsg =
+      Array.isArray(body.chatHistory) && body.chatHistory.length
+        ? [...body.chatHistory].reverse().find((m) => m.role === "user")?.text || ""
+        : "";
+
+    const rawQuestion = (body.question || "").trim() || (lastUserMsg || "").trim();
+
+    const langHint =
+      body.languageHint === "es" || body.languageHint === "en"
+        ? body.languageHint
+        : "auto";
+
+    const lang =
+      langHint === "es" || langHint === "en"
+        ? langHint
+        : detectLanguage(rawQuestion, userProfile?.locale ?? null);
+
+    const question =
+      rawQuestion ||
+      (lang === "es" ? DEFAULT_QUESTION_ES : DEFAULT_QUESTION_EN);
+
+    const hasImage = !!body.screenshotBase64;
+
+    // Context object for the model (trim aggressively to control tokens)
+    const context = {
+      threadId: body.threadId || null,
       userProfile,
-      question,
-      screenshotBase64,
-      backStudyContext,
-      language,
-      stylePreset,
-      coachingFocus,
-    } = body || {};
+      planSnapshot: body.planSnapshot ?? null,
+      gamification: body.gamification ?? null,
+      analyticsSummary: body.analyticsSummary ?? null,
 
-    if (!snapshot || !Array.isArray(recentSessions)) {
-      return NextResponse.json(
-        {
-          error: "AI coach failed",
-          details: "Missing 'snapshot' or 'recentSessions' in request body.",
-        },
-        { status: 400 }
-      );
-    }
+      // This can be large; keep it but it will be truncated in safeJson()
+      fullSnapshot: body.fullSnapshot ?? null,
 
-    const firstName = String(userProfile?.firstName || userProfile?.displayName || "trader");
+      // Sessions the client selected as relevant (most recent + back-study matched)
+      relevantSessions: Array.isArray(body.relevantSessions)
+        ? body.relevantSessions.slice(0, 25)
+        : [],
 
-    // Determine final language
-    let lang: "es" | "en";
-    if (language === "es" || language === "en") lang = language;
-    else {
-      lang = detectLanguage(question || "");
-      if (lang === "en" && userProfile?.locale?.toLowerCase().startsWith("es")) lang = "es";
-    }
+      // Prior chat context for continuity
+      chatTranscript: chatTranscript || "",
 
-    const askFollowup = Boolean(stylePreset?.askFollowupQuestion ?? true);
+      // Back-study context (symbol/date/tf/window)
+      backStudyContext: body.backStudyContext ?? null,
 
-    // Build a compact context (valid JSON, not truncated mid-string)
-    const compactContext = compact({
-      snapshot,
-      analyticsSummary,
-      planSnapshot,
-      growthPlan,
-      cashflowsSummary,
-      gamification,
-      recentSessions: (recentSessions || []).slice(0, 25),
-      relevantSessions: (relevantSessions || []).slice(0, 10),
-      backStudyContext: backStudyContext || null,
-      coachingFocus: coachingFocus || null,
-      userProfile: userProfile || null,
-    });
+      // UX hints
+      stylePreset: body.stylePreset ?? null,
+      coachingFocus: body.coachingFocus ?? null,
+    };
 
-    const contextJson = safeJsonStringify(compactContext);
+    const contextJson = safeJson(context, 17000);
 
-    // System prompt (style + constraints)
+    // Build system prompt (structured, but NOT a rigid script)
     const systemLines: string[] = [];
 
     if (lang === "es") {
       systemLines.push(
-        `Eres "NeuroTrader AI Coach", un coach de rendimiento de trading centrado en gestión de riesgo, psicología y calidad de proceso.`,
-        `Estás hablando con una sola persona, llamada "${firstName}". Háblale de tú, como coach directo y respetuoso.`,
-        `Tu misión: convertir los datos del journal y de la plataforma en recomendaciones prácticas para mejorar su ejecución.`,
-        `Reglas:`,
-        `- Responde 100% en español neutral (apto para Puerto Rico).`,
-        `- NO repitas el JSON ni menciones claves/IDs. Solo úsalo para detectar patrones.`,
-        `- No des recomendaciones de compra/venta específicas ni predicciones. Enfócate en proceso, riesgo, psicología y consistencia.`,
-        `Formato recomendado:`,
-        `1) Diagnóstico corto (2–4 líneas)`,
-        `2) 3 acciones concretas para la próxima sesión (bullets)`,
-        `3) Riesgo & proceso (reglas “si/entonces”)`,
-        askFollowup ? `4) 1 pregunta de seguimiento (para afinar el coaching)` : ``
+        `Eres "NeuroTrader AI Coach": un coach de rendimiento de trading estilo Wall Street (directo, exigente con el proceso, cero drama).`,
+        `Estás hablando con UNA persona llamada "${firstName}". Háblale de tú.`,
+        `Tu trabajo: convertir sus datos (journal, analytics, plan, retos, notas, back-study) en coaching accionable y específico.`,
+        ``,
+        `Formato (elige SOLO lo relevante; no uses siempre las mismas secciones):`,
+        `- Empieza con un saludo breve usando su nombre (1 línea).`,
+        `- Da un diagnóstico corto (2–3 líneas) basado en números/patrones reales del contexto.`,
+        `- Luego: 3–6 bullets con acciones concretas (si/entonces, reglas, checklist).`,
+        `- Cuando ayude, incluye UNA tabla corta en Markdown (<= 6 filas) para comparar (ej. "Últimas 5 sesiones vs Últimas 15", "Plan vs Real", "Antes vs Después").`,
+        `- Si hay backStudyContext o screenshot: comenta timing de entrada/salida. Si NO tienes velas/15m reales, dilo y pide la captura en 15m. Si la captura tiene flechas, úsala.`,
+        `- Cierra SIEMPRE con 1 pregunta de seguimiento (1 sola), después de tus recomendaciones.`,
+        ``,
+        `Estilo:`,
+        `- Español natural (no libreto). Ajusta tu forma de escribir a la pregunta del usuario.`,
+        `- Oraciones cortas, tono conversacional-profesional.`,
+        `- Nada de vergüenza/juzgar. Sé firme con la disciplina.`,
+        `- No prometas ganancias futuras.`
       );
     } else {
       systemLines.push(
-        `You are "NeuroTrader AI Coach", a trading performance coach focused on risk management, psychology and process quality.`,
-        `You're coaching ONE person called "${firstName}". Speak directly to them in second person, kind but direct.`,
-        `Your job: turn journal + platform context into practical coaching to improve execution.`,
-        `Rules:`,
-        `- Do NOT repeat raw JSON or mention keys/IDs. Use it internally only.`,
-        `- Do not provide trade signals, predictions, or specific buy/sell recommendations. Focus on process, risk, psychology, routines.`,
-        `Suggested format:`,
-        `1) Short diagnosis (2–4 lines)`,
-        `2) 3 concrete actions for the next session (bullets)`,
-        `3) Risk & process (if/then rules)`,
-        askFollowup ? `4) 1 follow-up question (to refine coaching)` : ``
+        `You are "NeuroTrader AI Coach": a Wall Street-style trading performance coach (direct, process-obsessed, no hype).`,
+        `You're coaching ONE person called "${firstName}". Speak in second person.`,
+        `Your job: turn their platform data (journal, analytics, plan, challenges, notes, back-study) into actionable coaching.`,
+        ``,
+        `Format (pick ONLY what is relevant; avoid a rigid template):`,
+        `- Start with a short greeting using their name (1 line).`,
+        `- Give a short diagnosis (2–3 lines) grounded in real patterns/numbers from context.`,
+        `- Then: 3–6 bullets with concrete actions (if/then rules, checklist, guardrails).`,
+        `- When useful, include ONE short Markdown table (<= 6 rows) to compare ("Last 5 vs last 15", "Plan vs actual", "Before vs after").`,
+        `- If backStudyContext or screenshot exists: comment on entry/exit timing. If you do NOT have true 15m candles, say so and ask for a 15m screenshot. If the screenshot has arrows, use it.`,
+        `- ALWAYS end with exactly 1 follow-up question, after your recommendations.`,
+        ``,
+        `Style:`,
+        `- Natural English (not scripted). Adapt your structure to the user’s question.`,
+        `- Short sentences, professional-conversational tone.`,
+        `- No shame. Be firm on discipline.`,
+        `- No promises of future profits.`
       );
     }
 
     systemLines.push(
-      `You will receive a JSON context with: snapshot, analyticsSummary, planSnapshot, growthPlan, cashflowsSummary, recentSessions, relevantSessions, gamification, and optional backStudyContext + screenshot.`,
-      `Use recentSessions to detect the *latest* pattern. Use analyticsSummary for longer-term tendencies. Use planSnapshot to evaluate plan adherence (cashflows-neutral).`,
-      `If a screenshot is present, treat it as a trade chart or performance screenshot and comment on entry/exit timing, structure, and rule adherence (not predictions).`
+      `You will receive a JSON "context" in the user message. Do NOT show the raw JSON, keys, IDs, or internal metadata.`,
+      `Use it internally to identify patterns and give coaching. If something important is missing, ask ONE clarifying question at the end (but still give best-effort coaching first).`
     );
 
-    // Build chat history for continuity (last ~10 turns max)
-    const historyMsgs =
-      Array.isArray(chatHistory) && chatHistory.length
-        ? chatHistory
-            .slice(-10)
-            .map((m) => ({
-              role: m.role === "coach" ? ("assistant" as const) : ("user" as const),
-              content: String(m.text || "").slice(0, 1200),
-            }))
-        : [];
-
-    // User prompt (context + question)
-    const userQuestion = (question || "").trim() || DEFAULT_QUESTION;
-
+    // Build user prompt
     const userText =
       (lang === "es"
-        ? `Contexto (úsalo SOLO para analizar; NO lo repitas literal):\n`
-        : `Context (use ONLY to analyze; do NOT repeat it literally):\n`) +
+        ? `Contexto (úsalo para analizar; NO lo repitas literal):\n`
+        : `Context (use to analyze; DO NOT repeat literally):\n`) +
       contextJson +
       "\n\n" +
       (lang === "es"
-        ? `Pregunta del usuario:\n"${userQuestion}"`
-        : `User question:\n"${userQuestion}"`);
+        ? `Pregunta del usuario:\n"${clampText(question, 2000)}"`
+        : `User question:\n"${clampText(question, 2000)}"`);
 
     const userContent: any[] = [{ type: "text", text: userText }];
 
-    if (screenshotBase64) {
+    if (body.screenshotBase64) {
       userContent.push({
         type: "input_image",
-        image_url: { url: screenshotBase64 },
+        image_url: { url: body.screenshotBase64 },
       });
     }
 
-    const model = process.env.AI_COACH_MODEL || "gpt-4o-mini";
+    const model = pickModel({ hasImage, question });
 
     const completion = await openai.chat.completions.create({
       model,
-      temperature: 0.35,
       messages: [
         { role: "system", content: systemLines.join("\n") },
-        ...historyMsgs,
         { role: "user", content: userContent as any },
       ],
-      // A slightly higher ceiling helps make the coaching more useful.
-      max_tokens: 750,
+      temperature: 0.35,
+      max_tokens: 500,
     });
 
-    const text = completion.choices?.[0]?.message?.content?.trim() || "";
+    const text = completion.choices?.[0]?.message?.content?.trim() ?? "";
 
     return NextResponse.json({
       text,
       model,
-      usage: (completion as any).usage || null,
+      lang,
     });
   } catch (err: any) {
     console.error("AI coach error:", err);
@@ -299,7 +293,9 @@ export async function POST(req: NextRequest) {
         error: "AI coach failed",
         details:
           err?.message ||
-          (typeof err === "string" ? err : "Unknown error calling OpenAI"),
+          (typeof err === "string"
+            ? err
+            : "Unknown error calling OpenAI"),
       },
       { status: 500 }
     );
