@@ -1946,7 +1946,7 @@ function PsychologySection({
 
   return (
     <section className="space-y-6">
-      <div className={`${wrapCard()} bg-gradient-to-br from-slate-900/70 via-slate-900/60 to-slate-950/70`}>
+      <div className={`${wrapCard()} bg-linear-to-br from-slate-900/70 via-slate-900/60 to-slate-950/70`}>
         <div className="flex items-baseline justify-between gap-3">
           <div>
             <p className={chartTitle()}>Psychology KPIs</p>
@@ -2826,7 +2826,7 @@ function StatisticsSection({
   return (
     <section className="space-y-6">
       {/* Command header */}
-      <div className={`${wrapCard()} bg-gradient-to-br from-slate-900/70 via-slate-950/65 to-slate-950/80`}>
+      <div className={`${wrapCard()} bg-linear-to-br from-slate-900/70 via-slate-950/65 to-slate-950/80`}>
         <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-3">
           <div>
             <p className={chartTitle()}>KPI Terminal</p>
@@ -2873,7 +2873,7 @@ function StatisticsSection({
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Search KPI…"
-                className="w-[240px] rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-400"
+                className="w-60 rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-400"
               />
             </div>
           </div>
