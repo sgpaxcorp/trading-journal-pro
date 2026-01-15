@@ -7,19 +7,21 @@ import { createHash } from "crypto";
 export const runtime = "nodejs";
 
 /**
- * Thinkorswim Broker Import — v12.4 (Option A / consistent history)
- * - Writes to: trades
- * - Uses: qty (NOT quantity)
- * - ALWAYS finalizes batch row:
+ * Multi-broker import (Thinkorswim + Tradovate Fills)
+ *
+ * ✅ Writes to: trades
+ * ✅ Optional ledger (broker_transactions): Thinkorswim ONLY (as before)
+ * ✅ ALWAYS finalizes trade_import_batches:
  *    status: "success" | "failed"
  *    imported_rows, updated_rows, duplicates, finished_at, duration_ms, error (optional)
- * - Dedupe:
- *    * In-memory dedupe by trade_hash (prevents ON CONFLICT affecting same row twice)
- *    * DB-level upsert by trade_hash
+ *
+ * Dedupe:
+ *  - In-memory dedupe by trade_hash (prevents duplicates within the same file)
+ *  - DB-level upsert by trade_hash
  */
 
 type AnyRow = any[];
-type Broker = "thinkorswim";
+type Broker = "thinkorswim" | "tradovate";
 
 /* -------------------- helpers -------------------- */
 function sha256(s: string) {
@@ -50,6 +52,9 @@ function parseNumber(v: unknown): number {
   const n = Number(cleaned);
   if (!Number.isFinite(n)) return 0;
   return neg ? -n : n;
+}
+function safeCost(v: unknown): number {
+  return Math.abs(parseNumber(v));
 }
 
 /* -------------------- CSV / Excel -------------------- */
@@ -94,7 +99,7 @@ function rowsFromExcelBuffer(buf: Buffer): AnyRow[] {
   return XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" }) as AnyRow[];
 }
 
-/* -------------------- datetime -------------------- */
+/* -------------------- datetime (Thinkorswim statement) -------------------- */
 function parseDateTime(dateRaw: unknown, timeRaw: unknown): string {
   const ds = String(dateRaw ?? "").trim();
   const ts = String(timeRaw ?? "").trim();
@@ -114,8 +119,8 @@ function parseDateTime(dateRaw: unknown, timeRaw: unknown): string {
   return new Date(Date.UTC(yy, mm - 1, dd, hh, mi, ss)).toISOString();
 }
 
-/* -------------------- header detection -------------------- */
-function findHeaderRow(rows: AnyRow[]) {
+/* -------------------- header detection (Thinkorswim) -------------------- */
+function findHeaderRowThinkorswim(rows: AnyRow[]) {
   for (let i = 0; i < rows.length; i++) {
     const r = rows[i] || [];
     const header = r.map((x) => String(x ?? "").trim().toUpperCase());
@@ -167,7 +172,7 @@ async function parallelLimit<T>(
 }
 
 /* ============================================================
-   CONTRACT CODE helpers (your exact format expectation)
+   CONTRACT CODE helpers (Thinkorswim options)
 ============================================================ */
 function tosYYMMDDCompact(expiryISO: string) {
   const yy = expiryISO.slice(2, 4);
@@ -177,10 +182,10 @@ function tosYYMMDDCompact(expiryISO: string) {
 }
 
 function formatContractCodeSimple(opts: {
-  root: string;        // SPX o SPXW
-  expiryISO: string;   // YYYY-MM-DD
+  root: string; // SPX o SPXW
+  expiryISO: string; // YYYY-MM-DD
   right: "C" | "P";
-  strike: number;      // 6985
+  strike: number; // 6985
 }) {
   const datePart = tosYYMMDDCompact(opts.expiryISO);
   const strikePart = Number.isInteger(opts.strike)
@@ -198,9 +203,18 @@ function parseTosExpiryToISO(raw: string): string | null {
 
   const day = m[1].padStart(2, "0");
   const monthMap: Record<string, string> = {
-    JAN: "01", FEB: "02", MAR: "03", APR: "04",
-    MAY: "05", JUN: "06", JUL: "07", AUG: "08",
-    SEP: "09", OCT: "10", NOV: "11", DEC: "12",
+    JAN: "01",
+    FEB: "02",
+    MAR: "03",
+    APR: "04",
+    MAY: "05",
+    JUN: "06",
+    JUL: "07",
+    AUG: "08",
+    SEP: "09",
+    OCT: "10",
+    NOV: "11",
+    DEC: "12",
   };
   const mm = monthMap[m[2].toUpperCase()];
   if (!mm) return null;
@@ -209,10 +223,16 @@ function parseTosExpiryToISO(raw: string): string | null {
   return `${yyyy}-${mm}-${day}`;
 }
 function normalizeOptionRoot(root: string, description: string): string {
-  if (root.toUpperCase() === "SPX" && /(WEEKLY|WEEKLYS)/i.test(description)) return "SPXW";
+  if (root.toUpperCase() === "SPX" && /(WEEKLY|WEEKLYS)/i.test(description))
+    return "SPXW";
   return root.toUpperCase();
 }
-function normalizeSideFromDesc(desc: string): "BOT" | "SOLD" | "BUY" | "SELL" | null {
+function normalizeSideFromDesc(desc: string):
+  | "BOT"
+  | "SOLD"
+  | "BUY"
+  | "SELL"
+  | null {
   const d = desc.toUpperCase();
   if (d.includes("BOT")) return "BOT";
   if (d.includes("SOLD")) return "SOLD";
@@ -243,7 +263,11 @@ function parseOptionFromDesc(desc: string) {
   const rawRoot = rootMatch?.[1] ?? null;
   if (!rawRoot) return null;
 
-  const right: "C" | "P" | null = U.includes("PUT") ? "P" : U.includes("CALL") ? "C" : null;
+  const right: "C" | "P" | null = U.includes("PUT")
+    ? "P"
+    : U.includes("CALL")
+    ? "C"
+    : null;
   if (!right) return null;
 
   const strikeCandidates = (U.match(/\b\d{3,5}(?:\.\d+)?\b/g) ?? [])
@@ -268,9 +292,101 @@ function parseOptionFromDesc(desc: string) {
   if (!expiryISO) return null;
 
   const root = normalizeOptionRoot(rawRoot, desc);
-  const contract_code = formatContractCodeSimple({ root, expiryISO, right, strike });
+  const contract_code = formatContractCodeSimple({
+    root,
+    expiryISO,
+    right,
+    strike,
+  });
 
   return { root, expiryISO, right, strike, contract_code, underlying: root };
+}
+
+/* ============================================================
+   Tradovate — Fills report parsing
+   Expected file: "Fills" CSV export that includes commissions.
+   Your sample has a first row "Fills" and then a header row.
+============================================================ */
+function findHeaderRowTradovateFills(rows: AnyRow[]) {
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i] || [];
+    const header = r.map((x) => String(x ?? "").trim().toLowerCase());
+    if (!header.length) continue;
+
+    const idx = (name: string) => header.indexOf(name.toLowerCase());
+
+    const fillId = idx("fill id") >= 0 ? idx("fill id") : idx("_id");
+    const ts = idx("_timestamp") >= 0 ? idx("_timestamp") : idx("timestamp");
+    const bs = idx("b/s") >= 0 ? idx("b/s") : idx("_action");
+    const qty = idx("quantity") >= 0 ? idx("quantity") : idx("_qty");
+    const price = idx("price") >= 0 ? idx("price") : idx("_price");
+    const contract = idx("contract") >= 0 ? idx("contract") : idx("_contractname");
+    const product = idx("product") >= 0 ? idx("product") : idx("_product");
+    const commission = idx("commission");
+
+    // minimally we need: fillId + ts + side + qty + price + contract + commission
+    const ok =
+      fillId >= 0 &&
+      ts >= 0 &&
+      bs >= 0 &&
+      qty >= 0 &&
+      price >= 0 &&
+      contract >= 0 &&
+      commission >= 0;
+
+    if (ok) {
+      return {
+        headerRowIdx: i,
+        cols: { fillId, ts, bs, qty, price, contract, product, commission },
+      };
+    }
+  }
+  return null;
+}
+
+function parseTradovateTimestampToISO(raw: unknown): string {
+  const s = String(raw ?? "").trim();
+  if (!s) return new Date().toISOString();
+
+  // Example: "2026-01-05 16:31:31.419Z"
+  // Convert "YYYY-MM-DD HH:mm:ss(.ms)Z" -> ISO by inserting "T"
+  const m = s.match(
+    /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?)(Z)?$/
+  );
+  if (m) {
+    const z = m[3] ? "Z" : "Z";
+    return `${m[1]}T${m[2]}${z}`;
+  }
+
+  // Fallback: try Date parsing
+  const d = new Date(s);
+  if (!Number.isNaN(d.getTime())) return d.toISOString();
+
+  return new Date().toISOString();
+}
+
+function normalizeTradovateSide(v: unknown): "BUY" | "SELL" | null {
+  const s = String(v ?? "").trim().toLowerCase();
+  if (!s) return null;
+
+  // " Buy" / " Sell"
+  if (s.startsWith("b")) return "BUY";
+  if (s.startsWith("s")) return "SELL";
+
+  // numeric action: 0=buy, 1=sell (observed in Tradovate APIs)
+  const n = Number(s);
+  if (Number.isFinite(n)) {
+    if (n === 0) return "BUY";
+    if (n === 1) return "SELL";
+  }
+
+  return null;
+}
+
+function futureRootFromSymbol(sym: string): string {
+  const s = (sym || "").trim().toUpperCase().replace(/^\//, "");
+  const m = s.match(/^([A-Z]{1,6})/);
+  return m?.[1] ?? s;
 }
 
 /* ============================================================
@@ -281,19 +397,25 @@ export async function POST(req: NextRequest) {
 
   const authHeader = req.headers.get("authorization") || "";
   const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
-  if (!token) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!token)
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { data: authData, error: authErr } = await supabaseAdmin.auth.getUser(token);
-  if (authErr || !authData?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (authErr || !authData?.user)
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
   const userId = authData.user.id;
 
   const form = await req.formData();
-  const brokerRaw = String(form.get("broker") ?? "").trim() || "thinkorswim";
-  const broker: Broker = brokerRaw.toLowerCase() === "thinkorswim" ? "thinkorswim" : "thinkorswim";
+
+  const brokerRaw = String(form.get("broker") ?? "").trim().toLowerCase();
+  const broker: Broker = brokerRaw === "tradovate" ? "tradovate" : "thinkorswim";
+
   const comment = String(form.get("comment") ?? "").trim() || null;
 
   const file = form.get("file");
-  if (!(file instanceof File)) return NextResponse.json({ error: "Missing file" }, { status: 400 });
+  if (!(file instanceof File))
+    return NextResponse.json({ error: "Missing file" }, { status: 400 });
 
   // 1) Create batch
   const { data: batch, error: batchErr } = await supabaseAdmin
@@ -313,18 +435,12 @@ export async function POST(req: NextRequest) {
     .single();
 
   if (batchErr || !batch?.id) {
-    return NextResponse.json({ error: batchErr?.message ?? "Failed to create batch" }, { status: 500 });
+    return NextResponse.json(
+      { error: batchErr?.message ?? "Failed to create batch" },
+      { status: 500 }
+    );
   }
   const batchId = batch.id as string;
-
-  // counters (for product UX)
-  let rowsRead = 0;
-  let trdSeen = 0;
-  let trdParsed = 0;
-  let trdSkipped = 0;
-
-  let tradeDuplicatesInFile = 0;
-  let ledgerDuplicatesInFile = 0;
 
   // final counters
   let tradeInserted = 0;
@@ -332,19 +448,185 @@ export async function POST(req: NextRequest) {
   let ledgerInserted = 0;
   let ledgerUpdated = 0;
   let ledgerDuplicates = 0;
+  let tradeDuplicatesInFile = 0;
+  let ledgerDuplicatesInFile = 0;
 
   try {
     const name = (file.name ?? "").toLowerCase();
     const isCsv = name.endsWith(".csv");
     const isExcel = name.endsWith(".xlsx") || name.endsWith(".xls");
-    if (!isCsv && !isExcel) throw new Error("Unsupported file type. Please upload CSV / XLS / XLSX.");
+    if (!isCsv && !isExcel)
+      throw new Error("Unsupported file type. Please upload CSV / XLS / XLSX.");
 
     const rows = isCsv
       ? rowsFromCsvText(await file.text())
       : rowsFromExcelBuffer(Buffer.from(await file.arrayBuffer()));
 
-    const detected = findHeaderRow(rows);
-    if (!detected) throw new Error("Could not detect statement headers in this file.");
+    /* ============================================================
+       TRADOVATE BRANCH
+    ============================================================ */
+    if (broker === "tradovate") {
+      const detected = findHeaderRowTradovateFills(rows);
+      if (!detected) {
+        throw new Error(
+          "Could not detect Tradovate Fills headers. Please export the 'Fills' report (CSV) with commissions."
+        );
+      }
+
+      const { headerRowIdx, cols } = detected;
+      const dataRows = rows.slice(headerRowIdx + 1);
+
+      const tradeByHash = new Map<string, any>();
+
+      for (const r of dataRows) {
+        const fillId = safeStr(r[cols.fillId]);
+        if (!fillId) continue;
+
+        const side = normalizeTradovateSide(r[cols.bs]);
+        const qty0 = parseNumber(r[cols.qty]);
+        const qty = Math.abs(qty0);
+        const price = parseNumber(r[cols.price]);
+
+        if (!side || !qty || !price) continue;
+
+        const contract = safeStr(r[cols.contract]).toUpperCase();
+        const product =
+          cols.product >= 0 ? safeStr(r[cols.product]).toUpperCase() : "";
+
+        const root = product || futureRootFromSymbol(contract);
+        const contract_code = contract || root;
+        const executed_at = parseTradovateTimestampToISO(r[cols.ts]);
+
+        const commissions = safeCost(r[cols.commission]);
+        const fees = 0;
+
+        const trade_hash = sha256([userId, broker, "FILL", fillId].join("|"));
+
+        if (tradeByHash.has(trade_hash)) {
+          tradeDuplicatesInFile++;
+          continue;
+        }
+
+        tradeByHash.set(trade_hash, {
+          user_id: userId,
+          broker,
+
+          asset_type: "future",
+          symbol: contract_code,
+          instrument_type: "future",
+          underlying_symbol: root,
+          instrument_symbol: contract_code,
+          contract_code,
+
+          option_root: null,
+          option_expiration: null,
+          option_strike: null,
+          option_right: null,
+          option_dte: null,
+
+          side,
+          qty,
+          price,
+          executed_at,
+
+          exchange: null,
+          commissions,
+          fees,
+
+          trade_hash,
+          raw: {
+            fill_id: fillId,
+            contract,
+            product: root,
+            sourceRow: r,
+          },
+          import_batch_id: batchId,
+        });
+      }
+
+      const tradeRowsAll = Array.from(tradeByHash.values());
+      const tradeHashes = tradeRowsAll.map((x) => x.trade_hash).filter(Boolean);
+
+      const existingTradeHash = new Set<string>();
+      if (tradeHashes.length) {
+        for (const part of chunk(tradeHashes, 800)) {
+          const { data, error } = await supabaseAdmin
+            .from("trades")
+            .select("trade_hash")
+            .eq("user_id", userId)
+            .in("trade_hash", part);
+
+          if (error)
+            throw new Error(error.message ?? "Failed to query existing trade_hash");
+          for (const it of data ?? [])
+            existingTradeHash.add((it as any).trade_hash);
+        }
+      }
+
+      tradeInserted = tradeRowsAll.filter(
+        (x) => !existingTradeHash.has(x.trade_hash)
+      ).length;
+      tradeUpdated = tradeRowsAll.length - tradeInserted;
+
+      if (tradeRowsAll.length) {
+        const { error } = await supabaseAdmin.from("trades").upsert(tradeRowsAll, {
+          onConflict: "trade_hash",
+          ignoreDuplicates: false,
+        });
+        if (error) throw new Error(error.message ?? "Trades upsert failed");
+      }
+
+      const durationMs = Date.now() - startedAt;
+      const duplicatesForHistory = tradeDuplicatesInFile;
+
+      // 2) Finalize batch — SUCCESS
+      const { error: updErr } = await supabaseAdmin
+        .from("trade_import_batches")
+        .update({
+          status: "success",
+          imported_rows: tradeInserted,
+          updated_rows: tradeUpdated,
+          duplicates: duplicatesForHistory,
+          finished_at: new Date().toISOString(),
+          duration_ms: durationMs,
+        })
+        .eq("id", batchId);
+
+      if (updErr) {
+        return NextResponse.json(
+          {
+            ok: true,
+            batchId,
+            broker,
+            warning: `Import done but failed to finalize batch: ${updErr.message}`,
+            inserted: tradeInserted,
+            updated: tradeUpdated,
+            duplicates: duplicatesForHistory,
+          },
+          { status: 200 }
+        );
+      }
+
+      return NextResponse.json(
+        {
+          ok: true,
+          batchId,
+          broker,
+          inserted: tradeInserted,
+          updated: tradeUpdated,
+          duplicates: duplicatesForHistory,
+          message: `Tradovate import complete — ${tradeInserted} new, ${tradeUpdated} updated, ${tradeDuplicatesInFile} duplicates skipped.`,
+        },
+        { status: 200 }
+      );
+    }
+
+    /* ============================================================
+       THINKORSWIM BRANCH (your existing logic)
+    ============================================================ */
+    const detected = findHeaderRowThinkorswim(rows);
+    if (!detected)
+      throw new Error("Could not detect statement headers in this file.");
 
     const { headerRowIdx, cols } = detected;
     const dataRows = rows.slice(headerRowIdx + 1);
@@ -354,8 +636,6 @@ export async function POST(req: NextRequest) {
     const tradeByHash = new Map<string, any>();
 
     for (const r of dataRows) {
-      rowsRead++;
-
       const dateCell = safeStr(r[cols.date]);
       if (!/^\d{1,2}\/\d{1,2}\/\d{2}$/.test(dateCell)) continue;
 
@@ -364,11 +644,13 @@ export async function POST(req: NextRequest) {
       const executed_at = parseDateTime(r[cols.date], r[cols.time]);
 
       const misc_fees_raw = cols.miscFees >= 0 ? parseNumber(r[cols.miscFees]) : null;
-      const commissions_fees_raw = cols.commFees >= 0 ? parseNumber(r[cols.commFees]) : null;
+      const commissions_fees_raw =
+        cols.commFees >= 0 ? parseNumber(r[cols.commFees]) : null;
 
       // store costs as positive
       const misc_fees = misc_fees_raw == null ? null : Math.abs(misc_fees_raw);
-      const commissions_fees = commissions_fees_raw == null ? null : Math.abs(commissions_fees_raw);
+      const commissions_fees =
+        commissions_fees_raw == null ? null : Math.abs(commissions_fees_raw);
 
       const amount = parseNumber(r[cols.amount]);
       const balance = cols.balance >= 0 ? parseNumber(r[cols.balance]) : null;
@@ -378,7 +660,16 @@ export async function POST(req: NextRequest) {
       const ref_num = ref_num_norm ? ref_num_norm : null;
 
       const row_hash = sha256(
-        [broker, userId, dateCell, safeStr(r[cols.time]), ref_num ?? "", txnType, description.slice(0, 240), String(amount)].join("|")
+        [
+          broker,
+          userId,
+          dateCell,
+          safeStr(r[cols.time]),
+          ref_num ?? "",
+          txnType,
+          description.slice(0, 240),
+          String(amount),
+        ].join("|")
       );
 
       txnRowsAll.push({
@@ -398,32 +689,37 @@ export async function POST(req: NextRequest) {
       });
 
       if (txnType === "TRD") {
-        trdSeen++;
-
         const side = normalizeSideFromDesc(description);
         const qty = parseQtyFromDesc(description);
         const price = parsePriceFromDesc(description);
 
-        if (!side || !qty || !price) {
-          trdSkipped++;
-          continue;
-        }
+        if (!side || !qty || !price) continue;
 
         const opt = parseOptionFromDesc(description);
         const instrument_type = opt ? "option" : "stock";
-        const symbol = opt?.underlying ?? (description.toUpperCase().match(/\b[A-Z]{1,6}\b/)?.[0] ?? "UNKNOWN");
+        const symbol = opt?.underlying ??
+          (description.toUpperCase().match(/\b[A-Z]{1,6}\b/)?.[0] ?? "UNKNOWN");
         const contract_code = opt?.contract_code ?? symbol;
 
         const trade_hash = ref_num
           ? sha256([userId, broker, "REF", ref_num].join("|"))
-          : sha256([userId, broker, "NREF", contract_code, executed_at, side, String(qty), String(price)].join("|"));
+          : sha256(
+              [
+                userId,
+                broker,
+                "NREF",
+                contract_code,
+                executed_at,
+                side,
+                String(qty),
+                String(price),
+              ].join("|")
+            );
 
         if (tradeByHash.has(trade_hash)) {
           tradeDuplicatesInFile++;
           continue;
         }
-
-        trdParsed++;
 
         tradeByHash.set(trade_hash, {
           user_id: userId,
@@ -537,7 +833,9 @@ export async function POST(req: NextRequest) {
 
     let ledgerDuplicatesNoRef = 0;
     if (noRefRows.length) {
-      const rowHashes = Array.from(new Set(noRefRows.map((x) => x.row_hash).filter(Boolean)));
+      const rowHashes = Array.from(
+        new Set(noRefRows.map((x) => x.row_hash).filter(Boolean))
+      );
       const existingHashSet = new Set<string>();
 
       for (const part of chunk(rowHashes, 800)) {
@@ -555,7 +853,9 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      const toInsert = noRefRows.filter((x) => !existingHashSet.has(String(x.row_hash)));
+      const toInsert = noRefRows.filter(
+        (x) => !existingHashSet.has(String(x.row_hash))
+      );
       ledgerDuplicatesNoRef = noRefRows.length - toInsert.length;
 
       for (const part of chunk(toInsert, 500)) {
@@ -585,7 +885,8 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    tradeInserted = tradeRowsAll.filter((x) => !existingTradeHash.has(x.trade_hash)).length;
+    tradeInserted = tradeRowsAll.filter((x) => !existingTradeHash.has(x.trade_hash))
+      .length;
     tradeUpdated = tradeRowsAll.length - tradeInserted;
 
     if (tradeRowsAll.length) {
@@ -630,6 +931,9 @@ export async function POST(req: NextRequest) {
         ok: true,
         batchId,
         broker,
+        inserted: tradeInserted,
+        updated: tradeUpdated,
+        duplicates: duplicatesForHistory,
         message:
           `Import complete — ${tradeInserted} new, ${tradeUpdated} updated, ` +
           `${tradeDuplicatesInFile} duplicates skipped. Ledger: ${ledgerInserted} new, ${ledgerUpdated} updated, ${ledgerDuplicates} duplicates skipped.`,
@@ -652,6 +956,9 @@ export async function POST(req: NextRequest) {
       })
       .eq("id", batchId);
 
-    return NextResponse.json({ ok: false, error: e?.message ?? "Import failed", batchId }, { status: 400 });
+    return NextResponse.json(
+      { ok: false, error: e?.message ?? "Import failed", batchId },
+      { status: 400 }
+    );
   }
 }

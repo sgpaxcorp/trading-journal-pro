@@ -542,11 +542,30 @@ const FUTURES_MULTIPLIERS: Record<string, number> = {
   HG: 25000,
 };
 
+// ✅ FIX: Futures root parsing so symbols like ESH6 map to ES (50/pt),
+// and M2KH6 maps to M2K, MNQH6 maps to MNQ, etc.
+//
+// Replace your existing futureRoot() with this:
+
+const FUT_MONTH_CODES = "FGHJKMNQUVXZ";
+
 function futureRoot(symbol: string) {
-  const s = (symbol || "").trim().toUpperCase().replace(/^\//, "");
-  const m = s.match(/^([A-Z]{1,4})/);
-  return m?.[1] ?? s;
+  const s0 = (symbol || "").trim().toUpperCase().replace(/^\//, "");
+  const s = s0.replace(/\s+/g, "");
+
+  // Common: ESH6, MNQH26, M2KH6, ESZ2025
+  const re1 = new RegExp(`^([A-Z0-9]{1,8})([${FUT_MONTH_CODES}])(\\d{1,4})$`);
+  const m1 = s.match(re1);
+  if (m1) return m1[1];
+
+  // Fallback: take first token
+  const m2 = s.match(/^([A-Z0-9]{1,8})/);
+  return m2?.[1] ?? s0;
 }
+
+// Your FUTURES_MULTIPLIERS map can remain the same (ES:50, MES:5, NQ:20, MNQ:2, etc).
+// With this root parsing, ESH6 -> ES, so multiplier becomes 50 and PnL becomes correct.
+
 
 function getContractMultiplier(kind: InstrumentType, symbol: string) {
   if (kind === "option") return 100;
