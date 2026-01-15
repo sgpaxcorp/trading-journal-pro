@@ -6,9 +6,11 @@ import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import { useEffect, useMemo, useState, Fragment } from "react";
 import type { ReactNode } from "react";
+import type { ApexOptions } from "apexcharts";
 
 import TopNav from "@/app/components/TopNav";
 import { useAuth } from "@/context/AuthContext";
+import { supabaseBrowser } from "@/lib/supaBaseClient";
 
 import { type InstrumentType } from "@/lib/journalNotes";
 import type { JournalEntry } from "@/lib/journalTypes";
@@ -28,12 +30,12 @@ import {
   PieChart,
   Pie,
   Cell,
-  AreaChart,
-  Area,
 } from "recharts";
 
 // ECharts (client-only)
 const EChartsReact = dynamic(() => import("echarts-for-react"), { ssr: false });
+// ApexCharts (client-only)
+const ApexChart = dynamic(() => import("react-apexcharts"), { ssr: false });
 
 /* =========================
    Types
@@ -1620,6 +1622,89 @@ function OverviewSection({
   const { totalSessions, greenSessions, learningSessions, sumPnl, avgPnl } = uiTotals;
   const respectEdge = probabilityStats.pGreenRespect - probabilityStats.baseGreenRate;
 
+  const equityApexSeries = useMemo(() => {
+    const pts = (equity || []).map((p) => {
+      const ts = Date.parse(`${p.date}T00:00:00.000Z`);
+      return { x: Number.isFinite(ts) ? ts : p.date, y: Number(p.value) || 0 };
+    });
+    return [{ name: "Equity", data: pts }];
+  }, [equity]);
+
+  const equityApexOptions = useMemo<ApexOptions>(() => {
+    return {
+      chart: {
+        type: "area",
+        background: "transparent",
+        toolbar: {
+          show: true,
+          tools: {
+            download: true,
+            selection: true,
+            zoom: true,
+            zoomin: true,
+            zoomout: true,
+            pan: true,
+            reset: true,
+          },
+        },
+        zoom: { enabled: true },
+        foreColor: CHART_COLORS.axis,
+      },
+      theme: { mode: "dark" },
+      dataLabels: { enabled: false },
+      stroke: { curve: "smooth", width: 2 },
+      colors: [CHART_COLORS.emerald],
+      fill: {
+        type: "gradient",
+        gradient: {
+          shadeIntensity: 0.2,
+          opacityFrom: 0.35,
+          opacityTo: 0.05,
+          stops: [0, 90, 100],
+        },
+      },
+      grid: { borderColor: CHART_COLORS.grid, strokeDashArray: 6 },
+      xaxis: {
+        type: "datetime",
+        labels: {
+          style: {
+            colors: CHART_COLORS.axis,
+            fontSize: "11px",
+            fontFamily: "inherit",
+          },
+        },
+        axisBorder: { color: CHART_COLORS.grid },
+        axisTicks: { color: CHART_COLORS.grid },
+      },
+      yaxis: {
+        labels: {
+          style: {
+            colors: CHART_COLORS.axis,
+            fontSize: "11px",
+            fontFamily: "inherit",
+          },
+          formatter: (v) => {
+            const n = Number(v);
+            if (!Number.isFinite(n)) return "";
+            return `$${n.toFixed(0)}`;
+          },
+        },
+      },
+      tooltip: {
+        theme: "dark",
+        x: { format: "MMM dd" },
+        y: {
+          formatter: (v) => {
+            const n = Number(v);
+            if (!Number.isFinite(n)) return "";
+            return `$${n.toFixed(2)}`;
+          },
+        },
+      },
+    };
+  }, [equity]);
+
+
   return (
     <section className="space-y-6">
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -1685,36 +1770,25 @@ function OverviewSection({
           <div className="flex items-baseline justify-between gap-3">
             <div>
               <p className={chartTitle()}>Equity Curve</p>
-              <p className={chartSub()}>Cumulative P&amp;L over time</p>
+              <p className={chartSub()}>Account equity over time (start balance + net P&amp;L)</p>
             </div>
             <span className="text-[11px] text-slate-500 font-mono">EQ</span>
           </div>
 
           <div className="mt-3 h-[280px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={equity}>
-                <CartesianGrid stroke={CHART_COLORS.grid} strokeDasharray="4 8" />
-                <XAxis
-                  dataKey="date"
-                  tick={axisStyle()}
-                  tickFormatter={formatDateFriendly}
-                  axisLine={{ stroke: CHART_COLORS.grid }}
-                  tickLine={false}
-                />
-                <YAxis tick={axisStyle()} axisLine={{ stroke: CHART_COLORS.grid }} tickLine={false} width={46} />
-                <Tooltip {...tooltipProps()} />
-                <Area
-                  type="monotone"
-                  dataKey="value"
-                  stroke={CHART_COLORS.emerald}
-                  strokeWidth={2}
-                  fill={CHART_COLORS.emeraldDim}
-                  fillOpacity={1}
-                  dot={false}
-                  activeDot={{ r: 3 }}
-                />
-              </AreaChart>
-            </ResponsiveContainer>
+            {equity && equity.length ? (
+              // @ts-ignore
+              <ApexChart
+                type="area"
+                height={280}
+                options={equityApexOptions}
+                series={equityApexSeries as any}
+              />
+            ) : (
+              <div className="h-full flex items-center justify-center text-slate-500 text-sm">
+                No equity data in this range.
+              </div>
+            )}
           </div>
         </div>
 
@@ -1872,7 +1946,7 @@ function PsychologySection({
 
   return (
     <section className="space-y-6">
-      <div className={`${wrapCard()} bg-linear-to-br from-slate-900/70 via-slate-900/60 to-slate-950/70`}>
+      <div className={`${wrapCard()} bg-gradient-to-br from-slate-900/70 via-slate-900/60 to-slate-950/70`}>
         <div className="flex items-baseline justify-between gap-3">
           <div>
             <p className={chartTitle()}>Psychology KPIs</p>
@@ -1991,7 +2065,80 @@ function InstrumentsSection({ stats, underlyingMix }: { stats: any; underlyingMi
   const mostSupportive = stats.mostSupportive || [];
   const topEarners = stats.topEarners || [];
   const toReview = stats.toReview || [];
-  const tickers = stats.tickers || [];
+  const tickers = (stats.tickers || []) as any[];
+
+  type TickerSortKey = "symbol" | "sessions" | "winRate" | "netPnl" | "avgPnl";
+
+  const [search, setSearch] = useState<string>("");
+  const [sortKey, setSortKey] = useState<TickerSortKey>("sessions");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  const [page, setPage] = useState<number>(1);
+
+  const pageSize = 25;
+
+  const filteredTickers = useMemo(() => {
+    const q = safeUpper(search).trim();
+    if (!q) return tickers;
+
+    return tickers.filter((t) => {
+      const sym = safeUpper(String(t?.symbol ?? ""));
+      const und = safeUpper(String(t?.underlying ?? ""));
+      return sym.includes(q) || und.includes(q);
+    });
+  }, [tickers, search]);
+
+  const sortedTickers = useMemo(() => {
+    const arr = [...filteredTickers];
+    const dir = sortDir === "asc" ? 1 : -1;
+
+    const num = (v: any) => {
+      const n = Number(v);
+      return Number.isFinite(n) ? n : 0;
+    };
+
+    arr.sort((a, b) => {
+      if (sortKey === "symbol") {
+        return (
+          safeUpper(String(a?.symbol ?? "")).localeCompare(safeUpper(String(b?.symbol ?? ""))) *
+          dir
+        );
+      }
+      if (sortKey === "sessions") return (num(a?.sessions) - num(b?.sessions)) * dir;
+      if (sortKey === "winRate") return (num(a?.winRate) - num(b?.winRate)) * dir;
+      if (sortKey === "netPnl") return (num(a?.netPnl) - num(b?.netPnl)) * dir;
+      if (sortKey === "avgPnl") return (num(a?.avgPnlPerSession) - num(b?.avgPnlPerSession)) * dir;
+      return 0;
+    });
+
+    return arr;
+  }, [filteredTickers, sortKey, sortDir]);
+
+  useEffect(() => {
+    // reset pagination when the user changes filters/sort
+    setPage(1);
+  }, [search, sortKey, sortDir]);
+
+  const totalPages = Math.max(1, Math.ceil(sortedTickers.length / pageSize));
+  const pageSafe = Math.min(Math.max(1, page), totalPages);
+
+  const pageItems = useMemo(() => {
+    const start = (pageSafe - 1) * pageSize;
+    return sortedTickers.slice(start, start + pageSize);
+  }, [sortedTickers, pageSafe]);
+
+  const sortMark = (k: TickerSortKey) => {
+    if (sortKey !== k) return "";
+    return sortDir === "asc" ? " ▲" : " ▼";
+  };
+
+  const toggleSort = (k: TickerSortKey) => {
+    if (sortKey === k) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+      return;
+    }
+    setSortKey(k);
+    setSortDir(k === "symbol" ? "asc" : "desc");
+  };
 
   return (
     <section className="space-y-6">
@@ -2049,43 +2196,133 @@ function InstrumentsSection({ stats, underlyingMix }: { stats: any; underlyingMi
       </div>
 
       <div className={wrapCard()}>
-        <div className="flex items-baseline justify-between gap-3">
+        <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-3">
           <div>
             <p className={chartTitle()}>Ticker table</p>
-            <p className={chartSub()}>Symbol + edge metrics (selected range)</p>
+            <p className={chartSub()}>
+              Search, sort, and page through symbol + edge metrics (selected range).
+            </p>
           </div>
-          <span className="text-[11px] text-slate-500 font-mono">TAB</span>
+
+          <div className="flex flex-wrap items-end gap-2">
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] text-slate-500 font-mono">SEARCH</span>
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="SPX, AAPL, ES…"
+                className="w-56 rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-400"
+              />
+            </div>
+
+            <div className="rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-2 text-xs text-slate-300">
+              <span className="font-mono">{sortedTickers.length}</span> rows
+            </div>
+
+            <span className="text-[11px] text-slate-500 font-mono">TAB</span>
+          </div>
         </div>
 
         <div className="mt-3 overflow-x-auto">
           <table className="min-w-[980px] w-full text-sm">
             <thead>
               <tr className="text-[11px] uppercase tracking-[0.22em] text-slate-500 border-b border-slate-800">
-                <th className="px-3 py-2 text-left">Symbol</th>
+                <th
+                  className="px-3 py-2 text-left cursor-pointer select-none hover:text-slate-300"
+                  onClick={() => toggleSort("symbol")}
+                  title="Sort"
+                >
+                  Symbol{sortMark("symbol")}
+                </th>
                 <th className="px-3 py-2 text-left">Underlying</th>
-                <th className="px-3 py-2 text-right">Sessions</th>
+                <th
+                  className="px-3 py-2 text-right cursor-pointer select-none hover:text-slate-300"
+                  onClick={() => toggleSort("sessions")}
+                  title="Sort"
+                >
+                  Sessions{sortMark("sessions")}
+                </th>
                 <th className="px-3 py-2 text-right">Closed</th>
-                <th className="px-3 py-2 text-right">Win%</th>
-                <th className="px-3 py-2 text-right">Net</th>
-                <th className="px-3 py-2 text-right">Avg</th>
+                <th
+                  className="px-3 py-2 text-right cursor-pointer select-none hover:text-slate-300"
+                  onClick={() => toggleSort("winRate")}
+                  title="Sort"
+                >
+                  Win%{sortMark("winRate")}
+                </th>
+                <th
+                  className="px-3 py-2 text-right cursor-pointer select-none hover:text-slate-300"
+                  onClick={() => toggleSort("netPnl")}
+                  title="Sort"
+                >
+                  Net{sortMark("netPnl")}
+                </th>
+                <th
+                  className="px-3 py-2 text-right cursor-pointer select-none hover:text-slate-300"
+                  onClick={() => toggleSort("avgPnl")}
+                  title="Sort"
+                >
+                  Avg{sortMark("avgPnl")}
+                </th>
               </tr>
             </thead>
             <tbody>
-              {tickers.slice(0, 60).map((t: any) => (
-                <tr key={t.symbol} className="border-t border-slate-800 bg-slate-950/45 hover:bg-slate-950/70 transition">
+              {pageItems.map((t: any) => (
+                <tr
+                  key={t.symbol}
+                  className="border-t border-slate-800 bg-slate-950/45 hover:bg-slate-950/70 transition"
+                >
                   <td className="px-3 py-2 font-mono text-slate-100">{t.symbol}</td>
                   <td className="px-3 py-2 font-mono text-slate-300">{t.underlying || "—"}</td>
                   <td className="px-3 py-2 text-right text-slate-200">{t.sessions}</td>
                   <td className="px-3 py-2 text-right text-slate-200">{t.tradesClosed}</td>
-                  <td className="px-3 py-2 text-right text-slate-200">{t.winRate.toFixed(1)}%</td>
-                  <td className={`px-3 py-2 text-right font-mono ${t.netPnl >= 0 ? "text-emerald-300" : "text-sky-300"}`}>
-                    {fmtMoney(t.netPnl)}
+                  <td className="px-3 py-2 text-right text-slate-200">{Number(t.winRate || 0).toFixed(1)}%</td>
+                  <td
+                    className={`px-3 py-2 text-right font-mono ${
+                      Number(t.netPnl || 0) >= 0 ? "text-emerald-300" : "text-sky-300"
+                    }`}
+                  >
+                    {fmtMoney(Number(t.netPnl || 0))}
                   </td>
-                  <td className="px-3 py-2 text-right font-mono text-slate-200">{fmtMoney(t.avgPnlPerSession)}</td>
+                  <td className="px-3 py-2 text-right font-mono text-slate-200">
+                    {fmtMoney(Number(t.avgPnlPerSession || 0))}
+                  </td>
                 </tr>
               ))}
+
+              {pageItems.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="px-3 py-6 text-center text-sm text-slate-500">
+                    No tickers match your search in this date range.
+                  </td>
+                </tr>
+              ) : null}
             </tbody>
           </table>
+        </div>
+
+        <div className="mt-3 flex items-center justify-between gap-3">
+          <button
+            type="button"
+            disabled={pageSafe <= 1}
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            className="px-3 py-2 rounded-xl border border-slate-800 text-slate-200 text-xs disabled:opacity-40 disabled:cursor-not-allowed hover:border-emerald-400 hover:text-emerald-300 transition"
+          >
+            Prev
+          </button>
+
+          <div className="text-[11px] text-slate-500 font-mono">
+            PAGE {pageSafe} / {totalPages}
+          </div>
+
+          <button
+            type="button"
+            disabled={pageSafe >= totalPages}
+            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            className="px-3 py-2 rounded-xl border border-slate-800 text-slate-200 text-xs disabled:opacity-40 disabled:cursor-not-allowed hover:border-emerald-400 hover:text-emerald-300 transition"
+          >
+            Next
+          </button>
         </div>
       </div>
     </section>
@@ -2589,7 +2826,7 @@ function StatisticsSection({
   return (
     <section className="space-y-6">
       {/* Command header */}
-      <div className={`${wrapCard()} bg-linear-to-br from-slate-900/70 via-slate-950/65 to-slate-950/80`}>
+      <div className={`${wrapCard()} bg-gradient-to-br from-slate-900/70 via-slate-950/65 to-slate-950/80`}>
         <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-3">
           <div>
             <p className={chartTitle()}>KPI Terminal</p>
@@ -2636,7 +2873,7 @@ function StatisticsSection({
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Search KPI…"
-                className="w-60 rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-400"
+                className="w-[240px] rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-400"
               />
             </div>
           </div>
@@ -2776,6 +3013,11 @@ export default function AnalyticsStatisticsPage() {
   const [snapshot, setSnapshot] = useState<AnalyticsSnapshot | null>(null);
   const [dailySnaps, setDailySnaps] = useState<DailySnapshotRow[]>([]);
 
+  // Growth Plan (authoritative starting balance for equity curve)
+  const [planStartingBalance, setPlanStartingBalance] = useState<number>(0);
+  const [planStartIso, setPlanStartIso] = useState<string>("");
+  const [loadingPlan, setLoadingPlan] = useState<boolean>(true);
+
   // auth gate
   useEffect(() => {
     if (!loading && !user) router.replace("/signin");
@@ -2797,6 +3039,58 @@ export default function AnalyticsStatisticsPage() {
 
   // unified userId (Supabase UUID) everywhere
   const userId = (user as any)?.id as string | undefined;
+
+  // Load Growth Plan from Supabase (to avoid any local/legacy starting-balance drift)
+  useEffect(() => {
+    let alive = true;
+
+    const run = async () => {
+      if (!userId) {
+        if (alive) setLoadingPlan(false);
+        return;
+      }
+
+      try {
+        setLoadingPlan(true);
+
+        const { data, error } = await supabaseBrowser
+          .from("growth_plans")
+          .select("starting_balance, created_at, updated_at")
+          .eq("user_id", userId)
+          .order("updated_at", { ascending: false })
+          .limit(1);
+
+        if (!alive) return;
+
+        if (error) {
+          console.error("[analytics] growth_plans load error:", error);
+          setPlanStartingBalance(0);
+          setPlanStartIso("");
+          return;
+        }
+
+        const row = Array.isArray(data) && data.length ? (data[0] as any) : null;
+        const sb = Number(row?.starting_balance ?? 0);
+        setPlanStartingBalance(Number.isFinite(sb) ? sb : 0);
+
+        const startIso = String(row?.created_at ?? row?.updated_at ?? "").slice(0, 10);
+        setPlanStartIso(looksLikeYYYYMMDD(startIso) ? startIso : "");
+      } catch (e) {
+        console.error("[analytics] growth_plans load exception:", e);
+        if (!alive) return;
+        setPlanStartingBalance(0);
+        setPlanStartIso("");
+      } finally {
+        if (alive) setLoadingPlan(false);
+      }
+    };
+
+    run();
+
+    return () => {
+      alive = false;
+    };
+  }, [userId]);
 
   // Load journal entries (all-time; filter in-memory by selected range)
   useEffect(() => {
@@ -2958,12 +3252,41 @@ export default function AnalyticsStatisticsPage() {
 
   // Build snapshot-like object for UI (based on filtered sessions + filtered daily snaps)
   useEffect(() => {
-    const snaps = [...(dailySnaps || [])].sort((a, b) => (a.date < b.date ? -1 : 1));
-    const equityCurve = snaps.map((s) => ({
-      date: s.date,
-      value: (Number((s as any).start_of_day_balance) || 0) + (Number((s as any).realized_usd) || 0),
-    }));
-    const dailyPnl = snaps.map((s) => ({ date: s.date, pnl: Number((s as any).realized_usd) || 0 }));
+    // Equity curve = Growth Plan starting balance + cumulative net session P&L (after fees).
+    // This prevents stale/legacy baselines (e.g., default 5000) from leaking into analytics.
+    const startIso = dateRange.startIso;
+    const endIso = dateRange.endIso;
+    const planStart = looksLikeYYYYMMDD(planStartIso) ? planStartIso : "";
+
+    const daily: Record<string, number> = {};
+    let pnlBefore = 0;
+
+    for (const s of sessionsAll) {
+      const dIso = sessionDateIsoKey(s);
+      if (!dIso) continue;
+      if (planStart && dIso < planStart) continue;
+
+      const net = sessionNet(s);
+
+      if (startIso && dIso < startIso) {
+        pnlBefore += net;
+        continue;
+      }
+      if (endIso && dIso > endIso) continue;
+
+      daily[dIso] = (daily[dIso] || 0) + net;
+    }
+
+    const dates = Object.keys(daily).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+
+    let eq = (Number.isFinite(planStartingBalance) ? planStartingBalance : 0) + pnlBefore;
+
+    const equityCurve = dates.map((d) => {
+      eq += daily[d] || 0;
+      return { date: d, value: Number(eq.toFixed(2)) };
+    });
+
+    const dailyPnl = dates.map((d) => ({ date: d, pnl: Number((daily[d] || 0).toFixed(2)) }));
 
     const totalSessions = sessions.length;
     const greenSessions = sessions.filter((s) => s.isGreenComputed).length;
@@ -3032,7 +3355,7 @@ export default function AnalyticsStatisticsPage() {
       series: { equityCurve, dailyPnl },
       edges: { symbols, underlyings },
     });
-  }, [dailySnaps, sessions]);
+  }, [sessionsAll, sessions, dateRange.startIso, dateRange.endIso, planStartingBalance, planStartIso]);
 
   /* =========================
      Probability stats (always use sessionNet)
@@ -3347,7 +3670,7 @@ export default function AnalyticsStatisticsPage() {
   /* =========================
      Render
   ========================= */
-  if (loading || !user || loadingData) {
+  if (loading || !user || loadingData || loadingPlan) {
     return (
       <main className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center">
         <p className="text-slate-400 text-sm">Loading analytics…</p>
