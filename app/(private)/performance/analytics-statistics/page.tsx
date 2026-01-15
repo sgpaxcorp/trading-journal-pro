@@ -11,7 +11,7 @@ import TopNav from "@/app/components/TopNav";
 import { useAuth } from "@/context/AuthContext";
 
 import { type InstrumentType } from "@/lib/journalNotes";
-import type { JournalEntry } from "@/lib/journalLocal";
+import type { JournalEntry } from "@/lib/journalTypes";
 import { getAllJournalEntries } from "@/lib/journalSupabase";
 import { listDailySnapshots, type DailySnapshotRow } from "@/lib/snapshotSupabase";
 
