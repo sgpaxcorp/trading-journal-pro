@@ -423,7 +423,7 @@ const performance: NavItem[] = [
   },
   {
     id: "plan",
-    title: "Cash Flow Plan",
+    title: "Cash Flow Tracking",
     description: "Track your deposits and withdrawals plan.",
     href: "/performance/plan",
   },
