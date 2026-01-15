@@ -166,6 +166,23 @@ function dateIsoFromAny(x: any): string | null {
   return null;
 }
 
+/**
+ * Balance Chart needs a stable "Plan start" anchor.
+ * - `created_at` never changes (even if you overwrite the plan with upsert)
+ * - `updated_at` represents the last "Approve & Save" moment (the effective plan start)
+ *
+ * We therefore prefer `updatedAt`, then fall back to `createdAt`, then today.
+ */
+function planStartIsoFromPlan(plan: GrowthPlan | null | undefined): string {
+  const created = dateIsoFromAny(plan?.createdAt);
+  const updated = dateIsoFromAny(plan?.updatedAt);
+
+  // Prefer the most recent timestamp between created/updated (ISO dates compare lexicographically).
+  if (created && updated) return created > updated ? created : updated;
+  return updated || created || isoDate(new Date());
+}
+
+
 function sessionPnlUsd(s: any): number {
   // Use net if present; else fall back.
   const v = Number(s?.pnlNet ?? s?.pnlComputed ?? s?.pnl ?? s?.realized_usd ?? s?.profit ?? 0);
@@ -323,7 +340,7 @@ export default function BalanceChartPage() {
           return;
         }
 
-        const planStartIso = dateIsoFromAny(gp.createdAt) ?? isoDate(new Date());
+        const planStartIso = planStartIsoFromPlan(gp);
 
         // 2) Entries + Cashflows (parallel)
         const [allEntries, cfRows] = await Promise.all([
@@ -374,7 +391,7 @@ export default function BalanceChartPage() {
     }
 
     const todayIso = isoDate(new Date());
-    const planStartIso = dateIsoFromAny(plan.createdAt) ?? todayIso;
+    const planStartIso = planStartIsoFromPlan(plan);
 
     // Aggregate PnL by date
     const pnlByDate = new Map<string, number>();
