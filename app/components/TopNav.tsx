@@ -214,7 +214,11 @@ function AccountMenu() {
 
   // Estilos del pill según plan
   const planLabel =
-    plan === "core" ? "Core" : plan === "advanced" ? "Advanced" : "No plan";
+    plan === "core"
+      ? "Core"
+      : plan === "advanced"
+      ? "Advanced"
+      : "No plan";
 
   const planClasses =
     plan === "core"
@@ -286,9 +290,8 @@ function AccountMenu() {
         onClick={() => setOpen((prev) => !prev)}
         className="group flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900/90 px-2.5 py-1.5 text-xs text-slate-100 hover:border-emerald-400 hover:text-emerald-300 hover:bg-slate-900 transition shadow-sm shadow-slate-900/40"
       >
-        {/* Avatar con borde “neuro-glow” */}
+        {/* Avatar */}
         <div className="relative">
-          <div className="absolute inset-0 rounded-full bg-emerald-400/40 blur-[6px] opacity-0 group-hover:opacity-100 transition-opacity" />
           <div className="h-7 w-7 rounded-full overflow-hidden bg-emerald-400 text-slate-950 flex items-center justify-center text-[11px] font-semibold border border-emerald-300/80">
             {photoURL ? (
               // eslint-disable-next-line @next/next/no-img-element
@@ -321,7 +324,7 @@ function AccountMenu() {
       {open && (
         <div className="absolute right-0 mt-2 w-72 rounded-2xl border border-slate-800 bg-slate-950 shadow-xl shadow-slate-900/70 z-50 overflow-hidden">
           {/* Header usuario */}
-          <div className="border-b border-slate-800 px-3 py-3 bg-gradient-to-r from-slate-950 via-slate-900 to-slate-950">
+          <div className="border-b border-slate-800 px-3 py-3 bg-linear-to-r from-slate-950 via-slate-900 to-slate-950">
             <p className="text-[13px] font-semibold text-slate-100 truncate">
               {displayName}
             </p>
@@ -401,7 +404,8 @@ const performance: NavItem[] = [
   {
     id: "balance-chart",
     title: "Balance chart",
-    description: "Evolution of your account and daily comparison vs. your target.",
+    description:
+      "Evolution of your account and daily comparison vs. your target.",
     href: "/performance/balance-chart",
   },
   {
@@ -462,6 +466,7 @@ const rules: NavItem[] = [
     description: "Reminders that you need when somethin happens.",
     href: "/rules-alarms/reminders",
   },
+
   {
     id: "alarms",
     title: "Alarms",
@@ -479,56 +484,27 @@ const forum: NavItem[] = [
   },
 ];
 
-/* ========== Brand (logo) ========== */
-/**
- * IMPORTANTE:
- * - Cualquier archivo dentro de /public se sirve en la raiz.
- *   Si tu archivo está en: public/neurotrader-logo.svg
- *   entonces el src correcto es: "/neurotrader-logo.svg"  (NO "/public/...")
- *
- * La razón del cuadrito con "?" casi siempre es:
- * - el src apunta a un archivo que no existe (o tiene nombre distinto)
- * - o se estaba intentando cargar "logo.ai" (Illustrator) como si fuera imagen web.
- */
-function BrandLogo() {
-  const [failed, setFailed] = useState(false);
-
-  return (
-    <Link
-      href="/dashboard"
-      className="flex items-center gap-3 shrink-0"
-      aria-label="Go to dashboard"
-    >
-      <span className="relative inline-flex items-center">
-        {/* Glow */}
-        <span className="absolute -inset-3 rounded-full bg-emerald-400/25 blur-[14px]" />
-
-        {!failed ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src="/neurotrader-logo.svg"
-            alt="Neuro Trader Journal"
-            className="relative h-7 md:h-8 w-auto drop-shadow-[0_0_10px_rgba(52,211,153,0.35)]"
-            onError={() => setFailed(true)}
-          />
-        ) : (
-          <div className="relative h-8 px-3 rounded-xl border border-emerald-400/40 bg-emerald-500/10 text-emerald-200 text-xs font-semibold flex items-center">
-            Neuro Trader
-          </div>
-        )}
-      </span>
-    </Link>
-  );
-}
-
 /* ========== TopNav ========== */
 
 export default function TopNav() {
   return (
+    // ✅ Sticky: siempre visible
     <nav className="sticky top-0 z-50 w-full border-b border-slate-800 bg-slate-950/90 backdrop-blur">
       <div className="flex items-center px-4 py-3 md:px-6 gap-6 w-full">
-        {/* Brand (logo) — click => dashboard */}
-        <BrandLogo />
+        {/* ✅ Brand: SOLO SVG, sin efectos, tamaño grande */}
+        <Link
+          href="/dashboard"
+          className="shrink-0 flex items-center"
+          aria-label="Go to dashboard"
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/neurotrader-logo.svg"
+            alt="Neuro Trader Journal"
+            className="h-20 md:h-21 lg:h-22 w-auto object-contain"
+            draggable={false}
+          />
+        </Link>
 
         {/* Nav row */}
         <div className="flex items-center gap-4 text-[14px] whitespace-nowrap flex-1">
