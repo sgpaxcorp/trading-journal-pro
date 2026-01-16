@@ -501,7 +501,7 @@ export default function TopNav() {
           <img
             src="/neurotrader-logo.svg"
             alt="Neuro Trader Journal"
-            className="h-20 md:h-21 lg:h-22 w-auto object-contain"
+            className="h-20 md:h-21 lg:h-33 w-auto object-contain"
             draggable={false}
           />
         </Link>
