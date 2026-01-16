@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useEffect, useRef, useState } from "react";
@@ -18,6 +19,19 @@ type DropdownProps = {
   title: string;
   items: NavItem[];
 };
+
+/* ========== Brand assets (in /public) ========== */
+/**
+ * IMPORTANT:
+ * - Browsers cannot render ".ai" (Adobe Illustrator) files directly.
+ * - Export your Illustrator "logo.ai" as SVG and place it in /public as:
+ *     /public/neurotrader-logo.svg
+ * - Then this component will render it crisply at any size.
+ *
+ * If you prefer using PNG, set BRAND_LOGO_SRC to "/neurotrader logo oficial-03.png".
+ */
+const BRAND_LOGO_SRC = "/neurotrader-logo.svg";
+const BRAND_LOGO_ALT = "Neuro Trader Journal";
 
 /* ========== Reusable Dropdown component (main nav menus) ========== */
 function Dropdown({ title, items }: DropdownProps) {
@@ -213,11 +227,7 @@ function AccountMenu() {
 
   // Estilos del pill según plan
   const planLabel =
-    plan === "core"
-      ? "Core"
-      : plan === "advanced"
-      ? "Advanced"
-      : "No plan";
+    plan === "core" ? "Core" : plan === "advanced" ? "Advanced" : "No plan";
 
   const planClasses =
     plan === "core"
@@ -466,7 +476,6 @@ const rules: NavItem[] = [
     description: "Reminders that you need when somethin happens.",
     href: "/rules-alarms/reminders",
   },
-
   {
     id: "alarms",
     title: "Alarms",
@@ -482,31 +491,45 @@ const forum: NavItem[] = [
     description: "Share progress with other traders.",
     href: "/forum/feed",
   },
- 
 ];
 
 /* ========== TopNav ========== */
 
 export default function TopNav() {
   return (
-    <nav className="relative z-50 w-full border-b border-slate-800 bg-slate-950/90 backdrop-blur">
+    <nav className="sticky top-0 z-50 w-full border-b border-slate-800 bg-slate-950/80 backdrop-blur">
       <div className="flex items-center px-4 py-3 md:px-6 gap-6 w-full">
-        {/* Brand con logo de Neuro Trader Journal */}
-        <div className="flex items-center gap-2">
-          <div className="h-7 w-7 rounded-md bg-emerald-400/90 flex items-center justify-center text-slate-950 text-xs font-black">
-            NTJ
-          </div>
-          <span className="text-sm md:text-base font-semibold tracking-tight bg-linear-to-r from-emerald-400 via-sky-400 to-indigo-400 text-transparent bg-clip-text">
-            Neuro Trader Journal
+        {/* Brand: logo only (click -> dashboard) */}
+        <Link
+          href="/dashboard"
+          className="group flex items-center gap-3 shrink-0"
+          aria-label="Go to dashboard"
+          title="Go to dashboard"
+        >
+          {/* Glow layer */}
+          <span className="relative block">
+            <span className="absolute -inset-2 rounded-xl bg-emerald-400/25 blur-xl opacity-70 group-hover:opacity-100 transition-opacity" />
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={BRAND_LOGO_SRC}
+              alt={BRAND_LOGO_ALT}
+              className={[
+                "relative block select-none",
+                // Same visual height as the old brand text (and visible).
+                "h-7 md:h-8 w-auto",
+                // Make it pop on dark background
+                "drop-shadow-[0_0_18px_rgba(16,185,129,0.55)]",
+                "group-hover:brightness-110 transition",
+              ].join(" ")}
+              draggable={false}
+            />
           </span>
-        </div>
+        </Link>
 
         {/* Nav row */}
         <div className="flex items-center gap-4 text-[14px] whitespace-nowrap flex-1">
-          {/* Performance (dropdown) */}
           <Dropdown title="Performance" items={performance} />
 
-          {/* Notebook como botón directo */}
           <Link
             href="/notebook"
             className="rounded-lg px-3 py-1.5 text-sm font-medium text-slate-200 hover:bg-slate-800 hover:text-slate-50 transition-colors"
@@ -514,7 +537,6 @@ export default function TopNav() {
             Notebook
           </Link>
 
-          {/* Back-Studying como botón directo */}
           <Link
             href="/back-study"
             className="rounded-lg px-3 py-1.5 text-sm font-medium text-slate-200 hover:bg-slate-800 hover:text-slate-50 transition-colors"
@@ -522,13 +544,11 @@ export default function TopNav() {
             Back-Studying
           </Link>
 
-          {/* Resto de dropdowns */}
           <Dropdown title="Challenges" items={challenges} />
           <Dropdown title="Resources" items={resources} />
           <Dropdown title="Rules & Alarms" items={rules} />
           <Dropdown title="Forum" items={forum} />
 
-          {/* Global Ranking */}
           <Link
             href="/globalranking"
             className="rounded-lg px-3 py-1.5 text-sm font-medium text-slate-200 hover:bg-slate-800 hover:text-slate-50 transition-colors"

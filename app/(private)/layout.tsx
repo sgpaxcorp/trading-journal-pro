@@ -6,6 +6,9 @@ import { useAuth } from "@/context/AuthContext";
 import { supabaseBrowser } from "@/lib/supaBaseClient";
 import CandleAssistant from "@/app/components/NeuroAssistant";
 
+
+
+
 /**
  * Global Reminder/Alert delivery bridge
  * - Listens for new rows in `public.ntj_alert_events` (status='active')
@@ -402,6 +405,8 @@ function GlobalReminderListener({
 /* -------------------------
    Layout
 ------------------------- */
+
+
 
 export default function PrivateLayout({ children }: PrivateLayoutProps) {
   const router = useRouter();
