@@ -119,20 +119,46 @@ function parseDateTime(dateRaw: unknown, timeRaw: unknown): string {
   return new Date(Date.UTC(yy, mm - 1, dd, hh, mi, ss)).toISOString();
 }
 
+/* -------------------- header normalization / fuzzy matching -------------------- */
+function normalizeHeaderCell(v: unknown): string {
+  // Excel/CSV sometimes includes NBSP or multiple spaces.
+  return String(v ?? "")
+    .replace(/\u00A0/g, " ")
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, " ");
+}
+
+function findHeaderIndex(header: string[], patterns: Array<string | RegExp>): number {
+  for (const p of patterns) {
+    if (typeof p === "string") {
+      const norm = normalizeHeaderCell(p);
+      const idx = header.indexOf(norm);
+      if (idx >= 0) return idx;
+      continue;
+    }
+
+    // RegExp search
+    const rx = p;
+    for (let i = 0; i < header.length; i++) {
+      if (rx.test(header[i])) return i;
+    }
+  }
+  return -1;
+}
+
 /* -------------------- header detection (Thinkorswim) -------------------- */
 function findHeaderRowThinkorswim(rows: AnyRow[]) {
   for (let i = 0; i < rows.length; i++) {
     const r = rows[i] || [];
-    const header = r.map((x) => String(x ?? "").trim().toUpperCase());
+    const header = r.map((x) => normalizeHeaderCell(x));
     if (!header.length) continue;
 
-    const idx = (name: string) => header.indexOf(name.toUpperCase());
-
-    const date = idx("DATE");
-    const time = idx("TIME");
-    const type = idx("TYPE");
-    const desc = idx("DESCRIPTION");
-    const amount = idx("AMOUNT");
+    const date = findHeaderIndex(header, ["DATE"]);
+    const time = findHeaderIndex(header, ["TIME"]);
+    const type = findHeaderIndex(header, ["TYPE"]);
+    const desc = findHeaderIndex(header, ["DESCRIPTION"]);
+    const amount = findHeaderIndex(header, ["AMOUNT"]);
 
     if (date >= 0 && time >= 0 && type >= 0 && desc >= 0 && amount >= 0) {
       return {
@@ -143,10 +169,33 @@ function findHeaderRowThinkorswim(rows: AnyRow[]) {
           type,
           desc,
           amount,
-          ref: idx("REF #"),
-          balance: idx("BALANCE"),
-          miscFees: idx("MISC FEES"),
-          commFees: idx("COMMISSIONS & FEES"),
+          // Optional / broker-dependent columns: be generous with header variants.
+          ref: findHeaderIndex(header, [
+            "REF #",
+            "REF#",
+            "REFERENCE #",
+            "REFERENCE",
+            "REF NUM",
+            "REF NO",
+            /\bREF\b/, // last resort
+          ]),
+          balance: findHeaderIndex(header, ["BALANCE", "CASH BALANCE", /\bBALANCE\b/]),
+          miscFees: findHeaderIndex(header, [
+            "MISC FEES",
+            "MISC. FEES",
+            "MISCELLANEOUS FEES",
+            /MISC.*FEE/,
+          ]),
+          commFees: findHeaderIndex(header, [
+            "COMMISSIONS & FEES",
+            "COMMISSION & FEES",
+            "COMMISSIONS AND FEES",
+            "COMMISSION AND FEES",
+            "COMMISSIONS/FEES",
+            "COMMISSION/FEES",
+            "COMM & FEES",
+            /COMM.*FEE/,
+          ]),
         },
       };
     }

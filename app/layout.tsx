@@ -3,7 +3,14 @@ import "./globals.css";
 import type { ReactNode } from "react";
 import { AuthProvider } from "@/context/AuthContext";
 import Footer from "@/app/components/Footer";
+import type { Metadata } from "next";
 
+export const metadata: Metadata = {
+  icons: {
+    icon: "/favicon.ico?v=2",
+    shortcut: "/favicon.ico?v=2",
+  },
+};
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
