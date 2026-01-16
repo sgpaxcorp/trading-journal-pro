@@ -20,19 +20,6 @@ type DropdownProps = {
   items: NavItem[];
 };
 
-/* ========== Brand assets (in /public) ========== */
-/**
- * IMPORTANT:
- * - Browsers cannot render ".ai" (Adobe Illustrator) files directly.
- * - Export your Illustrator "logo.ai" as SVG and place it in /public as:
- *     /public/neurotrader-logo.svg
- * - Then this component will render it crisply at any size.
- *
- * If you prefer using PNG, set BRAND_LOGO_SRC to "/neurotrader logo oficial-03.png".
- */
-const BRAND_LOGO_SRC = "/neurotrader-logo.svg";
-const BRAND_LOGO_ALT = "Neuro Trader Journal";
-
 /* ========== Reusable Dropdown component (main nav menus) ========== */
 function Dropdown({ title, items }: DropdownProps) {
   const [open, setOpen] = useState(false);
@@ -334,7 +321,7 @@ function AccountMenu() {
       {open && (
         <div className="absolute right-0 mt-2 w-72 rounded-2xl border border-slate-800 bg-slate-950 shadow-xl shadow-slate-900/70 z-50 overflow-hidden">
           {/* Header usuario */}
-          <div className="border-b border-slate-800 px-3 py-3 bg-linear-to-r from-slate-950 via-slate-900 to-slate-950">
+          <div className="border-b border-slate-800 px-3 py-3 bg-gradient-to-r from-slate-950 via-slate-900 to-slate-950">
             <p className="text-[13px] font-semibold text-slate-100 truncate">
               {displayName}
             </p>
@@ -414,8 +401,7 @@ const performance: NavItem[] = [
   {
     id: "balance-chart",
     title: "Balance chart",
-    description:
-      "Evolution of your account and daily comparison vs. your target.",
+    description: "Evolution of your account and daily comparison vs. your target.",
     href: "/performance/balance-chart",
   },
   {
@@ -493,43 +479,63 @@ const forum: NavItem[] = [
   },
 ];
 
+/* ========== Brand (logo) ========== */
+/**
+ * IMPORTANTE:
+ * - Cualquier archivo dentro de /public se sirve en la raiz.
+ *   Si tu archivo está en: public/neurotrader-logo.svg
+ *   entonces el src correcto es: "/neurotrader-logo.svg"  (NO "/public/...")
+ *
+ * La razón del cuadrito con "?" casi siempre es:
+ * - el src apunta a un archivo que no existe (o tiene nombre distinto)
+ * - o se estaba intentando cargar "logo.ai" (Illustrator) como si fuera imagen web.
+ */
+function BrandLogo() {
+  const [failed, setFailed] = useState(false);
+
+  return (
+    <Link
+      href="/dashboard"
+      className="flex items-center gap-3 shrink-0"
+      aria-label="Go to dashboard"
+    >
+      <span className="relative inline-flex items-center">
+        {/* Glow */}
+        <span className="absolute -inset-3 rounded-full bg-emerald-400/25 blur-[14px]" />
+
+        {!failed ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src="/neurotrader-logo.svg"
+            alt="Neuro Trader Journal"
+            className="relative h-7 md:h-8 w-auto drop-shadow-[0_0_10px_rgba(52,211,153,0.35)]"
+            onError={() => setFailed(true)}
+          />
+        ) : (
+          <div className="relative h-8 px-3 rounded-xl border border-emerald-400/40 bg-emerald-500/10 text-emerald-200 text-xs font-semibold flex items-center">
+            Neuro Trader
+          </div>
+        )}
+      </span>
+    </Link>
+  );
+}
+
 /* ========== TopNav ========== */
 
 export default function TopNav() {
   return (
-    <nav className="sticky top-0 z-50 w-full border-b border-slate-800 bg-slate-950/80 backdrop-blur">
+    <nav className="sticky top-0 z-50 w-full border-b border-slate-800 bg-slate-950/90 backdrop-blur">
       <div className="flex items-center px-4 py-3 md:px-6 gap-6 w-full">
-        {/* Brand: logo only (click -> dashboard) */}
-        <Link
-          href="/dashboard"
-          className="group flex items-center gap-3 shrink-0"
-          aria-label="Go to dashboard"
-          title="Go to dashboard"
-        >
-          {/* Glow layer */}
-          <span className="relative block">
-            <span className="absolute -inset-2 rounded-xl bg-emerald-400/25 blur-xl opacity-70 group-hover:opacity-100 transition-opacity" />
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={BRAND_LOGO_SRC}
-              alt={BRAND_LOGO_ALT}
-              className={[
-                "relative block select-none",
-                // Same visual height as the old brand text (and visible).
-                "h-7 md:h-8 w-auto",
-                // Make it pop on dark background
-                "drop-shadow-[0_0_18px_rgba(16,185,129,0.55)]",
-                "group-hover:brightness-110 transition",
-              ].join(" ")}
-              draggable={false}
-            />
-          </span>
-        </Link>
+        {/* Brand (logo) — click => dashboard */}
+        <BrandLogo />
 
         {/* Nav row */}
         <div className="flex items-center gap-4 text-[14px] whitespace-nowrap flex-1">
+          {/* Performance (dropdown) */}
           <Dropdown title="Performance" items={performance} />
 
+          {/* Notebook como botón directo */}
           <Link
             href="/notebook"
             className="rounded-lg px-3 py-1.5 text-sm font-medium text-slate-200 hover:bg-slate-800 hover:text-slate-50 transition-colors"
@@ -537,6 +543,7 @@ export default function TopNav() {
             Notebook
           </Link>
 
+          {/* Back-Studying como botón directo */}
           <Link
             href="/back-study"
             className="rounded-lg px-3 py-1.5 text-sm font-medium text-slate-200 hover:bg-slate-800 hover:text-slate-50 transition-colors"
@@ -544,11 +551,13 @@ export default function TopNav() {
             Back-Studying
           </Link>
 
+          {/* Resto de dropdowns */}
           <Dropdown title="Challenges" items={challenges} />
           <Dropdown title="Resources" items={resources} />
           <Dropdown title="Rules & Alarms" items={rules} />
           <Dropdown title="Forum" items={forum} />
 
+          {/* Global Ranking */}
           <Link
             href="/globalranking"
             className="rounded-lg px-3 py-1.5 text-sm font-medium text-slate-200 hover:bg-slate-800 hover:text-slate-50 transition-colors"
