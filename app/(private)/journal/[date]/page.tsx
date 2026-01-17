@@ -3,260 +3,43 @@
 
 import type React from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { saveJournalTradesForDay } from "@/lib/journalTradesSupabase";
-import { parseNotes } from "@/lib/journalNotes";
-import { supabaseBrowser } from "@/lib/supaBaseClient";
-
-import { getJournalTradesForDay } from "@/lib/journalTradesSupabase";
-
-
-
-
+import { useParams, useRouter } from "next/navigation";
 
 import JournalGrid, {
   type JournalWidgetId,
   type JournalWidgetDef,
 } from "@/app/components/JournalGrid";
 
-import type { JournalEntry } from "@/lib/journalTypes";
-import {
-  getJournalEntryByDate,
-  saveJournalEntry,
-} from "@/lib/journalSupabase";
+import RichTextEditor from "@/app/components/RichTextEditor";
 
-import {
-  getJournalTemplates,
-  addJournalTemplate,
-  deleteJournalTemplate,
-  JournalTemplate,
-} from "@/lib/journalTemplatesLocal";
+import type { JournalEntry } from "@/lib/journalTypes";
+import { getJournalEntryByDate, saveJournalEntry } from "@/lib/journalSupabase";
+
+import { getJournalTradesForDay, saveJournalTradesForDay } from "@/lib/journalTradesSupabase";
+
+import type { StoredTradeRow } from "@/lib/journalNotes";
 import { type InstrumentType } from "@/lib/journalNotes";
+
+import { supabaseBrowser } from "@/lib/supaBaseClient";
 import { useAuth } from "@/context/AuthContext";
 
-/* =========================
-   Helpers: editor / tables
-========================= */
-function insertHtmlAtCaret(html: string) {
-  const sel = window.getSelection?.();
-  if (!sel || sel.rangeCount === 0) return;
-  const range = sel.getRangeAt(0);
-  range.deleteContents();
-  const el = document.createElement("div");
-  el.innerHTML = html;
-  const frag = document.createDocumentFragment();
-  let node: ChildNode | null = null;
-  let lastNode: ChildNode | null = null;
-  while ((node = el.firstChild)) lastNode = frag.appendChild(node);
-  range.insertNode(frag);
-  if (lastNode) {
-    const newRange = range.cloneRange();
-    newRange.setStartAfter(lastNode);
-    newRange.collapse(true);
-    sel.removeAllRanges();
-    sel.addRange(newRange);
-  }
-}
+import {
+  listJournalTemplates,
+  createJournalTemplate,
+  deleteJournalTemplate,
+  type JournalTemplate,
+} from "@/lib/journalTemplatesSupabase";
 
-function closestTableFromSelection(): HTMLTableElement | null {
-  const sel = window.getSelection?.();
-  if (!sel || sel.rangeCount === 0) return null;
-  let node: Node | null = sel.anchorNode;
-  if (!node) return null;
-  if (node.nodeType === Node.TEXT_NODE) node = node.parentElement;
-  while (node && (node as HTMLElement).tagName !== "TABLE") {
-    node = (node as HTMLElement)?.parentElement ?? null;
-  }
-  return (node as HTMLTableElement) || null;
-}
+import {
+  getJournalUiSettings,
+  saveJournalUiSettings,
+} from "@/lib/journalUiSettingsSupabase";
 
-function insertTable(rows: number, cols: number) {
-  rows = Math.max(1, Math.min(6, rows));
-  cols = Math.max(1, Math.min(6, cols));
-  const head =
-    `<thead><tr>` +
-    Array.from({ length: cols })
-      .map(() => `<th class="border border-slate-700 px-2 py-1">Header</th>`)
-      .join("") +
-    `</tr></thead>`;
-  const body =
-    `<tbody>` +
-    Array.from({ length: rows })
-      .map(
-        () =>
-          `<tr>` +
-          Array.from({ length: cols })
-            .map(() => `<td class="border border-slate-800 px-2 py-1">Cell</td>`)
-            .join("") +
-          `</tr>`
-      )
-      .join("") +
-    `</tbody>`;
-
-  insertHtmlAtCaret(
-    `<table class="w-full border border-slate-700 text-left text-[15px]">${head}${body}</table>`
-  );
-}
-
-function addTableRow() {
-  const table = closestTableFromSelection();
-  if (!table) return;
-  const tbody = table.tBodies[0] || table.createTBody();
-  const cols =
-    table.tHead?.rows[0]?.cells.length || tbody.rows[0]?.cells.length || 2;
-  const tr = tbody.insertRow(-1);
-  for (let i = 0; i < cols; i++) {
-    const td = tr.insertCell(-1);
-    td.className = "border border-slate-800 px-2 py-1";
-    td.textContent = "Cell";
-  }
-}
-
-function addTableColumn() {
-  const table = closestTableFromSelection();
-  if (!table) return;
-  if (table.tHead && table.tHead.rows[0]) {
-    const th = document.createElement("th");
-    th.className = "border border-slate-700 px-2 py-1";
-    th.textContent = "Header";
-    table.tHead.rows[0].appendChild(th);
-  }
-  const tbody = table.tBodies[0];
-  if (tbody) {
-    Array.from(tbody.rows).forEach((row) => {
-      const td = document.createElement("td");
-      td.className = "border border-slate-800 px-2 py-1";
-      td.textContent = "Cell";
-      row.appendChild(td);
-    });
-  }
-}
-
-/* =========================
-   UI: Table Picker
-========================= */
-function TablePicker({
-  onPick,
-}: {
-  onPick: (rows: number, cols: number) => void;
-}) {
-  const [hover, setHover] = useState<[number, number] | null>(null);
-  return (
-    <div className="absolute top-full left-0 mt-1 rounded-lg border border-slate-700 bg-slate-900 p-2 shadow-xl z-50">
-      <div className="text-[11px] text-slate-400 mb-2">
-        {hover ? `${hover[0]} × ${hover[1]}` : "Choose size (max 6×6)"}
-      </div>
-      <div className="grid grid-cols-6 gap-1">
-        {Array.from({ length: 36 }).map((_, i) => {
-          const r = Math.floor(i / 6) + 1;
-          const c = (i % 6) + 1;
-          const active =
-            hover && r <= hover[0] && c <= hover[1]
-              ? "bg-emerald-500/80"
-              : "bg-slate-800";
-          return (
-            <button
-              key={i}
-              type="button"
-              onMouseEnter={() => setHover([r, c])}
-              onMouseLeave={() => setHover(null)}
-              onClick={() => onPick(r, c)}
-              className={`h-6 w-6 rounded ${active}`}
-            />
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-/* =========================
-   Toolbar
-========================= */
-function EditorToolbar({
-  onBold,
-  onItalic,
-  onUnderline,
-  onUL,
-  onOL,
-  onQuote,
-  onAddRow,
-  onAddCol,
-  onInsertTable,
-  extraRight,
-}: {
-  onBold: () => void;
-  onItalic: () => void;
-  onUnderline: () => void;
-  onUL: () => void;
-  onOL: () => void;
-  onQuote: () => void;
-  onAddRow: () => void;
-  onAddCol: () => void;
-  onInsertTable: (rows: number, cols: number) => void;
-  extraRight?: React.ReactNode;
-}) {
-  const [open, setOpen] = useState(false);
-  const btn =
-    "px-2 py-1 rounded bg-slate-800 text-slate-200 text-xs hover:bg-slate-700";
-  return (
-    <div className="relative flex items-center gap-1 w-full">
-      <div className="flex items-center gap-1">
-        <button className={btn} type="button" onClick={onBold}>
-          B
-        </button>
-        <button className={btn} type="button" onClick={onItalic}>
-          I
-        </button>
-        <button className={btn} type="button" onClick={onUnderline}>
-          U
-        </button>
-        <button className={btn} type="button" onClick={onUL}>
-          •
-        </button>
-        <button className={btn} type="button" onClick={onOL}>
-          1.
-        </button>
-        <button className={btn} type="button" onClick={onQuote}>
-          “ ”
-        </button>
-
-        <div className="relative">
-          <button
-            className={btn}
-            type="button"
-            onClick={() => setOpen((v) => !v)}
-            title="Insert table (1–6 × 1–6)"
-          >
-            ▦
-          </button>
-          {open && (
-            <TablePicker
-              onPick={(r, c) => {
-                onInsertTable(r, c);
-                setOpen(false);
-              }}
-            />
-          )}
-        </div>
-
-        <button className={btn} type="button" onClick={onAddRow}>
-          +row
-        </button>
-        <button className={btn} type="button" onClick={onAddCol}>
-          +col
-        </button>
-      </div>
-
-      <div className="ml-auto">{extraRight}</div>
-    </div>
-  );
-}
-
-/* =========================
+/* =========================================================
    Trades / DTE parsing
-========================= */
+========================================================= */
+
 const KIND_OPTIONS: { value: InstrumentType; label: string }[] = [
   { value: "stock", label: "Stocks" },
   { value: "option", label: "Options" },
@@ -268,10 +51,8 @@ const KIND_OPTIONS: { value: InstrumentType; label: string }[] = [
 
 type SideType = "long" | "short";
 
-/** Cómo se maneja la prima */
 type PremiumSide = "none" | "debit" | "credit";
 
-/** Estrategias de opciones (para tu journal) */
 type OptionStrategy =
   | "single"
   | "vertical_spread"
@@ -304,16 +85,12 @@ const STRATEGY_OPTIONS: { value: OptionStrategy; label: string }[] = [
   { value: "cash_secured_put", label: "Cash-secured put" },
   { value: "other", label: "Other option strategy" },
 ];
-// ✅ Normalizadores para adaptar StoredTradeRow -> EntryTradeRow/ExitTradeRow
 
+// ✅ Normalizers for DB -> UI
 function toSideType(raw: any): SideType {
   const s = String(raw ?? "").toLowerCase();
-
-  // si ya viene correcto
   if (s === "short") return "short";
   if (s === "long") return "long";
-
-  // si llega BUY/SELL de import, default long
   if (s.includes("short")) return "short";
   return "long";
 }
@@ -328,7 +105,6 @@ function toPremiumSide(raw: any): PremiumSide {
 
 function toOptionStrategy(raw: any): OptionStrategy {
   const s = String(raw ?? "").toLowerCase().trim();
-
   const allowed: OptionStrategy[] = [
     "single",
     "vertical_spread",
@@ -363,7 +139,6 @@ type EntryTradeRow = {
   symbol: string;
   kind: InstrumentType;
   side: SideType;
-  /** debit = compro prima, credit = vendo prima */
   premiumSide?: PremiumSide;
   optionStrategy?: OptionStrategy;
   price: string;
@@ -386,10 +161,6 @@ type ExitTradeRow = {
   dte?: number | null;
   expiry?: string | null;
 };
-/* =========================
-   UI -> StoredTradeRow (DB)
-========================= */
-import type { StoredTradeRow } from "@/lib/journalNotes";
 
 function toNum(v: any): number {
   const n = Number(String(v ?? "").trim());
@@ -431,19 +202,16 @@ function exitRowToStored(r: ExitTradeRow): StoredTradeRow {
 }
 
 function nowTimeLabel() {
-  return new Date().toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  return new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
 function parseSPXOptionSymbol(raw: string) {
   const s = (raw || "").trim().toUpperCase().replace(/^[\.\-]/, "");
-  // SPXW251121C6565  / SPX251121P6000
+  // SPXW251121C6565 / SPX251121P6000
   const m = s.match(/^([A-Z]+W?)(\d{6})([CP])(\d+(?:\.\d+)?)$/);
   if (!m) return null;
 
-  const underlying = m[1]; // SPX / SPXW
+  const underlying = m[1];
   const yy = Number(m[2].slice(0, 2));
   const mm = Number(m[2].slice(2, 4));
   const dd = Number(m[2].slice(4, 6));
@@ -463,11 +231,7 @@ function calcDTE(entryDateYYYYMMDD: string, expiry: Date) {
   try {
     const [y, m, d] = entryDateYYYYMMDD.split("-").map(Number);
     const entryUTC = Date.UTC(y, m - 1, d);
-    const expiryUTC = Date.UTC(
-      expiry.getFullYear(),
-      expiry.getMonth(),
-      expiry.getDate()
-    );
+    const expiryUTC = Date.UTC(expiry.getFullYear(), expiry.getMonth(), expiry.getDate());
     const msPerDay = 24 * 60 * 60 * 1000;
     const diffDays = Math.round((expiryUTC - entryUTC) / msPerDay);
     if (diffDays === 0) return 0;
@@ -477,28 +241,17 @@ function calcDTE(entryDateYYYYMMDD: string, expiry: Date) {
   }
 }
 
-/* =========================
-   Detect option symbols + safe kind
-========================= */
 function looksLikeOptionContract(symbol: string) {
   return !!parseSPXOptionSymbol(symbol);
 }
 
 function effectiveKind(kind: InstrumentType, symbol: string): InstrumentType {
-  if (kind === "option" && !looksLikeOptionContract(symbol)) {
-    return "stock";
-  }
+  if (kind === "option" && !looksLikeOptionContract(symbol)) return "stock";
   return kind || "other";
 }
 
-/** Normaliza premium por si viene de sesiones viejas sin ese campo */
-function normalizePremiumSide(
-  kind: InstrumentType,
-  premiumSide?: PremiumSide
-): PremiumSide {
-  if (kind === "option") {
-    return premiumSide || "debit";
-  }
+function normalizePremiumSide(kind: InstrumentType, premiumSide?: PremiumSide): PremiumSide {
+  if (kind === "option") return premiumSide || "debit";
   return premiumSide || "none";
 }
 
@@ -520,11 +273,10 @@ function strategyLabel(kind: InstrumentType, strategy?: OptionStrategy) {
   return found?.label ?? "Single / naked";
 }
 
-/* =========================
+/* =========================================================
    Contract multipliers
-========================= */
+========================================================= */
 
-// Futures point-value map (expand as you want)
 const FUTURES_MULTIPLIERS: Record<string, number> = {
   ES: 50,
   MES: 5,
@@ -542,30 +294,19 @@ const FUTURES_MULTIPLIERS: Record<string, number> = {
   HG: 25000,
 };
 
-// ✅ FIX: Futures root parsing so symbols like ESH6 map to ES (50/pt),
-// and M2KH6 maps to M2K, MNQH6 maps to MNQ, etc.
-//
-// Replace your existing futureRoot() with this:
-
 const FUT_MONTH_CODES = "FGHJKMNQUVXZ";
 
 function futureRoot(symbol: string) {
   const s0 = (symbol || "").trim().toUpperCase().replace(/^\//, "");
   const s = s0.replace(/\s+/g, "");
 
-  // Common: ESH6, MNQH26, M2KH6, ESZ2025
   const re1 = new RegExp(`^([A-Z0-9]{1,8})([${FUT_MONTH_CODES}])(\\d{1,4})$`);
   const m1 = s.match(re1);
   if (m1) return m1[1];
 
-  // Fallback: take first token
   const m2 = s.match(/^([A-Z0-9]{1,8})/);
   return m2?.[1] ?? s0;
 }
-
-// Your FUTURES_MULTIPLIERS map can remain the same (ES:50, MES:5, NQ:20, MNQ:2, etc).
-// With this root parsing, ESH6 -> ES, so multiplier becomes 50 and PnL becomes correct.
-
 
 function getContractMultiplier(kind: InstrumentType, symbol: string) {
   if (kind === "option") return 100;
@@ -576,17 +317,11 @@ function getContractMultiplier(kind: InstrumentType, symbol: string) {
   return 1;
 }
 
-/* =========================
+/* =========================================================
    Averages (UI only)
-========================= */
-function computeAverages(
-  trades: {
-    symbol: string;
-    kind: InstrumentType;
-    price: string;
-    quantity: string;
-  }[]
-) {
+========================================================= */
+
+function computeAverages(trades: { symbol: string; kind: InstrumentType; price: string; quantity: string }[]) {
   const map: Record<string, { sumPxQty: number; sumQty: number }> = {};
   for (const t of trades) {
     const symbol = (t.symbol || "").trim().toUpperCase();
@@ -606,47 +341,21 @@ function computeAverages(
   });
 }
 
-/* =========================
-   PnL helpers
-========================= */
+/* =========================================================
+   PnL helpers (FIFO + multipliers + premium)
+========================================================= */
 
-/**
- * Para productos lineales (stock/future/crypto/forex):
- *   - long: gana si sale más caro
- *   - short: gana si sale más barato
- * Para options:
- *   - debit (compro prima): gana si sale más caro
- *   - credit (vendo prima): gana si recompro más barato
- */
-function pnlSign(
-  kind: InstrumentType,
-  side: SideType,
-  premiumSide: PremiumSide
-): number {
+function pnlSign(kind: InstrumentType, side: SideType, premiumSide: PremiumSide): number {
   if (kind === "option") {
     const p = normalizePremiumSide(kind, premiumSide);
-    if (p === "credit") {
-      // venta de prima: entry = crédito, exit = débito
-      // profit si exit < entry → (exit - entry) negativo → sign -1
-      return -1;
-    }
-    // debit / none → se comporta como long
+    if (p === "credit") return -1;
     return 1;
   }
-  // lineales
   return side === "short" ? -1 : 1;
 }
 
-/* =========================
-   ✅ AUTO PnL (FIFO + multipliers + premium)
-========================= */
 function computeAutoPnL(entries: EntryTradeRow[], exits: ExitTradeRow[]) {
-  const key = (
-    s: string,
-    k: InstrumentType,
-    side: SideType,
-    premiumSide: PremiumSide
-  ) => `${s}|${k}|${side}|${premiumSide}`;
+  const key = (s: string, k: InstrumentType, side: SideType, premiumSide: PremiumSide) => `${s}|${k}|${side}|${premiumSide}`;
 
   type Lot = {
     price: number;
@@ -659,7 +368,6 @@ function computeAutoPnL(entries: EntryTradeRow[], exits: ExitTradeRow[]) {
 
   const entryLots: Record<string, Lot[]> = {};
 
-  // ---- ENTRIES (open lots) ----
   for (const e of entries) {
     const sym = (e.symbol || "").trim().toUpperCase();
     if (!sym) continue;
@@ -675,17 +383,9 @@ function computeAutoPnL(entries: EntryTradeRow[], exits: ExitTradeRow[]) {
     if (!Number.isFinite(px) || !Number.isFinite(qty) || qty <= 0) continue;
 
     entryLots[k] ||= [];
-    entryLots[k].push({
-      price: px,
-      qtyLeft: qty,
-      symbol: sym,
-      kind: kEff,
-      side: sideEff,
-      premiumSide: premEff,
-    });
+    entryLots[k].push({ price: px, qtyLeft: qty, symbol: sym, kind: kEff, side: sideEff, premiumSide: premEff });
   }
 
-  // ---- EXITS (close lots) ----
   let total = 0;
 
   for (const x of exits) {
@@ -700,8 +400,7 @@ function computeAutoPnL(entries: EntryTradeRow[], exits: ExitTradeRow[]) {
 
     const exitPx = parseFloat(x.price);
     let exitQty = parseFloat(x.quantity);
-    if (!Number.isFinite(exitPx) || !Number.isFinite(exitQty) || exitQty <= 0)
-      continue;
+    if (!Number.isFinite(exitPx) || !Number.isFinite(exitQty) || exitQty <= 0) continue;
 
     const lots = entryLots[k];
     if (!lots || lots.length === 0) continue;
@@ -712,12 +411,9 @@ function computeAutoPnL(entries: EntryTradeRow[], exits: ExitTradeRow[]) {
     while (exitQty > 0 && lots.length > 0) {
       const lot = lots[0];
       const closeQty = Math.min(lot.qtyLeft, exitQty);
-
       total += (exitPx - lot.price) * closeQty * sign * mult;
-
       lot.qtyLeft -= closeQty;
       exitQty -= closeQty;
-
       if (lot.qtyLeft <= 0) lots.shift();
     }
   }
@@ -725,21 +421,13 @@ function computeAutoPnL(entries: EntryTradeRow[], exits: ExitTradeRow[]) {
   return { total };
 }
 
-/* =========================
-   Widget shell (scroll-safe)
-========================= */
-function WidgetCard({
-  title,
-  children,
-  right,
-}: {
-  title: string;
-  children: React.ReactNode;
-  right?: React.ReactNode;
-}) {
+/* =========================================================
+   Widget shell
+========================================================= */
+
+function WidgetCard({ title, children, right }: { title: string; children: React.ReactNode; right?: React.ReactNode }) {
   return (
     <div className="bg-slate-900/95 border border-slate-800 rounded-2xl h-full flex flex-col overflow-hidden shadow-sm min-h-0">
-      {/* Header: solo el pequeño handle es draggable */}
       <div className="flex items-center justify-between px-4 py-2 border-b border-slate-800 bg-slate-950/40">
         <div className="flex items-center gap-2">
           <span className="drag-handle cursor-move select-none inline-flex items-center justify-center px-2 py-1 rounded-md border border-slate-700 text-[11px] text-slate-400">
@@ -749,26 +437,31 @@ function WidgetCard({
         </div>
         <div>{right}</div>
       </div>
-
       <div className="p-4 flex-1 min-h-0 overflow-auto">{children}</div>
     </div>
   );
 }
 
-/* =========================
+/* =========================================================
    Page
-========================= */
+========================================================= */
+
 export default function DailyJournalPage() {
   const params = useParams();
   const router = useRouter();
   const { user, loading: authLoading } = useAuth();
 
-const userId = user?.id ?? "";
+  const userId = (user as any)?.id ?? "";
 
+  const dateParam = Array.isArray(params?.date) ? params.date[0] : (params?.date as string);
 
-  const dateParam = Array.isArray(params?.date)
-    ? params.date[0]
-    : (params?.date as string);
+  // UI state (rich text)
+  const [premarketHtml, setPremarketHtml] = useState<string>("");
+  const [insideHtml, setInsideHtml] = useState<string>("");
+  const [afterHtml, setAfterHtml] = useState<string>("");
+
+  // Optional: keep a reference to the inside editor for dictation insertion
+  const insideEditorRef = useRef<any>(null);
 
   const [entry, setEntry] = useState<JournalEntry>({
     date: dateParam || "",
@@ -785,58 +478,57 @@ const userId = user?.id ?? "";
     respectedPlan: true,
   });
 
-
   const [pnlInput, setPnlInput] = useState<string>("");
 
   const [templates, setTemplates] = useState<JournalTemplate[]>([]);
   const [newTemplateName, setNewTemplateName] = useState("");
+
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState("");
-
-  const preRef = useRef<HTMLDivElement | null>(null);
-  const liveRef = useRef<HTMLDivElement | null>(null);
-  const postRef = useRef<HTMLDivElement | null>(null);
-
-  const [listening, setListening] = useState(false);
-  const recognitionRef = useRef<any>(null);
 
   const [entryTrades, setEntryTrades] = useState<EntryTradeRow[]>([]);
   const [exitTrades, setExitTrades] = useState<ExitTradeRow[]>([]);
 
-  const [newEntryTrade, setNewEntryTrade] =
-    useState<Omit<EntryTradeRow, "id">>({
-      symbol: "",
-      kind: "option",
-      side: "long",
-      premiumSide: "debit",
-      optionStrategy: "single",
-      price: "",
-      quantity: "",
-      time: nowTimeLabel(),
-      dte: null,
-      expiry: null,
-    });
+  const [newEntryTrade, setNewEntryTrade] = useState<Omit<EntryTradeRow, "id">>({
+    symbol: "",
+    kind: "option",
+    side: "long",
+    premiumSide: "debit",
+    optionStrategy: "single",
+    price: "",
+    quantity: "",
+    // Avoid SSR hydration mismatches: we set the default time on mount.
+    time: "",
+    dte: null,
+    expiry: null,
+  });
 
-  const [newExitTrade, setNewExitTrade] =
-    useState<Omit<ExitTradeRow, "id">>({
-      symbol: "",
-      kind: "option",
-      side: "long",
-      premiumSide: "debit",
-      optionStrategy: "single",
-      price: "",
-      quantity: "",
-      time: nowTimeLabel(),
-      dte: null,
-      expiry: null,
-    });
+  const [newExitTrade, setNewExitTrade] = useState<Omit<ExitTradeRow, "id">>({
+    symbol: "",
+    kind: "option",
+    side: "long",
+    premiumSide: "debit",
+    optionStrategy: "single",
+    price: "",
+    quantity: "",
+    // Avoid SSR hydration mismatches: we set the default time on mount.
+    time: "",
+    dte: null,
+    expiry: null,
+  });
 
-  /* ---------------- Widgets active state ---------------- */
-  const ALL_WIDGETS: {
-    id: JournalWidgetId;
-    label: string;
-    defaultOn: boolean;
-  }[] = [
+  // Fill default "Time" values on the client only (prevents SSR hydration mismatches).
+  useEffect(() => {
+    setNewEntryTrade((p) => (p.time ? p : { ...p, time: nowTimeLabel() }));
+    setNewExitTrade((p) => (p.time ? p : { ...p, time: nowTimeLabel() }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /* =========================================================
+     Widgets active state
+  ========================================================= */
+
+  const ALL_WIDGETS: { id: JournalWidgetId; label: string; defaultOn: boolean }[] = [
     { id: "pnl", label: "Day P&L", defaultOn: true },
     { id: "premarket", label: "Premarket Prep", defaultOn: true },
     { id: "inside", label: "Inside the Trade", defaultOn: true },
@@ -851,23 +543,32 @@ const userId = user?.id ?? "";
   ];
 
   const widgetsKey = "journal_widgets_active_v1";
-  const [activeWidgets, setActiveWidgets] = useState<JournalWidgetId[]>(() => {
-    if (typeof window === "undefined") {
-      return ALL_WIDGETS.filter((w) => w.defaultOn).map((w) => w.id);
-    }
+  const layoutStorageKey = "journal_layout_v1";
+  const UI_PAGE_KEY = "journal";
+
+  // IMPORTANT (SSR hydration): Next.js can pre-render this "use client" page on the server.
+  // If we read localStorage during the initial render, the server HTML can differ from the
+  // client's first render (stored toggles), causing a hydration mismatch.
+  // So we render a deterministic default first, then hydrate from localStorage/Supabase in effects.
+  const DEFAULT_ACTIVE_WIDGETS = ALL_WIDGETS.filter((w) => w.defaultOn).map((w) => w.id) as JournalWidgetId[];
+  const [activeWidgets, setActiveWidgets] = useState<JournalWidgetId[]>(DEFAULT_ACTIVE_WIDGETS);
+
+  // Fast client-side hydrate from localStorage (Supabase will override if it has saved UI).
+  useEffect(() => {
     try {
       const raw = localStorage.getItem(widgetsKey);
-      if (!raw)
-        return ALL_WIDGETS.filter((w) => w.defaultOn).map((w) => w.id);
-      const parsed = JSON.parse(raw) as JournalWidgetId[];
-      return parsed.length
-        ? parsed
-        : ALL_WIDGETS.filter((w) => w.defaultOn).map((w) => w.id);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as unknown;
+      if (Array.isArray(parsed) && parsed.length) {
+        setActiveWidgets(parsed as JournalWidgetId[]);
+      }
     } catch {
-      return ALL_WIDGETS.filter((w) => w.defaultOn).map((w) => w.id);
+      // ignore
     }
-  });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
+  // Keep localStorage in sync (fast UI)
   useEffect(() => {
     try {
       localStorage.setItem(widgetsKey, JSON.stringify(activeWidgets));
@@ -875,70 +576,274 @@ const userId = user?.id ?? "";
   }, [activeWidgets]);
 
   const toggleWidget = (id: JournalWidgetId) => {
-    setActiveWidgets((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
-    );
+    setActiveWidgets((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
   };
 
-  /* ---------- Protección de ruta ---------- */
+  /* =========================================================
+     ✅ FIX 1: If user clears cookies/site data, localStorage is wiped.
+     Solution: store templates + layout + widget toggles in Supabase.
+  ========================================================= */
+
+  const [journalGridKey, setJournalGridKey] = useState(0);
+
+  // Load UI settings + templates from Supabase
+  useEffect(() => {
+    if (!userId || authLoading) return;
+
+    let alive = true;
+
+    (async () => {
+      try {
+        // 1) UI settings (layout + widget toggles)
+        // Local-first: if localStorage already has settings, keep them.
+        // Supabase is the fallback when localStorage is empty (e.g., cookies/site data cleared).
+        let hasLocalWidgets = false;
+        let hasLocalLayout = false;
+
+        try {
+          const raw = localStorage.getItem(widgetsKey);
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed) && parsed.length) hasLocalWidgets = true;
+          }
+        } catch {}
+
+        try {
+          const raw = localStorage.getItem(layoutStorageKey);
+          if (raw) {
+            JSON.parse(raw);
+            hasLocalLayout = true;
+          }
+        } catch {}
+
+        const ui = await getJournalUiSettings(userId, UI_PAGE_KEY);
+        if (!alive) return;
+
+        if (ui) {
+          // widgets (only if missing locally)
+          const aw: any = (ui as any).activeWidgets ?? (ui as any).active_widgets;
+          if (!hasLocalWidgets && Array.isArray(aw) && aw.length) {
+            setActiveWidgets(aw);
+            try {
+              localStorage.setItem(widgetsKey, JSON.stringify(aw));
+            } catch {}
+          }
+
+          // layout (only if missing locally)
+          const lay: any = (ui as any).layout;
+          if (!hasLocalLayout && lay && typeof lay === "object") {
+            try {
+              localStorage.setItem(layoutStorageKey, JSON.stringify(lay));
+            } catch {}
+            // force remount so JournalGrid re-reads localStorage
+            setJournalGridKey((k) => k + 1);
+          }
+        }
+
+        // 2) Templates
+        const tpls = await listJournalTemplates(userId);
+        if (!alive) return;
+        setTemplates(tpls);
+      } catch (err) {
+        console.error("[journal] failed to load UI/templates:", err);
+      }
+    })();
+
+    return () => {
+      alive = false;
+    };
+  }, [userId, authLoading]);
+
+  // Persist activeWidgets to Supabase (debounced)
+  useEffect(() => {
+    if (!userId) return;
+    const t = setTimeout(() => {
+      saveJournalUiSettings(userId, UI_PAGE_KEY, { activeWidgets: activeWidgets as any }).catch((e) =>
+        console.error("[journal] save activeWidgets failed:", e)
+      );
+    }, 200);
+    return () => clearTimeout(t);
+  }, [userId, activeWidgets]);
+
+  // Persist grid layout to Supabase WITHOUT touching JournalGrid internals.
+  // JournalGrid already writes to localStorage; we just observe changes.
+  const lastLayoutStrRef = useRef<string | null>(null);
+  const saveLayoutTimerRef = useRef<any>(null);
+
+  useEffect(() => {
+    if (!userId || typeof window === "undefined") return;
+
+    lastLayoutStrRef.current = localStorage.getItem(layoutStorageKey);
+
+    const interval = setInterval(() => {
+      try {
+        const cur = localStorage.getItem(layoutStorageKey);
+        if (!cur || cur === lastLayoutStrRef.current) return;
+
+        lastLayoutStrRef.current = cur;
+
+        // debounce writes
+        if (saveLayoutTimerRef.current) clearTimeout(saveLayoutTimerRef.current);
+        saveLayoutTimerRef.current = setTimeout(() => {
+          try {
+            const json = JSON.parse(cur);
+            saveJournalUiSettings(userId, UI_PAGE_KEY, { layout: json }).catch((e) =>
+              console.error("[journal] save layout failed:", e)
+            );
+          } catch {
+            // ignore invalid JSON
+          }
+        }, 250);
+      } catch {
+        // ignore
+      }
+    }, 500);
+
+    return () => {
+      clearInterval(interval);
+      if (saveLayoutTimerRef.current) clearTimeout(saveLayoutTimerRef.current);
+    };
+  }, [userId]);
+
+  /* =========================================================
+     Route protection
+  ========================================================= */
+
   useEffect(() => {
     if (!authLoading && !user) {
       router.push("/signin");
     }
   }, [authLoading, user, router]);
 
-  // Load existing entry + templates (desde Supabase)
+  /* =========================================================
+     Load existing journal entry + notes
+  ========================================================= */
+
   useEffect(() => {
     if (!dateParam || authLoading || !userId) return;
 
     let active = true;
 
-    async function load() {
+    (async () => {
       try {
-        const existing = await getJournalEntryByDate(userId, dateParam);
+        const [existing, storedTrades] = await Promise.all([
+          getJournalEntryByDate(userId, dateParam),
+          getJournalTradesForDay(userId, dateParam).catch(() =>
+            ({ entries: [], exits: [] } as any)
+          ),
+        ]);
 
         if (!active) return;
 
+        // Notes (HTML blocks) come from journal_entries.notes
+        // Trades for PnL and tables come from journal_trades (preferred),
+        // with a fallback to notes payload for legacy data.
+        let fallbackEntries: any[] | null = null;
+        let fallbackExits: any[] | null = null;
+
         if (existing) {
           setEntry((prev) => ({ ...prev, ...existing, date: dateParam }));
+
           const existingPnl =
-            typeof existing.pnl === "number" ? String(existing.pnl) : "";
+            typeof (existing as any).pnl === "number"
+              ? String((existing as any).pnl)
+              : "";
           setPnlInput(existingPnl);
 
-          if (typeof existing.notes === "string") {
+          const notesStr =
+            typeof (existing as any).notes === "string" ? (existing as any).notes : "";
+
+          if (notesStr) {
             try {
-              const parsed = JSON.parse(existing.notes);
+              const parsed = JSON.parse(notesStr);
               if (parsed && typeof parsed === "object") {
-                if (preRef.current && parsed.premarket)
-                  preRef.current.innerHTML = parsed.premarket;
-                if (liveRef.current && parsed.live)
-                  liveRef.current.innerHTML = parsed.live;
-                if (postRef.current && parsed.post)
-                  postRef.current.innerHTML = parsed.post;
-                if (Array.isArray(parsed.entries))
-                  setEntryTrades(parsed.entries);
-                if (Array.isArray(parsed.exits)) setExitTrades(parsed.exits);
-              } else if (preRef.current && !preRef.current.innerHTML) {
-                preRef.current.innerHTML = existing.notes;
+                setPremarketHtml(String((parsed as any).premarket ?? ""));
+                setInsideHtml(String((parsed as any).live ?? ""));
+                setAfterHtml(String((parsed as any).post ?? ""));
+
+                if (Array.isArray((parsed as any).entries)) fallbackEntries = (parsed as any).entries;
+                if (Array.isArray((parsed as any).exits)) fallbackExits = (parsed as any).exits;
+              } else {
+                // Legacy plain string
+                setPremarketHtml(String(notesStr));
+                setInsideHtml("");
+                setAfterHtml("");
               }
             } catch {
-              if (preRef.current && !preRef.current.innerHTML) {
-                preRef.current.innerHTML = existing.notes;
-              }
+              // Legacy plain string
+              setPremarketHtml(String(notesStr));
+              setInsideHtml("");
+              setAfterHtml("");
             }
+          } else {
+            setPremarketHtml("");
+            setInsideHtml("");
+            setAfterHtml("");
           }
         } else {
+          // No journal_entries row yet (import-only day, first open, etc.)
           setEntry((prev) => ({ ...prev, date: dateParam }));
           setPnlInput("");
+          setPremarketHtml("");
+          setInsideHtml("");
+          setAfterHtml("");
         }
 
-        setTemplates(getJournalTemplates());
+        const storedEntries = Array.isArray((storedTrades as any)?.entries)
+          ? ((storedTrades as any).entries as any[])
+          : [];
+        const storedExits = Array.isArray((storedTrades as any)?.exits)
+          ? ((storedTrades as any).exits as any[])
+          : [];
+
+        const hasStoredTrades = storedEntries.length > 0 || storedExits.length > 0;
+
+        if (hasStoredTrades) {
+          const normEntry: EntryTradeRow[] = storedEntries.map((r: any) => ({
+            id: String(r.id ?? crypto.randomUUID()),
+            symbol: String(r.symbol ?? "").toUpperCase(),
+            kind: (r.kind ?? "other") as InstrumentType,
+
+            side: toSideType(r.side),
+            premiumSide: toPremiumSide(r.premiumSide ?? r.premium),
+            optionStrategy: toOptionStrategy(r.optionStrategy ?? r.strategy),
+
+            price: r.price != null ? String(r.price) : "",
+            quantity: r.quantity != null ? String(r.quantity) : "",
+            time: String(r.time ?? ""),
+
+            dte: r.dte ?? null,
+            expiry: (r as any).expiry ?? null,
+          }));
+
+          const normExit: ExitTradeRow[] = storedExits.map((r: any) => ({
+            id: String(r.id ?? crypto.randomUUID()),
+            symbol: String(r.symbol ?? "").toUpperCase(),
+            kind: (r.kind ?? "other") as InstrumentType,
+
+            side: toSideType(r.side),
+            premiumSide: toPremiumSide(r.premiumSide ?? r.premium),
+            optionStrategy: toOptionStrategy(r.optionStrategy ?? r.strategy),
+
+            price: r.price != null ? String(r.price) : "",
+            quantity: r.quantity != null ? String(r.quantity) : "",
+            time: String(r.time ?? ""),
+
+            dte: r.dte ?? null,
+            expiry: (r as any).expiry ?? null,
+          }));
+
+          setEntryTrades(normEntry);
+          setExitTrades(normExit);
+        } else {
+          // Fallback to legacy notes payload
+          setEntryTrades(Array.isArray(fallbackEntries) ? (fallbackEntries as any) : []);
+          setExitTrades(Array.isArray(fallbackExits) ? (fallbackExits as any) : []);
+        }
       } catch (err) {
         console.error("Error loading journal entry:", err);
       }
-    }
-
-    load();
+    })();
 
     return () => {
       active = false;
@@ -948,30 +853,28 @@ const userId = user?.id ?? "";
   const parsedDate = useMemo(() => {
     try {
       const [y, m, d] = dateParam.split("-").map(Number);
-      return new Date(y, m - 1, d).toLocaleDateString("en-US", {
+      const dt = new Date(Date.UTC(y, m - 1, d));
+      return new Intl.DateTimeFormat("en-US", {
         year: "numeric",
         month: "long",
         day: "2-digit",
-      });
+        timeZone: "UTC",
+      }).format(dt);
     } catch {
       return dateParam;
     }
   }, [dateParam]);
 
-  /* ---------- Toolbar helpers ---------- */
-  const execCmd = (cmd: string) => document.execCommand(cmd, false);
-  const insertQuote = () =>
-    insertHtmlAtCaret("<blockquote>Quote…</blockquote>");
+  /* =========================================================
+     Entries handlers
+  ========================================================= */
 
-  /* ---------- Entries handlers ---------- */
   const handleAddEntryTrade = () => {
     const symbol = newEntryTrade.symbol.trim().toUpperCase();
     if (!symbol || !newEntryTrade.price.trim()) return;
 
     let finalKind: InstrumentType = newEntryTrade.kind;
-    if (finalKind === "option" && !looksLikeOptionContract(symbol)) {
-      finalKind = "stock";
-    }
+    if (finalKind === "option" && !looksLikeOptionContract(symbol)) finalKind = "stock";
 
     let dte: number | null = null;
     let expiryStr: string | null = null;
@@ -1001,29 +904,18 @@ const userId = user?.id ?? "";
       },
     ]);
 
-    setNewEntryTrade((p) => ({
-      ...p,
-      symbol: "",
-      price: "",
-      quantity: "",
-      time: nowTimeLabel(),
-      dte: null,
-      expiry: null,
-    }));
+    setNewEntryTrade((p) => ({ ...p, symbol: "", price: "", quantity: "", time: nowTimeLabel(), dte: null, expiry: null }));
   };
 
-  const handleDeleteEntryTrade = (id: string) =>
-    setEntryTrades((prev) => prev.filter((t) => t.id !== id));
+  const handleDeleteEntryTrade = (id: string) => setEntryTrades((prev) => prev.filter((t) => t.id !== id));
 
-  /* ---------- Open positions ---------- */
+  /* =========================================================
+     Open positions (for exits dropdown)
+  ========================================================= */
+
   const openPositions = useMemo(() => {
-    const key = (
-      s: string,
-      k: InstrumentType,
-      side: SideType,
-      premiumSide: PremiumSide,
-      strategy: OptionStrategy
-    ) => `${s}|${k}|${side}|${premiumSide}|${strategy}`;
+    const key = (s: string, k: InstrumentType, side: SideType, premiumSide: PremiumSide, strategy: OptionStrategy) =>
+      `${s}|${k}|${side}|${premiumSide}|${strategy}`;
 
     const totals: Record<
       string,
@@ -1047,15 +939,7 @@ const userId = user?.id ?? "";
       const stratEff = normalizeStrategy(e.optionStrategy);
 
       const k = key(sym, kEff, sideEff, premEff, stratEff);
-      totals[k] ||= {
-        symbol: sym,
-        kind: kEff,
-        side: sideEff,
-        premiumSide: premEff,
-        optionStrategy: stratEff,
-        entryQty: 0,
-        exitQty: 0,
-      };
+      totals[k] ||= { symbol: sym, kind: kEff, side: sideEff, premiumSide: premEff, optionStrategy: stratEff, entryQty: 0, exitQty: 0 };
       totals[k].entryQty += Number(e.quantity) || 0;
     }
 
@@ -1068,15 +952,7 @@ const userId = user?.id ?? "";
       const stratEff = normalizeStrategy(x.optionStrategy);
 
       const k = key(sym, kEff, sideEff, premEff, stratEff);
-      totals[k] ||= {
-        symbol: sym,
-        kind: kEff,
-        side: sideEff,
-        premiumSide: premEff,
-        optionStrategy: stratEff,
-        entryQty: 0,
-        exitQty: 0,
-      };
+      totals[k] ||= { symbol: sym, kind: kEff, side: sideEff, premiumSide: premEff, optionStrategy: stratEff, entryQty: 0, exitQty: 0 };
       totals[k].exitQty += Number(x.quantity) || 0;
     }
 
@@ -1085,12 +961,19 @@ const userId = user?.id ?? "";
       .filter((t) => t.remainingQty > 0);
   }, [entryTrades, exitTrades]);
 
-  /* ---------- Exits handlers ---------- */
+  /* =========================================================
+     Exits handlers
+  ========================================================= */
+
   const handlePickOpenPosition = (posKey: string) => {
     if (!posKey) return;
-    const [symbol, kind, side, premiumSide, optionStrategy] = posKey.split(
-      "|"
-    ) as [string, InstrumentType, SideType, PremiumSide, OptionStrategy];
+    const [symbol, kind, side, premiumSide, optionStrategy] = posKey.split("|") as [
+      string,
+      InstrumentType,
+      SideType,
+      PremiumSide,
+      OptionStrategy
+    ];
 
     const pos = openPositions.find(
       (p) =>
@@ -1100,6 +983,7 @@ const userId = user?.id ?? "";
         p.premiumSide === premiumSide &&
         p.optionStrategy === optionStrategy
     );
+
     if (!pos) return;
 
     setNewExitTrade({
@@ -1121,9 +1005,7 @@ const userId = user?.id ?? "";
     if (!symbol || !newExitTrade.price.trim()) return;
 
     let finalKind: InstrumentType = newExitTrade.kind;
-    if (finalKind === "option" && !looksLikeOptionContract(symbol)) {
-      finalKind = "stock";
-    }
+    if (finalKind === "option" && !looksLikeOptionContract(symbol)) finalKind = "stock";
 
     let dte: number | null = null;
     let expiryStr: string | null = null;
@@ -1153,30 +1035,19 @@ const userId = user?.id ?? "";
       },
     ]);
 
-    setNewExitTrade((p) => ({
-      ...p,
-      price: "",
-      time: nowTimeLabel(),
-      dte: null,
-      expiry: null,
-    }));
+    setNewExitTrade((p) => ({ ...p, price: "", time: nowTimeLabel(), dte: null, expiry: null }));
   };
 
-  const handleDeleteExitTrade = (id: string) =>
-    setExitTrades((prev) => prev.filter((t) => t.id !== id));
+  const handleDeleteExitTrade = (id: string) => setExitTrades((prev) => prev.filter((t) => t.id !== id));
 
-  /* ---------- Averages ---------- */
-  const entryAverages = useMemo(
-    () => computeAverages(entryTrades),
-    [entryTrades]
-  );
+  const entryAverages = useMemo(() => computeAverages(entryTrades), [entryTrades]);
   const exitAverages = useMemo(() => computeAverages(exitTrades), [exitTrades]);
 
-  /* ---------- ✅ AUTO PNL local ---------- */
-  const pnlCalc = useMemo(
-    () => computeAutoPnL(entryTrades, exitTrades),
-    [entryTrades, exitTrades]
-  );
+  /* =========================================================
+     ✅ Auto PnL (FIFO)
+  ========================================================= */
+
+  const pnlCalc = useMemo(() => computeAutoPnL(entryTrades, exitTrades), [entryTrades, exitTrades]);
 
   useEffect(() => {
     const v = Number.isFinite(pnlCalc.total) ? pnlCalc.total : 0;
@@ -1184,31 +1055,31 @@ const userId = user?.id ?? "";
     setPnlInput(v.toFixed(2));
   }, [pnlCalc.total]);
 
-  /* ---------- Tags ---------- */
+  /* =========================================================
+     Tags
+  ========================================================= */
+
   const toggleTag = (tag: string) =>
     setEntry((prev) => {
       const current = prev.tags || [];
       const exists = current.includes(tag);
-      const tags = exists
-        ? current.filter((t) => t !== tag)
-        : [...current, tag];
+      const tags = exists ? current.filter((t) => t !== tag) : [...current, tag];
       return { ...prev, tags };
     });
 
   const probabilityTags = [
-     "Exploratory Trade",
-     "50% Probability",
-     "Trade with Edge",
-     "High Probability",
-     "Low Probability",
-     "Setup not perfect",
-     "Good Risk-Reward",
-     "Poor Risk-Reward",
-     "Followed Plan",
-     "Deviated from Plan",
-     "Clear Setup",
-     "Unclear Setup",
-                
+    "Exploratory Trade",
+    "50% Probability",
+    "Trade with Edge",
+    "High Probability",
+    "Low Probability",
+    "Setup not perfect",
+    "Good Risk-Reward",
+    "Poor Risk-Reward",
+    "Followed Plan",
+    "Deviated from Plan",
+    "Clear Setup",
+    "Unclear Setup",
   ];
 
   const exitReasonTags = [
@@ -1220,7 +1091,10 @@ const userId = user?.id ?? "";
     "Move stop to breakeven",
   ];
 
-  /* ---------- Save (Supabase) ---------- */
+  /* =========================================================
+     Save (Supabase)
+  ========================================================= */
+
   const handleSave = async (): Promise<boolean> => {
     if (!userId) {
       setMsg("Cannot save: no user.");
@@ -1230,182 +1104,56 @@ const userId = user?.id ?? "";
     setSaving(true);
     setMsg("");
 
-    const preHtml = preRef.current?.innerHTML || "";
-    const liveHtml = liveRef.current?.innerHTML || "";
-    const postHtml = postRef.current?.innerHTML || "";
-
     const notesPayload = JSON.stringify({
-      premarket: preHtml,
-      live: liveHtml,
-      post: postHtml,
+      premarket: premarketHtml,
+      live: insideHtml,
+      post: afterHtml,
       entries: entryTrades,
       exits: exitTrades,
     });
 
-      // ✅ 1) arma el entry a guardar usando notesPayload
-  const entryToSave = {
-    ...entry,
-    user_id: userId,
-    date: dateParam, // o entry.date si ya es el mismo
-    notes: notesPayload,
-    // ✅ si pnl lo tienes en input/string, fuerza número aquí
-    pnl: Number.isFinite(Number(pnlInput)) ? Number(pnlInput) : (entry as any).pnl ?? 0,
-  };
-
-  try {
-    // ✅ 2) guarda journal_entries
-    await saveJournalEntry(userId, entryToSave as any);
-
-    // ✅ 3) guarda journal_trades (filas) desde el STATE actual, no desde notes parseadas
-  const storedEntries = entryTrades.map(entryRowToStored);
-const storedExits = exitTrades.map(exitRowToStored);
-
-await saveJournalTradesForDay(userId, dateParam, {
-  entries: storedEntries,
-  exits: storedExits,
-});
-
-
-    setMsg("Saved ✅");
-    setTimeout(() => setMsg(""), 2000);
-    return true;
-  } catch (err: any) {
-    console.error(err);
-    setMsg(err?.message ?? "Save failed");
-    return false;
-  } finally {
-    setSaving(false);
-  }
-
-
-    const EMOTION_TAGS = [
-  "Calm",
-  "Greedy",
-  "Desperate",
-  "Adrenaline",
-  "Confident",
-  "Fearful",
-  "Angry",
-  "FOMO", 
-  "Revenge trade",
-  "Focus",
-  "Patience",
-  "Discipline",
-  "Anxiety",
-  "Overconfident",
-];
-
-const STRATEGY_CHECKLIST_TAGS = [
-   "Respect Strategy",
-                "Not follow my plan",
-                "No respect my plan",
-                "Planned stop was in place",
-                "Used planned position sizing",
-                "Risk-to-reward ≥ 2R (planned)",
-                "Risk-to-reward < 1.5R (tight)",
-                "Is Vix high?",
-                "Is Vix low?",
-                "Earnings play",
-                "News-driven trade",
-                "Momentum trade",
-                "Trend Follow Trade",
-                "Reversal trade",
-                "Scalping trade",
-                "swing trade",
-                "Options trade",
-                "Stock trade",
-                "Futures Trade",
-                "Forex Trade",
-                " Crypto Trade",
-                
-];
-
-
-    const pnlToSave = Number.isFinite(pnlCalc.total) ? pnlCalc.total : 0;
-// ✅ Derivados desde el payload de trades (tu notesPayload)
-const parsed = parseNotes(notesPayload); // notesPayload es string
-const firstEntry = parsed.entries?.[0];
-const firstExit = parsed.exits?.[0];
-
-const toNum = (v: any): number | undefined => {
-  if (v === null || v === undefined) return undefined;
-  const n = Number(String(v).trim());
-  return Number.isFinite(n) ? n : undefined;
-};
-
-// ✅ instrument / entryPrice / exitPrice / size
-const clean: JournalEntry = {
-  ...entry,
-
-  date: dateParam,
-  pnl: pnlToSave,
-
-  // 1) Instrument: prioridad = primer trade (si existe) -> si no, lo que ya tenga entry.instrument
-  instrument: (firstEntry?.symbol ?? entry.instrument ?? "").toString().trim(),
-
-  // 2) Entry/Exit/Size: prioridad = lo que ya tenga entry -> si no, lo derivamos del primer row
-  entryPrice:
-    typeof entry.entryPrice === "number" ? entry.entryPrice : toNum(firstEntry?.price),
-
-  exitPrice:
-    typeof entry.exitPrice === "number" ? entry.exitPrice : toNum(firstExit?.price),
-
-  size: typeof entry.size === "number" ? entry.size : toNum(firstEntry?.quantity),
-
-  notes: notesPayload,
-  screenshots: entry.screenshots || [],
-  tags: entry.tags || [],
-
-  respectedPlan:
-    typeof entry.respectedPlan === "boolean" ? entry.respectedPlan : true,
-};
-
-
+    const entryToSave = {
+      ...entry,
+      user_id: userId,
+      date: dateParam,
+      notes: notesPayload,
+      pnl: Number.isFinite(Number(pnlInput)) ? Number(pnlInput) : (entry as any).pnl ?? 0,
+    };
 
     try {
+      await saveJournalEntry(userId, entryToSave as any);
 
-      console.log("SAVING:", {
-  instrument: clean.instrument,
-  entryPrice: clean.entryPrice,
-  exitPrice: clean.exitPrice,
-  size: clean.size,
-});
+      const storedEntries = entryTrades.map(entryRowToStored);
+      const storedExits = exitTrades.map(exitRowToStored);
 
-      
-      await saveJournalEntry(userId, clean);
-      const parsed = parseNotes(clean.notes);
-      await saveJournalTradesForDay(userId, clean.date, parsed, 
-);
+      await saveJournalTradesForDay(userId, dateParam, {
+        entries: storedEntries,
+        exits: storedExits,
+      } as any);
 
-
-      setMsg("Session saved.");
+      setMsg("Saved ✅");
       setTimeout(() => setMsg(""), 2000);
       return true;
     } catch (err: any) {
       console.error(err);
-      const supaMsg =
-        (err && (err.message || (typeof err === "string" ? err : ""))) ||
-        "Unknown Supabase error";
-      setMsg(`Error saving session: ${supaMsg}`);
+      setMsg(err?.message ?? "Save failed");
       return false;
     } finally {
       setSaving(false);
     }
   };
 
-const handleSaveAndBack = async () => {
-  const ok = await handleSave();
-  if (!ok) return; // ✅ si falló, NO navegues
-  router.push("/dashboard");
-};
+  const handleSaveAndBack = async () => {
+    const ok = await handleSave();
+    if (!ok) return;
+    router.push("/dashboard");
+  };
 
+  /* =========================================================
+     Import / Sync
+  ========================================================= */
 
-  /* =========================
-     Import / Sync buttons
-  ========================= */
   const [syncing, setSyncing] = useState(false);
-
-  // ✅ Ajusta esta ruta si tu import page se llama distinto (ej: "/import3")
   const IMPORT_PATH = "/import";
 
   const handleGoToImport = () => {
@@ -1413,135 +1161,116 @@ const handleSaveAndBack = async () => {
   };
 
   const handleSyncFromImport = async () => {
-  if (!userId || !dateParam) {
-    setMsg("Cannot sync: missing user/date.");
-    return;
-  }
-
-  setSyncing(true);
-  setMsg("");
-
-  try {
-    // ✅ TOKEN CORRECTO
-    const {
-      data: { session },
-      error: sessionErr,
-    } = await supabaseBrowser.auth.getSession();
-
-    if (sessionErr || !session?.access_token) {
-      setMsg("Cannot sync: not authenticated.");
+    if (!userId || !dateParam) {
+      setMsg("Cannot sync: missing user/date.");
       return;
     }
 
-    const res = await fetch("/api/journal/sync", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${session.access_token}`,
-      },
-      body: JSON.stringify({ date: dateParam }),
-    });
+    setSyncing(true);
+    setMsg("");
 
-    const json = await res.json().catch(() => ({}));
+    try {
+      const {
+        data: { session },
+        error: sessionErr,
+      } = await supabaseBrowser.auth.getSession();
 
-    if (!res.ok) {
-      setMsg(json?.error ? `Sync error: ${json.error}` : "Sync error.");
-      return;
-    }
+      if (sessionErr || !session?.access_token) {
+        setMsg("Cannot sync: not authenticated.");
+        return;
+      }
 
-    const found = json?.trades_found ?? 0;
-    const groups = json?.groups ?? 0;
-    const updated = json?.updated ?? 0;
+      const res = await fetch("/api/journal/sync", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ date: dateParam }),
+      });
+
+      const json = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        setMsg(json?.error ? `Sync error: ${json.error}` : "Sync error.");
+        return;
+      }
+
+      const found = json?.trades_found ?? 0;
+      const groups = json?.groups ?? 0;
+      const updated = json?.updated ?? 0;
 
       setMsg(`Synced ${found} trades → ${groups} groups (${updated} updated).`);
-    setTimeout(() => setMsg(""), 2500);
+      setTimeout(() => setMsg(""), 2500);
 
-   // ✅ REHIDRATAR ESTADO DESDE SUPABASE (NO router.refresh)
-const freshEntry = await getJournalEntryByDate(userId, dateParam);
-if (freshEntry) {
-  setEntry((prev) => ({ ...prev, ...freshEntry, date: dateParam }));
-}
+      // rehydrate
+      const freshEntry = await getJournalEntryByDate(userId, dateParam);
+      if (freshEntry) setEntry((prev) => ({ ...prev, ...freshEntry, date: dateParam }));
 
-   const freshTrades = await getJournalTradesForDay(userId, dateParam);
+      const freshTrades = await getJournalTradesForDay(userId, dateParam);
 
-// ✅ convertir rows de Supabase (StoredTradeRow) al shape del UI
-const normEntry: EntryTradeRow[] = (freshTrades.entries ?? []).map((r: any) => ({
-  id: String(r.id ?? crypto.randomUUID()),
-  symbol: String(r.symbol ?? "").toUpperCase(),
-  kind: (r.kind ?? "other") as InstrumentType,
+      const normEntry: EntryTradeRow[] = (freshTrades.entries ?? []).map((r: any) => ({
+        id: String(r.id ?? crypto.randomUUID()),
+        symbol: String(r.symbol ?? "").toUpperCase(),
+        kind: (r.kind ?? "other") as InstrumentType,
+        side: toSideType(r.side),
+        premiumSide: toPremiumSide(r.premiumSide ?? (r as any).premium),
+        optionStrategy: toOptionStrategy(r.optionStrategy ?? (r as any).strategy),
+        price: r.price != null ? String(r.price) : "",
+        quantity: r.quantity != null ? String(r.quantity) : "",
+        time: String(r.time ?? ""),
+        dte: r.dte ?? null,
+        expiry: (r as any).expiry ?? null,
+      }));
 
-  side: toSideType(r.side),
-  premiumSide: toPremiumSide(r.premiumSide ?? r.premium),
-  optionStrategy: toOptionStrategy(r.optionStrategy ?? r.strategy),
+      const normExit: ExitTradeRow[] = (freshTrades.exits ?? []).map((r: any) => ({
+        id: String(r.id ?? crypto.randomUUID()),
+        symbol: String(r.symbol ?? "").toUpperCase(),
+        kind: (r.kind ?? "other") as InstrumentType,
+        side: toSideType(r.side),
+        premiumSide: toPremiumSide(r.premiumSide ?? (r as any).premium),
+        optionStrategy: toOptionStrategy(r.optionStrategy ?? (r as any).strategy),
+        price: r.price != null ? String(r.price) : "",
+        quantity: r.quantity != null ? String(r.quantity) : "",
+        time: String(r.time ?? ""),
+        dte: r.dte ?? null,
+        expiry: (r as any).expiry ?? null,
+      }));
 
-  price: r.price != null ? String(r.price) : "",
-  quantity: r.quantity != null ? String(r.quantity) : "",
-  time: String(r.time ?? ""),
+      setEntryTrades(normEntry);
+      setExitTrades(normExit);
 
-  dte: r.dte ?? null,
-  expiry: (r as any).expiry ?? null,
-}));
+      const freshPnl = freshEntry && typeof (freshEntry as any).pnl === "number" ? (freshEntry as any).pnl : Number((freshEntry as any)?.pnl) || 0;
+      setEntry((prev) => ({ ...prev, pnl: freshPnl }));
+      setPnlInput(freshPnl ? freshPnl.toFixed(2) : "");
+    } catch (err) {
+      console.error(err);
+      setMsg("Error syncing trades.");
+    } finally {
+      setSyncing(false);
+    }
+  };
 
-const normExit: ExitTradeRow[] = (freshTrades.exits ?? []).map((r: any) => ({
-  id: String(r.id ?? crypto.randomUUID()),
-  symbol: String(r.symbol ?? "").toUpperCase(),
-  kind: (r.kind ?? "other") as InstrumentType,
+  /* =========================================================
+     Templates (Supabase)
+  ========================================================= */
 
-  side: toSideType(r.side),
-  premiumSide: toPremiumSide(r.premiumSide ?? r.premium),
-  optionStrategy: toOptionStrategy(r.optionStrategy ?? r.strategy),
+  const handleSaveTemplate = async () => {
+    const name = newTemplateName.trim();
+    if (!name) return;
 
-  price: r.price != null ? String(r.price) : "",
-  quantity: r.quantity != null ? String(r.quantity) : "",
-  time: String(r.time ?? ""),
-
-  dte: r.dte ?? null,
-  expiry: (r as any).expiry ?? null,
-}));
-
-setEntryTrades(normEntry);
-setExitTrades(normExit);
-
-    // ✅ si tu entry trae pnl ya guardado, úsalo
-const freshPnl =
-  freshEntry && typeof (freshEntry as any).pnl === "number"
-    ? (freshEntry as any).pnl
-    : Number((freshEntry as any)?.pnl) || 0;
-
-// ✅ tu page no tiene setPnl; usa setEntry + setPnlInput
-setEntry((prev) => ({ ...prev, pnl: freshPnl }));
-setPnlInput(freshPnl ? freshPnl.toFixed(2) : "");
-
-
-  } catch (err) {
-    console.error(err);
-    setMsg("Error syncing trades.");
-  } finally {
-    setSyncing(false);
-  }
-};
-
-
- 
-  /* ---------- Templates ---------- */
-const handleSaveTemplate = () => {
-  if (!newTemplateName.trim()) return;
-
-  const preHtml = preRef.current?.innerHTML || "";
-  const liveHtml = liveRef.current?.innerHTML || "";
-  const postHtml = postRef.current?.innerHTML || "";
-
-  const payload = JSON.stringify({
-    premarket: preHtml,
-    live: liveHtml,
-    post: postHtml,
-  });
-
-  addJournalTemplate(newTemplateName.trim(), payload);
-  setTemplates(getJournalTemplates());
-  setNewTemplateName("");
-};
-
+    try {
+      const payload = JSON.stringify({ premarket: premarketHtml, live: insideHtml, post: afterHtml });
+      const created = await createJournalTemplate(userId, name, payload);
+      setTemplates((prev) => (created ? [created, ...prev] : prev));
+      setNewTemplateName("");
+      setMsg("Template saved ✅");
+      setTimeout(() => setMsg(""), 1600);
+    } catch (e: any) {
+      console.error(e);
+      setMsg(e?.message ?? "Template save failed");
+    }
+  };
 
   const handleApplyTemplate = (tpl: JournalTemplate) => {
     if (!tpl.content) return;
@@ -1549,25 +1278,33 @@ const handleSaveTemplate = () => {
     try {
       const parsed = JSON.parse(tpl.content);
       if (parsed && typeof parsed === "object") {
-        if (preRef.current && parsed.premarket)
-          preRef.current.innerHTML = parsed.premarket;
-        if (liveRef.current && parsed.live)
-          liveRef.current.innerHTML = parsed.live;
-        if (postRef.current && parsed.post)
-          postRef.current.innerHTML = parsed.post;
+        setPremarketHtml(String(parsed.premarket ?? ""));
+        setInsideHtml(String(parsed.live ?? ""));
+        setAfterHtml(String(parsed.post ?? ""));
         return;
       }
     } catch {
-      if (preRef.current) preRef.current.innerHTML = tpl.content;
+      setPremarketHtml(tpl.content);
     }
   };
 
-  const handleDeleteTemplate = (id: string) => {
-    deleteJournalTemplate(id);
-    setTemplates(getJournalTemplates());
+  const handleDeleteTemplate = async (id: string) => {
+    try {
+      await deleteJournalTemplate(userId, id);
+      setTemplates((prev) => prev.filter((t) => t.id !== id));
+    } catch (e: any) {
+      console.error(e);
+      setMsg(e?.message ?? "Delete failed");
+    }
   };
 
-  /* ---------- Dictation ---------- */
+  /* =========================================================
+     Dictation (insert into Inside editor)
+  ========================================================= */
+
+  const [listening, setListening] = useState(false);
+  const recognitionRef = useRef<any>(null);
+
   const toggleDictation = () => {
     const w = window as any;
     const SR = w.SpeechRecognition || w.webkitSpeechRecognition;
@@ -1575,24 +1312,30 @@ const handleSaveTemplate = () => {
       alert("SpeechRecognition is not available in this browser.");
       return;
     }
+
     if (!recognitionRef.current) {
       const rec = new SR();
       rec.lang = "en-US";
       rec.continuous = true;
       rec.interimResults = true;
+
       rec.onresult = (e: any) => {
         let txt = "";
         for (let i = e.resultIndex; i < e.results.length; i++) {
           txt += e.results[i][0].transcript;
         }
-        if (liveRef.current) {
-          liveRef.current.focus();
-          insertHtmlAtCaret(txt.replace(/\n/g, "<br/>") + " ");
+        // Insert into TipTap editor
+        try {
+          insideEditorRef.current?.chain?.().focus?.().insertContent(txt.replace(/\n/g, "<br/>") + " ").run?.();
+        } catch {
+          // ignore
         }
       };
+
       rec.onend = () => setListening(false);
       recognitionRef.current = rec;
     }
+
     if (!listening) {
       recognitionRef.current.start();
       setListening(true);
@@ -1602,47 +1345,26 @@ const handleSaveTemplate = () => {
     }
   };
 
-  const editorCls =
-    "min-h-[280px] w-full rounded-xl bg-slate-950 border border-slate-800 px-3 py-2 text-[16px] text-slate-100 leading-relaxed focus:outline-none focus:border-emerald-400 overflow-auto";
+  /* =========================================================
+     Averages + PnL
+  ========================================================= */
 
-  /* =========================
-     Widgets definitions
-  ========================= */
+  /* =========================================================
+     Widgets
+  ========================================================= */
+
   const WIDGETS: JournalWidgetDef[] = [
     {
       id: "premarket",
       title: "Premarket Prep",
-      defaultLayout: {
-        i: "premarket",
-        x: 0,
-        y: 0,
-        w: 7,
-        h: 8,
-        minW: 4,
-        minH: 6,
-      },
+      defaultLayout: { i: "premarket", x: 0, y: 0, w: 7, h: 8, minW: 4, minH: 6 },
       render: () => (
-        <WidgetCard
-          title="Premarket Prep"
-          right={
-            <EditorToolbar
-              onBold={() => execCmd("bold")}
-              onItalic={() => execCmd("italic")}
-              onUnderline={() => execCmd("underline")}
-              onUL={() => execCmd("insertUnorderedList")}
-              onOL={() => execCmd("insertOrderedList")}
-              onQuote={insertQuote}
-              onAddRow={addTableRow}
-              onAddCol={addTableColumn}
-              onInsertTable={insertTable}
-            />
-          }
-        >
-          <div
-            ref={preRef}
-            contentEditable
-            suppressContentEditableWarning
-            className={editorCls}
+        <WidgetCard title="Premarket Prep">
+          <RichTextEditor
+            value={premarketHtml}
+            onChange={setPremarketHtml}
+            placeholder="Premarket prep: bias, levels, planned setups, rules…"
+            minHeight={260}
           />
         </WidgetCard>
       ),
@@ -1654,9 +1376,7 @@ const handleSaveTemplate = () => {
       defaultLayout: { i: "pnl", x: 7, y: 0, w: 5, h: 3, minW: 3, minH: 2 },
       render: () => (
         <WidgetCard title="Day P&L">
-          <label className="text-slate-400 text-xs uppercase tracking-wide">
-            Day P&L (USD) — AUTO
-          </label>
+          <label className="text-slate-400 text-xs uppercase tracking-wide">Day P&L (USD) — AUTO</label>
           <input
             type="text"
             value={pnlInput}
@@ -1664,9 +1384,7 @@ const handleSaveTemplate = () => {
             className="mt-2 w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-slate-100 text-[16px] focus:outline-none focus:border-emerald-400 opacity-90"
             placeholder="Auto-calculated"
           />
-          <p className="text-xs text-slate-500 mt-2">
-            Calculated from Entries/Exits (FIFO + multipliers + premium).
-          </p>
+          <p className="text-xs text-slate-500 mt-2">Calculated from Entries/Exits (FIFO + multipliers + premium).</p>
         </WidgetCard>
       ),
     },
@@ -1674,22 +1392,12 @@ const handleSaveTemplate = () => {
     {
       id: "entries",
       title: "Entries",
-      defaultLayout: {
-        i: "entries",
-        x: 7,
-        y: 3,
-        w: 5,
-        h: 7,
-        minW: 4,
-        minH: 6,
-      },
+      defaultLayout: { i: "entries", x: 7, y: 3, w: 5, h: 7, minW: 4, minH: 6 },
       render: () => (
         <WidgetCard title="Entries">
           <div className="grid grid-cols-1 md:grid-cols-8 gap-2 text-sm">
             <div>
-              <label className="text-xs text-slate-400 block mb-1">
-                Symbol / Contract
-              </label>
+              <label className="text-xs text-slate-400 block mb-1">Symbol / Contract</label>
               <input
                 type="text"
                 value={newEntryTrade.symbol}
@@ -1707,12 +1415,7 @@ const handleSaveTemplate = () => {
               <label className="text-xs text-slate-400 block mb-1">Type</label>
               <select
                 value={newEntryTrade.kind}
-                onChange={(e) =>
-                  setNewEntryTrade((p) => ({
-                    ...p,
-                    kind: e.target.value as InstrumentType,
-                  }))
-                }
+                onChange={(e) => setNewEntryTrade((p) => ({ ...p, kind: e.target.value as InstrumentType }))}
                 className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-[14px] text-slate-100 focus:outline-none focus:border-emerald-400"
               >
                 {KIND_OPTIONS.map((k) => (
@@ -1727,12 +1430,7 @@ const handleSaveTemplate = () => {
               <label className="text-xs text-slate-400 block mb-1">Side</label>
               <select
                 value={newEntryTrade.side}
-                onChange={(e) =>
-                  setNewEntryTrade((p) => ({
-                    ...p,
-                    side: e.target.value as SideType,
-                  }))
-                }
+                onChange={(e) => setNewEntryTrade((p) => ({ ...p, side: e.target.value as SideType }))}
                 className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-[14px] text-slate-100 focus:outline-none focus:border-emerald-400"
               >
                 <option value="long">LONG</option>
@@ -1741,17 +1439,10 @@ const handleSaveTemplate = () => {
             </div>
 
             <div>
-              <label className="text-xs text-slate-400 block mb-1">
-                Premium
-              </label>
+              <label className="text-xs text-slate-400 block mb-1">Premium</label>
               <select
                 value={newEntryTrade.premiumSide}
-                onChange={(e) =>
-                  setNewEntryTrade((p) => ({
-                    ...p,
-                    premiumSide: e.target.value as PremiumSide,
-                  }))
-                }
+                onChange={(e) => setNewEntryTrade((p) => ({ ...p, premiumSide: e.target.value as PremiumSide }))}
                 className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-[14px] text-slate-100 focus:outline-none focus:border-emerald-400"
               >
                 {PREMIUM_OPTIONS.map((opt) => (
@@ -1763,17 +1454,10 @@ const handleSaveTemplate = () => {
             </div>
 
             <div>
-              <label className="text-xs text-slate-400 block mb-1">
-                Option strategy
-              </label>
+              <label className="text-xs text-slate-400 block mb-1">Option strategy</label>
               <select
                 value={newEntryTrade.optionStrategy}
-                onChange={(e) =>
-                  setNewEntryTrade((p) => ({
-                    ...p,
-                    optionStrategy: e.target.value as OptionStrategy,
-                  }))
-                }
+                onChange={(e) => setNewEntryTrade((p) => ({ ...p, optionStrategy: e.target.value as OptionStrategy }))}
                 className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-[14px] text-slate-100 focus:outline-none focus:border-emerald-400"
               >
                 {STRATEGY_OPTIONS.map((opt) => (
@@ -1789,26 +1473,17 @@ const handleSaveTemplate = () => {
               <input
                 type="number"
                 value={newEntryTrade.price}
-                onChange={(e) =>
-                  setNewEntryTrade((p) => ({ ...p, price: e.target.value }))
-                }
+                onChange={(e) => setNewEntryTrade((p) => ({ ...p, price: e.target.value }))}
                 className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-[14px] text-slate-100 focus:outline-none focus:border-emerald-400"
               />
             </div>
 
             <div>
-              <label className="text-xs text-slate-400 block mb-1">
-                Quantity
-              </label>
+              <label className="text-xs text-slate-400 block mb-1">Quantity</label>
               <input
                 type="number"
                 value={newEntryTrade.quantity}
-                onChange={(e) =>
-                  setNewEntryTrade((p) => ({
-                    ...p,
-                    quantity: e.target.value,
-                  }))
-                }
+                onChange={(e) => setNewEntryTrade((p) => ({ ...p, quantity: e.target.value }))}
                 className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-[14px] text-slate-100 focus:outline-none focus:border-emerald-400"
               />
             </div>
@@ -1818,18 +1493,10 @@ const handleSaveTemplate = () => {
               <input
                 type="text"
                 value={newEntryTrade.time}
-                onChange={(e) =>
-                  setNewEntryTrade((p) => ({ ...p, time: e.target.value }))
-                }
+                onChange={(e) => setNewEntryTrade((p) => ({ ...p, time: e.target.value }))}
                 className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-[14px] text-slate-300"
               />
-              <button
-                type="button"
-                className="text-[11px] text-emerald-300 mt-1"
-                onClick={() =>
-                  setNewEntryTrade((p) => ({ ...p, time: nowTimeLabel() }))
-                }
-              >
+              <button type="button" className="text-[11px] text-emerald-300 mt-1" onClick={() => setNewEntryTrade((p) => ({ ...p, time: nowTimeLabel() }))}>
                 use current time
               </button>
             </div>
@@ -1848,34 +1515,16 @@ const handleSaveTemplate = () => {
               <table className="w-full text-left text-[12px] border border-slate-800 rounded-lg overflow-hidden">
                 <thead className="bg-slate-900/80">
                   <tr>
-                    <th className="px-2 py-1 border-b border-slate-800">
-                      Symbol
-                    </th>
-                    <th className="px-2 py-1 border-b border-slate-800">
-                      Type
-                    </th>
-                    <th className="px-2 py-1 border-b border-slate-800">
-                      Side
-                    </th>
-                    <th className="px-2 py-1 border-b border-slate-800">
-                      Premium
-                    </th>
-                    <th className="px-2 py-1 border-b border-slate-800">
-                      Strategy
-                    </th>
-                    <th className="px-2 py-1 border-b border-slate-800">
-                      Price
-                    </th>
-                    <th className="px-2 py-1 border-b border-slate-800">
-                      Qty
-                    </th>
-                    <th className="px-2 py-1 border-b border-slate-800">
-                      Time
-                    </th>
+                    <th className="px-2 py-1 border-b border-slate-800">Symbol</th>
+                    <th className="px-2 py-1 border-b border-slate-800">Type</th>
+                    <th className="px-2 py-1 border-b border-slate-800">Side</th>
+                    <th className="px-2 py-1 border-b border-slate-800">Premium</th>
+                    <th className="px-2 py-1 border-b border-slate-800">Strategy</th>
+                    <th className="px-2 py-1 border-b border-slate-800">Price</th>
+                    <th className="px-2 py-1 border-b border-slate-800">Qty</th>
+                    <th className="px-2 py-1 border-b border-slate-800">Time</th>
                     <th className="px-2 py-1 border-b border-slate-800">DTE</th>
-                    <th className="px-2 py-1 border-b border-slate-800 text-right">
-                      –
-                    </th>
+                    <th className="px-2 py-1 border-b border-slate-800 text-right">–</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1884,25 +1533,14 @@ const handleSaveTemplate = () => {
                       <td className="px-2 py-1">{t.symbol}</td>
                       <td className="px-2 py-1">{t.kind}</td>
                       <td className="px-2 py-1">{t.side}</td>
-                      <td className="px-2 py-1">
-                        {premiumLabel(t.kind, t.premiumSide)}
-                      </td>
-                      <td className="px-2 py-1">
-                        {strategyLabel(t.kind, t.optionStrategy)}
-                      </td>
+                      <td className="px-2 py-1">{premiumLabel(t.kind, t.premiumSide)}</td>
+                      <td className="px-2 py-1">{strategyLabel(t.kind, t.optionStrategy)}</td>
                       <td className="px-2 py-1">{t.price}</td>
                       <td className="px-2 py-1">{t.quantity}</td>
                       <td className="px-2 py-1">{t.time}</td>
-                      <td className="px-2 py-1">
-                        {t.kind === "option" ? (t.dte ?? "—") : "—"}
-                      </td>
+                      <td className="px-2 py-1">{t.kind === "option" ? (t.dte ?? "—") : "—"}</td>
                       <td className="px-2 py-1 text-right">
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteEntryTrade(t.id)}
-                          className="text-slate-500 hover:text-sky-300"
-                          title="Delete entry"
-                        >
+                        <button type="button" onClick={() => handleDeleteEntryTrade(t.id)} className="text-slate-500 hover:text-sky-300" title="Delete entry">
                           ✕
                         </button>
                       </td>
@@ -1912,15 +1550,10 @@ const handleSaveTemplate = () => {
               </table>
 
               <div className="pt-1 border-t border-slate-800 mt-1">
-                <p className="text-[11px] text-slate-400 mb-1">
-                  Average entry price per symbol/type
-                </p>
+                <p className="text-[11px] text-slate-400 mb-1">Average entry price per symbol/type</p>
                 <div className="flex flex-wrap gap-2">
                   {entryAverages.map((a) => (
-                    <span
-                      key={`${a.symbol}|${a.kind}`}
-                      className="px-2 py-1 rounded-full bg-slate-950 border border-slate-700 text-[11px]"
-                    >
+                    <span key={`${a.symbol}|${a.kind}`} className="px-2 py-1 rounded-full bg-slate-950 border border-slate-700 text-[11px]">
                       {a.symbol} ({a.kind}): {a.avg.toFixed(2)} · qty {a.qty}
                     </span>
                   ))}
@@ -1935,22 +1568,12 @@ const handleSaveTemplate = () => {
     {
       id: "exits",
       title: "Exits",
-      defaultLayout: {
-        i: "exits",
-        x: 7,
-        y: 10,
-        w: 5,
-        h: 6,
-        minW: 4,
-        minH: 5,
-      },
+      defaultLayout: { i: "exits", x: 7, y: 10, w: 5, h: 6, minW: 4, minH: 5 },
       render: () => (
         <WidgetCard title="Exits">
           <div className="grid grid-cols-1 md:grid-cols-8 gap-2 text-sm">
             <div>
-              <label className="text-xs text-slate-400 block mb-1">
-                Close position
-              </label>
+              <label className="text-xs text-slate-400 block mb-1">Close position</label>
               <select
                 value={
                   newExitTrade.symbol
@@ -1958,10 +1581,7 @@ const handleSaveTemplate = () => {
                         newExitTrade.symbol,
                         effectiveKind(newExitTrade.kind, newExitTrade.symbol),
                         newExitTrade.side,
-                        normalizePremiumSide(
-                          newExitTrade.kind,
-                          newExitTrade.premiumSide
-                        ),
+                        normalizePremiumSide(newExitTrade.kind, newExitTrade.premiumSide),
                         normalizeStrategy(newExitTrade.optionStrategy),
                       ].join("|")
                     : ""
@@ -1972,25 +1592,10 @@ const handleSaveTemplate = () => {
                 <option value="">Select…</option>
                 {openPositions.map((p) => (
                   <option
-                    key={[
-                      p.symbol,
-                      p.kind,
-                      p.side,
-                      p.premiumSide,
-                      p.optionStrategy,
-                    ].join("|")}
-                    value={[
-                      p.symbol,
-                      p.kind,
-                      p.side,
-                      p.premiumSide,
-                      p.optionStrategy,
-                    ].join("|")}
+                    key={[p.symbol, p.kind, p.side, p.premiumSide, p.optionStrategy].join("|")}
+                    value={[p.symbol, p.kind, p.side, p.premiumSide, p.optionStrategy].join("|")}
                   >
-                    {p.symbol} ({p.kind}) {p.side.toUpperCase()} ·{" "}
-                    {premiumLabel(p.kind, p.premiumSide)} ·{" "}
-                    {strategyLabel(p.kind, p.optionStrategy)} · rem{" "}
-                    {p.remainingQty}
+                    {p.symbol} ({p.kind}) {p.side.toUpperCase()} · {premiumLabel(p.kind, p.premiumSide)} · {strategyLabel(p.kind, p.optionStrategy)} · rem {p.remainingQty}
                   </option>
                 ))}
               </select>
@@ -1998,108 +1603,44 @@ const handleSaveTemplate = () => {
 
             <div>
               <label className="text-xs text-slate-400 block mb-1">Type</label>
-              <input
-                readOnly
-                value={newExitTrade.kind}
-                className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-[14px] text-slate-300"
-              />
+              <input readOnly value={newExitTrade.kind} className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-[14px] text-slate-300" />
             </div>
 
             <div>
               <label className="text-xs text-slate-400 block mb-1">Side</label>
-              <input
-                readOnly
-                value={newExitTrade.side}
-                className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-[14px] text-slate-300"
-              />
+              <input readOnly value={newExitTrade.side} className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-[14px] text-slate-300" />
             </div>
 
             <div>
-              <label className="text-xs text-slate-400 block mb-1">
-                Premium
-              </label>
-              <input
-                readOnly
-                value={premiumLabel(
-                  newExitTrade.kind,
-                  newExitTrade.premiumSide
-                )}
-                className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-[14px] text-slate-300"
-              />
+              <label className="text-xs text-slate-400 block mb-1">Premium</label>
+              <input readOnly value={premiumLabel(newExitTrade.kind, newExitTrade.premiumSide)} className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-[14px] text-slate-300" />
             </div>
 
             <div>
-              <label className="text-xs text-slate-400 block mb-1">
-                Option strategy
-              </label>
-              <input
-                readOnly
-                value={strategyLabel(
-                  newExitTrade.kind,
-                  newExitTrade.optionStrategy
-                )}
-                className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-[14px] text-slate-300"
-              />
+              <label className="text-xs text-slate-400 block mb-1">Option strategy</label>
+              <input readOnly value={strategyLabel(newExitTrade.kind, newExitTrade.optionStrategy)} className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-[14px] text-slate-300" />
             </div>
 
             <div>
-              <label className="text-xs text-slate-400 block mb-1">
-                Exit price
-              </label>
-              <input
-                type="number"
-                value={newExitTrade.price}
-                onChange={(e) =>
-                  setNewExitTrade((p) => ({ ...p, price: e.target.value }))
-                }
-                className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-[14px] text-slate-100 focus:outline-none focus:border-emerald-400"
-              />
+              <label className="text-xs text-slate-400 block mb-1">Exit price</label>
+              <input type="number" value={newExitTrade.price} onChange={(e) => setNewExitTrade((p) => ({ ...p, price: e.target.value }))} className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-[14px] text-slate-100 focus:outline-none focus:border-emerald-400" />
             </div>
 
             <div>
-              <label className="text-xs text-slate-400 block mb-1">
-                Qty to close
-              </label>
-              <input
-                type="number"
-                value={newExitTrade.quantity}
-                onChange={(e) =>
-                  setNewExitTrade((p) => ({
-                    ...p,
-                    quantity: e.target.value,
-                  }))
-                }
-                className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-[14px] text-slate-100 focus:outline-none focus:border-emerald-400"
-              />
+              <label className="text-xs text-slate-400 block mb-1">Qty to close</label>
+              <input type="number" value={newExitTrade.quantity} onChange={(e) => setNewExitTrade((p) => ({ ...p, quantity: e.target.value }))} className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-[14px] text-slate-100 focus:outline-none focus:border-emerald-400" />
             </div>
 
             <div>
               <label className="text-xs text-slate-400 block mb-1">Time</label>
-              <input
-                type="text"
-                value={newExitTrade.time}
-                onChange={(e) =>
-                  setNewExitTrade((p) => ({ ...p, time: e.target.value }))
-                }
-                className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-[14px] text-slate-300"
-              />
-              <button
-                type="button"
-                className="text-[11px] text-emerald-300 mt-1"
-                onClick={() =>
-                  setNewExitTrade((p) => ({ ...p, time: nowTimeLabel() }))
-                }
-              >
+              <input type="text" value={newExitTrade.time} onChange={(e) => setNewExitTrade((p) => ({ ...p, time: e.target.value }))} className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-[14px] text-slate-300" />
+              <button type="button" className="text-[11px] text-emerald-300 mt-1" onClick={() => setNewExitTrade((p) => ({ ...p, time: nowTimeLabel() }))}>
                 use current time
               </button>
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={handleAddExitTrade}
-            className="mt-3 px-3 py-1.5 rounded-lg bg-emerald-400 text-slate-950 text-xs font-semibold hover:bg-emerald-300 transition"
-          >
+          <button type="button" onClick={handleAddExitTrade} className="mt-3 px-3 py-1.5 rounded-lg bg-emerald-400 text-slate-950 text-xs font-semibold hover:bg-emerald-300 transition">
             Add exit
           </button>
 
@@ -2108,34 +1649,16 @@ const handleSaveTemplate = () => {
               <table className="w-full text-left text-[12px] border border-slate-800 rounded-lg overflow-hidden">
                 <thead className="bg-slate-900/80">
                   <tr>
-                    <th className="px-2 py-1 border-b border-slate-800">
-                      Symbol
-                    </th>
-                    <th className="px-2 py-1 border-b border-slate-800">
-                      Type
-                    </th>
-                    <th className="px-2 py-1 border-b border-slate-800">
-                      Side
-                    </th>
-                    <th className="px-2 py-1 border-b border-slate-800">
-                      Premium
-                    </th>
-                    <th className="px-2 py-1 border-b border-slate-800">
-                      Strategy
-                    </th>
-                    <th className="px-2 py-1 border-b border-slate-800">
-                      Price
-                    </th>
-                    <th className="px-2 py-1 border-b border-slate-800">
-                      Qty
-                    </th>
-                    <th className="px-2 py-1 border-b border-slate-800">
-                      Time
-                    </th>
+                    <th className="px-2 py-1 border-b border-slate-800">Symbol</th>
+                    <th className="px-2 py-1 border-b border-slate-800">Type</th>
+                    <th className="px-2 py-1 border-b border-slate-800">Side</th>
+                    <th className="px-2 py-1 border-b border-slate-800">Premium</th>
+                    <th className="px-2 py-1 border-b border-slate-800">Strategy</th>
+                    <th className="px-2 py-1 border-b border-slate-800">Price</th>
+                    <th className="px-2 py-1 border-b border-slate-800">Qty</th>
+                    <th className="px-2 py-1 border-b border-slate-800">Time</th>
                     <th className="px-2 py-1 border-b border-slate-800">DTE</th>
-                    <th className="px-2 py-1 border-b border-slate-800 text-right">
-                      –
-                    </th>
+                    <th className="px-2 py-1 border-b border-slate-800 text-right">–</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -2144,25 +1667,14 @@ const handleSaveTemplate = () => {
                       <td className="px-2 py-1">{t.symbol}</td>
                       <td className="px-2 py-1">{t.kind}</td>
                       <td className="px-2 py-1">{t.side}</td>
-                      <td className="px-2 py-1">
-                        {premiumLabel(t.kind, t.premiumSide)}
-                      </td>
-                      <td className="px-2 py-1">
-                        {strategyLabel(t.kind, t.optionStrategy)}
-                      </td>
+                      <td className="px-2 py-1">{premiumLabel(t.kind, t.premiumSide)}</td>
+                      <td className="px-2 py-1">{strategyLabel(t.kind, t.optionStrategy)}</td>
                       <td className="px-2 py-1">{t.price}</td>
                       <td className="px-2 py-1">{t.quantity}</td>
                       <td className="px-2 py-1">{t.time}</td>
-                      <td className="px-2 py-1">
-                        {t.kind === "option" ? (t.dte ?? "—") : "—"}
-                      </td>
+                      <td className="px-2 py-1">{t.kind === "option" ? (t.dte ?? "—") : "—"}</td>
                       <td className="px-2 py-1 text-right">
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteExitTrade(t.id)}
-                          className="text-slate-500 hover:text-sky-300"
-                          title="Delete exit"
-                        >
+                        <button type="button" onClick={() => handleDeleteExitTrade(t.id)} className="text-slate-500 hover:text-sky-300" title="Delete exit">
                           ✕
                         </button>
                       </td>
@@ -2172,15 +1684,10 @@ const handleSaveTemplate = () => {
               </table>
 
               <div className="pt-1 border-t border-slate-800 mt-1">
-                <p className="text-[11px] text-slate-400 mb-1">
-                  Average exit price per symbol/type
-                </p>
+                <p className="text-[11px] text-slate-400 mb-1">Average exit price per symbol/type</p>
                 <div className="flex flex-wrap gap-2">
                   {exitAverages.map((a) => (
-                    <span
-                      key={`${a.symbol}|${a.kind}`}
-                      className="px-2 py-1 rounded-full bg-slate-950 border border-slate-700 text-[11px]"
-                    >
+                    <span key={`${a.symbol}|${a.kind}`} className="px-2 py-1 rounded-full bg-slate-950 border border-slate-700 text-[11px]">
                       {a.symbol} ({a.kind}): {a.avg.toFixed(2)}
                     </span>
                   ))}
@@ -2195,50 +1702,28 @@ const handleSaveTemplate = () => {
     {
       id: "inside",
       title: "Inside the Trade",
-      defaultLayout: {
-        i: "inside",
-        x: 0,
-        y: 8,
-        w: 7,
-        h: 8,
-        minW: 4,
-        minH: 6,
-      },
+      defaultLayout: { i: "inside", x: 0, y: 8, w: 7, h: 8, minW: 4, minH: 6 },
       render: () => (
         <WidgetCard
-          title="Inside the Trade (mic dictation)"
+          title="Inside the Trade"
           right={
-            <EditorToolbar
-              onBold={() => execCmd("bold")}
-              onItalic={() => execCmd("italic")}
-              onUnderline={() => execCmd("underline")}
-              onUL={() => execCmd("insertUnorderedList")}
-              onOL={() => execCmd("insertOrderedList")}
-              onQuote={insertQuote}
-              onAddRow={addTableRow}
-              onAddCol={addTableColumn}
-              onInsertTable={insertTable}
-              extraRight={
-                <button
-                  type="button"
-                  onClick={toggleDictation}
-                  className={`px-2 py-1 rounded ${
-                    listening
-                      ? "bg-sky-500 text-white"
-                      : "bg-slate-800 text-slate-200"
-                  } text-xs hover:bg-slate-700`}
-                >
-                  {listening ? "● Stop dictation" : "Start dictation"}
-                </button>
-              }
-            />
+            <button
+              type="button"
+              onClick={toggleDictation}
+              className={`px-2 py-1 rounded ${listening ? "bg-sky-500 text-white" : "bg-slate-800 text-slate-200"} text-xs hover:bg-slate-700`}
+            >
+              {listening ? "● Stop dictation" : "Start dictation"}
+            </button>
           }
         >
-          <div
-            ref={liveRef}
-            contentEditable
-            suppressContentEditableWarning
-            className={editorCls}
+          <RichTextEditor
+            value={insideHtml}
+            onChange={setInsideHtml}
+            placeholder="During the trade: execution notes, management decisions, mistakes, emotions…"
+            minHeight={260}
+            onReady={(ed) => {
+              insideEditorRef.current = ed;
+            }}
           />
         </WidgetCard>
       ),
@@ -2247,37 +1732,14 @@ const handleSaveTemplate = () => {
     {
       id: "after",
       title: "After-trade Analysis",
-      defaultLayout: {
-        i: "after",
-        x: 0,
-        y: 16,
-        w: 7,
-        h: 8,
-        minW: 4,
-        minH: 6,
-      },
+      defaultLayout: { i: "after", x: 0, y: 16, w: 7, h: 8, minW: 4, minH: 6 },
       render: () => (
-        <WidgetCard
-          title="After-trade Analysis"
-          right={
-            <EditorToolbar
-              onBold={() => execCmd("bold")}
-              onItalic={() => execCmd("italic")}
-              onUnderline={() => execCmd("underline")}
-              onUL={() => execCmd("insertUnorderedList")}
-              onOL={() => execCmd("insertOrderedList")}
-              onQuote={insertQuote}
-              onAddRow={addTableRow}
-              onAddCol={addTableColumn}
-              onInsertTable={insertTable}
-            />
-          }
-        >
-          <div
-            ref={postRef}
-            contentEditable
-            suppressContentEditableWarning
-            className={editorCls}
+        <WidgetCard title="After-trade Analysis">
+          <RichTextEditor
+            value={afterHtml}
+            onChange={setAfterHtml}
+            placeholder="Post-trade: what went right/wrong, process corrections, rule breaks, next actions…"
+            minHeight={260}
           />
         </WidgetCard>
       ),
@@ -2286,44 +1748,13 @@ const handleSaveTemplate = () => {
     {
       id: "emotional",
       title: "Emotional state",
-      defaultLayout: {
-        i: "emotional",
-        x: 7,
-        y: 16,
-        w: 5,
-        h: 4,
-        minW: 3,
-        minH: 3,
-      },
+      defaultLayout: { i: "emotional", x: 7, y: 16, w: 5, h: 4, minW: 3, minH: 3 },
       render: () => (
         <WidgetCard title="Emotional state & impulses">
           <div className="flex flex-wrap gap-2 text-[13px] leading-snug">
-            {[
-    "Calm",
-  "Greedy",
-  "Desperate",
-  "Adrenaline",
-  "Confident",
-  "Fearful",
-  "Angry",
-  "FOMO", 
-  "Revenge trade",
-  "Focus",
-  "Patience",
-  "Discipline",
-  "Anxiety",
-  "Overconfident",
-            ].map((t) => (
-              <label
-                key={t}
-                className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-slate-950 border border-slate-700"
-              >
-                <input
-                  type="checkbox"
-                  onChange={() => toggleTag(t)}
-                  checked={entry.tags?.includes(t)}
-                  className="h-4 w-4 rounded border-slate-600 bg-slate-950 shrink-0"
-                />
+            {["Calm", "Greedy", "Desperate", "Adrenaline", "Confident", "Fearful", "Angry", "FOMO", "Revenge trade", "Focus", "Patience", "Discipline", "Anxiety", "Overconfident"].map((t) => (
+              <label key={t} className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-slate-950 border border-slate-700">
+                <input type="checkbox" onChange={() => toggleTag(t)} checked={entry.tags?.includes(t)} className="h-4 w-4 rounded border-slate-600 bg-slate-950 shrink-0" />
                 <span className="wrap-break-word">{t}</span>
               </label>
             ))}
@@ -2335,22 +1766,11 @@ const handleSaveTemplate = () => {
     {
       id: "strategy",
       title: "Strategy / Probability",
-      defaultLayout: {
-        i: "strategy",
-        x: 7,
-        y: 20,
-        w: 5,
-        h: 6,
-        minW: 3,
-        minH: 3,
-      },
+      defaultLayout: { i: "strategy", x: 7, y: 20, w: 5, h: 6, minW: 3, minH: 3 },
       render: () => (
         <WidgetCard title="Strategy checklist + Probability">
-          {/* Strategy checklist */}
           <div className="mb-4">
-            <p className="text-slate-200 text-sm font-semibold mb-2">
-              Strategy checklist
-            </p>
+            <p className="text-slate-200 text-sm font-semibold mb-2">Strategy checklist</p>
             <div className="flex flex-wrap gap-2 text-[13px] leading-snug">
               {[
                 "Respect Strategy",
@@ -2367,64 +1787,33 @@ const handleSaveTemplate = () => {
                 "Momentum trade",
                 "Reversal trade",
                 "Scalping trade",
-                
               ].map((t) => (
-                <label
-                  key={t}
-                  className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-slate-950 border border-slate-700"
-                >
-                  <input
-                    type="checkbox"
-                    onChange={() => toggleTag(t)}
-                    checked={entry.tags?.includes(t)}
-                    className="h-4 w-4 rounded border-slate-600 bg-slate-950 shrink-0"
-                  />
+                <label key={t} className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-slate-950 border border-slate-700">
+                  <input type="checkbox" onChange={() => toggleTag(t)} checked={entry.tags?.includes(t)} className="h-4 w-4 rounded border-slate-600 bg-slate-950 shrink-0" />
                   <span className="wrap-break-word">{t}</span>
                 </label>
               ))}
             </div>
           </div>
 
-          {/* Exit reasons */}
           <div className="border-t border-slate-800 pt-3 mt-2">
-            <p className="text-slate-200 text-sm font-semibold mb-2">
-              Exit / Stop-loss evidence
-            </p>
+            <p className="text-slate-200 text-sm font-semibold mb-2">Exit / Stop-loss evidence</p>
             <div className="flex flex-wrap gap-2 text-[13px] leading-snug">
               {exitReasonTags.map((t) => (
-                <label
-                  key={t}
-                  className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-slate-950 border border-slate-700"
-                >
-                  <input
-                    type="checkbox"
-                    onChange={() => toggleTag(t)}
-                    checked={entry.tags?.includes(t)}
-                    className="h-4 w-4 rounded border-slate-600 bg-slate-950 shrink-0"
-                  />
+                <label key={t} className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-slate-950 border border-slate-700">
+                  <input type="checkbox" onChange={() => toggleTag(t)} checked={entry.tags?.includes(t)} className="h-4 w-4 rounded border-slate-600 bg-slate-950 shrink-0" />
                   <span className="wrap-break-word">{t}</span>
                 </label>
               ))}
             </div>
           </div>
 
-          {/* Probability tags */}
           <div className="border-t border-slate-800 pt-3 mt-3">
-            <p className="text-slate-200 text-sm font-semibold mb-2">
-              Probability & stats flags
-            </p>
+            <p className="text-slate-200 text-sm font-semibold mb-2">Probability & stats flags</p>
             <div className="flex flex-wrap gap-2 text-[13px] leading-snug">
               {probabilityTags.map((t) => (
-                <label
-                  key={t}
-                  className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-slate-950 border border-slate-700"
-                >
-                  <input
-                    type="checkbox"
-                    onChange={() => toggleTag(t)}
-                    checked={entry.tags?.includes(t)}
-                    className="h-4 w-4 rounded border-slate-600 bg-slate-950 shrink-0"
-                  />
+                <label key={t} className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-slate-950 border border-slate-700">
+                  <input type="checkbox" onChange={() => toggleTag(t)} checked={entry.tags?.includes(t)} className="h-4 w-4 rounded border-slate-600 bg-slate-950 shrink-0" />
                   <span className="wrap-break-word">{t}</span>
                 </label>
               ))}
@@ -2437,15 +1826,7 @@ const handleSaveTemplate = () => {
     {
       id: "screenshots",
       title: "Screenshots",
-      defaultLayout: {
-        i: "screenshots",
-        x: 0,
-        y: 24,
-        w: 12,
-        h: 6,
-        minW: 6,
-        minH: 5,
-      },
+      defaultLayout: { i: "screenshots", x: 0, y: 24, w: 12, h: 6, minW: 6, minH: 5 },
       render: () => (
         <WidgetCard title="Screenshots (links / notes)">
           <textarea
@@ -2470,23 +1851,12 @@ const handleSaveTemplate = () => {
     {
       id: "templates",
       title: "Templates",
-      defaultLayout: {
-        i: "templates",
-        x: 0,
-        y: 30,
-        w: 12,
-        h: 5,
-        minW: 6,
-        minH: 4,
-      },
+      defaultLayout: { i: "templates", x: 0, y: 30, w: 12, h: 5, minW: 6, minH: 4 },
       render: () => (
         <WidgetCard title="Templates (Premarket + Inside + After)">
           <div className="space-y-1 max-h-40 overflow-y-auto pr-1 mb-3">
             {templates.map((tpl) => (
-              <div
-                key={tpl.id}
-                className="flex items-center justify-between gap-2 text-xs bg-slate-950/90 border border-slate-800 rounded-lg px-2 py-1"
-              >
+              <div key={tpl.id} className="flex items-center justify-between gap-2 text-xs bg-slate-950/90 border border-slate-800 rounded-lg px-2 py-1">
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
@@ -2497,15 +1867,12 @@ const handleSaveTemplate = () => {
                   </button>
                   <span className="text-slate-300">{tpl.name}</span>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => handleDeleteTemplate(tpl.id)}
-                  className="text-slate-500 hover:text-sky-300"
-                >
+                <button type="button" onClick={() => handleDeleteTemplate(tpl.id)} className="text-slate-500 hover:text-sky-300" title="Delete template">
                   ✕
                 </button>
               </div>
             ))}
+            {templates.length === 0 && <p className="text-xs text-slate-400">No templates yet.</p>}
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-[1fr,auto] gap-2">
@@ -2516,11 +1883,7 @@ const handleSaveTemplate = () => {
               placeholder="Template name"
               className="w-full px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-xs text-slate-100 focus:outline-none focus:border-emerald-400"
             />
-            <button
-              type="button"
-              onClick={handleSaveTemplate}
-              className="px-4 py-1.5 rounded-lg bg-emerald-400 text-slate-950 text-xs font-semibold hover:bg-emerald-300 transition"
-            >
+            <button type="button" onClick={handleSaveTemplate} className="px-4 py-1.5 rounded-lg bg-emerald-400 text-slate-950 text-xs font-semibold hover:bg-emerald-300 transition">
               Save current as template
             </button>
           </div>
@@ -2531,28 +1894,13 @@ const handleSaveTemplate = () => {
     {
       id: "actions",
       title: "Actions",
-      defaultLayout: {
-        i: "actions",
-        x: 0,
-        y: 35,
-        w: 12,
-        h: 4,
-        minW: 6,
-        minH: 3,
-      },
+      defaultLayout: { i: "actions", x: 0, y: 35, w: 12, h: 4, minW: 6, minH: 3 },
       render: () => (
-          <WidgetCard title="Actions">
+        <WidgetCard title="Actions">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="text-[11px] text-slate-500">
-              {msg && <span className="text-emerald-400 mr-3">{msg}</span>}
-              Your structure, your rules.
-            </div>
+            <div className="text-[11px] text-slate-500">{msg && <span className="text-emerald-400 mr-3">{msg}</span>}Your structure, your rules.</div>
             <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={handleGoToImport}
-                className="px-4 py-2 rounded-xl border border-slate-700 text-slate-200 text-xs hover:border-sky-400 hover:text-sky-300 transition"
-              >
+              <button type="button" onClick={handleGoToImport} className="px-4 py-2 rounded-xl border border-slate-700 text-slate-200 text-xs hover:border-sky-400 hover:text-sky-300 transition">
                 Import
               </button>
 
@@ -2589,7 +1937,9 @@ const handleSaveTemplate = () => {
     },
   ];
 
-  const layoutStorageKey = "journal_layout_v1";
+  /* =========================================================
+     Render
+  ========================================================= */
 
   return (
     <main className="min-h-screen bg-slate-950 text-slate-50 px-4 md:px-8 py-6">
@@ -2597,15 +1947,9 @@ const handleSaveTemplate = () => {
         {/* Top */}
         <div className="flex items-start sm:items-center justify-between gap-4 mb-4">
           <div>
-            <p className="text-emerald-400 text-xs uppercase tracking-[0.25em]">
-              Daily Journal
-            </p>
-            <h1 className="text-[28px] md:text-[32px] font-semibold mt-1">
-              {parsedDate} — session review
-            </h1>
-            <p className="text-[15px] text-slate-400 mt-1">
-              Log trades, screenshots, emotions and rule compliance.
-            </p>
+            <p className="text-emerald-400 text-xs uppercase tracking-[0.25em]">Daily Journal</p>
+            <h1 className="text-[28px] md:text-[32px] font-semibold mt-1">{parsedDate} — session review</h1>
+            <p className="text-[15px] text-slate-400 mt-1">Log trades, screenshots, emotions and rule compliance.</p>
           </div>
           <div className="flex flex-col sm:flex-row gap-2">
             <button
@@ -2626,9 +1970,7 @@ const handleSaveTemplate = () => {
 
         {/* Widget toggles */}
         <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-3 mb-5">
-          <p className="text-xs text-slate-400 mb-2">
-            Customize this journal page: toggle widgets on/off.
-          </p>
+          <p className="text-xs text-slate-400 mb-2">Customize this journal page: toggle widgets on/off.</p>
           <div className="flex flex-wrap gap-2">
             {ALL_WIDGETS.map((w) => {
               const on = activeWidgets.includes(w.id);
@@ -2652,11 +1994,7 @@ const handleSaveTemplate = () => {
         </div>
 
         {/* Grid */}
-        <JournalGrid
-          storageKey={layoutStorageKey}
-          widgets={WIDGETS}
-          activeIds={activeWidgets}
-        />
+        <JournalGrid key={journalGridKey} storageKey={layoutStorageKey} widgets={WIDGETS} activeIds={activeWidgets} />
       </div>
     </main>
   );
