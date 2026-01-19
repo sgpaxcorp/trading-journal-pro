@@ -12,7 +12,6 @@ import {
   type ChallengeId,
   type ChallengeDefinition,
   type ChallengeProgress,
-  getChallengeProgress,
   getAllChallengeProgress,
   startChallenge,
 } from "@/lib/challengesSupabase";
@@ -34,19 +33,26 @@ type DialogMode = "start" | "restart" | null;
 ========================= */
 
 function getStatusLabel(status?: string | null) {
-  if (!status || status === "not_started") return "Not started";
+  if (!status) return "Not started";
   if (status === "active") return "Active";
   if (status === "completed") return "Completed";
   if (status === "failed") return "Failed";
+  if (status === "restarted") return "Restarted";
   return status;
 }
 
 function getStatusColorClasses(status?: string | null) {
-  if (!status || status === "not_started") return "text-slate-300";
+  if (!status) return "text-slate-300";
   if (status === "active") return "text-emerald-300";
   if (status === "completed") return "text-emerald-400";
   if (status === "failed") return "text-sky-300";
+  if (status === "restarted") return "text-slate-300";
   return "text-slate-300";
+}
+
+function pct(n: number) {
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(0, Math.min(100, n));
 }
 
 /* =========================
@@ -77,7 +83,7 @@ export default function ChallengesPage() {
       try {
         setError(null);
 
-        // Cargar todos los progress de DB
+        // Latest run per challenge
         const all = await getAllChallengeProgress(userId);
 
         const map: ProgressMap = {};
@@ -101,12 +107,6 @@ export default function ChallengesPage() {
     void run();
   }, [loading, userId]);
 
-  async function refreshProgress(id: ChallengeId) {
-    if (!userId) return;
-    const p = await getChallengeProgress(userId, id);
-    setProgressMap((prev) => ({ ...prev, [id]: p }));
-  }
-
   /* ---------- Dialog handlers ---------- */
 
   function openDialog(challenge: ChallengeDefinition, mode: DialogMode) {
@@ -128,7 +128,7 @@ export default function ChallengesPage() {
       setBusy(true);
       setError(null);
 
-      // startChallenge sirve como restart
+      // startChallenge serves as restart
       const updated = await startChallenge(userId, selectedChallenge.id);
 
       setProgressMap((prev) => ({
@@ -136,7 +136,7 @@ export default function ChallengesPage() {
         [selectedChallenge.id]: updated,
       }));
 
-      // refresca gamification
+      // refresh gamification
       const g = await getProfileGamification(userId, {
         syncToDb: true,
         fallbackToDbCache: true,
@@ -161,8 +161,8 @@ export default function ChallengesPage() {
           <div>
             <h1 className="text-3xl font-semibold tracking-tight">Challenges</h1>
             <p className="mt-2 max-w-2xl text-sm text-slate-400">
-              Structured missions to build consistency, discipline, and risk
-              control. Win by following your rules, not chasing P&amp;L.
+              Structured missions to build consistency, discipline, and risk control.
+              The point is to win on process, not chase P&amp;L.
             </p>
           </div>
 
@@ -196,13 +196,13 @@ export default function ChallengesPage() {
         <section className="grid gap-6 md:grid-cols-2">
           {CHALLENGES.map((c) => {
             const progress = progressMap[c.id];
-            const status = progress?.status ?? "not_started";
+            const status = progress?.status ?? null;
 
             const greenDays = progress?.processGreenDays ?? 0;
-            const targetDays = c.durationDays;
+            const tracked = progress?.daysTracked ?? 0;
 
-            const pct =
-              targetDays > 0 ? Math.min(100, (greenDays / targetDays) * 100) : 0;
+            const pctGreen = c.durationDays > 0 ? pct((greenDays / c.durationDays) * 100) : 0;
+            const pctTracked = c.durationDays > 0 ? pct((tracked / c.durationDays) * 100) : 0;
 
             const statusLabel = getStatusLabel(status);
             const statusClasses = getStatusColorClasses(status);
@@ -243,24 +243,44 @@ export default function ChallengesPage() {
                   </div>
 
                   <div className="text-right space-y-1">
-                    <p className="text-[11px] text-slate-400">Process-green days</p>
+                    <p className="text-[11px] text-slate-400">
+                      Process-green days
+                    </p>
                     <p className="text-sm font-semibold text-slate-100">
-                      {greenDays} / {targetDays}
+                      {greenDays} / {c.durationDays}
                     </p>
                   </div>
                 </div>
 
-                {/* Progress bar */}
+                {/* Progress bars */}
                 <div className="mt-2">
+                  <div className="flex items-center justify-between text-[10px] text-slate-500 mb-1">
+                    <span>Tracked</span>
+                    <span>
+                      {tracked} / {c.durationDays}
+                    </span>
+                  </div>
+                  <div className="h-1.5 w-full rounded-full bg-slate-900 overflow-hidden">
+                    <div
+                      className="h-full rounded-full bg-sky-400"
+                      style={{ width: `${pctTracked}%` }}
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between text-[10px] text-slate-500 mt-2 mb-1">
+                    <span>Green days</span>
+                    <span>{pctGreen.toFixed(0)}%</span>
+                  </div>
                   <div className="h-1.5 w-full rounded-full bg-slate-900 overflow-hidden">
                     <div
                       className="h-full rounded-full bg-emerald-400"
-                      style={{ width: `${pct}%` }}
+                      style={{ width: `${pctGreen}%` }}
                     />
                   </div>
-                  <p className="mt-1 text-[10px] text-slate-500">
-                    Each process-green day (respecting rules + journaling) advances
-                    this bar.
+
+                  <p className="mt-2 text-[10px] text-slate-500">
+                    Track daily check-ins on the detail page. XP is awarded per check-in
+                    and bonus XP unlocks on completion.
                   </p>
                 </div>
 
@@ -288,8 +308,8 @@ export default function ChallengesPage() {
         </section>
 
         <p className="mt-6 text-[11px] text-slate-500">
-          Tip: challenges are stored in your Supabase account. Journaling + respecting
-          rules can automatically update challenge progress.
+          Tip: challenges are stored in your Supabase account. Daily check-ins create
+          a challenge history. The AI coach can reference this to coach your process.
         </p>
       </main>
 
@@ -314,21 +334,19 @@ export default function ChallengesPage() {
 
             <ul className="mb-3 list-disc space-y-1 pl-5 text-xs text-slate-200">
               <li>
-                Each trading day counts as{" "}
+                Each day can be marked as{" "}
                 <span className="font-semibold">process-green</span> only if you
-                respect your risk rules and complete your journal.
+                respect max loss and complete your journal.
               </li>
               <li>
                 The goal is to reach{" "}
                 <span className="font-semibold">
                   at least 2/3 of the {selectedChallenge.durationDays} days
                 </span>{" "}
-                as process-green. Breaking max loss too often will hurt your
-                progress.
+                as process-green.
               </li>
               <li>
-                The AI coach will use your challenge progress to give you tailored
-                feedback on consistency and risk.
+                XP is awarded per day. Completing the challenge unlocks a badge.
               </li>
             </ul>
 

@@ -490,7 +490,7 @@ export default function CommunityFeedPage() {
                   value={newBody}
                   onChange={(e) => setNewBody(e.target.value)}
                   placeholder="Describe context, what happened, what you expected, and any screenshots or steps to reproduce."
-                  className="w-full min-h-[160px] rounded-xl border border-slate-700 bg-slate-950/60 px-3 py-2 text-sm outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400/40"
+                  className="w-full min-h-40 rounded-xl border border-slate-700 bg-slate-950/60 px-3 py-2 text-sm outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400/40"
                 />
                 <p className="text-[11px] text-slate-500 mt-1">Min 20 characters.</p>
               </div>
