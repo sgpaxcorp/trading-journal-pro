@@ -480,6 +480,16 @@ export default function DailyJournalPage() {
 
   const [pnlInput, setPnlInput] = useState<string>("");
 
+  // PnL source:
+  // - 'db': trust journal_entries.pnl (net, incl. fees/commissions from broker sync)
+  // - 'auto': recompute from Entries/Exits (and subtract broker costs from notes if present)
+  const [pnlMode, setPnlMode] = useState<"db" | "auto">("db");
+  const [pnlFromDb, setPnlFromDb] = useState<number | null>(null);
+
+  // Preserve extra keys that already exist in journal_entries.notes (e.g., broker sync metadata: costs/pnl/synced_at).
+  // This prevents the UI 'Save' action from accidentally wiping sync metadata.
+  const [notesExtra, setNotesExtra] = useState<Record<string, any>>({});
+
   const [templates, setTemplates] = useState<JournalTemplate[]>([]);
   const [newTemplateName, setNewTemplateName] = useState("");
 
@@ -744,11 +754,20 @@ export default function DailyJournalPage() {
         if (existing) {
           setEntry((prev) => ({ ...prev, ...existing, date: dateParam }));
 
-          const existingPnl =
+          const existingPnlNum =
             typeof (existing as any).pnl === "number"
-              ? String((existing as any).pnl)
-              : "";
-          setPnlInput(existingPnl);
+              ? (existing as any).pnl
+              : Number((existing as any).pnl);
+
+          if (Number.isFinite(existingPnlNum)) {
+            setPnlFromDb(existingPnlNum);
+            setPnlMode("db");
+            setPnlInput(existingPnlNum.toFixed(2));
+          } else {
+            setPnlFromDb(null);
+            setPnlMode("auto");
+            setPnlInput("");
+          }
 
           const notesStr =
             typeof (existing as any).notes === "string" ? (existing as any).notes : "";
@@ -763,30 +782,44 @@ export default function DailyJournalPage() {
 
                 if (Array.isArray((parsed as any).entries)) fallbackEntries = (parsed as any).entries;
                 if (Array.isArray((parsed as any).exits)) fallbackExits = (parsed as any).exits;
+
+                // Preserve extra keys from notes (e.g., broker sync metadata: costs/pnl/synced_at)
+                try {
+                  const { premarket, live, post, entries, exits, ...rest } = parsed as any;
+                  setNotesExtra(rest && typeof rest === "object" ? (rest as any) : {});
+                } catch {
+                  setNotesExtra({});
+                }
               } else {
                 // Legacy plain string
                 setPremarketHtml(String(notesStr));
                 setInsideHtml("");
                 setAfterHtml("");
+                setNotesExtra({});
               }
             } catch {
               // Legacy plain string
               setPremarketHtml(String(notesStr));
               setInsideHtml("");
               setAfterHtml("");
+              setNotesExtra({});
             }
           } else {
             setPremarketHtml("");
             setInsideHtml("");
             setAfterHtml("");
+            setNotesExtra({});
           }
         } else {
           // No journal_entries row yet (import-only day, first open, etc.)
           setEntry((prev) => ({ ...prev, date: dateParam }));
+          setPnlFromDb(null);
+          setPnlMode("auto");
           setPnlInput("");
           setPremarketHtml("");
           setInsideHtml("");
           setAfterHtml("");
+          setNotesExtra({});
         }
 
         const storedEntries = Array.isArray((storedTrades as any)?.entries)
@@ -873,6 +906,9 @@ export default function DailyJournalPage() {
     const symbol = newEntryTrade.symbol.trim().toUpperCase();
     if (!symbol || !newEntryTrade.price.trim()) return;
 
+    // User manually changed trades → switch PnL to auto mode (computed from Entries/Exits)
+    setPnlMode("auto");
+
     let finalKind: InstrumentType = newEntryTrade.kind;
     if (finalKind === "option" && !looksLikeOptionContract(symbol)) finalKind = "stock";
 
@@ -907,7 +943,10 @@ export default function DailyJournalPage() {
     setNewEntryTrade((p) => ({ ...p, symbol: "", price: "", quantity: "", time: nowTimeLabel(), dte: null, expiry: null }));
   };
 
-  const handleDeleteEntryTrade = (id: string) => setEntryTrades((prev) => prev.filter((t) => t.id !== id));
+  const handleDeleteEntryTrade = (id: string) => {
+    setPnlMode("auto");
+    setEntryTrades((prev) => prev.filter((t) => t.id !== id));
+  };
 
   /* =========================================================
      Open positions (for exits dropdown)
@@ -1004,6 +1043,9 @@ export default function DailyJournalPage() {
     const symbol = newExitTrade.symbol.trim().toUpperCase();
     if (!symbol || !newExitTrade.price.trim()) return;
 
+    // User manually changed trades → switch PnL to auto mode (computed from Entries/Exits)
+    setPnlMode("auto");
+
     let finalKind: InstrumentType = newExitTrade.kind;
     if (finalKind === "option" && !looksLikeOptionContract(symbol)) finalKind = "stock";
 
@@ -1038,7 +1080,10 @@ export default function DailyJournalPage() {
     setNewExitTrade((p) => ({ ...p, price: "", time: nowTimeLabel(), dte: null, expiry: null }));
   };
 
-  const handleDeleteExitTrade = (id: string) => setExitTrades((prev) => prev.filter((t) => t.id !== id));
+  const handleDeleteExitTrade = (id: string) => {
+    setPnlMode("auto");
+    setExitTrades((prev) => prev.filter((t) => t.id !== id));
+  };
 
   const entryAverages = useMemo(() => computeAverages(entryTrades), [entryTrades]);
   const exitAverages = useMemo(() => computeAverages(exitTrades), [exitTrades]);
@@ -1049,11 +1094,32 @@ export default function DailyJournalPage() {
 
   const pnlCalc = useMemo(() => computeAutoPnL(entryTrades, exitTrades), [entryTrades, exitTrades]);
 
+  // Broker sync metadata (optional): stored inside journal_entries.notes by /api/journal/sync
+  const brokerCommissions = useMemo(() => toNum((notesExtra as any)?.costs?.commissions), [notesExtra]);
+  const brokerFees = useMemo(() => toNum((notesExtra as any)?.costs?.fees), [notesExtra]);
+  const brokerCostsTotal = brokerCommissions + brokerFees;
+
+  const autoGrossPnl = useMemo(() => (Number.isFinite(pnlCalc.total) ? pnlCalc.total : 0), [pnlCalc.total]);
+  const autoNetPnl = useMemo(() => autoGrossPnl - brokerCostsTotal, [autoGrossPnl, brokerCostsTotal]);
+
+  const displayPnl = useMemo(() => {
+    if (pnlMode === "db" && pnlFromDb != null && Number.isFinite(pnlFromDb)) {
+      // If broker costs are present, prefer NET PnL. Some legacy rows may have saved gross.
+      if (brokerCostsTotal > 0) {
+        const eps = 0.01;
+        if (Math.abs(pnlFromDb - autoNetPnl) <= eps) return pnlFromDb; // already net
+        if (Math.abs(pnlFromDb - autoGrossPnl) <= eps) return autoNetPnl; // looks gross → convert to net
+      }
+      return pnlFromDb;
+    }
+    return autoNetPnl;
+  }, [pnlMode, pnlFromDb, autoGrossPnl, autoNetPnl, brokerCostsTotal]);
+
   useEffect(() => {
-    const v = Number.isFinite(pnlCalc.total) ? pnlCalc.total : 0;
+    const v = Number.isFinite(displayPnl) ? displayPnl : 0;
     setEntry((p) => ({ ...p, pnl: v }));
     setPnlInput(v.toFixed(2));
-  }, [pnlCalc.total]);
+  }, [displayPnl]);
 
   /* =========================================================
      Tags
@@ -1104,7 +1170,42 @@ export default function DailyJournalPage() {
     setSaving(true);
     setMsg("");
 
+    const commissions = toNum((notesExtra as any)?.costs?.commissions);
+    const fees = toNum((notesExtra as any)?.costs?.fees);
+    const costsTotal = commissions + fees;
+
+    const grossAuto = Number.isFinite(pnlCalc.total) ? pnlCalc.total : 0;
+    const netAuto = grossAuto - costsTotal;
+
+    const pnlToSave = (() => {
+      if (pnlMode === "db" && pnlFromDb != null && Number.isFinite(pnlFromDb)) {
+        if (costsTotal > 0) {
+          const eps = 0.01;
+          if (Math.abs(pnlFromDb - netAuto) <= eps) return pnlFromDb; // already net
+          if (Math.abs(pnlFromDb - grossAuto) <= eps) return netAuto; // saved gross → convert to net
+        }
+        return pnlFromDb;
+      }
+      return netAuto;
+    })();
+
+    // Preserve any extra keys that may already exist in notes (e.g., broker sync metadata)
+    const nextExtra: Record<string, any> = { ...(notesExtra || {}) };
+
+    // Keep a pnl snapshot in notes (if desired / present)
+    try {
+      const prevPnlMeta = nextExtra.pnl && typeof nextExtra.pnl === "object" ? (nextExtra.pnl as any) : {};
+      nextExtra.pnl = {
+        ...prevPnlMeta,
+        gross: Number.isFinite(Number(prevPnlMeta.gross)) ? Number(prevPnlMeta.gross) : Number(grossAuto.toFixed(2)),
+        net: Number(pnlToSave.toFixed(2)),
+      };
+    } catch {
+      // ignore
+    }
+
     const notesPayload = JSON.stringify({
+      ...nextExtra,
       premarket: premarketHtml,
       live: insideHtml,
       post: afterHtml,
@@ -1117,7 +1218,7 @@ export default function DailyJournalPage() {
       user_id: userId,
       date: dateParam,
       notes: notesPayload,
-      pnl: Number.isFinite(Number(pnlInput)) ? Number(pnlInput) : (entry as any).pnl ?? 0,
+      pnl: Number(pnlToSave.toFixed(2)),
     };
 
     try {
@@ -1130,6 +1231,10 @@ export default function DailyJournalPage() {
         entries: storedEntries,
         exits: storedExits,
       } as any);
+
+      setNotesExtra(nextExtra);
+      setPnlFromDb(Number(pnlToSave.toFixed(2)));
+      setPnlMode("db");
 
       setMsg("Saved ✅");
       setTimeout(() => setMsg(""), 2000);
@@ -1240,9 +1345,32 @@ export default function DailyJournalPage() {
       setEntryTrades(normEntry);
       setExitTrades(normExit);
 
-      const freshPnl = freshEntry && typeof (freshEntry as any).pnl === "number" ? (freshEntry as any).pnl : Number((freshEntry as any)?.pnl) || 0;
-      setEntry((prev) => ({ ...prev, pnl: freshPnl }));
-      setPnlInput(freshPnl ? freshPnl.toFixed(2) : "");
+      const freshPnlNum =
+        freshEntry && typeof (freshEntry as any).pnl === "number"
+          ? (freshEntry as any).pnl
+          : Number((freshEntry as any)?.pnl);
+
+      if (Number.isFinite(freshPnlNum)) {
+        setPnlFromDb(freshPnlNum);
+        setPnlMode("db");
+      } else {
+        setPnlFromDb(null);
+        setPnlMode("auto");
+      }
+
+      // Update broker metadata from notes (costs/pnl/etc) WITHOUT overwriting the user's local rich-text edits
+      try {
+        const notesStr = freshEntry && typeof (freshEntry as any).notes === "string" ? (freshEntry as any).notes : "";
+        if (notesStr) {
+          const parsedNotes = JSON.parse(notesStr);
+          if (parsedNotes && typeof parsedNotes === "object") {
+            const { premarket, live, post, entries, exits, ...rest } = parsedNotes as any;
+            setNotesExtra(rest && typeof rest === "object" ? (rest as any) : {});
+          }
+        }
+      } catch {
+        // ignore
+      }
     } catch (err) {
       console.error(err);
       setMsg("Error syncing trades.");
@@ -1721,7 +1849,7 @@ export default function DailyJournalPage() {
             onChange={setInsideHtml}
             placeholder="During the trade: execution notes, management decisions, mistakes, emotions…"
             minHeight={260}
-            onReady={(ed) => {
+            onReady={(ed: any) => {
               insideEditorRef.current = ed;
             }}
           />
