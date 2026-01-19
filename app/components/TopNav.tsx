@@ -480,7 +480,7 @@ const forum: NavItem[] = [
     id: "community-feed",
     title: "Community feed",
     description: "Share progress with other traders.",
-    href: "/forum/feed",
+    href: "/forum/community-feed",
   },
 ];
 
