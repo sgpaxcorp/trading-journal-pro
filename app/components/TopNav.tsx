@@ -436,18 +436,6 @@ const challenges: NavItem[] = [
     description: "Consistency challenge with rules.",
     href: "/challenges",
   },
-  {
-    id: "drawdown",
-    title: "Drawdown recovery",
-    description: "Plan to climb out safely.",
-    href: "/challenge/drawdown",
-  },
-  {
-    id: "account-goals",
-    title: "Account goals",
-    description: "Milestones for balance and risk.",
-    href: "/challenge/account-goals",
-  },
 ];
 
 const resources: NavItem[] = [
