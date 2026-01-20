@@ -30,6 +30,8 @@ export type ChallengeId =
   | "journal-streak"
   | "no-revenge";
 
+export type ChallengeTier = "Bronze" | "Silver" | "Gold" | "Platinum" | "Diamond";
+
 export type ChallengeStatus =
   | "active"
   | "completed"
