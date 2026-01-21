@@ -59,7 +59,10 @@ export async function saveJournalUiSettings(
     .upsert(payload, { onConflict: "user_id,page_key" });
 
   if (error) {
-    console.error("[journalUiSettingsSupabase] saveJournalUiSettings error:", error);
-    throw error;
+    // In the Journal page, a missing row or RLS misconfiguration can happen while
+    // users are onboarding. We still want the UI to work without spamming the dev
+    // overlay with console errors.
+    console.warn("[journalUiSettingsSupabase] saveJournalUiSettings warning:", error);
+    return;
   }
 }

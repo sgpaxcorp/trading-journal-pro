@@ -1,239 +1,144 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import React, { useEffect, useMemo, useState } from "react";
 
-import type { Editor } from "@tiptap/react";
 import { EditorContent, useEditor } from "@tiptap/react";
-
 import StarterKit from "@tiptap/starter-kit";
 import Underline from "@tiptap/extension-underline";
 import Link from "@tiptap/extension-link";
 import Placeholder from "@tiptap/extension-placeholder";
-import TextAlign from "@tiptap/extension-text-align";
-
 import { Table } from "@tiptap/extension-table";
 import { TableRow } from "@tiptap/extension-table-row";
 import { TableHeader } from "@tiptap/extension-table-header";
 import { TableCell } from "@tiptap/extension-table-cell";
 
-type Theme = "dark" | "light";
+/* =========================================================
+   Types
+========================================================= */
 
 type TableSize = { rows: number; cols: number };
 
-type Props = {
+type ToolbarTheme = "light";
+
+export type RichTextEditorProps = {
   value: string;
   onChange: (html: string) => void;
   placeholder?: string;
   className?: string;
   minHeight?: number;
-  onReady?: (editor: Editor) => void;
-  theme?: Theme;
+
+  /** Optional hook for parent components (e.g., dictation insertion) */
+  onReady?: (editor: any) => void;
+
+  /** Toolbar is intentionally "light" (white) for a professional look.
+   *  Editor surface remains dark to match the app.
+   */
+  toolbarTheme?: ToolbarTheme;
 };
+
+/* =========================================================
+   Small helpers
+========================================================= */
 
 function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
 }
 
-function useOnClickOutside(
-  refs: React.RefObject<HTMLElement>[],
-  handler: (e: MouseEvent | TouchEvent) => void,
-  enabled: boolean
-) {
-  useEffect(() => {
-    if (!enabled) return;
-
-    const listener = (e: MouseEvent | TouchEvent) => {
-      const target = e.target as Node | null;
-      if (!target) return;
-
-      for (const r of refs) {
-        const el = r.current;
-        if (el && el.contains(target)) return;
-      }
-
-      handler(e);
-    };
-
-    document.addEventListener("mousedown", listener);
-    document.addEventListener("touchstart", listener);
-    return () => {
-      document.removeEventListener("mousedown", listener);
-      document.removeEventListener("touchstart", listener);
-    };
-  }, [refs, handler, enabled]);
-}
-
 function Icon({ children }: { children: React.ReactNode }) {
-  return <span className="inline-flex h-5 w-5 items-center justify-center">{children}</span>;
+  return <span className="inline-flex h-8 w-8 items-center justify-center">{children}</span>;
 }
 
-type ToolbarButtonProps = {
+function TablePicker({ onPick }: { onPick: (size: TableSize) => void }) {
+  const [hover, setHover] = useState<TableSize | null>(null);
+
+  return (
+    <div className="absolute left-0 top-full mt-2 w-[220px] rounded-xl border border-slate-200 bg-white p-3 shadow-xl z-50">
+      <div className="mb-2 text-[11px] text-slate-500">
+        {hover ? `${hover.rows} × ${hover.cols}` : "Choose size (max 6×6)"}
+      </div>
+      <div className="grid grid-cols-6 gap-1">
+        {Array.from({ length: 36 }).map((_, i) => {
+          const r = Math.floor(i / 6) + 1;
+          const c = (i % 6) + 1;
+          const active = !!hover && r <= hover.rows && c <= hover.cols;
+
+          return (
+            <button
+              key={i}
+              type="button"
+              onMouseEnter={() => setHover({ rows: r, cols: c })}
+              onMouseLeave={() => setHover(null)}
+              onClick={() => onPick({ rows: r, cols: c })}
+              className={
+                "h-6 w-6 rounded border transition " +
+                (active
+                  ? "border-emerald-500 bg-emerald-100"
+                  : "border-slate-200 bg-slate-50 hover:bg-slate-100")
+              }
+              aria-label={`Insert ${r} by ${c} table`}
+              title={`Insert ${r}×${c}`}
+            />
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function ToolbarButton({
+  title,
+  active,
+  disabled,
+  onClick,
+  children,
+  theme,
+}: {
   title: string;
   active?: boolean;
   disabled?: boolean;
   onClick: () => void;
   children: React.ReactNode;
-  theme: Theme;
-};
+  theme: ToolbarTheme;
+}) {
+  const base =
+    "inline-flex items-center justify-center rounded-lg border text-sm font-semibold transition select-none";
 
-const ToolbarButton = React.forwardRef<HTMLButtonElement, ToolbarButtonProps>(function ToolbarButton(
-  { title, active, disabled, onClick, children, theme },
-  ref
-) {
-  const cls = useMemo(() => {
-    const base =
-      "inline-flex h-9 w-9 items-center justify-center rounded-lg border text-sm font-semibold transition focus:outline-none";
-
-    if (theme === "light") {
-      if (disabled) return `${base} cursor-not-allowed border-slate-200 bg-white text-slate-300`;
-      if (active) return `${base} border-emerald-400 bg-emerald-50 text-emerald-700`;
-      return `${base} border-slate-200 bg-white text-slate-700 hover:bg-slate-50`;
-    }
-
-    // dark
-    if (disabled) return `${base} cursor-not-allowed border-slate-700 bg-slate-900/60 text-slate-500`;
-    if (active) return `${base} border-emerald-400 bg-emerald-500/10 text-emerald-200`;
-    return `${base} border-slate-700 bg-slate-900/60 text-slate-200 hover:bg-slate-800/70`;
-  }, [active, disabled, theme]);
+  // For now we only support light toolbar to match the design request.
+  const cls =
+    theme === "light"
+      ? disabled
+        ? `${base} border-slate-200 bg-white text-slate-300 cursor-not-allowed`
+        : active
+        ? `${base} border-slate-900 bg-slate-900 text-white`
+        : `${base} border-slate-200 bg-white text-slate-700 hover:bg-slate-100`
+      : base;
 
   return (
-    <button ref={ref} type="button" className={cls} title={title} aria-label={title} onClick={onClick} disabled={disabled}>
+    <button type="button" title={title} aria-label={title} className={cls} onClick={onClick} disabled={disabled}>
       {children}
     </button>
   );
-});
-
-function ToolbarDivider({ theme }: { theme: Theme }) {
-  return <div className={`mx-1 h-6 w-px ${theme === "light" ? "bg-slate-200" : "bg-slate-700"}`} />;
 }
 
-function TablePickerPortal({
-  open,
-  anchorRef,
-  onPick,
-  onClose,
-  theme,
-}: {
-  open: boolean;
-  anchorRef: React.RefObject<HTMLElement>;
-  onPick: (size: TableSize) => void;
-  onClose: () => void;
-  theme: Theme;
-}) {
-  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
-  const [hover, setHover] = useState<TableSize | null>(null);
-  const panelRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const el = anchorRef.current;
-    if (!el) return;
-
-    const rect = el.getBoundingClientRect();
-    const left = Math.max(12, Math.min(rect.left, window.innerWidth - 260));
-    const top = rect.bottom + 10;
-    setPos({ left, top });
-  }, [open, anchorRef]);
-
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
-
-  useOnClickOutside([panelRef, anchorRef as any], () => onClose(), open);
-
-  if (!open) return null;
-  if (typeof document === "undefined" || !pos) return null;
-
-  const panel = (
-    <div
-      ref={panelRef}
-      className={`fixed z-9999 rounded-2xl border shadow-xl ${
-        theme === "light" ? "border-slate-200 bg-white" : "border-slate-700 bg-slate-950"
-      }`}
-      style={{ left: pos.left, top: pos.top }}
-    >
-      <div className={`px-4 pt-3 text-[12px] ${theme === "light" ? "text-slate-700" : "text-slate-200"}`}>
-        {hover ? (
-          <span className="font-semibold">{hover.rows} × {hover.cols}</span>
-        ) : (
-          <span className="font-semibold">Choose size</span>
-        )}
-        <span className={`ml-2 ${theme === "light" ? "text-slate-400" : "text-slate-400"}`}>(max 6×6)</span>
-      </div>
-
-      <div className="px-4 pb-4 pt-3">
-        <div className="grid grid-cols-6 gap-1">
-          {Array.from({ length: 36 }).map((_, i) => {
-            const r = Math.floor(i / 6) + 1;
-            const c = (i % 6) + 1;
-            const active = !!hover && r <= hover.rows && c <= hover.cols;
-
-            const cellCls =
-              theme === "light"
-                ? active
-                  ? "bg-emerald-400"
-                  : "bg-slate-200 hover:bg-slate-300"
-                : active
-                  ? "bg-emerald-400"
-                  : "bg-slate-800 hover:bg-slate-700";
-
-            return (
-              <button
-                key={i}
-                type="button"
-                onMouseEnter={() => setHover({ rows: r, cols: c })}
-                onMouseLeave={() => setHover(null)}
-                onClick={() => onPick({ rows: r, cols: c })}
-                className={`h-6 w-6 rounded-md transition ${cellCls}`}
-                aria-label={`Insert ${r} by ${c} table`}
-              />
-            );
-          })}
-        </div>
-
-        <div className="mt-3 flex justify-end">
-          <button
-            type="button"
-            onClick={onClose}
-            className={`rounded-full px-3 py-1 text-[11px] font-semibold transition ${
-              theme === "light"
-                ? "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-                : "border border-slate-700 bg-slate-950 text-slate-200 hover:bg-slate-900"
-            }`}
-          >
-            Close
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-
-  return createPortal(panel, document.body);
-}
+/* =========================================================
+   Component
+========================================================= */
 
 export default function RichTextEditor({
   value,
   onChange,
-  placeholder,
+  placeholder = "Write…",
   className = "",
   minHeight = 260,
   onReady,
-  theme = "light",
-}: Props) {
+  toolbarTheme = "light",
+}: RichTextEditorProps) {
   const [tableOpen, setTableOpen] = useState(false);
-  const tableBtnRef = useRef<HTMLButtonElement | null>(null);
 
-  const editor = useEditor({
-    extensions: [
+  const extensions = useMemo(
+    () => [
       StarterKit.configure({
         heading: { levels: [1, 2, 3] },
-        // Avoid version-specific typing issues (and keep the editor focused on journaling)
         codeBlock: false,
       }),
       Underline,
@@ -241,27 +146,22 @@ export default function RichTextEditor({
         openOnClick: false,
         autolink: true,
         linkOnPaste: true,
-        HTMLAttributes: {
-          class: "nt-rte-link",
-        },
       }),
-      Placeholder.configure({
-        placeholder: placeholder ?? "Write...",
-      }),
-      TextAlign.configure({
-        types: ["heading", "paragraph"],
-      }),
+      Placeholder.configure({ placeholder }),
       Table.configure({
         resizable: true,
-        HTMLAttributes: {
-          class: "nt-rte-table",
-        },
+        lastColumnResizable: true,
+        allowTableNodeSelection: true,
       }),
       TableRow,
       TableHeader,
       TableCell,
     ],
-    // Prevent hydration mismatch in Next.js app router
+    [placeholder]
+  );
+
+  const editor = useEditor({
+    extensions,
     immediatelyRender: false,
     content: value || "<p></p>",
     onUpdate: ({ editor }) => {
@@ -269,53 +169,51 @@ export default function RichTextEditor({
     },
     editorProps: {
       attributes: {
-        class: "nt-rte-prosemirror",
+        class:
+          // Keep typography readable on dark background; use a scoped wrapper for list/table fixes.
+          "nt-rte__content focus:outline-none px-4 py-3 text-[15px] leading-relaxed text-slate-100",
         style: `min-height: ${minHeight}px;`,
       },
     },
   });
 
-  // Expose editor instance to parent (dictation insertion, etc.)
+  // Notify parent when ready
   useEffect(() => {
     if (!editor || !onReady) return;
-    onReady(editor);
-  }, [editor, onReady]);
+    try {
+      onReady(editor);
+    } catch {
+      // ignore
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editor]);
 
-  // Keep editor in sync with external value
+  // Keep editor in sync with outer state
   useEffect(() => {
     if (!editor) return;
-    const cur = editor.getHTML();
+
+    const current = editor.getHTML();
     const next = value || "<p></p>";
-    if (cur !== next) {
-      editor.commands.setContent(next);
+
+    if (current !== next) {
+      // TipTap v2+: second argument is options
+      editor.commands.setContent(next, { emitUpdate: false });
     }
   }, [value, editor]);
 
-  useEffect(() => {
-    if (!editor) return;
-
-    // Close the table picker if editor loses focus (optional)
-    const onBlur = () => setTableOpen(false);
-    editor.on("blur", onBlur);
-    return () => {
-      editor.off("blur", onBlur);
-    };
-  }, [editor]);
-
-  const toolbarCls =
-    theme === "light"
-      ? "rounded-2xl border border-slate-200 bg-white px-2 py-2 shadow-sm"
-      : "rounded-2xl border border-slate-700 bg-slate-950/60 px-2 py-2";
-
-  const surfaceCls =
-    theme === "light"
-      ? "rounded-2xl border border-slate-200 bg-white"
-      : "rounded-2xl border border-slate-800 bg-slate-950";
+  const can = (fn: () => boolean) => {
+    try {
+      return !!editor?.can().chain().focus() && fn();
+    } catch {
+      return false;
+    }
+  };
 
   const insertLink = () => {
     if (!editor) return;
-    const prev = (editor.getAttributes("link")?.href as string | undefined) ?? "";
+    const prev = editor.getAttributes("link").href as string | undefined;
     const url = window.prompt("Paste URL", prev || "https://");
+
     if (url === null) return;
 
     const trimmed = url.trim();
@@ -340,243 +238,234 @@ export default function RichTextEditor({
       .run();
   };
 
-  const canAddRow = !!editor?.can().chain().focus().addRowAfter().run();
-  const canAddCol = !!editor?.can().chain().focus().addColumnAfter().run();
-  const canDelTable = !!editor?.can().chain().focus().deleteTable().run();
-
   return (
-    <div className={`nt-rte w-full ${className}`.trim()}>
-      {/* Toolbar */}
-      <div className={toolbarCls}>
-        <div className="flex flex-wrap items-center gap-1">
+    <div className={`w-full ${className}`.trim()}>
+      {/*
+        Professional "light" toolbar like the reference screenshot
+        while keeping the editor surface dark (matching the app).
+      */}
+      <div className="mb-2 flex flex-wrap items-center gap-1 rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
+        <ToolbarButton
+          theme={toolbarTheme}
+          title="Bold"
+          active={!!editor?.isActive("bold")}
+          disabled={!editor}
+          onClick={() => editor?.chain().focus().toggleBold().run()}
+        >
+          <Icon>
+            <span className="font-black">B</span>
+          </Icon>
+        </ToolbarButton>
+
+        <ToolbarButton
+          theme={toolbarTheme}
+          title="Italic"
+          active={!!editor?.isActive("italic")}
+          disabled={!editor}
+          onClick={() => editor?.chain().focus().toggleItalic().run()}
+        >
+          <Icon>
+            <span className="italic">I</span>
+          </Icon>
+        </ToolbarButton>
+
+        <ToolbarButton
+          theme={toolbarTheme}
+          title="Underline"
+          active={!!editor?.isActive("underline")}
+          disabled={!editor}
+          onClick={() => editor?.chain().focus().toggleUnderline().run()}
+        >
+          <Icon>
+            <span className="underline">U</span>
+          </Icon>
+        </ToolbarButton>
+
+        <ToolbarButton
+          theme={toolbarTheme}
+          title="Bullet list"
+          active={!!editor?.isActive("bulletList")}
+          disabled={!editor}
+          onClick={() => editor?.chain().focus().toggleBulletList().run()}
+        >
+          <Icon>•</Icon>
+        </ToolbarButton>
+
+        <ToolbarButton
+          theme={toolbarTheme}
+          title="Numbered list"
+          active={!!editor?.isActive("orderedList")}
+          disabled={!editor}
+          onClick={() => editor?.chain().focus().toggleOrderedList().run()}
+        >
+          <Icon>1.</Icon>
+        </ToolbarButton>
+
+        <ToolbarButton
+          theme={toolbarTheme}
+          title="Quote"
+          active={!!editor?.isActive("blockquote")}
+          disabled={!editor}
+          onClick={() => editor?.chain().focus().toggleBlockquote().run()}
+        >
+          <Icon>“”</Icon>
+        </ToolbarButton>
+
+        <ToolbarButton
+          theme={toolbarTheme}
+          title="Insert link"
+          active={!!editor?.isActive("link")}
+          disabled={!editor}
+          onClick={insertLink}
+        >
+          <Icon>🔗</Icon>
+        </ToolbarButton>
+
+        <div className="relative">
           <ToolbarButton
-            theme={theme}
-            title="Bold"
-            active={!!editor?.isActive("bold")}
-            disabled={!editor}
-            onClick={() => editor?.chain().focus().toggleBold().run()}
-          >
-            <Icon>B</Icon>
-          </ToolbarButton>
-
-          <ToolbarButton
-            theme={theme}
-            title="Italic"
-            active={!!editor?.isActive("italic")}
-            disabled={!editor}
-            onClick={() => editor?.chain().focus().toggleItalic().run()}
-          >
-            <Icon>I</Icon>
-          </ToolbarButton>
-
-          <ToolbarButton
-            theme={theme}
-            title="Underline"
-            active={!!editor?.isActive("underline")}
-            disabled={!editor}
-            onClick={() => editor?.chain().focus().toggleUnderline().run()}
-          >
-            <Icon>U</Icon>
-          </ToolbarButton>
-
-          <ToolbarDivider theme={theme} />
-
-          <ToolbarButton
-            theme={theme}
-            title="Bullet list"
-            active={!!editor?.isActive("bulletList")}
-            disabled={!editor}
-            onClick={() => editor?.chain().focus().toggleBulletList().run()}
-          >
-            <Icon>•</Icon>
-          </ToolbarButton>
-
-          <ToolbarButton
-            theme={theme}
-            title="Numbered list"
-            active={!!editor?.isActive("orderedList")}
-            disabled={!editor}
-            onClick={() => editor?.chain().focus().toggleOrderedList().run()}
-          >
-            <Icon>1.</Icon>
-          </ToolbarButton>
-
-          <ToolbarButton
-            theme={theme}
-            title="Quote"
-            active={!!editor?.isActive("blockquote")}
-            disabled={!editor}
-            onClick={() => editor?.chain().focus().toggleBlockquote().run()}
-          >
-            <Icon>“”</Icon>
-          </ToolbarButton>
-
-          <ToolbarDivider theme={theme} />
-
-          <ToolbarButton
-            theme={theme}
-            title="Insert link"
-            active={!!editor?.isActive("link")}
-            disabled={!editor}
-            onClick={insertLink}
-          >
-            <Icon>🔗</Icon>
-          </ToolbarButton>
-
-          <ToolbarButton
-            ref={tableBtnRef}
-            theme={theme}
+            theme={toolbarTheme}
             title="Insert table"
-            active={tableOpen}
             disabled={!editor}
             onClick={() => setTableOpen((v) => !v)}
           >
             <Icon>▦</Icon>
           </ToolbarButton>
-
-          <ToolbarButton
-            theme={theme}
-            title="Add row"
-            disabled={!editor || !canAddRow}
-            onClick={() => editor?.chain().focus().addRowAfter().run()}
-          >
-            <Icon>+r</Icon>
-          </ToolbarButton>
-
-          <ToolbarButton
-            theme={theme}
-            title="Add column"
-            disabled={!editor || !canAddCol}
-            onClick={() => editor?.chain().focus().addColumnAfter().run()}
-          >
-            <Icon>+c</Icon>
-          </ToolbarButton>
-
-          <ToolbarButton
-            theme={theme}
-            title="Delete table"
-            disabled={!editor || !canDelTable}
-            onClick={() => editor?.chain().focus().deleteTable().run()}
-          >
-            <Icon>del</Icon>
-          </ToolbarButton>
-
-          <div className="ml-auto" />
-
-          <ToolbarButton
-            theme={theme}
-            title="Undo"
-            disabled={!editor || !editor.can().chain().focus().undo().run()}
-            onClick={() => editor?.chain().focus().undo().run()}
-          >
-            <Icon>↶</Icon>
-          </ToolbarButton>
-
-          <ToolbarButton
-            theme={theme}
-            title="Redo"
-            disabled={!editor || !editor.can().chain().focus().redo().run()}
-            onClick={() => editor?.chain().focus().redo().run()}
-          >
-            <Icon>↷</Icon>
-          </ToolbarButton>
+          {tableOpen && editor && (
+            <TablePicker
+              onPick={(size) => {
+                insertTable(size.rows, size.cols);
+                setTableOpen(false);
+              }}
+            />
+          )}
         </div>
+
+        <ToolbarButton
+          theme={toolbarTheme}
+          title="Add table row"
+          disabled={!editor || !can(() => editor!.can().addRowAfter())}
+          onClick={() => editor?.chain().focus().addRowAfter().run()}
+        >
+          <Icon>+row</Icon>
+        </ToolbarButton>
+
+        <ToolbarButton
+          theme={toolbarTheme}
+          title="Add table column"
+          disabled={!editor || !can(() => editor!.can().addColumnAfter())}
+          onClick={() => editor?.chain().focus().addColumnAfter().run()}
+        >
+          <Icon>+col</Icon>
+        </ToolbarButton>
+
+        <ToolbarButton
+          theme={toolbarTheme}
+          title="Delete table"
+          disabled={!editor || !can(() => editor!.can().deleteTable())}
+          onClick={() => editor?.chain().focus().deleteTable().run()}
+        >
+          <Icon>del</Icon>
+        </ToolbarButton>
+
+        <div className="ml-auto" />
+
+        <ToolbarButton
+          theme={toolbarTheme}
+          title="Undo"
+          disabled={!editor || !can(() => editor!.can().undo())}
+          onClick={() => editor?.chain().focus().undo().run()}
+        >
+          <Icon>↶</Icon>
+        </ToolbarButton>
+
+        <ToolbarButton
+          theme={toolbarTheme}
+          title="Redo"
+          disabled={!editor || !can(() => editor!.can().redo())}
+          onClick={() => editor?.chain().focus().redo().run()}
+        >
+          <Icon>↷</Icon>
+        </ToolbarButton>
       </div>
 
-      {/* Table picker (portal to avoid clipping inside cards) */}
-      <TablePickerPortal
-        open={tableOpen && !!editor}
-        anchorRef={tableBtnRef as any}
-        theme={theme}
-        onPick={(size) => {
-          insertTable(size.rows, size.cols);
-          setTableOpen(false);
-        }}
-        onClose={() => setTableOpen(false)}
-      />
-
-      {/* Editor surface */}
-      <div className={`${surfaceCls} mt-2`}>
+      {/* Dark editor surface (keeps the app look) */}
+      <div className="nt-rte rounded-xl border border-slate-800 bg-slate-950">
         <EditorContent editor={editor} />
       </div>
 
-      {/* Local styles: list bullets + table borders visible on dark backgrounds */}
+      {/*
+        Scoped fixes:
+        - Force list markers to be visible (in case a global CSS reset removed them)
+        - Force table borders to be visible on dark background
+        - Provide reasonable table spacing and header styling
+      */}
       <style jsx global>{`
-        .nt-rte .nt-rte-prosemirror {
-          padding: 14px 14px;
-          font-size: 15px;
-          line-height: 1.6;
-          color: rgb(226 232 240);
+        .nt-rte .ProseMirror {
           outline: none;
         }
 
-        /* Lists (Tailwind preflight removes markers by default) */
+        .nt-rte .ProseMirror p {
+          margin: 0.4rem 0;
+        }
+
+        .nt-rte .ProseMirror ul,
+        .nt-rte .ProseMirror ol {
+          padding-left: 1.25rem;
+          margin: 0.6rem 0;
+        }
+
         .nt-rte .ProseMirror ul {
           list-style: disc;
-          padding-left: 1.35rem;
-          margin: 0.35rem 0;
         }
+
         .nt-rte .ProseMirror ol {
           list-style: decimal;
-          padding-left: 1.35rem;
-          margin: 0.35rem 0;
         }
+
         .nt-rte .ProseMirror li {
-          margin: 0.15rem 0;
+          margin: 0.25rem 0;
         }
 
-        /* Paragraph spacing */
-        .nt-rte .ProseMirror p {
-          margin: 0.35rem 0;
-        }
-
-        /* Blockquote */
-        .nt-rte .ProseMirror blockquote {
-          border-left: 3px solid rgba(16, 185, 129, 0.5);
-          padding-left: 0.85rem;
-          margin: 0.6rem 0;
-          color: rgb(226 232 240);
-          opacity: 0.95;
-        }
-
-        /* Links */
-        .nt-rte .ProseMirror a.nt-rte-link,
-        .nt-rte .ProseMirror a {
-          color: rgb(110 231 183);
-          text-decoration: underline;
-          text-underline-offset: 3px;
-        }
-
-        /* Tables */
         .nt-rte .ProseMirror table {
           width: 100%;
           border-collapse: collapse;
-          margin: 0.6rem 0;
+          margin: 0.75rem 0;
           table-layout: fixed;
         }
+
         .nt-rte .ProseMirror th,
         .nt-rte .ProseMirror td {
-          border: 1px solid rgba(148, 163, 184, 0.35);
-          padding: 0.45rem 0.55rem;
+          border: 1px solid rgba(226, 232, 240, 0.28);
+          padding: 0.5rem 0.6rem;
           vertical-align: top;
           word-break: break-word;
         }
+
         .nt-rte .ProseMirror th {
-          background: rgba(2, 6, 23, 0.35);
-          color: rgb(226 232 240);
-          font-weight: 600;
-        }
-        .nt-rte .ProseMirror td {
-          background: rgba(2, 6, 23, 0.12);
+          background: rgba(2, 6, 23, 0.6);
+          color: rgba(226, 232, 240, 0.95);
+          font-weight: 700;
         }
 
-        /* Make the editor feel better when empty */
-        .nt-rte .ProseMirror p.is-editor-empty:first-child::before {
-          color: rgba(148, 163, 184, 0.75);
-          content: attr(data-placeholder);
-          float: left;
-          height: 0;
-          pointer-events: none;
+        .nt-rte .ProseMirror td {
+          background: rgba(2, 6, 23, 0.25);
+        }
+
+        .nt-rte .ProseMirror .selectedCell:after {
+          background: rgba(16, 185, 129, 0.18);
+        }
+
+        .nt-rte .ProseMirror a {
+          color: rgba(110, 231, 183, 0.95);
+          text-decoration: underline;
+          text-underline-offset: 2px;
+        }
+
+        .nt-rte .ProseMirror blockquote {
+          border-left: 2px solid rgba(16, 185, 129, 0.6);
+          padding-left: 0.75rem;
+          margin: 0.75rem 0;
+          color: rgba(226, 232, 240, 0.85);
         }
       `}</style>
     </div>
