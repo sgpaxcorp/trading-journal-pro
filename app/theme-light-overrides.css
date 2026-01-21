@@ -1,0 +1,84 @@
+/* =========================================================
+   NeuroTrader "Light mode" overrides
+   Scope: only when <html class="theme-light">
+   Goal: keep your existing Tailwind classes, but remap the
+         dark palette to a clean, light UI with soft lines
+         and Neuro colors (emerald/violet/sky).
+   ========================================================= */
+
+html.theme-light {
+  color-scheme: light;
+}
+
+/* Base background + subtle brand "diffusion" */
+html.theme-light body {
+  background:
+    radial-gradient(1200px 700px at 12% 12%, rgba(16, 185, 129, 0.10), transparent 55%),
+    radial-gradient(1100px 650px at 88% 14%, rgba(139, 92, 246, 0.10), transparent 55%),
+    radial-gradient(900px 600px at 52% 88%, rgba(56, 189, 248, 0.10), transparent 60%),
+    #f7f9fc;
+  color: #0f172a;
+}
+
+/* Borders: convert dark slate borders to soft gray */
+html.theme-light .border-slate-900 { border-color: #e2e8f0 !important; }
+html.theme-light .border-slate-800 { border-color: #e2e8f0 !important; }
+html.theme-light .border-slate-700 { border-color: #cbd5e1 !important; }
+html.theme-light .border-slate-600 { border-color: #cbd5e1 !important; }
+
+/* Text: flip slate scale to readable dark text */
+html.theme-light .text-slate-50,
+html.theme-light .text-slate-100,
+html.theme-light .text-slate-200 {
+  color: #0f172a !important;
+}
+html.theme-light .text-slate-300 { color: #334155 !important; }
+html.theme-light .text-slate-400 { color: #475569 !important; }
+html.theme-light .text-slate-500 { color: #64748b !important; }
+
+/* Backgrounds: remap your core dark containers */
+html.theme-light .bg-slate-950 { background-color: rgba(248, 250, 252, 1) !important; }
+html.theme-light .bg-slate-900 { background-color: rgba(255, 255, 255, 1) !important; }
+html.theme-light .bg-slate-800 { background-color: rgba(241, 245, 249, 1) !important; }
+
+/* Backgrounds with opacity (Tailwind slash classes) */
+html.theme-light .bg-slate-950\/95 { background-color: rgba(248, 250, 252, 0.95) !important; }
+html.theme-light .bg-slate-950\/90 { background-color: rgba(248, 250, 252, 0.90) !important; }
+html.theme-light .bg-slate-950\/80 { background-color: rgba(248, 250, 252, 0.80) !important; }
+html.theme-light .bg-slate-950\/70 { background-color: rgba(248, 250, 252, 0.70) !important; }
+html.theme-light .bg-slate-950\/60 { background-color: rgba(248, 250, 252, 0.60) !important; }
+
+html.theme-light .bg-slate-900\/95 { background-color: rgba(255, 255, 255, 0.95) !important; }
+html.theme-light .bg-slate-900\/90 { background-color: rgba(255, 255, 255, 0.90) !important; }
+html.theme-light .bg-slate-900\/80 { background-color: rgba(255, 255, 255, 0.85) !important; }
+html.theme-light .bg-slate-900\/70 { background-color: rgba(255, 255, 255, 0.78) !important; }
+html.theme-light .bg-slate-900\/60 { background-color: rgba(255, 255, 255, 0.70) !important; }
+
+html.theme-light .bg-slate-800\/70 { background-color: rgba(241, 245, 249, 0.80) !important; }
+html.theme-light .bg-slate-800\/60 { background-color: rgba(241, 245, 249, 0.70) !important; }
+
+/* Dropdowns / panels often use slate shadows; soften them a bit */
+html.theme-light .shadow-slate-900\/70 {
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.12) !important;
+}
+
+/* Inputs / selects: preserve shape but improve contrast in light mode */
+html.theme-light input,
+html.theme-light textarea,
+html.theme-light select {
+  color: #0f172a;
+}
+html.theme-light input::placeholder,
+html.theme-light textarea::placeholder {
+  color: #94a3b8;
+}
+
+/* Focus rings: keep brand */
+html.theme-light :focus-visible {
+  outline-color: rgba(16, 185, 129, 0.65);
+}
+
+/* Optional: make hr-like borders more subtle */
+html.theme-light .divide-slate-800 > :not([hidden]) ~ :not([hidden]) {
+  border-color: #e2e8f0 !important;
+}

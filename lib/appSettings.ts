@@ -1,0 +1,149 @@
+"use client";
+
+import { useCallback, useEffect, useMemo, useState } from "react";
+
+export type AppTheme = "neuro" | "light";
+export type AppLocale = "auto" | "en" | "es";
+
+const THEME_KEY = "nt_theme";
+const LOCALE_KEY = "nt_locale";
+const EVT = "nt:app-settings";
+
+function safeWindow(): Window | null {
+  if (typeof window === "undefined") return null;
+  return window;
+}
+
+export function getStoredTheme(): AppTheme {
+  const w = safeWindow();
+  if (!w) return "neuro";
+  const v = w.localStorage.getItem(THEME_KEY);
+  return v === "light" ? "light" : "neuro";
+}
+
+export function setStoredTheme(theme: AppTheme) {
+  const w = safeWindow();
+  if (!w) return;
+  w.localStorage.setItem(THEME_KEY, theme);
+}
+
+export function getStoredLocale(): AppLocale {
+  const w = safeWindow();
+  if (!w) return "auto";
+  const v = w.localStorage.getItem(LOCALE_KEY);
+  if (v === "en" || v === "es" || v === "auto") return v;
+  return "auto";
+}
+
+export function setStoredLocale(locale: AppLocale) {
+  const w = safeWindow();
+  if (!w) return;
+  w.localStorage.setItem(LOCALE_KEY, locale);
+}
+
+export function applyThemeClass(theme: AppTheme) {
+  const w = safeWindow();
+  if (!w) return;
+
+  const root = w.document.documentElement;
+  const isLight = theme === "light";
+
+  root.classList.toggle("theme-light", isLight);
+  root.dataset.theme = theme;
+
+  // Helps native UI widgets (inputs, scrollbars in some browsers)
+  root.style.colorScheme = isLight ? "light" : "dark";
+}
+
+export function applyLocaleAttribute(locale: AppLocale) {
+  const w = safeWindow();
+  if (!w) return;
+
+  const root = w.document.documentElement;
+
+  // If user picks "auto", we keep current html lang unless it's missing.
+  if (locale === "auto") {
+    if (!root.lang) {
+      const browser = (w.navigator?.language || "en").toLowerCase();
+      root.lang = browser.startsWith("es") ? "es" : "en";
+    }
+    return;
+  }
+
+  root.lang = locale;
+}
+
+export function emitAppSettingsChange() {
+  const w = safeWindow();
+  if (!w) return;
+  w.dispatchEvent(new Event(EVT));
+}
+
+/**
+ * Lightweight settings hook (no provider needed).
+ * - Persists to localStorage
+ * - Applies html.theme-light
+ * - Exposes `ready` so consumers can avoid flicker
+ */
+export function useAppSettings(): {
+  theme: AppTheme;
+  setTheme: (t: AppTheme) => void;
+  locale: AppLocale;
+  setLocale: (l: AppLocale) => void;
+  ready: boolean;
+} {
+  const [theme, setThemeState] = useState<AppTheme>("neuro");
+  const [locale, setLocaleState] = useState<AppLocale>("auto");
+  const [ready, setReady] = useState(false);
+
+  // Initial load from localStorage
+  useEffect(() => {
+    const t = getStoredTheme();
+    const l = getStoredLocale();
+
+    setThemeState(t);
+    setLocaleState(l);
+
+    applyThemeClass(t);
+    applyLocaleAttribute(l);
+
+    setReady(true);
+  }, []);
+
+  // Keep multiple tabs / components in sync via a custom event
+  useEffect(() => {
+    const w = safeWindow();
+    if (!w) return;
+
+    function onEvt() {
+      const t = getStoredTheme();
+      const l = getStoredLocale();
+      setThemeState(t);
+      setLocaleState(l);
+      applyThemeClass(t);
+      applyLocaleAttribute(l);
+    }
+
+    w.addEventListener(EVT, onEvt);
+    return () => w.removeEventListener(EVT, onEvt);
+  }, []);
+
+  const setTheme = useCallback((t: AppTheme) => {
+    setStoredTheme(t);
+    applyThemeClass(t);
+    emitAppSettingsChange();
+    setThemeState(t);
+  }, []);
+
+  const setLocale = useCallback((l: AppLocale) => {
+    setStoredLocale(l);
+    applyLocaleAttribute(l);
+    emitAppSettingsChange();
+    setLocaleState(l);
+  }, []);
+
+  return useMemo(
+    () => ({ theme, setTheme, locale, setLocale, ready }),
+    [theme, setTheme, locale, setLocale, ready]
+  );
+}

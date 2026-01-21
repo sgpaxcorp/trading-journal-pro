@@ -1,10 +1,21 @@
 @import "tailwindcss";
+@import "./theme-overrides.css";
+
+/* =========================================================
+   NeuroTrader Journal — Global styles
+   NOTE:
+   - Your project was working with Tailwind v4 using `@import "tailwindcss";`.
+   - Some patches replaced this with `@tailwind base/components/utilities`, which can
+     result in Tailwind utilities not being generated in v4 setups.
+   - This file restores your original structure and keeps the theme overrides import.
+========================================================= */
 
 :root {
   --background: #ffffff;
   --foreground: #171717;
 }
 
+/* Tailwind v4 theme tokens (keeps bg-background / text-foreground etc working if used) */
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);

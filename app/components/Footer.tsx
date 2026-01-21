@@ -13,7 +13,7 @@ export default function Footer() {
   const year = new Date().getFullYear();
 
   return (
-    <footer className="w-full bg-[#0b0c14] text-slate-300 px-7 md:px-12 py-8 border-t border-slate-800 mt-auto">
+    <footer className="w-full bg-slate-950 text-slate-300 px-7 md:px-12 py-8 border-t border-slate-800 mt-auto">
       <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-10">
         {/* Col 1: Logo + disclaimer */}
         <div className="space-y-3">
@@ -46,7 +46,7 @@ export default function Footer() {
             <Link href="/pricing" className="hover:text-emerald-400 transition">
               Pricing
             </Link>
-            
+
             <Link href="/partners" className="hover:text-emerald-400 transition">
               Become a Partner *Coming Soon*
             </Link>

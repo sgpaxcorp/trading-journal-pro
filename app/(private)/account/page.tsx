@@ -1,4 +1,3 @@
-// app/account/page.tsx
 "use client";
 
 import {
@@ -340,6 +339,18 @@ export default function AccountPage() {
           >
             Account settings
           </a>
+
+          <a
+            href="/account/preferences"
+            className={`rounded-full px-3 py-1.5 ${
+              isCurrent("/account/preferences")
+                ? "bg-emerald-500/15 text-emerald-200 border border-emerald-400/60"
+                : "text-slate-300 border border-slate-700 hover:border-emerald-400 hover:text-emerald-200"
+            } transition`}
+          >
+            Preferences
+          </a>
+
           <a
             href="/account/password"
             className={`rounded-full px-3 py-1.5 ${

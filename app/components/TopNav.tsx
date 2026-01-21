@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useEffect, useRef, useState } from "react";
@@ -6,6 +5,10 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { supabaseBrowser } from "@/lib/supaBaseClient";
+
+import { useAppSettings } from "@/lib/appSettings";
+import { resolveLocale, t } from "@/lib/i18n";
+import ThemeBoot from "@/app/components/ThemeBoot";
 
 type NavItem = {
   id: string;
@@ -171,6 +174,9 @@ function AccountMenu() {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
+
+  const { locale } = useAppSettings();
+  const lang = resolveLocale(locale);
 
   // Plan que viene de Supabase (profiles.plan)
   const [profilePlan, setProfilePlan] = useState<string | null>(null);
@@ -345,12 +351,25 @@ function AccountMenu() {
                 href="/account"
                 className="flex items-center justify-between px-3 py-2 hover:bg-slate-900/80 transition-colors"
               >
-                <span>Account settings</span>
+                <span>{t("account.settings", lang)}</span>
                 <span className="text-[10px] text-slate-400">
                   Profile & photo
                 </span>
               </Link>
             </li>
+
+            <li>
+              <Link
+                href="/account/preferences"
+                className="flex items-center justify-between px-3 py-2 hover:bg-slate-900/80 transition-colors"
+              >
+                <span>{t("account.preferences", lang)}</span>
+                <span className="text-[10px] text-slate-400">
+                  Language & theme
+                </span>
+              </Link>
+            </li>
+
             <li>
               <Link
                 href="/account/password"
@@ -475,67 +494,76 @@ const forum: NavItem[] = [
 /* ========== TopNav ========== */
 
 export default function TopNav() {
+  // This also keeps Theme/Locale in sync if user changes them in Preferences.
+  const { locale } = useAppSettings();
+  const lang = resolveLocale(locale);
+
   return (
-    // ✅ Sticky: siempre visible
-    <nav className="sticky top-0 z-50 w-full border-b border-slate-800 bg-slate-950/90 backdrop-blur">
-      <div className="flex items-center px-4 py-3 md:px-6 gap-6 w-full">
-        {/* ✅ Brand: SOLO SVG, sin efectos, tamaño grande */}
-        <Link
-          href="/dashboard"
-          className="shrink-0 flex items-center"
-          aria-label="Go to dashboard"
-        >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src="/neurotrader-logo.svg"
-            alt="Neuro Trader Journal"
-            className="h-20 md:h-21 lg:h-33 w-auto object-contain"
-            draggable={false}
-          />
-        </Link>
+    <>
+      {/* Applies persisted theme + locale */}
+      <ThemeBoot />
 
-        {/* Nav row */}
-        <div className="flex items-center gap-4 text-[14px] whitespace-nowrap flex-1">
-          {/* Performance (dropdown) */}
-          <Dropdown title="Performance" items={performance} />
-
-          {/* Notebook como botón directo */}
+      {/* ✅ Sticky: siempre visible */}
+      <nav className="sticky top-0 z-50 w-full border-b border-slate-800 bg-slate-950/90 backdrop-blur">
+        <div className="flex items-center px-4 py-3 md:px-6 gap-6 w-full">
+          {/* ✅ Brand: SOLO SVG, sin efectos, tamaño grande */}
           <Link
-            href="/notebook"
-            className="rounded-lg px-3 py-1.5 text-sm font-medium text-slate-200 hover:bg-slate-800 hover:text-slate-50 transition-colors"
+            href="/dashboard"
+            className="shrink-0 flex items-center"
+            aria-label="Go to dashboard"
           >
-            Notebook
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/neurotrader-logo.svg"
+              alt="Neuro Trader Journal"
+              className="h-20 md:h-21 lg:h-33 w-auto object-contain"
+              draggable={false}
+            />
           </Link>
 
-          {/* Back-Studying como botón directo */}
-          <Link
-            href="/back-study"
-            className="rounded-lg px-3 py-1.5 text-sm font-medium text-slate-200 hover:bg-slate-800 hover:text-slate-50 transition-colors"
-          >
-            Back-Studying
-          </Link>
+          {/* Nav row */}
+          <div className="flex items-center gap-4 text-[14px] whitespace-nowrap flex-1">
+            {/* Performance (dropdown) */}
+            <Dropdown title={t("nav.performance", lang)} items={performance} />
 
-          {/* Resto de dropdowns */}
-          <Dropdown title="Challenges" items={challenges} />
-          <Dropdown title="Resources" items={resources} />
-          <Dropdown title="Rules & Alarms" items={rules} />
-          <Dropdown title="Forum" items={forum} />
+            {/* Notebook como botón directo */}
+            <Link
+              href="/notebook"
+              className="rounded-lg px-3 py-1.5 text-sm font-medium text-slate-200 hover:bg-slate-800 hover:text-slate-50 transition-colors"
+            >
+              {t("nav.notebook", lang)}
+            </Link>
 
-          {/* Global Ranking */}
-          <Link
-            href="/globalranking"
-            className="rounded-lg px-3 py-1.5 text-sm font-medium text-slate-200 hover:bg-slate-800 hover:text-slate-50 transition-colors"
-          >
-            Global Ranking
-          </Link>
+            {/* Back-Studying como botón directo */}
+            <Link
+              href="/back-study"
+              className="rounded-lg px-3 py-1.5 text-sm font-medium text-slate-200 hover:bg-slate-800 hover:text-slate-50 transition-colors"
+            >
+              {t("nav.backStudy", lang)}
+            </Link>
+
+            {/* Resto de dropdowns */}
+            <Dropdown title={t("nav.challenges", lang)} items={challenges} />
+            <Dropdown title={t("nav.resources", lang)} items={resources} />
+            <Dropdown title={t("nav.rules", lang)} items={rules} />
+            <Dropdown title={t("nav.forum", lang)} items={forum} />
+
+            {/* Global Ranking */}
+            <Link
+              href="/globalranking"
+              className="rounded-lg px-3 py-1.5 text-sm font-medium text-slate-200 hover:bg-slate-800 hover:text-slate-50 transition-colors"
+            >
+              {t("nav.globalRanking", lang)}
+            </Link>
+          </div>
+
+          {/* Right side: Help + Account */}
+          <div className="flex items-center gap-3">
+            <HelpMenu />
+            <AccountMenu />
+          </div>
         </div>
-
-        {/* Right side: Help + Account */}
-        <div className="flex items-center gap-3">
-          <HelpMenu />
-          <AccountMenu />
-        </div>
-      </div>
-    </nav>
+      </nav>
+    </>
   );
 }
