@@ -407,7 +407,7 @@ function AccountMenu({ theme, lang }: { theme: Theme; lang: Locale }) {
             )}
             <p className={`mt-1 text-[11px] ${isLight ? "text-emerald-700" : "text-emerald-300"}`}>
               {plan && plan !== "—"
-                ? `${t("account.currentPlan", lang)}: ${planLabel}`
+                ? `${t("Plan", lang)}: ${planLabel}`
                 : t("account.noSubscription", lang)}
             </p>
           </div>
@@ -419,7 +419,7 @@ function AccountMenu({ theme, lang }: { theme: Theme; lang: Locale }) {
                 href="/account"
                 className={`flex items-center justify-between px-3 py-2 transition-colors ${itemHoverClass}`}
               >
-                <span>{t("account.menu.settings", lang)}</span>
+                <span>{t("Account", lang)}</span>
                 <span className={`text-[10px] ${isLight ? "text-slate-500" : "text-slate-400"}`}>
                   {t("account.menu.profile", lang)}
                 </span>
@@ -430,7 +430,7 @@ function AccountMenu({ theme, lang }: { theme: Theme; lang: Locale }) {
                 href="/account/preferences"
                 className={`flex items-center justify-between px-3 py-2 transition-colors ${itemHoverClass}`}
               >
-                <span>{t("account.menu.preferences", lang)}</span>
+                <span>{t("Preferences", lang)}</span>
                 <span className={`text-[10px] ${isLight ? "text-slate-500" : "text-slate-400"}`}>
                   {t("account.menu.langTheme", lang)}
                 </span>
@@ -441,7 +441,7 @@ function AccountMenu({ theme, lang }: { theme: Theme; lang: Locale }) {
                 href="/account/password"
                 className={`flex items-center justify-between px-3 py-2 transition-colors ${itemHoverClass}`}
               >
-                <span>{t("account.menu.password", lang)}</span>
+                <span>{t("Security & Privacy", lang)}</span>
                 <span className={`text-[10px] ${isLight ? "text-slate-500" : "text-slate-400"}`}>
                   {t("account.menu.security", lang)}
                 </span>
@@ -452,7 +452,7 @@ function AccountMenu({ theme, lang }: { theme: Theme; lang: Locale }) {
                 href="/billing"
                 className={`flex items-center justify-between px-3 py-2 transition-colors ${itemHoverClass}`}
               >
-                <span>{t("account.menu.billing", lang)}</span>
+                <span>{t("Billing", lang)}</span>
                 <span className={`text-[10px] ${isLight ? "text-emerald-700" : "text-emerald-300"}`}>
                   {t("account.menu.upgrade", lang)}
                 </span>
@@ -463,7 +463,7 @@ function AccountMenu({ theme, lang }: { theme: Theme; lang: Locale }) {
                 href="/billing/history"
                 className={`flex items-center justify-between px-3 py-2 transition-colors ${itemHoverClass}`}
               >
-                <span>{t("account.menu.billingHistory", lang)}</span>
+                <span>{t("Billing History", lang)}</span>
                 <span className={`text-[10px] ${isLight ? "text-slate-500" : "text-slate-400"}`}>
                   {t("account.menu.invoices", lang)}
                 </span>
