@@ -5,6 +5,10 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 export type AppTheme = "neuro" | "light";
 export type AppLocale = "auto" | "en" | "es";
 
+// Backwards-compatible aliases (some components import `Theme` / `Locale`)
+export type Theme = AppTheme;
+export type Locale = AppLocale;
+
 const THEME_KEY = "nt_theme";
 const LOCALE_KEY = "nt_locale";
 const EVT = "nt:app-settings";

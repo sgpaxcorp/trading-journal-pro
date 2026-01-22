@@ -3,30 +3,37 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+
 import { useAuth } from "@/context/AuthContext";
 import { supabaseBrowser } from "@/lib/supaBaseClient";
 
-import { useAppSettings } from "@/lib/appSettings";
-import { resolveLocale, t } from "@/lib/i18n";
-import ThemeBoot from "@/app/components/ThemeBoot";
+import { useAppSettings, type Theme } from "@/lib/appSettings";
+import { resolveLocale, t, type Locale } from "@/lib/i18n";
 
 type NavItem = {
   id: string;
-  title: string;
+  title?: string;
   description?: string;
+  titleKey?: string;
+  descriptionKey?: string;
   href?: string;
   badge?: string;
 };
 
 type DropdownProps = {
-  title: string;
+  title?: string;
+  titleKey?: string;
   items: NavItem[];
+  theme: Theme;
+  lang: Locale;
 };
 
 /* ========== Reusable Dropdown component (main nav menus) ========== */
-function Dropdown({ title, items }: DropdownProps) {
+function Dropdown({ title, titleKey, items, theme, lang }: DropdownProps) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
+
+  const label = titleKey ? t(titleKey, lang) : title ?? "";
 
   // Close on click outside
   useEffect(() => {
@@ -40,54 +47,77 @@ function Dropdown({ title, items }: DropdownProps) {
     return () => window.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  const isLight = theme === "light";
+
+  const buttonClass = isLight
+    ? open
+      ? "bg-slate-200/80 text-slate-900 ring-1 ring-slate-300"
+      : "text-slate-700 hover:bg-slate-200/70 hover:text-slate-900"
+    : open
+    ? "bg-slate-800 text-emerald-300"
+    : "text-slate-200 hover:bg-slate-800 hover:text-slate-50";
+
+  const panelClass = isLight
+    ? "nt-dropdown-panel nt-card-glow border border-slate-200"
+    : "border border-slate-800 bg-slate-950 shadow-xl shadow-slate-900/70";
+
+  const itemHoverClass = isLight
+    ? "hover:bg-slate-100/80"
+    : "hover:bg-slate-800";
+
+  const titleClass = isLight
+    ? "text-slate-900 group-hover:text-emerald-700"
+    : "text-slate-100 group-hover:text-emerald-200";
+
+  const descClass = isLight
+    ? "text-slate-600 group-hover:text-slate-700"
+    : "text-slate-400 group-hover:text-slate-200";
+
   return (
     <div className="relative" ref={ref}>
       <button
         type="button"
         onClick={() => setOpen((prev) => !prev)}
-        className={`flex items-center gap-1 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors
-          ${
-            open
-              ? "bg-slate-800 text-emerald-300"
-              : "text-slate-200 hover:bg-slate-800 hover:text-slate-50"
-          }`}
+        className={`nt-menu-button flex items-center gap-1 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${buttonClass}`}
       >
-        {title}
+        {label}
         <span
-          className={`text-[11px] transition-transform ${
-            open ? "rotate-180" : ""
-          }`}
+          className={`text-[11px] transition-transform ${open ? "rotate-180" : ""}`}
         >
           ▾
         </span>
       </button>
 
       {open && (
-        <div className="absolute left-0 mt-2 w-80 rounded-2xl border border-slate-800 bg-slate-950 shadow-xl shadow-slate-900/70 z-50">
+        <div
+          className={`absolute left-0 mt-2 w-80 rounded-2xl shadow-xl z-50 overflow-hidden ${panelClass}`}
+        >
           <ul className="py-2">
             {items.map((item) => {
               const Wrapper: any = item.href ? Link : "div";
               const wrapperProps = item.href ? { href: item.href } : {};
 
+              const itemTitle = item.titleKey ? t(item.titleKey, lang) : item.title;
+              const itemDesc = item.descriptionKey
+                ? t(item.descriptionKey, lang)
+                : item.description;
+
               return (
                 <li key={item.id}>
                   <Wrapper
                     {...wrapperProps}
-                    className="group flex w-full items-start gap-3 rounded-xl px-3 py-2.5
-                               hover:bg-slate-800 hover:text-slate-100 transition-colors cursor-pointer"
+                    className={`group flex w-full items-start gap-3 rounded-xl px-3 py-2.5 transition-colors cursor-pointer ${itemHoverClass}`}
                   >
                     <div className="flex-1">
-                      <p className="text-sm font-medium text-slate-100 group-hover:text-emerald-200">
-                        {item.title}
+                      <p className={`text-sm font-medium ${titleClass}`}>
+                        {itemTitle}
                       </p>
-                      {item.description && (
-                        <p className="text-[11px] text-slate-400 group-hover:text-slate-200">
-                          {item.description}
-                        </p>
+                      {itemDesc && (
+                        <p className={`text-[11px] ${descClass}`}>{itemDesc}</p>
                       )}
                     </div>
                     {item.badge && (
-                      <span className="mt-0.5 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-300">
+                      <span className="mt-0.5 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-500">
                         {item.badge}
                       </span>
                     )}
@@ -104,9 +134,11 @@ function Dropdown({ title, items }: DropdownProps) {
 
 /* ========== HELP MENU ( ? icon ) ========== */
 
-function HelpMenu() {
+function HelpMenu({ theme, lang }: { theme: Theme; lang: Locale }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
+
+  const isLight = theme === "light";
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -119,46 +151,66 @@ function HelpMenu() {
     return () => window.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  const btnClass = isLight
+    ? "border-slate-300 bg-white text-slate-700 hover:border-emerald-400 hover:text-emerald-700"
+    : "border-slate-700 bg-slate-900 text-slate-300 hover:border-emerald-400 hover:text-emerald-300";
+
+  const panelClass = isLight
+    ? "nt-dropdown-panel nt-card-glow border border-slate-200"
+    : "border border-slate-800 bg-slate-950 shadow-xl shadow-slate-900/70";
+
+  const linkClass = isLight
+    ? "border-slate-300 text-slate-700 hover:border-emerald-400 hover:text-emerald-700"
+    : "border-slate-700 text-slate-200 hover:border-emerald-400 hover:text-emerald-300";
+
   return (
     <div className="relative" ref={ref}>
       <button
         type="button"
         onClick={() => setOpen((prev) => !prev)}
-        className="flex h-9 w-9 items-center justify-center rounded-full border border-slate-700 bg-slate-900 text-slate-300 text-sm hover:border-emerald-400 hover:text-emerald-300 transition"
+        className={`flex h-9 w-9 items-center justify-center rounded-full border text-sm transition ${btnClass}`}
         aria-label="Help"
       >
         ?
       </button>
 
       {open && (
-        <div className="absolute right-0 mt-2 w-80 rounded-2xl border border-slate-800 bg-slate-950 shadow-xl shadow-slate-900/70 z-50 p-3">
-          <p className="text-sm font-semibold text-slate-100 mb-1">
-            Need help with this page?
+        <div
+          className={`absolute right-0 mt-2 w-80 rounded-2xl shadow-xl z-50 p-3 ${panelClass}`}
+        >
+          <p
+            className={`text-sm font-semibold ${
+              isLight ? "text-slate-900" : "text-slate-100"
+            } mb-1`}
+          >
+            {t("help.title", lang)}
           </p>
-          <p className="text-[11px] text-slate-400 mb-3">
-            This dashboard is your central hub: you can see your P&amp;L
-            calendar, weekly summaries, streaks and daily targets. Use the
-            widgets to customize what matters most for your process.
+          <p className={`text-[11px] ${isLight ? "text-slate-600" : "text-slate-400"} mb-3`}>
+            {t("help.desc", lang)}
           </p>
 
-          <ul className="space-y-1.5 text-[11px] text-slate-300">
-            <li>• Click on any day in the calendar to open that journal.</li>
-            <li>• Use the widget toggles to show/hide blocks you care about.</li>
-            <li>• Edit your growth plan to update targets and calculations.</li>
+          <ul
+            className={`space-y-1.5 text-[11px] ${
+              isLight ? "text-slate-700" : "text-slate-300"
+            }`}
+          >
+            <li>• {t("help.bullet.calendar", lang)}</li>
+            <li>• {t("help.bullet.widgets", lang)}</li>
+            <li>• {t("help.bullet.plan", lang)}</li>
           </ul>
 
           <div className="mt-3 flex flex-wrap gap-2 text-[11px]">
             <Link
               href="/help/getting-started"
-              className="px-2 py-1 rounded-lg border border-slate-700 text-slate-200 hover:border-emerald-400 hover:text-emerald-300 transition"
+              className={`px-2 py-1 rounded-lg border transition ${linkClass}`}
             >
-              Getting started guide
+              {t("help.link.gettingStarted", lang)}
             </Link>
             <Link
               href="/quick-tour/page/dashboard"
-              className="px-2 py-1 rounded-lg border border-slate-700 text-slate-200 hover:border-emerald-400 hover:text-emerald-300 transition"
+              className={`px-2 py-1 rounded-lg border transition ${linkClass}`}
             >
-              Dashboard tour
+              {t("help.link.dashboardTour", lang)}
             </Link>
           </div>
         </div>
@@ -169,17 +221,16 @@ function HelpMenu() {
 
 /* ========== ACCOUNT MENU (avatar) ========== */
 
-function AccountMenu() {
+function AccountMenu({ theme, lang }: { theme: Theme; lang: Locale }) {
   const { user, signOut } = useAuth() as any;
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
 
-  const { locale } = useAppSettings();
-  const lang = resolveLocale(locale);
-
   // Plan que viene de Supabase (profiles.plan)
   const [profilePlan, setProfilePlan] = useState<string | null>(null);
+
+  const isLight = theme === "light";
 
   // Nombre a mostrar (prioriza firstName/lastName si existen)
   const displayName =
@@ -193,21 +244,14 @@ function AccountMenu() {
 
   // Plan que viene del objeto de usuario (auth)
   const rawPlanFromUser =
-    user?.plan ||
-    user?.subscriptionPlan ||
-    user?.user_metadata?.plan ||
-    "—";
+    user?.plan || user?.subscriptionPlan || user?.user_metadata?.plan || "—";
 
   // Plan efectivo: primero profiles.plan, luego auth, luego —
   const rawPlan =
-    profilePlan && typeof profilePlan === "string"
-      ? profilePlan
-      : rawPlanFromUser;
+    profilePlan && typeof profilePlan === "string" ? profilePlan : rawPlanFromUser;
 
   const plan =
-    typeof rawPlan === "string" && rawPlan !== "—"
-      ? rawPlan.toLowerCase()
-      : "—";
+    typeof rawPlan === "string" && rawPlan !== "—" ? rawPlan.toLowerCase() : "—";
 
   const photoURL = user?.photoURL || null;
 
@@ -220,17 +264,15 @@ function AccountMenu() {
 
   // Estilos del pill según plan
   const planLabel =
-    plan === "core"
-      ? "Core"
-      : plan === "advanced"
-      ? "Advanced"
-      : "No plan";
+    plan === "core" ? "Core" : plan === "advanced" ? "Advanced" : t("account.plan.none", lang);
 
   const planClasses =
     plan === "core"
-      ? "bg-emerald-500/10 text-emerald-300 border-emerald-400/60"
+      ? "bg-emerald-500/10 text-emerald-600 border-emerald-400/60"
       : plan === "advanced"
-      ? "bg-violet-500/10 text-violet-200 border-violet-400/70"
+      ? "bg-violet-500/10 text-violet-700 border-violet-400/70"
+      : isLight
+      ? "bg-slate-100 text-slate-700 border-slate-300"
       : "bg-slate-800 text-slate-300 border-slate-600";
 
   // Leer el plan más fresco desde profiles cuando haya user.id
@@ -288,13 +330,23 @@ function AccountMenu() {
     }
   };
 
+  const buttonClass = isLight
+    ? "border-slate-300 bg-white text-slate-800 hover:border-emerald-400 hover:text-emerald-700"
+    : "border-slate-700 bg-slate-900/90 text-slate-100 hover:border-emerald-400 hover:text-emerald-300 hover:bg-slate-900";
+
+  const panelClass = isLight
+    ? "nt-dropdown-panel nt-card-glow border border-slate-200"
+    : "border border-slate-800 bg-slate-950 shadow-xl shadow-slate-900/70";
+
+  const itemHoverClass = isLight ? "hover:bg-slate-100/80" : "hover:bg-slate-900/80";
+
   return (
     <div className="relative" ref={ref}>
       {/* BOTÓN SUPERIOR (avatar + nombre + plan) */}
       <button
         type="button"
         onClick={() => setOpen((prev) => !prev)}
-        className="group flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900/90 px-2.5 py-1.5 text-xs text-slate-100 hover:border-emerald-400 hover:text-emerald-300 hover:bg-slate-900 transition shadow-sm shadow-slate-900/40"
+        className={`group flex items-center gap-2 rounded-full border px-2.5 py-1.5 text-xs transition shadow-sm ${buttonClass}`}
       >
         {/* Avatar */}
         <div className="relative">
@@ -321,94 +373,116 @@ function AccountMenu() {
             className={`mt-0.5 inline-flex items-center gap-1 rounded-full border px-2 py-px text-[10px] font-medium ${planClasses}`}
           >
             <span className="h-1.5 w-1.5 rounded-full bg-current opacity-80" />
-            {plan === "—" ? "No plan set" : `Plan: ${planLabel}`}
+            {plan === "—"
+              ? t("account.plan.none", lang)
+              : `${t("account.plan.label", lang)}: ${planLabel}`}
           </span>
         </div>
       </button>
 
       {/* DROPDOWN */}
       {open && (
-        <div className="absolute right-0 mt-2 w-72 rounded-2xl border border-slate-800 bg-slate-950 shadow-xl shadow-slate-900/70 z-50 overflow-hidden">
+        <div
+          className={`absolute right-0 mt-2 w-72 rounded-2xl shadow-xl z-50 overflow-hidden ${panelClass}`}
+        >
           {/* Header usuario */}
-          <div className="border-b border-slate-800 px-3 py-3 bg-linear-to-r from-slate-950 via-slate-900 to-slate-950">
-            <p className="text-[13px] font-semibold text-slate-100 truncate">
+          <div
+            className={`border-b px-3 py-3 ${
+              isLight
+                ? "border-slate-200"
+                : "border-slate-800 bg-linear-to-r from-slate-950 via-slate-900 to-slate-950"
+            }`}
+          >
+            <p
+              className={`text-[13px] font-semibold truncate ${
+                isLight ? "text-slate-900" : "text-slate-100"
+              }`}
+            >
               {displayName}
             </p>
             {email && (
-              <p className="text-[11px] text-slate-400 truncate">{email}</p>
+              <p className={`text-[11px] truncate ${isLight ? "text-slate-600" : "text-slate-400"}`}>
+                {email}
+              </p>
             )}
-            <p className="mt-1 text-[11px] text-emerald-300">
+            <p className={`mt-1 text-[11px] ${isLight ? "text-emerald-700" : "text-emerald-300"}`}>
               {plan && plan !== "—"
-                ? `Current plan: ${planLabel}`
-                : "No subscription active"}
+                ? `${t("account.currentPlan", lang)}: ${planLabel}`
+                : t("account.noSubscription", lang)}
             </p>
           </div>
 
           {/* Opciones */}
-          <ul className="py-2 text-[12px] text-slate-200">
+          <ul className={`py-2 text-[12px] ${isLight ? "text-slate-800" : "text-slate-200"}`}>
             <li>
               <Link
                 href="/account"
-                className="flex items-center justify-between px-3 py-2 hover:bg-slate-900/80 transition-colors"
+                className={`flex items-center justify-between px-3 py-2 transition-colors ${itemHoverClass}`}
               >
-                <span>{t("account.settings", lang)}</span>
-                <span className="text-[10px] text-slate-400">
-                  Profile & photo
+                <span>{t("account.menu.settings", lang)}</span>
+                <span className={`text-[10px] ${isLight ? "text-slate-500" : "text-slate-400"}`}>
+                  {t("account.menu.profile", lang)}
                 </span>
               </Link>
             </li>
-
             <li>
               <Link
                 href="/account/preferences"
-                className="flex items-center justify-between px-3 py-2 hover:bg-slate-900/80 transition-colors"
+                className={`flex items-center justify-between px-3 py-2 transition-colors ${itemHoverClass}`}
               >
-                <span>{t("account.preferences", lang)}</span>
-                <span className="text-[10px] text-slate-400">
-                  Language & theme
+                <span>{t("account.menu.preferences", lang)}</span>
+                <span className={`text-[10px] ${isLight ? "text-slate-500" : "text-slate-400"}`}>
+                  {t("account.menu.langTheme", lang)}
                 </span>
               </Link>
             </li>
-
             <li>
               <Link
                 href="/account/password"
-                className="flex items-center justify-between px-3 py-2 hover:bg-slate-900/80 transition-colors"
+                className={`flex items-center justify-between px-3 py-2 transition-colors ${itemHoverClass}`}
               >
-                <span>Change password</span>
-                <span className="text-[10px] text-slate-400">Security</span>
+                <span>{t("account.menu.password", lang)}</span>
+                <span className={`text-[10px] ${isLight ? "text-slate-500" : "text-slate-400"}`}>
+                  {t("account.menu.security", lang)}
+                </span>
               </Link>
             </li>
             <li>
               <Link
                 href="/billing"
-                className="flex items-center justify-between px-3 py-2 hover:bg-slate-900/80 transition-colors"
+                className={`flex items-center justify-between px-3 py-2 transition-colors ${itemHoverClass}`}
               >
-                <span>Billing & subscription</span>
-                <span className="text-[10px] text-emerald-300">
-                  Upgrade / cancel
+                <span>{t("account.menu.billing", lang)}</span>
+                <span className={`text-[10px] ${isLight ? "text-emerald-700" : "text-emerald-300"}`}>
+                  {t("account.menu.upgrade", lang)}
                 </span>
               </Link>
             </li>
             <li>
               <Link
                 href="/billing/history"
-                className="flex items-center justify-between px-3 py-2 hover:bg-slate-900/80 transition-colors"
+                className={`flex items-center justify-between px-3 py-2 transition-colors ${itemHoverClass}`}
               >
-                <span>Billing history</span>
-                <span className="text-[10px] text-slate-400">Invoices</span>
+                <span>{t("account.menu.billingHistory", lang)}</span>
+                <span className={`text-[10px] ${isLight ? "text-slate-500" : "text-slate-400"}`}>
+                  {t("account.menu.invoices", lang)}
+                </span>
               </Link>
             </li>
           </ul>
 
           {/* Sign out */}
-          <div className="border-t border-slate-800 px-3 py-2 bg-slate-950/95">
+          <div className={`border-t px-3 py-2 ${isLight ? "border-slate-200" : "border-slate-800"}`}>
             <button
               type="button"
               onClick={handleSignOut}
-              className="w-full rounded-xl bg-slate-900 text-[12px] text-slate-300 py-2 border border-slate-700 hover:border-red-400 hover:text-red-300 hover:bg-slate-900/80 transition"
+              className={`w-full rounded-xl py-2 border text-[12px] transition ${
+                isLight
+                  ? "bg-white text-slate-700 border-slate-300 hover:border-red-400 hover:text-red-600"
+                  : "bg-slate-900 text-slate-300 border-slate-700 hover:border-red-400 hover:text-red-300 hover:bg-slate-900/80"
+              }`}
             >
-              Sign out
+              {t("account.menu.signOut", lang)}
             </button>
           </div>
         </div>
@@ -422,28 +496,27 @@ function AccountMenu() {
 const performance: NavItem[] = [
   {
     id: "balance-chart",
-    title: "Balance chart",
-    description:
-      "Evolution of your account and daily comparison vs. your target.",
+    titleKey: "nav.performance.balanceChart.title",
+    descriptionKey: "nav.performance.balanceChart.desc",
     href: "/performance/balance-chart",
   },
   {
     id: "analytics-statistics",
-    title: "Analytics Statistics",
-    description: "Analyze your historical data with statistics.",
+    titleKey: "nav.performance.analytics.title",
+    descriptionKey: "nav.performance.analytics.desc",
     href: "/performance/analytics-statistics",
   },
   {
     id: "ai-coaching",
-    title: "AI Coaching",
-    description: "Coaching ideas based on your metrics.",
+    titleKey: "nav.performance.aiCoaching.title",
+    descriptionKey: "nav.performance.aiCoaching.desc",
     href: "/performance/ai-coaching",
     badge: "AI",
   },
   {
     id: "plan",
-    title: "Cash Flow Tracking",
-    description: "Track your deposits and withdrawals plan.",
+    titleKey: "nav.performance.cashflow.title",
+    descriptionKey: "nav.performance.cashflow.desc",
     href: "/performance/plan",
   },
 ];
@@ -451,8 +524,8 @@ const performance: NavItem[] = [
 const challenges: NavItem[] = [
   {
     id: "challenges",
-    title: "Challenges",
-    description: "Consistency challenge with rules.",
+    titleKey: "nav.challenges.item.title",
+    descriptionKey: "nav.challenges.item.desc",
     href: "/challenges",
   },
 ];
@@ -460,8 +533,8 @@ const challenges: NavItem[] = [
 const resources: NavItem[] = [
   {
     id: "library",
-    title: "Library",
-    description: "Hand-picked books and videos.",
+    titleKey: "nav.resources.library.title",
+    descriptionKey: "nav.resources.library.desc",
     href: "/resources/library",
   },
 ];
@@ -469,15 +542,14 @@ const resources: NavItem[] = [
 const rules: NavItem[] = [
   {
     id: "reminders",
-    title: "Reminders",
-    description: "Reminders that you need when somethin happens.",
+    titleKey: "nav.rules.reminders.title",
+    descriptionKey: "nav.rules.reminders.desc",
     href: "/rules-alarms/reminders",
   },
-
   {
     id: "alarms",
-    title: "Alarms",
-    description: "Notifications for breaking rules.",
+    titleKey: "nav.rules.alarms.title",
+    descriptionKey: "nav.rules.alarms.desc",
     href: "/rules-alarms/alarms",
   },
 ];
@@ -485,8 +557,8 @@ const rules: NavItem[] = [
 const forum: NavItem[] = [
   {
     id: "community-feed",
-    title: "Community feed",
-    description: "Share progress with other traders.",
+    titleKey: "nav.forum.community.title",
+    descriptionKey: "nav.forum.community.desc",
     href: "/forum/community-feed",
   },
 ];
@@ -494,76 +566,90 @@ const forum: NavItem[] = [
 /* ========== TopNav ========== */
 
 export default function TopNav() {
-  // This also keeps Theme/Locale in sync if user changes them in Preferences.
-  const { locale } = useAppSettings();
+  const { theme, locale } = useAppSettings();
   const lang = resolveLocale(locale);
 
-  return (
-    <>
-      {/* Applies persisted theme + locale */}
-      <ThemeBoot />
+  const isLight = theme === "light";
 
-      {/* ✅ Sticky: siempre visible */}
-      <nav className="sticky top-0 z-50 w-full border-b border-slate-800 bg-slate-950/90 backdrop-blur">
-        <div className="flex items-center px-4 py-3 md:px-6 gap-6 w-full">
-          {/* ✅ Brand: SOLO SVG, sin efectos, tamaño grande */}
-          <Link
-            href="/dashboard"
-            className="shrink-0 flex items-center"
-            aria-label="Go to dashboard"
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src="/neurotrader-logo.svg"
-              alt="Neuro Trader Journal"
-              className="h-20 md:h-21 lg:h-33 w-auto object-contain"
-              draggable={false}
-            />
+  const navClass = isLight
+    ? "nt-topnav sticky top-0 z-50 w-full border-b border-slate-200 bg-white/80 backdrop-blur"
+    : "sticky top-0 z-50 w-full border-b border-slate-800 bg-slate-950/90 backdrop-blur";
+
+  const linkClass = isLight
+    ? "rounded-lg px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-200/70 hover:text-slate-900 transition-colors"
+    : "rounded-lg px-3 py-1.5 text-sm font-medium text-slate-200 hover:bg-slate-800 hover:text-slate-50 transition-colors";
+
+  return (
+    <nav className={navClass}>
+      <div className="flex items-center px-4 py-3 md:px-6 gap-6 w-full">
+        {/* Brand */}
+        <Link
+          href="/dashboard"
+          className="shrink-0 flex items-center"
+          aria-label="Go to dashboard"
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/neurotrader-logo.svg"
+            alt="Neuro Trader Journal"
+            className="h-20 md:h-21 lg:h-33 w-auto object-contain"
+            draggable={false}
+          />
+        </Link>
+
+        {/* Nav row */}
+        <div className="flex items-center gap-4 text-[14px] whitespace-nowrap flex-1">
+          <Dropdown
+            titleKey="nav.performance"
+            items={performance}
+            theme={theme}
+            lang={lang}
+          />
+
+          <Link href="/notebook" className={linkClass}>
+            {t("nav.notebook", lang)}
           </Link>
 
-          {/* Nav row */}
-          <div className="flex items-center gap-4 text-[14px] whitespace-nowrap flex-1">
-            {/* Performance (dropdown) */}
-            <Dropdown title={t("nav.performance", lang)} items={performance} />
+          <Link href="/back-study" className={linkClass}>
+            {t("nav.backStudy", lang)}
+          </Link>
 
-            {/* Notebook como botón directo */}
-            <Link
-              href="/notebook"
-              className="rounded-lg px-3 py-1.5 text-sm font-medium text-slate-200 hover:bg-slate-800 hover:text-slate-50 transition-colors"
-            >
-              {t("nav.notebook", lang)}
-            </Link>
+          <Dropdown
+            titleKey="nav.challenges"
+            items={challenges}
+            theme={theme}
+            lang={lang}
+          />
+          <Dropdown
+            titleKey="nav.resources"
+            items={resources}
+            theme={theme}
+            lang={lang}
+          />
+          <Dropdown
+            titleKey="nav.rules"
+            items={rules}
+            theme={theme}
+            lang={lang}
+          />
+          <Dropdown
+            titleKey="nav.forum"
+            items={forum}
+            theme={theme}
+            lang={lang}
+          />
 
-            {/* Back-Studying como botón directo */}
-            <Link
-              href="/back-study"
-              className="rounded-lg px-3 py-1.5 text-sm font-medium text-slate-200 hover:bg-slate-800 hover:text-slate-50 transition-colors"
-            >
-              {t("nav.backStudy", lang)}
-            </Link>
-
-            {/* Resto de dropdowns */}
-            <Dropdown title={t("nav.challenges", lang)} items={challenges} />
-            <Dropdown title={t("nav.resources", lang)} items={resources} />
-            <Dropdown title={t("nav.rules", lang)} items={rules} />
-            <Dropdown title={t("nav.forum", lang)} items={forum} />
-
-            {/* Global Ranking */}
-            <Link
-              href="/globalranking"
-              className="rounded-lg px-3 py-1.5 text-sm font-medium text-slate-200 hover:bg-slate-800 hover:text-slate-50 transition-colors"
-            >
-              {t("nav.globalRanking", lang)}
-            </Link>
-          </div>
-
-          {/* Right side: Help + Account */}
-          <div className="flex items-center gap-3">
-            <HelpMenu />
-            <AccountMenu />
-          </div>
+          <Link href="/globalranking" className={linkClass}>
+            {t("nav.globalRanking", lang)}
+          </Link>
         </div>
-      </nav>
-    </>
+
+        {/* Right side: Help + Account */}
+        <div className="flex items-center gap-3">
+          <HelpMenu theme={theme} lang={lang} />
+          <AccountMenu theme={theme} lang={lang} />
+        </div>
+      </div>
+    </nav>
   );
 }

@@ -1,142 +1,254 @@
-/* =========================================================
-   NeuroTrader Journal — Theme Overrides
-   Strategy:
-   - The app uses Tailwind utility classes like bg-slate-950, text-slate-50, etc.
-   - To avoid rewriting the entire UI, Light Mode is implemented by overriding
-     those dark utilities when <html> has the `theme-light` class.
+/* ==========================================================================
+   NeuroTrader Journal — Theme overrides (NeuroMode + Light mode)
+   Goal: Light mode should look like Analytics (white cards on a soft gray canvas)
+   while keeping brand accents (emerald / violet / sky) with subtle diffusion.
+   ========================================================================== */
 
-   Usage:
-   - Default (NeuroMode): no special class needed (dark remains as built).
-   - Light Mode: add `theme-light` to <html>.
-========================================================= */
-
+/* ------------------------------
+   Brand colors (shared)
+-------------------------------- */
 :root {
-  /* Dark (NeuroMode) baseline tokens (used for editor/table borders, etc.) */
-  --nt-editor-border-dark: rgba(255, 255, 255, 0.18);
-  --nt-editor-border-light: rgba(15, 23, 42, 0.16);
+  --nt-emerald: #10b981;
+  --nt-emerald-2: #34d399;
+
+  --nt-sky: #38bdf8;
+  --nt-sky-2: #0ea5e9;
+
+  --nt-violet: #a78bfa;
+  --nt-violet-2: #8b5cf6;
+
+  --nt-indigo: #818cf8;
+
+  /* Shadows */
+  --nt-shadow-soft: 0 10px 28px rgba(2, 6, 23, 0.10);
+  --nt-shadow-card: 0 18px 45px rgba(2, 6, 23, 0.14);
+  --nt-shadow-glow: 0 14px 40px rgba(16, 185, 129, 0.10),
+                    0 18px 55px rgba(56, 189, 248, 0.08),
+                    0 22px 65px rgba(167, 139, 250, 0.08);
 }
 
-/* ---------------------------------------------------------
-   Light palette (soft grey, not pure white)
---------------------------------------------------------- */
+/* ------------------------------
+   NeuroMode (dark) tokens
+-------------------------------- */
+html.theme-neuro {
+  color-scheme: dark;
+
+  --nt-bg: #0b1020;          /* page canvas */
+  --nt-bg-2: #070a14;        /* deeper */
+  --nt-surface: rgba(15, 23, 42, 0.72);
+  --nt-surface-2: rgba(2, 6, 23, 0.55);
+
+  --nt-card: rgba(15, 23, 42, 0.82);
+  --nt-card-2: rgba(2, 6, 23, 0.75);
+
+  --nt-border: rgba(148, 163, 184, 0.22);
+  --nt-border-2: rgba(148, 163, 184, 0.14);
+
+  --nt-text: #e2e8f0;
+  --nt-text-2: rgba(226, 232, 240, 0.78);
+  --nt-muted: rgba(148, 163, 184, 0.78);
+}
+
+/* ------------------------------
+   Light mode tokens (analytics-like)
+-------------------------------- */
 html.theme-light {
   color-scheme: light;
+
+  /* Canvas slightly darker than cards (like Analytics page) */
+  --nt-bg: #e7eef7;
+  --nt-bg-2: #dbe6f2;
+
+  /* Card surfaces */
+  --nt-surface: rgba(255, 255, 255, 0.94);
+  --nt-surface-2: rgba(248, 250, 252, 0.94);
+
+  --nt-card: rgba(255, 255, 255, 0.96);
+  --nt-card-2: rgba(248, 250, 252, 0.96);
+
+  --nt-border: rgba(15, 23, 42, 0.16);
+  --nt-border-2: rgba(15, 23, 42, 0.10);
+
+  --nt-text: #0f172a;
+  --nt-text-2: rgba(15, 23, 42, 0.78);
+  --nt-muted: rgba(51, 65, 85, 0.70);
 }
 
-html.theme-light,
+/* ------------------------------
+   Global canvas styling
+-------------------------------- */
+html.theme-neuro body {
+  background:
+    radial-gradient(1000px 520px at 15% 0%, rgba(56, 189, 248, 0.12), transparent 58%),
+    radial-gradient(1100px 560px at 85% 0%, rgba(167, 139, 250, 0.12), transparent 60%),
+    radial-gradient(1200px 680px at 50% 100%, rgba(16, 185, 129, 0.10), transparent 62%),
+    linear-gradient(180deg, var(--nt-bg), var(--nt-bg-2));
+  color: var(--nt-text);
+}
+
 html.theme-light body {
-  background: #f5f7fb !important; /* soft grey */
-  color: #0f172a !important;      /* slate-900 */
+  background:
+    /* subtle top shade to create depth behind white cards */
+    linear-gradient(180deg, rgba(2, 6, 23, 0.06) 0%, rgba(2, 6, 23, 0.00) 34%),
+    radial-gradient(900px 520px at 18% 0%, rgba(16, 185, 129, 0.12), transparent 60%),
+    radial-gradient(900px 520px at 82% 0%, rgba(167, 139, 250, 0.12), transparent 60%),
+    radial-gradient(1100px 700px at 50% 100%, rgba(56, 189, 248, 0.10), transparent 66%),
+    linear-gradient(180deg, var(--nt-bg), var(--nt-bg-2));
+  color: var(--nt-text);
 }
 
-/* ---------------------------------------------------------
-   Background remaps
---------------------------------------------------------- */
-.theme-light .bg-slate-950 { background-color: #f5f7fb !important; }
-.theme-light .bg-slate-900 { background-color: #ffffff !important; }
-.theme-light .bg-slate-800 { background-color: #f1f5f9 !important; } /* slate-100 */
-.theme-light .bg-slate-700 { background-color: #e2e8f0 !important; } /* slate-200 */
+/* ==========================================================================
+   LIGHT MODE REMAPS
+   We keep your existing Tailwind classes, but remap the “dark” palette to
+   light surfaces (cards + borders + readable text).
+   ========================================================================== */
 
-/* Common translucent dark overlays used in your UI */
-.theme-light .bg-slate-950\/60 { background-color: rgba(255, 255, 255, 0.72) !important; }
-.theme-light .bg-slate-950\/70 { background-color: rgba(255, 255, 255, 0.78) !important; }
-.theme-light .bg-slate-950\/80 { background-color: rgba(255, 255, 255, 0.84) !important; }
-
-.theme-light .bg-slate-900\/40 { background-color: rgba(255, 255, 255, 0.82) !important; }
-.theme-light .bg-slate-900\/50 { background-color: rgba(255, 255, 255, 0.86) !important; }
-.theme-light .bg-slate-900\/60 { background-color: rgba(255, 255, 255, 0.90) !important; }
-.theme-light .bg-slate-900\/70 { background-color: rgba(255, 255, 255, 0.94) !important; }
-.theme-light .bg-slate-900\/80 { background-color: rgba(255, 255, 255, 0.97) !important; }
-
-.theme-light .bg-slate-800\/60 { background-color: rgba(241, 245, 249, 0.92) !important; }
-.theme-light .bg-slate-800\/70 { background-color: rgba(241, 245, 249, 0.96) !important; }
-.theme-light .bg-slate-800\/80 { background-color: rgba(241, 245, 249, 0.98) !important; }
-
-/* Subtle colored panels in dark mode can become too heavy on light backgrounds */
-.theme-light .bg-sky-900\/30 { background-color: rgba(2, 132, 199, 0.08) !important; } /* sky-600 tint */
-.theme-light .bg-emerald-500\/10 { background-color: rgba(16, 185, 129, 0.10) !important; }
-.theme-light .bg-emerald-500\/15 { background-color: rgba(16, 185, 129, 0.12) !important; }
-
-/* ---------------------------------------------------------
-   Borders
---------------------------------------------------------- */
-.theme-light .border-slate-900 { border-color: #e2e8f0 !important; }
-.theme-light .border-slate-800 { border-color: #e2e8f0 !important; }
-.theme-light .border-slate-700 { border-color: #e2e8f0 !important; }
-.theme-light .border-slate-600 { border-color: #cbd5e1 !important; }
-
-.theme-light .border-emerald-500\/30 { border-color: rgba(16, 185, 129, 0.35) !important; }
-.theme-light .border-emerald-500\/40 { border-color: rgba(16, 185, 129, 0.45) !important; }
-.theme-light .border-emerald-400\/60 { border-color: rgba(16, 185, 129, 0.55) !important; }
-
-.theme-light .border-sky-700\/60 { border-color: rgba(2, 132, 199, 0.35) !important; }
-.theme-light .border-sky-800\/60 { border-color: rgba(2, 132, 199, 0.35) !important; }
-
-/* ---------------------------------------------------------
-   Text colors (flip dark->light semantics)
---------------------------------------------------------- */
+/* Text remaps */
 .theme-light .text-slate-50,
-.theme-light .text-slate-100 {
-  color: #0f172a !important;
+.theme-light .text-white,
+.theme-light .text-slate-100,
+.theme-light .text-slate-200,
+.theme-light .text-slate-300 {
+  color: var(--nt-text) !important;
 }
 
-.theme-light .text-slate-200 { color: #1e293b !important; } /* slate-800 */
-.theme-light .text-slate-300 { color: #334155 !important; } /* slate-700 */
-.theme-light .text-slate-400 { color: #475569 !important; } /* slate-600 */
-.theme-light .text-slate-500 { color: #64748b !important; } /* slate-500 */
+.theme-light .text-slate-400,
+.theme-light .text-slate-500 {
+  color: var(--nt-muted) !important;
+}
 
-/* Keep emerald text readable on light backgrounds */
-.theme-light .text-emerald-100 { color: #065f46 !important; }
-.theme-light .text-emerald-200 { color: #047857 !important; }
-.theme-light .text-emerald-300 { color: #059669 !important; }
-.theme-light .text-emerald-400 { color: #10b981 !important; }
+/* Border remaps */
+.theme-light .border-slate-800,
+.theme-light .border-slate-700,
+.theme-light .border-slate-600 {
+  border-color: var(--nt-border) !important;
+}
 
-/* ---------------------------------------------------------
-   Inputs / textareas
---------------------------------------------------------- */
+.theme-light .border-emerald-500\/30,
+.theme-light .border-emerald-500\/40,
+.theme-light .border-emerald-400\/60 {
+  border-color: rgba(16, 185, 129, 0.35) !important;
+}
+
+/* ------------------------------
+   Background remaps (most used)
+-------------------------------- */
+
+/* “Page canvas” backgrounds */
+.theme-light .bg-slate-950,
+.theme-light .bg-slate-950\/95,
+.theme-light .bg-slate-950\/90,
+.theme-light .bg-slate-950\/80,
+.theme-light .bg-slate-950\/70 {
+  background-color: var(--nt-bg) !important;
+  color: var(--nt-text) !important;
+}
+
+/* “Card/surface” backgrounds (dark blocks become white cards) */
+.theme-light .bg-slate-900,
+.theme-light .bg-slate-900\/95,
+.theme-light .bg-slate-900\/90,
+.theme-light .bg-slate-900\/85,
+.theme-light .bg-slate-900\/80,
+.theme-light .bg-slate-900\/75,
+.theme-light .bg-slate-900\/70,
+.theme-light .bg-slate-900\/60,
+.theme-light .bg-slate-900\/50,
+.theme-light .bg-slate-900\/40,
+.theme-light .bg-slate-800,
+.theme-light .bg-slate-800\/80,
+.theme-light .bg-slate-800\/70,
+.theme-light .bg-slate-800\/60,
+.theme-light .bg-slate-800\/50 {
+  background-color: var(--nt-card) !important;
+  color: var(--nt-text) !important;
+  box-shadow: var(--nt-shadow-card), var(--nt-shadow-glow);
+}
+
+/* Neutralize dark gradients used as “cards” in NeuroMode so they become light cards.
+   IMPORTANT: we keep gradients for special elements if you add .nt-keep-gradient */
+.theme-light .bg-linear-to-r:not(.nt-keep-gradient):not(.nt-topnav):not(.nt-hero),
+.theme-light .bg-linear-to-b:not(.nt-keep-gradient):not(.nt-topnav):not(.nt-hero),
+.theme-light .bg-linear-to-br:not(.nt-keep-gradient):not(.nt-topnav):not(.nt-hero),
+.theme-light .bg-linear-to-bl:not(.nt-keep-gradient):not(.nt-topnav):not(.nt-hero),
+.theme-light .bg-linear-to-t:not(.nt-keep-gradient):not(.nt-topnav):not(.nt-hero),
+.theme-light .bg-linear-to-tr:not(.nt-keep-gradient):not(.nt-topnav):not(.nt-hero),
+.theme-light .bg-linear-to-tl:not(.nt-keep-gradient):not(.nt-topnav):not(.nt-hero),
+/* legacy Tailwind gradient names */
+.theme-light .bg-gradient-to-r:not(.nt-keep-gradient):not(.nt-topnav):not(.nt-hero),
+.theme-light .bg-gradient-to-b:not(.nt-keep-gradient):not(.nt-topnav):not(.nt-hero),
+.theme-light .bg-gradient-to-br:not(.nt-keep-gradient):not(.nt-topnav):not(.nt-hero),
+.theme-light .bg-gradient-to-bl:not(.nt-keep-gradient):not(.nt-topnav):not(.nt-hero),
+.theme-light .bg-gradient-to-t:not(.nt-keep-gradient):not(.nt-topnav):not(.nt-hero),
+.theme-light .bg-gradient-to-tr:not(.nt-keep-gradient):not(.nt-topnav):not(.nt-hero),
+.theme-light .bg-gradient-to-tl:not(.nt-keep-gradient):not(.nt-topnav):not(.nt-hero) {
+  background-image: none !important;
+  background-color: var(--nt-card) !important;
+  color: var(--nt-text) !important;
+  box-shadow: var(--nt-shadow-card), var(--nt-shadow-glow);
+}
+
+/* Inputs */
 .theme-light input,
 .theme-light textarea,
 .theme-light select {
-  color: #0f172a;
+  background-color: rgba(255, 255, 255, 0.95) !important;
+  color: var(--nt-text) !important;
+  border-color: var(--nt-border) !important;
 }
 
 .theme-light input::placeholder,
 .theme-light textarea::placeholder {
-  color: #94a3b8;
+  color: rgba(51, 65, 85, 0.55) !important;
 }
 
-/* Many inputs use bg-slate-950 (or /60) in the app */
-.theme-light .bg-slate-950,
-.theme-light .bg-slate-950\/60,
-.theme-light .bg-slate-950\/70,
-.theme-light .bg-slate-950\/80 {
-  /* Keep them looking like light inputs/cards */
-  background-color: #ffffff !important;
+/* “Pills” / buttons that were dark in NeuroMode */
+.theme-light .bg-emerald-500\/10 {
+  background-color: rgba(16, 185, 129, 0.10) !important;
+}
+.theme-light .bg-violet-500\/10 {
+  background-color: rgba(167, 139, 250, 0.10) !important;
+}
+.theme-light .bg-slate-800\/70 {
+  background-color: rgba(248, 250, 252, 0.92) !important;
 }
 
-/* ---------------------------------------------------------
-   RichTextEditor / ProseMirror: table borders visible in both themes
---------------------------------------------------------- */
-/* Dark mode: make borders visible on dark background */
-.ProseMirror table {
-  border-collapse: collapse;
-  border: 1px solid var(--nt-editor-border-dark);
-}
-.ProseMirror td,
-.ProseMirror th {
-  border: 1px solid var(--nt-editor-border-dark);
+/* Make nav dropdowns look light even if they were built for NeuroMode */
+.theme-light .nt-dropdown-panel {
+  background:
+    radial-gradient(520px 260px at 12% 0%, rgba(16, 185, 129, 0.12), transparent 55%),
+    radial-gradient(520px 260px at 88% 0%, rgba(167, 139, 250, 0.12), transparent 55%),
+    rgba(255, 255, 255, 0.92);
+  border-color: var(--nt-border) !important;
+  box-shadow: var(--nt-shadow-card), var(--nt-shadow-glow) !important;
 }
 
-/* Light mode: borders should be subtle but visible */
-.theme-light .ProseMirror table,
-.theme-light .ProseMirror td,
-.theme-light .ProseMirror th {
-  border-color: var(--nt-editor-border-light) !important;
+/* Top nav light contrast (optional class to keep gradients) */
+.theme-light .nt-topnav {
+  background:
+    radial-gradient(900px 420px at 20% 0%, rgba(16, 185, 129, 0.12), transparent 62%),
+    radial-gradient(900px 420px at 80% 0%, rgba(167, 139, 250, 0.12), transparent 62%),
+    rgba(255, 255, 255, 0.72);
+  border-color: var(--nt-border) !important;
+  box-shadow: var(--nt-shadow-soft) !important;
+  backdrop-filter: blur(12px);
 }
 
-/* ---------------------------------------------------------
-   Shadows (optional: reduce heavy glow on light backgrounds)
---------------------------------------------------------- */
-.theme-light .shadow-\[0_0_40px_rgba\(16\,185\,129\,0\.12\)\] {
-  box-shadow: 0 0 28px rgba(2, 132, 199, 0.10) !important;
+/* Footer light mode */
+.theme-light footer,
+.theme-light .nt-footer {
+  background:
+    radial-gradient(900px 460px at 12% 0%, rgba(56, 189, 248, 0.12), transparent 62%),
+    radial-gradient(900px 460px at 88% 0%, rgba(16, 185, 129, 0.10), transparent 62%),
+    rgba(255, 255, 255, 0.85);
+  color: rgba(15, 23, 42, 0.78) !important;
+  border-color: var(--nt-border) !important;
+}
+
+/* Safety: ensure links remain readable in light mode */
+.theme-light a {
+  color: rgba(30, 64, 175, 0.90);
+}
+.theme-light a:hover {
+  color: rgba(37, 99, 235, 0.95);
 }
