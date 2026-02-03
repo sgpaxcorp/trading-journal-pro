@@ -455,7 +455,7 @@ export default function BalanceChartPage() {
     const pct = dailyTargetPct(plan);
     const lossDaysPerWeek = plan?.lossDaysPerWeek ?? 0;
 
-    const out: Array<{ date: string; actual: number; projected: number; dayPnl: number }> = [];
+    const out: Array<{ date: string; actual: number; projected: number; dayPnl: number; cashflow: number }> = [];
 
     // Iterate trading days
     for (let i = 0; i < tradingDates.length; i++) {
@@ -492,6 +492,7 @@ export default function BalanceChartPage() {
         actual: Number(actualBalance.toFixed(2)),
         projected: Number(projectedBalance.toFixed(2)),
         dayPnl: Number(dayPnl.toFixed(2)),
+        cashflow: Number((cashByDate[dateStr] ?? 0).toFixed(2)),
       });
     }
 
@@ -526,6 +527,7 @@ export default function BalanceChartPage() {
         actual: Number(actualAsOf.toFixed(2)),
         projected: Number(projectedAsOf.toFixed(2)),
         dayPnl: 0,
+        cashflow: Number((cashByDate[rangeEndIso] ?? cashDeltaAfterLastTrade).toFixed(2)),
       };
       out.push(asOfPoint);
       currentPoint = asOfPoint;
@@ -564,11 +566,32 @@ export default function BalanceChartPage() {
         ? serverSeries.projected
         : actualSeries.map((p) => ({ date: p.date, value: p.value }));
 
+      const dailyMap: Record<string, number> = {};
+      for (const d of serverSeries.daily ?? []) {
+        if (!d?.date) continue;
+        dailyMap[d.date] = Number(d.value ?? 0);
+      }
+
+      const startBase = Number(
+        serverSeries.plan?.startingBalance ?? plan?.startingBalance ?? start
+      );
+
+      const derivedCashByDate: Record<string, number> = {};
+      for (let i = 0; i < actualSeries.length; i++) {
+        const cur = Number(actualSeries[i]?.value ?? 0);
+        const prev = i === 0 ? startBase : Number(actualSeries[i - 1]?.value ?? cur);
+        const dayPnl = Number(dailyMap[actualSeries[i]?.date] ?? 0);
+        let cash = Number((cur - prev - dayPnl).toFixed(2));
+        if (Math.abs(cash) < 0.01) cash = 0;
+        derivedCashByDate[actualSeries[i]?.date] = cash;
+      }
+
       const chartData = actualSeries.map((p, idx) => ({
         date: p.date,
         actual: Number(p.value ?? 0),
         projected: Number(projectedSeries[idx]?.value ?? projectedSeries[projectedSeries.length - 1]?.value ?? p.value ?? 0),
         dayPnl: Number(pnlByDate[p.date] ?? 0),
+        cashflow: Number(derivedCashByDate[p.date] ?? 0),
       }));
 
       const lastActual = actualSeries[actualSeries.length - 1] ?? { date: planStartIso, value: start };
@@ -591,10 +614,11 @@ export default function BalanceChartPage() {
         diffPct: Number(serverDiffPct.toFixed(2)),
         totalTradingPnl: Number(serverSeries.totals.tradingPnl ?? outObj.totalTradingPnl ?? 0),
         totalCashflowNet: Number(serverSeries.totals.cashflowNet ?? outObj.totalCashflowNet ?? 0),
+        cashflowByDate: derivedCashByDate,
       };
     }
 
-    return outObj;
+    return { ...outObj, cashflowByDate: cashByDate };
   }, [plan, entries, cashflows, serverSeries]);
 
   /* =========================
@@ -765,6 +789,7 @@ export default function BalanceChartPage() {
                       <th className="text-left px-4 py-2">#</th>
                       <th className="text-left px-4 py-2">Date</th>
                       <th className="text-right px-4 py-2">Day P&amp;L</th>
+                      <th className="text-right px-4 py-2">Cashflow</th>
                       <th className="text-right px-4 py-2">Actual</th>
                       <th className="text-right px-4 py-2">Projected</th>
                     </tr>
@@ -772,12 +797,29 @@ export default function BalanceChartPage() {
                   <tbody>
                     {computed.chartData.map((r, idx) => {
                       const isCurrent = r.date === computed.currentDateStr;
+                      const cash = Number((r as any).cashflow ?? 0);
+                      const cashLabel =
+                        cash > 0 ? "Cash inflow" : cash < 0 ? "Cash outflow" : "";
                       return (
                         <tr key={r.date} className={isCurrent ? "bg-emerald-500/10" : ""}>
                           <td className="px-4 py-2 text-slate-500">{idx + 1}</td>
                           <td className="px-4 py-2 text-slate-200">{r.date}</td>
                           <td className={"px-4 py-2 text-right " + (r.dayPnl >= 0 ? "text-emerald-300" : "text-sky-300")}>
                             {r.dayPnl >= 0 ? "+" : "-"}{currency(Math.abs(r.dayPnl))}
+                          </td>
+                          <td className={"px-4 py-2 text-right " + (cash >= 0 ? "text-emerald-300" : "text-sky-300")}>
+                            {cash === 0 ? (
+                              "—"
+                            ) : (
+                              <div className="flex flex-col items-end">
+                                <span className="text-[11px] uppercase tracking-wide text-slate-400">
+                                  {cashLabel}
+                                </span>
+                                <span className="font-semibold">
+                                  {cash >= 0 ? "+" : "-"}{currency(Math.abs(cash))}
+                                </span>
+                              </div>
+                            )}
                           </td>
                           <td className="px-4 py-2 text-right text-slate-100 font-semibold">{currency(r.actual)}</td>
                           <td className="px-4 py-2 text-right text-slate-300">{currency(r.projected)}</td>

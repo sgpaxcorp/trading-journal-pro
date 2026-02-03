@@ -4,6 +4,7 @@ import React, { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { supabaseBrowser } from "@/lib/supaBaseClient";
+import { syncMyTrophies } from "@/lib/trophiesSupabase";
 import CandleAssistant from "@/app/components/NeuroAssistant";
 import GlobalAlertPopups from "@/app/components/GlobalAlertPopups";
 import GlobalAlertRuleEngine from "@/app/components/GlobalAlertRuleEngine";
@@ -142,6 +143,27 @@ export default function PrivateLayout({ children }: PrivateLayoutProps) {
   const isOnAllowedRoute = ALLOW_WITHOUT_ACTIVE_SUB.some((p) =>
     pathname.startsWith(p)
   );
+
+  // Background trophy sync for legacy users (runs once per session window)
+  useEffect(() => {
+    if (!userId) return;
+
+    const key = `ntj_trophy_sync_${userId}`;
+    const now = Date.now();
+    const windowMs = 6 * 60 * 60 * 1000; // 6 hours
+
+    try {
+      const last = Number(localStorage.getItem(key) || 0);
+      if (Number.isFinite(last) && now - last < windowMs) return;
+      localStorage.setItem(key, String(now));
+    } catch {
+      // If localStorage fails, just proceed without caching
+    }
+
+    syncMyTrophies(userId).catch((err) => {
+      console.warn("[PrivateLayout] trophy sync failed:", err);
+    });
+  }, [userId]);
 
   const isVerifyingSubscription =
     !!userId &&
