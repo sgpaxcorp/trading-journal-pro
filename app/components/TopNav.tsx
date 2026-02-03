@@ -1,14 +1,16 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { MessageSquare } from "lucide-react";
 
 import { useAuth } from "@/context/AuthContext";
 import { supabaseBrowser } from "@/lib/supaBaseClient";
 
 import { useAppSettings, type Theme } from "@/lib/appSettings";
 import { resolveLocale, t, type Locale } from "@/lib/i18n";
+import { listAlertEvents, subscribeToAlertEvents } from "@/lib/alertsSupabase";
 
 type NavItem = {
   id: string;
@@ -216,6 +218,75 @@ function HelpMenu({ theme, lang }: { theme: Theme; lang: Locale }) {
         </div>
       )}
     </div>
+  );
+}
+
+/* ========== ALERTS INBOX (message icon + badge) ========== */
+
+function AlertsInboxButton({ theme }: { theme: Theme }) {
+  const { user } = useAuth() as any;
+  const userId = (user as any)?.id || (user as any)?.uid || "";
+  const [count, setCount] = useState(0);
+
+  const isLight = theme === "light";
+
+  const btnClass = isLight
+    ? "border-slate-300 bg-white text-slate-700 hover:border-emerald-400 hover:text-emerald-700"
+    : "border-slate-700 bg-slate-900 text-slate-300 hover:border-emerald-400 hover:text-emerald-300";
+
+  const refresh = useCallback(async () => {
+    if (!userId) {
+      setCount(0);
+      return;
+    }
+    const res = await listAlertEvents(userId, { includeDismissed: false, limit: 200 });
+    if (!res.ok) {
+      setCount(0);
+      return;
+    }
+    setCount(res.data.events.length);
+  }, [userId]);
+
+  useEffect(() => {
+    refresh().catch(() => void 0);
+  }, [refresh]);
+
+  useEffect(() => {
+    if (!userId) return;
+    const sub = subscribeToAlertEvents(userId, () => {
+      refresh().catch(() => void 0);
+    });
+
+    const t = window.setInterval(() => {
+      refresh().catch(() => void 0);
+    }, 30_000);
+
+    const onForce = () => refresh().catch(() => void 0);
+    window.addEventListener("ntj_alert_force_pull", onForce);
+
+    return () => {
+      window.clearInterval(t);
+      window.removeEventListener("ntj_alert_force_pull", onForce);
+      sub?.unsubscribe?.();
+    };
+  }, [userId, refresh]);
+
+  const label = count > 9 ? "9+" : String(count);
+
+  return (
+    <Link
+      href="/messages"
+      className={`relative flex h-9 w-9 items-center justify-center rounded-full border text-sm transition ${btnClass}`}
+      aria-label="Alerts inbox"
+      title="Alerts inbox"
+    >
+      <MessageSquare className="h-4 w-4" />
+      {count > 0 ? (
+        <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] rounded-full bg-emerald-400 text-[10px] font-semibold text-slate-950 flex items-center justify-center px-1 shadow-sm">
+          {label}
+        </span>
+      ) : null}
+    </Link>
   );
 }
 
@@ -646,6 +717,7 @@ export default function TopNav() {
 
         {/* Right side: Help + Account */}
         <div className="flex items-center gap-3">
+          <AlertsInboxButton theme={theme} />
           <HelpMenu theme={theme} lang={lang} />
           <AccountMenu theme={theme} lang={lang} />
         </div>

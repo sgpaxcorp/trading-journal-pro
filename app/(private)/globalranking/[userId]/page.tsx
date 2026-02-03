@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import GlobalRealtimeNotifications from "@/app/components/GlobalRealtimeNotifications";
 
 import TopNav from "@/app/components/TopNav";
 import TrophyToasts, { type TrophyToastItem } from "@/app/components/TrophyToasts";

@@ -464,17 +464,34 @@ async function getUserTrophyCounters(userId: string): Promise<Record<string, num
   const best_streak = computeBestStreak(uniqueDates);
 
   // Growth plan created?
-  const { data: planRow, error: planErr } = await supabaseBrowser
-    .from("growth_plan")
-    .select("id")
-    .eq("user_id", userId)
-    .maybeSingle();
+  // Support multiple table names used across NeuroTraderJournal versions.
+  const plan_created = await (async () => {
+    const candidates: Array<{ table: string; userCol: string }> = [
+      { table: "ntj_growth_plans", userCol: "user_id" },
+      { table: "growth_plans", userCol: "user_id" },
+      { table: "growth_plan", userCol: "user_id" },
+      { table: "cash_flow_plans", userCol: "user_id" },
+      { table: "cash_flow_plan", userCol: "user_id" },
+      { table: "plan", userCol: "user_id" },
+    ];
 
-  if (planErr) {
-    console.warn("[Trophies] growth_plan query failed:", planErr);
-  }
+    for (const c of candidates) {
+      try {
+        const { data, error } = await supabaseBrowser
+          .from(c.table)
+          .select("id")
+          .eq(c.userCol, userId)
+          .limit(1);
 
-  const plan_created = planRow?.id ? 1 : 0;
+        if (error) continue;
+        if (data && data.length > 0) return 1;
+      } catch {
+        // ignore
+      }
+    }
+
+    return 0;
+  })();
 
   // Challenges completed
   const { data: completedChallenges, error: chErr } = await supabaseBrowser

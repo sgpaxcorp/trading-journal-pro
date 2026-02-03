@@ -51,7 +51,7 @@ export default function TrophyToasts({ items, onDismiss, onClear }: Props) {
   if (!items.length) return null;
 
   return (
-    <div className="fixed top-16 right-4 z-1000 flex flex-col gap-3 w-[320px] max-w-[90vw]">
+    <div className="fixed top-16 right-4 z-[1000] flex flex-col gap-3 w-[320px] max-w-[90vw]">
       {items.map((t) => (
         <div
           key={t.id}

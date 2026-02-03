@@ -120,13 +120,12 @@ function dailyTargetPct(plan: GrowthPlan | null): number {
 async function fetchLatestGrowthPlan(userId: string): Promise<GrowthPlan | null> {
   if (!userId) return null;
 
-    // IMPORTANT:
-    // Supabase's typed `select()` parser needs a string literal to infer row types.
-    // Avoid building the select string dynamically (e.g., array.join), otherwise strict TS may infer
-    // the result as `GenericStringError` (TS2352).
-    const SELECT_GROWTH_PLAN =
-      "id,user_id,starting_balance,target_balance,daily_target_pct,daily_goal_percent,max_daily_loss_percent,loss_days_per_week,trading_days,selected_plan,created_at,updated_at" as const;
-
+  // IMPORTANT:
+  // Supabase's typed `select()` parser needs a string literal to infer row types.
+  // Avoid building the select string dynamically (e.g., array.join), otherwise strict TS may infer
+  // the result as `GenericStringError` (TS2352).
+  const SELECT_GROWTH_PLAN =
+    "id,user_id,starting_balance,target_balance,daily_target_pct,daily_goal_percent,max_daily_loss_percent,loss_days_per_week,trading_days,selected_plan,created_at,updated_at" as const;
 
   try {
     const { data, error } = await supabaseBrowser
@@ -142,7 +141,7 @@ async function fetchLatestGrowthPlan(userId: string): Promise<GrowthPlan | null>
       return null;
     }
 
-    const row = data?.[0] ?? undefined;
+    const row = (data as any)?.[0] ?? undefined;
     if (!row) return null;
 
     const createdAtIso = row.created_at || row.updated_at || new Date().toISOString();
@@ -728,4 +727,3 @@ export default function PlanPage() {
     </main>
   );
 }
-3

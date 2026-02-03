@@ -139,7 +139,11 @@ html.theme-light body {
 .theme-light .bg-slate-950\/95,
 .theme-light .bg-slate-950\/90,
 .theme-light .bg-slate-950\/80,
-.theme-light .bg-slate-950\/70 {
+.theme-light .bg-slate-950\/70,
+.theme-light .bg-slate-950\/60,
+.theme-light .bg-slate-950\/50,
+.theme-light .bg-slate-950\/40,
+.theme-light .bg-slate-950\/30 {
   background-color: var(--nt-bg) !important;
   color: var(--nt-text) !important;
 }

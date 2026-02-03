@@ -1238,6 +1238,11 @@ export default function DailyJournalPage() {
 
       setMsg("Saved ✅");
       setTimeout(() => setMsg(""), 2000);
+      try {
+        window.dispatchEvent(new Event("ntj_alert_engine_run_now"));
+      } catch {
+        // ignore
+      }
       return true;
     } catch (err: any) {
       console.error(err);

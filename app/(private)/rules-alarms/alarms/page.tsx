@@ -1,576 +1,84 @@
-// app/rules-alarms/alarms/page.tsx
 "use client";
 
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
-
-import TopNav from "@/app/components/TopNav";
+import { ArrowLeft, Search } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
-
 import { supabaseBrowser } from "@/lib/supaBaseClient";
 import {
-  getAllJournalEntries,
-  getJournalEntryByDate,
-  saveJournalEntry,
-} from "@/lib/journalSupabase";
-import { saveJournalTradesForDay } from "@/lib/journalTradesSupabase";
+  AlertEvent,
+  AlertChannel,
+  AlertRule,
+  AlertSeverity,
+  channelsLabel,
+  dismissAlertEvent,
+  fireTestEventFromRule,
+  isEventActive,
+  isEventSnoozed,
+  listAlertEvents,
+  listAlertRules,
+  patchAlertEventPayload,
+  snoozeAlertEvent,
+  subscribeToAlertEvents,
+  updateAlertRule,
+} from "@/lib/alertsSupabase";
+import TopNav from "@/app/components/TopNav";
 
-import type { InstrumentType, StoredTradeRow } from "@/lib/journalNotes";
+type Tab = "active" | "rules" | "audit" | "history";
 
-/* =====================================================================================
-  Neuro Trader Journal — Rules & Alarms
-  - Detects unresolved open positions across the journal (cross-day FIFO ledger).
-  - Creates ONE alarm per unresolved open position (per contract/strategy bucket).
-  - Expired options (DTE-derived) require user confirmation before resolving to $0.00.
-  - Clicking an alarm routes to the Journal Date page where the position originated.
-  - Includes starter “rules catalog” toggles + local audit trail history.
-
-  Notes:
-  - UI strings are in English (platform requirement). Assistant guidance is Spanish.
-  - Expiry is derived from (openDate + dte) if explicit expiry is not stored.
-  - Resolution writes BOTH journal_entries.notes (JSON) AND journal_trades rows (via saveJournalTradesForDay),
-    so the Journal page and Analytics both converge.
-===================================================================================== */
-
-/* =========================
-   Types
-========================= */
-
-type SideType = "long" | "short";
-type PremiumSide = "none" | "debit" | "credit";
-
-type JournalEntryLike = {
-  date: string; // YYYY-MM-DD
-  notes?: unknown;
-  pnl?: number;
-  tags?: string[] | null;
-  respectedPlan?: boolean | null;
-
-  // allow extra fields from DB
-  [k: string]: any;
+type OpenPosition = {
+  id?: string | number | null;
+  symbol?: string | null;
+  qty?: number | null;
+  asset_type?: string | null;
+  expiration?: string | null;
+  strike?: number | null;
+  option_type?: string | null;
+  side?: string | null;
+  premium?: string | null;
+  strategy?: string | null;
+  dte?: number | null;
+  journal_date?: string | null;
+  source?: "trades" | "journal" | "notes" | string | null;
 };
 
-type ParsedNotesPayload = {
-  premarket?: string;
-  live?: string;
-  post?: string;
-  entries?: any[];
-  exits?: any[];
-};
-
-type NormalizedTrade = {
-  id: string;
-  symbol: string;
-  kind: InstrumentType;
-  side: SideType;
-  premiumSide: PremiumSide;
-  optionStrategy: string;
-  price: number;
-  quantity: number;
-  time: string; // HH:MM (best-effort)
-  dte: number | null;
-  expiry: string | null; // YYYY-MM-DD optional
-};
-
-type Fill = {
-  date: string; // YYYY-MM-DD
-  timeMins: number; // sortable within day
-  isEntry: boolean;
-  t: NormalizedTrade;
-};
-
-type OpenLot = {
-  key: string;
-  symbol: string;
-  kind: InstrumentType;
-  side: SideType;
-  premiumSide: PremiumSide;
-  optionStrategy: string;
-
-  openDate: string;
-  openTimeMins: number;
-
-  entryPrice: number;
-  qtyLeft: number;
-  dte: number | null;
-  expiry: string | null; // explicit if available
-
-  lastTouchedDate: string; // last date seen for this symbol (entry/exit) for context
-};
-
-type AlarmSeverity = "critical" | "warning" | "info";
-
-type Alarm = {
-  id: string;
-  type:
-    | "EXPIRED_OPTION_UNRESOLVED"
-    | "OPEN_POSITION_UNRESOLVED"
-    | "MISSING_EMOTIONS"
-    | "MISSING_STRATEGY_CHECKLIST"
-    | "MISSING_PREMARKET"
-    | "CUSTOM";
-  severity: AlarmSeverity;
-
-  title: string;
-  message: string;
-
-  date: string; // main “anchor” date for routing (usually openDate)
-  createdAtIso: string;
-
-  href?: string;
-
-  // payload for actions
-  meta?: Record<string, any>;
-};
-
-type AlarmRuleId =
-  | "expired_options"
-  | "open_positions"
-  | "missing_emotions"
-  | "missing_strategy_checklist"
-  | "missing_premarket";
-
-/* =========================
-   Constants
-========================= */
-
-const EMOTION_TAGS = [
-  "Calm",
-  "Greedy",
-  "Desperate",
-  "FOMO",
-  "Revenge trade",
-  "Focus",
-  "Patience",
-  "Discipline",
-  "Anxiety",
-  "Overconfident",
-];
-
-const STRATEGY_CHECKLIST_TAGS = [
-  "Respect Strategy",
-  "Not follow my plan",
-  "No respect my plan",
-  "Planned stop was in place",
-  "Used planned position sizing",
-  "Risk-to-reward ≥ 2R (planned)",
-  "Risk-to-reward < 1.5R (tight)",
-  "Is Vix high?",
-  "Is Vix low?",
-  "Earnings play",
-  "News-driven trade",
-  "Momentum trade",
-  "Trend Follow Trade",
-  "Reversal trade",
-  "Scalping trade",
-  "swing trade",
-  "Options trade",
-  "Stock trade",
-  "Futures Trade",
-  "Forex Trade",
-  "Crypto Trade",
-];
-
-const DEFAULT_RULES: { id: AlarmRuleId; label: string; description: string; defaultOn: boolean }[] = [
-  {
-    id: "expired_options",
-    label: "Expired options need resolution",
-    description:
-      "Detects unresolved option positions where (openDate + DTE) is in the past. Requires user confirmation before resolving to $0.00.",
-    defaultOn: true,
-  },
-  {
-    id: "open_positions",
-    label: "Open positions detected",
-    description:
-      "Detects unresolved positions across your journal (cross-day FIFO). Useful for swing positions and reconciliation.",
-    defaultOn: true,
-  },
-  {
-    id: "missing_emotions",
-    label: "Missing emotions (journal hygiene)",
-    description:
-      "Triggers when a journal day has no emotions selected. High correlation with impulsive loops and hindsight bias.",
-    defaultOn: true,
-  },
-  {
-    id: "missing_strategy_checklist",
-    label: "Missing strategy checklist (process drift)",
-    description:
-      "Triggers when a day has no strategy checklist tags. Process drift is a silent P&L leak.",
-    defaultOn: true,
-  },
-  {
-    id: "missing_premarket",
-    label: "Missing premarket prep",
-    description:
-      "Triggers when premarket section is empty. Prep is your first risk-control.",
-    defaultOn: false,
-  },
-];
-
-const LS_RULES_KEY = "ntj_alarm_rules_v1";
-const LS_SNOOZE_KEY = "ntj_alarm_snoozed_v1";
-const LS_HISTORY_KEY = "ntj_alarm_history_v1";
-
-/* =========================
-   UI helpers
-========================= */
-
-const THEME = {
-  grid: "rgba(148,163,184,0.12)",
-  axis: "rgba(148,163,184,0.55)",
-  text: "rgba(226,232,240,0.92)",
-  card: "bg-slate-900/70 border border-slate-800",
-};
-
-function wrapCard() {
-  return "rounded-2xl border border-slate-800 bg-slate-900/70 shadow-[0_0_30px_rgba(15,23,42,0.55)]";
+function safeArr<T = any>(v: any): T[] {
+  return Array.isArray(v) ? (v as T[]) : [];
 }
 
-function chartTitle() {
-  return "text-[11px] uppercase tracking-[0.22em] text-slate-300";
-}
-function chartSub() {
-  return "text-[11px] text-slate-500 mt-1";
-}
-
-function safeUpper(s: any) {
-  return String(s ?? "").trim().toUpperCase();
-}
-
-function clamp(n: number, a: number, b: number) {
-  return Math.max(a, Math.min(b, n));
+function fmtDate(d?: string | null) {
+  if (!d) return "—";
+  const t = new Date(d).getTime();
+  if (!Number.isFinite(t)) return "—";
+  return new Date(t).toLocaleString();
 }
 
 function isoDate(d: Date) {
-  return d.toISOString().slice(0, 10);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
 }
 
-function formatDateFriendly(dateStr: string) {
-  try {
-    const [y, m, d] = dateStr.split("-").map(Number);
-    return new Date(y, m - 1, d).toLocaleDateString("en-US", {
-      month: "short",
-      day: "2-digit",
-      year: "numeric",
-    });
-  } catch {
-    return dateStr;
-  }
+function normalizeKind(raw: any): string {
+  const k = String(raw ?? "").toLowerCase();
+  if (["stock", "option", "future", "crypto", "forex", "other"].includes(k)) return k;
+  return "other";
 }
 
-function fmtMoney(x: number) {
-  const sign = x >= 0 ? "+" : "-";
-  return `${sign}$${Math.abs(x).toFixed(2)}`;
+function normalizeSide(raw: any): "long" | "short" {
+  const s = String(raw ?? "").toLowerCase();
+  if (s.includes("short")) return "short";
+  return "long";
 }
 
-function toNumberMaybe(v: unknown): number {
-  if (typeof v === "number" && Number.isFinite(v)) return v;
-  if (typeof v === "string") {
-    const n = parseFloat(v.replace(/[^0-9.\-]/g, ""));
-    if (Number.isFinite(n)) return n;
-  }
-  return 0;
-}
-
-function uuid(): string {
-  try {
-    // @ts-ignore
-    return crypto?.randomUUID?.() ?? `id_${Math.random().toString(16).slice(2)}_${Date.now()}`;
-  } catch {
-    return `id_${Math.random().toString(16).slice(2)}_${Date.now()}`;
-  }
-}
-
-function parseTimeMins(raw: any): number {
-  const s = String(raw ?? "").trim();
-  if (!s) return 12 * 60; // neutral midday
-  const m = s.match(/^(\d{1,2}):(\d{2})/);
-  if (m) {
-    const hh = clamp(Number(m[1]) || 0, 0, 23);
-    const mm = clamp(Number(m[2]) || 0, 0, 59);
-    return hh * 60 + mm;
-  }
-  const d = new Date(s);
-  if (!Number.isNaN(d.getTime())) return d.getHours() * 60 + d.getMinutes();
-  return 12 * 60;
-}
-
-function addDaysIso(baseIso: string, days: number): string | null {
-  try {
-    const [y, m, d] = baseIso.split("-").map(Number);
-    const dt = new Date(Date.UTC(y, m - 1, d));
-    dt.setUTCDate(dt.getUTCDate() + days);
-    return isoDate(dt);
-  } catch {
-    return null;
-  }
-}
-
-function isBlankHtml(s: string | undefined | null) {
-  const x = String(s ?? "").trim();
-  if (!x) return true;
-  const stripped = x
-    .replace(/<br\s*\/?>/gi, "")
-    .replace(/<\/?p>/gi, "")
-    .replace(/&nbsp;/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-  return stripped.length === 0;
-}
-
-/* =========================
-   Notes parsing (robust)
-========================= */
-
-function parseNotesPayload(notesRaw: unknown): ParsedNotesPayload {
-  if (!notesRaw) return {};
-  if (typeof notesRaw === "object") {
-    const o = notesRaw as any;
-    return {
-      premarket: typeof o?.premarket === "string" ? o.premarket : undefined,
-      live: typeof o?.live === "string" ? o.live : undefined,
-      post: typeof o?.post === "string" ? o.post : undefined,
-      entries: Array.isArray(o?.entries) ? o.entries : [],
-      exits: Array.isArray(o?.exits) ? o.exits : [],
-    };
-  }
-  if (typeof notesRaw === "string") {
-    try {
-      const parsed = JSON.parse(notesRaw);
-      if (parsed && typeof parsed === "object") return parseNotesPayload(parsed);
-      // raw html fallback
-      return { premarket: notesRaw };
-    } catch {
-      // raw html fallback
-      return { premarket: notesRaw };
-    }
-  }
-  return {};
-}
-
-function normalizeKind(k: any): InstrumentType {
-  return (k || "other") as InstrumentType;
-}
-function normalizeSide(s: any): SideType {
-  return s === "short" ? "short" : "long";
-}
-function normalizePremiumSide(kind: InstrumentType, raw: any): PremiumSide {
-  const k = String(kind || "").toLowerCase();
-  const s = String(raw ?? "").toLowerCase().trim();
-  if (k.includes("option")) {
-    if (s.includes("credit")) return "credit";
-    if (s.includes("debit")) return "debit";
-    return "debit"; // options default
-  }
+function normalizePremium(raw: any): "none" | "debit" | "credit" {
+  const p = String(raw ?? "").toLowerCase();
+  if (p.includes("credit")) return "credit";
+  if (p.includes("debit")) return "debit";
   return "none";
 }
-function normalizeOptionStrategy(raw: any): string {
-  const s = String(raw ?? "").trim();
-  return s ? s : "single";
-}
-
-function normalizeTradeRow(raw: any): NormalizedTrade | null {
-  if (!raw || typeof raw !== "object") return null;
-  const symbol = safeUpper(raw.symbol);
-  if (!symbol) return null;
-
-  const kind = normalizeKind(raw.kind);
-  const side = normalizeSide(raw.side);
-  const premiumSide = normalizePremiumSide(kind, raw.premiumSide ?? raw.premium);
-  const optionStrategy = normalizeOptionStrategy(raw.optionStrategy ?? raw.strategy);
-
-  const price = toNumberMaybe(raw.price);
-  const quantity = toNumberMaybe(raw.quantity);
-
-  if (!Number.isFinite(quantity) || quantity <= 0) return null;
-
-  const time = String(raw.time ?? "").trim();
-  const dteRaw = raw.dte;
-  const dte =
-    typeof dteRaw === "number" && Number.isFinite(dteRaw)
-      ? dteRaw
-      : typeof dteRaw === "string" && dteRaw.trim()
-      ? Number(dteRaw)
-      : null;
-  const expiry = typeof raw.expiry === "string" && raw.expiry.includes("-") ? raw.expiry : null;
-
-  return {
-    id: String(raw.id ?? uuid()),
-    symbol,
-    kind,
-    side,
-    premiumSide,
-    optionStrategy,
-    price: Number.isFinite(price) ? price : 0,
-    quantity,
-    time,
-    dte: Number.isFinite(dte as any) ? (dte as number) : null,
-    expiry,
-  };
-}
-
-/* =========================
-   Cross-day FIFO ledger
-========================= */
-
-function buildFills(entries: JournalEntryLike[]): { fills: Fill[]; sessionMeta: Record<string, ParsedNotesPayload> } {
-  const fills: Fill[] = [];
-  const sessionMeta: Record<string, ParsedNotesPayload> = {};
-
-  for (const e of entries) {
-    const date = String(e.date || "").slice(0, 10);
-    if (!date) continue;
-
-    const payload = parseNotesPayload(e.notes);
-    sessionMeta[date] = payload;
-
-    const ent = Array.isArray(payload.entries) ? payload.entries : [];
-    const ex = Array.isArray(payload.exits) ? payload.exits : [];
-
-    for (const r of ent) {
-      const t = normalizeTradeRow(r);
-      if (!t) continue;
-      fills.push({ date, timeMins: parseTimeMins(t.time), isEntry: true, t });
-    }
-    for (const r of ex) {
-      const t = normalizeTradeRow(r);
-      if (!t) continue;
-      fills.push({ date, timeMins: parseTimeMins(t.time), isEntry: false, t });
-    }
-  }
-
-  fills.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.timeMins - b.timeMins));
-
-  return { fills, sessionMeta };
-}
-
-function keyExact(t: NormalizedTrade) {
-  return `${t.symbol}|${t.kind}|${t.side}|${t.premiumSide}|${t.optionStrategy}`;
-}
-function keyLooseNoStrat(t: NormalizedTrade) {
-  return `${t.symbol}|${t.kind}|${t.side}|${t.premiumSide}|*`;
-}
-function keyLooseSymbolKindSide(t: NormalizedTrade) {
-  return `${t.symbol}|${t.kind}|${t.side}|*|*`;
-}
-
-function processFifo(fills: Fill[]): OpenLot[] {
-  const openByExact = new Map<string, OpenLot[]>();
-  const lastTouchedBySymbol: Record<string, string> = {};
-
-  const pushLot = (k: string, lot: OpenLot) => {
-    const arr = openByExact.get(k) ?? [];
-    arr.push(lot);
-    openByExact.set(k, arr);
-  };
-
-  const getCandidates = (t: NormalizedTrade): { key: string; lots: OpenLot[] }[] => {
-    const out: { key: string; lots: OpenLot[] }[] = [];
-
-    const k1 = keyExact(t);
-    const a1 = openByExact.get(k1);
-    if (a1 && a1.length) out.push({ key: k1, lots: a1 });
-
-    // if strategy mismatched, try any strategy bucket for the same premiumSide
-    const k2 = keyLooseNoStrat(t);
-    for (const [k, lots] of openByExact.entries()) {
-      if (!lots.length) continue;
-      if (k.startsWith(k2.replace("|*", ""))) {
-        out.push({ key: k, lots });
-      }
-    }
-
-    // last-resort: symbol-kind-side ignoring premium + strat
-    const k3 = keyLooseSymbolKindSide(t);
-    for (const [k, lots] of openByExact.entries()) {
-      if (!lots.length) continue;
-      if (k.startsWith(k3.replace("|*|*", ""))) {
-        out.push({ key: k, lots });
-      }
-    }
-
-    // de-dupe keys keeping insertion order
-    const seen = new Set<string>();
-    return out.filter((x) => {
-      if (seen.has(x.key)) return false;
-      seen.add(x.key);
-      return true;
-    });
-  };
-
-  for (const f of fills) {
-    const t = f.t;
-    lastTouchedBySymbol[t.symbol] = f.date;
-
-    if (f.isEntry) {
-      const k = keyExact(t);
-      pushLot(k, {
-        key: k,
-        symbol: t.symbol,
-        kind: t.kind,
-        side: t.side,
-        premiumSide: t.premiumSide,
-        optionStrategy: t.optionStrategy,
-        openDate: f.date,
-        openTimeMins: f.timeMins,
-        entryPrice: t.price,
-        qtyLeft: t.quantity,
-        dte: t.dte,
-        expiry: t.expiry,
-        lastTouchedDate: f.date,
-      });
-      continue;
-    }
-
-    // EXIT — close FIFO
-    let qtyToClose = t.quantity;
-    const candidates = getCandidates(t);
-
-    for (const c of candidates) {
-      if (qtyToClose <= 0) break;
-      const lots = c.lots;
-
-      while (qtyToClose > 0 && lots.length > 0) {
-        const lot = lots[0];
-
-        // refresh "last touched" for context
-        lot.lastTouchedDate = f.date;
-
-        const take = Math.min(lot.qtyLeft, qtyToClose);
-        lot.qtyLeft -= take;
-        qtyToClose -= take;
-
-        if (lot.qtyLeft <= 0.0000001) lots.shift();
-      }
-
-      if (!lots.length) openByExact.set(c.key, []);
-    }
-
-    // If qtyToClose remains > 0, it's an orphan exit; we do nothing (keeps system conservative).
-  }
-
-  const out: OpenLot[] = [];
-  for (const lots of openByExact.values()) {
-    for (const lot of lots) {
-      if (lot.qtyLeft > 0.0000001) {
-        lot.lastTouchedDate = lastTouchedBySymbol[lot.symbol] ?? lot.lastTouchedDate;
-        out.push(lot);
-      }
-    }
-  }
-
-  // stable ordering: older first (most urgent)
-  out.sort((a, b) => (a.openDate < b.openDate ? -1 : a.openDate > b.openDate ? 1 : a.openTimeMins - b.openTimeMins));
-  return out;
-}
-
-/* =========================
-   Resolution PnL (FIFO, same-day only)
-   - Used only to update journal_entries.pnl when we append a synthetic exit in that same journal day.
-========================= */
 
 const FUTURES_MULTIPLIERS: Record<string, number> = {
   ES: 50,
@@ -589,1247 +97,1150 @@ const FUTURES_MULTIPLIERS: Record<string, number> = {
   HG: 25000,
 };
 
+const FUT_MONTH_CODES = "FGHJKMNQUVXZ";
+
 function futureRoot(symbol: string) {
-  const s = safeUpper(symbol).replace(/^\//, "");
-  const m = s.match(/^([A-Z]{1,4})/);
-  return m?.[1] ?? s;
+  const s0 = (symbol || "").trim().toUpperCase().replace(/^\//, "");
+  const s = s0.replace(/\s+/g, "");
+  const re1 = new RegExp(`^([A-Z0-9]{1,8})([${FUT_MONTH_CODES}])(\\d{1,4})$`);
+  const m1 = s.match(re1);
+  if (m1) return m1[1];
+  const m2 = s.match(/^([A-Z0-9]{1,8})/);
+  return m2?.[1] ?? s0;
 }
 
-function contractMultiplier(kind: InstrumentType, symbol: string) {
+function getContractMultiplier(kind: string, symbol: string) {
   if (kind === "option") return 100;
-  if (kind === "future") return FUTURES_MULTIPLIERS[futureRoot(symbol)] ?? 1;
+  if (kind === "future") {
+    const root = futureRoot(symbol);
+    return FUTURES_MULTIPLIERS[root] ?? 1;
+  }
   return 1;
 }
 
-function pnlSign(kind: InstrumentType, side: SideType, premiumSide: PremiumSide) {
+function parseSPXOptionSymbol(raw: string) {
+  const s = (raw || "").trim().toUpperCase().replace(/^[\.\-]/, "");
+  const m = s.match(/^([A-Z]+W?)(\d{6})([CP])(\d+(?:\.\d+)?)$/);
+  if (!m) return null;
+  return { underlying: m[1] };
+}
+
+function looksLikeOptionContract(symbol: string) {
+  return !!parseSPXOptionSymbol(symbol);
+}
+
+function effectiveKind(kind: string, symbol: string): string {
+  if (kind === "option" && !looksLikeOptionContract(symbol)) return "stock";
+  return kind || "other";
+}
+
+function pnlSign(kind: string, side: "long" | "short", premiumSide: "none" | "debit" | "credit") {
   if (kind === "option") {
-    return premiumSide === "credit" ? -1 : 1;
+    if (premiumSide === "credit") return -1;
+    return 1;
   }
   return side === "short" ? -1 : 1;
 }
 
-function computeAutoPnLForDay(entriesRaw: any[], exitsRaw: any[]): number {
-  const entries: NormalizedTrade[] = [];
-  const exits: NormalizedTrade[] = [];
-
-  for (const r of entriesRaw || []) {
-    const t = normalizeTradeRow(r);
-    if (t) entries.push(t);
-  }
-  for (const r of exitsRaw || []) {
-    const t = normalizeTradeRow(r);
-    if (t) exits.push(t);
-  }
-
-  type Lot = {
-    price: number;
-    qtyLeft: number;
-    symbol: string;
-    kind: InstrumentType;
-    side: SideType;
-    premiumSide: PremiumSide;
-    optionStrategy: string;
-  };
-
-  const lotsByKey: Record<string, Lot[]> = {};
-  const k = (t: NormalizedTrade) => `${t.symbol}|${t.kind}|${t.side}|${t.premiumSide}|${t.optionStrategy}`;
+function computeAutoPnL(
+  entries: { symbol: string; kind: string; side: "long" | "short"; premiumSide: "none" | "debit" | "credit"; price: number; quantity: number }[],
+  exits: { symbol: string; kind: string; side: "long" | "short"; premiumSide: "none" | "debit" | "credit"; price: number; quantity: number }[]
+) {
+  const key = (s: string, k: string, side: string, prem: string) => `${s}|${k}|${side}|${prem}`;
+  type Lot = { price: number; qtyLeft: number; symbol: string; kind: string; side: "long" | "short"; premiumSide: "none" | "debit" | "credit" };
+  const entryLots: Record<string, Lot[]> = {};
 
   for (const e of entries) {
-    const key = k(e);
-    lotsByKey[key] ||= [];
-    lotsByKey[key].push({
-      price: e.price,
-      qtyLeft: e.quantity,
-      symbol: e.symbol,
-      kind: e.kind,
-      side: e.side,
-      premiumSide: e.premiumSide,
-      optionStrategy: e.optionStrategy,
-    });
+    const sym = (e.symbol || "").trim().toUpperCase();
+    if (!sym) continue;
+    const kEff = effectiveKind(e.kind, sym);
+    const premEff = e.premiumSide;
+    const k = key(sym, kEff, e.side, premEff);
+    if (!Number.isFinite(e.price) || !Number.isFinite(e.quantity) || e.quantity <= 0) continue;
+    entryLots[k] ||= [];
+    entryLots[k].push({ price: e.price, qtyLeft: e.quantity, symbol: sym, kind: kEff, side: e.side, premiumSide: premEff });
   }
 
   let total = 0;
 
   for (const x of exits) {
-    const key = k(x);
-    const lots = lotsByKey[key];
-    if (!lots || !lots.length) continue;
+    const sym = (x.symbol || "").trim().toUpperCase();
+    if (!sym) continue;
+    const kEff = effectiveKind(x.kind, sym);
+    const premEff = x.premiumSide;
+    const k = key(sym, kEff, x.side, premEff);
+    if (!Number.isFinite(x.price) || !Number.isFinite(x.quantity) || x.quantity <= 0) continue;
+    const lots = entryLots[k];
+    if (!lots || lots.length === 0) continue;
 
+    const sign = pnlSign(kEff, x.side, premEff);
+    const mult = getContractMultiplier(kEff, sym);
     let exitQty = x.quantity;
-    const sign = pnlSign(x.kind, x.side, x.premiumSide);
-    const mult = contractMultiplier(x.kind, x.symbol);
-    const exitPx = x.price;
 
     while (exitQty > 0 && lots.length > 0) {
       const lot = lots[0];
       const closeQty = Math.min(lot.qtyLeft, exitQty);
-
-      total += (exitPx - lot.price) * closeQty * sign * mult;
-
+      total += (x.price - lot.price) * closeQty * sign * mult;
       lot.qtyLeft -= closeQty;
       exitQty -= closeQty;
-
-      if (lot.qtyLeft <= 0.0000001) lots.shift();
+      if (lot.qtyLeft <= 0) lots.shift();
     }
   }
 
-  return Number(total.toFixed(2));
+  return { total };
 }
 
-/* =========================
-   Rules storage (local)
-========================= */
+async function recomputeJournalPnlForDate(userId: string, date: string) {
+  const res = await supabaseBrowser
+    .from("journal_trades")
+    .select("symbol,kind,side,premium,price,quantity,leg")
+    .eq("user_id", userId)
+    .eq("journal_date", date);
 
-function loadRuleState(): Record<AlarmRuleId, boolean> {
-  const base = Object.fromEntries(DEFAULT_RULES.map((r) => [r.id, r.defaultOn])) as Record<
-    AlarmRuleId,
-    boolean
-  >;
+  if (res.error || !Array.isArray(res.data)) return;
 
-  if (typeof window === "undefined") return base;
+  const entries = [];
+  const exits = [];
+  for (const r of res.data as any[]) {
+    const symbol = String(r?.symbol ?? "").trim();
+    if (!symbol) continue;
+    const kind = normalizeKind(r?.kind);
+    const side = normalizeSide(r?.side);
+    const premiumSide = normalizePremium(r?.premium);
+    const price = Number(r?.price ?? 0);
+    const quantity = Number(r?.quantity ?? 0);
+    const leg = String(r?.leg ?? "entry").toLowerCase();
+    const isExit = leg.includes("exit") || leg.includes("close");
 
-  try {
-    const raw = localStorage.getItem(LS_RULES_KEY);
-    if (!raw) return base;
-    const parsed = JSON.parse(raw) as Partial<Record<AlarmRuleId, boolean>>;
-    return { ...base, ...(parsed || {}) };
-  } catch {
-    return base;
+    const row = { symbol, kind, side, premiumSide, price, quantity };
+    if (isExit) exits.push(row);
+    else entries.push(row);
   }
+
+  const total = computeAutoPnL(entries, exits).total;
+  const pnl = Number.isFinite(total) ? Number(total.toFixed(2)) : 0;
+
+  await supabaseBrowser
+    .from("journal_entries")
+    .update({ pnl })
+    .eq("user_id", userId)
+    .eq("date", date);
 }
 
-function saveRuleState(state: Record<AlarmRuleId, boolean>) {
-  try {
-    localStorage.setItem(LS_RULES_KEY, JSON.stringify(state));
-  } catch {}
+function parsePrice(v: string): number | null {
+  if (!v || !v.trim()) return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
 }
 
-type SnoozeMap = Record<string, string>; // alarmId -> untilIso
-function loadSnoozed(): SnoozeMap {
-  if (typeof window === "undefined") return {};
-  try {
-    const raw = localStorage.getItem(LS_SNOOZE_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw) as SnoozeMap;
-    return parsed || {};
-  } catch {
-    return {};
+function extractOpenPositionsFromEvent(e: AlertEvent | null): OpenPosition[] {
+  const payload: any = e?.payload ?? {};
+  const meta = payload?.meta ?? payload?.stats ?? {};
+  const list =
+    payload?.open_positions_list ??
+    payload?.open_positions ??
+    meta?.open_positions_list ??
+    meta?.open_positions ??
+    payload?.meta?.open_positions ??
+    [];
+  return safeArr(list);
+}
+
+function extractExpiringOptionsFromEvent(e: AlertEvent | null): OpenPosition[] {
+  const payload: any = e?.payload ?? {};
+  const meta = payload?.meta ?? payload?.stats ?? {};
+  const list =
+    payload?.options_expiring_today ??
+    payload?.options_expiring ??
+    meta?.options_expiring_today ??
+    meta?.options_expiring ??
+    [];
+  return safeArr(list);
+}
+
+async function closeTradeAtPrice(userId: string, tradeId: string, closeAtISO: string, closePrice?: number | null) {
+  const price = typeof closePrice === "number" && Number.isFinite(closePrice) ? closePrice : null;
+
+  const pricePatches: Record<string, any>[] = price === null
+    ? [{}]
+    : [
+        { exit_price: price },
+        { close_price: price },
+        { exit_price: price, close_price: price },
+      ];
+
+  const basePatches: Record<string, any>[] = [
+    { closed_at: closeAtISO, status: "closed" },
+    { close_time: closeAtISO, status: "closed" },
+    { exited_at: closeAtISO, status: "closed" },
+    { exit_time: closeAtISO, status: "closed" },
+
+    { closed_at: closeAtISO },
+    { close_time: closeAtISO },
+    { exited_at: closeAtISO },
+    { exit_time: closeAtISO },
+  ];
+
+  const attempts: Record<string, any>[] = [];
+  for (const base of basePatches) {
+    for (const patch of pricePatches) {
+      attempts.push({ ...base, ...patch });
+    }
   }
-}
-function saveSnoozed(m: SnoozeMap) {
-  try {
-    localStorage.setItem(LS_SNOOZE_KEY, JSON.stringify(m));
-  } catch {}
-}
 
-type HistoryItem = {
-  id: string;
-  createdAtIso: string;
-  action: "RESOLVE_TO_ZERO";
-  openDate: string;
-  symbol: string;
-  kind: InstrumentType;
-  side: SideType;
-  premiumSide: PremiumSide;
-  optionStrategy: string;
-  qty: number;
-  expiryDerived?: string | null;
-};
-
-function loadHistory(): HistoryItem[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = localStorage.getItem(LS_HISTORY_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw) as HistoryItem[];
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
+  if (price !== null) {
+    attempts.push({ exit_price: price, status: "closed" });
+    attempts.push({ close_price: price, status: "closed" });
+    attempts.push({ exit_price: price });
+    attempts.push({ close_price: price });
   }
+
+  let lastErr: any = null;
+
+  for (const patch of attempts) {
+    const { error } = await supabaseBrowser
+      .from("trades")
+      .update(patch)
+      .eq("id", tradeId)
+      .eq("user_id", userId);
+
+    if (!error) return { ok: true as const };
+
+    lastErr = error;
+    const msg = String(error.message ?? "");
+    const isMissingColumn =
+      msg.includes("does not exist") ||
+      msg.includes("Could not find") ||
+      (msg.includes("column") && msg.includes("of relation"));
+
+    // If it's a column mismatch, try the next patch; otherwise stop.
+    if (!isMissingColumn) break;
+  }
+
+  return { ok: false as const, error: String(lastErr?.message ?? "Failed to close trade") };
 }
-function saveHistory(items: HistoryItem[]) {
+
+async function closeJournalPositionAtPrice(
+  userId: string,
+  pos: OpenPosition,
+  closeAtISO: string,
+  closePrice?: number | null
+) {
+  const symbol = String(pos.symbol ?? "").trim();
+  if (!symbol) return { ok: false as const, error: "Missing symbol" };
+  const price = typeof closePrice === "number" && Number.isFinite(closePrice) ? closePrice : null;
+  const qtyRaw = typeof pos.qty === "number" ? pos.qty : Number(pos.qty ?? 0);
+  const qty = Number.isFinite(qtyRaw) && qtyRaw > 0 ? qtyRaw : 1;
+
+  const now = new Date(closeAtISO);
+  const journalDate = pos.journal_date || isoDate(now);
+  const timeStr = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+  const row: Record<string, any> = {
+    user_id: userId,
+    journal_date: journalDate,
+    leg: "exit",
+    symbol,
+    kind: pos.asset_type ?? null,
+    side: pos.side ?? null,
+    premium: pos.premium ?? null,
+    strategy: pos.strategy ?? null,
+    price,
+    quantity: qty,
+    time: timeStr,
+    dte: typeof pos.dte === "number" ? pos.dte : null,
+  };
+
+  const { error } = await supabaseBrowser.from("journal_trades").insert(row);
+  if (error) return { ok: false as const, error: String(error.message ?? "Failed to close journal trade") };
   try {
-    localStorage.setItem(LS_HISTORY_KEY, JSON.stringify(items.slice(0, 400)));
-  } catch {}
+    await recomputeJournalPnlForDate(userId, journalDate);
+  } catch {
+    // ignore
+  }
+  return { ok: true as const };
 }
 
-/* =========================
-   Tooltip that renders ABOVE (fixed + portalless)
-========================= */
-
-function useAnchoredTooltip() {
-  const ref = useRef<HTMLSpanElement | null>(null);
-  const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const el = ref.current;
-    if (!el) return;
-
-    const update = () => {
-      const r = el.getBoundingClientRect();
-      setPos({
-        top: Math.max(8, r.top - 10),
-        left: Math.min(window.innerWidth - 12, Math.max(12, r.left + r.width / 2)),
-      });
-    };
-
-    update();
-    window.addEventListener("scroll", update, true);
-    window.addEventListener("resize", update);
-    return () => {
-      window.removeEventListener("scroll", update, true);
-      window.removeEventListener("resize", update);
-    };
-  }, [open]);
-
-  return { ref, open, setOpen, pos };
-}
-
-function InfoTip({ text }: { text: string }) {
-  const { ref, open, setOpen, pos } = useAnchoredTooltip();
-
+function SeverityPill({ severity }: { severity: AlertSeverity }) {
+  const label = severity.toUpperCase();
+  const cls =
+    severity === "critical"
+      ? "border-rose-500/40 bg-rose-500/10 text-rose-200"
+      : severity === "warning"
+        ? "border-amber-500/40 bg-amber-500/10 text-amber-200"
+        : severity === "success"
+          ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-200"
+          : "border-sky-500/40 bg-sky-500/10 text-sky-200";
   return (
-    <>
-      <span
-        ref={ref}
-        className="relative inline-flex h-6 w-6 items-center justify-center rounded-full border border-slate-700 text-[11px] text-slate-300 hover:text-emerald-200 cursor-help"
-        onMouseEnter={() => setOpen(true)}
-        onMouseLeave={() => setOpen(false)}
-        onFocus={() => setOpen(true)}
-        onBlur={() => setOpen(false)}
-        tabIndex={0}
-        aria-label="Info"
-      >
-        i
-      </span>
-
-      {open && pos && (
-        <div
-          className="fixed z-200 w-[320px] -translate-x-1/2 -translate-y-full rounded-2xl border border-slate-700 bg-slate-950/95 p-3 text-[11px] leading-relaxed text-slate-100 shadow-[0_0_30px_rgba(0,0,0,0.65)]"
-          style={{ top: pos.top, left: pos.left }}
-          role="tooltip"
-        >
-          {text}
-        </div>
-      )}
-    </>
+    <span className={["inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold tracking-[0.2em]", cls].join(" ")}>
+      {label}
+    </span>
   );
 }
 
-/* =========================
-   Modal
-========================= */
-
-function ConfirmModal({
-  open,
-  title,
-  body,
-  confirmText = "Confirm",
-  cancelText = "Cancel",
-  danger = false,
-  onCancel,
-  onConfirm,
-  busy,
-}: {
-  open: boolean;
-  title: string;
-  body: React.ReactNode;
-  confirmText?: string;
-  cancelText?: string;
-  danger?: boolean;
-  onCancel: () => void;
-  onConfirm: () => void;
-  busy?: boolean;
-}) {
-  if (!open) return null;
+function KpiCard({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
-    <div className="fixed inset-0 z-500 flex items-center justify-center">
-      <div className="absolute inset-0 bg-black/60" onClick={busy ? undefined : onCancel} />
-      <div className="relative w-[92vw] max-w-[640px] rounded-2xl border border-slate-800 bg-slate-950 p-5 shadow-[0_0_40px_rgba(0,0,0,0.75)]">
-        <p className="text-slate-100 text-lg font-semibold">{title}</p>
-        <div className="mt-3 text-sm text-slate-300 leading-relaxed">{body}</div>
-
-        <div className="mt-5 flex items-center justify-end gap-2">
-          <button
-            type="button"
-            disabled={!!busy}
-            onClick={onCancel}
-            className="px-4 py-2 rounded-xl border border-slate-700 text-slate-200 text-sm hover:border-slate-500 transition disabled:opacity-50"
-          >
-            {cancelText}
-          </button>
-          <button
-            type="button"
-            disabled={!!busy}
-            onClick={onConfirm}
-            className={`px-4 py-2 rounded-xl text-sm font-semibold transition disabled:opacity-50 ${
-              danger
-                ? "bg-rose-500 text-white hover:bg-rose-400"
-                : "bg-emerald-400 text-slate-950 hover:bg-emerald-300"
-            }`}
-          >
-            {busy ? "Working…" : confirmText}
-          </button>
-        </div>
-      </div>
+    <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
+      <div className="text-[11px] uppercase tracking-[0.28em] text-slate-500">{label}</div>
+      <div className="mt-2 text-2xl font-semibold text-slate-100">{value}</div>
+      {sub ? <div className="mt-1 text-xs text-slate-400">{sub}</div> : null}
     </div>
   );
 }
 
-/* =========================
-   Page
-========================= */
-
-export default function RulesAlarmsPage() {
-  const { user, loading } = useAuth();
+export default function AlarmsConsolePage() {
   const router = useRouter();
+  const { user } = useAuth();
+  const userId = user?.id || "";
 
-  const userId = (user as any)?.id as string | undefined;
+  const [tab, setTab] = useState<Tab>("active");
+  const [busy, setBusy] = useState(false);
 
-  const [loadingData, setLoadingData] = useState(true);
-  const [entries, setEntries] = useState<JournalEntryLike[]>([]);
+  const [rules, setRules] = useState<AlertRule[]>([]);
+  const [events, setEvents] = useState<AlertEvent[]>([]);
+  const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
 
-  const [tab, setTab] = useState<"alarms" | "rules" | "history">("alarms");
-
-  const [ruleState, setRuleState] = useState<Record<AlarmRuleId, boolean>>(() => loadRuleState());
-  const [snoozed, setSnoozed] = useState<SnoozeMap>(() => loadSnoozed());
-  const [history, setHistory] = useState<HistoryItem[]>(() => loadHistory());
-
+  const [flash, setFlash] = useState<{ type: "success" | "error" | "info"; msg: string } | null>(null);
   const [query, setQuery] = useState("");
-  const [severityFilter, setSeverityFilter] = useState<AlarmSeverity | "ALL">("ALL");
-  const [typeFilter, setTypeFilter] = useState<Alarm["type"] | "ALL">("ALL");
+  const [severityFilter, setSeverityFilter] = useState<"all" | AlertSeverity>("all");
+  const [closePriceByTrade, setClosePriceByTrade] = useState<Record<string, string>>({});
 
-  const [selectedAlarmId, setSelectedAlarmId] = useState<string | null>(null);
+  const selectedEvent = useMemo(
+    () => events.find((e) => e.id === selectedEventId) ?? null,
+    [events, selectedEventId]
+  );
 
-  const [confirmOpen, setConfirmOpen] = useState(false);
-  const [confirmAlarm, setConfirmAlarm] = useState<Alarm | null>(null);
-  const [busyResolve, setBusyResolve] = useState(false);
+  const activeEvents = useMemo(() => events.filter((e) => e.kind === "alarm" && isEventActive(e)), [events]);
+  const snoozedEvents = useMemo(
+    () => events.filter((e) => e.kind === "alarm" && !isEventActive(e) && isEventSnoozed(e)),
+    [events]
+  );
+  const historyEvents = useMemo(
+    () => events.filter((e) => e.kind === "alarm" && e.dismissed && !isEventSnoozed(e)),
+    [events]
+  );
 
-  // auth gate
-  useEffect(() => {
-    if (!loading && !user) router.replace("/signin");
-  }, [loading, user, router]);
+  const openPositionsRule = useMemo(() => {
+    const matchByTrigger = rules.find((r) => String((r as any).trigger_type ?? (r as any).triggerType ?? "").toLowerCase() === "open_positions");
+    if (matchByTrigger) return matchByTrigger;
+    return rules.find((r) => /open\s*positions/i.test(r.title)) ?? null;
+  }, [rules]);
 
-  // Load all journal entries (user scope). Alarms are computed client-side.
-  useEffect(() => {
-    if (loading || !userId) return;
-
-    let alive = true;
-    const run = async () => {
-      try {
-        setLoadingData(true);
-        const all = await getAllJournalEntries(userId);
-        if (!alive) return;
-        setEntries(Array.isArray(all) ? (all as any) : []);
-      } catch (e) {
-        console.error("[rules-alarms] load error", e);
-        if (alive) setEntries([]);
-      } finally {
-        if (alive) setLoadingData(false);
-      }
-    };
-    run();
-
-    return () => {
-      alive = false;
-    };
-  }, [loading, userId]);
-
-  // Persist rule toggles + snoozes + history
-  useEffect(() => saveRuleState(ruleState), [ruleState]);
-  useEffect(() => saveSnoozed(snoozed), [snoozed]);
-  useEffect(() => saveHistory(history), [history]);
-
-  // Clean up expired snoozes occasionally
-  useEffect(() => {
-    const now = new Date();
-    const cleaned: SnoozeMap = { ...snoozed };
-    let changed = false;
-
-    for (const [id, untilIso] of Object.entries(cleaned)) {
-      const d = new Date(untilIso);
-      if (Number.isNaN(d.getTime()) || d <= now) {
-        delete cleaned[id];
-        changed = true;
-      }
-    }
-
-    if (changed) setSnoozed(cleaned);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const todayIso = useMemo(() => isoDate(new Date()), []);
-
-  /* -----------------------------
-     Build fills + open lots (cross-day)
-  ----------------------------- */
-  const { fills, sessionMeta } = useMemo(() => buildFills(entries), [entries]);
-
-  const openLots = useMemo(() => {
-    if (!ruleState.open_positions && !ruleState.expired_options) return [];
-    return processFifo(fills);
-  }, [fills, ruleState.open_positions, ruleState.expired_options]);
-
-  /* -----------------------------
-     Generate alarms
-  ----------------------------- */
-  const alarmsAll: Alarm[] = useMemo(() => {
-    const out: Alarm[] = [];
-    const nowIso = new Date().toISOString();
-
-    const tagsForDate = (date: string): string[] => {
-      const e = entries.find((x) => String(x.date).slice(0, 10) === date);
-      const tags = (e?.tags ?? []) as any;
-      return Array.isArray(tags) ? tags.map((t) => String(t)) : [];
-    };
-
-    const hasAnyTag = (tags: string[], pool: string[]) => {
-      const set = new Set(tags.map((t) => safeUpper(t)));
-      for (const p of pool) if (set.has(safeUpper(p))) return true;
-      return false;
-    };
-
-    // 1) Open positions (including expired options)
-    for (const lot of openLots) {
-      const isOption = lot.kind === "option";
-
-      // expiry: prefer explicit; else derive from openDate + dte
-      const expiryDerived =
-        lot.expiry && lot.expiry.includes("-")
-          ? lot.expiry
-          : typeof lot.dte === "number" && Number.isFinite(lot.dte)
-          ? addDaysIso(lot.openDate, lot.dte)
-          : null;
-
-      const isExpired = isOption && !!expiryDerived && todayIso >= expiryDerived;
-
-      // filter: expired vs open
-      if (isExpired && !ruleState.expired_options) continue;
-      if (!isExpired && !ruleState.open_positions) continue;
-
-      const id = `${isExpired ? "exp" : "open"}|${lot.openDate}|${lot.symbol}|${lot.kind}|${lot.side}|${lot.premiumSide}|${lot.optionStrategy}`;
-
-      const premiumTone =
-        lot.kind === "option" && lot.premiumSide === "credit" ? "Premium credit (short volatility)" : "Debit premium (defined risk)";
-
-      if (isExpired) {
-        out.push({
-          id,
-          type: "EXPIRED_OPTION_UNRESOLVED",
-          severity: "warning",
-          title: "Expired option needs confirmation",
-          message: `Unresolved option position is past expiry. Confirm resolution to $0.00 to clean your ledger. (${premiumTone})`,
-          date: lot.openDate,
-          createdAtIso: nowIso,
-          href: `/journal/${lot.openDate}?focus=${encodeURIComponent(lot.symbol)}`,
-          meta: {
-            lot,
-            expiryDerived,
-            isExpired,
-          },
-        });
-      } else {
-        out.push({
-          id,
-          type: "OPEN_POSITION_UNRESOLVED",
-          severity: "info",
-          title: "Open position detected",
-          message: `Unresolved position remains open in your ledger. Review or reconcile via import/exit entry.`,
-          date: lot.openDate,
-          createdAtIso: nowIso,
-          href: `/journal/${lot.openDate}?focus=${encodeURIComponent(lot.symbol)}`,
-          meta: {
-            lot,
-            expiryDerived,
-            isExpired,
-          },
-        });
-      }
-    }
-
-    // 2) Journal hygiene alarms (per day)
-    // Keep this bounded: latest 120 days based on available entries
-    const sortedDates = [...entries]
-      .map((e) => String(e.date).slice(0, 10))
-      .filter(Boolean)
-      .sort((a, b) => (a < b ? 1 : -1))
-      .slice(0, 120);
-
-    for (const date of sortedDates) {
-      const tags = tagsForDate(date);
-      const payload = sessionMeta[date] ?? {};
-      const premarketEmpty = isBlankHtml(payload?.premarket);
-
-      if (ruleState.missing_emotions && !hasAnyTag(tags, EMOTION_TAGS)) {
-        out.push({
-          id: `emo|${date}`,
-          type: "MISSING_EMOTIONS",
-          severity: "info",
-          title: "Journal hygiene: emotions missing",
-          message: "No emotions selected for this day. Emotional labeling reduces impulsive loops.",
-          date,
-          createdAtIso: nowIso,
-          href: `/journal/${date}`,
-          meta: { date },
-        });
-      }
-
-      if (ruleState.missing_strategy_checklist && !hasAnyTag(tags, STRATEGY_CHECKLIST_TAGS)) {
-        out.push({
-          id: `chk|${date}`,
-          type: "MISSING_STRATEGY_CHECKLIST",
-          severity: "info",
-          title: "Process drift: checklist missing",
-          message: "No strategy checklist tags found. Process drift is a silent performance leak.",
-          date,
-          createdAtIso: nowIso,
-          href: `/journal/${date}`,
-          meta: { date },
-        });
-      }
-
-      if (ruleState.missing_premarket && premarketEmpty) {
-        out.push({
-          id: `pm|${date}`,
-          type: "MISSING_PREMARKET",
-          severity: "info",
-          title: "Premarket prep missing",
-          message: "Premarket section is empty. Prep is your first risk-control.",
-          date,
-          createdAtIso: nowIso,
-          href: `/journal/${date}`,
-          meta: { date },
-        });
-      }
-    }
-
-    // 3) Custom alarms (placeholder container — can be extended later)
-    // For now: none.
-
-    // Apply snoozes
-    const now = new Date();
-    const snoozedIds = new Set<string>();
-    for (const [id, untilIso] of Object.entries(snoozed || {})) {
-      const d = new Date(untilIso);
-      if (!Number.isNaN(d.getTime()) && d > now) snoozedIds.add(id);
-    }
-
-    return out.filter((a) => !snoozedIds.has(a.id));
-  }, [entries, openLots, ruleState, sessionMeta, snoozed, todayIso]);
-
-  const alarmsFiltered = useMemo(() => {
+  const filteredActiveEvents = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return alarmsAll
-      .filter((a) => (severityFilter === "ALL" ? true : a.severity === severityFilter))
-      .filter((a) => (typeFilter === "ALL" ? true : a.type === typeFilter))
-      .filter((a) => {
-        if (!q) return true;
-        const hay = `${a.title} ${a.message} ${a.date} ${a.type}`.toLowerCase();
-        return hay.includes(q);
-      })
-      .sort((a, b) => {
-        // severity first
-        const rank = (s: AlarmSeverity) => (s === "critical" ? 3 : s === "warning" ? 2 : 1);
-        const r = rank(b.severity) - rank(a.severity);
-        if (r !== 0) return r;
-        // newest date first
-        if (a.date !== b.date) return a.date < b.date ? 1 : -1;
-        return a.id < b.id ? 1 : -1;
-      });
-  }, [alarmsAll, query, severityFilter, typeFilter]);
+    return activeEvents.filter((e) => {
+      if (severityFilter !== "all" && e.severity !== severityFilter) return false;
+      if (!q) return true;
+      return (
+        String(e.title ?? "").toLowerCase().includes(q) ||
+        String(e.message ?? "").toLowerCase().includes(q) ||
+        String(e.category ?? "").toLowerCase().includes(q)
+      );
+    });
+  }, [activeEvents, query, severityFilter]);
 
-  const selectedAlarm = useMemo(() => {
-    if (!selectedAlarmId) return alarmsFiltered[0] ?? null;
-    return alarmsFiltered.find((a) => a.id === selectedAlarmId) ?? alarmsFiltered[0] ?? null;
-  }, [alarmsFiltered, selectedAlarmId]);
+  const refreshAll = useCallback(async () => {
+    if (!userId) return;
+    setBusy(true);
+    try {
+      const [rulesRes, eventsRes] = await Promise.all([
+        listAlertRules(userId, { kind: "alarm", includeDisabled: true, limit: 200 }),
+        listAlertEvents(userId, { kind: "alarm", includeDismissed: true, includeSnoozed: true, limit: 500 }),
+      ]);
+
+      if (!rulesRes.ok) setFlash({ type: "error", msg: rulesRes.error || "Failed to load rules" });
+      if (!eventsRes.ok) setFlash({ type: "error", msg: eventsRes.error || "Failed to load events" });
+
+      setRules(rulesRes.ok ? rulesRes.data.rules : []);
+      setEvents(eventsRes.ok ? eventsRes.data.events : []);
+    } finally {
+      setBusy(false);
+    }
+  }, [userId]);
 
   useEffect(() => {
-    if (!selectedAlarmId && alarmsFiltered.length) setSelectedAlarmId(alarmsFiltered[0].id);
-  }, [alarmsFiltered, selectedAlarmId]);
+    refreshAll();
+  }, [refreshAll]);
 
-  /* -----------------------------
-     Actions: Snooze + Resolve
-  ----------------------------- */
-
-  const snoozeAlarm = (alarmId: string, hours: number) => {
-    const until = new Date(Date.now() + hours * 60 * 60 * 1000).toISOString();
-    setSnoozed((prev) => ({ ...(prev || {}), [alarmId]: until }));
-  };
-
-  const openResolveConfirm = (alarm: Alarm) => {
-    setConfirmAlarm(alarm);
-    setConfirmOpen(true);
-  };
-
-  const closeConfirm = () => {
-    if (busyResolve) return;
-    setConfirmOpen(false);
-    setConfirmAlarm(null);
-  };
-
-  async function resolveExpiredOptionToZero(alarm: Alarm) {
+  useEffect(() => {
     if (!userId) return;
-    if (alarm.type !== "EXPIRED_OPTION_UNRESOLVED") return;
+    const sub = subscribeToAlertEvents(userId, () => {
+      refreshAll();
+    });
+    const t = window.setInterval(() => {
+      refreshAll();
+    }, 30_000);
+    const onForce = () => refreshAll();
+    window.addEventListener("ntj_alert_force_pull", onForce);
+    return () => {
+      window.clearInterval(t);
+      window.removeEventListener("ntj_alert_force_pull", onForce);
+      sub?.unsubscribe?.();
+    };
+  }, [userId, refreshAll]);
 
-    const lot = alarm.meta?.lot as OpenLot | undefined;
-    if (!lot) return;
+  useEffect(() => {
+    setClosePriceByTrade({});
+  }, [selectedEventId]);
 
-    setBusyResolve(true);
+  // Audit Trail: pick the newest open-positions related event by default
+  useEffect(() => {
+    if (tab !== "audit") return;
+    if (selectedEventId) return;
 
+    const candidate =
+      events.find((e) => extractOpenPositionsFromEvent(e).length > 0 || extractExpiringOptionsFromEvent(e).length > 0) ??
+      null;
+
+    if (candidate) setSelectedEventId(candidate.id);
+  }, [tab, selectedEventId, events]);
+
+  async function onTestRule(ruleId: string) {
+    if (!userId) return;
+    setBusy(true);
+    setFlash(null);
     try {
-      // 1) Load journal entry by date (source of truth for notes payload)
-      const openDate = lot.openDate;
-      const existing = await getJournalEntryByDate(userId, openDate);
-
-      if (!existing) {
-        throw new Error(`Cannot resolve: journal entry not found for ${openDate}.`);
+      const res = await fireTestEventFromRule(userId, ruleId);
+      if (!res.ok) {
+        setFlash({ type: "error", msg: res.error || "Test failed" });
+        return;
       }
+      setFlash({ type: "success", msg: "Test event fired. You should see a popup within a few seconds." });
+      await refreshAll();
+      if (res.data.eventId) {
+        setSelectedEventId(res.data.eventId);
+        setTab("active");
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
 
-      // 2) Parse notes payload, append synthetic exit (UI format)
-      const payload = parseNotesPayload((existing as any).notes);
+  async function onSnooze(eventId: string, minutes: number) {
+    if (!userId) return;
+    setBusy(true);
+    setFlash(null);
+    try {
+      const res = await snoozeAlertEvent(userId, eventId, minutes);
+      if (!res.ok) setFlash({ type: "error", msg: res.error || "Snooze failed" });
+      await refreshAll();
+    } finally {
+      setBusy(false);
+    }
+  }
 
-      const entArr = Array.isArray(payload.entries) ? payload.entries : [];
-      const exArr = Array.isArray(payload.exits) ? payload.exits : [];
+  async function onDismiss(eventId: string) {
+    if (!userId) return;
+    setBusy(true);
+    setFlash(null);
+    try {
+      const res = await dismissAlertEvent(userId, eventId);
+      if (!res.ok) setFlash({ type: "error", msg: res.error || "Dismiss failed" });
+      await refreshAll();
+    } finally {
+      setBusy(false);
+    }
+  }
 
-      // Compute remaining qty for this key within THIS day payload (conservative)
-      // If the day doesn't contain the entry rows (import model differs), we still append exit into this day
-      // to satisfy the “where it is open” UX and to clear analytics open-positions.
-      const remainingQty = Math.max(0, Number(lot.qtyLeft) || 0);
-      if (remainingQty <= 0) {
-        // nothing to do
-        snoozeAlarm(alarm.id, 72);
+  async function onTogglePopup(rule: AlertRule) {
+    if (!userId) return;
+    setBusy(true);
+    setFlash(null);
+    try {
+      const current: AlertChannel[] = Array.isArray(rule.channels) && rule.channels.length > 0 ? rule.channels : ["inapp"];
+      const hasPopup = current.includes("popup");
+      let next: AlertChannel[] = hasPopup
+        ? current.filter((c) => c !== "popup")
+        : Array.from(new Set<AlertChannel>([...current, "popup"]));
+      if (next.length === 0) next = ["inapp"];
+
+      const res = await updateAlertRule(userId, rule.id, { channels: next });
+      if (!res.ok) setFlash({ type: "error", msg: res.error || "Failed to update channels" });
+      await refreshAll();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onMarkSwing(tradeId: string) {
+    if (!userId || !openPositionsRule) return;
+    setBusy(true);
+    setFlash(null);
+    try {
+      const meta: any = (openPositionsRule as any).meta ?? {};
+      const ignore = new Set<string>(safeArr(meta.ignore_trade_ids).map((v) => String(v)));
+      ignore.add(String(tradeId));
+
+      const nextMeta = { ...meta, ignore_trade_ids: Array.from(ignore) };
+      const res = await updateAlertRule(userId, openPositionsRule.id, { meta: nextMeta });
+      if (!res.ok) {
+        setFlash({ type: "error", msg: res.error || "Failed to mark swing" });
         return;
       }
 
-      const syntheticExitUi = {
-        id: uuid(),
-        symbol: lot.symbol,
-        kind: lot.kind,
-        side: lot.side,
-        premiumSide: lot.premiumSide,
-        optionStrategy: lot.optionStrategy,
-        price: "0",
-        quantity: String(remainingQty),
-        time: "EXP",
-        dte: 0,
-        expiry: null,
-      };
-
-      const nextPayload: ParsedNotesPayload = {
-        ...payload,
-        entries: entArr,
-        exits: [...exArr, syntheticExitUi],
-      };
-
-      const nextNotesStr = JSON.stringify(nextPayload);
-
-      // 3) Update PnL for that journal day (same-day FIFO)
-      const nextPnl = computeAutoPnLForDay(nextPayload.entries || [], nextPayload.exits || []);
-
-      // 4) Save journal entry (notes + pnl)
-      const entryToSave = {
-        ...(existing as any),
-        user_id: userId,
-        date: openDate,
-        notes: nextNotesStr,
-        pnl: nextPnl,
-      };
-
-      await saveJournalEntry(userId, entryToSave as any);
-
-      // 5) Save journal_trades rows to match payload (keeps DB + notes consistent)
-      const toStored = (r: any): StoredTradeRow => {
-        const t = normalizeTradeRow(r);
-        return {
-          id: t?.id ?? uuid(),
-          symbol: t?.symbol ?? "",
-          kind: (t?.kind ?? "other") as any,
-          side: (t?.side ?? "long") as any,
-          premiumSide: (t as any)?.premiumSide,
-          optionStrategy: (t as any)?.optionStrategy,
-          price: Number(t?.price ?? 0),
-          quantity: Number(t?.quantity ?? 0),
-          time: String(t?.time ?? ""),
-          dte: t?.dte ?? undefined,
-          // keep additional fields untouched (future schema)
-        } as any;
-      };
-
-      const storedEntries = (nextPayload.entries || []).map(toStored).filter((x) => x.symbol);
-      const storedExits = (nextPayload.exits || []).map(toStored).filter((x) => x.symbol);
-
-      await saveJournalTradesForDay(userId, openDate, { entries: storedEntries, exits: storedExits } as any);
-
-      // 6) Update local cache so alarms recompute instantly
-      setEntries((prev) =>
-        (prev || []).map((e) =>
-          String(e.date).slice(0, 10) === openDate ? { ...(e as any), notes: nextNotesStr, pnl: nextPnl } : e
-        )
-      );
-
-      // 7) Audit trail (local) + best-effort DB write
-      const histItem: HistoryItem = {
-        id: uuid(),
-        createdAtIso: new Date().toISOString(),
-        action: "RESOLVE_TO_ZERO",
-        openDate,
-        symbol: lot.symbol,
-        kind: lot.kind,
-        side: lot.side,
-        premiumSide: lot.premiumSide,
-        optionStrategy: lot.optionStrategy,
-        qty: remainingQty,
-        expiryDerived: alarm.meta?.expiryDerived ?? null,
-      };
-
-      setHistory((prev) => [histItem, ...(prev || [])].slice(0, 300));
-
-      // Optional DB insert (won't break if table doesn't exist)
-      try {
-        await supabaseBrowser.from("ntj_resolution_runs").insert([
-          {
-            user_id: userId,
-            created_at: histItem.createdAtIso,
-            action: histItem.action,
-            open_date: histItem.openDate,
-            symbol: histItem.symbol,
-            kind: histItem.kind,
-            side: histItem.side,
-            premium_side: histItem.premiumSide,
-            option_strategy: histItem.optionStrategy,
-            qty: histItem.qty,
-            expiry_derived: histItem.expiryDerived,
-          },
-        ]);
-      } catch {
-        // ignore if not configured yet
-      }
-
-      // 8) Snooze the alarm after successful resolve (it will also disappear because position is closed)
-      snoozeAlarm(alarm.id, 24);
-    } catch (err: any) {
-      console.error("[resolveExpiredOptionToZero] error", err);
-      alert(err?.message ?? "Resolution failed. Check console logs.");
+      // Re-run engine so the audit trail refreshes and potentially auto-resolves.
+      window.dispatchEvent(new Event("ntj_alert_engine_run_now"));
+      setFlash({ type: "success", msg: "Marked as swing (ignored for open-positions alarm)." });
+      await refreshAll();
     } finally {
-      setBusyResolve(false);
+      setBusy(false);
     }
   }
 
-  /* =========================
-     Render
-  ========================= */
+  async function onClosePositionsAtPrice(positions: OpenPosition[], price: number, sourceEvent: AlertEvent) {
+    if (!userId || positions.length === 0) return;
+    if (!Number.isFinite(price)) return;
 
-  if (loading || !user || loadingData) {
-    return (
-      <main className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center">
-        <p className="text-slate-400 text-sm">Loading rules & alarms…</p>
-      </main>
-    );
+    setBusy(true);
+    setFlash(null);
+
+    try {
+      const closeAtISO = new Date().toISOString();
+      const results = await Promise.all(
+        positions.map(async (pos) => {
+          const tradeId = pos?.id != null ? String(pos.id) : "";
+          const looksLikeJournal = tradeId.includes("|") || !!pos.premium || !!pos.strategy;
+          if (pos.source === "journal" || pos.source === "notes" || looksLikeJournal) {
+            return closeJournalPositionAtPrice(userId, pos, closeAtISO, price);
+          }
+          if (!tradeId) return { ok: false as const, error: "Missing trade id" };
+          return closeTradeAtPrice(userId, tradeId, closeAtISO, price);
+        })
+      );
+
+      const failed = results.find((r) => !r.ok) as any;
+      if (failed) {
+        setFlash({ type: "error", msg: failed.error || "Failed closing position(s)" });
+        return;
+      }
+
+      const actionType = price === 0 ? "close_at_zero" : "close_at_price";
+      await patchAlertEventPayload(userId, sourceEvent.id, {
+        last_action: { type: actionType, at: closeAtISO, trade_ids: positions.map((p) => p?.id).filter(Boolean), price },
+      });
+
+      // Re-run engine so the alarm updates/auto-resolves.
+      window.dispatchEvent(new Event("ntj_alert_engine_run_now"));
+
+      setFlash({ type: "success", msg: `Closed ${positions.length} position(s) at $${price}.` });
+      setClosePriceByTrade((prev) => {
+        const next = { ...prev };
+        positions.forEach((p) => {
+          const tradeId = p?.id != null ? String(p.id) : "";
+          if (tradeId) delete next[tradeId];
+        });
+        return next;
+      });
+      await refreshAll();
+    } finally {
+      setBusy(false);
+    }
   }
 
-  const totals = {
-    active: alarmsFiltered.length,
-    expired: alarmsFiltered.filter((a) => a.type === "EXPIRED_OPTION_UNRESOLVED").length,
-    open: alarmsFiltered.filter((a) => a.type === "OPEN_POSITION_UNRESOLVED").length,
-  };
+  const auditOpenPositions = extractOpenPositionsFromEvent(selectedEvent);
+  const auditExpiring = extractExpiringOptionsFromEvent(selectedEvent);
+  const auditOpenCount = useMemo(() => {
+    const payload: any = selectedEvent?.payload ?? {};
+    const stats = payload?.stats ?? payload?.meta ?? {};
+    const n = typeof stats?.open_positions === "number" ? stats.open_positions : Number(stats?.open_positions ?? 0);
+    return Number.isFinite(n) ? n : 0;
+  }, [selectedEvent]);
 
-  const severityBadge = (sev: AlarmSeverity) => {
-    if (sev === "critical") return "border-rose-500/40 bg-rose-500/10 text-rose-200";
-    if (sev === "warning") return "border-amber-400/40 bg-amber-400/10 text-amber-100";
-    return "border-slate-600/45 bg-slate-800/40 text-slate-200";
-  };
-
-  const typeLabel = (t: Alarm["type"]) => {
-    if (t === "EXPIRED_OPTION_UNRESOLVED") return "Expired option";
-    if (t === "OPEN_POSITION_UNRESOLVED") return "Open position";
-    if (t === "MISSING_EMOTIONS") return "Journal hygiene";
-    if (t === "MISSING_STRATEGY_CHECKLIST") return "Process drift";
-    if (t === "MISSING_PREMARKET") return "Premarket";
-    return "Custom";
-  };
+  const expiringPositions = useMemo(() => {
+    const list = auditExpiring.filter((p) => p && p.id !== null && p.id !== undefined);
+    return list;
+  }, [auditExpiring]);
 
   return (
     <main className="min-h-screen bg-slate-950 text-slate-50">
       <TopNav />
+      <div className="px-6 md:px-10 py-8 max-w-7xl mx-auto">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+          <div className="text-[11px] uppercase tracking-[0.32em] text-emerald-400">Rules &amp; Alarms • Alarms</div>
+          <h1 className="mt-2 text-3xl font-semibold text-slate-100">Active alarms &amp; audit trail</h1>
+          <p className="mt-2 max-w-2xl text-sm text-slate-400">
+            Monitor open positions, expiring options, and key risk rules. When an alarm fires, resolve it with a snooze,
+            dismissal, or a close-at-price action.
+          </p>
+          </div>
 
-      <div className="px-4 md:px-8 py-6">
-        <div className="max-w-6xl mx-auto">
-          <header className="flex flex-col gap-4 mb-6">
-            <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => router.push("/dashboard")}
+            className="inline-flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-950/30 px-3 py-2 text-xs font-semibold text-slate-100 transition hover:border-emerald-500/60 hover:bg-emerald-500/10 hover:text-emerald-200"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Back to dashboard
+          </button>
+          <button
+            className="rounded-xl border border-slate-700 bg-slate-900/40 px-3 py-2 text-xs font-semibold text-slate-100 hover:border-emerald-500/60 hover:bg-emerald-500/10"
+            onClick={() => window.dispatchEvent(new Event("ntj_alert_engine_run_now"))}
+            disabled={!userId || busy}
+            title="Force the alert engine to evaluate rules now"
+          >
+            Run checks now
+          </button>
+          <button
+            className="rounded-xl border border-slate-700 bg-slate-900/40 px-3 py-2 text-xs font-semibold text-slate-100 hover:border-emerald-500/60 hover:bg-emerald-500/10"
+            onClick={refreshAll}
+            disabled={!userId || busy}
+          >
+            Refresh
+          </button>
+        </div>
+      </div>
+
+        {flash && (
+          <div
+          className={[
+            "mt-5 rounded-xl border px-3 py-2 text-sm",
+            flash.type === "success"
+              ? "border-emerald-800 bg-emerald-950/40 text-emerald-200"
+              : flash.type === "error"
+                ? "border-rose-800 bg-rose-950/40 text-rose-200"
+                : "border-slate-700 bg-slate-900/40 text-slate-200",
+          ].join(" ")}
+        >
+          {flash.msg}
+        </div>
+      )}
+
+        <div className="mt-6 grid gap-4 md:grid-cols-3">
+        <KpiCard label="Active alarms" value={String(activeEvents.length)} sub="Currently firing" />
+        <KpiCard label="Snoozed" value={String(snoozedEvents.length)} sub="Hidden temporarily" />
+        <KpiCard label="Rules enabled" value={String(rules.filter((r) => r.enabled).length)} sub="Alarms configured" />
+      </div>
+
+        <div className="mt-6 flex flex-wrap gap-2">
+        {[
+          ["active", `Active (${activeEvents.length})`],
+          ["rules", `Rules (${rules.length})`],
+          ["audit", "Audit trail"],
+          ["history", `History (${historyEvents.length})`],
+        ].map(([k, label]) => (
+          <button
+            key={k}
+            className={[
+              "rounded-full border px-4 py-1 text-xs font-semibold",
+              tab === (k as Tab)
+                ? "border-emerald-400/60 bg-emerald-500/10 text-emerald-200"
+                : "border-slate-700 bg-slate-900/30 text-slate-300 hover:border-emerald-400/60",
+            ].join(" ")}
+            onClick={() => setTab(k as Tab)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+        {tab === "active" && (
+        <div className="mt-6 grid gap-6 lg:grid-cols-[1.4fr_1fr]">
+          <section className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div>
-                <p className="text-emerald-400 text-xs uppercase tracking-[0.25em]">
-                  Rules & Alarms
-                </p>
-                <h1 className="text-3xl md:text-4xl font-semibold mt-1">
-                  Alarms, Guardrails, and Audit Trail
-                </h1>
-                <p className="text-sm md:text-base text-slate-400 mt-2 max-w-3xl">
-                  System-grade alerts: unresolved positions, expired options requiring confirmation, and journal hygiene.
-                  Built to keep traders disciplined, not discouraged.
+                <div className="text-xs uppercase tracking-[0.28em] text-slate-500">Active alarms</div>
+                <p className="mt-2 text-sm text-slate-400">
+                  Click an alarm to see evidence, context, and recommended actions.
                 </p>
               </div>
-
-              <div className="flex flex-col items-start md:items-end gap-2">
-                <Link
-                  href="/dashboard"
-                  className="px-3 py-2 rounded-xl border border-slate-700 text-slate-200 text-xs md:text-sm hover:border-emerald-400 hover:text-emerald-300 transition"
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+                  <input
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    placeholder="Search alarms..."
+                    className="w-48 rounded-xl border border-slate-700 bg-slate-950/40 pl-9 pr-3 py-2 text-xs text-slate-200 placeholder:text-slate-500 focus:border-emerald-400"
+                  />
+                </div>
+                <select
+                  value={severityFilter}
+                  onChange={(e) => setSeverityFilter(e.target.value as any)}
+                  className="rounded-xl border border-slate-700 bg-slate-950/40 px-3 py-2 text-xs text-slate-200 focus:border-emerald-400"
                 >
-                  ← Back to dashboard
-                </Link>
-                <p className="text-[11px] text-slate-500">
-                  Active alarms:{" "}
-                  <span className="text-emerald-300 font-semibold">{totals.active}</span>
-                </p>
+                  <option value="all">All severities</option>
+                  <option value="info">Info</option>
+                  <option value="success">Success</option>
+                  <option value="warning">Warning</option>
+                  <option value="critical">Critical</option>
+                </select>
               </div>
             </div>
 
-            {/* Tabs */}
-            <section className={wrapCard()}>
-              <div className="p-3 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-                <div className="flex flex-wrap gap-2">
-                  {[
-                    { id: "alarms", label: "Alarms" },
-                    { id: "rules", label: "Rules" },
-                    { id: "history", label: "History" },
-                  ].map((t) => {
-                    const active = tab === (t.id as any);
-                    return (
+            <div className="mt-5 space-y-3">
+              {filteredActiveEvents.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-slate-700 bg-slate-950/30 p-4 text-sm text-slate-400">
+                  No alarms match your filters.
+                </div>
+              ) : (
+                filteredActiveEvents.map((e) => (
+                  <button
+                    key={e.id}
+                    onClick={() => setSelectedEventId(e.id)}
+                    className={[
+                      "w-full rounded-xl border p-4 text-left transition",
+                      selectedEventId === e.id
+                        ? "border-emerald-400/50 bg-emerald-500/10"
+                        : "border-slate-800 bg-slate-950/30 hover:border-slate-600",
+                    ].join(" ")}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <SeverityPill severity={e.severity} />
+                        <span className="text-[11px] uppercase tracking-[0.2em] text-slate-500">alarm</span>
+                      </div>
+                      <div className="text-xs text-slate-400">{fmtDate(e.triggered_at)}</div>
+                    </div>
+                    <div className="mt-2 text-sm font-semibold text-slate-100">{e.title || "Alarm"}</div>
+                    <div className="mt-1 text-xs text-slate-400 line-clamp-2">{e.message || "—"}</div>
+                  </button>
+                ))
+              )}
+            </div>
+          </section>
+
+          <div className="grid gap-4">
+            <section className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <div className="text-xs uppercase tracking-[0.28em] text-slate-500">Alarm detail</div>
+                  <p className="mt-2 text-sm text-slate-400">Evidence, action plan, and controls.</p>
+                </div>
+                {selectedEvent ? <SeverityPill severity={selectedEvent.severity} /> : null}
+              </div>
+
+              {!selectedEvent ? (
+                <div className="mt-6 rounded-xl border border-dashed border-slate-700 bg-slate-950/30 p-4 text-sm text-slate-400">
+                  Select an alarm from the left to inspect details and actions.
+                </div>
+              ) : (
+                <div className="mt-5 space-y-4">
+                  <div>
+                    <div className="text-xl font-semibold text-slate-100">{selectedEvent.title}</div>
+                    <div className="mt-2 text-sm text-slate-300">{selectedEvent.message}</div>
+                  </div>
+
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
+                      <div className="text-[11px] uppercase tracking-[0.2em] text-slate-500">Created</div>
+                      <div className="mt-1 text-sm text-slate-200">{fmtDate(selectedEvent.triggered_at)}</div>
+                    </div>
+                    <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
+                      <div className="text-[11px] uppercase tracking-[0.2em] text-slate-500">Category</div>
+                      <div className="mt-1 text-sm text-slate-200">{selectedEvent.category || "alarm"}</div>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      className="rounded-lg border border-slate-700 bg-slate-900/40 px-3 py-2 text-xs font-semibold text-slate-100 hover:border-emerald-400/60 hover:bg-emerald-500/10"
+                      onClick={() => onSnooze(selectedEvent.id, 60)}
+                      disabled={busy}
+                    >
+                      Snooze 1h
+                    </button>
+                    <button
+                      className="rounded-lg border border-slate-700 bg-slate-900/40 px-3 py-2 text-xs font-semibold text-slate-100 hover:border-rose-400/60 hover:bg-rose-500/10"
+                      onClick={() => onDismiss(selectedEvent.id)}
+                      disabled={busy}
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+
+                  <details className="rounded-lg border border-slate-800 bg-slate-950/40 p-3">
+                    <summary className="cursor-pointer text-xs font-semibold text-slate-300">View raw metadata</summary>
+                    <pre className="mt-3 max-h-56 overflow-auto text-xs text-slate-300">
+                      {JSON.stringify(selectedEvent.payload ?? {}, null, 2)}
+                    </pre>
+                  </details>
+                </div>
+              )}
+            </section>
+
+            <section className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
+              <div className="text-xs uppercase tracking-[0.28em] text-slate-500">Quick controls</div>
+              <p className="mt-2 text-sm text-slate-400">Snoozing hides the alarm until the chosen time.</p>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <button
+                  className="rounded-lg border border-slate-700 bg-slate-900/40 px-3 py-2 text-xs font-semibold text-slate-100 hover:border-emerald-400/60 hover:bg-emerald-500/10"
+                  onClick={() => selectedEvent && onSnooze(selectedEvent.id, 10)}
+                  disabled={!selectedEvent || busy}
+                >
+                  Snooze 10m
+                </button>
+                <button
+                  className="rounded-lg border border-slate-700 bg-slate-900/40 px-3 py-2 text-xs font-semibold text-slate-100 hover:border-emerald-400/60 hover:bg-emerald-500/10"
+                  onClick={() => selectedEvent && onSnooze(selectedEvent.id, 1440)}
+                  disabled={!selectedEvent || busy}
+                >
+                  Snooze 24h
+                </button>
+              </div>
+            </section>
+          </div>
+        </div>
+      )}
+
+        {tab === "rules" && (
+        <section className="mt-6 rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <div className="text-xs uppercase tracking-[0.28em] text-slate-500">Alarm rules</div>
+              <p className="mt-2 text-sm text-slate-400">Toggle rules on/off and trigger test alarms.</p>
+            </div>
+            <div className="text-xs text-slate-400">{busy ? "Working…" : ""}</div>
+          </div>
+
+          {rules.length === 0 ? (
+            <div className="mt-4 rounded-xl border border-dashed border-slate-700 bg-slate-950/30 p-4 text-sm text-slate-400">
+              No rules found.
+            </div>
+          ) : (
+            <div className="mt-5 space-y-3">
+              {rules.map((r) => (
+                <div key={r.id} className="rounded-xl border border-slate-800 bg-slate-950/30 p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-4">
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <SeverityPill severity={r.severity} />
+                        <span className="text-xs text-slate-400">{r.category}</span>
+                      </div>
+                      <div className="text-base font-semibold text-slate-100">{r.title}</div>
+                      <div className="text-sm text-slate-400">{r.message || "—"}</div>
+                      <div className="text-[11px] text-slate-500">
+                        Channels: <span className="text-slate-300 font-medium">{channelsLabel(r.channels ?? [])}</span>
+                      </div>
+                      {(r as any).meta?.ignore_trade_ids?.length ? (
+                        <div className="text-xs text-slate-500">
+                          Ignoring {(r as any).meta.ignore_trade_ids.length} position(s)
+                        </div>
+                      ) : null}
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
                       <button
-                        key={t.id}
-                        type="button"
-                        onClick={() => setTab(t.id as any)}
-                        className={`px-3 py-1.5 rounded-full text-xs md:text-sm border transition ${
-                          active
-                            ? "bg-emerald-400 text-slate-950 border-emerald-300 shadow-[0_0_20px_rgba(16,185,129,0.30)]"
-                            : "bg-slate-950 text-slate-200 border-slate-700 hover:border-emerald-400 hover:text-emerald-300"
-                        }`}
+                        className="rounded-lg border border-slate-700 bg-slate-900/40 px-3 py-2 text-xs font-semibold text-slate-100 hover:border-emerald-400/60 hover:bg-emerald-500/10"
+                        onClick={() => onTestRule(r.id)}
+                        disabled={busy || !userId}
                       >
-                        {t.label}
+                        Test
                       </button>
-                    );
-                  })}
-                </div>
 
-                <div className="flex flex-wrap items-center gap-2">
-                  <div className="rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-2 text-xs text-slate-300">
-                    <span className="font-mono">{totals.expired}</span> expired
-                  </div>
-                  <div className="rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-2 text-xs text-slate-300">
-                    <span className="font-mono">{totals.open}</span> open
-                  </div>
-                </div>
-              </div>
-            </section>
-          </header>
+                      <button
+                        className={[
+                          "rounded-lg border px-3 py-2 text-xs font-semibold transition",
+                          (r.channels ?? []).includes("popup")
+                            ? "border-emerald-500/50 bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/20"
+                            : "border-slate-700 bg-slate-900/40 text-slate-200 hover:border-emerald-400/60 hover:bg-emerald-500/10",
+                        ].join(" ")}
+                        onClick={() => onTogglePopup(r)}
+                        disabled={busy || !userId}
+                        title="Toggle popup delivery"
+                      >
+                        Popup {((r.channels ?? []).includes("popup")) ? "On" : "Off"}
+                      </button>
 
-          {/* ============= Alarms Tab ============= */}
-          {tab === "alarms" && (
-            <section className="grid grid-cols-1 lg:grid-cols-[1fr,420px] gap-4">
-              {/* List */}
-              <div className={wrapCard()}>
-                <div className="p-4 border-b border-slate-800 flex flex-col md:flex-row md:items-end md:justify-between gap-3">
-                  <div>
-                    <p className={chartTitle()}>Active alarms</p>
-                    <p className={chartSub()}>
-                      Click an alarm to review. Expired options require confirmation before resolving to $0.00.
-                    </p>
-                  </div>
+                      <button
+                        className="rounded-lg border border-slate-700 bg-slate-900/40 px-3 py-2 text-xs font-semibold text-slate-100 hover:border-emerald-400/60 hover:bg-emerald-500/10"
+                        onClick={async () => {
+                          if (!userId) return;
+                          setBusy(true);
+                          setFlash(null);
+                          try {
+                            const res = await updateAlertRule(userId, r.id, { enabled: !r.enabled });
+                            if (!res.ok) setFlash({ type: "error", msg: res.error || "Failed to update rule" });
+                            await refreshAll();
+                          } finally {
+                            setBusy(false);
+                          }
+                        }}
+                        disabled={busy || !userId}
+                      >
+                        {r.enabled ? "Disable" : "Enable"}
+                      </button>
 
-                  <div className="flex flex-col md:flex-row md:items-end gap-2">
-                    <div>
-                      <span className="text-[11px] text-slate-500 font-mono">SEARCH</span>
-                      <input
-                        value={query}
-                        onChange={(e) => setQuery(e.target.value)}
-                        placeholder="symbol, date, type…"
-                        className="mt-1 w-full md:w-60 rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-400"
-                      />
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      <div>
-                        <span className="text-[11px] text-slate-500 font-mono">SEVERITY</span>
-                        <select
-                          value={severityFilter}
-                          onChange={(e) => setSeverityFilter(e.target.value as any)}
-                          className="mt-1 w-full rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-400"
-                        >
-                          <option value="ALL">All</option>
-                          <option value="critical">Critical</option>
-                          <option value="warning">Warning</option>
-                          <option value="info">Info</option>
-                        </select>
-                      </div>
-
-                      <div>
-                        <span className="text-[11px] text-slate-500 font-mono">TYPE</span>
-                        <select
-                          value={typeFilter}
-                          onChange={(e) => setTypeFilter(e.target.value as any)}
-                          className="mt-1 w-full rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-400"
-                        >
-                          <option value="ALL">All</option>
-                          <option value="EXPIRED_OPTION_UNRESOLVED">Expired option</option>
-                          <option value="OPEN_POSITION_UNRESOLVED">Open position</option>
-                          <option value="MISSING_EMOTIONS">Missing emotions</option>
-                          <option value="MISSING_STRATEGY_CHECKLIST">Missing checklist</option>
-                          <option value="MISSING_PREMARKET">Missing premarket</option>
-                        </select>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="p-4 space-y-2 max-h-[66vh] overflow-auto">
-                  {alarmsFiltered.length === 0 ? (
-                    <div className="rounded-2xl border border-slate-800 bg-slate-950/50 p-4">
-                      <p className="text-slate-200 text-sm font-medium">No alarms right now</p>
-                      <p className="text-slate-500 text-sm mt-1">
-                        Clean ledger, clean mind. If you expected alarms, check Rules toggles and your journal data.
-                      </p>
-                    </div>
-                  ) : (
-                    alarmsFiltered.map((a) => {
-                      const active = a.id === selectedAlarmId;
-                      return (
+                      {openPositionsRule?.id === r.id && (r as any).meta?.ignore_trade_ids?.length ? (
                         <button
-                          key={a.id}
-                          type="button"
-                          onClick={() => setSelectedAlarmId(a.id)}
-                          className={`w-full text-left rounded-2xl border p-4 transition ${
-                            active
-                              ? "border-emerald-400/60 bg-emerald-400/5 shadow-[0_0_25px_rgba(16,185,129,0.10)]"
-                              : "border-slate-800 bg-slate-950/40 hover:bg-slate-950/65"
-                          }`}
+                          className="rounded-lg border border-amber-800 bg-amber-950/30 px-3 py-2 text-xs font-semibold text-amber-200 hover:bg-amber-950/60"
+                          onClick={async () => {
+                            if (!userId) return;
+                            setBusy(true);
+                            setFlash(null);
+                            try {
+                              const meta: any = (r as any).meta ?? {};
+                              const res = await updateAlertRule(userId, r.id, { meta: { ...meta, ignore_trade_ids: [] } });
+                              if (!res.ok) setFlash({ type: "error", msg: res.error || "Failed to clear ignores" });
+                              window.dispatchEvent(new Event("ntj_alert_engine_run_now"));
+                              await refreshAll();
+                            } finally {
+                              setBusy(false);
+                            }
+                          }}
+                          disabled={busy}
                         >
-                          <div className="flex items-start justify-between gap-3">
-                            <div>
-                              <p className="text-slate-100 font-medium">{a.title}</p>
-                              <p className="text-[12px] text-slate-400 mt-1 leading-relaxed">
-                                {a.message}
-                              </p>
-                            </div>
-
-                            <div className="flex flex-col items-end gap-2">
-                              <span className={`px-2 py-1 rounded-full text-[11px] border ${severityBadge(a.severity)}`}>
-                                {a.severity.toUpperCase()}
-                              </span>
-                              <span className="text-[11px] text-slate-500 font-mono">
-                                {typeLabel(a.type)}
-                              </span>
-                              <span className="text-[11px] text-slate-500 font-mono">
-                                {formatDateFriendly(a.date)}
-                              </span>
-                            </div>
-                          </div>
+                          Clear ignored
                         </button>
-                      );
-                    })
-                  )}
-                </div>
-              </div>
-
-              {/* Detail */}
-              <div className={`${wrapCard()} lg:sticky lg:top-6 h-fit`}>
-                <div className="p-4 border-b border-slate-800 flex items-center justify-between gap-3">
-                  <div>
-                    <p className={chartTitle()}>Alarm detail</p>
-                    <p className={chartSub()}>Review context, then take action.</p>
+                      ) : null}
+                    </div>
                   </div>
-                  <InfoTip text="Expired options are not auto-closed. Traders must confirm a synthetic exit at $0.00 to keep the ledger and psychology clean. This prevents hidden open-risk and distorted stats." />
                 </div>
-
-                <div className="p-4">
-                  {!selectedAlarm ? (
-                    <p className="text-slate-500 text-sm">Select an alarm.</p>
-                  ) : (
-                    <>
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <p className="text-lg font-semibold text-slate-100">{selectedAlarm.title}</p>
-                          <p className="text-sm text-slate-400 mt-1 leading-relaxed">{selectedAlarm.message}</p>
-                        </div>
-                        <span className={`px-2 py-1 rounded-full text-[11px] border ${severityBadge(selectedAlarm.severity)}`}>
-                          {selectedAlarm.severity.toUpperCase()}
-                        </span>
-                      </div>
-
-                      <div className="mt-4 grid grid-cols-2 gap-2">
-                        <div className="rounded-2xl border border-slate-800 bg-slate-950/50 p-3">
-                          <p className="text-[10px] uppercase tracking-[0.22em] text-slate-500">Type</p>
-                          <p className="text-sm text-slate-200 mt-1">{typeLabel(selectedAlarm.type)}</p>
-                        </div>
-                        <div className="rounded-2xl border border-slate-800 bg-slate-950/50 p-3">
-                          <p className="text-[10px] uppercase tracking-[0.22em] text-slate-500">Date</p>
-                          <p className="text-sm text-slate-200 mt-1">{formatDateFriendly(selectedAlarm.date)}</p>
-                        </div>
-                      </div>
-
-                      {/* Open-lot details */}
-                      {selectedAlarm.meta?.lot && (
-                        <div className="mt-3 rounded-2xl border border-slate-800 bg-slate-950/50 p-3">
-                          <p className="text-[10px] uppercase tracking-[0.22em] text-slate-500">
-                            Position details
-                          </p>
-
-                          <div className="mt-2 grid grid-cols-2 gap-2 text-sm">
-                            <div>
-                              <p className="text-[11px] text-slate-500">Symbol</p>
-                              <p className="font-mono text-slate-100">{selectedAlarm.meta.lot.symbol}</p>
-                            </div>
-                            <div>
-                              <p className="text-[11px] text-slate-500">Kind</p>
-                              <p className="font-mono text-slate-100">{selectedAlarm.meta.lot.kind}</p>
-                            </div>
-
-                            <div>
-                              <p className="text-[11px] text-slate-500">Side</p>
-                              <p className="font-mono text-slate-100">{selectedAlarm.meta.lot.side}</p>
-                            </div>
-                            <div>
-                              <p className="text-[11px] text-slate-500">Premium</p>
-                              <p className="font-mono text-slate-100">{selectedAlarm.meta.lot.premiumSide}</p>
-                            </div>
-
-                            <div>
-                              <p className="text-[11px] text-slate-500">Strategy</p>
-                              <p className="font-mono text-slate-100">{selectedAlarm.meta.lot.optionStrategy}</p>
-                            </div>
-                            <div>
-                              <p className="text-[11px] text-slate-500">Remaining</p>
-                              <p className="font-mono text-slate-100">{Number(selectedAlarm.meta.lot.qtyLeft).toFixed(2)}</p>
-                            </div>
-
-                            <div className="col-span-2">
-                              <p className="text-[11px] text-slate-500">Expiry (derived)</p>
-                              <p className="font-mono text-slate-100">
-                                {selectedAlarm.meta.expiryDerived ?? "—"}{" "}
-                                {selectedAlarm.meta.isExpired ? (
-                                  <span className="ml-2 text-amber-200">EXPIRED</span>
-                                ) : (
-                                  <span className="ml-2 text-slate-400">not expired</span>
-                                )}
-                              </p>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-
-                      <div className="mt-4 flex flex-col gap-2">
-                        {selectedAlarm.href && (
-                          <Link
-                            href={selectedAlarm.href}
-                            className="px-4 py-2 rounded-xl border border-slate-700 text-slate-200 text-sm hover:border-emerald-400 hover:text-emerald-300 transition text-center"
-                          >
-                            Review in Journal
-                          </Link>
-                        )}
-
-                        {selectedAlarm.type === "EXPIRED_OPTION_UNRESOLVED" && (
-                          <button
-                            type="button"
-                            onClick={() => openResolveConfirm(selectedAlarm)}
-                            className="px-4 py-2 rounded-xl bg-emerald-400 text-slate-950 text-sm font-semibold hover:bg-emerald-300 transition"
-                          >
-                            Resolve to $0.00 (confirm)
-                          </button>
-                        )}
-
-                        <div className="grid grid-cols-2 gap-2">
-                          <button
-                            type="button"
-                            onClick={() => snoozeAlarm(selectedAlarm.id, 24)}
-                            className="px-4 py-2 rounded-xl border border-slate-700 text-slate-200 text-sm hover:border-slate-500 transition"
-                          >
-                            Snooze 24h
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => snoozeAlarm(selectedAlarm.id, 72)}
-                            className="px-4 py-2 rounded-xl border border-slate-700 text-slate-200 text-sm hover:border-slate-500 transition"
-                          >
-                            Snooze 3d
-                          </button>
-                        </div>
-
-                        <p className="text-[11px] text-slate-500 leading-relaxed mt-1">
-                          Tip: If you imported broker data and still see an open position, it often means an expiration
-                          event did not create a closing fill. Use “Resolve to $0.00” after confirming.
-                        </p>
-                      </div>
-                    </>
-                  )}
-                </div>
-              </div>
-
-              {/* Confirm modal */}
-              <ConfirmModal
-                open={confirmOpen}
-                title="Confirm resolution to $0.00"
-                body={
-                  <>
-                    <p>
-                      This will append a <span className="text-emerald-300 font-semibold">synthetic exit</span> at{" "}
-                      <span className="font-mono text-slate-100">$0.00</span> to the original journal day, in order to
-                      remove unresolved expired options from your open positions.
-                    </p>
-                    <p className="mt-2 text-[13px] text-slate-400">
-                      This is a ledger hygiene operation. It does not change your broker statement, and it is only done
-                      after your confirmation.
-                    </p>
-                    {confirmAlarm?.meta?.lot && (
-                      <div className="mt-3 rounded-xl border border-slate-800 bg-slate-950/60 p-3 text-[13px] text-slate-200">
-                        <p className="font-mono">
-                          {confirmAlarm.meta.lot.symbol} · {confirmAlarm.meta.lot.kind} · {confirmAlarm.meta.lot.side} ·{" "}
-                          {confirmAlarm.meta.lot.premiumSide} · qty {Number(confirmAlarm.meta.lot.qtyLeft).toFixed(2)}
-                        </p>
-                        <p className="text-[12px] text-slate-500 mt-1">
-                          Date: {confirmAlarm.meta.lot.openDate} · Expiry (derived): {confirmAlarm.meta.expiryDerived ?? "—"}
-                        </p>
-                      </div>
-                    )}
-                  </>
-                }
-                confirmText="Yes, resolve to $0.00"
-                cancelText="Cancel"
-                onCancel={closeConfirm}
-                onConfirm={() => {
-                  if (!confirmAlarm) return;
-                  resolveExpiredOptionToZero(confirmAlarm);
-                  closeConfirm();
-                }}
-                busy={busyResolve}
-              />
-            </section>
+              ))}
+            </div>
           )}
+        </section>
+      )}
 
-          {/* ============= Rules Tab ============= */}
-          {tab === "rules" && (
-            <section className="space-y-4">
-              <div className={wrapCard()}>
-                <div className="p-4 border-b border-slate-800 flex items-center justify-between gap-3">
-                  <div>
-                    <p className={chartTitle()}>Alarm rules catalog</p>
-                    <p className={chartSub()}>
-                      Choose which system alarms you want enabled. These are guardrails — not punishments.
-                    </p>
+        {tab === "audit" && (
+        <div className="mt-6 grid gap-6 lg:grid-cols-2">
+          <section className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-xs uppercase tracking-[0.28em] text-slate-500">Audit trail</div>
+                <p className="mt-2 text-sm text-slate-400">
+                  Open positions detected by the engine. Mark swings to ignore in future checks.
+                </p>
+              </div>
+              <div className="text-xs text-slate-500">
+                {selectedEvent ? `From ${fmtDate(selectedEvent.triggered_at)}` : ""}
+              </div>
+            </div>
+
+            {!selectedEvent ? (
+              <div className="mt-4 rounded-xl border border-dashed border-slate-700 bg-slate-950/30 p-4 text-sm text-slate-400">
+                No audit event selected. Pick an active alarm first.
+              </div>
+            ) : (
+              <div className="mt-4 space-y-3">
+                {auditOpenPositions.length === 0 ? (
+                  <div className="rounded-xl border border-slate-800 bg-slate-950/30 p-4 text-sm text-slate-400">
+                    {auditOpenCount > 0
+                      ? `Open positions detected (${auditOpenCount}), but details are missing. Save your journal trades or sync trades to enable audit actions.`
+                      : "No open positions detected."}
                   </div>
-                  <InfoTip text="Rules are evaluated from your Journal Date pages. For scale, these will later be persisted server-side (Supabase) per user. For now: local settings." />
-                </div>
+                ) : (
+                  auditOpenPositions.map((p, idx) => {
+                    const id = p?.id;
+                    const tradeId = id !== null && id !== undefined ? String(id) : "";
+                    const symbol = p?.symbol ?? "—";
+                    const qty = p?.qty ?? null;
+                    const assetType = p?.asset_type ?? null;
+                    const exp = p?.expiration ?? null;
+                    const journalDate = p?.journal_date ?? null;
 
-                <div className="p-4 space-y-3">
-                  {DEFAULT_RULES.map((r) => {
-                    const on = !!ruleState[r.id];
                     return (
                       <div
-                        key={r.id}
-                        className="rounded-2xl border border-slate-800 bg-slate-950/45 p-4 flex flex-col md:flex-row md:items-start md:justify-between gap-3"
+                        key={`${tradeId}-${idx}`}
+                        className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-800 bg-slate-950/30 px-4 py-3"
                       >
-                        <div>
-                          <p className="text-slate-100 font-medium">{r.label}</p>
-                          <p className="text-sm text-slate-500 mt-1 leading-relaxed">{r.description}</p>
+                        <div className="min-w-0">
+                          <div className="truncate text-sm font-semibold text-slate-100">{symbol}</div>
+                          <div className="text-xs text-slate-400">
+                            {assetType ? `${assetType}` : "position"}
+                            {qty !== null ? ` • qty ${qty}` : ""}
+                            {exp ? ` • exp ${exp}` : ""}
+                          </div>
+                          <div className="text-[11px] text-slate-500">trade id: {tradeId || "—"}</div>
+                          {journalDate ? (
+                            <div className="text-[11px] text-slate-500">journal date: {journalDate}</div>
+                          ) : null}
                         </div>
 
-                        <div className="flex items-center gap-2">
-                          <span className="text-[11px] text-slate-500 font-mono">{r.id}</span>
+                        <div className="flex shrink-0 gap-2">
+                          {journalDate ? (
+                            <Link
+                              href={`/journal/${journalDate}`}
+                              className="rounded-lg border border-slate-700 bg-slate-900/40 px-3 py-2 text-xs font-semibold text-slate-100 hover:border-emerald-400/60 hover:bg-emerald-500/10"
+                            >
+                              Open journal
+                            </Link>
+                          ) : null}
                           <button
-                            type="button"
-                            onClick={() =>
-                              setRuleState((prev) => ({ ...prev, [r.id]: !prev[r.id] }))
-                            }
-                            className={`px-4 py-2 rounded-xl text-sm font-semibold border transition ${
-                              on
-                                ? "bg-emerald-400 text-slate-950 border-emerald-300 hover:bg-emerald-300"
-                                : "bg-slate-950 text-slate-200 border-slate-700 hover:border-emerald-400 hover:text-emerald-300"
-                            }`}
+                            className="rounded-lg border border-slate-700 bg-slate-900/40 px-3 py-2 text-xs font-semibold text-slate-100 hover:border-emerald-400/60 hover:bg-emerald-500/10"
+                            onClick={() => onMarkSwing(tradeId)}
+                            disabled={!tradeId || busy || !openPositionsRule}
                           >
-                            {on ? "Enabled" : "Disabled"}
+                            Mark swing
                           </button>
                         </div>
                       </div>
                     );
-                  })}
-                </div>
-
-                <div className="p-4 border-t border-slate-800">
-                  <p className="text-[11px] text-slate-500 leading-relaxed">
-                    Next step: custom alarms (user-defined) + server persistence + notification channels.
-                  </p>
-                </div>
+                  })
+                )}
               </div>
-            </section>
-          )}
+            )}
+          </section>
 
-          {/* ============= History Tab ============= */}
-          {tab === "history" && (
-            <section className="space-y-4">
-              <div className={wrapCard()}>
-                <div className="p-4 border-b border-slate-800 flex items-center justify-between gap-3">
-                  <div>
-                    <p className={chartTitle()}>Audit trail</p>
-                    <p className={chartSub()}>
-                      Confirmed actions are recorded. This protects both the trader and the platform.
-                    </p>
+          <section className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-xs uppercase tracking-[0.28em] text-slate-500">Expiring options</div>
+                <p className="mt-2 text-sm text-slate-400">
+                  Close expiring premium strategies at $0, or specify a custom close price.
+                </p>
+              </div>
+              <div className="text-xs text-slate-500">
+                {selectedEvent ? `From ${fmtDate(selectedEvent.triggered_at)}` : ""}
+              </div>
+            </div>
+
+            {!selectedEvent ? (
+              <div className="mt-4 rounded-xl border border-dashed border-slate-700 bg-slate-950/30 p-4 text-sm text-slate-400">
+                No audit event selected. Pick an active alarm first.
+              </div>
+            ) : (
+              <div className="mt-4 space-y-3">
+                {auditExpiring.length === 0 ? (
+                  <div className="rounded-xl border border-slate-800 bg-slate-950/30 p-4 text-sm text-slate-400">
+                    No expiring options found.
                   </div>
-                  <InfoTip text="This is stored locally right now (and optionally in a Supabase table if you create ntj_resolution_runs). Next: full server-side audit with searchable runs and exports." />
-                </div>
-
-                <div className="p-4 overflow-x-auto">
-                  {history.length === 0 ? (
-                    <div className="rounded-2xl border border-slate-800 bg-slate-950/45 p-4">
-                      <p className="text-slate-200 text-sm font-medium">No history yet</p>
-                      <p className="text-slate-500 text-sm mt-1">
-                        When you resolve expired options to $0.00, you will see an audit record here.
-                      </p>
+                ) : (
+                  <>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-xs font-semibold text-emerald-200 hover:bg-emerald-500/20"
+                        onClick={() => selectedEvent && onClosePositionsAtPrice(expiringPositions, 0, selectedEvent)}
+                        disabled={busy || !selectedEvent || expiringPositions.length === 0}
+                      >
+                        Close all at $0
+                      </button>
                     </div>
-                  ) : (
-                    <table className="min-w-[980px] w-full text-sm">
-                      <thead>
-                        <tr className="text-[11px] uppercase tracking-[0.22em] text-slate-500 border-b border-slate-800">
-                          <th className="px-3 py-2 text-left">Time</th>
-                          <th className="px-3 py-2 text-left">Action</th>
-                          <th className="px-3 py-2 text-left">Open date</th>
-                          <th className="px-3 py-2 text-left">Symbol</th>
-                          <th className="px-3 py-2 text-left">Kind</th>
-                          <th className="px-3 py-2 text-left">Premium</th>
-                          <th className="px-3 py-2 text-right">Qty</th>
-                          <th className="px-3 py-2 text-left">Expiry (derived)</th>
-                          <th className="px-3 py-2 text-left">Link</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {history.slice(0, 200).map((h) => (
-                          <tr key={h.id} className="border-t border-slate-800 bg-slate-950/35 hover:bg-slate-950/55 transition">
-                            <td className="px-3 py-2 text-slate-300">
-                              {new Date(h.createdAtIso).toLocaleString()}
-                            </td>
-                            <td className="px-3 py-2 font-mono text-slate-200">{h.action}</td>
-                            <td className="px-3 py-2 font-mono text-slate-200">{h.openDate}</td>
-                            <td className="px-3 py-2 font-mono text-slate-100">{h.symbol}</td>
-                            <td className="px-3 py-2 font-mono text-slate-200">{h.kind}</td>
-                            <td className="px-3 py-2 font-mono text-slate-200">{h.premiumSide}</td>
-                            <td className="px-3 py-2 text-right font-mono text-slate-200">{h.qty.toFixed(2)}</td>
-                            <td className="px-3 py-2 font-mono text-slate-300">{h.expiryDerived ?? "—"}</td>
-                            <td className="px-3 py-2">
-                              <Link
-                                href={`/journal/${h.openDate}?focus=${encodeURIComponent(h.symbol)}`}
-                                className="text-emerald-300 hover:text-emerald-200 underline"
+
+                    {auditExpiring.map((p, idx) => {
+                      const id = p?.id;
+                      const tradeId = id !== null && id !== undefined ? String(id) : "";
+                      const symbol = p?.symbol ?? "—";
+                      const qty = p?.qty ?? null;
+                      const assetType = p?.asset_type ?? null;
+                      const exp = p?.expiration ?? null;
+                      const strike = p?.strike ?? null;
+                      const optionType = p?.option_type ?? null;
+                      const side = p?.side ?? null;
+                      const journalDate = p?.journal_date ?? null;
+
+                      const priceStr = closePriceByTrade[tradeId] ?? "";
+                      const priceNum = parsePrice(priceStr);
+
+                      return (
+                        <div
+                          key={`${tradeId}-${idx}`}
+                          className="flex flex-col gap-3 rounded-xl border border-slate-800 bg-slate-950/30 px-4 py-3"
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="truncate text-sm font-semibold text-slate-100">{symbol}</div>
+                              <div className="text-xs text-slate-400">
+                                {assetType ? `${assetType}` : "option"}
+                                {qty !== null ? ` • qty ${qty}` : ""}
+                                {strike !== null ? ` • ${strike}` : ""}
+                                {optionType ? ` • ${optionType}` : ""}
+                                {side ? ` • ${side}` : ""}
+                                {exp ? ` • exp ${exp}` : ""}
+                              </div>
+                              <div className="text-[11px] text-slate-500">trade id: {tradeId || "—"}</div>
+                              {journalDate ? (
+                                <div className="text-[11px] text-slate-500">journal date: {journalDate}</div>
+                              ) : null}
+                            </div>
+
+                            <div className="flex flex-wrap items-center gap-2">
+                              {journalDate ? (
+                                <Link
+                                  href={`/journal/${journalDate}`}
+                                  className="rounded-lg border border-slate-700 bg-slate-900/40 px-3 py-2 text-xs font-semibold text-slate-100 hover:border-emerald-400/60 hover:bg-emerald-500/10"
+                                >
+                                  Open journal
+                                </Link>
+                              ) : null}
+                              <button
+                                className="rounded-lg border border-slate-700 bg-slate-900/40 px-3 py-2 text-xs font-semibold text-slate-100 hover:border-emerald-400/60 hover:bg-emerald-500/10"
+                                onClick={() => selectedEvent && onClosePositionsAtPrice([p], 0, selectedEvent)}
+                                disabled={!tradeId || busy || !selectedEvent}
                               >
-                                Open journal
-                              </Link>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  )}
-                </div>
+                                Close @ $0
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className="flex flex-wrap items-center gap-2">
+                            <input
+                              value={priceStr}
+                              onChange={(e) => setClosePriceByTrade((prev) => ({ ...prev, [tradeId]: e.target.value }))}
+                              placeholder="Close price"
+                              className="w-32 rounded-lg border border-slate-700 bg-slate-950/40 px-3 py-2 text-xs text-slate-200 placeholder:text-slate-500 focus:border-emerald-400"
+                            />
+                            <button
+                              className="rounded-lg border border-slate-700 bg-slate-900/40 px-3 py-2 text-xs font-semibold text-slate-100 hover:border-emerald-400/60 hover:bg-emerald-500/10"
+                              onClick={() => selectedEvent && priceNum !== null && onClosePositionsAtPrice([p], priceNum, selectedEvent)}
+                              disabled={!tradeId || busy || !selectedEvent || priceNum === null}
+                            >
+                              Close @ price
+                            </button>
+                            {priceNum === null ? (
+                              <span className="text-[11px] text-slate-500">Enter a valid price.</span>
+                            ) : null}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </>
+                )}
               </div>
-            </section>
-          )}
+            )}
+          </section>
         </div>
+      )}
+
+        {tab === "history" && (
+        <section className="mt-6 rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <div className="text-xs uppercase tracking-[0.28em] text-slate-500">Alarm history</div>
+              <p className="mt-2 text-sm text-slate-400">A record of alarms and your actions.</p>
+            </div>
+            <button
+              className="rounded-lg border border-slate-700 bg-slate-900/40 px-3 py-2 text-xs font-semibold text-slate-100 hover:border-emerald-400/60 hover:bg-emerald-500/10"
+              onClick={refreshAll}
+              disabled={busy}
+            >
+              Refresh history
+            </button>
+          </div>
+
+          {historyEvents.length === 0 ? (
+            <div className="mt-4 rounded-xl border border-dashed border-slate-700 bg-slate-950/30 p-4 text-sm text-slate-400">
+              No alarm history yet.
+            </div>
+          ) : (
+            <div className="mt-5 overflow-hidden rounded-xl border border-slate-800">
+              <table className="min-w-full text-left text-sm">
+                <thead className="bg-slate-950/50 text-xs uppercase tracking-[0.2em] text-slate-500">
+                  <tr>
+                    <th className="px-4 py-3">Time</th>
+                    <th className="px-4 py-3">Severity</th>
+                    <th className="px-4 py-3">Title</th>
+                    <th className="px-4 py-3">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800">
+                  {historyEvents.map((e) => (
+                    <tr key={e.id} className="bg-slate-900/40">
+                      <td className="px-4 py-3 text-slate-300">{fmtDate(e.triggered_at)}</td>
+                      <td className="px-4 py-3">
+                        <SeverityPill severity={e.severity} />
+                      </td>
+                      <td className="px-4 py-3 text-slate-100">{e.title || "Alarm"}</td>
+                      <td className="px-4 py-3 text-slate-300">{e.dismissed ? "Dismissed" : e.status}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+        )}
       </div>
     </main>
   );

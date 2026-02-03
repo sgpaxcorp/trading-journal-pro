@@ -1,3 +1,4 @@
+// app/(private)/growth-plan/page.tsx
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -19,6 +20,8 @@ import {
   upsertGrowthPlanSupabase,
 } from "@/lib/growthPlanSupabase";
 
+import { listCashflows, signedCashflowAmount } from "@/lib/cashflowsSupabase";
+
 import { pushNeuroMessage, openNeuroPanel } from "@/app/components/neuroEventBus";
 
 /* ================= Helpers ================= */
@@ -32,6 +35,23 @@ const currency = (n: number) =>
   n.toLocaleString(undefined, { style: "currency", currency: "USD" });
 const todayLong = () =>
   new Date().toLocaleDateString(undefined, { year: "numeric", month: "long", day: "2-digit" });
+
+function toDateOnlyStr(value: unknown): string | null {
+  if (!value) return null;
+  const s = String(value);
+  if (!s) return null;
+  // If already YYYY-MM-DD
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  // If ISO datetime
+  if (/^\d{4}-\d{2}-\d{2}T/.test(s)) return s.slice(0, 10);
+  // Try Date parse
+  const d = new Date(s);
+  if (!Number.isFinite(d.getTime())) return null;
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
 
 type PlanRow = {
   day: number;
@@ -353,6 +373,10 @@ export default function GrowthPlanPage() {
   const [error, setError] = useState("");
   const [hasExistingPlan, setHasExistingPlan] = useState(false);
 
+  // Cashflows net since plan start (for correct $ conversions when editing an existing plan)
+  const [cashflowNet, setCashflowNet] = useState(0);
+  const [loadedStartingBalance, setLoadedStartingBalance] = useState<number | null>(null);
+
   // IMPORTANT: page UI is English by requirement.
   // Neuro language toggle must be stored in Supabase.
   const [assistantLang, setAssistantLang] = useState<AssistantLang>("en");
@@ -388,7 +412,16 @@ export default function GrowthPlanPage() {
   const lossDaysPerWeek = clampInt(toNum(lossDaysPerWeekStr, 0), 0, 5);
   const riskPerTradePct = Math.max(0, toNum(riskPerTradePctStr, 0));
 
-  const riskUsd = useMemo(() => calcRiskUsd(startingBalance, riskPerTradePct), [startingBalance, riskPerTradePct]);
+  const baseBalanceForDollars = useMemo(() => {
+    // If editing an existing plan AND the user hasn't changed the starting balance from what we loaded,
+    // then include net cashflows since plan start for $ conversions (risk USD, goal USD, max-loss USD).
+    if (loadedStartingBalance !== null && Math.abs(startingBalance - loadedStartingBalance) < 0.01) {
+      return Math.max(0, startingBalance + (cashflowNet || 0));
+    }
+    return Math.max(0, startingBalance);
+  }, [startingBalance, loadedStartingBalance, cashflowNet]);
+
+  const riskUsd = useMemo(() => calcRiskUsd(baseBalanceForDollars, riskPerTradePct), [baseBalanceForDollars, riskPerTradePct]);
 
   const onlyNum = (s: string) => s.replace(/[^\d.]/g, "");
 
@@ -428,6 +461,35 @@ export default function GrowthPlanPage() {
           setStepsData(existing.steps ?? getDefaultSteps());
           setRules(existing.rules && existing.rules.length ? existing.rules : getDefaultSuggestedRules());
 
+          setLoadedStartingBalance(Number(existing.startingBalance ?? 0));
+
+          // ✅ Load net cashflows since plan start (for $ conversions)
+          const cashflowUserId = String((user as any)?.id || (user as any)?.uid || "");
+          if (cashflowUserId) {
+            try {
+              const planStart =
+                toDateOnlyStr((existing as any).createdAt) ||
+                toDateOnlyStr((existing as any).created_at) ||
+                toDateOnlyStr((existing as any).createdAtIso) ||
+                toDateOnlyStr((existing as any).createdAtISO) ||
+                toDateOnlyStr((existing as any).updatedAt) ||
+                toDateOnlyStr((existing as any).updated_at) ||
+                toDateOnlyStr((existing as any).updatedAtIso) ||
+                toDateOnlyStr((existing as any).updatedAtISO);
+
+              const opts: any = planStart ? { fromDate: planStart, throwOnError: true } : { throwOnError: true };
+              const cf = await listCashflows(cashflowUserId, opts);
+              if (!mounted) return;
+              const net = (cf ?? []).reduce((acc: number, c: any) => acc + signedCashflowAmount(c), 0);
+              setCashflowNet(net);
+            } catch (e) {
+              console.warn("[GrowthPlan] cashflows load error", e);
+              setCashflowNet(0);
+            }
+          } else {
+            setCashflowNet(0);
+          }
+
           // ✅ Neuro language from Supabase (stored inside plan to keep "everything in Supabase")
           // We store it in stepsData._ui.lang (does not require schema changes)
           const anySteps = (existing.steps as any) || {};
@@ -444,6 +506,10 @@ export default function GrowthPlanPage() {
           openNeuroPanel();
         } else {
           // new plan
+          setHasExistingPlan(false);
+          setLoadedStartingBalance(null);
+          setCashflowNet(0);
+
           const t =
             (await neuroReact("growth_plan_loaded", assistantLang, {
               hasExistingPlan: false,
@@ -489,7 +555,7 @@ export default function GrowthPlanPage() {
   const lastRiskNudgeRef = useRef<number>(0);
   useEffect(() => {
     if (!user) return;
-    if (startingBalance <= 0) return;
+    if (baseBalanceForDollars <= 0) return;
     if (riskPerTradePct <= 2) return;
 
     const now = Date.now();
@@ -501,7 +567,7 @@ export default function GrowthPlanPage() {
         (await neuroReact("risk_too_high", assistantLang, {
           riskPct: riskPerTradePct,
           riskUsd,
-          startingBalance,
+          startingBalance: baseBalanceForDollars,
         })) ||
         `Quick note: you're risking ${riskPerTradePct.toFixed(2)}% per trade (~${currency(
           riskUsd
@@ -509,7 +575,7 @@ export default function GrowthPlanPage() {
       pushNeuroMessage(text);
       openNeuroPanel();
     })();
-  }, [riskPerTradePct, riskUsd, startingBalance, user, assistantLang]);
+  }, [riskPerTradePct, riskUsd, baseBalanceForDollars, user, assistantLang]);
 
   // Field help throttle (so Neuro doesn’t spam)
   const lastFieldHelpRef = useRef<Record<string, number>>({});
@@ -575,15 +641,15 @@ export default function GrowthPlanPage() {
   );
 
   const dailyGoalDollar =
-    startingBalance > 0 ? (startingBalance * (dailyGoalPercentChosen || 0)) / 100 : 0;
+    baseBalanceForDollars > 0 ? (baseBalanceForDollars * (dailyGoalPercentChosen || 0)) / 100 : 0;
   const maxLossDollar =
-    startingBalance > 0 ? (startingBalance * (maxDailyLossPercent || 0)) / 100 : 0;
+    baseBalanceForDollars > 0 ? (baseBalanceForDollars * (maxDailyLossPercent || 0)) / 100 : 0;
 
   // PDF events
   const onDownloadPdfSuggested = async () => {
     await generateAndDownloadPDF(suggestedRows, {
       mode: "suggested",
-      name: user?.name || "User",
+      name: (user as any)?.name || "User",
       startingBalance,
       targetBalance,
       tradingDays,
@@ -608,7 +674,7 @@ export default function GrowthPlanPage() {
   const onDownloadPdfChosen = async () => {
     await generateAndDownloadPDF(chosenRows, {
       mode: "chosen",
-      name: user?.name || "User",
+      name: (user as any)?.name || "User",
       startingBalance,
       tradingDays,
       dailyGoalPercentChosen,
@@ -849,6 +915,12 @@ export default function GrowthPlanPage() {
             This turns your plan into a system: <b>Prepare → Analysis → Strategy → Journal</b>. Neuro and AI Coach will
             use this to coach you based on real execution.
           </p>
+
+          {cashflowNet !== 0 && loadedStartingBalance !== null && Math.abs(startingBalance - loadedStartingBalance) < 0.01 ? (
+            <p className="text-[12px] text-slate-500">
+              Note: Net cashflows since plan start detected ({cashflowNet >= 0 ? "+" : "-"}{currency(Math.abs(cashflowNet))}). Dollar conversions (risk $, goal $, max-loss $) use: start + net cashflows.
+            </p>
+          ) : null}
         </div>
 
         {/* Stepper (FIXED: numeric array to avoid "01/11/21") */}
@@ -970,7 +1042,7 @@ export default function GrowthPlanPage() {
                   placeholder="2"
                 />
                 <p className="text-slate-400 mt-1">
-                  With your starting balance, {riskPerTradePct || 0}% ≈{" "}
+                  With your equity base, {riskPerTradePct || 0}% ≈{" "}
                   <b className="text-emerald-300">{currency(riskUsd)}</b> per trade.
                 </p>
               </div>

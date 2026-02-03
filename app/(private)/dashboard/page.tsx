@@ -12,6 +12,9 @@ import type { JournalEntry } from "@/lib/journalTypes";
 import { getAllJournalEntries } from "@/lib/journalSupabase";
 import { upsertDailySnapshot } from "@/lib/snapshotSupabase";
 
+// ✅ Cashflows (deposits/withdrawals)
+import { listCashflows, signedCashflowAmount, type Cashflow } from "@/lib/cashflowsSupabase";
+
 // IMPORTANT: do NOT import ChecklistItem type from your lib because it may be string/union.
 // We only import the function and normalize its output.
 import { getDailyChecklist } from "@/lib/checklistSupabase";
@@ -36,6 +39,34 @@ function formatDateYYYYMMDD(d: Date): string {
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
+}
+
+function toDateOnlyStr(value: unknown): string | null {
+  if (!value) return null;
+
+  if (typeof value === "string") {
+    const s = value.slice(0, 10);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  }
+
+  const d = new Date(value as any);
+  if (Number.isNaN(d.getTime())) return null;
+  return formatDateYYYYMMDD(d);
+}
+
+function getPlanStartDateStr(plan: unknown): string | null {
+  const p: any = plan ?? null;
+  if (!p) return null;
+
+  return (
+    toDateOnlyStr(p.createdAt) ||
+    toDateOnlyStr(p.created_at) ||
+    toDateOnlyStr(p.createdAtIso) ||
+    toDateOnlyStr(p.createdAtISO) ||
+    toDateOnlyStr(p.updatedAt) ||
+    toDateOnlyStr(p.updated_at) ||
+    null
+  );
 }
 
 function getWeekOfYear(date: Date): number {
@@ -327,7 +358,6 @@ function extractChecklistTextsFromGrowthPlan(plan: GrowthPlan | null): string[] 
     });
 }
 
-
 function mergeChecklistBaseWithSaved(baseTexts: string[], saved: UiChecklistItem[]): UiChecklistItem[] {
   const base = baseTexts.map((t) => ({ text: t, done: false }));
   const savedNorm = normalizeChecklistItems(saved);
@@ -359,6 +389,7 @@ export default function DashboardPage() {
 
   const [plan, setPlan] = useState<GrowthPlan | null>(null);
   const [entries, setEntries] = useState<JournalEntry[]>([]);
+  const [cashflows, setCashflows] = useState<Cashflow[]>([]);
   const [viewDate, setViewDate] = useState<Date | null>(new Date());
 
   const [calendarCells, setCalendarCells] = useState<CalendarCell[]>([]);
@@ -465,14 +496,18 @@ export default function DashboardPage() {
     if (!user) router.replace("/signin");
   }, [loading, user, router]);
 
-  // Load plan + journal + checklist (rolling day for checklist)
+  // Load plan + journal + checklist + cashflows (rolling day for checklist)
   useEffect(() => {
     if (loading || !user) return;
 
-    const userId = (user as any)?.uid || (user as any)?.id || "";
-    if (!userId) {
+    const journalUserId = (user as any)?.uid || (user as any)?.id || "";
+    const cashflowUserIdPrimary = (user as any)?.id || (user as any)?.uid || "";
+    const cashflowUserIdSecondary = (user as any)?.uid || (user as any)?.id || "";
+
+    if (!journalUserId && !cashflowUserIdPrimary) {
       setPlan(null);
       setEntries([]);
+      setCashflows([]);
       setTodayChecklist([]);
       setTodayChecklistNotes(null);
       return;
@@ -485,11 +520,35 @@ export default function DashboardPage() {
         const dbPlan = await getGrowthPlanSupabase();
         if (!cancelled) setPlan(dbPlan ?? null);
 
-        const dbEntries = await getAllJournalEntries(userId);
+        // Journal entries (trading P&L)
+        const dbEntries = journalUserId ? await getAllJournalEntries(journalUserId) : [];
         if (!cancelled) setEntries(dbEntries);
 
+        // Cashflows (deposits/withdrawals)
+        try {
+          const fromDate = getPlanStartDateStr(dbPlan ?? null) ?? undefined;
+          const opts: any = fromDate ? { fromDate, throwOnError: true } : { throwOnError: true };
+
+          let cf: Cashflow[] = [];
+
+          if (cashflowUserIdPrimary) {
+            cf = await listCashflows(String(cashflowUserIdPrimary), opts);
+          }
+
+          // fallback in case your auth object uses uid != id
+          if ((!cf || cf.length === 0) && cashflowUserIdSecondary && cashflowUserIdSecondary !== cashflowUserIdPrimary) {
+            const alt = await listCashflows(String(cashflowUserIdSecondary), opts);
+            if (alt?.length) cf = alt;
+          }
+
+          if (!cancelled) setCashflows(cf ?? []);
+        } catch (err) {
+          console.warn("[dashboard] cashflows load error:", err);
+          if (!cancelled) setCashflows([]);
+        }
+
         // this can return ANY shape → normalize
-        const checklistRow: any = await getDailyChecklist(userId, rollingTodayStr);
+        const checklistRow: any = journalUserId ? await getDailyChecklist(journalUserId, rollingTodayStr) : null;
 
         const defaultChecklist: string[] = [
           "Respect your max daily loss limit.",
@@ -515,6 +574,7 @@ export default function DashboardPage() {
         if (!cancelled) {
           setPlan(null);
           setEntries([]);
+          setCashflows([]);
           setTodayChecklist([]);
           setTodayChecklistNotes(null);
           setChecklistSaving(false);
@@ -565,12 +625,8 @@ export default function DashboardPage() {
   const tradingStats = useMemo(() => calcTradingDayStats(entries), [entries]);
 
   const filteredEntries = useMemo(() => {
-    if (!plan || !(plan as any).createdAt) return entries;
-
-    const planDateObj = new Date((plan as any).createdAt as any);
-    if (Number.isNaN(planDateObj.getTime())) return entries;
-
-    const planStartStr = formatDateYYYYMMDD(planDateObj);
+    const planStartStr = getPlanStartDateStr(plan);
+    if (!planStartStr) return entries;
 
     const filtered = entries.filter((e) => {
       const raw = (e as any).date;
@@ -581,6 +637,25 @@ export default function DashboardPage() {
 
     return filtered.length > 0 ? filtered : entries;
   }, [plan, entries]);
+
+  const filteredCashflows = useMemo(() => {
+    // prefer to filter cashflows from plan start too (defensive)
+    const planStartStr = getPlanStartDateStr(plan);
+    if (!planStartStr) return cashflows;
+
+    const filtered = cashflows.filter((cf) => {
+      const raw = (cf as any)?.date;
+      if (!raw) return false;
+      const ds = String(raw).slice(0, 10);
+      return ds >= planStartStr;
+    });
+
+    return filtered.length > 0 ? filtered : cashflows;
+  }, [plan, cashflows]);
+
+  const cashflowNet = useMemo(() => {
+    return (filteredCashflows ?? []).reduce((acc, cf) => acc + signedCashflowAmount(cf), 0);
+  }, [filteredCashflows]);
 
   // ✅ Daily Target uses rollingTodayStr ONLY
   const sessionDateStr = rollingTodayStr;
@@ -612,7 +687,12 @@ export default function DashboardPage() {
           return s + entryPnl;
         }, 0);
 
-    const startOfSessionBalance = starting + sumUpTo(sessionDateStr);
+    const sumCashflowsUpToInclusive = (dateStr: string) =>
+      filteredCashflows
+        .filter((cf) => String((cf as any)?.date).slice(0, 10) <= dateStr)
+        .reduce((s, cf) => s + signedCashflowAmount(cf), 0);
+
+    const startOfSessionBalance = starting + sumUpTo(sessionDateStr) + sumCashflowsUpToInclusive(sessionDateStr);
     const expectedSessionUSD = dailyTargetPct !== 0 ? startOfSessionBalance * (dailyTargetPct / 100) : 0;
 
     const sessionEntry =
@@ -645,7 +725,7 @@ export default function DashboardPage() {
       remainingToGoal,
       aboveGoal,
     };
-  }, [plan, filteredEntries, sessionDateStr]);
+  }, [plan, filteredEntries, filteredCashflows, sessionDateStr]);
 
   // Snapshot upsert
   useEffect(() => {
@@ -667,6 +747,11 @@ export default function DashboardPage() {
           delta_usd: dailyCalcs.diffSessionVsGoal,
           goal_met: dailyCalcs.goalMet,
         });
+        try {
+          window.dispatchEvent(new Event("ntj_alert_engine_run_now"));
+        } catch {
+          // ignore
+        }
       } catch (e) {
         if (!cancelled) console.warn("[snapshotSupabase] upsert error:", e);
       }
@@ -747,7 +832,8 @@ export default function DashboardPage() {
       return sum + pnl;
     }, 0);
 
-    const currentBalanceLocal = plan && filteredEntries.length > 0 ? startingLocal + totalPnlLocal : startingLocal;
+    // ✅ Current account balance = starting balance + trading P&L + net cashflows (deposits/withdrawals)
+    const currentBalanceLocal = plan ? startingLocal + totalPnlLocal + (cashflowNet ?? 0) : startingLocal;
 
     const progressPctLocal =
       plan && targetLocal > startingLocal
@@ -763,7 +849,7 @@ export default function DashboardPage() {
       progressPct: progressPctLocal,
       clampedProgress: clampedProgressLocal,
     };
-  }, [plan, filteredEntries]);
+  }, [plan, filteredEntries, cashflowNet]);
 
   const greenStreak = calcGreenStreak(filteredEntries);
 
@@ -1005,7 +1091,7 @@ export default function DashboardPage() {
       );
     }
 
-   
+
     // --- rest unchanged (placeholders / your original widgets) ---
     if (id === "trading-days") {
       const { totalTradingDays, remainingTradingDays, tradedDays, missedDays } = tradingStats;
