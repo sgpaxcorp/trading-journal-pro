@@ -263,6 +263,7 @@ export default function BalanceChartPage() {
   const [serverSeries, setServerSeries] = useState<{
     series: Array<{ date: string; value: number }>;
     projected: Array<{ date: string; value: number }>;
+    daily?: Array<{ date: string; value: number }>;
     totals: { tradingPnl: number; cashflowNet: number; currentBalance: number };
     plan: { startingBalance: number; targetBalance: number; dailyTargetPct: number; planStartIso: string };
   } | null>(null);
