@@ -571,13 +571,24 @@ export default function BalanceChartPage() {
         dayPnl: Number(pnlByDate[p.date] ?? 0),
       }));
 
-      const last = actualSeries[actualSeries.length - 1] ?? { date: planStartIso, value: start };
+      const lastActual = actualSeries[actualSeries.length - 1] ?? { date: planStartIso, value: start };
+      const lastProjected =
+        projectedSeries[projectedSeries.length - 1] ??
+        { date: lastActual.date, value: lastActual.value };
+
+      const serverCurrentBalance = Number(serverSeries.totals.currentBalance ?? lastActual.value ?? 0);
+      const serverProjectedBalance = Number(lastProjected.value ?? 0);
+      const serverDiff = serverCurrentBalance - serverProjectedBalance;
+      const serverDiffPct = serverProjectedBalance !== 0 ? (serverDiff / serverProjectedBalance) * 100 : 0;
 
       return {
         ...outObj,
         chartData,
-        currentDateStr: last.date,
-        currentBalance: Number(serverSeries.totals.currentBalance ?? last.value ?? 0),
+        currentDateStr: lastActual.date,
+        currentBalance: serverCurrentBalance,
+        projectedBalance: serverProjectedBalance,
+        diff: Number(serverDiff.toFixed(2)),
+        diffPct: Number(serverDiffPct.toFixed(2)),
         totalTradingPnl: Number(serverSeries.totals.tradingPnl ?? outObj.totalTradingPnl ?? 0),
         totalCashflowNet: Number(serverSeries.totals.cashflowNet ?? outObj.totalCashflowNet ?? 0),
       };
@@ -710,8 +721,23 @@ export default function BalanceChartPage() {
                       labelFormatter={(label) => `Date: ${label}`}
                     />
                     <Legend />
-                    <Line type="monotone" dataKey="projected" name="Projected" dot={false} strokeWidth={2} />
-                    <Line type="monotone" dataKey="actual" name="Actual" dot={false} strokeWidth={2} />
+                    <Line
+                      type="monotone"
+                      dataKey="projected"
+                      name="Projected"
+                      dot={false}
+                      strokeWidth={2.2}
+                      stroke="#22c55e"
+                      strokeDasharray="6 4"
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="actual"
+                      name="Actual"
+                      dot={false}
+                      strokeWidth={2.6}
+                      stroke="#38bdf8"
+                    />
                   </LineChart>
                 </ResponsiveContainer>
               </div>

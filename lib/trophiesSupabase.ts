@@ -90,6 +90,70 @@ function normalizeRuleOp(raw: unknown): TrophyRuleOp {
   return "gte";
 }
 
+const COUNTER_ALIASES: Record<string, string[]> = {
+  plan_created: [
+    "growth_plan_created",
+    "growth_plan_saved",
+    "growth_plan_complete",
+    "growth_plan_completed",
+    "growth_plan_uploaded",
+    "growth_plan_upload",
+    "growth_plan_done",
+    "plan_created",
+    "plan_saved",
+    "plan_complete",
+    "plan_completed",
+    "plan_uploaded",
+    "plan_upload",
+    "plan_done",
+  ],
+  days_logged: [
+    "journal_days",
+    "journaling_days",
+    "days_in_journal",
+    "days_traded",
+    "trading_days",
+    "trading_days_logged",
+    "journal_entries",
+    "journal_days_logged",
+    "days_journaled",
+  ],
+  best_streak: [
+    "journal_streak",
+    "streak",
+    "streak_best",
+    "best_streak_days",
+    "longest_streak",
+    "streak_days",
+  ],
+  challenges_completed: [
+    "challenge_completed",
+    "completed_challenges",
+    "challenges_done",
+    "challenges_finished",
+  ],
+};
+
+function applyCounterAliases(input: Record<string, number>): Record<string, number> {
+  const out: Record<string, number> = { ...input };
+
+  for (const [base, aliases] of Object.entries(COUNTER_ALIASES)) {
+    const baseKey = normalizeRuleKey(base);
+    const baseValue = Number(out[baseKey] ?? out[base] ?? 0);
+
+    out[baseKey] = baseValue;
+    out[base] = baseValue;
+
+    for (const alias of aliases) {
+      const key = normalizeRuleKey(alias);
+      if (out[key] == null) out[key] = baseValue;
+      if (out[alias] == null) out[alias] = baseValue;
+    }
+  }
+
+  return out;
+}
+
 export function tierIconPath(tier?: TrophyTier | string | null): string {
   const t = String(tier ?? "bronze").toLowerCase();
   return TIER_ICON_MAP[t] ?? "/Bronze_Trophy.svg";
@@ -365,7 +429,9 @@ export async function listPublicLeaderboard(
     avatar_url: (r.avatar_url ?? null) as string | null,
     tier: (r.tier ?? "Bronze") as TrophyTier,
     xp_total: Number(r.xp_total ?? 0),
-    trophies_total: Number(r.trophies_total ?? 0),
+    trophies_count: Number(
+      r.trophies_count ?? r.trophies_total ?? r.trophies ?? 0
+    ),
   }));
 }
 
@@ -399,7 +465,7 @@ export async function getPublicUserProfile(
     avatar_url: ((row as any).avatar_url ?? null) as string | null,
     tier: ((row as any).tier ?? getTierFromXp(xp)) as TrophyTier,
     xp_total: xp,
-    trophies_count: Number((row as any).trophies_count ?? 0),
+    trophies_count: Number((row as any).trophies_count ?? (row as any).trophies_total ?? 0),
     level: Number((row as any).level ?? getLevelFromXp(xp)),
   };
 }
@@ -560,7 +626,7 @@ async function getUserTrophyCounters(userId: string): Promise<Record<string, num
 
   const challenges_completed = (completedChallenges ?? []).length;
 
-  return {
+  const counters = {
     days_logged,
     best_streak,
     plan_created,
@@ -573,6 +639,8 @@ async function getUserTrophyCounters(userId: string): Promise<Record<string, num
     trading_days_logged: days_logged,
     streak_best: best_streak,
   };
+
+  return applyCounterAliases(counters);
 }
 
 function computeBestStreak(sortedDates: string[]): number {

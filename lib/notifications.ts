@@ -87,9 +87,17 @@ export async function fetchRecentEarnedTrophies(
   // Prefer the public RPC if present (it already joins trophy_definitions)
   // but fall back to a join query if the RPC isn't available.
   try {
-    const { data, error } = await supabaseBrowser.rpc("nt_public_user_trophies", {
-      target_user_id: userId,
+    let { data, error } = await supabaseBrowser.rpc("nt_public_user_trophies", {
+      target_user: userId,
     });
+
+    if (error) {
+      const alt = await supabaseBrowser.rpc("nt_public_user_trophies", {
+        p_user_id: userId,
+      });
+      data = alt.data;
+      error = alt.error;
+    }
 
     if (!error && Array.isArray(data)) {
       const rows = data as any[];

@@ -1248,7 +1248,12 @@ function OverviewSection({
 }) {
   const eqSeries = useMemo(() => {
     const pts = equity ?? [];
-    return [{ name: "Equity", data: pts.map((p) => [new Date(p.date).getTime(), p.value]) }];
+    const data = pts.map((p) => [new Date(p.date).getTime(), p.value]);
+    if (data.length === 1) {
+      const [x, y] = data[0];
+      data.push([x + 86400000, y]);
+    }
+    return [{ name: "Equity", data }];
   }, [equity]);
 
   const pnlSeries = useMemo(() => {
@@ -1303,7 +1308,7 @@ function OverviewSection({
           stops: [0, 70, 100],
         },
       },
-      markers: { size: 0 },
+      markers: { size: 2 },
       xaxis: { type: "datetime" },
       yaxis: { labels: { formatter: (v) => `$${Math.round(v)}` } },
       tooltip: { x: { format: "yyyy-MM-dd" }, y: { formatter: (v) => fmtUsd(v) } },

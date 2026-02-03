@@ -188,7 +188,14 @@ export async function GET(req: NextRequest) {
     const startingBalance = toNum(plan?.starting_balance ?? 0, 0);
     const targetBalance = toNum(plan?.target_balance ?? 0, 0);
     const dailyTargetPct = toNum(plan?.daily_target_pct ?? plan?.daily_goal_percent ?? 0, 0);
-    const lossDaysPerWeek = Math.max(0, Math.min(5, Math.floor(toNum(plan?.loss_days_per_week ?? 0, 0))));
+    const lossDaysRaw =
+      plan?.loss_days_per_week ??
+      plan?.loss_day ??
+      plan?.loss_days ??
+      plan?.loss_day_per_week ??
+      plan?.lossDaysPerWeek ??
+      0;
+    const lossDaysPerWeek = Math.max(0, Math.min(5, Math.floor(toNum(lossDaysRaw, 0))));
 
     const planStartIso = (() => {
       const raw = String(plan?.created_at ?? plan?.updated_at ?? "");
