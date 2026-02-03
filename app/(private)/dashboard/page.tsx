@@ -390,6 +390,7 @@ export default function DashboardPage() {
   const [plan, setPlan] = useState<GrowthPlan | null>(null);
   const [entries, setEntries] = useState<JournalEntry[]>([]);
   const [cashflows, setCashflows] = useState<Cashflow[]>([]);
+  const [serverSeries, setServerSeries] = useState<Array<{ date: string; value: number }> | null>(null);
   const [viewDate, setViewDate] = useState<Date | null>(new Date());
 
   const [calendarCells, setCalendarCells] = useState<CalendarCell[]>([]);
@@ -589,6 +590,35 @@ export default function DashboardPage() {
     };
   }, [loading, user, rollingTodayStr]);
 
+  // Authoritative balance series (server-side)
+  useEffect(() => {
+    let alive = true;
+    async function loadSeries() {
+      if (loading || !user) return;
+      try {
+        const { data: sessionData } = await supabaseBrowser.auth.getSession();
+        const token = sessionData?.session?.access_token;
+        if (!token) return;
+
+        const res = await fetch("/api/account/series", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) return;
+        const body = await res.json();
+        if (!alive) return;
+        if (Array.isArray(body?.series)) {
+          setServerSeries(body.series);
+        }
+      } catch {
+        // ignore
+      }
+    }
+    loadSeries();
+    return () => {
+      alive = false;
+    };
+  }, [loading, user]);
+
   // Rebuild calendar
   useEffect(() => {
     if (!viewDate) return;
@@ -692,9 +722,6 @@ export default function DashboardPage() {
         .filter((cf) => String((cf as any)?.date).slice(0, 10) <= dateStr)
         .reduce((s, cf) => s + signedCashflowAmount(cf), 0);
 
-    const startOfSessionBalance = starting + sumUpTo(sessionDateStr) + sumCashflowsUpToInclusive(sessionDateStr);
-    const expectedSessionUSD = dailyTargetPct !== 0 ? startOfSessionBalance * (dailyTargetPct / 100) : 0;
-
     const sessionEntry =
       filteredEntries.find((e) => String((e as any).date).slice(0, 10) === sessionDateStr) ?? null;
 
@@ -704,6 +731,24 @@ export default function DashboardPage() {
           return typeof pnlRaw === "number" ? pnlRaw : Number(pnlRaw) || 0;
         })()
       : 0;
+
+    const fallbackStart = starting + sumUpTo(sessionDateStr) + sumCashflowsUpToInclusive(sessionDateStr);
+
+    let startOfSessionBalance = fallbackStart;
+
+    if (serverSeries && serverSeries.length) {
+      const exact = serverSeries.find((p) => p.date === sessionDateStr);
+      if (exact && Number.isFinite(exact.value)) {
+        startOfSessionBalance = Number(exact.value) - actualSessionUSD;
+      } else {
+        const prior = [...serverSeries].filter((p) => p.date < sessionDateStr).pop();
+        if (prior && Number.isFinite(prior.value)) {
+          startOfSessionBalance = Number(prior.value);
+        }
+      }
+    }
+
+    const expectedSessionUSD = dailyTargetPct !== 0 ? startOfSessionBalance * (dailyTargetPct / 100) : 0;
 
     const diffSessionVsGoal = actualSessionUSD - expectedSessionUSD;
     const goalMet = expectedSessionUSD > 0 && actualSessionUSD >= expectedSessionUSD;
@@ -725,7 +770,7 @@ export default function DashboardPage() {
       remainingToGoal,
       aboveGoal,
     };
-  }, [plan, filteredEntries, filteredCashflows, sessionDateStr]);
+  }, [plan, filteredEntries, filteredCashflows, sessionDateStr, serverSeries]);
 
   // Snapshot upsert
   useEffect(() => {

@@ -863,7 +863,8 @@ export default function AnalyticsStatisticsPage() {
     let alive = true;
 
     async function run() {
-      if (!cashflowUserIds.primary && !cashflowUserIds.secondary) return;
+      const uid = userId ?? "";
+      if (!uid) return;
 
       try {
         const start = dateRange.startIso;
@@ -873,7 +874,7 @@ export default function AnalyticsStatisticsPage() {
           return;
         }
 
-        const snaps = await listDailySnapshots(userId, start, end);
+        const snaps = await listDailySnapshots(uid, start, end);
         if (!alive) return;
         setDailySnaps(snaps ?? []);
       } catch (err) {
