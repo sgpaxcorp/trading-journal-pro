@@ -32,9 +32,74 @@ function toNum(x: unknown, fb = 0): number {
   return Number.isFinite(n) ? n : fb;
 }
 
-export function signedCashflowAmount(cf: Pick<Cashflow, "type" | "amount">): number {
-  const amt = Math.abs(toNum(cf.amount, 0));
-  return cf.type === "withdrawal" ? -amt : amt;
+function normalizeCashflowType(raw: unknown, amountRaw: number): CashflowType {
+  const t = String(raw ?? "").toLowerCase().trim();
+  if (t.includes("with") || t.includes("wd")) return "withdrawal";
+  if (t.includes("dep") || t.includes("add") || t.includes("fund")) return "deposit";
+  if (amountRaw < 0) return "withdrawal";
+  return "deposit";
+}
+
+function resolveCashflowDate(raw: any): string {
+  const v = raw?.date ?? raw?.cashflow_date ?? raw?.created_at ?? raw?.createdAt ?? "";
+  if (!v) return "";
+  const s = String(v);
+  if (s.length >= 10) return s.slice(0, 10);
+  const d = new Date(s);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toISOString().slice(0, 10);
+}
+
+function mapCashflowRow(row: any): Cashflow {
+  const amountRaw = toNum(row?.amount ?? row?.amount_usd ?? row?.amountUsd ?? row?.usd_amount ?? row?.value ?? 0, 0);
+  const type = normalizeCashflowType(row?.type ?? row?.cashflow_type ?? row?.kind ?? row?.txn_type ?? "", amountRaw);
+  const amount = Math.abs(amountRaw);
+  return {
+    id: String(row?.id ?? ""),
+    user_id: String(row?.user_id ?? row?.userId ?? ""),
+    date: resolveCashflowDate(row),
+    type,
+    amount,
+    note: row?.note ?? row?.memo ?? null,
+    created_at: String(row?.created_at ?? row?.createdAt ?? ""),
+  };
+}
+
+function isMissingRelation(err: any): boolean {
+  const msg = String(err?.message ?? "").toLowerCase();
+  return err?.code === "42P01" || msg.includes("does not exist") || msg.includes("undefined table");
+}
+
+function isMissingColumn(err: any): boolean {
+  const msg = String(err?.message ?? "").toLowerCase();
+  return err?.code === "42703" || (msg.includes("column") && msg.includes("does not exist"));
+}
+
+export function signedCashflowAmount(cf: Pick<Cashflow, "type" | "amount"> & { amount?: any; type?: any }): number {
+  const amountRaw = toNum((cf as any)?.amount ?? (cf as any)?.amount_usd ?? (cf as any)?.amountUsd ?? 0, 0);
+  if (!Number.isFinite(amountRaw) || amountRaw === 0) return 0;
+  const type = normalizeCashflowType((cf as any)?.type ?? (cf as any)?.cashflow_type ?? "", amountRaw);
+  const amt = Math.abs(amountRaw);
+  return type === "withdrawal" ? -amt : amt;
+}
+
+async function queryCashflowsTable(
+  table: string,
+  userId: string,
+  opts?: { fromDate?: string; toDate?: string }
+): Promise<{ data: any[]; error: any | null }> {
+  let q = supabaseBrowser.from(table).select("*").eq("user_id", userId);
+
+  let { data, error } = await q.order("date", { ascending: false }).order("created_at", { ascending: false });
+
+  // If date column doesn't exist, retry without date filters and sort only by created_at.
+  if (error && isMissingColumn(error)) {
+    const retry = await supabaseBrowser.from(table).select("*").eq("user_id", userId).order("created_at", { ascending: false });
+    data = retry.data as any[] | null;
+    error = retry.error;
+  }
+
+  return { data: (data ?? []) as any[], error };
 }
 
 export async function listCashflows(
@@ -43,33 +108,50 @@ export async function listCashflows(
 ) {
   if (!userId) return [] as Cashflow[];
 
-  let q = supabaseBrowser
-    .from("cashflows")
-    .select("id,user_id,date,type,amount,note,created_at")
-    .eq("user_id", userId)
-    .order("date", { ascending: false })
-    .order("created_at", { ascending: false });
+  // Primary table: cashflows
+  let primary = await queryCashflowsTable("cashflows", userId, opts);
 
-  if (opts?.fromDate) q = q.gte("date", opts.fromDate);
-  if (opts?.toDate) q = q.lte("date", opts.toDate);
+  // Fallback to legacy table if needed
+  if (primary.error && isMissingRelation(primary.error)) {
+    const legacy = await queryCashflowsTable("ntj_cashflows", userId, opts);
+    if (legacy.error) {
+      console.error("[cashflowsSupabase] listCashflows error:", legacy.error);
+      if (opts?.throwOnError) throw legacy.error;
+      return [] as Cashflow[];
+    }
+    const normalizedLegacy = legacy.data.map(mapCashflowRow);
+    return normalizedLegacy.filter((r) => {
+      if (!r.date) return true;
+      if (opts?.fromDate && r.date < opts.fromDate) return false;
+      if (opts?.toDate && r.date > opts.toDate) return false;
+      return true;
+    });
+  }
 
-  const { data, error } = await q;
-
-  if (error) {
-    console.error("[cashflowsSupabase] listCashflows error:", error);
-    if (opts?.throwOnError) throw error;
+  if (primary.error) {
+    console.error("[cashflowsSupabase] listCashflows error:", primary.error);
+    if (opts?.throwOnError) throw primary.error;
     return [] as Cashflow[];
   }
 
-  return (data ?? []).map((r: any) => ({
-    id: String(r.id),
-    user_id: String(r.user_id),
-    date: String(r.date),
-    type: (r.type as CashflowType) || "deposit",
-    amount: toNum(r.amount, 0),
-    note: r.note ?? null,
-    created_at: String(r.created_at ?? ""),
-  }));
+  let rows = primary.data ?? [];
+
+  // If primary table is empty, try legacy table for backwards compatibility.
+  if (!rows.length) {
+    const legacy = await queryCashflowsTable("ntj_cashflows", userId, opts);
+    if (!legacy.error && legacy.data?.length) {
+      rows = legacy.data;
+    }
+  }
+
+  const normalized = rows.map(mapCashflowRow);
+
+  return normalized.filter((r) => {
+    if (!r.date) return true;
+    if (opts?.fromDate && r.date < opts.fromDate) return false;
+    if (opts?.toDate && r.date > opts.toDate) return false;
+    return true;
+  });
 }
 
 export async function createCashflow(params: {
@@ -95,41 +177,43 @@ export async function createCashflow(params: {
     note,
   };
 
-  const { data, error } = await supabaseBrowser
+  // Try primary table first
+  let res = await supabaseBrowser
     .from("cashflows")
     .insert(payload)
-    .select("id,user_id,date,type,amount,note,created_at")
+    .select("*")
     .single();
 
-  if (error) {
-    console.error("[cashflowsSupabase] createCashflow error:", error);
-    throw error;
+  if (res.error && isMissingRelation(res.error)) {
+    // Fallback to legacy table
+    res = await supabaseBrowser
+      .from("ntj_cashflows")
+      .insert(payload)
+      .select("*")
+      .single();
   }
 
-  return {
-    id: String((data as any).id),
-    user_id: String((data as any).user_id),
-    date: String((data as any).date),
-    type: ((data as any).type as CashflowType) || type,
-    amount: toNum((data as any).amount, amount),
-    note: (data as any).note ?? null,
-    created_at: String((data as any).created_at ?? ""),
-  } as Cashflow;
+  if (res.error) {
+    console.error("[cashflowsSupabase] createCashflow error:", res.error);
+    throw res.error;
+  }
+
+  return mapCashflowRow(res.data);
 }
 
 export async function deleteCashflow(userId: string, cashflowId: string) {
   if (!userId) throw new Error("Missing userId");
   if (!cashflowId) throw new Error("Missing cashflowId");
 
-  const { error } = await supabaseBrowser
-    .from("cashflows")
-    .delete()
-    .eq("user_id", userId)
-    .eq("id", cashflowId);
+  let res = await supabaseBrowser.from("cashflows").delete().eq("user_id", userId).eq("id", cashflowId);
 
-  if (error) {
-    console.error("[cashflowsSupabase] deleteCashflow error:", error);
-    throw error;
+  if (res.error && isMissingRelation(res.error)) {
+    res = await supabaseBrowser.from("ntj_cashflows").delete().eq("user_id", userId).eq("id", cashflowId);
+  }
+
+  if (res.error) {
+    console.error("[cashflowsSupabase] deleteCashflow error:", res.error);
+    throw res.error;
   }
 
   return true;

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo } from "react";
+import { tierIconPath } from "@/lib/trophiesSupabase";
 
 export type TrophyToastItem = {
   /** Unique id for dismissing a single toast */
@@ -58,8 +59,14 @@ export default function TrophyToasts({ items, onDismiss, onClear }: Props) {
           className="rounded-2xl border border-slate-800 bg-slate-950/90 backdrop-blur p-3 shadow-xl shadow-slate-900/70"
         >
           <div className="flex items-start gap-2">
-            <div className="mt-0.5 h-9 w-9 shrink-0 rounded-xl border border-slate-800 bg-slate-900 flex items-center justify-center text-lg">
-              <span>{t.icon ?? "🏆"}</span>
+            <div className="mt-0.5 h-9 w-9 shrink-0 rounded-xl border border-slate-800 bg-slate-900 flex items-center justify-center">
+              {t.tier ? (
+                <img src={tierIconPath(t.tier)} alt="" className="h-6 w-6 object-contain" />
+              ) : t.icon ? (
+                <span className="text-lg">{t.icon}</span>
+              ) : (
+                <span className="text-lg">🏆</span>
+              )}
             </div>
 
             <div className="flex-1">

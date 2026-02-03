@@ -17,6 +17,7 @@ import type { JournalEntry } from "@/lib/journalTypes";
 import { getJournalEntryByDate, saveJournalEntry } from "@/lib/journalSupabase";
 
 import { getJournalTradesForDay, saveJournalTradesForDay } from "@/lib/journalTradesSupabase";
+import { syncMyTrophies } from "@/lib/trophiesSupabase";
 
 import type { StoredTradeRow } from "@/lib/journalNotes";
 import { type InstrumentType } from "@/lib/journalNotes";
@@ -1238,6 +1239,11 @@ export default function DailyJournalPage() {
 
       setMsg("Saved ✅");
       setTimeout(() => setMsg(""), 2000);
+      if (userId) {
+        void syncMyTrophies(String(userId)).catch((err) => {
+          console.warn("[Journal] trophy sync failed:", err);
+        });
+      }
       try {
         window.dispatchEvent(new Event("ntj_alert_engine_run_now"));
       } catch {

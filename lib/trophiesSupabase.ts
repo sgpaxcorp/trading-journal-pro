@@ -68,6 +68,33 @@ export type TrophySyncResult = {
   newTrophies?: PublicUserTrophy[];
 };
 
+const TIER_ICON_MAP: Record<string, string> = {
+  elite: "/Elite_Trophy.svg",
+  gold: "/Gold_Trophy.svg",
+  silver: "/Silver_Trophy.svg",
+  bronze: "/Bronze_Trophy.svg",
+};
+
+function normalizeRuleKey(raw: unknown): string {
+  return String(raw ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_")
+    .replace(/[^a-z0-9_]/g, "");
+}
+
+function normalizeRuleOp(raw: unknown): TrophyRuleOp {
+  const op = String(raw ?? "").trim().toLowerCase();
+  if (op === "eq" || op === "=") return "eq";
+  if (op === "lte" || op === "<=") return "lte";
+  return "gte";
+}
+
+export function tierIconPath(tier?: TrophyTier | string | null): string {
+  const t = String(tier ?? "bronze").toLowerCase();
+  return TIER_ICON_MAP[t] ?? "/Bronze_Trophy.svg";
+}
+
 let _trophyDefsCache: { at: number; items: TrophyDefinition[] } | null = null;
 
 export function getTierFromXp(xp: number): TrophyTier {
@@ -161,8 +188,8 @@ export async function listTrophyDefinitions(opts?: {
     tier: r.tier as TrophyTier,
     xp: Number(r.xp ?? 0),
     category: String(r.category ?? "General"),
-    rule_key: String(r.rule_key ?? ""),
-    rule_op: (r.rule_op ?? "gte") as TrophyRuleOp,
+    rule_key: normalizeRuleKey(r.rule_key ?? ""),
+    rule_op: normalizeRuleOp(r.rule_op ?? "gte"),
     rule_value: Number(r.rule_value ?? 0),
     tags: (r.tags ?? null) as string[] | null,
     icon: (r.icon ?? null) as string | null,
@@ -466,27 +493,31 @@ async function getUserTrophyCounters(userId: string): Promise<Record<string, num
   // Growth plan created?
   // Support multiple table names used across NeuroTraderJournal versions.
   const plan_created = await (async () => {
-    const candidates: Array<{ table: string; userCol: string }> = [
-      { table: "ntj_growth_plans", userCol: "user_id" },
-      { table: "growth_plans", userCol: "user_id" },
-      { table: "growth_plan", userCol: "user_id" },
-      { table: "cash_flow_plans", userCol: "user_id" },
-      { table: "cash_flow_plan", userCol: "user_id" },
-      { table: "plan", userCol: "user_id" },
+    const tables = [
+      "ntj_growth_plans",
+      "growth_plans",
+      "growth_plan",
+      "cash_flow_plans",
+      "cash_flow_plan",
+      "plan",
     ];
 
-    for (const c of candidates) {
-      try {
-        const { data, error } = await supabaseBrowser
-          .from(c.table)
-          .select("id")
-          .eq(c.userCol, userId)
-          .limit(1);
+    const userCols = ["user_id", "userId", "uid", "user_uid"];
 
-        if (error) continue;
-        if (data && data.length > 0) return 1;
-      } catch {
-        // ignore
+    for (const table of tables) {
+      for (const col of userCols) {
+        try {
+          const { data, error } = await supabaseBrowser
+            .from(table)
+            .select("id")
+            .eq(col, userId)
+            .limit(1);
+
+          if (error) continue;
+          if (data && data.length > 0) return 1;
+        } catch {
+          // ignore
+        }
       }
     }
 

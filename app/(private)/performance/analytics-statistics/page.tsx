@@ -31,7 +31,7 @@ import { type InstrumentType } from "@/lib/journalNotes";
 import type { JournalEntry } from "@/lib/journalTypes";
 import { getAllJournalEntries } from "@/lib/journalSupabase";
 import { listDailySnapshots, type DailySnapshotRow } from "@/lib/snapshotSupabase";
-import { listCashflows, type Cashflow } from "@/lib/cashflowsSupabase";
+import { listCashflows, signedCashflowAmount, type Cashflow } from "@/lib/cashflowsSupabase";
 
 // ApexCharts needs dynamic import (no SSR)
 const Chart = dynamic(() => import("react-apexcharts"), { ssr: false });
@@ -205,12 +205,17 @@ function toNumberMaybe(x: unknown): number {
 }
 
 function cashflowSignedUsd(cf: any): number {
-  const t = String(cf?.type ?? cf?.cashflow_type ?? "").toLowerCase().trim();
-  const amt = toNumberMaybe(cf?.amount_usd ?? cf?.amountUsd ?? cf?.amount ?? 0);
-  if (!Number.isFinite(amt) || amt === 0) return 0;
-  if (t === "withdrawal") return -Math.abs(amt);
-  // default deposit
-  return Math.abs(amt);
+  return signedCashflowAmount(cf as any);
+}
+
+function cashflowDateIso(cf: any): string {
+  const raw = cf?.date ?? cf?.created_at ?? cf?.createdAt ?? "";
+  if (!raw) return "";
+  const s = String(raw);
+  if (s.length >= 10) return s.slice(0, 10);
+  const d = new Date(s);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toISOString().slice(0, 10);
 }
 
 function fmtUsd(n: number): string {
@@ -434,7 +439,7 @@ function computeEquityCurve(
   let cashBefore = 0;
 
   for (const cf of cashflowsAll ?? []) {
-    const d = String((cf as any)?.date ?? "").slice(0, 10);
+    const d = cashflowDateIso(cf);
     if (!looksLikeYYYYMMDD(d)) continue;
     if (planStart && d < planStart) continue;
 
@@ -880,7 +885,7 @@ export default function AnalyticsStatisticsPage() {
         if (!alive) return;
 
         const filtered = (rows ?? []).filter((cf: any) => {
-          const d = String(cf?.date ?? "").slice(0, 10);
+          const d = cashflowDateIso(cf);
           if (!looksLikeYYYYMMDD(d)) return false;
           if (end && d > end) return false;
           if (fromDate && d < fromDate) return false;
@@ -916,7 +921,7 @@ export default function AnalyticsStatisticsPage() {
     const end = looksLikeYYYYMMDD(dateRange.endIso) ? dateRange.endIso : "";
 
     return (cashflows ?? []).filter((cf: any) => {
-      const d = String(cf?.date ?? "").slice(0, 10);
+      const d = cashflowDateIso(cf);
       if (!looksLikeYYYYMMDD(d)) return false;
       if (start && d < start) return false;
       if (end && d > end) return false;
@@ -1183,7 +1188,15 @@ function OverviewSection({
 
   const pnlSeries = useMemo(() => {
     const pts = daily ?? [];
-    return [{ name: "Daily P&L", data: pts.map((p) => [new Date(p.date).getTime(), p.value]) }];
+    const data = pts.map((p) => {
+      const v = Number(p.value ?? 0);
+      const open = 0;
+      const close = v;
+      const high = Math.max(open, close);
+      const low = Math.min(open, close);
+      return { x: new Date(p.date).getTime(), y: [open, high, low, close] };
+    });
+    return [{ name: "Daily P&L", data }];
   }, [daily]);
 
   const eqOptions: ApexOptions = useMemo(
@@ -1201,13 +1214,29 @@ function OverviewSection({
 
   const pnlOptions: ApexOptions = useMemo(
     () => ({
-      chart: { type: "bar", toolbar: { show: false }, foreColor: "#cbd5e1" },
+      chart: { type: "candlestick", toolbar: { show: false }, foreColor: "#cbd5e1" },
       xaxis: { type: "datetime" },
       yaxis: { labels: { formatter: (v) => `$${Math.round(v)}` } },
       tooltip: { x: { format: "yyyy-MM-dd" }, y: { formatter: (v) => fmtUsd(v) } },
       grid: { borderColor: "#1f2937" },
       theme: { mode: "dark" },
-      plotOptions: { bar: { borderRadius: 4 } },
+      plotOptions: {
+        candlestick: {
+          colors: {
+            upward: "#22c55e",
+            downward: "#ef4444",
+          },
+        },
+      },
+      annotations: {
+        yaxis: [
+          {
+            y: 0,
+            borderColor: "#334155",
+            strokeDashArray: 4,
+          },
+        ],
+      },
     }),
     []
   );
@@ -1225,7 +1254,7 @@ function OverviewSection({
 
       <Card title="Daily P&amp;L" right={<span className="text-xs text-slate-500">Trading P&amp;L only</span>}>
         <div className="h-[320px]">
-          <Chart options={pnlOptions} series={pnlSeries as any} type="bar" height={320} />
+          <Chart options={pnlOptions} series={pnlSeries as any} type="candlestick" height={320} />
         </div>
       </Card>
 

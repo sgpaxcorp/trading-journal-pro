@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo } from "react";
+import { tierIconPath } from "@/lib/trophiesSupabase";
 
 export type TrophyCelebrationData = {
   title: string;
@@ -45,6 +46,7 @@ function confettiPaletteForTier(tier?: string) {
 }
 
 export default function TrophyCelebrationDialog({ open, trophy, onClose }: Props) {
+  const iconSrc = trophy?.tier ? tierIconPath(trophy.tier) : (trophy?.icon ?? null);
   const confetti = useMemo(() => {
     const colors = confettiPaletteForTier(trophy?.tier);
     const pieces = Array.from({ length: 34 }).map((_, i) => {
@@ -117,9 +119,13 @@ export default function TrophyCelebrationDialog({ open, trophy, onClose }: Props
         <div className="relative p-6 sm:p-7">
           <div className="flex items-start justify-between gap-4">
             <div className="flex items-center gap-3">
-              <div className="relative h-14 w-14 rounded-2xl border border-slate-700 bg-slate-900/70 flex items-center justify-center text-2xl">
+              <div className="relative h-14 w-14 rounded-2xl border border-slate-700 bg-slate-900/70 flex items-center justify-center">
                 <span className="trophy-pulse" />
-                <span className="relative z-10">{trophy.icon ?? "🏆"}</span>
+                {iconSrc ? (
+                  <img src={iconSrc} alt="" className="relative z-10 h-9 w-9 object-contain" />
+                ) : (
+                  <span className="relative z-10 text-2xl">🏆</span>
+                )}
               </div>
               <div>
                 <p className="text-[11px] uppercase tracking-[0.25em] text-emerald-300/90">

@@ -1,6 +1,7 @@
 "use client";
 
 import { supabaseBrowser } from "@/lib/supaBaseClient";
+import { tierIconPath } from "@/lib/trophiesSupabase";
 
 /**
  * Trophy sync request (client).
@@ -55,15 +56,16 @@ async function fetchTrophyDefinition(trophyId: string): Promise<{
 }
 
 function toNotification(userId: string, trophyId: string, earnedAt: string | null | undefined, def: any): EarnedTrophyNotification {
+  const tier = String(def?.tier ?? "Bronze");
   return {
     id: `${userId}:${trophyId}`,
     user_id: userId,
     trophy_id: trophyId,
     title: String(def?.title ?? trophyId),
     description: String(def?.description ?? ""),
-    tier: String(def?.tier ?? "Bronze"),
+    tier,
     xp: Number(def?.xp ?? 0),
-    icon: (def?.icon ?? null) as any,
+    icon: tierIconPath(tier),
     category: (def?.category ?? null) as any,
     earned_at: String(earnedAt ?? new Date().toISOString()),
   };

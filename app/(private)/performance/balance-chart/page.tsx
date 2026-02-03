@@ -27,7 +27,7 @@ import { supabaseBrowser } from "@/lib/supaBaseClient";
 import { getAllJournalEntries } from "@/lib/journalSupabase";
 import type { JournalEntry } from "@/lib/journalLocal";
 
-import { listCashflows, type Cashflow } from "@/lib/cashflowsSupabase";
+import { listCashflows, signedCashflowAmount, type Cashflow } from "@/lib/cashflowsSupabase";
 
 import {
   ResponsiveContainer,
@@ -206,11 +206,7 @@ function dailyTargetPct(plan: GrowthPlan | null): number {
 ========================= */
 
 function cashflowNet(cf: any): number {
-  const t = String(cf?.type ?? cf?.cashflow_type ?? "").toLowerCase().trim();
-  const amt = toNum(cf?.amount_usd ?? cf?.amountUsd ?? cf?.amount ?? 0, 0);
-  if (!Number.isFinite(amt) || amt === 0) return 0;
-  if (t === "withdrawal") return -Math.abs(amt);
-  return Math.abs(amt);
+  return signedCashflowAmount(cf as any);
 }
 
 /* =========================

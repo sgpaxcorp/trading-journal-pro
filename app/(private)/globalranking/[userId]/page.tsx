@@ -18,6 +18,7 @@ import {
   type PublicUserTrophy,
   type TrophyDefinition,
   type TrophyTier,
+  tierIconPath,
 } from "@/lib/trophiesSupabase";
 
 type TrophyCardItem = {
@@ -51,6 +52,7 @@ function tierStyles(tier: TrophyTier) {
 
 function TrophyCard({ item }: { item: TrophyCardItem }) {
   const isLocked = !!item.locked;
+  const iconSrc = !item.secret ? tierIconPath(item.tier) : null;
 
   return (
     <div
@@ -71,7 +73,15 @@ function TrophyCard({ item }: { item: TrophyCardItem }) {
                 : "border-slate-800 bg-slate-900 text-slate-100",
             ].join(" ")}
           >
-            <span>{item.icon ?? (isLocked ? "🔒" : "🏆")}</span>
+            {iconSrc ? (
+              <img
+                src={iconSrc}
+                alt=""
+                className={`h-7 w-7 object-contain ${isLocked ? "opacity-60" : ""}`}
+              />
+            ) : (
+              <span>{isLocked ? "🔒" : "🏆"}</span>
+            )}
           </div>
 
           <div className="min-w-0">
@@ -237,7 +247,7 @@ export default function GlobalRankingUserProfilePage() {
           tier: d.tier,
           xp: d.xp,
           category: d.category,
-          icon: isSecret ? "🔒" : d.icon ?? "🏆",
+          icon: d.icon ?? null,
           earned_at: null,
           locked: true,
           secret: d.secret ?? null,

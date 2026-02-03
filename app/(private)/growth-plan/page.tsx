@@ -21,6 +21,7 @@ import {
 } from "@/lib/growthPlanSupabase";
 
 import { listCashflows, signedCashflowAmount } from "@/lib/cashflowsSupabase";
+import { syncMyTrophies } from "@/lib/trophiesSupabase";
 
 import { pushNeuroMessage, openNeuroPanel } from "@/app/components/neuroEventBus";
 
@@ -838,6 +839,11 @@ export default function GrowthPlanPage() {
 
     try {
       await upsertGrowthPlanSupabase(payload);
+      if (user?.id) {
+        void syncMyTrophies(String(user.id)).catch((err) => {
+          console.warn("[GrowthPlan] trophy sync failed:", err);
+        });
+      }
 
       const msg =
         (await neuroReact("growth_plan_saved", assistantLang, {
