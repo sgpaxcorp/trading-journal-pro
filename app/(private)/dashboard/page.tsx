@@ -18,6 +18,7 @@ import { listCashflows, signedCashflowAmount, type Cashflow } from "@/lib/cashfl
 // IMPORTANT: do NOT import ChecklistItem type from your lib because it may be string/union.
 // We only import the function and normalize its output.
 import { getDailyChecklist } from "@/lib/checklistSupabase";
+import { supabaseBrowser } from "@/lib/supaBaseClient";
 
 import TopNav from "@/app/components/TopNav";
 import DashboardGrid, { type GridItemId } from "@/app/components/DashboardGrid";
