@@ -527,7 +527,7 @@ export default function DashboardPage() {
         // Cashflows (deposits/withdrawals)
         try {
           const fromDate = getPlanStartDateStr(dbPlan ?? null) ?? undefined;
-          const opts: any = fromDate ? { fromDate, throwOnError: true } : { throwOnError: true };
+          const opts: any = fromDate ? { fromDate, throwOnError: true, forceServer: true } : { throwOnError: true, forceServer: true };
 
           let cf: Cashflow[] = [];
 

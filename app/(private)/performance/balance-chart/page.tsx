@@ -109,6 +109,20 @@ function resolveUserId(user: any): string {
   return String(user?.id || user?.uid || user?.email || "");
 }
 
+function resolvePlanUserId(user: any): string {
+  return String(user?.id || user?.uid || "");
+}
+
+function resolveJournalUserId(user: any): string {
+  return String(user?.uid || user?.id || user?.email || "");
+}
+
+function resolveCashflowUserIds(user: any): { primary: string; secondary: string } {
+  const primary = String(user?.id || "");
+  const secondary = String(user?.uid || "");
+  return { primary, secondary };
+}
+
 /* =========================
    Growth plan
 ========================= */
@@ -238,18 +252,27 @@ function sessionPnlUsd(e: any): number {
 export default function BalanceChartPage() {
   const { user, loading } = useAuth() as any;
   const userId = useMemo(() => resolveUserId(user), [user]);
+  const planUserId = useMemo(() => resolvePlanUserId(user), [user]);
+  const journalUserId = useMemo(() => resolveJournalUserId(user), [user]);
+  const cashflowUserIds = useMemo(() => resolveCashflowUserIds(user), [user]);
 
   const [plan, setPlan] = useState<GrowthPlan | null>(null);
   const [entries, setEntries] = useState<JournalEntry[]>([]);
   const [cashflows, setCashflows] = useState<Cashflow[]>([]);
   const [loadingData, setLoadingData] = useState(true);
+  const [serverSeries, setServerSeries] = useState<{
+    series: Array<{ date: string; value: number }>;
+    projected: Array<{ date: string; value: number }>;
+    totals: { tradingPnl: number; cashflowNet: number; currentBalance: number };
+    plan: { startingBalance: number; targetBalance: number; dailyTargetPct: number; planStartIso: string };
+  } | null>(null);
 
   /* -------- Load plan, journal, cashflows -------- */
   useEffect(() => {
     let alive = true;
 
     async function loadAll() {
-      if (loading || !userId) return;
+      if (loading || !planUserId) return;
       setLoadingData(true);
 
       try {
@@ -260,7 +283,7 @@ export default function BalanceChartPage() {
         const { data, error } = await supabaseBrowser
           .from("growth_plans")
           .select(SELECT_GROWTH_PLAN)
-          .eq("user_id", userId)
+          .eq("user_id", planUserId)
           .order("updated_at", { ascending: false })
           .order("created_at", { ascending: false })
           .limit(1);
@@ -277,7 +300,12 @@ export default function BalanceChartPage() {
 
         // Journal entries
         try {
-          const all = await getAllJournalEntries(userId);
+          const primaryId = journalUserId || planUserId || "";
+          let all = primaryId ? await getAllJournalEntries(primaryId) : [];
+          if ((!all || all.length === 0) && planUserId && planUserId !== primaryId) {
+            const alt = await getAllJournalEntries(planUserId);
+            if (alt?.length) all = alt;
+          }
           if (!alive) return;
           setEntries((all ?? []) as any);
         } catch (err) {
@@ -303,18 +331,23 @@ export default function BalanceChartPage() {
     return () => {
       alive = false;
     };
-  }, [loading, userId]);
+  }, [loading, planUserId, journalUserId]);
 
   // Load cashflows once plan is known (so we use a stable plan start anchor)
   useEffect(() => {
     let alive = true;
 
     async function loadCashflows() {
-      if (loading || !userId) return;
+      if (loading || (!cashflowUserIds.primary && !cashflowUserIds.secondary)) return;
       const planStartIso = planStartIsoFromPlan(plan);
 
       try {
-        const cf = await listCashflows(userId, { fromDate: planStartIso, throwOnError: false });
+        const opts = { fromDate: planStartIso, throwOnError: false, forceServer: true };
+        let cf = cashflowUserIds.primary ? await listCashflows(cashflowUserIds.primary, opts) : [];
+        if ((!cf || cf.length === 0) && cashflowUserIds.secondary && cashflowUserIds.secondary !== cashflowUserIds.primary) {
+          const alt = await listCashflows(cashflowUserIds.secondary, opts);
+          if (alt?.length) cf = alt;
+        }
         if (!alive) return;
         setCashflows(cf ?? []);
       } catch (err) {
@@ -328,7 +361,41 @@ export default function BalanceChartPage() {
     return () => {
       alive = false;
     };
-  }, [loading, userId, plan]);
+  }, [loading, plan, cashflowUserIds.primary, cashflowUserIds.secondary]);
+
+  // Server series (authoritative)
+  useEffect(() => {
+    let alive = true;
+    async function loadSeries() {
+      if (loading) return;
+      try {
+        const { data: sessionData } = await supabaseBrowser.auth.getSession();
+        const token = sessionData?.session?.access_token;
+        if (!token) return;
+
+        const res = await fetch("/api/account/series", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) return;
+        const body = await res.json();
+        if (!alive) return;
+        if (Array.isArray(body?.series)) {
+          setServerSeries({
+            series: body.series,
+            projected: Array.isArray(body?.projected) ? body.projected : [],
+            totals: body?.totals ?? { tradingPnl: 0, cashflowNet: 0, currentBalance: 0 },
+            plan: body?.plan ?? { startingBalance: 0, targetBalance: 0, dailyTargetPct: 0, planStartIso: "" },
+          });
+        }
+      } catch {
+        // ignore
+      }
+    }
+    loadSeries();
+    return () => {
+      alive = false;
+    };
+  }, [loading]);
 
   /* -------- Compute chart data -------- */
   const computed = useMemo(() => {
@@ -473,7 +540,7 @@ export default function BalanceChartPage() {
     const totalTradingPnl = cumPnl;
     const totalCashflowNet = cumCash;
 
-    return {
+    const outObj = {
       planStartDate: planStartIso,
       currentDateStr: currentPoint.date,
       tradingDays: tradingDates.length,
@@ -490,7 +557,34 @@ export default function BalanceChartPage() {
 
       pct,
     };
-  }, [plan, entries, cashflows]);
+
+    if (serverSeries && serverSeries.series.length) {
+      const actualSeries = serverSeries.series;
+      const projectedSeries = serverSeries.projected.length
+        ? serverSeries.projected
+        : actualSeries.map((p) => ({ date: p.date, value: p.value }));
+
+      const chartData = actualSeries.map((p, idx) => ({
+        date: p.date,
+        actual: Number(p.value ?? 0),
+        projected: Number(projectedSeries[idx]?.value ?? projectedSeries[projectedSeries.length - 1]?.value ?? p.value ?? 0),
+        dayPnl: Number(pnlByDate[p.date] ?? 0),
+      }));
+
+      const last = actualSeries[actualSeries.length - 1] ?? { date: planStartIso, value: start };
+
+      return {
+        ...outObj,
+        chartData,
+        currentDateStr: last.date,
+        currentBalance: Number(serverSeries.totals.currentBalance ?? last.value ?? 0),
+        totalTradingPnl: Number(serverSeries.totals.tradingPnl ?? outObj.totalTradingPnl ?? 0),
+        totalCashflowNet: Number(serverSeries.totals.cashflowNet ?? outObj.totalCashflowNet ?? 0),
+      };
+    }
+
+    return outObj;
+  }, [plan, entries, cashflows, serverSeries]);
 
   /* =========================
      Render

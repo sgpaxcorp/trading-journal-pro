@@ -184,6 +184,16 @@ function isoDate(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
+function resolveJournalUserId(user: any): string {
+  return String(user?.uid || user?.id || user?.email || "");
+}
+
+function resolveCashflowUserIds(user: any): { primary: string; secondary: string } {
+  const primary = String(user?.id || "");
+  const secondary = String(user?.uid || "");
+  return { primary, secondary };
+}
+
 function startOfYearIso(): string {
   const now = new Date();
   return `${now.getFullYear()}-01-01`;
@@ -745,6 +755,8 @@ export default function AnalyticsStatisticsPage() {
   const router = useRouter();
 
   const userId = (user as any)?.id as string | undefined;
+  const journalUserId = useMemo(() => resolveJournalUserId(user), [user]);
+  const cashflowUserIds = useMemo(() => resolveCashflowUserIds(user), [user]);
 
   const [dateRange, setDateRange] = useState<DateRange>(() => getDefaultRange("30D"));
 
@@ -755,6 +767,10 @@ export default function AnalyticsStatisticsPage() {
   const [snapshot, setSnapshot] = useState<AnalyticsSnapshot | null>(null);
   const [dailySnaps, setDailySnaps] = useState<DailySnapshotRow[]>([]);
   const [cashflows, setCashflows] = useState<Cashflow[]>([]);
+  const [serverSeries, setServerSeries] = useState<{
+    series: Array<{ date: string; value: number }>;
+    daily: Array<{ date: string; value: number }>;
+  } | null>(null);
 
   // Growth plan context
   const [planStartingBalance, setPlanStartingBalance] = useState<number>(0);
@@ -814,11 +830,16 @@ export default function AnalyticsStatisticsPage() {
     let alive = true;
 
     async function run() {
-      if (!userId) return;
+      if (!journalUserId && !userId) return;
 
       setLoadingData(true);
       try {
-        const all = await getAllJournalEntries(userId);
+        const primaryId = journalUserId || userId || "";
+        let all = primaryId ? await getAllJournalEntries(primaryId) : [];
+        if ((!all || all.length === 0) && userId && userId !== primaryId) {
+          const alt = await getAllJournalEntries(userId);
+          if (alt?.length) all = alt;
+        }
         if (!alive) return;
         setEntries((all ?? []) as any);
       } catch (err) {
@@ -835,14 +856,14 @@ export default function AnalyticsStatisticsPage() {
     return () => {
       alive = false;
     };
-  }, [userId]);
+  }, [journalUserId, userId]);
 
   // Load daily snapshots (optional)
   useEffect(() => {
     let alive = true;
 
     async function run() {
-      if (!userId) return;
+      if (!cashflowUserIds.primary && !cashflowUserIds.secondary) return;
 
       try {
         const start = dateRange.startIso;
@@ -881,7 +902,12 @@ export default function AnalyticsStatisticsPage() {
       const end = looksLikeYYYYMMDD(dateRange.endIso) ? dateRange.endIso : "";
 
       try {
-        const rows = await listCashflows(userId, fromDate ? { fromDate, throwOnError: false } : { throwOnError: false });
+        const opts = fromDate ? { fromDate, throwOnError: false, forceServer: true } : { throwOnError: false, forceServer: true };
+        let rows = cashflowUserIds.primary ? await listCashflows(cashflowUserIds.primary, opts) : [];
+        if ((!rows || rows.length === 0) && cashflowUserIds.secondary && cashflowUserIds.secondary !== cashflowUserIds.primary) {
+          const alt = await listCashflows(cashflowUserIds.secondary, opts);
+          if (alt?.length) rows = alt;
+        }
         if (!alive) return;
 
         const filtered = (rows ?? []).filter((cf: any) => {
@@ -904,7 +930,39 @@ export default function AnalyticsStatisticsPage() {
     return () => {
       alive = false;
     };
-  }, [userId, planStartIso, dateRange.startIso, dateRange.endIso]);
+  }, [cashflowUserIds.primary, cashflowUserIds.secondary, planStartIso, dateRange.startIso, dateRange.endIso]);
+
+  // Server series (authoritative)
+  useEffect(() => {
+    let alive = true;
+    async function loadSeries() {
+      if (loading) return;
+      try {
+        const { data: sessionData } = await supabaseBrowser.auth.getSession();
+        const token = sessionData?.session?.access_token;
+        if (!token) return;
+
+        const res = await fetch("/api/account/series", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) return;
+        const body = await res.json();
+        if (!alive) return;
+        if (Array.isArray(body?.series)) {
+          setServerSeries({
+            series: body.series,
+            daily: Array.isArray(body?.daily) ? body.daily : [],
+          });
+        }
+      } catch {
+        // ignore
+      }
+    }
+    loadSeries();
+    return () => {
+      alive = false;
+    };
+  }, [loading]);
 
   const sessionsAll = useMemo(() => buildSessionsFromEntries(entries), [entries]);
 
@@ -967,14 +1025,20 @@ export default function AnalyticsStatisticsPage() {
   const uiEquity = useMemo(() => {
     const s = snapshot;
     if (!s) return [] as EquityPoint[];
+    if (serverSeries && serverSeries.series.length) {
+      return serverSeries.series.map((p) => ({ date: p.date, value: Number(p.value ?? 0) }));
+    }
     return s.equityCurve;
-  }, [snapshot]);
+  }, [snapshot, serverSeries]);
 
   const uiDaily = useMemo(() => {
     const s = snapshot;
     if (!s) return [] as DailyPnlPoint[];
+    if (serverSeries && serverSeries.daily.length) {
+      return serverSeries.daily.map((p) => ({ date: p.date, value: Number(p.value ?? 0) }));
+    }
     return s.dailyPnl;
-  }, [snapshot]);
+  }, [snapshot, serverSeries]);
 
   if (loading || !user) {
     return (
@@ -1199,14 +1263,50 @@ function OverviewSection({
     return [{ name: "Daily P&L", data }];
   }, [daily]);
 
+  const pnlBounds = useMemo(() => {
+    const vals = (daily ?? []).map((p) => Number(p.value ?? 0)).filter((v) => Number.isFinite(v));
+    if (!vals.length) return { min: -1, max: 1 };
+    let min = Math.min(...vals);
+    let max = Math.max(...vals);
+    if (min === max) {
+      const pad = Math.max(1, Math.abs(min) * 0.5);
+      return { min: min - pad, max: max + pad };
+    }
+    const span = Math.max(1, (max - min) * 0.2);
+    return { min: min - span, max: max + span };
+  }, [daily]);
+
   const eqOptions: ApexOptions = useMemo(
     () => ({
-      chart: { type: "line", toolbar: { show: false }, foreColor: "#cbd5e1" },
-      stroke: { width: 2 },
+      chart: {
+        type: "line",
+        toolbar: { show: false },
+        foreColor: "#cbd5e1",
+        background: "transparent",
+        dropShadow: {
+          enabled: true,
+          top: 2,
+          left: 0,
+          blur: 6,
+          opacity: 0.2,
+        },
+      },
+      stroke: { width: 2.4, curve: "smooth" },
+      colors: ["#38bdf8"],
+      fill: {
+        type: "gradient",
+        gradient: {
+          shadeIntensity: 0.3,
+          opacityFrom: 0.35,
+          opacityTo: 0.02,
+          stops: [0, 70, 100],
+        },
+      },
+      markers: { size: 0 },
       xaxis: { type: "datetime" },
       yaxis: { labels: { formatter: (v) => `$${Math.round(v)}` } },
       tooltip: { x: { format: "yyyy-MM-dd" }, y: { formatter: (v) => fmtUsd(v) } },
-      grid: { borderColor: "#1f2937" },
+      grid: { borderColor: "#1f2937", strokeDashArray: 4 },
       theme: { mode: "dark" },
     }),
     []
@@ -1214,11 +1314,20 @@ function OverviewSection({
 
   const pnlOptions: ApexOptions = useMemo(
     () => ({
-      chart: { type: "candlestick", toolbar: { show: false }, foreColor: "#cbd5e1" },
+      chart: {
+        type: "candlestick",
+        toolbar: { show: false },
+        foreColor: "#cbd5e1",
+        background: "transparent",
+      },
       xaxis: { type: "datetime" },
-      yaxis: { labels: { formatter: (v) => `$${Math.round(v)}` } },
+      yaxis: {
+        min: pnlBounds.min,
+        max: pnlBounds.max,
+        labels: { formatter: (v) => `$${Math.round(v)}` },
+      },
       tooltip: { x: { format: "yyyy-MM-dd" }, y: { formatter: (v) => fmtUsd(v) } },
-      grid: { borderColor: "#1f2937" },
+      grid: { borderColor: "#1f2937", strokeDashArray: 4 },
       theme: { mode: "dark" },
       plotOptions: {
         candlestick: {
@@ -1226,6 +1335,7 @@ function OverviewSection({
             upward: "#22c55e",
             downward: "#ef4444",
           },
+          wick: { useFillColor: true },
         },
       },
       annotations: {
@@ -1238,7 +1348,7 @@ function OverviewSection({
         ],
       },
     }),
-    []
+    [pnlBounds.min, pnlBounds.max]
   );
 
   return (

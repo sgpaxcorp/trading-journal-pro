@@ -102,10 +102,42 @@ async function queryCashflowsTable(
   return { data: (data ?? []) as any[], error };
 }
 
-export async function listCashflows(
-  userId: string,
-  opts?: { fromDate?: string; toDate?: string; throwOnError?: boolean }
-) {
+type ListCashflowsOpts = {
+  fromDate?: string;
+  toDate?: string;
+  throwOnError?: boolean;
+  forceServer?: boolean;
+  skipServer?: boolean;
+};
+
+async function fetchCashflowsViaApi(opts?: ListCashflowsOpts): Promise<Cashflow[] | null> {
+  if (typeof window === "undefined") return null;
+
+  try {
+    const { data: sessionData } = await supabaseBrowser.auth.getSession();
+    const token = sessionData?.session?.access_token;
+    if (!token) return null;
+
+    const params = new URLSearchParams();
+    if (opts?.fromDate) params.set("fromDate", opts.fromDate);
+    if (opts?.toDate) params.set("toDate", opts.toDate);
+
+    const url = `/api/cashflows/list${params.toString() ? `?${params.toString()}` : ""}`;
+    const res = await fetch(url, {
+      method: "GET",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    if (!res.ok) return null;
+    const body = await res.json();
+    const rows = Array.isArray(body?.cashflows) ? (body.cashflows as any[]) : [];
+    return rows.map(mapCashflowRow);
+  } catch {
+    return null;
+  }
+}
+
+export async function listCashflows(userId: string, opts?: ListCashflowsOpts) {
   if (!userId) return [] as Cashflow[];
 
   // Primary table: cashflows
@@ -116,6 +148,10 @@ export async function listCashflows(
     const legacy = await queryCashflowsTable("ntj_cashflows", userId, opts);
     if (legacy.error) {
       console.error("[cashflowsSupabase] listCashflows error:", legacy.error);
+      if (!opts?.skipServer) {
+        const apiRows = await fetchCashflowsViaApi(opts);
+        if (apiRows) return apiRows;
+      }
       if (opts?.throwOnError) throw legacy.error;
       return [] as Cashflow[];
     }
@@ -130,6 +166,10 @@ export async function listCashflows(
 
   if (primary.error) {
     console.error("[cashflowsSupabase] listCashflows error:", primary.error);
+    if (!opts?.skipServer) {
+      const apiRows = await fetchCashflowsViaApi(opts);
+      if (apiRows) return apiRows;
+    }
     if (opts?.throwOnError) throw primary.error;
     return [] as Cashflow[];
   }
@@ -141,17 +181,27 @@ export async function listCashflows(
     const legacy = await queryCashflowsTable("ntj_cashflows", userId, opts);
     if (!legacy.error && legacy.data?.length) {
       rows = legacy.data;
+    } else if (!opts?.skipServer) {
+      const apiRows = await fetchCashflowsViaApi({ ...opts, forceServer: false });
+      if (apiRows) return apiRows;
     }
   }
 
   const normalized = rows.map(mapCashflowRow);
 
-  return normalized.filter((r) => {
+  const filtered = normalized.filter((r) => {
     if (!r.date) return true;
     if (opts?.fromDate && r.date < opts.fromDate) return false;
     if (opts?.toDate && r.date > opts.toDate) return false;
     return true;
   });
+
+  if (!filtered.length && opts?.forceServer && !opts?.skipServer) {
+    const apiRows = await fetchCashflowsViaApi(opts);
+    if (apiRows) return apiRows;
+  }
+
+  return filtered;
 }
 
 export async function createCashflow(params: {

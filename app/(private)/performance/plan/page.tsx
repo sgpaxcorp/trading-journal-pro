@@ -223,8 +223,19 @@ export default function PlanPage() {
       // cashflows ledger (deposits/withdrawals)
       try {
         const fromDate = gp ? String(gp.createdAtIso).slice(0, 10) : undefined;
-        const cf = await listCashflows(planUserId, fromDate ? { fromDate, throwOnError: true } : { throwOnError: true });
-        setCashflows(cf);
+        const opts = fromDate ? { fromDate, throwOnError: true, forceServer: true } : { throwOnError: true, forceServer: true };
+
+        const primary = String((user as any)?.id || "");
+        const secondary = String((user as any)?.uid || "");
+
+        let cf: Cashflow[] = [];
+        if (primary) cf = await listCashflows(primary, opts);
+        if ((!cf || cf.length === 0) && secondary && secondary !== primary) {
+          const alt = await listCashflows(secondary, opts);
+          if (alt?.length) cf = alt;
+        }
+
+        setCashflows(cf ?? []);
       } catch (err: any) {
         console.error("[PlanPage] cashflows load error:", err);
         // Common setup issue: missing table

@@ -215,6 +215,29 @@ export async function getPublicLeaderboardTop(limit = 25) {
 export async function syncMyTrophies(userId: string): Promise<TrophySyncResult> {
   if (!userId) return { inserted: 0 };
 
+  // Prefer server-side sync to bypass RLS in production.
+  if (typeof window !== "undefined") {
+    try {
+      const { data: sessionData } = await supabaseBrowser.auth.getSession();
+      const token = sessionData?.session?.access_token;
+      if (token) {
+        const res = await fetch("/api/trophies/sync", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.ok) {
+          const body = await res.json();
+          return {
+            inserted: Number(body?.inserted ?? 0),
+            newTrophies: Array.isArray(body?.newTrophies) ? body.newTrophies : [],
+          };
+        }
+      }
+    } catch (err) {
+      console.warn("[trophiesSupabase] server sync failed, falling back:", err);
+    }
+  }
+
   // Load definitions (include secrets so they can be earned)
   const defs = await listTrophyDefinitions({ includeSecret: true });
 
@@ -542,6 +565,13 @@ async function getUserTrophyCounters(userId: string): Promise<Record<string, num
     best_streak,
     plan_created,
     challenges_completed,
+    // aliases for different rule keys used across deployments
+    growth_plan_created: plan_created,
+    growth_plan: plan_created,
+    plan_saved: plan_created,
+    journal_days: days_logged,
+    trading_days_logged: days_logged,
+    streak_best: best_streak,
   };
 }
 

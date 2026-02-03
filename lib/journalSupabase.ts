@@ -39,6 +39,27 @@ function toStringArray(raw: unknown): string[] {
   return Array.isArray(raw) ? (raw as string[]) : [];
 }
 
+async function fetchJournalEntriesViaApi(opts?: { fromDate?: string; toDate?: string }): Promise<any[] | null> {
+  if (typeof window === "undefined") return null;
+  try {
+    const { data: sessionData } = await supabaseBrowser.auth.getSession();
+    const token = sessionData?.session?.access_token;
+    if (!token) return null;
+
+    const params = new URLSearchParams();
+    if (opts?.fromDate) params.set("fromDate", opts.fromDate);
+    if (opts?.toDate) params.set("toDate", opts.toDate);
+
+    const url = `/api/journal/list${params.toString() ? `?${params.toString()}` : ""}`;
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) return null;
+    const body = await res.json();
+    return Array.isArray(body?.entries) ? (body.entries as any[]) : [];
+  } catch {
+    return null;
+  }
+}
+
 function normalizeEntry(entry: JournalEntry): JournalEntry {
   const cleanPnl =
     typeof entry.pnl === "number"
@@ -95,6 +116,12 @@ function rowToJournalEntry(row: any): JournalEntry {
 
 export async function getAllJournalEntries(userId: string): Promise<JournalEntry[]> {
   if (!userId) return [];
+
+  // Prefer server-side read (bypasses RLS / legacy id mismatches)
+  const serverRows = await fetchJournalEntriesViaApi();
+  if (serverRows && serverRows.length > 0) {
+    return serverRows.map(rowToJournalEntry);
+  }
 
   const { data, error } = await supabaseBrowser
     .from(TABLE_NAME)
