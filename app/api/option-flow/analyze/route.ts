@@ -186,6 +186,7 @@ Organiza por expiración y prioriza strikes por premium/actividad y cercanía al
 Identifica niveles reales (con etiqueta pivot/supply/demand/wall/friction), contratos con más potencial y escenarios
 de squeeze con condiciones claras. Evita frases genéricas; usa lecturas breves pero específicas.
 Incluye una conclusión final que resuma el sesgo y el mapa de niveles en 3-5 bullets.
+Si el símbolo subyacente aparece en los prints, incluye el símbolo en keyTrades[].details.symbol (ej: SPX, SPXW, NDX).
 Incluye lectura de prints grandes deep ITM solo como nota (no como nivel clave) si el OI es bajo.
 Si hay mezcla de prints BID/ASK, deja claro si es venta de prima o compra agresiva.
 En "expirations[].strikes" incluye los strikes más relevantes (6-10 por expiración) con prints/size/premium/OI y lectura rápida.

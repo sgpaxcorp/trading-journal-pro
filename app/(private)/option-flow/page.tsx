@@ -416,7 +416,8 @@ function collectFlowBuckets(expirations?: ExpirationBucket[]) {
   const buckets = {
     callsAsk: [] as ExpirationStrike[],
     putsAsk: [] as ExpirationStrike[],
-    bids: [] as ExpirationStrike[],
+    callsBid: [] as ExpirationStrike[],
+    putsBid: [] as ExpirationStrike[],
     mixed: [] as ExpirationStrike[],
   };
   if (!expirations?.length) return buckets;
@@ -426,7 +427,8 @@ function collectFlowBuckets(expirations?: ExpirationBucket[]) {
       const type = (row.type || "").toUpperCase();
       if (side === "ASK" && type === "C") buckets.callsAsk.push(row);
       else if (side === "ASK" && type === "P") buckets.putsAsk.push(row);
-      else if (side === "BID") buckets.bids.push(row);
+      else if (side === "BID" && type === "C") buckets.callsBid.push(row);
+      else if (side === "BID" && type === "P") buckets.putsBid.push(row);
       else buckets.mixed.push(row);
     });
   });
@@ -587,9 +589,23 @@ async function renderPriceChartDataUrl(
   levels: { price: number; side?: string }[]
 ): Promise<string | null> {
   if (!symbol) return null;
+  const upper = symbol.trim().toUpperCase();
+  const symbolMap: Record<string, string> = {
+    SPX: "^SPX",
+    SPXW: "^SPX",
+    NDX: "^NDX",
+    NDXW: "^NDX",
+    RUT: "^RUT",
+    VIX: "^VIX",
+    ES: "ES=F",
+    NQ: "NQ=F",
+    YM: "YM=F",
+    RTY: "RTY=F",
+  };
+  const yahooSymbol = symbolMap[upper] ?? (upper.startsWith("^") ? upper : upper);
   try {
     const res = await fetch(
-      `/api/yahoo-chart?symbol=${encodeURIComponent(symbol)}&range=1mo&interval=1d`
+      `/api/yahoo-chart?symbol=${encodeURIComponent(yahooSymbol)}&range=1mo&interval=1d`
     );
     if (!res.ok) return null;
     const body = await res.json();
@@ -1103,9 +1119,15 @@ export default function OptionFlowPage() {
       sections.push(
         renderBucket("Calls agresivos (ASK)", buckets.callsAsk) +
           renderBucket("Puts agresivos (ASK)", buckets.putsAsk) +
-          renderBucket("Ventas en BID (prima)", buckets.bids)
+          renderBucket("Calls venta agresiva (BID)", buckets.callsBid) +
+          renderBucket("Puts venta agresiva (BID)", buckets.putsBid)
       );
-      if (!buckets.callsAsk.length && !buckets.putsAsk.length && !buckets.bids.length) {
+      if (
+        !buckets.callsAsk.length &&
+        !buckets.putsAsk.length &&
+        !buckets.callsBid.length &&
+        !buckets.putsBid.length
+      ) {
         sections.push(`<p>Sin señales agresivas claras (ASK/BID). La mayoría está en MID/mixto.</p>`);
       }
     }
@@ -1400,8 +1422,14 @@ export default function OptionFlowPage() {
       };
       addBucket("Calls agresivos (ASK)", buckets.callsAsk);
       addBucket("Puts agresivos (ASK)", buckets.putsAsk);
-      addBucket("Ventas en BID (prima)", buckets.bids);
-      if (!buckets.callsAsk.length && !buckets.putsAsk.length && !buckets.bids.length) {
+      addBucket("Calls venta agresiva (BID)", buckets.callsBid);
+      addBucket("Puts venta agresiva (BID)", buckets.putsBid);
+      if (
+        !buckets.callsAsk.length &&
+        !buckets.putsAsk.length &&
+        !buckets.callsBid.length &&
+        !buckets.putsBid.length
+      ) {
         doc.setFontSize(9);
         doc.setTextColor(71, 85, 105);
         doc.text("Sin señales agresivas claras (ASK/BID). Mayoría en MID/mixto.", margin, y);
