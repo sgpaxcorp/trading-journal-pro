@@ -327,12 +327,41 @@ export async function listAlertRules(
     if (!opts?.includeDisabled) q = q.eq("enabled", true);
 
     const { data, error } = await q;
-    if (error) return { ok: false, error: error.message };
+    if (error) {
+      // fallback: server-side API (bypass RLS)
+      if (typeof window !== "undefined") {
+        try {
+          const { data: sessionData } = await supabaseBrowser.auth.getSession();
+          const token = sessionData?.session?.access_token;
+          if (token) {
+            const params = new URLSearchParams();
+            params.set("includeDisabled", String(!!opts?.includeDisabled));
+            params.set("limit", String(limit));
+            const res = await fetch(`/api/alerts/rules?${params.toString()}`, {
+              headers: { Authorization: `Bearer ${token}` },
+            });
+            if (res.ok) {
+              const body = await res.json();
+              const rows = Array.isArray(body?.rules) ? body.rules : [];
+              const rulesRaw: AlertRule[] = rows.map((r: any) => normalizeRuleRow(r));
+              const rules = rulesRaw.filter((r: AlertRule) =>
+                opts?.kind ? r.kind === opts.kind : true
+              );
+              return { ok: true, data: { rules } };
+            }
+          }
+        } catch (e: any) {
+          console.warn(LOG, "listAlertRules server fallback failed:", e);
+        }
+      }
 
-    const rulesRaw = (data ?? []).map((r) => normalizeRuleRow(r));
+      return { ok: false, error: error.message };
+    }
+
+    const rulesRaw: AlertRule[] = (data ?? []).map((r) => normalizeRuleRow(r));
 
     // IMPORTANT: we do NOT filter by kind at the DB level because Option A has no kind column.
-    const rules = rulesRaw.filter((r) => (opts?.kind ? r.kind === opts.kind : true));
+    const rules = rulesRaw.filter((r: AlertRule) => (opts?.kind ? r.kind === opts.kind : true));
 
     return { ok: true, data: { rules } };
   } catch (e: any) {

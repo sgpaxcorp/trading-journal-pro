@@ -685,6 +685,10 @@ export default function TopNav() {
             {t("nav.backStudy", lang)}
           </Link>
 
+          <Link href="/option-flow" className={linkClass}>
+            {t("nav.optionFlow", lang)}
+          </Link>
+
           <Dropdown
             titleKey="nav.challenges"
             items={challenges}

@@ -240,6 +240,7 @@ export async function GET(req: NextRequest) {
     let cumCash = 0;
     const series: SeriesPoint[] = [];
     const daily: SeriesPoint[] = [];
+    const cashflow: SeriesPoint[] = [];
 
     for (const d of dateList) {
       const dayPnl = pnlByDate[d] ?? 0;
@@ -248,6 +249,7 @@ export async function GET(req: NextRequest) {
       cumCash += dayCash;
       const value = startingBalance + cumPnl + cumCash;
       series.push({ date: d, value: Number(value.toFixed(2)) });
+      cashflow.push({ date: d, value: Number(dayCash.toFixed(2)) });
       if (pnlByDate[d] != null) {
         daily.push({ date: d, value: Number(dayPnl.toFixed(2)) });
       }
@@ -289,6 +291,7 @@ export async function GET(req: NextRequest) {
       },
       series,
       projected,
+      cashflow,
       daily,
     });
   } catch (err: any) {

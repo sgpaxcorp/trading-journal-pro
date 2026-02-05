@@ -51,6 +51,7 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     "nav.resources": "Resources",
     "nav.rules": "Rules & Alarms",
     "nav.forum": "Forum",
+    "nav.optionFlow": "Option Flow Intelligence",
     "nav.globalRanking": "Global Ranking",
 
     // Backwards-compatible aliases (older patches)
@@ -61,6 +62,7 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     "nav.resources.title": "Resources",
     "nav.rules.title": "Rules & Alarms",
     "nav.forum.title": "Forum",
+    "nav.optionFlow.title": "Option Flow Intelligence",
     "nav.globalRanking.title": "Global Ranking",
 
     /* -----------------
@@ -273,6 +275,7 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     "nav.resources": "Recursos",
     "nav.rules": "Reglas y alarmas",
     "nav.forum": "Foro",
+    "nav.optionFlow": "Inteligencia de flujo de opciones",
     "nav.globalRanking": "Ranking global",
 
     // Aliases
@@ -283,6 +286,7 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     "nav.resources.title": "Recursos",
     "nav.rules.title": "Reglas y alarmas",
     "nav.forum.title": "Foro",
+    "nav.optionFlow.title": "Inteligencia de flujo de opciones",
     "nav.globalRanking.title": "Ranking global",
 
     /* -----------------

@@ -263,6 +263,7 @@ export default function BalanceChartPage() {
   const [serverSeries, setServerSeries] = useState<{
     series: Array<{ date: string; value: number }>;
     projected: Array<{ date: string; value: number }>;
+    cashflow?: Array<{ date: string; value: number }>;
     daily?: Array<{ date: string; value: number }>;
     totals: { tradingPnl: number; cashflowNet: number; currentBalance: number };
     plan: { startingBalance: number; targetBalance: number; dailyTargetPct: number; planStartIso: string };
@@ -384,6 +385,7 @@ export default function BalanceChartPage() {
           setServerSeries({
             series: body.series,
             projected: Array.isArray(body?.projected) ? body.projected : [],
+            cashflow: Array.isArray(body?.cashflow) ? body.cashflow : [],
             totals: body?.totals ?? { tradingPnl: 0, cashflowNet: 0, currentBalance: 0 },
             plan: body?.plan ?? { startingBalance: 0, targetBalance: 0, dailyTargetPct: 0, planStartIso: "" },
           });
@@ -577,14 +579,23 @@ export default function BalanceChartPage() {
         serverSeries.plan?.startingBalance ?? plan?.startingBalance ?? start
       );
 
-      const derivedCashByDate: Record<string, number> = {};
-      for (let i = 0; i < actualSeries.length; i++) {
-        const cur = Number(actualSeries[i]?.value ?? 0);
-        const prev = i === 0 ? startBase : Number(actualSeries[i - 1]?.value ?? cur);
-        const dayPnl = Number(dailyMap[actualSeries[i]?.date] ?? 0);
-        let cash = Number((cur - prev - dayPnl).toFixed(2));
-        if (Math.abs(cash) < 0.01) cash = 0;
-        derivedCashByDate[actualSeries[i]?.date] = cash;
+      const cashflowByDate: Record<string, number> = {};
+
+      if (serverSeries.cashflow && serverSeries.cashflow.length) {
+        for (const cf of serverSeries.cashflow) {
+          if (!cf?.date) continue;
+          const val = Number(cf.value ?? 0);
+          cashflowByDate[cf.date] = Number(val.toFixed(2));
+        }
+      } else {
+        for (let i = 0; i < actualSeries.length; i++) {
+          const cur = Number(actualSeries[i]?.value ?? 0);
+          const prev = i === 0 ? startBase : Number(actualSeries[i - 1]?.value ?? cur);
+          const dayPnl = Number(dailyMap[actualSeries[i]?.date] ?? 0);
+          let cash = Number((cur - prev - dayPnl).toFixed(2));
+          if (Math.abs(cash) < 0.01) cash = 0;
+          cashflowByDate[actualSeries[i]?.date] = cash;
+        }
       }
 
       const chartData = actualSeries.map((p, idx) => ({
@@ -592,7 +603,7 @@ export default function BalanceChartPage() {
         actual: Number(p.value ?? 0),
         projected: Number(projectedSeries[idx]?.value ?? projectedSeries[projectedSeries.length - 1]?.value ?? p.value ?? 0),
         dayPnl: Number(pnlByDate[p.date] ?? 0),
-        cashflow: Number(derivedCashByDate[p.date] ?? 0),
+        cashflow: Number(cashflowByDate[p.date] ?? 0),
       }));
 
       const lastActual = actualSeries[actualSeries.length - 1] ?? { date: planStartIso, value: start };
@@ -615,7 +626,7 @@ export default function BalanceChartPage() {
         diffPct: Number(serverDiffPct.toFixed(2)),
         totalTradingPnl: Number(serverSeries.totals.tradingPnl ?? outObj.totalTradingPnl ?? 0),
         totalCashflowNet: Number(serverSeries.totals.cashflowNet ?? outObj.totalCashflowNet ?? 0),
-        cashflowByDate: derivedCashByDate,
+        cashflowByDate,
       };
     }
 

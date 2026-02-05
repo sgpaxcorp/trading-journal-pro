@@ -1047,7 +1047,12 @@ export default function GlobalAlertRuleEngine() {
 
     try {
       let rulesRes = await listAlertRules(userId, { includeDisabled: true, limit: 500 });
-      if (!rulesRes.ok) throw new Error(rulesRes.error || "Unable to load rules");
+      if (!rulesRes.ok) {
+        setLastRunOk(false);
+        setLastRunNote(rulesRes.error || "Unable to load rules");
+        setLastRunAt(new Date().toISOString());
+        return;
+      }
 
       let rules = rulesRes.data.rules;
       if (!ensuredRef.current) {
