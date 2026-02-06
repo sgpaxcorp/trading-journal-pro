@@ -207,6 +207,7 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     "footer.description":
       "Tools designed for every trader — in any market — who wants to centralize their trading journey, master self-awareness, and elevate performance. Centralize your journal, understand your patterns, and execute with precision. Because the better you know yourself — the stronger your edge.",
     "footer.links.login": "Log In",
+    "footer.links.staff": "Staff login",
     "footer.links.blog": "Blog",
     "footer.links.pricing": "Pricing",
     "footer.links.partner": "Become a Partner *Coming Soon*",
@@ -428,6 +429,7 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     "footer.description":
       "Herramientas diseñadas para traders — en cualquier mercado — que desean centralizar su progreso, dominar la autoobservación y elevar su desempeño. Centraliza tu journal, entiende tus patrones y ejecuta con precisión. Mientras mejor te conozcas — más fuerte será tu ventaja.",
     "footer.links.login": "Iniciar sesión",
+    "footer.links.staff": "Staff login",
     "footer.links.blog": "Blog",
     "footer.links.pricing": "Precios",
     "footer.links.partner": "Sé partner *Próximamente*",
@@ -488,6 +490,7 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
 const ALIASES: Record<string, string> = {
   // Example: older keys that differ only in naming
   "footer.login": "footer.links.login",
+  "footer.staff": "footer.links.staff",
   "footer.blog": "footer.links.blog",
   "footer.pricing": "footer.links.pricing",
   "footer.partner": "footer.links.partner",

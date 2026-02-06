@@ -54,6 +54,12 @@ export default function Footer() {
             <Link href="/signin" className={isLight ? "hover:text-emerald-600 transition" : "hover:text-emerald-400 transition"}>
               {t("footer.links.login", lang)}
             </Link>
+            <Link
+              href="/signin?next=/admin"
+              className={isLight ? "hover:text-emerald-600 transition" : "hover:text-emerald-400 transition"}
+            >
+              {t("footer.links.staff", lang)}
+            </Link>
             <Link href="/blog" className={isLight ? "hover:text-emerald-600 transition" : "hover:text-emerald-400 transition"}>
               {t("footer.links.blog", lang)}
             </Link>

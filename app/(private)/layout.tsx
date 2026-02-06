@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { supabaseBrowser } from "@/lib/supaBaseClient";
@@ -20,12 +20,14 @@ const ALLOW_WITHOUT_ACTIVE_SUB = [
   "/billing/success",
   "/pricing",
   "/confirmed",
+  "/admin",
 ];
 
 export default function PrivateLayout({ children }: PrivateLayoutProps) {
   const router = useRouter();
   const pathname = usePathname();
   const { user, loading } = useAuth() as any;
+  const sessionIdRef = useRef<string | null>(null);
 
   const [subscriptionStatus, setSubscriptionStatus] = useState<string>("pending");
   const [onboardingCompleted, setOnboardingCompleted] = useState<boolean>(false);
@@ -41,6 +43,40 @@ export default function PrivateLayout({ children }: PrivateLayoutProps) {
       router.replace("/signin");
     }
   }, [loading, user, router]);
+
+  useEffect(() => {
+    if (!user || typeof window === "undefined") return;
+    if (!sessionIdRef.current) {
+      const sessionId =
+        (crypto as any)?.randomUUID?.() ||
+        `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+      sessionIdRef.current = sessionId;
+    }
+  }, [user]);
+
+  useEffect(() => {
+    if (!user || !pathname) return;
+    const track = async () => {
+      try {
+        const { data: sessionData } = await supabaseBrowser.auth.getSession();
+        const token = sessionData?.session?.access_token;
+        if (!token) return;
+        const sessionId = sessionIdRef.current;
+        if (!sessionId) return;
+        await fetch("/api/admin/track", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ path: pathname, sessionId }),
+        });
+      } catch {
+        // silent
+      }
+    };
+    track();
+  }, [user, pathname]);
 
   /* 2) Leer perfil más reciente desde Supabase (tabla profiles) */
   useEffect(() => {
