@@ -9,6 +9,8 @@ import TopNav from "@/app/components/TopNav";
 import { useAuth } from "@/context/AuthContext";
 import { supabaseBrowser } from "@/lib/supaBaseClient";
 import { hasEntitlement } from "@/lib/entitlementsSupabase";
+import { useAppSettings } from "@/lib/appSettings";
+import { resolveLocale } from "@/lib/i18n";
 
 type ProviderId = "unusualwhales" | "optionstrat" | "cheddarflow" | "quantdata" | "other";
 
@@ -100,6 +102,12 @@ type ParseProgress = {
   percent: number;
   scanned: number;
   matched: number;
+};
+
+type Lang = "en" | "es";
+const LOCALE_TAG: Record<Lang, string> = {
+  en: "en-US",
+  es: "es-ES",
 };
 
 const MAX_ROWS_BASE = 400;
@@ -232,6 +240,10 @@ function formatBytes(bytes: number) {
   if (mb < 1024) return `${mb.toFixed(1)} MB`;
   const gb = mb / 1024;
   return `${gb.toFixed(2)} GB`;
+}
+
+function formatTemplate(template: string, vars: Record<string, string | number>) {
+  return template.replace(/\{(\w+)\}/g, (_, key) => String(vars[key] ?? ""));
 }
 
 function escapeHtml(value: string) {
@@ -437,8 +449,10 @@ function collectFlowBuckets(expirations?: ExpirationBucket[]) {
 
 function deriveKeyLevelsFromExpirations(
   expirations: ExpirationBucket[],
-  limit = 6
+  limit = 6,
+  lang: Lang = "en"
 ): { price?: number; label?: string; reason?: string; side?: string }[] {
+  const isEs = lang === "es";
   const rows = expirations.flatMap((exp) => exp.strikes ?? []);
   if (!rows.length) return [];
   const scored = rows
@@ -474,7 +488,7 @@ function deriveKeyLevelsFromExpirations(
       price: strike,
       label,
       side,
-      reason: "Acumulación de prints en el strike.",
+      reason: isEs ? "Acumulación de prints en el strike." : "Concentrated prints at the strike.",
     });
     if (levels.length >= limit) break;
   }
@@ -482,8 +496,10 @@ function deriveKeyLevelsFromExpirations(
 }
 
 async function renderPremiumBarChartDataUrl(
-  strikes: { strike?: number; premiumTotal?: string }[]
+  strikes: { strike?: number; premiumTotal?: string }[],
+  lang: Lang = "en"
 ): Promise<string | null> {
+  const isEs = lang === "es";
   if (!strikes?.length) return null;
   const rows = strikes
     .map((row) => ({
@@ -514,7 +530,11 @@ async function renderPremiumBarChartDataUrl(
 
   ctx.fillStyle = "#0f172a";
   ctx.font = "12px Helvetica";
-  ctx.fillText("Concentración de premium (Top strikes)", padding.left, padding.top - 8);
+  ctx.fillText(
+    isEs ? "Concentración de premium (Top strikes)" : "Premium concentration (Top strikes)",
+    padding.left,
+    padding.top - 8
+  );
 
   rows.forEach((row, idx) => {
     const x = padding.left + idx * (barWidth + 12);
@@ -531,8 +551,10 @@ async function renderPremiumBarChartDataUrl(
 }
 
 async function renderLevelsMapDataUrl(
-  levels: { price: number; side?: string }[]
+  levels: { price: number; side?: string }[],
+  lang: Lang = "en"
 ): Promise<string | null> {
+  const isEs = lang === "es";
   const clean = levels.filter((lvl) => Number.isFinite(lvl.price));
   if (!clean.length) return null;
   const width = 820;
@@ -561,7 +583,11 @@ async function renderLevelsMapDataUrl(
 
   ctx.fillStyle = "#0f172a";
   ctx.font = "12px Helvetica";
-  ctx.fillText("Key Levels Visual Map", padding.left, padding.top - 8);
+  ctx.fillText(
+    isEs ? "Mapa visual de niveles clave" : "Key Levels Visual Map",
+    padding.left,
+    padding.top - 8
+  );
 
   clean.forEach((lvl) => {
     const side = normalizeSide(lvl.side);
@@ -586,9 +612,11 @@ async function renderLevelsMapDataUrl(
 
 async function renderPriceChartDataUrl(
   symbol: string,
-  levels: { price: number; side?: string }[]
+  levels: { price: number; side?: string }[],
+  lang: Lang = "en"
 ): Promise<string | null> {
   if (!symbol) return null;
+  const isEs = lang === "es";
   const upper = symbol.trim().toUpperCase();
   const symbolMap: Record<string, string> = {
     SPX: "^SPX",
@@ -678,7 +706,11 @@ async function renderPriceChartDataUrl(
       ctx.setLineDash([]);
       ctx.fillStyle = "#0f172a";
       ctx.font = "10px Inter, Arial";
-      ctx.fillText(`Last ${lastClose.toFixed(2)}`, width - padding.right + 6, yLast + 3);
+      ctx.fillText(
+        `${isEs ? "Último" : "Last"} ${lastClose.toFixed(2)}`,
+        width - padding.right + 6,
+        yLast + 3
+      );
     }
 
     // levels
@@ -704,7 +736,11 @@ async function renderPriceChartDataUrl(
     // labels
     ctx.fillStyle = "#0f172a";
     ctx.font = "12px Inter, Arial";
-    ctx.fillText(`${symbol.toUpperCase()} (cierres diarios)`, padding.left, padding.top - 8);
+    ctx.fillText(
+      `${symbol.toUpperCase()} (${isEs ? "cierres diarios" : "daily closes"})`,
+      padding.left,
+      padding.top - 8
+    );
 
     return canvas.toDataURL("image/png");
   } catch {
@@ -941,6 +977,10 @@ export default function OptionFlowPage() {
   const { user } = useAuth() as any;
   const userId: string = user?.id ?? "";
   const email: string = user?.email ?? "";
+  const { locale } = useAppSettings();
+  const lang = resolveLocale(locale) as Lang;
+  const isEs = lang === "es";
+  const localeTag = LOCALE_TAG[lang];
 
   const [entitled, setEntitled] = useState<boolean | null>(null);
   const [checking, setChecking] = useState<boolean>(true);
@@ -1000,8 +1040,14 @@ export default function OptionFlowPage() {
 
   const statusLabel = paywallEnabled
     ? entitled
-      ? "Add-on activo"
-      : "Add-on requerido"
+      ? isEs
+        ? "Add-on activo"
+        : "Add-on active"
+      : isEs
+      ? "Add-on requerido"
+      : "Add-on required"
+    : isEs
+    ? "Acceso temprano"
     : "Early access";
 
   function appendMessage(msg: Omit<ChatMessage, "id"> & { id?: string }) {
@@ -1013,14 +1059,26 @@ export default function OptionFlowPage() {
     const summary = data.summary ? escapeHtml(data.summary) : "";
     const bias = data.flowBias ? escapeHtml(data.flowBias) : "";
 
-    sections.push(`<h3>1) Resumen ejecutivo</h3>`);
-    sections.push(`<p>${summary || "Sin resumen disponible."}</p>`);
+    sections.push(
+      `<h3>1) ${isEs ? "Resumen ejecutivo" : "Executive summary"}</h3>`
+    );
+    sections.push(
+      `<p>${summary || (isEs ? "Sin resumen disponible." : "No summary available.")}</p>`
+    );
     if (bias) {
-      sections.push(`<p><strong>Sesgo macro:</strong> ${bias}</p>`);
+      sections.push(
+        `<p><strong>${isEs ? "Sesgo macro" : "Macro bias"}:</strong> ${bias}</p>`
+      );
     }
 
     if (data.expirations && data.expirations.length) {
-      sections.push(`<h3>2) Organización de los últimos prints por expiración</h3>`);
+      sections.push(
+        `<h3>2) ${
+          isEs
+            ? "Organización de los últimos prints por expiración"
+            : "Latest prints organized by expiration"
+        }</h3>`
+      );
       data.expirations.forEach((exp) => {
         const expiry = exp.expiry ? escapeHtml(exp.expiry) : "—";
         const tenor = exp.tenor ? ` (${escapeHtml(exp.tenor)})` : "";
@@ -1030,13 +1088,13 @@ export default function OptionFlowPage() {
           sections.push(
             `<table style="width:100%;border-collapse:collapse;margin-top:8px;">` +
               `<thead><tr>` +
-              `<th style="text-align:left;border-bottom:1px solid rgba(148,163,184,0.4);padding:6px 4px;">Strike</th>` +
-              `<th style="text-align:left;border-bottom:1px solid rgba(148,163,184,0.4);padding:6px 4px;">Tipo</th>` +
-              `<th style="text-align:left;border-bottom:1px solid rgba(148,163,184,0.4);padding:6px 4px;">Prints</th>` +
-              `<th style="text-align:left;border-bottom:1px solid rgba(148,163,184,0.4);padding:6px 4px;">Size</th>` +
-              `<th style="text-align:left;border-bottom:1px solid rgba(148,163,184,0.4);padding:6px 4px;">Premium</th>` +
-              `<th style="text-align:left;border-bottom:1px solid rgba(148,163,184,0.4);padding:6px 4px;">OI máx</th>` +
-              `<th style="text-align:left;border-bottom:1px solid rgba(148,163,184,0.4);padding:6px 4px;">Lectura</th>` +
+              `<th style="text-align:left;border-bottom:1px solid rgba(148,163,184,0.4);padding:6px 4px;">${isEs ? "Strike" : "Strike"}</th>` +
+              `<th style="text-align:left;border-bottom:1px solid rgba(148,163,184,0.4);padding:6px 4px;">${isEs ? "Tipo" : "Type"}</th>` +
+              `<th style="text-align:left;border-bottom:1px solid rgba(148,163,184,0.4);padding:6px 4px;">${isEs ? "Prints" : "Prints"}</th>` +
+              `<th style="text-align:left;border-bottom:1px solid rgba(148,163,184,0.4);padding:6px 4px;">${isEs ? "Size" : "Size"}</th>` +
+              `<th style="text-align:left;border-bottom:1px solid rgba(148,163,184,0.4);padding:6px 4px;">${isEs ? "Premium" : "Premium"}</th>` +
+              `<th style="text-align:left;border-bottom:1px solid rgba(148,163,184,0.4);padding:6px 4px;">${isEs ? "OI máx" : "Max OI"}</th>` +
+              `<th style="text-align:left;border-bottom:1px solid rgba(148,163,184,0.4);padding:6px 4px;">${isEs ? "Lectura" : "Read"}</th>` +
               `</tr></thead><tbody>` +
               exp.strikes
                 .map((row) => {
@@ -1062,7 +1120,9 @@ export default function OptionFlowPage() {
           );
         }
         if (exp.notes) {
-          sections.push(`<p><strong>Lectura:</strong> ${escapeHtml(exp.notes)}</p>`);
+          sections.push(
+            `<p><strong>${isEs ? "Lectura" : "Read"}:</strong> ${escapeHtml(exp.notes)}</p>`
+          );
         }
         if (exp.keyTakeaways && exp.keyTakeaways.length) {
           sections.push(
@@ -1073,7 +1133,9 @@ export default function OptionFlowPage() {
     }
 
     if (data.keyLevels && data.keyLevels.length) {
-      sections.push(`<h3>3) Niveles clave (priorizados)</h3>`);
+      sections.push(
+        `<h3>3) ${isEs ? "Niveles clave (priorizados)" : "Key levels (prioritized)"}</h3>`
+      );
       sections.push(
         `<ul>` +
           data.keyLevels
@@ -1082,7 +1144,7 @@ export default function OptionFlowPage() {
               const label = level.label ? ` · ${escapeHtml(level.label)}` : "";
               const side = level.side ? ` · ${escapeHtml(level.side)}` : "";
               const reason = level.reason ? ` — ${escapeHtml(level.reason)}` : "";
-              return `<li><strong>Nivel ${idx + 1}</strong> — ${price}${label}${side}${reason}</li>`;
+              return `<li><strong>${isEs ? "Nivel" : "Level"} ${idx + 1}</strong> — ${price}${label}${side}${reason}</li>`;
             })
             .join("") +
           `</ul>`
@@ -1108,19 +1170,33 @@ export default function OptionFlowPage() {
           `<h4>${title}</h4>` +
           `<table style="width:100%;border-collapse:collapse;margin-top:6px;">` +
           `<thead><tr>` +
-          `<th style="text-align:left;border-bottom:1px solid rgba(148,163,184,0.4);padding:4px;">Strike</th>` +
-          `<th style="text-align:left;border-bottom:1px solid rgba(148,163,184,0.4);padding:4px;">Prints</th>` +
-          `<th style="text-align:left;border-bottom:1px solid rgba(148,163,184,0.4);padding:4px;">Size</th>` +
-          `<th style="text-align:left;border-bottom:1px solid rgba(148,163,184,0.4);padding:4px;">Premium</th>` +
+          `<th style="text-align:left;border-bottom:1px solid rgba(148,163,184,0.4);padding:4px;">${isEs ? "Strike" : "Strike"}</th>` +
+          `<th style="text-align:left;border-bottom:1px solid rgba(148,163,184,0.4);padding:4px;">${isEs ? "Prints" : "Prints"}</th>` +
+          `<th style="text-align:left;border-bottom:1px solid rgba(148,163,184,0.4);padding:4px;">${isEs ? "Size" : "Size"}</th>` +
+          `<th style="text-align:left;border-bottom:1px solid rgba(148,163,184,0.4);padding:4px;">${isEs ? "Premium" : "Premium"}</th>` +
           `</tr></thead><tbody>${lines}</tbody></table>`
         );
       };
-      sections.push(`<h3>4) Mapa de flujo agresivo</h3>`);
       sections.push(
-        renderBucket("Calls agresivos (ASK)", buckets.callsAsk) +
-          renderBucket("Puts agresivos (ASK)", buckets.putsAsk) +
-          renderBucket("Calls venta agresiva (BID)", buckets.callsBid) +
-          renderBucket("Puts venta agresiva (BID)", buckets.putsBid)
+        `<h3>4) ${isEs ? "Mapa de flujo agresivo (ASK/BID)" : "Aggressive flow map (ASK/BID)"}</h3>`
+      );
+      sections.push(
+        renderBucket(
+          isEs ? "Calls agresivos (ASK)" : "Aggressive calls (ASK)",
+          buckets.callsAsk
+        ) +
+          renderBucket(
+            isEs ? "Puts agresivos (ASK)" : "Aggressive puts (ASK)",
+            buckets.putsAsk
+          ) +
+          renderBucket(
+            isEs ? "Calls venta agresiva (BID)" : "Call selling (BID)",
+            buckets.callsBid
+          ) +
+          renderBucket(
+            isEs ? "Puts venta agresiva (BID)" : "Put selling (BID)",
+            buckets.putsBid
+          )
       );
       if (
         !buckets.callsAsk.length &&
@@ -1128,32 +1204,40 @@ export default function OptionFlowPage() {
         !buckets.callsBid.length &&
         !buckets.putsBid.length
       ) {
-        sections.push(`<p>Sin señales agresivas claras (ASK/BID). La mayoría está en MID/mixto.</p>`);
+        sections.push(
+          `<p>${
+            isEs
+              ? "Sin señales agresivas claras (ASK/BID). La mayoría está en MID/mixto."
+              : "No clear aggressive signals (ASK/BID). Most flow is MID/mixed."
+          }</p>`
+        );
       }
     }
 
     if (data.contractsWithPotential) {
-      sections.push(`<h3>5) Contratos con mayor potencial</h3>`);
+      sections.push(
+        `<h3>5) ${isEs ? "Contratos con mayor potencial" : "Contracts with the most potential"}</h3>`
+      );
       const gamma = data.contractsWithPotential.gamma ?? [];
       const directional = data.contractsWithPotential.directional ?? [];
       const stress = data.contractsWithPotential.stress ?? [];
       if (gamma.length) {
         sections.push(
-          `<p><strong>Gamma (ATM / corto plazo):</strong></p><ul>` +
+          `<p><strong>${isEs ? "Gamma (ATM / corto plazo)" : "Gamma (short-term ATM)"}:</strong></p><ul>` +
             gamma.map((item) => `<li>${escapeHtml(item)}</li>`).join("") +
             `</ul>`
         );
       }
       if (directional.length) {
         sections.push(
-          `<p><strong>Direccionales (techo/piso):</strong></p><ul>` +
+          `<p><strong>${isEs ? "Direccionales (techo/piso)" : "Directional (ceiling/floor)"}:</strong></p><ul>` +
             directional.map((item) => `<li>${escapeHtml(item)}</li>`).join("") +
             `</ul>`
         );
       }
       if (stress.length) {
         sections.push(
-          `<p><strong>Zona de estrés:</strong></p><ul>` +
+          `<p><strong>${isEs ? "Zona de estrés" : "Stress zone"}:</strong></p><ul>` +
             stress.map((item) => `<li>${escapeHtml(item)}</li>`).join("") +
             `</ul>`
         );
@@ -1161,35 +1245,57 @@ export default function OptionFlowPage() {
     }
 
     if (data.squeezeScenarios) {
-      sections.push(`<h3>6) Squeeze (condiciones y frenos)</h3>`);
+      sections.push(
+        `<h3>6) ${isEs ? "Squeeze (condiciones y frenos)" : "Squeeze (conditions & brakes)"}</h3>`
+      );
       const upside = data.squeezeScenarios.upside;
       const downside = data.squeezeScenarios.downside;
       if (upside) {
-        sections.push(`<p><strong>Upside:</strong> ${escapeHtml(upside.condition || "")}</p>`);
+        sections.push(
+          `<p><strong>${isEs ? "Alza" : "Upside"}:</strong> ${escapeHtml(
+            upside.condition || ""
+          )}</p>`
+        );
         if (upside.candidates?.length) {
           sections.push(
             `<ul>` + upside.candidates.map((c) => `<li>${escapeHtml(c)}</li>`).join("") + `</ul>`
           );
         }
         if (upside.brakes) {
-          sections.push(`<p><strong>Freno principal:</strong> ${escapeHtml(upside.brakes)}</p>`);
+          sections.push(
+            `<p><strong>${isEs ? "Freno principal" : "Main brake"}:</strong> ${escapeHtml(
+              upside.brakes
+            )}</p>`
+          );
         }
       }
       if (downside) {
-        sections.push(`<p><strong>Downside:</strong> ${escapeHtml(downside.condition || "")}</p>`);
+        sections.push(
+          `<p><strong>${isEs ? "Baja" : "Downside"}:</strong> ${escapeHtml(
+            downside.condition || ""
+          )}</p>`
+        );
         if (downside.candidates?.length) {
           sections.push(
             `<ul>` + downside.candidates.map((c) => `<li>${escapeHtml(c)}</li>`).join("") + `</ul>`
           );
         }
         if (downside.brakes) {
-          sections.push(`<p><strong>Freno principal:</strong> ${escapeHtml(downside.brakes)}</p>`);
+          sections.push(
+            `<p><strong>${isEs ? "Freno principal" : "Main brake"}:</strong> ${escapeHtml(
+              downside.brakes
+            )}</p>`
+          );
         }
       }
     }
 
     if (data.tradingPlan) {
-      sections.push(`<h3>7) Conclusión / Plan de trading (educativo)</h3>`);
+      sections.push(
+        `<h3>7) ${
+          isEs ? "Conclusión / Plan de trading (educativo)" : "Conclusion / Trading plan (educational)"
+        }</h3>`
+      );
       if (data.tradingPlan.headline) {
         sections.push(`<p><strong>${escapeHtml(data.tradingPlan.headline)}</strong></p>`);
       }
@@ -1201,25 +1307,41 @@ export default function OptionFlowPage() {
         );
       }
       if (data.tradingPlan.invalidation) {
-        sections.push(`<p><strong>Invalidación:</strong> ${escapeHtml(data.tradingPlan.invalidation)}</p>`);
+        sections.push(
+          `<p><strong>${isEs ? "Invalidación" : "Invalidation"}:</strong> ${escapeHtml(
+            data.tradingPlan.invalidation
+          )}</p>`
+        );
       }
       if (data.tradingPlan.risk) {
-        sections.push(`<p><strong>Riesgo:</strong> ${escapeHtml(data.tradingPlan.risk)}</p>`);
+        sections.push(
+          `<p><strong>${isEs ? "Riesgo" : "Risk"}:</strong> ${escapeHtml(
+            data.tradingPlan.risk
+          )}</p>`
+        );
       }
       sections.push(
-        `<p><em>Este plan es educativo y debe validarse con tu propio análisis y contexto de riesgo.</em></p>`
+        `<p><em>${
+          isEs
+            ? "Este plan es educativo y debe validarse con tu propio análisis y contexto de riesgo."
+            : "This plan is educational and must be validated with your own analysis and risk context."
+        }</em></p>`
       );
     }
 
     if (data.riskNotes && data.riskNotes.length) {
-      sections.push(`<h3>8) Riesgos / notas</h3>`);
+      sections.push(
+        `<h3>8) ${isEs ? "Riesgos / notas" : "Risks / notes"}</h3>`
+      );
       sections.push(
         `<ul>` + data.riskNotes.map((note) => `<li>${escapeHtml(note)}</li>`).join("") + `</ul>`
       );
     }
 
     if (data.suggestedFocus && data.suggestedFocus.length) {
-      sections.push(`<h3>9) Enfoque sugerido</h3>`);
+      sections.push(
+        `<h3>9) ${isEs ? "Enfoque sugerido" : "Suggested focus"}</h3>`
+      );
       sections.push(
         `<ul>` +
           data.suggestedFocus.map((item) => `<li>${escapeHtml(item)}</li>`).join("") +
@@ -1243,11 +1365,19 @@ export default function OptionFlowPage() {
     }
 
     doc.setFontSize(16);
-    doc.text("Option Flow Intelligence - Reporte", margin, y);
+    doc.text(
+      isEs ? "Option Flow Intelligence - Reporte" : "Option Flow Intelligence - Report",
+      margin,
+      y
+    );
     y += 16;
 
     doc.setFontSize(10);
-    doc.text(`Generado: ${new Date().toLocaleString()}`, margin, y);
+    doc.text(
+      `${isEs ? "Generado" : "Generated"}: ${new Date().toLocaleString(localeTag)}`,
+      margin,
+      y
+    );
     y += 12;
 
     const meta = payload.meta ?? {};
@@ -1259,10 +1389,12 @@ export default function OptionFlowPage() {
     const providerLabel =
       PROVIDERS.find((item) => item.id === metaProvider)?.label ?? metaProvider;
     const metaLine = [
-      metaUnderlying ? `Underlying: ${metaUnderlying.trim().toUpperCase()}` : null,
-      metaProvider ? `Provider: ${providerLabel}` : null,
-      metaIntent ? `Intent: ${metaIntent.toUpperCase()}` : null,
-      metaClose ? `Cierre previo: ${metaClose.toFixed(2)}` : null,
+      metaUnderlying
+        ? `${isEs ? "Activo" : "Underlying"}: ${metaUnderlying.trim().toUpperCase()}`
+        : null,
+      metaProvider ? `${isEs ? "Proveedor" : "Provider"}: ${providerLabel}` : null,
+      metaIntent ? `${isEs ? "Intento" : "Intent"}: ${metaIntent.toUpperCase()}` : null,
+      metaClose ? `${isEs ? "Cierre previo" : "Previous close"}: ${metaClose.toFixed(2)}` : null,
     ]
       .filter(Boolean)
       .join(" · ");
@@ -1276,13 +1408,13 @@ export default function OptionFlowPage() {
     }
 
     const keyStats = [
-      ["Activo", metaUnderlying ? metaUnderlying.trim().toUpperCase() : "—"],
-      ["Intento", metaIntent ? metaIntent.toUpperCase() : "—"],
-      ["Sesgo", payload.flowBias ?? "—"],
+      [isEs ? "Activo" : "Asset", metaUnderlying ? metaUnderlying.trim().toUpperCase() : "—"],
+      [isEs ? "Intento" : "Intent", metaIntent ? metaIntent.toUpperCase() : "—"],
+      [isEs ? "Sesgo" : "Bias", payload.flowBias ?? "—"],
     ];
     autoTable(doc, {
       startY: y,
-      head: [["Key Stats", "Valor"]],
+      head: [[isEs ? "Datos clave" : "Key Stats", isEs ? "Valor" : "Value"]],
       body: keyStats,
       styles: { fontSize: 9 },
       headStyles: { fillColor: [17, 24, 39] },
@@ -1290,9 +1422,9 @@ export default function OptionFlowPage() {
     });
     y = (doc as any).lastAutoTable.finalY + 16;
 
-    const summary = payload.summary || "Sin resumen disponible.";
+    const summary = payload.summary || (isEs ? "Sin resumen disponible." : "No summary available.");
     doc.setFontSize(12);
-    doc.text("1) Resumen ejecutivo", margin, y);
+    doc.text(`1) ${isEs ? "Resumen ejecutivo" : "Executive summary"}`, margin, y);
     y += 12;
     doc.setFontSize(10);
     const summaryLines = doc.splitTextToSize(summary, 520);
@@ -1301,7 +1433,11 @@ export default function OptionFlowPage() {
 
     if (payload.expirations && payload.expirations.length) {
       doc.setFontSize(12);
-      doc.text("2) Organización por expiración", margin, y);
+      doc.text(
+        `2) ${isEs ? "Organización por expiración" : "Expiration breakdown"}`,
+        margin,
+        y
+      );
       y += 12;
       payload.expirations.forEach((exp) => {
         doc.setFontSize(11);
@@ -1311,7 +1447,17 @@ export default function OptionFlowPage() {
         if (strikes.length) {
           autoTable(doc, {
             startY: y,
-            head: [["Strike", "Tipo", "Prints", "Size", "Premium", "OI", "Lectura"]],
+            head: [
+              [
+                "Strike",
+                isEs ? "Tipo" : "Type",
+                "Prints",
+                "Size",
+                "Premium",
+                "OI",
+                isEs ? "Lectura" : "Read",
+              ],
+            ],
             body: strikes.map((row) => [
               row.strike ?? "",
               row.type ?? "",
@@ -1329,7 +1475,10 @@ export default function OptionFlowPage() {
         }
         if (exp.notes) {
           doc.setFontSize(9);
-          const noteLines = doc.splitTextToSize(`Lectura: ${exp.notes}`, 520);
+          const noteLines = doc.splitTextToSize(
+            `${isEs ? "Lectura" : "Read"}: ${exp.notes}`,
+            520
+          );
           doc.text(noteLines, margin, y);
           y += noteLines.length * 11 + 6;
         }
@@ -1339,11 +1488,23 @@ export default function OptionFlowPage() {
 
     if (payload.keyLevels && payload.keyLevels.length) {
       doc.setFontSize(12);
-      doc.text("3) Niveles clave (priorizados)", margin, y);
+      doc.text(
+        `3) ${isEs ? "Niveles clave (priorizados)" : "Key levels (prioritized)"}`,
+        margin,
+        y
+      );
       y += 12;
       autoTable(doc, {
         startY: y,
-        head: [["Nivel", "Precio", "Etiqueta", "Lado", "Razón"]],
+        head: [
+          [
+            isEs ? "Nivel" : "Level",
+            isEs ? "Precio" : "Price",
+            isEs ? "Etiqueta" : "Label",
+            isEs ? "Lado" : "Side",
+            isEs ? "Razón" : "Reason",
+          ],
+        ],
         body: payload.keyLevels.map((lvl, idx) => [
           `#${idx + 1}`,
           lvl.price != null ? Number(lvl.price).toFixed(2) : "",
@@ -1371,7 +1532,7 @@ export default function OptionFlowPage() {
     let levelLines =
       payload.keyLevels?.filter((lvl) => Number.isFinite(Number(lvl.price))) ?? [];
     if (!levelLines.length && payload.expirations?.length) {
-      levelLines = deriveKeyLevelsFromExpirations(payload.expirations);
+      levelLines = deriveKeyLevelsFromExpirations(payload.expirations, 6, lang);
     }
     if (normalizedUnderlying && levelLines.length) {
       const chartUrl = await renderPriceChartDataUrl(
@@ -1379,7 +1540,8 @@ export default function OptionFlowPage() {
         levelLines.map((lvl) => ({
           price: Number(lvl.price),
           side: lvl.side,
-        }))
+        })),
+        lang
       );
       if (chartUrl) {
         const chartHeight = 240;
@@ -1388,7 +1550,13 @@ export default function OptionFlowPage() {
           y = margin;
         }
         doc.setFontSize(12);
-        doc.text("Gráfica con niveles (BID azul / CALL verde)", margin, y);
+        doc.text(
+          isEs
+            ? "Gráfica con niveles (BID azul / CALL verde)"
+            : "Chart with levels (BID blue / CALL green)",
+          margin,
+          y
+        );
         y += 10;
         doc.addImage(chartUrl, "PNG", margin, y, 520, chartHeight);
         y += chartHeight + 16;
@@ -1398,7 +1566,11 @@ export default function OptionFlowPage() {
 
     if (payload.expirations && payload.expirations.length) {
       doc.setFontSize(12);
-      doc.text("4) Mapa de flujo agresivo (ASK/BID)", margin, y);
+      doc.text(
+        `4) ${isEs ? "Mapa de flujo agresivo (ASK/BID)" : "Aggressive flow map (ASK/BID)"}`,
+        margin,
+        y
+      );
       y += 10;
       const buckets = collectFlowBuckets(payload.expirations);
       const makeRows = (rows: ExpirationStrike[]) =>
@@ -1420,10 +1592,10 @@ export default function OptionFlowPage() {
         });
         y = (doc as any).lastAutoTable.finalY + 8;
       };
-      addBucket("Calls agresivos (ASK)", buckets.callsAsk);
-      addBucket("Puts agresivos (ASK)", buckets.putsAsk);
-      addBucket("Calls venta agresiva (BID)", buckets.callsBid);
-      addBucket("Puts venta agresiva (BID)", buckets.putsBid);
+      addBucket(isEs ? "Calls agresivos (ASK)" : "Aggressive calls (ASK)", buckets.callsAsk);
+      addBucket(isEs ? "Puts agresivos (ASK)" : "Aggressive puts (ASK)", buckets.putsAsk);
+      addBucket(isEs ? "Calls venta agresiva (BID)" : "Call selling (BID)", buckets.callsBid);
+      addBucket(isEs ? "Puts venta agresiva (BID)" : "Put selling (BID)", buckets.putsBid);
       if (
         !buckets.callsAsk.length &&
         !buckets.putsAsk.length &&
@@ -1432,7 +1604,13 @@ export default function OptionFlowPage() {
       ) {
         doc.setFontSize(9);
         doc.setTextColor(71, 85, 105);
-        doc.text("Sin señales agresivas claras (ASK/BID). Mayoría en MID/mixto.", margin, y);
+        doc.text(
+          isEs
+            ? "Sin señales agresivas claras (ASK/BID). Mayoría en MID/mixto."
+            : "No clear aggressive signals (ASK/BID). Majority is MID/mixed.",
+          margin,
+          y
+        );
         doc.setTextColor(0, 0, 0);
         y += 12;
       }
@@ -1441,7 +1619,11 @@ export default function OptionFlowPage() {
 
     if (payload.contractsWithPotential) {
       doc.setFontSize(12);
-      doc.text("5) Contratos con mayor potencial", margin, y);
+      doc.text(
+        `5) ${isEs ? "Contratos con mayor potencial" : "Contracts with the most potential"}`,
+        margin,
+        y
+      );
       y += 12;
       const gamma = payload.contractsWithPotential.gamma ?? [];
       const directional = payload.contractsWithPotential.directional ?? [];
@@ -1455,15 +1637,19 @@ export default function OptionFlowPage() {
         doc.text(lines, margin, y);
         y += lines.length * 12 + 6;
       };
-      addList("Gamma / ATM corto plazo", gamma);
-      addList("Direccionales / techo-piso", directional);
-      addList("Zona de estrés", stress);
+      addList(isEs ? "Gamma / ATM corto plazo" : "Gamma / short-term ATM", gamma);
+      addList(isEs ? "Direccionales / techo-piso" : "Directional / ceiling-floor", directional);
+      addList(isEs ? "Zona de estrés" : "Stress zone", stress);
       y += 4;
     }
 
     if (payload.squeezeScenarios) {
       doc.setFontSize(12);
-      doc.text("6) Squeeze (condiciones y frenos)", margin, y);
+      doc.text(
+        `6) ${isEs ? "Squeeze (condiciones y frenos)" : "Squeeze (conditions & brakes)"}`,
+        margin,
+        y
+      );
       y += 12;
       const formatScenario = (label: string, scenario?: SqueezeScenario) => {
         if (!scenario) return;
@@ -1471,7 +1657,10 @@ export default function OptionFlowPage() {
         doc.text(label, margin, y);
         y += 12;
         if (scenario.condition) {
-          const lines = doc.splitTextToSize(`Condición: ${scenario.condition}`, 520);
+          const lines = doc.splitTextToSize(
+            `${isEs ? "Condición" : "Condition"}: ${scenario.condition}`,
+            520
+          );
           doc.text(lines, margin, y);
           y += lines.length * 12;
         }
@@ -1483,14 +1672,17 @@ export default function OptionFlowPage() {
           y += lines.length * 12;
         }
         if (scenario.brakes) {
-          const lines = doc.splitTextToSize(`Freno: ${scenario.brakes}`, 520);
+          const lines = doc.splitTextToSize(
+            `${isEs ? "Freno" : "Brake"}: ${scenario.brakes}`,
+            520
+          );
           doc.text(lines, margin, y);
           y += lines.length * 12;
         }
         y += 6;
       };
-      formatScenario("Upside", payload.squeezeScenarios.upside);
-      formatScenario("Downside", payload.squeezeScenarios.downside);
+      formatScenario(isEs ? "Alza" : "Upside", payload.squeezeScenarios.upside);
+      formatScenario(isEs ? "Baja" : "Downside", payload.squeezeScenarios.downside);
       y += 4;
     }
 
@@ -1501,7 +1693,13 @@ export default function OptionFlowPage() {
         y = margin;
       }
       doc.setFontSize(12);
-      doc.text("7) Conclusión / Plan de trading (educativo)", margin, y);
+      doc.text(
+        `7) ${
+          isEs ? "Conclusión / Plan de trading (educativo)" : "Conclusion / Trading plan (educational)"
+        }`,
+        margin,
+        y
+      );
       y += 12;
       doc.setFontSize(10);
       if (planLines.length) {
@@ -1529,14 +1727,17 @@ export default function OptionFlowPage() {
         }
         if (payload.tradingPlan.invalidation) {
           const lines = doc.splitTextToSize(
-            `Invalidación: ${payload.tradingPlan.invalidation}`,
+            `${isEs ? "Invalidación" : "Invalidation"}: ${payload.tradingPlan.invalidation}`,
             520
           );
           doc.text(lines, margin, y);
           y += lines.length * 12 + 4;
         }
         if (payload.tradingPlan.risk) {
-          const lines = doc.splitTextToSize(`Riesgo: ${payload.tradingPlan.risk}`, 520);
+          const lines = doc.splitTextToSize(
+            `${isEs ? "Riesgo" : "Risk"}: ${payload.tradingPlan.risk}`,
+            520
+          );
           doc.text(lines, margin, y);
           y += lines.length * 12 + 4;
         }
@@ -1544,7 +1745,9 @@ export default function OptionFlowPage() {
       doc.setFontSize(9);
       doc.setTextColor(71, 85, 105);
       doc.text(
-        "Este plan es educativo y debe validarse con tu propio análisis y contexto de riesgo.",
+        isEs
+          ? "Este plan es educativo y debe validarse con tu propio análisis y contexto de riesgo."
+          : "This plan is educational and must be validated with your own analysis and risk context.",
         margin,
         y + 6
       );
@@ -1552,11 +1755,15 @@ export default function OptionFlowPage() {
       y += 18;
     }
 
-    const disclaimer =
-      "DISCLAIMER: Este reporte y el plan de trading son únicamente educativos e informativos. " +
-      "No constituyen asesoría financiera, recomendación de inversión ni invitación a operar. " +
-      "El trading de opciones implica alto riesgo y puede resultar en pérdidas significativas. " +
-      "Cada trader es responsable de sus decisiones.";
+    const disclaimer = isEs
+      ? "DISCLAIMER: Este reporte y el plan de trading son únicamente educativos e informativos. " +
+        "No constituyen asesoría financiera, recomendación de inversión ni invitación a operar. " +
+        "El trading de opciones implica alto riesgo y puede resultar en pérdidas significativas. " +
+        "Cada trader es responsable de sus decisiones."
+      : "DISCLAIMER: This report and trading plan are for educational and informational purposes only. " +
+        "They are not financial advice, investment recommendations, or an invitation to trade. " +
+        "Options trading involves high risk and can result in significant losses. " +
+        "Each trader is responsible for their own decisions.";
     const pageHeight = doc.internal.pageSize.getHeight();
     doc.setFontSize(8);
     const disclaimerLines = doc.splitTextToSize(disclaimer, 520);
@@ -1596,7 +1803,11 @@ export default function OptionFlowPage() {
       payload.meta?.underlying ? payload.meta.underlying.toUpperCase() : null,
       payload.meta?.tradeIntent ? payload.meta.tradeIntent.toUpperCase() : null,
     ].filter(Boolean);
-    const title = titleParts.length ? `Option Flow ${titleParts.join(" · ")}` : "Option Flow Reporte";
+    const title = titleParts.length
+      ? `Option Flow ${titleParts.join(" · ")}`
+      : isEs
+      ? "Option Flow Reporte"
+      : "Option Flow Report";
     const { data, error } = await supabaseBrowser
       .from("option_flow_archives")
       .insert({
@@ -1710,12 +1921,13 @@ export default function OptionFlowPage() {
       {
         id: makeId(),
         role: "assistant",
-        title: "Option Flow Intelligence",
-        body:
-          "¿Cómo quieres analizar el flujo de órdenes? Puedes pegar screenshots o subir un CSV (máx 12MB).",
+      title: isEs ? "Inteligencia de Flujo de Opciones" : "Option Flow Intelligence",
+        body: isEs
+          ? "¿Cómo quieres analizar el flujo de órdenes? Puedes pegar screenshots o subir un CSV (máx 12MB)."
+          : "How do you want to analyze the order flow? Paste screenshots or upload a CSV (max 12MB).",
       },
     ]);
-  }, [chatLog.length]);
+  }, [chatLog.length, isEs]);
 
   useEffect(() => {
     if (!userId) return;
@@ -1784,10 +1996,12 @@ export default function OptionFlowPage() {
         }),
       });
       const body = await res.json();
-      if (!res.ok) throw new Error(body?.error || "Checkout falló");
+      if (!res.ok) {
+        throw new Error(body?.error || (isEs ? "Checkout falló" : "Checkout failed"));
+      }
       if (body?.url) window.location.href = body.url;
     } catch (e: any) {
-      setMessage(e?.message || "Unable to start checkout.");
+      setMessage(e?.message || (isEs ? "No se pudo iniciar el checkout." : "Unable to start checkout."));
     }
   }
 
@@ -1823,19 +2037,31 @@ export default function OptionFlowPage() {
       setAnalysisNotes(noteOverride);
     }
     if (hasCsv && !isCsv) {
-      appendMessage({ role: "system", body: "Solo se admiten archivos CSV por ahora." });
+      appendMessage({
+        role: "system",
+        body: isEs
+          ? "Solo se admiten archivos CSV por ahora."
+          : "Only CSV files are supported for now.",
+      });
       if (!hasShots) return;
     }
     if (csvTooLarge) {
       appendMessage({
         role: "system",
-        body: `El CSV es muy grande (${formatBytes(csvFile?.size || 0)}). El máximo es ${MAX_CSV_MB} MB. Usa screenshots o exporta un CSV más pequeño.`,
+        body: formatTemplate(
+          isEs
+            ? "El CSV es muy grande ({size}). El máximo es {max} MB. Usa screenshots o exporta un CSV más pequeño."
+            : "CSV is too large ({size}). Max size is {max} MB. Use screenshots or export a smaller CSV.",
+          { size: formatBytes(csvFile?.size || 0), max: MAX_CSV_MB }
+        ),
       });
     }
     if (!hasCsv && !hasShots) {
       appendMessage({
         role: "system",
-        body: "Pega screenshots o sube un CSV (máx 12MB) para iniciar el análisis.",
+        body: isEs
+          ? "Pega screenshots o sube un CSV (máx 12MB) para iniciar el análisis."
+          : "Paste screenshots or upload a CSV (max 12MB) to start the analysis.",
       });
       return;
     }
@@ -1850,7 +2076,9 @@ export default function OptionFlowPage() {
     if (!normalizedUnderlying) {
       appendMessage({
         role: "system",
-        body: "Tip: agrega el underlying para auto traer el cierre anterior.",
+        body: isEs
+          ? "Tip: agrega el underlying para auto traer el cierre anterior."
+          : "Tip: add the underlying so we can auto-fetch the previous close.",
       });
     }
 
@@ -1872,7 +2100,7 @@ export default function OptionFlowPage() {
     try {
       const { data: sessionData } = await supabaseBrowser.auth.getSession();
       const token = sessionData?.session?.access_token;
-      if (!token) throw new Error("Sesión no disponible");
+      if (!token) throw new Error(isEs ? "Sesión no disponible" : "Session not available");
 
       let prevClose = previousClose;
       if (!prevClose && normalizedUnderlying) {
@@ -1912,7 +2140,9 @@ export default function OptionFlowPage() {
         if (normalizedUnderlying && rowsForAnalysis.length === 0) {
           appendMessage({
             role: "system",
-            body: "No hay filas que coincidan con ese underlying. Verifica el símbolo o usa screenshots.",
+            body: isEs
+              ? "No hay filas que coincidan con ese underlying. Verifica el símbolo o usa screenshots."
+              : "No rows match that underlying. Check the symbol or use screenshots.",
           });
           if (!hasShots) {
             setAnalyzing(false);
@@ -1950,11 +2180,12 @@ export default function OptionFlowPage() {
           rows: compactRows,
           screenshotDataUrls,
           analystNotes: note || null,
+          language: lang,
         }),
       });
 
       const body = await res.json();
-      if (!res.ok) throw new Error(body?.error || "El análisis falló");
+      if (!res.ok) throw new Error(body?.error || (isEs ? "El análisis falló" : "Analysis failed"));
 
       const analysisPayload: AnalysisData = {
         ...(body ?? {}),
@@ -1967,7 +2198,11 @@ export default function OptionFlowPage() {
         },
       };
       if ((!analysisPayload.keyLevels || !analysisPayload.keyLevels.length) && analysisPayload.expirations) {
-        analysisPayload.keyLevels = deriveKeyLevelsFromExpirations(analysisPayload.expirations);
+        analysisPayload.keyLevels = deriveKeyLevelsFromExpirations(
+          analysisPayload.expirations,
+          6,
+          lang
+        );
       }
 
       setSummary(analysisPayload.summary ?? "");
@@ -1980,7 +2215,7 @@ export default function OptionFlowPage() {
 
       appendMessage({
         role: "assistant",
-        title: "Análisis completo",
+        title: isEs ? "Análisis completo" : "Full analysis",
         html: formatted,
       });
 
@@ -2002,14 +2237,17 @@ export default function OptionFlowPage() {
           analysisPayload.keyLevels.map((lvl: any) => ({
             price: Number(lvl?.price),
             side: lvl?.side,
-          }))
+          })),
+          lang
         );
         if (chartUrl) {
           setChartDataUrl(chartUrl);
           appendMessage({
             role: "assistant",
-            title: "Gráfica con niveles (BID azul / CALL verde)",
-            html: `<img src="${chartUrl}" alt="SPX levels" style="width:100%;border-radius:12px;border:1px solid rgba(148,163,184,0.2);" />`,
+            title: isEs
+              ? "Gráfica con niveles (BID azul / CALL verde)"
+              : "Chart with levels (BID blue / CALL green)",
+            html: `<img src="${chartUrl}" alt="levels chart" style="width:100%;border-radius:12px;border:1px solid rgba(148,163,184,0.2);" />`,
           });
         }
       }
@@ -2018,11 +2256,16 @@ export default function OptionFlowPage() {
 
       appendMessage({
         role: "assistant",
-        title: "Siguiente paso",
-        body: "¿Quieres que arme el plan de premarket y lo envíe directo a tu journal?",
+        title: isEs ? "Siguiente paso" : "Next step",
+        body: isEs
+          ? "¿Quieres que arme el plan de premarket y lo envíe directo a tu journal?"
+          : "Want me to build the premarket plan and send it directly to your journal?",
       });
     } catch (e: any) {
-      appendMessage({ role: "system", body: e?.message || "El análisis falló." });
+      appendMessage({
+        role: "system",
+        body: e?.message || (isEs ? "El análisis falló." : "Analysis failed."),
+      });
     } finally {
       setAnalyzing(false);
       setTypingState(null);
@@ -2044,7 +2287,7 @@ export default function OptionFlowPage() {
     try {
       const { data: sessionData } = await supabaseBrowser.auth.getSession();
       const token = sessionData?.session?.access_token;
-      if (!token) throw new Error("Sesión no disponible");
+      if (!token) throw new Error(isEs ? "Sesión no disponible" : "Session not available");
 
       const res = await fetch("/api/option-flow/premarket", {
         method: "POST",
@@ -2060,29 +2303,37 @@ export default function OptionFlowPage() {
           uploadId: analysisId,
           notes: note || null,
           tradeIntent,
+          language: lang,
         }),
       });
       const body = await res.json();
-      if (!res.ok) throw new Error(body?.error || "El plan falló");
+      if (!res.ok) {
+        throw new Error(body?.error || (isEs ? "El plan falló" : "Plan failed"));
+      }
       setPlanHtml(body?.planHtml ?? "");
 
       appendMessage({
         role: "assistant",
-        title: "Plan de premarket",
+        title: isEs ? "Plan de premarket" : "Premarket plan",
         html: body?.planHtml ?? "",
       });
 
       appendMessage({
         role: "assistant",
-        title: "Siguiente paso",
-        body: "¿Quieres que lo envíe al journal (premarket widget)?",
+        title: isEs ? "Siguiente paso" : "Next step",
+        body: isEs
+          ? "¿Quieres que lo envíe al journal (premarket widget)?"
+          : "Do you want me to send it to the journal (premarket widget)?",
       });
 
       if (analysisData && body?.planHtml) {
         await updatePdfArchive(analysisData, body.planHtml);
       }
     } catch (e: any) {
-      appendMessage({ role: "system", body: e?.message || "No se pudo generar el plan." });
+      appendMessage({
+        role: "system",
+        body: e?.message || (isEs ? "No se pudo generar el plan." : "Couldn't generate the plan."),
+      });
     } finally {
       setPlanning(false);
       setTypingState(null);
@@ -2095,7 +2346,7 @@ export default function OptionFlowPage() {
     try {
       const { data: sessionData } = await supabaseBrowser.auth.getSession();
       const token = sessionData?.session?.access_token;
-      if (!token) throw new Error("Sesión no disponible");
+      if (!token) throw new Error(isEs ? "Sesión no disponible" : "Session not available");
 
       const res = await fetch("/api/journal/premarket", {
         method: "POST",
@@ -2109,15 +2360,24 @@ export default function OptionFlowPage() {
         }),
       });
       const body = await res.json();
-      if (!res.ok) throw new Error(body?.error || "Save failed");
+      if (!res.ok) {
+        throw new Error(body?.error || (isEs ? "No se pudo guardar." : "Save failed"));
+      }
 
       appendMessage({
         role: "assistant",
-        title: "Journal actualizado",
-        body: `Plan de premarket guardado para ${journalDate}.`,
+        title: isEs ? "Journal actualizado" : "Journal updated",
+        body: isEs
+          ? `Plan de premarket guardado para ${journalDate}.`
+          : `Premarket plan saved for ${journalDate}.`,
       });
     } catch (e: any) {
-      appendMessage({ role: "system", body: e?.message || "No se pudo guardar en el journal." });
+      appendMessage({
+        role: "system",
+        body:
+          e?.message ||
+          (isEs ? "No se pudo guardar en el journal." : "Couldn't save to the journal."),
+      });
     } finally {
       setSavingToJournal(false);
     }
@@ -2149,7 +2409,9 @@ export default function OptionFlowPage() {
     if (!text && !csvFile && pastedShots.length === 0) {
       appendMessage({
         role: "system",
-        body: "Escribe qué quieres analizar o adjunta un CSV/screenshot.",
+        body: isEs
+          ? "Escribe qué quieres analizar o adjunta un CSV/screenshot."
+          : "Type what you want to analyze or attach a CSV/screenshot.",
       });
       return;
     }
@@ -2157,14 +2419,19 @@ export default function OptionFlowPage() {
     if (text) {
       appendMessage({ role: "user", body: text });
     } else {
-      appendMessage({ role: "user", body: "Analiza los archivos adjuntos." });
+      appendMessage({
+        role: "user",
+        body: isEs ? "Analiza los archivos adjuntos." : "Analyze the attached files.",
+      });
     }
 
     if (wantsJournal) {
       if (!planHtml) {
         appendMessage({
           role: "system",
-          body: "Primero necesito un plan generado para enviarlo al journal.",
+          body: isEs
+            ? "Primero necesito un plan generado para enviarlo al journal."
+            : "I need a plan generated before sending it to the journal.",
         });
         return;
       }
@@ -2177,7 +2444,9 @@ export default function OptionFlowPage() {
       if (!summary) {
         appendMessage({
           role: "system",
-          body: "Primero necesito correr un análisis del flujo.",
+          body: isEs
+            ? "Primero necesito correr un análisis del flujo."
+            : "I need to run a flow analysis first.",
         });
         return;
       }
@@ -2192,19 +2461,21 @@ export default function OptionFlowPage() {
 
   const renderChatPanel = (isFullScreen = false) => (
     <div
-      className={`rounded-3xl border border-slate-800 bg-gradient-to-b from-slate-950/70 via-slate-950/40 to-slate-950/70 p-6 flex flex-col ${
-        isFullScreen ? "flex-1" : "min-h-[78vh]"
+      className={`rounded-3xl border border-slate-800 bg-gradient-to-b from-slate-950/70 via-slate-950/40 to-slate-950/70 p-4 sm:p-6 flex flex-col ${
+        isFullScreen ? "flex-1" : "min-h-[70vh] sm:min-h-[78vh]"
       }`}
     >
       <div className="flex items-center justify-between mb-2">
-        <h2 className="text-sm font-semibold">Option Flow Chat</h2>
+        <h2 className="text-sm font-semibold">
+          {isEs ? "Chat de Option Flow" : "Option Flow Chat"}
+        </h2>
         <button
           type="button"
           onClick={() => void handleDownloadPdf()}
           disabled={!analysisData}
           className="rounded-full border border-slate-700 px-3 py-1 text-[10.5px] text-slate-200 hover:border-emerald-400 hover:text-emerald-200 disabled:opacity-50"
         >
-          Descargar PDF
+          {isEs ? "Descargar PDF" : "Download PDF"}
         </button>
       </div>
 
@@ -2221,14 +2492,26 @@ export default function OptionFlowPage() {
             }`}
           >
             <p className="text-[10px] uppercase tracking-[0.25em] text-slate-400">
-              {msg.role === "assistant" ? "Assistant" : msg.role === "user" ? "You" : "System"}
+              {msg.role === "assistant"
+                ? isEs
+                  ? "Asistente"
+                  : "Assistant"
+                : msg.role === "user"
+                ? isEs
+                  ? "Tú"
+                  : "You"
+                : isEs
+                ? "Sistema"
+                : "System"}
             </p>
             {msg.title && <p className="text-[12px] font-semibold text-slate-100 mt-1">{msg.title}</p>}
             {msg.body && <p className="text-[11.5px] text-slate-200 mt-2 leading-relaxed">{msg.body}</p>}
             {msg.meta && <p className="text-[10.5px] text-emerald-200 mt-2">{msg.meta}</p>}
             {msg.keyTrades && msg.keyTrades.length > 0 && (
               <div className="mt-3 space-y-2 text-[11px]">
-                <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Key trades</p>
+                <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500">
+                  {isEs ? "Trades clave" : "Key trades"}
+                </p>
                 {msg.keyTrades.slice(0, 6).map((trade, idx) => (
                   <div key={idx} className="rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-2">
                     <p className="text-slate-100 font-semibold">
@@ -2250,7 +2533,13 @@ export default function OptionFlowPage() {
         {typingState && (
           <div className="rounded-2xl border border-slate-700 bg-slate-900/60 px-4 py-3 text-[12.5px] text-slate-200">
             <span className="font-semibold">
-              {typingState === "analyzing" ? "Analizando" : "Armando plan"}
+              {typingState === "analyzing"
+                ? isEs
+                  ? "Analizando"
+                  : "Analyzing"
+                : isEs
+                ? "Armando plan"
+                : "Building plan"}
             </span>
             <span className="inline-flex ml-2">
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-300 animate-bounce" />
@@ -2275,7 +2564,11 @@ export default function OptionFlowPage() {
             onPaste={(e) => handlePasteScreenshots(e as any)}
             className="w-full bg-transparent text-[11.5px] text-slate-100 outline-none"
             rows={4}
-            placeholder="Escribe aquí: 'Analiza este flujo', 'Genera plan', 'Envía al journal'..."
+            placeholder={
+              isEs
+                ? "Escribe aquí: 'Analiza este flujo', 'Genera plan', 'Envía al journal'..."
+                : "Type here: 'Analyze this flow', 'Generate plan', 'Send to journal'..."
+            }
           />
         </div>
 
@@ -2289,7 +2582,7 @@ export default function OptionFlowPage() {
                   onClick={() => removeShot(shot.id)}
                   className="absolute right-1 top-1 rounded-full bg-slate-900/80 px-2 py-0.5 text-[10px] text-slate-200"
                 >
-                  Quitar
+                  {isEs ? "Quitar" : "Remove"}
                 </button>
               </div>
             ))}
@@ -2298,7 +2591,7 @@ export default function OptionFlowPage() {
 
         <div className="mt-3 flex flex-wrap items-center gap-3">
           <label className="text-[11px] text-slate-400">
-            CSV (opcional, 12MB máx)
+            {isEs ? "CSV (opcional, 12MB máx)" : "CSV (optional, 12MB max)"}
             <input
               type="file"
               accept=".csv"
@@ -2316,14 +2609,14 @@ export default function OptionFlowPage() {
             onClick={clearShots}
             className="text-[11px] text-slate-400 hover:text-emerald-200"
           >
-            Limpiar screenshots
+            {isEs ? "Limpiar screenshots" : "Clear screenshots"}
           </button>
           <button
             type="button"
             onClick={() => setCsvFile(null)}
             className="text-[11px] text-slate-400 hover:text-emerald-200"
           >
-            Quitar CSV
+            {isEs ? "Quitar CSV" : "Remove CSV"}
           </button>
           <button
             type="button"
@@ -2331,14 +2624,32 @@ export default function OptionFlowPage() {
             disabled={analyzing || parsing || planning || savingToJournal}
             className="ml-auto rounded-2xl bg-emerald-400 px-5 py-2 text-[12.5px] font-semibold text-slate-950 shadow hover:bg-emerald-300 disabled:opacity-60"
           >
-            {parsing ? "Procesando CSV…" : analyzing ? "Analizando…" : planning ? "Armando plan…" : savingToJournal ? "Guardando…" : "Enviar"}
+            {parsing
+              ? isEs
+                ? "Procesando CSV…"
+                : "Processing CSV…"
+              : analyzing
+              ? isEs
+                ? "Analizando…"
+                : "Analyzing…"
+              : planning
+              ? isEs
+                ? "Armando plan…"
+                : "Building plan…"
+              : savingToJournal
+              ? isEs
+                ? "Guardando…"
+                : "Saving…"
+              : isEs
+              ? "Enviar"
+              : "Send"}
           </button>
         </div>
 
         {(parsing || parseProgress.percent > 0) && (
           <div className="mt-2 space-y-1">
             <div className="flex items-center justify-between text-[11px] text-slate-400">
-              <span>Progreso de parsing</span>
+              <span>{isEs ? "Progreso de parsing" : "Parsing progress"}</span>
               <span>{parseProgress.percent}%</span>
             </div>
             <div className="h-1.5 rounded-full bg-slate-800">
@@ -2349,8 +2660,10 @@ export default function OptionFlowPage() {
             </div>
             {(parseProgress.scanned > 0 || parseProgress.matched > 0) && (
               <p className="text-[11px] text-slate-500">
-                Escaneado {parseProgress.scanned.toLocaleString()} · Coincidencias{" "}
-                {parseProgress.matched.toLocaleString()}
+                {isEs ? "Escaneado" : "Scanned"}{" "}
+                {parseProgress.scanned.toLocaleString(localeTag)} ·{" "}
+                {isEs ? "Coincidencias" : "Matches"}{" "}
+                {parseProgress.matched.toLocaleString(localeTag)}
               </p>
             )}
           </div>
@@ -2360,16 +2673,18 @@ export default function OptionFlowPage() {
       {archives.length > 0 && (
         <div className="mt-4 rounded-2xl border border-slate-800 bg-slate-950/60 p-4 space-y-3">
           <div className="flex items-center justify-between">
-            <p className="text-[11px] uppercase tracking-[0.25em] text-slate-400">Historial (5 días)</p>
+            <p className="text-[11px] uppercase tracking-[0.25em] text-slate-400">
+              {isEs ? "Historial (5 días)" : "History (5 days)"}
+            </p>
           </div>
           <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
             {archives.map((archive) => (
               <div key={archive.id} className="rounded-2xl border border-slate-800 bg-slate-950/50 p-3">
                 <p className="text-[12px] font-semibold text-slate-100">
-                  {archive.title || "Option Flow Reporte"}
+                  {archive.title || (isEs ? "Option Flow Reporte" : "Option Flow Report")}
                 </p>
                 <p className="text-[11px] text-slate-500">
-                  {new Date(archive.created_at).toLocaleString()}
+                  {new Date(archive.created_at).toLocaleString(localeTag)}
                 </p>
                 <div className="mt-2 flex items-center gap-2">
                   <button
@@ -2384,7 +2699,9 @@ export default function OptionFlowPage() {
             ))}
           </div>
           <p className="text-[11px] text-slate-500">
-            Los reportes se archivan por 5 días y luego se eliminan automáticamente.
+            {isEs
+              ? "Los reportes se archivan por 5 días y luego se eliminan automáticamente."
+              : "Reports are stored for 5 days and then automatically deleted."}
           </p>
         </div>
       )}
@@ -2394,7 +2711,9 @@ export default function OptionFlowPage() {
   if (checking) {
     return (
       <main className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center">
-        <p className="text-sm text-slate-400">Checking access…</p>
+        <p className="text-sm text-slate-400">
+          {isEs ? "Verificando acceso…" : "Checking access…"}
+        </p>
       </main>
     );
   }
@@ -2403,23 +2722,25 @@ export default function OptionFlowPage() {
     <main className="min-h-screen bg-slate-950 text-slate-50">
       <TopNav />
 
-      <div className="w-full max-w-none mx-auto px-6 md:px-16 py-8 space-y-7">
+      <div className="w-full max-w-none mx-auto px-4 sm:px-6 md:px-16 py-6 sm:py-8 space-y-7">
         {fullScreenChat && (
           <div className="fixed inset-0 z-[60] bg-slate-950/95 backdrop-blur">
-            <div className="w-full max-w-none px-8 py-6 h-full flex flex-col">
+            <div className="w-full max-w-none px-4 sm:px-8 py-6 h-full flex flex-col">
               <div className="flex items-center justify-between mb-4">
                 <div>
                   <p className="text-[10px] uppercase tracking-[0.35em] text-emerald-300">
-                    Option Flow Intelligence
+                    {isEs ? "Inteligencia de Flujo de Opciones" : "Option Flow Intelligence"}
                   </p>
-                  <h2 className="text-2xl font-semibold mt-2">Focus mode</h2>
+                  <h2 className="text-2xl font-semibold mt-2">
+                    {isEs ? "Modo enfoque" : "Focus mode"}
+                  </h2>
                 </div>
                 <button
                   type="button"
                   onClick={() => setFullScreenChat(false)}
                   className="rounded-full border border-slate-700 bg-slate-900/70 px-4 py-2 text-xs text-slate-200 hover:border-emerald-400 hover:text-emerald-200"
                 >
-                  Exit full screen
+                  {isEs ? "Salir de pantalla completa" : "Exit full screen"}
                 </button>
               </div>
               {renderChatPanel(true)}
@@ -2429,11 +2750,15 @@ export default function OptionFlowPage() {
         <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <p className="text-[11px] uppercase tracking-[0.35em] text-emerald-300">
-              Option Flow Intelligence
+              {isEs ? "Inteligencia de Flujo de Opciones" : "Option Flow Intelligence"}
             </p>
-            <h1 className="text-2xl font-semibold mt-2">Option Flow Intelligence</h1>
-            <p className="text-[13px] text-slate-400 mt-2 max-w-3xl">
-              Pega screenshots o sube un CSV (máx 12MB) para extraer prints relevantes y armar un plan de premarket.
+            <h1 className="text-xl sm:text-2xl font-semibold mt-2">
+              {isEs ? "Inteligencia de Flujo de Opciones" : "Option Flow Intelligence"}
+            </h1>
+            <p className="text-[12px] sm:text-[13px] text-slate-400 mt-2 max-w-3xl">
+              {isEs
+                ? "Pega screenshots o sube un CSV (máx 12MB) para extraer prints relevantes y armar un plan de premarket."
+                : "Paste screenshots or upload a CSV (max 12MB) to extract key prints and build a premarket plan."}
             </p>
           </div>
 
@@ -2444,7 +2769,7 @@ export default function OptionFlowPage() {
                 onClick={() => setFullScreenChat(true)}
                 className="rounded-full border border-slate-700 bg-slate-900/60 px-3 py-1 text-slate-300 hover:border-emerald-400 hover:text-emerald-200"
               >
-                Full screen chat
+                {isEs ? "Chat pantalla completa" : "Full screen chat"}
               </button>
             )}
             <span className="rounded-full border border-emerald-400/60 bg-emerald-500/10 px-3 py-1 text-emerald-200 text-xs">
@@ -2455,10 +2780,13 @@ export default function OptionFlowPage() {
 
         {showPaywall ? (
           <section className="rounded-3xl border border-slate-800 bg-slate-900/60 p-6">
-            <h2 className="text-lg font-semibold">Desbloquear Option Flow Intelligence</h2>
+            <h2 className="text-lg font-semibold">
+              {isEs ? "Desbloquear Option Flow Intelligence" : "Unlock Option Flow Intelligence"}
+            </h2>
             <p className="text-sm text-slate-400 mt-2 max-w-2xl">
-              Get advanced flow analysis, AI summaries, and premarket plans based on the most meaningful options
-              activity.
+              {isEs
+                ? "Obtén análisis avanzado del flujo, resúmenes de IA y planes premarket basados en la actividad más relevante."
+                : "Get advanced flow analysis, AI summaries, and premarket plans based on the most meaningful options activity."}
             </p>
             <div className="mt-4 flex flex-wrap items-center gap-3">
               <button
@@ -2466,13 +2794,13 @@ export default function OptionFlowPage() {
                 onClick={handleCheckout}
                 className="rounded-xl bg-emerald-400 px-4 py-2 text-xs font-semibold text-slate-950 shadow hover:bg-emerald-300"
               >
-                Desbloquear por $5/mes
+                {isEs ? "Desbloquear por $5/mes" : "Unlock for $5/mo"}
               </button>
               <Link
                 href="/billing"
                 className="rounded-xl border border-slate-700 px-4 py-2 text-xs text-slate-300 hover:border-emerald-400 hover:text-emerald-200"
               >
-                Administrar facturación
+                {isEs ? "Administrar facturación" : "Manage billing"}
               </Link>
             </div>
             {message && <p className="mt-3 text-xs text-amber-200">{message}</p>}

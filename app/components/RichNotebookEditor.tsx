@@ -1,6 +1,8 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
+import { useAppSettings } from "@/lib/appSettings";
+import { resolveLocale } from "@/lib/i18n";
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 
@@ -17,6 +19,10 @@ export default function RichNotebookEditor({
   placeholder,
   minHeight = 220,
 }: RichNotebookEditorProps) {
+  const { locale } = useAppSettings();
+  const lang = resolveLocale(locale);
+  const isEs = lang === "es";
+  const L = (en: string, es: string) => (isEs ? es : en);
   const editor = useEditor({
     extensions: [
       StarterKit.configure({
@@ -98,7 +104,7 @@ export default function RichNotebookEditor({
           }`}
         >
           <span className="font-semibold">B</span>
-          <span>Bold</span>
+          <span>{L("Bold", "Negrita")}</span>
         </button>
 
         <button
@@ -111,7 +117,7 @@ export default function RichNotebookEditor({
           }`}
         >
           <span className="italic">I</span>
-          <span>Italic</span>
+          <span>{L("Italic", "Itálica")}</span>
         </button>
 
         <button
@@ -124,7 +130,7 @@ export default function RichNotebookEditor({
           }`}
         >
           <span>•</span>
-          <span>Bullet</span>
+          <span>{L("Bullet", "Viñetas")}</span>
         </button>
 
         <button
@@ -137,7 +143,7 @@ export default function RichNotebookEditor({
           }`}
         >
           <span>1.</span>
-          <span>Numbered</span>
+          <span>{L("Numbered", "Numerado")}</span>
         </button>
       </div>
 

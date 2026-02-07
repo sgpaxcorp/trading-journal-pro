@@ -6,6 +6,8 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
+import { useAppSettings } from "@/lib/appSettings";
+import { resolveLocale } from "@/lib/i18n";
 
 import {
   calcRiskUsd,
@@ -32,10 +34,20 @@ const toNum = (s: string, fb = 0) => {
 };
 const clampInt = (n: number, lo = 0, hi = Number.MAX_SAFE_INTEGER) =>
   Math.max(lo, Math.min(hi, Math.floor(n)));
-const currency = (n: number) =>
-  n.toLocaleString(undefined, { style: "currency", currency: "USD" });
-const todayLong = () =>
-  new Date().toLocaleDateString(undefined, { year: "numeric", month: "long", day: "2-digit" });
+const currency = (n: number) => {
+  const locale =
+    typeof document !== "undefined"
+      ? document.documentElement.lang || undefined
+      : undefined;
+  return n.toLocaleString(locale, { style: "currency", currency: "USD" });
+};
+const todayLong = () => {
+  const locale =
+    typeof document !== "undefined"
+      ? document.documentElement.lang || undefined
+      : undefined;
+  return new Date().toLocaleDateString(locale, { year: "numeric", month: "long", day: "2-digit" });
+};
 
 function toDateOnlyStr(value: unknown): string | null {
   if (!value) return null;
@@ -189,10 +201,12 @@ async function generateAndDownloadPDF(
     requiredGoalPct?: number;
     explainRequired?: { goalDays: number; totalLossDays: number; prodLoss: number };
     projectedFinalBalance?: number;
-  }
+  },
+  lang: "en" | "es"
 ) {
   const doc = new jsPDF({ unit: "pt", format: "letter" });
   const M = 56;
+  const L = (en: string, es: string) => (lang === "es" ? es : en);
 
   let y = 48;
   const logo = await loadLogoDataURL("/logo.png");
@@ -209,52 +223,79 @@ async function generateAndDownloadPDF(
   doc.setFontSize(28);
   const title =
     meta.mode === "suggested"
-      ? "Growth Plan – Suggested (Exact Target)"
-      : "Growth Plan – Built with Your Daily Goal";
+      ? L("Growth Plan – Suggested (Exact Target)", "Plan de crecimiento – Sugerido (Meta exacta)")
+      : L("Growth Plan – Built with Your Daily Goal", "Plan de crecimiento – Con tu meta diaria");
   doc.text(title, M, y);
   y += 32;
 
   doc.setFont("helvetica", "normal");
   doc.setFontSize(14);
   doc.setTextColor("#334155");
-  doc.text(`Date: ${todayLong()}`, M, y);
+  doc.text(`${L("Date", "Fecha")}: ${todayLong()}`, M, y);
   y += 26;
 
   doc.setTextColor("#0f172a");
-  doc.text(`Dear ${meta.name || "User"},`, M, y);
+  doc.text(`${L("Hello", "Hola")} ${meta.name || L("User", "Usuario")},`, M, y);
   y += 20;
 
   const chunks: string[] = [];
   if (meta.mode === "suggested") {
     chunks.push(
-      `You start with ${currency(meta.startingBalance)} and want to reach ${currency(
-        meta.targetBalance || 0
-      )} in ${meta.tradingDays} trading day(s).`
+      L(
+        `You start with ${currency(meta.startingBalance)} and want to reach ${currency(
+          meta.targetBalance || 0
+        )} in ${meta.tradingDays} trading day(s).`,
+        `Comienzas con ${currency(meta.startingBalance)} y quieres llegar a ${currency(
+          meta.targetBalance || 0
+        )} en ${meta.tradingDays} día(s) de trading.`
+      )
     );
     chunks.push(
-      `This suggested plan computes the average goal-day return needed to finish exactly at your target, while loss-days apply your max daily loss (${meta.maxDailyLossPercent}%).`
+      L(
+        `This suggested plan computes the average goal-day return needed to finish exactly at your target, while loss-days apply your max daily loss (${meta.maxDailyLossPercent}%).`,
+        `Este plan sugerido calcula el retorno promedio necesario en días de meta para terminar exactamente en el objetivo, mientras que los días de pérdida aplican tu pérdida diaria máxima (${meta.maxDailyLossPercent}%).`
+      )
     );
     if (meta.explainRequired) {
       const { goalDays, totalLossDays, prodLoss } = meta.explainRequired;
       const required = meta.requiredGoalPct ?? 0;
       chunks.push(
-        `Weekly pattern assumes ${meta.lossDaysPerWeek} loss day(s) per 5 trading days → ${totalLossDays} loss day(s) and ${goalDays} goal-day(s).`
+        L(
+          `Weekly pattern assumes ${meta.lossDaysPerWeek} loss day(s) per 5 trading days → ${totalLossDays} loss day(s) and ${goalDays} goal-day(s).`,
+          `El patrón semanal asume ${meta.lossDaysPerWeek} día(s) de pérdida por cada 5 días de trading → ${totalLossDays} día(s) de pérdida y ${goalDays} día(s) de meta.`
+        )
       );
       chunks.push(
-        `Required r satisfies: (1 + r)^G = Target / (Start × Π(1 − L)). With Π(1 − L) ≈ ${prodLoss.toFixed(
-          6
-        )}, r ≈ ${required.toFixed(3)}% (applied on goal-days only).`
+        L(
+          `Required r satisfies: (1 + r)^G = Target / (Start × Π(1 − L)). With Π(1 − L) ≈ ${prodLoss.toFixed(
+            6
+          )}, r ≈ ${required.toFixed(3)}% (applied on goal-days only).`,
+          `El r requerido cumple: (1 + r)^G = Objetivo / (Inicio × Π(1 − L)). Con Π(1 − L) ≈ ${prodLoss.toFixed(
+            6
+          )}, r ≈ ${required.toFixed(3)}% (aplicado solo en días de meta).`
+        )
       );
     }
   } else {
     chunks.push(
-      `You start with ${currency(meta.startingBalance)} and trade for ${meta.tradingDays} day(s) using your selected daily goal of ${meta.dailyGoalPercentChosen}%.`
+      L(
+        `You start with ${currency(meta.startingBalance)} and trade for ${meta.tradingDays} day(s) using your selected daily goal of ${meta.dailyGoalPercentChosen}%.`,
+        `Comienzas con ${currency(meta.startingBalance)} y operas por ${meta.tradingDays} día(s) usando tu meta diaria seleccionada de ${meta.dailyGoalPercentChosen}%.`
+      )
     );
     chunks.push(
-      `On loss-days we apply your max daily loss of ${meta.maxDailyLossPercent}%. Weekly pattern places ${meta.lossDaysPerWeek} loss day(s) within each 5-day trading week.`
+      L(
+        `On loss-days we apply your max daily loss of ${meta.maxDailyLossPercent}%. Weekly pattern places ${meta.lossDaysPerWeek} loss day(s) within each 5-day trading week.`,
+        `En días de pérdida aplicamos tu pérdida diaria máxima de ${meta.maxDailyLossPercent}%. El patrón semanal coloca ${meta.lossDaysPerWeek} día(s) de pérdida dentro de cada semana de 5 días.`
+      )
     );
     if (typeof meta.projectedFinalBalance === "number") {
-      chunks.push(`Projected ending balance: ${currency(meta.projectedFinalBalance)}.`);
+      chunks.push(
+        L(
+          `Projected ending balance: ${currency(meta.projectedFinalBalance)}.`,
+          `Balance final proyectado: ${currency(meta.projectedFinalBalance)}.`
+        )
+      );
     }
   }
 
@@ -264,20 +305,20 @@ async function generateAndDownloadPDF(
   y += 18 + wrapped.length * 16;
 
   const summaryBody: Array<[string, string]> = [
-    ["Starting balance", currency(meta.startingBalance)],
-    ["Trading days", String(meta.tradingDays)],
-    ["Daily goal (selected)", `${meta.dailyGoalPercentChosen}%`],
-    ["Max daily loss (%)", `${meta.maxDailyLossPercent}%`],
-    ["Loss days per week", String(meta.lossDaysPerWeek)],
+    [L("Starting balance", "Balance inicial"), currency(meta.startingBalance)],
+    [L("Trading days", "Días de trading"), String(meta.tradingDays)],
+    [L("Daily goal (selected)", "Meta diaria (seleccionada)"), `${meta.dailyGoalPercentChosen}%`],
+    [L("Max daily loss (%)", "Pérdida diaria máx (%)"), `${meta.maxDailyLossPercent}%`],
+    [L("Loss days per week", "Días de pérdida por semana"), String(meta.lossDaysPerWeek)],
   ];
 
   if (meta.mode === "suggested") {
-    summaryBody.splice(1, 0, ["Target balance", currency(meta.targetBalance || 0)]);
+    summaryBody.splice(1, 0, [L("Target balance", "Balance objetivo"), currency(meta.targetBalance || 0)]);
     if (typeof meta.requiredGoalPct === "number") {
-      summaryBody.push(["Required goal-day %", `${meta.requiredGoalPct.toFixed(3)}%`]);
+      summaryBody.push([L("Required goal-day %", "% requerido en días de meta"), `${meta.requiredGoalPct.toFixed(3)}%`]);
     }
   } else if (typeof meta.projectedFinalBalance === "number") {
-    summaryBody.push(["Projected ending balance", currency(meta.projectedFinalBalance)]);
+    summaryBody.push([L("Projected ending balance", "Balance final proyectado"), currency(meta.projectedFinalBalance)]);
   }
 
   autoTable(doc, {
@@ -286,14 +327,14 @@ async function generateAndDownloadPDF(
     styles: { fontSize: 12, cellPadding: 6 },
     headStyles: { fillColor: [248, 250, 252], textColor: [15, 23, 42] },
     body: summaryBody,
-    columns: [{ header: "Field" }, { header: "Value" }],
+    columns: [{ header: L("Field", "Campo") }, { header: L("Value", "Valor") }],
     theme: "grid",
   });
 
   doc.addPage();
   const tableData = rows.map((r) => [
     r.day,
-    r.type === "loss" ? "Loss" : "Goal",
+    r.type === "loss" ? L("Loss", "Pérdida") : L("Goal", "Meta"),
     `${r.pct.toFixed(3)}%`,
     currency(r.expectedUSD),
     currency(r.endBalance),
@@ -303,7 +344,7 @@ async function generateAndDownloadPDF(
     margin: { left: M, right: M, top: 56 },
     styles: { fontSize: 12, cellPadding: 6 },
     headStyles: { fillColor: [241, 245, 249], textColor: [15, 23, 42] },
-    head: [["Day", "Type", "% applied", "Expected (USD)", "Ending balance (USD)"]],
+    head: [[L("Day", "Día"), L("Type", "Tipo"), L("% applied", "% aplicado"), L("Expected (USD)", "Esperado (USD)"), L("Ending balance (USD)", "Balance final (USD)")]],
     body: tableData,
     theme: "grid",
     didDrawPage: () => {
@@ -311,12 +352,12 @@ async function generateAndDownloadPDF(
       doc.setFont("helvetica", "bold");
       const h =
         meta.mode === "suggested"
-          ? "Daily Schedule – Suggested Plan (Exact Target)"
-          : "Daily Schedule – Plan Using Your Daily Goal";
+          ? L("Daily Schedule – Suggested Plan (Exact Target)", "Calendario diario – Plan sugerido (Meta exacta)")
+          : L("Daily Schedule – Plan Using Your Daily Goal", "Calendario diario – Plan con tu meta diaria");
       doc.text(h, M, 40);
       doc.setFont("helvetica", "normal");
       doc.setFontSize(10);
-      doc.text(`Page ${doc.getNumberOfPages()}`, 612 - M, 792 - 28, { align: "right" });
+      doc.text(`${L("Page", "Página")} ${doc.getNumberOfPages()}`, 612 - M, 792 - 28, { align: "right" });
     },
   });
 
@@ -356,12 +397,20 @@ type WizardStep = 0 | 1 | 2 | 3 | 4;
 
 const STEP_ORDER: WizardStep[] = [0, 1, 2, 3, 4];
 
-const STEP_TITLES: Record<WizardStep, string> = {
-  0: "Meta & Numbers",
+const STEP_TITLES_EN: Record<WizardStep, string> = {
+  0: "Goal & Numbers",
   1: "Prepare",
   2: "Analysis",
   3: "Strategy",
   4: "Journal & Commit",
+};
+
+const STEP_TITLES_ES: Record<WizardStep, string> = {
+  0: "Meta y números",
+  1: "Preparación",
+  2: "Análisis",
+  3: "Estrategia",
+  4: "Journal y compromiso",
 };
 
 type AssistantLang = "en" | "es"; // stored in Supabase (inside growth plan record)
@@ -369,6 +418,11 @@ type AssistantLang = "en" | "es"; // stored in Supabase (inside growth plan reco
 export default function GrowthPlanPage() {
   const { user, loading } = useAuth();
   const router = useRouter();
+  const { locale } = useAppSettings();
+  const lang = resolveLocale(locale) as AssistantLang;
+  const isEs = lang === "es";
+  const L = (en: string, es: string) => (isEs ? es : en);
+  const stepTitles = isEs ? STEP_TITLES_ES : STEP_TITLES_EN;
 
   const [step, setStep] = useState<WizardStep>(0);
   const [error, setError] = useState("");
@@ -378,9 +432,8 @@ export default function GrowthPlanPage() {
   const [cashflowNet, setCashflowNet] = useState(0);
   const [loadedStartingBalance, setLoadedStartingBalance] = useState<number | null>(null);
 
-  // IMPORTANT: page UI is English by requirement.
-  // Neuro language toggle must be stored in Supabase.
-  const [assistantLang, setAssistantLang] = useState<AssistantLang>("en");
+  // Neuro language toggle is stored in Supabase (kept in steps._ui.lang)
+  const [assistantLang, setAssistantLang] = useState<AssistantLang>(lang);
 
   // Strings for inputs
   const [startingBalanceStr, setStartingBalanceStr] = useState("5000");
@@ -500,9 +553,12 @@ export default function GrowthPlanPage() {
           const t =
             (await neuroReact("growth_plan_loaded", savedLang, {
               hasExistingPlan: true,
-              step: STEP_TITLES[0],
+              step: stepTitles[0],
             })) ||
-            "Loaded your Growth Plan. We'll go step-by-step: Meta & Numbers → Prepare → Analysis → Strategy → Journal & Commit.";
+            L(
+              "Loaded your Growth Plan. We'll go step-by-step: Goal & Numbers → Prepare → Analysis → Strategy → Journal & Commit.",
+              "Cargamos tu plan. Vamos paso a paso: Meta y números → Preparación → Análisis → Estrategia → Journal y compromiso."
+            );
           pushNeuroMessage(t);
           openNeuroPanel();
         } else {
@@ -514,9 +570,12 @@ export default function GrowthPlanPage() {
           const t =
             (await neuroReact("growth_plan_loaded", assistantLang, {
               hasExistingPlan: false,
-              step: STEP_TITLES[0],
+              step: stepTitles[0],
             })) ||
-            "Welcome. Start by entering your account numbers and risk rules. Then we build your trading process step-by-step.";
+            L(
+              "Welcome. Start by entering your account numbers and risk rules. Then we build your trading process step-by-step.",
+              "Bienvenido. Empieza ingresando tus números de cuenta y reglas de riesgo. Luego construimos tu proceso paso a paso."
+            );
           pushNeuroMessage(t);
           openNeuroPanel();
         }
@@ -570,9 +629,14 @@ export default function GrowthPlanPage() {
           riskUsd,
           startingBalance: baseBalanceForDollars,
         })) ||
-        `Quick note: you're risking ${riskPerTradePct.toFixed(2)}% per trade (~${currency(
-          riskUsd
-        )}). If you want 2%, reduce size or trade cheaper contracts.`;
+        L(
+          `Quick note: you're risking ${riskPerTradePct.toFixed(2)}% per trade (~${currency(
+            riskUsd
+          )}). If you want 2%, reduce size or trade cheaper contracts.`,
+          `Nota rápida: estás arriesgando ${riskPerTradePct.toFixed(2)}% por trade (~${currency(
+            riskUsd
+          )}). Si quieres 2%, reduce tamaño o usa contratos más baratos.`
+        );
       pushNeuroMessage(text);
       openNeuroPanel();
     })();
@@ -596,7 +660,7 @@ export default function GrowthPlanPage() {
   if (loading || !user) {
     return (
       <main className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center">
-        <p className="text-base text-slate-400">Loading…</p>
+        <p className="text-base text-slate-400">{L("Loading…", "Cargando…")}</p>
       </main>
     );
   }
@@ -648,45 +712,59 @@ export default function GrowthPlanPage() {
 
   // PDF events
   const onDownloadPdfSuggested = async () => {
-    await generateAndDownloadPDF(suggestedRows, {
-      mode: "suggested",
-      name: (user as any)?.name || "User",
-      startingBalance,
-      targetBalance,
-      tradingDays,
-      dailyGoalPercentChosen,
-      maxDailyLossPercent,
-      lossDaysPerWeek,
-      requiredGoalPct,
-      explainRequired: {
-        goalDays: explainRequired.goalDays,
-        totalLossDays: explainRequired.totalLossDays,
-        prodLoss: explainRequired.prodLoss,
+    await generateAndDownloadPDF(
+      suggestedRows,
+      {
+        mode: "suggested",
+        name: (user as any)?.name || L("User", "Usuario"),
+        startingBalance,
+        targetBalance,
+        tradingDays,
+        dailyGoalPercentChosen,
+        maxDailyLossPercent,
+        lossDaysPerWeek,
+        requiredGoalPct,
+        explainRequired: {
+          goalDays: explainRequired.goalDays,
+          totalLossDays: explainRequired.totalLossDays,
+          prodLoss: explainRequired.prodLoss,
+        },
       },
-    });
+      lang
+    );
 
     const text =
       (await neuroReact("pdf_downloaded", assistantLang, { mode: "suggested" })) ||
-      "Downloaded. This schedule is structure—not a promise. Now choose which plan you will approve.";
+      L(
+        "Downloaded. This schedule is structure—not a promise. Now choose which plan you will approve.",
+        "Descargado. Este calendario es estructura, no promesa. Ahora elige qué plan vas a aprobar."
+      );
     pushNeuroMessage(text);
     openNeuroPanel();
   };
 
   const onDownloadPdfChosen = async () => {
-    await generateAndDownloadPDF(chosenRows, {
-      mode: "chosen",
-      name: (user as any)?.name || "User",
-      startingBalance,
-      tradingDays,
-      dailyGoalPercentChosen,
-      maxDailyLossPercent,
-      lossDaysPerWeek,
-      projectedFinalBalance: chosenFinalBalance,
-    });
+    await generateAndDownloadPDF(
+      chosenRows,
+      {
+        mode: "chosen",
+        name: (user as any)?.name || L("User", "Usuario"),
+        startingBalance,
+        tradingDays,
+        dailyGoalPercentChosen,
+        maxDailyLossPercent,
+        lossDaysPerWeek,
+        projectedFinalBalance: chosenFinalBalance,
+      },
+      lang
+    );
 
     const text =
       (await neuroReact("pdf_downloaded", assistantLang, { mode: "chosen" })) ||
-      "Downloaded. Great—now your plan is measurable. Focus on executing the process.";
+      L(
+        "Downloaded. Great—now your plan is measurable. Focus on executing the process.",
+        "Descargado. Excelente: tu plan ya es medible. Enfócate en ejecutar el proceso."
+      );
     pushNeuroMessage(text);
     openNeuroPanel();
   };
@@ -707,7 +785,12 @@ export default function GrowthPlanPage() {
     };
     setRules((prev) => [rule, ...prev]);
     setNewRuleText("");
-    pushNeuroMessage(`Rule added: "${t}". Clear rules protect you when emotions show up.`);
+    pushNeuroMessage(
+      L(
+        `Rule added: "${t}". Clear rules protect you when emotions show up.`,
+        `Regla agregada: "${t}". Reglas claras te protegen cuando aparecen emociones.`
+      )
+    );
     openNeuroPanel();
   }
 
@@ -741,12 +824,14 @@ export default function GrowthPlanPage() {
   async function goNext() {
     setError("");
     if (!canGoNext) {
-      setError("Complete required fields before continuing.");
+      setError(L("Complete required fields before continuing.", "Completa los campos requeridos antes de continuar."));
       return;
     }
     const next = (Math.min(4, step + 1) as WizardStep);
     setStep(next);
-    const t = (await neuroReact("wizard_step_next", assistantLang, { to: STEP_TITLES[next] })) || `Next: ${STEP_TITLES[next]}.`;
+    const t =
+      (await neuroReact("wizard_step_next", assistantLang, { to: stepTitles[next] })) ||
+      (isEs ? `Siguiente: ${stepTitles[next]}.` : `Next: ${stepTitles[next]}.`);
     pushNeuroMessage(t);
     openNeuroPanel();
   }
@@ -755,14 +840,18 @@ export default function GrowthPlanPage() {
     setError("");
     const prev = (Math.max(0, step - 1) as WizardStep);
     setStep(prev);
-    const t = (await neuroReact("wizard_step_back", assistantLang, { to: STEP_TITLES[prev] })) || `Back to: ${STEP_TITLES[prev]}.`;
+    const t =
+      (await neuroReact("wizard_step_back", assistantLang, { to: stepTitles[prev] })) ||
+      (isEs ? `Volver a: ${stepTitles[prev]}.` : `Back to: ${stepTitles[prev]}.`);
     pushNeuroMessage(t);
     openNeuroPanel();
   }
 
   async function onStepClick(s: WizardStep) {
     setStep(s);
-    const t = (await neuroReact("wizard_step_clicked", assistantLang, { to: STEP_TITLES[s] })) || `Opened: ${STEP_TITLES[s]}.`;
+    const t =
+      (await neuroReact("wizard_step_clicked", assistantLang, { to: stepTitles[s] })) ||
+      (isEs ? `Abierto: ${stepTitles[s]}.` : `Opened: ${stepTitles[s]}.`);
     pushNeuroMessage(t);
     openNeuroPanel();
   }
@@ -788,25 +877,28 @@ export default function GrowthPlanPage() {
       maxDailyLossPercent <= 0 ||
       riskPerTradePct <= 0
     ) {
-      setError("Please enter valid, positive values first.");
+      setError(L("Please enter valid, positive values first.", "Ingresa valores válidos y positivos primero."));
       return;
     }
     if (!selectedPlan) {
-      setError("Select which plan you want to approve (Suggested or Your chosen plan).");
+      setError(L("Select which plan you want to approve (Suggested or Your chosen plan).", "Selecciona qué plan quieres aprobar (Sugerido o Tu plan)."));
       return;
     }
     if (selectedPlan === "chosen" && dailyGoalPercentChosen <= 0) {
-      setError("Daily goal (%) must be greater than 0 for your chosen plan.");
+      setError(L("Daily goal (%) must be greater than 0 for your chosen plan.", "La meta diaria (%) debe ser mayor que 0 para tu plan elegido."));
       return;
     }
     if (!committed) {
-      setError("Please confirm your commitment before saving.");
+      setError(L("Please confirm your commitment before saving.", "Confirma tu compromiso antes de guardar."));
       return;
     }
 
     if (hasExistingPlan) {
       const confirmed = window.confirm(
-        "Editing your growth plan may reset statistics, balance chart and related analytics. Journal entries will NOT be reset. Continue?"
+        L(
+          "Editing your growth plan may reset statistics, balance chart and related analytics. Journal entries will NOT be reset. Continue?",
+          "Editar tu plan puede reiniciar estadísticas, balance chart y analíticas relacionadas. El journal NO se reinicia. ¿Continuar?"
+        )
       );
       if (!confirmed) return;
     }
@@ -851,17 +943,22 @@ export default function GrowthPlanPage() {
           riskPct: riskPerTradePct,
           riskUsd,
         })) ||
-        `Saved ✅ Max risk per trade: ${riskPerTradePct.toFixed(2)}% (~${currency(
-          riskUsd
-        )}). Your AI Coach can now evaluate your execution against this plan.`;
+        L(
+          `Saved ✅ Max risk per trade: ${riskPerTradePct.toFixed(2)}% (~${currency(
+            riskUsd
+          )}). Your AI Coach can now evaluate your execution against this plan.`,
+          `Guardado ✅ Riesgo máx por trade: ${riskPerTradePct.toFixed(2)}% (~${currency(
+            riskUsd
+          )}). El Coach IA ya puede evaluar tu ejecución vs este plan.`
+        );
 
       pushNeuroMessage(msg);
       openNeuroPanel();
       router.push("/dashboard");
     } catch (e) {
       console.error("[GrowthPlan] save error", e);
-      setError("There was a problem saving your growth plan. Please try again.");
-      pushNeuroMessage("Save failed. Please try again in a moment.");
+      setError(L("There was a problem saving your growth plan. Please try again.", "Hubo un problema guardando tu plan. Intenta de nuevo."));
+      pushNeuroMessage(L("Save failed. Please try again in a moment.", "Error al guardar. Intenta nuevamente en un momento."));
       openNeuroPanel();
     }
   };
@@ -873,8 +970,10 @@ export default function GrowthPlanPage() {
         <div className="space-y-2">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <p className="text-emerald-400 uppercase tracking-[0.22em] text-[12px]">NEURO TARDER</p>
-              <h1 className="text-2xl md:text-3xl font-semibold text-emerald-400">Growth Plan Wizard</h1>
+              <p className="text-emerald-400 uppercase tracking-[0.22em] text-[12px]">NEURO TRADER</p>
+              <h1 className="text-2xl md:text-3xl font-semibold text-emerald-400">
+                {L("Growth Plan Wizard", "Asistente de plan de crecimiento")}
+              </h1>
             </div>
 
             {/* ✅ Neuro language toggle (saved to Supabase inside plan) */}
@@ -886,7 +985,7 @@ export default function GrowthPlanPage() {
                   onClick={() => {
                     setAssistantLang("en");
                     persistAssistantLang("en");
-                    pushNeuroMessage("Neuro language set to EN.");
+                    pushNeuroMessage(L("Neuro language set to EN.", "Idioma de Neuro: EN."));
                     openNeuroPanel();
                   }}
                   className={`px-3 py-1 rounded-full transition ${
@@ -902,7 +1001,7 @@ export default function GrowthPlanPage() {
                   onClick={() => {
                     setAssistantLang("es");
                     persistAssistantLang("es");
-                    pushNeuroMessage("Idioma de Neuro: ES.");
+                    pushNeuroMessage(L("Neuro language set to ES.", "Idioma de Neuro: ES."));
                     openNeuroPanel();
                   }}
                   className={`px-3 py-1 rounded-full transition ${
@@ -918,13 +1017,25 @@ export default function GrowthPlanPage() {
           </div>
 
           <p className="text-slate-400 max-w-3xl">
-            This turns your plan into a system: <b>Prepare → Analysis → Strategy → Journal</b>. Neuro and AI Coach will
-            use this to coach you based on real execution.
+            {L(
+              "This turns your plan into a system:",
+              "Esto convierte tu plan en un sistema:"
+            )}{" "}
+            <b>{L("Prepare → Analysis → Strategy → Journal", "Preparar → Análisis → Estrategia → Journal")}</b>.{" "}
+            {L(
+              "Neuro and AI Coach will use this to coach you based on real execution.",
+              "Neuro y el Coach IA usarán esto para guiarte según tu ejecución real."
+            )}
           </p>
 
           {cashflowNet !== 0 && loadedStartingBalance !== null && Math.abs(startingBalance - loadedStartingBalance) < 0.01 ? (
             <p className="text-[12px] text-slate-500">
-              Note: Net cashflows since plan start detected ({cashflowNet >= 0 ? "+" : "-"}{currency(Math.abs(cashflowNet))}). Dollar conversions (risk $, goal $, max-loss $) use: start + net cashflows.
+              {L("Note:", "Nota:")} {L("Net cashflows since plan start detected", "Se detectaron cashflows netos desde el inicio del plan")}{" "}
+              ({cashflowNet >= 0 ? "+" : "-"}{currency(Math.abs(cashflowNet))}).{" "}
+              {L(
+                "Dollar conversions (risk $, goal $, max-loss $) use: start + net cashflows.",
+                "Las conversiones en dólares (riesgo $, meta $, pérdida máx $) usan: inicio + cashflows netos."
+              )}
             </p>
           ) : null}
         </div>
@@ -942,7 +1053,7 @@ export default function GrowthPlanPage() {
                   : "border-slate-700 text-slate-300 hover:border-emerald-400/60"
               }`}
             >
-              {idx + 1}. {STEP_TITLES[s]}
+              {idx + 1}. {stepTitles[s]}
             </button>
           ))}
         </div>
@@ -952,7 +1063,7 @@ export default function GrowthPlanPage() {
           <div className="space-y-5">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="block mb-1 text-slate-300">Starting balance (USD)</label>
+                <label className="block mb-1 text-slate-300">{L("Starting balance (USD)", "Balance inicial (USD)")}</label>
                 <input
                   inputMode="decimal"
                   value={startingBalanceStr}
@@ -963,12 +1074,15 @@ export default function GrowthPlanPage() {
                   placeholder="0"
                 />
                 <p className="text-slate-500 mt-1">
-                  This should match your broker account balance you’re starting from.
+                  {L(
+                    "This should match your broker account balance you’re starting from.",
+                    "Debe coincidir con el balance con el que arrancas en tu broker."
+                  )}
                 </p>
               </div>
 
               <div>
-                <label className="block mb-1 text-slate-300">Target balance (USD)</label>
+                <label className="block mb-1 text-slate-300">{L("Target balance (USD)", "Balance objetivo (USD)")}</label>
                 <input
                   inputMode="decimal"
                   value={targetBalanceStr}
@@ -981,7 +1095,9 @@ export default function GrowthPlanPage() {
               </div>
 
               <div>
-                <label className="block mb-1 text-slate-300">Trading days you commit to follow this plan</label>
+                <label className="block mb-1 text-slate-300">
+                  {L("Trading days you commit to follow this plan", "Días de trading que te comprometes a seguir")}
+                </label>
                 <input
                   inputMode="numeric"
                   value={tradingDaysStr}
@@ -994,7 +1110,7 @@ export default function GrowthPlanPage() {
               </div>
 
               <div>
-                <label className="block mb-1 text-slate-300">Max daily loss (%)</label>
+                <label className="block mb-1 text-slate-300">{L("Max daily loss (%)", "Pérdida diaria máx (%)")}</label>
                 <input
                   inputMode="decimal"
                   value={maxDailyLossPercentStr}
@@ -1005,12 +1121,15 @@ export default function GrowthPlanPage() {
                   placeholder="0.00"
                 />
                 <p className="text-slate-500 mt-1">
-                  Your daily safety brake. When hit, you stop trading for the day.
+                  {L(
+                    "Your daily safety brake. When hit, you stop trading for the day.",
+                    "Tu freno de seguridad diario. Al alcanzarlo, paras de operar ese día."
+                  )}
                 </p>
               </div>
 
               <div>
-                <label className="block mb-1 text-slate-300">Loss days per week (preview)</label>
+                <label className="block mb-1 text-slate-300">{L("Loss days per week (preview)", "Días de pérdida por semana (preview)")}</label>
                 <input
                   inputMode="numeric"
                   value={lossDaysPerWeekStr}
@@ -1020,11 +1139,15 @@ export default function GrowthPlanPage() {
                   className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-slate-100 focus:border-emerald-400 outline-none"
                   placeholder="0..5"
                 />
-                <p className="text-slate-500 mt-1">Distributed across each 5-day trading week.</p>
+                <p className="text-slate-500 mt-1">
+                  {L("Distributed across each 5-day trading week.", "Distribuido en cada semana de 5 días de trading.")}
+                </p>
               </div>
 
               <div>
-                <label className="block mb-1 text-slate-300">Daily goal (%) (only if you choose “Your chosen plan”)</label>
+                <label className="block mb-1 text-slate-300">
+                  {L("Daily goal (%) (only if you choose “Your chosen plan”)", "Meta diaria (%) (solo si eliges “Tu plan”)")}
+                </label>
                 <input
                   inputMode="decimal"
                   value={dailyGoalPercentStr}
@@ -1037,7 +1160,7 @@ export default function GrowthPlanPage() {
               </div>
 
               <div className="md:col-span-2">
-                <label className="block mb-1 text-slate-300">Max risk per trade (%) (suggested: 2%)</label>
+                <label className="block mb-1 text-slate-300">{L("Max risk per trade (%) (suggested: 2%)", "Riesgo máximo por trade (%) (sugerido: 2%)")}</label>
                 <input
                   inputMode="decimal"
                   value={riskPerTradePctStr}
@@ -1048,14 +1171,15 @@ export default function GrowthPlanPage() {
                   placeholder="2"
                 />
                 <p className="text-slate-400 mt-1">
-                  With your equity base, {riskPerTradePct || 0}% ≈{" "}
-                  <b className="text-emerald-300">{currency(riskUsd)}</b> per trade.
+                  {L("With your equity base,", "Con tu equity base,")} {riskPerTradePct || 0}% ≈{" "}
+                  <b className="text-emerald-300">{currency(riskUsd)}</b>{" "}
+                  {L("per trade.", "por trade.")}
                 </p>
               </div>
 
               <div className="md:col-span-2">
                 <label className="block mb-1 text-slate-300">
-                  Max -1% loss days before review (optional)
+                  {L("Max -1% loss days before review (optional)", "Máx. días de pérdida -1% antes de revisar (opcional)")}
                 </label>
                 <input
                   inputMode="numeric"
@@ -1073,7 +1197,9 @@ export default function GrowthPlanPage() {
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               <div className="bg-slate-950/80 border border-emerald-500/15 rounded-2xl p-4 space-y-3">
                 <div className="flex items-center justify-between">
-                  <p className="font-semibold text-emerald-300">Suggested plan (Exact Target)</p>
+                  <p className="font-semibold text-emerald-300">
+                    {L("Suggested plan (Exact Target)", "Plan sugerido (Meta exacta)")}
+                  </p>
                   <label className="flex items-center gap-2 text-emerald-300 cursor-pointer">
                     <input
                       type="radio"
@@ -1081,31 +1207,36 @@ export default function GrowthPlanPage() {
                       checked={selectedPlan === "suggested"}
                       onChange={() => {
                         setSelectedPlan("suggested");
-                        pushNeuroMessage("Selected: Suggested plan. This one aims to land exactly on your target.");
+                        pushNeuroMessage(
+                          L(
+                            "Selected: Suggested plan. This one aims to land exactly on your target.",
+                            "Seleccionado: Plan sugerido. Este busca caer exactamente en tu meta."
+                          )
+                        );
                         openNeuroPanel();
                       }}
                       className="h-4 w-4 accent-emerald-400"
                     />
-                    Select
+                    {L("Select", "Seleccionar")}
                   </label>
                 </div>
 
                 <table className="w-full border-collapse">
                   <tbody>
                     <tr className="border-b border-slate-800">
-                      <td className="py-1.5 pr-3 text-slate-400">Starting</td>
+                      <td className="py-1.5 pr-3 text-slate-400">{L("Starting", "Inicio")}</td>
                       <td className="py-1.5 text-slate-100">{currency(startingBalance)}</td>
                     </tr>
                     <tr className="border-b border-slate-800">
-                      <td className="py-1.5 pr-3 text-slate-400">Target</td>
+                      <td className="py-1.5 pr-3 text-slate-400">{L("Target", "Meta")}</td>
                       <td className="py-1.5 text-emerald-400 font-semibold">{currency(targetBalance)}</td>
                     </tr>
                     <tr className="border-t border-slate-800">
-                      <td className="py-1.5 pr-3 text-slate-400">Loss days/week</td>
+                      <td className="py-1.5 pr-3 text-slate-400">{L("Loss days/week", "Días de pérdida/sem")}</td>
                       <td className="py-1.5 text-slate-100">{lossDaysPerWeek}</td>
                     </tr>
                     <tr className="border-t border-slate-800">
-                      <td className="py-1.5 pr-3 text-slate-400">Required goal-day %</td>
+                      <td className="py-1.5 pr-3 text-slate-400">{L("Required goal-day %", "% requerido en días de meta")}</td>
                       <td className="py-1.5 text-slate-100">
                         {Number.isFinite(explainRequired.goalPct) ? `${explainRequired.goalPct.toFixed(3)}%` : "—"}
                       </td>
@@ -1117,13 +1248,13 @@ export default function GrowthPlanPage() {
                   onClick={onDownloadPdfSuggested}
                   className="px-4 py-2 rounded-xl border border-emerald-400 text-emerald-300 hover:bg-emerald-400/10 transition"
                 >
-                  Download PDF (Suggested)
+                  {L("Download PDF (Suggested)", "Descargar PDF (Sugerido)")}
                 </button>
               </div>
 
               <div className="bg-slate-950/80 border border-sky-500/20 rounded-2xl p-4 space-y-3">
                 <div className="flex items-center justify-between">
-                  <p className="font-semibold text-sky-300">Your chosen plan</p>
+                  <p className="font-semibold text-sky-300">{L("Your chosen plan", "Tu plan elegido")}</p>
                   <label className="flex items-center gap-2 text-sky-300 cursor-pointer">
                     <input
                       type="radio"
@@ -1131,35 +1262,40 @@ export default function GrowthPlanPage() {
                       checked={selectedPlan === "chosen"}
                       onChange={() => {
                         setSelectedPlan("chosen");
-                        pushNeuroMessage("Selected: Your chosen plan. This uses your daily goal percent.");
+                        pushNeuroMessage(
+                          L(
+                            "Selected: Your chosen plan. This uses your daily goal percent.",
+                            "Seleccionado: Tu plan elegido. Usa tu porcentaje de meta diaria."
+                          )
+                        );
                         openNeuroPanel();
                       }}
                       className="h-4 w-4 accent-sky-400"
                     />
-                    Select
+                    {L("Select", "Seleccionar")}
                   </label>
                 </div>
 
                 <table className="w-full border-collapse">
                   <tbody>
                     <tr className="border-b border-slate-800">
-                      <td className="py-1.5 pr-3 text-slate-400">Starting</td>
+                      <td className="py-1.5 pr-3 text-slate-400">{L("Starting", "Inicio")}</td>
                       <td className="py-1.5 text-slate-100">{currency(startingBalance)}</td>
                     </tr>
                     <tr className="border-b border-slate-800">
-                      <td className="py-1.5 pr-3 text-slate-400">Daily goal</td>
+                      <td className="py-1.5 pr-3 text-slate-400">{L("Daily goal", "Meta diaria")}</td>
                       <td className="py-1.5 text-emerald-300">
                         {dailyGoalPercentChosen || 0}% ({currency(dailyGoalDollar)})
                       </td>
                     </tr>
                     <tr className="border-b border-slate-800">
-                      <td className="py-1.5 pr-3 text-slate-400">Max daily loss</td>
+                      <td className="py-1.5 pr-3 text-slate-400">{L("Max daily loss", "Pérdida diaria máx")}</td>
                       <td className="py-1.5 text-sky-300">
                         {maxDailyLossPercent || 0}% ({currency(maxLossDollar)})
                       </td>
                     </tr>
                     <tr className="border-b border-slate-800">
-                      <td className="py-1.5 pr-3 text-slate-400">Projected ending</td>
+                      <td className="py-1.5 pr-3 text-slate-400">{L("Projected ending", "Final proyectado")}</td>
                       <td className="py-1.5 text-slate-100">{currency(chosenFinalBalance)}</td>
                     </tr>
                   </tbody>
@@ -1169,14 +1305,14 @@ export default function GrowthPlanPage() {
                   onClick={onDownloadPdfChosen}
                   className="px-4 py-2 rounded-xl border border-sky-400 text-sky-300 hover:bg-sky-400/10 transition"
                 >
-                  Download PDF (Chosen)
+                  {L("Download PDF (Chosen)", "Descargar PDF (Elegido)")}
                 </button>
               </div>
             </div>
 
             {/* Rules */}
             <div className="bg-slate-950/70 border border-slate-800 rounded-2xl p-4 space-y-3">
-              <p className="font-semibold text-slate-100">Rules (Non-negotiables)</p>
+              <p className="font-semibold text-slate-100">{L("Rules (Non-negotiables)", "Reglas (No negociables)")}</p>
 
               <div className="space-y-2">
                 {rules.map((r) => (
@@ -1201,11 +1337,11 @@ export default function GrowthPlanPage() {
                         {r.label}{" "}
                         {r.isSuggested ? (
                           <span className="text-[10px] ml-2 text-emerald-300/90 border border-emerald-500/20 px-2 py-px rounded-full">
-                            suggested
+                            {L("suggested", "sugerida")}
                           </span>
                         ) : (
                           <span className="text-[10px] ml-2 text-slate-400 border border-slate-700 px-2 py-px rounded-full">
-                            custom
+                            {L("custom", "personalizada")}
                           </span>
                         )}
                       </div>
@@ -1221,14 +1357,14 @@ export default function GrowthPlanPage() {
                   onFocus={() => fieldHelp("add_rule")}
                   onChange={(e) => setNewRuleText(e.target.value)}
                   className="flex-1 px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-slate-100 focus:border-emerald-400 outline-none"
-                  placeholder="Add your own rule (e.g., No revenge trading)"
+                  placeholder={L("Add your own rule (e.g., No revenge trading)", "Agrega tu propia regla (ej., No revenge trading)")}
                 />
                 <button
                   type="button"
                   onClick={addRule}
                   className="px-4 py-2 rounded-xl bg-emerald-400 text-slate-950 font-semibold hover:bg-emerald-300 transition"
                 >
-                  Add
+                  {L("Add", "Agregar")}
                 </button>
               </div>
             </div>
@@ -1238,9 +1374,14 @@ export default function GrowthPlanPage() {
         {/* ================= STEP 1 ================= */}
         {step === 1 && (
           <div className="bg-slate-950/70 border border-slate-800 rounded-2xl p-4 space-y-2">
-            <p className="font-semibold text-emerald-300">1) Prepare Before Trading</p>
+            <p className="font-semibold text-emerald-300">
+              {L("1) Prepare Before Trading", "1) Preparación antes de operar")}
+            </p>
             <p className="text-slate-400 text-sm">
-              Build your checklist. AI Coach will compare your execution against this.
+              {L(
+                "Build your checklist. AI Coach will compare your execution against this.",
+                "Construye tu checklist. El Coach IA comparará tu ejecución contra esto."
+              )}
             </p>
 
             <div className="space-y-2">
@@ -1258,13 +1399,18 @@ export default function GrowthPlanPage() {
                   />
                   <button
                     type="button"
-                    onClick={() => {
-                      const items = [...(stepsData.prepare?.checklist ?? [])];
-                      items.splice(idx, 1);
-                      updatePrepareChecklist(items);
-                      pushNeuroMessage("Checklist item removed. Keep the list short and actionable.");
-                      openNeuroPanel();
-                    }}
+                      onClick={() => {
+                        const items = [...(stepsData.prepare?.checklist ?? [])];
+                        items.splice(idx, 1);
+                        updatePrepareChecklist(items);
+                        pushNeuroMessage(
+                          L(
+                            "Checklist item removed. Keep the list short and actionable.",
+                            "Item eliminado. Mantén la lista corta y accionable."
+                          )
+                        );
+                        openNeuroPanel();
+                      }}
                     className="px-3 py-2 rounded-xl border border-slate-700 text-slate-300 hover:border-red-400/60 hover:text-red-300 transition"
                   >
                     ✕
@@ -1277,14 +1423,19 @@ export default function GrowthPlanPage() {
               type="button"
               onClick={() => {
                 const items = [...(stepsData.prepare?.checklist ?? [])];
-                items.push({ id: uuid(), text: "New checklist item", isSuggested: false, isActive: true });
+                items.push({ id: uuid(), text: L("New checklist item", "Nuevo item de checklist"), isSuggested: false, isActive: true });
                 updatePrepareChecklist(items);
-                pushNeuroMessage("Added a checklist item. Write it as something you can verify before entering.");
+                pushNeuroMessage(
+                  L(
+                    "Added a checklist item. Write it as something you can verify before entering.",
+                    "Checklist agregado. Escríbelo como algo que puedas verificar antes de entrar."
+                  )
+                );
                 openNeuroPanel();
               }}
               className="px-4 py-2 rounded-xl border border-emerald-400 text-emerald-300 hover:bg-emerald-400/10 transition"
             >
-              + Add item
+              {L("+ Add item", "+ Agregar item")}
             </button>
 
             <textarea
@@ -1294,7 +1445,10 @@ export default function GrowthPlanPage() {
                 setStepsData((p) => ({ ...p, prepare: { ...(p.prepare ?? {}), notes: e.target.value } }))
               }
               className="w-full mt-3 min-h-[110px] px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-slate-100 focus:border-emerald-400 outline-none"
-              placeholder="Optional notes (what invalidates trading today, what you must avoid, etc.)"
+              placeholder={L(
+                "Optional notes (what invalidates trading today, what you must avoid, etc.)",
+                "Notas opcionales (qué invalida operar hoy, qué debes evitar, etc.)"
+              )}
             />
           </div>
         )}
@@ -1302,21 +1456,26 @@ export default function GrowthPlanPage() {
         {/* ================= STEP 2 ================= */}
         {step === 2 && (
           <div className="bg-slate-950/70 border border-slate-800 rounded-2xl p-4 space-y-2">
-            <p className="font-semibold text-emerald-300">2) Analysis</p>
+            <p className="font-semibold text-emerald-300">
+              {L("2) Analysis", "2) Análisis")}
+            </p>
             <p className="text-slate-400 text-sm">
-              Select what your analysis is based on. Neuro uses this to flag when you trade outside your identity.
+              {L(
+                "Select what your analysis is based on. Neuro uses this to flag when you trade outside your identity.",
+                "Selecciona en qué basas tu análisis. Neuro usa esto para alertar cuando operas fuera de tu identidad."
+              )}
             </p>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               {[
-                { k: "technical", label: "Technical" },
-                { k: "fundamental", label: "Fundamental" },
-                { k: "options_flow", label: "Options Flow" },
-                { k: "harmonic_patterns", label: "Harmonic patterns" },
-                { k: "price_action", label: "Price Action" },
-                { k: "market_profile", label: "Market Profile" },
-                { k: "order_flow", label: "Order Flow" },
-                { k: "other", label: "Other" },
+                { k: "technical", label: L("Technical", "Técnico") },
+                { k: "fundamental", label: L("Fundamental", "Fundamental") },
+                { k: "options_flow", label: L("Options Flow", "Flujo de opciones") },
+                { k: "harmonic_patterns", label: L("Harmonic patterns", "Patrones armónicos") },
+                { k: "price_action", label: L("Price Action", "Price action") },
+                { k: "market_profile", label: L("Market Profile", "Market profile") },
+                { k: "order_flow", label: L("Order Flow", "Order flow") },
+                { k: "other", label: L("Other", "Otro") },
               ].map((o) => {
                 const styles = stepsData.analysis?.styles ?? [];
                 const active = styles.includes(o.k as any);
@@ -1348,7 +1507,7 @@ export default function GrowthPlanPage() {
                 setStepsData((p) => ({ ...p, analysis: { ...(p.analysis ?? {}), otherStyleText: e.target.value } }))
               }
               className="w-full mt-3 px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-slate-100 focus:border-emerald-400 outline-none"
-              placeholder="If you selected 'Other', describe it here…"
+              placeholder={L("If you selected 'Other', describe it here…", "Si seleccionaste 'Otro', descríbelo aquí…")}
             />
 
             <textarea
@@ -1358,7 +1517,10 @@ export default function GrowthPlanPage() {
                 setStepsData((p) => ({ ...p, analysis: { ...(p.analysis ?? {}), notes: e.target.value } }))
               }
               className="w-full mt-3 min-h-[130px] px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-slate-100 focus:border-emerald-400 outline-none"
-              placeholder="Describe your analysis process (confirmations, invalidations, what you avoid)."
+              placeholder={L(
+                "Describe your analysis process (confirmations, invalidations, what you avoid).",
+                "Describe tu proceso de análisis (confirmaciones, invalidaciones, qué evitas)."
+              )}
             />
           </div>
         )}
@@ -1366,9 +1528,14 @@ export default function GrowthPlanPage() {
         {/* ================= STEP 3 ================= */}
         {step === 3 && (
           <div className="bg-slate-950/70 border border-slate-800 rounded-2xl p-4 space-y-2">
-            <p className="font-semibold text-emerald-300">3) Strategy</p>
+            <p className="font-semibold text-emerald-300">
+              {L("3) Strategy", "3) Estrategia")}
+            </p>
             <p className="text-slate-400 text-sm">
-              Define your setups with entry/exit/management. The clearer this is, the sharper the coaching.
+              {L(
+                "Define your setups with entry/exit/management. The clearer this is, the sharper the coaching.",
+                "Define tus setups con entrada/salida/gestión. Mientras más claro, más preciso el coaching."
+              )}
             </p>
 
             <div className="space-y-3">
@@ -1384,7 +1551,7 @@ export default function GrowthPlanPage() {
                         updateStrategies(arr);
                       }}
                       className="flex-1 px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-slate-100 focus:border-emerald-400 outline-none"
-                      placeholder="Strategy name"
+                      placeholder={L("Strategy name", "Nombre de estrategia")}
                     />
                     <button
                       type="button"
@@ -1392,7 +1559,12 @@ export default function GrowthPlanPage() {
                         const arr = [...(stepsData.strategy?.strategies ?? [])];
                         arr.splice(idx, 1);
                         updateStrategies(arr);
-                        pushNeuroMessage("Strategy removed. Keep only what you actually trade.");
+                        pushNeuroMessage(
+                          L(
+                            "Strategy removed. Keep only what you actually trade.",
+                            "Estrategia eliminada. Deja solo lo que realmente operas."
+                          )
+                        );
                         openNeuroPanel();
                       }}
                       className="px-3 py-2 rounded-xl border border-slate-700 text-slate-300 hover:border-red-400/60 hover:text-red-300 transition"
@@ -1402,11 +1574,11 @@ export default function GrowthPlanPage() {
                   </div>
 
                   {[
-                    ["setup", "Setup / Context"],
-                    ["entryRules", "Entry rules (conditions)"],
-                    ["exitRules", "Exit rules (TP / SL)"],
-                    ["managementRules", "Management (trail, scale, etc.)"],
-                    ["invalidation", "Invalidation (when NOT valid)"],
+                    ["setup", L("Setup / Context", "Setup / Contexto")],
+                    ["entryRules", L("Entry rules (conditions)", "Reglas de entrada (condiciones)")],
+                    ["exitRules", L("Exit rules (TP / SL)", "Reglas de salida (TP / SL)")],
+                    ["managementRules", L("Management (trail, scale, etc.)", "Gestión (trail, scale, etc.)")],
+                    ["invalidation", L("Invalidation (when NOT valid)", "Invalidación (cuando NO es válido)")],
                   ].map(([k, label]) => (
                     <textarea
                       key={k}
@@ -1430,7 +1602,7 @@ export default function GrowthPlanPage() {
               onClick={() => {
                 const arr = [...(stepsData.strategy?.strategies ?? [])];
                 arr.unshift({
-                  name: "New Strategy",
+                  name: L("New Strategy", "Nueva estrategia"),
                   setup: "",
                   entryRules: "",
                   exitRules: "",
@@ -1440,12 +1612,17 @@ export default function GrowthPlanPage() {
                   timeframe: "",
                 });
                 updateStrategies(arr);
-                pushNeuroMessage("Strategy added. Tip: write entries as YES/NO criteria, not vibes.");
+                pushNeuroMessage(
+                  L(
+                    "Strategy added. Tip: write entries as YES/NO criteria, not vibes.",
+                    "Estrategia agregada. Tip: escribe criterios SI/NO, no sensaciones."
+                  )
+                );
                 openNeuroPanel();
               }}
               className="px-4 py-2 rounded-xl border border-emerald-400 text-emerald-300 hover:bg-emerald-400/10 transition"
             >
-              + Add strategy
+              {L("+ Add strategy", "+ Agregar estrategia")}
             </button>
 
             <textarea
@@ -1455,7 +1632,10 @@ export default function GrowthPlanPage() {
                 setStepsData((p) => ({ ...p, strategy: { ...(p.strategy ?? {}), notes: e.target.value } }))
               }
               className="w-full mt-3 min-h-[130px] px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-slate-100 focus:border-emerald-400 outline-none"
-              placeholder="General strategy notes (when to stop, what to avoid, etc.)"
+              placeholder={L(
+                "General strategy notes (when to stop, what to avoid, etc.)",
+                "Notas generales de estrategia (cuándo parar, qué evitar, etc.)"
+              )}
             />
           </div>
         )}
@@ -1463,9 +1643,14 @@ export default function GrowthPlanPage() {
         {/* ================= STEP 4 ================= */}
         {step === 4 && (
           <div className="bg-slate-950/70 border border-slate-800 rounded-2xl p-4 space-y-2">
-            <p className="font-semibold text-emerald-300">4) Journal & Commit</p>
+            <p className="font-semibold text-emerald-300">
+              {L("4) Journal & Commit", "4) Journal y compromiso")}
+            </p>
             <p className="text-slate-400 text-sm">
-              AI Coach will compare your journal execution against this plan (imports, emotions, rules, screenshots).
+              {L(
+                "AI Coach will compare your journal execution against this plan (imports, emotions, rules, screenshots).",
+                "El Coach IA comparará tu ejecución del journal con este plan (importaciones, emociones, reglas, screenshots)."
+              )}
             </p>
 
             <textarea
@@ -1478,7 +1663,10 @@ export default function GrowthPlanPage() {
                 }))
               }
               className="w-full mt-2 min-h-[150px] px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-slate-100 focus:border-emerald-400 outline-none"
-              placeholder="Describe how you will journal: imports, emotions, reasons for entry, rules followed/broken, screenshots, etc."
+              placeholder={L(
+                "Describe how you will journal: imports, emotions, reasons for entry, rules followed/broken, screenshots, etc.",
+                "Describe cómo llevarás el journal: importaciones, emociones, razones de entrada, reglas seguidas/rotas, screenshots, etc."
+              )}
             />
 
             <label className="flex items-start gap-2 text-slate-300 cursor-pointer mt-2">
@@ -1490,15 +1678,22 @@ export default function GrowthPlanPage() {
                   setError("");
                   fieldHelp("commitment");
                   if (e.target.checked) {
-                    pushNeuroMessage("Commitment confirmed ✅. Next step is to Approve & Save your Growth Plan.");
+                    pushNeuroMessage(
+                      L(
+                        "Commitment confirmed ✅. Next step is to Approve & Save your Growth Plan.",
+                        "Compromiso confirmado ✅. El siguiente paso es Aprobar y Guardar tu plan."
+                      )
+                    );
                     openNeuroPanel();
                   }
                 }}
                 className="mt-0.5 h-4 w-4 rounded border-slate-500 bg-slate-900 accent-emerald-400"
               />
               <span>
-                I understand this is a commitment to process, not a guarantee of profits. I agree to follow this plan
-                with discipline.
+                {L(
+                  "I understand this is a commitment to process, not a guarantee of profits. I agree to follow this plan with discipline.",
+                  "Entiendo que esto es un compromiso con el proceso, no una garantía de ganancias. Acepto seguir este plan con disciplina."
+                )}
               </span>
             </label>
 
@@ -1514,7 +1709,7 @@ export default function GrowthPlanPage() {
                     : "bg-slate-800 text-slate-500 cursor-not-allowed"
                 }`}
               >
-                Approve & Save Growth Plan
+                {L("Approve & Save Growth Plan", "Aprobar y guardar plan")}
               </button>
 
               <button
@@ -1522,7 +1717,7 @@ export default function GrowthPlanPage() {
                 onClick={() => router.back()}
                 className="px-4 py-2 rounded-xl border border-slate-700 text-slate-300 hover:border-emerald-400 hover:text-emerald-300 transition"
               >
-                Cancel
+                {L("Cancel", "Cancelar")}
               </button>
             </div>
           </div>
@@ -1540,7 +1735,7 @@ export default function GrowthPlanPage() {
                 : "border-slate-700 text-slate-300 hover:border-emerald-400 hover:text-emerald-300"
             }`}
           >
-            Back
+            {L("Back", "Atrás")}
           </button>
 
           <button
@@ -1553,7 +1748,7 @@ export default function GrowthPlanPage() {
                 : "border-emerald-400 text-emerald-300 hover:bg-emerald-400/10"
             }`}
           >
-            Next
+            {L("Next", "Siguiente")}
           </button>
         </div>
       </div>

@@ -9,6 +9,8 @@ import remarkGfm from "remark-gfm";
 
 import { useAuth } from "@/context/AuthContext";
 import TopNav from "@/app/components/TopNav";
+import { useAppSettings } from "@/lib/appSettings";
+import { resolveLocale } from "@/lib/i18n";
 
 import type { JournalEntry } from "@/lib/journalTypes";
 import { getAllJournalEntries } from "@/lib/journalSupabase";
@@ -113,6 +115,11 @@ type AnalyticsSummary = {
     sumPnl: number;
     avgPnl: number;
     winRate: number;
+    avgWin: number;
+    avgLesson: number;
+    profitFactor: number | null;
+    expectancy: number | null;
+    breakevenRate: number;
     bestDay: { date: string; pnl: number } | null;
     toughestDay: { date: string; pnl: number } | null;
   };
@@ -161,11 +168,18 @@ type BackStudyParams = {
    Helpers
 ========================= */
 
-const QUICK_PROMPTS: string[] = [
+const QUICK_PROMPTS_EN: string[] = [
   "Based on my last sessions, what is the main thing I should change?",
   "Looking only at recent data, what is my biggest psychological leak?",
   "How am I doing vs my plan and challenges this week?",
   "What should I improve in my risk management during losing days?",
+];
+
+const QUICK_PROMPTS_ES: string[] = [
+  "Basado en mis últimas sesiones, ¿qué es lo principal que debo cambiar?",
+  "Viendo solo datos recientes, ¿cuál es mi mayor fuga psicológica?",
+  "¿Cómo voy vs mi plan y mis retos esta semana?",
+  "¿Qué debo mejorar en mi gestión de riesgo durante días rojos?",
 ];
 
 function makeId() {
@@ -252,6 +266,25 @@ function clampText(s: any, max = 900): string {
   return t.length > max ? t.slice(0, max) + "…" : t;
 }
 
+function parseNotesJson(raw: unknown): Record<string, any> | null {
+  if (!raw || typeof raw !== "string") return null;
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? (parsed as Record<string, any>) : null;
+  } catch {
+    return null;
+  }
+}
+
+function parseCostsFromNotes(notes: Record<string, any> | null) {
+  const fees = Number(notes?.costs?.fees ?? notes?.fees ?? 0);
+  const commissions = Number(notes?.costs?.commissions ?? notes?.commissions ?? 0);
+  return {
+    fees: Number.isFinite(fees) ? fees : 0,
+    commissions: Number.isFinite(commissions) ? commissions : 0,
+  };
+}
+
 function toNum(x: any, fb = 0): number {
   const n = Number(x);
   return Number.isFinite(n) ? n : fb;
@@ -285,16 +318,28 @@ function planStartIsoFromPlan(plan: GrowthPlanRow | null): string | null {
 
 function formatDayLabel(dow: string) {
   const n = Number(dow);
-  const map: Record<number, string> = {
-    0: "Sunday",
-    1: "Monday",
-    2: "Tuesday",
-    3: "Wednesday",
-    4: "Thursday",
-    5: "Friday",
-    6: "Saturday",
-  };
-  return map[n] ?? dow;
+  if (!Number.isFinite(n)) return dow;
+  const locale =
+    typeof document !== "undefined"
+      ? document.documentElement.lang || "en"
+      : "en";
+  try {
+    const d = new Date();
+    const shift = (d.getDay() - n + 7) % 7;
+    d.setDate(d.getDate() - shift);
+    return new Intl.DateTimeFormat(locale, { weekday: "long" }).format(d);
+  } catch {
+    const fallback: Record<number, string> = {
+      0: "Sunday",
+      1: "Monday",
+      2: "Tuesday",
+      3: "Wednesday",
+      4: "Thursday",
+      5: "Friday",
+      6: "Saturday",
+    };
+    return fallback[n] ?? dow;
+  }
 }
 
 /* Detect approximate language of the question (hint for backend) */
@@ -352,12 +397,25 @@ function buildUserProfileForCoach(rawUser: any): UserProfileForCoach | null {
 
 /* Journal entry → best guess net P&L */
 function sessionNetPnl(entry: any): number {
-  const net =
+  const direct =
     entry?.pnlNet ??
     entry?.netPnl ??
     entry?.pnl ??
-    0;
-  return toNum(net, 0);
+    null;
+  const directNum = Number(direct);
+  if (Number.isFinite(directNum)) return directNum;
+
+  const notes = parseNotesJson(entry?.notes);
+  const noteNet = Number(notes?.pnl?.net ?? notes?.pnl_net);
+  if (Number.isFinite(noteNet)) return noteNet;
+
+  const noteGross = Number(notes?.pnl?.gross ?? notes?.pnl_gross);
+  if (Number.isFinite(noteGross)) {
+    const costs = parseCostsFromNotes(notes);
+    return noteGross - (costs.fees + costs.commissions);
+  }
+
+  return 0;
 }
 
 /* A compact session object to send to the backend (keeps tokens reasonable) */
@@ -443,6 +501,11 @@ function buildAnalyticsSummaryFromEntries(entries: JournalEntry[]): AnalyticsSum
     sumPnl: 0,
     avgPnl: 0,
     winRate: 0,
+    avgWin: 0,
+    avgLesson: 0,
+    profitFactor: null as number | null,
+    expectancy: null as number | null,
+    breakevenRate: 0,
     bestDay: null as { date: string; pnl: number } | null,
     toughestDay: null as { date: string; pnl: number } | null,
   };
@@ -515,14 +578,29 @@ function buildAnalyticsSummaryFromEntries(entries: JournalEntry[]): AnalyticsSum
 
   if (base.totalSessions > 0) {
     base.avgPnl = base.sumPnl / base.totalSessions;
-    base.winRate = (base.greenSessions / base.totalSessions) * 100;
+    const denom = base.greenSessions + base.learningSessions;
+    base.winRate = denom > 0 ? (base.greenSessions / denom) * 100 : 0;
+    base.breakevenRate = (base.flatSessions / base.totalSessions) * 100;
+  }
+
+  const wins = (entries as any[]).map(sessionNetPnl).filter((p) => p > 0);
+  const lessons = (entries as any[]).map(sessionNetPnl).filter((p) => p < 0).map((p) => Math.abs(p));
+  base.avgWin = wins.length ? wins.reduce((a, b) => a + b, 0) / wins.length : 0;
+  base.avgLesson = lessons.length ? lessons.reduce((a, b) => a + b, 0) / lessons.length : 0;
+  const sumWins = wins.reduce((a, b) => a + b, 0);
+  const sumLessons = lessons.reduce((a, b) => a + b, 0);
+  base.profitFactor = sumLessons > 0 ? sumWins / sumLessons : null;
+  if (base.winRate != null) {
+    const pWin = (base.winRate ?? 0) / 100;
+    base.expectancy = pWin * base.avgWin - (1 - pWin) * base.avgLesson;
   }
 
   for (const key of Object.keys(byDayOfWeek)) {
     const bucket = byDayOfWeek[key];
     if (bucket.sessions > 0) {
       bucket.avgPnl = bucket.sumPnl / bucket.sessions;
-      bucket.winRate = (bucket.green / bucket.sessions) * 100;
+      const denom = bucket.green + bucket.learning;
+      bucket.winRate = denom > 0 ? (bucket.green / denom) * 100 : 0;
     }
   }
 
@@ -640,7 +718,11 @@ function fileToDataUrl(file: File): Promise<string> {
 /* Currency formatter */
 function usd(n: number) {
   const v = Number.isFinite(n) ? n : 0;
-  return v.toLocaleString(undefined, { style: "currency", currency: "USD" });
+  const locale =
+    typeof document !== "undefined"
+      ? document.documentElement.lang || undefined
+      : undefined;
+  return v.toLocaleString(locale, { style: "currency", currency: "USD" });
 }
 
 /* =========================
@@ -651,6 +733,11 @@ function AiCoachingPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { user, loading: authLoading } = useAuth();
+  const { locale } = useAppSettings();
+  const lang = resolveLocale(locale);
+  const isEs = lang === "es";
+  const L = (en: string, es: string) => (isEs ? es : en);
+  const quickPrompts = isEs ? QUICK_PROMPTS_ES : QUICK_PROMPTS_EN;
 
   // Platform data
   const [entries, setEntries] = useState<JournalEntry[]>([]);
@@ -701,21 +788,24 @@ function AiCoachingPageInner() {
     if (!backStudyParams) return null;
 
     const lines: (string | null)[] = [
-      "Back-study trade context:",
-      `- Underlying symbol: ${backStudyParams.symbol}`,
-      `- Session date (local calendar): ${backStudyParams.date}`,
+      L("Back-study trade context:", "Contexto de back-study:"),
+      `- ${L("Underlying symbol", "Símbolo subyacente")}: ${backStudyParams.symbol}`,
+      `- ${L("Session date (local calendar)", "Fecha de sesión (calendario local)")}: ${backStudyParams.date}`,
       backStudyParams.entryTime && backStudyParams.exitTime
-        ? `- Intraday window: ${backStudyParams.entryTime} → ${backStudyParams.exitTime} (local time)`
+        ? `- ${L("Intraday window", "Ventana intradía")}: ${backStudyParams.entryTime} → ${backStudyParams.exitTime} (${L("local time", "hora local")})`
         : backStudyParams.entryTime
-        ? `- Entry time: ${backStudyParams.entryTime} (local time)`
+        ? `- ${L("Entry time", "Hora de entrada")}: ${backStudyParams.entryTime} (${L("local time", "hora local")})`
         : null,
-      backStudyParams.tf ? `- Chart timeframe selected: ${backStudyParams.tf}` : null,
-      backStudyParams.range ? `- Historical range loaded: ${backStudyParams.range}` : null,
-      "If an image is attached, it is a screenshot of this back-study chart with green/blue arrows marking entry and exit.",
+      backStudyParams.tf ? `- ${L("Chart timeframe selected", "Timeframe seleccionado")}: ${backStudyParams.tf}` : null,
+      backStudyParams.range ? `- ${L("Historical range loaded", "Rango histórico cargado")}: ${backStudyParams.range}` : null,
+      L(
+        "If an image is attached, it is a screenshot of this back-study chart with green/blue arrows marking entry and exit.",
+        "Si hay una imagen adjunta, es un screenshot del chart con flechas verde/azul marcando entrada y salida."
+      ),
     ];
 
     return lines.filter(Boolean).join("\n");
-  }, [backStudyParams]);
+  }, [backStudyParams, lang]);
 
   /* ---------- Protect route ---------- */
   useEffect(() => {
@@ -748,7 +838,7 @@ function AiCoachingPageInner() {
         if (qsThread && initialThreads.some((t) => t.id === qsThread)) {
           threadToUse = initialThreads.find((t) => t.id === qsThread) || null;
         } else {
-          threadToUse = await getOrCreateMostRecentAiCoachThread({ userId, defaultTitle: "AI Coaching" });
+          threadToUse = await getOrCreateMostRecentAiCoachThread({ userId, defaultTitle: L("AI Coaching", "Coaching AI") });
         }
 
         const refreshedThreads = threadToUse
@@ -952,7 +1042,7 @@ function AiCoachingPageInner() {
 
     const t = await createAiCoachThread({
       userId: coachUserProfile.id,
-      title: "AI Coaching",
+      title: L("AI Coaching", "Coaching AI"),
       metadata: backStudyParams ? { backStudyParams } : null,
     });
 
@@ -1001,11 +1091,14 @@ function AiCoachingPageInner() {
 
     try {
       const finalQuestion = question.trim();
-      const languageHint = detectLanguage(finalQuestion);
+      const languageHint = isEs ? "es" : detectLanguage(finalQuestion);
 
       const userText =
         finalQuestion ||
-        "(No specific question. Please analyze the attached screenshot and my data.)";
+        L(
+          "(No specific question. Please analyze the attached screenshot and my data.)",
+          "(Sin pregunta específica. Analiza el screenshot adjunto y mis datos.)"
+        );
 
       // 1) Persist the user message first (Supabase)
       const userRow = await insertAiCoachMessage({
@@ -1107,11 +1200,16 @@ function AiCoachingPageInner() {
       const data = await res.json().catch(() => ({}));
 
       if (!res.ok) {
-        const msg = data?.details || data?.error || "There was an error contacting the AI coach.";
+        const msg =
+          data?.details ||
+          data?.error ||
+          L("There was an error contacting the AI coach.", "Hubo un error contactando al coach AI.");
         throw new Error(msg);
       }
 
-      const coachText = String(data.text || "").trim() || "No response text received.";
+      const coachText =
+        String(data.text || "").trim() ||
+        L("No response text received.", "No se recibió texto de respuesta.");
 
       // 5) Persist coach message (Supabase)
       const coachRow = await insertAiCoachMessage({
@@ -1139,7 +1237,7 @@ function AiCoachingPageInner() {
       clearScreenshot();
     } catch (err: any) {
       console.error("[AI Coaching] request error:", err);
-      setCoachState({ loading: false, error: err?.message || "Unknown error" });
+      setCoachState({ loading: false, error: err?.message || L("Unknown error", "Error desconocido") });
     }
   }
 
@@ -1158,7 +1256,7 @@ function AiCoachingPageInner() {
   if (authLoading || !user) {
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center">
-        <p className="text-sm text-slate-400">Loading coach…</p>
+        <p className="text-sm text-slate-400">{L("Loading coach…", "Cargando coach…")}</p>
       </div>
     );
   }
@@ -1175,13 +1273,18 @@ function AiCoachingPageInner() {
               AI
             </div>
             <div>
-              <h1 className="text-2xl font-semibold">Your AI Trading Coach</h1>
+              <h1 className="text-2xl font-semibold">
+                {L("Your AI Trading Coach", "Tu coach de trading con IA")}
+              </h1>
               <p className="text-sm text-slate-400 mt-1">
-                Practical coaching on risk, psychology and process, using your journal, analytics, challenges and growth plan.
+                {L(
+                  "Practical coaching on risk, psychology and process, using your journal, analytics, challenges and growth plan.",
+                  "Coaching práctico de riesgo, psicología y proceso usando tu journal, analytics, retos y plan de crecimiento."
+                )}
               </p>
               {coachUserProfile && (
                 <p className="text-[11px] text-slate-500 mt-1">
-                  Coaching for{" "}
+                  {L("Coaching for", "Coaching para")}{" "}
                   <span className="font-semibold text-emerald-300">
                     {coachUserProfile.firstName}
                   </span>
@@ -1194,11 +1297,11 @@ function AiCoachingPageInner() {
           <div className="flex flex-col items-end gap-2">
             {gamification && (
               <div className="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-3 py-1 text-[11px] text-emerald-200">
-                Level{" "}
+                {L("Level", "Nivel")}{" "}
                 <span className="font-semibold text-emerald-100">
                   {gamification.level}
                 </span>{" "}
-                · Tier{" "}
+                · {L("Tier", "Rango")}{" "}
                 <span className="font-semibold text-emerald-100">
                   {gamification.tier}
                 </span>{" "}
@@ -1209,7 +1312,7 @@ function AiCoachingPageInner() {
               href="/performance/analytics-statistics"
               className="text-xs rounded-full border border-slate-700 px-3 py-1 hover:bg-slate-800"
             >
-              ← Back to Analytics
+              ← {L("Back to Analytics", "Volver a Analytics")}
             </Link>
           </div>
         </div>
@@ -1218,22 +1321,22 @@ function AiCoachingPageInner() {
         {backStudyParams && (
           <div className="rounded-2xl border border-sky-700/60 bg-sky-900/30 px-3 py-2 text-[11px] text-sky-100 flex flex-wrap items-center gap-2">
             <span className="font-semibold uppercase tracking-[0.18em] text-sky-300">
-              Back-study trade linked
+              {L("Back-study trade linked", "Back-study vinculado")}
             </span>
             <span>
-              Symbol:{" "}
+              {L("Symbol", "Símbolo")}:{" "}
               <span className="font-mono font-semibold">
                 {backStudyParams.symbol}
               </span>
             </span>
-            <span>· Date: {backStudyParams.date}</span>
+            <span>· {L("Date", "Fecha")}: {backStudyParams.date}</span>
             {backStudyParams.entryTime && backStudyParams.exitTime && (
               <span>
-                · Window: {backStudyParams.entryTime} → {backStudyParams.exitTime}
+                · {L("Window", "Ventana")}: {backStudyParams.entryTime} → {backStudyParams.exitTime}
               </span>
             )}
-            {backStudyParams.tf && <span>· TF: {backStudyParams.tf}</span>}
-            {backStudyParams.range && <span>· Range: {backStudyParams.range}</span>}
+            {backStudyParams.tf && <span>· {L("TF", "TF")}: {backStudyParams.tf}</span>}
+            {backStudyParams.range && <span>· {L("Range", "Rango")}: {backStudyParams.range}</span>}
           </div>
         )}
 
@@ -1243,9 +1346,15 @@ function AiCoachingPageInner() {
             {/* Chat header */}
             <div className="border-b border-slate-800 px-4 py-3 flex items-center justify-between gap-3">
               <div>
-                <p className="text-sm font-medium text-slate-100">Live coaching</p>
+                <p className="text-sm font-medium text-slate-100">
+                  {L("Live coaching", "Coaching en vivo")}
+                </p>
                 <p className="text-xs text-slate-400">
-                  Ask questions, attach a chart screenshot, and get short, focused feedback. Puedes escribir en español o inglés.
+                  {L(
+                    "Ask questions, attach a chart screenshot, and get short, focused feedback.",
+                    "Haz preguntas, adjunta un screenshot y recibe feedback corto y directo."
+                  )}{" "}
+                  {L("You can write in English or Spanish.", "Puedes escribir en español o inglés.")}
                 </p>
               </div>
 
@@ -1258,7 +1367,7 @@ function AiCoachingPageInner() {
                 >
                   {threads.map((t) => (
                     <option key={t.id} value={t.id}>
-                      {t.title || "AI Coaching"} · {String(t.updated_at || "").slice(0, 10)}
+                      {t.title || L("AI Coaching", "AI Coaching")} · {String(t.updated_at || "").slice(0, 10)}
                     </option>
                   ))}
                 </select>
@@ -1267,7 +1376,7 @@ function AiCoachingPageInner() {
                   onClick={createNewThread}
                   className="text-xs rounded-xl border border-slate-700 px-3 py-1 hover:bg-slate-800"
                 >
-                  New chat
+                  {L("New chat", "Nuevo chat")}
                 </button>
               </div>
             </div>
@@ -1276,11 +1385,14 @@ function AiCoachingPageInner() {
             <div className="flex-1 min-h-0 overflow-y-auto px-4 py-3 space-y-3">
               {!messages.length && !coachState.error && (
                 <p className="text-xs text-slate-500">
-                  Start by typing a question (example:{" "}
+                  {L("Start by typing a question (example:", "Empieza escribiendo una pregunta (ejemplo:")}{" "}
                   <span className="italic">
-                    “What do I need to improve in my last 5 sessions?”
+                    {L("“What do I need to improve in my last 5 sessions?”", "“¿Qué debo mejorar en mis últimas 5 sesiones?”")}
                   </span>
-                  ). You can also attach a screenshot of a trade chart with entry/exit arrows.
+                  {L(
+                    "). You can also attach a screenshot of a trade chart with entry/exit arrows.",
+                    "). También puedes adjuntar un screenshot de un chart con flechas de entrada/salida."
+                  )}
                 </p>
               )}
 
@@ -1304,7 +1416,7 @@ function AiCoachingPageInner() {
               {coachState.loading && (
                 <div className="flex justify-start">
                   <div className="text-xs text-slate-400 italic">
-                    The coach is analyzing your data…
+                    {L("The coach is analyzing your data…", "El coach está analizando tus datos…")}
                   </div>
                 </div>
               )}
@@ -1322,7 +1434,7 @@ function AiCoachingPageInner() {
             <div className="border-t border-slate-800 px-4 py-3 space-y-3">
               {/* Quick prompts */}
               <div className="flex flex-wrap gap-2">
-                {QUICK_PROMPTS.map((p) => (
+                {quickPrompts.map((p) => (
                   <button
                     key={p}
                     type="button"
@@ -1339,14 +1451,17 @@ function AiCoachingPageInner() {
                 <div className="flex gap-2">
                   <textarea
                     className="flex-1 min-h-[60px] max-h-[140px] rounded-xl border border-slate-700 bg-slate-950/60 px-3 py-2 text-sm outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400/40"
-                    placeholder="Ask your coach about your last trades, emotions, challenges, or plan adherence... (puedes escribir en español)"
+                    placeholder={L(
+                      "Ask your coach about your last trades, emotions, challenges, or plan adherence...",
+                      "Pregunta al coach sobre tus últimas operaciones, emociones, retos o disciplina del plan..."
+                    )}
                     value={question}
                     onChange={(e) => setQuestion(e.target.value)}
                   />
                   <div className="w-32 flex flex-col items-center gap-2">
                     <label className="w-full text-[11px] text-center rounded-xl border border-dashed border-slate-700 bg-slate-950/60 px-2 py-2 cursor-pointer hover:border-emerald-400 hover:text-emerald-200">
-                      <span className="block mb-1">Screenshot</span>
-                      <span className="text-[10px] text-slate-400">Chart / PnL / platform</span>
+                      <span className="block mb-1">{L("Screenshot", "Screenshot")}</span>
+                      <span className="text-[10px] text-slate-400">{L("Chart / P&L / platform", "Chart / P&L / plataforma")}</span>
                       <input
                         type="file"
                         accept="image/*"
@@ -1358,7 +1473,7 @@ function AiCoachingPageInner() {
                       <div className="relative w-full">
                         <img
                           src={screenshotPreview}
-                          alt="Screenshot preview"
+                          alt={L("Screenshot preview", "Vista previa")}
                           className="rounded-lg border border-slate-700 max-h-24 w-full object-cover"
                         />
                         <button
@@ -1384,7 +1499,7 @@ function AiCoachingPageInner() {
                         : "bg-emerald-500 hover:bg-emerald-400 text-slate-900"
                     }`}
                   >
-                    {coachState.loading ? "Coaching..." : "Send to AI coach"}
+                    {coachState.loading ? L("Coaching...", "Analizando...") : L("Send to AI coach", "Enviar al coach AI")}
                   </button>
                 </div>
               </div>
@@ -1394,55 +1509,59 @@ function AiCoachingPageInner() {
           {/* Side panel */}
           <section className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4 space-y-4 min-h-0 overflow-y-auto">
             <h2 className="text-sm font-medium text-slate-200 flex items-center justify-between">
-              Snapshot
-              <span className="text-[10px] text-slate-400">Last {recentSessions.length} sessions</span>
+              {L("Snapshot", "Resumen")}
+              <span className="text-[10px] text-slate-400">
+                {L("Last", "Últimas")} {recentSessions.length} {L("sessions", "sesiones")}
+              </span>
             </h2>
 
             <div className="grid grid-cols-2 gap-3 text-sm">
               <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
-                <p className="text-[11px] text-slate-400">Total sessions</p>
+                <p className="text-[11px] text-slate-400">{L("Total sessions", "Sesiones totales")}</p>
                 <p className="text-xl font-semibold">{snapshot?.totalSessions ?? 0}</p>
               </div>
               <div className="rounded-xl border border-emerald-800/60 bg-slate-950/60 p-3">
-                <p className="text-[11px] text-slate-400">Green</p>
+                <p className="text-[11px] text-slate-400">{L("Wins", "Ganadas")}</p>
                 <p className="text-xl font-semibold">{snapshot?.greenSessions ?? 0}</p>
               </div>
               <div className="rounded-xl border border-sky-800/60 bg-slate-950/60 p-3">
-                <p className="text-[11px] text-slate-400">Red</p>
+                <p className="text-[11px] text-slate-400">{L("Lessons", "Aprendizajes")}</p>
                 <p className="text-xl font-semibold">{snapshot?.redSessions ?? 0}</p>
               </div>
               <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
-                <p className="text-[11px] text-slate-400">Win rate (est.)</p>
+                <p className="text-[11px] text-slate-400">{L("Win rate (est.)", "Win rate (est.)")}</p>
                 <p className="text-xl font-semibold">{snapshot ? `${snapshot.winRate.toFixed(1)}%` : "—"}</p>
               </div>
             </div>
 
             {planSnapshot && (
               <div className="rounded-xl border border-emerald-700 bg-slate-950/70 p-3 space-y-1">
-                <p className="text-[11px] text-emerald-300 font-semibold">Plan vs current (cashflows-neutral)</p>
-
-                <p className="text-[12px] text-slate-300">
-                  Start: <span className="font-semibold">{usd(planSnapshot.effectiveStartingBalance)}</span>{" "}
-                  · Target: <span className="font-semibold text-emerald-300">{usd(planSnapshot.effectiveTargetBalance)}</span>
+                <p className="text-[11px] text-emerald-300 font-semibold">
+                  {L("Plan vs current (cashflows-neutral)", "Plan vs actual (neutral a cashflows)")}
                 </p>
 
                 <p className="text-[12px] text-slate-300">
-                  Current balance: <span className="font-semibold">{usd(planSnapshot.currentBalance)}</span>
+                  {L("Start", "Inicio")}: <span className="font-semibold">{usd(planSnapshot.effectiveStartingBalance)}</span>{" "}
+                  · {L("Target", "Meta")}: <span className="font-semibold text-emerald-300">{usd(planSnapshot.effectiveTargetBalance)}</span>
+                </p>
+
+                <p className="text-[12px] text-slate-300">
+                  {L("Current balance", "Balance actual")}: <span className="font-semibold">{usd(planSnapshot.currentBalance)}</span>
                 </p>
 
                 <p className="text-[11px] text-slate-400">
-                  Progress vs plan: {planSnapshot.progressPct.toFixed(1)}% · Sessions since plan: {planSnapshot.sessionsSincePlan}
+                  {L("Progress vs plan", "Progreso vs plan")}: {planSnapshot.progressPct.toFixed(1)}% · {L("Sessions since plan", "Sesiones desde el plan")}: {planSnapshot.sessionsSincePlan}
                 </p>
 
                 <p className="text-[11px] text-slate-400">
-                  Trading P&amp;L: {usd(planSnapshot.tradingPnlSincePlan)} · Net cashflow: {usd(planSnapshot.netCashflows)}
+                  {L("Trading P&L", "P&L trading")}: {usd(planSnapshot.tradingPnlSincePlan)} · {L("Net cashflow", "Cashflow neto")}: {usd(planSnapshot.netCashflows)}
                 </p>
               </div>
             )}
 
             {/* Top tags */}
             <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
-              <p className="text-[11px] text-slate-400 mb-2">Most common tags</p>
+              <p className="text-[11px] text-slate-400 mb-2">{L("Most common tags", "Tags más comunes")}</p>
               <div className="flex flex-wrap gap-1.5">
                 {Object.entries(analyticsSummary.tagCounts)
                   .sort((a, b) => b[1] - a[1])
@@ -1453,14 +1572,17 @@ function AiCoachingPageInner() {
                     </span>
                   ))}
                 {!Object.keys(analyticsSummary.tagCounts).length && (
-                  <p className="text-[11px] text-slate-500">No tags yet.</p>
+                  <p className="text-[11px] text-slate-500">{L("No tags yet.", "Aún no hay tags.")}</p>
                 )}
               </div>
             </div>
 
             {!snapshot && !dataLoading && (
               <p className="text-xs text-amber-300">
-                You need at least one journal session saved before the coach can analyze your data.
+                {L(
+                  "You need at least one journal session saved before the coach can analyze your data.",
+                  "Necesitas al menos una sesión en el journal para que el coach pueda analizar tus datos."
+                )}
               </p>
             )}
           </section>
@@ -1475,11 +1597,15 @@ function AiCoachingPageInner() {
 ========================= */
 
 export default function AiCoachingPage() {
+  const loadingLabel =
+    typeof document !== "undefined" && document.documentElement.lang.toLowerCase().startsWith("es")
+      ? "Cargando coach…"
+      : "Loading coach…";
   return (
     <Suspense
       fallback={
         <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center">
-          <p className="text-sm text-slate-400">Loading coach…</p>
+          <p className="text-sm text-slate-400">{loadingLabel}</p>
         </div>
       }
     >

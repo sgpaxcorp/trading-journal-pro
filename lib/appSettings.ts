@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { supabaseBrowser } from "@/lib/supaBaseClient";
 
 export type AppTheme = "neuro" | "light";
 export type AppLocale = "auto" | "en" | "es";
@@ -100,18 +101,56 @@ export function useAppSettings(): {
   const [locale, setLocaleState] = useState<AppLocale>("auto");
   const [ready, setReady] = useState(false);
 
-  // Initial load from localStorage
+  // Initial load from localStorage + hydrate from Supabase when signed in
   useEffect(() => {
-    const t = getStoredTheme();
-    const l = getStoredLocale();
+    let alive = true;
 
-    setThemeState(t);
-    setLocaleState(l);
+    const load = async () => {
+      const t = getStoredTheme();
+      const l = getStoredLocale();
 
-    applyThemeClass(t);
-    applyLocaleAttribute(l);
+      setThemeState(t);
+      setLocaleState(l);
 
-    setReady(true);
+      applyThemeClass(t);
+      applyLocaleAttribute(l);
+
+      try {
+        const { data: sessionData } = await supabaseBrowser.auth.getSession();
+        const userId = sessionData?.session?.user?.id;
+        if (!userId) return;
+
+        const { data, error } = await supabaseBrowser
+          .from("user_preferences")
+          .select("theme, locale")
+          .eq("user_id", userId)
+          .maybeSingle();
+
+        if (error) {
+          console.warn("[appSettings] user_preferences load error:", error);
+          return;
+        }
+
+        if (data?.theme) {
+          const nextTheme = data.theme === "light" ? "light" : "neuro";
+          if (nextTheme !== t) setThemeState(nextTheme);
+        }
+
+        if (data?.locale) {
+          const dbLocale = data.locale === "en" || data.locale === "es" || data.locale === "auto" ? data.locale : "auto";
+          if (dbLocale !== l) setLocaleState(dbLocale);
+        }
+      } catch (e) {
+        console.warn("[appSettings] bootstrap exception:", e);
+      } finally {
+        if (alive) setReady(true);
+      }
+    };
+
+    void load();
+    return () => {
+      alive = false;
+    };
   }, []);
 
   // Keep multiple tabs / components in sync via a custom event
@@ -132,6 +171,17 @@ export function useAppSettings(): {
     return () => w.removeEventListener(EVT, onEvt);
   }, []);
 
+  // Apply + persist when state changes (covers DB hydration)
+  useEffect(() => {
+    applyThemeClass(theme);
+    setStoredTheme(theme);
+  }, [theme]);
+
+  useEffect(() => {
+    applyLocaleAttribute(locale);
+    setStoredLocale(locale);
+  }, [locale]);
+
   const setTheme = useCallback((t: AppTheme) => {
     setStoredTheme(t);
     applyThemeClass(t);
@@ -145,6 +195,44 @@ export function useAppSettings(): {
     emitAppSettingsChange();
     setLocaleState(l);
   }, []);
+
+  // Persist to Supabase whenever theme/locale changes (if signed in)
+  useEffect(() => {
+    if (!ready) return;
+
+    let alive = true;
+
+    const sync = async () => {
+      try {
+        const { data: sessionData } = await supabaseBrowser.auth.getSession();
+        const userId = sessionData?.session?.user?.id;
+        if (!userId) return;
+
+        const { error } = await supabaseBrowser
+          .from("user_preferences")
+          .upsert(
+            {
+              user_id: userId,
+              theme,
+              locale,
+              updated_at: new Date().toISOString(),
+            },
+            { onConflict: "user_id" }
+          );
+
+        if (error) {
+          console.warn("[appSettings] user_preferences upsert error:", error);
+        }
+      } catch (e) {
+        console.warn("[appSettings] sync exception:", e);
+      }
+    };
+
+    void sync();
+    return () => {
+      alive = false;
+    };
+  }, [theme, locale, ready]);
 
   return useMemo(
     () => ({ theme, setTheme, locale, setLocale, ready }),

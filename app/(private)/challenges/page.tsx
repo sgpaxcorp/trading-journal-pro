@@ -6,6 +6,8 @@ import Link from "next/link";
 
 import TopNav from "@/app/components/TopNav";
 import { useAuth } from "@/context/AuthContext";
+import { useAppSettings } from "@/lib/appSettings";
+import { resolveLocale } from "@/lib/i18n";
 
 import {
   CHALLENGES,
@@ -32,12 +34,12 @@ type DialogMode = "start" | "restart" | null;
    Helpers
 ========================= */
 
-function getStatusLabel(status?: string | null) {
-  if (!status) return "Not started";
-  if (status === "active") return "Active";
-  if (status === "completed") return "Completed";
-  if (status === "failed") return "Failed";
-  if (status === "restarted") return "Restarted";
+function getStatusLabel(status: string | null | undefined, L: (en: string, es: string) => string) {
+  if (!status) return L("Not started", "No iniciado");
+  if (status === "active") return L("Active", "Activo");
+  if (status === "completed") return L("Completed", "Completado");
+  if (status === "failed") return L("Failed", "Fallido");
+  if (status === "restarted") return L("Restarted", "Reiniciado");
   return status;
 }
 
@@ -61,6 +63,10 @@ function pct(n: number) {
 
 export default function ChallengesPage() {
   const { user, loading } = useAuth() as any;
+  const { locale } = useAppSettings();
+  const lang = resolveLocale(locale);
+  const isEs = lang === "es";
+  const L = (en: string, es: string) => (isEs ? es : en);
 
   const userId = useMemo(() => user?.id || "", [user]);
 
@@ -100,7 +106,7 @@ export default function ChallengesPage() {
         setProfile(g);
       } catch (e: any) {
         console.error("[ChallengesPage] load error:", e);
-        setError(e?.message ?? "Failed to load challenges.");
+        setError(e?.message ?? L("Failed to load challenges.", "No se pudieron cargar los retos."));
       }
     };
 
@@ -146,7 +152,7 @@ export default function ChallengesPage() {
       closeDialog();
     } catch (e: any) {
       console.error("[ChallengesPage] confirm error:", e);
-      setError(e?.message ?? "Failed to start challenge.");
+      setError(e?.message ?? L("Failed to start challenge.", "No se pudo iniciar el reto."));
     } finally {
       setBusy(false);
     }
@@ -159,28 +165,30 @@ export default function ChallengesPage() {
         {/* Header */}
         <header className="mb-8 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
           <div>
-            <h1 className="text-3xl font-semibold tracking-tight">Challenges</h1>
+            <h1 className="text-3xl font-semibold tracking-tight">{L("Challenges", "Retos")}</h1>
             <p className="mt-2 max-w-2xl text-sm text-slate-400">
-              Structured missions to build consistency, discipline, and risk control.
-              The point is to win on process, not chase P&amp;L.
+              {L(
+                "Structured missions to build consistency, discipline, and risk control. The point is to win on process, not chase P&L.",
+                "Misiones estructuradas para construir consistencia, disciplina y control de riesgo. El objetivo es ganar en proceso, no perseguir el P&L."
+              )}
             </p>
           </div>
 
           {profile && (
             <div className="rounded-2xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-xs text-emerald-200">
               <p>
-                Level{" "}
+                {L("Level", "Nivel")}{" "}
                 <span className="font-semibold text-emerald-100">
                   {profile.level}
                 </span>{" "}
-                · Tier{" "}
+                · {L("Tier", "Nivel")}{" "}
                 <span className="font-semibold text-emerald-100">
                   {profile.tier}
                 </span>
               </p>
               <p className="mt-1">
-                {profile.xp.toLocaleString()} XP • {profile.badges.length} badges
-                unlocked
+                {profile.xp.toLocaleString()} XP • {profile.badges.length}{" "}
+                {L("badges unlocked", "insignias desbloqueadas")}
               </p>
             </div>
           )}
@@ -204,7 +212,7 @@ export default function ChallengesPage() {
             const pctGreen = c.durationDays > 0 ? pct((greenDays / c.durationDays) * 100) : 0;
             const pctTracked = c.durationDays > 0 ? pct((tracked / c.durationDays) * 100) : 0;
 
-            const statusLabel = getStatusLabel(status);
+            const statusLabel = getStatusLabel(status, L);
             const statusClasses = getStatusColorClasses(status);
 
             const isActive = status === "active";
@@ -222,7 +230,8 @@ export default function ChallengesPage() {
                   <p className="text-sm text-slate-300">{c.shortDescription}</p>
 
                   <p className="mt-3 text-[11px] font-semibold text-emerald-400">
-                    DURATION: {c.durationDays} DAYS
+                    {L("DURATION", "DURACIÓN")}: {c.durationDays}{" "}
+                    {L("DAYS", "DÍAS")}
                   </p>
                   <p className="text-sm text-slate-200">{c.highlight}</p>
 
@@ -236,7 +245,7 @@ export default function ChallengesPage() {
                 {/* Status + progress */}
                 <div className="mt-4 flex items-end justify-between text-xs">
                   <div className="space-y-1">
-                    <p className="text-[11px] text-slate-400">Status</p>
+                    <p className="text-[11px] text-slate-400">{L("Status", "Estado")}</p>
                     <p className={`text-sm font-medium ${statusClasses}`}>
                       {statusLabel}
                     </p>
@@ -244,7 +253,7 @@ export default function ChallengesPage() {
 
                   <div className="text-right space-y-1">
                     <p className="text-[11px] text-slate-400">
-                      Process-green days
+                      {L("Process-green days", "Días verdes de proceso")}
                     </p>
                     <p className="text-sm font-semibold text-slate-100">
                       {greenDays} / {c.durationDays}
@@ -255,7 +264,7 @@ export default function ChallengesPage() {
                 {/* Progress bars */}
                 <div className="mt-2">
                   <div className="flex items-center justify-between text-[10px] text-slate-500 mb-1">
-                    <span>Tracked</span>
+                    <span>{L("Tracked", "Registrados")}</span>
                     <span>
                       {tracked} / {c.durationDays}
                     </span>
@@ -268,7 +277,7 @@ export default function ChallengesPage() {
                   </div>
 
                   <div className="flex items-center justify-between text-[10px] text-slate-500 mt-2 mb-1">
-                    <span>Green days</span>
+                    <span>{L("Green days", "Días verdes")}</span>
                     <span>{pctGreen.toFixed(0)}%</span>
                   </div>
                   <div className="h-1.5 w-full rounded-full bg-slate-900 overflow-hidden">
@@ -279,8 +288,10 @@ export default function ChallengesPage() {
                   </div>
 
                   <p className="mt-2 text-[10px] text-slate-500">
-                    Track daily check-ins on the detail page. XP is awarded per check-in
-                    and bonus XP unlocks on completion.
+                    {L(
+                      "Track daily check-ins on the detail page. XP is awarded per check-in and bonus XP unlocks on completion.",
+                      "Registra check‑ins diarios en la página de detalle. Se otorga XP por cada check‑in y XP extra al completar."
+                    )}
                   </p>
                 </div>
 
@@ -292,14 +303,14 @@ export default function ChallengesPage() {
                     className="rounded-full bg-emerald-400 px-4 py-1.5 text-xs font-semibold text-slate-950 hover:bg-emerald-300 transition disabled:opacity-60"
                     disabled={busy || !userId}
                   >
-                    {isActive ? "Restart" : "Start challenge"}
+                    {isActive ? L("Restart", "Reiniciar") : L("Start challenge", "Iniciar reto")}
                   </button>
 
                   <Link
                     href={`/challenges/${c.id}`}
                     className="text-xs text-emerald-300 underline underline-offset-4 hover:text-emerald-200"
                   >
-                    View details
+                    {L("View details", "Ver detalles")}
                   </Link>
                 </div>
               </article>
@@ -308,8 +319,10 @@ export default function ChallengesPage() {
         </section>
 
         <p className="mt-6 text-[11px] text-slate-500">
-          Tip: challenges are stored in your Supabase account. Daily check-ins create
-          a challenge history. The AI coach can reference this to coach your process.
+          {L(
+            "Tip: challenges are stored in your Supabase account. Daily check-ins create a challenge history. The AI coach can reference this to coach your process.",
+            "Tip: los retos se guardan en tu cuenta de Supabase. Los check‑ins diarios crean un historial. El coach AI puede usarlo para ayudarte."
+          )}
         </p>
       </main>
 
@@ -318,42 +331,46 @@ export default function ChallengesPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 backdrop-blur-sm">
           <div className="w-full max-w-md rounded-3xl border border-slate-800 bg-slate-900 p-5 shadow-xl">
             <p className="text-[11px] uppercase tracking-wide text-emerald-300 mb-1">
-              {dialogMode === "start" ? "Start challenge" : "Restart challenge"}
+              {dialogMode === "start" ? L("Start challenge", "Iniciar reto") : L("Restart challenge", "Reiniciar reto")}
             </p>
             <h2 className="text-lg font-semibold text-slate-50 mb-2">
               {selectedChallenge.title}
             </h2>
 
             <p className="text-sm text-slate-300 mb-3">
-              This mission is about{" "}
+              {L("This mission is about", "Esta misión es sobre")}{" "}
               <span className="font-semibold">
-                consistency, discipline and risk control
+                {L("consistency, discipline and risk control", "consistencia, disciplina y control de riesgo")}
               </span>
-              . Before you begin, please read and acknowledge the rules:
+              . {L("Before you begin, please read and acknowledge the rules:", "Antes de comenzar, lee y acepta las reglas:")}
             </p>
 
             <ul className="mb-3 list-disc space-y-1 pl-5 text-xs text-slate-200">
               <li>
-                Each day can be marked as{" "}
-                <span className="font-semibold">process-green</span> only if you
-                respect max loss and complete your journal.
+                {L("Each day can be marked as", "Cada día puede marcarse como")}{" "}
+                <span className="font-semibold">{L("process-green", "verde de proceso")}</span>{" "}
+                {L("only if you respect max loss and complete your journal.", "solo si respetas la pérdida máxima y completas tu journal.")}
               </li>
               <li>
-                The goal is to reach{" "}
+                {L("The goal is to reach", "El objetivo es llegar a")}{" "}
                 <span className="font-semibold">
-                  at least 2/3 of the {selectedChallenge.durationDays} days
+                  {L("at least 2/3 of the", "al menos 2/3 de los")}{" "}
+                  {selectedChallenge.durationDays} {L("days", "días")}
                 </span>{" "}
-                as process-green.
+                {L("as process-green.", "como verdes de proceso.")}
               </li>
               <li>
-                XP is awarded per day. Completing the challenge unlocks a badge.
+                {L(
+                  "XP is awarded per day. Completing the challenge unlocks a badge.",
+                  "Se otorga XP por día. Completar el reto desbloquea una insignia."
+                )}
               </li>
             </ul>
 
             <p className="mb-4 text-[11px] text-slate-400">
-              By continuing, you agree to focus on{" "}
-              <span className="font-semibold">process over P&amp;L</span> for the
-              duration of this challenge.
+              {L("By continuing, you agree to focus on", "Al continuar, aceptas enfocarte en")}{" "}
+              <span className="font-semibold">{L("process over P&L", "proceso sobre P&L")}</span>{" "}
+              {L("for the duration of this challenge.", "durante la duración de este reto.")}
             </p>
 
             <div className="flex items-center justify-end gap-2 text-xs">
@@ -363,7 +380,7 @@ export default function ChallengesPage() {
                 className="rounded-full border border-slate-700 px-3 py-1 text-slate-300 hover:bg-slate-800"
                 disabled={busy}
               >
-                Cancel
+                {L("Cancel", "Cancelar")}
               </button>
               <button
                 type="button"
@@ -372,10 +389,10 @@ export default function ChallengesPage() {
                 disabled={busy}
               >
                 {busy
-                  ? "Working..."
+                  ? L("Working...", "Trabajando...")
                   : dialogMode === "start"
-                  ? "I understand, start"
-                  : "I understand, restart"}
+                  ? L("I understand, start", "Entiendo, iniciar")
+                  : L("I understand, restart", "Entiendo, reiniciar")}
               </button>
             </div>
           </div>

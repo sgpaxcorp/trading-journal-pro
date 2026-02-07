@@ -7,6 +7,8 @@ import { useRouter } from "next/navigation";
 
 import TopNav from "@/app/components/TopNav";
 import { useAuth } from "@/context/AuthContext";
+import { useAppSettings } from "@/lib/appSettings";
+import { resolveLocale } from "@/lib/i18n";
 
 import {
   createForumThread,
@@ -40,6 +42,10 @@ function fmtDate(d: string | null | undefined) {
 export default function CommunityFeedPage() {
   const router = useRouter();
   const { user, loading: authLoading } = useAuth();
+  const { locale } = useAppSettings();
+  const lang = resolveLocale(locale);
+  const isEs = lang === "es";
+  const L = (en: string, es: string) => (isEs ? es : en);
 
   const userId = (user as any)?.id ?? "";
   const authorName = useMemo(() => safeNameFromUser(user), [user]);
@@ -106,7 +112,7 @@ export default function CommunityFeedPage() {
       setThreads(th);
     } catch (e: any) {
       console.error(e);
-      setError(e?.message || "Failed to load community feed.");
+      setError(e?.message || L("Failed to load community feed.", "No se pudo cargar el feed de comunidad."));
     } finally {
       setDataLoading(false);
     }
@@ -127,7 +133,7 @@ export default function CommunityFeedPage() {
       setThreads(th);
     } catch (e: any) {
       console.error(e);
-      setError(e?.message || "Search failed.");
+      setError(e?.message || L("Search failed.", "La búsqueda falló."));
     } finally {
       setDataLoading(false);
     }
@@ -157,7 +163,7 @@ export default function CommunityFeedPage() {
       router.push(`/forum/community-feed/${created.id}`);
     } catch (e: any) {
       console.error(e);
-      setError(e?.message || "Failed to create thread.");
+      setError(e?.message || L("Failed to create thread.", "No se pudo crear el hilo."));
     } finally {
       setCreating(false);
     }
@@ -166,7 +172,7 @@ export default function CommunityFeedPage() {
   if (authLoading || !user) {
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center">
-        <p className="text-sm text-slate-400">Loading community…</p>
+        <p className="text-sm text-slate-400">{L("Loading community…", "Cargando comunidad…")}</p>
       </div>
     );
   }
@@ -180,10 +186,13 @@ export default function CommunityFeedPage() {
           {/* Header */}
           <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4 mb-5">
             <div>
-              <p className="text-emerald-400 text-xs uppercase tracking-[0.25em]">Forum</p>
-              <h1 className="text-2xl md:text-3xl font-semibold mt-2">Community feed</h1>
+              <p className="text-emerald-400 text-xs uppercase tracking-[0.25em]">{L("Forum", "Foro")}</p>
+              <h1 className="text-2xl md:text-3xl font-semibold mt-2">{L("Community feed", "Feed de comunidad")}</h1>
               <p className="text-sm text-slate-400 mt-2 max-w-2xl">
-                Share progress, ask platform questions, post trade reviews, and build better process with other traders.
+                {L(
+                  "Share progress, ask platform questions, post trade reviews, and build better process with other traders.",
+                  "Comparte avances, haz preguntas de la plataforma, publica reviews de trades y construye mejor proceso con otros traders."
+                )}
               </p>
             </div>
 
@@ -193,13 +202,13 @@ export default function CommunityFeedPage() {
                 onClick={() => setNewOpen(true)}
                 className="inline-flex items-center justify-center rounded-full px-4 py-2 text-sm font-medium bg-emerald-500 hover:bg-emerald-400 text-slate-900 transition"
               >
-                + New thread
+                {L("+ New thread", "+ Nuevo hilo")}
               </button>
               <Link
                 href="/performance/analytics-statistics"
                 className="inline-flex items-center justify-center rounded-full px-4 py-2 text-sm font-medium border border-slate-700 text-slate-200 hover:border-emerald-400 hover:text-emerald-200 transition"
               >
-                Analytics
+                {L("Analytics", "Analytics")}
               </Link>
             </div>
           </div>
@@ -211,7 +220,7 @@ export default function CommunityFeedPage() {
                 <input
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Search threads (title or body)…"
+                  placeholder={L("Search threads (title or body)…", "Buscar hilos (título o contenido)…")}
                   className="w-full rounded-xl border border-slate-700 bg-slate-950/60 px-3 py-2 text-sm outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400/40"
                 />
                 <button
@@ -219,7 +228,7 @@ export default function CommunityFeedPage() {
                   onClick={runSearch}
                   className="shrink-0 rounded-xl border border-slate-700 px-4 py-2 text-sm hover:border-emerald-400 hover:text-emerald-200 transition"
                 >
-                  Search
+                  {L("Search", "Buscar")}
                 </button>
               </div>
 
@@ -229,7 +238,7 @@ export default function CommunityFeedPage() {
                   onChange={(e) => setCategoryId(e.target.value ? e.target.value : null)}
                   className="text-sm rounded-xl border border-slate-700 bg-slate-950/60 px-3 py-2"
                 >
-                  <option value="">All categories</option>
+                  <option value="">{L("All categories", "Todas las categorías")}</option>
                   {categories.map((c) => (
                     <option key={c.id} value={c.id}>
                       {c.name}
@@ -242,16 +251,17 @@ export default function CommunityFeedPage() {
                   onChange={(e) => setSort(e.target.value as ThreadSort)}
                   className="text-sm rounded-xl border border-slate-700 bg-slate-950/60 px-3 py-2"
                 >
-                  <option value="active">Most active</option>
-                  <option value="new">Newest</option>
-                  <option value="top">Top (views)</option>
+                  <option value="active">{L("Most active", "Más activos")}</option>
+                  <option value="new">{L("Newest", "Más nuevos")}</option>
+                  <option value="top">{L("Top (views)", "Top (vistas)")}</option>
                 </select>
               </div>
             </div>
 
             {activeCategory && (
               <p className="text-xs text-slate-400 mt-2">
-                Filtering by: <span className="text-emerald-200 font-semibold">{activeCategory.name}</span>
+                {L("Filtering by:", "Filtrando por:")}{" "}
+                <span className="text-emerald-200 font-semibold">{activeCategory.name}</span>
                 {activeCategory.description ? <span className="text-slate-500"> — {activeCategory.description}</span> : null}
               </p>
             )}
@@ -269,11 +279,11 @@ export default function CommunityFeedPage() {
             <section className="rounded-2xl border border-slate-800 bg-slate-900/70 overflow-hidden">
               <div className="border-b border-slate-800 px-4 py-3 flex items-center justify-between">
                 <div>
-                  <p className="text-sm font-medium text-slate-100">Threads</p>
-                  <p className="text-xs text-slate-400">Ask, share, review, and improve together.</p>
+                  <p className="text-sm font-medium text-slate-100">{L("Threads", "Hilos")}</p>
+                  <p className="text-xs text-slate-400">{L("Ask, share, review, and improve together.", "Pregunta, comparte, revisa y mejora en comunidad.")}</p>
                 </div>
                 <div className="text-xs text-slate-500">
-                  {dataLoading ? "Loading…" : `${threads.length} shown`}
+                  {dataLoading ? L("Loading…", "Cargando…") : L(`${threads.length} shown`, `${threads.length} mostrados`)}
                 </div>
               </div>
 
@@ -288,9 +298,12 @@ export default function CommunityFeedPage() {
 
                 {!dataLoading && threads.length === 0 && (
                   <div className="p-6">
-                    <p className="text-sm text-slate-300">No threads found.</p>
+                    <p className="text-sm text-slate-300">{L("No threads found.", "No se encontraron hilos.")}</p>
                     <p className="text-xs text-slate-500 mt-1">
-                      Try removing filters, or create the first thread in this category.
+                      {L(
+                        "Try removing filters, or create the first thread in this category.",
+                        "Prueba quitando filtros o crea el primer hilo en esta categoría."
+                      )}
                     </p>
                   </div>
                 )}
@@ -311,12 +324,12 @@ export default function CommunityFeedPage() {
                             <div className="flex flex-wrap items-center gap-2 mb-1">
                               {t.is_pinned && (
                                 <span className="px-2 py-0.5 rounded-full text-[10px] uppercase tracking-[0.18em] border border-amber-500/50 bg-amber-500/10 text-amber-200">
-                                  Pinned
+                                  {L("Pinned", "Fijado")}
                                 </span>
                               )}
                               {t.is_locked && (
                                 <span className="px-2 py-0.5 rounded-full text-[10px] uppercase tracking-[0.18em] border border-slate-600 bg-slate-950/50 text-slate-300">
-                                  Locked
+                                  {L("Locked", "Bloqueado")}
                                 </span>
                               )}
                               {cat?.name && (
@@ -337,24 +350,24 @@ export default function CommunityFeedPage() {
 
                             <div className="flex flex-wrap items-center gap-3 text-[11px] text-slate-500 mt-2">
                               <span>
-                                by{" "}
+                                {L("by", "por")}{" "}
                                 <span className="text-slate-300 font-semibold">
-                                  {t.author_name || "Trader"}
+                                  {t.author_name || L("Trader", "Trader")}
                                 </span>
                               </span>
                               <span>·</span>
-                              <span>Created {fmtDate(t.created_at)}</span>
+                              <span>{L("Created", "Creado")} {fmtDate(t.created_at)}</span>
                               <span>·</span>
-                              <span>Active {fmtDate(t.last_post_at)}</span>
+                              <span>{L("Active", "Activo")} {fmtDate(t.last_post_at)}</span>
                             </div>
                           </div>
 
                           <div className="shrink-0 flex items-center gap-2 text-[11px]">
                             <div className="rounded-xl border border-slate-800 bg-slate-950/50 px-2 py-1 text-slate-300">
-                              {t.reply_count} replies
+                              {t.reply_count} {L("replies", "respuestas")}
                             </div>
                             <div className="rounded-xl border border-slate-800 bg-slate-950/50 px-2 py-1 text-slate-300">
-                              {t.view_count} views
+                              {t.view_count} {L("views", "vistas")}
                             </div>
                           </div>
                         </div>
@@ -367,9 +380,12 @@ export default function CommunityFeedPage() {
             {/* Sidebar */}
             <aside className="space-y-4">
               <section className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
-                <h2 className="text-sm font-medium text-slate-200">Categories</h2>
+                <h2 className="text-sm font-medium text-slate-200">{L("Categories", "Categorías")}</h2>
                 <p className="text-xs text-slate-500 mt-1">
-                  Use categories to keep discussions focused and searchable.
+                  {L(
+                    "Use categories to keep discussions focused and searchable.",
+                    "Usa categorías para mantener discusiones enfocadas y fáciles de buscar."
+                  )}
                 </p>
 
                 <div className="mt-3 space-y-2">
@@ -382,7 +398,7 @@ export default function CommunityFeedPage() {
                         : "border-slate-800 bg-slate-950/40 text-slate-200 hover:border-emerald-400"
                     }`}
                   >
-                    All categories
+                    {L("All categories", "Todas las categorías")}
                   </button>
 
                   {categories.map((c) => (
@@ -399,7 +415,7 @@ export default function CommunityFeedPage() {
                       <div className="flex items-center justify-between gap-2">
                         <span className="font-semibold">{c.name}</span>
                         {c.is_locked && (
-                          <span className="text-[10px] text-slate-400">Locked</span>
+                          <span className="text-[10px] text-slate-400">{L("Locked", "Bloqueado")}</span>
                         )}
                       </div>
                       {c.description && (
@@ -413,14 +429,19 @@ export default function CommunityFeedPage() {
               </section>
 
               <section className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
-                <h2 className="text-sm font-medium text-slate-200">How to get better answers</h2>
+                <h2 className="text-sm font-medium text-slate-200">{L("How to get better answers", "Cómo obtener mejores respuestas")}</h2>
                 <ul className="mt-2 text-xs text-slate-400 space-y-2 list-disc pl-5">
-                  <li>Write the instrument, timeframe, and what you were trying to do.</li>
-                  <li>For platform issues, include screenshots + what you expected vs what happened.</li>
-                  <li>For trade reviews, post entry/exit rules and what you felt during the trade.</li>
+                  <li>{L("Write the instrument, timeframe, and what you were trying to do.", "Escribe el instrumento, timeframe y lo que intentabas hacer.")}</li>
+                  <li>{L("For platform issues, include screenshots + what you expected vs what happened.", "Para problemas de plataforma, incluye screenshots y lo esperado vs lo ocurrido.")}</li>
+                  <li>{L("For trade reviews, post entry/exit rules and what you felt during the trade.", "Para reviews de trades, incluye reglas de entrada/salida y cómo te sentiste.")}</li>
                 </ul>
                 <div className="mt-3 rounded-xl border border-slate-800 bg-slate-950/40 p-3 text-xs text-slate-300">
-                  Tip: Use the <span className="text-emerald-200 font-semibold">Platform Questions</span> category for anything related to imports, sync, PnL, templates, or settings.
+                  {L(
+                    "Tip: Use the",
+                    "Tip: Usa la"
+                  )}{" "}
+                  <span className="text-emerald-200 font-semibold">{L("Platform Questions", "Preguntas de plataforma")}</span>{" "}
+                  {L("category for anything related to imports, sync, PnL, templates, or settings.", "para cualquier tema de imports, sync, PnL, plantillas o settings.")}
                 </div>
               </section>
             </aside>
@@ -434,8 +455,8 @@ export default function CommunityFeedPage() {
           <div className="w-full max-w-2xl rounded-2xl border border-slate-700 bg-slate-900 shadow-xl overflow-hidden">
             <div className="border-b border-slate-800 px-4 py-3 flex items-center justify-between">
               <div>
-                <p className="text-sm font-semibold text-slate-100">Create a new thread</p>
-                <p className="text-xs text-slate-400">Keep it specific and actionable.</p>
+                <p className="text-sm font-semibold text-slate-100">{L("Create a new thread", "Crear un nuevo hilo")}</p>
+                <p className="text-xs text-slate-400">{L("Keep it specific and actionable.", "Manténlo específico y accionable.")}</p>
               </div>
               <button
                 type="button"
@@ -457,14 +478,14 @@ export default function CommunityFeedPage() {
                   >
                     {categories.map((c) => (
                       <option key={c.id} value={c.id} disabled={c.is_locked}>
-                        {c.name}{c.is_locked ? " (locked)" : ""}
+                        {c.name}{c.is_locked ? L(" (locked)", " (bloqueado)") : ""}
                       </option>
                     ))}
                   </select>
                 </div>
 
                 <div>
-                  <label className="block text-xs text-slate-400 mb-1">Your name (display)</label>
+                  <label className="block text-xs text-slate-400 mb-1">{L("Your name (display)", "Tu nombre (visible)")}</label>
                   <input
                     readOnly
                     value={authorName}
@@ -474,31 +495,37 @@ export default function CommunityFeedPage() {
               </div>
 
               <div>
-                <label className="block text-xs text-slate-400 mb-1">Title</label>
+                <label className="block text-xs text-slate-400 mb-1">{L("Title", "Título")}</label>
                 <input
                   value={newTitle}
                   onChange={(e) => setNewTitle(e.target.value)}
-                  placeholder="Example: My PnL doesn't match after refresh (fees?)"
+                  placeholder={L("Example: My PnL doesn't match after refresh (fees?)", "Ejemplo: Mi PnL no coincide después de refrescar (comisiones?)")}
                   className="w-full rounded-xl border border-slate-700 bg-slate-950/60 px-3 py-2 text-sm outline-none focus:border-emerald-400"
                 />
-                <p className="text-[11px] text-slate-500 mt-1">Min 6 characters.</p>
+                <p className="text-[11px] text-slate-500 mt-1">{L("Min 6 characters.", "Mínimo 6 caracteres.")}</p>
               </div>
 
               <div>
-                <label className="block text-xs text-slate-400 mb-1">Post</label>
+                <label className="block text-xs text-slate-400 mb-1">{L("Post", "Publicación")}</label>
                 <textarea
                   value={newBody}
                   onChange={(e) => setNewBody(e.target.value)}
-                  placeholder="Describe context, what happened, what you expected, and any screenshots or steps to reproduce."
+                  placeholder={L(
+                    "Describe context, what happened, what you expected, and any screenshots or steps to reproduce.",
+                    "Describe el contexto, lo que pasó, lo que esperabas y cualquier screenshot o pasos para reproducir."
+                  )}
                   className="w-full min-h-40 rounded-xl border border-slate-700 bg-slate-950/60 px-3 py-2 text-sm outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400/40"
                 />
-                <p className="text-[11px] text-slate-500 mt-1">Min 20 characters.</p>
+                <p className="text-[11px] text-slate-500 mt-1">{L("Min 20 characters.", "Mínimo 20 caracteres.")}</p>
               </div>
             </div>
 
             <div className="border-t border-slate-800 px-4 py-3 flex items-center justify-between">
               <p className="text-[11px] text-slate-500">
-                Community is private to logged-in users. Be respectful, keep it constructive.
+                {L(
+                  "Community is private to logged-in users. Be respectful, keep it constructive.",
+                  "La comunidad es privada para usuarios logueados. Sé respetuoso y constructivo."
+                )}
               </p>
 
               <button
@@ -511,7 +538,7 @@ export default function CommunityFeedPage() {
                     : "bg-emerald-500 hover:bg-emerald-400 text-slate-900"
                 }`}
               >
-                {creating ? "Creating…" : "Create thread"}
+                {creating ? L("Creating…", "Creando…") : L("Create thread", "Crear hilo")}
               </button>
             </div>
           </div>

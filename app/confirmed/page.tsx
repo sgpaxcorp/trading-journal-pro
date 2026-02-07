@@ -3,8 +3,15 @@
 
 import Link from "next/link";
 import { motion } from "framer-motion";
+import { useAppSettings } from "@/lib/appSettings";
+import { resolveLocale } from "@/lib/i18n";
 
 export default function ConfirmedPage() {
+  const { locale } = useAppSettings();
+  const lang = resolveLocale(locale);
+  const isEs = lang === "es";
+  const L = (en: string, es: string) => (isEs ? es : en);
+
   return (
     <main className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center px-4">
       {/* Background glow */}
@@ -62,7 +69,7 @@ export default function ConfirmedPage() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.35 }}
         >
-          Welcome, your account is live ✅
+          {L("Welcome, your account is live ✅", "Bienvenido, tu cuenta está activa ✅")}
         </motion.h1>
 
         <motion.p
@@ -71,7 +78,10 @@ export default function ConfirmedPage() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.45 }}
         >
-          Your account has been created successfully and your email is confirmed.
+          {L(
+            "Your account has been created successfully and your email is confirmed.",
+            "Tu cuenta se creó correctamente y tu email está confirmado."
+          )}
         </motion.p>
 
         <motion.p
@@ -80,9 +90,10 @@ export default function ConfirmedPage() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.55 }}
         >
-          From now on, every journal entry is a rep for your brain. You&apos;re
-          not here to gamble — you&apos;re here to train your nervous system to
-          think, execute and recover like a professional trader.
+          {L(
+            "From now on, every journal entry is a rep for your brain. You're not here to gamble — you're here to train your nervous system to think, execute and recover like a professional trader.",
+            "Desde ahora, cada entrada del journal es una repetición para tu cerebro. No estás aquí para apostar — estás aquí para entrenar tu sistema nervioso a pensar, ejecutar y recuperarte como un trader profesional."
+          )}
         </motion.p>
 
         <motion.p
@@ -91,9 +102,10 @@ export default function ConfirmedPage() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.65 }}
         >
-          This is Day 1 of your new routine: clear rules, defined risk and brutal
-          honesty with yourself. The journal will track your P&amp;L, but the
-          real edge we care about is your psychology.
+          {L(
+            "This is Day 1 of your new routine: clear rules, defined risk and brutal honesty with yourself. The journal will track your P&L, but the real edge we care about is your psychology.",
+            "Este es el Día 1 de tu nueva rutina: reglas claras, riesgo definido y brutal honestidad contigo mismo. El journal seguirá tu P&L, pero el edge real que nos importa es tu psicología."
+          )}
         </motion.p>
 
         <motion.div
@@ -107,7 +119,7 @@ export default function ConfirmedPage() {
             href="/quick-tour"
             className="inline-flex px-6 py-2.5 rounded-xl bg-emerald-400 text-slate-950 text-xs md:text-sm font-semibold hover:bg-emerald-300 shadow-lg shadow-emerald-500/25"
           >
-            Start the journey
+            {L("Start the journey", "Comenzar el recorrido")}
           </Link>
         </motion.div>
 
@@ -117,8 +129,10 @@ export default function ConfirmedPage() {
           animate={{ opacity: 1 }}
           transition={{ delay: 1 }}
         >
-          Breathe, follow your plan, and let the data show you who you&apos;re
-          becoming as a trader.
+          {L(
+            "Breathe, follow your plan, and let the data show you who you're becoming as a trader.",
+            "Respira, sigue tu plan y deja que los datos te muestren en quién te estás convirtiendo como trader."
+          )}
         </motion.p>
       </motion.div>
     </main>

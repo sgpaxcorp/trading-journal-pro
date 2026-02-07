@@ -9,6 +9,8 @@ import remarkGfm from "remark-gfm";
 
 import TopNav from "@/app/components/TopNav";
 import { useAuth } from "@/context/AuthContext";
+import { useAppSettings } from "@/lib/appSettings";
+import { resolveLocale } from "@/lib/i18n";
 
 import {
   createForumPost,
@@ -19,12 +21,12 @@ import {
   type ForumThread,
 } from "@/lib/forumSupabase";
 
-function safeNameFromUser(user: any) {
+function safeNameFromUser(user: any, fallback: string) {
   const meta = user?.user_metadata || {};
   const full = meta.first_name || meta.full_name || meta.name || "";
   const email = user?.email || "";
   const emailHandle = email ? String(email).split("@")[0] : "";
-  return (full || emailHandle || "Trader").toString().trim();
+  return (full || emailHandle || fallback).toString().trim();
 }
 
 function fmtDateTime(v: string) {
@@ -82,9 +84,13 @@ export default function CommunityThreadPage() {
   const params = useParams();
   const router = useRouter();
   const { user, loading: authLoading } = useAuth();
+  const { locale } = useAppSettings();
+  const lang = resolveLocale(locale);
+  const isEs = lang === "es";
+  const L = (en: string, es: string) => (isEs ? es : en);
 
   const userId = (user as any)?.id ?? "";
-  const authorName = useMemo(() => safeNameFromUser(user), [user]);
+  const authorName = useMemo(() => safeNameFromUser(user, L("Trader", "Trader")), [user, L]);
 
   const threadId = Array.isArray((params as any)?.threadId)
     ? (params as any).threadId[0]
@@ -122,7 +128,7 @@ export default function CommunityThreadPage() {
       void incrementForumThreadView(threadId);
     } catch (e: any) {
       console.error(e);
-      setError(e?.message || "Failed to load thread.");
+      setError(e?.message || L("Failed to load thread.", "No se pudo cargar el hilo."));
     } finally {
       setLoading(false);
     }
@@ -158,7 +164,7 @@ export default function CommunityThreadPage() {
       setReply("");
     } catch (e: any) {
       console.error(e);
-      setError(e?.message || "Failed to post reply.");
+      setError(e?.message || L("Failed to post reply.", "No se pudo publicar la respuesta."));
     } finally {
       setSending(false);
     }
@@ -167,7 +173,7 @@ export default function CommunityThreadPage() {
   if (authLoading || !user) {
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center">
-        <p className="text-sm text-slate-400">Loading thread…</p>
+        <p className="text-sm text-slate-400">{L("Loading thread…", "Cargando hilo…")}</p>
       </div>
     );
   }
@@ -180,8 +186,10 @@ export default function CommunityThreadPage() {
         <div className="mx-auto w-full max-w-[1100px]">
           <div className="flex items-center justify-between gap-3 mb-4">
             <div>
-              <p className="text-emerald-400 text-xs uppercase tracking-[0.25em]">Forum</p>
-              <h1 className="text-xl md:text-2xl font-semibold mt-2">Community feed</h1>
+              <p className="text-emerald-400 text-xs uppercase tracking-[0.25em]">{L("Forum", "Foro")}</p>
+              <h1 className="text-xl md:text-2xl font-semibold mt-2">
+                {L("Community feed", "Feed comunitario")}
+              </h1>
             </div>
 
             <div className="flex gap-2">
@@ -189,7 +197,7 @@ export default function CommunityThreadPage() {
                 href="/forum/community-feed"
                 className="rounded-full border border-slate-700 px-4 py-2 text-sm hover:border-emerald-400 hover:text-emerald-200 transition"
               >
-                ← Back
+                ← {L("Back", "Volver")}
               </Link>
             </div>
           </div>
@@ -209,7 +217,7 @@ export default function CommunityThreadPage() {
 
           {!loading && !thread && (
             <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
-              <p className="text-sm text-slate-300">Thread not found.</p>
+              <p className="text-sm text-slate-300">{L("Thread not found.", "Hilo no encontrado.")}</p>
             </div>
           )}
 
@@ -221,12 +229,12 @@ export default function CommunityThreadPage() {
                   <div className="flex flex-wrap items-center gap-2">
                     {thread.is_pinned && (
                       <span className="px-2 py-0.5 rounded-full text-[10px] uppercase tracking-[0.18em] border border-amber-500/50 bg-amber-500/10 text-amber-200">
-                        Pinned
+                        {L("Pinned", "Fijado")}
                       </span>
                     )}
                     {thread.is_locked && (
                       <span className="px-2 py-0.5 rounded-full text-[10px] uppercase tracking-[0.18em] border border-slate-600 bg-slate-950/50 text-slate-300">
-                        Locked
+                        {L("Locked", "Bloqueado")}
                       </span>
                     )}
                     {cat?.name && (
@@ -242,17 +250,21 @@ export default function CommunityThreadPage() {
 
                   <div className="flex flex-wrap items-center gap-3 text-[11px] text-slate-500 mt-2">
                     <span>
-                      Started by{" "}
+                      {L("Started by", "Iniciado por")}{" "}
                       <span className="text-slate-200 font-semibold">
-                        {thread.author_name || "Trader"}
+                        {thread.author_name || L("Trader", "Trader")}
                       </span>
                     </span>
                     <span>·</span>
                     <span>{fmtDateTime(thread.created_at)}</span>
                     <span>·</span>
-                    <span>{thread.reply_count} replies</span>
+                    <span>
+                      {thread.reply_count} {L("replies", "respuestas")}
+                    </span>
                     <span>·</span>
-                    <span>{thread.view_count} views</span>
+                    <span>
+                      {thread.view_count} {L("views", "vistas")}
+                    </span>
                   </div>
                 </div>
 
@@ -265,18 +277,27 @@ export default function CommunityThreadPage() {
               <section className="mt-4 rounded-2xl border border-slate-800 bg-slate-900/70 overflow-hidden">
                 <div className="border-b border-slate-800 px-4 py-3 flex items-center justify-between">
                   <div>
-                    <p className="text-sm font-medium text-slate-100">Replies</p>
+                    <p className="text-sm font-medium text-slate-100">{L("Replies", "Respuestas")}</p>
                     <p className="text-xs text-slate-500">
-                      Keep it constructive. If you share stats, include timeframe + sample size.
+                      {L(
+                        "Keep it constructive. If you share stats, include timeframe + sample size.",
+                        "Mantén un tono constructivo. Si compartes estadísticas, incluye periodo y tamaño de muestra."
+                      )}
                     </p>
                   </div>
-                  <div className="text-xs text-slate-500">{posts.length} replies</div>
+                  <div className="text-xs text-slate-500">
+                    {posts.length} {L("replies", "respuestas")}
+                  </div>
                 </div>
 
                 {posts.length === 0 && (
                   <div className="px-4 py-6">
-                    <p className="text-sm text-slate-300">No replies yet.</p>
-                    <p className="text-xs text-slate-500 mt-1">Be the first to reply.</p>
+                    <p className="text-sm text-slate-300">
+                      {L("No replies yet.", "Aún no hay respuestas.")}
+                    </p>
+                    <p className="text-xs text-slate-500 mt-1">
+                      {L("Be the first to reply.", "Sé el primero en responder.")}
+                    </p>
                   </div>
                 )}
 
@@ -287,7 +308,7 @@ export default function CommunityThreadPage() {
                         <div className="flex items-center justify-between gap-3">
                           <div className="flex items-center gap-2">
                             <span className="text-sm font-semibold text-slate-200">
-                              {p.author_name || "Trader"}
+                              {p.author_name || L("Trader", "Trader")}
                             </span>
                             {p.is_ai && (
                               <span className="px-2 py-0.5 rounded-full text-[10px] uppercase tracking-[0.18em] border border-emerald-500/60 bg-emerald-500/10 text-emerald-200">
@@ -310,14 +331,20 @@ export default function CommunityThreadPage() {
               {/* Reply box */}
               <section className="mt-4 rounded-2xl border border-slate-800 bg-slate-900/70 overflow-hidden">
                 <div className="border-b border-slate-800 px-4 py-3">
-                  <p className="text-sm font-medium text-slate-100">Reply</p>
+                  <p className="text-sm font-medium text-slate-100">{L("Reply", "Responder")}</p>
                   {thread.is_locked ? (
                     <p className="text-xs text-slate-500 mt-1">
-                      This thread is locked. New replies are disabled.
+                      {L(
+                        "This thread is locked. New replies are disabled.",
+                        "Este hilo está bloqueado. No se permiten nuevas respuestas."
+                      )}
                     </p>
                   ) : (
                     <p className="text-xs text-slate-500 mt-1">
-                      Markdown supported (lists, links, tables).
+                      {L(
+                        "Markdown supported (lists, links, tables).",
+                        "Markdown disponible (listas, enlaces, tablas)."
+                      )}
                     </p>
                   )}
                 </div>
@@ -326,14 +353,15 @@ export default function CommunityThreadPage() {
                   <textarea
                     value={reply}
                     onChange={(e) => setReply(e.target.value)}
-                    placeholder="Write a reply…"
+                    placeholder={L("Write a reply…", "Escribe una respuesta…")}
                     className="w-full min-h-[120px] rounded-xl border border-slate-700 bg-slate-950/60 px-3 py-2 text-sm outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400/40 disabled:opacity-60"
                     disabled={thread.is_locked}
                   />
 
                   <div className="flex items-center justify-between gap-3">
                     <p className="text-[11px] text-slate-500">
-                      Post as <span className="text-slate-200 font-semibold">{authorName}</span>.
+                      {L("Post as", "Publicar como")}{" "}
+                      <span className="text-slate-200 font-semibold">{authorName}</span>.
                     </p>
 
                     <button
@@ -346,7 +374,7 @@ export default function CommunityThreadPage() {
                           : "bg-emerald-500 hover:bg-emerald-400 text-slate-900"
                       }`}
                     >
-                      {sending ? "Posting…" : "Post reply"}
+                      {sending ? L("Posting…", "Publicando…") : L("Post reply", "Publicar respuesta")}
                     </button>
                   </div>
                 </div>

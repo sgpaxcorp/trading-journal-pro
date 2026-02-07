@@ -7,6 +7,8 @@ import { useEffect, useMemo, useState } from "react";
 
 import TopNav from "@/app/components/TopNav";
 import { useAuth } from "@/context/AuthContext";
+import { useAppSettings } from "@/lib/appSettings";
+import { resolveLocale } from "@/lib/i18n";
 
 import {
   CHALLENGES,
@@ -37,12 +39,12 @@ function todayIso(): string {
   return `${yyyy}-${mm}-${dd}`;
 }
 
-function statusLabel(status?: string | null) {
-  if (!status) return "Not started";
-  if (status === "active") return "Active";
-  if (status === "completed") return "Completed";
-  if (status === "failed") return "Failed";
-  if (status === "restarted") return "Restarted";
+function statusLabel(status: string | null | undefined, L: (en: string, es: string) => string) {
+  if (!status) return L("Not started", "No iniciado");
+  if (status === "active") return L("Active", "Activo");
+  if (status === "completed") return L("Completed", "Completado");
+  if (status === "failed") return L("Failed", "Fallido");
+  if (status === "restarted") return L("Restarted", "Reiniciado");
   return status;
 }
 
@@ -59,6 +61,10 @@ export default function ChallengeDetailPage() {
   const router = useRouter();
   const params = useParams() as unknown as RouteParams;
   const { user, loading } = useAuth() as any;
+  const { locale } = useAppSettings();
+  const lang = resolveLocale(locale);
+  const isEs = lang === "es";
+  const L = (en: string, es: string) => (isEs ? es : en);
 
   const userId = useMemo(() => user?.id || "", [user]);
 
@@ -153,7 +159,7 @@ export default function ChallengeDetailPage() {
         setNote("");
       } catch (e: any) {
         console.error("[ChallengeDetailPage] load error:", e);
-        setError(e?.message ?? "Failed to load challenge.");
+        setError(e?.message ?? L("Failed to load challenge.", "No se pudo cargar el reto."));
       }
     };
 
@@ -242,7 +248,7 @@ export default function ChallengeDetailPage() {
       setNote("");
     } catch (e: any) {
       console.error("[ChallengeDetailPage] start error:", e);
-      setError(e?.message ?? "Failed to start challenge.");
+      setError(e?.message ?? L("Failed to start challenge.", "No se pudo iniciar el reto."));
     } finally {
       setSaving(false);
     }
@@ -289,7 +295,7 @@ export default function ChallengeDetailPage() {
       setNote("");
     } catch (e: any) {
       console.error("[ChallengeDetailPage] check-in error:", e);
-      setError(e?.message ?? "Failed to save check-in.");
+      setError(e?.message ?? L("Failed to save check-in.", "No se pudo guardar el check-in."));
     } finally {
       setCheckinBusy(false);
     }
@@ -312,7 +318,7 @@ export default function ChallengeDetailPage() {
         <div className="mb-6 flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
           <div className="space-y-1">
             <p className="text-xs uppercase tracking-wide text-emerald-400">
-              Challenge
+              {L("Challenge", "Reto")}
             </p>
             <h1 className="text-3xl font-semibold tracking-tight">
               {definition.title}
@@ -330,15 +336,15 @@ export default function ChallengeDetailPage() {
               className="rounded-full bg-emerald-400 px-4 py-2 text-xs font-semibold text-slate-950 hover:bg-emerald-300 transition disabled:opacity-60"
             >
               {saving
-                ? "Starting..."
+                ? L("Starting...", "Iniciando...")
                 : progress
-                ? "Restart challenge"
-                : "Start challenge"}
+                ? L("Restart challenge", "Reiniciar reto")
+                : L("Start challenge", "Iniciar reto")}
             </button>
 
             {runs.length > 0 && (
               <div className="flex items-center gap-2 text-[11px] text-slate-400">
-                <span>Run:</span>
+                <span>{L("Run:", "Corrida:")}</span>
                 <select
                   value={selectedRunId || ""}
                   onChange={(e) => setSelectedRunId(e.target.value)}
@@ -346,7 +352,7 @@ export default function ChallengeDetailPage() {
                 >
                   {runs.map((r) => (
                     <option key={r.runId} value={r.runId}>
-                      {String(r.startedAt || "").slice(0, 10)} · {statusLabel(r.status)} · {r.processGreenDays}/{r.requiredGreenDays}
+                      {String(r.startedAt || "").slice(0, 10)} · {statusLabel(r.status, L)} · {r.processGreenDays}/{r.requiredGreenDays}
                     </option>
                   ))}
                 </select>
@@ -364,23 +370,24 @@ export default function ChallengeDetailPage() {
         <section className="grid gap-4 md:grid-cols-[2fr,1.2fr] mb-8">
           <article className="rounded-2xl border border-emerald-500/30 bg-slate-900/70 p-5">
             <p className="text-xs uppercase tracking-wide text-emerald-300">
-              Overview
+              {L("Overview", "Resumen")}
             </p>
             <p className="mt-2 text-sm text-slate-200">
               {definition.highlight}
             </p>
 
             <p className="mt-4 text-xs text-slate-400">
-              Duration: {" "}
+              {L("Duration:", "Duración:")}{" "}
               <span className="font-medium text-slate-100">
-                {definition.durationDays} trading days (check-ins)
+                {definition.durationDays} {L("trading days (check-ins)", "días de trading (check-ins)")}
               </span>
             </p>
 
             <p className="mt-2 text-xs text-slate-400">
-              Completion target: {" "}
+              {L("Completion target:", "Meta de cumplimiento:")}{" "}
               <span className="font-medium text-slate-100">
-                {Math.ceil(definition.durationDays * definition.requiredGreenPct)} process-green days
+                {Math.ceil(definition.durationDays * definition.requiredGreenPct)}{" "}
+                {L("process-green days", "días verdes de proceso")}
               </span>
             </p>
 
@@ -391,37 +398,39 @@ export default function ChallengeDetailPage() {
             </ul>
 
             <p className="mt-5 text-[11px] text-slate-400">
-              Tip: do a quick check-in after each trading day. The goal is to stack
-              process-green days. Your XP and badges reward consistency, not hype.
+              {L(
+                "Tip: do a quick check-in after each trading day. The goal is to stack process-green days. Your XP and badges reward consistency, not hype.",
+                "Tip: haz un check‑in rápido después de cada día de trading. El objetivo es acumular días verdes de proceso. Tu XP e insignias premian la consistencia."
+              )}
             </p>
           </article>
 
           <aside className="space-y-4">
             <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
               <p className="text-xs uppercase tracking-wide text-slate-400">
-                Status
+                {L("Status", "Estado")}
               </p>
               <p className={`mt-1 text-lg font-semibold capitalize ${statusClass(activeRun?.status ?? null)}`}>
-                {statusLabel(activeRun?.status ?? null)}
+                {statusLabel(activeRun?.status ?? null, L)}
               </p>
 
               {activeRun && (
                 <>
                   <div className="mt-4 grid grid-cols-2 gap-3">
                     <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
-                      <p className="text-[11px] text-slate-400">Green vs target</p>
+                      <p className="text-[11px] text-slate-400">{L("Green vs target", "Verdes vs meta")}</p>
                       <p className="text-sm font-semibold text-emerald-300">{requiredLabel}</p>
                     </div>
                     <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
-                      <p className="text-[11px] text-slate-400">Days tracked</p>
+                      <p className="text-[11px] text-slate-400">{L("Days tracked", "Días registrados")}</p>
                       <p className="text-sm font-semibold text-slate-100">{durationLabel}</p>
                     </div>
                     <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
-                      <p className="text-[11px] text-slate-400">Max loss breaks</p>
+                      <p className="text-[11px] text-slate-400">{L("Max loss breaks", "Rompimientos de max loss")}</p>
                       <p className="text-sm font-semibold text-slate-100">{activeRun.maxLossBreaks}</p>
                     </div>
                     <div className="rounded-xl border border-emerald-800/60 bg-slate-950/60 p-3">
-                      <p className="text-[11px] text-slate-400">XP earned</p>
+                      <p className="text-[11px] text-slate-400">{L("XP earned", "XP ganados")}</p>
                       <p className="text-sm font-semibold text-emerald-300">{activeRun.xpEarned.toLocaleString()} XP</p>
                     </div>
                   </div>
@@ -431,7 +440,7 @@ export default function ChallengeDetailPage() {
                       <div className="h-full rounded-full bg-emerald-400" style={{ width: `${pct}%` }} />
                     </div>
                     <p className="mt-1 text-[10px] text-slate-500">
-                      Challenge completion progress (days logged).
+                      {L("Challenge completion progress (days logged).", "Progreso del reto (días registrados).")}
                     </p>
                   </div>
                 </>
@@ -439,22 +448,24 @@ export default function ChallengeDetailPage() {
 
               {!activeRun && (
                 <p className="mt-3 text-xs text-slate-400">
-                  You have not started this challenge yet. Start it to begin tracking
-                  daily check-ins and XP.
+                  {L(
+                    "You have not started this challenge yet. Start it to begin tracking daily check-ins and XP.",
+                    "Aún no has iniciado este reto. Inícialo para comenzar a registrar check‑ins y XP."
+                  )}
                 </p>
               )}
             </div>
 
             <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
               <p className="text-xs uppercase tracking-wide text-slate-400">
-                Profile snapshot
+                {L("Profile snapshot", "Resumen de perfil")}
               </p>
               <p className="mt-1 text-sm text-slate-200">
-                Level <span className="font-semibold">{gamification.level}</span> • Tier{" "}
+                {L("Level", "Nivel")} <span className="font-semibold">{gamification.level}</span> • {L("Tier", "Nivel")}{" "}
                 <span className="font-semibold">{gamification.tier}</span>
               </p>
               <p className="mt-1 text-xs text-emerald-300">
-                {gamification.xp.toLocaleString()} XP total
+                {gamification.xp.toLocaleString()} {L("XP total", "XP total")}
               </p>
 
               {gamification.badges.length > 0 && (
@@ -477,14 +488,17 @@ export default function ChallengeDetailPage() {
         <section className="rounded-3xl border border-slate-800 bg-slate-900/60 p-5 mb-6">
           <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
             <div>
-              <h2 className="text-lg font-semibold text-slate-50">Daily check-in</h2>
+              <h2 className="text-lg font-semibold text-slate-50">{L("Daily check-in", "Check‑in diario")}</h2>
               <p className="text-[12px] text-slate-400 mt-1">
-                Log each trading day. You can edit a prior day inside the current run.
+                {L(
+                  "Log each trading day. You can edit a prior day inside the current run.",
+                  "Registra cada día de trading. Puedes editar un día anterior en la corrida actual."
+                )}
               </p>
             </div>
 
             <div className="text-right">
-              <p className="text-[11px] text-slate-400">XP preview</p>
+              <p className="text-[11px] text-slate-400">{L("XP preview", "Vista previa XP")}</p>
               <p className={`text-sm font-semibold ${processGreen ? "text-emerald-300" : "text-slate-200"}`}>
                 {xpPreview.toLocaleString()} XP
               </p>
@@ -493,7 +507,7 @@ export default function ChallengeDetailPage() {
 
           <div className="mt-4 grid gap-3 md:grid-cols-2">
             <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
-              <label className="text-[11px] uppercase tracking-wide text-slate-400">Day</label>
+              <label className="text-[11px] uppercase tracking-wide text-slate-400">{L("Day", "Día")}</label>
               <input
                 type="date"
                 value={checkinDay}
@@ -511,7 +525,7 @@ export default function ChallengeDetailPage() {
                     className="h-4 w-4 rounded border-slate-600 bg-slate-950"
                     disabled={!canCheckin || checkinBusy}
                   />
-                  <span className="text-slate-200">Journal completed</span>
+                  <span className="text-slate-200">{L("Journal completed", "Journal completado")}</span>
                 </label>
 
                 <label className="flex items-center gap-2">
@@ -522,7 +536,7 @@ export default function ChallengeDetailPage() {
                     className="h-4 w-4 rounded border-slate-600 bg-slate-950"
                     disabled={!canCheckin || checkinBusy}
                   />
-                  <span className="text-slate-200">Respected max loss rule</span>
+                  <span className="text-slate-200">{L("Respected max loss rule", "Respeté la regla de max loss")}</span>
                 </label>
 
                 <label className="flex items-center gap-2">
@@ -533,17 +547,20 @@ export default function ChallengeDetailPage() {
                     className="h-4 w-4 rounded border-slate-600 bg-slate-950"
                     disabled={!canCheckin || checkinBusy}
                   />
-                  <span className="text-slate-200">Followed my plan</span>
+                  <span className="text-slate-200">{L("Followed my plan", "Seguí mi plan")}</span>
                 </label>
               </div>
 
               <div className="mt-4 rounded-xl border border-slate-800 bg-slate-900/50 px-3 py-2">
-                <p className="text-[11px] uppercase tracking-wide text-slate-400">Result</p>
+                <p className="text-[11px] uppercase tracking-wide text-slate-400">{L("Result", "Resultado")}</p>
                 <p className={`text-sm font-semibold ${processGreen ? "text-emerald-300" : "text-sky-200"}`}>
-                  {processGreen ? "Process-green day" : "Learning day"}
+                  {processGreen ? L("Process-green day", "Día verde de proceso") : L("Learning day", "Día de aprendizaje")}
                 </p>
                 <p className="text-[11px] text-slate-500 mt-1">
-                  Process-green requires: journal + max loss respected + followed plan.
+                  {L(
+                    "Process-green requires: journal + max loss respected + followed plan.",
+                    "Verde de proceso requiere: journal + max loss respetado + plan seguido."
+                  )}
                 </p>
               </div>
 
@@ -554,35 +571,39 @@ export default function ChallengeDetailPage() {
                   disabled={!canCheckin || checkinBusy}
                   className="rounded-full bg-emerald-400 px-4 py-2 text-xs font-semibold text-slate-950 hover:bg-emerald-300 transition disabled:opacity-60"
                 >
-                  {checkinBusy ? "Saving..." : "Save check-in"}
+                  {checkinBusy ? L("Saving...", "Guardando...") : L("Save check-in", "Guardar check-in")}
                 </button>
               </div>
 
               {!canCheckin && (
                 <p className="mt-3 text-[11px] text-slate-500">
-                  Start the challenge to unlock check-ins.
+                  {L("Start the challenge to unlock check-ins.", "Inicia el reto para desbloquear check‑ins.")}
                 </p>
               )}
 
               {activeRun && activeRun.status !== "active" && (
                 <p className="mt-3 text-[11px] text-slate-500">
-                  This run is {statusLabel(activeRun.status)}. Start a new run to continue earning XP.
+                  {L("This run is", "Esta corrida está")} {statusLabel(activeRun.status, L)}.{" "}
+                  {L("Start a new run to continue earning XP.", "Inicia una nueva corrida para seguir ganando XP.")}
                 </p>
               )}
             </div>
 
             <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4 flex flex-col">
-              <label className="text-[11px] uppercase tracking-wide text-slate-400">Notes (optional)</label>
+              <label className="text-[11px] uppercase tracking-wide text-slate-400">{L("Notes (optional)", "Notas (opcional)")}</label>
               <textarea
                 value={note}
                 onChange={(e) => setNote(e.target.value)}
                 className="mt-1 flex-1 min-h-[140px] resize-y rounded-xl border border-slate-700 bg-slate-950/50 px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-400"
-                placeholder="What did you do well? What rule slipped? What will you do differently tomorrow?"
+                placeholder={L(
+                  "What did you do well? What rule slipped? What will you do differently tomorrow?",
+                  "¿Qué hiciste bien? ¿Qué regla falló? ¿Qué harás diferente mañana?"
+                )}
                 disabled={!canCheckin || checkinBusy}
               />
 
               <div className="mt-3 text-[11px] text-slate-500">
-                Tip: keep it short and honest. The point is pattern recognition.
+                {L("Tip: keep it short and honest. The point is pattern recognition.", "Tip: sé breve y honesto. El objetivo es reconocer patrones.")}
               </div>
             </div>
           </div>
@@ -592,30 +613,30 @@ export default function ChallengeDetailPage() {
         <section className="rounded-3xl border border-slate-800 bg-slate-900/60 p-5">
           <div className="flex items-center justify-between gap-3 mb-3">
             <div>
-              <h2 className="text-lg font-semibold text-slate-50">History</h2>
+              <h2 className="text-lg font-semibold text-slate-50">{L("History", "Historial")}</h2>
               <p className="text-[12px] text-slate-400 mt-1">
-                Click a row to load it into the check-in form.
+                {L("Click a row to load it into the check-in form.", "Haz clic en una fila para cargarla en el check‑in.")}
               </p>
             </div>
             <p className="text-[11px] text-slate-400">
-              {dayLogs.length} days logged
+              {dayLogs.length} {L("days logged", "días registrados")}
             </p>
           </div>
 
           {dayLogs.length === 0 ? (
             <p className="text-sm text-slate-400">
-              No check-ins yet for this run.
+              {L("No check-ins yet for this run.", "Aún no hay check‑ins para esta corrida.")}
             </p>
           ) : (
             <div className="overflow-x-auto rounded-2xl border border-slate-800 bg-slate-950/40">
               <table className="w-full border-collapse text-[12px]">
                 <thead className="bg-slate-950/60">
                   <tr>
-                    <th className="px-3 py-2 text-left text-[11px] uppercase tracking-[0.18em] text-slate-300">Day</th>
-                    <th className="px-3 py-2 text-left text-[11px] uppercase tracking-[0.18em] text-slate-300">Result</th>
-                    <th className="px-3 py-2 text-left text-[11px] uppercase tracking-[0.18em] text-slate-300">Checklist</th>
+                    <th className="px-3 py-2 text-left text-[11px] uppercase tracking-[0.18em] text-slate-300">{L("Day", "Día")}</th>
+                    <th className="px-3 py-2 text-left text-[11px] uppercase tracking-[0.18em] text-slate-300">{L("Result", "Resultado")}</th>
+                    <th className="px-3 py-2 text-left text-[11px] uppercase tracking-[0.18em] text-slate-300">{L("Checklist", "Checklist")}</th>
                     <th className="px-3 py-2 text-right text-[11px] uppercase tracking-[0.18em] text-slate-300">XP</th>
-                    <th className="px-3 py-2 text-left text-[11px] uppercase tracking-[0.18em] text-slate-300">Notes</th>
+                    <th className="px-3 py-2 text-left text-[11px] uppercase tracking-[0.18em] text-slate-300">{L("Notes", "Notas")}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -627,7 +648,7 @@ export default function ChallengeDetailPage() {
                         key={d.id}
                         className="border-t border-slate-800/70 hover:bg-slate-900/40 cursor-pointer"
                         onClick={() => handleLoadLogIntoForm(d)}
-                        title="Click to edit this day"
+                        title={L("Click to edit this day", "Haz clic para editar este día")}
                       >
                         <td className="px-3 py-2 text-slate-100 font-medium whitespace-nowrap">{d.day}</td>
                         <td className="px-3 py-2">
@@ -638,15 +659,15 @@ export default function ChallengeDetailPage() {
                                 : "border-sky-500/40 bg-sky-500/10 text-sky-200"
                             }`}
                           >
-                            {d.processGreen ? "GREEN" : "LEARNING"}
+                            {d.processGreen ? L("GREEN", "VERDE") : L("LEARNING", "APRENDIZAJE")}
                           </span>
                         </td>
                         <td className="px-3 py-2 text-slate-300">
-                          <span className={d.journalCompleted ? "text-emerald-200" : "text-slate-500"}>Journal</span>
+                          <span className={d.journalCompleted ? "text-emerald-200" : "text-slate-500"}>{L("Journal", "Journal")}</span>
                           <span className="text-slate-600"> · </span>
-                          <span className={d.respectedMaxLoss ? "text-emerald-200" : "text-rose-200"}>Max loss</span>
+                          <span className={d.respectedMaxLoss ? "text-emerald-200" : "text-rose-200"}>{L("Max loss", "Max loss")}</span>
                           <span className="text-slate-600"> · </span>
-                          <span className={d.followedPlan ? "text-emerald-200" : "text-slate-500"}>Plan</span>
+                          <span className={d.followedPlan ? "text-emerald-200" : "text-slate-500"}>{L("Plan", "Plan")}</span>
                         </td>
                         <td className="px-3 py-2 text-right text-slate-100 font-semibold whitespace-nowrap">
                           {d.xpAwarded.toLocaleString()}
@@ -667,10 +688,13 @@ export default function ChallengeDetailPage() {
             href="/challenges"
             className="text-emerald-300 hover:text-emerald-200 underline underline-offset-4"
           >
-            ← Back to all challenges
+            ← {L("Back to all challenges", "Volver a todos los retos")}
           </Link>
           <p>
-            Your AI coach will use this challenge history to personalize your coaching.
+            {L(
+              "Your AI coach will use this challenge history to personalize your coaching.",
+              "Tu coach AI usará este historial de retos para personalizar tu coaching."
+            )}
           </p>
         </div>
       </main>

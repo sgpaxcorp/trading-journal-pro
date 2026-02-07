@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo } from "react";
 import { tierIconPath } from "@/lib/trophiesSupabase";
+import { useAppSettings } from "@/lib/appSettings";
+import { resolveLocale } from "@/lib/i18n";
 
 export type TrophyToastItem = {
   /** Unique id for dismissing a single toast */
@@ -32,6 +34,10 @@ function tierPill(tier?: string) {
 }
 
 export default function TrophyToasts({ items, onDismiss, onClear }: Props) {
+  const { locale } = useAppSettings();
+  const lang = resolveLocale(locale);
+  const isEs = lang === "es";
+  const L = (en: string, es: string) => (isEs ? es : en);
   // Auto-clear after a few seconds per toast (staggered)
   const ids = useMemo(() => items.map((i) => i.id), [items]);
 
@@ -76,7 +82,7 @@ export default function TrophyToasts({ items, onDismiss, onClear }: Props) {
                 </p>
                 <button
                   type="button"
-                  aria-label="Dismiss"
+                  aria-label={L("Dismiss", "Descartar")}
                   onClick={() => {
                     if (onDismiss) onDismiss(t.id);
                     else if (onClear) onClear();
@@ -98,12 +104,22 @@ export default function TrophyToasts({ items, onDismiss, onClear }: Props) {
                       t.tier
                     )}`}
                   >
-                    {t.tier}
+                    {isEs
+                      ? t.tier.toLowerCase() === "elite"
+                        ? "Élite"
+                        : t.tier.toLowerCase() === "gold"
+                        ? "Oro"
+                        : t.tier.toLowerCase() === "silver"
+                        ? "Plata"
+                        : t.tier.toLowerCase() === "bronze"
+                        ? "Bronce"
+                        : t.tier
+                      : t.tier}
                   </span>
                 )}
                 {typeof t.xp === "number" && (
                   <span className="text-emerald-200 font-semibold">
-                    +{t.xp} XP
+                    +{t.xp} {L("XP", "XP")}
                   </span>
                 )}
               </div>

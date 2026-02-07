@@ -1,0 +1,14 @@
+fastapi==0.115.6
+uvicorn[standard]==0.30.6
+pydantic==2.8.2
+pydantic-settings==2.4.0
+python-multipart==0.0.9
+pandas==2.2.2
+numpy==2.0.2
+scikit-learn==1.5.1
+joblib==1.4.2
+sqlmodel==0.0.22
+sqlalchemy==2.0.32
+psycopg2-binary==2.9.9
+openai==1.44.0
+pillow==10.4.0

@@ -36,19 +36,22 @@ import {
   getJournalUiSettings,
   saveJournalUiSettings,
 } from "@/lib/journalUiSettingsSupabase";
+import { useAppSettings } from "@/lib/appSettings";
+import { resolveLocale } from "@/lib/i18n";
 
 /* =========================================================
    Trades / DTE parsing
 ========================================================= */
 
-const KIND_OPTIONS: { value: InstrumentType; label: string }[] = [
-  { value: "stock", label: "Stocks" },
-  { value: "option", label: "Options" },
-  { value: "future", label: "Futures" },
-  { value: "crypto", label: "Crypto" },
-  { value: "forex", label: "Forex" },
-  { value: "other", label: "Other" },
-];
+const KIND_VALUES: InstrumentType[] = ["stock", "option", "future", "crypto", "forex", "other"];
+const KIND_LABELS: Record<InstrumentType, { en: string; es: string }> = {
+  stock: { en: "Stocks", es: "Acciones" },
+  option: { en: "Options", es: "Opciones" },
+  future: { en: "Futures", es: "Futuros" },
+  crypto: { en: "Crypto", es: "Cripto" },
+  forex: { en: "Forex", es: "Forex" },
+  other: { en: "Other", es: "Otro" },
+};
 
 type SideType = "long" | "short";
 
@@ -67,25 +70,39 @@ type OptionStrategy =
   | "cash_secured_put"
   | "other";
 
-const PREMIUM_OPTIONS: { value: PremiumSide; label: string }[] = [
-  { value: "none", label: "—" },
-  { value: "debit", label: "Debit (I pay premium)" },
-  { value: "credit", label: "Credit (I receive premium)" },
-];
+const PREMIUM_VALUES: PremiumSide[] = ["none", "debit", "credit"];
+const PREMIUM_LABELS: Record<PremiumSide, { en: string; es: string }> = {
+  none: { en: "—", es: "—" },
+  debit: { en: "Debit (I pay premium)", es: "Débito (pago prima)" },
+  credit: { en: "Credit (I receive premium)", es: "Crédito (recibo prima)" },
+};
 
-const STRATEGY_OPTIONS: { value: OptionStrategy; label: string }[] = [
-  { value: "single", label: "Single / naked" },
-  { value: "vertical_spread", label: "Vertical spread" },
-  { value: "iron_condor", label: "Iron Condor" },
-  { value: "iron_butterfly", label: "Iron Butterfly" },
-  { value: "straddle", label: "Straddle" },
-  { value: "strangle", label: "Strangle" },
-  { value: "calendar", label: "Calendar spread" },
-  { value: "diagonal", label: "Diagonal spread" },
-  { value: "covered_call", label: "Covered call" },
-  { value: "cash_secured_put", label: "Cash-secured put" },
-  { value: "other", label: "Other option strategy" },
+const STRATEGY_VALUES: OptionStrategy[] = [
+  "single",
+  "vertical_spread",
+  "iron_condor",
+  "iron_butterfly",
+  "straddle",
+  "strangle",
+  "calendar",
+  "diagonal",
+  "covered_call",
+  "cash_secured_put",
+  "other",
 ];
+const STRATEGY_LABELS: Record<OptionStrategy, { en: string; es: string }> = {
+  single: { en: "Single / naked", es: "Simple / naked" },
+  vertical_spread: { en: "Vertical spread", es: "Spread vertical" },
+  iron_condor: { en: "Iron Condor", es: "Iron Condor" },
+  iron_butterfly: { en: "Iron Butterfly", es: "Iron Butterfly" },
+  straddle: { en: "Straddle", es: "Straddle" },
+  strangle: { en: "Strangle", es: "Strangle" },
+  calendar: { en: "Calendar spread", es: "Calendar spread" },
+  diagonal: { en: "Diagonal spread", es: "Diagonal spread" },
+  covered_call: { en: "Covered call", es: "Covered call" },
+  cash_secured_put: { en: "Cash-secured put", es: "Cash‑secured put" },
+  other: { en: "Other option strategy", es: "Otra estrategia de opciones" },
+};
 
 // ✅ Normalizers for DB -> UI
 function toSideType(raw: any): SideType {
@@ -260,18 +277,15 @@ function normalizeStrategy(optionStrategy?: OptionStrategy): OptionStrategy {
   return optionStrategy || "single";
 }
 
-function premiumLabel(kind: InstrumentType, premiumSide?: PremiumSide) {
+function premiumLabel(kind: InstrumentType, premiumSide: PremiumSide | undefined, lang: "en" | "es") {
   const p = normalizePremiumSide(kind, premiumSide);
-  if (p === "debit") return "Debit";
-  if (p === "credit") return "Credit";
-  return "—";
+  return PREMIUM_LABELS[p]?.[lang] ?? PREMIUM_LABELS[p]?.en ?? "—";
 }
 
-function strategyLabel(kind: InstrumentType, strategy?: OptionStrategy) {
+function strategyLabel(kind: InstrumentType, strategy: OptionStrategy | undefined, lang: "en" | "es") {
   if (kind !== "option") return "—";
   const s = normalizeStrategy(strategy);
-  const found = STRATEGY_OPTIONS.find((o) => o.value === s);
-  return found?.label ?? "Single / naked";
+  return STRATEGY_LABELS[s]?.[lang] ?? STRATEGY_LABELS[s]?.en ?? "Single / naked";
 }
 
 /* =========================================================
@@ -451,6 +465,23 @@ export default function DailyJournalPage() {
   const params = useParams();
   const router = useRouter();
   const { user, loading: authLoading } = useAuth();
+  const { locale } = useAppSettings();
+  const lang = resolveLocale(locale);
+  const isEs = lang === "es";
+  const L = (en: string, es: string) => (isEs ? es : en);
+
+  const kindOptions = useMemo(
+    () => KIND_VALUES.map((value) => ({ value, label: KIND_LABELS[value]?.[lang] ?? KIND_LABELS[value]?.en ?? value })),
+    [lang]
+  );
+  const premiumOptions = useMemo(
+    () => PREMIUM_VALUES.map((value) => ({ value, label: PREMIUM_LABELS[value]?.[lang] ?? PREMIUM_LABELS[value]?.en ?? value })),
+    [lang]
+  );
+  const strategyOptions = useMemo(
+    () => STRATEGY_VALUES.map((value) => ({ value, label: STRATEGY_LABELS[value]?.[lang] ?? STRATEGY_LABELS[value]?.en ?? value })),
+    [lang]
+  );
 
   const userId = (user as any)?.id ?? "";
 
@@ -540,17 +571,17 @@ export default function DailyJournalPage() {
   ========================================================= */
 
   const ALL_WIDGETS: { id: JournalWidgetId; label: string; defaultOn: boolean }[] = [
-    { id: "pnl", label: "Day P&L", defaultOn: true },
-    { id: "premarket", label: "Premarket Prep", defaultOn: true },
-    { id: "inside", label: "Inside the Trade", defaultOn: true },
-    { id: "after", label: "After-trade Analysis", defaultOn: true },
-    { id: "entries", label: "Entries", defaultOn: true },
-    { id: "exits", label: "Exits", defaultOn: true },
-    { id: "emotional", label: "Emotional State", defaultOn: true },
-    { id: "strategy", label: "Strategy / Probability", defaultOn: true },
-    { id: "screenshots", label: "Screenshots", defaultOn: true },
-    { id: "templates", label: "Templates", defaultOn: true },
-    { id: "actions", label: "Actions", defaultOn: true },
+    { id: "pnl", label: L("Day P&L", "P&L del día"), defaultOn: true },
+    { id: "premarket", label: L("Premarket Prep", "Preparación premarket"), defaultOn: true },
+    { id: "inside", label: L("Inside the Trade", "Dentro del trade"), defaultOn: true },
+    { id: "after", label: L("After-trade Analysis", "Análisis post‑trade"), defaultOn: true },
+    { id: "entries", label: L("Entries", "Entradas"), defaultOn: true },
+    { id: "exits", label: L("Exits", "Salidas"), defaultOn: true },
+    { id: "emotional", label: L("Emotional State", "Estado emocional"), defaultOn: true },
+    { id: "strategy", label: L("Strategy / Probability", "Estrategia / Probabilidad"), defaultOn: true },
+    { id: "screenshots", label: L("Screenshots", "Screenshots"), defaultOn: true },
+    { id: "templates", label: L("Templates", "Plantillas"), defaultOn: true },
+    { id: "actions", label: L("Actions", "Acciones"), defaultOn: true },
   ];
 
   const widgetsKey = "journal_widgets_active_v1";
@@ -1134,6 +1165,40 @@ export default function DailyJournalPage() {
       return { ...prev, tags };
     });
 
+  const emotionTags = [
+    "Calm",
+    "Greedy",
+    "Desperate",
+    "Adrenaline",
+    "Confident",
+    "Fearful",
+    "Angry",
+    "FOMO",
+    "Revenge trade",
+    "Focus",
+    "Patience",
+    "Discipline",
+    "Anxiety",
+    "Overconfident",
+  ];
+
+  const emotionTagLabels: Record<string, string> = {
+    Calm: "Calma",
+    Greedy: "Codicia",
+    Desperate: "Desesperado",
+    Adrenaline: "Adrenalina",
+    Confident: "Confiado",
+    Fearful: "Miedo",
+    Angry: "Enojo",
+    FOMO: "FOMO",
+    "Revenge trade": "Trade de revancha",
+    Focus: "Enfoque",
+    Patience: "Paciencia",
+    Discipline: "Disciplina",
+    Anxiety: "Ansiedad",
+    Overconfident: "Sobreconfiado",
+  };
+
   const probabilityTags = [
     "Exploratory Trade",
     "50% Probability",
@@ -1149,6 +1214,21 @@ export default function DailyJournalPage() {
     "Unclear Setup",
   ];
 
+  const probabilityTagLabels: Record<string, string> = {
+    "Exploratory Trade": "Trade exploratorio",
+    "50% Probability": "Probabilidad 50%",
+    "Trade with Edge": "Trade con edge",
+    "High Probability": "Alta probabilidad",
+    "Low Probability": "Baja probabilidad",
+    "Setup not perfect": "Setup no perfecto",
+    "Good Risk-Reward": "Buen R/R",
+    "Poor Risk-Reward": "Mal R/R",
+    "Followed Plan": "Siguió el plan",
+    "Deviated from Plan": "Se desvió del plan",
+    "Clear Setup": "Setup claro",
+    "Unclear Setup": "Setup poco claro",
+  };
+
   const exitReasonTags = [
     "Stop Loss Placed",
     "Take Profit Hit",
@@ -1158,13 +1238,41 @@ export default function DailyJournalPage() {
     "Move stop to breakeven",
   ];
 
+  const exitReasonTagLabels: Record<string, string> = {
+    "Stop Loss Placed": "Stop loss colocado",
+    "Take Profit Hit": "Take profit ejecutado",
+    "Manual Exit": "Salida manual",
+    "Moved stop to profit": "Stop movido a profit",
+    "Stopped out (loss)": "Stop ejecutado (pérdida)",
+    "Move stop to breakeven": "Mover stop a BE",
+  };
+
+  const strategyTagLabels: Record<string, string> = {
+    "Respect Strategy": "Respeta la estrategia",
+    "Not follow my plan": "No seguí mi plan",
+    "No respect my plan": "No respeté mi plan",
+    "Planned stop was in place": "Stop planificado en su lugar",
+    "Used planned position sizing": "Usé tamaño de posición planificado",
+    "Risk-to-reward ≥ 2R (planned)": "Riesgo/beneficio ≥ 2R (plan)",
+    "Risk-to-reward < 1.5R (tight)": "Riesgo/beneficio < 1.5R (ajustado)",
+    "Is Vix high?": "¿VIX alto?",
+    "Is Vix low?": "¿VIX bajo?",
+    "Earnings play": "Trade por earnings",
+    "News-driven trade": "Trade por noticias",
+    "Momentum trade": "Trade de momentum",
+    "Reversal trade": "Trade de reversión",
+    "Scalping trade": "Trade de scalping",
+  };
+
+  const tagLabel = (tag: string, map: Record<string, string>) => (isEs ? map[tag] ?? tag : tag);
+
   /* =========================================================
      Save (Supabase)
   ========================================================= */
 
   const handleSave = async (): Promise<boolean> => {
     if (!userId) {
-      setMsg("Cannot save: no user.");
+      setMsg(L("Cannot save: no user.", "No se puede guardar: sin usuario."));
       return false;
     }
 
@@ -1237,7 +1345,7 @@ export default function DailyJournalPage() {
       setPnlFromDb(Number(pnlToSave.toFixed(2)));
       setPnlMode("db");
 
-      setMsg("Saved ✅");
+      setMsg(L("Saved ✅", "Guardado ✅"));
       setTimeout(() => setMsg(""), 2000);
       if (userId) {
         void syncMyTrophies(String(userId)).catch((err) => {
@@ -1252,7 +1360,7 @@ export default function DailyJournalPage() {
       return true;
     } catch (err: any) {
       console.error(err);
-      setMsg(err?.message ?? "Save failed");
+      setMsg(err?.message ?? L("Save failed", "Error al guardar"));
       return false;
     } finally {
       setSaving(false);
@@ -1278,7 +1386,7 @@ export default function DailyJournalPage() {
 
   const handleSyncFromImport = async () => {
     if (!userId || !dateParam) {
-      setMsg("Cannot sync: missing user/date.");
+      setMsg(L("Cannot sync: missing user/date.", "No se puede sincronizar: falta usuario/fecha."));
       return;
     }
 
@@ -1292,7 +1400,7 @@ export default function DailyJournalPage() {
       } = await supabaseBrowser.auth.getSession();
 
       if (sessionErr || !session?.access_token) {
-        setMsg("Cannot sync: not authenticated.");
+        setMsg(L("Cannot sync: not authenticated.", "No se puede sincronizar: no autenticado."));
         return;
       }
 
@@ -1308,7 +1416,7 @@ export default function DailyJournalPage() {
       const json = await res.json().catch(() => ({}));
 
       if (!res.ok) {
-        setMsg(json?.error ? `Sync error: ${json.error}` : "Sync error.");
+        setMsg(json?.error ? `${L("Sync error:", "Error de sync:")} ${json.error}` : L("Sync error.", "Error de sync."));
         return;
       }
 
@@ -1384,7 +1492,7 @@ export default function DailyJournalPage() {
       }
     } catch (err) {
       console.error(err);
-      setMsg("Error syncing trades.");
+      setMsg(L("Error syncing trades.", "Error al sincronizar trades."));
     } finally {
       setSyncing(false);
     }
@@ -1403,11 +1511,11 @@ export default function DailyJournalPage() {
       const created = await createJournalTemplate(userId, name, payload);
       setTemplates((prev) => (created ? [created, ...prev] : prev));
       setNewTemplateName("");
-      setMsg("Template saved ✅");
+      setMsg(L("Template saved ✅", "Plantilla guardada ✅"));
       setTimeout(() => setMsg(""), 1600);
     } catch (e: any) {
       console.error(e);
-      setMsg(e?.message ?? "Template save failed");
+      setMsg(e?.message ?? L("Template save failed", "Error al guardar la plantilla"));
     }
   };
 
@@ -1433,7 +1541,7 @@ export default function DailyJournalPage() {
       setTemplates((prev) => prev.filter((t) => t.id !== id));
     } catch (e: any) {
       console.error(e);
-      setMsg(e?.message ?? "Delete failed");
+      setMsg(e?.message ?? L("Delete failed", "Error al eliminar"));
     }
   };
 
@@ -1448,13 +1556,18 @@ export default function DailyJournalPage() {
     const w = window as any;
     const SR = w.SpeechRecognition || w.webkitSpeechRecognition;
     if (!SR) {
-      alert("SpeechRecognition is not available in this browser.");
+      alert(
+        L(
+          "SpeechRecognition is not available in this browser.",
+          "SpeechRecognition no está disponible en este navegador."
+        )
+      );
       return;
     }
 
     if (!recognitionRef.current) {
       const rec = new SR();
-      rec.lang = "en-US";
+      rec.lang = isEs ? "es-ES" : "en-US";
       rec.continuous = true;
       rec.interimResults = true;
 
@@ -1495,14 +1608,17 @@ export default function DailyJournalPage() {
   const WIDGETS: JournalWidgetDef[] = [
     {
       id: "premarket",
-      title: "Premarket Prep",
+      title: L("Premarket Prep", "Preparación premarket"),
       defaultLayout: { i: "premarket", x: 0, y: 0, w: 7, h: 8, minW: 4, minH: 6 },
       render: () => (
-        <WidgetCard title="Premarket Prep">
+        <WidgetCard title={L("Premarket Prep", "Preparación premarket")}>
           <RichTextEditor
             value={premarketHtml}
             onChange={setPremarketHtml}
-            placeholder="Premarket prep: bias, levels, planned setups, rules…"
+            placeholder={L(
+              "Premarket prep: bias, levels, planned setups, rules…",
+              "Preparación premarket: sesgo, niveles, setups planificados, reglas…"
+            )}
             minHeight={260}
           />
         </WidgetCard>
@@ -1511,32 +1627,41 @@ export default function DailyJournalPage() {
 
     {
       id: "pnl",
-      title: "Day P&L",
+      title: L("Day P&L", "P&L del día"),
       defaultLayout: { i: "pnl", x: 7, y: 0, w: 5, h: 3, minW: 3, minH: 2 },
       render: () => (
-        <WidgetCard title="Day P&L">
-          <label className="text-slate-400 text-xs uppercase tracking-wide">Day P&L (USD) — AUTO</label>
+        <WidgetCard title={L("Day P&L", "P&L del día")}>
+          <label className="text-slate-400 text-xs uppercase tracking-wide">
+            {L("Day P&L (USD) — AUTO", "P&L del día (USD) — AUTO")}
+          </label>
           <input
             type="text"
             value={pnlInput}
             readOnly
             className="mt-2 w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-slate-100 text-[16px] focus:outline-none focus:border-emerald-400 opacity-90"
-            placeholder="Auto-calculated"
+            placeholder={L("Auto-calculated", "Calculado automáticamente")}
           />
-          <p className="text-xs text-slate-500 mt-2">Calculated from Entries/Exits (FIFO + multipliers + premium).</p>
+          <p className="text-xs text-slate-500 mt-2">
+            {L(
+              "Calculated from Entries/Exits (FIFO + multipliers + premium).",
+              "Calculado desde Entradas/Salidas (FIFO + multiplicadores + prima)."
+            )}
+          </p>
         </WidgetCard>
       ),
     },
 
     {
       id: "entries",
-      title: "Entries",
+      title: L("Entries", "Entradas"),
       defaultLayout: { i: "entries", x: 7, y: 3, w: 5, h: 7, minW: 4, minH: 6 },
       render: () => (
-        <WidgetCard title="Entries">
+        <WidgetCard title={L("Entries", "Entradas")}>
           <div className="grid grid-cols-1 md:grid-cols-8 gap-2 text-sm">
             <div>
-              <label className="text-xs text-slate-400 block mb-1">Symbol / Contract</label>
+              <label className="text-xs text-slate-400 block mb-1">
+                {L("Symbol / Contract", "Símbolo / Contrato")}
+              </label>
               <input
                 type="text"
                 value={newEntryTrade.symbol}
@@ -1551,13 +1676,13 @@ export default function DailyJournalPage() {
             </div>
 
             <div>
-              <label className="text-xs text-slate-400 block mb-1">Type</label>
+              <label className="text-xs text-slate-400 block mb-1">{L("Type", "Tipo")}</label>
               <select
                 value={newEntryTrade.kind}
                 onChange={(e) => setNewEntryTrade((p) => ({ ...p, kind: e.target.value as InstrumentType }))}
                 className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-[14px] text-slate-100 focus:outline-none focus:border-emerald-400"
               >
-                {KIND_OPTIONS.map((k) => (
+                {kindOptions.map((k) => (
                   <option key={k.value} value={k.value}>
                     {k.label}
                   </option>
@@ -1566,25 +1691,25 @@ export default function DailyJournalPage() {
             </div>
 
             <div>
-              <label className="text-xs text-slate-400 block mb-1">Side</label>
+              <label className="text-xs text-slate-400 block mb-1">{L("Side", "Lado")}</label>
               <select
                 value={newEntryTrade.side}
                 onChange={(e) => setNewEntryTrade((p) => ({ ...p, side: e.target.value as SideType }))}
                 className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-[14px] text-slate-100 focus:outline-none focus:border-emerald-400"
               >
-                <option value="long">LONG</option>
-                <option value="short">SHORT</option>
+                <option value="long">{L("LONG", "LARGO")}</option>
+                <option value="short">{L("SHORT", "CORTO")}</option>
               </select>
             </div>
 
             <div>
-              <label className="text-xs text-slate-400 block mb-1">Premium</label>
+              <label className="text-xs text-slate-400 block mb-1">{L("Premium", "Prima")}</label>
               <select
                 value={newEntryTrade.premiumSide}
                 onChange={(e) => setNewEntryTrade((p) => ({ ...p, premiumSide: e.target.value as PremiumSide }))}
                 className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-[14px] text-slate-100 focus:outline-none focus:border-emerald-400"
               >
-                {PREMIUM_OPTIONS.map((opt) => (
+                {premiumOptions.map((opt) => (
                   <option key={opt.value} value={opt.value}>
                     {opt.label}
                   </option>
@@ -1593,13 +1718,15 @@ export default function DailyJournalPage() {
             </div>
 
             <div>
-              <label className="text-xs text-slate-400 block mb-1">Option strategy</label>
+              <label className="text-xs text-slate-400 block mb-1">
+                {L("Option strategy", "Estrategia de opciones")}
+              </label>
               <select
                 value={newEntryTrade.optionStrategy}
                 onChange={(e) => setNewEntryTrade((p) => ({ ...p, optionStrategy: e.target.value as OptionStrategy }))}
                 className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-[14px] text-slate-100 focus:outline-none focus:border-emerald-400"
               >
-                {STRATEGY_OPTIONS.map((opt) => (
+                {strategyOptions.map((opt) => (
                   <option key={opt.value} value={opt.value}>
                     {opt.label}
                   </option>
@@ -1608,7 +1735,7 @@ export default function DailyJournalPage() {
             </div>
 
             <div>
-              <label className="text-xs text-slate-400 block mb-1">Price</label>
+              <label className="text-xs text-slate-400 block mb-1">{L("Price", "Precio")}</label>
               <input
                 type="number"
                 value={newEntryTrade.price}
@@ -1618,7 +1745,7 @@ export default function DailyJournalPage() {
             </div>
 
             <div>
-              <label className="text-xs text-slate-400 block mb-1">Quantity</label>
+              <label className="text-xs text-slate-400 block mb-1">{L("Quantity", "Cantidad")}</label>
               <input
                 type="number"
                 value={newEntryTrade.quantity}
@@ -1628,15 +1755,19 @@ export default function DailyJournalPage() {
             </div>
 
             <div>
-              <label className="text-xs text-slate-400 block mb-1">Time</label>
+              <label className="text-xs text-slate-400 block mb-1">{L("Time", "Hora")}</label>
               <input
                 type="text"
                 value={newEntryTrade.time}
                 onChange={(e) => setNewEntryTrade((p) => ({ ...p, time: e.target.value }))}
                 className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-[14px] text-slate-300"
               />
-              <button type="button" className="text-[11px] text-emerald-300 mt-1" onClick={() => setNewEntryTrade((p) => ({ ...p, time: nowTimeLabel() }))}>
-                use current time
+              <button
+                type="button"
+                className="text-[11px] text-emerald-300 mt-1"
+                onClick={() => setNewEntryTrade((p) => ({ ...p, time: nowTimeLabel() }))}
+              >
+                {L("use current time", "usar hora actual")}
               </button>
             </div>
           </div>
@@ -1646,7 +1777,7 @@ export default function DailyJournalPage() {
             onClick={handleAddEntryTrade}
             className="mt-3 px-3 py-1.5 rounded-lg bg-emerald-400 text-slate-950 text-xs font-semibold hover:bg-emerald-300 transition"
           >
-            Add entry
+            {L("Add entry", "Agregar entrada")}
           </button>
 
           {entryTrades.length > 0 && (
@@ -1654,14 +1785,14 @@ export default function DailyJournalPage() {
               <table className="w-full text-left text-[12px] border border-slate-800 rounded-lg overflow-hidden">
                 <thead className="bg-slate-900/80">
                   <tr>
-                    <th className="px-2 py-1 border-b border-slate-800">Symbol</th>
-                    <th className="px-2 py-1 border-b border-slate-800">Type</th>
-                    <th className="px-2 py-1 border-b border-slate-800">Side</th>
-                    <th className="px-2 py-1 border-b border-slate-800">Premium</th>
-                    <th className="px-2 py-1 border-b border-slate-800">Strategy</th>
-                    <th className="px-2 py-1 border-b border-slate-800">Price</th>
-                    <th className="px-2 py-1 border-b border-slate-800">Qty</th>
-                    <th className="px-2 py-1 border-b border-slate-800">Time</th>
+                    <th className="px-2 py-1 border-b border-slate-800">{L("Symbol", "Símbolo")}</th>
+                    <th className="px-2 py-1 border-b border-slate-800">{L("Type", "Tipo")}</th>
+                    <th className="px-2 py-1 border-b border-slate-800">{L("Side", "Lado")}</th>
+                    <th className="px-2 py-1 border-b border-slate-800">{L("Premium", "Prima")}</th>
+                    <th className="px-2 py-1 border-b border-slate-800">{L("Strategy", "Estrategia")}</th>
+                    <th className="px-2 py-1 border-b border-slate-800">{L("Price", "Precio")}</th>
+                    <th className="px-2 py-1 border-b border-slate-800">{L("Qty", "Cant.")}</th>
+                    <th className="px-2 py-1 border-b border-slate-800">{L("Time", "Hora")}</th>
                     <th className="px-2 py-1 border-b border-slate-800">DTE</th>
                     <th className="px-2 py-1 border-b border-slate-800 text-right">–</th>
                   </tr>
@@ -1672,14 +1803,19 @@ export default function DailyJournalPage() {
                       <td className="px-2 py-1">{t.symbol}</td>
                       <td className="px-2 py-1">{t.kind}</td>
                       <td className="px-2 py-1">{t.side}</td>
-                      <td className="px-2 py-1">{premiumLabel(t.kind, t.premiumSide)}</td>
-                      <td className="px-2 py-1">{strategyLabel(t.kind, t.optionStrategy)}</td>
+                      <td className="px-2 py-1">{premiumLabel(t.kind, t.premiumSide, lang)}</td>
+                      <td className="px-2 py-1">{strategyLabel(t.kind, t.optionStrategy, lang)}</td>
                       <td className="px-2 py-1">{t.price}</td>
                       <td className="px-2 py-1">{t.quantity}</td>
                       <td className="px-2 py-1">{t.time}</td>
                       <td className="px-2 py-1">{t.kind === "option" ? (t.dte ?? "—") : "—"}</td>
                       <td className="px-2 py-1 text-right">
-                        <button type="button" onClick={() => handleDeleteEntryTrade(t.id)} className="text-slate-500 hover:text-sky-300" title="Delete entry">
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteEntryTrade(t.id)}
+                          className="text-slate-500 hover:text-sky-300"
+                          title={L("Delete entry", "Eliminar entrada")}
+                        >
                           ✕
                         </button>
                       </td>
@@ -1689,11 +1825,13 @@ export default function DailyJournalPage() {
               </table>
 
               <div className="pt-1 border-t border-slate-800 mt-1">
-                <p className="text-[11px] text-slate-400 mb-1">Average entry price per symbol/type</p>
+                <p className="text-[11px] text-slate-400 mb-1">
+                  {L("Average entry price per symbol/type", "Precio promedio de entrada por símbolo/tipo")}
+                </p>
                 <div className="flex flex-wrap gap-2">
                   {entryAverages.map((a) => (
                     <span key={`${a.symbol}|${a.kind}`} className="px-2 py-1 rounded-full bg-slate-950 border border-slate-700 text-[11px]">
-                      {a.symbol} ({a.kind}): {a.avg.toFixed(2)} · qty {a.qty}
+                      {a.symbol} ({a.kind}): {a.avg.toFixed(2)} · {L("qty", "cant.")} {a.qty}
                     </span>
                   ))}
                 </div>
@@ -1706,13 +1844,15 @@ export default function DailyJournalPage() {
 
     {
       id: "exits",
-      title: "Exits",
+      title: L("Exits", "Salidas"),
       defaultLayout: { i: "exits", x: 7, y: 10, w: 5, h: 6, minW: 4, minH: 5 },
       render: () => (
-        <WidgetCard title="Exits">
+        <WidgetCard title={L("Exits", "Salidas")}>
           <div className="grid grid-cols-1 md:grid-cols-8 gap-2 text-sm">
             <div>
-              <label className="text-xs text-slate-400 block mb-1">Close position</label>
+              <label className="text-xs text-slate-400 block mb-1">
+                {L("Close position", "Cerrar posición")}
+              </label>
               <select
                 value={
                   newExitTrade.symbol
@@ -1728,59 +1868,62 @@ export default function DailyJournalPage() {
                 onChange={(e) => handlePickOpenPosition(e.target.value)}
                 className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-[14px] text-slate-100 focus:outline-none focus:border-emerald-400"
               >
-                <option value="">Select…</option>
+                <option value="">{L("Select…", "Seleccionar…")}</option>
                 {openPositions.map((p) => (
                   <option
                     key={[p.symbol, p.kind, p.side, p.premiumSide, p.optionStrategy].join("|")}
                     value={[p.symbol, p.kind, p.side, p.premiumSide, p.optionStrategy].join("|")}
                   >
-                    {p.symbol} ({p.kind}) {p.side.toUpperCase()} · {premiumLabel(p.kind, p.premiumSide)} · {strategyLabel(p.kind, p.optionStrategy)} · rem {p.remainingQty}
+                    {p.symbol} ({p.kind}) {p.side.toUpperCase()} · {premiumLabel(p.kind, p.premiumSide, lang)} ·{" "}
+                    {strategyLabel(p.kind, p.optionStrategy, lang)} · {L("rem", "rest")}{` ${p.remainingQty}`}
                   </option>
                 ))}
               </select>
             </div>
 
             <div>
-              <label className="text-xs text-slate-400 block mb-1">Type</label>
+              <label className="text-xs text-slate-400 block mb-1">{L("Type", "Tipo")}</label>
               <input readOnly value={newExitTrade.kind} className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-[14px] text-slate-300" />
             </div>
 
             <div>
-              <label className="text-xs text-slate-400 block mb-1">Side</label>
+              <label className="text-xs text-slate-400 block mb-1">{L("Side", "Lado")}</label>
               <input readOnly value={newExitTrade.side} className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-[14px] text-slate-300" />
             </div>
 
             <div>
-              <label className="text-xs text-slate-400 block mb-1">Premium</label>
-              <input readOnly value={premiumLabel(newExitTrade.kind, newExitTrade.premiumSide)} className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-[14px] text-slate-300" />
+              <label className="text-xs text-slate-400 block mb-1">{L("Premium", "Prima")}</label>
+              <input readOnly value={premiumLabel(newExitTrade.kind, newExitTrade.premiumSide, lang)} className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-[14px] text-slate-300" />
             </div>
 
             <div>
-              <label className="text-xs text-slate-400 block mb-1">Option strategy</label>
-              <input readOnly value={strategyLabel(newExitTrade.kind, newExitTrade.optionStrategy)} className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-[14px] text-slate-300" />
+              <label className="text-xs text-slate-400 block mb-1">
+                {L("Option strategy", "Estrategia de opciones")}
+              </label>
+              <input readOnly value={strategyLabel(newExitTrade.kind, newExitTrade.optionStrategy, lang)} className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-[14px] text-slate-300" />
             </div>
 
             <div>
-              <label className="text-xs text-slate-400 block mb-1">Exit price</label>
+              <label className="text-xs text-slate-400 block mb-1">{L("Exit price", "Precio de salida")}</label>
               <input type="number" value={newExitTrade.price} onChange={(e) => setNewExitTrade((p) => ({ ...p, price: e.target.value }))} className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-[14px] text-slate-100 focus:outline-none focus:border-emerald-400" />
             </div>
 
             <div>
-              <label className="text-xs text-slate-400 block mb-1">Qty to close</label>
+              <label className="text-xs text-slate-400 block mb-1">{L("Qty to close", "Cantidad a cerrar")}</label>
               <input type="number" value={newExitTrade.quantity} onChange={(e) => setNewExitTrade((p) => ({ ...p, quantity: e.target.value }))} className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-[14px] text-slate-100 focus:outline-none focus:border-emerald-400" />
             </div>
 
             <div>
-              <label className="text-xs text-slate-400 block mb-1">Time</label>
+              <label className="text-xs text-slate-400 block mb-1">{L("Time", "Hora")}</label>
               <input type="text" value={newExitTrade.time} onChange={(e) => setNewExitTrade((p) => ({ ...p, time: e.target.value }))} className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-[14px] text-slate-300" />
               <button type="button" className="text-[11px] text-emerald-300 mt-1" onClick={() => setNewExitTrade((p) => ({ ...p, time: nowTimeLabel() }))}>
-                use current time
+                {L("use current time", "usar hora actual")}
               </button>
             </div>
           </div>
 
           <button type="button" onClick={handleAddExitTrade} className="mt-3 px-3 py-1.5 rounded-lg bg-emerald-400 text-slate-950 text-xs font-semibold hover:bg-emerald-300 transition">
-            Add exit
+            {L("Add exit", "Agregar salida")}
           </button>
 
           {exitTrades.length > 0 && (
@@ -1788,14 +1931,14 @@ export default function DailyJournalPage() {
               <table className="w-full text-left text-[12px] border border-slate-800 rounded-lg overflow-hidden">
                 <thead className="bg-slate-900/80">
                   <tr>
-                    <th className="px-2 py-1 border-b border-slate-800">Symbol</th>
-                    <th className="px-2 py-1 border-b border-slate-800">Type</th>
-                    <th className="px-2 py-1 border-b border-slate-800">Side</th>
-                    <th className="px-2 py-1 border-b border-slate-800">Premium</th>
-                    <th className="px-2 py-1 border-b border-slate-800">Strategy</th>
-                    <th className="px-2 py-1 border-b border-slate-800">Price</th>
-                    <th className="px-2 py-1 border-b border-slate-800">Qty</th>
-                    <th className="px-2 py-1 border-b border-slate-800">Time</th>
+                    <th className="px-2 py-1 border-b border-slate-800">{L("Symbol", "Símbolo")}</th>
+                    <th className="px-2 py-1 border-b border-slate-800">{L("Type", "Tipo")}</th>
+                    <th className="px-2 py-1 border-b border-slate-800">{L("Side", "Lado")}</th>
+                    <th className="px-2 py-1 border-b border-slate-800">{L("Premium", "Prima")}</th>
+                    <th className="px-2 py-1 border-b border-slate-800">{L("Strategy", "Estrategia")}</th>
+                    <th className="px-2 py-1 border-b border-slate-800">{L("Price", "Precio")}</th>
+                    <th className="px-2 py-1 border-b border-slate-800">{L("Qty", "Cant.")}</th>
+                    <th className="px-2 py-1 border-b border-slate-800">{L("Time", "Hora")}</th>
                     <th className="px-2 py-1 border-b border-slate-800">DTE</th>
                     <th className="px-2 py-1 border-b border-slate-800 text-right">–</th>
                   </tr>
@@ -1806,14 +1949,19 @@ export default function DailyJournalPage() {
                       <td className="px-2 py-1">{t.symbol}</td>
                       <td className="px-2 py-1">{t.kind}</td>
                       <td className="px-2 py-1">{t.side}</td>
-                      <td className="px-2 py-1">{premiumLabel(t.kind, t.premiumSide)}</td>
-                      <td className="px-2 py-1">{strategyLabel(t.kind, t.optionStrategy)}</td>
+                      <td className="px-2 py-1">{premiumLabel(t.kind, t.premiumSide, lang)}</td>
+                      <td className="px-2 py-1">{strategyLabel(t.kind, t.optionStrategy, lang)}</td>
                       <td className="px-2 py-1">{t.price}</td>
                       <td className="px-2 py-1">{t.quantity}</td>
                       <td className="px-2 py-1">{t.time}</td>
                       <td className="px-2 py-1">{t.kind === "option" ? (t.dte ?? "—") : "—"}</td>
                       <td className="px-2 py-1 text-right">
-                        <button type="button" onClick={() => handleDeleteExitTrade(t.id)} className="text-slate-500 hover:text-sky-300" title="Delete exit">
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteExitTrade(t.id)}
+                          className="text-slate-500 hover:text-sky-300"
+                          title={L("Delete exit", "Eliminar salida")}
+                        >
                           ✕
                         </button>
                       </td>
@@ -1823,7 +1971,9 @@ export default function DailyJournalPage() {
               </table>
 
               <div className="pt-1 border-t border-slate-800 mt-1">
-                <p className="text-[11px] text-slate-400 mb-1">Average exit price per symbol/type</p>
+                <p className="text-[11px] text-slate-400 mb-1">
+                  {L("Average exit price per symbol/type", "Precio promedio de salida por símbolo/tipo")}
+                </p>
                 <div className="flex flex-wrap gap-2">
                   {exitAverages.map((a) => (
                     <span key={`${a.symbol}|${a.kind}`} className="px-2 py-1 rounded-full bg-slate-950 border border-slate-700 text-[11px]">
@@ -1840,25 +1990,28 @@ export default function DailyJournalPage() {
 
     {
       id: "inside",
-      title: "Inside the Trade",
+      title: L("Inside the Trade", "Dentro del trade"),
       defaultLayout: { i: "inside", x: 0, y: 8, w: 7, h: 8, minW: 4, minH: 6 },
       render: () => (
         <WidgetCard
-          title="Inside the Trade"
+          title={L("Inside the Trade", "Dentro del trade")}
           right={
             <button
               type="button"
               onClick={toggleDictation}
               className={`px-2 py-1 rounded ${listening ? "bg-sky-500 text-white" : "bg-slate-800 text-slate-200"} text-xs hover:bg-slate-700`}
             >
-              {listening ? "● Stop dictation" : "Start dictation"}
+              {listening ? L("● Stop dictation", "● Detener dictado") : L("Start dictation", "Iniciar dictado")}
             </button>
           }
         >
           <RichTextEditor
             value={insideHtml}
             onChange={setInsideHtml}
-            placeholder="During the trade: execution notes, management decisions, mistakes, emotions…"
+            placeholder={L(
+              "During the trade: execution notes, management decisions, mistakes, emotions…",
+              "Durante el trade: notas de ejecución, decisiones de manejo, errores, emociones…"
+            )}
             minHeight={260}
             onReady={(ed: any) => {
               insideEditorRef.current = ed;
@@ -1870,14 +2023,17 @@ export default function DailyJournalPage() {
 
     {
       id: "after",
-      title: "After-trade Analysis",
+      title: L("After-trade Analysis", "Análisis post‑trade"),
       defaultLayout: { i: "after", x: 0, y: 16, w: 7, h: 8, minW: 4, minH: 6 },
       render: () => (
-        <WidgetCard title="After-trade Analysis">
+        <WidgetCard title={L("After-trade Analysis", "Análisis post‑trade")}>
           <RichTextEditor
             value={afterHtml}
             onChange={setAfterHtml}
-            placeholder="Post-trade: what went right/wrong, process corrections, rule breaks, next actions…"
+            placeholder={L(
+              "Post-trade: what went right/wrong, process corrections, rule breaks, next actions…",
+              "Post-trade: qué salió bien/mal, correcciones de proceso, rompimientos de reglas, próximos pasos…"
+            )}
             minHeight={260}
           />
         </WidgetCard>
@@ -1886,15 +2042,15 @@ export default function DailyJournalPage() {
 
     {
       id: "emotional",
-      title: "Emotional state",
+      title: L("Emotional state", "Estado emocional"),
       defaultLayout: { i: "emotional", x: 7, y: 16, w: 5, h: 4, minW: 3, minH: 3 },
       render: () => (
-        <WidgetCard title="Emotional state & impulses">
+        <WidgetCard title={L("Emotional state & impulses", "Estado emocional e impulsos")}>
           <div className="flex flex-wrap gap-2 text-[13px] leading-snug">
-            {["Calm", "Greedy", "Desperate", "Adrenaline", "Confident", "Fearful", "Angry", "FOMO", "Revenge trade", "Focus", "Patience", "Discipline", "Anxiety", "Overconfident"].map((t) => (
+            {emotionTags.map((t) => (
               <label key={t} className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-slate-950 border border-slate-700">
                 <input type="checkbox" onChange={() => toggleTag(t)} checked={entry.tags?.includes(t)} className="h-4 w-4 rounded border-slate-600 bg-slate-950 shrink-0" />
-                <span className="wrap-break-word">{t}</span>
+                <span className="wrap-break-word">{tagLabel(t, emotionTagLabels)}</span>
               </label>
             ))}
           </div>
@@ -1904,12 +2060,14 @@ export default function DailyJournalPage() {
 
     {
       id: "strategy",
-      title: "Strategy / Probability",
+      title: L("Strategy / Probability", "Estrategia / Probabilidad"),
       defaultLayout: { i: "strategy", x: 7, y: 20, w: 5, h: 6, minW: 3, minH: 3 },
       render: () => (
-        <WidgetCard title="Strategy checklist + Probability">
+        <WidgetCard title={L("Strategy checklist + Probability", "Checklist de estrategia + Probabilidad")}>
           <div className="mb-4">
-            <p className="text-slate-200 text-sm font-semibold mb-2">Strategy checklist</p>
+            <p className="text-slate-200 text-sm font-semibold mb-2">
+              {L("Strategy checklist", "Checklist de estrategia")}
+            </p>
             <div className="flex flex-wrap gap-2 text-[13px] leading-snug">
               {[
                 "Respect Strategy",
@@ -1929,31 +2087,35 @@ export default function DailyJournalPage() {
               ].map((t) => (
                 <label key={t} className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-slate-950 border border-slate-700">
                   <input type="checkbox" onChange={() => toggleTag(t)} checked={entry.tags?.includes(t)} className="h-4 w-4 rounded border-slate-600 bg-slate-950 shrink-0" />
-                  <span className="wrap-break-word">{t}</span>
+                  <span className="wrap-break-word">{tagLabel(t, strategyTagLabels)}</span>
                 </label>
               ))}
             </div>
           </div>
 
           <div className="border-t border-slate-800 pt-3 mt-2">
-            <p className="text-slate-200 text-sm font-semibold mb-2">Exit / Stop-loss evidence</p>
+            <p className="text-slate-200 text-sm font-semibold mb-2">
+              {L("Exit / Stop-loss evidence", "Evidencia de salida / stop-loss")}
+            </p>
             <div className="flex flex-wrap gap-2 text-[13px] leading-snug">
               {exitReasonTags.map((t) => (
                 <label key={t} className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-slate-950 border border-slate-700">
                   <input type="checkbox" onChange={() => toggleTag(t)} checked={entry.tags?.includes(t)} className="h-4 w-4 rounded border-slate-600 bg-slate-950 shrink-0" />
-                  <span className="wrap-break-word">{t}</span>
+                  <span className="wrap-break-word">{tagLabel(t, exitReasonTagLabels)}</span>
                 </label>
               ))}
             </div>
           </div>
 
           <div className="border-t border-slate-800 pt-3 mt-3">
-            <p className="text-slate-200 text-sm font-semibold mb-2">Probability & stats flags</p>
+            <p className="text-slate-200 text-sm font-semibold mb-2">
+              {L("Probability & stats flags", "Señales de probabilidad y stats")}
+            </p>
             <div className="flex flex-wrap gap-2 text-[13px] leading-snug">
               {probabilityTags.map((t) => (
                 <label key={t} className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-slate-950 border border-slate-700">
                   <input type="checkbox" onChange={() => toggleTag(t)} checked={entry.tags?.includes(t)} className="h-4 w-4 rounded border-slate-600 bg-slate-950 shrink-0" />
-                  <span className="wrap-break-word">{t}</span>
+                  <span className="wrap-break-word">{tagLabel(t, probabilityTagLabels)}</span>
                 </label>
               ))}
             </div>
@@ -1964,10 +2126,10 @@ export default function DailyJournalPage() {
 
     {
       id: "screenshots",
-      title: "Screenshots",
+      title: L("Screenshots", "Screenshots"),
       defaultLayout: { i: "screenshots", x: 0, y: 24, w: 12, h: 6, minW: 6, minH: 5 },
       render: () => (
-        <WidgetCard title="Screenshots (links / notes)">
+        <WidgetCard title={L("Screenshots (links / notes)", "Screenshots (links / notas)")}>
           <textarea
             rows={8}
             value={(entry.screenshots || []).join("\n")}
@@ -1981,7 +2143,7 @@ export default function DailyJournalPage() {
               }))
             }
             className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-[15px] text-slate-100 focus:outline-none focus:border-emerald-400 resize-y"
-            placeholder="Paste here URLs/notes…"
+            placeholder={L("Paste here URLs/notes…", "Pega aquí URLs/notas…")}
           />
         </WidgetCard>
       ),
@@ -1989,10 +2151,10 @@ export default function DailyJournalPage() {
 
     {
       id: "templates",
-      title: "Templates",
+      title: L("Templates", "Plantillas"),
       defaultLayout: { i: "templates", x: 0, y: 30, w: 12, h: 5, minW: 6, minH: 4 },
       render: () => (
-        <WidgetCard title="Templates (Premarket + Inside + After)">
+        <WidgetCard title={L("Templates (Premarket + Inside + After)", "Plantillas (Premarket + Dentro + Post)")}>
           <div className="space-y-1 max-h-40 overflow-y-auto pr-1 mb-3">
             {templates.map((tpl) => (
               <div key={tpl.id} className="flex items-center justify-between gap-2 text-xs bg-slate-950/90 border border-slate-800 rounded-lg px-2 py-1">
@@ -2002,16 +2164,23 @@ export default function DailyJournalPage() {
                     onClick={() => handleApplyTemplate(tpl)}
                     className="px-2 py-1 rounded bg-emerald-500/90 text-slate-950 text-[11px] font-semibold hover:bg-emerald-400"
                   >
-                    Apply
+                    {L("Apply", "Aplicar")}
                   </button>
                   <span className="text-slate-300">{tpl.name}</span>
                 </div>
-                <button type="button" onClick={() => handleDeleteTemplate(tpl.id)} className="text-slate-500 hover:text-sky-300" title="Delete template">
+                <button
+                  type="button"
+                  onClick={() => handleDeleteTemplate(tpl.id)}
+                  className="text-slate-500 hover:text-sky-300"
+                  title={L("Delete template", "Eliminar plantilla")}
+                >
                   ✕
                 </button>
               </div>
             ))}
-            {templates.length === 0 && <p className="text-xs text-slate-400">No templates yet.</p>}
+            {templates.length === 0 && (
+              <p className="text-xs text-slate-400">{L("No templates yet.", "Aún no hay plantillas.")}</p>
+            )}
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-[1fr,auto] gap-2">
@@ -2019,11 +2188,11 @@ export default function DailyJournalPage() {
               type="text"
               value={newTemplateName}
               onChange={(e) => setNewTemplateName(e.target.value)}
-              placeholder="Template name"
+              placeholder={L("Template name", "Nombre de la plantilla")}
               className="w-full px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-xs text-slate-100 focus:outline-none focus:border-emerald-400"
             />
             <button type="button" onClick={handleSaveTemplate} className="px-4 py-1.5 rounded-lg bg-emerald-400 text-slate-950 text-xs font-semibold hover:bg-emerald-300 transition">
-              Save current as template
+              {L("Save current as template", "Guardar actual como plantilla")}
             </button>
           </div>
         </WidgetCard>
@@ -2032,15 +2201,18 @@ export default function DailyJournalPage() {
 
     {
       id: "actions",
-      title: "Actions",
+      title: L("Actions", "Acciones"),
       defaultLayout: { i: "actions", x: 0, y: 35, w: 12, h: 4, minW: 6, minH: 3 },
       render: () => (
-        <WidgetCard title="Actions">
+        <WidgetCard title={L("Actions", "Acciones")}>
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="text-[11px] text-slate-500">{msg && <span className="text-emerald-400 mr-3">{msg}</span>}Your structure, your rules.</div>
+            <div className="text-[11px] text-slate-500">
+              {msg && <span className="text-emerald-400 mr-3">{msg}</span>}
+              {L("Your structure, your rules.", "Tu estructura, tus reglas.")}
+            </div>
             <div className="flex gap-2">
               <button type="button" onClick={handleGoToImport} className="px-4 py-2 rounded-xl border border-slate-700 text-slate-200 text-xs hover:border-sky-400 hover:text-sky-300 transition">
-                Import
+                {L("Import", "Importar")}
               </button>
 
               <button
@@ -2049,7 +2221,7 @@ export default function DailyJournalPage() {
                 disabled={syncing}
                 className="px-4 py-2 rounded-xl border border-slate-700 text-slate-200 text-xs hover:border-amber-400 hover:text-amber-300 transition disabled:opacity-50"
               >
-                {syncing ? "Syncing…" : "Sync"}
+                {syncing ? L("Syncing…", "Sincronizando…") : L("Sync", "Sincronizar")}
               </button>
 
               <button
@@ -2058,7 +2230,7 @@ export default function DailyJournalPage() {
                 disabled={saving}
                 className="px-4 py-2 rounded-xl border border-slate-700 text-slate-200 text-xs hover:border-emerald-400 hover:text-emerald-300 transition disabled:opacity-50"
               >
-                Save
+                {L("Save", "Guardar")}
               </button>
 
               <button
@@ -2067,7 +2239,7 @@ export default function DailyJournalPage() {
                 disabled={saving}
                 className="px-6 py-2 rounded-xl bg-emerald-400 text-slate-950 text-sm font-semibold hover:bg-emerald-300 transition disabled:opacity-50"
               >
-                Save & return to dashboard
+                {L("Save & return to dashboard", "Guardar y volver al dashboard")}
               </button>
             </div>
           </div>
@@ -2086,9 +2258,18 @@ export default function DailyJournalPage() {
         {/* Top */}
         <div className="flex items-start sm:items-center justify-between gap-4 mb-4">
           <div>
-            <p className="text-emerald-400 text-xs uppercase tracking-[0.25em]">Daily Journal</p>
-            <h1 className="text-[28px] md:text-[32px] font-semibold mt-1">{parsedDate} — session review</h1>
-            <p className="text-[15px] text-slate-400 mt-1">Log trades, screenshots, emotions and rule compliance.</p>
+            <p className="text-emerald-400 text-xs uppercase tracking-[0.25em]">
+              {L("Daily Journal", "Journal diario")}
+            </p>
+            <h1 className="text-[28px] md:text-[32px] font-semibold mt-1">
+              {parsedDate} — {L("session review", "revisión de sesión")}
+            </h1>
+            <p className="text-[15px] text-slate-400 mt-1">
+              {L(
+                "Log trades, screenshots, emotions and rule compliance.",
+                "Registra trades, screenshots, emociones y cumplimiento de reglas."
+              )}
+            </p>
           </div>
           <div className="flex flex-col sm:flex-row gap-2">
             <button
@@ -2096,20 +2277,25 @@ export default function DailyJournalPage() {
               onClick={() => router.back()}
               className="shrink-0 px-3 py-2 rounded-xl border border-slate-700 text-slate-300 text-sm hover:border-emerald-400 hover:text-emerald-300 transition"
             >
-              ← Back
+              {L("← Back", "← Volver")}
             </button>
             <Link
               href="/dashboard"
               className="shrink-0 px-3 py-2 rounded-xl border border-slate-700 text-slate-300 text-sm hover:border-emerald-400 hover:text-emerald-300 transition"
             >
-              ← Back to dashboard
+              {L("← Back to dashboard", "← Volver al dashboard")}
             </Link>
           </div>
         </div>
 
         {/* Widget toggles */}
         <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-3 mb-5">
-          <p className="text-xs text-slate-400 mb-2">Customize this journal page: toggle widgets on/off.</p>
+          <p className="text-xs text-slate-400 mb-2">
+            {L(
+              "Customize this journal page: toggle widgets on/off.",
+              "Personaliza esta página: activa o desactiva los widgets."
+            )}
+          </p>
           <div className="flex flex-wrap gap-2">
             {ALL_WIDGETS.map((w) => {
               const on = activeWidgets.includes(w.id);

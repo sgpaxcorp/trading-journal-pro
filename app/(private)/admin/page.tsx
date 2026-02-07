@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { supabaseBrowser } from "@/lib/supaBaseClient";
 import TopNav from "@/app/components/TopNav";
+import { useAppSettings } from "@/lib/appSettings";
+import { resolveLocale } from "@/lib/i18n";
 
 type Metrics = {
   totals: {
@@ -29,6 +31,10 @@ type Metrics = {
 
 export default function AdminDashboardPage() {
   const { user, loading } = useAuth() as any;
+  const { locale } = useAppSettings();
+  const lang = resolveLocale(locale);
+  const isEs = lang === "es";
+  const L = (en: string, es: string) => (isEs ? es : en);
   const [metrics, setMetrics] = useState<Metrics | null>(null);
   const [loadingMetrics, setLoadingMetrics] = useState(true);
   const [forbidden, setForbidden] = useState(false);
@@ -66,7 +72,7 @@ export default function AdminDashboardPage() {
   if (loading) {
     return (
       <main className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center">
-        <p className="text-sm text-slate-400">Cargando…</p>
+        <p className="text-sm text-slate-400">{L("Loading…", "Cargando…")}</p>
       </main>
     );
   }
@@ -76,9 +82,12 @@ export default function AdminDashboardPage() {
       <main className="min-h-screen bg-slate-950 text-slate-50">
         <TopNav />
         <div className="max-w-3xl mx-auto px-6 py-16">
-          <h1 className="text-xl font-semibold">Acceso restringido</h1>
+          <h1 className="text-xl font-semibold">{L("Access restricted", "Acceso restringido")}</h1>
           <p className="text-sm text-slate-400 mt-2">
-            Esta sección es solo para el staff autorizado.
+            {L(
+              "This section is only for authorized staff.",
+              "Esta sección es solo para el staff autorizado."
+            )}
           </p>
         </div>
       </main>
@@ -91,17 +100,22 @@ export default function AdminDashboardPage() {
       <div className="max-w-6xl mx-auto px-6 py-10 space-y-8">
         <header className="flex flex-col gap-2">
           <p className="text-[11px] uppercase tracking-[0.3em] text-emerald-300">
-            Admin
+            {L("Admin", "Admin")}
           </p>
-          <h1 className="text-2xl font-semibold">Platform Insights</h1>
+          <h1 className="text-2xl font-semibold">{L("Platform Insights", "Insights de plataforma")}</h1>
           <p className="text-sm text-slate-400">
-            Métricas de uso y crecimiento para optimizar la plataforma.
+            {L(
+              "Usage and growth metrics to optimize the platform.",
+              "Métricas de uso y crecimiento para optimizar la plataforma."
+            )}
           </p>
         </header>
 
         {loadingMetrics && (
           <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-6">
-            <p className="text-sm text-slate-400">Cargando métricas…</p>
+            <p className="text-sm text-slate-400">
+              {L("Loading metrics…", "Cargando métricas…")}
+            </p>
           </div>
         )}
 
@@ -110,29 +124,30 @@ export default function AdminDashboardPage() {
             <section className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
                 <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">
-                  Usuarios
+                  {L("Users", "Usuarios")}
                 </p>
                 <p className="text-2xl font-semibold mt-2">{metrics.totals.users}</p>
                 <p className="text-[12px] text-slate-400 mt-1">
-                  Activos 7d: {metrics.actives.last7d} · 30d: {metrics.actives.last30d}
+                  {L("Active 7d", "Activos 7d")}: {metrics.actives.last7d} ·{" "}
+                  {L("30d", "30d")}: {metrics.actives.last30d}
                 </p>
               </div>
               <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
                 <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">
-                  Suscripciones
+                  {L("Subscriptions", "Suscripciones")}
                 </p>
                 <p className="text-2xl font-semibold mt-2">{metrics.totals.activeSubs}</p>
                 <p className="text-[12px] text-slate-400 mt-1">
-                  Conversión: {metrics.conversionRate}%
+                  {L("Conversion", "Conversión")}: {metrics.conversionRate}%
                 </p>
               </div>
               <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
                 <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">
-                  Add-ons
+                  {L("Add-ons", "Add-ons")}
                 </p>
                 <p className="text-2xl font-semibold mt-2">{metrics.totals.addonActive}</p>
                 <p className="text-[12px] text-slate-400 mt-1">
-                  Option Flow activos
+                  {L("Option Flow active", "Option Flow activos")}
                 </p>
               </div>
             </section>
@@ -140,43 +155,49 @@ export default function AdminDashboardPage() {
             <section className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
                 <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">
-                  Nuevos registros
+                  {L("New signups", "Nuevos registros")}
                 </p>
                 <p className="text-2xl font-semibold mt-2">{metrics.signups.last7d}</p>
                 <p className="text-[12px] text-slate-400 mt-1">
-                  Últimos 30d: {metrics.signups.last30d}
+                  {L("Last 30d", "Últimos 30d")}: {metrics.signups.last30d}
                 </p>
               </div>
               <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
                 <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">
-                  Sesiones (30d)
+                  {L("Sessions (30d)", "Sesiones (30d)")}
                 </p>
                 <p className="text-2xl font-semibold mt-2">{metrics.usage.sessions30d}</p>
                 <p className="text-[12px] text-slate-400 mt-1">
-                  Tiempo promedio: {metrics.usage.avgSessionMinutes} min
+                  {L("Avg time", "Tiempo promedio")}: {metrics.usage.avgSessionMinutes}{" "}
+                  {L("min", "min")}
                 </p>
               </div>
               <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
                 <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">
-                  Health
+                  {L("Health", "Health")}
                 </p>
                 <p className="text-[12px] text-slate-400 mt-2">
-                  Insights listos para optimizar onboarding, pricing y features.
+                  {L(
+                    "Insights ready to optimize onboarding, pricing, and features.",
+                    "Insights listos para optimizar onboarding, pricing y features."
+                  )}
                 </p>
               </div>
             </section>
 
             <section className="rounded-2xl border border-slate-800 bg-slate-900/60 p-6">
               <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-semibold">Páginas más usadas</h2>
-                <p className="text-xs text-slate-400">Últimos 30 días</p>
+                <h2 className="text-lg font-semibold">
+                  {L("Top pages", "Páginas más usadas")}
+                </h2>
+                <p className="text-xs text-slate-400">{L("Last 30 days", "Últimos 30 días")}</p>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-[12px]">
                   <thead>
                     <tr className="text-left text-slate-400">
-                      <th className="py-2">Página</th>
-                      <th className="py-2">Visitas</th>
+                      <th className="py-2">{L("Page", "Página")}</th>
+                      <th className="py-2">{L("Visits", "Visitas")}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -189,7 +210,7 @@ export default function AdminDashboardPage() {
                     {!metrics.usage.topPages.length && (
                       <tr>
                         <td className="py-3 text-slate-500" colSpan={2}>
-                          Sin datos suficientes aún.
+                          {L("Not enough data yet.", "Sin datos suficientes aún.")}
                         </td>
                       </tr>
                     )}

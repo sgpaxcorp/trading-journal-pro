@@ -15,6 +15,8 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/context/AuthContext";
+import { useAppSettings } from "@/lib/appSettings";
+import { resolveLocale } from "@/lib/i18n";
 import { supabaseBrowser } from "@/lib/supaBaseClient";
 import {
   AlertRule,
@@ -911,21 +913,30 @@ function inferCategory(triggerType: string): string {
   return "general";
 }
 
-function titleFallback(triggerType: string): string {
+function titleFallback(triggerType: string, lang: "en" | "es"): string {
+  const isEs = lang === "es";
   const t = normalizeTrigger(triggerType);
-  if (t.includes("DAILY_GOAL")) return "Daily goal achieved";
-  if (t.includes("MAX_LOSS") || t.includes("LOSS_LIMIT")) return "Daily max loss hit";
-  if (t.includes("MAX_GAIN") || t.includes("GAIN_LIMIT") || t.includes("PROFIT_CAP")) return "Daily max gain hit";
-  if (t.includes("OPEN_POSITIONS")) return "Open position still active";
-  if (t.includes("EXPIRED_OPTIONS") || t.includes("OPTIONS_EXPIR")) return "Option expiring / expired";
-  if (t.includes("MISSING_EMOTIONS")) return "Journal hygiene: emotions missing";
-  if (t.includes("MISSING_SCREENSHOTS")) return "Process drift: screenshot missing";
-  if (t.includes("CHECKLIST")) return "Process drift: checklist missing";
-  if (t.includes("IMPULSE")) return "Risk discipline: impulse tags";
-  return "Rule triggered";
+  if (t.includes("DAILY_GOAL")) return isEs ? "Meta diaria alcanzada" : "Daily goal achieved";
+  if (t.includes("MAX_LOSS") || t.includes("LOSS_LIMIT"))
+    return isEs ? "Pérdida máxima diaria alcanzada" : "Daily max loss hit";
+  if (t.includes("MAX_GAIN") || t.includes("GAIN_LIMIT") || t.includes("PROFIT_CAP"))
+    return isEs ? "Ganancia máxima diaria alcanzada" : "Daily max gain hit";
+  if (t.includes("OPEN_POSITIONS"))
+    return isEs ? "Posición abierta aún activa" : "Open position still active";
+  if (t.includes("EXPIRED_OPTIONS") || t.includes("OPTIONS_EXPIR"))
+    return isEs ? "Opciones por vencer / vencidas" : "Option expiring / expired";
+  if (t.includes("MISSING_EMOTIONS"))
+    return isEs ? "Higiene del journal: emociones faltantes" : "Journal hygiene: emotions missing";
+  if (t.includes("MISSING_SCREENSHOTS"))
+    return isEs ? "Deriva de proceso: falta screenshot" : "Process drift: screenshot missing";
+  if (t.includes("CHECKLIST"))
+    return isEs ? "Deriva de proceso: falta checklist" : "Process drift: checklist missing";
+  if (t.includes("IMPULSE")) return isEs ? "Disciplina de riesgo: impulsos" : "Risk discipline: impulse tags";
+  return isEs ? "Regla activada" : "Rule triggered";
 }
 
-function messageFallback(triggerType: string, stats: DailyStats, rule: AlertRule): string {
+function messageFallback(triggerType: string, stats: DailyStats, rule: AlertRule, lang: "en" | "es"): string {
+  const isEs = lang === "es";
   const t = normalizeTrigger(triggerType);
   const net = stats.net_pnl;
   const goal = stats.daily_goal;
@@ -938,15 +949,23 @@ function messageFallback(triggerType: string, stats: DailyStats, rule: AlertRule
 
   if (t.includes("DAILY_GOAL")) {
     if (goal > 0) {
-      return `You hit your daily goal (${fmtMoney(goal)}). Today P&L: ${fmtMoney(net)}. Lock the win and protect discipline.`;
+      return isEs
+        ? `Lograste tu meta diaria (${fmtMoney(goal)}). P&L de hoy: ${fmtMoney(net)}. Asegura la ganancia y protege la disciplina.`
+        : `You hit your daily goal (${fmtMoney(goal)}). Today P&L: ${fmtMoney(net)}. Lock the win and protect discipline.`;
     }
-    return `Daily goal achieved. Today P&L: ${fmtMoney(net)}. Lock the win and protect discipline.`;
+    return isEs
+      ? `Meta diaria alcanzada. P&L de hoy: ${fmtMoney(net)}. Asegura la ganancia y protege la disciplina.`
+      : `Daily goal achieved. Today P&L: ${fmtMoney(net)}. Lock the win and protect discipline.`;
   }
   if (t.includes("MAX_LOSS") || t.includes("LOSS_LIMIT")) {
-    return `Daily max loss hit (${fmtMoney(maxLoss)}). Today P&L: ${fmtMoney(net)}. Stop trading and review.`;
+    return isEs
+      ? `Pérdida máxima diaria alcanzada (${fmtMoney(maxLoss)}). P&L de hoy: ${fmtMoney(net)}. Detén el trading y revisa.`
+      : `Daily max loss hit (${fmtMoney(maxLoss)}). Today P&L: ${fmtMoney(net)}. Stop trading and review.`;
   }
   if (t.includes("MAX_GAIN") || t.includes("GAIN_LIMIT") || t.includes("PROFIT_CAP")) {
-    return `Daily max gain hit (${fmtMoney(maxGain)}). Today P&L: ${fmtMoney(net)}. Stop trading to protect the edge.`;
+    return isEs
+      ? `Ganancia máxima diaria alcanzada (${fmtMoney(maxGain)}). P&L de hoy: ${fmtMoney(net)}. Detén el trading para proteger la ventaja.`
+      : `Daily max gain hit (${fmtMoney(maxGain)}). Today P&L: ${fmtMoney(net)}. Stop trading to protect the edge.`;
   }
   if (t.includes("OPEN_POSITIONS")) {
     const syms = (stats.open_positions_list || [])
@@ -963,28 +982,44 @@ function messageFallback(triggerType: string, stats: DailyStats, rule: AlertRule
       : "";
     const guidance =
       style === "swing"
-        ? "If this is intended swing exposure, mark it as swing to stop reminders."
+        ? isEs
+          ? "Si es exposición swing intencional, márcala como swing para detener recordatorios."
+          : "If this is intended swing exposure, mark it as swing to stop reminders."
+        : isEs
+        ? "Si NO es intencional (day trade), ciérrala o márcala como swing. Para opciones que vencen, decide: cerrar en $0 / dejar expirar."
         : "If this is NOT intended (day trading), close it or mark it as swing. For options expiring, decide: close at $0 / let expire.";
-    return `You still have ${open} open position(s)${syms ? ` (${syms}${open > 6 ? "…" : ""})` : ""}.${extra} ${guidance}`;
+    return isEs
+      ? `Aún tienes ${open} posición(es) abierta(s)${syms ? ` (${syms}${open > 6 ? "…" : ""})` : ""}.${extra} ${guidance}`
+      : `You still have ${open} open position(s)${syms ? ` (${syms}${open > 6 ? "…" : ""})` : ""}.${extra} ${guidance}`;
   }
   if (t.includes("EXPIRED_OPTIONS") || t.includes("OPTIONS_EXPIR")) {
     const exp = stats.options_expiring_today || [];
     const syms = exp.map((p) => p.symbol).filter(Boolean).slice(0, 8).join(", ");
-    return `You have option position(s) expiring today. Decide: close at $0 / let expire, or mark as swing/premium strategy. ${syms ? `(${syms})` : ""}`;
+    return isEs
+      ? `Tienes posiciones de opciones que vencen hoy. Decide: cerrar en $0 / dejar expirar, o marcar como swing/estrategia de prima. ${syms ? `(${syms})` : ""}`
+      : `You have option position(s) expiring today. Decide: close at $0 / let expire, or mark as swing/premium strategy. ${syms ? `(${syms})` : ""}`;
   }
   if (t.includes("MISSING_EMOTIONS")) {
-    return "No emotions selected for this day. Emotional labeling reduces impulsive loops.";
+    return isEs
+      ? "No seleccionaste emociones para este día. Etiquetar emociones reduce loops impulsivos."
+      : "No emotions selected for this day. Emotional labeling reduces impulsive loops.";
   }
   if (t.includes("MISSING_SCREENSHOTS")) {
-    return "No screenshots logged for this day. Evidence prevents hindsight bias.";
+    return isEs
+      ? "No hay screenshots registrados para este día. La evidencia evita el sesgo de retrospectiva."
+      : "No screenshots logged for this day. Evidence prevents hindsight bias.";
   }
   if (t.includes("CHECKLIST")) {
-    return "No strategy checklist tags found. Process drift is a silent performance leak.";
+    return isEs
+      ? "No hay tags de checklist de estrategia. La deriva de proceso es una fuga silenciosa de performance."
+      : "No strategy checklist tags found. Process drift is a silent performance leak.";
   }
   if (t.includes("IMPULSE")) {
-    return "Impulse tags detected. Pause and verify plan compliance before next trade.";
+    return isEs
+      ? "Tags de impulso detectados. Pausa y verifica el plan antes del próximo trade."
+      : "Impulse tags detected. Pause and verify plan compliance before next trade.";
   }
-  return rule.message || "Rule triggered.";
+  return rule.message || (isEs ? "Regla activada." : "Rule triggered.");
 }
 
 function computeTriggered(triggerType: string, stats: DailyStats, rule: AlertRule): boolean {
@@ -1029,6 +1064,10 @@ function computeTriggered(triggerType: string, stats: DailyStats, rule: AlertRul
 export default function GlobalAlertRuleEngine() {
   const { user } = useAuth();
   const userId = user?.id ?? "";
+  const { locale } = useAppSettings();
+  const lang = resolveLocale(locale);
+  const isEs = lang === "es";
+  const L = (en: string, es: string) => (isEs ? es : en);
 
   const [lastRunAt, setLastRunAt] = useState<string | null>(null);
   const [lastRunOk, setLastRunOk] = useState<boolean>(true);
@@ -1049,7 +1088,7 @@ export default function GlobalAlertRuleEngine() {
       let rulesRes = await listAlertRules(userId, { includeDisabled: true, limit: 500 });
       if (!rulesRes.ok) {
         setLastRunOk(false);
-        setLastRunNote(rulesRes.error || "Unable to load rules");
+        setLastRunNote(rulesRes.error || L("Unable to load rules", "No se pudieron cargar las reglas"));
         setLastRunAt(new Date().toISOString());
         return;
       }
@@ -1063,7 +1102,7 @@ export default function GlobalAlertRuleEngine() {
       const enabled = rules.filter((r) => r.enabled);
       if (enabled.length === 0) {
         setLastRunOk(true);
-        setLastRunNote("No enabled rules.");
+        setLastRunNote(L("No enabled rules.", "No hay reglas activas."));
         setLastRunAt(new Date().toISOString());
         return;
       }
@@ -1178,8 +1217,8 @@ for (const rule of enabled) {
 
   const nowISO = new Date().toISOString();
   const category = inferCategory(triggerType);
-  const title = rule.title || titleFallback(triggerType);
-  const message = rule.message || messageFallback(triggerType, statsForRule, rule);
+  const title = rule.title || titleFallback(triggerType, lang);
+  const message = rule.message || messageFallback(triggerType, statsForRule, rule, lang);
 
   const payload = {
     trigger_type: triggerType,
@@ -1296,20 +1335,22 @@ if (created + updated + resolved > 0) emitForcePull();
 setLastRunOk(true);
 setLastRunNote(
   created + updated + resolved > 0
-    ? `Events: +${created} created, ${updated} updated, ${resolved} resolved.`
-    : "No triggers."
+    ? isEs
+      ? `Eventos: +${created} creados, ${updated} actualizados, ${resolved} resueltos.`
+      : `Events: +${created} created, ${updated} updated, ${resolved} resolved.`
+    : L("No triggers.", "Sin disparos.")
 );
 setLastRunAt(new Date().toISOString());
     } catch (e: any) {
       setLastRunOk(false);
-      setLastRunNote(e?.message || "Rule engine failed");
+      setLastRunNote(e?.message || L("Rule engine failed", "Falló el motor de reglas"));
       setLastRunAt(new Date().toISOString());
       // eslint-disable-next-line no-console
       console.error("[alerts-engine] error", e);
     } finally {
       isRunningRef.current = false;
     }
-  }, [todayISO, userId]);
+  }, [todayISO, userId, isEs, lang]);
 
   // Polling loop
   useEffect(() => {

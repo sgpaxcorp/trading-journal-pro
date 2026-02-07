@@ -10,6 +10,8 @@ import {
 } from "react-icons/fa";
 import FloatingAskButton from "../components/FloatingAskButton";
 import type { CSSProperties } from "react";
+import { useAppSettings } from "@/lib/appSettings";
+import { resolveLocale } from "@/lib/i18n";
 
 type PlanRow = {
   section?: string;               // Header principal
@@ -252,7 +254,10 @@ const rows: PlanRow[] = [
   },
 ];
 
-function renderCell(value: string | boolean | undefined) {
+function renderCell(
+  value: string | boolean | undefined,
+  translate: (text: string) => string
+) {
   if (value === true) {
     return (
       <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-emerald-500/15 border border-emerald-400/70 text-emerald-300 text-xs">
@@ -264,11 +269,78 @@ function renderCell(value: string | boolean | undefined) {
 
     return <span className="text-slate-600 text-xs">—</span>;
   }
-  return <span className="text-[11px] text-slate-100">{value}</span>;
+  return <span className="text-[11px] text-slate-100">{translate(value)}</span>;
 }
 
 export default function PlansComparison() {
   const year = new Date().getFullYear();
+  const { locale } = useAppSettings();
+  const lang = resolveLocale(locale);
+  const isEs = lang === "es";
+  const L = (en: string, es: string) => (isEs ? es : en);
+
+  const ES_MAP: Record<string, string> = {
+    GENERAL: "GENERAL",
+    "PLANNING & RULES": "PLANIFICACIÓN Y REGLAS",
+    NOTEBOOK: "NOTEBOOK",
+    REPORTING: "REPORTES",
+    ANALYTICS: "ANALÍTICA",
+    "Progress analysis": "Análisis de progreso",
+    "OTHER TOOLS": "OTRAS HERRAMIENTAS",
+    "COACHING PROGRAM & AI": "PROGRAMA DE COACHING E IA",
+    Accounts: "Cuentas",
+    "Data storage": "Almacenamiento",
+    "Trade imports": "Importación de trades",
+    Support: "Soporte",
+    "Planning your goal (customizable)": "Planificación de metas (personalizable)",
+    "Set-up rules (customizable)": "Reglas de setup (personalizables)",
+    "Set-up messages and alarms (customizable)": "Mensajes y alarmas de setup (personalizables)",
+    Notebook: "Notebook",
+    "Pre-market planning": "Planificación premarket",
+    "Trade management (entry/exit chart)": "Gestión de trades (gráfico entrada/salida)",
+    "Emotions register (drop-down tags)": "Registro de emociones (tags desplegables)",
+    "Well executed and lesson learned sections": "Secciones de trade bien ejecutado y lección aprendida",
+    Templates: "Plantillas",
+    "Add images and screenshots": "Agregar imágenes y screenshots",
+    "Stylus-friendly interface for Tablet": "Interfaz para tablet (stylus)",
+    "Calendar with results (daily, monthly, yearly)": "Calendario con resultados (diario, mensual, anual)",
+    "Account performance graph": "Gráfica de performance de cuenta",
+    "AI summary report (selectable period)": "Reporte resumen con IA (periodo seleccionable)",
+    "AI suggestions": "Sugerencias de IA",
+    "Emotionless graph": "Gráfica sin emociones",
+    "Progress ratio": "Ratio de progreso",
+    "Average return ratio (weekly)": "Retorno promedio (semanal)",
+    "Average trades per day, week, month": "Promedio de trades por día, semana, mes",
+    "Days with well executed trades and lessons learned": "Días con trades bien ejecutados y lecciones aprendidas",
+    "How many days are well executed and lessons learned": "Cuántos días fueron bien ejecutados y con lecciones aprendidas",
+    "Risk management ratio": "Ratio de gestión de riesgo",
+    "Economic calendar": "Calendario económico",
+    "Manage trading business": "Gestionar negocio de trading",
+    "Track profits and losses": "Seguimiento de ganancias y pérdidas",
+    "Track business expenses": "Seguimiento de gastos del negocio",
+    "PDF reporting": "Reportes PDF",
+    "AI coaching": "AI coaching",
+    "Custom rules and actions": "Reglas y acciones personalizadas",
+    "After your goal is reached": "Después de alcanzar la meta",
+    "After your risk is reached": "Después de alcanzar el riesgo",
+    "Coaching templates": "Plantillas de coaching",
+    "Up to 5": "Hasta 5",
+    "Coming soon": "Próximamente",
+    "Email support": "Soporte por email",
+    "Priority email & chat": "Email y chat prioritario",
+    Basic: "Básico",
+    Advanced: "Avanzado",
+    Core: "Core",
+    Advance: "Avanzado",
+    "Best value": "Mejor valor",
+    Features: "Features",
+    "Compare Plans": "Comparar planes",
+  };
+
+  const translate = (text?: string) => {
+    if (!text) return "";
+    return isEs ? ES_MAP[text] || text : text;
+  };
 
   return (
     <main className="min-h-screen bg-slate-950 text-slate-50 flex flex-col">
@@ -285,13 +357,19 @@ export default function PlansComparison() {
         <div className="flex items-start justify-between max-w-6xl mx-auto mb-8">
           <div>
             <h1 className="text-2xl md:text-3xl font-semibold">
-              Compare Plans
+              {L("Compare Plans", "Comparar planes")}
             </h1>
             <p className="text-[10px] md:text-xs text-emerald-400 mt-1 max-w-xl">
-              Trade Journal Pro: structure, data, and trading psychology — all in one place.
+              {L(
+                "Trade Journal Pro: structure, data, and trading psychology — all in one place.",
+                "Trade Journal Pro: estructura, datos y psicología de trading — todo en un solo lugar."
+              )}
             </p>
             <p className="text-[10px] md:text-xs text-slate-400 mt-1 max-w-xl">
-              Choose between a solid foundation for your journal or the complete ecosystem with logging, advanced analytics, and AI coaching.
+              {L(
+                "Choose between a solid foundation for your journal or the complete ecosystem with logging, advanced analytics, and AI coaching.",
+                "Elige entre una base sólida para tu journal o el ecosistema completo con logging, analítica avanzada y AI coaching."
+              )}
             </p>
           </div>
 
@@ -300,13 +378,13 @@ export default function PlansComparison() {
               href="/pricing"
               className="text-slate-400 hover:text-emerald-400"
             >
-              ← Back to pricing
+              ← {L("Back to pricing", "Volver a precios")}
             </Link>
             <Link
               href="/"
               className="text-slate-500 hover:text-emerald-300"
             >
-              Go to home
+              {L("Go to home", "Ir al inicio")}
             </Link>
           </div>
         </div>
@@ -321,7 +399,7 @@ export default function PlansComparison() {
                   className="px-4 py-4 font-semibold text-slate-300 uppercase tracking-wide align-top"
                   style={{ fontSize: "22px" }}
                 >
-                  Features
+                  {L("Features", "Features")}
                 </th>
 
                 {/* CORE */}
@@ -331,7 +409,7 @@ export default function PlansComparison() {
                       className="uppercase tracking-wide text-slate-400 font-semibold"
                       style={{ fontSize: "16px" }}
                     >
-                      Core
+                      {L("Core", "Core")}
                     </span>
                     <span
                       className="text-emerald-400 font-bold leading-none"
@@ -343,21 +421,24 @@ export default function PlansComparison() {
                         style={{ fontSize: "16px" }}
                       >
                         {" "}
-                        /month
+                        {L("/month", "/mes")}
                       </span>
                     </span>
                     <span
                       className="text-slate-500 max-w-[180px]"
                       style={{ fontSize: "12px", lineHeight: "1.4" }}
                     >
-                      Ideal for independent traders who want structure and clarity.
+                      {L(
+                        "Ideal for independent traders who want structure and clarity.",
+                        "Ideal para traders independientes que buscan estructura y claridad."
+                      )}
                     </span>
                     <Link
                       href="/signup?plan=core"
                       className="mt-2 inline-flex justify-center items-center px-6 py-3 rounded-2xl bg-emerald-400 text-slate-950 font-semibold shadow-lg shadow-emerald-500/25 hover:bg-emerald-300 hover:shadow-emerald-400/30 transition"
                       style={{ fontSize: "14px" }}
                     >
-                      Get Started Core
+                      {L("Get Started Core", "Empezar Core")}
                     </Link>
                   </div>
                 </th>
@@ -370,13 +451,13 @@ export default function PlansComparison() {
                         className="uppercase tracking-wide text-emerald-300 font-semibold"
                         style={{ fontSize: "16px" }}
                       >
-                        Advanced
+                        {L("Advanced", "Advanced")}
                       </span>
                       <span
                         className="px-2 py-0.5 rounded-full bg-emerald-400/10 text-emerald-300 border border-emerald-500/40"
                         style={{ fontSize: "10px" }}
                       >
-                        Best value
+                        {L("Best value", "Mejor valor")}
                       </span>
                     </div>
                     <span
@@ -389,21 +470,24 @@ export default function PlansComparison() {
                         style={{ fontSize: "16px" }}
                       >
                         {" "}
-                        /month
+                        {L("/month", "/mes")}
                       </span>
                     </span>
                     <span
                       className="text-slate-500 max-w-[200px] text-center"
                       style={{ fontSize: "12px", lineHeight: "1.4" }}
                     >
-                      For serious traders, coaches, prop-firm style tracking, and business-level reporting.
+                      {L(
+                        "For serious traders, coaches, prop-firm style tracking, and business-level reporting.",
+                        "Para traders serios, coaches, tracking estilo prop-firm y reportes a nivel negocio."
+                      )}
                     </span>
                     <Link
                       href="/signup?plan=advanced"
                       className="mt-2 inline-flex justify-center items-center px-6 py-3 rounded-2xl bg-emerald-400 text-slate-950 font-semibold shadow-lg shadow-emerald-500/25 hover:bg-emerald-300 hover:shadow-emerald-400/30 transition"
                       style={{ fontSize: "14px" }}
                     >
-                      Get Started Advanced
+                      {L("Get Started Advanced", "Empezar Advanced")}
                     </Link>
                   </div>
                 </th>
@@ -426,7 +510,7 @@ export default function PlansComparison() {
                           ...(row.sectionStyle || {}),
                         }}
                       >
-                        {row.section}
+                        {translate(row.section)}
                       </td>
                     </tr>
                   );
@@ -450,7 +534,7 @@ export default function PlansComparison() {
                           ...(row.subheaderStyle || {}),
                         }}
                       >
-                        {row.subheader}
+                        {translate(row.subheader)}
                       </td>
                     </tr>
                   );
@@ -481,19 +565,19 @@ export default function PlansComparison() {
                         ...(row.labelStyle || {}),
                       }}
                     >
-                      {row.label}
+                      {translate(row.label)}
                     </td>
                     <td
                       className="px-4 py-3 text-center border-t border-slate-900"
                       style={{ fontSize: "12px" }}
                     >
-                      {renderCell(row.core)}
+                      {renderCell(row.core, translate)}
                     </td>
                     <td
                       className="px-4 py-3 text-center border-t border-slate-900"
                       style={{ fontSize: "12px" }}
                     >
-                      {renderCell(row.advanced)}
+                      {renderCell(row.advanced, translate)}
                     </td>
                   </tr>
                 );

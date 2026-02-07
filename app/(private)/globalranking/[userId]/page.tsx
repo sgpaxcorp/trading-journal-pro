@@ -8,6 +8,8 @@ import GlobalRealtimeNotifications from "@/app/components/GlobalRealtimeNotifica
 import TopNav from "@/app/components/TopNav";
 import TrophyToasts, { type TrophyToastItem } from "@/app/components/TrophyToasts";
 import { useAuth } from "@/context/AuthContext";
+import { useAppSettings } from "@/lib/appSettings";
+import { resolveLocale } from "@/lib/i18n";
 import {
   describeUnlock,
   getPublicUserProfile,
@@ -50,7 +52,22 @@ function tierStyles(tier: TrophyTier) {
   }
 }
 
+function tierLabel(tier: TrophyTier | string | null | undefined, lang: "en" | "es") {
+  const t = String(tier || "").toLowerCase();
+  const map: Record<string, { en: string; es: string }> = {
+    elite: { en: "Elite", es: "Elite" },
+    gold: { en: "Gold", es: "Oro" },
+    silver: { en: "Silver", es: "Plata" },
+    bronze: { en: "Bronze", es: "Bronce" },
+  };
+  return map[t]?.[lang] ?? (lang === "es" ? "Bronce" : "Bronze");
+}
+
 function TrophyCard({ item }: { item: TrophyCardItem }) {
+  const { locale } = useAppSettings();
+  const lang = resolveLocale(locale);
+  const isEs = lang === "es";
+  const L = (en: string, es: string) => (isEs ? es : en);
   const isLocked = !!item.locked;
   const iconSrc = !item.secret ? tierIconPath(item.tier) : null;
 
@@ -94,7 +111,7 @@ function TrophyCard({ item }: { item: TrophyCardItem }) {
 
             {isLocked && item.unlockHint && (
               <p className="mt-2 text-[11px] text-slate-400">
-                <span className="text-slate-300 font-medium">To unlock:</span>{" "}
+                <span className="text-slate-300 font-medium">{L("To unlock:", "Para desbloquear:")}</span>{" "}
                 {item.unlockHint}
               </p>
             )}
@@ -108,7 +125,7 @@ function TrophyCard({ item }: { item: TrophyCardItem }) {
               tierStyles(item.tier),
             ].join(" ")}
           >
-            {item.tier}
+            {tierLabel(item.tier, lang)}
           </span>
           <span className="text-[10px] text-emerald-200 font-semibold">
             +{item.xp} XP
@@ -119,7 +136,11 @@ function TrophyCard({ item }: { item: TrophyCardItem }) {
       <div className="mt-3 flex items-center justify-between text-[10px]">
         <span className="text-slate-400">{item.category}</span>
         <span className="text-slate-500">
-          {item.earned_at ? new Date(item.earned_at).toLocaleDateString() : isLocked ? "Locked" : ""}
+          {item.earned_at
+            ? new Date(item.earned_at).toLocaleDateString(lang)
+            : isLocked
+              ? L("Locked", "Bloqueado")
+              : ""}
         </span>
       </div>
     </div>
@@ -128,6 +149,10 @@ function TrophyCard({ item }: { item: TrophyCardItem }) {
 
 export default function GlobalRankingUserProfilePage() {
   const params = useParams<{ userId?: string }>();
+  const { locale } = useAppSettings();
+  const lang = resolveLocale(locale);
+  const isEs = lang === "es";
+  const L = (en: string, es: string) => (isEs ? es : en);
   const targetUserId = useMemo(() => {
     const v: any = (params as any)?.userId;
     return Array.isArray(v) ? v[0] : v;
@@ -237,7 +262,7 @@ export default function GlobalRankingUserProfilePage() {
         const isSecret = !!d.secret;
         const title = isSecret ? "Secret trophy" : d.title;
         const description = isSecret
-          ? "Keep trading and journaling to reveal this trophy."
+          ? L("Keep trading and journaling to reveal this trophy.", "Sigue operando y haciendo journal para revelar este trofeo.")
           : d.description;
 
         return {
@@ -251,10 +276,10 @@ export default function GlobalRankingUserProfilePage() {
           earned_at: null,
           locked: true,
           secret: d.secret ?? null,
-          unlockHint: isSecret ? "Hidden requirement" : describeUnlock(d),
+          unlockHint: isSecret ? L("Hidden requirement", "Requisito oculto") : describeUnlock(d),
         };
       });
-  }, [isMe, catalog, earned]);
+  }, [isMe, catalog, earned, L]);
 
   const displayedCards = useMemo(() => {
     if (!isMe) return earnedCards;
@@ -283,30 +308,33 @@ export default function GlobalRankingUserProfilePage() {
       />
 
       <div className="max-w-6xl mx-auto px-6 md:px-8 py-10 space-y-8">
-        <div className="flex items-center justify-between gap-4">
-          <Link
-            href="/globalranking"
-            className="text-sm text-slate-300 hover:text-emerald-300 transition"
-          >
-            ← Back to Global Ranking
-          </Link>
+            <div className="flex items-center justify-between gap-4">
+              <Link
+                href="/globalranking"
+                className="text-sm text-slate-300 hover:text-emerald-300 transition"
+              >
+                ← {L("Back to Global Ranking", "Volver al ranking global")}
+              </Link>
 
-          {isMe && (
-            <span className="text-[11px] text-slate-400">
-              New trophies appear automatically as you complete milestones.
-            </span>
-          )}
-        </div>
+              {isMe && (
+                <span className="text-[11px] text-slate-400">
+                  {L(
+                    "New trophies appear automatically as you complete milestones.",
+                    "Los nuevos trofeos aparecen automáticamente al completar metas."
+                  )}
+                </span>
+              )}
+            </div>
 
         {/* Header */}
         <div className="flex items-start justify-between gap-6">
           <div>
             <p className="text-[11px] tracking-[0.25em] text-slate-400">
-              TRADER PROFILE
+              {L("TRADER PROFILE", "PERFIL DEL TRADER")}
             </p>
 
             <h1 className="mt-2 text-3xl font-semibold text-slate-100">
-              {profile?.display_name || (loading ? "Loading..." : "Trader")}
+              {profile?.display_name || (loading ? L("Loading...", "Cargando...") : L("Trader", "Trader"))}
             </h1>
 
             <p className="mt-2 text-sm text-slate-300">
@@ -315,8 +343,8 @@ export default function GlobalRankingUserProfilePage() {
                   <span className="text-emerald-200 font-semibold">
                     {profile.xp_total}
                   </span>{" "}
-                  XP • Level {profile.level} • {profile.trophies_count}{" "}
-                  trophies
+                  XP • {L("Level", "Nivel")} {profile.level} • {profile.trophies_count}{" "}
+                  {L("trophies", "trofeos")}
                 </>
               ) : (
                 "—"
@@ -325,14 +353,14 @@ export default function GlobalRankingUserProfilePage() {
           </div>
 
           <div className="flex items-center gap-2">
-            <span className="text-xs text-slate-400">Tier</span>
+            <span className="text-xs text-slate-400">{L("Tier", "Nivel")}</span>
             <span
               className={[
                 "inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold",
                 tierStyles((profile?.tier || "Bronze") as TrophyTier),
               ].join(" ")}
             >
-              {profile?.tier || "Bronze"}
+              {tierLabel(profile?.tier || "Bronze", lang)}
             </span>
           </div>
         </div>
@@ -341,13 +369,13 @@ export default function GlobalRankingUserProfilePage() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="text-sm font-semibold text-slate-100">
-              Trophies
+              {L("Trophies", "Trofeos")}
             </h2>
             <p className="text-[11px] text-slate-400">
               {isMe
-                ? "Your profile shows both earned and locked trophies."
-                : "Only earned trophies are visible to other traders."}
-              {categoriesCount ? ` • Categories: ${categoriesCount}` : ""}
+                ? L("Your profile shows both earned and locked trophies.", "Tu perfil muestra trofeos ganados y bloqueados.")
+                : L("Only earned trophies are visible to other traders.", "Solo los trofeos ganados son visibles para otros traders.")}
+              {categoriesCount ? ` • ${L("Categories", "Categorías")}: ${categoriesCount}` : ""}
             </p>
           </div>
 
@@ -363,7 +391,7 @@ export default function GlobalRankingUserProfilePage() {
                     : "border-slate-800 bg-slate-900/60 text-slate-200 hover:border-slate-700",
                 ].join(" ")}
               >
-                Earned ({earnedCards.length})
+                {L("Earned", "Ganados")} ({earnedCards.length})
               </button>
               <button
                 type="button"
@@ -375,7 +403,7 @@ export default function GlobalRankingUserProfilePage() {
                     : "border-slate-800 bg-slate-900/60 text-slate-200 hover:border-slate-700",
                 ].join(" ")}
               >
-                Locked ({lockedCards.length})
+                {L("Locked", "Bloqueados")} ({lockedCards.length})
               </button>
               <button
                 type="button"
@@ -387,7 +415,7 @@ export default function GlobalRankingUserProfilePage() {
                     : "border-slate-800 bg-slate-900/60 text-slate-200 hover:border-slate-700",
                 ].join(" ")}
               >
-                All ({earnedCards.length + lockedCards.length})
+                {L("All", "Todos")} ({earnedCards.length + lockedCards.length})
               </button>
             </div>
           )}
@@ -395,7 +423,7 @@ export default function GlobalRankingUserProfilePage() {
 
         {/* Grid */}
         {loading ? (
-          <div className="text-sm text-slate-400">Loading trophies…</div>
+          <div className="text-sm text-slate-400">{L("Loading trophies…", "Cargando trofeos…")}</div>
         ) : displayedCards.length ? (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {displayedCards.map((t) => (
@@ -404,13 +432,15 @@ export default function GlobalRankingUserProfilePage() {
           </div>
         ) : (
           <div className="text-sm text-slate-400">
-            No trophies yet. Start journaling to earn your first one.
+            {L("No trophies yet. Start journaling to earn your first one.", "Aún no hay trofeos. Empieza a hacer journal para ganar el primero.")}
           </div>
         )}
 
         <div className="text-[11px] text-slate-500">
-          Privacy note: profiles show trophies and public ranking stats only. No
-          email, phone, or address is exposed.
+          {L(
+            "Privacy note: profiles show trophies and public ranking stats only. No email, phone, or address is exposed.",
+            "Nota de privacidad: los perfiles muestran solo trofeos y estadísticas públicas. No se expone email, teléfono ni dirección."
+          )}
         </div>
       </div>
     </main>

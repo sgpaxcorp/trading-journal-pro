@@ -19,6 +19,8 @@ import { listCashflows, signedCashflowAmount, type Cashflow } from "@/lib/cashfl
 // We only import the function and normalize its output.
 import { getDailyChecklist } from "@/lib/checklistSupabase";
 import { supabaseBrowser } from "@/lib/supaBaseClient";
+import { useAppSettings } from "@/lib/appSettings";
+import { resolveLocale } from "@/lib/i18n";
 
 import TopNav from "@/app/components/TopNav";
 import DashboardGrid, { type GridItemId } from "@/app/components/DashboardGrid";
@@ -94,15 +96,6 @@ type WeekSummary = {
 
 type WidgetId = GridItemId;
 
-const ALL_WIDGETS: { id: WidgetId; label: string }[] = [
-  { id: "progress", label: "Account Progress" },
-  { id: "daily-target", label: "Daily Target" },
-  { id: "calendar", label: "P&L Calendar" },
-  { id: "weekly", label: "Weekly Summary" },
-  { id: "streak", label: "Green Streak" },
-  { id: "actions", label: "Checklist" },
-  { id: "trading-days", label: "Trading Days (Year)" },
-];
 
 // ===== Trading calendar / holidays =====
 const TRADING_HOLIDAYS: string[] = [];
@@ -123,7 +116,8 @@ function isTradingDay(dateStr: string): boolean {
 
 function buildMonthCalendar(
   entries: JournalEntry[],
-  baseDate: Date
+  baseDate: Date,
+  localeTag: string
 ): { cells: CalendarCell[]; weeks: WeekSummary[]; monthLabel: string } {
   const year = baseDate.getFullYear();
   const month = baseDate.getMonth();
@@ -177,7 +171,7 @@ function buildMonthCalendar(
     cells.push({ dateStr, dayNumber, entry, isToday, isCurrentMonth });
   }
 
-  const monthLabel = baseDate.toLocaleString("en-US", { month: "long", year: "numeric" });
+  const monthLabel = baseDate.toLocaleString(localeTag, { month: "long", year: "numeric" });
   return { cells, weeks, monthLabel };
 }
 
@@ -387,6 +381,21 @@ function mergeChecklistBaseWithSaved(baseTexts: string[], saved: UiChecklistItem
 export default function DashboardPage() {
   const { user, loading } = useAuth();
   const router = useRouter();
+  const { locale } = useAppSettings();
+  const lang = resolveLocale(locale);
+  const isEs = lang === "es";
+  const localeTag = isEs ? "es-ES" : "en-US";
+  const L = (en: string, es: string) => (isEs ? es : en);
+
+  const ALL_WIDGETS: { id: WidgetId; label: string }[] = [
+    { id: "progress", label: L("Account Progress", "Progreso de cuenta") },
+    { id: "daily-target", label: L("Daily Target", "Meta diaria") },
+    { id: "calendar", label: L("P&L Calendar", "Calendario P&L") },
+    { id: "weekly", label: L("Weekly Summary", "Resumen semanal") },
+    { id: "streak", label: L("Green Streak", "Racha verde") },
+    { id: "actions", label: L("Checklist", "Checklist") },
+    { id: "trading-days", label: L("Trading Days (Year)", "Días de trading (año)") },
+  ];
 
   const [plan, setPlan] = useState<GrowthPlan | null>(null);
   const [entries, setEntries] = useState<JournalEntry[]>([]);
@@ -553,9 +562,9 @@ export default function DashboardPage() {
         const checklistRow: any = journalUserId ? await getDailyChecklist(journalUserId, rollingTodayStr) : null;
 
         const defaultChecklist: string[] = [
-          "Respect your max daily loss limit.",
-          "Take only planned setups from your playbook.",
-          "Log your session inside 3 minutes.",
+          L("Respect your max daily loss limit.", "Respeta tu pérdida máxima diaria."),
+          L("Take only planned setups from your playbook.", "Toma solo setups planificados de tu playbook."),
+          L("Log your session inside 3 minutes.", "Registra tu sesión dentro de 3 minutos."),
         ];
 
         const baseTexts = extractChecklistTextsFromGrowthPlan(dbPlan ?? null);
@@ -580,7 +589,7 @@ export default function DashboardPage() {
           setTodayChecklist([]);
           setTodayChecklistNotes(null);
           setChecklistSaving(false);
-          setChecklistSaveError("Failed to load checklist.");
+          setChecklistSaveError(L("Failed to load checklist.", "No se pudo cargar el checklist."));
         }
       }
     };
@@ -623,11 +632,11 @@ export default function DashboardPage() {
   // Rebuild calendar
   useEffect(() => {
     if (!viewDate) return;
-    const { cells, weeks, monthLabel } = buildMonthCalendar(entries, viewDate);
+    const { cells, weeks, monthLabel } = buildMonthCalendar(entries, viewDate, localeTag);
     setCalendarCells(cells);
     setWeeks(weeks);
     setMonthLabel(monthLabel);
-  }, [entries, viewDate]);
+  }, [entries, viewDate, localeTag]);
 
   const weekRowNumbers = useMemo(() => {
     const rows: (number | null)[] = [];
@@ -839,7 +848,12 @@ export default function DashboardPage() {
       }
     } catch (err) {
       console.warn("[checklist] autosave failed:", err);
-      setChecklistSaveError("Could not save checklist (retrying on next change).");
+      setChecklistSaveError(
+        L(
+          "Could not save checklist (retrying on next change).",
+          "No se pudo guardar el checklist (reintentando en el próximo cambio)."
+        )
+      );
       lastPayloadRef.current = ""; // allow retry
     } finally {
       setChecklistSaving(false);
@@ -866,7 +880,7 @@ export default function DashboardPage() {
   }
 
   // Derived metrics
-  const name = (user as any)?.name || "Trader";
+  const name = (user as any)?.name || L("Trader", "Trader");
 
   const { starting, target, currentBalance, progressPct, clampedProgress } = useMemo(() => {
     const startingLocal = (plan as any)?.startingBalance ?? 0;
@@ -939,17 +953,22 @@ export default function DashboardPage() {
     if (id === "progress") {
       return (
         <>
-          <p className="text-slate-400 text-[14px] font-medium">Account Progress</p>
+          <p className="text-slate-400 text-[14px] font-medium">
+            {L("Account Progress", "Progreso de cuenta")}
+          </p>
 
           {plan ? (
             <>
               <p className="text-[16px] text-slate-300 mt-2">
-                Start: <span className="text-slate-50 font-semibold">${starting.toFixed(2)}</span> · Target:{" "}
+                {L("Start:", "Inicio:")}{" "}
+                <span className="text-slate-50 font-semibold">${starting.toFixed(2)}</span> ·{" "}
+                {L("Target:", "Meta:")}{" "}
                 <span className="text-emerald-400 font-semibold">${target.toFixed(2)}</span>
               </p>
 
               <p className="text-[16px] text-slate-300 mt-1">
-                Current balance: <span className="text-slate-50 font-semibold">${currentBalance.toFixed(2)}</span>
+                {L("Current balance:", "Balance actual:")}{" "}
+                <span className="text-slate-50 font-semibold">${currentBalance.toFixed(2)}</span>
               </p>
 
               <div className="mt-4 h-4 w-full rounded-full bg-slate-800 overflow-hidden">
@@ -961,17 +980,26 @@ export default function DashboardPage() {
 
               <p className="text-[14px] text-slate-400 mt-2 leading-snug">
                 {clampedProgress <= 0
-                  ? "You are at 0% of this plan. Let the first sessions set the tone."
+                  ? L(
+                      "You are at 0% of this plan. Let the first sessions set the tone.",
+                      "Estás en 0% de este plan. Deja que las primeras sesiones marquen el ritmo."
+                    )
                   : clampedProgress < 100
-                  ? `You have completed ${progressPct.toFixed(1)}% of your target based on data since this plan started.`
-                  : `You have exceeded this target. Time to define the next structured goal.`}
+                  ? L(
+                      `You have completed ${progressPct.toFixed(1)}% of your target based on data since this plan started.`,
+                      `Has completado ${progressPct.toFixed(1)}% de tu meta según los datos desde que inició este plan.`
+                    )
+                  : L(
+                      "You have exceeded this target. Time to define the next structured goal.",
+                      "Has superado esta meta. Es momento de definir el próximo objetivo."
+                    )}
               </p>
             </>
           ) : (
             <p className="text-[14px] text-slate-500 mt-2">
-              No growth plan set yet.{" "}
+              {L("No growth plan set yet.", "Aún no tienes un plan de crecimiento.")}{" "}
               <Link href="/growth-plan" className="text-emerald-400 underline">
-                Create your plan now.
+                {L("Create your plan now.", "Crea tu plan ahora.")}
               </Link>
             </p>
           )}
@@ -982,19 +1010,29 @@ export default function DashboardPage() {
     if (id === "streak") {
       return (
         <>
-          <p className="text-slate-400 text-[14px] font-medium">Green Streak & Performance</p>
+          <p className="text-slate-400 text-[14px] font-medium">
+            {L("Green Streak & Performance", "Racha verde y rendimiento")}
+          </p>
 
           <p className="text-5xl font-semibold text-emerald-400 mt-1">
-            {greenStreak} <span className="text-[16px] text-slate-400 font-normal">days</span>
+            {greenStreak}{" "}
+            <span className="text-[16px] text-slate-400 font-normal">
+              {L("days", "días")}
+            </span>
           </p>
 
           <p className="text-[14px] text-slate-400 mt-2">
-            Green days: <span className="text-emerald-300 font-semibold">{greenDays}</span> · Blue days:{" "}
+            {L("Green days:", "Días verdes:")}{" "}
+            <span className="text-emerald-300 font-semibold">{greenDays}</span> ·{" "}
+            {L("Blue days:", "Días azules:")}{" "}
             <span className="text-sky-300 font-semibold">{blueDays}</span>
           </p>
 
           <p className="text-[14px] text-slate-500 mt-2">
-            The goal is consistency: protect your streak by respecting your max loss, not by forcing trades.
+            {L(
+              "The goal is consistency: protect your streak by respecting your max loss, not by forcing trades.",
+              "El objetivo es la consistencia: protege tu racha respetando tu pérdida máxima, no forzando trades."
+            )}
           </p>
         </>
       );
@@ -1006,11 +1044,17 @@ export default function DashboardPage() {
         <>
           <div className="flex items-start justify-between gap-3">
             <div>
-              <p className="text-slate-400 text-[14px] font-medium">Today&apos;s Checklist</p>
+              <p className="text-slate-400 text-[14px] font-medium">
+                {L("Today's Checklist", "Checklist de hoy")}
+              </p>
               <p className="text-[12px] text-slate-500 mt-1">
                 {rollingTodayStr}
-                {checklistSaving ? <span className="ml-2 text-emerald-300">Saving…</span> : null}
-                {!checklistSaving && !checklistSaveError ? <span className="ml-2 text-slate-600">Saved</span> : null}
+                {checklistSaving ? (
+                  <span className="ml-2 text-emerald-300">{L("Saving…", "Guardando…")}</span>
+                ) : null}
+                {!checklistSaving && !checklistSaveError ? (
+                  <span className="ml-2 text-slate-600">{L("Saved", "Guardado")}</span>
+                ) : null}
               </p>
             </div>
           </div>
@@ -1045,7 +1089,7 @@ export default function DashboardPage() {
             href={`/journal/${rollingTodayStr}`}
             className="inline-flex mt-4 px-4 py-2 rounded-xl bg-emerald-400 text-slate-950 text-[14px] font-semibold hover:bg-emerald-300 transition"
           >
-            Open today&apos;s journal
+            {L("Open today's journal", "Abrir el journal de hoy")}
           </Link>
         </>
       );
@@ -1055,37 +1099,41 @@ export default function DashboardPage() {
     if (id === "daily-target") {
       return (
         <>
-          <p className="text-slate-400 text-[14px] font-medium">Daily Target (Today)</p>
+          <p className="text-slate-400 text-[14px] font-medium">
+            {L("Daily Target (Today)", "Meta diaria (hoy)")}
+          </p>
 
           <div className="mt-2 rounded-xl border border-emerald-400/30 bg-emerald-400/10 p-3">
             {plan && dailyCalcs.dailyTargetPct !== 0 ? (
               <>
                 <p className="text-[13px] text-emerald-300 font-medium">
-                  Goal: {dailyCalcs.dailyTargetPct.toFixed(2)}% of start-of-day balance
+                  {L("Goal:", "Meta:")} {dailyCalcs.dailyTargetPct.toFixed(2)}%{" "}
+                  {L("of start-of-day balance", "del balance al inicio del día")}
                 </p>
 
                 <p className="text-[12px] text-slate-400 mt-1">
-                  Session date: <span className="text-slate-100 font-medium">{sessionDateStr}</span>
+                  {L("Session date:", "Fecha de sesión:")}{" "}
+                  <span className="text-slate-100 font-medium">{sessionDateStr}</span>
                 </p>
 
                 <p className="text-[14px] text-slate-300 mt-1">
-                  Start-of-day:{" "}
+                  {L("Start-of-day:", "Inicio del día:")}{" "}
                   <span className="font-semibold text-slate-50">${dailyCalcs.startOfSessionBalance.toFixed(2)}</span>
                 </p>
 
                 <div className="mt-3 grid grid-cols-3 gap-3">
                   <div>
-                    <p className="text-[12px] text-slate-400">Expected</p>
+                    <p className="text-[12px] text-slate-400">{L("Expected", "Esperado")}</p>
                     <p className="text-emerald-300 font-semibold">${dailyCalcs.expectedSessionUSD.toFixed(2)}</p>
                   </div>
                   <div>
-                    <p className="text-[12px] text-slate-400">Realized</p>
+                    <p className="text-[12px] text-slate-400">{L("Realized", "Realizado")}</p>
                     <p className={dailyCalcs.actualSessionUSD >= 0 ? "text-emerald-300 font-semibold" : "text-sky-300 font-semibold"}>
                       {dailyCalcs.actualSessionUSD >= 0 ? "+" : "-"}${Math.abs(dailyCalcs.actualSessionUSD).toFixed(2)}
                     </p>
                   </div>
                   <div>
-                    <p className="text-[12px] text-slate-400">Delta</p>
+                    <p className="text-[12px] text-slate-400">{L("Delta", "Delta")}</p>
                     <p className={dailyCalcs.diffSessionVsGoal >= 0 ? "text-emerald-400 font-semibold" : "text-sky-400 font-semibold"}>
                       {dailyCalcs.diffSessionVsGoal >= 0 ? "+" : "-"}${Math.abs(dailyCalcs.diffSessionVsGoal).toFixed(2)}
                     </p>
@@ -1099,26 +1147,33 @@ export default function DashboardPage() {
                       style={{ width: `${dailyCalcs.progressToGoal}%` }}
                     />
                   </div>
-                  <p className="text-[11px] text-slate-400 mt-1">{dailyCalcs.progressToGoal.toFixed(1)}% of today&apos;s goal</p>
+                  <p className="text-[11px] text-slate-400 mt-1">
+                    {dailyCalcs.progressToGoal.toFixed(1)}%{" "}
+                    {L("of today's goal", "de la meta de hoy")}
+                  </p>
                 </div>
 
                 <div className="mt-3 grid grid-cols-2 gap-3">
                   <div className="rounded-lg border border-slate-800 bg-slate-900/40 p-2">
-                    <p className="text-[11px] text-slate-500">Remaining to goal</p>
+                    <p className="text-[11px] text-slate-500">{L("Remaining to goal", "Falta para la meta")}</p>
                     <p className="text-[14px] font-semibold text-slate-100">${dailyCalcs.remainingToGoal.toFixed(2)}</p>
                   </div>
 
                   <div className="rounded-lg border border-slate-800 bg-slate-900/40 p-2">
-                    <p className="text-[11px] text-slate-500">Above goal</p>
+                    <p className="text-[11px] text-slate-500">{L("Above goal", "Por encima de la meta")}</p>
                     <p className="text-[14px] font-semibold text-emerald-300">${dailyCalcs.aboveGoal.toFixed(2)}</p>
                   </div>
                 </div>
 
                 <div className="mt-3 text-[13px]">
                   {dailyCalcs.goalMet ? (
-                    <span className="px-2 py-1 rounded-lg bg-emerald-400 text-slate-950 font-semibold">Goal met ✅</span>
+                    <span className="px-2 py-1 rounded-lg bg-emerald-400 text-slate-950 font-semibold">
+                      {L("Goal met ✅", "Meta cumplida ✅")}
+                    </span>
                   ) : (
-                    <span className="px-2 py-1 rounded-lg bg-slate-800 text-slate-200 border border-slate-700">Goal not met ❌</span>
+                    <span className="px-2 py-1 rounded-lg bg-slate-800 text-slate-200 border border-slate-700">
+                      {L("Goal not met ❌", "Meta no cumplida ❌")}
+                    </span>
                   )}
                 </div>
 
@@ -1126,11 +1181,16 @@ export default function DashboardPage() {
                   href={`/journal/${sessionDateStr}`}
                   className="inline-flex mt-3 px-3 py-1.5 rounded-lg bg-emerald-400 text-slate-950 text-[13px] font-semibold hover:bg-emerald-300 transition"
                 >
-                  Open today&apos;s journal
+                  {L("Open today's journal", "Abrir el journal de hoy")}
                 </Link>
               </>
             ) : (
-              <p className="text-[13px] text-slate-400">Set a daily % target in your growth plan to enable this widget.</p>
+              <p className="text-[13px] text-slate-400">
+                {L(
+                  "Set a daily % target in your growth plan to enable this widget.",
+                  "Configura un % diario en tu plan de crecimiento para activar este widget."
+                )}
+              </p>
             )}
           </div>
         </>
@@ -1143,22 +1203,24 @@ export default function DashboardPage() {
       const { totalTradingDays, remainingTradingDays, tradedDays, missedDays } = tradingStats;
       return (
         <>
-          <p className="text-slate-400 text-[14px] font-medium">Trading Days – {new Date().getFullYear()}</p>
+          <p className="text-slate-400 text-[14px] font-medium">
+            {L("Trading Days", "Días de trading")} – {new Date().getFullYear()}
+          </p>
           <div className="mt-3 space-y-2 text-[14px] text-slate-300">
             <div className="flex items-center justify-between">
-              <span>Total trading days</span>
+              <span>{L("Total trading days", "Total de días de trading")}</span>
               <span className="font-semibold">{totalTradingDays}</span>
             </div>
             <div className="flex items-center justify-between">
-              <span>Days traded</span>
+              <span>{L("Days traded", "Días operados")}</span>
               <span className="font-semibold text-emerald-300">{tradedDays}</span>
             </div>
             <div className="flex items-center justify-between">
-              <span>Days not traded (so far)</span>
+              <span>{L("Days not traded (so far)", "Días sin operar (hasta ahora)")}</span>
               <span className="font-semibold text-sky-300">{missedDays}</span>
             </div>
             <div className="flex items-center justify-between">
-              <span>Trading days remaining</span>
+              <span>{L("Trading days remaining", "Días de trading restantes")}</span>
               <span className="font-semibold text-emerald-400">{remainingTradingDays}</span>
             </div>
           </div>
@@ -1168,16 +1230,23 @@ export default function DashboardPage() {
 
     if (id === "economic-news") {
       const countries = [
-        { code: "US", label: "United States" },
-        { code: "EU", label: "Eurozone" },
-        { code: "UK", label: "United Kingdom" },
-        { code: "JP", label: "Japan" },
-        { code: "CA", label: "Canada" },
+        { code: "US", label: L("United States", "Estados Unidos") },
+        { code: "EU", label: L("Eurozone", "Eurozona") },
+        { code: "UK", label: L("United Kingdom", "Reino Unido") },
+        { code: "JP", label: L("Japan", "Japón") },
+        { code: "CA", label: L("Canada", "Canadá") },
       ];
       return (
         <>
-          <p className="text-slate-400 text-[14px] font-medium">Economic News Calendar</p>
-          <p className="text-[12px] text-slate-500 mt-1">Choose a country to focus your macro events.</p>
+          <p className="text-slate-400 text-[14px] font-medium">
+            {L("Economic News Calendar", "Calendario de noticias económicas")}
+          </p>
+          <p className="text-[12px] text-slate-500 mt-1">
+            {L(
+              "Choose a country to focus your macro events.",
+              "Elige un país para enfocar tus eventos macro."
+            )}
+          </p>
           <div className="mt-3">
             <select
               value={ecoNewsCountry}
@@ -1200,27 +1269,27 @@ export default function DashboardPage() {
         <div className="h-full flex flex-col">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <p className="text-xs text-slate-400">P&amp;L Calendar</p>
+              <p className="text-xs text-slate-400">{L("P&L Calendar", "Calendario P&L")}</p>
               <h2 className="text-2xl font-semibold text-slate-50">{monthLabel}</h2>
             </div>
 
             <div className="flex items-center gap-2">
               <button onClick={goPrevMonth} className="px-3 py-1.5 rounded-lg bg-slate-800 text-slate-200 text-xs hover:bg-slate-700">
-                ← Prev
+                {L("← Prev", "← Ant")}
               </button>
               <button onClick={goNextMonth} className="px-3 py-1.5 rounded-lg bg-slate-800 text-slate-200 text-xs hover:bg-slate-700">
-                Next →
+                {L("Next →", "Sig →")}
               </button>
             </div>
           </div>
 
           <div className="grid grid-cols-[auto_repeat(5,minmax(0,1fr))] gap-2 mb-2 text-[12px] text-slate-500">
-            <div className="text-left">Week</div>
-            <div className="text-center">Mon</div>
-            <div className="text-center">Tue</div>
-            <div className="text-center">Wed</div>
-            <div className="text-center">Thu</div>
-            <div className="text-center">Fri</div>
+            <div className="text-left">{L("Week", "Semana")}</div>
+            <div className="text-center">{L("Mon", "Lun")}</div>
+            <div className="text-center">{L("Tue", "Mar")}</div>
+            <div className="text-center">{L("Wed", "Mié")}</div>
+            <div className="text-center">{L("Thu", "Jue")}</div>
+            <div className="text-center">{L("Fri", "Vie")}</div>
           </div>
 
           <div className="space-y-2 text-[14px]">
@@ -1265,10 +1334,10 @@ export default function DashboardPage() {
                           <p className="text-[16px] font-semibold leading-none">
                             {pnl > 0 ? `+$${pnl.toFixed(0)}` : pnl < 0 ? `-$${Math.abs(pnl).toFixed(0)}` : "$0"}
                           </p>
-                          <p className="text-[11px] mt-1 opacity-85">Open journal ↗</p>
+                          <p className="text-[11px] mt-1 opacity-85">{L("Open journal ↗", "Abrir journal ↗")}</p>
                         </div>
                       ) : hasDate ? (
-                        <p className="mt-auto text-[11px] text-slate-500">Add journal</p>
+                        <p className="mt-auto text-[11px] text-slate-500">{L("Add journal", "Agregar journal")}</p>
                       ) : null}
                     </div>
                   );
@@ -1283,21 +1352,26 @@ export default function DashboardPage() {
     if (id === "weekly") {
       return (
         <>
-          <h3 className="text-xl font-semibold text-slate-50 mb-1">Weekly Summary</h3>
+          <h3 className="text-xl font-semibold text-slate-50 mb-1">
+            {L("Weekly Summary", "Resumen semanal")}
+          </h3>
           <p className="text-[12px] text-emerald-300 mb-3">
-            You are currently in week {currentWeekOfYear} of {new Date().getFullYear()}.
+            {L(
+              `You are currently in week ${currentWeekOfYear} of ${new Date().getFullYear()}.`,
+              `Actualmente estás en la semana ${currentWeekOfYear} de ${new Date().getFullYear()}.`
+            )}
           </p>
 
           {weeks.map((w) => {
             const weekNumber = weekRowNumbers[w.index] ?? w.index + 1;
-            const label = `Week ${weekNumber}`;
+            const label = `${L("Week", "Semana")} ${weekNumber}`;
             const isCurrentWeek = weekNumber === currentWeekOfYear;
 
             if (w.daysWithTrades === 0 && w.pnl === 0) {
               return (
                 <div key={w.index} className="flex items-center justify-between text-[14px] text-slate-600">
                   <span className="text-slate-500">{label}</span>
-                  <span>$0 · 0 days</span>
+                  <span>$0 · 0 {L("days", "días")}</span>
                 </div>
               );
             }
@@ -1307,7 +1381,8 @@ export default function DashboardPage() {
               <div key={w.index} className="flex items-center justify-between text-[14px]">
                 <span className={isCurrentWeek ? "text-emerald-300 font-semibold" : "text-emerald-200"}>{label}</span>
                 <span className={positive ? "text-emerald-400 font-semibold" : "text-sky-400 font-semibold"}>
-                  {positive ? "+" : "-"}${Math.abs(w.pnl).toFixed(2)} · {w.daysWithTrades} day{w.daysWithTrades !== 1 ? "s" : ""}
+                  {positive ? "+" : "-"}${Math.abs(w.pnl).toFixed(2)} · {w.daysWithTrades}{" "}
+                  {L(w.daysWithTrades !== 1 ? "days" : "day", w.daysWithTrades !== 1 ? "días" : "día")}
                 </span>
               </div>
             );
@@ -1318,7 +1393,7 @@ export default function DashboardPage() {
 
     return (
       <p className="text-[14px] text-slate-400">
-        Unknown widget: <span className="font-mono">{id}</span>
+        {L("Unknown widget:", "Widget desconocido:")} <span className="font-mono">{id}</span>
       </p>
     );
   };
@@ -1327,7 +1402,9 @@ export default function DashboardPage() {
   if (loading || !viewDate) {
     return (
       <main className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center">
-        <p className="text-base text-slate-400">Loading your dashboard...</p>
+        <p className="text-base text-slate-400">
+          {L("Loading your dashboard...", "Cargando tu dashboard...")}
+        </p>
       </main>
     );
   }
@@ -1335,7 +1412,9 @@ export default function DashboardPage() {
   if (!user) {
     return (
       <main className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center">
-        <p className="text-base text-slate-400">Redirecting to sign in...</p>
+        <p className="text-base text-slate-400">
+          {L("Redirecting to sign in...", "Redirigiendo para iniciar sesión...")}
+        </p>
       </main>
     );
   }
@@ -1347,10 +1426,17 @@ export default function DashboardPage() {
       <div className="px-6 md:px-10 py-8">
         <header className="flex flex-col md:flex-row justify-between gap-4 mb-8">
           <div>
-            <p className="text-emerald-400 text-xs uppercase tracking-[0.25em]">Trading Journal Pro</p>
-            <h1 className="text-4xl font-semibold mt-1">Dashboard overview</h1>
+            <p className="text-emerald-400 text-xs uppercase tracking-[0.25em]">
+              {L("Trading Journal Pro", "Trading Journal Pro")}
+            </p>
+            <h1 className="text-4xl font-semibold mt-1">
+              {L("Dashboard overview", "Resumen del dashboard")}
+            </h1>
             <p className="text-[14px] md:text-[16px] text-slate-400 mt-2 max-w-3xl">
-              Welcome back, {name}. Structured like a pro journal, built to compete with any premium platform.
+              {L(
+                `Welcome back, ${name}. Structured like a pro journal, built to compete with any premium platform.`,
+                `Bienvenido de nuevo, ${name}. Estructurado como un journal pro, listo para competir con cualquier plataforma premium.`
+              )}
             </p>
           </div>
 
@@ -1359,20 +1445,25 @@ export default function DashboardPage() {
               href="/growth-plan"
               className="px-4 py-2 rounded-xl bg-emerald-400 text-slate-950 text-[14px] font-semibold hover:bg-emerald-300 transition"
             >
-              Edit growth plan
+              {L("Edit growth plan", "Editar plan de crecimiento")}
             </Link>
 
             <Link
               href="/growthaccountsimulator"
               className="px-4 py-2 rounded-xl border border-slate-700 text-slate-200 text-[14px] hover:border-emerald-400 hover:text-emerald-300 transition"
             >
-              Growth simulator
+              {L("Growth simulator", "Simulador de crecimiento")}
             </Link>
           </div>
         </header>
 
         <section className="mb-6 rounded-xl border border-slate-800 bg-slate-900/60 p-4">
-          <p className="text-[13px] text-slate-400 mb-2">Customize your dashboard: toggle widgets on/off.</p>
+          <p className="text-[13px] text-slate-400 mb-2">
+            {L(
+              "Customize your dashboard: toggle widgets on/off.",
+              "Personaliza tu dashboard: activa o desactiva los widgets."
+            )}
+          </p>
 
           <div className="flex flex-wrap gap-2">
             {ALL_WIDGETS.map((w) => {

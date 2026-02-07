@@ -49,7 +49,7 @@ export default function AccountPreferencesPage() {
         <header className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <p className="text-[11px] uppercase tracking-[0.25em] text-emerald-400">
-              Account
+              {lang === "es" ? "Cuenta" : "Account"}
             </p>
             <h1 className="text-3xl font-semibold mt-1">
               {t("prefs.title", lang)}
@@ -98,7 +98,7 @@ export default function AccountPreferencesPage() {
                 : "text-slate-300 border border-slate-700 hover:border-emerald-400 hover:text-emerald-200"
             } transition`}
           >
-            Change password
+            {t("account.password", lang, "Change password")}
           </a>
 
           <a
@@ -109,7 +109,7 @@ export default function AccountPreferencesPage() {
                 : "text-slate-300 border border-slate-700 hover:border-emerald-400 hover:text-emerald-200"
             } transition`}
           >
-            Billing & subscription
+            {t("account.billing", lang, "Billing & subscription")}
           </a>
 
           <a
@@ -120,7 +120,7 @@ export default function AccountPreferencesPage() {
                 : "text-slate-300 border border-slate-700 hover:border-emerald-400 hover:text-emerald-200"
             } transition`}
           >
-            Billing history
+            {t("account.billingHistory", lang, "Billing history")}
           </a>
         </nav>
 

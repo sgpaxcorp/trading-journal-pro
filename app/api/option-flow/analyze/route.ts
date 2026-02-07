@@ -86,7 +86,8 @@ function aggregateExpirations(expirations: any[]): any[] {
   });
 }
 
-function deriveKeyLevelsFromExpirations(expirations: any[]): any[] {
+function deriveKeyLevelsFromExpirations(expirations: any[], lang: "en" | "es" = "en"): any[] {
+  const isEs = lang === "es";
   const rows = expirations.flatMap((exp) => exp?.strikes ?? []);
   if (!rows.length) return [];
   const scored = rows
@@ -112,7 +113,9 @@ function deriveKeyLevelsFromExpirations(expirations: any[]): any[] {
         price: Number(row.strike),
         label,
         side,
-        reason: "Acumulación de prints en el strike.",
+        reason: isEs
+          ? "Acumulación de prints en el strike."
+          : "Concentrated prints at the strike.",
       };
     });
   return scored;
@@ -166,6 +169,7 @@ export async function POST(req: NextRequest) {
       rows,
       screenshotDataUrls,
       analystNotes,
+      language,
     } = body as {
       provider?: string;
       underlying?: string;
@@ -174,11 +178,16 @@ export async function POST(req: NextRequest) {
       rows?: any[];
       screenshotDataUrls?: string[];
       analystNotes?: string | null;
+      language?: string;
     };
 
     const trimmedRows = safeRows(rows ?? [], 200);
 
-    const systemPrompt = `
+    const lang = String(language || "en").toLowerCase().startsWith("es") ? "es" : "en";
+    const isEs = lang === "es";
+
+    const systemPrompt = isEs
+      ? `
 Eres un trader senior de floor en Wall Street especializado en opciones (ventas de prima, gamma, coberturas).
 Tu análisis debe sonar como un briefing profesional para traders institucionales: claro, directo y accionable.
 Analiza los últimos prints y responde SIEMPRE en español con un tono profesional tipo report de mesa.
@@ -244,6 +253,84 @@ Devuelve exclusivamente JSON válido con esta forma:
     "steps": ["paso accionable 1", "paso 2", "paso 3"],
     "invalidation": "qué invalida el plan",
     "risk": "riesgos principales"
+  },
+  "keyTrades": [
+    {
+      "headline": "short title",
+      "whyItMatters": "1-2 sentences",
+      "details": { "symbol": "...", "strike": "...", "expiry": "...", "size": "...", "premium": "...", "side": "...", "time": "..." }
+    }
+  ],
+  "riskNotes": ["..."],
+  "suggestedFocus": ["..."]
+}
+`.trim()
+      : `
+You are a senior Wall Street floor trader specialized in options (premium selling, gamma, hedging).
+Your analysis must read like a professional institutional briefing: clear, direct, and actionable.
+Analyze the latest prints and ALWAYS respond in English with a professional desk-report tone.
+Organize by expiration and prioritize strikes by premium/activity and proximity to spot (mention spot zone when possible).
+Identify real levels (label pivot/supply/demand/wall/friction), contracts with most potential, and squeeze scenarios
+with clear conditions. Avoid generic phrases; use concise, specific reads.
+Include a final conclusion summarizing bias and the level map in 3-5 bullets.
+If the underlying symbol appears in prints, include it in keyTrades[].details.symbol (e.g., SPX, SPXW, NDX).
+Include large deep ITM prints only as a note (not a key level) if OI is low.
+If prints mix BID/ASK, clarify whether it's premium selling or aggressive buying.
+In "expirations[].strikes" include the most relevant strikes (6-10 per expiration) with prints/size/premium/OI and quick read.
+In "keyLevels" prioritize 4-6 max levels and explain why they dominate the tape.
+IMPORTANT: Only consider aggressive flow when prints are at ASK (directional entries) or BID (premium selling).
+If prints are MID/MIXED/UNKNOWN, do not classify as aggressive.
+Consider trader notes (analystNotes) and recent memory (recentMemory) to improve the analysis.
+Return only valid JSON with this shape:
+{
+  "summary": "short executive summary",
+  "flowBias": "bullish | bearish | mixed | neutral",
+  "expirations": [
+    {
+      "expiry": "YYYY-MM-DD",
+      "tenor": "0DTE | 1DTE | weekly | monthly | other",
+      "range": "approx spot zone",
+      "strikes": [
+        {
+          "strike": 0,
+          "type": "C|P",
+          "prints": 0,
+          "sizeTotal": 0,
+          "premiumTotal": "~0",
+          "oiMax": 0,
+          "side": "ASK|BID|MIXED",
+          "read": "quick read"
+        }
+      ],
+      "notes": "per-expiration read",
+      "keyTakeaways": ["..."]
+    }
+  ],
+  "keyLevels": [
+    { "price": 0, "label": "pivot|supply|demand|wall|friction", "side": "BID|ASK|MIXED|UNKNOWN", "reason": "why it matters" }
+  ],
+  "contractsWithPotential": {
+    "gamma": ["contract/strike + why"],
+    "directional": ["contract/strike + why"],
+    "stress": ["contract/strike + why"]
+  },
+  "squeezeScenarios": {
+    "upside": {
+      "condition": "squeeze condition",
+      "candidates": ["..."],
+      "brakes": "main brake"
+    },
+    "downside": {
+      "condition": "squeeze condition",
+      "candidates": ["..."],
+      "brakes": "main brake"
+    }
+  },
+  "tradingPlan": {
+    "headline": "short plan headline",
+    "steps": ["action step 1", "step 2", "step 3"],
+    "invalidation": "what invalidates the plan",
+    "risk": "key risks"
   },
   "keyTrades": [
     {
@@ -355,7 +442,7 @@ Devuelve exclusivamente JSON válido con esta forma:
       }))
       .filter((level: any) => Number.isFinite(level.price));
     if (!keyLevels.length && expirations.length) {
-      keyLevels = deriveKeyLevelsFromExpirations(expirations);
+      keyLevels = deriveKeyLevelsFromExpirations(expirations, lang);
     }
 
     let uploadId: string | null = null;

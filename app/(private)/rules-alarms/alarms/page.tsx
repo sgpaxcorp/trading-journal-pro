@@ -6,6 +6,8 @@ import { useRouter } from "next/navigation";
 import { ArrowLeft, Search } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { supabaseBrowser } from "@/lib/supaBaseClient";
+import { useAppSettings } from "@/lib/appSettings";
+import { resolveLocale } from "@/lib/i18n";
 import {
   AlertEvent,
   AlertChannel,
@@ -51,7 +53,11 @@ function fmtDate(d?: string | null) {
   if (!d) return "—";
   const t = new Date(d).getTime();
   if (!Number.isFinite(t)) return "—";
-  return new Date(t).toLocaleString();
+  const locale =
+    typeof document !== "undefined"
+      ? document.documentElement.lang || undefined
+      : undefined;
+  return new Date(t).toLocaleString(locale);
 }
 
 function isoDate(d: Date) {
@@ -392,6 +398,10 @@ export default function AlarmsConsolePage() {
   const router = useRouter();
   const { user } = useAuth();
   const userId = user?.id || "";
+  const { locale } = useAppSettings();
+  const lang = resolveLocale(locale);
+  const isEs = lang === "es";
+  const L = (en: string, es: string) => (isEs ? es : en);
 
   const [tab, setTab] = useState<Tab>("active");
   const [busy, setBusy] = useState(false);
@@ -448,8 +458,12 @@ export default function AlarmsConsolePage() {
         listAlertEvents(userId, { kind: "alarm", includeDismissed: true, includeSnoozed: true, limit: 500 }),
       ]);
 
-      if (!rulesRes.ok) setFlash({ type: "error", msg: rulesRes.error || "Failed to load rules" });
-      if (!eventsRes.ok) setFlash({ type: "error", msg: eventsRes.error || "Failed to load events" });
+      if (!rulesRes.ok) {
+        setFlash({ type: "error", msg: rulesRes.error || L("Failed to load rules", "No se pudieron cargar las reglas") });
+      }
+      if (!eventsRes.ok) {
+        setFlash({ type: "error", msg: eventsRes.error || L("Failed to load events", "No se pudieron cargar los eventos") });
+      }
 
       setRules(rulesRes.ok ? rulesRes.data.rules : []);
       setEvents(eventsRes.ok ? eventsRes.data.events : []);
@@ -502,10 +516,16 @@ export default function AlarmsConsolePage() {
     try {
       const res = await fireTestEventFromRule(userId, ruleId);
       if (!res.ok) {
-        setFlash({ type: "error", msg: res.error || "Test failed" });
+        setFlash({ type: "error", msg: res.error || L("Test failed", "La prueba falló") });
         return;
       }
-      setFlash({ type: "success", msg: "Test event fired. You should see a popup within a few seconds." });
+      setFlash({
+        type: "success",
+        msg: L(
+          "Test event fired. You should see a popup within a few seconds.",
+          "Evento de prueba enviado. Deberías ver un pop‑up en unos segundos."
+        ),
+      });
       await refreshAll();
       if (res.data.eventId) {
         setSelectedEventId(res.data.eventId);
@@ -522,7 +542,7 @@ export default function AlarmsConsolePage() {
     setFlash(null);
     try {
       const res = await snoozeAlertEvent(userId, eventId, minutes);
-      if (!res.ok) setFlash({ type: "error", msg: res.error || "Snooze failed" });
+      if (!res.ok) setFlash({ type: "error", msg: res.error || L("Snooze failed", "No se pudo posponer") });
       await refreshAll();
     } finally {
       setBusy(false);
@@ -535,7 +555,7 @@ export default function AlarmsConsolePage() {
     setFlash(null);
     try {
       const res = await dismissAlertEvent(userId, eventId);
-      if (!res.ok) setFlash({ type: "error", msg: res.error || "Dismiss failed" });
+      if (!res.ok) setFlash({ type: "error", msg: res.error || L("Dismiss failed", "No se pudo descartar") });
       await refreshAll();
     } finally {
       setBusy(false);
@@ -555,7 +575,9 @@ export default function AlarmsConsolePage() {
       if (next.length === 0) next = ["inapp"];
 
       const res = await updateAlertRule(userId, rule.id, { channels: next });
-      if (!res.ok) setFlash({ type: "error", msg: res.error || "Failed to update channels" });
+      if (!res.ok) {
+        setFlash({ type: "error", msg: res.error || L("Failed to update channels", "No se pudieron actualizar los canales") });
+      }
       await refreshAll();
     } finally {
       setBusy(false);
@@ -574,13 +596,19 @@ export default function AlarmsConsolePage() {
       const nextMeta = { ...meta, ignore_trade_ids: Array.from(ignore) };
       const res = await updateAlertRule(userId, openPositionsRule.id, { meta: nextMeta });
       if (!res.ok) {
-        setFlash({ type: "error", msg: res.error || "Failed to mark swing" });
+        setFlash({ type: "error", msg: res.error || L("Failed to mark swing", "No se pudo marcar como swing") });
         return;
       }
 
       // Re-run engine so the audit trail refreshes and potentially auto-resolves.
       window.dispatchEvent(new Event("ntj_alert_engine_run_now"));
-      setFlash({ type: "success", msg: "Marked as swing (ignored for open-positions alarm)." });
+      setFlash({
+        type: "success",
+        msg: L(
+          "Marked as swing (ignored for open-positions alarm).",
+          "Marcado como swing (se ignorará en la alarma de posiciones abiertas)."
+        ),
+      });
       await refreshAll();
     } finally {
       setBusy(false);
@@ -603,14 +631,14 @@ export default function AlarmsConsolePage() {
           if (pos.source === "journal" || pos.source === "notes" || looksLikeJournal) {
             return closeJournalPositionAtPrice(userId, pos, closeAtISO, price);
           }
-          if (!tradeId) return { ok: false as const, error: "Missing trade id" };
+          if (!tradeId) return { ok: false as const, error: L("Missing trade id", "Falta el id de trade") };
           return closeTradeAtPrice(userId, tradeId, closeAtISO, price);
         })
       );
 
       const failed = results.find((r) => !r.ok) as any;
       if (failed) {
-        setFlash({ type: "error", msg: failed.error || "Failed closing position(s)" });
+        setFlash({ type: "error", msg: failed.error || L("Failed closing position(s)", "No se pudieron cerrar posiciones") });
         return;
       }
 
@@ -622,7 +650,13 @@ export default function AlarmsConsolePage() {
       // Re-run engine so the alarm updates/auto-resolves.
       window.dispatchEvent(new Event("ntj_alert_engine_run_now"));
 
-      setFlash({ type: "success", msg: `Closed ${positions.length} position(s) at $${price}.` });
+      setFlash({
+        type: "success",
+        msg: L(
+          `Closed ${positions.length} position(s) at $${price}.`,
+          `Se cerraron ${positions.length} posiciones en $${price}.`
+        ),
+      });
       setClosePriceByTrade((prev) => {
         const next = { ...prev };
         positions.forEach((p) => {
@@ -657,11 +691,17 @@ export default function AlarmsConsolePage() {
       <div className="px-6 md:px-10 py-8 max-w-7xl mx-auto">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div>
-          <div className="text-[11px] uppercase tracking-[0.32em] text-emerald-400">Rules &amp; Alarms • Alarms</div>
-          <h1 className="mt-2 text-3xl font-semibold text-slate-100">Active alarms &amp; audit trail</h1>
+          <div className="text-[11px] uppercase tracking-[0.32em] text-emerald-400">
+            {L("Rules & Alarms • Alarms", "Reglas y alarmas • Alarmas")}
+          </div>
+          <h1 className="mt-2 text-3xl font-semibold text-slate-100">
+            {L("Active alarms & audit trail", "Alarmas activas y auditoría")}
+          </h1>
           <p className="mt-2 max-w-2xl text-sm text-slate-400">
-            Monitor open positions, expiring options, and key risk rules. When an alarm fires, resolve it with a snooze,
-            dismissal, or a close-at-price action.
+            {L(
+              "Monitor open positions, expiring options, and key risk rules. When an alarm fires, resolve it with a snooze, dismissal, or a close-at-price action.",
+              "Monitorea posiciones abiertas, opciones por expirar y reglas clave de riesgo. Cuando se dispare una alarma, resuélvela con posponer, descartar o cerrar a precio."
+            )}
           </p>
           </div>
 
@@ -672,22 +712,22 @@ export default function AlarmsConsolePage() {
             className="inline-flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-950/30 px-3 py-2 text-xs font-semibold text-slate-100 transition hover:border-emerald-500/60 hover:bg-emerald-500/10 hover:text-emerald-200"
           >
             <ArrowLeft className="h-4 w-4" />
-            Back to dashboard
+            {L("Back to dashboard", "Volver al dashboard")}
           </button>
           <button
             className="rounded-xl border border-slate-700 bg-slate-900/40 px-3 py-2 text-xs font-semibold text-slate-100 hover:border-emerald-500/60 hover:bg-emerald-500/10"
             onClick={() => window.dispatchEvent(new Event("ntj_alert_engine_run_now"))}
             disabled={!userId || busy}
-            title="Force the alert engine to evaluate rules now"
+            title={L("Force the alert engine to evaluate rules now", "Forzar el motor para evaluar reglas ahora")}
           >
-            Run checks now
+            {L("Run checks now", "Ejecutar checks ahora")}
           </button>
           <button
             className="rounded-xl border border-slate-700 bg-slate-900/40 px-3 py-2 text-xs font-semibold text-slate-100 hover:border-emerald-500/60 hover:bg-emerald-500/10"
             onClick={refreshAll}
             disabled={!userId || busy}
           >
-            Refresh
+            {L("Refresh", "Actualizar")}
           </button>
         </div>
       </div>
@@ -708,17 +748,21 @@ export default function AlarmsConsolePage() {
       )}
 
         <div className="mt-6 grid gap-4 md:grid-cols-3">
-        <KpiCard label="Active alarms" value={String(activeEvents.length)} sub="Currently firing" />
-        <KpiCard label="Snoozed" value={String(snoozedEvents.length)} sub="Hidden temporarily" />
-        <KpiCard label="Rules enabled" value={String(rules.filter((r) => r.enabled).length)} sub="Alarms configured" />
+        <KpiCard label={L("Active alarms", "Alarmas activas")} value={String(activeEvents.length)} sub={L("Currently firing", "Disparándose ahora")} />
+        <KpiCard label={L("Snoozed", "Pospuestas")} value={String(snoozedEvents.length)} sub={L("Hidden temporarily", "Ocultas temporalmente")} />
+        <KpiCard
+          label={L("Rules enabled", "Reglas activas")}
+          value={String(rules.filter((r) => r.enabled).length)}
+          sub={L("Alarms configured", "Alarmas configuradas")}
+        />
       </div>
 
         <div className="mt-6 flex flex-wrap gap-2">
         {[
-          ["active", `Active (${activeEvents.length})`],
-          ["rules", `Rules (${rules.length})`],
-          ["audit", "Audit trail"],
-          ["history", `History (${historyEvents.length})`],
+          ["active", L(`Active (${activeEvents.length})`, `Activas (${activeEvents.length})`)],
+          ["rules", L(`Rules (${rules.length})`, `Reglas (${rules.length})`)],
+          ["audit", L("Audit trail", "Auditoría")],
+          ["history", L(`History (${historyEvents.length})`, `Historial (${historyEvents.length})`)],
         ].map(([k, label]) => (
           <button
             key={k}
@@ -740,9 +784,12 @@ export default function AlarmsConsolePage() {
           <section className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div>
-                <div className="text-xs uppercase tracking-[0.28em] text-slate-500">Active alarms</div>
+                <div className="text-xs uppercase tracking-[0.28em] text-slate-500">{L("Active alarms", "Alarmas activas")}</div>
                 <p className="mt-2 text-sm text-slate-400">
-                  Click an alarm to see evidence, context, and recommended actions.
+                  {L(
+                    "Click an alarm to see evidence, context, and recommended actions.",
+                    "Haz clic en una alarma para ver evidencia, contexto y acciones recomendadas."
+                  )}
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
@@ -751,7 +798,7 @@ export default function AlarmsConsolePage() {
                   <input
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
-                    placeholder="Search alarms..."
+                    placeholder={L("Search alarms...", "Buscar alarmas...")}
                     className="w-48 rounded-xl border border-slate-700 bg-slate-950/40 pl-9 pr-3 py-2 text-xs text-slate-200 placeholder:text-slate-500 focus:border-emerald-400"
                   />
                 </div>
@@ -760,11 +807,11 @@ export default function AlarmsConsolePage() {
                   onChange={(e) => setSeverityFilter(e.target.value as any)}
                   className="rounded-xl border border-slate-700 bg-slate-950/40 px-3 py-2 text-xs text-slate-200 focus:border-emerald-400"
                 >
-                  <option value="all">All severities</option>
-                  <option value="info">Info</option>
-                  <option value="success">Success</option>
-                  <option value="warning">Warning</option>
-                  <option value="critical">Critical</option>
+                  <option value="all">{L("All severities", "Todas las severidades")}</option>
+                  <option value="info">{L("Info", "Info")}</option>
+                  <option value="success">{L("Success", "Éxito")}</option>
+                  <option value="warning">{L("Warning", "Advertencia")}</option>
+                  <option value="critical">{L("Critical", "Crítica")}</option>
                 </select>
               </div>
             </div>
@@ -772,7 +819,7 @@ export default function AlarmsConsolePage() {
             <div className="mt-5 space-y-3">
               {filteredActiveEvents.length === 0 ? (
                 <div className="rounded-xl border border-dashed border-slate-700 bg-slate-950/30 p-4 text-sm text-slate-400">
-                  No alarms match your filters.
+                  {L("No alarms match your filters.", "No hay alarmas que coincidan con tus filtros.")}
                 </div>
               ) : (
                 filteredActiveEvents.map((e) => (
@@ -789,11 +836,11 @@ export default function AlarmsConsolePage() {
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex items-center gap-2">
                         <SeverityPill severity={e.severity} />
-                        <span className="text-[11px] uppercase tracking-[0.2em] text-slate-500">alarm</span>
+                        <span className="text-[11px] uppercase tracking-[0.2em] text-slate-500">{L("alarm", "alarma")}</span>
                       </div>
                       <div className="text-xs text-slate-400">{fmtDate(e.triggered_at)}</div>
                     </div>
-                    <div className="mt-2 text-sm font-semibold text-slate-100">{e.title || "Alarm"}</div>
+                    <div className="mt-2 text-sm font-semibold text-slate-100">{e.title || L("Alarm", "Alarma")}</div>
                     <div className="mt-1 text-xs text-slate-400 line-clamp-2">{e.message || "—"}</div>
                   </button>
                 ))
@@ -805,15 +852,15 @@ export default function AlarmsConsolePage() {
             <section className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <div className="text-xs uppercase tracking-[0.28em] text-slate-500">Alarm detail</div>
-                  <p className="mt-2 text-sm text-slate-400">Evidence, action plan, and controls.</p>
+                  <div className="text-xs uppercase tracking-[0.28em] text-slate-500">{L("Alarm detail", "Detalle de alarma")}</div>
+                  <p className="mt-2 text-sm text-slate-400">{L("Evidence, action plan, and controls.", "Evidencia, plan de acción y controles.")}</p>
                 </div>
                 {selectedEvent ? <SeverityPill severity={selectedEvent.severity} /> : null}
               </div>
 
               {!selectedEvent ? (
                 <div className="mt-6 rounded-xl border border-dashed border-slate-700 bg-slate-950/30 p-4 text-sm text-slate-400">
-                  Select an alarm from the left to inspect details and actions.
+                  {L("Select an alarm from the left to inspect details and actions.", "Selecciona una alarma a la izquierda para ver detalles y acciones.")}
                 </div>
               ) : (
                 <div className="mt-5 space-y-4">
@@ -824,12 +871,12 @@ export default function AlarmsConsolePage() {
 
                   <div className="grid gap-3 md:grid-cols-2">
                     <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
-                      <div className="text-[11px] uppercase tracking-[0.2em] text-slate-500">Created</div>
+                      <div className="text-[11px] uppercase tracking-[0.2em] text-slate-500">{L("Created", "Creada")}</div>
                       <div className="mt-1 text-sm text-slate-200">{fmtDate(selectedEvent.triggered_at)}</div>
                     </div>
                     <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
-                      <div className="text-[11px] uppercase tracking-[0.2em] text-slate-500">Category</div>
-                      <div className="mt-1 text-sm text-slate-200">{selectedEvent.category || "alarm"}</div>
+                      <div className="text-[11px] uppercase tracking-[0.2em] text-slate-500">{L("Category", "Categoría")}</div>
+                      <div className="mt-1 text-sm text-slate-200">{selectedEvent.category || L("alarm", "alarma")}</div>
                     </div>
                   </div>
 
@@ -839,19 +886,19 @@ export default function AlarmsConsolePage() {
                       onClick={() => onSnooze(selectedEvent.id, 60)}
                       disabled={busy}
                     >
-                      Snooze 1h
+                      {L("Snooze 1h", "Posponer 1h")}
                     </button>
                     <button
                       className="rounded-lg border border-slate-700 bg-slate-900/40 px-3 py-2 text-xs font-semibold text-slate-100 hover:border-rose-400/60 hover:bg-rose-500/10"
                       onClick={() => onDismiss(selectedEvent.id)}
                       disabled={busy}
                     >
-                      Dismiss
+                      {L("Dismiss", "Descartar")}
                     </button>
                   </div>
 
                   <details className="rounded-lg border border-slate-800 bg-slate-950/40 p-3">
-                    <summary className="cursor-pointer text-xs font-semibold text-slate-300">View raw metadata</summary>
+                    <summary className="cursor-pointer text-xs font-semibold text-slate-300">{L("View raw metadata", "Ver metadatos crudos")}</summary>
                     <pre className="mt-3 max-h-56 overflow-auto text-xs text-slate-300">
                       {JSON.stringify(selectedEvent.payload ?? {}, null, 2)}
                     </pre>
@@ -861,22 +908,22 @@ export default function AlarmsConsolePage() {
             </section>
 
             <section className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
-              <div className="text-xs uppercase tracking-[0.28em] text-slate-500">Quick controls</div>
-              <p className="mt-2 text-sm text-slate-400">Snoozing hides the alarm until the chosen time.</p>
+              <div className="text-xs uppercase tracking-[0.28em] text-slate-500">{L("Quick controls", "Controles rápidos")}</div>
+              <p className="mt-2 text-sm text-slate-400">{L("Snoozing hides the alarm until the chosen time.", "Posponer oculta la alarma hasta el momento elegido.")}</p>
               <div className="mt-4 flex flex-wrap gap-2">
                 <button
                   className="rounded-lg border border-slate-700 bg-slate-900/40 px-3 py-2 text-xs font-semibold text-slate-100 hover:border-emerald-400/60 hover:bg-emerald-500/10"
                   onClick={() => selectedEvent && onSnooze(selectedEvent.id, 10)}
                   disabled={!selectedEvent || busy}
                 >
-                  Snooze 10m
+                  {L("Snooze 10m", "Posponer 10m")}
                 </button>
                 <button
                   className="rounded-lg border border-slate-700 bg-slate-900/40 px-3 py-2 text-xs font-semibold text-slate-100 hover:border-emerald-400/60 hover:bg-emerald-500/10"
                   onClick={() => selectedEvent && onSnooze(selectedEvent.id, 1440)}
                   disabled={!selectedEvent || busy}
                 >
-                  Snooze 24h
+                  {L("Snooze 24h", "Posponer 24h")}
                 </button>
               </div>
             </section>
@@ -888,15 +935,15 @@ export default function AlarmsConsolePage() {
         <section className="mt-6 rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
           <div className="flex items-center justify-between gap-4">
             <div>
-              <div className="text-xs uppercase tracking-[0.28em] text-slate-500">Alarm rules</div>
-              <p className="mt-2 text-sm text-slate-400">Toggle rules on/off and trigger test alarms.</p>
+              <div className="text-xs uppercase tracking-[0.28em] text-slate-500">{L("Alarm rules", "Reglas de alarmas")}</div>
+              <p className="mt-2 text-sm text-slate-400">{L("Toggle rules on/off and trigger test alarms.", "Activa o desactiva reglas y dispara pruebas.")}</p>
             </div>
-            <div className="text-xs text-slate-400">{busy ? "Working…" : ""}</div>
+            <div className="text-xs text-slate-400">{busy ? L("Working…", "Trabajando…") : ""}</div>
           </div>
 
           {rules.length === 0 ? (
             <div className="mt-4 rounded-xl border border-dashed border-slate-700 bg-slate-950/30 p-4 text-sm text-slate-400">
-              No rules found.
+              {L("No rules found.", "No se encontraron reglas.")}
             </div>
           ) : (
             <div className="mt-5 space-y-3">
@@ -911,11 +958,13 @@ export default function AlarmsConsolePage() {
                       <div className="text-base font-semibold text-slate-100">{r.title}</div>
                       <div className="text-sm text-slate-400">{r.message || "—"}</div>
                       <div className="text-[11px] text-slate-500">
-                        Channels: <span className="text-slate-300 font-medium">{channelsLabel(r.channels ?? [])}</span>
+                        {L("Channels:", "Canales:")}{" "}
+                        <span className="text-slate-300 font-medium">{channelsLabel(r.channels ?? [])}</span>
                       </div>
                       {(r as any).meta?.ignore_trade_ids?.length ? (
                         <div className="text-xs text-slate-500">
-                          Ignoring {(r as any).meta.ignore_trade_ids.length} position(s)
+                          {L("Ignoring", "Ignorando")} {(r as any).meta.ignore_trade_ids.length}{" "}
+                          {L("position(s)", "posición(es)")}
                         </div>
                       ) : null}
                     </div>
@@ -926,7 +975,7 @@ export default function AlarmsConsolePage() {
                         onClick={() => onTestRule(r.id)}
                         disabled={busy || !userId}
                       >
-                        Test
+                        {L("Test", "Probar")}
                       </button>
 
                       <button
@@ -938,9 +987,10 @@ export default function AlarmsConsolePage() {
                         ].join(" ")}
                         onClick={() => onTogglePopup(r)}
                         disabled={busy || !userId}
-                        title="Toggle popup delivery"
+                        title={L("Toggle popup delivery", "Alternar entrega por pop‑up")}
                       >
-                        Popup {((r.channels ?? []).includes("popup")) ? "On" : "Off"}
+                        {L("Popup", "Pop‑up")}{" "}
+                        {((r.channels ?? []).includes("popup")) ? L("On", "Activado") : L("Off", "Desactivado")}
                       </button>
 
                       <button
@@ -951,7 +1001,9 @@ export default function AlarmsConsolePage() {
                           setFlash(null);
                           try {
                             const res = await updateAlertRule(userId, r.id, { enabled: !r.enabled });
-                            if (!res.ok) setFlash({ type: "error", msg: res.error || "Failed to update rule" });
+                            if (!res.ok) {
+                              setFlash({ type: "error", msg: res.error || L("Failed to update rule", "No se pudo actualizar la regla") });
+                            }
                             await refreshAll();
                           } finally {
                             setBusy(false);
@@ -959,7 +1011,7 @@ export default function AlarmsConsolePage() {
                         }}
                         disabled={busy || !userId}
                       >
-                        {r.enabled ? "Disable" : "Enable"}
+                        {r.enabled ? L("Disable", "Desactivar") : L("Enable", "Activar")}
                       </button>
 
                       {openPositionsRule?.id === r.id && (r as any).meta?.ignore_trade_ids?.length ? (
@@ -972,7 +1024,9 @@ export default function AlarmsConsolePage() {
                             try {
                               const meta: any = (r as any).meta ?? {};
                               const res = await updateAlertRule(userId, r.id, { meta: { ...meta, ignore_trade_ids: [] } });
-                              if (!res.ok) setFlash({ type: "error", msg: res.error || "Failed to clear ignores" });
+                              if (!res.ok) {
+                                setFlash({ type: "error", msg: res.error || L("Failed to clear ignores", "No se pudieron limpiar los ignorados") });
+                              }
                               window.dispatchEvent(new Event("ntj_alert_engine_run_now"));
                               await refreshAll();
                             } finally {
@@ -981,7 +1035,7 @@ export default function AlarmsConsolePage() {
                           }}
                           disabled={busy}
                         >
-                          Clear ignored
+                          {L("Clear ignored", "Limpiar ignorados")}
                         </button>
                       ) : null}
                     </div>
@@ -998,27 +1052,33 @@ export default function AlarmsConsolePage() {
           <section className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
             <div className="flex items-center justify-between">
               <div>
-                <div className="text-xs uppercase tracking-[0.28em] text-slate-500">Audit trail</div>
+                <div className="text-xs uppercase tracking-[0.28em] text-slate-500">{L("Audit trail", "Auditoría")}</div>
                 <p className="mt-2 text-sm text-slate-400">
-                  Open positions detected by the engine. Mark swings to ignore in future checks.
+                  {L(
+                    "Open positions detected by the engine. Mark swings to ignore in future checks.",
+                    "Posiciones abiertas detectadas por el motor. Marca swings para ignorarlas en futuros checks."
+                  )}
                 </p>
               </div>
               <div className="text-xs text-slate-500">
-                {selectedEvent ? `From ${fmtDate(selectedEvent.triggered_at)}` : ""}
+                {selectedEvent ? L(`From ${fmtDate(selectedEvent.triggered_at)}`, `Desde ${fmtDate(selectedEvent.triggered_at)}`) : ""}
               </div>
             </div>
 
             {!selectedEvent ? (
-              <div className="mt-4 rounded-xl border border-dashed border-slate-700 bg-slate-950/30 p-4 text-sm text-slate-400">
-                No audit event selected. Pick an active alarm first.
-              </div>
+                <div className="mt-4 rounded-xl border border-dashed border-slate-700 bg-slate-950/30 p-4 text-sm text-slate-400">
+                  {L("No audit event selected. Pick an active alarm first.", "No hay evento de auditoría seleccionado. Elige una alarma activa primero.")}
+                </div>
             ) : (
               <div className="mt-4 space-y-3">
                 {auditOpenPositions.length === 0 ? (
                   <div className="rounded-xl border border-slate-800 bg-slate-950/30 p-4 text-sm text-slate-400">
                     {auditOpenCount > 0
-                      ? `Open positions detected (${auditOpenCount}), but details are missing. Save your journal trades or sync trades to enable audit actions.`
-                      : "No open positions detected."}
+                      ? L(
+                          `Open positions detected (${auditOpenCount}), but details are missing. Save your journal trades or sync trades to enable audit actions.`,
+                          `Se detectaron posiciones abiertas (${auditOpenCount}), pero faltan detalles. Guarda tus trades del journal o sincroniza trades para habilitar acciones de auditoría.`
+                        )
+                      : L("No open positions detected.", "No se detectaron posiciones abiertas.")}
                   </div>
                 ) : (
                   auditOpenPositions.map((p, idx) => {
@@ -1038,13 +1098,13 @@ export default function AlarmsConsolePage() {
                         <div className="min-w-0">
                           <div className="truncate text-sm font-semibold text-slate-100">{symbol}</div>
                           <div className="text-xs text-slate-400">
-                            {assetType ? `${assetType}` : "position"}
-                            {qty !== null ? ` • qty ${qty}` : ""}
-                            {exp ? ` • exp ${exp}` : ""}
+                            {assetType ? `${assetType}` : L("position", "posición")}
+                            {qty !== null ? L(` • qty ${qty}`, ` • qty ${qty}`) : ""}
+                            {exp ? L(` • exp ${exp}`, ` • exp ${exp}`) : ""}
                           </div>
-                          <div className="text-[11px] text-slate-500">trade id: {tradeId || "—"}</div>
+                          <div className="text-[11px] text-slate-500">{L("trade id:", "trade id:")} {tradeId || "—"}</div>
                           {journalDate ? (
-                            <div className="text-[11px] text-slate-500">journal date: {journalDate}</div>
+                            <div className="text-[11px] text-slate-500">{L("journal date:", "fecha de journal:")} {journalDate}</div>
                           ) : null}
                         </div>
 
@@ -1054,7 +1114,7 @@ export default function AlarmsConsolePage() {
                               href={`/journal/${journalDate}`}
                               className="rounded-lg border border-slate-700 bg-slate-900/40 px-3 py-2 text-xs font-semibold text-slate-100 hover:border-emerald-400/60 hover:bg-emerald-500/10"
                             >
-                              Open journal
+                              {L("Open journal", "Abrir journal")}
                             </Link>
                           ) : null}
                           <button
@@ -1062,7 +1122,7 @@ export default function AlarmsConsolePage() {
                             onClick={() => onMarkSwing(tradeId)}
                             disabled={!tradeId || busy || !openPositionsRule}
                           >
-                            Mark swing
+                            {L("Mark swing", "Marcar swing")}
                           </button>
                         </div>
                       </div>
@@ -1076,25 +1136,28 @@ export default function AlarmsConsolePage() {
           <section className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
             <div className="flex items-center justify-between">
               <div>
-                <div className="text-xs uppercase tracking-[0.28em] text-slate-500">Expiring options</div>
+                <div className="text-xs uppercase tracking-[0.28em] text-slate-500">{L("Expiring options", "Opciones por expirar")}</div>
                 <p className="mt-2 text-sm text-slate-400">
-                  Close expiring premium strategies at $0, or specify a custom close price.
+                  {L(
+                    "Close expiring premium strategies at $0, or specify a custom close price.",
+                    "Cierra estrategias de prima por expirar en $0 o especifica un precio de cierre."
+                  )}
                 </p>
               </div>
               <div className="text-xs text-slate-500">
-                {selectedEvent ? `From ${fmtDate(selectedEvent.triggered_at)}` : ""}
+                {selectedEvent ? L(`From ${fmtDate(selectedEvent.triggered_at)}`, `Desde ${fmtDate(selectedEvent.triggered_at)}`) : ""}
               </div>
             </div>
 
             {!selectedEvent ? (
-              <div className="mt-4 rounded-xl border border-dashed border-slate-700 bg-slate-950/30 p-4 text-sm text-slate-400">
-                No audit event selected. Pick an active alarm first.
-              </div>
+                <div className="mt-4 rounded-xl border border-dashed border-slate-700 bg-slate-950/30 p-4 text-sm text-slate-400">
+                  {L("No audit event selected. Pick an active alarm first.", "No hay evento de auditoría seleccionado. Elige una alarma activa primero.")}
+                </div>
             ) : (
               <div className="mt-4 space-y-3">
                 {auditExpiring.length === 0 ? (
                   <div className="rounded-xl border border-slate-800 bg-slate-950/30 p-4 text-sm text-slate-400">
-                    No expiring options found.
+                    {L("No expiring options found.", "No se encontraron opciones por expirar.")}
                   </div>
                 ) : (
                   <>
@@ -1104,7 +1167,7 @@ export default function AlarmsConsolePage() {
                         onClick={() => selectedEvent && onClosePositionsAtPrice(expiringPositions, 0, selectedEvent)}
                         disabled={busy || !selectedEvent || expiringPositions.length === 0}
                       >
-                        Close all at $0
+                        {L("Close all at $0", "Cerrar todo a $0")}
                       </button>
                     </div>
 
@@ -1132,16 +1195,16 @@ export default function AlarmsConsolePage() {
                             <div className="min-w-0">
                               <div className="truncate text-sm font-semibold text-slate-100">{symbol}</div>
                               <div className="text-xs text-slate-400">
-                                {assetType ? `${assetType}` : "option"}
-                                {qty !== null ? ` • qty ${qty}` : ""}
+                                {assetType ? `${assetType}` : L("option", "opción")}
+                                {qty !== null ? L(` • qty ${qty}`, ` • qty ${qty}`) : ""}
                                 {strike !== null ? ` • ${strike}` : ""}
                                 {optionType ? ` • ${optionType}` : ""}
                                 {side ? ` • ${side}` : ""}
-                                {exp ? ` • exp ${exp}` : ""}
+                                {exp ? L(` • exp ${exp}`, ` • exp ${exp}`) : ""}
                               </div>
-                              <div className="text-[11px] text-slate-500">trade id: {tradeId || "—"}</div>
+                              <div className="text-[11px] text-slate-500">{L("trade id:", "trade id:")} {tradeId || "—"}</div>
                               {journalDate ? (
-                                <div className="text-[11px] text-slate-500">journal date: {journalDate}</div>
+                                <div className="text-[11px] text-slate-500">{L("journal date:", "fecha de journal:")} {journalDate}</div>
                               ) : null}
                             </div>
 
@@ -1151,7 +1214,7 @@ export default function AlarmsConsolePage() {
                                   href={`/journal/${journalDate}`}
                                   className="rounded-lg border border-slate-700 bg-slate-900/40 px-3 py-2 text-xs font-semibold text-slate-100 hover:border-emerald-400/60 hover:bg-emerald-500/10"
                                 >
-                                  Open journal
+                                  {L("Open journal", "Abrir journal")}
                                 </Link>
                               ) : null}
                               <button
@@ -1159,7 +1222,7 @@ export default function AlarmsConsolePage() {
                                 onClick={() => selectedEvent && onClosePositionsAtPrice([p], 0, selectedEvent)}
                                 disabled={!tradeId || busy || !selectedEvent}
                               >
-                                Close @ $0
+                                {L("Close @ $0", "Cerrar @ $0")}
                               </button>
                             </div>
                           </div>
@@ -1168,7 +1231,7 @@ export default function AlarmsConsolePage() {
                             <input
                               value={priceStr}
                               onChange={(e) => setClosePriceByTrade((prev) => ({ ...prev, [tradeId]: e.target.value }))}
-                              placeholder="Close price"
+                              placeholder={L("Close price", "Precio de cierre")}
                               className="w-32 rounded-lg border border-slate-700 bg-slate-950/40 px-3 py-2 text-xs text-slate-200 placeholder:text-slate-500 focus:border-emerald-400"
                             />
                             <button
@@ -1176,10 +1239,10 @@ export default function AlarmsConsolePage() {
                               onClick={() => selectedEvent && priceNum !== null && onClosePositionsAtPrice([p], priceNum, selectedEvent)}
                               disabled={!tradeId || busy || !selectedEvent || priceNum === null}
                             >
-                              Close @ price
+                              {L("Close @ price", "Cerrar @ precio")}
                             </button>
                             {priceNum === null ? (
-                              <span className="text-[11px] text-slate-500">Enter a valid price.</span>
+                              <span className="text-[11px] text-slate-500">{L("Enter a valid price.", "Ingresa un precio válido.")}</span>
                             ) : null}
                           </div>
                         </div>
@@ -1197,31 +1260,31 @@ export default function AlarmsConsolePage() {
         <section className="mt-6 rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
           <div className="flex items-center justify-between gap-4">
             <div>
-              <div className="text-xs uppercase tracking-[0.28em] text-slate-500">Alarm history</div>
-              <p className="mt-2 text-sm text-slate-400">A record of alarms and your actions.</p>
+              <div className="text-xs uppercase tracking-[0.28em] text-slate-500">{L("Alarm history", "Historial de alarmas")}</div>
+              <p className="mt-2 text-sm text-slate-400">{L("A record of alarms and your actions.", "Registro de alarmas y tus acciones.")}</p>
             </div>
             <button
               className="rounded-lg border border-slate-700 bg-slate-900/40 px-3 py-2 text-xs font-semibold text-slate-100 hover:border-emerald-400/60 hover:bg-emerald-500/10"
               onClick={refreshAll}
               disabled={busy}
             >
-              Refresh history
+              {L("Refresh history", "Actualizar historial")}
             </button>
           </div>
 
           {historyEvents.length === 0 ? (
             <div className="mt-4 rounded-xl border border-dashed border-slate-700 bg-slate-950/30 p-4 text-sm text-slate-400">
-              No alarm history yet.
+              {L("No alarm history yet.", "Aún no hay historial de alarmas.")}
             </div>
           ) : (
             <div className="mt-5 overflow-hidden rounded-xl border border-slate-800">
               <table className="min-w-full text-left text-sm">
                 <thead className="bg-slate-950/50 text-xs uppercase tracking-[0.2em] text-slate-500">
                   <tr>
-                    <th className="px-4 py-3">Time</th>
-                    <th className="px-4 py-3">Severity</th>
-                    <th className="px-4 py-3">Title</th>
-                    <th className="px-4 py-3">Status</th>
+                    <th className="px-4 py-3">{L("Time", "Hora")}</th>
+                    <th className="px-4 py-3">{L("Severity", "Severidad")}</th>
+                    <th className="px-4 py-3">{L("Title", "Título")}</th>
+                    <th className="px-4 py-3">{L("Status", "Estado")}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800">
@@ -1231,8 +1294,8 @@ export default function AlarmsConsolePage() {
                       <td className="px-4 py-3">
                         <SeverityPill severity={e.severity} />
                       </td>
-                      <td className="px-4 py-3 text-slate-100">{e.title || "Alarm"}</td>
-                      <td className="px-4 py-3 text-slate-300">{e.dismissed ? "Dismissed" : e.status}</td>
+                      <td className="px-4 py-3 text-slate-100">{e.title || L("Alarm", "Alarma")}</td>
+                      <td className="px-4 py-3 text-slate-300">{e.dismissed ? L("Dismissed", "Descartada") : e.status}</td>
                     </tr>
                   ))}
                 </tbody>

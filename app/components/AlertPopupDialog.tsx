@@ -1,6 +1,8 @@
 "use client";
 
 import React, { useMemo } from "react";
+import { useAppSettings } from "@/lib/appSettings";
+import { resolveLocale } from "@/lib/i18n";
 
 export type AlertPopupData = {
   id: string;
@@ -41,16 +43,38 @@ function severityPill(sev: AlertPopupData["severity"]) {
 }
 
 export default function AlertPopupDialog({ open, busy, data, onClose, onSnooze, onDismiss, onResolve }: Props) {
+  const { locale } = useAppSettings();
+  const lang = resolveLocale(locale);
+  const isEs = lang === "es";
+  const L = (en: string, es: string) => (isEs ? es : en);
+
   const triggered = useMemo(() => {
     if (!data?.triggered_at) return null;
     const dt = new Date(data.triggered_at);
     if (Number.isNaN(dt.getTime())) return null;
-    return dt.toLocaleString();
+    return dt.toLocaleString(isEs ? "es-ES" : "en-US");
   }, [data?.triggered_at]);
 
   if (!open || !data) return null;
 
   const isPositions = (data.category || "").toLowerCase() === "positions";
+  const kindLabel =
+    data.kind === "alarm"
+      ? L("alarm", "alarma")
+      : data.kind === "reminder"
+      ? L("reminder", "recordatorio")
+      : data.kind === "notification"
+      ? L("notification", "notificación")
+      : data.kind || "";
+
+  const severityLabel = (() => {
+    const sev = data.severity;
+    if (!isEs) return sev.toUpperCase();
+    if (sev === "critical") return "CRÍTICA";
+    if (sev === "warning") return "ADVERTENCIA";
+    if (sev === "success") return "ÉXITO";
+    return "INFO";
+  })();
 
   return (
     <div className="fixed inset-0 z-[110] flex items-end sm:items-center justify-center p-4">
@@ -61,10 +85,10 @@ export default function AlertPopupDialog({ open, busy, data, onClose, onSnooze, 
             <div className="min-w-0">
               <div className="flex items-center gap-2">
                 <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs ${severityPill(data.severity)}`}>
-                  {data.severity.toUpperCase()}
+                  {severityLabel}
                 </span>
-                {data.kind ? (
-                  <span className="text-xs text-slate-400">{data.kind}</span>
+                {kindLabel ? (
+                  <span className="text-xs text-slate-400">{kindLabel}</span>
                 ) : null}
                 {triggered ? <span className="text-xs text-slate-500">· {triggered}</span> : null}
               </div>
@@ -73,7 +97,7 @@ export default function AlertPopupDialog({ open, busy, data, onClose, onSnooze, 
             <button
               onClick={onClose}
               className="rounded-lg px-2 py-1 text-slate-400 hover:text-slate-200 hover:bg-slate-900"
-              aria-label="Close"
+              aria-label={L("Close", "Cerrar")}
             >
               ✕
             </button>
@@ -84,21 +108,23 @@ export default function AlertPopupDialog({ open, busy, data, onClose, onSnooze, 
           {/* Positions-specific resolver actions */}
           {isPositions && onResolve ? (
             <div className="mt-4 rounded-xl border border-slate-800 bg-slate-900/40 p-3">
-              <div className="text-xs text-slate-400">Open-position intent</div>
+              <div className="text-xs text-slate-400">
+                {L("Open-position intent", "Intención de posición abierta")}
+              </div>
               <div className="mt-2 flex flex-wrap gap-2">
                 <button
                   onClick={() => onResolve("keep_open")}
                   className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 hover:bg-slate-900"
                   disabled={busy}
                 >
-                  Mark as Swing (keep open)
+                  {L("Mark as Swing (keep open)", "Marcar como Swing (mantener abierta)")}
                 </button>
                 <button
                   onClick={() => onResolve("close_at_zero")}
                   className="rounded-lg border border-emerald-700/50 bg-emerald-950/30 px-3 py-2 text-sm text-emerald-100 hover:bg-emerald-950/50"
                   disabled={busy}
                 >
-                  Close @ $0 / Let expire
+                  {L("Close @ $0 / Let expire", "Cerrar en $0 / Dejar expirar")}
                 </button>
               </div>
             </div>
@@ -113,14 +139,14 @@ export default function AlertPopupDialog({ open, busy, data, onClose, onSnooze, 
                     className="rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-slate-100 hover:bg-slate-900"
                     disabled={busy}
                   >
-                    Snooze 10m
+                    {L("Snooze 10m", "Posponer 10m")}
                   </button>
                   <button
                     onClick={() => onSnooze(60)}
                     className="rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-slate-100 hover:bg-slate-900"
                     disabled={busy}
                   >
-                    Snooze 1h
+                    {L("Snooze 1h", "Posponer 1h")}
                   </button>
                 </>
               ) : null}
@@ -133,14 +159,14 @@ export default function AlertPopupDialog({ open, busy, data, onClose, onSnooze, 
                   className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 hover:bg-slate-900"
                   disabled={busy}
                 >
-                  Dismiss
+                  {L("Dismiss", "Descartar")}
                 </button>
               ) : null}
               <button
                 onClick={onClose}
                 className="rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-slate-300 hover:bg-slate-900"
               >
-                Close
+                {L("Close", "Cerrar")}
               </button>
             </div>
           </div>

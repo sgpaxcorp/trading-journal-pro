@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useMemo } from "react";
+import { useAppSettings } from "@/lib/appSettings";
+import { resolveLocale } from "@/lib/i18n";
 
 type Props = {
   href: string;
@@ -14,10 +16,15 @@ type Props = {
 export default function GoToDashboard({
   href,
   hideOn = ["/dashboard"],
-  label = "Go to Dashboard",
+  label,
   className = "",
 }: Props) {
   const pathname = usePathname() || "/";
+  const { locale } = useAppSettings();
+  const lang = resolveLocale(locale);
+  const isEs = lang === "es";
+  const L = (en: string, es: string) => (isEs ? es : en);
+  const resolvedLabel = label || L("Go to Dashboard", "Ir al dashboard");
 
   // Ocultar si el pathname hace match exacto o por prefijo con cualquiera en hideOn
   const shouldHide = useMemo(() => {
@@ -36,7 +43,7 @@ export default function GoToDashboard({
   return (
     <Link
       href={href}
-      aria-label={label}
+      aria-label={resolvedLabel}
       className={[
         "fixed right-6 bottom-6 z-9999",
         "inline-flex items-center gap-2",
@@ -49,7 +56,7 @@ export default function GoToDashboard({
     >
       {/* Icono simple (→) */}
       <span className="inline-block">🏠</span>
-      <span>{label}</span>
+      <span>{resolvedLabel}</span>
     </Link>
   );
 }

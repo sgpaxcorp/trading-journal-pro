@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useAppSettings } from "@/lib/appSettings";
+import { resolveLocale } from "@/lib/i18n";
 import RGL, { WidthProvider, type Layout } from "react-grid-layout";
 import "react-grid-layout/css/styles.css";
 import "react-resizable/css/styles.css";
@@ -136,6 +138,10 @@ export default function DashboardGrid({
   /** Storage key opcional (por usuario). Si no se pasa, usa DEFAULT_STORAGE_KEY. */
   storageKey?: string;
 }) {
+  const { locale } = useAppSettings();
+  const lang = resolveLocale(locale);
+  const isEs = lang === "es";
+  const L = (en: string, es: string) => (isEs ? es : en);
   const effectiveStorageKey = storageKey || DEFAULT_STORAGE_KEY;
 
   // Layout completo (incluye widgets aunque estén ocultos)
@@ -243,7 +249,7 @@ export default function DashboardGrid({
             className="bg-slate-900/95 border border-slate-800 rounded-2xl p-4 overflow-hidden"
           >
             <div className="drag-handle cursor-move text-[12px] text-slate-400 mb-2">
-              Drag · {id}
+              {L("Drag", "Arrastrar")} · {id}
             </div>
             <div className="text-[14px] h-full min-h-0 overflow-auto pr-1">
               {renderItem(id)}

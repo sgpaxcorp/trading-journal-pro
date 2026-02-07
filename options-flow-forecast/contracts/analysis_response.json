@@ -1,0 +1,19 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AnalyzeResponse",
+  "type": "object",
+  "properties": {
+    "status": {"type": "string", "enum": ["ok", "needs_more_data"]},
+    "missing": {"type": "array", "items": {"type": "string"}},
+    "parsed_flow_table": {"type": "object"},
+    "engineered_features": {"type": "object"},
+    "forecast": {"type": "object"},
+    "key_levels": {"type": "array", "items": {"type": "object"}},
+    "rationale": {"type": "string"},
+    "confidence": {"type": "number"},
+    "disclaimer": {"type": "string"},
+    "observed": {"type": "object"},
+    "inferences": {"type": "object"}
+  },
+  "required": ["status", "disclaimer"]
+}

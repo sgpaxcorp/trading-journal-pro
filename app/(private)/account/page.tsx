@@ -10,6 +10,8 @@ import { useRouter, usePathname } from "next/navigation";
 import TopNav from "@/app/components/TopNav";
 import { useAuth } from "@/context/AuthContext";
 import { supabaseBrowser } from "@/lib/supaBaseClient";
+import { useAppSettings } from "@/lib/appSettings";
+import { resolveLocale } from "@/lib/i18n";
 import {
   getProfileGamification,
   type ProfileGamification,
@@ -28,6 +30,11 @@ export default function AccountPage() {
   const { user, loading } = useAuth() as any;
   const router = useRouter();
   const pathname = usePathname();
+  const { locale } = useAppSettings();
+  const lang = resolveLocale(locale);
+  const isEs = lang === "es";
+  const L = (en: string, es: string) => (isEs ? es : en);
+  const localeTag = isEs ? "es-ES" : "en-US";
 
   const [profile, setProfile] = useState<ProfileState>({
     firstName: "",
@@ -125,7 +132,10 @@ export default function AccountPage() {
           });
           setLoadingProfile(false);
           setError(
-            "We couldn't load your profile from the database, but you can edit it below."
+            L(
+              "We couldn't load your profile from the database, but you can edit it below.",
+              "No pudimos cargar tu perfil desde la base de datos, pero puedes editarlo abajo."
+            )
           );
         }
       }
@@ -167,7 +177,7 @@ export default function AccountPage() {
   if (loading || !user) {
     return (
       <main className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center">
-        <p className="text-slate-400 text-sm">Loading account…</p>
+        <p className="text-slate-400 text-sm">{L("Loading account…", "Cargando cuenta…")}</p>
       </main>
     );
   }
@@ -180,8 +190,10 @@ export default function AccountPage() {
 
   const planLabel =
     typeof planRaw === "string"
-      ? planRaw.charAt(0).toUpperCase() + planRaw.slice(1)
-      : "Standard";
+      ? planRaw.toLowerCase() === "standard"
+        ? L("Standard", "Estándar")
+        : planRaw.charAt(0).toUpperCase() + planRaw.slice(1)
+      : L("Standard", "Estándar");
 
   const initials =
     (profile.firstName || profile.email || user.email || "T")
@@ -216,10 +228,13 @@ export default function AccountPage() {
         console.error("[Account] Error saving profile:", upsertError);
         setError(
           upsertError.message ||
-            "We couldn't save your profile. Please try again."
+            L(
+              "We couldn't save your profile. Please try again.",
+              "No pudimos guardar tu perfil. Intenta de nuevo."
+            )
         );
       } else {
-        setMessage("Profile updated successfully.");
+        setMessage(L("Profile updated successfully.", "Perfil actualizado con éxito."));
 
         // refresca gamification por si cambias algo y quieres re-render limpio
         try {
@@ -234,7 +249,7 @@ export default function AccountPage() {
       }
     } catch (err: any) {
       console.error("[Account] Unexpected error saving profile:", err);
-      setError("Something went wrong while saving your profile.");
+      setError(L("Something went wrong while saving your profile.", "Algo salió mal al guardar tu perfil."));
     } finally {
       setSaving(false);
     }
@@ -246,7 +261,7 @@ export default function AccountPage() {
     if (!file || !user?.id) return;
 
     if (file.size > 5 * 1024 * 1024) {
-      setError("Image must be ≤ 5MB.");
+      setError(L("Image must be ≤ 5MB.", "La imagen debe ser ≤ 5MB."));
       e.target.value = "";
       return;
     }
@@ -269,7 +284,7 @@ export default function AccountPage() {
 
       if (uploadError) {
         console.error("[Account] Avatar upload error:", uploadError);
-        setError("We couldn't upload your photo. Please try again.");
+        setError(L("We couldn't upload your photo. Please try again.", "No pudimos subir tu foto. Intenta de nuevo."));
         setUploadingAvatar(false);
         return;
       }
@@ -281,7 +296,7 @@ export default function AccountPage() {
       const publicUrl = publicUrlData?.publicUrl;
 
       if (!publicUrl) {
-        setError("Photo uploaded, but we couldn't get the public URL.");
+        setError(L("Photo uploaded, but we couldn't get the public URL.", "Se subió la foto, pero no pudimos obtener el enlace público."));
         setUploadingAvatar(false);
         return;
       }
@@ -290,10 +305,10 @@ export default function AccountPage() {
         ...prev,
         avatarUrl: publicUrl,
       }));
-      setMessage("Profile photo updated.");
+      setMessage(L("Profile photo updated.", "Foto de perfil actualizada."));
     } catch (err) {
       console.error("[Account] Unexpected avatar upload error:", err);
-      setError("Something went wrong while uploading your photo.");
+      setError(L("Something went wrong while uploading your photo.", "Algo salió mal al subir tu foto."));
     } finally {
       setUploadingAvatar(false);
       e.target.value = "";
@@ -312,17 +327,19 @@ export default function AccountPage() {
         <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <p className="text-[11px] uppercase tracking-[0.25em] text-emerald-400">
-              Account
+              {L("Account", "Cuenta")}
             </p>
-            <h1 className="text-3xl font-semibold mt-1">Account settings</h1>
+            <h1 className="text-3xl font-semibold mt-1">{L("Account settings", "Configuración de cuenta")}</h1>
             <p className="text-sm text-slate-400 mt-2 max-w-xl">
-              Update your identity, contact information and see your gamification
-              progress inside NeuroTrader Journal.
+              {L(
+                "Update your identity, contact information and see your gamification progress inside NeuroTrader Journal.",
+                "Actualiza tu identidad, información de contacto y revisa tu progreso de gamificación dentro de NeuroTrader Journal."
+              )}
             </p>
           </div>
 
           <div className="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-4 py-2 text-xs text-emerald-200">
-            <span className="font-semibold text-emerald-100">Current plan:</span>{" "}
+            <span className="font-semibold text-emerald-100">{L("Current plan:", "Plan actual:")}</span>{" "}
             {planLabel}
           </div>
         </header>
@@ -337,7 +354,7 @@ export default function AccountPage() {
                 : "text-slate-300 border border-slate-700 hover:border-emerald-400 hover:text-emerald-200"
             } transition`}
           >
-            Account settings
+            {L("Account settings", "Configuración de cuenta")}
           </a>
 
           <a
@@ -348,7 +365,7 @@ export default function AccountPage() {
                 : "text-slate-300 border border-slate-700 hover:border-emerald-400 hover:text-emerald-200"
             } transition`}
           >
-            Preferences
+            {L("Preferences", "Preferencias")}
           </a>
 
           <a
@@ -359,7 +376,7 @@ export default function AccountPage() {
                 : "text-slate-300 border border-slate-700 hover:border-emerald-400 hover:text-emerald-200"
             } transition`}
           >
-            Change password
+            {L("Change password", "Cambiar contraseña")}
           </a>
           <a
             href="/billing"
@@ -369,7 +386,7 @@ export default function AccountPage() {
                 : "text-slate-300 border border-slate-700 hover:border-emerald-400 hover:text-emerald-200"
             } transition`}
           >
-            Billing & subscription
+            {L("Billing & subscription", "Facturación y suscripción")}
           </a>
           <a
             href="/billing/history"
@@ -379,7 +396,7 @@ export default function AccountPage() {
                 : "text-slate-300 border border-slate-700 hover:border-emerald-400 hover:text-emerald-200"
             } transition`}
           >
-            Billing history
+            {L("Billing history", "Historial de facturación")}
           </a>
         </nav>
 
@@ -388,7 +405,7 @@ export default function AccountPage() {
           {/* Profile & identity */}
           <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5 space-y-5">
             <h2 className="text-sm font-semibold text-slate-100">
-              Profile &amp; identity
+              {L("Profile & identity", "Perfil e identidad")}
             </h2>
 
             {/* Avatar + upload */}
@@ -398,7 +415,7 @@ export default function AccountPage() {
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
                     src={profile.avatarUrl}
-                    alt={profile.firstName || profile.email || "Avatar"}
+                    alt={profile.firstName || profile.email || L("Avatar", "Avatar")}
                     className="h-full w-full object-cover"
                   />
                 ) : (
@@ -407,8 +424,10 @@ export default function AccountPage() {
               </div>
               <div className="text-xs text-slate-400">
                 <p>
-                  This avatar is used in the top navigation, AI feedback and
-                  rankings.
+                  {L(
+                    "This avatar is used in the top navigation, AI feedback and rankings.",
+                    "Este avatar se usa en la navegación superior, feedback de IA y rankings."
+                  )}
                 </p>
                 <div className="mt-2 flex items-center gap-2">
                   <label className="inline-flex items-center rounded-full bg-slate-800/70 px-3 py-1.5 text-[11px] font-medium text-slate-100 border border-slate-600 hover:border-emerald-400 hover:text-emerald-200 cursor-pointer transition">
@@ -418,10 +437,10 @@ export default function AccountPage() {
                       className="hidden"
                       onChange={handleAvatarUpload}
                     />
-                    {uploadingAvatar ? "Uploading…" : "Upload photo"}
+                    {uploadingAvatar ? L("Uploading…", "Subiendo…") : L("Upload photo", "Subir foto")}
                   </label>
                   <span className="text-[10px] text-slate-500">
-                    JPG, PNG, ≤ 5MB
+                    {L("JPG, PNG, ≤ 5MB", "JPG, PNG, ≤ 5MB")}
                   </span>
                 </div>
               </div>
@@ -432,7 +451,7 @@ export default function AccountPage() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-[11px] text-slate-400 mb-1">
-                    First name
+                    {L("First name", "Nombre")}
                   </label>
                   <input
                     value={profile.firstName}
@@ -440,12 +459,12 @@ export default function AccountPage() {
                       setProfile((p) => ({ ...p, firstName: e.target.value }))
                     }
                     className="w-full rounded-md bg-slate-950 border border-slate-700 px-3 py-2 text-xs text-slate-100 outline-none focus:border-emerald-400"
-                    placeholder="First name"
+                    placeholder={L("First name", "Nombre")}
                   />
                 </div>
                 <div>
                   <label className="block text-[11px] text-slate-400 mb-1">
-                    Last name
+                    {L("Last name", "Apellido")}
                   </label>
                   <input
                     value={profile.lastName}
@@ -453,7 +472,7 @@ export default function AccountPage() {
                       setProfile((p) => ({ ...p, lastName: e.target.value }))
                     }
                     className="w-full rounded-md bg-slate-950 border border-slate-700 px-3 py-2 text-xs text-slate-100 outline-none focus:border-emerald-400"
-                    placeholder="Last name"
+                    placeholder={L("Last name", "Apellido")}
                   />
                 </div>
               </div>
@@ -461,16 +480,16 @@ export default function AccountPage() {
               {/* Email (read only) */}
               <div>
                 <label className="block text-[11px] text-slate-400 mb-1">
-                  Email
+                  {L("Email", "Correo")}
                 </label>
                 <input
                   value={profile.email}
                   readOnly
                   className="w-full rounded-md bg-slate-950 border border-slate-700 px-3 py-2 text-xs text-slate-300 outline-none cursor-not-allowed"
-                  placeholder="Email"
+                  placeholder={L("Email", "Correo")}
                 />
                 <p className="mt-1 text-[10px] text-slate-500">
-                  This email is used for your account and rankings.
+                  {L("This email is used for your account and rankings.", "Este correo se usa para tu cuenta y rankings.")}
                 </p>
               </div>
 
@@ -478,7 +497,7 @@ export default function AccountPage() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-[11px] text-slate-400 mb-1">
-                    Phone
+                    {L("Phone", "Teléfono")}
                   </label>
                   <input
                     value={profile.phone}
@@ -486,12 +505,12 @@ export default function AccountPage() {
                       setProfile((p) => ({ ...p, phone: e.target.value }))
                     }
                     className="w-full rounded-md bg-slate-950 border border-slate-700 px-3 py-2 text-xs text-slate-100 outline-none focus:border-emerald-400"
-                    placeholder="+1 555 000 0000"
+                    placeholder={L("+1 555 000 0000", "+1 555 000 0000")}
                   />
                 </div>
                 <div>
                   <label className="block text-[11px] text-slate-400 mb-1">
-                    Address
+                    {L("Address", "Dirección")}
                   </label>
                   <input
                     value={profile.address}
@@ -499,7 +518,7 @@ export default function AccountPage() {
                       setProfile((p) => ({ ...p, address: e.target.value }))
                     }
                     className="w-full rounded-md bg-slate-950 border border-slate-700 px-3 py-2 text-xs text-slate-100 outline-none focus:border-emerald-400"
-                    placeholder="City, Country"
+                    placeholder={L("City, Country", "Ciudad, País")}
                   />
                 </div>
               </div>
@@ -508,7 +527,7 @@ export default function AccountPage() {
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between pt-2 border-t border-slate-800 mt-2 gap-3">
                 <div className="text-[11px] text-slate-500 space-y-1">
                   <p>
-                    Current plan:{" "}
+                    {L("Current plan:", "Plan actual:")}{" "}
                     <span className="text-emerald-300 font-medium">
                       {planLabel}
                     </span>
@@ -519,7 +538,7 @@ export default function AccountPage() {
                   disabled={saving}
                   className="px-4 py-2 rounded-xl bg-emerald-400 text-slate-950 text-xs font-semibold hover:bg-emerald-300 transition disabled:opacity-60"
                 >
-                  {saving ? "Saving…" : "Save changes"}
+                  {saving ? L("Saving…", "Guardando…") : L("Save changes", "Guardar cambios")}
                 </button>
               </div>
 
@@ -531,7 +550,7 @@ export default function AccountPage() {
               )}
               {loadingProfile && (
                 <p className="text-[11px] text-slate-500 mt-1">
-                  Loading profile…
+                  {L("Loading profile…", "Cargando perfil…")}
                 </p>
               )}
             </form>
@@ -540,14 +559,15 @@ export default function AccountPage() {
           {/* Gamification & progress */}
           <section className="rounded-2xl border border-emerald-500/30 bg-slate-900/80 p-5 text-sm">
             <h2 className="text-sm font-semibold text-emerald-200">
-              Gamification &amp; progress
+              {L("Gamification & progress", "Gamificación y progreso")}
             </h2>
 
             {!gamification && (
               <p className="mt-3 text-xs text-slate-400">
-                Once you start challenges, your XP, level and tier will appear
-                here. Complete process-green days and finish challenges to earn
-                rewards.
+                {L(
+                  "Once you start challenges, your XP, level and tier will appear here. Complete process-green days and finish challenges to earn rewards.",
+                  "Cuando empieces los desafíos, tu XP, nivel y tier aparecerán aquí. Completa días en verde y desafíos para ganar recompensas."
+                )}
               </p>
             )}
 
@@ -555,31 +575,31 @@ export default function AccountPage() {
               <>
                 <div className="mt-3 grid grid-cols-2 gap-3 text-xs">
                   <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-3">
-                    <p className="text-[11px] text-slate-400">Level</p>
+                    <p className="text-[11px] text-slate-400">{L("Level", "Nivel")}</p>
                     <p className="mt-1 text-lg font-semibold text-emerald-300">
                       {gamification.level}
                     </p>
                     <p className="text-[11px] text-slate-500">
-                      Based on total XP earned.
+                      {L("Based on total XP earned.", "Basado en el XP total ganado.")}
                     </p>
                   </div>
 
                   <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-3">
-                    <p className="text-[11px] text-slate-400">Tier</p>
+                    <p className="text-[11px] text-slate-400">{L("Tier", "Tier")}</p>
                     <p className="mt-1 text-lg font-semibold text-emerald-300">
                       {gamification.tier}
                     </p>
                     <p className="text-[11px] text-slate-500">
-                      Higher tiers unlock more rewards.
+                      {L("Higher tiers unlock more rewards.", "Tiers más altos desbloquean más recompensas.")}
                     </p>
                   </div>
 
                   <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-3 col-span-2">
                     <p className="text-[11px] text-slate-400">
-                      Total XP across challenges
+                      {L("Total XP across challenges", "XP total en desafíos")}
                     </p>
                     <p className="mt-1 text-lg font-semibold text-emerald-200">
-                      {gamification.xp.toLocaleString()} XP
+                      {gamification.xp.toLocaleString(localeTag)} XP
                     </p>
 
                     <div className="mt-2 h-1.5 w-full rounded-full bg-slate-900 overflow-hidden">
@@ -599,7 +619,10 @@ export default function AccountPage() {
                       })()}
                     </div>
                     <p className="mt-1 text-[11px] text-slate-500">
-                      XP comes from process-green days and completed challenges.
+                      {L(
+                        "XP comes from process-green days and completed challenges.",
+                        "El XP proviene de días en verde y desafíos completados."
+                      )}
                     </p>
                   </div>
                 </div>
@@ -607,7 +630,7 @@ export default function AccountPage() {
                 {gamification.badges.length > 0 && (
                   <div className="mt-3">
                     <p className="text-[11px] text-slate-400 mb-1">
-                      Badges unlocked
+                      {L("Badges unlocked", "Insignias desbloqueadas")}
                     </p>
                     <div className="flex flex-wrap gap-1.5">
                       {gamification.badges.map((b: string) => (
@@ -623,8 +646,10 @@ export default function AccountPage() {
                 )}
 
                 <p className="mt-3 text-[11px] text-slate-500">
-                  Your AI coach and global rankings will use this profile (level,
-                  tier, XP and badges) to adjust feedback and rewards.
+                  {L(
+                    "Your AI coach and global rankings will use this profile (level, tier, XP and badges) to adjust feedback and rewards.",
+                    "Tu coach de IA y los rankings globales usarán este perfil (nivel, tier, XP e insignias) para ajustar feedback y recompensas."
+                  )}
                 </p>
               </>
             )}

@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo } from "react";
 import { tierIconPath } from "@/lib/trophiesSupabase";
+import { useAppSettings } from "@/lib/appSettings";
+import { resolveLocale } from "@/lib/i18n";
 
 export type TrophyCelebrationData = {
   title: string;
@@ -17,13 +19,13 @@ type Props = {
   onClose: () => void;
 };
 
-function tierLabel(tier?: string) {
+function tierLabel(tier?: string, isEs = false) {
   const t = (tier || "").toLowerCase();
-  if (t === "elite") return "Elite";
-  if (t === "gold") return "Gold";
-  if (t === "silver") return "Silver";
-  if (t === "bronze") return "Bronze";
-  return tier || "Trophy";
+  if (t === "elite") return isEs ? "Élite" : "Elite";
+  if (t === "gold") return isEs ? "Oro" : "Gold";
+  if (t === "silver") return isEs ? "Plata" : "Silver";
+  if (t === "bronze") return isEs ? "Bronce" : "Bronze";
+  return tier || (isEs ? "Trofeo" : "Trophy");
 }
 
 function tierPillClass(tier?: string) {
@@ -46,6 +48,10 @@ function confettiPaletteForTier(tier?: string) {
 }
 
 export default function TrophyCelebrationDialog({ open, trophy, onClose }: Props) {
+  const { locale } = useAppSettings();
+  const lang = resolveLocale(locale);
+  const isEs = lang === "es";
+  const L = (en: string, es: string) => (isEs ? es : en);
   const iconSrc = trophy?.tier ? tierIconPath(trophy.tier) : (trophy?.icon ?? null);
   const confetti = useMemo(() => {
     const colors = confettiPaletteForTier(trophy?.tier);
@@ -80,7 +86,7 @@ export default function TrophyCelebrationDialog({ open, trophy, onClose }: Props
       {/* Backdrop */}
       <button
         type="button"
-        aria-label="Close"
+        aria-label={L("Close", "Cerrar")}
         onClick={onClose}
         className="absolute inset-0 bg-slate-950/60 backdrop-blur-[6px]"
       />
@@ -129,7 +135,7 @@ export default function TrophyCelebrationDialog({ open, trophy, onClose }: Props
               </div>
               <div>
                 <p className="text-[11px] uppercase tracking-[0.25em] text-emerald-300/90">
-                  Trophy unlocked
+                  {L("Trophy unlocked", "Trofeo desbloqueado")}
                 </p>
                 <h3 className="text-xl sm:text-2xl font-semibold text-slate-50 mt-1">
                   {trophy.title}
@@ -140,12 +146,13 @@ export default function TrophyCelebrationDialog({ open, trophy, onClose }: Props
             <div className="flex flex-col items-end gap-2">
               <span className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[11px] font-semibold ${tierPillClass(trophy.tier)}`}>
                 <span className="h-1.5 w-1.5 rounded-full bg-current opacity-90" />
-                {tierLabel(trophy.tier)}
+                {tierLabel(trophy.tier, isEs)}
               </span>
 
               {typeof trophy.xp === "number" && (
                 <span className="text-[11px] text-slate-200/90">
-                  <span className="font-semibold text-emerald-200">+{trophy.xp}</span> XP
+                  <span className="font-semibold text-emerald-200">+{trophy.xp}</span>{" "}
+                  {L("XP", "XP")}
                 </span>
               )}
             </div>
@@ -163,7 +170,7 @@ export default function TrophyCelebrationDialog({ open, trophy, onClose }: Props
               onClick={onClose}
               className="rounded-xl px-4 py-2 text-sm font-semibold bg-emerald-400 text-slate-950 hover:bg-emerald-300 transition"
             >
-              Continue
+              {L("Continue", "Continuar")}
             </button>
           </div>
         </div>

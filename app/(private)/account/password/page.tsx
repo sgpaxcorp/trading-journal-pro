@@ -6,10 +6,16 @@ import { useRouter } from "next/navigation";
 import TopNav from "@/app/components/TopNav";
 import { useAuth } from "@/context/AuthContext";
 import { supabaseBrowser } from "@/lib/supaBaseClient";
+import { useAppSettings } from "@/lib/appSettings";
+import { resolveLocale } from "@/lib/i18n";
 
 export default function ChangePasswordPage() {
   const { user, loading } = useAuth() as any;
   const router = useRouter();
+  const { locale } = useAppSettings();
+  const lang = resolveLocale(locale);
+  const isEs = lang === "es";
+  const L = (en: string, es: string) => (isEs ? es : en);
 
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -33,17 +39,17 @@ export default function ChangePasswordPage() {
     if (!user) return;
 
     if (!currentPassword) {
-      setError("Please enter your current password.");
+      setError(L("Please enter your current password.", "Ingresa tu contraseña actual."));
       return;
     }
 
     if (newPassword.length < 8) {
-      setError("New password must be at least 8 characters.");
+      setError(L("New password must be at least 8 characters.", "La nueva contraseña debe tener al menos 8 caracteres."));
       return;
     }
 
     if (newPassword !== confirm) {
-      setError("New password and confirmation do not match.");
+      setError(L("New password and confirmation do not match.", "La nueva contraseña y la confirmación no coinciden."));
       return;
     }
 
@@ -51,7 +57,12 @@ export default function ChangePasswordPage() {
     try {
       const email = user.email as string | undefined;
       if (!email) {
-        setError("We couldn't find your email. Please sign out and sign in again.");
+        setError(
+          L(
+            "We couldn't find your email. Please sign out and sign in again.",
+            "No encontramos tu correo. Cierra sesión e inicia de nuevo."
+          )
+        );
         return;
       }
 
@@ -65,7 +76,7 @@ export default function ChangePasswordPage() {
 
       if (signInError) {
         console.error("[ChangePassword] Wrong current password:", signInError);
-        setError("Current password is incorrect.");
+        setError(L("Current password is incorrect.", "La contraseña actual es incorrecta."));
         return;
       }
 
@@ -76,17 +87,17 @@ export default function ChangePasswordPage() {
 
       if (updateError) {
         console.error("[ChangePassword] Error updating password:", updateError);
-        setError(updateError.message || "We couldn't update your password.");
+        setError(updateError.message || L("We couldn't update your password.", "No pudimos actualizar tu contraseña."));
         return;
       }
 
-      setMessage("Your password has been updated successfully.");
+      setMessage(L("Your password has been updated successfully.", "Tu contraseña se actualizó correctamente."));
       setCurrentPassword("");
       setNewPassword("");
       setConfirm("");
     } catch (err: any) {
       console.error("[ChangePassword] Unexpected error:", err);
-      setError(err.message || "Something went wrong while updating your password.");
+      setError(err.message || L("Something went wrong while updating your password.", "Algo salió mal al actualizar tu contraseña."));
     } finally {
       setSaving(false);
     }
@@ -95,7 +106,7 @@ export default function ChangePasswordPage() {
   if (loading || !user) {
     return (
       <main className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center">
-        <p className="text-slate-400 text-sm">Loading…</p>
+        <p className="text-slate-400 text-sm">{L("Loading…", "Cargando…")}</p>
       </main>
     );
   }
@@ -107,11 +118,14 @@ export default function ChangePasswordPage() {
       <div className="max-w-xl mx-auto px-6 md:px-8 py-8 space-y-6">
         <header>
           <p className="text-[11px] uppercase tracking-[0.25em] text-emerald-400">
-            Security
+            {L("Security", "Seguridad")}
           </p>
-          <h1 className="text-3xl font-semibold mt-1">Change password</h1>
+          <h1 className="text-3xl font-semibold mt-1">{L("Change password", "Cambiar contraseña")}</h1>
           <p className="text-sm text-slate-400 mt-2">
-            Use a strong password that you don&apos;t reuse in other apps.
+            {L(
+              "Use a strong password that you don't reuse in other apps.",
+              "Usa una contraseña fuerte que no reutilices en otras apps."
+            )}
           </p>
         </header>
 
@@ -119,7 +133,7 @@ export default function ChangePasswordPage() {
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label className="block text-[11px] text-slate-400 mb-1">
-                Current password
+                {L("Current password", "Contraseña actual")}
               </label>
               <input
                 required
@@ -132,7 +146,7 @@ export default function ChangePasswordPage() {
 
             <div>
               <label className="block text-[11px] text-slate-400 mb-1">
-                New password
+                {L("New password", "Nueva contraseña")}
               </label>
               <input
                 required
@@ -145,7 +159,7 @@ export default function ChangePasswordPage() {
 
             <div>
               <label className="block text-[11px] text-slate-400 mb-1">
-                Confirm new password
+                {L("Confirm new password", "Confirmar nueva contraseña")}
               </label>
               <input
                 required
@@ -157,21 +171,22 @@ export default function ChangePasswordPage() {
             </div>
 
             <p className="text-[10px] text-slate-500">
-              We&apos;ll verify your current password and then update it securely
-              using Supabase Auth. If you forgot your password, use the
-              &quot;Forgot password?&quot; link on the sign in page instead.
+              {L(
+                "We'll verify your current password and then update it securely using Supabase Auth. If you forgot your password, use the \"Forgot password?\" link on the sign in page instead.",
+                "Verificaremos tu contraseña actual y luego la actualizaremos de forma segura con Supabase Auth. Si olvidaste tu contraseña, usa el enlace \"¿Olvidaste tu contraseña?\" en la página de inicio de sesión."
+              )}
             </p>
 
             <div className="flex items-center justify-between pt-2 border-t border-slate-800 mt-2">
               <span className="text-[11px] text-slate-500">
-                You&apos;ll use this password the next time you log in.
+                {L("You'll use this password the next time you log in.", "Usarás esta contraseña la próxima vez que inicies sesión.")}
               </span>
               <button
                 type="submit"
                 disabled={saving}
                 className="px-4 py-2 rounded-xl bg-emerald-400 text-slate-950 text-xs font-semibold hover:bg-emerald-300 transition disabled:opacity-60"
               >
-                {saving ? "Updating…" : "Update password"}
+                {saving ? L("Updating…", "Actualizando…") : L("Update password", "Actualizar contraseña")}
               </button>
             </div>
 

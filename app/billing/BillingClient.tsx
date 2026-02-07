@@ -6,6 +6,8 @@ import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { useAuth } from "@/context/AuthContext";
 import type { PlanId } from "@/lib/types";
+import { useAppSettings } from "@/lib/appSettings";
+import { resolveLocale } from "@/lib/i18n";
 
 type BillingClientProps = {
   initialPlan: PlanId; // "core" | "advanced"
@@ -14,6 +16,10 @@ type BillingClientProps = {
 export default function BillingClient({ initialPlan }: BillingClientProps) {
   const router = useRouter();
   const { user, loading: authLoading } = useAuth();
+  const { locale } = useAppSettings();
+  const lang = resolveLocale(locale);
+  const isEs = lang === "es";
+  const L = (en: string, es: string) => (isEs ? es : en);
 
   const [selectedPlan, setSelectedPlan] = useState<PlanId>(initialPlan);
   const [couponCode, setCouponCode] = useState("");
@@ -24,7 +30,7 @@ export default function BillingClient({ initialPlan }: BillingClientProps) {
     if (authLoading) return;
 
     if (!user) {
-      setError("You need to sign in before starting checkout.");
+      setError(L("You need to sign in before starting checkout.", "Debes iniciar sesión antes de iniciar el checkout."));
       // Si quisieras redirect: router.push(`/signin?redirect=/billing?plan=${selectedPlan}`);
       return;
     }
@@ -47,15 +53,15 @@ export default function BillingClient({ initialPlan }: BillingClientProps) {
       const data = await res.json();
 
       if (!res.ok) {
-        throw new Error(data.error || "Failed to start checkout");
+        throw new Error(data.error || L("Failed to start checkout", "No se pudo iniciar el checkout"));
       }
       if (!data.url) {
-        throw new Error("Missing checkout URL");
+        throw new Error(L("Missing checkout URL", "Falta la URL de checkout"));
       }
 
       window.location.href = data.url as string;
     } catch (err: any) {
-      setError(err.message ?? "Something went wrong starting checkout.");
+      setError(err.message ?? L("Something went wrong starting checkout.", "Algo salió mal iniciando el checkout."));
     } finally {
       setLoading(false);
     }
@@ -89,14 +95,16 @@ export default function BillingClient({ initialPlan }: BillingClientProps) {
           {/* Steps / wizard header */}
           <div className="mb-8">
             <p className="text-[11px] font-semibold tracking-[0.2em] text-emerald-400 uppercase">
-              Subscription
+              {L("Subscription", "Suscripción")}
             </p>
             <h1 className="mt-2 text-2xl md:text-3xl font-semibold text-slate-50">
-              Choose your plan
+              {L("Choose your plan", "Elige tu plan")}
             </h1>
             <p className="mt-2 text-xs md:text-sm text-slate-300">
-              Step 2 of 4 – Select the plan that matches how you trade. You can
-              upgrade later as your account grows.
+              {L(
+                "Step 2 of 4 – Select the plan that matches how you trade. You can upgrade later as your account grows.",
+                "Paso 2 de 4 – Selecciona el plan que se adapte a cómo operas. Puedes hacer upgrade más adelante a medida que crezca tu cuenta."
+              )}
             </p>
 
             <ol className="mt-4 flex flex-wrap gap-4 text-[10px] md:text-[11px] text-slate-400">
@@ -104,25 +112,25 @@ export default function BillingClient({ initialPlan }: BillingClientProps) {
                 <span className="h-5 w-5 rounded-full bg-emerald-500 text-slate-950 text-[10px] flex items-center justify-center">
                   1
                 </span>
-                Information
+                {L("Information", "Información")}
               </li>
               <li className="flex items-center gap-1">
                 <span className="h-5 w-5 rounded-full border border-emerald-400 text-emerald-300 text-[10px] flex items-center justify-center">
                   2
                 </span>
-                Plan selection
+                {L("Plan selection", "Selección de plan")}
               </li>
               <li className="flex items-center gap-1">
                 <span className="h-5 w-5 rounded-full border border-slate-600 text-slate-400 text-[10px] flex items-center justify-center">
                   3
                 </span>
-                Checkout
+                {L("Checkout", "Checkout")}
               </li>
               <li className="flex items-center gap-1">
                 <span className="h-5 w-5 rounded-full border border-slate-600 text-slate-400 text-[10px] flex items-center justify-center">
                   4
                 </span>
-                Confirmed
+                {L("Confirmed", "Confirmado")}
               </li>
             </ol>
           </div>
@@ -146,15 +154,15 @@ export default function BillingClient({ initialPlan }: BillingClientProps) {
                 }`}
             >
               <div className="absolute inset-x-0 -top-px h-px bg-linear-to-r from-transparent via-emerald-400/50 to-transparent" />
-              <p className="text-xs font-semibold text-slate-100 mb-1">Core</p>
+              <p className="text-xs font-semibold text-slate-100 mb-1">{L("Core", "Core")}</p>
               <p className="text-lg md:text-xl font-bold text-emerald-300 mb-1">
                 $14.99
               </p>
-              <p className="text-[11px] text-slate-400 mb-2">per month</p>
+              <p className="text-[11px] text-slate-400 mb-2">{L("per month", "por mes")}</p>
               <ul className="space-y-1 text-[11px] text-slate-300">
-                <li>• Full daily journal & calendar</li>
-                <li>• Back-study module</li>
-                <li>• Basic analytics</li>
+                <li>• {L("Full daily journal & calendar", "Diario diario completo y calendario")}</li>
+                <li>• {L("Back-study module", "Módulo de back-study")}</li>
+                <li>• {L("Basic analytics", "Analítica básica")}</li>
               </ul>
             </motion.button>
 
@@ -194,30 +202,32 @@ export default function BillingClient({ initialPlan }: BillingClientProps) {
               </motion.div>
 
               <div className="relative flex items-center justify-between mb-1">
-                <p className="text-xs font-semibold text-slate-50">Advanced</p>
+                <p className="text-xs font-semibold text-slate-50">{L("Advanced", "Advanced")}</p>
                 <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 border border-emerald-400/80 px-2.5 py-0.5 text-[9px] text-emerald-100 font-semibold">
                   <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                  Most popular
+                  {L("Most popular", "Más popular")}
                 </span>
               </div>
 
               <p className="relative text-lg md:text-xl font-bold text-emerald-100 mb-1">
                 $24.99
                 <span className="ml-2 text-[10px] font-normal text-emerald-100/80">
-                  / month
+                  {L("/ month", "/ mes")}
                 </span>
               </p>
 
               <p className="relative text-[11px] text-slate-100/90 mb-2">
-                Designed for traders who want deep analytics, mindset feedback
-                and AI coaching.
+                {L(
+                  "Designed for traders who want deep analytics, mindset feedback and AI coaching.",
+                  "Diseñado para traders que quieren analítica profunda, feedback de mindset y AI coaching."
+                )}
               </p>
 
               <ul className="relative space-y-1 text-[11px] text-slate-50">
-                <li>• Everything in Core</li>
-                <li>• Advanced analytics & breakdowns</li>
-                <li>• AI coaching & mindset tools</li>
-                <li>• Priority improvements & new features</li>
+                <li>• {L("Everything in Core", "Todo lo de Core")}</li>
+                <li>• {L("Advanced analytics & breakdowns", "Analítica avanzada y breakdowns")}</li>
+                <li>• {L("AI coaching & mindset tools", "AI coaching y herramientas de mindset")}</li>
+                <li>• {L("Priority improvements & new features", "Mejoras prioritarias y nuevas features")}</li>
               </ul>
             </motion.button>
           </div>
@@ -227,7 +237,7 @@ export default function BillingClient({ initialPlan }: BillingClientProps) {
             <div className="flex flex-col md:flex-row md:items-center gap-3">
               <div className="flex-1">
                 <label className="block text-[10px] text-slate-400 mb-1">
-                  Coupon code (optional)
+                  {L("Coupon code (optional)", "Código de cupón (opcional)")}
                 </label>
                 <input
                   value={couponCode}
@@ -246,10 +256,8 @@ export default function BillingClient({ initialPlan }: BillingClientProps) {
                 className="w-full md:w-auto px-6 py-2.5 rounded-xl bg-emerald-400 text-slate-950 text-xs md:text-sm font-semibold hover:bg-emerald-300 disabled:opacity-60 disabled:cursor-not-allowed transition"
               >
                 {loading || authLoading
-                  ? "Checking your account…"
-                  : `Continue with ${
-                      selectedPlan === "core" ? "Core" : "Advanced"
-                    }`}
+                  ? L("Checking your account…", "Verificando tu cuenta…")
+                  : `${L("Continue with", "Continuar con")} ${selectedPlan === "core" ? L("Core", "Core") : L("Advanced", "Advanced")}`}
               </button>
             </div>
 
@@ -260,9 +268,10 @@ export default function BillingClient({ initialPlan }: BillingClientProps) {
             )}
 
             <p className="text-[10px] text-slate-400">
-              Your subscription unlocks features like advanced analytics, AI
-              coaching and more. You can manage or cancel your plan any time in
-              Settings.
+              {L(
+                "Your subscription unlocks features like advanced analytics, AI coaching and more. You can manage or cancel your plan any time in Settings.",
+                "Tu suscripción desbloquea features como analítica avanzada, AI coaching y más. Puedes gestionar o cancelar tu plan en cualquier momento desde Settings."
+              )}
             </p>
           </div>
         </div>

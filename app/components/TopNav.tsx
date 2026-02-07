@@ -104,6 +104,9 @@ function Dropdown({ title, titleKey, items, theme, lang }: DropdownProps) {
                 ? t(item.descriptionKey, lang)
                 : item.description;
 
+              const badgeLabel =
+                item.badge === "AI" && lang === "es" ? "IA" : item.badge;
+
               return (
                 <li key={item.id}>
                   <Wrapper
@@ -118,9 +121,9 @@ function Dropdown({ title, titleKey, items, theme, lang }: DropdownProps) {
                         <p className={`text-[11px] ${descClass}`}>{itemDesc}</p>
                       )}
                     </div>
-                    {item.badge && (
+                    {badgeLabel && (
                       <span className="mt-0.5 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-500">
-                        {item.badge}
+                        {badgeLabel}
                       </span>
                     )}
                   </Wrapper>
@@ -139,6 +142,7 @@ function Dropdown({ title, titleKey, items, theme, lang }: DropdownProps) {
 function HelpMenu({ theme, lang }: { theme: Theme; lang: Locale }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
+  const L = (en: string, es: string) => (lang === "es" ? es : en);
 
   const isLight = theme === "light";
 
@@ -171,7 +175,7 @@ function HelpMenu({ theme, lang }: { theme: Theme; lang: Locale }) {
         type="button"
         onClick={() => setOpen((prev) => !prev)}
         className={`flex h-9 w-9 items-center justify-center rounded-full border text-sm transition ${btnClass}`}
-        aria-label="Help"
+        aria-label={L("Help", "Ayuda")}
       >
         ?
       </button>
@@ -223,10 +227,11 @@ function HelpMenu({ theme, lang }: { theme: Theme; lang: Locale }) {
 
 /* ========== ALERTS INBOX (message icon + badge) ========== */
 
-function AlertsInboxButton({ theme }: { theme: Theme }) {
+function AlertsInboxButton({ theme, lang }: { theme: Theme; lang: Locale }) {
   const { user } = useAuth() as any;
   const userId = (user as any)?.id || (user as any)?.uid || "";
   const [count, setCount] = useState(0);
+  const L = (en: string, es: string) => (lang === "es" ? es : en);
 
   const isLight = theme === "light";
 
@@ -277,8 +282,8 @@ function AlertsInboxButton({ theme }: { theme: Theme }) {
     <Link
       href="/messages"
       className={`relative flex h-9 w-9 items-center justify-center rounded-full border text-sm transition ${btnClass}`}
-      aria-label="Alerts inbox"
-      title="Alerts inbox"
+      aria-label={L("Alerts inbox", "Bandeja de alertas")}
+      title={L("Alerts inbox", "Bandeja de alertas")}
     >
       <MessageSquare className="h-4 w-4" />
       {count > 0 ? (
@@ -297,6 +302,7 @@ function AccountMenu({ theme, lang }: { theme: Theme; lang: Locale }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
+  const L = (en: string, es: string) => (lang === "es" ? es : en);
 
   // Plan que viene de Supabase (profiles.plan)
   const [profilePlan, setProfilePlan] = useState<string | null>(null);
@@ -309,7 +315,7 @@ function AccountMenu({ theme, lang }: { theme: Theme; lang: Locale }) {
     user?.name ||
     user?.displayName ||
     user?.email?.split("@")[0] ||
-    "Trader";
+    L("Trader", "Trader");
 
   const email = user?.email || "";
 
@@ -639,6 +645,7 @@ const forum: NavItem[] = [
 export default function TopNav() {
   const { theme, locale } = useAppSettings();
   const lang = resolveLocale(locale);
+  const L = (en: string, es: string) => (lang === "es" ? es : en);
 
   const isLight = theme === "light";
 
@@ -657,7 +664,7 @@ export default function TopNav() {
         <Link
           href="/dashboard"
           className="shrink-0 flex items-center"
-          aria-label="Go to dashboard"
+          aria-label={L("Go to dashboard", "Ir al dashboard")}
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
@@ -721,7 +728,7 @@ export default function TopNav() {
 
         {/* Right side: Help + Account */}
         <div className="flex items-center gap-3">
-          <AlertsInboxButton theme={theme} />
+          <AlertsInboxButton theme={theme} lang={lang} />
           <HelpMenu theme={theme} lang={lang} />
           <AccountMenu theme={theme} lang={lang} />
         </div>

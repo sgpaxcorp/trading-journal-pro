@@ -40,6 +40,12 @@ export async function GET(req: NextRequest) {
 
     const userId = authData.user.id;
     const email = authData.user.email ?? "";
+    const legacyUid =
+      (authData.user.user_metadata as any)?.uid ||
+      (authData.user.user_metadata as any)?.legacy_uid ||
+      (authData.user.user_metadata as any)?.legacy_user_id ||
+      (authData.user.user_metadata as any)?.user_uid ||
+      "";
 
     const { searchParams } = new URL(req.url);
     const fromDate = toDateOnly(searchParams.get("fromDate"));
@@ -57,6 +63,20 @@ export async function GET(req: NextRequest) {
         error = alt.error;
         if (error) {
           // ignore email mismatch errors (e.g., uuid column)
+          data = data ?? [];
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    // Fallback: legacy uid stored in user_metadata (older accounts)
+    if ((!data || data.length === 0) && legacyUid) {
+      try {
+        const alt = await fetchJournalEntriesByUserId(String(legacyUid), fromDate, toDate);
+        data = alt.data as any[] | null;
+        error = alt.error;
+        if (error) {
           data = data ?? [];
         }
       } catch {

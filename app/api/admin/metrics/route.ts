@@ -58,6 +58,11 @@ export async function GET(req: NextRequest) {
       .select("user_id, session_id, path, created_at")
       .gte("created_at", since30);
 
+    const { data: sessions30 } = await supabaseAdmin
+      .from("usage_sessions")
+      .select("id, started_at, last_seen_at")
+      .gte("started_at", since30);
+
     const { data: events7 } = await supabaseAdmin
       .from("usage_events")
       .select("user_id")
@@ -76,20 +81,11 @@ export async function GET(req: NextRequest) {
       .slice(0, 10)
       .map(([path, count]) => ({ path, count }));
 
-    const sessionGroups = new Map<string, { min: number; max: number }>();
-    (events30 ?? []).forEach((e: any) => {
-      if (!e.session_id || !e.created_at) return;
-      const ts = new Date(e.created_at).getTime();
-      const current = sessionGroups.get(e.session_id);
-      if (!current) sessionGroups.set(e.session_id, { min: ts, max: ts });
-      else {
-        current.min = Math.min(current.min, ts);
-        current.max = Math.max(current.max, ts);
-      }
+    const sessionDurations = (sessions30 ?? []).map((s: any) => {
+      const start = s?.started_at ? new Date(s.started_at).getTime() : 0;
+      const end = s?.last_seen_at ? new Date(s.last_seen_at).getTime() : start;
+      return Math.max(0, end - start);
     });
-    const sessionDurations = Array.from(sessionGroups.values()).map((g) =>
-      Math.max(0, g.max - g.min)
-    );
     const avgSessionMs =
       sessionDurations.length > 0
         ? sessionDurations.reduce((a, b) => a + b, 0) / sessionDurations.length
@@ -121,7 +117,7 @@ export async function GET(req: NextRequest) {
       },
       usage: {
         topPages,
-        sessions30d: sessionGroups.size,
+        sessions30d: (sessions30 ?? []).length,
         avgSessionMinutes: Number(avgSessionMinutes.toFixed(1)),
       },
       conversionRate: Number((conversionRate * 100).toFixed(1)),

@@ -58,6 +58,7 @@ export async function POST(req: NextRequest) {
       uploadId,
       notes,
       tradeIntent,
+      language,
     } = body as {
       summary?: string;
       keyTrades?: any[];
@@ -66,14 +67,25 @@ export async function POST(req: NextRequest) {
       uploadId?: string | null;
       notes?: string | null;
       tradeIntent?: string | null;
+      language?: string;
     };
 
-    const systemPrompt = `
+    const lang = String(language || "en").toLowerCase().startsWith("es") ? "es" : "en";
+    const systemPrompt =
+      lang === "es"
+        ? `
+Eres un estratega profesional de opciones preparando un plan de ataque premarket.
+Usa el resumen de flujo, la intención y los key trades para definir sesgo, niveles clave, zonas de liquidez y plan de riesgo.
+Devuelve HTML que se pueda colocar en el widget de "Premarket Prep".
+Mantén estructura con headings y bullets.
+`
+        : `
 You are a professional options strategist preparing a premarket attack plan.
-Use the options flow summary, trade intent, and key trades to define bias, key levels, expected liquidity zones, and risk plan.
-Return HTML that can be placed into a "Premarket Prep" journal widget.
+Use the flow summary, trade intent, and key trades to define bias, key levels, liquidity zones, and risk plan.
+Return HTML that can be placed in the "Premarket Prep" journal widget.
 Keep it structured with headings and bullet points.
-`.trim();
+`;
+    const finalPrompt = systemPrompt.trim();
 
     const userPayload = {
       underlying,
@@ -87,7 +99,7 @@ Keep it structured with headings and bullet points.
     const completion = await openai.chat.completions.create({
       model: DEFAULT_MODEL,
       messages: [
-        { role: "system", content: systemPrompt },
+        { role: "system", content: finalPrompt },
         { role: "user", content: JSON.stringify(userPayload, null, 2) },
       ],
       temperature: 0.3,

@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supaBaseClient";
+import { useAppSettings } from "@/lib/appSettings";
+import { resolveLocale } from "@/lib/i18n";
 
 type PlanId = "core" | "advanced";
 
@@ -14,6 +16,10 @@ type SimpleUser = {
 
 export default function PricingPage() {
   const router = useRouter();
+  const { locale } = useAppSettings();
+  const lang = resolveLocale(locale);
+  const isEs = lang === "es";
+  const L = (en: string, es: string) => (isEs ? es : en);
 
   const [user, setUser] = useState<SimpleUser | null>(null);
   const [loadingPlan, setLoadingPlan] = useState<PlanId | null>(null);
@@ -70,7 +76,7 @@ export default function PricingPage() {
       });
 
       if (!res.ok) {
-        let message = "Unable to start checkout.";
+        let message = L("Unable to start checkout.", "No se pudo iniciar el checkout.");
         try {
           const body = await res.json();
           if (body?.error) message = body.error;
@@ -83,14 +89,14 @@ export default function PricingPage() {
       const data = await res.json();
 
       if (!data.url) {
-        throw new Error("Missing checkout URL from Stripe.");
+        throw new Error(L("Missing checkout URL from Stripe.", "Falta la URL de checkout de Stripe."));
       }
 
       // Redirect to Stripe Checkout
       window.location.href = data.url;
     } catch (err: any) {
       console.error("Error starting checkout:", err);
-      setError(err?.message ?? "Something went wrong starting checkout.");
+      setError(err?.message ?? L("Something went wrong starting checkout.", "Algo salió mal iniciando el checkout."));
       setLoadingPlan(null);
     }
   }
@@ -112,28 +118,32 @@ export default function PricingPage() {
         <header className="w-full max-w-5xl flex items-center justify-between mb-10">
           <div>
             <p className="text-emerald-400 text-[10px] uppercase tracking-[0.2em]">
-              Choose your edge
+              {L("Choose your edge", "Elige tu ventaja")}
             </p>
             <h1 className="text-2xl md:text-3xl font-semibold">
-              Pricing for serious &amp; funded traders
+              {L("Pricing for serious & funded traders", "Precios para traders serios y fondeados")}
             </h1>
             <p className="text-[11px] md:text-xs text-slate-300 mt-1">
-              Clear, simple plans designed to keep you disciplined, consistent,
-              and ready for prop firms &amp; challenges.
+              {L(
+                "Clear, simple plans designed to keep you disciplined, consistent, and ready for prop firms & challenges.",
+                "Planes claros y simples diseñados para mantenerte disciplinado, consistente y listo para prop firms y challenges."
+              )}
             </p>
           </div>
           <Link
             href="/"
             className="text-[10px] md:text-xs text-slate-400 hover:text-emerald-400"
           >
-            ← Back to home
+            ← {L("Back to home", "Volver al inicio")}
           </Link>
         </header>
 
         {/* Copy */}
         <div className="w-full max-w-5xl mb-4 text-[10px] md:text-xs text-slate-400">
-          No contracts. No hidden fees. Just a trading journal built to protect
-          your psychology, enforce your rules, and show real progress.
+          {L(
+            "No contracts. No hidden fees. Just a trading journal built to protect your psychology, enforce your rules, and show real progress.",
+            "Sin contratos. Sin cargos ocultos. Un journal creado para proteger tu psicología, reforzar tus reglas y mostrar progreso real."
+          )}
         </div>
 
         {/* Error message (if any) */}
@@ -149,50 +159,52 @@ export default function PricingPage() {
             {/* CORE (planId = "core") */}
             <div className="flex-1 max-w-sm mx-auto bg-slate-950/96 border border-slate-800 rounded-2xl p-5 flex flex-col shadow-xl backdrop-blur-sm">
               <h2 className="text-sm font-semibold text-slate-50 mb-1">
-                Core
+                {L("Core", "Core")}
               </h2>
               <p className="text-emerald-400 text-3xl font-semibold leading-none">
                 $14.99
                 <span className="text-[9px] text-slate-400 font-normal">
                   {" "}
-                  / month
+                  {L("/ month", "/ mes")}
                 </span>
               </p>
               <p className="text-[10px] text-slate-300 mt-2">
-                Ideal for active traders who want structure, clear goals and
-                emotional control without overcomplicating things.
+                {L(
+                  "Ideal for active traders who want structure, clear goals and emotional control without overcomplicating things.",
+                  "Ideal para traders activos que buscan estructura, metas claras y control emocional sin complicarse."
+                )}
               </p>
               <div className="mt-3 h-px bg-slate-800" />
               <ul className="mt-3 space-y-1.5 text-[16px] text-slate-200">
-                <li>✓ One (1) account</li>
-                <li>✓ Multi-asset journal (stocks, futures, forex, crypto)</li>
-                <li>✓ Organized notebook for pre-market prep and journal</li>
-                <li>✓ P&amp;L calendar (green gains, blue losses)</li>
-                <li>✓ Custom Trading Plan</li>
-                <li>✓ Daily, Weekly &amp; Monthly goals</li>
-                <li>✓ Track goals and account balance</li>
-                <li>✓ Set alerts: daily goal &amp; max loss</li>
-                <li>✓ AI performance summary (daily, weekly, monthly)</li>
-                <li>✓ Basic analytics – win rate ratio</li>
-                <li>✓ 1GB data storage</li>
+                <li>✓ {L("One (1) account", "Una (1) cuenta")}</li>
+                <li>✓ {L("Multi-asset journal (stocks, futures, forex, crypto)", "Journal multi-activo (stocks, futuros, forex, cripto)")}</li>
+                <li>✓ {L("Organized notebook for pre-market prep and journal", "Notebook organizado para premarket y journal")}</li>
+                <li>✓ {L("P&L calendar (green gains, blue losses)", "Calendario de P&L (ganancias verdes, pérdidas azules)")}</li>
+                <li>✓ {L("Custom Trading Plan", "Trading Plan personalizado")}</li>
+                <li>✓ {L("Daily, Weekly & Monthly goals", "Metas diarias, semanales y mensuales")}</li>
+                <li>✓ {L("Track goals and account balance", "Seguimiento de metas y balance de cuenta")}</li>
+                <li>✓ {L("Set alerts: daily goal & max loss", "Alertas: meta diaria y max loss")}</li>
+                <li>✓ {L("AI performance summary (daily, weekly, monthly)", "Resumen de performance con IA (diario, semanal, mensual)")}</li>
+                <li>✓ {L("Basic analytics – win rate ratio", "Analítica básica – ratio de win rate")}</li>
+                <li>✓ {L("1GB data storage", "1GB de almacenamiento")}</li>
               </ul>
               <button
                 onClick={() => handleStart("core")}
                 disabled={loadingPlan !== null}
                 className="mt-5 w-full py-2 rounded-xl bg-emerald-400 text-slate-950 text-xs font-semibold hover:bg-emerald-300 transition disabled:opacity-60 disabled:cursor-not-allowed"
               >
-                {loadingPlan === "core" ? "Redirecting..." : "Start Core"}
+                {loadingPlan === "core" ? L("Redirecting...", "Redirigiendo...") : L("Start Core", "Empezar Core")}
               </button>
 
               <Link
                 href="/plans-comparison"
                 className="mt-3 w-full text-center py-2 rounded-xl border border-emerald-400/50 text-emerald-300 text-xs font-semibold hover:bg-emerald-400/10 transition"
               >
-                See more →
+                {L("See more →", "Ver más →")}
               </Link>
 
               <p className="mt-2 text-[9px] text-slate-500">
-                Perfect for personal accounts and first evaluations.
+                {L("Perfect for personal accounts and first evaluations.", "Perfecto para cuentas personales y primeras evaluaciones.")}
               </p>
             </div>
 
@@ -202,31 +214,33 @@ export default function PricingPage() {
               <div className="relative bg-slate-950/98 border border-emerald-500/60 rounded-2xl p-5 flex flex-col shadow-[0_15px_60px_rgba(15,23,42,0.9)] backdrop-blur-sm">
                 <div className="flex items-center justify-between">
                   <h2 className="text-sm font-semibold text-emerald-400">
-                    Advanced
+                    {L("Advanced", "Advanced")}
                   </h2>
                   <span className="px-2 py-0.5 rounded-full bg-emerald-400/10 text-emerald-300 text-[8px] border border-emerald-500/40">
-                    Most popular
+                    {L("Most popular", "Más popular")}
                   </span>
                 </div>
                 <p className="text-emerald-400 text-3xl font-semibold leading-none">
                   $24.99
                   <span className="text-[9px] text-slate-400 font-normal">
                     {" "}
-                    / month
+                    {L("/ month", "/ mes")}
                   </span>
                 </p>
                 <p className="text-[10px] text-slate-300 mt-2">
-                  For full-time and funded traders who need deep analytics,
-                  advanced alerts and reports ready for prop firms.
+                  {L(
+                    "For full-time and funded traders who need deep analytics, advanced alerts and reports ready for prop firms.",
+                    "Para traders full-time o fondeados que necesitan analítica profunda, alertas avanzadas y reportes listos para prop firms."
+                  )}
                 </p>
                 <div className="mt-3 h-px bg-slate-800" />
                 <ul className="mt-3 space-y-1.5 text-[16px] text-slate-200">
-                  <li>✓ Five (5) accounts</li>
-                  <li>✓ Everything in Core</li>
-                  <li>✓ Advanced analytics report</li>
-                  <li>✓ Custom alerts (drawdown, revenge, schedule)</li>
-                  <li>✓ Custom coaching plan</li>
-                  <li>✓ Track your trading business expenses</li>
+                  <li>✓ {L("Five (5) accounts", "Cinco (5) cuentas")}</li>
+                  <li>✓ {L("Everything in Core", "Todo lo de Core")}</li>
+                  <li>✓ {L("Advanced analytics report", "Reporte de analítica avanzada")}</li>
+                  <li>✓ {L("Custom alerts (drawdown, revenge, schedule)", "Alertas personalizadas (drawdown, revenge, horario)")}</li>
+                  <li>✓ {L("Custom coaching plan", "Plan de coaching personalizado")}</li>
+                  <li>✓ {L("Track your trading business expenses", "Seguimiento de gastos del negocio de trading")}</li>
                 </ul>
                 <button
                   onClick={() => handleStart("advanced")}
@@ -234,19 +248,22 @@ export default function PricingPage() {
                   className="mt-5 w-full py-2 rounded-xl bg-emerald-400 text-slate-950 text-xs font-semibold hover:bg-emerald-300 transition disabled:opacity-60 disabled:cursor-not-allowed"
                 >
                   {loadingPlan === "advanced"
-                    ? "Redirecting..."
-                    : "Start Advanced"}
+                    ? L("Redirecting...", "Redirigiendo...")
+                    : L("Start Advanced", "Empezar Advanced")}
                 </button>
 
                 <Link
                   href="/plans-comparison"
                   className="mt-3 w-full text-center py-2 rounded-xl border border-emerald-400/50 text-emerald-300 text-xs font-semibold hover:bg-emerald-400/10 transition"
                 >
-                  See more →
+                  {L("See more →", "Ver más →")}
                 </Link>
 
                 <p className="mt-2 text-[9px] text-emerald-300">
-                  If you treat trading like a business, this is your plan.
+                  {L(
+                    "If you treat trading like a business, this is your plan.",
+                    "Si tratas el trading como un negocio, este es tu plan."
+                  )}
                 </p>
               </div>
             </div>

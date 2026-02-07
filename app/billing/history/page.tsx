@@ -4,6 +4,8 @@
 import { useEffect, useState } from "react";
 import TopNav from "@/app/components/TopNav";
 import { useAuth } from "@/context/AuthContext";
+import { useAppSettings } from "@/lib/appSettings";
+import { resolveLocale } from "@/lib/i18n";
 
 type Invoice = {
   id: string;
@@ -16,6 +18,11 @@ type Invoice = {
 
 export default function BillingHistoryPage() {
   const { user, loading } = useAuth();
+  const { locale } = useAppSettings();
+  const lang = resolveLocale(locale);
+  const isEs = lang === "es";
+  const L = (en: string, es: string) => (isEs ? es : en);
+  const localeTag = isEs ? "es-ES" : "en-US";
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [loadingInvoices, setLoadingInvoices] = useState(true);
 
@@ -55,7 +62,7 @@ export default function BillingHistoryPage() {
   if (loading || !user) {
     return (
       <main className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center">
-        <p className="text-slate-400 text-sm">Loading billing history…</p>
+        <p className="text-slate-400 text-sm">{L("Loading billing history…", "Cargando historial de facturación…")}</p>
       </main>
     );
   }
@@ -66,32 +73,34 @@ export default function BillingHistoryPage() {
       <div className="max-w-4xl mx-auto px-6 md:px-8 py-8 space-y-6">
         <header>
           <p className="text-[11px] uppercase tracking-[0.25em] text-emerald-400">
-            Billing
+            {L("Billing", "Facturación")}
           </p>
-          <h1 className="text-3xl font-semibold mt-1">Billing history</h1>
+          <h1 className="text-3xl font-semibold mt-1">{L("Billing history", "Historial de facturación")}</h1>
           <p className="text-sm text-slate-400 mt-2">
-            View past invoices and payments for your subscription.
+            {L("View past invoices and payments for your subscription.", "Revisa facturas y pagos anteriores de tu suscripción.")}
           </p>
         </header>
 
         <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
           {loadingInvoices ? (
-            <p className="text-sm text-slate-400">Loading invoices…</p>
+            <p className="text-sm text-slate-400">{L("Loading invoices…", "Cargando facturas…")}</p>
           ) : invoices.length === 0 ? (
             <p className="text-sm text-slate-400">
-              No invoices yet. Your first invoice will appear after your first
-              successful payment.
+              {L(
+                "No invoices yet. Your first invoice will appear after your first successful payment.",
+                "Aún no hay facturas. Tu primera factura aparecerá después del primer pago exitoso."
+              )}
             </p>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-left text-sm">
                 <thead className="text-[11px] uppercase tracking-wide text-slate-500 border-b border-slate-800">
                   <tr>
-                    <th className="py-2 pr-4">Date</th>
-                    <th className="py-2 pr-4">Invoice #</th>
-                    <th className="py-2 pr-4">Amount</th>
-                    <th className="py-2 pr-4">Status</th>
-                    <th className="py-2 pr-4 text-right">Download</th>
+                    <th className="py-2 pr-4">{L("Date", "Fecha")}</th>
+                    <th className="py-2 pr-4">{L("Invoice #", "Factura #")}</th>
+                    <th className="py-2 pr-4">{L("Amount", "Monto")}</th>
+                    <th className="py-2 pr-4">{L("Status", "Estado")}</th>
+                    <th className="py-2 pr-4 text-right">{L("Download", "Descargar")}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -101,7 +110,7 @@ export default function BillingHistoryPage() {
                       className="border-b border-slate-850/60 last:border-0"
                     >
                       <td className="py-2 pr-4 text-[12px] text-slate-200">
-                        {new Date(inv.date).toLocaleDateString()}
+                        {new Date(inv.date).toLocaleDateString(localeTag)}
                       </td>
                       <td className="py-2 pr-4 text-[12px] text-slate-300">
                         {inv.number}
@@ -120,7 +129,11 @@ export default function BillingHistoryPage() {
                               : "rounded-full px-2 py-0.5 bg-slate-700/40 text-slate-300 text-[11px]"
                           }
                         >
-                          {inv.status}
+                          {inv.status === "paid"
+                            ? L("paid", "pagado")
+                            : inv.status === "open"
+                              ? L("open", "abierto")
+                              : L("void", "anulado")}
                         </span>
                       </td>
                       <td className="py-2 pr-4 text-[12px] text-right">
@@ -128,7 +141,7 @@ export default function BillingHistoryPage() {
                           type="button"
                           className="text-emerald-300 hover:text-emerald-200 text-[11px]"
                         >
-                          Download PDF
+                          {L("Download PDF", "Descargar PDF")}
                         </button>
                       </td>
                     </tr>

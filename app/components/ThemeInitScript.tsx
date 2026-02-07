@@ -15,12 +15,15 @@ export default function ThemeInitScript() {
   try {
     var theme = localStorage.getItem("nt_theme") || "neuro";
     var locale = localStorage.getItem("nt_locale") || "en";
+    var resolvedLocale = locale === "auto"
+      ? ((navigator.language || "en").toLowerCase().startsWith("es") ? "es" : "en")
+      : locale;
 
     var root = document.documentElement;
     root.classList.remove("theme-neuro", "theme-light");
     root.classList.add(theme === "light" ? "theme-light" : "theme-neuro");
 
-    root.lang = locale || "en";
+    root.lang = resolvedLocale || "en";
 
     // color-scheme helps inputs, scrollbars, etc.
     root.style.colorScheme = (theme === "light" ? "light" : "dark");

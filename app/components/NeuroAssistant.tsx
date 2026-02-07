@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import { onNeuroPush, type NeuroPush } from "@/app/components/neuroEventBus";
+import { useAppSettings } from "@/lib/appSettings";
+import { resolveLocale } from "@/lib/i18n";
 
 type AssistantState = "idle" | "thinking" | "talking";
 type Lang = "en" | "es";
@@ -20,13 +22,15 @@ const AVATAR_SRC: Record<AvatarState, { webm?: string; mp4: string }> = {
 function NeuroAvatarButton({
   state,
   open,
-  size = 168, // ✅ 30% menos (de 240)
+  size = 120, // ✅ más compacto
   onToggle,
+  ariaLabel,
 }: {
   state: AvatarState;
   open: boolean;
   size?: number;
   onToggle: () => void;
+  ariaLabel: string;
 }) {
   const [topState, setTopState] = useState<AvatarState>("idle");
   const [bottomState, setBottomState] = useState<AvatarState>("idle");
@@ -84,7 +88,7 @@ function NeuroAvatarButton({
         bottomRef.current?.play?.().catch(() => {});
         onToggle();
       }}
-      aria-label="Open Neuro Assistant"
+      aria-label={ariaLabel}
       className="fixed bottom-4 right-4 z-40 select-none"
       style={{ width: size, height: size }}
     >
@@ -166,6 +170,8 @@ function NeuroAvatarButton({
 
 export default function NeuroAssistant() {
   const pathname = usePathname();
+  const { locale } = useAppSettings();
+  const prefLang: Lang = resolveLocale(locale) === "es" ? "es" : "en";
 
   const [open, setOpen] = useState(false);
   const [state, setState] = useState<AssistantState>("idle");
@@ -173,14 +179,19 @@ export default function NeuroAssistant() {
 
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [lang, setLang] = useState<Lang>("en");
+  const [lang, setLang] = useState<Lang>(prefLang);
+  const L = (en: string, es: string) => (lang === "es" ? es : en);
+
+  useEffect(() => {
+    setLang(prefLang);
+  }, [prefLang]);
 
   // ✅ Auto-scroll al final
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
 
   // ✅ Chat pegado al avatar (sin taparlo)
-  const AVATAR_SIZE = 168;
+  const AVATAR_SIZE = 120;
   const RIGHT_OFFSET = useMemo(() => {
     const rightPadding = 16; // right-4
     const gap = -32; // espacio entre chat y muñeco
@@ -247,7 +258,7 @@ export default function NeuroAssistant() {
         }),
       });
 
-      if (!res.ok) throw new Error("Request failed");
+      if (!res.ok) throw new Error(L("Request failed", "La solicitud falló"));
 
       const data = await res.json();
       const answer: string =
@@ -294,6 +305,7 @@ export default function NeuroAssistant() {
         open={open}
         size={AVATAR_SIZE}
         onToggle={() => setOpen((o) => !o)}
+        ariaLabel={L("Open Neuro Assistant", "Abrir asistente Neuro")}
       />
 
       {open && (
@@ -309,7 +321,9 @@ export default function NeuroAssistant() {
                 <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-emerald-400/90 text-sm">
                   🧠
                 </span>
-                <span className="font-semibold">Neuro – Neuro Trader Guide</span>
+                <span className="font-semibold">
+                  {L("Neuro – Neuro Trader Guide", "Neuro — Guía de Neuro Trader")}
+                </span>
               </div>
 
               <div className="flex items-center gap-2">
@@ -342,6 +356,7 @@ export default function NeuroAssistant() {
                   type="button"
                   onClick={() => setOpen(false)}
                   className="text-slate-500 hover:text-slate-200 text-sm"
+                  aria-label={L("Close", "Cerrar")}
                 >
                   ✕
                 </button>

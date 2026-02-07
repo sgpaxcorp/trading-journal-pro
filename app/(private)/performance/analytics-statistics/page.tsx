@@ -19,13 +19,15 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
-import { useEffect, useMemo, useState, Fragment } from "react";
+import { useEffect, useMemo, useState, useRef, Fragment } from "react";
 import type { ReactNode } from "react";
 import type { ApexOptions } from "apexcharts";
 
 import TopNav from "@/app/components/TopNav";
 import { useAuth } from "@/context/AuthContext";
 import { supabaseBrowser } from "@/lib/supaBaseClient";
+import { useAppSettings } from "@/lib/appSettings";
+import { resolveLocale } from "@/lib/i18n";
 
 import { type InstrumentType } from "@/lib/journalNotes";
 import type { JournalEntry } from "@/lib/journalTypes";
@@ -49,6 +51,9 @@ type AnalyticsGroupId =
   | "instruments"
   | "trades"
   | "statistics";
+
+type Lang = "en" | "es";
+const LL = (lang: Lang, en: string, es: string) => (lang === "es" ? es : en);
 
 type DateRangePreset = "7D" | "30D" | "90D" | "YTD" | "ALL";
 
@@ -123,6 +128,52 @@ type HourBucket = {
   winRate: number;
 };
 
+type JournalTradeRow = {
+  journal_date: string;
+  leg: string;
+  symbol: string | null;
+  kind: string | null;
+  side: string | null;
+  premium: string | null;
+  strategy: string | null;
+  price: number | null;
+  quantity: number | null;
+  time: string | null;
+};
+
+type MatchedTrade = {
+  date: string;
+  symbol: string;
+  kind: InstrumentType;
+  side: "long" | "short";
+  premium: "debit" | "credit" | "none";
+  entryTimeMin: number | null;
+  exitTimeMin: number | null;
+  durationMin: number | null;
+  qty: number;
+  entryPrice: number;
+  exitPrice: number;
+  pnl: number;
+};
+
+type TradeAnalytics = {
+  matchedTrades: MatchedTrade[];
+  tradeCount: number;
+  tradeDays: number;
+  hourBuckets: HourBucket[];
+  hold: {
+    avgHoldMins: number | null;
+    medianHoldMins: number | null;
+    minHoldMins: number | null;
+    maxHoldMins: number | null;
+    avgHoldWinMins: number | null;
+    avgHoldLossMins: number | null;
+    totalHoldHours: number | null;
+  };
+  avgPnlPerTrade: number | null;
+  pnlPerHour: number | null;
+};
+
 type TradeRow = {
   date: string;
   title: string;
@@ -141,6 +192,7 @@ type AnalyticsSnapshot = {
   totalTrades: number;
   wins: number;
   losses: number;
+  breakevens: number;
   winRate: number;
 
   grossPnl: number;
@@ -157,8 +209,16 @@ type AnalyticsSnapshot = {
   maxLoss: number;
 
   maxDrawdown: number;
+  maxDrawdownPct: number;
   longestWinStreak: number;
   longestLossStreak: number;
+
+  // institutional KPIs
+  cagr: number | null;
+  sharpe: number | null;
+  sortino: number | null;
+  recoveryFactor: number | null;
+  payoffRatio: number | null;
 
   equityCurve: EquityPoint[];
   dailyPnl: DailyPnlPoint[];
@@ -209,6 +269,11 @@ function clamp(n: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, n));
 }
 
+function toNumberOrNull(x: unknown): number | null {
+  const n = Number(x);
+  return Number.isFinite(n) ? n : null;
+}
+
 function toNumberMaybe(x: unknown): number {
   const n = Number(x);
   return Number.isFinite(n) ? n : 0;
@@ -230,7 +295,8 @@ function cashflowDateIso(cf: any): string {
 
 function fmtUsd(n: number): string {
   const v = Number.isFinite(n) ? n : 0;
-  return v.toLocaleString(undefined, { style: "currency", currency: "USD" });
+  const locale = typeof document !== "undefined" ? document.documentElement.lang : undefined;
+  return v.toLocaleString(locale || undefined, { style: "currency", currency: "USD" });
 }
 
 function fmtPct(p: number): string {
@@ -303,8 +369,16 @@ function sortIsoDates(a: string, b: string): number {
 
 function dowLabel(iso: string): string {
   const d = new Date(iso + "T00:00:00");
-  const day = d.getDay();
-  return ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][day] || "";
+  const locale =
+    typeof document !== "undefined"
+      ? document.documentElement.lang || "en"
+      : "en";
+  try {
+    return new Intl.DateTimeFormat(locale, { weekday: "short" }).format(d);
+  } catch {
+    const day = d.getDay();
+    return ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][day] || "";
+  }
 }
 
 function hourLabelFromIso(isoDateTime: string | null | undefined): string | null {
@@ -320,25 +394,70 @@ function monthLabel(iso: string): string {
   return String(iso).slice(0, 7);
 }
 
+function parseNotesJson(raw: unknown): Record<string, any> | null {
+  if (!raw || typeof raw !== "string") return null;
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? (parsed as Record<string, any>) : null;
+  } catch {
+    return null;
+  }
+}
+
+function parseCostsFromEntry(entry: any): { fees: number; commissions: number; total: number } {
+  const notes = parseNotesJson(entry?.notes);
+  const fees = toNumberOrNull(notes?.costs?.fees ?? notes?.fees);
+  const commissions = toNumberOrNull(notes?.costs?.commissions ?? notes?.commissions);
+  const f = fees ?? 0;
+  const c = commissions ?? 0;
+  return { fees: f, commissions: c, total: f + c };
+}
+
 function parseFeesUsdFromEntry(entry: any): number {
   // flexible: feesUsd, fees_usd, fees
-  return toNumberMaybe(entry?.feesUsd ?? entry?.fees_usd ?? entry?.fees ?? 0);
+  const direct = toNumberOrNull(entry?.feesUsd ?? entry?.fees_usd ?? entry?.fees);
+  if (direct != null) return direct;
+  return parseCostsFromEntry(entry).total;
 }
 
 function parsePnlGrossFromEntry(entry: any): number {
   // flexible: pnl, pnlUsd, pnl_gross
-  return toNumberMaybe(entry?.pnlGross ?? entry?.pnl_gross ?? entry?.pnlUsd ?? entry?.pnl ?? 0);
+  const notes = parseNotesJson(entry?.notes);
+  const noteGross = toNumberOrNull(notes?.pnl?.gross ?? notes?.pnl_gross);
+  if (noteGross != null) return noteGross;
+
+  const directGross = toNumberOrNull(entry?.pnlGross ?? entry?.pnl_gross ?? entry?.pnlUsd);
+  if (directGross != null) return directGross;
+
+  const costs = parseCostsFromEntry(entry);
+  const noteNet = toNumberOrNull(notes?.pnl?.net ?? notes?.pnl_net);
+  if (noteNet != null) return noteNet + costs.total;
+
+  const directNet = toNumberOrNull(entry?.pnlNet ?? entry?.pnl_net);
+  if (directNet != null) return directNet + costs.total;
+
+  const fallback = toNumberOrNull(entry?.pnl);
+  return fallback != null ? fallback + costs.total : 0;
 }
 
 function parsePnlNetFromEntry(entry: any): number {
   // if already provided
-  const direct = toNumberMaybe(entry?.pnlNet ?? entry?.pnl_net ?? NaN);
-  if (Number.isFinite(direct)) return direct;
+  const direct = toNumberOrNull(entry?.pnlNet ?? entry?.pnl_net);
+  if (direct != null) return direct;
 
-  // else derive
-  const gross = parsePnlGrossFromEntry(entry);
-  const fees = parseFeesUsdFromEntry(entry);
-  return gross - fees;
+  const notes = parseNotesJson(entry?.notes);
+  const noteNet = toNumberOrNull(notes?.pnl?.net ?? notes?.pnl_net);
+  if (noteNet != null) return noteNet;
+
+  const costs = parseCostsFromEntry(entry);
+  const noteGross = toNumberOrNull(notes?.pnl?.gross ?? notes?.pnl_gross);
+  if (noteGross != null) return noteGross - costs.total;
+
+  const directGross = toNumberOrNull(entry?.pnlGross ?? entry?.pnl_gross ?? entry?.pnlUsd);
+  if (directGross != null) return directGross - costs.total;
+
+  const fallback = toNumberOrNull(entry?.pnl);
+  return fallback != null ? fallback : 0;
 }
 
 function parseInstrumentType(entry: any): InstrumentType | undefined {
@@ -357,7 +476,9 @@ function parseSymbol(entry: any): string | undefined {
 
 function parseTitle(entry: any): string {
   const t = String(entry?.title ?? entry?.name ?? entry?.notesTitle ?? "").trim();
-  return t || "Trade";
+  if (t) return t;
+  const lang = typeof document !== "undefined" ? document.documentElement.lang : "en";
+  return lang && lang.toLowerCase().startsWith("es") ? "Operación" : "Trade";
 }
 
 function parseDateIso(entry: any): string {
@@ -370,7 +491,7 @@ function parseCreatedAtIso(entry: any): string {
   return iso;
 }
 
-function buildSessionsFromEntries(entries: JournalEntry[]): SessionWithTrades[] {
+function buildSessionsFromEntries(entries: JournalEntry[], tradeDates?: Set<string>): SessionWithTrades[] {
   const out: SessionWithTrades[] = [];
 
   for (const e of entries ?? []) {
@@ -381,7 +502,14 @@ function buildSessionsFromEntries(entries: JournalEntry[]): SessionWithTrades[] 
     const feesUsd = parseFeesUsdFromEntry(e);
     const pnlNet = parsePnlNetFromEntry(e);
 
-    const win = pnlNet >= 0;
+    const notes = parseNotesJson(e?.notes);
+    const hasNotesTrades =
+      Array.isArray(notes?.entries) && notes?.entries?.length > 0 ||
+      Array.isArray(notes?.exits) && notes?.exits?.length > 0;
+    const hasTradeEvidence = (tradeDates?.has(date) ?? false) || hasNotesTrades || Math.abs(pnlNet) > 0;
+    if (!hasTradeEvidence) continue;
+
+    const win = pnlNet > 0;
 
     out.push({
       id: String((e as any)?.id ?? (e as any)?.uuid ?? `${date}-${Math.random()}`),
@@ -495,6 +623,76 @@ function computeDrawdown(equity: EquityPoint[]): number {
   return maxDd;
 }
 
+function computeDrawdownPct(equity: EquityPoint[]): number {
+  let peak = -Infinity;
+  let maxDdPct = 0;
+
+  for (const p of equity ?? []) {
+    const v = p.value;
+    if (!Number.isFinite(v)) continue;
+    if (v > peak) peak = v;
+    if (peak <= 0) continue;
+    const ddPct = ((peak - v) / peak) * 100;
+    if (ddPct > maxDdPct) maxDdPct = ddPct;
+  }
+
+  return maxDdPct;
+}
+
+function computeDailyReturns(equity: EquityPoint[]): number[] {
+  if (!equity || equity.length < 2) return [];
+  const out: number[] = [];
+  for (let i = 1; i < equity.length; i++) {
+    const prev = equity[i - 1]?.value ?? 0;
+    const cur = equity[i]?.value ?? 0;
+    if (!Number.isFinite(prev) || !Number.isFinite(cur) || prev === 0) continue;
+    out.push((cur - prev) / prev);
+  }
+  return out;
+}
+
+function computeSharpe(returns: number[]): number | null {
+  if (!returns.length) return null;
+  const meanDaily = mean(returns);
+  const sd = stddev(returns);
+  if (!Number.isFinite(sd) || sd === 0) return null;
+  return (meanDaily * 252) / (sd * Math.sqrt(252));
+}
+
+function computeSortino(returns: number[]): number | null {
+  if (!returns.length) return null;
+  const meanDaily = mean(returns);
+  const downside = returns.filter((r) => r < 0);
+  const downsideSd = stddev(downside);
+  if (!Number.isFinite(downsideSd) || downsideSd === 0) return null;
+  return (meanDaily * 252) / (downsideSd * Math.sqrt(252));
+}
+
+function computeCagr(equity: EquityPoint[]): number | null {
+  if (!equity || equity.length < 2) return null;
+  const first = equity[0];
+  const last = equity[equity.length - 1];
+  if (!first || !last) return null;
+  const start = first.value;
+  const end = last.value;
+  if (!Number.isFinite(start) || !Number.isFinite(end) || start <= 0) return null;
+  const startDate = new Date(first.date);
+  const endDate = new Date(last.date);
+  const years = (endDate.getTime() - startDate.getTime()) / (365.25 * 24 * 3600 * 1000);
+  if (!Number.isFinite(years) || years <= 0) return null;
+  return (Math.pow(end / start, 1 / years) - 1) * 100;
+}
+
+function computeRecoveryFactor(netProfit: number, maxDrawdown: number): number | null {
+  if (!Number.isFinite(netProfit) || !Number.isFinite(maxDrawdown) || maxDrawdown === 0) return null;
+  return netProfit / maxDrawdown;
+}
+
+function computePayoffRatio(avgWin: number, avgLoss: number): number | null {
+  if (!Number.isFinite(avgWin) || !Number.isFinite(avgLoss) || avgLoss === 0) return null;
+  return avgWin / avgLoss;
+}
+
 function computeStreaks(sessions: SessionWithTrades[]): { win: number; loss: number } {
   let bestWin = 0;
   let bestLoss = 0;
@@ -503,12 +701,16 @@ function computeStreaks(sessions: SessionWithTrades[]): { win: number; loss: num
   let curLoss = 0;
 
   for (const s of sessions ?? []) {
-    if (s.win) {
+    const pnl = toNumberMaybe(s.pnlNet);
+    if (pnl > 0) {
       curWin += 1;
       curLoss = 0;
-    } else {
+    } else if (pnl < 0) {
       curLoss += 1;
       curWin = 0;
+    } else {
+      curWin = 0;
+      curLoss = 0;
     }
     if (curWin > bestWin) bestWin = curWin;
     if (curLoss > bestLoss) bestLoss = curLoss;
@@ -545,14 +747,31 @@ function computeHistogram(values: number[], bins = 14): HistogramBin[] {
   return out;
 }
 
+function countOutcomeStats(sessions: SessionWithTrades[]) {
+  let wins = 0;
+  let losses = 0;
+  let breakevens = 0;
+
+  for (const s of sessions ?? []) {
+    const pnl = toNumberMaybe(s.pnlNet);
+    if (pnl > 0) wins += 1;
+    else if (pnl < 0) losses += 1;
+    else breakevens += 1;
+  }
+
+  const denom = wins + losses;
+  const winRate = denom > 0 ? (wins / denom) * 100 : 0;
+  return { wins, losses, breakevens, winRate };
+}
+
 function computeMonthlyBuckets(sessions: SessionWithTrades[]): MonthBucket[] {
   const byMonth = groupBy(sessions, (s) => monthLabel(s.date));
   const out: MonthBucket[] = Object.entries(byMonth)
     .map(([month, arr]) => {
       const pnl = sum(arr.map((s) => s.pnlNet ?? 0));
       const trades = arr.length;
-      const wins = arr.filter((s) => s.win).length;
-      const winRate = trades ? (wins / trades) * 100 : 0;
+      const stats = countOutcomeStats(arr);
+      const winRate = stats.winRate;
       return { month, pnl, trades, winRate };
     })
     .sort((a, b) => (a.month < b.month ? -1 : a.month > b.month ? 1 : 0));
@@ -565,8 +784,8 @@ function computeSymbolBuckets(sessions: SessionWithTrades[]): SymbolBucket[] {
   const out: SymbolBucket[] = Object.entries(bySym).map(([symbol, arr]) => {
     const pnl = sum(arr.map((s) => s.pnlNet ?? 0));
     const trades = arr.length;
-    const wins = arr.filter((s) => s.win).length;
-    const winRate = trades ? (wins / trades) * 100 : 0;
+    const stats = countOutcomeStats(arr);
+    const winRate = stats.winRate;
     return { symbol, pnl, trades, winRate };
   });
 
@@ -582,8 +801,8 @@ function computeDOWBuckets(sessions: SessionWithTrades[]): DayOfWeekBucket[] {
   const out: DayOfWeekBucket[] = Object.entries(byDow).map(([dow, arr]) => {
     const pnl = sum(arr.map((s) => s.pnlNet ?? 0));
     const trades = arr.length;
-    const wins = arr.filter((s) => s.win).length;
-    const winRate = trades ? (wins / trades) * 100 : 0;
+    const stats = countOutcomeStats(arr);
+    const winRate = stats.winRate;
     return { dow, pnl, trades, winRate };
   });
 
@@ -611,17 +830,314 @@ function computeHourBuckets(entries: JournalEntry[], sessions: SessionWithTrades
     if (!buckets[h]) buckets[h] = { pnl: 0, trades: 0, wins: 0 };
     buckets[h].pnl += toNumberMaybe(s.pnlNet);
     buckets[h].trades += 1;
-    if (s.win) buckets[h].wins += 1;
+    if (toNumberMaybe(s.pnlNet) > 0) buckets[h].wins += 1;
   }
 
   const out: HourBucket[] = Object.entries(buckets)
     .map(([hour, b]) => {
-      const winRate = b.trades ? (b.wins / b.trades) * 100 : 0;
+      const losses = Math.max(0, b.trades - b.wins);
+      const denom = b.wins + losses;
+      const winRate = denom ? (b.wins / denom) * 100 : 0;
       return { hour, pnl: b.pnl, trades: b.trades, winRate };
     })
     .sort((a, b) => (a.hour < b.hour ? -1 : a.hour > b.hour ? 1 : 0));
 
   return out;
+}
+
+function parseClockToMinutes(raw?: string | null): number | null {
+  if (!raw) return null;
+  const s = String(raw).trim();
+  if (!s) return null;
+  const m = s.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?$/i);
+  if (!m) return null;
+  let hh = Number(m[1]);
+  const mm = Number(m[2]);
+  if (!Number.isFinite(hh) || !Number.isFinite(mm)) return null;
+  const ampm = m[4]?.toUpperCase();
+  if (ampm === "AM") {
+    if (hh === 12) hh = 0;
+  } else if (ampm === "PM") {
+    if (hh < 12) hh += 12;
+  }
+  if (hh < 0 || hh > 23 || mm < 0 || mm > 59) return null;
+  return hh * 60 + mm;
+}
+
+function hourLabelFromMinutes(mins: number | null): string | null {
+  if (mins == null) return null;
+  const h = Math.floor(mins / 60);
+  if (!Number.isFinite(h)) return null;
+  return `${String(h).padStart(2, "0")}:00`;
+}
+
+const FUTURES_MULTIPLIERS: Record<string, number> = {
+  ES: 50,
+  MES: 5,
+  NQ: 20,
+  MNQ: 2,
+  YM: 5,
+  MYM: 0.5,
+  RTY: 50,
+  M2K: 5,
+  CL: 1000,
+  MCL: 100,
+  GC: 100,
+  MGC: 10,
+  SI: 5000,
+  HG: 25000,
+};
+
+const FUT_MONTH_CODES = "FGHJKMNQUVXZ";
+
+function futureRoot(symbol: string) {
+  const s0 = (symbol || "").trim().toUpperCase().replace(/^\//, "");
+  const s = s0.replace(/\s+/g, "");
+  const re1 = new RegExp(`^([A-Z0-9]{1,8})([${FUT_MONTH_CODES}])(\\d{1,4})$`);
+  const m1 = s.match(re1);
+  if (m1) return m1[1];
+  const m2 = s.match(/^([A-Z0-9]{1,8})/);
+  return m2?.[1] ?? s0;
+}
+
+function normalizeKind(kindRaw?: string | null): InstrumentType {
+  const v = String(kindRaw ?? "").trim().toLowerCase();
+  if (v.startsWith("opt")) return "option";
+  if (v.startsWith("fut")) return "future";
+  if (v.startsWith("sto")) return "stock";
+  if (v.startsWith("cry")) return "crypto";
+  if (v.startsWith("for")) return "forex";
+  return "other";
+}
+
+function normalizeSide(sideRaw?: string | null): "long" | "short" {
+  const v = String(sideRaw ?? "").trim().toLowerCase();
+  return v === "short" ? "short" : "long";
+}
+
+function normalizePremiumSide(kind: InstrumentType, premiumRaw?: string | null): "credit" | "debit" | "none" {
+  if (kind !== "option") return "none";
+  const v = String(premiumRaw ?? "").trim().toLowerCase();
+  if (v.startsWith("cr")) return "credit";
+  if (v.startsWith("de")) return "debit";
+  return "debit";
+}
+
+function pnlSign(kind: InstrumentType, side: "long" | "short", premium: "credit" | "debit" | "none"): number {
+  if (kind === "option") return premium === "credit" ? -1 : 1;
+  return side === "short" ? -1 : 1;
+}
+
+function getContractMultiplier(kind: InstrumentType, symbol: string) {
+  if (kind === "option") return 100;
+  if (kind === "future") {
+    const root = futureRoot(symbol);
+    return FUTURES_MULTIPLIERS[root] ?? 1;
+  }
+  return 1;
+}
+
+function computeTradeAnalytics(tradeRows: JournalTradeRow[], sessions: SessionWithTrades[]): TradeAnalytics {
+  if (!tradeRows || tradeRows.length === 0) {
+    return {
+      matchedTrades: [],
+      tradeCount: 0,
+      tradeDays: 0,
+      hourBuckets: [],
+      hold: {
+        avgHoldMins: null,
+        medianHoldMins: null,
+        minHoldMins: null,
+        maxHoldMins: null,
+        avgHoldWinMins: null,
+        avgHoldLossMins: null,
+        totalHoldHours: null,
+      },
+      avgPnlPerTrade: null,
+      pnlPerHour: null,
+    };
+  }
+
+  const dailyNet = new Map<string, number>();
+  for (const s of sessions ?? []) {
+    if (!s.date) continue;
+    dailyNet.set(s.date, toNumberMaybe(s.pnlNet));
+  }
+
+  const rowsByDate = groupBy(tradeRows, (r) => r.journal_date || (r as any).date || "");
+  const matchedTrades: MatchedTrade[] = [];
+
+  for (const [date, rows] of Object.entries(rowsByDate)) {
+    const entries = rows.filter((r) => !String(r.leg ?? "").toLowerCase().includes("exit"));
+    const exits = rows.filter((r) => String(r.leg ?? "").toLowerCase().includes("exit"));
+
+    const entryLots: Record<string, Array<{
+      qtyLeft: number;
+      price: number;
+      timeMin: number | null;
+      symbol: string;
+      kind: InstrumentType;
+      side: "long" | "short";
+      premium: "credit" | "debit" | "none";
+    }>> = {};
+
+    for (const e of entries) {
+      const symbol = String(e.symbol ?? "").trim().toUpperCase();
+      if (!symbol) continue;
+      const kind = normalizeKind(e.kind);
+      const side = normalizeSide(e.side);
+      const premium = normalizePremiumSide(kind, e.premium);
+      const price = toNumberOrNull(e.price);
+      const qty = toNumberOrNull(e.quantity);
+      if (price == null || qty == null || qty <= 0) continue;
+      const timeMin = parseClockToMinutes(e.time);
+      const key = `${symbol}|${kind}|${side}|${premium}`;
+      entryLots[key] ||= [];
+      entryLots[key].push({ qtyLeft: qty, price, timeMin, symbol, kind, side, premium });
+    }
+
+    const sortedExits = exits.slice().sort((a, b) => {
+      const ta = parseClockToMinutes(a.time);
+      const tb = parseClockToMinutes(b.time);
+      if (ta == null && tb == null) return 0;
+      if (ta == null) return 1;
+      if (tb == null) return -1;
+      return ta - tb;
+    });
+
+    const matches: MatchedTrade[] = [];
+    for (const x of sortedExits) {
+      const symbol = String(x.symbol ?? "").trim().toUpperCase();
+      if (!symbol) continue;
+      const kind = normalizeKind(x.kind);
+      const side = normalizeSide(x.side);
+      const premium = normalizePremiumSide(kind, x.premium);
+      const exitPrice = toNumberOrNull(x.price);
+      let exitQty = toNumberOrNull(x.quantity);
+      if (exitPrice == null || exitQty == null || exitQty <= 0) continue;
+      const exitTimeMin = parseClockToMinutes(x.time);
+
+      const key = `${symbol}|${kind}|${side}|${premium}`;
+      const lots = entryLots[key];
+      if (!lots || lots.length === 0) continue;
+
+      const sign = pnlSign(kind, side, premium);
+      const mult = getContractMultiplier(kind, symbol);
+
+      while (exitQty > 0 && lots.length > 0) {
+        const lot = lots[0];
+        const closeQty = Math.min(lot.qtyLeft, exitQty);
+        const pnl = (exitPrice - lot.price) * closeQty * sign * mult;
+        const durationMin =
+          lot.timeMin != null && exitTimeMin != null && exitTimeMin >= lot.timeMin
+            ? exitTimeMin - lot.timeMin
+            : null;
+
+        matches.push({
+          date,
+          symbol,
+          kind,
+          side,
+          premium,
+          entryTimeMin: lot.timeMin,
+          exitTimeMin,
+          durationMin,
+          qty: closeQty,
+          entryPrice: lot.price,
+          exitPrice,
+          pnl,
+        });
+
+        lot.qtyLeft -= closeQty;
+        exitQty -= closeQty;
+        if (lot.qtyLeft <= 0) lots.shift();
+      }
+    }
+
+    const computedNet = matches.reduce((s, t) => s + toNumberMaybe(t.pnl), 0);
+    const dailyTarget = toNumberOrNull(dailyNet.get(date));
+    if (dailyTarget != null && dailyTarget !== 0) {
+      if (computedNet !== 0) {
+        const scale = dailyTarget / computedNet;
+        matches.forEach((t) => {
+          t.pnl = Number((t.pnl * scale).toFixed(4));
+        });
+      } else {
+        const totalQty = matches.reduce((s, t) => s + t.qty, 0) || 0;
+        if (totalQty > 0) {
+          matches.forEach((t) => {
+            t.pnl = Number((dailyTarget * (t.qty / totalQty)).toFixed(4));
+          });
+        }
+      }
+    }
+
+    matchedTrades.push(...matches);
+  }
+
+  const hourBucketsMap: Record<string, { pnl: number; trades: number; wins: number; losses: number }> = {};
+  for (const t of matchedTrades) {
+    const hour = hourLabelFromMinutes(t.exitTimeMin);
+    if (!hour) continue;
+    if (!hourBucketsMap[hour]) {
+      hourBucketsMap[hour] = { pnl: 0, trades: 0, wins: 0, losses: 0 };
+    }
+    hourBucketsMap[hour].pnl += toNumberMaybe(t.pnl);
+    hourBucketsMap[hour].trades += 1;
+    if (t.pnl > 0) hourBucketsMap[hour].wins += 1;
+    else if (t.pnl < 0) hourBucketsMap[hour].losses += 1;
+  }
+
+  const hourBuckets: HourBucket[] = Object.entries(hourBucketsMap)
+    .map(([hour, b]) => {
+      const denom = b.wins + b.losses;
+      const winRate = denom > 0 ? (b.wins / denom) * 100 : 0;
+      return { hour, pnl: b.pnl, trades: b.trades, winRate };
+    })
+    .sort((a, b) => (a.hour < b.hour ? -1 : a.hour > b.hour ? 1 : 0));
+
+  const durations = matchedTrades
+    .map((t) => t.durationMin)
+    .filter((n): n is number => n != null && Number.isFinite(n));
+
+  const winDurations = matchedTrades
+    .filter((t) => t.pnl > 0 && t.durationMin != null)
+    .map((t) => t.durationMin as number);
+  const lossDurations = matchedTrades
+    .filter((t) => t.pnl < 0 && t.durationMin != null)
+    .map((t) => t.durationMin as number);
+
+  const avgHoldMins = durations.length ? mean(durations) : null;
+  const medianHoldMins = durations.length ? median(durations) : null;
+  const minHoldMins = durations.length ? Math.min(...durations) : null;
+  const maxHoldMins = durations.length ? Math.max(...durations) : null;
+  const avgHoldWinMins = winDurations.length ? mean(winDurations) : null;
+  const avgHoldLossMins = lossDurations.length ? mean(lossDurations) : null;
+
+  const totalHoldHours = durations.length ? sum(durations) / 60 : null;
+  const totalNetPnl = matchedTrades.reduce((s, t) => s + toNumberMaybe(t.pnl), 0);
+  const avgPnlPerTrade = matchedTrades.length ? totalNetPnl / matchedTrades.length : null;
+  const pnlPerHour = totalHoldHours && totalHoldHours > 0 ? totalNetPnl / totalHoldHours : null;
+
+  const tradeDays = new Set(matchedTrades.map((t) => t.date)).size;
+
+  return {
+    matchedTrades,
+    tradeCount: matchedTrades.length,
+    tradeDays,
+    hourBuckets,
+    hold: {
+      avgHoldMins,
+      medianHoldMins,
+      minHoldMins,
+      maxHoldMins,
+      avgHoldWinMins,
+      avgHoldLossMins,
+      totalHoldHours,
+    },
+    avgPnlPerTrade,
+    pnlPerHour,
+  };
 }
 
 function buildTradesTable(sessions: SessionWithTrades[]): TradeRow[] {
@@ -646,19 +1162,22 @@ function computeSnapshot(
   cashflows: Cashflow[],
   startingBalance: number,
   planStartIso: string,
-  range: DateRange
+  range: DateRange,
+  tradeStats?: TradeAnalytics | null
 ): AnalyticsSnapshot {
   const totalSessions = sessions.length;
-  const wins = sessions.filter((s) => s.win).length;
-  const losses = totalSessions - wins;
-  const winRate = totalSessions ? (wins / totalSessions) * 100 : 0;
+  const outcomeStats = countOutcomeStats(sessions);
+  const wins = outcomeStats.wins;
+  const losses = outcomeStats.losses;
+  const breakevens = outcomeStats.breakevens;
+  const winRate = outcomeStats.winRate;
 
   const grossPnl = sum(sessions.map((s) => toNumberMaybe(s.pnlGross)));
   const totalFees = sum(sessions.map((s) => toNumberMaybe(s.feesUsd)));
   const netPnl = sum(sessions.map((s) => toNumberMaybe(s.pnlNet)));
   const avgNetPerSession = totalSessions ? netPnl / totalSessions : 0;
 
-  const winsArr = sessions.filter((s) => s.pnlNet != null && s.pnlNet >= 0).map((s) => toNumberMaybe(s.pnlNet));
+  const winsArr = sessions.filter((s) => s.pnlNet != null && s.pnlNet > 0).map((s) => toNumberMaybe(s.pnlNet));
   const lossArr = sessions.filter((s) => s.pnlNet != null && s.pnlNet < 0).map((s) => Math.abs(toNumberMaybe(s.pnlNet)));
 
   const sumWins = sum(winsArr);
@@ -668,25 +1187,35 @@ function computeSnapshot(
   const avgWin = winsArr.length ? mean(winsArr) : 0;
   const avgLoss = lossArr.length ? mean(lossArr) : 0;
 
-  const expectancy = (winRate / 100) * avgWin - (1 - winRate / 100) * avgLoss;
+  const denom = wins + losses;
+  const pWin = denom > 0 ? wins / denom : 0;
+  const expectancy = pWin * avgWin - (1 - pWin) * avgLoss;
 
   const maxWin = winsArr.length ? Math.max(...winsArr) : 0;
   const maxLoss = lossArr.length ? Math.max(...lossArr) : 0;
 
   const { equityCurve, dailyPnl } = computeEquityCurve(sessionsAll, cashflows, startingBalance, planStartIso, range.startIso, range.endIso);
   const maxDrawdown = computeDrawdown(equityCurve);
+  const maxDrawdownPct = computeDrawdownPct(equityCurve);
+  const returns = computeDailyReturns(equityCurve);
+  const sharpe = computeSharpe(returns);
+  const sortino = computeSortino(returns);
+  const cagr = computeCagr(equityCurve);
+  const recoveryFactor = computeRecoveryFactor(netPnl, maxDrawdown);
+  const payoffRatio = computePayoffRatio(avgWin, avgLoss);
   const streaks = computeStreaks(sessions);
 
   const pnlHistogram = computeHistogram(sessions.map((s) => toNumberMaybe(s.pnlNet)));
   const monthly = computeMonthlyBuckets(sessions);
   const bySymbol = computeSymbolBuckets(sessions);
   const byDOW = computeDOWBuckets(sessions);
-  const byHour = computeHourBuckets(entries, sessions);
+  const byHour = tradeStats?.hourBuckets?.length
+    ? tradeStats.hourBuckets
+    : computeHourBuckets(entries, sessions);
 
   const tradesTable = buildTradesTable(sessions);
 
-  // totalTrades is the same as totalSessions here (since one entry per trade session). Keep for future.
-  const totalTrades = totalSessions;
+  const totalTrades = tradeStats?.tradeCount ?? totalSessions;
 
   return {
     updatedAtIso: new Date().toISOString(),
@@ -695,6 +1224,7 @@ function computeSnapshot(
     totalTrades,
     wins,
     losses,
+    breakevens,
     winRate,
 
     grossPnl,
@@ -711,8 +1241,15 @@ function computeSnapshot(
     maxLoss,
 
     maxDrawdown,
+    maxDrawdownPct,
     longestWinStreak: streaks.win,
     longestLossStreak: streaks.loss,
+
+    cagr,
+    sharpe,
+    sortino,
+    recoveryFactor,
+    payoffRatio,
 
     equityCurve,
     dailyPnl,
@@ -753,6 +1290,11 @@ function getDefaultRange(preset: DateRangePreset): DateRange {
 export default function AnalyticsStatisticsPage() {
   const { user, loading } = useAuth() as any;
   const router = useRouter();
+  const { locale } = useAppSettings();
+  const lang = resolveLocale(locale) as Lang;
+  const isEs = lang === "es";
+  const L = (en: string, es: string) => LL(lang, en, es);
+  const localeTag = isEs ? "es-ES" : "en-US";
 
   const userId = (user as any)?.id as string | undefined;
   const journalUserId = useMemo(() => resolveJournalUserId(user), [user]);
@@ -761,8 +1303,10 @@ export default function AnalyticsStatisticsPage() {
   const [dateRange, setDateRange] = useState<DateRange>(() => getDefaultRange("30D"));
 
   const [entries, setEntries] = useState<JournalEntry[]>([]);
+  const [tradeRows, setTradeRows] = useState<JournalTradeRow[]>([]);
   const [activeGroup, setActiveGroup] = useState<AnalyticsGroupId>("overview");
   const [loadingData, setLoadingData] = useState(true);
+  const autoRangeAppliedRef = useRef(false);
 
   const [snapshot, setSnapshot] = useState<AnalyticsSnapshot | null>(null);
   const [dailySnaps, setDailySnaps] = useState<DailySnapshotRow[]>([]);
@@ -857,6 +1401,50 @@ export default function AnalyticsStatisticsPage() {
       alive = false;
     };
   }, [journalUserId, userId]);
+
+  // Load journal_trades for timing analytics (entries/exits per fill)
+  useEffect(() => {
+    let alive = true;
+
+    async function run() {
+      if (!userId && !journalUserId) return;
+
+      const start = looksLikeYYYYMMDD(dateRange.startIso) ? dateRange.startIso : "";
+      const end = looksLikeYYYYMMDD(dateRange.endIso) ? dateRange.endIso : "";
+
+      const fetchRows = async (uid: string) => {
+        let q = supabaseBrowser
+          .from("journal_trades")
+          .select("journal_date, leg, symbol, kind, side, premium, strategy, price, quantity, time")
+          .eq("user_id", uid)
+          .order("journal_date", { ascending: true });
+        if (start) q = q.gte("journal_date", start);
+        if (end) q = q.lte("journal_date", end);
+        const { data, error } = await q;
+        if (error) throw error;
+        return (data ?? []) as JournalTradeRow[];
+      };
+
+      try {
+        let rows: JournalTradeRow[] = [];
+        if (userId) rows = await fetchRows(userId);
+        if ((!rows || rows.length === 0) && journalUserId && journalUserId !== userId) {
+          rows = await fetchRows(journalUserId);
+        }
+        if (!alive) return;
+        setTradeRows(rows ?? []);
+      } catch (err) {
+        console.error("[AnalyticsStatistics] journal_trades fetch error:", err);
+        if (!alive) return;
+        setTradeRows([]);
+      }
+    }
+
+    run();
+    return () => {
+      alive = false;
+    };
+  }, [userId, journalUserId, dateRange.startIso, dateRange.endIso]);
 
   // Load daily snapshots (optional)
   useEffect(() => {
@@ -965,7 +1553,15 @@ export default function AnalyticsStatisticsPage() {
     };
   }, [loading]);
 
-  const sessionsAll = useMemo(() => buildSessionsFromEntries(entries), [entries]);
+  const tradeDates = useMemo(() => {
+    return new Set(
+      (tradeRows ?? [])
+        .map((r) => r.journal_date || (r as any).date || "")
+        .filter(looksLikeYYYYMMDD)
+    );
+  }, [tradeRows]);
+
+  const sessionsAll = useMemo(() => buildSessionsFromEntries(entries, tradeDates), [entries, tradeDates]);
 
   const sessions = useMemo(() => {
     // Apply range and also clamp to plan start if present
@@ -973,6 +1569,18 @@ export default function AnalyticsStatisticsPage() {
     if (!planStartIso) return ranged;
     return ranged.filter((s) => s.date >= planStartIso);
   }, [sessionsAll, dateRange.startIso, dateRange.endIso, planStartIso]);
+
+  const tradeStats = useMemo(() => computeTradeAnalytics(tradeRows, sessions), [tradeRows, sessions]);
+
+  // Auto-expand to ALL if range returns zero sessions but data exists
+  useEffect(() => {
+    if (autoRangeAppliedRef.current) return;
+    if (dateRange.preset === "ALL") return;
+    if (sessionsAll.length > 0 && sessions.length === 0) {
+      autoRangeAppliedRef.current = true;
+      setDateRange(getDefaultRange("ALL"));
+    }
+  }, [sessionsAll.length, sessions.length, dateRange.preset]);
 
   // cashflows in selected range (for KPIs)
   const cashflowsInRange = useMemo(() => {
@@ -991,9 +1599,9 @@ export default function AnalyticsStatisticsPage() {
   // Build snapshot
   useEffect(() => {
     // We recompute snapshot when sessions/cashflows/range changes.
-    const snap = computeSnapshot(entries, sessionsAll, sessions, cashflows, planStartingBalance, planStartIso, dateRange);
+    const snap = computeSnapshot(entries, sessionsAll, sessions, cashflows, planStartingBalance, planStartIso, dateRange, tradeStats);
     setSnapshot(snap);
-  }, [entries, sessionsAll, sessions, cashflows, planStartingBalance, planStartIso, dateRange]);
+  }, [entries, sessionsAll, sessions, cashflows, planStartingBalance, planStartIso, dateRange, tradeStats]);
 
   // Derived display data
   const uiTotals = useMemo(() => {
@@ -1003,6 +1611,7 @@ export default function AnalyticsStatisticsPage() {
         totalSessions: 0,
         wins: 0,
         losses: 0,
+        breakevens: 0,
         winRate: 0,
         netPnl: 0,
         totalFees: 0,
@@ -1015,6 +1624,7 @@ export default function AnalyticsStatisticsPage() {
       totalSessions: s.totalSessions,
       wins: s.wins,
       losses: s.losses,
+      breakevens: s.breakevens,
       winRate: s.winRate,
       netPnl: s.netPnl,
       totalFees: s.totalFees,
@@ -1044,7 +1654,7 @@ export default function AnalyticsStatisticsPage() {
   if (loading || !user) {
     return (
       <main className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center">
-        <p className="text-base text-slate-400">Loading…</p>
+        <p className="text-base text-slate-400">{L("Loading…", "Cargando…")}</p>
       </main>
     );
   }
@@ -1057,9 +1667,19 @@ export default function AnalyticsStatisticsPage() {
         <header className="mb-6">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <h1 className="text-3xl font-semibold">Analytics &amp; Statistics</h1>
+              <h1 className="text-3xl font-semibold">
+                {L("Analytics & Statistics", "Análisis y estadísticas")}
+              </h1>
               <p className="text-sm text-slate-400 mt-1">
-                Deep performance breakdown for your trading journal. Deposits/withdrawals are pulled from <span className="font-mono">cashflows</span> and included in account equity.
+                {L(
+                  "Deep performance breakdown for your trading journal. Deposits/withdrawals are pulled from",
+                  "Desglose profundo del performance de tu journal. Depósitos/retiros se leen desde"
+                )}{" "}
+                <span className="font-mono">cashflows</span>{" "}
+                {L(
+                  "and included in account equity.",
+                  "y se incluyen en el equity de cuenta."
+                )}
               </p>
             </div>
 
@@ -1068,14 +1688,14 @@ export default function AnalyticsStatisticsPage() {
                 href="/dashboard"
                 className="inline-flex items-center rounded-xl border border-slate-700 px-3 py-1.5 text-xs font-medium text-slate-200 hover:border-emerald-400 hover:text-emerald-300 transition"
               >
-                Dashboard →
+                {L("Dashboard →", "Dashboard →")}
               </Link>
 
               <Link
                 href="/balance-chart"
                 className="inline-flex items-center rounded-xl border border-slate-700 px-3 py-1.5 text-xs font-medium text-slate-200 hover:border-emerald-400 hover:text-emerald-300 transition"
               >
-                Balance chart →
+                {L("Balance chart →", "Gráfico de balance →")}
               </Link>
             </div>
           </div>
@@ -1084,7 +1704,7 @@ export default function AnalyticsStatisticsPage() {
         {/* Date range selector */}
         <section className="mb-6 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
           <div className="flex items-center gap-2">
-            <div className="text-xs text-slate-400">Range</div>
+            <div className="text-xs text-slate-400">{L("Range", "Rango")}</div>
             <div className="inline-flex rounded-xl border border-slate-800 bg-slate-950/60 p-1">
               {(["7D", "30D", "90D", "YTD", "ALL"] as DateRangePreset[]).map((p) => (
                 <button
@@ -1110,25 +1730,53 @@ export default function AnalyticsStatisticsPage() {
                 {dateRange.startIso} → {dateRange.endIso}
               </span>
             ) : (
-              <span>All time → {dateRange.endIso}</span>
+              <span>{L("All time →", "Todo el histórico →")} {dateRange.endIso}</span>
             )}
           </div>
         </section>
 
         {/* Top KPIs */}
         <section className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-          <KpiCard label="Sessions" value={uiTotals.totalSessions.toLocaleString()} sub={loadingData ? "Loading…" : ""} />
-          <KpiCard label="Win rate" value={fmtPct(uiTotals.winRate)} sub={`${uiTotals.wins}W / ${uiTotals.losses}L`} />
           <KpiCard
-            label="Net P&amp;L"
-            value={fmtUsd(uiTotals.netPnl)}
-            valueClass={uiTotals.netPnl >= 0 ? "text-emerald-300" : "text-sky-300"}
-            sub={`Fees: ${fmtUsd(uiTotals.totalFees)}`}
+            label={L("Sessions", "Sesiones")}
+            value={uiTotals.totalSessions.toLocaleString()}
+            sub={loadingData ? L("Loading…", "Cargando…") : ""}
+            help={L(
+              "Trading days with activity inside the selected range.",
+              "Días con actividad de trading dentro del rango seleccionado."
+            )}
           />
           <KpiCard
-            label="Expectancy"
+            label={L("Win rate", "Tasa de acierto")}
+            value={fmtPct(uiTotals.winRate)}
+            sub={
+              lang === "es"
+                ? `${uiTotals.wins}G / ${uiTotals.losses}Apr / ${uiTotals.breakevens}Plano`
+                : `${uiTotals.wins}W / ${uiTotals.losses}Learn / ${uiTotals.breakevens}Flat`
+            }
+            help={L(
+              "Wins divided by (wins + lessons). Flat days are excluded.",
+              "Ganadas dividido entre (ganadas + aprendizajes). Días planos se excluyen."
+            )}
+          />
+          <KpiCard
+            label={L("Net P&L", "P&L neto")}
+            value={fmtUsd(uiTotals.netPnl)}
+            valueClass={uiTotals.netPnl >= 0 ? "text-emerald-300" : "text-sky-300"}
+            sub={`${L("Fees", "Comisiones")}: ${fmtUsd(uiTotals.totalFees)}`}
+            help={L(
+              "Sum of net P&L after fees across the selected sessions.",
+              "Suma del P&L neto (después de comisiones) en el rango seleccionado."
+            )}
+          />
+          <KpiCard
+            label={L("Expectancy", "Expectativa")}
             value={fmtUsd(uiTotals.expectancy)}
             sub={uiTotals.profitFactor != null ? `PF: ${uiTotals.profitFactor.toFixed(2)}` : "PF: —"}
+            help={L(
+              "Expected result per session: P(win)×avgWin − P(lesson)×avgLesson.",
+              "Resultado esperado por sesión: P(ganar)×promedioWin − P(aprender)×promedioLesson."
+            )}
           />
         </section>
 
@@ -1136,14 +1784,14 @@ export default function AnalyticsStatisticsPage() {
         <section className="mb-6">
           <div className="flex flex-wrap gap-2">
             {([
-              ["overview", "Overview"],
-              ["performance", "Performance"],
-              ["risk", "Risk"],
-              ["distribution", "Distribution"],
-              ["time", "Time"],
-              ["instruments", "Instruments"],
-              ["trades", "Trades"],
-              ["statistics", "Statistics"],
+              ["overview", L("Overview", "Resumen")],
+              ["performance", L("Performance", "Rendimiento")],
+              ["risk", L("Risk", "Riesgo")],
+              ["distribution", L("Distribution", "Distribución")],
+              ["time", L("Time", "Tiempo")],
+              ["instruments", L("Instruments", "Instrumentos")],
+              ["trades", L("Trades", "Operaciones")],
+              ["statistics", L("Statistics", "Estadísticas")],
             ] as Array<[AnalyticsGroupId, string]>).map(([id, label]) => (
               <button
                 key={id}
@@ -1164,31 +1812,42 @@ export default function AnalyticsStatisticsPage() {
 
         {uiTotals.totalSessions === 0 ? (
           <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5 text-sm text-slate-300">
-            No trade sessions found in this date range.
+            {L("No trade sessions found in this date range.", "No se encontraron sesiones en este rango.")}
             <div className="text-xs text-slate-500 mt-2">
-              If you expected data, confirm your journal entries are saved in Supabase for user id <span className="font-mono">{String(userId || "")}</span>.
+              {L(
+                "If you expected data, confirm your journal entries are saved in Supabase for user id",
+                "Si esperabas datos, confirma que tus entradas están guardadas en Supabase para el usuario"
+              )}{" "}
+              <span className="font-mono">{String(userId || "")}</span>.
             </div>
           </div>
         ) : (
           <>
             {activeGroup === "overview" && (
-              <OverviewSection equity={uiEquity} daily={uiDaily} snapshot={snapshot} />
+              <OverviewSection lang={lang} equity={uiEquity} daily={uiDaily} snapshot={snapshot} />
             )}
 
-            {activeGroup === "performance" && <PerformanceSection snapshot={snapshot} />}
+            {activeGroup === "performance" && <PerformanceSection lang={lang} snapshot={snapshot} />}
 
-            {activeGroup === "risk" && <RiskSection snapshot={snapshot} />}
+            {activeGroup === "risk" && <RiskSection lang={lang} snapshot={snapshot} />}
 
-            {activeGroup === "distribution" && <DistributionSection snapshot={snapshot} />}
+            {activeGroup === "distribution" && <DistributionSection lang={lang} snapshot={snapshot} />}
 
-            {activeGroup === "time" && <TimeSection snapshot={snapshot} />}
+            {activeGroup === "time" && <TimeSection lang={lang} snapshot={snapshot} />}
 
-            {activeGroup === "instruments" && <InstrumentsSection snapshot={snapshot} />}
+            {activeGroup === "instruments" && <InstrumentsSection lang={lang} snapshot={snapshot} />}
 
-            {activeGroup === "trades" && <TradesSection snapshot={snapshot} />}
+            {activeGroup === "trades" && <TradesSection lang={lang} snapshot={snapshot} />}
 
             {activeGroup === "statistics" && (
-              <StatisticsSection sessions={sessions} dailySnaps={dailySnaps} cashflows={cashflowsInRange} rangeEndIso={dateRange.endIso} />
+              <StatisticsSection
+                lang={lang}
+                sessions={sessions}
+                dailySnaps={dailySnaps}
+                cashflows={cashflowsInRange}
+                rangeEndIso={dateRange.endIso}
+                tradeStats={tradeStats}
+              />
             )}
           </>
         )}
@@ -1201,20 +1860,37 @@ export default function AnalyticsStatisticsPage() {
    UI Components
 ===================== */
 
+function InfoDot({ text }: { text: string }) {
+  return (
+    <span
+      className="ml-2 inline-flex h-4 w-4 items-center justify-center rounded-full border border-slate-700 text-[10px] text-slate-400"
+      title={text}
+      aria-label={text}
+    >
+      i
+    </span>
+  );
+}
+
 function KpiCard({
   label,
   value,
   sub,
   valueClass,
+  help,
 }: {
   label: string;
   value: string;
   sub?: string;
   valueClass?: string;
+  help: string;
 }) {
   return (
     <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
-      <div className="text-[11px] text-slate-500 tracking-widest uppercase">{label}</div>
+      <div className="text-[11px] text-slate-500 tracking-widest uppercase flex items-center">
+        <span>{label}</span>
+        <InfoDot text={help} />
+      </div>
       <div className={["mt-1 text-2xl font-semibold", valueClass || ""].join(" ")}>{value}</div>
       {sub ? <div className="mt-1 text-xs text-slate-400">{sub}</div> : null}
     </div>
@@ -1238,14 +1914,17 @@ function Card({ title, right, children }: { title: string; right?: ReactNode; ch
 ===================== */
 
 function OverviewSection({
+  lang,
   equity,
   daily,
   snapshot,
 }: {
+  lang: Lang;
   equity: EquityPoint[];
   daily: DailyPnlPoint[];
   snapshot: AnalyticsSnapshot | null;
 }) {
+  const T = (en: string, es: string) => LL(lang, en, es);
   const eqSeries = useMemo(() => {
     const pts = equity ?? [];
     const data = pts.map((p) => [new Date(p.date).getTime(), p.value]);
@@ -1253,8 +1932,8 @@ function OverviewSection({
       const [x, y] = data[0];
       data.push([x + 86400000, y]);
     }
-    return [{ name: "Equity", data }];
-  }, [equity]);
+    return [{ name: T("Equity", "Equity"), data }];
+  }, [equity, lang]);
 
   const pnlSeries = useMemo(() => {
     const pts = daily ?? [];
@@ -1266,8 +1945,8 @@ function OverviewSection({
       const low = Math.min(open, close);
       return { x: new Date(p.date).getTime(), y: [open, high, low, close] };
     });
-    return [{ name: "Daily P&L", data }];
-  }, [daily]);
+    return [{ name: T("Daily P&L", "P&L diario"), data }];
+  }, [daily, lang]);
 
   const pnlBounds = useMemo(() => {
     const vals = (daily ?? []).map((p) => Number(p.value ?? 0)).filter((v) => Number.isFinite(v));
@@ -1339,7 +2018,7 @@ function OverviewSection({
         candlestick: {
           colors: {
             upward: "#22c55e",
-            downward: "#ef4444",
+            downward: "#60a5fa",
           },
           wick: { useFillColor: true },
         },
@@ -1360,64 +2039,152 @@ function OverviewSection({
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
       <Card
-        title="Equity Curve"
-        right={<span className="text-xs text-slate-500">Account equity (trading P&L + deposits/withdrawals)</span>}
+        title={T("Equity Curve", "Curva de equity")}
+        right={<span className="text-xs text-slate-500">{T("Account equity (trading P&L + deposits/withdrawals)", "Equity de cuenta (P&L trading + depósitos/retiros)")}</span>}
       >
         <div className="h-[320px]">
           <Chart options={eqOptions} series={eqSeries as any} type="line" height={320} />
         </div>
       </Card>
 
-      <Card title="Daily P&amp;L" right={<span className="text-xs text-slate-500">Trading P&amp;L only</span>}>
+      <Card title={T("Daily P&L", "P&L diario")} right={<span className="text-xs text-slate-500">{T("Trading P&L only", "Solo P&L de trading")}</span>}>
         <div className="h-[320px]">
           <Chart options={pnlOptions} series={pnlSeries as any} type="candlestick" height={320} />
         </div>
       </Card>
 
-      <Card title="Quick stats">
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
-          <MiniStat label="Avg / session" value={snapshot ? fmtUsd(snapshot.avgNetPerSession) : "—"} />
-          <MiniStat label="Max win" value={snapshot ? fmtUsd(snapshot.maxWin) : "—"} />
-          <MiniStat label="Max loss" value={snapshot ? fmtUsd(snapshot.maxLoss) : "—"} />
-          <MiniStat label="Max drawdown" value={snapshot ? fmtUsd(snapshot.maxDrawdown) : "—"} />
+      <Card title={T("Quick stats", "Estadísticas rápidas")}>
+        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 text-sm">
+          <MiniStat
+            label={T("Avg / session", "Promedio / sesión")}
+            value={snapshot ? fmtUsd(snapshot.avgNetPerSession) : "—"}
+            help={T("Average net result per session.", "Promedio neto por sesión.")}
+          />
+          <MiniStat
+            label={T("Max win", "Máx. ganancia")}
+            value={snapshot ? fmtUsd(snapshot.maxWin) : "—"}
+            help={T("Best single-session result.", "Mejor resultado en una sesión.")}
+          />
+          <MiniStat
+            label={T("Max lesson", "Máx. aprendizaje")}
+            value={snapshot ? fmtUsd(snapshot.maxLoss) : "—"}
+            help={T("Largest drawdown in a single session.", "Mayor caída en una sola sesión.")}
+          />
+          <MiniStat
+            label={T("Max drawdown", "Máx. drawdown")}
+            value={snapshot ? fmtUsd(snapshot.maxDrawdown) : "—"}
+            help={T("Largest peak-to-trough decline in equity.", "Mayor caída desde un pico hasta un valle en equity.")}
+          />
+          <MiniStat
+            label={T("Avg win", "Promedio ganador")}
+            value={snapshot ? fmtUsd(snapshot.avgWin) : "—"}
+            help={T("Average winning session result.", "Promedio de sesiones ganadoras.")}
+          />
+          <MiniStat
+            label={T("Avg lesson", "Promedio aprendizaje")}
+            value={snapshot ? fmtUsd(snapshot.avgLoss) : "—"}
+            help={T("Average learning session magnitude.", "Promedio de sesiones de aprendizaje.")}
+          />
+          <MiniStat
+            label={T("Breakeven rate", "Tasa de plano")}
+            value={
+              snapshot && snapshot.totalSessions > 0
+                ? fmtPct((snapshot.breakevens / snapshot.totalSessions) * 100)
+                : "—"
+            }
+            help={T("Share of flat sessions.", "Porcentaje de sesiones planas.")}
+          />
         </div>
       </Card>
 
-      <Card title="Streaks">
+      <Card title={T("Streaks", "Rachas")}>
         <div className="grid grid-cols-2 gap-3 text-sm">
-          <MiniStat label="Longest win streak" value={snapshot ? String(snapshot.longestWinStreak) : "—"} />
-          <MiniStat label="Longest loss streak" value={snapshot ? String(snapshot.longestLossStreak) : "—"} />
+          <MiniStat
+            label={T("Longest win streak", "Racha ganadora más larga")}
+            value={snapshot ? String(snapshot.longestWinStreak) : "—"}
+            help={T("Most consecutive winning sessions.", "Mayor número de sesiones ganadoras consecutivas.")}
+          />
+          <MiniStat
+            label={T("Longest lesson streak", "Racha de aprendizaje más larga")}
+            value={snapshot ? String(snapshot.longestLossStreak) : "—"}
+            help={T("Most consecutive learning sessions.", "Mayor número de sesiones de aprendizaje consecutivas.")}
+          />
         </div>
+      </Card>
+
+      <Card title={T("Institutional KPIs", "KPIs institucionales")}>
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-sm">
+          <MiniStat
+            label={T("CAGR", "CAGR")}
+            value={snapshot?.cagr != null ? fmtPct(snapshot.cagr) : "—"}
+            help={T("Annualized growth based on the equity curve.", "Crecimiento anualizado basado en la curva de equity.")}
+          />
+          <MiniStat
+            label={T("Sharpe", "Sharpe")}
+            value={snapshot?.sharpe != null ? snapshot.sharpe.toFixed(2) : "—"}
+            help={T("Risk-adjusted return vs total volatility.", "Retorno ajustado por riesgo vs volatilidad total.")}
+          />
+          <MiniStat
+            label={T("Sortino", "Sortino")}
+            value={snapshot?.sortino != null ? snapshot.sortino.toFixed(2) : "—"}
+            help={T("Risk-adjusted return vs downside volatility only.", "Retorno ajustado por riesgo vs volatilidad negativa.")}
+          />
+          <MiniStat
+            label={T("Max DD %", "Máx DD %")}
+            value={snapshot?.maxDrawdownPct != null ? fmtPct(snapshot.maxDrawdownPct) : "—"}
+            help={T("Max drawdown as a percentage of peak equity.", "Máximo drawdown como % del pico de equity.")}
+          />
+          <MiniStat
+            label={T("Recovery factor", "Recovery factor")}
+            value={snapshot?.recoveryFactor != null ? snapshot.recoveryFactor.toFixed(2) : "—"}
+            help={T("Net profit divided by max drawdown.", "Ganancia neta dividido por max drawdown.")}
+          />
+          <MiniStat
+            label={T("Payoff ratio", "Payoff ratio")}
+            value={snapshot?.payoffRatio != null ? snapshot.payoffRatio.toFixed(2) : "—"}
+            help={T("Average win divided by average lesson.", "Promedio ganancia dividido por promedio aprendizaje.")}
+          />
+        </div>
+        <p className="text-[11px] text-slate-500 mt-3">
+          {T(
+            "Sharpe/Sortino use daily equity returns; CAGR is annualized from the first/last equity points.",
+            "Sharpe/Sortino usan retornos diarios de equity; CAGR es anualizado desde el primer/último punto."
+          )}
+        </p>
       </Card>
     </div>
   );
 }
 
-function MiniStat({ label, value }: { label: string; value: string }) {
+function MiniStat({ label, value, help }: { label: string; value: string; help: string }) {
   return (
     <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
-      <div className="text-[11px] text-slate-500">{label}</div>
+      <div className="text-[11px] text-slate-500 flex items-center">
+        <span>{label}</span>
+        <InfoDot text={help} />
+      </div>
       <div className="mt-1 text-slate-100 font-semibold">{value}</div>
     </div>
   );
 }
 
-function PerformanceSection({ snapshot }: { snapshot: AnalyticsSnapshot | null }) {
+function PerformanceSection({ lang, snapshot }: { lang: Lang; snapshot: AnalyticsSnapshot | null }) {
+  const T = (en: string, es: string) => LL(lang, en, es);
   const rows = snapshot?.monthly ?? [];
 
   return (
-    <Card title="Monthly performance" right={<span className="text-xs text-slate-500">Net P&amp;L by month</span>}>
+    <Card title={T("Monthly performance", "Rendimiento mensual")} right={<span className="text-xs text-slate-500">{T("Net P&L by month", "P&L neto por mes")}</span>}>
       {rows.length === 0 ? (
-        <p className="text-sm text-slate-400">No data.</p>
+        <p className="text-sm text-slate-400">{T("No data.", "Sin datos.")}</p>
       ) : (
         <div className="overflow-x-auto">
           <table className="min-w-full text-sm">
             <thead>
               <tr className="text-xs text-slate-500 border-b border-slate-800">
-                <th className="text-left py-2 pr-4">Month</th>
-                <th className="text-right py-2 px-2">P&amp;L</th>
-                <th className="text-right py-2 px-2">Trades</th>
-                <th className="text-right py-2 pl-2">Win rate</th>
+                <th className="text-left py-2 pr-4">{T("Month", "Mes")}</th>
+                <th className="text-right py-2 px-2">{T("P&L", "P&L")}</th>
+                <th className="text-right py-2 px-2">{T("Trades", "Operaciones")}</th>
+                <th className="text-right py-2 pl-2">{T("Win rate", "Tasa de acierto")}</th>
               </tr>
             </thead>
             <tbody>
@@ -1439,8 +2206,9 @@ function PerformanceSection({ snapshot }: { snapshot: AnalyticsSnapshot | null }
   );
 }
 
-function RiskSection({ snapshot }: { snapshot: AnalyticsSnapshot | null }) {
-  if (!snapshot) return <Card title="Risk"><p className="text-sm text-slate-400">No data.</p></Card>;
+function RiskSection({ lang, snapshot }: { lang: Lang; snapshot: AnalyticsSnapshot | null }) {
+  const T = (en: string, es: string) => LL(lang, en, es);
+  if (!snapshot) return <Card title={T("Risk", "Riesgo")}><p className="text-sm text-slate-400">{T("No data.", "Sin datos.")}</p></Card>;
 
   const pnl = snapshot.tradesTable.map((t) => t.pnlNet);
   const avg = mean(pnl);
@@ -1450,28 +2218,32 @@ function RiskSection({ snapshot }: { snapshot: AnalyticsSnapshot | null }) {
   const q75 = quantile(pnl, 0.75);
 
   return (
-    <Card title="Risk & consistency">
+    <Card title={T("Risk & consistency", "Riesgo y consistencia")}>
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-sm">
-        <MiniStat label="Std dev" value={fmtUsd(sd)} />
-        <MiniStat label="Median" value={fmtUsd(med)} />
-        <MiniStat label="Avg" value={fmtUsd(avg)} />
-        <MiniStat label="25th pct" value={fmtUsd(q25)} />
-        <MiniStat label="75th pct" value={fmtUsd(q75)} />
-        <MiniStat label="Profit factor" value={snapshot.profitFactor != null ? snapshot.profitFactor.toFixed(2) : "—"} />
+        <MiniStat label={T("Std dev", "Desv. estándar")} value={fmtUsd(sd)} help={T("Volatility of session results.", "Volatilidad de resultados por sesión.")} />
+        <MiniStat label={T("Median", "Mediana")} value={fmtUsd(med)} help={T("Middle session result.", "Resultado central por sesión.")} />
+        <MiniStat label={T("Avg", "Promedio")} value={fmtUsd(avg)} help={T("Average session result.", "Promedio por sesión.")} />
+        <MiniStat label={T("25th pct", "Pct 25")} value={fmtUsd(q25)} help={T("Bottom quartile of results.", "Cuartil inferior de resultados.")} />
+        <MiniStat label={T("75th pct", "Pct 75")} value={fmtUsd(q75)} help={T("Top quartile of results.", "Cuartil superior de resultados.")} />
+        <MiniStat label={T("Profit factor", "Factor de ganancia")} value={snapshot.profitFactor != null ? snapshot.profitFactor.toFixed(2) : "—"} help={T("Sum of wins divided by sum of lessons.", "Suma de ganadas dividido por suma de aprendizajes.")} />
       </div>
 
       <p className="text-xs text-slate-500 mt-4">
-        Std dev measures how volatile your per-session results are. Lower is generally more consistent.
+        {T(
+          "Std dev measures how volatile your per-session results are. Lower is generally more consistent.",
+          "La desviación estándar mide qué tan volátiles son tus resultados por sesión. Más bajo suele ser más consistente."
+        )}
       </p>
     </Card>
   );
 }
 
-function DistributionSection({ snapshot }: { snapshot: AnalyticsSnapshot | null }) {
+function DistributionSection({ lang, snapshot }: { lang: Lang; snapshot: AnalyticsSnapshot | null }) {
+  const T = (en: string, es: string) => LL(lang, en, es);
   const bins = snapshot?.pnlHistogram ?? [];
 
   const series = useMemo(() => {
-    return [{ name: "Count", data: bins.map((b) => b.count) }];
+    return [{ name: T("Count", "Cantidad"), data: bins.map((b) => b.count) }];
   }, [bins]);
 
   const options: ApexOptions = useMemo(
@@ -1487,9 +2259,9 @@ function DistributionSection({ snapshot }: { snapshot: AnalyticsSnapshot | null 
   );
 
   return (
-    <Card title="P&amp;L distribution" right={<span className="text-xs text-slate-500">Histogram of session P&amp;L</span>}>
+    <Card title={T("P&L distribution", "Distribución de P&L")} right={<span className="text-xs text-slate-500">{T("Histogram of session P&L", "Histograma de P&L por sesión")}</span>}>
       {bins.length === 0 ? (
-        <p className="text-sm text-slate-400">No data.</p>
+        <p className="text-sm text-slate-400">{T("No data.", "Sin datos.")}</p>
       ) : (
         <div className="h-[320px]">
           <Chart options={options} series={series as any} type="bar" height={320} />
@@ -1499,24 +2271,25 @@ function DistributionSection({ snapshot }: { snapshot: AnalyticsSnapshot | null 
   );
 }
 
-function TimeSection({ snapshot }: { snapshot: AnalyticsSnapshot | null }) {
+function TimeSection({ lang, snapshot }: { lang: Lang; snapshot: AnalyticsSnapshot | null }) {
+  const T = (en: string, es: string) => LL(lang, en, es);
   const byDOW = snapshot?.byDOW ?? [];
   const byHour = snapshot?.byHour ?? [];
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-      <Card title="By day of week">
+      <Card title={T("By day of week", "Por día de la semana")}>
         {byDOW.length === 0 ? (
-          <p className="text-sm text-slate-400">No data.</p>
+          <p className="text-sm text-slate-400">{T("No data.", "Sin datos.")}</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="min-w-full text-sm">
               <thead>
                 <tr className="text-xs text-slate-500 border-b border-slate-800">
-                  <th className="text-left py-2 pr-4">Day</th>
-                  <th className="text-right py-2 px-2">P&amp;L</th>
-                  <th className="text-right py-2 px-2">Trades</th>
-                  <th className="text-right py-2 pl-2">Win rate</th>
+                  <th className="text-left py-2 pr-4">{T("Day", "Día")}</th>
+                  <th className="text-right py-2 px-2">{T("P&L", "P&L")}</th>
+                  <th className="text-right py-2 px-2">{T("Trades", "Operaciones")}</th>
+                  <th className="text-right py-2 pl-2">{T("Win rate", "Tasa de acierto")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -1536,18 +2309,23 @@ function TimeSection({ snapshot }: { snapshot: AnalyticsSnapshot | null }) {
         )}
       </Card>
 
-      <Card title="By hour">
+      <Card title={T("By hour", "Por hora")}>
         {byHour.length === 0 ? (
-          <p className="text-sm text-slate-400">No data (requires created_at timestamps in your entries).</p>
+          <p className="text-sm text-slate-400">
+            {T(
+              "No data (requires trade times in your journal).",
+              "Sin datos (requiere horas de trades en tu journal)."
+            )}
+          </p>
         ) : (
           <div className="overflow-x-auto">
             <table className="min-w-full text-sm">
               <thead>
                 <tr className="text-xs text-slate-500 border-b border-slate-800">
-                  <th className="text-left py-2 pr-4">Hour</th>
-                  <th className="text-right py-2 px-2">P&amp;L</th>
-                  <th className="text-right py-2 px-2">Trades</th>
-                  <th className="text-right py-2 pl-2">Win rate</th>
+                  <th className="text-left py-2 pr-4">{T("Hour", "Hora")}</th>
+                  <th className="text-right py-2 px-2">{T("P&L", "P&L")}</th>
+                  <th className="text-right py-2 px-2">{T("Trades", "Operaciones")}</th>
+                  <th className="text-right py-2 pl-2">{T("Win rate", "Tasa de acierto")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -1570,22 +2348,23 @@ function TimeSection({ snapshot }: { snapshot: AnalyticsSnapshot | null }) {
   );
 }
 
-function InstrumentsSection({ snapshot }: { snapshot: AnalyticsSnapshot | null }) {
+function InstrumentsSection({ lang, snapshot }: { lang: Lang; snapshot: AnalyticsSnapshot | null }) {
+  const T = (en: string, es: string) => LL(lang, en, es);
   const rows = snapshot?.bySymbol ?? [];
 
   return (
-    <Card title="By symbol" right={<span className="text-xs text-slate-500">Sorted by net P&amp;L</span>}>
+    <Card title={T("By symbol", "Por símbolo")} right={<span className="text-xs text-slate-500">{T("Sorted by net P&L", "Ordenado por P&L neto")}</span>}>
       {rows.length === 0 ? (
-        <p className="text-sm text-slate-400">No data.</p>
+        <p className="text-sm text-slate-400">{T("No data.", "Sin datos.")}</p>
       ) : (
         <div className="overflow-x-auto">
           <table className="min-w-full text-sm">
             <thead>
               <tr className="text-xs text-slate-500 border-b border-slate-800">
-                <th className="text-left py-2 pr-4">Symbol</th>
-                <th className="text-right py-2 px-2">P&amp;L</th>
-                <th className="text-right py-2 px-2">Trades</th>
-                <th className="text-right py-2 pl-2">Win rate</th>
+                <th className="text-left py-2 pr-4">{T("Symbol", "Símbolo")}</th>
+                <th className="text-right py-2 px-2">{T("P&L", "P&L")}</th>
+                <th className="text-right py-2 px-2">{T("Trades", "Operaciones")}</th>
+                <th className="text-right py-2 pl-2">{T("Win rate", "Tasa de acierto")}</th>
               </tr>
             </thead>
             <tbody>
@@ -1607,24 +2386,25 @@ function InstrumentsSection({ snapshot }: { snapshot: AnalyticsSnapshot | null }
   );
 }
 
-function TradesSection({ snapshot }: { snapshot: AnalyticsSnapshot | null }) {
+function TradesSection({ lang, snapshot }: { lang: Lang; snapshot: AnalyticsSnapshot | null }) {
+  const T = (en: string, es: string) => LL(lang, en, es);
   const rows = snapshot?.tradesTable ?? [];
 
   return (
-    <Card title="Trades" right={<span className="text-xs text-slate-500">Most recent first</span>}>
+    <Card title={T("Trades", "Operaciones")} right={<span className="text-xs text-slate-500">{T("Most recent first", "Más recientes primero")}</span>}>
       {rows.length === 0 ? (
-        <p className="text-sm text-slate-400">No data.</p>
+        <p className="text-sm text-slate-400">{T("No data.", "Sin datos.")}</p>
       ) : (
         <div className="overflow-x-auto">
           <table className="min-w-full text-sm">
             <thead>
               <tr className="text-xs text-slate-500 border-b border-slate-800">
-                <th className="text-left py-2 pr-4">Date</th>
-                <th className="text-left py-2 px-2">Title</th>
-                <th className="text-left py-2 px-2">Instrument</th>
-                <th className="text-left py-2 px-2">Symbol</th>
-                <th className="text-right py-2 px-2">Fees</th>
-                <th className="text-right py-2 pl-2">Net</th>
+                <th className="text-left py-2 pr-4">{T("Date", "Fecha")}</th>
+                <th className="text-left py-2 px-2">{T("Title", "Título")}</th>
+                <th className="text-left py-2 px-2">{T("Instrument", "Instrumento")}</th>
+                <th className="text-left py-2 px-2">{T("Symbol", "Símbolo")}</th>
+                <th className="text-right py-2 px-2">{T("Fees", "Comisiones")}</th>
+                <th className="text-right py-2 pl-2">{T("Net", "Neto")}</th>
               </tr>
             </thead>
             <tbody>
@@ -1659,6 +2439,14 @@ type StatsAgg = {
   totalTradeCosts: number;
 
   avgHoldMins: number | null;
+  medianHoldMins: number | null;
+  minHoldMins: number | null;
+  maxHoldMins: number | null;
+  avgHoldWinMins: number | null;
+  avgHoldLossMins: number | null;
+  avgPnlPerTrade: number | null;
+  pnlPerHour: number | null;
+  tradesPerSession: number | null;
 
   totalClosedTrades: number;
   avgRMultiple: number | null;
@@ -1694,8 +2482,9 @@ function computeStatsAgg(opts: {
   ledgerOpenPositions: any[];
   dailySnaps: DailySnapshotRow[];
   cashflows: Cashflow[];
+  tradeStats?: TradeAnalytics | null;
 }): StatsAgg {
-  const { sessions, ledgerClosedTrades, ledgerOpenPositions, dailySnaps, cashflows } = opts;
+  const { sessions, ledgerClosedTrades, ledgerOpenPositions, dailySnaps, cashflows, tradeStats } = opts;
 
   // account growth from snapshots if present
   let accountGrowthPct: number | null = null;
@@ -1742,11 +2531,18 @@ function computeStatsAgg(opts: {
 
   const totalTradeCosts = sum((sessions ?? []).map((s) => toNumberMaybe(s.feesUsd)));
 
-  // The journal in this project doesn’t always store hold time / R multiple, so keep these null unless you have data
-  const avgHoldMins: number | null = null;
+  const avgHoldMins: number | null = tradeStats?.hold?.avgHoldMins ?? null;
+  const medianHoldMins: number | null = tradeStats?.hold?.medianHoldMins ?? null;
+  const minHoldMins: number | null = tradeStats?.hold?.minHoldMins ?? null;
+  const maxHoldMins: number | null = tradeStats?.hold?.maxHoldMins ?? null;
+  const avgHoldWinMins: number | null = tradeStats?.hold?.avgHoldWinMins ?? null;
+  const avgHoldLossMins: number | null = tradeStats?.hold?.avgHoldLossMins ?? null;
+  const avgPnlPerTrade: number | null = tradeStats?.avgPnlPerTrade ?? null;
+  const pnlPerHour: number | null = tradeStats?.pnlPerHour ?? null;
+  const tradesPerSession: number | null = tradeStats && sessions.length ? tradeStats.tradeCount / sessions.length : null;
 
   const closedTrades = ledgerClosedTrades ?? [];
-  const totalClosedTrades = closedTrades.length;
+  const totalClosedTrades = tradeStats?.tradeCount ?? closedTrades.length;
 
   const rMultiples = closedTrades
     .map((t: any) => toNumberMaybe(t?.r_multiple ?? t?.rMultiple ?? NaN))
@@ -1765,6 +2561,14 @@ function computeStatsAgg(opts: {
     totalTradeCosts,
 
     avgHoldMins,
+    medianHoldMins,
+    minHoldMins,
+    maxHoldMins,
+    avgHoldWinMins,
+    avgHoldLossMins,
+    avgPnlPerTrade,
+    pnlPerHour,
+    tradesPerSession,
 
     totalClosedTrades,
     avgRMultiple,
@@ -1776,46 +2580,72 @@ function computeStatsAgg(opts: {
 }
 
 function StatisticsSection({
+  lang,
   sessions,
   dailySnaps,
   cashflows,
   rangeEndIso,
+  tradeStats,
 }: {
+  lang: Lang;
   sessions: SessionWithTrades[];
   dailySnaps: DailySnapshotRow[];
   cashflows: Cashflow[];
   rangeEndIso: string;
+  tradeStats: TradeAnalytics;
 }) {
+  const T = (en: string, es: string) => LL(lang, en, es);
   // if you have a trade ledger, load it here; for now we infer from sessions
   const ledgerClosedTrades = useMemo(() => [], []);
   const ledgerOpenPositions = useMemo(() => [], []);
 
   const agg = useMemo(() => {
-    return computeStatsAgg({ sessions, ledgerClosedTrades, ledgerOpenPositions, dailySnaps, cashflows });
-  }, [sessions, ledgerClosedTrades, ledgerOpenPositions, dailySnaps, cashflows]);
+    return computeStatsAgg({ sessions, ledgerClosedTrades, ledgerOpenPositions, dailySnaps, cashflows, tradeStats });
+  }, [sessions, ledgerClosedTrades, ledgerOpenPositions, dailySnaps, cashflows, tradeStats]);
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-      <Card title="Account metrics" right={<span className="text-xs text-slate-500">As of {rangeEndIso}</span>}>
+      <Card title={T("Account metrics", "Métricas de cuenta")} right={<span className="text-xs text-slate-500">{T("As of", "Al")} {rangeEndIso}</span>}>
         <div className="grid grid-cols-2 gap-3 text-sm">
-          <MiniStat label="Account growth" value={agg.accountGrowthPct != null ? fmtPct(agg.accountGrowthPct) : "—"} />
-          <MiniStat label="Trade costs" value={fmtUsd(agg.totalTradeCosts)} />
-          <MiniStat label="Deposits" value={agg.totalDeposits != null ? fmtUsd(agg.totalDeposits) : "—"} />
-          <MiniStat label="Withdrawals" value={agg.totalWithdrawals != null ? fmtUsd(agg.totalWithdrawals) : "—"} />
+          <MiniStat label={T("Account growth", "Crecimiento de cuenta")} value={agg.accountGrowthPct != null ? fmtPct(agg.accountGrowthPct) : "—"} help={T("Change in equity over the range.", "Cambio en equity durante el rango.")} />
+          <MiniStat label={T("Trade costs", "Costos de trading")} value={fmtUsd(agg.totalTradeCosts)} help={T("Total commissions + fees.", "Total de comisiones + fees.")} />
+          <MiniStat label={T("Deposits", "Depósitos")} value={agg.totalDeposits != null ? fmtUsd(agg.totalDeposits) : "—"} help={T("Cash added to the account.", "Aportes de efectivo a la cuenta.")} />
+          <MiniStat label={T("Withdrawals", "Retiros")} value={agg.totalWithdrawals != null ? fmtUsd(agg.totalWithdrawals) : "—"} help={T("Cash removed from the account.", "Retiros de efectivo de la cuenta.")} />
         </div>
         <p className="text-xs text-slate-500 mt-4">
-          Deposits/withdrawals are read from <span className="font-mono">cashflows</span> when snapshot columns aren&apos;t available.
+          {T(
+            "Deposits/withdrawals are read from",
+            "Los depósitos/retiros se leen desde"
+          )}{" "}
+          <span className="font-mono">cashflows</span>{" "}
+          {T(
+            "when snapshot columns aren't available.",
+            "cuando las columnas de snapshot no están disponibles."
+          )}
         </p>
       </Card>
 
-      <Card title="Trade metrics">
+      <Card title={T("Trade metrics", "Métricas de trading")}>
         <div className="grid grid-cols-2 gap-3 text-sm">
-          <MiniStat label="Closed trades" value={String(agg.totalClosedTrades)} />
-          <MiniStat label="Open positions" value={String(agg.openPositionsCount)} />
-          <MiniStat label="Avg R" value={agg.avgRMultiple != null ? agg.avgRMultiple.toFixed(2) : "—"} />
-          <MiniStat label="Best R" value={agg.bestRMultiple != null ? agg.bestRMultiple.toFixed(2) : "—"} />
-          <MiniStat label="Worst R" value={agg.worstRMultiple != null ? agg.worstRMultiple.toFixed(2) : "—"} />
-          <MiniStat label="Avg hold" value={agg.avgHoldMins != null ? `${agg.avgHoldMins.toFixed(0)} min` : "—"} />
+          <MiniStat label={T("Closed trades", "Operaciones cerradas")} value={String(agg.totalClosedTrades)} help={T("Count of closed trade legs.", "Cantidad de operaciones cerradas.")} />
+          <MiniStat label={T("Open positions", "Posiciones abiertas")} value={String(agg.openPositionsCount)} help={T("Open positions detected in the ledger.", "Posiciones abiertas detectadas en el ledger.")} />
+          <MiniStat label={T("Avg R", "R promedio")} value={agg.avgRMultiple != null ? agg.avgRMultiple.toFixed(2) : "—"} help={T("Average R-multiple (if available).", "R-múltiplo promedio (si disponible).")} />
+          <MiniStat label={T("Best R", "Mejor R")} value={agg.bestRMultiple != null ? agg.bestRMultiple.toFixed(2) : "—"} help={T("Best single-trade R-multiple.", "Mejor R-múltiplo por trade.")} />
+          <MiniStat label={T("Lowest R", "R más bajo")} value={agg.worstRMultiple != null ? agg.worstRMultiple.toFixed(2) : "—"} help={T("Lowest single-trade R-multiple.", "R-múltiplo más bajo por trade.")} />
+          <MiniStat label={T("Avg hold", "Holding promedio")} value={agg.avgHoldMins != null ? `${agg.avgHoldMins.toFixed(0)} min` : "—"} help={T("Average holding time for closed trades.", "Tiempo promedio en operaciones cerradas.")} />
+        </div>
+      </Card>
+
+      <Card title={T("Timing & efficiency", "Tiempo y eficiencia")}>
+        <div className="grid grid-cols-2 gap-3 text-sm">
+          <MiniStat label={T("Median hold", "Holding mediana")} value={agg.medianHoldMins != null ? `${agg.medianHoldMins.toFixed(0)} min` : "—"} help={T("Median holding time.", "Tiempo mediano de holding.")} />
+          <MiniStat label={T("Shortest hold", "Holding mínimo")} value={agg.minHoldMins != null ? `${agg.minHoldMins.toFixed(0)} min` : "—"} help={T("Shortest holding time.", "Menor tiempo de holding.")} />
+          <MiniStat label={T("Longest hold", "Holding máximo")} value={agg.maxHoldMins != null ? `${agg.maxHoldMins.toFixed(0)} min` : "—"} help={T("Longest holding time.", "Mayor tiempo de holding.")} />
+          <MiniStat label={T("Avg hold (wins)", "Holding promedio (ganadas)")} value={agg.avgHoldWinMins != null ? `${agg.avgHoldWinMins.toFixed(0)} min` : "—"} help={T("Average holding time for winning trades.", "Promedio de holding en trades ganadores.")} />
+          <MiniStat label={T("Avg hold (lessons)", "Holding promedio (aprendizajes)")} value={agg.avgHoldLossMins != null ? `${agg.avgHoldLossMins.toFixed(0)} min` : "—"} help={T("Average holding time for learning trades.", "Promedio de holding en trades de aprendizaje.")} />
+          <MiniStat label={T("Trades / session", "Operaciones / sesión")} value={agg.tradesPerSession != null ? agg.tradesPerSession.toFixed(2) : "—"} help={T("Average number of trades per session.", "Promedio de trades por sesión.")} />
+          <MiniStat label={T("Avg P&L / trade", "P&L prom. / trade")} value={agg.avgPnlPerTrade != null ? fmtUsd(agg.avgPnlPerTrade) : "—"} help={T("Average net P&L per trade.", "P&L neto promedio por trade.")} />
+          <MiniStat label={T("P&L per hour", "P&L por hora")} value={agg.pnlPerHour != null ? fmtUsd(agg.pnlPerHour) : "—"} help={T("Net P&L divided by total holding hours.", "P&L neto dividido entre horas en posición.")} />
         </div>
       </Card>
     </div>

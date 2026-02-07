@@ -5,6 +5,8 @@ import Link from "next/link";
 import TopNav from "@/app/components/TopNav";
 import TrophyToasts, { type TrophyToastItem } from "@/app/components/TrophyToasts";
 import { useAuth } from "@/context/AuthContext";
+import { useAppSettings } from "@/lib/appSettings";
+import { resolveLocale } from "@/lib/i18n";
 import {
   getPublicUserProfile,
   listPublicLeaderboard,
@@ -20,8 +22,23 @@ function tierPill(tier?: string | null) {
   return "bg-emerald-500/15 text-emerald-200 border-emerald-400/40";
 }
 
+function tierLabel(tier: string | null | undefined, lang: "en" | "es") {
+  const t = (tier || "").toLowerCase();
+  const map: Record<string, { en: string; es: string }> = {
+    elite: { en: "Elite", es: "Elite" },
+    gold: { en: "Gold", es: "Oro" },
+    silver: { en: "Silver", es: "Plata" },
+    bronze: { en: "Bronze", es: "Bronce" },
+  };
+  return map[t]?.[lang] ?? (lang === "es" ? "Bronce" : "Bronze");
+}
+
 export default function GlobalRankingPage() {
   const { user, loading } = useAuth() as any;
+  const { locale } = useAppSettings();
+  const lang = resolveLocale(locale);
+  const isEs = lang === "es";
+  const L = (en: string, es: string) => (isEs ? es : en);
 
   const [rows, setRows] = useState<PublicLeaderboardRow[]>([]);
   const [me, setMe] = useState<PublicLeaderboardRow | null>(null);
@@ -97,7 +114,7 @@ export default function GlobalRankingPage() {
       } catch (e: any) {
         console.error("[GlobalRanking] Load error:", e);
         if (!cancelled) {
-          setError("We couldn't load the global ranking. Please try again.");
+          setError(L("We couldn't load the global ranking. Please try again.", "No pudimos cargar el ranking global. Intenta de nuevo."));
           setLoadingRows(false);
         }
       }
@@ -113,7 +130,7 @@ export default function GlobalRankingPage() {
   if (loading) {
     return (
       <main className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center">
-        <p className="text-sm text-slate-400">Loading…</p>
+        <p className="text-sm text-slate-400">{L("Loading…", "Cargando…")}</p>
       </main>
     );
   }
@@ -139,12 +156,14 @@ export default function GlobalRankingPage() {
         <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <p className="text-[11px] uppercase tracking-[0.25em] text-emerald-300">
-              Community
+              {L("Community", "Comunidad")}
             </p>
-            <h1 className="text-3xl font-semibold mt-1">Global Ranking</h1>
+            <h1 className="text-3xl font-semibold mt-1">{L("Global Ranking", "Ranking global")}</h1>
             <p className="text-sm text-slate-400 mt-2 max-w-2xl">
-              Leaderboard by total XP. XP includes challenge XP plus all trophies you earn
-              across the platform.
+              {L(
+                "Leaderboard by total XP. XP includes challenge XP plus all trophies you earn across the platform.",
+                "Ranking por XP total. El XP incluye el XP de retos más todos los trofeos que ganas en la plataforma."
+              )}
             </p>
           </div>
 
@@ -154,7 +173,7 @@ export default function GlobalRankingPage() {
                 href={`/globalranking/${userId}`}
                 className="rounded-xl border border-slate-700 bg-slate-900/70 px-4 py-2 text-xs font-semibold text-slate-100 hover:border-emerald-400 hover:text-emerald-200 transition"
               >
-                My trophies
+                {L("My trophies", "Mis trofeos")}
               </Link>
             </div>
           )}
@@ -165,35 +184,39 @@ export default function GlobalRankingPage() {
           <section className="rounded-3xl border border-slate-800 bg-slate-900/50 p-5">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <p className="text-xs text-slate-400">Your snapshot</p>
+                <p className="text-xs text-slate-400">{L("Your snapshot", "Tu resumen")}</p>
                 <p className="mt-1 text-sm text-slate-200">
                   {typeof myRankInTop25 === "number" ? (
                     <>
-                      Your rank: <span className="font-semibold text-emerald-200">#{myRankInTop25}</span>
+                      {L("Your rank:", "Tu rango:")}{" "}
+                      <span className="font-semibold text-emerald-200">#{myRankInTop25}</span>
                       {me ? (
                         <>
-                          {" "}({me.xp_total?.toLocaleString?.() ?? me.xp_total} XP · {me.trophies_count} trophies)
+                          {" "}({me.xp_total?.toLocaleString?.() ?? me.xp_total} XP · {me.trophies_count}{" "}
+                          {L("trophies", "trofeos")})
                         </>
                       ) : null}
                     </>
                   ) : me ? (
                     <>
-                      {me.xp_total?.toLocaleString?.() ?? me.xp_total} XP · {me.trophies_count} trophies
-                      <span className="text-slate-500"> · Not in the top 25 yet</span>
+                      {me.xp_total?.toLocaleString?.() ?? me.xp_total} XP · {me.trophies_count}{" "}
+                      {L("trophies", "trofeos")}
+                      <span className="text-slate-500"> · {L("Not in the top 25 yet", "Aún no estás en el top 25")}</span>
                     </>
                   ) : (
-                    <span className="text-slate-500">Loading…</span>
+                    <span className="text-slate-500">{L("Loading…", "Cargando…")}</span>
                   )}
                 </p>
               </div>
 
               <div className="flex items-center gap-2 text-[11px] text-slate-400">
                 <span className="rounded-full border border-slate-700 bg-slate-950/40 px-3 py-1">
-                  Showing top <span className="text-slate-200 font-semibold">25</span>
+                  {L("Showing top", "Mostrando top")}{" "}
+                  <span className="text-slate-200 font-semibold">25</span>
                 </span>
                 {syncing && (
                   <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-emerald-200">
-                    Checking trophies…
+                    {L("Checking trophies…", "Revisando trofeos…")}
                   </span>
                 )}
               </div>
@@ -204,31 +227,33 @@ export default function GlobalRankingPage() {
         {/* Leaderboard */}
         <section className="rounded-3xl border border-slate-800 bg-slate-900/50 overflow-hidden">
           <div className="flex items-center justify-between px-5 py-4 border-b border-slate-800">
-            <h2 className="text-sm font-semibold text-slate-100">Top traders</h2>
-            <p className="text-[11px] text-slate-400">Updated live as users earn trophies.</p>
+            <h2 className="text-sm font-semibold text-slate-100">{L("Top traders", "Top traders")}</h2>
+            <p className="text-[11px] text-slate-400">
+              {L("Updated live as users earn trophies.", "Se actualiza en vivo cuando los usuarios ganan trofeos.")}
+            </p>
           </div>
 
           {error && <p className="px-5 py-4 text-xs text-red-300">{error}</p>}
 
           {loadingRows ? (
-            <p className="px-5 py-6 text-sm text-slate-400">Loading leaderboard…</p>
+            <p className="px-5 py-6 text-sm text-slate-400">{L("Loading leaderboard…", "Cargando ranking…")}</p>
           ) : (
             <div className="overflow-x-auto">
               <table className="min-w-full text-sm">
                 <thead className="text-[11px] uppercase tracking-[0.22em] text-slate-500">
                   <tr className="border-b border-slate-800">
-                    <th className="text-left px-5 py-3">Rank</th>
-                    <th className="text-left px-5 py-3">Trader</th>
-                    <th className="text-left px-5 py-3">Tier</th>
+                    <th className="text-left px-5 py-3">{L("Rank", "Rango")}</th>
+                    <th className="text-left px-5 py-3">{L("Trader", "Trader")}</th>
+                    <th className="text-left px-5 py-3">{L("Tier", "Nivel")}</th>
                     <th className="text-right px-5 py-3">XP</th>
-                    <th className="text-right px-5 py-3">Trophies</th>
+                    <th className="text-right px-5 py-3">{L("Trophies", "Trofeos")}</th>
                     <th className="text-right px-5 py-3">&nbsp;</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800">
                   {rows.map((r, idx) => {
                     const isMe = r.user_id === userId;
-                    const name = r.display_name || "Trader";
+                    const name = r.display_name || L("Trader", "Trader");
 
                     return (
                       <tr
@@ -241,7 +266,7 @@ export default function GlobalRankingPage() {
                             <span className="font-medium text-slate-100">{name}</span>
                             {isMe && (
                               <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-200">
-                                You
+                                {L("You", "Tú")}
                               </span>
                             )}
                           </div>
@@ -252,7 +277,7 @@ export default function GlobalRankingPage() {
                               r.tier
                             )}`}
                           >
-                            {r.tier || "Bronze"}
+                            {tierLabel(r.tier, lang)}
                           </span>
                         </td>
                         <td className="px-5 py-4 text-right font-semibold text-slate-100">
@@ -266,7 +291,7 @@ export default function GlobalRankingPage() {
                             href={`/globalranking/${r.user_id}`}
                             className="text-xs font-semibold text-emerald-300 hover:text-emerald-200"
                           >
-                            View trophies →
+                            {L("View trophies →", "Ver trofeos →")}
                           </Link>
                         </td>
                       </tr>
@@ -276,8 +301,10 @@ export default function GlobalRankingPage() {
               </table>
 
               <p className="px-5 py-4 text-[11px] text-slate-500">
-                Privacy note: profiles show only trophies earned and public ranking stats. No email,
-                phone or address is exposed.
+                {L(
+                  "Privacy note: profiles show only trophies earned and public ranking stats. No email, phone or address is exposed.",
+                  "Nota de privacidad: los perfiles muestran solo trofeos ganados y estadísticas públicas. No se expone email, teléfono ni dirección."
+                )}
               </p>
             </div>
           )}

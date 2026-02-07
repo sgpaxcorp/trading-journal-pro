@@ -7,6 +7,8 @@ import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 
 import { useAuth } from "@/context/AuthContext";
+import { useAppSettings } from "@/lib/appSettings";
+import { resolveLocale } from "@/lib/i18n";
 import type { JournalEntry } from "@/lib/journalTypes";
 import { getAllJournalEntries } from "@/lib/journalSupabase";
 import RichNotebookEditor from "@/app/components/RichNotebookEditor";
@@ -43,21 +45,6 @@ type NotebookStorage = {
   pages: LocalNotebookPage[];
 };
 
-const MONTH_LABELS = [
-  "January",
-  "February",
-  "March",
-  "April",
-  "May",
-  "June",
-  "July",
-  "August",
-  "September",
-  "October",
-  "November",
-  "December",
-];
-
 const NOTEBOOK_STORAGE_KEY = "tjp_notebooks_v1";
 const FREE_NOTES_STORAGE_KEY = "tjp_notebook_free_notes_v1";
 
@@ -68,9 +55,9 @@ function toYMD(date: Date): string {
   return `${y}-${m}-${d}`;
 }
 
-function formatShortDate(dateStr: string) {
+function formatShortDate(dateStr: string, locale?: string) {
   const d = new Date(`${dateStr}T00:00:00`);
-  return d.toLocaleDateString(undefined, {
+  return d.toLocaleDateString(locale, {
     month: "short",
     day: "numeric",
     year: "numeric",
@@ -78,13 +65,13 @@ function formatShortDate(dateStr: string) {
 }
 
 // Evita mostrar JSON crudo como notas
-function getNotebookPreview(raw: any): string | null {
+function getNotebookPreview(raw: any, fallbackText: string): string | null {
   if (!raw) return null;
 
   if (typeof raw === "string") {
     const trimmed = raw.trim();
     if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
-      return "Tap to open this notebook page summary.";
+      return fallbackText;
     }
     return trimmed;
   }
@@ -180,55 +167,56 @@ function getLastWeekdayOfMonth(
   return new Date(year, month, day);
 }
 
-function getUsFederalHolidays(year: number): Holiday[] {
+function getUsFederalHolidays(year: number, lang: "en" | "es"): Holiday[] {
   const holidays: Holiday[] = [];
+  const label = (en: string, es: string) => (lang === "es" ? es : en);
 
   // Fixed-date
   holidays.push(
-    { date: toYMD(new Date(year, 0, 1)), label: "New Year's Day" },
+    { date: toYMD(new Date(year, 0, 1)), label: label("New Year's Day", "Año Nuevo") },
     {
       date: toYMD(new Date(year, 5, 19)),
-      label: "Juneteenth National Independence Day",
+      label: label("Juneteenth National Independence Day", "Juneteenth"),
     },
-    { date: toYMD(new Date(year, 6, 4)), label: "Independence Day" },
-    { date: toYMD(new Date(year, 10, 11)), label: "Veterans Day" },
-    { date: toYMD(new Date(year, 11, 25)), label: "Christmas Day" }
+    { date: toYMD(new Date(year, 6, 4)), label: label("Independence Day", "Día de la Independencia") },
+    { date: toYMD(new Date(year, 10, 11)), label: label("Veterans Day", "Día de los Veteranos") },
+    { date: toYMD(new Date(year, 11, 25)), label: label("Christmas Day", "Navidad") }
   );
 
   // MLK – 3rd Monday Jan
   holidays.push({
     date: toYMD(getNthWeekdayOfMonth(year, 0, 1, 3)),
-    label: "Martin Luther King Jr. Day",
+    label: label("Martin Luther King Jr. Day", "Día de Martin Luther King Jr."),
   });
 
   // Presidents – 3rd Monday Feb
   holidays.push({
     date: toYMD(getNthWeekdayOfMonth(year, 1, 1, 3)),
-    label: "Presidents' Day",
+    label: label("Presidents' Day", "Día de los Presidentes"),
   });
 
   // Memorial – last Monday May
   holidays.push({
     date: toYMD(getLastWeekdayOfMonth(year, 4, 1)),
-    label: "Memorial Day",
+    label: label("Memorial Day", "Memorial Day"),
   });
 
   // Labor – 1st Monday Sep
   holidays.push({
     date: toYMD(getNthWeekdayOfMonth(year, 8, 1, 1)),
-    label: "Labor Day",
+    label: label("Labor Day", "Día del Trabajo"),
   });
 
   // Columbus / Indigenous – 2nd Monday Oct
   holidays.push({
     date: toYMD(getNthWeekdayOfMonth(year, 9, 1, 2)),
-    label: "Columbus / Indigenous Peoples' Day",
+    label: label("Columbus / Indigenous Peoples' Day", "Día de Colón / Pueblos Indígenas"),
   });
 
   // Thanksgiving – 4th Thursday Nov
   holidays.push({
     date: toYMD(getNthWeekdayOfMonth(year, 10, 4, 4)),
-    label: "Thanksgiving Day",
+    label: label("Thanksgiving Day", "Día de Acción de Gracias"),
   });
 
   holidays.sort((a, b) => a.date.localeCompare(b.date));
@@ -257,6 +245,10 @@ function detectLanguage(q: string): "es" | "en" | "auto" {
 export default function NotebookPage() {
   const router = useRouter();
   const { user, loading: authLoading } = useAuth();
+  const { locale } = useAppSettings();
+  const lang = resolveLocale(locale);
+  const isEs = lang === "es";
+  const L = (en: string, es: string) => (isEs ? es : en);
 
   // Journal entries desde Supabase
   const [entries, setEntries] = useState<JournalEntry[]>([]);
@@ -407,9 +399,14 @@ export default function NotebookPage() {
   const todayStr = useMemo(() => toYMD(new Date()), []);
   const currentYear = useMemo(() => new Date().getFullYear(), []);
   const holidays = useMemo(
-    () => getUsFederalHolidays(currentYear),
-    [currentYear]
+    () => getUsFederalHolidays(currentYear, lang),
+    [currentYear, lang]
   );
+
+  const monthLabels = useMemo(() => {
+    const fmt = new Intl.DateTimeFormat(lang, { month: "long" });
+    return Array.from({ length: 12 }, (_, i) => fmt.format(new Date(2020, i, 1)));
+  }, [lang]);
 
   const holidaysByMonth = useMemo(() => {
     const byMonth: Record<number, Holiday[]> = {};
@@ -523,12 +520,18 @@ export default function NotebookPage() {
       const data = await res.json();
       setAiAnswer(
         data.answer ??
-          "The AI coach did not return a message. Please try again."
+          L(
+            "The AI coach did not return a message. Please try again.",
+            "El coach AI no devolvió un mensaje. Intenta de nuevo."
+          )
       );
     } catch (err) {
       console.error(err);
       setAiAnswer(
-        "There was an error talking to the AI coach. Please try again in a moment."
+        L(
+          "There was an error talking to the AI coach. Please try again in a moment.",
+          "Hubo un error al hablar con el coach AI. Intenta de nuevo en un momento."
+        )
       );
     } finally {
       setAiLoading(false);
@@ -538,7 +541,7 @@ export default function NotebookPage() {
   // acciones para custom notebooks
   const handleAddNotebook = () => {
     if (!isNbLoaded) return;
-    const name = newNotebookName.trim() || "Untitled notebook";
+    const name = newNotebookName.trim() || L("Untitled notebook", "Notebook sin título");
     const id = createId();
     const now = new Date().toISOString();
     setNbData((prev) => ({
@@ -558,7 +561,7 @@ export default function NotebookPage() {
     const newPage: LocalNotebookPage = {
       id,
       notebookId: activeNotebookId,
-      title: "Untitled page",
+      title: L("Untitled page", "Página sin título"),
       createdAt: now,
       updatedAt: now,
       content: "",
@@ -591,10 +594,10 @@ export default function NotebookPage() {
     return (
       <main className="min-h-screen bg-slate-950 text-slate-50 px-6 md:px-10 py-8">
         <h1 className="text-3xl font-semibold tracking-tight">
-          Daily notebook
+          {L("Daily notebook", "Notebook diario")}
         </h1>
         <p className="text-slate-400 mt-2 text-sm">
-          Loading your notebook…
+          {L("Loading your notebook…", "Cargando tu notebook…")}
         </p>
       </main>
     );
@@ -610,27 +613,29 @@ export default function NotebookPage() {
             onClick={() => router.back()}
             className="inline-flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900/80 px-3 py-1.5 text-xs text-slate-200 hover:border-emerald-400/60 hover:text-emerald-100 transition"
           >
-            ← Back
+            ← {L("Back", "Volver")}
           </button>
 
           <Link
             href={`/journal/${todayStr}`}
             className="inline-flex items-center gap-2 rounded-full border border-emerald-400/60 bg-emerald-500/10 px-4 py-2 text-sm font-medium text-emerald-100 hover:bg-emerald-500/20 transition"
           >
-            Open today&apos;s journal page
+            {L("Open today's journal page", "Abrir la página del journal de hoy")}
             <span className="text-xs text-emerald-200/80">
-              ({formatShortDate(todayStr)})
+              ({formatShortDate(todayStr, lang)})
             </span>
           </Link>
         </div>
 
         <div>
           <h1 className="text-3xl font-semibold tracking-tight">
-            Daily notebook
+            {L("Daily notebook", "Notebook diario")}
           </h1>
           <p className="text-slate-400 mt-1">
-            Your journal in notebook format – free space for trading, study and
-            life notes.
+            {L(
+              "Your journal in notebook format – free space for trading, study and life notes.",
+              "Tu journal en formato notebook – espacio libre para trading, estudio y notas de vida."
+            )}
           </p>
         </div>
       </header>
@@ -646,7 +651,7 @@ export default function NotebookPage() {
               : "text-slate-400 hover:text-slate-100"
           }`}
         >
-          Notebook pages
+          {L("Notebook pages", "Páginas del notebook")}
         </button>
         <button
           type="button"
@@ -657,7 +662,7 @@ export default function NotebookPage() {
               : "text-slate-400 hover:text-slate-100"
           }`}
         >
-          Calendar & holidays
+          {L("Calendar & holidays", "Calendario y feriados")}
         </button>
       </div>
 
@@ -674,7 +679,7 @@ export default function NotebookPage() {
                   : "text-slate-400 hover:text-slate-100"
               }`}
             >
-              Journal notebook
+              {L("Journal notebook", "Notebook del journal")}
             </button>
             <button
               type="button"
@@ -685,7 +690,7 @@ export default function NotebookPage() {
                   : "text-slate-400 hover:text-slate-100"
               }`}
             >
-              Custom notebooks
+              {L("Custom notebooks", "Notebooks personalizados")}
             </button>
           </div>
 
@@ -694,31 +699,37 @@ export default function NotebookPage() {
             <div className="space-y-4">
               <div>
                 <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                  Journal notebook
+                  {L("Journal notebook", "Notebook del journal")}
                 </p>
                 <h2 className="text-xl font-semibold text-slate-50 mt-1">
-                  Daily pages with summaries and free-space notes
+                  {L(
+                    "Daily pages with summaries and free-space notes",
+                    "Páginas diarias con resúmenes y notas libres"
+                  )}
                 </h2>
               </div>
 
               {sorted.length === 0 ? (
                 <p className="text-slate-500 text-sm mt-3">
-                  You don&apos;t have journal pages yet. Create your first
-                  entry from the journal to see it here.
+                  {L(
+                    "You don't have journal pages yet. Create your first entry from the journal to see it here.",
+                    "Aún no tienes páginas del journal. Crea tu primera entrada en el journal para verla aquí."
+                  )}
                 </p>
               ) : (
                 <div className="flex flex-col lg:flex-row gap-4">
                   {/* LISTA DE PÁGINAS A LA IZQUIERDA (tipo OneNote) */}
                   <aside className="rounded-2xl border border-slate-800 bg-slate-950/80 p-3 flex flex-col lg:w-80 xl:w-96 lg:flex-none max-h-[560px]">
                     <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500 mb-2">
-                      Pages
+                      {L("Pages", "Páginas")}
                     </p>
                     <div className="flex-1 overflow-y-auto space-y-2">
                       {sorted.map((e: any) => {
                         const isSelected =
                           selectedJournalDate === e.date;
                         const preview = getNotebookPreview(
-                          (e as any).notes
+                          (e as any).notes,
+                          L("Tap to open this notebook page summary.", "Toca para abrir el resumen de esta página.")
                         );
 
                         return (
@@ -738,7 +749,7 @@ export default function NotebookPage() {
                           >
                             <div className="flex items-center justify-between gap-2">
                               <span className="font-medium truncate">
-                                {formatShortDate(e.date)}
+                                {formatShortDate(e.date, lang)}
                               </span>
                               <span
                                 className={`text-[11px] tabular-nums ${
@@ -770,16 +781,19 @@ export default function NotebookPage() {
                         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
                           <div>
                             <p className="text-xs uppercase tracking-[0.16em] text-slate-400">
-                              Notebook page
+                              {L("Notebook page", "Página de notebook")}
                             </p>
                             <h3 className="text-2xl font-semibold text-slate-50">
                               {formatShortDate(
-                                (selectedJournalEntry as any).date
+                                (selectedJournalEntry as any).date,
+                                lang
                               )}
                             </h3>
                             <p className="text-[11px] text-slate-500 mt-1">
-                              Summary and notes connected to your trading
-                              journal.
+                              {L(
+                                "Summary and notes connected to your trading journal.",
+                                "Resumen y notas conectadas a tu journal de trading."
+                              )}
                             </p>
                           </div>
                           <div className="text-right space-y-1">
@@ -799,7 +813,7 @@ export default function NotebookPage() {
                               ).toFixed(2)}
                             </p>
                             <p className="text-[11px] text-slate-500">
-                              Day P&amp;L
+                              {L("Day P&L", "P&L del día")}
                             </p>
                             <Link
                               href={`/journal/${
@@ -807,7 +821,7 @@ export default function NotebookPage() {
                               }`}
                               className="inline-flex items-center justify-center rounded-full border border-slate-700 bg-slate-950/80 px-3 py-1 text-[11px] font-medium text-slate-200 hover:border-emerald-400/60 hover:text-emerald-100 transition"
                             >
-                              Open full journal page →
+                              {L("Open full journal page →", "Abrir journal completo →")}
                             </Link>
                           </div>
                         </div>
@@ -816,10 +830,10 @@ export default function NotebookPage() {
                         <div className="grid gap-4 md:grid-cols-3 text-sm text-slate-200">
                           <div className="rounded-2xl bg-slate-950/70 border border-slate-800 p-3">
                             <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
-                              Trades
+                              {L("Trades", "Trades")}
                             </p>
                             <p className="mt-2">
-                              Entries:{" "}
+                              {L("Entries:", "Entradas:")}{" "}
                               <span className="font-semibold">
                                 {Array.isArray(
                                   (selectedJournalEntry as any).entries
@@ -829,7 +843,7 @@ export default function NotebookPage() {
                               </span>
                             </p>
                             <p>
-                              Exits:{" "}
+                              {L("Exits:", "Salidas:")}{" "}
                               <span className="font-semibold">
                                 {Array.isArray(
                                   (selectedJournalEntry as any).exits
@@ -843,25 +857,25 @@ export default function NotebookPage() {
                           {/* Tarjeta con estado de notas */}
                           <div className="rounded-2xl bg-slate-950/70 border border-slate-800 p-3">
                             <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
-                              Notes blocks
+                              {L("Notes blocks", "Bloques de notas")}
                             </p>
                             <ul className="mt-2 space-y-1 text-sm">
                               <li>
-                                Premarket:{" "}
+                                {L("Premarket:", "Premarket:")}{" "}
                                 <span className="font-semibold">
-                                  {notesStatus?.premarket ? "Written" : "Empty"}
+                                  {notesStatus?.premarket ? L("Written", "Escrito") : L("Empty", "Vacío")}
                                 </span>
                               </li>
                               <li>
-                                Live session:{" "}
+                                {L("Live session:", "Sesión en vivo:")}{" "}
                                 <span className="font-semibold">
-                                  {notesStatus?.live ? "Written" : "Empty"}
+                                  {notesStatus?.live ? L("Written", "Escrito") : L("Empty", "Vacío")}
                                 </span>
                               </li>
                               <li>
-                                Post-market:{" "}
+                                {L("Post-market:", "Post-market:")}{" "}
                                 <span className="font-semibold">
-                                  {notesStatus?.post ? "Written" : "Empty"}
+                                  {notesStatus?.post ? L("Written", "Escrito") : L("Empty", "Vacío")}
                                 </span>
                               </li>
                             </ul>
@@ -869,13 +883,17 @@ export default function NotebookPage() {
 
                           <div className="rounded-2xl bg-slate-950/70 border border-slate-800 p-3">
                             <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
-                              Quick description
+                              {L("Quick description", "Descripción rápida")}
                             </p>
                             <p className="mt-2 text-sm text-slate-200">
                               {getNotebookPreview(
-                                (selectedJournalEntry as any).notes
+                                (selectedJournalEntry as any).notes,
+                                L("Tap to open this notebook page summary.", "Toca para abrir el resumen de esta página.")
                               ) ??
-                                "Write a short description in your journal notes to see it here as a quick summary."}
+                                L(
+                                  "Write a short description in your journal notes to see it here as a quick summary.",
+                                  "Escribe una descripción corta en tus notas del journal para verla aquí como resumen."
+                                )}
                             </p>
                           </div>
                         </div>
@@ -885,13 +903,16 @@ export default function NotebookPage() {
                           {/* FREE NOTES */}
                           <div className="space-y-3">
                             <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
-                              Free notebook space
+                              {L("Free notebook space", "Espacio libre del notebook")}
                             </p>
 
                             <RichNotebookEditor
                               value={selectedFreeNotes}
                               onChange={handleFreeNotesChange}
-                              placeholder="Write anything here: study notes, psychology reflections, ideas for this day…"
+                              placeholder={L(
+                                "Write anything here: study notes, psychology reflections, ideas for this day…",
+                                "Escribe aquí: notas de estudio, reflexiones, ideas para este día…"
+                              )}
                               minHeight={260}
                             />
                           </div>
@@ -900,11 +921,13 @@ export default function NotebookPage() {
                           <div className="rounded-3xl border border-emerald-500/40 bg-linear-to-br from-slate-950 via-slate-950 to-emerald-900/30 p-3 md:p-4 space-y-3">
                             <div>
                               <p className="text-[11px] uppercase tracking-[0.18em] text-emerald-300">
-                                AI coach
+                                {L("AI coach", "Coach AI")}
                               </p>
                               <p className="text-sm text-emerald-50 mt-0.5">
-                                Ask a question about this day. Puedes escribir
-                                en español o inglés.
+                                {L(
+                                  "Ask a question about this day. You can write in English or Spanish.",
+                                  "Haz una pregunta sobre este día. Puedes escribir en español o inglés."
+                                )}
                               </p>
                             </div>
 
@@ -913,7 +936,10 @@ export default function NotebookPage() {
                               onChange={(e) =>
                                 setAiQuestion(e.target.value)
                               }
-                              placeholder="Example: ¿Qué hice bien hoy y qué debería ajustar en mi gestión de riesgo?"
+                              placeholder={L(
+                                "Example: What did I do well today and what should I adjust in my risk management?",
+                                "Ejemplo: ¿Qué hice bien hoy y qué debería ajustar en mi gestión de riesgo?"
+                              )}
                               className="w-full rounded-2xl border border-emerald-500/40 bg-slate-950/80 px-3 py-2 text-xs text-slate-100 resize-y min-h-[90px] focus:outline-none focus:ring-1 focus:ring-emerald-400/70"
                             />
 
@@ -924,8 +950,8 @@ export default function NotebookPage() {
                               className="inline-flex items-center justify-center rounded-full bg-emerald-500 px-3 py-1.5 text-xs font-semibold text-slate-950 hover:bg-emerald-400 disabled:opacity-50 disabled:cursor-not-allowed transition"
                             >
                               {aiLoading
-                                ? "Thinking…"
-                                : "Ask AI about this page"}
+                                ? L("Thinking…", "Pensando…")
+                                : L("Ask AI about this page", "Preguntar al AI sobre esta página")}
                             </button>
 
                             {aiAnswer && (
@@ -938,7 +964,7 @@ export default function NotebookPage() {
                       </>
                     ) : (
                       <p className="text-sm text-slate-500">
-                        Select a page on the left to see its summary.
+                        {L("Select a page on the left to see its summary.", "Selecciona una página a la izquierda para ver su resumen.")}
                       </p>
                     )}
                   </section>
@@ -953,10 +979,13 @@ export default function NotebookPage() {
               <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
                 <div>
                   <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                    Custom notebooks
+                    {L("Custom notebooks", "Notebooks personalizados")}
                   </p>
                   <h2 className="text-xl font-semibold text-slate-50 mt-1">
-                    Create notebooks and free pages for courses, ideas and notes
+                    {L(
+                      "Create notebooks and free pages for courses, ideas and notes",
+                      "Crea notebooks y páginas libres para cursos, ideas y notas"
+                    )}
                   </h2>
                 </div>
 
@@ -965,7 +994,7 @@ export default function NotebookPage() {
                   <div className="flex items-center gap-2">
                     <input
                       type="text"
-                      placeholder="New notebook name"
+                      placeholder={L("New notebook name", "Nombre del nuevo notebook")}
                       value={newNotebookName}
                       onChange={(e) =>
                         setNewNotebookName(e.target.value)
@@ -978,7 +1007,7 @@ export default function NotebookPage() {
                       disabled={!isNbLoaded}
                       className="rounded-full bg-emerald-500/90 px-3 py-1.5 text-xs font-semibold text-slate-950 hover:bg-emerald-400 disabled:opacity-50 disabled:cursor-not-allowed transition"
                     >
-                      Create notebook
+                      {L("Create notebook", "Crear notebook")}
                     </button>
                   </div>
 
@@ -988,7 +1017,7 @@ export default function NotebookPage() {
                     disabled={!activeNotebookId || !isNbLoaded}
                     className="rounded-full bg-slate-900/80 border border-emerald-500/60 px-3 py-1.5 text-xs font-semibold text-emerald-200 hover:bg-emerald-500/10 disabled:opacity-40 disabled:cursor-not-allowed transition"
                   >
-                    Create page
+                    {L("Create page", "Crear página")}
                   </button>
                 </div>
               </div>
@@ -998,11 +1027,11 @@ export default function NotebookPage() {
                 <aside className="rounded-2xl border border-slate-800 bg-slate-950/80 p-3">
                   {!isNbLoaded ? (
                     <p className="text-xs text-slate-500">
-                      Loading notebooks…
+                      {L("Loading notebooks…", "Cargando notebooks…")}
                     </p>
                   ) : nbData.notebooks.length === 0 ? (
                     <p className="text-xs text-slate-500">
-                      No custom notebooks yet. Create one to start writing.
+                      {L("No custom notebooks yet. Create one to start writing.", "Aún no hay notebooks personalizados. Crea uno para empezar a escribir.")}
                     </p>
                   ) : (
                     <ul className="space-y-1.5">
@@ -1035,22 +1064,23 @@ export default function NotebookPage() {
                 <section className="rounded-2xl border border-slate-800 bg-slate-950/80 p-4 md:p-5">
                   {!activeNotebook ? (
                     <p className="text-sm text-slate-500">
-                      Select a notebook on the left or create a new one.
+                      {L("Select a notebook on the left or create a new one.", "Selecciona un notebook a la izquierda o crea uno nuevo.")}
                     </p>
                   ) : (
                     <>
                       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
                         <div>
                           <p className="text-xs uppercase tracking-[0.16em] text-slate-500">
-                            Notebook
+                            {L("Notebook", "Notebook")}
                           </p>
                           <h3 className="text-lg font-semibold text-slate-50">
                             {activeNotebook.name}
                           </h3>
                           <p className="text-[11px] text-slate-500 mt-1">
-                            Created{" "}
+                            {L("Created", "Creado")}{" "}
                             {formatShortDate(
-                              activeNotebook.createdAt.slice(0, 10)
+                              activeNotebook.createdAt.slice(0, 10),
+                              lang
                             )}
                           </p>
                         </div>
@@ -1064,20 +1094,22 @@ export default function NotebookPage() {
                               }
                               className="rounded-full bg-slate-900/80 border border-slate-700 px-3 py-1.5 text-xs text-slate-100 focus:outline-none focus:ring-1 focus:ring-emerald-400/60"
                             >
-                              {activeNotebookPages.map((p) => (
-                                <option key={p.id} value={p.id}>
-                                  {p.title || "Untitled page"}
-                                </option>
-                              ))}
-                            </select>
-                          )}
+                                  {activeNotebookPages.map((p) => (
+                                    <option key={p.id} value={p.id}>
+                                      {p.title || L("Untitled page", "Página sin título")}
+                                    </option>
+                                  ))}
+                                </select>
+                              )}
                         </div>
                       </div>
 
                       {activeNotebookPages.length === 0 ? (
                         <p className="text-sm text-slate-500 mt-4">
-                          This notebook doesn&apos;t have pages yet. Use
-                          &quot;Create page&quot; to start writing.
+                          {L(
+                            "This notebook doesn't have pages yet. Use \"Create page\" to start writing.",
+                            "Este notebook aún no tiene páginas. Usa \"Crear página\" para empezar a escribir."
+                          )}
                         </p>
                       ) : activePage ? (
                         <div className="mt-4 space-y-3">
@@ -1090,13 +1122,14 @@ export default function NotebookPage() {
                                   title: e.target.value,
                                 })
                               }
-                              placeholder="Page title"
+                              placeholder={L("Page title", "Título de la página")}
                               className="w-full rounded-2xl bg-slate-900/90 border border-slate-700 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-emerald-400/60"
                             />
                             <p className="text-[11px] text-slate-500">
-                              Last updated{" "}
+                              {L("Last updated", "Última actualización")}{" "}
                               {formatShortDate(
-                                activePage.updatedAt.slice(0, 10)
+                                activePage.updatedAt.slice(0, 10),
+                                lang
                               )}
                             </p>
                           </div>
@@ -1111,7 +1144,10 @@ export default function NotebookPage() {
                                   content: e.target.value,
                                 })
                               }
-                              placeholder="Write anything here: course notes, reflections, trading lessons, ideas..."
+                              placeholder={L(
+                                "Write anything here: course notes, reflections, trading lessons, ideas...",
+                                "Escribe aquí: notas de curso, reflexiones, lecciones de trading, ideas..."
+                              )}
                               className="relative w-full min-h-[220px] md:min-h-80 resize-y bg-transparent px-4 py-4 text-sm text-slate-100 focus:outline-none"
                             />
                           </div>
@@ -1131,20 +1167,22 @@ export default function NotebookPage() {
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
               <div>
                 <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                  Calendar page
+                  {L("Calendar page", "Página de calendario")}
                 </p>
                 <h2 className="text-2xl font-semibold mt-1">
-                  {currentYear} holidays
+                  {L(`${currentYear} holidays`, `Feriados ${currentYear}`)}
                 </h2>
                 <p className="text-slate-400 text-sm mt-1 max-w-xl">
-                  Overview of the main U.S. federal holidays so you always know
-                  which days markets and many offices may be closed.
+                  {L(
+                    "Overview of the main U.S. federal holidays so you always know which days markets and many offices may be closed.",
+                    "Resumen de los principales feriados federales de EE. UU. para saber qué días los mercados y oficinas pueden estar cerrados."
+                  )}
                 </p>
               </div>
             </div>
 
             <div className="mt-5 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-              {MONTH_LABELS.map((label, monthIndex) => {
+              {monthLabels.map((label, monthIndex) => {
                 const monthHolidays = holidaysByMonth[monthIndex] || [];
                 if (monthHolidays.length === 0) return null;
 
@@ -1166,7 +1204,7 @@ export default function NotebookPage() {
                             {h.label}
                           </span>
                           <span className="text-xs tabular-nums text-slate-400">
-                            {formatShortDate(h.date)}
+                            {formatShortDate(h.date, lang)}
                           </span>
                         </li>
                       ))}
@@ -1177,10 +1215,10 @@ export default function NotebookPage() {
             </div>
 
             <p className="text-[11px] text-slate-500 mt-4">
-              Note: This page shows major U.S. federal holidays for{" "}
-              {currentYear}. If you need to add custom holidays (for your
-              country, broker, or family events), you can note them directly in
-              your daily notebook pages.
+              {L(
+                `Note: This page shows major U.S. federal holidays for ${currentYear}. If you need to add custom holidays (for your country, broker, or family events), you can note them directly in your daily notebook pages.`,
+                `Nota: esta página muestra los principales feriados federales de EE. UU. de ${currentYear}. Si necesitas agregar feriados personalizados (tu país, broker o eventos familiares), puedes anotarlos en tus páginas diarias.`
+              )}
             </p>
           </div>
         </section>

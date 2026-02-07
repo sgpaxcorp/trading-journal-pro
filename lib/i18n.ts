@@ -40,6 +40,20 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
        Common
     ------------------ */
     "common.loading": "Loading…",
+    "common.close": "Close",
+    "common.cancel": "Cancel",
+
+    /* -----------------
+       Settings (gear menu)
+    ------------------ */
+    "settings.title": "Settings",
+    "settings.subtitle": "Language and theme preferences (saved to your account).",
+    "settings.language": "Language",
+    "settings.theme": "Theme",
+    "settings.theme.neuro": "NeuroMode (dark)",
+    "settings.theme.light": "Light Mode",
+    "settings.otherLanguage": "Other language code",
+    "settings.saveHint": "Changes save automatically.",
 
     /* -----------------
        TopNav (canonical)
@@ -134,6 +148,9 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     "help.point3": "Edit your growth plan to update targets and calculations.",
     "help.gettingStarted": "Getting started guide",
     "help.dashboardTour": "Dashboard tour",
+    "help.bullet.calendar": "Click on any day in the calendar to open that journal.",
+    "help.bullet.widgets": "Use the widget toggles to show/hide blocks you care about.",
+    "help.bullet.plan": "Edit your growth plan to update targets and calculations.",
 
     // Older aliases
     "help.button": "Help",
@@ -160,6 +177,18 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     "account.menu.noSubscription": "No subscription active",
     "account.menu.currentPlan": "Current plan",
     "account.menu.plan": "Plan",
+    "account.menu.profile": "Profile & photo",
+    "account.menu.langTheme": "Language & theme",
+    "account.noSubscription": "No subscription active",
+    "account.plan.label": "Plan",
+
+    // Simple labels used by menu UI
+    Account: "Account",
+    Preferences: "Preferences",
+    "Security & Privacy": "Security & Privacy",
+    Billing: "Billing",
+    "Billing History": "Billing history",
+    Plan: "Plan",
 
     // Older alias namespace (accountMenu.*)
     "accountMenu.accountSettings": "Account settings",
@@ -234,21 +263,25 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     "prefs.title": "Preferences",
     "prefs.subtitle": "Personalize your experience (language and appearance).",
     "prefs.appearance.label": "Appearance",
+    "prefs.appearance": "Appearance",
     "prefs.theme.title": "Theme",
+    "prefs.theme.label": "Theme",
     "prefs.theme.subtitle":
       "Switch between NeuroMode (dark) and Light mode. Light mode keeps your brand colors (green, violet, blue) with brighter backgrounds and soft gray lines.",
     "prefs.theme.neuro": "NeuroMode",
     "prefs.theme.light": "Light mode",
     "prefs.language.label": "Language",
     "prefs.language.title": "Language",
+    "prefs.language": "Language",
     "prefs.language.subtitle":
       "Select your preferred language. If you choose Auto, we follow your browser language.",
     "prefs.language.auto": "Auto",
     "prefs.language.english": "English",
-    "prefs.language.spanish": "Español",
+    "prefs.language.spanish": "Spanish",
     "prefs.note":
       "Note: We are rolling out translations progressively, page by page. Navigation and account settings are prioritized first.",
     "prefs.saved": "Saved",
+    "prefs.hint.saved": "Saved",
     "prefs.saving": "Saving…",
     "prefs.error": "We couldn't save your preferences. Please try again.",
 
@@ -265,6 +298,20 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
        Common
     ------------------ */
     "common.loading": "Cargando…",
+    "common.close": "Cerrar",
+    "common.cancel": "Cancelar",
+
+    /* -----------------
+       Settings (gear menu)
+    ------------------ */
+    "settings.title": "Preferencias",
+    "settings.subtitle": "Idioma y tema (se guarda en tu cuenta).",
+    "settings.language": "Idioma",
+    "settings.theme": "Tema",
+    "settings.theme.neuro": "NeuroMode (oscuro)",
+    "settings.theme.light": "Modo claro",
+    "settings.otherLanguage": "Otro código de idioma",
+    "settings.saveHint": "Los cambios se guardan automáticamente.",
 
     /* -----------------
        TopNav (canonical)
@@ -356,6 +403,9 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     "help.point3": "Edita tu plan de crecimiento para actualizar cálculos.",
     "help.gettingStarted": "Guía de inicio",
     "help.dashboardTour": "Tour del dashboard",
+    "help.bullet.calendar": "Haz clic en un día del calendario para abrir ese journal.",
+    "help.bullet.widgets": "Usa los toggles para mostrar/ocultar widgets.",
+    "help.bullet.plan": "Edita tu plan de crecimiento para actualizar cálculos.",
 
     // Aliases
     "help.button": "Ayuda",
@@ -382,6 +432,18 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     "account.menu.noSubscription": "Sin suscripción activa",
     "account.menu.currentPlan": "Plan actual",
     "account.menu.plan": "Plan",
+    "account.menu.profile": "Perfil y foto",
+    "account.menu.langTheme": "Idioma y tema",
+    "account.noSubscription": "Sin suscripción activa",
+    "account.plan.label": "Plan",
+
+    // Etiquetas simples usadas en menús
+    Account: "Cuenta",
+    Preferences: "Preferencias",
+    "Security & Privacy": "Seguridad y privacidad",
+    Billing: "Facturación",
+    "Billing History": "Historial de facturación",
+    Plan: "Plan",
 
     // Older alias namespace (accountMenu.*)
     "accountMenu.accountSettings": "Configuración de cuenta",
@@ -456,21 +518,25 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     "prefs.title": "Preferencias",
     "prefs.subtitle": "Personaliza tu experiencia (idioma y apariencia).",
     "prefs.appearance.label": "Apariencia",
+    "prefs.appearance": "Apariencia",
     "prefs.theme.title": "Tema",
+    "prefs.theme.label": "Tema",
     "prefs.theme.subtitle":
       "Cambia entre NeuroMode (oscuro) y modo claro. El modo claro mantiene los colores de marca (verde, violeta y azul) con fondos más brillantes y líneas grises suaves.",
     "prefs.theme.neuro": "NeuroMode",
     "prefs.theme.light": "Modo claro",
     "prefs.language.label": "Idioma",
     "prefs.language.title": "Idioma",
+    "prefs.language": "Idioma",
     "prefs.language.subtitle":
       "Selecciona tu idioma preferido. Si eliges Auto, usamos el idioma del navegador.",
     "prefs.language.auto": "Auto",
-    "prefs.language.english": "English",
+    "prefs.language.english": "Inglés",
     "prefs.language.spanish": "Español",
     "prefs.note":
       "Nota: estamos implementando traducciones progresivamente, página por página. Navegación y cuenta se priorizan primero.",
     "prefs.saved": "Guardado",
+    "prefs.hint.saved": "Guardado",
     "prefs.saving": "Guardando…",
     "prefs.error": "No pudimos guardar tus preferencias. Intenta de nuevo.",
 

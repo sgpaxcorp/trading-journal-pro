@@ -2,7 +2,8 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { useAppSettings } from "@/context/AppSettingsContext";
+import { useAppSettings, type AppLocale } from "@/lib/appSettings";
+import { resolveLocale, t as translate } from "@/lib/i18n";
 
 function GearIcon() {
   return (
@@ -30,19 +31,12 @@ function GearIcon() {
   );
 }
 
-function normalizeLocaleInput(raw: string): string {
-  const s = (raw || "").trim();
-  if (!s) return "en";
-  // Keep casing as lower for consistency; allow tags like es-PR
-  return s.toLowerCase();
-}
-
 export default function AppSettingsButton() {
-  const { theme, locale, setTheme, setLocale, t, localeOptions } = useAppSettings();
+  const { theme, locale, setTheme, setLocale } = useAppSettings();
+  const lang = resolveLocale(locale);
+  const t = (key: string, fallback?: string) => translate(key, lang, fallback);
 
   const [open, setOpen] = useState(false);
-  const [langMode, setLangMode] = useState<"preset" | "custom">("preset");
-  const [customLocale, setCustomLocale] = useState("");
 
   const wrapRef = useRef<HTMLDivElement | null>(null);
 
@@ -58,20 +52,16 @@ export default function AppSettingsButton() {
     return () => document.removeEventListener("mousedown", onDocClick);
   }, [open]);
 
-  const presetCodes = useMemo(() => localeOptions.map((o) => o.code), [localeOptions]);
-  const isPreset = presetCodes.includes((locale || "en").toLowerCase().split("-")[0]);
+  const localeOptions = useMemo(
+    () => [
+      { code: "auto", label: t("prefs.language.auto", "Auto") },
+      { code: "en", label: t("prefs.language.english", "English") },
+      { code: "es", label: t("prefs.language.spanish", "Español") },
+    ],
+    [lang]
+  );
 
-  useEffect(() => {
-    // Keep the UI state consistent with the stored locale
-    if (isPreset) {
-      setLangMode("preset");
-      setCustomLocale("");
-    } else {
-      setLangMode("custom");
-      setCustomLocale(locale || "");
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [locale]);
+  const presetCodes = useMemo(() => localeOptions.map((o) => o.code), [localeOptions]);
 
   return (
     <div className="relative" ref={wrapRef}>
@@ -153,17 +143,10 @@ export default function AppSettingsButton() {
               <div className="mt-2 flex items-center gap-2">
                 <select
                   className="flex-1 rounded-xl border border-slate-700 bg-slate-950/50 px-3 py-2 text-xs text-slate-100 outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400/30"
-                  value={langMode === "custom" ? "__custom__" : (locale || "en").toLowerCase().split("-")[0]}
+                  value={presetCodes.includes(locale) ? locale : "auto"}
                   onChange={(e) => {
                     const v = e.target.value;
-                    if (v === "__custom__") {
-                      setLangMode("custom");
-                      setCustomLocale(locale || "");
-                      return;
-                    }
-                    setLangMode("preset");
-                    setCustomLocale("");
-                    setLocale(v);
+                    setLocale(v as AppLocale);
                   }}
                 >
                   {localeOptions.map((o) => (
@@ -171,24 +154,8 @@ export default function AppSettingsButton() {
                       {o.label} ({o.code})
                     </option>
                   ))}
-                  <option value="__custom__">{t("settings.otherLanguage")}</option>
                 </select>
               </div>
-
-              {langMode === "custom" && (
-                <div className="mt-2">
-                  <input
-                    value={customLocale}
-                    onChange={(e) => setCustomLocale(e.target.value)}
-                    onBlur={() => setLocale(normalizeLocaleInput(customLocale))}
-                    placeholder="e.g. es-PR, de, it"
-                    className="w-full rounded-xl border border-slate-700 bg-slate-950/50 px-3 py-2 text-xs text-slate-100 outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400/30"
-                  />
-                  <p className="mt-1 text-[11px] text-slate-400">
-                    {t("settings.saveHint")}
-                  </p>
-                </div>
-              )}
             </div>
           </div>
 

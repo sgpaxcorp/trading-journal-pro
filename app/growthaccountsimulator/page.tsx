@@ -3,14 +3,26 @@
 import { useState, useMemo } from "react";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
+import { useAppSettings } from "@/lib/appSettings";
+import { resolveLocale } from "@/lib/i18n";
 
 type Period = "daily" | "weekly" | "monthly";
 
 export default function GrowthAccountSimulator() {
+  const { locale } = useAppSettings();
+  const lang = resolveLocale(locale);
+  const isEs = lang === "es";
+  const L = (en: string, es: string) => (isEs ? es : en);
   const [startingBalance, setStartingBalance] = useState(1000);
   const [percent, setPercent] = useState(1);
   const [period, setPeriod] = useState<Period>("daily");
   const [days, setDays] = useState(20);
+  const periodLabel =
+    period === "daily"
+      ? L("daily", "diario")
+      : period === "weekly"
+        ? L("weekly", "semanal")
+        : L("monthly", "mensual");
 
   // Build simulation rows
   const simulation = useMemo(() => {
@@ -53,19 +65,20 @@ export default function GrowthAccountSimulator() {
     // Subtítulo
     doc.setTextColor(148, 163, 253);
     doc.setFontSize(11);
-    doc.text("Growth Account Simulation Report", 14, 32);
+    doc.text(L("Growth Account Simulation Report", "Reporte de simulación de crecimiento"), 14, 32);
 
     // Resumen
     doc.setFontSize(9);
     doc.text(
-      `Starting balance: $${startingBalance.toFixed(
-        2
-      )} | Growth: ${percent || 0}% / ${period} | Trading days: ${days}`,
+      L(
+        `Starting balance: $${startingBalance.toFixed(2)} | Growth: ${percent || 0}% / ${periodLabel} | Trading days: ${days}`,
+        `Balance inicial: $${startingBalance.toFixed(2)} | Crecimiento: ${percent || 0}% / ${periodLabel} | Días de trading: ${days}`
+      ),
       14,
       40
     );
     doc.text(
-      `Estimated ending balance: $${endingBalance.toFixed(2)}`,
+      L(`Estimated ending balance: $${endingBalance.toFixed(2)}`, `Balance final estimado: $${endingBalance.toFixed(2)}`),
       14,
       46
     );
@@ -78,7 +91,7 @@ export default function GrowthAccountSimulator() {
 
     // Tabla con autoTable
     autoTable(doc, {
-      head: [["Trading day", "Balance"]],
+      head: [[L("Trading day", "Día de trading"), L("Balance", "Balance")]],
       body: tableBody,
       startY: 52,
       styles: {
@@ -90,18 +103,20 @@ export default function GrowthAccountSimulator() {
       },
     });
 
-    doc.save("tjp-growth-plan-report.pdf");
+    doc.save(isEs ? "tjp-reporte-growth-plan.pdf" : "tjp-growth-plan-report.pdf");
   };
 
   return (
     <main className="min-h-screen bg-slate-950 text-slate-50 flex flex-col items-center justify-center px-6 py-10">
       <div className="max-w-2xl w-full bg-slate-900/90 border border-slate-800 rounded-2xl p-8 shadow-2xl">
         <h1 className="text-3xl font-semibold text-center mb-4 text-emerald-400">
-          Growth Plan Simulator
+          {L("Growth Plan Simulator", "Simulador de Growth Plan")}
         </h1>
         <p className="text-slate-400 text-center mb-8 text-sm">
-          Estimate how your trading account can grow based on your balance, %
-          return, trading frequency and number of trading days.
+          {L(
+            "Estimate how your trading account can grow based on your balance, % return, trading frequency and number of trading days.",
+            "Estima cómo puede crecer tu cuenta según tu balance, % de retorno, frecuencia y número de días de trading."
+          )}
         </p>
 
         {/* Inputs */}
@@ -109,7 +124,7 @@ export default function GrowthAccountSimulator() {
           {/* Starting Balance */}
           <div>
             <label className="block text-sm font-medium text-slate-300 mb-1">
-              Starting Balance
+              {L("Starting Balance", "Balance inicial")}
             </label>
             <input
               type="number"
@@ -123,14 +138,14 @@ export default function GrowthAccountSimulator() {
                 )
               }
               className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-slate-100 focus:outline-none focus:border-emerald-400 text-sm"
-              placeholder="e.g. 1,000"
+              placeholder={L("e.g. 1,000", "ej. 1,000")}
             />
           </div>
 
           {/* Percentage */}
           <div>
             <label className="block text-sm font-medium text-slate-300 mb-1">
-              Growth % per selected period
+              {L("Growth % per selected period", "% de crecimiento por periodo")}
             </label>
             <input
               type="number"
@@ -144,26 +159,26 @@ export default function GrowthAccountSimulator() {
                 )
               }
               className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-slate-100 focus:outline-none focus:border-emerald-400 text-sm"
-              placeholder="e.g. 1.5"
+              placeholder={L("e.g. 1.5", "ej. 1.5")}
             />
           </div>
 
           {/* Frequency */}
           <div>
             <label className="block text-sm font-medium text-slate-300 mb-1">
-              Frequency
+              {L("Frequency", "Frecuencia")}
             </label>
             <select
               value={period}
               onChange={(e) => setPeriod(e.target.value as Period)}
               className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-slate-100 focus:outline-none focus:border-emerald-400 text-sm"
             >
-              <option value="daily">Daily</option>
+              <option value="daily">{L("Daily", "Diario")}</option>
               <option value="weekly">
-                Weekly (applies every 5 trading days)
+                {L("Weekly (applies every 5 trading days)", "Semanal (aplica cada 5 días de trading)")}
               </option>
               <option value="monthly">
-                Monthly (applies every 20 trading days)
+                {L("Monthly (applies every 20 trading days)", "Mensual (aplica cada 20 días de trading)")}
               </option>
             </select>
           </div>
@@ -171,7 +186,7 @@ export default function GrowthAccountSimulator() {
           {/* Trading Days */}
           <div>
             <label className="block text-sm font-medium text-slate-300 mb-1">
-              Trading Days
+              {L("Trading Days", "Días de trading")}
             </label>
             <input
               type="number"
@@ -185,7 +200,7 @@ export default function GrowthAccountSimulator() {
                 )
               }
               className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-slate-100 focus:outline-none focus:border-emerald-400 text-sm"
-              placeholder="e.g. 20"
+              placeholder={L("e.g. 20", "ej. 20")}
             />
           </div>
         </div>
@@ -193,30 +208,33 @@ export default function GrowthAccountSimulator() {
         {/* Result */}
         <div className="text-center mt-4">
           <h2 className="text-lg font-semibold text-slate-200 mb-2">
-            Estimated Ending Balance:
+            {L("Estimated Ending Balance:", "Balance final estimado:")}
           </h2>
           <p className="text-3xl font-bold text-emerald-400">
             ${endingBalance.toFixed(2)}
           </p>
           <p className="text-xs text-slate-500 mt-2">
-            Based on {percent || 0}% {period} growth for {days} trading days.
+            {L(
+              `Based on ${percent || 0}% ${periodLabel} growth for ${days} trading days.`,
+              `Basado en ${percent || 0}% de crecimiento ${periodLabel} durante ${days} días de trading.`
+            )}
           </p>
         </div>
 
         {/* Table preview */}
         <div className="mt-6">
           <p className="text-[11px] font-semibold text-slate-200 mb-2">
-            Projection preview
+            {L("Projection preview", "Vista previa de proyección")}
           </p>
           <div className="max-h-40 overflow-y-auto border border-slate-800 rounded-lg text-[10px]">
             <table className="w-full border-collapse">
               <thead className="bg-slate-900/90 border-b border-slate-800">
                 <tr>
                   <th className="px-3 py-1.5 text-left text-slate-300">
-                    Trading day
+                    {L("Trading day", "Día de trading")}
                   </th>
                   <th className="px-3 py-1.5 text-left text-slate-300">
-                    Balance
+                    {L("Balance", "Balance")}
                   </th>
                 </tr>
               </thead>
@@ -240,7 +258,7 @@ export default function GrowthAccountSimulator() {
                       colSpan={2}
                       className="px-3 py-3 text-center text-slate-500"
                     >
-                      Adjust inputs to see the projection.
+                      {L("Adjust inputs to see the projection.", "Ajusta los inputs para ver la proyección.")}
                     </td>
                   </tr>
                 )}
@@ -255,13 +273,13 @@ export default function GrowthAccountSimulator() {
             onClick={handleDownloadPdf}
             className="inline-block px-6 py-2.5 rounded-xl bg-emerald-400 text-slate-950 text-xs font-semibold hover:bg-emerald-300 transition shadow-lg shadow-emerald-500/25"
           >
-            Download PDF report
+            {L("Download PDF report", "Descargar reporte PDF")}
           </button>
           <a
             href="/"
             className="inline-block px-6 py-2.5 rounded-xl border border-slate-700 text-[10px] text-slate-300 hover:border-emerald-400 hover:text-emerald-300 transition"
           >
-            ← Back to Home
+            ← {L("Back to Home", "Volver al inicio")}
           </a>
         </div>
       </div>

@@ -1,6 +1,8 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
+import { useAppSettings } from "@/lib/appSettings";
+import { resolveLocale } from "@/lib/i18n";
 
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
@@ -48,13 +50,23 @@ function Icon({ children }: { children: React.ReactNode }) {
   return <span className="inline-flex h-8 w-8 items-center justify-center">{children}</span>;
 }
 
-function TablePicker({ onPick }: { onPick: (size: TableSize) => void }) {
+function TablePicker({
+  onPick,
+  label,
+  ariaLabel,
+  titleLabel,
+}: {
+  onPick: (size: TableSize) => void;
+  label: (rows: number, cols: number) => string;
+  ariaLabel: (rows: number, cols: number) => string;
+  titleLabel: (rows: number, cols: number) => string;
+}) {
   const [hover, setHover] = useState<TableSize | null>(null);
 
   return (
     <div className="absolute left-0 top-full mt-2 w-[220px] rounded-xl border border-slate-200 bg-white p-3 shadow-xl z-50">
       <div className="mb-2 text-[11px] text-slate-500">
-        {hover ? `${hover.rows} × ${hover.cols}` : "Choose size (max 6×6)"}
+        {hover ? `${hover.rows} × ${hover.cols}` : label(6, 6)}
       </div>
       <div className="grid grid-cols-6 gap-1">
         {Array.from({ length: 36 }).map((_, i) => {
@@ -75,8 +87,8 @@ function TablePicker({ onPick }: { onPick: (size: TableSize) => void }) {
                   ? "border-emerald-500 bg-emerald-100"
                   : "border-slate-200 bg-slate-50 hover:bg-slate-100")
               }
-              aria-label={`Insert ${r} by ${c} table`}
-              title={`Insert ${r}×${c}`}
+              aria-label={ariaLabel(r, c)}
+              title={titleLabel(r, c)}
             />
           );
         })}
@@ -127,12 +139,17 @@ function ToolbarButton({
 export default function RichTextEditor({
   value,
   onChange,
-  placeholder = "Write…",
+  placeholder,
   className = "",
   minHeight = 260,
   onReady,
   toolbarTheme = "light",
 }: RichTextEditorProps) {
+  const { locale } = useAppSettings();
+  const lang = resolveLocale(locale);
+  const isEs = lang === "es";
+  const L = (en: string, es: string) => (isEs ? es : en);
+  const effectivePlaceholder = placeholder ?? L("Write…", "Escribe…");
   const [tableOpen, setTableOpen] = useState(false);
 
   const extensions = useMemo(
@@ -147,7 +164,7 @@ export default function RichTextEditor({
         autolink: true,
         linkOnPaste: true,
       }),
-      Placeholder.configure({ placeholder }),
+      Placeholder.configure({ placeholder: effectivePlaceholder }),
       Table.configure({
         resizable: true,
         lastColumnResizable: true,
@@ -157,7 +174,7 @@ export default function RichTextEditor({
       TableHeader,
       TableCell,
     ],
-    [placeholder]
+    [effectivePlaceholder]
   );
 
   const editor = useEditor({
@@ -212,7 +229,10 @@ export default function RichTextEditor({
   const insertLink = () => {
     if (!editor) return;
     const prev = editor.getAttributes("link").href as string | undefined;
-    const url = window.prompt("Paste URL", prev || "https://");
+    const url = window.prompt(
+      isEs ? "Pega la URL" : "Paste URL",
+      prev || "https://"
+    );
 
     if (url === null) return;
 
@@ -247,7 +267,7 @@ export default function RichTextEditor({
       <div className="mb-2 flex flex-wrap items-center gap-1 rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
         <ToolbarButton
           theme={toolbarTheme}
-          title="Bold"
+          title={L("Bold", "Negrita")}
           active={!!editor?.isActive("bold")}
           disabled={!editor}
           onClick={() => editor?.chain().focus().toggleBold().run()}
@@ -259,7 +279,7 @@ export default function RichTextEditor({
 
         <ToolbarButton
           theme={toolbarTheme}
-          title="Italic"
+          title={L("Italic", "Itálica")}
           active={!!editor?.isActive("italic")}
           disabled={!editor}
           onClick={() => editor?.chain().focus().toggleItalic().run()}
@@ -271,7 +291,7 @@ export default function RichTextEditor({
 
         <ToolbarButton
           theme={toolbarTheme}
-          title="Underline"
+          title={L("Underline", "Subrayado")}
           active={!!editor?.isActive("underline")}
           disabled={!editor}
           onClick={() => editor?.chain().focus().toggleUnderline().run()}
@@ -283,7 +303,7 @@ export default function RichTextEditor({
 
         <ToolbarButton
           theme={toolbarTheme}
-          title="Bullet list"
+          title={L("Bullet list", "Lista con viñetas")}
           active={!!editor?.isActive("bulletList")}
           disabled={!editor}
           onClick={() => editor?.chain().focus().toggleBulletList().run()}
@@ -293,7 +313,7 @@ export default function RichTextEditor({
 
         <ToolbarButton
           theme={toolbarTheme}
-          title="Numbered list"
+          title={L("Numbered list", "Lista numerada")}
           active={!!editor?.isActive("orderedList")}
           disabled={!editor}
           onClick={() => editor?.chain().focus().toggleOrderedList().run()}
@@ -303,7 +323,7 @@ export default function RichTextEditor({
 
         <ToolbarButton
           theme={toolbarTheme}
-          title="Quote"
+          title={L("Quote", "Cita")}
           active={!!editor?.isActive("blockquote")}
           disabled={!editor}
           onClick={() => editor?.chain().focus().toggleBlockquote().run()}
@@ -313,7 +333,7 @@ export default function RichTextEditor({
 
         <ToolbarButton
           theme={toolbarTheme}
-          title="Insert link"
+          title={L("Insert link", "Insertar enlace")}
           active={!!editor?.isActive("link")}
           disabled={!editor}
           onClick={insertLink}
@@ -324,7 +344,7 @@ export default function RichTextEditor({
         <div className="relative">
           <ToolbarButton
             theme={toolbarTheme}
-            title="Insert table"
+            title={L("Insert table", "Insertar tabla")}
             disabled={!editor}
             onClick={() => setTableOpen((v) => !v)}
           >
@@ -336,13 +356,16 @@ export default function RichTextEditor({
                 insertTable(size.rows, size.cols);
                 setTableOpen(false);
               }}
+              label={() => L("Choose size (max 6×6)", "Elige tamaño (máx 6×6)")}
+              ariaLabel={(r, c) => L(`Insert ${r} by ${c} table`, `Insertar tabla de ${r} × ${c}`)}
+              titleLabel={(r, c) => L(`Insert ${r}×${c}`, `Insertar ${r}×${c}`)}
             />
           )}
         </div>
 
         <ToolbarButton
           theme={toolbarTheme}
-          title="Add table row"
+          title={L("Add table row", "Agregar fila")}
           disabled={!editor || !can(() => editor!.can().addRowAfter())}
           onClick={() => editor?.chain().focus().addRowAfter().run()}
         >
@@ -351,7 +374,7 @@ export default function RichTextEditor({
 
         <ToolbarButton
           theme={toolbarTheme}
-          title="Add table column"
+          title={L("Add table column", "Agregar columna")}
           disabled={!editor || !can(() => editor!.can().addColumnAfter())}
           onClick={() => editor?.chain().focus().addColumnAfter().run()}
         >
@@ -360,7 +383,7 @@ export default function RichTextEditor({
 
         <ToolbarButton
           theme={toolbarTheme}
-          title="Delete table"
+          title={L("Delete table", "Eliminar tabla")}
           disabled={!editor || !can(() => editor!.can().deleteTable())}
           onClick={() => editor?.chain().focus().deleteTable().run()}
         >
@@ -371,7 +394,7 @@ export default function RichTextEditor({
 
         <ToolbarButton
           theme={toolbarTheme}
-          title="Undo"
+          title={L("Undo", "Deshacer")}
           disabled={!editor || !can(() => editor!.can().undo())}
           onClick={() => editor?.chain().focus().undo().run()}
         >
@@ -380,7 +403,7 @@ export default function RichTextEditor({
 
         <ToolbarButton
           theme={toolbarTheme}
-          title="Redo"
+          title={L("Redo", "Rehacer")}
           disabled={!editor || !can(() => editor!.can().redo())}
           onClick={() => editor?.chain().focus().redo().run()}
         >

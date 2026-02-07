@@ -23,6 +23,9 @@ import Link from "next/link";
 import TopNav from "@/app/components/TopNav";
 import { useAuth } from "@/context/AuthContext";
 
+import { useAppSettings } from "@/lib/appSettings";
+import { resolveLocale } from "@/lib/i18n";
+
 import { supabaseBrowser } from "@/lib/supaBaseClient";
 import { getAllJournalEntries } from "@/lib/journalSupabase";
 import type { JournalEntry } from "@/lib/journalLocal";
@@ -92,16 +95,16 @@ function toNum(x: unknown, fb = 0): number {
   return Number.isFinite(n) ? n : fb;
 }
 
-function currency(n: number): string {
+function currency(n: number, locale?: string): string {
   const v = Number.isFinite(n) ? n : 0;
-  return v.toLocaleString(undefined, { style: "currency", currency: "USD" });
+  return v.toLocaleString(locale || undefined, { style: "currency", currency: "USD" });
 }
 
-function formatDateFriendly(iso: string): string {
+function formatDateFriendly(iso: string, locale?: string): string {
   if (!iso) return "";
   const d = parseISODate(iso);
   if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  return d.toLocaleDateString(locale || undefined, { month: "short", day: "numeric" });
 }
 
 function resolveUserId(user: any): string {
@@ -251,6 +254,12 @@ function sessionPnlUsd(e: any): number {
 
 export default function BalanceChartPage() {
   const { user, loading } = useAuth() as any;
+  const { locale } = useAppSettings();
+  const lang = resolveLocale(locale);
+  const isEs = lang === "es";
+  const L = (en: string, es: string) => (isEs ? es : en);
+  const localeTag = isEs ? "es-ES" : "en-US";
+
   const userId = useMemo(() => resolveUserId(user), [user]);
   const planUserId = useMemo(() => resolvePlanUserId(user), [user]);
   const journalUserId = useMemo(() => resolveJournalUserId(user), [user]);
@@ -268,6 +277,9 @@ export default function BalanceChartPage() {
     totals: { tradingPnl: number; cashflowNet: number; currentBalance: number };
     plan: { startingBalance: number; targetBalance: number; dailyTargetPct: number; planStartIso: string };
   } | null>(null);
+
+  const fmtCurrency = (n: number) => currency(n, localeTag);
+  const fmtDate = (iso: string) => formatDateFriendly(iso, localeTag);
 
   /* -------- Load plan, journal, cashflows -------- */
   useEffect(() => {
@@ -640,7 +652,9 @@ export default function BalanceChartPage() {
   if (loading || loadingData) {
     return (
       <main className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center">
-        <p className="text-sm text-slate-400">Loading balance chart…</p>
+        <p className="text-sm text-slate-400">
+          {L("Loading balance chart…", "Cargando balance chart…")}
+        </p>
       </main>
     );
   }
@@ -652,12 +666,18 @@ export default function BalanceChartPage() {
       <div className="px-6 md:px-10 py-8 max-w-7xl mx-auto">
         <header className="mb-6 flex items-start justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-semibold">Balance Chart</h1>
+            <h1 className="text-3xl font-semibold">{L("Balance Chart", "Gráfico de balance")}</h1>
             <p className="text-sm text-slate-400 mt-1">
-              Actual account equity vs your growth-plan projection. Cashflows (deposits/withdrawals) are applied to both lines so trading performance stays comparable.
+              {L(
+                "Actual account equity vs your growth-plan projection. Cashflows (deposits/withdrawals) are applied to both lines so trading performance stays comparable.",
+                "Equity real de la cuenta vs la proyección del plan. Los cashflows (depósitos/retiros) se aplican a ambas líneas para mantener comparable el performance."
+              )}
             </p>
             <p className="text-xs text-slate-500 mt-1">
-              Trading days are Mon–Fri. If a cashflow happens on a weekend, we add an “as-of” point for the latest cashflow date.
+              {L(
+                "Trading days are Mon–Fri. If a cashflow happens on a weekend, we add an “as-of” point for the latest cashflow date.",
+                "Los días de trading son Lun–Vie. Si hay un cashflow en fin de semana, añadimos un punto “as-of” en la última fecha."
+              )}
             </p>
           </div>
 
@@ -666,22 +686,27 @@ export default function BalanceChartPage() {
               href="/plan"
               className="inline-flex items-center rounded-xl border border-slate-700 px-3 py-1.5 text-xs font-medium text-slate-200 hover:border-emerald-400 hover:text-emerald-300 transition"
             >
-              Cashflows →
+              {L("Cashflows →", "Flujos →")}
             </Link>
             <Link
               href="/analytics-statistics"
               className="inline-flex items-center rounded-xl border border-slate-700 px-3 py-1.5 text-xs font-medium text-slate-200 hover:border-emerald-400 hover:text-emerald-300 transition"
             >
-              Analytics →
+              {L("Analytics →", "Analítica →")}
             </Link>
           </div>
         </header>
 
         {!plan ? (
           <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5 text-sm text-slate-300">
-            No Growth Plan found yet (table: <span className="text-slate-100 font-semibold">growth_plans</span>). Create one in{" "}
+            {L(
+              "No Growth Plan found yet (table:",
+              "Aún no hay un Growth Plan (tabla:"
+            )}{" "}
+            <span className="text-slate-100 font-semibold">growth_plans</span>).{" "}
+            {L("Create one in", "Crea uno en")}{" "}
             <Link className="text-emerald-300 hover:text-emerald-200 underline" href="/growth-plan">
-              Growth Plan Wizard
+              {L("Growth Plan Wizard", "Growth Plan Wizard")}
             </Link>
             .
           </div>
@@ -690,34 +715,45 @@ export default function BalanceChartPage() {
             {/* KPI row */}
             <section className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
               <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
-                <div className="text-[11px] text-slate-500 tracking-widest uppercase">Starting balance</div>
-                <div className="mt-1 text-2xl font-semibold">{currency(plan.startingBalance)}</div>
+                <div className="text-[11px] text-slate-500 tracking-widest uppercase">
+                  {L("Starting balance", "Balance inicial")}
+                </div>
+                <div className="mt-1 text-2xl font-semibold">{fmtCurrency(plan.startingBalance)}</div>
                 <div className="mt-1 text-xs text-slate-400">
-                  Plan start: <span className="text-slate-200">{computed.planStartDate}</span>
+                  {L("Plan start:", "Inicio del plan:")}{" "}
+                  <span className="text-slate-200">{computed.planStartDate}</span>
                 </div>
               </div>
 
               <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
-                <div className="text-[11px] text-slate-500 tracking-widest uppercase">Current balance</div>
-                <div className="mt-1 text-2xl font-semibold">{currency(computed.currentBalance)}</div>
+                <div className="text-[11px] text-slate-500 tracking-widest uppercase">
+                  {L("Current balance", "Balance actual")}
+                </div>
+                <div className="mt-1 text-2xl font-semibold">{fmtCurrency(computed.currentBalance)}</div>
                 <div className="mt-1 text-xs text-slate-400">
-                  As of: <span className="text-slate-200">{computed.currentDateStr}</span>
+                  {L("As of:", "Al:")}{" "}
+                  <span className="text-slate-200">{computed.currentDateStr}</span>
                 </div>
               </div>
 
               <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
-                <div className="text-[11px] text-slate-500 tracking-widest uppercase">Projected balance</div>
-                <div className="mt-1 text-2xl font-semibold">{currency(computed.projectedBalance)}</div>
+                <div className="text-[11px] text-slate-500 tracking-widest uppercase">
+                  {L("Projected balance", "Balance proyectado")}
+                </div>
+                <div className="mt-1 text-2xl font-semibold">{fmtCurrency(computed.projectedBalance)}</div>
                 <div className="mt-1 text-xs text-slate-400">
-                  Daily target: <span className="text-slate-200">{computed.pct.toFixed(3)}%</span>
+                  {L("Daily target:", "Meta diaria:")}{" "}
+                  <span className="text-slate-200">{computed.pct.toFixed(3)}%</span>
                 </div>
               </div>
 
               <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
-                <div className="text-[11px] text-slate-500 tracking-widest uppercase">Vs projection</div>
+                <div className="text-[11px] text-slate-500 tracking-widest uppercase">
+                  {L("Vs projection", "Vs proyección")}
+                </div>
                 <div className="mt-1 text-2xl font-semibold">
                   <span className={computed.diff >= 0 ? "text-emerald-300" : "text-sky-300"}>
-                    {computed.diff >= 0 ? "+" : "-"}{currency(Math.abs(computed.diff))}
+                    {computed.diff >= 0 ? "+" : "-"}{fmtCurrency(Math.abs(computed.diff))}
                   </span>
                 </div>
                 <div className="mt-1 text-xs text-slate-400">
@@ -730,18 +766,23 @@ export default function BalanceChartPage() {
             <section className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5 mb-6">
               <div className="flex items-center justify-between mb-4">
                 <div>
-                  <h2 className="text-base font-semibold">Equity curve</h2>
+                  <h2 className="text-base font-semibold">{L("Equity curve", "Curva de equity")}</h2>
                   <p className="text-xs text-slate-500 mt-1">
-                    Trading days only (Mon–Fri). Cashflows are applied to both lines; weekend cashflows appear as an “as-of” point.
+                    {L(
+                      "Trading days only (Mon–Fri). Cashflows are applied to both lines; weekend cashflows appear as an “as-of” point.",
+                      "Solo días de trading (Lun–Vie). Los cashflows se aplican a ambas líneas; los de fin de semana aparecen como punto “as-of”."
+                    )}
                   </p>
                 </div>
                 <div className="text-xs text-slate-400">
-                  Trading P&amp;L: <span className={computed.totalTradingPnl >= 0 ? "text-emerald-300 font-semibold" : "text-sky-300 font-semibold"}>
-                    {computed.totalTradingPnl >= 0 ? "+" : "-"}{currency(Math.abs(computed.totalTradingPnl))}
+                  {L("Trading P&L:", "Trading P&L:")}{" "}
+                  <span className={computed.totalTradingPnl >= 0 ? "text-emerald-300 font-semibold" : "text-sky-300 font-semibold"}>
+                    {computed.totalTradingPnl >= 0 ? "+" : "-"}{fmtCurrency(Math.abs(computed.totalTradingPnl))}
                   </span>
                   <span className="mx-2 text-slate-700">|</span>
-                  Net cashflow: <span className={computed.totalCashflowNet >= 0 ? "text-emerald-300 font-semibold" : "text-sky-300 font-semibold"}>
-                    {computed.totalCashflowNet >= 0 ? "+" : "-"}{currency(Math.abs(computed.totalCashflowNet))}
+                  {L("Net cashflow:", "Cashflow neto:")}{" "}
+                  <span className={computed.totalCashflowNet >= 0 ? "text-emerald-300 font-semibold" : "text-sky-300 font-semibold"}>
+                    {computed.totalCashflowNet >= 0 ? "+" : "-"}{fmtCurrency(Math.abs(computed.totalCashflowNet))}
                   </span>
                 </div>
               </div>
@@ -750,17 +791,17 @@ export default function BalanceChartPage() {
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={computed.chartData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="date" tickFormatter={formatDateFriendly} />
-                    <YAxis tickFormatter={(v) => currency(Number(v))} />
+                    <XAxis dataKey="date" tickFormatter={fmtDate} />
+                    <YAxis tickFormatter={(v) => fmtCurrency(Number(v))} />
                     <Tooltip
-                      formatter={(value: any) => currency(Number(value))}
-                      labelFormatter={(label) => `Date: ${label}`}
+                      formatter={(value: any) => fmtCurrency(Number(value))}
+                      labelFormatter={(label) => `${L("Date", "Fecha")}: ${label}`}
                     />
                     <Legend />
                     <Line
                       type="monotone"
                       dataKey="projected"
-                      name="Projected"
+                      name={L("Projected", "Proyectado")}
                       dot={false}
                       strokeWidth={2.2}
                       stroke="#22c55e"
@@ -769,7 +810,7 @@ export default function BalanceChartPage() {
                     <Line
                       type="monotone"
                       dataKey="actual"
-                      name="Actual"
+                      name={L("Actual", "Actual")}
                       dot={false}
                       strokeWidth={2.6}
                       stroke="#38bdf8"
@@ -783,14 +824,18 @@ export default function BalanceChartPage() {
             <section className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
               <div className="flex items-center justify-between mb-4">
                 <div>
-                  <h2 className="text-base font-semibold">Schedule</h2>
+                  <h2 className="text-base font-semibold">{L("Schedule", "Calendario")}</h2>
                   <p className="text-xs text-slate-500 mt-1">
-                    From your plan start to your latest trading day (plus an as-of point if a weekend cashflow occurred).
+                    {L(
+                      "From your plan start to your latest trading day (plus an as-of point if a weekend cashflow occurred).",
+                      "Desde el inicio del plan hasta el último día de trading (más un punto “as-of” si hubo cashflow en fin de semana)."
+                    )}
                   </p>
                 </div>
 
                 <div className="text-xs text-slate-400">
-                  Trading days shown: <span className="text-slate-200 font-semibold">{computed.tradingDays}</span>
+                  {L("Trading days shown:", "Días de trading mostrados:")}{" "}
+                  <span className="text-slate-200 font-semibold">{computed.tradingDays}</span>
                 </div>
               </div>
 
@@ -799,11 +844,11 @@ export default function BalanceChartPage() {
                   <thead className="bg-slate-950/60 text-slate-400">
                     <tr>
                       <th className="text-left px-4 py-2">#</th>
-                      <th className="text-left px-4 py-2">Date</th>
-                      <th className="text-right px-4 py-2">Day P&amp;L</th>
-                      <th className="text-right px-4 py-2">Cashflow</th>
-                      <th className="text-right px-4 py-2">Actual</th>
-                      <th className="text-right px-4 py-2">Projected</th>
+                      <th className="text-left px-4 py-2">{L("Date", "Fecha")}</th>
+                      <th className="text-right px-4 py-2">{L("Day P&L", "P&L día")}</th>
+                      <th className="text-right px-4 py-2">{L("Cashflow", "Cashflow")}</th>
+                      <th className="text-right px-4 py-2">{L("Actual", "Actual")}</th>
+                      <th className="text-right px-4 py-2">{L("Projected", "Proyectado")}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -811,13 +856,17 @@ export default function BalanceChartPage() {
                       const isCurrent = r.date === computed.currentDateStr;
                       const cash = Number((r as any).cashflow ?? 0);
                       const cashLabel =
-                        cash > 0 ? "Cash inflow" : cash < 0 ? "Cash outflow" : "";
+                        cash > 0
+                          ? L("Cash inflow", "Entrada de efectivo")
+                          : cash < 0
+                          ? L("Cash outflow", "Salida de efectivo")
+                          : "";
                       return (
                         <tr key={r.date} className={isCurrent ? "bg-emerald-500/10" : ""}>
                           <td className="px-4 py-2 text-slate-500">{idx + 1}</td>
                           <td className="px-4 py-2 text-slate-200">{r.date}</td>
                           <td className={"px-4 py-2 text-right " + (r.dayPnl >= 0 ? "text-emerald-300" : "text-sky-300")}>
-                            {r.dayPnl >= 0 ? "+" : "-"}{currency(Math.abs(r.dayPnl))}
+                            {r.dayPnl >= 0 ? "+" : "-"}{fmtCurrency(Math.abs(r.dayPnl))}
                           </td>
                           <td className={"px-4 py-2 text-right " + (cash >= 0 ? "text-emerald-300" : "text-sky-300")}>
                             {cash === 0 ? (
@@ -828,13 +877,13 @@ export default function BalanceChartPage() {
                                   {cashLabel}
                                 </span>
                                 <span className="font-semibold">
-                                  {cash >= 0 ? "+" : "-"}{currency(Math.abs(cash))}
+                                  {cash >= 0 ? "+" : "-"}{fmtCurrency(Math.abs(cash))}
                                 </span>
                               </div>
                             )}
                           </td>
-                          <td className="px-4 py-2 text-right text-slate-100 font-semibold">{currency(r.actual)}</td>
-                          <td className="px-4 py-2 text-right text-slate-300">{currency(r.projected)}</td>
+                          <td className="px-4 py-2 text-right text-slate-100 font-semibold">{fmtCurrency(r.actual)}</td>
+                          <td className="px-4 py-2 text-right text-slate-300">{fmtCurrency(r.projected)}</td>
                         </tr>
                       );
                     })}

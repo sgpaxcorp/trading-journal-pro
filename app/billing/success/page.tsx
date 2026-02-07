@@ -8,7 +8,7 @@ export default function BillingSuccessPage() {
       fallback={
         <main className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center px-4">
           <p className="text-xs text-slate-400">
-            Loading subscription status...
+            Loading subscription status... / Cargando estado de suscripción...
           </p>
         </main>
       }

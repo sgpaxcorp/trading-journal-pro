@@ -22,6 +22,9 @@ import { useRouter } from "next/navigation";
 import TopNav from "@/app/components/TopNav";
 import { useAuth } from "@/context/AuthContext";
 
+import { useAppSettings } from "@/lib/appSettings";
+import { resolveLocale } from "@/lib/i18n";
+
 import { supabaseBrowser } from "@/lib/supaBaseClient";
 import { getAllJournalEntries } from "@/lib/journalSupabase";
 import type { JournalEntry } from "@/lib/journalLocal";
@@ -97,9 +100,9 @@ function isoToday(): string {
   return `${y}-${m}-${day}`;
 }
 
-function currency(n: number): string {
+function currency(n: number, locale?: string): string {
   const v = Number.isFinite(n) ? n : 0;
-  return v.toLocaleString(undefined, { style: "currency", currency: "USD" });
+  return v.toLocaleString(locale || undefined, { style: "currency", currency: "USD" });
 }
 
 function getPlanUserId(user: any): string {
@@ -179,6 +182,11 @@ async function fetchLatestGrowthPlan(userId: string): Promise<GrowthPlan | null>
 export default function PlanPage() {
   const { user, loading } = useAuth() as any;
   const router = useRouter();
+  const { locale } = useAppSettings();
+  const lang = resolveLocale(locale);
+  const isEs = lang === "es";
+  const L = (en: string, es: string) => (isEs ? es : en);
+  const localeTag = isEs ? "es-ES" : "en-US";
 
   const planUserId = useMemo(() => getPlanUserId(user), [user]);
   const journalUserId = useMemo(() => getJournalUserId(user), [user]);
@@ -196,6 +204,8 @@ export default function PlanPage() {
 
   const [saving, setSaving] = useState(false);
   const [cashflowTableMissing, setCashflowTableMissing] = useState(false);
+
+  const fmtCurrency = (n: number) => currency(n, localeTag);
 
   useEffect(() => {
     if (!loading && !user) router.replace("/signin");
@@ -348,7 +358,12 @@ export default function PlanPage() {
   async function onDeleteCashflow(id: string) {
     if (!planUserId) return;
 
-    const ok = window.confirm("Delete this cashflow record? This does NOT delete any trades, only this deposit/withdrawal row.");
+    const ok = window.confirm(
+      L(
+        "Delete this cashflow record? This does NOT delete any trades, only this deposit/withdrawal row.",
+        "¿Eliminar este cashflow? Esto NO borra trades, solo esta fila de depósito/retiro."
+      )
+    );
     if (!ok) return;
 
     setSaving(true);
@@ -365,7 +380,9 @@ export default function PlanPage() {
   if (loading || !user || loadingData) {
     return (
       <main className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center">
-        <p className="text-base text-slate-400">Loading your plan...</p>
+        <p className="text-base text-slate-400">
+          {L("Loading your plan...", "Cargando tu plan...")}
+        </p>
       </main>
     );
   }
@@ -378,9 +395,12 @@ export default function PlanPage() {
         <header className="mb-6">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <h1 className="text-3xl font-semibold">Cash Flow Tracking</h1>
+              <h1 className="text-3xl font-semibold">{L("Cash Flow Tracking", "Seguimiento de cashflow")}</h1>
               <p className="text-sm text-slate-400 mt-1">
-                Deposits/withdrawals live here so your trading statistics stay clean. This page updates your goal dollars automatically based on account equity.
+                {L(
+                  "Deposits/withdrawals live here so your trading statistics stay clean. This page updates your goal dollars automatically based on account equity.",
+                  "Aquí viven los depósitos/retiros para mantener limpias tus estadísticas. Esta página actualiza tus metas automáticamente según el equity."
+                )}
               </p>
             </div>
 
@@ -389,14 +409,14 @@ export default function PlanPage() {
                 href="/growth-plan"
                 className="inline-flex items-center rounded-xl border border-slate-700 px-3 py-1.5 text-xs font-medium text-slate-200 hover:border-emerald-400 hover:text-emerald-300 transition"
               >
-                Growth plan wizard →
+                {L("Growth plan wizard →", "Asistente de plan →")}
               </Link>
 
               <Link
                 href="/balance-chart"
                 className="inline-flex items-center rounded-xl border border-slate-700 px-3 py-1.5 text-xs font-medium text-slate-200 hover:border-emerald-400 hover:text-emerald-300 transition"
               >
-                Balance chart →
+                {L("Balance chart →", "Gráfico de balance →")}
               </Link>
 
               <button
@@ -404,7 +424,7 @@ export default function PlanPage() {
                 onClick={() => reloadAll()}
                 className="inline-flex items-center rounded-xl border border-slate-700 px-3 py-1.5 text-xs font-medium text-slate-200 hover:border-slate-500 hover:text-slate-100 transition"
               >
-                Refresh
+                {L("Refresh", "Actualizar")}
               </button>
             </div>
           </div>
@@ -412,9 +432,14 @@ export default function PlanPage() {
 
         {!plan ? (
           <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5 text-sm text-slate-300">
-            No Growth Plan found yet (table: <span className="text-slate-100 font-semibold">growth_plans</span>). Create one in{" "}
+            {L(
+              "No Growth Plan found yet (table:",
+              "Aún no hay un Growth Plan (tabla:"
+            )}{" "}
+            <span className="text-slate-100 font-semibold">growth_plans</span>).{" "}
+            {L("Create one in", "Crea uno en")}{" "}
             <Link className="text-emerald-300 hover:text-emerald-200 underline" href="/growth-plan">
-              Growth Plan Wizard
+              {L("Growth Plan Wizard", "Asistente de plan")}
             </Link>
             .
           </div>
@@ -423,49 +448,58 @@ export default function PlanPage() {
             {/* KPI row */}
             <section className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
               <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
-                <div className="text-[11px] text-slate-500 tracking-widest uppercase">Starting balance</div>
-                <div className="mt-1 text-2xl font-semibold">{currency(balances.starting)}</div>
+                <div className="text-[11px] text-slate-500 tracking-widest uppercase">
+                  {L("Starting balance", "Balance inicial")}
+                </div>
+                <div className="mt-1 text-2xl font-semibold">{fmtCurrency(balances.starting)}</div>
                 <div className="mt-1 text-xs text-slate-400">
-                  Plan created: <span className="text-slate-200">{planStartDate || "—"}</span>
+                  {L("Plan created:", "Plan creado:")}{" "}
+                  <span className="text-slate-200">{planStartDate || "—"}</span>
                 </div>
               </div>
 
               <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
-                <div className="text-[11px] text-slate-500 tracking-widest uppercase">Trading equity</div>
-                <div className="mt-1 text-2xl font-semibold">{currency(balances.tradingEquity)}</div>
+                <div className="text-[11px] text-slate-500 tracking-widest uppercase">
+                  {L("Trading equity", "Equity de trading")}
+                </div>
+                <div className="mt-1 text-2xl font-semibold">{fmtCurrency(balances.tradingEquity)}</div>
                 <div className="mt-1 text-xs text-slate-400">
-                  P&amp;L (trading only):{" "}
+                  {L("P&L (trading only):", "P&L (solo trading):")}{" "}
                   <span className={totalTradingPnl >= 0 ? "text-emerald-300 font-semibold" : "text-sky-300 font-semibold"}>
-                    {totalTradingPnl >= 0 ? "+" : "-"}{currency(Math.abs(totalTradingPnl))}
+                    {totalTradingPnl >= 0 ? "+" : "-"}{fmtCurrency(Math.abs(totalTradingPnl))}
                   </span>
                 </div>
               </div>
 
               <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
-                <div className="text-[11px] text-slate-500 tracking-widest uppercase">Account equity</div>
-                <div className="mt-1 text-2xl font-semibold">{currency(balances.accountEquity)}</div>
+                <div className="text-[11px] text-slate-500 tracking-widest uppercase">
+                  {L("Account equity", "Equity de cuenta")}
+                </div>
+                <div className="mt-1 text-2xl font-semibold">{fmtCurrency(balances.accountEquity)}</div>
                 <div className="mt-1 text-xs text-slate-400">
-                  Net cashflow:{" "}
+                  {L("Net cashflow:", "Cashflow neto:")}{" "}
                   <span className={cashflowNet >= 0 ? "text-emerald-300 font-semibold" : "text-sky-300 font-semibold"}>
-                    {cashflowNet >= 0 ? "+" : "-"}{currency(Math.abs(cashflowNet))}
+                    {cashflowNet >= 0 ? "+" : "-"}{fmtCurrency(Math.abs(cashflowNet))}
                   </span>
                 </div>
               </div>
 
               <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
-                <div className="text-[11px] text-slate-500 tracking-widest uppercase">Today&apos;s thresholds</div>
+                <div className="text-[11px] text-slate-500 tracking-widest uppercase">
+                  {L("Today's thresholds", "Umbrales de hoy")}
+                </div>
                 <div className="mt-1 text-sm text-slate-200 space-y-1">
                   <div>
-                    Daily goal:{" "}
+                    {L("Daily goal:", "Meta diaria:")}{" "}
                     <span className="text-emerald-300 font-semibold">
-                      {currency(balances.dailyGoalUsd)}
+                      {fmtCurrency(balances.dailyGoalUsd)}
                     </span>{" "}
                     <span className="text-slate-500">({balances.pct.toFixed(3)}%)</span>
                   </div>
                   <div>
-                    Max daily loss:{" "}
+                    {L("Max daily loss:", "Pérdida diaria máx:")}{" "}
                     <span className="text-sky-300 font-semibold">
-                      {currency(balances.maxLossUsd)}
+                      {fmtCurrency(balances.maxLossUsd)}
                     </span>{" "}
                     <span className="text-slate-500">({(plan.maxDailyLossPercent ?? 0).toFixed(2)}%)</span>
                   </div>
@@ -477,16 +511,19 @@ export default function PlanPage() {
             <section className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
               <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
                 <div className="flex items-center justify-between">
-                  <div className="text-[11px] text-slate-500 tracking-widest uppercase">Progress vs target</div>
+                  <div className="text-[11px] text-slate-500 tracking-widest uppercase">
+                    {L("Progress vs target", "Progreso vs meta")}
+                  </div>
                   <div className="text-xs text-slate-400">
-                    Target: <span className="text-slate-100 font-semibold">{currency(plan.targetBalance ?? 0)}</span>
+                    {L("Target:", "Meta:")}{" "}
+                    <span className="text-slate-100 font-semibold">{fmtCurrency(plan.targetBalance ?? 0)}</span>
                   </div>
                 </div>
 
                 <div className="mt-3 space-y-3">
                   <div>
                     <div className="flex items-center justify-between text-xs text-slate-300 mb-1">
-                      <span>Trading only</span>
+                      <span>{L("Trading only", "Solo trading")}</span>
                       <span className="text-slate-200 font-semibold">{(progress.tradingPct * 100).toFixed(1)}%</span>
                     </div>
                     <div className="h-2 rounded-full bg-slate-950 border border-slate-800 overflow-hidden">
@@ -499,7 +536,7 @@ export default function PlanPage() {
 
                   <div>
                     <div className="flex items-center justify-between text-xs text-slate-300 mb-1">
-                      <span>Including cashflows</span>
+                      <span>{L("Including cashflows", "Incluyendo cashflows")}</span>
                       <span className="text-slate-200 font-semibold">{(progress.accountPct * 100).toFixed(1)}%</span>
                     </div>
                     <div className="h-2 rounded-full bg-slate-950 border border-slate-800 overflow-hidden">
@@ -511,28 +548,33 @@ export default function PlanPage() {
                   </div>
 
                   <p className="text-[11px] text-slate-500">
-                    Cashflows do not count as trading performance. They only adjust account equity and goal dollars.
+                    {L(
+                      "Cashflows do not count as trading performance. They only adjust account equity and goal dollars.",
+                      "Los cashflows no cuentan como performance. Solo ajustan el equity y las metas."
+                    )}
                   </p>
                 </div>
               </div>
 
               <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
-                <div className="text-[11px] text-slate-500 tracking-widest uppercase">Plan snapshot</div>
+                <div className="text-[11px] text-slate-500 tracking-widest uppercase">
+                  {L("Plan snapshot", "Resumen del plan")}
+                </div>
                 <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
                   <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
-                    <div className="text-[11px] text-slate-500">Trading days</div>
+                    <div className="text-[11px] text-slate-500">{L("Trading days", "Días de trading")}</div>
                     <div className="mt-1 text-slate-100 font-semibold">{plan.tradingDays ?? 0}</div>
                   </div>
                   <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
-                    <div className="text-[11px] text-slate-500">Loss days/week</div>
+                    <div className="text-[11px] text-slate-500">{L("Loss days/week", "Días de pérdida/sem")}</div>
                     <div className="mt-1 text-slate-100 font-semibold">{plan.lossDaysPerWeek ?? 0}</div>
                   </div>
                   <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
-                    <div className="text-[11px] text-slate-500">Selected plan</div>
+                    <div className="text-[11px] text-slate-500">{L("Selected plan", "Plan seleccionado")}</div>
                     <div className="mt-1 text-slate-100 font-semibold">{plan.selectedPlan || "—"}</div>
                   </div>
                   <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
-                    <div className="text-[11px] text-slate-500">Daily target %</div>
+                    <div className="text-[11px] text-slate-500">{L("Daily target %", "% meta diaria")}</div>
                     <div className="mt-1 text-emerald-300 font-semibold">{balances.pct.toFixed(3)}%</div>
                   </div>
                 </div>
@@ -545,34 +587,47 @@ export default function PlanPage() {
               <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
                 <div className="flex items-center justify-between mb-4">
                   <div>
-                    <h2 className="text-base font-semibold text-slate-50">Cashflow ledger</h2>
+                    <h2 className="text-base font-semibold text-slate-50">{L("Cashflow ledger", "Ledger de cashflow")}</h2>
                     <p className="text-xs text-slate-500 mt-1">
-                      Deposits & withdrawals tracked separately from trading stats.
+                      {L(
+                        "Deposits & withdrawals tracked separately from trading stats.",
+                        "Depósitos y retiros se registran separados de las estadísticas de trading."
+                      )}
                     </p>
                   </div>
 
                   <div className="text-right text-xs text-slate-400 space-y-1">
                     <div>
-                      Deposits: <span className="text-emerald-300 font-semibold">{currency(cashflowDeposits)}</span>
+                      {L("Deposits:", "Depósitos:")}{" "}
+                      <span className="text-emerald-300 font-semibold">{fmtCurrency(cashflowDeposits)}</span>
                     </div>
                     <div>
-                      Withdrawals: <span className="text-sky-300 font-semibold">{currency(cashflowWithdrawals)}</span>
+                      {L("Withdrawals:", "Retiros:")}{" "}
+                      <span className="text-sky-300 font-semibold">{fmtCurrency(cashflowWithdrawals)}</span>
                     </div>
                   </div>
                 </div>
 
                 {cashflowTableMissing ? (
                   <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-4 text-sm text-slate-300">
-                    Cashflow module is not enabled yet (table <span className="text-slate-100 font-semibold">cashflows</span> not found or blocked by RLS).
+                    {L(
+                      "Cashflow module is not enabled yet (table",
+                      "El módulo de cashflow aún no está habilitado (tabla"
+                    )}{" "}
+                    <span className="text-slate-100 font-semibold">cashflows</span>{" "}
+                    {L("not found or blocked by RLS).", "no encontrada o bloqueada por RLS).")}
                     <div className="text-xs text-slate-500 mt-2">
-                      If you&apos;re the developer: run the cashflows migration SQL and confirm RLS policies.
+                      {L(
+                        "If you're the developer: run the cashflows migration SQL and confirm RLS policies.",
+                        "Si eres developer: corre la migración SQL de cashflows y confirma las políticas RLS."
+                      )}
                     </div>
                   </div>
                 ) : cashflows.length === 0 ? (
                   <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-4 text-sm text-slate-300">
-                    No cashflows yet.
+                    {L("No cashflows yet.", "Aún no hay cashflows.")}
                     <div className="text-xs text-slate-500 mt-1">
-                      Add a deposit or withdrawal on the right.
+                      {L("Add a deposit or withdrawal on the right.", "Agrega un depósito o retiro a la derecha.")}
                     </div>
                   </div>
                 ) : (
@@ -596,13 +651,13 @@ export default function PlanPage() {
                                     : "border-sky-500/30 text-sky-300 bg-sky-500/10",
                                 ].join(" ")}
                               >
-                                {isDeposit ? "DEPOSIT" : "WITHDRAWAL"}
+                                {isDeposit ? L("DEPOSIT", "DEPÓSITO") : L("WITHDRAWAL", "RETIRO")}
                               </span>
                             </div>
 
                             <div className="mt-1 text-sm text-slate-100 font-semibold">
                               {signed >= 0 ? "+" : "-"}
-                              {currency(Math.abs(signed))}
+                              {fmtCurrency(Math.abs(signed))}
                             </div>
 
                             {cf.note ? (
@@ -618,7 +673,7 @@ export default function PlanPage() {
                             disabled={saving}
                             className="shrink-0 rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:border-red-400/60 hover:text-red-300 transition disabled:opacity-60"
                           >
-                            Delete
+                            {L("Delete", "Eliminar")}
                           </button>
                         </div>
                       );
@@ -631,16 +686,19 @@ export default function PlanPage() {
               <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
                 <div className="flex items-center justify-between mb-4">
                   <div>
-                    <h2 className="text-base font-semibold text-slate-50">Add cashflow</h2>
+                    <h2 className="text-base font-semibold text-slate-50">{L("Add cashflow", "Agregar cashflow")}</h2>
                     <p className="text-xs text-slate-500 mt-1">
-                      This updates goal dollars automatically, without changing win-rate or P&amp;L stats.
+                      {L(
+                        "This updates goal dollars automatically, without changing win-rate or P&L stats.",
+                        "Esto actualiza las metas automáticamente sin cambiar tu win-rate ni P&L."
+                      )}
                     </p>
                   </div>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <div className="md:col-span-2">
-                    <label className="block text-xs text-slate-400 mb-1">Type</label>
+                    <label className="block text-xs text-slate-400 mb-1">{L("Type", "Tipo")}</label>
                     <div className="inline-flex rounded-xl border border-slate-800 bg-slate-950/60 p-1">
                       <button
                         type="button"
@@ -652,7 +710,7 @@ export default function PlanPage() {
                             : "text-slate-300 hover:text-slate-50",
                         ].join(" ")}
                       >
-                        Deposit
+                        {L("Deposit", "Depósito")}
                       </button>
                       <button
                         type="button"
@@ -664,13 +722,13 @@ export default function PlanPage() {
                             : "text-slate-300 hover:text-slate-50",
                         ].join(" ")}
                       >
-                        Withdrawal
+                        {L("Withdrawal", "Retiro")}
                       </button>
                     </div>
                   </div>
 
                   <div>
-                    <label className="block text-xs text-slate-400 mb-1">Date</label>
+                    <label className="block text-xs text-slate-400 mb-1">{L("Date", "Fecha")}</label>
                     <input
                       type="date"
                       value={cfDate}
@@ -680,7 +738,7 @@ export default function PlanPage() {
                   </div>
 
                   <div>
-                    <label className="block text-xs text-slate-400 mb-1">Amount (USD)</label>
+                    <label className="block text-xs text-slate-400 mb-1">{L("Amount (USD)", "Monto (USD)")}</label>
                     <input
                       inputMode="decimal"
                       value={cfAmount}
@@ -691,11 +749,14 @@ export default function PlanPage() {
                   </div>
 
                   <div className="md:col-span-2">
-                    <label className="block text-xs text-slate-400 mb-1">Note (optional)</label>
+                    <label className="block text-xs text-slate-400 mb-1">{L("Note (optional)", "Nota (opcional)")}</label>
                     <input
                       value={cfNote}
                       onChange={(e) => setCfNote(e.target.value)}
-                      placeholder="e.g., Added margin / New deposit / Withdrew profits"
+                      placeholder={L(
+                        "e.g., Added margin / New deposit / Withdrew profits",
+                        "ej., Añadí margen / Nuevo depósito / Retiré ganancias"
+                      )}
                       className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-400"
                     />
                   </div>
@@ -708,25 +769,36 @@ export default function PlanPage() {
                     disabled={saving || cashflowTableMissing}
                     className="rounded-xl bg-emerald-400 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-emerald-300 disabled:opacity-60"
                   >
-                    Add
+                    {L("Add", "Agregar")}
                   </button>
 
                   <div className="text-xs text-slate-500">
-                    After saving, your <span className="text-slate-200">daily goal $</span> and <span className="text-slate-200">max loss $</span> update based on account equity.
+                    {L("After saving, your ", "Luego de guardar, tu ")}
+                    <span className="text-slate-200">{L("daily goal $", "meta diaria $")}</span>
+                    {L(" and ", " y ")}
+                    <span className="text-slate-200">{L("max loss $", "pérdida máx $")}</span>{" "}
+                    {L("update based on account equity.", "se actualizan según el equity de la cuenta.")}
                   </div>
                 </div>
 
                 <div className="mt-6 rounded-xl border border-slate-800 bg-slate-950/40 p-4 text-xs text-slate-400 space-y-2">
-                  <div className="text-slate-200 font-semibold">How this works</div>
+                  <div className="text-slate-200 font-semibold">{L("How this works", "Cómo funciona")}</div>
                   <ul className="list-disc pl-5 space-y-1">
                     <li>
-                      Trading P&amp;L is calculated only from your journal/trade imports.
+                      {L(
+                        "Trading P&L is calculated only from your journal/trade imports.",
+                        "El P&L de trading se calcula solo desde tu journal/imports."
+                      )}
                     </li>
                     <li>
-                      Deposits/withdrawals are stored in <span className="font-mono">cashflows</span> and never counted as P&amp;L.
+                      {L("Deposits/withdrawals are stored in", "Los depósitos/retiros se guardan en")}{" "}
+                      <span className="font-mono">cashflows</span>{" "}
+                      {L("and never counted as P&L.", "y nunca cuentan como P&L.")}
                     </li>
                     <li>
-                      Goal dollars (and max-loss dollars) are computed from your <span className="text-slate-200">account equity</span> = trading equity + net cashflows.
+                      {L("Goal dollars (and max-loss dollars) are computed from your", "Las metas en $ (y pérdidas máx) se calculan desde tu")}{" "}
+                      <span className="text-slate-200">{L("account equity", "equity de cuenta")}</span>{" "}
+                      = {L("trading equity", "trading equity")} + {L("net cashflows", "cashflows netos")}.
                     </li>
                   </ul>
                 </div>

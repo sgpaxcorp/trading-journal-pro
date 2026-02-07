@@ -1,9 +1,11 @@
 // app/start/StartClient.tsx
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supaBaseClient";
+import { useAppSettings } from "@/lib/appSettings";
+import { resolveLocale } from "@/lib/i18n";
 
 type PlanId = "core" | "advanced";
 type Step = 1 | 2 | 3 | 4;
@@ -17,27 +19,31 @@ type StartClientProps = {
   initialPlan: PlanId;
 };
 
-const STEPS: { id: Step; label: string; description: string }[] = [
-  { id: 1, label: "Information", description: "Create your account credentials." },
-  { id: 2, label: "Plan selection", description: "Choose between Core or Advanced." },
-  { id: 3, label: "Checkout", description: "Complete secure payment with Stripe." },
-  { id: 4, label: "Confirmed", description: "Access your trading workspace." },
+const buildSteps = (L: (en: string, es: string) => string): { id: Step; label: string; description: string }[] => [
+  { id: 1, label: L("Information", "Información"), description: L("Create your account credentials.", "Crea tus credenciales de cuenta.") },
+  { id: 2, label: L("Plan selection", "Selección de plan"), description: L("Choose between Core or Advanced.", "Elige entre Core o Advanced.") },
+  { id: 3, label: L("Checkout", "Checkout"), description: L("Complete secure payment with Stripe.", "Completa el pago seguro con Stripe.") },
+  { id: 4, label: L("Confirmed", "Confirmado"), description: L("Access your trading workspace.", "Accede a tu espacio de trading.") },
 ];
 
-const PLAN_COPY: Record<PlanId, { name: string; price: string; description: string }> = {
+const buildPlanCopy = (L: (en: string, es: string) => string): Record<PlanId, { name: string; price: string; description: string }> => ({
   core: {
-    name: "Core",
-    price: "$14.99 / month",
-    description:
+    name: L("Core", "Core"),
+    price: L("$14.99 / month", "$14.99 / mes"),
+    description: L(
       "Ideal for active traders who want structure, clear goals and emotional control without overcomplicating things.",
+      "Ideal para traders activos que buscan estructura, metas claras y control emocional sin complicarse."
+    ),
   },
   advanced: {
-    name: "Advanced",
-    price: "$24.99 / month",
-    description:
+    name: L("Advanced", "Advanced"),
+    price: L("$24.99 / month", "$24.99 / mes"),
+    description: L(
       "For full-time and funded traders who need deep analytics, advanced alerts and reports ready for prop firms.",
+      "Para traders full-time o fondeados que necesitan analítica profunda, alertas avanzadas y reportes listos para prop firms."
+    ),
   },
-};
+});
 
 function classNames(...classes: (string | false | null | undefined)[]) {
   return classes.filter(Boolean).join(" ");
@@ -46,6 +52,13 @@ function classNames(...classes: (string | false | null | undefined)[]) {
 export default function StartClient({ initialPlan }: StartClientProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { locale } = useAppSettings();
+  const lang = resolveLocale(locale);
+  const isEs = lang === "es";
+  const L = (en: string, es: string) => (isEs ? es : en);
+
+  const steps = useMemo(() => buildSteps(L), [lang]);
+  const planCopy = useMemo(() => buildPlanCopy(L), [lang]);
 
   // 👇 Leemos los query params que mandamos desde /confirmed
   const stepFromQuery = searchParams.get("step");
@@ -105,7 +118,7 @@ export default function StartClient({ initialPlan }: StartClientProps) {
     setError(null);
 
     if (!infoForm.email || !infoForm.password) {
-      setError("Please enter a valid email and password.");
+      setError(L("Please enter a valid email and password.", "Ingresa un email y contraseña válidos."));
       return;
     }
 
@@ -125,7 +138,7 @@ export default function StartClient({ initialPlan }: StartClientProps) {
       });
 
       if (error || !data.user) {
-        setError(error?.message ?? "Unable to create your account.");
+        setError(error?.message ?? L("Unable to create your account.", "No se pudo crear tu cuenta."));
         setLoadingInfo(false);
         return;
       }
@@ -139,7 +152,7 @@ export default function StartClient({ initialPlan }: StartClientProps) {
       setCurrentStep(2);
     } catch (err: any) {
       console.error("Error on sign up:", err);
-      setError(err?.message ?? "Unexpected error while creating account.");
+      setError(err?.message ?? L("Unexpected error while creating account.", "Error inesperado al crear la cuenta."));
     } finally {
       setLoadingInfo(false);
     }
@@ -150,7 +163,7 @@ export default function StartClient({ initialPlan }: StartClientProps) {
     setError(null);
     if (!user) {
       // Si por alguna razón no hay usuario, forzamos volver a step 1 para crearlo
-      setError("Please create your account first.");
+      setError(L("Please create your account first.", "Primero crea tu cuenta."));
       setCurrentStep(1);
       return;
     }
@@ -161,7 +174,7 @@ export default function StartClient({ initialPlan }: StartClientProps) {
   async function handleCheckout() {
     setError(null);
     if (!user) {
-      setError("Missing user information.");
+      setError(L("Missing user information.", "Falta información del usuario."));
       setCurrentStep(1);
       return;
     }
@@ -185,7 +198,7 @@ export default function StartClient({ initialPlan }: StartClientProps) {
 
       if (!res.ok) {
         const message =
-          body?.error ?? "Error creating checkout session. Please try again.";
+          body?.error ?? L("Error creating checkout session. Please try again.", "Error creando la sesión de checkout. Intenta de nuevo.");
         setError(message);
         setLoadingCheckout(false);
         return;
@@ -193,7 +206,7 @@ export default function StartClient({ initialPlan }: StartClientProps) {
 
       const url = body?.url as string | undefined;
       if (!url) {
-        setError("Missing checkout URL from Stripe.");
+        setError(L("Missing checkout URL from Stripe.", "Falta la URL de checkout de Stripe."));
         setLoadingCheckout(false);
         return;
       }
@@ -201,7 +214,7 @@ export default function StartClient({ initialPlan }: StartClientProps) {
       window.location.href = url;
     } catch (err: any) {
       console.error("Error starting Stripe checkout:", err);
-      setError(err?.message ?? "Unexpected error starting checkout.");
+      setError(err?.message ?? L("Unexpected error starting checkout.", "Error inesperado iniciando checkout."));
       setLoadingCheckout(false);
     }
   }
@@ -213,11 +226,13 @@ export default function StartClient({ initialPlan }: StartClientProps) {
       return (
         <div>
           <h2 className="text-xl md:text-2xl font-semibold mb-2">
-            Create your account
+            {L("Create your account", "Crea tu cuenta")}
           </h2>
           <p className="text-xs text-slate-400 mb-4">
-            Step 1 of 4 – Your login details. Next you will choose your plan and
-            complete a secure Stripe payment.
+            {L(
+              "Step 1 of 4 – Your login details. Next you will choose your plan and complete a secure Stripe payment.",
+              "Paso 1 de 4 – Tus datos de acceso. Luego elegirás tu plan y completarás un pago seguro con Stripe."
+            )}
           </p>
 
           <form
@@ -226,7 +241,7 @@ export default function StartClient({ initialPlan }: StartClientProps) {
           >
             <div>
               <label className="block mb-1 text-slate-300">
-                Full name (optional)
+                {L("Full name (optional)", "Nombre completo (opcional)")}
               </label>
               <input
                 type="text"
@@ -238,12 +253,12 @@ export default function StartClient({ initialPlan }: StartClientProps) {
                   }))
                 }
                 className="w-full rounded-lg bg-slate-900/80 border border-slate-700 px-3 py-2 text-xs md:text-sm outline-none focus:border-emerald-400"
-                placeholder="How should we call you?"
+                placeholder={L("How should we call you?", "¿Cómo quieres que te llamemos?")}
               />
             </div>
 
             <div>
-              <label className="block mb-1 text-slate-300">Email</label>
+              <label className="block mb-1 text-slate-300">{L("Email", "Correo")}</label>
               <input
                 type="email"
                 value={infoForm.email}
@@ -257,7 +272,7 @@ export default function StartClient({ initialPlan }: StartClientProps) {
             </div>
 
             <div>
-              <label className="block mb-1 text-slate-300">Password</label>
+              <label className="block mb-1 text-slate-300">{L("Password", "Contraseña")}</label>
               <input
                 type="password"
                 value={infoForm.password}
@@ -268,21 +283,24 @@ export default function StartClient({ initialPlan }: StartClientProps) {
                   }))
                 }
                 className="w-full rounded-lg bg-slate-900/80 border border-slate-700 px-3 py-2 text-xs md:text-sm outline-none focus:border-emerald-400"
-                placeholder="At least 8 characters"
+                placeholder={L("At least 8 characters", "Al menos 8 caracteres")}
                 required
               />
             </div>
 
             <div className="flex items-center justify-between pt-2">
               <p className="text-[10px] text-slate-500">
-                By continuing, you agree to our terms and privacy policy.
+                {L(
+                  "By continuing, you agree to our terms and privacy policy.",
+                  "Al continuar, aceptas nuestros términos y política de privacidad."
+                )}
               </p>
               <button
                 type="submit"
                 disabled={loadingInfo}
                 className="inline-flex px-5 py-2 rounded-xl bg-emerald-400 text-slate-950 text-xs font-semibold hover:bg-emerald-300 disabled:opacity-60 disabled:cursor-not-allowed"
               >
-                {loadingInfo ? "Creating..." : "Continue"}
+                {loadingInfo ? L("Creating...", "Creando...") : L("Continue", "Continuar")}
               </button>
             </div>
           </form>
@@ -291,17 +309,19 @@ export default function StartClient({ initialPlan }: StartClientProps) {
     }
 
     if (currentStep === 2) {
-      const core = PLAN_COPY.core;
-      const adv = PLAN_COPY.advanced;
+      const core = planCopy.core;
+      const adv = planCopy.advanced;
 
       return (
         <div>
           <h2 className="text-xl md:text-2xl font-semibold mb-2">
-            Choose your plan
+            {L("Choose your plan", "Elige tu plan")}
           </h2>
           <p className="text-xs text-slate-400 mb-4">
-            Step 2 of 4 – Select the plan that matches how you trade. You can
-            upgrade later as your account grows.
+            {L(
+              "Step 2 of 4 – Select the plan that matches how you trade. You can upgrade later as your account grows.",
+              "Paso 2 de 4 – Selecciona el plan que encaje con tu forma de operar. Puedes hacer upgrade más adelante."
+            )}
           </p>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
@@ -358,7 +378,7 @@ export default function StartClient({ initialPlan }: StartClientProps) {
                 onClick={() => setCurrentStep(1)}
                 className="text-[10px] text-slate-400 hover:text-emerald-300"
               >
-                ← Back to information
+                ← {L("Back to information", "Volver a información")}
               </button>
             )}
             <button
@@ -366,7 +386,7 @@ export default function StartClient({ initialPlan }: StartClientProps) {
               onClick={handlePlanContinue}
               className="inline-flex px-5 py-2 rounded-xl bg-emerald-400 text-slate-950 text-xs font-semibold hover:bg-emerald-300"
             >
-              Continue to checkout
+              {L("Continue to checkout", "Continuar al checkout")}
             </button>
           </div>
         </div>
@@ -374,21 +394,22 @@ export default function StartClient({ initialPlan }: StartClientProps) {
     }
 
     if (currentStep === 3) {
-      const plan = PLAN_COPY[selectedPlan];
+      const plan = planCopy[selectedPlan];
 
       return (
         <div>
           <h2 className="text-xl md:text-2xl font-semibold mb-2">
-            Secure checkout
+            {L("Secure checkout", "Checkout seguro")}
           </h2>
           <p className="text-xs text-slate-400 mb-4">
-            Step 3 of 4 – You will be redirected to Stripe to complete your
-            payment. You can enter a promotion code directly on the Stripe
-            checkout page.
+            {L(
+              "Step 3 of 4 – You will be redirected to Stripe to complete your payment. You can enter a promotion code directly on the Stripe checkout page.",
+              "Paso 3 de 4 – Serás redirigido a Stripe para completar tu pago. Puedes introducir un código de promoción directamente en Stripe."
+            )}
           </p>
 
           <div className="mb-4 rounded-xl border border-slate-700 bg-slate-900/60 p-4 text-xs">
-            <p className="text-slate-300 mb-1">Selected plan</p>
+            <p className="text-slate-300 mb-1">{L("Selected plan", "Plan seleccionado")}</p>
             <p className="font-semibold text-slate-50">
               {plan.name}{" "}
               <span className="text-[11px] text-slate-400">
@@ -396,8 +417,10 @@ export default function StartClient({ initialPlan }: StartClientProps) {
               </span>
             </p>
             <p className="mt-2 text-[11px] text-slate-400">
-              Payment processing is handled securely by Stripe. You&apos;ll
-              receive a payment receipt via email.
+              {L(
+                "Payment processing is handled securely by Stripe. You'll receive a payment receipt via email.",
+                "El procesamiento del pago lo maneja Stripe de forma segura. Recibirás un recibo por email."
+              )}
             </p>
           </div>
 
@@ -407,7 +430,7 @@ export default function StartClient({ initialPlan }: StartClientProps) {
               onClick={() => setCurrentStep(2)}
               className="text-[10px] text-slate-400 hover:text-emerald-300"
             >
-              ← Back to plan selection
+              ← {L("Back to plan selection", "Volver a selección de plan")}
             </button>
             <button
               type="button"
@@ -415,7 +438,7 @@ export default function StartClient({ initialPlan }: StartClientProps) {
               disabled={loadingCheckout}
               className="inline-flex px-5 py-2 rounded-xl bg-emerald-400 text-slate-950 text-xs font-semibold hover:bg-emerald-300 disabled:opacity-60 disabled:cursor-not-allowed"
             >
-              {loadingCheckout ? "Redirecting..." : "Continue to Stripe"}
+              {loadingCheckout ? L("Redirecting...", "Redirigiendo...") : L("Continue to Stripe", "Continuar a Stripe")}
             </button>
           </div>
         </div>
@@ -430,9 +453,9 @@ export default function StartClient({ initialPlan }: StartClientProps) {
       <div className="w-full max-w-5xl bg-slate-900/90 border border-slate-800 rounded-2xl p-6 md:p-8 shadow-2xl grid grid-cols-1 md:grid-cols-[220px,1fr] gap-6">
         {/* Sidebar Steps */}
         <aside className="border-b md:border-b-0 md:border-r border-slate-800 pb-4 md:pb-0 md:pr-6">
-          <h1 className="text-lg font-semibold mb-4">Get started</h1>
+          <h1 className="text-lg font-semibold mb-4">{L("Get started", "Comienza")}</h1>
           <ul className="space-y-3 text-xs">
-            {STEPS.map((step) => {
+            {steps.map((step) => {
               const isActive = step.id === currentStep;
               const isCompleted = step.id < currentStep;
               return (
@@ -471,8 +494,10 @@ export default function StartClient({ initialPlan }: StartClientProps) {
             })}
           </ul>
           <p className="mt-6 text-[10px] text-slate-500 border-t border-slate-800 pt-3">
-            Secure payments powered by Stripe. You&apos;ll receive a payment
-            receipt and onboarding emails after your subscription is confirmed.
+            {L(
+              "Secure payments powered by Stripe. You'll receive a payment receipt and onboarding emails after your subscription is confirmed.",
+              "Pagos seguros con Stripe. Recibirás un recibo y emails de onboarding cuando se confirme tu suscripción."
+            )}
           </p>
         </aside>
 

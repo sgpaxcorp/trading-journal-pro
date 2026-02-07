@@ -6,6 +6,8 @@ import { useRouter } from "next/navigation";
 
 import TopNav from "@/app/components/TopNav";
 import { useAuth } from "@/context/AuthContext";
+import { useAppSettings } from "@/lib/appSettings";
+import { resolveLocale } from "@/lib/i18n";
 
 import type { JournalEntry } from "@/lib/journalLocal";
 import { getAllJournalEntries } from "@/lib/journalSupabase";
@@ -279,6 +281,12 @@ type InteractiveCandleChartProps = {
   exitPrice?: number | null;
   entryColor?: string;
   exitColor?: string;
+  entryLabel?: string;
+  exitLabel?: string;
+  zoomInLabel?: string;
+  zoomOutLabel?: string;
+  zoomResetLabel?: string;
+  emptyLabel?: string;
 };
 
 function InteractiveCandleChart({
@@ -292,6 +300,12 @@ function InteractiveCandleChart({
   exitPrice,
   entryColor = "#22c55e",
   exitColor = "#38bdf8",
+  entryLabel = "Entry",
+  exitLabel = "Exit",
+  zoomInLabel = "Zoom in",
+  zoomOutLabel = "Zoom out",
+  zoomResetLabel = "Reset zoom",
+  emptyLabel = "No chart data for this symbol/timeframe.",
 }: InteractiveCandleChartProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<any>(null);
@@ -445,7 +459,7 @@ function InteractiveCandleChart({
         position: "belowBar",
         color: entryColor,
         shape: "arrowUp",
-        text: `Entry ${entryPrice != null ? entryPrice.toFixed(2) : ""}`,
+        text: `${entryLabel} ${entryPrice != null ? entryPrice.toFixed(2) : ""}`.trim(),
       });
     }
 
@@ -456,7 +470,7 @@ function InteractiveCandleChart({
         position: "aboveBar",
         color: exitColor,
         shape: "arrowDown",
-        text: `Exit ${exitPrice != null ? exitPrice.toFixed(2) : ""}`,
+        text: `${exitLabel} ${exitPrice != null ? exitPrice.toFixed(2) : ""}`.trim(),
       });
     }
 
@@ -510,14 +524,14 @@ function InteractiveCandleChart({
                 className="inline-block h-2 w-4 rounded"
                 style={{ backgroundColor: entryColor }}
               />
-              <span className="text-slate-300">Entry</span>
+              <span className="text-slate-300">{entryLabel}</span>
             </div>
             <div className="flex items-center gap-1">
               <span
                 className="inline-block h-2 w-4 rounded"
                 style={{ backgroundColor: exitColor }}
               />
-              <span className="text-slate-300">Exit</span>
+              <span className="text-slate-300">{exitLabel}</span>
             </div>
           </div>
 
@@ -526,7 +540,7 @@ function InteractiveCandleChart({
               type="button"
               onClick={handleZoomIn}
               className="px-2 py-1 rounded-md bg-slate-800 border border-slate-700 hover:border-emerald-400 hover:text-emerald-300"
-              title="Zoom in"
+              title={zoomInLabel}
             >
               +
             </button>
@@ -534,7 +548,7 @@ function InteractiveCandleChart({
               type="button"
               onClick={handleZoomOut}
               className="px-2 py-1 rounded-md bg-slate-800 border border-slate-700 hover:border-emerald-400 hover:text-emerald-300"
-              title="Zoom out"
+              title={zoomOutLabel}
             >
               −
             </button>
@@ -542,7 +556,7 @@ function InteractiveCandleChart({
               type="button"
               onClick={handleReset}
               className="px-2 py-1 rounded-md bg-slate-800 border border-slate-700 hover:border-emerald-400 hover:text-emerald-300"
-              title="Reset zoom"
+              title={zoomResetLabel}
             >
               ⟳
             </button>
@@ -552,7 +566,7 @@ function InteractiveCandleChart({
 
       {!candles.length ? (
         <p className="text-sm text-slate-400">
-          No chart data for this symbol/timeframe.
+          {emptyLabel}
         </p>
       ) : (
         <div
@@ -571,6 +585,23 @@ function InteractiveCandleChart({
 export default function BackStudyPage() {
   const { user, loading } = useAuth();
   const router = useRouter();
+  const { locale } = useAppSettings();
+  const lang = resolveLocale(locale);
+  const isEs = lang === "es";
+  const L = (en: string, es: string) => (isEs ? es : en);
+
+  const rangeLabels = useMemo<Record<ChartRangeId, string>>(
+    () => ({
+      "1D": L("1 Day", "1 Día"),
+      "5D": L("5 Days", "5 Días"),
+      "1W": L("1 Week", "1 Semana"),
+      "1M": L("1 Month", "1 Mes"),
+      "3M": L("3 Months", "3 Meses"),
+      "6M": L("6 Months", "6 Meses"),
+      "1Y": L("1 Year", "1 Año"),
+    }),
+    [lang]
+  );
 
   const [entriesLoading, setEntriesLoading] = useState(false);
   const [entriesError, setEntriesError] = useState<string | null>(null);
@@ -607,7 +638,7 @@ export default function BackStudyPage() {
       } catch (err) {
         console.error("Error loading journal entries for back-study:", err);
         if (isMounted) {
-          setEntriesError("Could not load your journal entries.");
+          setEntriesError(L("Could not load your journal entries.", "No se pudieron cargar tus entradas del journal."));
         }
       } finally {
         if (isMounted) {
@@ -900,7 +931,7 @@ export default function BackStudyPage() {
   if (loading || !user || entriesLoading) {
     return (
       <main className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center">
-        <p className="text-slate-400 text-sm">Loading back-study…</p>
+        <p className="text-slate-400 text-sm">{L("Loading back-study…", "Cargando back-study…")}</p>
       </main>
     );
   }
@@ -914,15 +945,16 @@ export default function BackStudyPage() {
           <header className="flex flex-col md:flex-row justify-between gap-4 mb-2">
             <div>
               <p className="text-emerald-400 text-xs uppercase tracking-[0.25em]">
-                Back-Studying
+                {L("Back-Studying", "Back-Study")}
               </p>
               <h1 className="text-3xl md:text-4xl font-semibold mt-1">
-                Chart replays from your journal
+                {L("Chart replays from your journal", "Replays de charts desde tu journal")}
               </h1>
               <p className="text-sm md:text-base text-slate-400 mt-2 max-w-xl">
-                Each entry in the Entries/Exits widgets becomes a trade. The
-                chart marks the exact entry (green arrow) and exit (blue arrow)
-                using the times and prices you saved in the daily journal.
+                {L(
+                  "Each entry in the Entries/Exits widgets becomes a trade. The chart marks the exact entry (green arrow) and exit (blue arrow) using the times and prices you saved in the daily journal.",
+                  "Cada entrada en los widgets de Entradas/Salidas se convierte en un trade. El chart marca la entrada (flecha verde) y la salida (flecha azul) usando horas y precios guardados en tu journal."
+                )}
               </p>
             </div>
 
@@ -931,7 +963,7 @@ export default function BackStudyPage() {
               onClick={() => router.push("/dashboard")}
               className="self-start md:self-center px-4 py-2 rounded-xl border border-slate-700 text-slate-200 text-sm hover:border-emerald-400 hover:text-emerald-300 transition"
             >
-              ← Back to dashboard
+              ← {L("Back to dashboard", "Volver al dashboard")}
             </button>
           </header>
 
@@ -939,7 +971,7 @@ export default function BackStudyPage() {
             <section className="rounded-2xl border border-rose-500/60 bg-rose-950/40 p-4 md:p-5">
               <p className="text-sm text-rose-200">{entriesError}</p>
               <p className="text-xs text-rose-300/80 mt-1">
-                Check your connection or try again later.
+                {L("Check your connection or try again later.", "Revisa tu conexión o intenta más tarde.")}
               </p>
             </section>
           )}
@@ -947,11 +979,13 @@ export default function BackStudyPage() {
           {!entriesError && trades.length === 0 ? (
             <section className="rounded-2xl border border-slate-800 bg-slate-900/80 p-4 md:p-5">
               <p className="text-sm text-slate-200 mb-1">
-                No trades found for back-study.
+                {L("No trades found for back-study.", "No se encontraron trades para back-study.")}
               </p>
               <p className="text-sm text-slate-400">
-                Make sure you have Entries and Exits saved in the journal
-                (notes JSON) so they can be replayed here.
+                {L(
+                  "Make sure you have Entries and Exits saved in the journal (notes JSON) so they can be replayed here.",
+                  "Asegúrate de tener Entradas y Salidas guardadas en el journal (notes JSON) para poder reproducirlas aquí."
+                )}
               </p>
             </section>
           ) : (
@@ -965,7 +999,7 @@ export default function BackStudyPage() {
                   >
                     {/* Session selector */}
                     <div className="flex flex-col gap-1">
-                      <label className="text-xs text-slate-400">Session</label>
+                      <label className="text-xs text-slate-400">{L("Session", "Sesión")}</label>
                       <select
                         className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-400"
                         value={selectedDate}
@@ -993,7 +1027,7 @@ export default function BackStudyPage() {
                     {/* Trade selector */}
                     <div className="flex flex-col gap-1 md:col-span-2">
                       <label className="text-xs text-slate-400">
-                        Trade (symbol)
+                        {L("Trade (symbol)", "Trade (símbolo)")}
                       </label>
                       <select
                         className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-400"
@@ -1009,7 +1043,7 @@ export default function BackStudyPage() {
                       </select>
                       {selectedTrade && (
                         <p className="text-[11px] text-slate-400 mt-1">
-                          Underlying:{" "}
+                          {L("Underlying:", "Underlying:")}{" "}
                           <span className="font-mono text-slate-200">
                             {selectedTrade.underlyingSymbol}
                           </span>
@@ -1017,7 +1051,7 @@ export default function BackStudyPage() {
                             selectedTrade.contractSymbol !==
                               selectedTrade.underlyingSymbol && (
                               <>
-                                {" · "}Contract:{" "}
+                                {" · "}{L("Contract:", "Contrato:")}{" "}
                                 <span className="font-mono text-slate-200">
                                   {selectedTrade.contractSymbol}
                                 </span>
@@ -1031,7 +1065,7 @@ export default function BackStudyPage() {
                     <div className="flex flex-col gap-3">
                       <div className="flex flex-col gap-1">
                         <span className="text-[11px] text-slate-400 uppercase tracking-[0.15em]">
-                          Timeframe
+                          {L("Timeframe", "Timeframe")}
                         </span>
                         <div className="flex flex-wrap gap-1">
                           {TIMEFRAMES.map((tf) => {
@@ -1056,7 +1090,7 @@ export default function BackStudyPage() {
 
                       <div className="flex flex-col gap-1">
                         <span className="text-[11px] text-slate-400 uppercase tracking-[0.15em]">
-                          History range
+                          {L("History range", "Rango histórico")}
                         </span>
                         <div className="flex flex-wrap gap-1">
                           {CHART_RANGES.map((r) => {
@@ -1072,7 +1106,7 @@ export default function BackStudyPage() {
                                     : "bg-slate-950 text-slate-200 border-slate-700 hover:border-sky-400 hover:text-sky-300"
                                 }`}
                               >
-                                {r.label}
+                                {rangeLabels[r.id]}
                               </button>
                             );
                           })}
@@ -1084,7 +1118,7 @@ export default function BackStudyPage() {
                           type="submit"
                           className="w-full px-4 py-2 rounded-xl bg-emerald-500 text-slate-950 text-sm font-semibold shadow-[0_0_20px_rgba(16,185,129,0.45)] hover:bg-emerald-400 transition"
                         >
-                          Load replay
+                          {L("Load replay", "Cargar replay")}
                         </button>
 
                         <button
@@ -1093,7 +1127,7 @@ export default function BackStudyPage() {
                           className="w-full px-4 py-2 rounded-xl bg-sky-500 text-slate-950 text-xs md:text-sm font-semibold shadow-[0_0_16px_rgba(56,189,248,0.5)] hover:bg-sky-400 transition"
                           disabled={!selectedTrade}
                         >
-                          Ask AI Coach about this trade
+                          {L("Ask AI Coach about this trade", "Preguntar al coach AI sobre este trade")}
                         </button>
                       </div>
                     </div>
@@ -1107,7 +1141,7 @@ export default function BackStudyPage() {
                     <div>
                       {underlyingState.loading ? (
                         <p className="text-sm text-slate-400">
-                          Loading underlying chart…
+                          {L("Loading underlying chart…", "Cargando chart del underlying…")}
                         </p>
                       ) : underlyingState.error ? (
                         <p className="text-sm text-sky-300">
@@ -1115,7 +1149,7 @@ export default function BackStudyPage() {
                         </p>
                       ) : (
                         <InteractiveCandleChart
-                          title="Underlying asset"
+                          title={L("Underlying asset", "Activo subyacente")}
                           symbol={normalizeSymbolForYahoo(
                             selectedTrade.underlyingSymbol,
                             selectedTrade.kind
@@ -1128,6 +1162,12 @@ export default function BackStudyPage() {
                           exitPrice={selectedTrade.exitPrice ?? undefined}
                           entryColor="#22c55e"
                           exitColor="#38bdf8"
+                          entryLabel={L("Entry", "Entrada")}
+                          exitLabel={L("Exit", "Salida")}
+                          zoomInLabel={L("Zoom in", "Acercar")}
+                          zoomOutLabel={L("Zoom out", "Alejar")}
+                          zoomResetLabel={L("Reset zoom", "Reiniciar zoom")}
+                          emptyLabel={L("No chart data for this symbol/timeframe.", "No hay datos de chart para este símbolo/timeframe.")}
                         />
                       )}
                     </div>
@@ -1137,7 +1177,7 @@ export default function BackStudyPage() {
                       <div>
                         {contractState.loading ? (
                           <p className="text-sm text-slate-400">
-                            Loading contract chart…
+                            {L("Loading contract chart…", "Cargando chart del contrato…")}
                           </p>
                         ) : contractState.error ? (
                           <p className="text-sm text-sky-300">
@@ -1145,7 +1185,7 @@ export default function BackStudyPage() {
                           </p>
                         ) : (
                           <InteractiveCandleChart
-                            title="Contract used"
+                            title={L("Contract used", "Contrato usado")}
                             symbol={normalizeSymbolForYahoo(
                               selectedTrade.contractSymbol,
                               "option"
@@ -1158,6 +1198,12 @@ export default function BackStudyPage() {
                             exitPrice={selectedTrade.exitPrice ?? undefined}
                             entryColor="#22c55e"
                             exitColor="#38bdf8"
+                            entryLabel={L("Entry", "Entrada")}
+                            exitLabel={L("Exit", "Salida")}
+                            zoomInLabel={L("Zoom in", "Acercar")}
+                            zoomOutLabel={L("Zoom out", "Alejar")}
+                            zoomResetLabel={L("Reset zoom", "Reiniciar zoom")}
+                            emptyLabel={L("No chart data for this symbol/timeframe.", "No hay datos de chart para este símbolo/timeframe.")}
                           />
                         )}
                       </div>
