@@ -22,6 +22,7 @@ import Link from "next/link";
 
 import TopNav from "@/app/components/TopNav";
 import { useAuth } from "@/context/AuthContext";
+import { useTradingAccounts } from "@/hooks/useTradingAccounts";
 
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
@@ -254,6 +255,7 @@ function sessionPnlUsd(e: any): number {
 
 export default function BalanceChartPage() {
   const { user, loading } = useAuth() as any;
+  const { activeAccountId, loading: accountsLoading } = useTradingAccounts();
   const { locale } = useAppSettings();
   const lang = resolveLocale(locale);
   const isEs = lang === "es";
@@ -286,7 +288,7 @@ export default function BalanceChartPage() {
     let alive = true;
 
     async function loadAll() {
-      if (loading || !planUserId) return;
+      if (loading || accountsLoading || !planUserId || !activeAccountId) return;
       setLoadingData(true);
 
       try {
@@ -298,6 +300,7 @@ export default function BalanceChartPage() {
           .from("growth_plans")
           .select(SELECT_GROWTH_PLAN)
           .eq("user_id", planUserId)
+          .eq("account_id", activeAccountId)
           .order("updated_at", { ascending: false })
           .order("created_at", { ascending: false })
           .limit(1);
@@ -315,9 +318,9 @@ export default function BalanceChartPage() {
         // Journal entries
         try {
           const primaryId = journalUserId || planUserId || "";
-          let all = primaryId ? await getAllJournalEntries(primaryId) : [];
+          let all = primaryId ? await getAllJournalEntries(primaryId, activeAccountId) : [];
           if ((!all || all.length === 0) && planUserId && planUserId !== primaryId) {
-            const alt = await getAllJournalEntries(planUserId);
+            const alt = await getAllJournalEntries(planUserId, activeAccountId);
             if (alt?.length) all = alt;
           }
           if (!alive) return;
@@ -345,18 +348,18 @@ export default function BalanceChartPage() {
     return () => {
       alive = false;
     };
-  }, [loading, planUserId, journalUserId]);
+  }, [loading, planUserId, journalUserId, accountsLoading, activeAccountId]);
 
   // Load cashflows once plan is known (so we use a stable plan start anchor)
   useEffect(() => {
     let alive = true;
 
     async function loadCashflows() {
-      if (loading || (!cashflowUserIds.primary && !cashflowUserIds.secondary)) return;
+      if (loading || accountsLoading || !activeAccountId || (!cashflowUserIds.primary && !cashflowUserIds.secondary)) return;
       const planStartIso = planStartIsoFromPlan(plan);
 
       try {
-        const opts = { fromDate: planStartIso, throwOnError: false, forceServer: true };
+        const opts = { fromDate: planStartIso, throwOnError: false, forceServer: true, accountId: activeAccountId };
         let cf = cashflowUserIds.primary ? await listCashflows(cashflowUserIds.primary, opts) : [];
         if ((!cf || cf.length === 0) && cashflowUserIds.secondary && cashflowUserIds.secondary !== cashflowUserIds.primary) {
           const alt = await listCashflows(cashflowUserIds.secondary, opts);
@@ -375,19 +378,19 @@ export default function BalanceChartPage() {
     return () => {
       alive = false;
     };
-  }, [loading, plan, cashflowUserIds.primary, cashflowUserIds.secondary]);
+  }, [loading, plan, cashflowUserIds.primary, cashflowUserIds.secondary, accountsLoading, activeAccountId]);
 
   // Server series (authoritative)
   useEffect(() => {
     let alive = true;
     async function loadSeries() {
-      if (loading) return;
+      if (loading || accountsLoading || !activeAccountId) return;
       try {
         const { data: sessionData } = await supabaseBrowser.auth.getSession();
         const token = sessionData?.session?.access_token;
         if (!token) return;
 
-        const res = await fetch("/api/account/series", {
+        const res = await fetch(`/api/account/series?accountId=${encodeURIComponent(activeAccountId)}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
         if (!res.ok) return;
@@ -410,7 +413,7 @@ export default function BalanceChartPage() {
     return () => {
       alive = false;
     };
-  }, [loading]);
+  }, [loading, accountsLoading, activeAccountId]);
 
   /* -------- Compute chart data -------- */
   const computed = useMemo(() => {

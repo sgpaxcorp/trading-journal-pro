@@ -8,6 +8,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import { useAuth } from "@/context/AuthContext";
+import { useTradingAccounts } from "@/hooks/useTradingAccounts";
 import TopNav from "@/app/components/TopNav";
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
@@ -733,6 +734,7 @@ function AiCoachingPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { user, loading: authLoading } = useAuth();
+  const { activeAccountId, loading: accountsLoading } = useTradingAccounts();
   const { locale } = useAppSettings();
   const lang = resolveLocale(locale);
   const isEs = lang === "es";
@@ -814,7 +816,7 @@ function AiCoachingPageInner() {
 
   /* ---------- Load everything (ALL from Supabase) ---------- */
   useEffect(() => {
-    if (authLoading || !user) return;
+    if (authLoading || !user || accountsLoading || !activeAccountId) return;
 
     let alive = true;
 
@@ -871,7 +873,7 @@ function AiCoachingPageInner() {
         }
 
         // 3) Journal
-        const all = userId ? await getAllJournalEntries(userId) : [];
+        const all = userId && activeAccountId ? await getAllJournalEntries(userId, activeAccountId) : [];
         if (!alive) return;
         setEntries(all || []);
 
@@ -882,6 +884,7 @@ function AiCoachingPageInner() {
             "id,user_id,starting_balance,target_balance,daily_target_pct,daily_goal_percent,max_daily_loss_percent,max_risk_per_trade_usd,created_at,updated_at"
           )
           .eq("user_id", userId)
+          .eq("account_id", activeAccountId)
           .order("updated_at", { ascending: false })
           .order("created_at", { ascending: false })
           .limit(1)
@@ -895,18 +898,19 @@ function AiCoachingPageInner() {
 
         const planStartIso = planStartIsoFromPlan((gp as any) || null);
         // 5) Cashflows (since plan start if possible)
-        const cfs = userId
+        const cfs = userId && activeAccountId
           ? await listCashflows(userId, {
               fromDate: planStartIso || undefined,
               toDate: undefined,
               throwOnError: false,
+              accountId: activeAccountId,
             })
           : [];
         if (!alive) return;
         setCashflows(cfs || []);
 
         // 6) Full snapshot (platform-wide)
-        const full = userId ? await buildAiCoachSnapshot(userId) : null;
+        const full = userId ? await buildAiCoachSnapshot(userId, activeAccountId) : null;
         if (!alive) return;
         setFullSnapshot(full);
 
@@ -933,7 +937,7 @@ function AiCoachingPageInner() {
       alive = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authLoading, user]);
+  }, [authLoading, user, accountsLoading, activeAccountId]);
 
   /* ---------- Derived stats ---------- */
 

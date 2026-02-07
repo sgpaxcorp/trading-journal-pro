@@ -4,6 +4,15 @@ import { parseNotes } from "@/lib/journalNotes";
 
 export const runtime = "nodejs";
 
+async function resolveActiveAccountId(userId: string): Promise<string | null> {
+  const { data } = await supabaseAdmin
+    .from("user_preferences")
+    .select("active_account_id")
+    .eq("user_id", userId)
+    .maybeSingle();
+  return (data as any)?.active_account_id ?? null;
+}
+
 function toDateString(raw: unknown): string {
   if (!raw) return "";
   const s = String(raw);
@@ -31,18 +40,21 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const date = toDateString(body?.date);
     const premarketHtml = String(body?.premarket ?? "").trim();
+    const requestedAccountId = body?.accountId ? String(body.accountId) : "";
+    const accountId = requestedAccountId || (await resolveActiveAccountId(userId));
 
     if (!date || !premarketHtml) {
       return NextResponse.json({ error: "Missing date or premarket content" }, { status: 400 });
     }
 
     async function loadEntry(uid: string) {
-      const { data, error } = await supabaseAdmin
+      let q = supabaseAdmin
         .from("journal_entries")
         .select("notes")
         .eq("user_id", uid)
-        .eq("date", date)
-        .maybeSingle();
+        .eq("date", date);
+      if (accountId) q = q.eq("account_id", accountId);
+      const { data, error } = await q.maybeSingle();
       if (error) return null;
       return data as any;
     }
@@ -69,6 +81,7 @@ export async function POST(req: NextRequest) {
         .from("journal_entries")
         .insert({
           user_id: targetUserId,
+          account_id: accountId ?? null,
           date,
           notes: nextNotes,
           created_at: new Date().toISOString(),
@@ -77,7 +90,7 @@ export async function POST(req: NextRequest) {
 
       if (insErr) throw insErr;
     } else {
-      const { error: updErr } = await supabaseAdmin
+      let updQuery = supabaseAdmin
         .from("journal_entries")
         .update({
           notes: nextNotes,
@@ -85,6 +98,8 @@ export async function POST(req: NextRequest) {
         })
         .eq("user_id", targetUserId)
         .eq("date", date);
+      if (accountId) updQuery = updQuery.eq("account_id", accountId);
+      const { error: updErr } = await updQuery;
 
       if (updErr) throw updErr;
     }

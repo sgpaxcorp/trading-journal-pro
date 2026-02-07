@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 
 import { useAuth } from "@/context/AuthContext";
+import { useTradingAccounts } from "@/hooks/useTradingAccounts";
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
 import type { JournalEntry } from "@/lib/journalTypes";
@@ -245,6 +246,7 @@ function detectLanguage(q: string): "es" | "en" | "auto" {
 export default function NotebookPage() {
   const router = useRouter();
   const { user, loading: authLoading } = useAuth();
+  const { activeAccountId, loading: accountsLoading } = useTradingAccounts();
   const { locale } = useAppSettings();
   const lang = resolveLocale(locale);
   const isEs = lang === "es";
@@ -269,7 +271,7 @@ export default function NotebookPage() {
 
   // Cargar entries desde Supabase
   useEffect(() => {
-    if (authLoading || !user) return;
+    if (authLoading || !user || accountsLoading || !activeAccountId) return;
 
     const load = async () => {
       try {
@@ -279,7 +281,7 @@ export default function NotebookPage() {
         if (!userId) {
           setEntries([]);
         } else {
-          const all = await getAllJournalEntries(userId);
+          const all = await getAllJournalEntries(userId, activeAccountId);
           setEntries(all);
         }
       } catch (err) {
@@ -291,7 +293,7 @@ export default function NotebookPage() {
     };
 
     void load();
-  }, [authLoading, user]);
+  }, [authLoading, user, accountsLoading, activeAccountId]);
 
   const sorted = useMemo(
     () =>

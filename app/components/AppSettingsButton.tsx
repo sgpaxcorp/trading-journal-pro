@@ -146,7 +146,9 @@ export default function AppSettingsButton() {
                   value={presetCodes.includes(locale) ? locale : "auto"}
                   onChange={(e) => {
                     const v = e.target.value;
-                    setLocale(v as AppLocale);
+                    if (v === "auto" || v === "en" || v === "es") {
+                      setLocale(v);
+                    }
                   }}
                 >
                   {localeOptions.map((o) => (

@@ -14,7 +14,7 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
-      <body className="bg-slate-950 text-slate-50">
+      <body className="bg-slate-950 text-slate-50 overflow-x-hidden">
         <AuthProvider>
           {/* Wrapper para mantener el footer al fondo */}
           <div className="min-h-screen flex flex-col">

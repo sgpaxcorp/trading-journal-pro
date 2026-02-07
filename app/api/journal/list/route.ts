@@ -12,7 +12,12 @@ function toDateOnly(s: string | null): string {
   return d.toISOString().slice(0, 10);
 }
 
-async function fetchJournalEntriesByUserId(userId: string, fromDate?: string, toDate?: string) {
+async function fetchJournalEntriesByUserId(
+  userId: string,
+  fromDate?: string,
+  toDate?: string,
+  accountId?: string | null
+) {
   let q = supabaseAdmin
     .from("journal_entries")
     .select(
@@ -20,11 +25,21 @@ async function fetchJournalEntriesByUserId(userId: string, fromDate?: string, to
     )
     .eq("user_id", userId)
     .order("date", { ascending: true });
+  if (accountId) q = q.eq("account_id", accountId);
 
   if (fromDate) q = q.gte("date", fromDate);
   if (toDate) q = q.lte("date", toDate);
 
   return q;
+}
+
+async function resolveActiveAccountId(userId: string): Promise<string | null> {
+  const { data } = await supabaseAdmin
+    .from("user_preferences")
+    .select("active_account_id")
+    .eq("user_id", userId)
+    .maybeSingle();
+  return (data as any)?.active_account_id ?? null;
 }
 
 export async function GET(req: NextRequest) {
@@ -50,15 +65,17 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const fromDate = toDateOnly(searchParams.get("fromDate"));
     const toDate = toDateOnly(searchParams.get("toDate"));
+    const requestedAccountId = searchParams.get("accountId") || "";
+    const accountId = requestedAccountId || (await resolveActiveAccountId(userId));
 
     // First attempt: uuid user id
-    let { data, error } = await fetchJournalEntriesByUserId(userId, fromDate, toDate);
+    let { data, error } = await fetchJournalEntriesByUserId(userId, fromDate, toDate, accountId);
     if (error) throw error;
 
     // Fallback: legacy rows stored by email
     if ((!data || data.length === 0) && email) {
       try {
-        const alt = await fetchJournalEntriesByUserId(email, fromDate, toDate);
+        const alt = await fetchJournalEntriesByUserId(email, fromDate, toDate, accountId);
         data = alt.data as any[] | null;
         error = alt.error;
         if (error) {
@@ -73,7 +90,7 @@ export async function GET(req: NextRequest) {
     // Fallback: legacy uid stored in user_metadata (older accounts)
     if ((!data || data.length === 0) && legacyUid) {
       try {
-        const alt = await fetchJournalEntriesByUserId(String(legacyUid), fromDate, toDate);
+        const alt = await fetchJournalEntriesByUserId(String(legacyUid), fromDate, toDate, accountId);
         data = alt.data as any[] | null;
         error = alt.error;
         if (error) {

@@ -25,6 +25,7 @@ import type { ApexOptions } from "apexcharts";
 
 import TopNav from "@/app/components/TopNav";
 import { useAuth } from "@/context/AuthContext";
+import { useTradingAccounts } from "@/hooks/useTradingAccounts";
 import { supabaseBrowser } from "@/lib/supaBaseClient";
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
@@ -1289,6 +1290,7 @@ function getDefaultRange(preset: DateRangePreset): DateRange {
 
 export default function AnalyticsStatisticsPage() {
   const { user, loading } = useAuth() as any;
+  const { activeAccountId, loading: accountsLoading } = useTradingAccounts();
   const router = useRouter();
   const { locale } = useAppSettings();
   const lang = resolveLocale(locale) as Lang;
@@ -1329,7 +1331,7 @@ export default function AnalyticsStatisticsPage() {
     let alive = true;
 
     async function run() {
-      if (!userId) return;
+      if (!userId || accountsLoading || !activeAccountId) return;
 
       try {
         const SELECT_GROWTH_PLAN = "starting_balance,created_at,updated_at" as const;
@@ -1337,6 +1339,7 @@ export default function AnalyticsStatisticsPage() {
           .from("growth_plans")
           .select(SELECT_GROWTH_PLAN)
           .eq("user_id", userId)
+          .eq("account_id", activeAccountId)
           .order("updated_at", { ascending: false })
           .order("created_at", { ascending: false })
           .limit(1);
@@ -1367,21 +1370,21 @@ export default function AnalyticsStatisticsPage() {
     return () => {
       alive = false;
     };
-  }, [userId]);
+  }, [userId, accountsLoading, activeAccountId]);
 
   // Load journal entries (trades)
   useEffect(() => {
     let alive = true;
 
     async function run() {
-      if (!journalUserId && !userId) return;
+      if ((!journalUserId && !userId) || accountsLoading || !activeAccountId) return;
 
       setLoadingData(true);
       try {
         const primaryId = journalUserId || userId || "";
-        let all = primaryId ? await getAllJournalEntries(primaryId) : [];
+        let all = primaryId ? await getAllJournalEntries(primaryId, activeAccountId) : [];
         if ((!all || all.length === 0) && userId && userId !== primaryId) {
-          const alt = await getAllJournalEntries(userId);
+          const alt = await getAllJournalEntries(userId, activeAccountId);
           if (alt?.length) all = alt;
         }
         if (!alive) return;
@@ -1400,14 +1403,14 @@ export default function AnalyticsStatisticsPage() {
     return () => {
       alive = false;
     };
-  }, [journalUserId, userId]);
+  }, [journalUserId, userId, accountsLoading, activeAccountId]);
 
   // Load journal_trades for timing analytics (entries/exits per fill)
   useEffect(() => {
     let alive = true;
 
     async function run() {
-      if (!userId && !journalUserId) return;
+      if ((!userId && !journalUserId) || accountsLoading || !activeAccountId) return;
 
       const start = looksLikeYYYYMMDD(dateRange.startIso) ? dateRange.startIso : "";
       const end = looksLikeYYYYMMDD(dateRange.endIso) ? dateRange.endIso : "";
@@ -1418,6 +1421,7 @@ export default function AnalyticsStatisticsPage() {
           .select("journal_date, leg, symbol, kind, side, premium, strategy, price, quantity, time")
           .eq("user_id", uid)
           .order("journal_date", { ascending: true });
+        if (activeAccountId) q = q.eq("account_id", activeAccountId);
         if (start) q = q.gte("journal_date", start);
         if (end) q = q.lte("journal_date", end);
         const { data, error } = await q;
@@ -1444,7 +1448,7 @@ export default function AnalyticsStatisticsPage() {
     return () => {
       alive = false;
     };
-  }, [userId, journalUserId, dateRange.startIso, dateRange.endIso]);
+  }, [userId, journalUserId, dateRange.startIso, dateRange.endIso, accountsLoading, activeAccountId]);
 
   // Load daily snapshots (optional)
   useEffect(() => {
@@ -1452,7 +1456,7 @@ export default function AnalyticsStatisticsPage() {
 
     async function run() {
       const uid = userId ?? "";
-      if (!uid) return;
+      if (!uid || accountsLoading || !activeAccountId) return;
 
       try {
         const start = dateRange.startIso;
@@ -1462,7 +1466,7 @@ export default function AnalyticsStatisticsPage() {
           return;
         }
 
-        const snaps = await listDailySnapshots(uid, start, end);
+        const snaps = await listDailySnapshots(uid, start, end, activeAccountId);
         if (!alive) return;
         setDailySnaps(snaps ?? []);
       } catch (err) {
@@ -1476,14 +1480,14 @@ export default function AnalyticsStatisticsPage() {
     return () => {
       alive = false;
     };
-  }, [userId, dateRange.startIso, dateRange.endIso]);
+  }, [userId, dateRange.startIso, dateRange.endIso, accountsLoading, activeAccountId]);
 
   // Load cashflows (deposits/withdrawals) so equity reflects cash movements
   useEffect(() => {
     let alive = true;
 
     async function run() {
-      if (!userId) return;
+      if (!userId || accountsLoading || !activeAccountId) return;
 
       // We fetch from plan start if available (to compute baseline inside the selected range),
       // and filter to the current end date client-side.
@@ -1491,7 +1495,9 @@ export default function AnalyticsStatisticsPage() {
       const end = looksLikeYYYYMMDD(dateRange.endIso) ? dateRange.endIso : "";
 
       try {
-        const opts = fromDate ? { fromDate, throwOnError: false, forceServer: true } : { throwOnError: false, forceServer: true };
+        const opts = fromDate
+          ? { fromDate, throwOnError: false, forceServer: true, accountId: activeAccountId }
+          : { throwOnError: false, forceServer: true, accountId: activeAccountId };
         let rows = cashflowUserIds.primary ? await listCashflows(cashflowUserIds.primary, opts) : [];
         if ((!rows || rows.length === 0) && cashflowUserIds.secondary && cashflowUserIds.secondary !== cashflowUserIds.primary) {
           const alt = await listCashflows(cashflowUserIds.secondary, opts);
@@ -1519,19 +1525,19 @@ export default function AnalyticsStatisticsPage() {
     return () => {
       alive = false;
     };
-  }, [cashflowUserIds.primary, cashflowUserIds.secondary, planStartIso, dateRange.startIso, dateRange.endIso]);
+  }, [cashflowUserIds.primary, cashflowUserIds.secondary, planStartIso, dateRange.startIso, dateRange.endIso, accountsLoading, activeAccountId]);
 
   // Server series (authoritative)
   useEffect(() => {
     let alive = true;
     async function loadSeries() {
-      if (loading) return;
+      if (loading || accountsLoading || !activeAccountId) return;
       try {
         const { data: sessionData } = await supabaseBrowser.auth.getSession();
         const token = sessionData?.session?.access_token;
         if (!token) return;
 
-        const res = await fetch("/api/account/series", {
+        const res = await fetch(`/api/account/series?accountId=${encodeURIComponent(activeAccountId)}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
         if (!res.ok) return;
@@ -1551,7 +1557,7 @@ export default function AnalyticsStatisticsPage() {
     return () => {
       alive = false;
     };
-  }, [loading]);
+  }, [loading, accountsLoading, activeAccountId]);
 
   const tradeDates = useMemo(() => {
     return new Set(

@@ -22,7 +22,7 @@ const AVATAR_SRC: Record<AvatarState, { webm?: string; mp4: string }> = {
 function NeuroAvatarButton({
   state,
   open,
-  size = 120, // ✅ más compacto
+  size = 104, // ✅ más compacto
   onToggle,
   ariaLabel,
 }: {

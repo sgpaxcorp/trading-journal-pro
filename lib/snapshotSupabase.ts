@@ -4,6 +4,7 @@ import { supabaseBrowser } from "@/lib/supaBaseClient";
 export type DailySnapshotRow = {
   user_id: string;
   date: string; // "YYYY-MM-DD"
+  account_id?: string | null;
   start_of_day_balance: number;
   expected_usd: number;
   realized_usd: number;
@@ -24,6 +25,7 @@ export async function upsertDailySnapshot(row: DailySnapshotRow) {
   const { error } = await supabaseBrowser.from(TABLE).upsert(
     {
       user_id: row.user_id,
+      account_id: row.account_id ?? null,
       date: row.date,
       start_of_day_balance: row.start_of_day_balance,
       expected_usd: row.expected_usd,
@@ -31,19 +33,24 @@ export async function upsertDailySnapshot(row: DailySnapshotRow) {
       delta_usd: row.delta_usd,
       goal_met: row.goal_met,
     },
-    { onConflict: "user_id,date" }
+    { onConflict: "user_id,date,account_id" }
   );
 
   if (error) throw error;
 }
 
-export async function getDailySnapshot(userId: string, date: string) {
-  const { data, error } = await supabaseBrowser
+export async function getDailySnapshot(userId: string, date: string, accountId?: string | null) {
+  let query = supabaseBrowser
     .from(TABLE)
     .select("*")
     .eq("user_id", userId)
-    .eq("date", date)
-    .maybeSingle();
+    .eq("date", date);
+
+  if (accountId) {
+    query = query.eq("account_id", accountId);
+  }
+
+  const { data, error } = await query.maybeSingle();
 
   if (error) throw error;
   if (!data) return null;
@@ -51,6 +58,7 @@ export async function getDailySnapshot(userId: string, date: string) {
   return {
     user_id: data.user_id,
     date: data.date,
+    account_id: data.account_id ?? null,
     start_of_day_balance: toNumber(data.start_of_day_balance),
     expected_usd: toNumber(data.expected_usd),
     realized_usd: toNumber(data.realized_usd),
@@ -61,20 +69,26 @@ export async function getDailySnapshot(userId: string, date: string) {
   } as DailySnapshotRow;
 }
 
-export async function listDailySnapshots(userId: string, from: string, to: string) {
-  const { data, error } = await supabaseBrowser
+export async function listDailySnapshots(userId: string, from: string, to: string, accountId?: string | null) {
+  let query = supabaseBrowser
     .from(TABLE)
     .select("*")
     .eq("user_id", userId)
     .gte("date", from)
-    .lte("date", to)
-    .order("date", { ascending: true });
+    .lte("date", to);
+
+  if (accountId) {
+    query = query.eq("account_id", accountId);
+  }
+
+  const { data, error } = await query.order("date", { ascending: true });
 
   if (error) throw error;
 
   return (data ?? []).map((d: any) => ({
     user_id: d.user_id,
     date: d.date,
+    account_id: d.account_id ?? null,
     start_of_day_balance: toNumber(d.start_of_day_balance),
     expected_usd: toNumber(d.expected_usd),
     realized_usd: toNumber(d.realized_usd),

@@ -53,7 +53,8 @@ function normalizeTimeForPgTime(raw: any): string | null {
 export async function saveJournalTradesForDay(
   userId: string,
   date: string, // YYYY-MM-DD
-  payload: TradesPayload
+  payload: TradesPayload,
+  accountId?: string | null
 ) {
   if (!userId) throw new Error("Missing userId");
   if (!date) throw new Error("Missing date");
@@ -61,17 +62,23 @@ export async function saveJournalTradesForDay(
   const entries = payload.entries ?? [];
   const exits = payload.exits ?? [];
 
-  const { error: delErr } = await supabaseBrowser
+  let delQuery = supabaseBrowser
     .from(TABLE)
     .delete()
     .eq("user_id", userId)
     .eq("journal_date", date);
 
+  if (accountId) {
+    delQuery = delQuery.eq("account_id", accountId);
+  }
+
+  const { error: delErr } = await delQuery;
+
   if (delErr) throw delErr;
 
   const rows = [
-    ...entries.map((r) => mapRow(userId, date, "entry", r)),
-    ...exits.map((r) => mapRow(userId, date, "exit", r)),
+    ...entries.map((r) => mapRow(userId, date, "entry", r, accountId)),
+    ...exits.map((r) => mapRow(userId, date, "exit", r, accountId)),
   ].filter(Boolean) as any[];
 
   if (rows.length === 0) return;
@@ -80,7 +87,7 @@ export async function saveJournalTradesForDay(
   if (insErr) throw insErr;
 }
 
-function mapRow(userId: string, date: string, leg: TradeLeg, r: StoredTradeRow) {
+function mapRow(userId: string, date: string, leg: TradeLeg, r: StoredTradeRow, accountId?: string | null) {
   const premium = (r as any).premiumSide ?? (r as any).premium ?? null;
   const strategy = (r as any).optionStrategy ?? (r as any).strategy ?? null;
 
@@ -105,6 +112,7 @@ function mapRow(userId: string, date: string, leg: TradeLeg, r: StoredTradeRow) 
 
   return {
     user_id: userId,
+    account_id: accountId ?? null,
     journal_date: date,
     leg,
 
@@ -129,16 +137,22 @@ function mapRow(userId: string, date: string, leg: TradeLeg, r: StoredTradeRow) 
 
 export async function getJournalTradesForDay(
   userId: string,
-  date: string
+  date: string,
+  accountId?: string | null
 ): Promise<TradesPayload> {
   if (!userId || !date) return {};
 
-  const { data, error } = await supabaseBrowser
+  let query = supabaseBrowser
     .from(TABLE)
     .select("*")
     .eq("user_id", userId)
-    .eq("journal_date", date)
-    .order("id", { ascending: true });
+    .eq("journal_date", date);
+
+  if (accountId) {
+    query = query.eq("account_id", accountId);
+  }
+
+  const { data, error } = await query.order("id", { ascending: true });
 
   if (error) throw error;
 

@@ -20,6 +20,7 @@ export type CashflowType = "deposit" | "withdrawal";
 export type Cashflow = {
   id: string;
   user_id: string;
+  account_id?: string | null;
   date: string; // YYYY-MM-DD
   type: CashflowType;
   amount: number; // positive number (we apply sign by type)
@@ -57,6 +58,7 @@ function mapCashflowRow(row: any): Cashflow {
   return {
     id: String(row?.id ?? ""),
     user_id: String(row?.user_id ?? row?.userId ?? ""),
+    account_id: row?.account_id ?? null,
     date: resolveCashflowDate(row),
     type,
     amount,
@@ -86,9 +88,12 @@ export function signedCashflowAmount(cf: Pick<Cashflow, "type" | "amount"> & { a
 async function queryCashflowsTable(
   table: string,
   userId: string,
-  opts?: { fromDate?: string; toDate?: string }
+  opts?: { fromDate?: string; toDate?: string; accountId?: string | null }
 ): Promise<{ data: any[]; error: any | null }> {
   let q = supabaseBrowser.from(table).select("*").eq("user_id", userId);
+  if (opts?.accountId) {
+    q = q.eq("account_id", opts.accountId);
+  }
 
   let { data, error } = await q.order("date", { ascending: false }).order("created_at", { ascending: false });
 
@@ -105,6 +110,7 @@ async function queryCashflowsTable(
 type ListCashflowsOpts = {
   fromDate?: string;
   toDate?: string;
+  accountId?: string | null;
   throwOnError?: boolean;
   forceServer?: boolean;
   skipServer?: boolean;
@@ -121,6 +127,7 @@ async function fetchCashflowsViaApi(opts?: ListCashflowsOpts): Promise<Cashflow[
     const params = new URLSearchParams();
     if (opts?.fromDate) params.set("fromDate", opts.fromDate);
     if (opts?.toDate) params.set("toDate", opts.toDate);
+    if (opts?.accountId) params.set("accountId", opts.accountId);
 
     const url = `/api/cashflows/list${params.toString() ? `?${params.toString()}` : ""}`;
     const res = await fetch(url, {
@@ -206,12 +213,13 @@ export async function listCashflows(userId: string, opts?: ListCashflowsOpts) {
 
 export async function createCashflow(params: {
   userId: string;
+  accountId?: string | null;
   date: string; // YYYY-MM-DD
   type: CashflowType;
   amount: number; // positive
   note?: string | null;
 }) {
-  const { userId, date, type, amount } = params;
+  const { userId, date, type, amount, accountId } = params;
   const note = params.note ?? null;
 
   if (!userId) throw new Error("Missing userId");
@@ -221,6 +229,7 @@ export async function createCashflow(params: {
 
   const payload = {
     user_id: userId,
+    account_id: accountId ?? null,
     date,
     type,
     amount,

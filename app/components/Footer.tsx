@@ -2,12 +2,11 @@
 
 import Link from "next/link";
 import {
-  FaTwitter,
   FaInstagram,
   FaLinkedinIn,
-  FaDiscord,
   FaFacebookF,
 } from "react-icons/fa";
+import { FaXTwitter } from "react-icons/fa6";
 
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale, t } from "@/lib/i18n";
@@ -90,17 +89,14 @@ export default function Footer() {
         {/* Col 3: Socials */}
         <div className="flex flex-col gap-4 md:items-end">
           <div className={isLight ? "flex gap-3" : "flex gap-3 text-slate-400"}>
-            <a href="#" className={socialBtnClass} aria-label="Twitter">
-              <FaTwitter className="text-[16px]" />
+            <a href="#" className={socialBtnClass} aria-label="X">
+              <FaXTwitter className="text-[16px]" />
             </a>
             <a href="#" className={socialBtnClass} aria-label="Instagram">
               <FaInstagram className="text-[16px]" />
             </a>
             <a href="#" className={socialBtnClass} aria-label="LinkedIn">
               <FaLinkedinIn className="text-[16px]" />
-            </a>
-            <a href="#" className={socialBtnClass} aria-label="Discord">
-              <FaDiscord className="text-[16px]" />
             </a>
             <a href="#" className={socialBtnClass} aria-label="Facebook">
               <FaFacebookF className="text-[16px]" />

@@ -85,8 +85,11 @@ function cashflowSigned(cf: CashflowRow): number {
   return cf.type === "withdrawal" ? -Math.abs(cf.amount) : Math.abs(cf.amount);
 }
 
-async function queryCashflows(table: string, userId: string) {
+async function queryCashflows(table: string, userId: string, accountId?: string | null) {
   let q = supabaseAdmin.from(table).select("*").eq("user_id", userId);
+  if (accountId) {
+    q = q.eq("account_id", accountId);
+  }
   let { data, error } = await q.order("date", { ascending: true }).order("created_at", { ascending: true });
 
   // If date column doesn't exist, retry without ordering by date
@@ -99,12 +102,16 @@ async function queryCashflows(table: string, userId: string) {
   return { data: (data ?? []) as any[], error };
 }
 
-async function listCashflowsForUser(userId: string, email?: string | null): Promise<CashflowRow[]> {
+async function listCashflowsForUser(
+  userId: string,
+  email?: string | null,
+  accountId?: string | null
+): Promise<CashflowRow[]> {
   // Primary: cashflows
   let rows: any[] = [];
-  let primary = await queryCashflows("cashflows", userId);
+  let primary = await queryCashflows("cashflows", userId, accountId);
   if (primary.error && primary.error.code === "42P01") {
-    const legacy = await queryCashflows("ntj_cashflows", userId);
+    const legacy = await queryCashflows("ntj_cashflows", userId, accountId);
     if (legacy.error) throw legacy.error;
     rows = legacy.data;
   } else if (primary.error) {
@@ -112,14 +119,14 @@ async function listCashflowsForUser(userId: string, email?: string | null): Prom
   } else {
     rows = primary.data;
     if (!rows.length) {
-      const legacy = await queryCashflows("ntj_cashflows", userId);
+      const legacy = await queryCashflows("ntj_cashflows", userId, accountId);
       if (!legacy.error && legacy.data?.length) rows = legacy.data;
     }
   }
 
   if ((!rows || rows.length === 0) && email) {
     try {
-      const emailRows = await queryCashflows("cashflows", email);
+      const emailRows = await queryCashflows("cashflows", email, accountId);
       if (!emailRows.error && emailRows.data?.length) rows = emailRows.data;
     } catch {
       // ignore
@@ -129,22 +136,27 @@ async function listCashflowsForUser(userId: string, email?: string | null): Prom
   return rows.map(mapCashflowRow);
 }
 
-async function listJournalEntries(userId: string, email?: string | null) {
-  let { data, error } = await supabaseAdmin
+async function listJournalEntries(userId: string, email?: string | null, accountId?: string | null) {
+  let q = supabaseAdmin
     .from("journal_entries")
     .select("date, pnl")
     .eq("user_id", userId)
     .order("date", { ascending: true });
+  if (accountId) q = q.eq("account_id", accountId);
+
+  let { data, error } = await q;
 
   if (error) throw error;
 
   if ((!data || data.length === 0) && email) {
     try {
-      const alt = await supabaseAdmin
+      let altQ = supabaseAdmin
         .from("journal_entries")
         .select("date, pnl")
         .eq("user_id", email)
         .order("date", { ascending: true });
+      if (accountId) altQ = altQ.eq("account_id", accountId);
+      const alt = await altQ;
       if (!alt.error && alt.data?.length) data = alt.data as any[];
     } catch {
       // ignore
@@ -173,11 +185,19 @@ export async function GET(req: NextRequest) {
 
     const userId = authData.user.id;
     const email = authData.user.email ?? null;
-
+    const { searchParams } = new URL(req.url);
+    const requestedAccountId = searchParams.get("accountId") || "";
+    const { data: pref } = await supabaseAdmin
+      .from("user_preferences")
+      .select("active_account_id")
+      .eq("user_id", userId)
+      .maybeSingle();
+    const accountId = requestedAccountId || (pref as any)?.active_account_id || null;
     const { data: planRows, error: planErr } = await supabaseAdmin
       .from("growth_plans")
       .select("starting_balance,target_balance,daily_target_pct,daily_goal_percent,loss_days_per_week,trading_days,created_at,updated_at")
       .eq("user_id", userId)
+      .eq("account_id", accountId)
       .order("updated_at", { ascending: false })
       .order("created_at", { ascending: false })
       .limit(1);
@@ -203,8 +223,8 @@ export async function GET(req: NextRequest) {
       return "";
     })();
 
-    const journalRows = await listJournalEntries(userId, email);
-    const cashflows = await listCashflowsForUser(userId, email);
+    const journalRows = await listJournalEntries(userId, email, accountId);
+    const cashflows = await listCashflowsForUser(userId, email, accountId);
 
     const pnlByDate: Record<string, number> = {};
     let minDate = "";

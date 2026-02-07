@@ -63,9 +63,13 @@ function isMissingColumn(err: any): boolean {
 
 async function queryCashflowsTable(
   table: string,
-  userId: string
+  userId: string,
+  accountId?: string | null
 ): Promise<{ data: any[]; error: any | null }> {
   let q = supabaseAdmin.from(table).select("*").eq("user_id", userId);
+  if (accountId) {
+    q = q.eq("account_id", accountId);
+  }
   let { data, error } = await q.order("date", { ascending: false }).order("created_at", { ascending: false });
 
   if (error && isMissingColumn(error)) {
@@ -75,6 +79,15 @@ async function queryCashflowsTable(
   }
 
   return { data: (data ?? []) as any[], error };
+}
+
+async function resolveActiveAccountId(userId: string): Promise<string | null> {
+  const { data } = await supabaseAdmin
+    .from("user_preferences")
+    .select("active_account_id")
+    .eq("user_id", userId)
+    .maybeSingle();
+  return (data as any)?.active_account_id ?? null;
 }
 
 export async function GET(req: NextRequest) {
@@ -92,12 +105,14 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const fromDate = searchParams.get("fromDate") || "";
     const toDate = searchParams.get("toDate") || "";
+    const requestedAccountId = searchParams.get("accountId") || "";
+    const accountId = requestedAccountId || (await resolveActiveAccountId(userId));
 
     let rows: any[] = [];
 
-    let primary = await queryCashflowsTable("cashflows", userId);
+    let primary = await queryCashflowsTable("cashflows", userId, accountId);
     if (primary.error && isMissingRelation(primary.error)) {
-      const legacy = await queryCashflowsTable("ntj_cashflows", userId);
+      const legacy = await queryCashflowsTable("ntj_cashflows", userId, accountId);
       if (legacy.error) throw legacy.error;
       rows = legacy.data;
     } else if (primary.error) {
@@ -105,7 +120,7 @@ export async function GET(req: NextRequest) {
     } else {
       rows = primary.data;
       if (!rows.length) {
-        const legacy = await queryCashflowsTable("ntj_cashflows", userId);
+        const legacy = await queryCashflowsTable("ntj_cashflows", userId, accountId);
         if (!legacy.error && legacy.data?.length) rows = legacy.data;
       }
     }

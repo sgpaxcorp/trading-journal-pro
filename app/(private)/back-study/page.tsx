@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 
 import TopNav from "@/app/components/TopNav";
 import { useAuth } from "@/context/AuthContext";
+import { useTradingAccounts } from "@/hooks/useTradingAccounts";
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
 
@@ -584,6 +585,7 @@ function InteractiveCandleChart({
 
 export default function BackStudyPage() {
   const { user, loading } = useAuth();
+  const { activeAccountId, loading: accountsLoading } = useTradingAccounts();
   const router = useRouter();
   const { locale } = useAppSettings();
   const lang = resolveLocale(locale);
@@ -616,7 +618,7 @@ export default function BackStudyPage() {
 
   // Load journal sessions from Supabase
   useEffect(() => {
-    if (loading || !user) return;
+    if (loading || !user || accountsLoading || !activeAccountId) return;
 
     let isMounted = true;
 
@@ -630,7 +632,7 @@ export default function BackStudyPage() {
           return;
         }
 
-        const all = await getAllJournalEntries(user.id);
+        const all = await getAllJournalEntries(user.id, activeAccountId);
 
         if (isMounted) {
           setEntries(all ?? []);
@@ -652,7 +654,7 @@ export default function BackStudyPage() {
     return () => {
       isMounted = false;
     };
-  }, [loading, user]);
+  }, [loading, user, accountsLoading, activeAccountId]);
 
   const sessions: SessionWithTrades[] = useMemo(() => {
     return entries.map((s) => {

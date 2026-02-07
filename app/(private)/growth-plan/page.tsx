@@ -18,12 +18,13 @@ import {
   type GrowthPlanSteps,
   type GrowthPlanChecklistItem,
   type GrowthPlanStrategy,
-  getGrowthPlanSupabase,
+  getGrowthPlanSupabaseByAccount,
   upsertGrowthPlanSupabase,
 } from "@/lib/growthPlanSupabase";
 
 import { listCashflows, signedCashflowAmount } from "@/lib/cashflowsSupabase";
 import { syncMyTrophies } from "@/lib/trophiesSupabase";
+import { useTradingAccounts } from "@/hooks/useTradingAccounts";
 
 import { pushNeuroMessage, openNeuroPanel } from "@/app/components/neuroEventBus";
 
@@ -417,6 +418,7 @@ type AssistantLang = "en" | "es"; // stored in Supabase (inside growth plan reco
 
 export default function GrowthPlanPage() {
   const { user, loading } = useAuth();
+  const { activeAccountId, loading: accountsLoading } = useTradingAccounts();
   const router = useRouter();
   const { locale } = useAppSettings();
   const lang = resolveLocale(locale) as AssistantLang;
@@ -488,9 +490,9 @@ export default function GrowthPlanPage() {
     let mounted = true;
 
     (async () => {
-      if (loading || !user) return;
+      if (loading || !user || accountsLoading || !activeAccountId) return;
       try {
-        const existing = await getGrowthPlanSupabase();
+        const existing = await getGrowthPlanSupabaseByAccount(activeAccountId);
         if (!mounted) return;
 
         if (existing) {
@@ -531,7 +533,9 @@ export default function GrowthPlanPage() {
                 toDateOnlyStr((existing as any).updatedAtIso) ||
                 toDateOnlyStr((existing as any).updatedAtISO);
 
-              const opts: any = planStart ? { fromDate: planStart, throwOnError: true } : { throwOnError: true };
+              const opts: any = planStart
+                ? { fromDate: planStart, throwOnError: true, accountId: activeAccountId }
+                : { throwOnError: true, accountId: activeAccountId };
               const cf = await listCashflows(cashflowUserId, opts);
               if (!mounted) return;
               const net = (cf ?? []).reduce((acc: number, c: any) => acc + signedCashflowAmount(c), 0);
@@ -587,7 +591,7 @@ export default function GrowthPlanPage() {
     return () => {
       mounted = false;
     };
-  }, [loading, user]); // intentionally not depending on assistantLang to avoid reloading loop
+  }, [loading, user, accountsLoading, activeAccountId]); // intentionally not depending on assistantLang to avoid reloading loop
 
   // save assistant language to Supabase (inside steps._ui.lang)
   const langSaveTimer = useRef<any>(null);
@@ -602,9 +606,12 @@ export default function GrowthPlanPage() {
     if (langSaveTimer.current) clearTimeout(langSaveTimer.current);
     langSaveTimer.current = setTimeout(async () => {
       try {
-        await upsertGrowthPlanSupabase({
-          steps: mergedSteps,
-        } as any);
+        await upsertGrowthPlanSupabase(
+          {
+            steps: mergedSteps,
+          } as any,
+          activeAccountId
+        );
       } catch (e) {
         console.error("[GrowthPlan] persistAssistantLang error", e);
       }
@@ -930,7 +937,7 @@ export default function GrowthPlanPage() {
     };
 
     try {
-      await upsertGrowthPlanSupabase(payload);
+      await upsertGrowthPlanSupabase(payload, activeAccountId);
       if (user?.id) {
         void syncMyTrophies(String(user.id)).catch((err) => {
           console.warn("[GrowthPlan] trophy sync failed:", err);

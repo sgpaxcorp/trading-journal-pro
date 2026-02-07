@@ -68,6 +68,7 @@ export type GrowthPlanSteps = {
 
 export type GrowthPlan = {
   user_id: string;
+  accountId?: string | null;
 
   startingBalance: number;
   targetBalance: number;
@@ -198,6 +199,7 @@ function normalizePlan(raw: any, userId: string): GrowthPlan {
 
   return {
     user_id: userId,
+    accountId: raw?.account_id ?? null,
 
     startingBalance: num(raw?.starting_balance ?? raw?.startingBalance, 0),
     targetBalance: num(raw?.target_balance ?? raw?.targetBalance, 0),
@@ -231,6 +233,7 @@ function normalizePlan(raw: any, userId: string): GrowthPlan {
 function toDb(plan: GrowthPlan) {
   return {
     user_id: plan.user_id,
+    account_id: plan.accountId ?? null,
 
     starting_balance: num(plan.startingBalance, 0),
     target_balance: num(plan.targetBalance, 0),
@@ -276,6 +279,9 @@ export async function getGrowthPlanSupabase(): Promise<GrowthPlan | null> {
     .from(TABLE)
     .select("*")
     .eq("user_id", userId)
+    .order("updated_at", { ascending: false })
+    .order("created_at", { ascending: false })
+    .limit(1)
     .maybeSingle();
 
   if (error) {
@@ -287,17 +293,50 @@ export async function getGrowthPlanSupabase(): Promise<GrowthPlan | null> {
   return normalizePlan(data, userId);
 }
 
-/** Crea/actualiza (upsert) el Growth Plan del usuario */
-export async function upsertGrowthPlanSupabase(plan: Partial<GrowthPlan>): Promise<GrowthPlan> {
+/** Lee el Growth Plan del usuario por cuenta */
+export async function getGrowthPlanSupabaseByAccount(accountId?: string | null): Promise<GrowthPlan | null> {
   const userId = await getAuthedUserId();
+  if (!accountId) return getGrowthPlanSupabase();
+
+  const { data, error } = await supabaseBrowser
+    .from(TABLE)
+    .select("*")
+    .eq("user_id", userId)
+    .eq("account_id", accountId)
+    .maybeSingle();
+
+  if (error) {
+    console.error(LOG, "getGrowthPlanSupabaseByAccount error", error);
+    throw error;
+  }
+  if (!data) return null;
+
+  return normalizePlan(data, userId);
+}
+
+/** Crea/actualiza (upsert) el Growth Plan del usuario */
+export async function upsertGrowthPlanSupabase(
+  plan: Partial<GrowthPlan>,
+  accountId?: string | null
+): Promise<GrowthPlan> {
+  const userId = await getAuthedUserId();
+  const resolvedAccountId = accountId ?? plan.accountId ?? null;
+  if (!resolvedAccountId) throw new Error("Missing accountId for growth plan");
 
   // Cargamos actual para merge suave
-  const current = await getGrowthPlanSupabase();
+  const current = await getGrowthPlanSupabaseByAccount(resolvedAccountId);
 
   const merged: GrowthPlan = normalizePlan(
     {
       ...(current ? toDb(current) : {}),
-      ...(plan ? toDb({ ...(current ?? ({} as any)), ...(plan as any), user_id: userId } as GrowthPlan) : {}),
+      ...(plan
+        ? toDb({
+            ...(current ?? ({} as any)),
+            ...(plan as any),
+            user_id: userId,
+            accountId: resolvedAccountId,
+          } as GrowthPlan)
+        : {}),
       // Nota: normalizePlan soporta tanto campos db como app
     },
     userId
@@ -307,7 +346,7 @@ export async function upsertGrowthPlanSupabase(plan: Partial<GrowthPlan>): Promi
 
   const { data, error } = await supabaseBrowser
     .from(TABLE)
-    .upsert(payload, { onConflict: "user_id" })
+    .upsert(payload, { onConflict: "user_id,account_id" })
     .select("*")
     .single();
 
@@ -320,9 +359,10 @@ export async function upsertGrowthPlanSupabase(plan: Partial<GrowthPlan>): Promi
 }
 
 /** Borra el Growth Plan del usuario */
-export async function deleteGrowthPlanSupabase(): Promise<void> {
+export async function deleteGrowthPlanSupabase(accountId?: string | null): Promise<void> {
   const userId = await getAuthedUserId();
-  const { error } = await supabaseBrowser.from(TABLE).delete().eq("user_id", userId);
+  if (!accountId) throw new Error("Missing accountId for growth plan");
+  const { error } = await supabaseBrowser.from(TABLE).delete().eq("user_id", userId).eq("account_id", accountId);
   if (error) {
     console.error(LOG, "deleteGrowthPlanSupabase error", error);
     throw error;

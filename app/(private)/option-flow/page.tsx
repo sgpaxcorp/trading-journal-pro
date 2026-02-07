@@ -7,6 +7,7 @@ import autoTable from "jspdf-autotable";
 
 import TopNav from "@/app/components/TopNav";
 import { useAuth } from "@/context/AuthContext";
+import { useTradingAccounts } from "@/hooks/useTradingAccounts";
 import { supabaseBrowser } from "@/lib/supaBaseClient";
 import { hasEntitlement } from "@/lib/entitlementsSupabase";
 import { useAppSettings } from "@/lib/appSettings";
@@ -975,6 +976,7 @@ async function parseCsvWithWorker(
 
 export default function OptionFlowPage() {
   const { user } = useAuth() as any;
+  const { activeAccountId } = useTradingAccounts();
   const userId: string = user?.id ?? "";
   const email: string = user?.email ?? "";
   const { locale } = useAppSettings();
@@ -2357,6 +2359,7 @@ export default function OptionFlowPage() {
         body: JSON.stringify({
           date: journalDate,
           premarket: planHtml,
+          accountId: activeAccountId,
         }),
       });
       const body = await res.json();

@@ -24,6 +24,7 @@ import { type InstrumentType } from "@/lib/journalNotes";
 
 import { supabaseBrowser } from "@/lib/supaBaseClient";
 import { useAuth } from "@/context/AuthContext";
+import { useTradingAccounts } from "@/hooks/useTradingAccounts";
 
 import {
   listJournalTemplates,
@@ -465,6 +466,7 @@ export default function DailyJournalPage() {
   const params = useParams();
   const router = useRouter();
   const { user, loading: authLoading } = useAuth();
+  const { activeAccountId, loading: accountsLoading } = useTradingAccounts();
   const { locale } = useAppSettings();
   const lang = resolveLocale(locale);
   const isEs = lang === "es";
@@ -762,15 +764,15 @@ export default function DailyJournalPage() {
   ========================================================= */
 
   useEffect(() => {
-    if (!dateParam || authLoading || !userId) return;
+    if (!dateParam || authLoading || accountsLoading || !userId || !activeAccountId) return;
 
     let active = true;
 
     (async () => {
       try {
         const [existing, storedTrades] = await Promise.all([
-          getJournalEntryByDate(userId, dateParam),
-          getJournalTradesForDay(userId, dateParam).catch(() =>
+          getJournalEntryByDate(userId, dateParam, activeAccountId),
+          getJournalTradesForDay(userId, dateParam, activeAccountId).catch(() =>
             ({ entries: [], exits: [] } as any)
           ),
         ]);
@@ -913,7 +915,7 @@ export default function DailyJournalPage() {
     return () => {
       active = false;
     };
-  }, [dateParam, userId, authLoading]);
+  }, [dateParam, userId, authLoading, accountsLoading, activeAccountId]);
 
   const parsedDate = useMemo(() => {
     try {
@@ -1331,7 +1333,7 @@ export default function DailyJournalPage() {
     };
 
     try {
-      await saveJournalEntry(userId, entryToSave as any);
+      await saveJournalEntry(userId, entryToSave as any, activeAccountId);
 
       const storedEntries = entryTrades.map(entryRowToStored);
       const storedExits = exitTrades.map(exitRowToStored);
@@ -1339,7 +1341,7 @@ export default function DailyJournalPage() {
       await saveJournalTradesForDay(userId, dateParam, {
         entries: storedEntries,
         exits: storedExits,
-      } as any);
+      } as any, activeAccountId);
 
       setNotesExtra(nextExtra);
       setPnlFromDb(Number(pnlToSave.toFixed(2)));
@@ -1385,7 +1387,7 @@ export default function DailyJournalPage() {
   };
 
   const handleSyncFromImport = async () => {
-    if (!userId || !dateParam) {
+    if (!userId || !dateParam || !activeAccountId) {
       setMsg(L("Cannot sync: missing user/date.", "No se puede sincronizar: falta usuario/fecha."));
       return;
     }
@@ -1410,7 +1412,7 @@ export default function DailyJournalPage() {
           "content-type": "application/json",
           authorization: `Bearer ${session.access_token}`,
         },
-        body: JSON.stringify({ date: dateParam }),
+        body: JSON.stringify({ date: dateParam, accountId: activeAccountId }),
       });
 
       const json = await res.json().catch(() => ({}));
@@ -1428,10 +1430,10 @@ export default function DailyJournalPage() {
       setTimeout(() => setMsg(""), 2500);
 
       // rehydrate
-      const freshEntry = await getJournalEntryByDate(userId, dateParam);
+      const freshEntry = await getJournalEntryByDate(userId, dateParam, activeAccountId);
       if (freshEntry) setEntry((prev) => ({ ...prev, ...freshEntry, date: dateParam }));
 
-      const freshTrades = await getJournalTradesForDay(userId, dateParam);
+      const freshTrades = await getJournalTradesForDay(userId, dateParam, activeAccountId);
 
       const normEntry: EntryTradeRow[] = (freshTrades.entries ?? []).map((r: any) => ({
         id: String(r.id ?? crypto.randomUUID()),

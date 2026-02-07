@@ -16,6 +16,7 @@ import {
   getProfileGamification,
   type ProfileGamification,
 } from "@/lib/profileGamificationSupabase";
+import { useTradingAccounts } from "@/hooks/useTradingAccounts";
 
 type ProfileState = {
   firstName: string;
@@ -47,6 +48,19 @@ export default function AccountPage() {
 
   const [gamification, setGamification] =
     useState<ProfileGamification | null>(null);
+
+  const {
+    accounts,
+    activeAccountId,
+    createAccount,
+    setActiveAccount,
+    loading: accountsLoading,
+    error: accountsError,
+  } = useTradingAccounts();
+  const [newAccountName, setNewAccountName] = useState("");
+  const [newAccountBroker, setNewAccountBroker] = useState("");
+  const [creatingAccount, setCreatingAccount] = useState(false);
+  const [accountMessage, setAccountMessage] = useState<string | null>(null);
 
   const [loadingProfile, setLoadingProfile] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -192,6 +206,8 @@ export default function AccountPage() {
     typeof planRaw === "string"
       ? planRaw.toLowerCase() === "standard"
         ? L("Standard", "Estándar")
+        : planRaw.toLowerCase() === "advanced"
+        ? "Advance"
         : planRaw.charAt(0).toUpperCase() + planRaw.slice(1)
       : L("Standard", "Estándar");
 
@@ -317,6 +333,25 @@ export default function AccountPage() {
 
   /* ---------- Helpers UI ---------- */
   const isCurrent = (href: string) => pathname === href;
+  const activeAccount = accounts.find((a) => a.id === activeAccountId) ?? accounts[0] ?? null;
+
+  async function handleCreateAccount(e: FormEvent) {
+    e.preventDefault();
+    const name = newAccountName.trim();
+    if (!name) return;
+    setCreatingAccount(true);
+    setAccountMessage(null);
+    try {
+      await createAccount(name, newAccountBroker.trim() || undefined);
+      setNewAccountName("");
+      setNewAccountBroker("");
+      setAccountMessage(L("Trading account created.", "Cuenta creada."));
+    } catch (err: any) {
+      setAccountMessage(err?.message || L("Failed to create account.", "No se pudo crear la cuenta."));
+    } finally {
+      setCreatingAccount(false);
+    }
+  }
 
   return (
     <main className="min-h-screen bg-slate-950 text-slate-50">
@@ -655,6 +690,119 @@ export default function AccountPage() {
             )}
           </section>
         </div>
+
+        {/* Trading accounts */}
+        <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5 space-y-4">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-[11px] uppercase tracking-[0.25em] text-emerald-400">
+                {L("Trading accounts", "Cuentas de trading")}
+              </p>
+              <h2 className="text-lg font-semibold text-slate-100">
+                {L("Broker-specific journals", "Journals por broker")}
+              </h2>
+              <p className="text-xs text-slate-400 mt-1 max-w-2xl">
+                {L(
+                  "Each trading account keeps its own journal, analytics, and cashflows. Switch accounts from the top nav.",
+                  "Cada cuenta mantiene su propio journal, analíticas y cashflows. Cambia de cuenta desde la barra superior."
+                )}
+              </p>
+            </div>
+            <div className="text-[11px] text-slate-400">
+              {activeAccount ? (
+                <>
+                  {L("Active:", "Activa:")}{" "}
+                  <span className="text-emerald-200 font-semibold">{activeAccount.name}</span>
+                </>
+              ) : (
+                L("No account selected", "Sin cuenta seleccionada")
+              )}
+            </div>
+          </div>
+
+          {accountsLoading ? (
+            <p className="text-xs text-slate-400">{L("Loading accounts…", "Cargando cuentas…")}</p>
+          ) : (
+            <>
+              <div className="grid gap-3 md:grid-cols-2">
+                {accounts.length === 0 && (
+                  <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-4 text-xs text-slate-400">
+                    {L("No trading accounts yet.", "Todavía no hay cuentas de trading.")}
+                  </div>
+                )}
+                {accounts.map((acc) => (
+                  <div
+                    key={acc.id}
+                    className={`rounded-xl border p-4 text-xs ${
+                      acc.id === activeAccountId
+                        ? "border-emerald-500/60 bg-emerald-500/10"
+                        : "border-slate-800 bg-slate-950/60"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-semibold text-slate-100">{acc.name}</p>
+                        <p className="text-[11px] text-slate-400">
+                          {acc.broker ? acc.broker : L("Broker not set", "Broker no definido")}
+                        </p>
+                      </div>
+                      {acc.id === activeAccountId ? (
+                        <span className="rounded-full border border-emerald-500/40 bg-emerald-500/15 px-2 py-0.5 text-[10px] text-emerald-200">
+                          {L("Active", "Activa")}
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setActiveAccount(acc.id)}
+                          className="rounded-full border border-slate-700 px-3 py-1 text-[10px] text-slate-200 hover:border-emerald-400 hover:text-emerald-200 transition"
+                        >
+                          {L("Set active", "Activar")}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <form onSubmit={handleCreateAccount} className="mt-4 grid gap-3 md:grid-cols-[1.2fr_1fr_auto]">
+                <div>
+                  <label className="block text-[11px] text-slate-400 mb-1">
+                    {L("Account name", "Nombre de cuenta")}
+                  </label>
+                  <input
+                    value={newAccountName}
+                    onChange={(e) => setNewAccountName(e.target.value)}
+                    className="w-full rounded-md bg-slate-950 border border-slate-700 px-3 py-2 text-xs text-slate-100 outline-none focus:border-emerald-400"
+                    placeholder={L("e.g. Interactive Brokers", "ej. Interactive Brokers")}
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] text-slate-400 mb-1">
+                    {L("Broker (optional)", "Broker (opcional)")}
+                  </label>
+                  <input
+                    value={newAccountBroker}
+                    onChange={(e) => setNewAccountBroker(e.target.value)}
+                    className="w-full rounded-md bg-slate-950 border border-slate-700 px-3 py-2 text-xs text-slate-100 outline-none focus:border-emerald-400"
+                    placeholder={L("e.g. IBKR, Tradovate", "ej. IBKR, Tradovate")}
+                  />
+                </div>
+                <div className="flex items-end">
+                  <button
+                    type="submit"
+                    disabled={creatingAccount || !newAccountName.trim()}
+                    className="w-full rounded-xl bg-emerald-400 text-slate-950 px-4 py-2 text-xs font-semibold hover:bg-emerald-300 transition disabled:opacity-60"
+                  >
+                    {creatingAccount ? L("Creating…", "Creando…") : L("Add account", "Agregar cuenta")}
+                  </button>
+                </div>
+              </form>
+
+              {accountMessage && <p className="text-[11px] text-emerald-300 mt-2">{accountMessage}</p>}
+              {accountsError && <p className="text-[11px] text-red-400 mt-2">{accountsError}</p>}
+            </>
+          )}
+        </section>
       </div>
     </main>
   );

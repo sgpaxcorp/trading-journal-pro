@@ -3,8 +3,18 @@ import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 
 export const runtime = "nodejs";
 
+async function resolveActiveAccountId(userId: string): Promise<string | null> {
+  const { data } = await supabaseAdmin
+    .from("user_preferences")
+    .select("active_account_id")
+    .eq("user_id", userId)
+    .maybeSingle();
+  return (data as any)?.active_account_id ?? null;
+}
+
 type SyncBody = {
   date: string; // YYYY-MM-DD
+  accountId?: string | null;
 };
 
 /* ---------------- helpers ---------------- */
@@ -207,6 +217,8 @@ export async function POST(req: NextRequest) {
     const body = (await req.json()) as SyncBody;
     const date = body?.date;
     if (!date) return NextResponse.json({ error: "Missing date" }, { status: 400 });
+    const requestedAccountId = body?.accountId ? String(body.accountId) : "";
+    const accountId = requestedAccountId || (await resolveActiveAccountId(userId));
 
     const { startISO, endISO } = dayRangeUTC(date);
 
@@ -420,11 +432,14 @@ export async function POST(req: NextRequest) {
 
     /* ---------- persist journal_trades (so UI shows entries/exits immediately) ---------- */
     // 1) delete day rows
-    const { error: delJT } = await supabaseAdmin
+    let delQuery = supabaseAdmin
       .from("journal_trades")
       .delete()
       .eq("user_id", userId)
       .eq("journal_date", date);
+    if (accountId) delQuery = delQuery.eq("account_id", accountId);
+
+    const { error: delJT } = await delQuery;
 
     if (delJT) return NextResponse.json({ error: delJT.message }, { status: 500 });
 
@@ -432,6 +447,7 @@ export async function POST(req: NextRequest) {
     const jtRows = [
       ...entries.map((r) => ({
         user_id: userId,
+        account_id: accountId ?? null,
         journal_date: date,
         leg: "entry",
         symbol: String(r.symbol ?? "").trim(),
@@ -448,6 +464,7 @@ export async function POST(req: NextRequest) {
       })),
       ...exits.map((r) => ({
         user_id: userId,
+        account_id: accountId ?? null,
         journal_date: date,
         leg: "exit",
         symbol: String(r.symbol ?? "").trim(),
@@ -495,6 +512,7 @@ export async function POST(req: NextRequest) {
       .upsert(
         {
           user_id: userId,
+          account_id: accountId ?? null,
           date,
           pnl: pnlNet,
           instrument: entries[0]?.symbol ?? "UNKNOWN",
@@ -505,7 +523,7 @@ export async function POST(req: NextRequest) {
           notes,
           respected_plan: true,
         },
-        { onConflict: "user_id,date" }
+        { onConflict: "user_id,date,account_id" }
       );
 
     return NextResponse.json({

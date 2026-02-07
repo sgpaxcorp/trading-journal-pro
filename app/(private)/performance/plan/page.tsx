@@ -21,6 +21,7 @@ import { useRouter } from "next/navigation";
 
 import TopNav from "@/app/components/TopNav";
 import { useAuth } from "@/context/AuthContext";
+import { useTradingAccounts } from "@/hooks/useTradingAccounts";
 
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
@@ -120,7 +121,7 @@ function dailyTargetPct(plan: GrowthPlan | null): number {
   return plan.dailyTargetPct > 0 ? plan.dailyTargetPct : plan.dailyGoalPercent;
 }
 
-async function fetchLatestGrowthPlan(userId: string): Promise<GrowthPlan | null> {
+async function fetchLatestGrowthPlan(userId: string, accountId?: string | null): Promise<GrowthPlan | null> {
   if (!userId) return null;
 
   // IMPORTANT:
@@ -131,10 +132,12 @@ async function fetchLatestGrowthPlan(userId: string): Promise<GrowthPlan | null>
     "id,user_id,starting_balance,target_balance,daily_target_pct,daily_goal_percent,max_daily_loss_percent,loss_days_per_week,trading_days,selected_plan,created_at,updated_at" as const;
 
   try {
-    const { data, error } = await supabaseBrowser
+    let q = supabaseBrowser
       .from("growth_plans")
       .select(SELECT_GROWTH_PLAN)
-      .eq("user_id", userId)
+      .eq("user_id", userId);
+    if (accountId) q = q.eq("account_id", accountId);
+    const { data, error } = await q
       .order("updated_at", { ascending: false })
       .order("created_at", { ascending: false })
       .limit(1);
@@ -181,6 +184,7 @@ async function fetchLatestGrowthPlan(userId: string): Promise<GrowthPlan | null>
 
 export default function PlanPage() {
   const { user, loading } = useAuth() as any;
+  const { activeAccountId, loading: accountsLoading } = useTradingAccounts();
   const router = useRouter();
   const { locale } = useAppSettings();
   const lang = resolveLocale(locale);
@@ -212,19 +216,19 @@ export default function PlanPage() {
   }, [loading, user, router]);
 
   async function reloadAll() {
-    if (loading || !user) return;
+    if (loading || !user || accountsLoading || !activeAccountId) return;
     if (!planUserId) return;
 
     setLoadingData(true);
     setCashflowTableMissing(false);
 
     try {
-      const gp = await fetchLatestGrowthPlan(planUserId);
+      const gp = await fetchLatestGrowthPlan(planUserId, activeAccountId);
       setPlan(gp);
 
       // journal entries (for trading P&L)
       if (journalUserId) {
-        const all = await getAllJournalEntries(journalUserId);
+        const all = await getAllJournalEntries(journalUserId, activeAccountId);
         setEntries(all ?? []);
       } else {
         setEntries([]);
@@ -233,7 +237,9 @@ export default function PlanPage() {
       // cashflows ledger (deposits/withdrawals)
       try {
         const fromDate = gp ? String(gp.createdAtIso).slice(0, 10) : undefined;
-        const opts = fromDate ? { fromDate, throwOnError: true, forceServer: true } : { throwOnError: true, forceServer: true };
+        const opts = fromDate
+          ? { fromDate, throwOnError: true, forceServer: true, accountId: activeAccountId }
+          : { throwOnError: true, forceServer: true, accountId: activeAccountId };
 
         const primary = String((user as any)?.id || "");
         const secondary = String((user as any)?.uid || "");
@@ -258,10 +264,10 @@ export default function PlanPage() {
   }
 
   useEffect(() => {
-    if (loading || !user) return;
+    if (loading || !user || accountsLoading || !activeAccountId) return;
     reloadAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, planUserId, journalUserId]);
+  }, [loading, planUserId, journalUserId, accountsLoading, activeAccountId]);
 
   const planStartDate = useMemo(() => {
     if (!plan) return "";
@@ -327,7 +333,7 @@ export default function PlanPage() {
   }, [plan, balances.tradingEquity, balances.accountEquity]);
 
   async function onAddCashflow() {
-    if (!planUserId) return;
+    if (!planUserId || !activeAccountId) return;
     if (!cfDate) return;
 
     const amount = Number(String(cfAmount).replace(/[^\d.]/g, ""));
@@ -337,6 +343,7 @@ export default function PlanPage() {
     try {
       await createCashflow({
         userId: planUserId,
+        accountId: activeAccountId,
         date: cfDate,
         type: cfType,
         amount,

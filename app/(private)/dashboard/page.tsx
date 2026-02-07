@@ -7,7 +7,7 @@ import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 
 import { useAuth } from "@/context/AuthContext";
-import { getGrowthPlanSupabase, type GrowthPlan } from "@/lib/growthPlanSupabase";
+import { getGrowthPlanSupabaseByAccount, type GrowthPlan } from "@/lib/growthPlanSupabase";
 import type { JournalEntry } from "@/lib/journalTypes";
 import { getAllJournalEntries } from "@/lib/journalSupabase";
 import { upsertDailySnapshot } from "@/lib/snapshotSupabase";
@@ -21,6 +21,7 @@ import { getDailyChecklist } from "@/lib/checklistSupabase";
 import { supabaseBrowser } from "@/lib/supaBaseClient";
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
+import { useTradingAccounts } from "@/hooks/useTradingAccounts";
 
 import TopNav from "@/app/components/TopNav";
 import DashboardGrid, { type GridItemId } from "@/app/components/DashboardGrid";
@@ -380,6 +381,14 @@ function mergeChecklistBaseWithSaved(baseTexts: string[], saved: UiChecklistItem
 ========================= */
 export default function DashboardPage() {
   const { user, loading } = useAuth();
+  const {
+    accounts,
+    activeAccountId,
+    setActiveAccount,
+    createAccount,
+    loading: accountsLoading,
+    error: accountsError,
+  } = useTradingAccounts();
   const router = useRouter();
   const { locale } = useAppSettings();
   const lang = resolveLocale(locale);
@@ -418,6 +427,12 @@ export default function DashboardPage() {
   ]);
 
   const [ecoNewsCountry, setEcoNewsCountry] = useState("US");
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const [showAccountCreate, setShowAccountCreate] = useState(false);
+  const [newAccountName, setNewAccountName] = useState("");
+  const [newAccountBroker, setNewAccountBroker] = useState("");
+  const [creatingAccount, setCreatingAccount] = useState(false);
+  const [accountMessage, setAccountMessage] = useState<string | null>(null);
   const [widgetsLoaded, setWidgetsLoaded] = useState(false);
 
   // ✅ Checklist (today) — UI type ONLY
@@ -509,7 +524,7 @@ export default function DashboardPage() {
 
   // Load plan + journal + checklist + cashflows (rolling day for checklist)
   useEffect(() => {
-    if (loading || !user) return;
+    if (loading || !user || accountsLoading || !activeAccountId) return;
 
     const journalUserId = (user as any)?.uid || (user as any)?.id || "";
     const cashflowUserIdPrimary = (user as any)?.id || (user as any)?.uid || "";
@@ -528,17 +543,19 @@ export default function DashboardPage() {
 
     const loadAll = async () => {
       try {
-        const dbPlan = await getGrowthPlanSupabase();
+        const dbPlan = await getGrowthPlanSupabaseByAccount(activeAccountId);
         if (!cancelled) setPlan(dbPlan ?? null);
 
         // Journal entries (trading P&L)
-        const dbEntries = journalUserId ? await getAllJournalEntries(journalUserId) : [];
+        const dbEntries = journalUserId ? await getAllJournalEntries(journalUserId, activeAccountId) : [];
         if (!cancelled) setEntries(dbEntries);
 
         // Cashflows (deposits/withdrawals)
         try {
           const fromDate = getPlanStartDateStr(dbPlan ?? null) ?? undefined;
-          const opts: any = fromDate ? { fromDate, throwOnError: true, forceServer: true } : { throwOnError: true, forceServer: true };
+          const opts: any = fromDate
+            ? { fromDate, throwOnError: true, forceServer: true, accountId: activeAccountId }
+            : { throwOnError: true, forceServer: true, accountId: activeAccountId };
 
           let cf: Cashflow[] = [];
 
@@ -598,19 +615,19 @@ export default function DashboardPage() {
     return () => {
       cancelled = true;
     };
-  }, [loading, user, rollingTodayStr]);
+  }, [loading, user, rollingTodayStr, accountsLoading, activeAccountId]);
 
   // Authoritative balance series (server-side)
   useEffect(() => {
     let alive = true;
     async function loadSeries() {
-      if (loading || !user) return;
+      if (loading || !user || accountsLoading || !activeAccountId) return;
       try {
         const { data: sessionData } = await supabaseBrowser.auth.getSession();
         const token = sessionData?.session?.access_token;
         if (!token) return;
 
-        const res = await fetch("/api/account/series", {
+        const res = await fetch(`/api/account/series?accountId=${encodeURIComponent(activeAccountId)}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
         if (!res.ok) return;
@@ -785,7 +802,7 @@ export default function DashboardPage() {
   // Snapshot upsert
   useEffect(() => {
     const userId = (user as any)?.uid || (user as any)?.id || "";
-    if (!userId) return;
+    if (!userId || !activeAccountId) return;
     if (!plan) return;
     if (dailyCalcs.dailyTargetPct === 0) return;
 
@@ -795,6 +812,7 @@ export default function DashboardPage() {
       try {
         await upsertDailySnapshot({
           user_id: userId,
+          account_id: activeAccountId,
           date: sessionDateStr,
           start_of_day_balance: dailyCalcs.startOfSessionBalance,
           expected_usd: dailyCalcs.expectedSessionUSD,
@@ -816,7 +834,7 @@ export default function DashboardPage() {
     return () => {
       cancelled = true;
     };
-  }, [user, plan, sessionDateStr, dailyCalcs]);
+  }, [user, plan, sessionDateStr, dailyCalcs, activeAccountId]);
 
   // ========== Checklist autosave ==========
   async function saveChecklistToServer(payload: { date: string; items: UiChecklistItem[]; notes?: string | null }) {
@@ -1440,7 +1458,7 @@ export default function DashboardPage() {
             </p>
           </div>
 
-          <div className="flex flex-wrap gap-2 items-start md:items-end">
+          <div className="flex flex-wrap items-center gap-3">
             <Link
               href="/growth-plan"
               className="px-4 py-2 rounded-xl bg-emerald-400 text-slate-950 text-[14px] font-semibold hover:bg-emerald-300 transition"
@@ -1448,14 +1466,123 @@ export default function DashboardPage() {
               {L("Edit growth plan", "Editar plan de crecimiento")}
             </Link>
 
-            <Link
-              href="/growthaccountsimulator"
-              className="px-4 py-2 rounded-xl border border-slate-700 text-slate-200 text-[14px] hover:border-emerald-400 hover:text-emerald-300 transition"
-            >
-              {L("Growth simulator", "Simulador de crecimiento")}
-            </Link>
+            {accounts.length > 0 && (
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setAccountMenuOpen((v) => !v)}
+                  className="rounded-full border border-slate-700/70 bg-slate-950/50 px-3 py-2 text-[12px] text-slate-200 hover:border-emerald-400/70 hover:text-emerald-200 transition"
+                >
+                  {L("Account:", "Cuenta:")}{" "}
+                  <span className="font-semibold">
+                    {accounts.find((a) => a.id === activeAccountId)?.name ?? accounts[0]?.name ?? "—"}
+                  </span>
+                  <span className="ml-2 text-slate-500">▾</span>
+                </button>
+
+                {accountMenuOpen && (
+                  <div className="absolute right-0 mt-2 w-60 rounded-xl border border-slate-800 bg-slate-950/95 p-2 shadow-xl z-20">
+                    <p className="px-2 py-1 text-[10px] uppercase tracking-[0.2em] text-slate-500">
+                      {L("Switch account", "Cambiar cuenta")}
+                    </p>
+                    <div className="mt-1 space-y-1">
+                      {accounts.map((acc) => {
+                        const isActive = acc.id === activeAccountId;
+                        return (
+                          <button
+                            key={acc.id}
+                            type="button"
+                            onClick={() => {
+                              setActiveAccount(acc.id);
+                              setAccountMenuOpen(false);
+                            }}
+                            className={`w-full text-left rounded-lg px-3 py-2 text-[12px] transition ${
+                              isActive
+                                ? "bg-emerald-500/15 text-emerald-200"
+                                : "text-slate-200 hover:bg-slate-800/70"
+                            }`}
+                          >
+                            <div className="font-medium">{acc.name}</div>
+                            <div className="text-[10px] text-slate-400">
+                              {acc.broker || L("Broker not set", "Broker no definido")}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    <div className="mt-2 border-t border-slate-800 pt-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowAccountCreate(true);
+                          setAccountMenuOpen(false);
+                        }}
+                        className="w-full rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-[12px] text-emerald-200 hover:border-emerald-400/60 transition"
+                      >
+                        {L("Create new account", "Crear nueva cuenta")}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </header>
+
+        {showAccountCreate && (
+          <section className="mb-6 rounded-xl border border-slate-800 bg-slate-950/70 p-4 max-w-md">
+            <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400 mb-2">
+              {L("New account", "Nueva cuenta")}
+            </p>
+            <div className="space-y-2">
+              <input
+                value={newAccountName}
+                onChange={(e) => setNewAccountName(e.target.value)}
+                placeholder={L("Account name", "Nombre de cuenta")}
+                className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-1.5 text-[12px] text-slate-200"
+              />
+              <input
+                value={newAccountBroker}
+                onChange={(e) => setNewAccountBroker(e.target.value)}
+                placeholder={L("Broker (optional)", "Broker (opcional)")}
+                className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-1.5 text-[12px] text-slate-200"
+              />
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  disabled={creatingAccount || !newAccountName.trim()}
+                  onClick={async () => {
+                    try {
+                      setCreatingAccount(true);
+                      setAccountMessage(null);
+                      await createAccount(newAccountName.trim(), newAccountBroker.trim() || undefined);
+                      setNewAccountName("");
+                      setNewAccountBroker("");
+                      setShowAccountCreate(false);
+                    } catch (err: any) {
+                      setAccountMessage(err?.message || L("Could not create account.", "No se pudo crear la cuenta."));
+                    } finally {
+                      setCreatingAccount(false);
+                    }
+                  }}
+                  className="rounded-lg bg-emerald-400 px-3 py-1.5 text-[12px] font-semibold text-slate-950 hover:bg-emerald-300 transition disabled:opacity-60"
+                >
+                  {creatingAccount ? L("Creating…", "Creando…") : L("Create", "Crear")}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowAccountCreate(false)}
+                  className="rounded-lg border border-slate-700 px-3 py-1.5 text-[12px] text-slate-300 hover:border-slate-500 transition"
+                >
+                  {L("Cancel", "Cancelar")}
+                </button>
+              </div>
+              {accountMessage && <p className="text-[11px] text-emerald-300">{accountMessage}</p>}
+              {accountsError && <p className="text-[11px] text-red-400">{accountsError}</p>}
+            </div>
+          </section>
+        )}
 
         <section className="mb-6 rounded-xl border border-slate-800 bg-slate-900/60 p-4">
           <p className="text-[13px] text-slate-400 mb-2">

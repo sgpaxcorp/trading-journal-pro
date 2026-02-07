@@ -7,6 +7,7 @@ export type LocaleCode = string;
 export type UserPreferences = {
   theme: ThemeMode;
   locale: LocaleCode;
+  activeAccountId?: string | null;
 };
 
 const TABLE = "user_preferences";
@@ -28,7 +29,7 @@ export async function getUserPreferences(userId: string): Promise<UserPreference
 
     const { data, error } = await supabaseBrowser
       .from(TABLE)
-      .select("theme, locale")
+      .select("theme, locale, active_account_id")
       .eq("user_id", userId)
       .maybeSingle();
 
@@ -42,6 +43,7 @@ export async function getUserPreferences(userId: string): Promise<UserPreference
     return {
       theme: normalizeTheme((data as any).theme),
       locale: normalizeLocale((data as any).locale),
+      activeAccountId: ((data as any).active_account_id ?? null) as string | null,
     };
   } catch (e) {
     console.error(LOG, "getUserPreferences exception:", e);
@@ -60,6 +62,7 @@ export async function upsertUserPreferences(
       user_id: userId,
       theme: prefs.theme ? normalizeTheme(prefs.theme) : undefined,
       locale: prefs.locale ? normalizeLocale(prefs.locale) : undefined,
+      active_account_id: prefs.activeAccountId ?? undefined,
       updated_at: new Date().toISOString(),
     };
 
@@ -72,7 +75,7 @@ export async function upsertUserPreferences(
     const { data, error } = await supabaseBrowser
       .from(TABLE)
       .upsert(payload as any, { onConflict: "user_id" })
-      .select("theme, locale")
+      .select("theme, locale, active_account_id")
       .maybeSingle();
 
     if (error) {
@@ -85,6 +88,7 @@ export async function upsertUserPreferences(
     return {
       theme: normalizeTheme((data as any).theme),
       locale: normalizeLocale((data as any).locale),
+      activeAccountId: ((data as any).active_account_id ?? null) as string | null,
     };
   } catch (e) {
     console.error(LOG, "upsertUserPreferences exception:", e);

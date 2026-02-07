@@ -39,7 +39,7 @@ function toStringArray(raw: unknown): string[] {
   return Array.isArray(raw) ? (raw as string[]) : [];
 }
 
-async function fetchJournalEntriesViaApi(opts?: { fromDate?: string; toDate?: string }): Promise<any[] | null> {
+async function fetchJournalEntriesViaApi(opts?: { fromDate?: string; toDate?: string; accountId?: string | null }): Promise<any[] | null> {
   if (typeof window === "undefined") return null;
   try {
     const { data: sessionData } = await supabaseBrowser.auth.getSession();
@@ -49,6 +49,7 @@ async function fetchJournalEntriesViaApi(opts?: { fromDate?: string; toDate?: st
     const params = new URLSearchParams();
     if (opts?.fromDate) params.set("fromDate", opts.fromDate);
     if (opts?.toDate) params.set("toDate", opts.toDate);
+    if (opts?.accountId) params.set("accountId", opts.accountId);
 
     const url = `/api/journal/list${params.toString() ? `?${params.toString()}` : ""}`;
     const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
@@ -114,22 +115,27 @@ function rowToJournalEntry(row: any): JournalEntry {
    GET: todos los journals
 ========================= */
 
-export async function getAllJournalEntries(userId: string): Promise<JournalEntry[]> {
+export async function getAllJournalEntries(userId: string, accountId?: string | null): Promise<JournalEntry[]> {
   if (!userId) return [];
 
   // Prefer server-side read (bypasses RLS / legacy id mismatches)
-  const serverRows = await fetchJournalEntriesViaApi();
+  const serverRows = await fetchJournalEntriesViaApi({ accountId });
   if (serverRows && serverRows.length > 0) {
     return serverRows.map(rowToJournalEntry);
   }
 
-  const { data, error } = await supabaseBrowser
+  let query = supabaseBrowser
     .from(TABLE_NAME)
     .select(
       "user_id, date, pnl, instrument, direction, entry_price, exit_price, size, screenshots, notes, emotion, tags, respected_plan, created_at, updated_at"
     )
-    .eq("user_id", userId)
-    .order("date", { ascending: true });
+    .eq("user_id", userId);
+
+  if (accountId) {
+    query = query.eq("account_id", accountId);
+  }
+
+  const { data, error } = await query.order("date", { ascending: true });
 
   if (error) {
     console.error(`${LOG_PREFIX} getAllJournalEntries error:`, error);
@@ -145,18 +151,24 @@ export async function getAllJournalEntries(userId: string): Promise<JournalEntry
 
 export async function getJournalEntryByDate(
   userId: string,
-  date: string
+  date: string,
+  accountId?: string | null
 ): Promise<JournalEntry | null> {
   if (!userId || !date) return null;
 
-  const { data, error } = await supabaseBrowser
+  let query = supabaseBrowser
     .from(TABLE_NAME)
     .select(
       "user_id, date, pnl, instrument, direction, entry_price, exit_price, size, screenshots, notes, emotion, tags, respected_plan, created_at, updated_at"
     )
     .eq("user_id", userId)
-    .eq("date", date)
-    .maybeSingle();
+    .eq("date", date);
+
+  if (accountId) {
+    query = query.eq("account_id", accountId);
+  }
+
+  const { data, error } = await query.maybeSingle();
 
   if (error) {
     console.error(`${LOG_PREFIX} getJournalEntryByDate error:`, error);
@@ -170,7 +182,7 @@ export async function getJournalEntryByDate(
    SAVE: upsert por (user_id,date)
 ========================= */
 
-export async function saveJournalEntry(userId: string, entry: JournalEntry): Promise<void> {
+export async function saveJournalEntry(userId: string, entry: JournalEntry, accountId?: string | null): Promise<void> {
   if (!userId) throw new Error("Missing userId in saveJournalEntry");
   if (!entry?.date) throw new Error("Missing entry.date in saveJournalEntry");
 
@@ -178,6 +190,7 @@ export async function saveJournalEntry(userId: string, entry: JournalEntry): Pro
 
   const row = {
     user_id: userId,
+    account_id: accountId ?? null,
     date: normalized.date,
     pnl: normalized.pnl,
 
@@ -198,7 +211,7 @@ export async function saveJournalEntry(userId: string, entry: JournalEntry): Pro
   };
 
   const { error } = await supabaseBrowser.from(TABLE_NAME).upsert(row, {
-    onConflict: "user_id,date",
+    onConflict: "user_id,date,account_id",
   });
 
   if (error) {

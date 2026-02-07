@@ -31,7 +31,7 @@ export type AiCoachSnapshot = {
  * ✅ ESTE NOMBRE ES EL QUE TU PAGE IMPORTA.
  * Si no existe este export, sale el error ts(2724).
  */
-export async function buildAiCoachSnapshot(userId: string): Promise<AiCoachSnapshot> {
+export async function buildAiCoachSnapshot(userId: string, accountId?: string | null): Promise<AiCoachSnapshot> {
   if (!userId) {
     return {
       journalEntries: [],
@@ -42,7 +42,7 @@ export async function buildAiCoachSnapshot(userId: string): Promise<AiCoachSnaps
   }
 
   const [journalEntries, challenges, profileGamification] = await Promise.all([
-    getAllJournalEntries(userId),
+    getAllJournalEntries(userId, accountId),
     getAllChallengeProgress(userId),
     getProfileGamification(userId),
   ]);

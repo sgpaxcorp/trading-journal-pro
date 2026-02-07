@@ -341,13 +341,17 @@ function AccountMenu({ theme, lang }: { theme: Theme; lang: Locale }) {
 
   // Estilos del pill según plan
   const planLabel =
-    plan === "core" ? "Core" : plan === "advanced" ? "Advanced" : t("account.plan.none", lang);
+    plan === "core"
+      ? "Core"
+      : plan === "advanced"
+      ? "Advance"
+      : t("account.plan.none", lang);
 
   const planClasses =
     plan === "core"
-      ? "bg-emerald-500/10 text-emerald-600 border-emerald-400/60"
+      ? "bg-emerald-500/20 text-emerald-100 border-emerald-300/80 shadow-[0_0_14px_rgba(16,185,129,0.35)]"
       : plan === "advanced"
-      ? "bg-violet-500/10 text-violet-700 border-violet-400/70"
+      ? "bg-violet-500/20 text-violet-100 border-violet-300/80 shadow-[0_0_14px_rgba(139,92,246,0.35)]"
       : isLight
       ? "bg-slate-100 text-slate-700 border-slate-300"
       : "bg-slate-800 text-slate-300 border-slate-600";
@@ -447,12 +451,12 @@ function AccountMenu({ theme, lang }: { theme: Theme; lang: Locale }) {
             {displayName}
           </span>
           <span
-            className={`mt-0.5 inline-flex items-center gap-1 rounded-full border px-2 py-px text-[10px] font-medium ${planClasses}`}
+            className={`mt-0.5 inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-[11px] font-semibold ${planClasses}`}
           >
             <span className="h-1.5 w-1.5 rounded-full bg-current opacity-80" />
             {plan === "—"
               ? t("account.plan.none", lang)
-              : `${t("account.plan.label", lang)}: ${planLabel}`}
+              : planLabel}
           </span>
         </div>
       </button>
@@ -659,7 +663,7 @@ export default function TopNav() {
 
   return (
     <nav className={navClass}>
-      <div className="flex items-center px-4 py-3 md:px-6 gap-6 w-full">
+      <div className="flex flex-wrap items-center px-4 py-3 md:px-6 gap-x-6 gap-y-3 w-full">
         {/* Brand */}
         <Link
           href="/dashboard"
@@ -670,13 +674,13 @@ export default function TopNav() {
           <img
             src="/neurotrader-logo.svg"
             alt="Neuro Trader Journal"
-            className="h-20 md:h-21 lg:h-33 w-auto object-contain"
+            className="h-24 md:h-28 lg:h-32 w-auto object-contain"
             draggable={false}
           />
         </Link>
 
         {/* Nav row */}
-        <div className="flex items-center gap-4 text-[14px] whitespace-nowrap flex-1">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-[13px] flex-1 min-w-0">
           <Dropdown
             titleKey="nav.performance"
             items={performance}
@@ -727,7 +731,7 @@ export default function TopNav() {
         </div>
 
         {/* Right side: Help + Account */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 shrink-0">
           <AlertsInboxButton theme={theme} lang={lang} />
           <HelpMenu theme={theme} lang={lang} />
           <AccountMenu theme={theme} lang={lang} />
