@@ -26,8 +26,47 @@ type Metrics = {
     sessions30d: number;
     avgSessionMinutes: number;
   };
+  series: {
+    dailyEvents: { date: string; count: number }[];
+    dailySessions: { date: string; count: number }[];
+    dailySignups: { date: string; count: number }[];
+  };
   conversionRate: number;
 };
+
+function Sparkline({
+  data,
+  stroke = "#34d399",
+}: {
+  data?: { date: string; count: number }[] | null;
+  stroke?: string;
+}) {
+  const safeData = data ?? [];
+  const values = safeData.map((d) => d.count);
+  const max = Math.max(...values, 1);
+  const min = Math.min(...values, 0);
+  const range = max - min || 1;
+  const points = safeData
+    .map((d, i) => {
+      const x = (i / Math.max(1, safeData.length - 1)) * 120;
+      const y = 36 - ((d.count - min) / range) * 36;
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(" ");
+
+  return (
+    <svg viewBox="0 0 120 40" className="w-full h-10">
+      <polyline
+        fill="none"
+        stroke={stroke}
+        strokeWidth="2"
+        points={points || "0,36 120,36"}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
 
 export default function AdminDashboardPage() {
   const { user, loading } = useAuth() as any;
@@ -182,6 +221,51 @@ export default function AdminDashboardPage() {
                     "Insights listos para optimizar onboarding, pricing y features."
                   )}
                 </p>
+              </div>
+            </section>
+
+            <section className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
+                <div className="flex items-center justify-between">
+                  <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">
+                    {L("Daily events", "Eventos diarios")}
+                  </p>
+                  <span className="text-[10px] text-slate-500">
+                    {L("30d", "30d")}
+                  </span>
+                </div>
+                <p className="text-lg font-semibold mt-2">
+                  {metrics.series?.dailyEvents?.at(-1)?.count ?? 0}
+                </p>
+                <Sparkline data={metrics.series?.dailyEvents} stroke="#38bdf8" />
+              </div>
+              <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
+                <div className="flex items-center justify-between">
+                  <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">
+                    {L("Daily sessions", "Sesiones diarias")}
+                  </p>
+                  <span className="text-[10px] text-slate-500">
+                    {L("30d", "30d")}
+                  </span>
+                </div>
+                <p className="text-lg font-semibold mt-2">
+                  {metrics.series?.dailySessions?.at(-1)?.count ?? 0}
+                </p>
+                <Sparkline data={metrics.series?.dailySessions} stroke="#34d399" />
+              </div>
+              <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
+                <div className="flex items-center justify-between">
+                  <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">
+                    {L("Daily signups", "Registros diarios")}
+                  </p>
+                  <span className="text-[10px] text-slate-500">
+                    {L("30d", "30d")}
+                  </span>
+                </div>
+                <p className="text-lg font-semibold mt-2">
+                  {metrics.series?.dailySignups?.at(-1)?.count ?? 0}
+                </p>
+                <Sparkline data={metrics.series?.dailySignups} stroke="#f59e0b" />
               </div>
             </section>
 

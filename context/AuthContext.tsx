@@ -30,7 +30,7 @@ type SignUpArgs = {
   email: string;
   password: string;
   phone: string;
-  address: string; // dirección postal
+  address?: string; // dirección postal (opcional)
   plan: PlanId; // core | advanced
 };
 
@@ -159,7 +159,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             first_name: firstName,
             last_name: lastName,
             phone,
-            postal_address: address,
+            postal_address: address ?? null,
             plan,
           },
           emailRedirectTo: redirectTo,
@@ -185,7 +185,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           first_name: firstName,
           last_name: lastName,
           phone,
-          postal_address: address,
+          postal_address: address ?? null,
 
           // Campos de suscripción
           plan, // core | advanced (PlanId)

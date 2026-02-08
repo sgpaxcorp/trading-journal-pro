@@ -26,14 +26,14 @@ export async function POST(req: Request) {
     }
 
     const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini", // puedes cambiar de modelo si quieres
-      temperature: 0.7,
-      max_tokens: 400,
+      model: "gpt-4o-mini",
+      temperature: 0.4,
+      max_tokens: 450,
       messages: [
         {
           role: "system",
           content:
-            "You are the Trading Journal Pro assistant. You help with questions about the platform, trading journaling, trading psychology, and any general definitions or concepts the user asks for. Answer in the same language as the user, be clear and concise.",
+            "You are the Neuro Trader Journal product assistant. Your job is to answer common prospect questions about features, pricing, and how the platform helps traders. Keep it concise and helpful. Always explain benefits clearly. When relevant, recommend the Advanced plan for traders who want deeper analytics, AI coaching, advanced alerts, and reports. Never be pushy. Match the user's language.",
         },
         {
           role: "user",

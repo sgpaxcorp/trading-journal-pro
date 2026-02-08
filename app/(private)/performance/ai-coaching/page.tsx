@@ -9,6 +9,7 @@ import remarkGfm from "remark-gfm";
 
 import { useAuth } from "@/context/AuthContext";
 import { useTradingAccounts } from "@/hooks/useTradingAccounts";
+import { useUserPlan } from "@/hooks/useUserPlan";
 import TopNav from "@/app/components/TopNav";
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
@@ -735,11 +736,64 @@ function AiCoachingPageInner() {
   const searchParams = useSearchParams();
   const { user, loading: authLoading } = useAuth();
   const { activeAccountId, loading: accountsLoading } = useTradingAccounts();
+  const { plan, loading: planLoading } = useUserPlan();
   const { locale } = useAppSettings();
   const lang = resolveLocale(locale);
   const isEs = lang === "es";
   const L = (en: string, es: string) => (isEs ? es : en);
   const quickPrompts = isEs ? QUICK_PROMPTS_ES : QUICK_PROMPTS_EN;
+
+  if (planLoading) {
+    return (
+      <main className="min-h-screen bg-slate-950 text-slate-50">
+        <TopNav />
+        <div className="max-w-4xl mx-auto px-6 py-16">
+          <p className="text-sm text-slate-400">{L("Loading…", "Cargando…")}</p>
+        </div>
+      </main>
+    );
+  }
+
+  if (plan !== "advanced") {
+    return (
+      <main className="min-h-screen bg-slate-950 text-slate-50">
+        <TopNav />
+        <div className="max-w-4xl mx-auto px-6 py-16">
+          <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
+            <p className="text-emerald-300 text-[11px] uppercase tracking-[0.3em]">
+              {L("Advanced feature", "Función Advanced")}
+            </p>
+            <h1 className="text-xl font-semibold mt-2">
+              {L(
+                "AI Coaching is included in Advanced",
+                "AI Coaching está incluido en Advanced"
+              )}
+            </h1>
+            <p className="text-sm text-slate-400 mt-2">
+              {L(
+                "Upgrade to Advanced to unlock action plans, deep analytics insights, and AI-driven coaching.",
+                "Actualiza a Advanced para desbloquear planes de acción, insights avanzados y coaching con IA."
+              )}
+            </p>
+            <div className="mt-4 flex flex-wrap gap-3">
+              <Link
+                href="/billing"
+                className="px-4 py-2 rounded-xl bg-emerald-400 text-slate-950 text-xs font-semibold hover:bg-emerald-300 transition"
+              >
+                {L("Upgrade to Advanced", "Actualizar a Advanced")}
+              </Link>
+              <Link
+                href="/plans-comparison"
+                className="px-4 py-2 rounded-xl border border-slate-700 text-slate-200 text-xs hover:border-emerald-400 transition"
+              >
+                {L("Compare plans", "Comparar planes")}
+              </Link>
+            </div>
+          </div>
+        </div>
+      </main>
+    );
+  }
 
   // Platform data
   const [entries, setEntries] = useState<JournalEntry[]>([]);

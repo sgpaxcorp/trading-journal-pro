@@ -5,8 +5,8 @@ export const runtime = "nodejs";
 
 function maxAccountsForPlan(planRaw: string | null | undefined): number {
   const plan = String(planRaw || "").toLowerCase();
-  if (plan === "advanced" || plan === "pro") return 2;
-  return 1;
+  if (plan === "advanced" || plan === "pro") return 999;
+  return 5;
 }
 
 export async function POST(req: NextRequest) {

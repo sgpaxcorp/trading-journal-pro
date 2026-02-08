@@ -3,15 +3,23 @@ import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
 
 type PlanId = "core" | "advanced";
+type BillingCycle = "monthly" | "annual";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {
   });
 
 // Price IDs from your Stripe Dashboard (env vars)
-const PRICE_IDS: Record<PlanId, string> = {
-  core: process.env.STRIPE_PRICE_CORE_MONTHLY ?? "",
-  advanced: process.env.STRIPE_PRICE_ADVANCED_MONTHLY ?? "",
+const PRICE_IDS: Record<PlanId, Record<BillingCycle, string>> = {
+  core: {
+    monthly: process.env.STRIPE_PRICE_CORE_MONTHLY ?? "",
+    annual: process.env.STRIPE_PRICE_CORE_ANNUAL ?? "",
+  },
+  advanced: {
+    monthly: process.env.STRIPE_PRICE_ADVANCED_MONTHLY ?? "",
+    annual: process.env.STRIPE_PRICE_ADVANCED_ANNUAL ?? "",
+  },
 };
+const OPTION_FLOW_PRICE = process.env.STRIPE_PRICE_OPTIONFLOW_MONTHLY ?? "";
 
 export async function POST(req: NextRequest) {
   try {
@@ -20,7 +28,9 @@ export async function POST(req: NextRequest) {
     const userId = body.userId as string | undefined;
     const email = body.email as string | undefined;
     const planId = body.planId as PlanId | undefined;
+    const billingCycle = (body.billingCycle as BillingCycle | undefined) ?? "monthly";
     const couponCodeRaw = body.couponCode as string | undefined; // opcional
+    const addonOptionFlow = Boolean(body.addonOptionFlow);
 
     if (!userId || !email || !planId) {
       return NextResponse.json(
@@ -33,18 +43,22 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Invalid plan" }, { status: 400 });
     }
 
-    const priceId = PRICE_IDS[planId];
+    const priceId = PRICE_IDS[planId][billingCycle];
     if (!priceId) {
       console.error(
         "[CHECKOUT] Missing priceId for plan",
         planId,
-        "CORE=",
-        process.env.STRIPE_PRICE_CORE_MONTHLY,
-        "ADV=",
-        process.env.STRIPE_PRICE_ADVANCED_MONTHLY
+        "cycle=",
+        billingCycle
       );
       return NextResponse.json(
         { error: "Price ID not configured for this plan" },
+        { status: 500 }
+      );
+    }
+    if (addonOptionFlow && !OPTION_FLOW_PRICE) {
+      return NextResponse.json(
+        { error: "Option Flow price ID not configured" },
         { status: 500 }
       );
     }
@@ -111,15 +125,23 @@ export async function POST(req: NextRequest) {
     // =====================================================
     // Create Checkout Session
     // =====================================================
+    const lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] = [
+      {
+        price: priceId,
+        quantity: 1,
+      },
+    ];
+    if (addonOptionFlow) {
+      lineItems.push({
+        price: OPTION_FLOW_PRICE,
+        quantity: 1,
+      });
+    }
+
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
       customer: customerId, // ✅ usamos solo customer
-      line_items: [
-        {
-          price: priceId,
-          quantity: 1,
-        },
-      ],
+      line_items: lineItems,
       discounts,
       allow_promotion_codes: false,
       success_url: `${origin}/confirmed?session_id={CHECKOUT_SESSION_ID}`,
@@ -128,12 +150,14 @@ export async function POST(req: NextRequest) {
         supabaseUserId: userId,
         planId,
         couponCode: couponCode ?? "",
+        addonOptionFlow: addonOptionFlow ? "true" : "false",
       },
       subscription_data: {
         metadata: {
           supabaseUserId: userId,
           planId,
           couponCode: couponCode ?? "",
+          addonOptionFlow: addonOptionFlow ? "true" : "false",
         },
       },
     });

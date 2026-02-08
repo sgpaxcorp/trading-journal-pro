@@ -81,6 +81,26 @@ export function useTradingAccounts() {
     return body.account as TradingAccount;
   }, [fetchAccounts]);
 
+  const deleteAccount = useCallback(async (accountId: string) => {
+    const { data: sessionData } = await supabaseBrowser.auth.getSession();
+    const token = sessionData?.session?.access_token;
+    if (!token) throw new Error("Unauthorized");
+
+    const res = await fetch("/api/trading-accounts/delete", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ accountId }),
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body?.error || "Failed to delete account");
+
+    await fetchAccounts();
+    return true;
+  }, [fetchAccounts]);
+
   const setActive = useCallback(async (accountId: string) => {
     const { data: sessionData } = await supabaseBrowser.auth.getSession();
     const token = sessionData?.session?.access_token;
@@ -112,6 +132,7 @@ export function useTradingAccounts() {
     error,
     refresh: fetchAccounts,
     createAccount,
+    deleteAccount,
     setActiveAccount: setActive,
   };
 }

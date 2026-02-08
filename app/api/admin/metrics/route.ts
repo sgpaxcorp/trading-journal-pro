@@ -1,19 +1,55 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 
-async function isAdmin(userId: string): Promise<boolean> {
+function parseAdminEmails(envValue?: string | null) {
+  return (envValue || "")
+    .split(",")
+    .map((v) => v.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+async function isAdmin(userId: string, email?: string | null): Promise<boolean> {
   const { data, error } = await supabaseAdmin
     .from("admin_users")
     .select("user_id, active")
     .eq("user_id", userId)
     .eq("active", true)
     .limit(1);
-  if (error) return false;
-  return (data ?? []).length > 0;
+  if (!error && (data ?? []).length > 0) return true;
+
+  const allowList = parseAdminEmails(process.env.ADMIN_EMAILS);
+  if (email && allowList.includes(email.toLowerCase())) return true;
+  return false;
 }
 
 function toISO(daysAgo: number) {
   return new Date(Date.now() - daysAgo * 24 * 60 * 60 * 1000).toISOString();
+}
+
+function toDayKey(value: string | Date) {
+  const d = typeof value === "string" ? new Date(value) : value;
+  return d.toISOString().slice(0, 10);
+}
+
+function buildDailySeries<T extends Record<string, any>>(
+  items: T[] | null | undefined,
+  dateKey: keyof T,
+  days: number
+) {
+  const today = new Date();
+  const buckets = new Map<string, number>();
+  for (let i = days - 1; i >= 0; i -= 1) {
+    const d = new Date(today.getTime() - i * 24 * 60 * 60 * 1000);
+    buckets.set(toDayKey(d), 0);
+  }
+  (items ?? []).forEach((item) => {
+    const raw = item[dateKey];
+    if (!raw) return;
+    const key = toDayKey(raw as string);
+    if (!buckets.has(key)) return;
+    buckets.set(key, (buckets.get(key) || 0) + 1);
+  });
+  return Array.from(buckets.entries()).map(([date, count]) => ({ date, count }));
 }
 
 export async function GET(req: NextRequest) {
@@ -28,18 +64,23 @@ export async function GET(req: NextRequest) {
     }
 
     const userId = authData.user.id;
-    const admin = await isAdmin(userId);
+    const admin = await isAdmin(userId, authData.user.email);
     if (!admin) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
     const since7 = toISO(7);
     const since30 = toISO(30);
 
-    const [{ count: totalUsers }, { count: activeSubs }] = await Promise.all([
+    const [{ count: totalUsers }, { count: activeSubs }, { data: profiles30 }] =
+      await Promise.all([
       supabaseAdmin.from("profiles").select("id", { count: "exact", head: true }),
       supabaseAdmin
         .from("profiles")
         .select("id", { count: "exact", head: true })
         .eq("subscription_status", "active"),
+      supabaseAdmin
+        .from("profiles")
+        .select("id, created_at")
+        .gte("created_at", since30),
     ]);
 
     const [{ count: newUsers7d }, { count: newUsers30d }] = await Promise.all([
@@ -101,6 +142,10 @@ export async function GET(req: NextRequest) {
     const conversionRate =
       totalUsers && totalUsers > 0 ? (activeSubs || 0) / totalUsers : 0;
 
+    const dailyEvents = buildDailySeries(events30, "created_at", 30);
+    const dailySessions = buildDailySeries(sessions30, "started_at", 30);
+    const dailySignups = buildDailySeries(profiles30, "created_at", 30);
+
     return NextResponse.json({
       totals: {
         users: totalUsers || 0,
@@ -119,6 +164,11 @@ export async function GET(req: NextRequest) {
         topPages,
         sessions30d: (sessions30 ?? []).length,
         avgSessionMinutes: Number(avgSessionMinutes.toFixed(1)),
+      },
+      series: {
+        dailyEvents,
+        dailySessions,
+        dailySignups,
       },
       conversionRate: Number((conversionRate * 100).toFixed(1)),
     });

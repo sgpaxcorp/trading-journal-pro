@@ -1,15 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import {
-  FaTwitter,
-  FaInstagram,
-  FaLinkedinIn,
-  FaDiscord,
-  FaFacebookF,
-} from "react-icons/fa";
 import FloatingAskButton from "../components/FloatingAskButton";
 import type { CSSProperties } from "react";
+import { useState } from "react";
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
 
@@ -26,7 +20,6 @@ type PlanRow = {
 };
 
 const rows: PlanRow[] = [
-  // GENERAL
   {
     section: "GENERAL",
     sectionStyle: {
@@ -34,25 +27,19 @@ const rows: PlanRow[] = [
       color: "#e5e7eb",
     },
   },
-  { label: "Accounts", core: "1", advanced: "Up to 5" },
+  { label: "Trading accounts", core: "5", advanced: "Unlimited" },
   { label: "Data storage", core: "1GB", advanced: "5GB" },
-  { label: "Trade imports", core: "Coming soon", advanced: "Coming Soon" },
   { label: "Support", core: "Email support", advanced: "Priority email & chat" },
 
-  // PLANNING & RULES
   {
     section: "PLANNING & RULES",
     sectionStyle: { fontSize: "15px", color: "#e5e7eb" },
   },
-  { label: "Planning your goal (customizable)", core: true, advanced: true },
-  { label: "Set-up rules (customizable)", core: true, advanced: true },
-  {
-    label: "Set-up messages and alarms (customizable)",
-   core: "Basic",
-    advanced: "Advanced",
-  },
+  { label: "Growth plan & daily targets", core: true, advanced: true },
+  { label: "Setup rules & triggers", core: true, advanced: true },
+  { label: "Alerts & reminders", core: "Basic", advanced: "Advanced" },
+  { label: "Daily checklist", core: true, advanced: true },
 
-  // NOTEBOOK (SUBHEADER CUSTOMIZABLE)
   {
     subheader: "Notebook",
     subheaderStyle: {
@@ -62,196 +49,58 @@ const rows: PlanRow[] = [
       fontWeight: 600,
     },
   },
-  {
-    label: "Pre-market planning",
-    indent: 1,
-   core: true,
-    advanced: true,
-  },
-  {
-    label: "Trade management (entry/exit chart)",
-    indent: 1,
-    core: true,
-    advanced: true,
-  },
-  {
-    label: "Emotions register (drop-down tags)",
-    indent: 1,
-    core: true,
-    advanced: true,
-  },
-  {
-    label: "Well executed and lesson learned sections",
-    indent: 1,
-    core: true,
-    advanced: true,
-  },
-  {
-    label: "Templates",
-    indent: 1,
-    core: "Core",
-    advanced: "Advance",
-  },
-  {
-    label: "Add images and screenshots",
-    indent: 1,
-    core: true,
-    advanced: true,
-  },
-  {
-    label: "Stylus-friendly interface for Tablet",
-    indent: 1,
-    core: "Coming soon",
-    advanced: "Coming soon",
-  },
+  { label: "Premarket plan", indent: 1, core: true, advanced: true },
+  { label: "Entries & exits", indent: 1, core: true, advanced: true },
+  { label: "Emotions & tags", indent: 1, core: true, advanced: true },
+  { label: "Lessons learned", indent: 1, core: true, advanced: true },
+  { label: "Templates", indent: 1, core: true, advanced: true },
+  { label: "Images & screenshots", indent: 1, core: true, advanced: true },
 
-  // REPORTING
   {
     section: "REPORTING",
     sectionStyle: { fontSize: "15px", color: "#e5e7eb" },
   },
-  {
-    label: "Calendar with results (daily, monthly, yearly)",
-    core: true,
-    advanced: true,
-  },
-  {
-    label: "Account performance graph",
-    core: true,
-    advanced: true,
-  },
-  {
-    label: "AI summary report (selectable period)",
-    core: false,
-    advanced: true,
-  },
-  {
-    label: "AI suggestions",
-    core: false,
-   advanced: true,
-  },
-  {
-    label: "Emotionless graph",
-    core: true,
-    advanced: true,
-  },
+  { label: "Calendar results", core: true, advanced: true },
+  { label: "Equity curve & balance chart", core: true, advanced: true },
+  { label: "Cashflow tracking", core: true, advanced: true },
+  { label: "PDF reports", core: false, advanced: true },
+  { label: "AI summary report", core: false, advanced: true },
 
-  // ANALYTICS
   {
     section: "ANALYTICS",
     sectionStyle: { fontSize: "15px", color: "#e5e7eb" },
   },
-  {
-    label: "Progress ratio",
-    core: true,
-    advanced: true,
-  },
-  {
-    label: "Average return ratio (weekly)",
-    core: false,
-    advanced: true,
-  },
-  {
-    label: "Average trades per day, week, month",
-    core: false,
-    advanced: true,
-  },
+  { label: "Core KPIs", core: true, advanced: true },
+  { label: "Time-of-day breakdown", core: false, advanced: true },
+  { label: "Instrument & strategy breakdowns", core: false, advanced: true },
+  { label: "Risk metrics", core: false, advanced: true },
+  { label: "Streaks", core: true, advanced: true },
 
-  // PROGRESS ANALYSIS (SUBHEADER CUSTOMIZABLE)
-  {
-    subheader: "Progress analysis",
-    subheaderStyle: {
-      paddingLeft: "24px",
-      fontSize: "14px",
-      color: "#22c55e",
-      fontWeight: 600,
-    },
-  },
-  {
-    label: "Days with well executed trades and lessons learned",
-    indent: 1,
-    core: false,
-    advanced: true,
-  },
-  {
-    label: "How many days are well executed and lessons learned",
-    indent: 1,
-    core: false,
-    advanced: true,
-  },
-  {
-    label: "Risk management ratio",
-    core: true,
-    advanced: true,
-  },
-
-  // OTHER TOOLS
   {
     section: "OTHER TOOLS",
     sectionStyle: { fontSize: "15px", color: "#e5e7eb" },
   },
-  {
-    label: "Economic calendar",
-    core: true,
-    advanced: true,
-  },
-  {
-    label: "Manage trading business",
-    core: false,
-    advanced: true,
-  },
-  {
-    label: "Track profits and losses",
-    core: false,
-   advanced: true,
-  },
-  {
-    label: "Track business expenses",
-    core: false,
-    advanced: true,
-  },
-  {
-    label: "PDF reporting",
-    core: false,
-    advanced: true,
-  },
+  { label: "Back-study module", core: true, advanced: true },
+  { label: "Challenges", core: true, advanced: true },
+  { label: "Global ranking (opt-in)", core: true, advanced: true },
+  { label: "Option Flow Intelligence (add-on)", core: "Add-on", advanced: "Add-on" },
 
-  // COACHING PROGRAM & AI
   {
     section: "COACHING PROGRAM & AI",
     sectionStyle: { fontSize: "15px", color: "#e5e7eb" },
   },
+  { label: "AI coaching & action plans", core: false, advanced: true },
+  { label: "Mindset prompts & trade review", core: false, advanced: true },
+
   {
-    label: "AI coaching",
-    core: false,
-   advanced: true,
+    section: "ADD-ON: OPTION FLOW INTELLIGENCE",
+    sectionStyle: { fontSize: "15px", color: "#34d399" },
   },
-  {
-    subheader: "Custom rules and actions",
-    subheaderStyle: {
-      paddingLeft: "24px",
-      fontSize: "14px",
-      color: "#22c55e",
-      fontWeight: 600,
-    },
-  },
-  {
-    label: "After your goal is reached",
-    indent: 1,
-    core: "Basic",
-    advanced: "Advanced",
-  },
-  {
-    label: "After your risk is reached",
-    indent: 1,
-    core: "Basic",
-    advanced: "Advanced",
-  },
-  {
-    label: "Coaching templates",
-    core: false,
-    advanced: true,
-  },
+  { label: "Flow analysis summary", core: "Add-on", advanced: "Add-on" },
+  { label: "Premarket attack plan (PDF)", core: "Add-on", advanced: "Add-on" },
+  { label: "Downloadable PDF report", core: "Add-on", advanced: "Add-on" },
+  { label: "Key levels & risk notes", core: "Add-on", advanced: "Add-on" },
+  { label: "Screenshot or CSV ingest", core: "Add-on", advanced: "Add-on" },
 ];
 
 function renderCell(
@@ -278,6 +127,15 @@ export default function PlansComparison() {
   const lang = resolveLocale(locale);
   const isEs = lang === "es";
   const L = (en: string, es: string) => (isEs ? es : en);
+  const [billingCycle, setBillingCycle] = useState<"monthly" | "annual">("monthly");
+
+  const PRICES = {
+    core: { monthly: 14.99, annual: 149.99 },
+    advanced: { monthly: 24.99, annual: 249.99 },
+  } as const;
+
+  const priceFor = (planId: "core" | "advanced") =>
+    billingCycle === "monthly" ? PRICES[planId].monthly : PRICES[planId].annual / 12;
 
   const ES_MAP: Record<string, string> = {
     GENERAL: "GENERAL",
@@ -285,56 +143,53 @@ export default function PlansComparison() {
     NOTEBOOK: "NOTEBOOK",
     REPORTING: "REPORTES",
     ANALYTICS: "ANALÍTICA",
-    "Progress analysis": "Análisis de progreso",
     "OTHER TOOLS": "OTRAS HERRAMIENTAS",
     "COACHING PROGRAM & AI": "PROGRAMA DE COACHING E IA",
-    Accounts: "Cuentas",
+    "ADD-ON: OPTION FLOW INTELLIGENCE": "ADD-ON: OPTION FLOW INTELLIGENCE",
+    "Trading accounts": "Cuentas de trading",
+    "Unlimited": "Ilimitadas",
     "Data storage": "Almacenamiento",
-    "Trade imports": "Importación de trades",
     Support: "Soporte",
-    "Planning your goal (customizable)": "Planificación de metas (personalizable)",
-    "Set-up rules (customizable)": "Reglas de setup (personalizables)",
-    "Set-up messages and alarms (customizable)": "Mensajes y alarmas de setup (personalizables)",
+    "Growth plan & daily targets": "Plan de crecimiento y metas diarias",
+    "Setup rules & triggers": "Reglas y disparadores de setup",
+    "Alerts & reminders": "Alertas y recordatorios",
+    "Daily checklist": "Checklist diario",
     Notebook: "Notebook",
-    "Pre-market planning": "Planificación premarket",
-    "Trade management (entry/exit chart)": "Gestión de trades (gráfico entrada/salida)",
-    "Emotions register (drop-down tags)": "Registro de emociones (tags desplegables)",
-    "Well executed and lesson learned sections": "Secciones de trade bien ejecutado y lección aprendida",
+    "Premarket plan": "Plan premarket",
+    "Entries & exits": "Entradas y salidas",
+    "Emotions & tags": "Emociones y etiquetas",
+    "Lessons learned": "Lecciones aprendidas",
     Templates: "Plantillas",
-    "Add images and screenshots": "Agregar imágenes y screenshots",
-    "Stylus-friendly interface for Tablet": "Interfaz para tablet (stylus)",
-    "Calendar with results (daily, monthly, yearly)": "Calendario con resultados (diario, mensual, anual)",
-    "Account performance graph": "Gráfica de performance de cuenta",
-    "AI summary report (selectable period)": "Reporte resumen con IA (periodo seleccionable)",
-    "AI suggestions": "Sugerencias de IA",
-    "Emotionless graph": "Gráfica sin emociones",
-    "Progress ratio": "Ratio de progreso",
-    "Average return ratio (weekly)": "Retorno promedio (semanal)",
-    "Average trades per day, week, month": "Promedio de trades por día, semana, mes",
-    "Days with well executed trades and lessons learned": "Días con trades bien ejecutados y lecciones aprendidas",
-    "How many days are well executed and lessons learned": "Cuántos días fueron bien ejecutados y con lecciones aprendidas",
-    "Risk management ratio": "Ratio de gestión de riesgo",
-    "Economic calendar": "Calendario económico",
-    "Manage trading business": "Gestionar negocio de trading",
-    "Track profits and losses": "Seguimiento de ganancias y pérdidas",
-    "Track business expenses": "Seguimiento de gastos del negocio",
-    "PDF reporting": "Reportes PDF",
-    "AI coaching": "AI coaching",
-    "Custom rules and actions": "Reglas y acciones personalizadas",
-    "After your goal is reached": "Después de alcanzar la meta",
-    "After your risk is reached": "Después de alcanzar el riesgo",
-    "Coaching templates": "Plantillas de coaching",
-    "Up to 5": "Hasta 5",
-    "Coming soon": "Próximamente",
+    "Images & screenshots": "Imágenes y screenshots",
+    "Calendar results": "Calendario de resultados",
+    "Equity curve & balance chart": "Curva de equity y balance",
+    "Cashflow tracking": "Seguimiento de cashflows",
+    "PDF reports": "Reportes PDF",
+    "AI summary report": "Reporte resumen con IA",
+    "Core KPIs": "KPIs clave",
+    "Time-of-day breakdown": "Desglose por hora",
+    "Instrument & strategy breakdowns": "Desglose por instrumento y estrategia",
+    "Risk metrics": "Métricas de riesgo",
+    Streaks: "Rachas",
+    "Back-study module": "Módulo de back-study",
+    Challenges: "Retos",
+    "Global ranking (opt-in)": "Ranking global (opcional)",
+    "Option Flow Intelligence (add-on)": "Option Flow Intelligence (add-on)",
+    "AI coaching & action plans": "AI coaching y planes de acción",
+    "Mindset prompts & trade review": "Prompts de mindset y revisión de trades",
+    "Flow analysis summary": "Resumen de análisis de flujo",
+    "Premarket attack plan (PDF)": "Plan de ataque premarket (PDF)",
+    "Downloadable PDF report": "Reporte PDF descargable",
+    "Key levels & risk notes": "Niveles clave y notas de riesgo",
+    "Screenshot or CSV ingest": "Ingesta por screenshot o CSV",
     "Email support": "Soporte por email",
     "Priority email & chat": "Email y chat prioritario",
-    Basic: "Básico",
-    Advanced: "Avanzado",
-    Core: "Core",
-    Advance: "Avanzado",
     "Best value": "Mejor valor",
-    Features: "Features",
+    Features: "Características",
     "Compare Plans": "Comparar planes",
+    "Add-on": "Add-on",
+    Core: "Core",
+    Advanced: "Avanzado",
   };
 
   const translate = (text?: string) => {
@@ -354,7 +209,7 @@ export default function PlansComparison() {
       {/* Contenido */}
       <div className="relative z-10 px-6 md:px-12 pt-10 pb-10 flex-1 flex flex-col">
         {/* Header */}
-        <div className="flex items-start justify-between max-w-6xl mx-auto mb-8">
+        <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between max-w-6xl mx-auto mb-8">
           <div>
             <h1 className="text-2xl md:text-3xl font-semibold">
               {L("Compare Plans", "Comparar planes")}
@@ -373,19 +228,47 @@ export default function PlansComparison() {
             </p>
           </div>
 
-          <div className="hidden md:flex flex-col items-end gap-3 text-[9px] md:text-[10px]">
-            <Link
-              href="/pricing"
-              className="text-slate-400 hover:text-emerald-400"
-            >
-              ← {L("Back to pricing", "Volver a precios")}
-            </Link>
-            <Link
-              href="/"
-              className="text-slate-500 hover:text-emerald-300"
-            >
-              {L("Go to home", "Ir al inicio")}
-            </Link>
+          <div className="flex items-center gap-3 text-[9px] md:text-[10px]">
+            <div className="inline-flex rounded-full border border-slate-800 bg-slate-950/80 p-1">
+              <button
+                type="button"
+                onClick={() => setBillingCycle("monthly")}
+                className={[
+                  "px-3 py-1 rounded-full transition",
+                  billingCycle === "monthly"
+                    ? "bg-emerald-400 text-slate-950 font-semibold"
+                    : "text-slate-300 hover:text-slate-50",
+                ].join(" ")}
+              >
+                {L("Monthly", "Mensual")}
+              </button>
+              <button
+                type="button"
+                onClick={() => setBillingCycle("annual")}
+                className={[
+                  "px-3 py-1 rounded-full transition",
+                  billingCycle === "annual"
+                    ? "bg-emerald-400 text-slate-950 font-semibold"
+                    : "text-slate-300 hover:text-slate-50",
+                ].join(" ")}
+              >
+                {L("Annual", "Anual")}
+              </button>
+            </div>
+            <div className="flex flex-col items-end gap-3 text-[9px] md:text-[10px]">
+              <Link
+                href="/pricing"
+                className="text-slate-400 hover:text-emerald-400"
+              >
+                ← {L("Back to pricing", "Volver a precios")}
+              </Link>
+              <Link
+                href="/"
+                className="text-slate-500 hover:text-emerald-300"
+              >
+                {L("Go to home", "Ir al inicio")}
+              </Link>
+            </div>
           </div>
         </div>
 
@@ -399,7 +282,7 @@ export default function PlansComparison() {
                   className="px-4 py-4 font-semibold text-slate-300 uppercase tracking-wide align-top"
                   style={{ fontSize: "22px" }}
                 >
-                  {L("Features", "Features")}
+                  {L("Features", "Características")}
                 </th>
 
                 {/* CORE */}
@@ -415,15 +298,24 @@ export default function PlansComparison() {
                       className="text-emerald-400 font-bold leading-none"
                       style={{ fontSize: "25px" }}
                     >
-                      $14.99
+                      ${priceFor("core").toFixed(2)}
                       <span
                         className="text-slate-400 font-normal"
                         style={{ fontSize: "16px" }}
                       >
                         {" "}
-                        {L("/month", "/mes")}
+                        {billingCycle === "monthly"
+                          ? L("/month", "/mes")
+                          : L("/month (billed yearly)", "/mes (facturado anual)")}
                       </span>
                     </span>
+                    {billingCycle === "annual" && (
+                      <span
+                        className="mt-2 inline-flex items-center rounded-full border border-emerald-400/60 bg-emerald-500/10 px-2 py-0.5 text-[10px] text-emerald-200"
+                      >
+                        {L("Save 2 months", "Ahorra 2 meses")}
+                      </span>
+                    )}
                     <span
                       className="text-slate-500 max-w-[180px]"
                       style={{ fontSize: "12px", lineHeight: "1.4" }}
@@ -434,7 +326,7 @@ export default function PlansComparison() {
                       )}
                     </span>
                     <Link
-                      href="/signup?plan=core"
+                      href={`/signup?plan=core&cycle=${billingCycle}`}
                       className="mt-2 inline-flex justify-center items-center px-6 py-3 rounded-2xl bg-emerald-400 text-slate-950 font-semibold shadow-lg shadow-emerald-500/25 hover:bg-emerald-300 hover:shadow-emerald-400/30 transition"
                       style={{ fontSize: "14px" }}
                     >
@@ -464,15 +356,24 @@ export default function PlansComparison() {
                       className="text-emerald-400 font-bold leading-none"
                       style={{ fontSize: "25px" }}
                     >
-                      $24.99
+                      ${priceFor("advanced").toFixed(2)}
                       <span
                         className="text-slate-400 font-normal"
                         style={{ fontSize: "16px" }}
                       >
                         {" "}
-                        {L("/month", "/mes")}
+                        {billingCycle === "monthly"
+                          ? L("/month", "/mes")
+                          : L("/month (billed yearly)", "/mes (facturado anual)")}
                       </span>
                     </span>
+                    {billingCycle === "annual" && (
+                      <span
+                        className="mt-2 inline-flex items-center rounded-full border border-emerald-400/60 bg-emerald-500/10 px-2 py-0.5 text-[10px] text-emerald-200"
+                      >
+                        {L("Save 2 months", "Ahorra 2 meses")}
+                      </span>
+                    )}
                     <span
                       className="text-slate-500 max-w-[200px] text-center"
                       style={{ fontSize: "12px", lineHeight: "1.4" }}
@@ -483,7 +384,7 @@ export default function PlansComparison() {
                       )}
                     </span>
                     <Link
-                      href="/signup?plan=advanced"
+                      href={`/signup?plan=advanced&cycle=${billingCycle}`}
                       className="mt-2 inline-flex justify-center items-center px-6 py-3 rounded-2xl bg-emerald-400 text-slate-950 font-semibold shadow-lg shadow-emerald-500/25 hover:bg-emerald-300 hover:shadow-emerald-400/30 transition"
                       style={{ fontSize: "14px" }}
                     >

@@ -24,6 +24,15 @@ export default function PricingPage() {
   const [user, setUser] = useState<SimpleUser | null>(null);
   const [loadingPlan, setLoadingPlan] = useState<PlanId | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [billingCycle, setBillingCycle] = useState<"monthly" | "annual">("monthly");
+
+  const PRICES = {
+    core: { monthly: 14.99, annual: 149.99 },
+    advanced: { monthly: 24.99, annual: 249.99 },
+  } as const;
+
+  const priceFor = (planId: PlanId) =>
+    billingCycle === "monthly" ? PRICES[planId].monthly : PRICES[planId].annual / 12;
 
   // Load current user from Supabase on mount
   useEffect(() => {
@@ -72,6 +81,7 @@ export default function PricingPage() {
           userId: user.id,
           email: user.email,
           planId,
+          billingCycle,
         }),
       });
 
@@ -115,7 +125,7 @@ export default function PricingPage() {
       {/* CONTENT */}
       <div className="relative z-10 px-6 md:px-12 pt-10 pb-8 flex-1 flex flex-col items-center">
         {/* Header */}
-        <header className="w-full max-w-5xl flex items-center justify-between mb-10">
+        <header className="w-full max-w-5xl flex flex-col gap-6 md:flex-row md:items-end md:justify-between mb-10">
           <div>
             <p className="text-emerald-400 text-[10px] uppercase tracking-[0.2em]">
               {L("Choose your edge", "Elige tu ventaja")}
@@ -130,12 +140,40 @@ export default function PricingPage() {
               )}
             </p>
           </div>
-          <Link
-            href="/"
-            className="text-[10px] md:text-xs text-slate-400 hover:text-emerald-400"
-          >
-            ← {L("Back to home", "Volver al inicio")}
-          </Link>
+          <div className="flex items-center justify-between w-full md:w-auto gap-4">
+            <div className="inline-flex rounded-full border border-slate-800 bg-slate-950/80 p-1 text-[10px] md:text-xs">
+              <button
+                type="button"
+                onClick={() => setBillingCycle("monthly")}
+                className={[
+                  "px-4 py-1.5 rounded-full transition",
+                  billingCycle === "monthly"
+                    ? "bg-emerald-400 text-slate-950 font-semibold"
+                    : "text-slate-300 hover:text-slate-50",
+                ].join(" ")}
+              >
+                {L("Monthly", "Mensual")}
+              </button>
+              <button
+                type="button"
+                onClick={() => setBillingCycle("annual")}
+                className={[
+                  "px-4 py-1.5 rounded-full transition",
+                  billingCycle === "annual"
+                    ? "bg-emerald-400 text-slate-950 font-semibold"
+                    : "text-slate-300 hover:text-slate-50",
+                ].join(" ")}
+              >
+                {L("Annual (save 2 months)", "Anual (ahorra 2 meses)")}
+              </button>
+            </div>
+            <Link
+              href="/"
+              className="text-[10px] md:text-xs text-slate-400 hover:text-emerald-400"
+            >
+              ← {L("Back to home", "Volver al inicio")}
+            </Link>
+          </div>
         </header>
 
         {/* Copy */}
@@ -161,13 +199,22 @@ export default function PricingPage() {
               <h2 className="text-sm font-semibold text-slate-50 mb-1">
                 {L("Core", "Core")}
               </h2>
-              <p className="text-emerald-400 text-3xl font-semibold leading-none">
-                $14.99
-                <span className="text-[9px] text-slate-400 font-normal">
-                  {" "}
-                  {L("/ month", "/ mes")}
-                </span>
-              </p>
+              <div className="flex items-center gap-2">
+                <p className="text-emerald-400 text-3xl font-semibold leading-none">
+                  ${priceFor("core").toFixed(2)}
+                  <span className="text-[9px] text-slate-400 font-normal">
+                    {" "}
+                    {billingCycle === "monthly"
+                      ? L("/ month", "/ mes")
+                      : L("/ month (billed yearly)", "/ mes (facturado anual)")}
+                  </span>
+                </p>
+                {billingCycle === "annual" && (
+                  <span className="rounded-full border border-emerald-400/60 bg-emerald-500/10 px-2 py-0.5 text-[9px] text-emerald-200">
+                    {L("Save 2 months", "Ahorra 2 meses")}
+                  </span>
+                )}
+              </div>
               <p className="text-[10px] text-slate-300 mt-2">
                 {L(
                   "Ideal for active traders who want structure, clear goals and emotional control without overcomplicating things.",
@@ -176,16 +223,17 @@ export default function PricingPage() {
               </p>
               <div className="mt-3 h-px bg-slate-800" />
               <ul className="mt-3 space-y-1.5 text-[16px] text-slate-200">
-                <li>✓ {L("One (1) account", "Una (1) cuenta")}</li>
-                <li>✓ {L("Multi-asset journal (stocks, futures, forex, crypto)", "Journal multi-activo (stocks, futuros, forex, cripto)")}</li>
-                <li>✓ {L("Organized notebook for pre-market prep and journal", "Notebook organizado para premarket y journal")}</li>
-                <li>✓ {L("P&L calendar (green gains, blue losses)", "Calendario de P&L (ganancias verdes, pérdidas azules)")}</li>
-                <li>✓ {L("Custom Trading Plan", "Trading Plan personalizado")}</li>
-                <li>✓ {L("Daily, Weekly & Monthly goals", "Metas diarias, semanales y mensuales")}</li>
-                <li>✓ {L("Track goals and account balance", "Seguimiento de metas y balance de cuenta")}</li>
-                <li>✓ {L("Set alerts: daily goal & max loss", "Alertas: meta diaria y max loss")}</li>
-                <li>✓ {L("AI performance summary (daily, weekly, monthly)", "Resumen de performance con IA (diario, semanal, mensual)")}</li>
-                <li>✓ {L("Basic analytics – win rate ratio", "Analítica básica – ratio de win rate")}</li>
+                <li>✓ {L("Five (5) trading accounts", "Cinco (5) cuentas de trading")}</li>
+                <li>✓ {L("Premarket plan + journal entries/exits", "Plan premarket + entradas/salidas")}</li>
+                <li>✓ {L("Emotions, tags, and lessons learned", "Emociones, etiquetas y lecciones")}</li>
+                <li>✓ {L("Calendar results", "Calendario de resultados")}</li>
+                <li>✓ {L("Equity curve + balance chart", "Curva de equity + balance")}</li>
+                <li>✓ {L("Cashflow tracking", "Seguimiento de cashflows")}</li>
+                <li>✓ {L("Core KPIs", "KPIs clave")}</li>
+                <li>✓ {L("Basic alerts & reminders", "Alertas y recordatorios básicos")}</li>
+                <li>✓ {L("Automated journaling imports", "Importación automática de journaling")}</li>
+                <li>✓ {L("Back-study module & challenges", "Módulo back-study y retos")}</li>
+                <li>✓ {L("Global ranking (opt-in)", "Ranking global (opcional)")}</li>
                 <li>✓ {L("1GB data storage", "1GB de almacenamiento")}</li>
               </ul>
               <button
@@ -220,13 +268,22 @@ export default function PricingPage() {
                     {L("Most popular", "Más popular")}
                   </span>
                 </div>
-                <p className="text-emerald-400 text-3xl font-semibold leading-none">
-                  $24.99
-                  <span className="text-[9px] text-slate-400 font-normal">
-                    {" "}
-                    {L("/ month", "/ mes")}
-                  </span>
-                </p>
+                <div className="flex items-center gap-2">
+                  <p className="text-emerald-400 text-3xl font-semibold leading-none">
+                    ${priceFor("advanced").toFixed(2)}
+                    <span className="text-[9px] text-slate-400 font-normal">
+                      {" "}
+                      {billingCycle === "monthly"
+                        ? L("/ month", "/ mes")
+                        : L("/ month (billed yearly)", "/ mes (facturado anual)")}
+                    </span>
+                  </p>
+                  {billingCycle === "annual" && (
+                    <span className="rounded-full border border-emerald-400/60 bg-emerald-500/10 px-2 py-0.5 text-[9px] text-emerald-200">
+                      {L("Save 2 months", "Ahorra 2 meses")}
+                    </span>
+                  )}
+                </div>
                 <p className="text-[10px] text-slate-300 mt-2">
                   {L(
                     "For full-time and funded traders who need deep analytics, advanced alerts and reports ready for prop firms.",
@@ -235,12 +292,15 @@ export default function PricingPage() {
                 </p>
                 <div className="mt-3 h-px bg-slate-800" />
                 <ul className="mt-3 space-y-1.5 text-[16px] text-slate-200">
-                  <li>✓ {L("Five (5) accounts", "Cinco (5) cuentas")}</li>
+                  <li>✓ {L("Unlimited trading accounts", "Cuentas de trading ilimitadas")}</li>
                   <li>✓ {L("Everything in Core", "Todo lo de Core")}</li>
-                  <li>✓ {L("Advanced analytics report", "Reporte de analítica avanzada")}</li>
-                  <li>✓ {L("Custom alerts (drawdown, revenge, schedule)", "Alertas personalizadas (drawdown, revenge, horario)")}</li>
-                  <li>✓ {L("Custom coaching plan", "Plan de coaching personalizado")}</li>
-                  <li>✓ {L("Track your trading business expenses", "Seguimiento de gastos del negocio de trading")}</li>
+                  <li>✓ {L("Time-of-day & instrument breakdowns", "Desglose por hora e instrumento")}</li>
+                  <li>✓ {L("Risk metrics + streaks", "Métricas de riesgo + rachas")}</li>
+                  <li>✓ {L("Advanced alerts & reminders", "Alertas y recordatorios avanzados")}</li>
+                  <li>✓ {L("Automated journaling imports", "Importación automática de journaling")}</li>
+                  <li>✓ {L("AI coaching & action plans", "AI coaching y planes de acción")}</li>
+                  <li>✓ {L("PDF reports + AI summary", "Reportes PDF + resumen IA")}</li>
+                  <li>✓ {L("Priority email & chat support", "Soporte prioritario por email y chat")}</li>
                 </ul>
                 <button
                   onClick={() => handleStart("advanced")}

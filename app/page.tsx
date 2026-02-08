@@ -2,13 +2,6 @@
 
 import Link from "next/link";
 import FloatingAskButton from "./components/FloatingAskButton";
-import {
-  FaTwitter,
-  FaInstagram,
-  FaLinkedinIn,
-  FaDiscord,
-  FaFacebookF,
-} from "react-icons/fa";
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
 
@@ -23,16 +16,19 @@ export default function Home() {
     <main className="min-h-screen bg-slate-950 text-slate-50">
       {/* Top Bar */}
       <header className="w-full flex items-center justify-between px-6 md:px-12 py-4 border-b border-slate-800 bg-slate-950/90 backdrop-blur">
-        <div className="flex items-center gap-2">
-          <div className="h-7 w-7 rounded-md bg-emerald-400/90 flex items-center justify-center text-slate-950 text-xs font-black">
-            TJ
-          </div>
+        <div className="flex items-center gap-3">
+          <img
+            src="/neurotrader-logo.svg"
+            alt="Neuro Trader Journal"
+            className="h-10 md:h-12 w-auto object-contain"
+            draggable={false}
+          />
           <span className="font-semibold text-sm md:text-base tracking-tight">
-            Trading Journal Pro
+            Neuro Trader Journal
           </span>
         </div>
         <nav className="flex items-center gap-4 text-xs md:text-sm text-slate-400">
-          <Link href="/features" className="hover:text-emerald-400">
+          <Link href="/plans-comparison" className="hover:text-emerald-400">
             {L("Features", "Features")}
           </Link>
           <Link href="/pricing" className="hover:text-emerald-400">
@@ -64,21 +60,26 @@ export default function Home() {
         {/* Left: Text */}
         <div className="w-full lg:w-1/2 space-y-6">
           <p className="text-emerald-400 text-xs uppercase tracking-[0.2em]">
-            {L("Next-level trading journal", "Journal de trading nivel pro")}
+            {L("Embrace the process", "Abraza el proceso")}
           </p>
           <h1 className="text-3xl md:text-4xl lg:text-5xl font-semibold leading-tight">
-            {L("Track your performance without", "Mide tu performance sin")}
+            {L("Treat trading like a business.", "Convierte el trading en un negocio.")}{" "}
             <span className="text-emerald-400">
-              {L(" destroying your psychology", " destruir tu psicología")}
+              {L("Master your psychology.", "Domina tu psicología.")}
             </span>
-            .
           </h1>
           <p className="text-slate-300 text-sm md:text-base leading-relaxed">
             {L(
-              "Trading Journal Pro centralizes your trades, goals, rules and mindset. Set a growth plan, log every trade, see P&L without aggressive red, and let AI highlight your best habits and biggest leaks.",
-              "Trading Journal Pro centraliza tus trades, metas, reglas y mindset. Crea un growth plan, registra cada trade, ve tu P&L sin rojo agresivo y deja que la IA resalte tus mejores hábitos y mayores fugas."
+              "Neuro Trader Journal helps you build structure, measure performance, and keep your execution aligned with your plan. The core edge is your mindset — not just the trade.",
+              "Neuro Trader Journal te ayuda a crear estructura, medir rendimiento y mantener la ejecución alineada con tu plan. La ventaja principal es tu mentalidad — no solo el trade."
             )}
           </p>
+          <ul className="text-slate-300 text-sm md:text-base space-y-2">
+            <li>• {L("Automate journaling: import single trades, premium-selling, and complex options strategies.", "Automatiza el journal: importa trades simples, ventas de prima y estrategias complejas de opciones.")}</li>
+            <li>• {L("Build rules, goals, and alerts to protect your downside.", "Crea reglas, metas y alertas para proteger tu downside.")}</li>
+            <li>• {L("Run your trading like a business with clear accountability.", "Opera como negocio con responsabilidad clara.")}</li>
+            <li>• {L("Switch languages (English/Spanish) and toggle Neuro Mode or Light Mode.", "Cambia idiomas (inglés/español) y alterna entre Neuro Mode o Light Mode.")}</li>
+          </ul>
           <div className="flex flex-wrap gap-3 pt-2">
             <Link
               href="/signup"
@@ -101,7 +102,7 @@ export default function Home() {
           </p>
         </div>
 
-        {/* Right: Stacked dashboard preview (portfolio + calendar + journal) */}
+        {/* Right: Visual platform preview */}
         <div className="w-full lg:w-1/2 flex justify-center">
           <div className="relative w-full max-w-xl">
             {/* Gradient background */}
@@ -239,6 +240,354 @@ export default function Home() {
                 {L("AI: repeat this setup, avoid revenge trades.", "IA: repite este setup, evita revenge trades.")}
               </p>
             </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Trading like a business + roadmap */}
+      <section className="px-6 md:px-12 pb-16">
+        <div className="max-w-6xl mx-auto">
+          <div className="flex flex-col gap-3 mb-6">
+            <p className="text-emerald-400 text-xs uppercase tracking-[0.2em]">
+              {L("Trading like a business", "Trading como negocio")}
+            </p>
+            <h2 className="text-2xl md:text-3xl font-semibold">
+              {L(
+                "A business roadmap for disciplined trading.",
+                "Un roadmap de negocio para operar con disciplina."
+              )}
+            </h2>
+            <p className="text-slate-300 text-sm md:text-base max-w-3xl">
+              {L(
+                "Build structure, log everything, lead yourself, and let AI review the data for patterns that win and patterns that lose.",
+                "Crea estructura, registra todo, lidera tu proceso y deja que la IA detecte patrones que ganan y patrones que pierden."
+              )}
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-[1.25fr,0.75fr] gap-8 items-start">
+            {/* Roadmap visual (pro) */}
+            <div className="relative rounded-3xl border border-slate-800 bg-slate-950/90 p-6 overflow-hidden">
+              <div className="absolute inset-0 bg-[radial-gradient(circle_at_12%_18%,rgba(16,185,129,0.28),transparent_48%),radial-gradient(circle_at_50%_10%,rgba(139,92,246,0.22),transparent_50%),radial-gradient(circle_at_85%_18%,rgba(56,189,248,0.24),transparent_52%)]" />
+              <div className="absolute inset-0 opacity-20 pointer-events-none">
+                <svg viewBox="0 0 800 240" className="w-full h-full">
+                  <path
+                    d="M20 200 C120 140, 220 160, 320 120 C420 80, 520 140, 620 90 C700 60, 760 80, 780 40"
+                    fill="none"
+                    stroke="rgba(56,189,248,0.9)"
+                    strokeWidth="3"
+                    strokeDasharray="6 6"
+                  />
+                  {[
+                    [80, 170, 20],
+                    [140, 150, -10],
+                    [200, 160, 12],
+                    [260, 130, -8],
+                    [320, 120, 18],
+                    [380, 105, -12],
+                    [440, 120, 10],
+                    [500, 95, -16],
+                    [560, 110, 14],
+                    [620, 85, -20],
+                    [680, 70, 22],
+                  ].map(([x, y, h], i) => (
+                    <g key={i}>
+                      <line x1={x} y1={y - 22} x2={x} y2={y + 22} stroke="rgba(226,232,240,0.9)" strokeWidth="2.5" />
+                      <rect
+                        x={x - 7}
+                        y={h >= 0 ? y - h : y}
+                        width="14"
+                        height={Math.abs(h)}
+                        rx="3"
+                        fill={h >= 0 ? "rgba(52,211,153,0.9)" : "rgba(139,92,246,0.85)"}
+                      />
+                    </g>
+                  ))}
+                </svg>
+              </div>
+
+              <div className="relative">
+                <div className="flex items-center justify-between text-[10px] text-slate-400">
+                  <span>{L("Success roadmap", "Roadmap de éxito")}</span>
+                  <span className="text-emerald-300">{L("Trading business system", "Sistema de negocio")}</span>
+                </div>
+
+                <div className="mt-6 grid grid-cols-1 md:grid-cols-5 gap-3">
+                  {[
+                    {
+                      step: "01",
+                      title: L("Create a plan", "Crea un plan"),
+                      desc: L("Start here. Structure + risk limits.", "Empieza aquí. Estructura + límites de riesgo."),
+                    },
+                    {
+                      step: "02",
+                      title: L("Log", "Registro"),
+                      desc: L("Trades + sentiment", "Trades + sentimiento"),
+                    },
+                    {
+                      step: "03",
+                      title: L("Rules", "Reglas"),
+                      desc: L("Discipline & alerts", "Disciplina y alertas"),
+                    },
+                    {
+                      step: "04",
+                      title: L("Metrics", "Métricas"),
+                      desc: L("KPIs & streaks", "KPIs y rachas"),
+                    },
+                    {
+                      step: "05",
+                      title: L("AI Review", "Revisión IA"),
+                      desc: L("Patterns + new path", "Patrones + nuevo rumbo"),
+                    },
+                  ].map((item) => (
+                    <div key={item.step} className="rounded-2xl border border-slate-800 bg-slate-900/85 p-4 text-center">
+                      <div className="mx-auto mb-2 h-9 w-9 rounded-full border border-emerald-400/60 bg-emerald-500/15 flex items-center justify-center text-[11px] text-emerald-300 font-semibold">
+                        {item.step}
+                      </div>
+                      <p className="text-slate-50 text-[12px] font-semibold">{item.title}</p>
+                      <p className="text-slate-400 text-[10px] mt-1">{item.desc}</p>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="mt-5 rounded-2xl border border-slate-800 bg-slate-900/80 p-4 text-[11px] text-slate-400">
+                  {L(
+                    "Log every trade and sentiment. Follow your rules. Monitor your metrics. AI reviews your data and finds winning and losing patterns.",
+                    "Registra cada trade y sentimiento. Sigue tus reglas. Monitorea tus métricas. La IA revisa tus datos y detecta patrones ganadores y perdedores."
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="relative">
+              <div className="absolute -inset-6 rounded-4xl bg-linear-to-br from-emerald-500/15 via-indigo-500/10 to-transparent blur-2xl" />
+              <div className="relative p-1">
+                <p className="text-emerald-400 text-xs uppercase tracking-[0.2em]">
+                  {L("How the platform helps you", "Cómo la plataforma te ayuda")}
+                </p>
+                <h3 className="text-2xl md:text-3xl font-semibold mt-2">
+                  {L(
+                    "A system that turns your execution into a repeatable business.",
+                    "Un sistema que convierte tu ejecución en un negocio repetible."
+                  )}
+                </h3>
+                <div className="mt-2 flex items-center justify-end text-[10px] text-emerald-300 font-semibold">
+                  {L("Built-in system", "Sistema integrado")}
+                </div>
+                <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 items-stretch">
+                  {[
+                    {
+                      label: L("Create a structured plan", "Crear un plan estructurado"),
+                      desc: L(
+                        "Start with a clear plan to build structure and targets.",
+                        "Empieza con un plan claro para crear estructura y metas."
+                      ),
+                      gradient: "from-emerald-500/20 via-indigo-500/15 to-violet-500/20",
+                    },
+                    {
+                      label: L("Log execution + sentiment", "Registrar ejecución + sentimiento"),
+                      desc: L(
+                        "Knowing yourself leads to better decisions.",
+                        "Conocerte mejor te ayuda a tomar mejores decisiones."
+                      ),
+                      gradient: "from-blue-500/20 via-violet-500/15 to-emerald-500/20",
+                    },
+                    {
+                      label: L("Rules = self‑leadership", "Reglas = auto‑liderazgo"),
+                      desc: L(
+                        "Follow the rules you set. Respect your process.",
+                        "Cumple tus reglas y respeta tu proceso."
+                      ),
+                      gradient: "from-emerald-500/20 via-blue-500/15 to-violet-500/20",
+                    },
+                    {
+                      label: L("Metrics that reveal your edge", "Métricas que revelan tu edge"),
+                      desc: L(
+                        "Understand execution and decisions to improve.",
+                        "Entiende tu ejecución y decisiones para mejorar."
+                      ),
+                      gradient: "from-violet-500/20 via-indigo-500/15 to-emerald-500/20",
+                    },
+                    {
+                      label: L("AI coach that stays objective", "IA objetiva como coach"),
+                      desc: L(
+                        "AI reviews every decision, sentiment, and strategy to suggest a better path.",
+                        "La IA revisa cada decisión, sentimiento y estrategia para sugerir un mejor camino."
+                      ),
+                      gradient: "from-indigo-500/20 via-violet-500/15 to-emerald-500/20",
+                    },
+                    {
+                      label: L("Turn trading into a business", "Convierte el trading en un negocio"),
+                      desc: L(
+                        "Build your business plan: goals, rules, schedule, cost control, and when to scale or pause.",
+                        "Crea tu plan de negocio: objetivos, reglas, horario, control de costos y cuándo escalar o pausar."
+                      ),
+                      gradient: "from-emerald-500/20 via-indigo-500/15 to-violet-500/20",
+                    },
+                    {
+                      label: L("Reduce uncertainty with process", "Reduce la incertidumbre con proceso"),
+                      desc: L(
+                        "Anchors you to a clear flow: setup → entry → management → exit → review.",
+                        "Te ancla a un flujo claro: setup → entrada → gestión → salida → revisión."
+                      ),
+                      gradient: "from-blue-500/20 via-violet-500/15 to-emerald-500/20",
+                    },
+                    {
+                      label: L("Risk management that protects capital", "Gestión de riesgo que protege capital"),
+                      desc: L(
+                        "Define risk per trade, daily/weekly limits, sizing rules, and when to stop.",
+                        "Define riesgo por trade, límites diarios/semanales, sizing y cuándo detenerte."
+                      ),
+                      gradient: "from-violet-500/20 via-indigo-500/15 to-emerald-500/20",
+                    },
+                  ].map((row, i) => (
+                    <div
+                      key={i}
+                      className={`relative overflow-hidden rounded-2xl bg-gradient-to-br ${row.gradient} p-6 shadow-[0_12px_46px_rgba(0,0,0,0.45)] min-h-[132px] h-full`}
+                    >
+                      <div className="pointer-events-none absolute -inset-6 rounded-3xl bg-gradient-to-br from-emerald-500/25 via-indigo-500/20 to-violet-500/25 blur-2xl opacity-70 animate-pulse [animation-duration:6s]" />
+                      <div className="relative text-slate-50 font-semibold text-[13px]">{row.label}</div>
+                      <div className="relative text-slate-300 text-[11px] mt-2 leading-relaxed">{row.desc}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Automated journaling section */}
+      <section className="px-6 md:px-12 pb-16">
+        <div className="max-w-6xl mx-auto space-y-6">
+          <div className="relative p-1">
+            <p className="text-emerald-400 text-xs uppercase tracking-[0.2em]">
+              {L("Automate journaling", "Automatiza el journaling")}
+            </p>
+            <h3 className="text-xl md:text-2xl font-semibold mt-2">
+              {L(
+                "Import trades and let the system classify everything.",
+                "Importa trades y deja que el sistema clasifique todo."
+              )}
+            </h3>
+            <p className="text-slate-300 text-sm mt-3">
+              {L(
+                "Single trades, premium-selling, and complex options strategies are mapped to your journal automatically.",
+                "Trades simples, ventas de prima y estrategias complejas de opciones se mapean al journal automáticamente."
+              )}
+            </p>
+          </div>
+
+          <div className="relative p-1">
+            <div className="flex items-center justify-between text-[10px] text-slate-400">
+              <span>{L("Automated journaling system", "Sistema de journaling automático")}</span>
+              <span className="text-emerald-300 font-semibold">{L("Consistent", "Consistente")}</span>
+            </div>
+            <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 items-stretch">
+              {[
+                {
+                  label: L("Single trades + multi‑leg", "Trades simples + multi‑leg"),
+                  desc: L(
+                    "Imports and maps every leg automatically.",
+                    "Importa y mapea cada pierna automáticamente."
+                  ),
+                  gradient: "from-emerald-500/20 via-indigo-500/15 to-violet-500/20",
+                },
+                {
+                  label: L("Premium selling strategies", "Estrategias de venta de prima"),
+                  desc: L(
+                    "Tracks credits, debits, and rollouts in one place.",
+                    "Registra créditos, débitos y rollouts en un solo lugar."
+                  ),
+                  gradient: "from-blue-500/20 via-violet-500/15 to-emerald-500/20",
+                },
+                {
+                  label: L("Complex options flows", "Flujos complejos de opciones"),
+                  desc: L(
+                    "Classifies strategy types and timestamps them.",
+                    "Clasifica tipos de estrategia y sus timestamps."
+                  ),
+                  gradient: "from-violet-500/20 via-indigo-500/15 to-emerald-500/20",
+                },
+                {
+                  label: L("Structured in minutes", "Estructurado en minutos"),
+                  desc: L(
+                    "Analytics are ready as soon as the import finishes.",
+                    "La analítica queda lista al terminar la importación."
+                  ),
+                  gradient: "from-indigo-500/20 via-violet-500/15 to-emerald-500/20",
+                },
+              ].map((row, i) => (
+                <div
+                  key={i}
+                  className={`relative overflow-hidden rounded-2xl bg-gradient-to-br ${row.gradient} p-6 shadow-[0_12px_46px_rgba(0,0,0,0.45)] min-h-[132px] h-full`}
+                >
+                  <div className="pointer-events-none absolute -inset-6 rounded-3xl bg-gradient-to-br from-emerald-500/25 via-indigo-500/20 to-violet-500/25 blur-2xl opacity-70 animate-pulse [animation-duration:6s]" />
+                  <div className="relative text-slate-50 font-semibold text-[13px]">{row.label}</div>
+                  <div className="relative text-slate-300 text-[11px] mt-2 leading-relaxed">{row.desc}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Why this journal is different */}
+      <section className="px-6 md:px-12 pb-20">
+        <div className="max-w-6xl mx-auto">
+          <p className="text-emerald-400 text-xs uppercase tracking-[0.2em]">
+            {L("Why this journal is different", "¿Qué hace diferente este journal?")}
+          </p>
+          <h3 className="text-2xl md:text-3xl font-semibold mt-2">
+            {L(
+              "Built for serious traders who treat this as a business.",
+              "Creado para traders serios que lo tratan como un negocio."
+            )}
+          </h3>
+          <div className="mt-6 grid grid-cols-1 md:grid-cols-4 gap-4">
+            {[
+              {
+                title: L("Automated journaling", "Journaling automatizado"),
+                desc: L(
+                  "Import trades fast. Single, premium-selling, and complex options strategies are mapped instantly.",
+                  "Importa trades rápido. Trades simples, venta de prima y estrategias complejas quedan mapeadas al instante."
+                ),
+                tone: "from-emerald-500/60 via-indigo-500/55 to-violet-600/60",
+              },
+              {
+                title: L("Unlimited accountability", "Accountability real"),
+                desc: L(
+                  "Rules, goals, and alerts keep you honest and consistent.",
+                  "Reglas, metas y alertas te mantienen honesto y consistente."
+                ),
+                tone: "from-blue-500/60 via-violet-600/55 to-emerald-500/60",
+              },
+              {
+                title: L("AI trading review", "Revisión con IA"),
+                desc: L(
+                  "AI detects winning patterns and warns you about losing behaviors.",
+                  "La IA detecta patrones ganadores y te advierte sobre comportamientos perdedores."
+                ),
+                tone: "from-violet-600/60 via-blue-600/55 to-emerald-600/60",
+              },
+              {
+                title: L("Automated analytics statistics", "Analítica automática"),
+                desc: L(
+                  "No manual calculations. Your performance stats are generated instantly.",
+                  "Sin cálculos manuales. Tus estadísticas se generan al instante."
+                ),
+                tone: "from-blue-600/60 via-violet-600/55 to-emerald-600/60",
+              },
+            ].map((card) => (
+              <div
+                key={card.title}
+                className={`relative overflow-hidden rounded-2xl bg-gradient-to-br ${card.tone} p-6 shadow-[0_12px_46px_rgba(0,0,0,0.45)]`}
+              >
+                <div className="pointer-events-none absolute -inset-6 rounded-3xl bg-gradient-to-br from-emerald-500/25 via-indigo-500/20 to-violet-500/25 blur-2xl opacity-70 animate-pulse [animation-duration:6s]" />
+                <p className="relative text-white font-semibold text-[13px]">{card.title}</p>
+                <p className="relative text-white/80 text-[11px] mt-2 leading-relaxed">{card.desc}</p>
+              </div>
+            ))}
           </div>
         </div>
       </section>
@@ -398,97 +747,6 @@ export default function Home() {
         </div>
       </section>
 
-      {/* What is a trading journal */}
-      <section className="px-6 md:px-12 pb-10 space-y-6">
-        <h2 className="text-xl md:text-2xl font-semibold">
-          {L(
-            "What is a trading journal and why this one is different?",
-            "¿Qué es un journal de trading y por qué este es diferente?"
-          )}
-        </h2>
-        <div className="grid gap-5 md:grid-cols-3 text-sm text-slate-300">
-          <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 space-y-2">
-            <h3 className="font-semibold text-slate-50 text-sm">
-              {L("More than a spreadsheet", "Más que una hoja de cálculo")}
-            </h3>
-            <p>
-              {L(
-                "A trading journal is a structured record of your trades, plans, and decisions. We turn it into a guided workflow so you don’t drown in random Excel files or screenshots.",
-                "Un journal de trading es un registro estructurado de tus trades, planes y decisiones. Lo convertimos en un flujo guiado para que no te ahogues en Exceles o capturas sueltas."
-              )}
-            </p>
-          </div>
-          <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 space-y-2">
-            <h3 className="font-semibold text-slate-50 text-sm">
-              {L("Psychology-safe P&L visualization", "Visualización de P&L amigable con la psicología")}
-            </h3>
-            <p>
-              {L(
-                "Losses are shown in calming blue instead of aggressive red. Combined with rule-based alerts, the goal is to reduce tilt, revenge trading, and emotional spirals.",
-                "Las pérdidas se muestran en azul calmado en lugar de rojo agresivo. Con alertas por reglas, el objetivo es reducir tilt, revenge trading y espirales emocionales."
-              )}
-            </p>
-          </div>
-          <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 space-y-2">
-            <h3 className="font-semibold text-slate-50 text-sm">
-              {L("AI-powered performance coach", "Coach de rendimiento con IA")}
-            </h3>
-            <p>
-              {L(
-                "Daily, weekly and monthly summaries analyze your data: best setups, dangerous times, broken rules and simple steps to become consistently disciplined.",
-                "Resúmenes diarios, semanales y mensuales analizan tus datos: mejores setups, horarios peligrosos, reglas rotas y pasos simples para ser consistentemente disciplinado."
-              )}
-            </p>
-          </div>
-        </div>
-      </section>
-
-      {/* How it works */}
-      <section className="px-6 md:px-12 pb-10">
-        <h2 className="text-xl md:text-2xl font-semibold mb-4">
-          {L("How it works", "Cómo funciona")}
-        </h2>
-        <ol className="grid md:grid-cols-4 gap-4 text-sm text-slate-300">
-          <li className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4">
-            <p className="font-semibold mb-1">{L("1. Create your plan", "1. Crea tu plan")}</p>
-            <p>
-              {L(
-                "Choose starting balance, growth target, and timeframe. We generate clear daily and weekly objectives.",
-                "Elige balance inicial, meta de crecimiento y horizonte. Generamos objetivos diarios y semanales claros."
-              )}
-            </p>
-          </li>
-          <li className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4">
-            <p className="font-semibold mb-1">{L("2. Log every trade", "2. Registra cada trade")}</p>
-            <p>
-              {L(
-                "Multi-asset support: options, futures, stocks, forex, crypto. Tag setups, emotions, and rule compliance.",
-                "Soporte multi‑activo: opciones, futuros, acciones, forex y cripto. Etiqueta setups, emociones y cumplimiento de reglas."
-              )}
-            </p>
-          </li>
-          <li className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4">
-            <p className="font-semibold mb-1">{L("3. Follow your rules", "3. Sigue tus reglas")}</p>
-            <p>
-              {L(
-                "Pop-up alerts when you hit your goal or max loss so you stop trading before emotions take over.",
-                "Alertas cuando alcanzas tu meta o pérdida máxima para que pares antes de que las emociones tomen control."
-              )}
-            </p>
-          </li>
-          <li className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4">
-            <p className="font-semibold mb-1">{L("4. Let AI review your week", "4. Deja que la IA revise tu semana")}</p>
-            <p>
-              {L(
-                "Automated summaries highlight patterns and give concrete, non-fluffy suggestions to improve.",
-                "Resúmenes automatizados resaltan patrones y dan sugerencias concretas para mejorar."
-              )}
-            </p>
-          </li>
-        </ol>
-      </section>
-
-     
       {/* Ask Anything button */}
       <FloatingAskButton />
     </main>

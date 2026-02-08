@@ -26,6 +26,7 @@ import type { ApexOptions } from "apexcharts";
 import TopNav from "@/app/components/TopNav";
 import { useAuth } from "@/context/AuthContext";
 import { useTradingAccounts } from "@/hooks/useTradingAccounts";
+import { useUserPlan } from "@/hooks/useUserPlan";
 import { supabaseBrowser } from "@/lib/supaBaseClient";
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
@@ -1291,12 +1292,14 @@ function getDefaultRange(preset: DateRangePreset): DateRange {
 export default function AnalyticsStatisticsPage() {
   const { user, loading } = useAuth() as any;
   const { activeAccountId, loading: accountsLoading } = useTradingAccounts();
+  const { plan, loading: planLoading } = useUserPlan();
   const router = useRouter();
   const { locale } = useAppSettings();
   const lang = resolveLocale(locale) as Lang;
   const isEs = lang === "es";
   const L = (en: string, es: string) => LL(lang, en, es);
   const localeTag = isEs ? "es-ES" : "en-US";
+  const isAdvanced = plan === "advanced";
 
   const userId = (user as any)?.id as string | undefined;
   const journalUserId = useMemo(() => resolveJournalUserId(user), [user]);
@@ -1325,6 +1328,12 @@ export default function AnalyticsStatisticsPage() {
   useEffect(() => {
     if (!loading && !user) router.replace("/signin");
   }, [loading, user, router]);
+
+  useEffect(() => {
+    if (!planLoading && !isAdvanced && activeGroup !== "overview") {
+      setActiveGroup("overview");
+    }
+  }, [planLoading, isAdvanced, activeGroup]);
 
   // Load growth plan starting balance + start date
   useEffect(() => {
@@ -1775,15 +1784,38 @@ export default function AnalyticsStatisticsPage() {
               "Suma del P&L neto (después de comisiones) en el rango seleccionado."
             )}
           />
-          <KpiCard
-            label={L("Expectancy", "Expectativa")}
-            value={fmtUsd(uiTotals.expectancy)}
-            sub={uiTotals.profitFactor != null ? `PF: ${uiTotals.profitFactor.toFixed(2)}` : "PF: —"}
-            help={L(
-              "Expected result per session: P(win)×avgWin − P(lesson)×avgLesson.",
-              "Resultado esperado por sesión: P(ganar)×promedioWin − P(aprender)×promedioLesson."
-            )}
-          />
+          {isAdvanced ? (
+            <KpiCard
+              label={L("Expectancy", "Expectativa")}
+              value={fmtUsd(uiTotals.expectancy)}
+              sub={uiTotals.profitFactor != null ? `PF: ${uiTotals.profitFactor.toFixed(2)}` : "PF: —"}
+              help={L(
+                "Expected result per session: P(win)×avgWin − P(lesson)×avgLesson.",
+                "Resultado esperado por sesión: P(ganar)×promedioWin − P(aprender)×promedioLesson."
+              )}
+            />
+          ) : (
+            <div className="relative overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
+              <div className="absolute inset-0 bg-slate-950/60 backdrop-blur-[2px]" />
+              <div className="relative z-10">
+                <p className="text-[10px] uppercase tracking-[0.3em] text-slate-400">
+                  {L("Advanced KPI", "KPI avanzado")}
+                </p>
+                <p className="mt-2 text-sm text-slate-300">
+                  {L(
+                    "Unlock expectancy & profit factor",
+                    "Desbloquea expectativa y profit factor"
+                  )}
+                </p>
+                <Link
+                  href="/billing"
+                  className="mt-3 inline-flex text-[11px] text-emerald-300 hover:text-emerald-200"
+                >
+                  {L("Upgrade to Advanced →", "Actualizar a Advanced →")}
+                </Link>
+              </div>
+            </div>
+          )}
         </section>
 
         {/* Tabs */}
@@ -1802,18 +1834,28 @@ export default function AnalyticsStatisticsPage() {
               <button
                 key={id}
                 type="button"
-                onClick={() => setActiveGroup(id)}
+                onClick={() => (isAdvanced ? setActiveGroup(id) : id === "overview" ? setActiveGroup(id) : null)}
+                disabled={!isAdvanced && id !== "overview"}
                 className={[
                   "rounded-xl border px-3 py-1.5 text-xs transition",
                   activeGroup === id
                     ? "border-emerald-400 text-emerald-300"
                     : "border-slate-800 text-slate-300 hover:text-slate-50 hover:border-slate-700",
+                  !isAdvanced && id !== "overview" ? "opacity-40 cursor-not-allowed" : "",
                 ].join(" ")}
               >
                 {label}
               </button>
             ))}
           </div>
+          {!isAdvanced && (
+            <p className="mt-2 text-[11px] text-slate-500">
+              {L(
+                "Advanced analytics are available on the Advanced plan. Core includes the Overview only.",
+                "La analítica avanzada está en el plan Advanced. Core incluye solo el Resumen."
+              )}
+            </p>
+          )}
         </section>
 
         {uiTotals.totalSessions === 0 ? (
@@ -1830,30 +1872,93 @@ export default function AnalyticsStatisticsPage() {
         ) : (
           <>
             {activeGroup === "overview" && (
-              <OverviewSection lang={lang} equity={uiEquity} daily={uiDaily} snapshot={snapshot} />
+              isAdvanced ? (
+                <OverviewSection lang={lang} equity={uiEquity} daily={uiDaily} snapshot={snapshot} />
+              ) : (
+                <div className="relative">
+                  <div className="absolute inset-0 z-10 flex items-center justify-center">
+                    <div className="rounded-2xl border border-slate-800 bg-slate-950/80 p-6 text-center max-w-lg">
+                      <p className="text-[10px] uppercase tracking-[0.3em] text-slate-400">
+                        {L("Advanced analytics", "Analítica avanzada")}
+                      </p>
+                      <p className="mt-2 text-sm text-slate-200">
+                        {L(
+                          "Upgrade to Advanced to unlock full analytics, charts, and breakdowns.",
+                          "Actualiza a Advanced para desbloquear analítica completa, gráficos y desgloses."
+                        )}
+                      </p>
+                      <div className="mt-4 flex flex-wrap gap-3 justify-center">
+                        <Link
+                          href="/billing"
+                          className="px-4 py-2 rounded-xl bg-emerald-400 text-slate-950 text-xs font-semibold hover:bg-emerald-300 transition"
+                        >
+                          {L("Upgrade to Advanced", "Actualizar a Advanced")}
+                        </Link>
+                        <Link
+                          href="/plans-comparison"
+                          className="px-4 py-2 rounded-xl border border-slate-700 text-slate-200 text-xs hover:border-emerald-400 transition"
+                        >
+                          {L("Compare plans", "Comparar planes")}
+                        </Link>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="blur-[2px] opacity-60 pointer-events-none select-none">
+                    <OverviewSection lang={lang} equity={uiEquity} daily={uiDaily} snapshot={snapshot} />
+                  </div>
+                </div>
+              )
             )}
-
-            {activeGroup === "performance" && <PerformanceSection lang={lang} snapshot={snapshot} />}
-
-            {activeGroup === "risk" && <RiskSection lang={lang} snapshot={snapshot} />}
-
-            {activeGroup === "distribution" && <DistributionSection lang={lang} snapshot={snapshot} />}
-
-            {activeGroup === "time" && <TimeSection lang={lang} snapshot={snapshot} />}
-
-            {activeGroup === "instruments" && <InstrumentsSection lang={lang} snapshot={snapshot} />}
-
-            {activeGroup === "trades" && <TradesSection lang={lang} snapshot={snapshot} />}
-
-            {activeGroup === "statistics" && (
-              <StatisticsSection
-                lang={lang}
-                sessions={sessions}
-                dailySnaps={dailySnaps}
-                cashflows={cashflowsInRange}
-                rangeEndIso={dateRange.endIso}
-                tradeStats={tradeStats}
-              />
+            {isAdvanced ? (
+              <>
+                {activeGroup === "performance" && <PerformanceSection lang={lang} snapshot={snapshot} />}
+                {activeGroup === "risk" && <RiskSection lang={lang} snapshot={snapshot} />}
+                {activeGroup === "distribution" && <DistributionSection lang={lang} snapshot={snapshot} />}
+                {activeGroup === "time" && <TimeSection lang={lang} snapshot={snapshot} />}
+                {activeGroup === "instruments" && <InstrumentsSection lang={lang} snapshot={snapshot} />}
+                {activeGroup === "trades" && <TradesSection lang={lang} snapshot={snapshot} />}
+                {activeGroup === "statistics" && (
+                  <StatisticsSection
+                    lang={lang}
+                    sessions={sessions}
+                    dailySnaps={dailySnaps}
+                    cashflows={cashflowsInRange}
+                    rangeEndIso={dateRange.endIso}
+                    tradeStats={tradeStats}
+                  />
+                )}
+              </>
+            ) : (
+              activeGroup !== "overview" && (
+                <div className="relative overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/60 p-8">
+                  <div className="absolute inset-0 backdrop-blur-[2px] opacity-70" />
+                  <div className="relative z-10">
+                    <h3 className="text-lg font-semibold text-slate-100">
+                      {L("Advanced analytics locked", "Analítica avanzada bloqueada")}
+                    </h3>
+                    <p className="text-sm text-slate-400 mt-2 max-w-xl">
+                      {L(
+                        "Upgrade to Advanced to unlock deep performance, risk, time-of-day, and instrument analytics.",
+                        "Actualiza a Advanced para desbloquear analítica profunda de rendimiento, riesgo, tiempo e instrumentos."
+                      )}
+                    </p>
+                    <div className="mt-4 flex flex-wrap gap-3">
+                      <Link
+                        href="/billing"
+                        className="px-4 py-2 rounded-xl bg-emerald-400 text-slate-950 text-xs font-semibold hover:bg-emerald-300 transition"
+                      >
+                        {L("Upgrade to Advanced", "Actualizar a Advanced")}
+                      </Link>
+                      <Link
+                        href="/plans-comparison"
+                        className="px-4 py-2 rounded-xl border border-slate-700 text-slate-200 text-xs hover:border-emerald-400 transition"
+                      >
+                        {L("Compare plans", "Comparar planes")}
+                      </Link>
+                    </div>
+                  </div>
+                </div>
+              )
             )}
           </>
         )}

@@ -7,6 +7,8 @@ import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 
 import { useAuth } from "@/context/AuthContext";
+import { useUserPlan } from "@/hooks/useUserPlan";
+import TopNav from "@/app/components/TopNav";
 import { useTradingAccounts } from "@/hooks/useTradingAccounts";
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
@@ -247,10 +249,63 @@ export default function NotebookPage() {
   const router = useRouter();
   const { user, loading: authLoading } = useAuth();
   const { activeAccountId, loading: accountsLoading } = useTradingAccounts();
+  const { plan, loading: planLoading } = useUserPlan();
   const { locale } = useAppSettings();
   const lang = resolveLocale(locale);
   const isEs = lang === "es";
   const L = (en: string, es: string) => (isEs ? es : en);
+
+  if (planLoading) {
+    return (
+      <main className="min-h-screen bg-slate-950 text-slate-50">
+        <TopNav />
+        <div className="max-w-4xl mx-auto px-6 py-16">
+          <p className="text-sm text-slate-400">{L("Loading…", "Cargando…")}</p>
+        </div>
+      </main>
+    );
+  }
+
+  if (plan !== "advanced") {
+    return (
+      <main className="min-h-screen bg-slate-950 text-slate-50">
+        <TopNav />
+        <div className="max-w-4xl mx-auto px-6 py-16">
+          <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
+            <p className="text-emerald-300 text-[11px] uppercase tracking-[0.3em]">
+              {L("Advanced feature", "Función Advanced")}
+            </p>
+            <h1 className="text-xl font-semibold mt-2">
+              {L(
+                "Notebook is included in Advanced",
+                "El Notebook está incluido en Advanced"
+              )}
+            </h1>
+            <p className="text-sm text-slate-400 mt-2">
+              {L(
+                "Upgrade to Advanced to unlock the full notebook experience, custom pages, and richer journaling.",
+                "Actualiza a Advanced para desbloquear el notebook completo, páginas personalizadas y un journaling más profundo."
+              )}
+            </p>
+            <div className="mt-4 flex flex-wrap gap-3">
+              <Link
+                href="/billing"
+                className="px-4 py-2 rounded-xl bg-emerald-400 text-slate-950 text-xs font-semibold hover:bg-emerald-300 transition"
+              >
+                {L("Upgrade to Advanced", "Actualizar a Advanced")}
+              </Link>
+              <Link
+                href="/plans-comparison"
+                className="px-4 py-2 rounded-xl border border-slate-700 text-slate-200 text-xs hover:border-emerald-400 transition"
+              >
+                {L("Compare plans", "Comparar planes")}
+              </Link>
+            </div>
+          </div>
+        </div>
+      </main>
+    );
+  }
 
   // Journal entries desde Supabase
   const [entries, setEntries] = useState<JournalEntry[]>([]);

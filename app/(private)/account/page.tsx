@@ -54,6 +54,7 @@ export default function AccountPage() {
     activeAccountId,
     createAccount,
     setActiveAccount,
+    deleteAccount,
     loading: accountsLoading,
     error: accountsError,
   } = useTradingAccounts();
@@ -751,13 +752,40 @@ export default function AccountPage() {
                           {L("Active", "Activa")}
                         </span>
                       ) : (
-                        <button
-                          type="button"
-                          onClick={() => setActiveAccount(acc.id)}
-                          className="rounded-full border border-slate-700 px-3 py-1 text-[10px] text-slate-200 hover:border-emerald-400 hover:text-emerald-200 transition"
-                        >
-                          {L("Set active", "Activar")}
-                        </button>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setActiveAccount(acc.id)}
+                            className="rounded-full border border-slate-700 px-3 py-1 text-[10px] text-slate-200 hover:border-emerald-400 hover:text-emerald-200 transition"
+                          >
+                            {L("Set active", "Activar")}
+                          </button>
+                          {accounts.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                const ok = window.confirm(
+                                  L(
+                                    "Delete this trading account? This will remove its journal, analytics, and cashflows.",
+                                    "¿Eliminar esta cuenta? Se borrará su journal, analíticas y cashflows."
+                                  )
+                                );
+                                if (!ok) return;
+                                try {
+                                  await deleteAccount(acc.id);
+                                  setAccountMessage(L("Account deleted.", "Cuenta eliminada."));
+                                } catch (err: any) {
+                                  setAccountMessage(
+                                    err?.message || L("Failed to delete account.", "No se pudo eliminar la cuenta.")
+                                  );
+                                }
+                              }}
+                              className="rounded-full border border-rose-500/50 px-3 py-1 text-[10px] text-rose-200 hover:border-rose-400 transition"
+                            >
+                              {L("Delete", "Eliminar")}
+                            </button>
+                          )}
+                        </div>
                       )}
                     </div>
                   </div>

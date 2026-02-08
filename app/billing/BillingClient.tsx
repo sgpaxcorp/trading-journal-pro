@@ -3,6 +3,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
 import { useAuth } from "@/context/AuthContext";
 import type { PlanId } from "@/lib/types";
@@ -17,6 +18,7 @@ type BillingClientProps = {
 
 export default function BillingClient({ initialPlan }: BillingClientProps) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { user, loading: authLoading } = useAuth();
   const { locale } = useAppSettings();
   const lang = resolveLocale(locale);
@@ -32,6 +34,22 @@ export default function BillingClient({ initialPlan }: BillingClientProps) {
   const [loadingProfile, setLoadingProfile] = useState(true);
   const [addonActive, setAddonActive] = useState(false);
   const [addonLoading, setAddonLoading] = useState(false);
+  const [addonSelected, setAddonSelected] = useState(false);
+  const [billingCycle, setBillingCycle] = useState<"monthly" | "annual">("monthly");
+
+  const PRICES = {
+    core: { monthly: 14.99, annual: 149.99 },
+    advanced: { monthly: 24.99, annual: 249.99 },
+  } as const;
+
+  const priceFor = (planId: PlanId) =>
+    billingCycle === "monthly" ? PRICES[planId].monthly : PRICES[planId].annual / 12;
+
+  useEffect(() => {
+    const cycle = searchParams?.get("cycle");
+    if (cycle === "annual") setBillingCycle("annual");
+    if (cycle === "monthly") setBillingCycle("monthly");
+  }, [searchParams]);
 
   const normalizePlan = (raw: unknown): PlanId | "none" => {
     const v = String(raw ?? "").toLowerCase();
@@ -126,6 +144,8 @@ export default function BillingClient({ initialPlan }: BillingClientProps) {
           userId: user.id,
           email: user.email,
           couponCode: couponCode.trim() || undefined,
+          addonOptionFlow: !hasActivePlan && addonSelected,
+          billingCycle,
         }),
       });
 
@@ -179,7 +199,8 @@ export default function BillingClient({ initialPlan }: BillingClientProps) {
   }
 
   const isButtonDisabled = loading || authLoading;
-  const isCurrentSelection = currentPlan !== "none" && selectedPlan === currentPlan;
+  const hasActivePlan = currentPlan !== "none" && currentStatus === "active";
+  const isCurrentSelection = hasActivePlan && selectedPlan === currentPlan;
   const currentPlanLabel =
     currentPlan === "advanced"
       ? L("Advance", "Advance")
@@ -233,22 +254,51 @@ export default function BillingClient({ initialPlan }: BillingClientProps) {
                 </p>
               </div>
 
-              <div className="rounded-2xl border border-slate-800 bg-slate-900/70 px-4 py-3 text-xs">
-                <p className="text-[10px] uppercase tracking-[0.2em] text-slate-400">
-                  {L("Current plan", "Plan actual")}
-                </p>
-                <div className="mt-2 flex items-center gap-2">
-                  <span className="rounded-full border border-emerald-400/60 bg-emerald-500/10 px-3 py-1 text-[11px] font-semibold text-emerald-200">
-                    {loadingProfile ? L("Loading…", "Cargando…") : currentPlanLabel}
-                  </span>
-                  <span className="rounded-full border border-slate-700 bg-slate-950/70 px-3 py-1 text-[11px] text-slate-300">
-                    {statusLabel}
-                  </span>
-                </div>
-                <p className="mt-2 text-[10px] text-slate-500">
-                  {L("Manage billing or upgrade any time.", "Administra tu facturación o haz upgrade cuando quieras.")}
-                </p>
+              <div className="inline-flex rounded-full border border-slate-800 bg-slate-950/80 p-1 text-[10px] md:text-xs">
+                <button
+                  type="button"
+                  onClick={() => setBillingCycle("monthly")}
+                  className={[
+                    "px-4 py-1.5 rounded-full transition",
+                    billingCycle === "monthly"
+                      ? "bg-emerald-400 text-slate-950 font-semibold"
+                      : "text-slate-300 hover:text-slate-50",
+                  ].join(" ")}
+                >
+                  {L("Monthly", "Mensual")}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBillingCycle("annual")}
+                  className={[
+                    "px-4 py-1.5 rounded-full transition",
+                    billingCycle === "annual"
+                      ? "bg-emerald-400 text-slate-950 font-semibold"
+                      : "text-slate-300 hover:text-slate-50",
+                  ].join(" ")}
+                >
+                  {L("Annual (save 2 months)", "Anual (ahorra 2 meses)")}
+                </button>
               </div>
+
+              {hasActivePlan && (
+                <div className="rounded-2xl border border-slate-800 bg-slate-900/70 px-4 py-3 text-xs">
+                  <p className="text-[10px] uppercase tracking-[0.2em] text-slate-400">
+                    {L("Current plan", "Plan actual")}
+                  </p>
+                  <div className="mt-2 flex items-center gap-2">
+                    <span className="rounded-full border border-emerald-400/60 bg-emerald-500/10 px-3 py-1 text-[11px] font-semibold text-emerald-200">
+                      {loadingProfile ? L("Loading…", "Cargando…") : currentPlanLabel}
+                    </span>
+                    <span className="rounded-full border border-slate-700 bg-slate-950/70 px-3 py-1 text-[11px] text-slate-300">
+                      {statusLabel}
+                    </span>
+                  </div>
+                  <p className="mt-2 text-[10px] text-slate-500">
+                    {L("Manage billing or upgrade any time.", "Administra tu facturación o haz upgrade cuando quieras.")}
+                  </p>
+                </div>
+              )}
             </div>
           </div>
 
@@ -270,17 +320,33 @@ export default function BillingClient({ initialPlan }: BillingClientProps) {
                     : "border-slate-700/80 bg-slate-950/90 hover:border-emerald-400/60 hover:bg-slate-900/70"
                 }`}
             >
-              {currentPlan === "core" && (
+              {hasActivePlan && currentPlan === "core" && (
                 <span className="absolute right-3 top-3 rounded-full border border-emerald-300/70 bg-emerald-500/15 px-2.5 py-0.5 text-[10px] font-semibold text-emerald-200">
                   {L("Current plan", "Plan actual")}
                 </span>
               )}
               <div className="absolute inset-x-0 -top-px h-px bg-linear-to-r from-transparent via-emerald-400/50 to-transparent" />
               <p className="text-xs font-semibold text-slate-100 mb-1">{L("Core", "Core")}</p>
-              <p className="text-lg md:text-xl font-bold text-emerald-300 mb-1">
-                $14.99
+              <div className="flex items-center gap-2 mb-1">
+                <p className="text-lg md:text-xl font-bold text-emerald-300">
+                  ${priceFor("core").toFixed(2)}
+                </p>
+                {billingCycle === "annual" && (
+                  <span className="rounded-full border border-emerald-400/60 bg-emerald-500/10 px-2 py-0.5 text-[9px] text-emerald-200">
+                    {L("Save 2 months", "Ahorra 2 meses")}
+                  </span>
+                )}
+              </div>
+              <p className="text-[11px] text-slate-400 mb-2">
+                {billingCycle === "monthly"
+                  ? L("per month", "por mes")
+                  : L("per month (billed yearly)", "por mes (facturado anual)")}
               </p>
-              <p className="text-[11px] text-slate-400 mb-2">{L("per month", "por mes")}</p>
+              {billingCycle === "annual" && (
+                <p className="text-[10px] text-slate-500 mb-2">
+                  {L("Billed annually", "Facturado anual")}
+                </p>
+              )}
               <ul className="space-y-1 text-[11px] text-slate-300">
                 <li>• {L("Full daily journal & calendar", "Diario diario completo y calendario")}</li>
                 <li>• {L("Back-study module", "Módulo de back-study")}</li>
@@ -304,7 +370,7 @@ export default function BillingClient({ initialPlan }: BillingClientProps) {
                     : "border-slate-700/80 bg-slate-950/95 hover:border-emerald-400/80 hover:bg-linear-to-br hover:from-emerald-500/15 hover:via-slate-900 hover:to-slate-950"
                 }`}
             >
-              {currentPlan === "advanced" && (
+              {hasActivePlan && currentPlan === "advanced" && (
                 <span className="absolute right-3 top-3 rounded-full border border-emerald-300/70 bg-emerald-500/15 px-2.5 py-0.5 text-[10px] font-semibold text-emerald-100">
                   {L("Current plan", "Plan actual")}
                 </span>
@@ -336,12 +402,26 @@ export default function BillingClient({ initialPlan }: BillingClientProps) {
                 </span>
               </div>
 
-              <p className="relative text-lg md:text-xl font-bold text-emerald-100 mb-1">
-                $24.99
-                <span className="ml-2 text-[10px] font-normal text-emerald-100/80">
-                  {L("/ month", "/ mes")}
-                </span>
+              <div className="relative flex items-center gap-2 mb-1">
+                <p className="text-lg md:text-xl font-bold text-emerald-100">
+                  ${priceFor("advanced").toFixed(2)}
+                </p>
+                {billingCycle === "annual" && (
+                  <span className="rounded-full border border-emerald-300/70 bg-emerald-500/15 px-2 py-0.5 text-[9px] text-emerald-100">
+                    {L("Save 2 months", "Ahorra 2 meses")}
+                  </span>
+                )}
+              </div>
+              <p className="text-[11px] text-emerald-100/80 mb-1">
+                {billingCycle === "monthly"
+                  ? L("/ month", "/ mes")
+                  : L("/ month (billed yearly)", "/ mes (facturado anual)")}
               </p>
+              {billingCycle === "annual" && (
+                <p className="text-[10px] text-emerald-100/70 mb-2">
+                  {L("Billed annually", "Facturado anual")}
+                </p>
+              )}
 
               <p className="relative text-[11px] text-slate-100/90 mb-2">
                 {L(
@@ -359,50 +439,112 @@ export default function BillingClient({ initialPlan }: BillingClientProps) {
             </motion.button>
           </div>
 
-          {/* Coupon + CTA */}
-          <div className="mt-6 border-t border-slate-800/80 pt-5 space-y-3">
-            <div className="flex flex-col md:flex-row md:items-center gap-3">
-              <div className="flex-1">
-                <label className="block text-[10px] text-slate-400 mb-1">
-                  {L("Coupon code (optional)", "Código de cupón (opcional)")}
-                </label>
-                <input
-                  value={couponCode}
-                  onChange={(e) =>
-                    setCouponCode(e.target.value.toUpperCase())
-                  }
-                  placeholder={L("Enter coupon code", "Ingresa tu cupón")}
-                  className="w-full rounded-md bg-slate-950/90 border border-slate-700 px-3 py-2 text-xs text-slate-100 outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400/60"
-                />
+          {/* Checkout summary (new users) */}
+          {!hasActivePlan && (
+            <div className="mt-6 border-t border-slate-800/80 pt-5 space-y-4">
+              <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
+                <p className="text-[10px] uppercase tracking-[0.2em] text-slate-400">
+                  {L("Your selection", "Tu selección")}
+                </p>
+                <div className="mt-3 flex flex-wrap items-center gap-4 text-sm text-slate-200">
+                  <span className="rounded-full border border-emerald-400/60 bg-emerald-500/10 px-3 py-1 text-[11px] font-semibold text-emerald-200">
+                    {selectedPlan === "core" ? L("Core plan", "Plan Core") : L("Advanced plan", "Plan Advanced")}
+                  </span>
+                  {addonSelected && (
+                    <span className="rounded-full border border-slate-600 bg-slate-950/70 px-3 py-1 text-[11px] text-slate-200">
+                      {L("Option Flow add-on", "Add-on Option Flow")}
+                    </span>
+                  )}
+                </div>
+                <p className="mt-3 text-[11px] text-slate-400">
+                  {L(
+                    "You will be redirected to Stripe to complete your subscription.",
+                    "Serás redirigido a Stripe para completar tu suscripción."
+                  )}
+                </p>
               </div>
 
-              <button
-                type="button"
-                onClick={handleCheckout}
-                disabled={isButtonDisabled || isCurrentSelection}
-                className="w-full md:w-auto px-6 py-2.5 rounded-xl bg-emerald-400 text-slate-950 text-xs md:text-sm font-semibold hover:bg-emerald-300 disabled:opacity-60 disabled:cursor-not-allowed transition"
-              >
-                {loading || authLoading
-                  ? L("Checking your account…", "Verificando tu cuenta…")
-                  : isCurrentSelection
-                  ? L("Current plan", "Plan actual")
-                  : `${L("Continue with", "Continuar con")} ${selectedPlan === "core" ? L("Core", "Core") : L("Advanced", "Advanced")}`}
-              </button>
-            </div>
+              <div className="flex flex-col md:flex-row md:items-center gap-3">
+                <div className="flex-1">
+                  <label className="block text-[10px] text-slate-400 mb-1">
+                    {L("Coupon code (optional)", "Código de cupón (opcional)")}
+                  </label>
+                  <input
+                    value={couponCode}
+                    onChange={(e) =>
+                      setCouponCode(e.target.value.toUpperCase())
+                    }
+                    placeholder={L("Enter coupon code", "Ingresa tu cupón")}
+                    className="w-full rounded-md bg-slate-950/90 border border-slate-700 px-3 py-2 text-xs text-slate-100 outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400/60"
+                  />
+                </div>
 
-            {error && (
-              <p className="text-[11px] text-red-400">
-                {error}
-              </p>
-            )}
+                <button
+                  type="button"
+                  onClick={handleCheckout}
+                  disabled={isButtonDisabled}
+                  className="w-full md:w-auto min-w-[180px] px-6 py-2.5 rounded-xl bg-emerald-400 text-slate-950 text-xs md:text-sm font-semibold hover:bg-emerald-300 disabled:opacity-60 disabled:cursor-not-allowed transition whitespace-nowrap text-center leading-none"
+                >
+                  {loading || authLoading
+                    ? L("Checking…", "Verificando…")
+                    : L("Checkout with Stripe", "Pagar con Stripe")}
+                </button>
+              </div>
 
-            <p className="text-[10px] text-slate-400">
-              {L(
-                "Your subscription unlocks features like advanced analytics, AI coaching and more. You can manage or cancel your plan any time in Settings.",
-                "Tu suscripción desbloquea features como analítica avanzada, AI coaching y más. Puedes gestionar o cancelar tu plan en cualquier momento desde Settings."
+              {error && (
+                <p className="text-[11px] text-red-400">
+                  {error}
+                </p>
               )}
-            </p>
-          </div>
+            </div>
+          )}
+
+          {/* Coupon + CTA (existing subscribers) */}
+          {hasActivePlan && (
+            <div className="mt-6 border-t border-slate-800/80 pt-5 space-y-3">
+              <div className="flex flex-col md:flex-row md:items-center gap-3">
+                <div className="flex-1">
+                  <label className="block text-[10px] text-slate-400 mb-1">
+                    {L("Coupon code (optional)", "Código de cupón (opcional)")}
+                  </label>
+                  <input
+                    value={couponCode}
+                    onChange={(e) =>
+                      setCouponCode(e.target.value.toUpperCase())
+                    }
+                    placeholder={L("Enter coupon code", "Ingresa tu cupón")}
+                    className="w-full rounded-md bg-slate-950/90 border border-slate-700 px-3 py-2 text-xs text-slate-100 outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400/60"
+                  />
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleCheckout}
+                  disabled={isButtonDisabled || isCurrentSelection}
+                  className="w-full md:w-auto min-w-[180px] px-6 py-2.5 rounded-xl bg-emerald-400 text-slate-950 text-xs md:text-sm font-semibold hover:bg-emerald-300 disabled:opacity-60 disabled:cursor-not-allowed transition whitespace-nowrap text-center leading-none"
+                >
+                  {loading || authLoading
+                    ? L("Checking…", "Verificando…")
+                    : isCurrentSelection
+                    ? L("Current plan", "Plan actual")
+                    : `${L("Continue with", "Continuar con")} ${selectedPlan === "core" ? L("Core", "Core") : L("Advanced", "Advanced")}`}
+                </button>
+              </div>
+
+              {error && (
+                <p className="text-[11px] text-red-400">
+                  {error}
+                </p>
+              )}
+
+              <p className="text-[10px] text-slate-400">
+                {L(
+                  "Your subscription unlocks features like advanced analytics, AI coaching and more. You can manage or cancel your plan any time in Settings.",
+                  "Tu suscripción desbloquea features como analítica avanzada, AI coaching y más. Puedes gestionar o cancelar tu plan en cualquier momento desde Settings."
+                )}
+              </p>
+            </div>
+          )}
 
           {/* Add-ons */}
           <div className="mt-8 border-t border-slate-800/80 pt-6 space-y-4">
@@ -439,16 +581,32 @@ export default function BillingClient({ initialPlan }: BillingClientProps) {
               </div>
 
               <div className="flex flex-wrap items-center gap-3">
-                <button
-                  type="button"
-                  onClick={handleAddonCheckout}
-                  disabled={isButtonDisabled || addonActive}
-                  className="rounded-xl bg-emerald-400 px-4 py-2 text-xs font-semibold text-slate-950 hover:bg-emerald-300 disabled:opacity-60 disabled:cursor-not-allowed"
-                >
-                  {addonActive
-                    ? L("Already active", "Ya activo")
-                    : L("Add Option Flow", "Agregar Option Flow")}
-                </button>
+                {!hasActivePlan ? (
+                  <button
+                    type="button"
+                    onClick={() => setAddonSelected((prev) => !prev)}
+                    className={`rounded-xl px-4 py-2 text-xs font-semibold transition ${
+                      addonSelected
+                        ? "bg-emerald-400 text-slate-950 hover:bg-emerald-300"
+                        : "border border-slate-700 text-slate-200 hover:border-emerald-400"
+                    }`}
+                  >
+                    {addonSelected
+                      ? L("Remove Option Flow", "Quitar Option Flow")
+                      : L("Add Option Flow", "Agregar Option Flow")}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleAddonCheckout}
+                    disabled={isButtonDisabled || addonActive}
+                    className="rounded-xl bg-emerald-400 px-4 py-2 text-xs font-semibold text-slate-950 hover:bg-emerald-300 disabled:opacity-60 disabled:cursor-not-allowed"
+                  >
+                    {addonActive
+                      ? L("Already active", "Ya activo")
+                      : L("Add Option Flow", "Agregar Option Flow")}
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => router.push("/option-flow")}

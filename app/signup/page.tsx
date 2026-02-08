@@ -96,7 +96,6 @@ function SignUpPageInner() {
   const [lastName, setLastName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
-  const [address, setAddress] = useState("");
   const [password, setPassword] = useState("");
 
   const [loading, setLoading] = useState(false);
@@ -129,7 +128,6 @@ function SignUpPageInner() {
         email: normalizedEmail,
         password,
         phone,
-        address,
         plan: planForMetadata,
       });
 
@@ -286,21 +284,6 @@ function SignUpPageInner() {
               onChange={(e) => setPhone(e.target.value)}
               className="w-full rounded-md bg-slate-950 border border-slate-700 px-3 py-2 text-xs text-slate-100 outline-none focus:border-emerald-400"
               placeholder="+1 787 000 0000"
-            />
-          </div>
-
-          {/* Address */}
-          <div>
-            <label className="block text-[10px] text-slate-400 mb-1">
-              {L("Mailing address", "Dirección postal")}
-            </label>
-            <textarea
-              required
-              rows={2}
-              value={address}
-              onChange={(e) => setAddress(e.target.value)}
-              className="w-full rounded-md bg-slate-950 border border-slate-700 px-3 py-2 text-xs text-slate-100 outline-none focus:border-emerald-400 resize-y"
-              placeholder={L("Street, city, state, ZIP / postal code", "Calle, ciudad, estado, código postal")}
             />
           </div>
 
