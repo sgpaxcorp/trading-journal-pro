@@ -13,9 +13,9 @@ export default function Home() {
   const year = new Date().getFullYear();
 
   return (
-    <main className="min-h-screen bg-slate-950 text-slate-50">
+    <main className="min-h-screen bg-slate-950 text-slate-50 overflow-x-hidden">
       {/* Top Bar */}
-      <header className="w-full flex items-center justify-between px-6 md:px-12 py-4 border-b border-slate-800 bg-slate-950/90 backdrop-blur">
+      <header className="w-full flex flex-col md:flex-row md:items-center md:justify-between gap-3 px-4 sm:px-6 md:px-12 py-4 border-b border-slate-800 bg-slate-950/90 backdrop-blur">
         <div className="flex items-center gap-3">
           <img
             src="/neurotrader-logo.svg"
@@ -27,7 +27,7 @@ export default function Home() {
             Neuro Trader Journal
           </span>
         </div>
-        <nav className="flex items-center gap-4 text-xs md:text-sm text-slate-400">
+        <nav className="w-full md:w-auto flex flex-wrap items-center justify-start md:justify-end gap-2 md:gap-4 text-[10px] md:text-sm text-slate-400">
           <Link href="/plans-comparison" className="hover:text-emerald-400">
             {L("Features", "Features")}
           </Link>
@@ -42,13 +42,13 @@ export default function Home() {
           </Link>
           <Link
             href="/signin"
-            className="px-3 py-1.5 rounded-full border border-slate-600 hover:border-emerald-400 transition"
+            className="px-2.5 md:px-3 py-1.5 rounded-full border border-slate-600 hover:border-emerald-400 transition text-[10px] md:text-sm"
           >
             {L("Sign in", "Ingresar")}
           </Link>
           <Link
             href="/signup"
-            className="px-3 py-1.5 rounded-full bg-emerald-400 text-slate-950 font-semibold hover:bg-emerald-300 transition"
+            className="px-2.5 md:px-3 py-1.5 rounded-full bg-emerald-400 text-slate-950 font-semibold hover:bg-emerald-300 transition text-[10px] md:text-sm"
           >
             {L("Begin Now", "Comenzar")}
           </Link>
@@ -382,7 +382,7 @@ export default function Home() {
                         "Start with a clear plan to build structure and targets.",
                         "Empieza con un plan claro para crear estructura y metas."
                       ),
-                      gradient: "from-emerald-500/20 via-indigo-500/15 to-violet-500/20",
+                      gradient: "from-emerald-500/22 via-indigo-500/18 to-violet-500/22",
                     },
                     {
                       label: L("Log execution + sentiment", "Registrar ejecución + sentimiento"),
@@ -390,7 +390,7 @@ export default function Home() {
                         "Knowing yourself leads to better decisions.",
                         "Conocerte mejor te ayuda a tomar mejores decisiones."
                       ),
-                      gradient: "from-blue-500/20 via-violet-500/15 to-emerald-500/20",
+                      gradient: "from-emerald-500/22 via-indigo-500/18 to-violet-500/22",
                     },
                     {
                       label: L("Rules = self‑leadership", "Reglas = auto‑liderazgo"),
@@ -398,7 +398,7 @@ export default function Home() {
                         "Follow the rules you set. Respect your process.",
                         "Cumple tus reglas y respeta tu proceso."
                       ),
-                      gradient: "from-emerald-500/20 via-blue-500/15 to-violet-500/20",
+                      gradient: "from-emerald-500/22 via-indigo-500/18 to-violet-500/22",
                     },
                     {
                       label: L("Metrics that reveal your edge", "Métricas que revelan tu edge"),
@@ -406,7 +406,7 @@ export default function Home() {
                         "Understand execution and decisions to improve.",
                         "Entiende tu ejecución y decisiones para mejorar."
                       ),
-                      gradient: "from-violet-500/20 via-indigo-500/15 to-emerald-500/20",
+                      gradient: "from-emerald-500/22 via-indigo-500/18 to-violet-500/22",
                     },
                     {
                       label: L("AI coach that stays objective", "IA objetiva como coach"),
@@ -414,7 +414,7 @@ export default function Home() {
                         "AI reviews every decision, sentiment, and strategy to suggest a better path.",
                         "La IA revisa cada decisión, sentimiento y estrategia para sugerir un mejor camino."
                       ),
-                      gradient: "from-indigo-500/20 via-violet-500/15 to-emerald-500/20",
+                      gradient: "from-emerald-500/22 via-indigo-500/18 to-violet-500/22",
                     },
                     {
                       label: L("Turn trading into a business", "Convierte el trading en un negocio"),
@@ -422,7 +422,7 @@ export default function Home() {
                         "Build your business plan: goals, rules, schedule, cost control, and when to scale or pause.",
                         "Crea tu plan de negocio: objetivos, reglas, horario, control de costos y cuándo escalar o pausar."
                       ),
-                      gradient: "from-emerald-500/20 via-indigo-500/15 to-violet-500/20",
+                      gradient: "from-emerald-500/22 via-indigo-500/18 to-violet-500/22",
                     },
                     {
                       label: L("Reduce uncertainty with process", "Reduce la incertidumbre con proceso"),
@@ -430,7 +430,7 @@ export default function Home() {
                         "Anchors you to a clear flow: setup → entry → management → exit → review.",
                         "Te ancla a un flujo claro: setup → entrada → gestión → salida → revisión."
                       ),
-                      gradient: "from-blue-500/20 via-violet-500/15 to-emerald-500/20",
+                      gradient: "from-emerald-500/22 via-indigo-500/18 to-violet-500/22",
                     },
                     {
                       label: L("Risk management that protects capital", "Gestión de riesgo que protege capital"),
@@ -438,7 +438,7 @@ export default function Home() {
                         "Define risk per trade, daily/weekly limits, sizing rules, and when to stop.",
                         "Define riesgo por trade, límites diarios/semanales, sizing y cuándo detenerte."
                       ),
-                      gradient: "from-violet-500/20 via-indigo-500/15 to-emerald-500/20",
+                      gradient: "from-emerald-500/22 via-indigo-500/18 to-violet-500/22",
                     },
                   ].map((row, i) => (
                     <div
@@ -491,7 +491,7 @@ export default function Home() {
                     "Imports and maps every leg automatically.",
                     "Importa y mapea cada pierna automáticamente."
                   ),
-                  gradient: "from-emerald-500/20 via-indigo-500/15 to-violet-500/20",
+                  gradient: "from-emerald-500/22 via-indigo-500/18 to-violet-500/22",
                 },
                 {
                   label: L("Premium selling strategies", "Estrategias de venta de prima"),
@@ -499,7 +499,7 @@ export default function Home() {
                     "Tracks credits, debits, and rollouts in one place.",
                     "Registra créditos, débitos y rollouts en un solo lugar."
                   ),
-                  gradient: "from-blue-500/20 via-violet-500/15 to-emerald-500/20",
+                  gradient: "from-emerald-500/22 via-indigo-500/18 to-violet-500/22",
                 },
                 {
                   label: L("Complex options flows", "Flujos complejos de opciones"),
@@ -507,7 +507,7 @@ export default function Home() {
                     "Classifies strategy types and timestamps them.",
                     "Clasifica tipos de estrategia y sus timestamps."
                   ),
-                  gradient: "from-violet-500/20 via-indigo-500/15 to-emerald-500/20",
+                  gradient: "from-emerald-500/22 via-indigo-500/18 to-violet-500/22",
                 },
                 {
                   label: L("Structured in minutes", "Estructurado en minutos"),
@@ -515,7 +515,7 @@ export default function Home() {
                     "Analytics are ready as soon as the import finishes.",
                     "La analítica queda lista al terminar la importación."
                   ),
-                  gradient: "from-indigo-500/20 via-violet-500/15 to-emerald-500/20",
+                  gradient: "from-emerald-500/22 via-indigo-500/18 to-violet-500/22",
                 },
               ].map((row, i) => (
                 <div
@@ -552,7 +552,7 @@ export default function Home() {
                   "Import trades fast. Single, premium-selling, and complex options strategies are mapped instantly.",
                   "Importa trades rápido. Trades simples, venta de prima y estrategias complejas quedan mapeadas al instante."
                 ),
-                tone: "from-emerald-500/60 via-indigo-500/55 to-violet-600/60",
+                tone: "from-emerald-500/22 via-indigo-500/18 to-violet-500/22",
               },
               {
                 title: L("Unlimited accountability", "Accountability real"),
@@ -560,7 +560,7 @@ export default function Home() {
                   "Rules, goals, and alerts keep you honest and consistent.",
                   "Reglas, metas y alertas te mantienen honesto y consistente."
                 ),
-                tone: "from-blue-500/60 via-violet-600/55 to-emerald-500/60",
+                tone: "from-emerald-500/22 via-indigo-500/18 to-violet-500/22",
               },
               {
                 title: L("AI trading review", "Revisión con IA"),
@@ -568,7 +568,7 @@ export default function Home() {
                   "AI detects winning patterns and warns you about losing behaviors.",
                   "La IA detecta patrones ganadores y te advierte sobre comportamientos perdedores."
                 ),
-                tone: "from-violet-600/60 via-blue-600/55 to-emerald-600/60",
+                tone: "from-emerald-500/22 via-indigo-500/18 to-violet-500/22",
               },
               {
                 title: L("Automated analytics statistics", "Analítica automática"),
@@ -576,7 +576,7 @@ export default function Home() {
                   "No manual calculations. Your performance stats are generated instantly.",
                   "Sin cálculos manuales. Tus estadísticas se generan al instante."
                 ),
-                tone: "from-blue-600/60 via-violet-600/55 to-emerald-600/60",
+                tone: "from-emerald-500/22 via-indigo-500/18 to-violet-500/22",
               },
             ].map((card) => (
               <div
