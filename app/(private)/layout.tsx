@@ -87,10 +87,29 @@ export default function PrivateLayout({ children }: PrivateLayoutProps) {
         .from("profiles")
         .select("subscription_status, onboarding_completed")
         .eq("id", user.id)
-        .single();
+        .maybeSingle();
 
-      if (error || !data) {
-        console.error("[PrivateLayout] Error loading profile:", error);
+      const missingProfile = !data;
+      const hasError = !!error && (error as any)?.code !== "PGRST116";
+
+      if ((missingProfile || hasError) && typeof window !== "undefined") {
+        try {
+          const session = await supabaseBrowser.auth.getSession();
+          const token = session?.data?.session?.access_token;
+          if (token) {
+            await fetch("/api/profile/ensure", {
+              method: "POST",
+              headers: { Authorization: `Bearer ${token}` },
+            });
+          }
+        } catch {
+          // silent
+        }
+      }
+
+      if (missingProfile || hasError) {
+        setSubscriptionStatus("pending");
+        setOnboardingCompleted(false);
         setProfileChecked(true);
         return;
       }
@@ -139,7 +158,7 @@ export default function PrivateLayout({ children }: PrivateLayoutProps) {
           .from("profiles")
           .select("subscription_status, onboarding_completed")
           .eq("id", user.id)
-          .single();
+          .maybeSingle();
 
         if (!error && data) {
           const status =
@@ -149,8 +168,6 @@ export default function PrivateLayout({ children }: PrivateLayoutProps) {
 
           setSubscriptionStatus(status);
           setOnboardingCompleted(onboarding);
-        } else {
-          console.error("[PrivateLayout] Error on re-check:", error);
         }
 
         setRefreshAttempts((prev) => prev + 1);
@@ -232,7 +249,7 @@ export default function PrivateLayout({ children }: PrivateLayoutProps) {
 
   return (
     <>
-      {children}
+      <div className="ntj-fullwidth">{children}</div>
 
       {/* ✅ GLOBAL Rules & Alarms engine + delivery */}
       {userId && isActive && profileChecked ? (

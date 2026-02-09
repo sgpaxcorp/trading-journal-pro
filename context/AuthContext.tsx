@@ -143,6 +143,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const normalizedEmail = email.trim().toLowerCase();
       const fullName = `${firstName} ${lastName}`.trim();
+      const normalizedAddress = String(address || "").trim() || null;
 
       const redirectTo =
         typeof window !== "undefined"
@@ -159,7 +160,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             first_name: firstName,
             last_name: lastName,
             phone,
-            postal_address: address ?? null,
+            postal_address: normalizedAddress,
             plan,
           },
           emailRedirectTo: redirectTo,
@@ -185,7 +186,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           first_name: firstName,
           last_name: lastName,
           phone,
-          postal_address: address ?? null,
+          postal_address: normalizedAddress,
 
           // Campos de suscripción
           plan, // core | advanced (PlanId)

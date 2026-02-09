@@ -128,6 +128,7 @@ function SignUpPageInner() {
         email: normalizedEmail,
         password,
         phone,
+        address: "",
         plan: planForMetadata,
       });
 

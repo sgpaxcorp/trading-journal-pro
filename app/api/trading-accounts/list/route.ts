@@ -22,7 +22,12 @@ export async function GET(req: NextRequest) {
       .eq("user_id", userId)
       .order("created_at", { ascending: true });
 
-    if (listErr) throw listErr;
+    if (listErr) {
+      if ((listErr as any)?.code === "42P01") {
+        return NextResponse.json({ accounts: [], activeAccountId: null });
+      }
+      throw listErr;
+    }
 
     const { data: prefs } = await supabaseAdmin
       .from("user_preferences")

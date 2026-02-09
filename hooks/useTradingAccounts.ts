@@ -36,8 +36,14 @@ export function useTradingAccounts() {
       const res = await fetch("/api/trading-accounts/list", {
         headers: { Authorization: `Bearer ${token}` },
       });
-      const body = await res.json();
-      if (!res.ok) throw new Error(body?.error || "Failed to load accounts");
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        console.warn("[useTradingAccounts] list error:", body?.error || res.status);
+        setAccounts([]);
+        setActiveAccountId(null);
+        setError(body?.error || "Failed to load accounts");
+        return;
+      }
 
       const rows: TradingAccount[] = Array.isArray(body?.accounts) ? body.accounts : [];
       setAccounts(rows);
@@ -54,7 +60,7 @@ export function useTradingAccounts() {
         }
       }
     } catch (err: any) {
-      console.error("[useTradingAccounts] load error:", err);
+      console.warn("[useTradingAccounts] load error:", err);
       setError(err?.message || "Failed to load accounts");
     } finally {
       setLoading(false);

@@ -72,3 +72,14 @@ body {
     animation: none;
   }
 }
+
+/* Full-width pages (private app) */
+.ntj-fullwidth main > :is(div, section, article) {
+  max-width: none !important;
+  width: 100%;
+}
+
+.ntj-fullwidth main > :is(div, section, article).mx-auto {
+  margin-left: 0;
+  margin-right: 0;
+}

@@ -1,10 +1,10 @@
 // app/notebook/page.tsx
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 
 import { useAuth } from "@/context/AuthContext";
 import { useUserPlan } from "@/hooks/useUserPlan";
@@ -15,6 +15,21 @@ import { resolveLocale } from "@/lib/i18n";
 import type { JournalEntry } from "@/lib/journalTypes";
 import { getAllJournalEntries } from "@/lib/journalSupabase";
 import RichNotebookEditor from "@/app/components/RichNotebookEditor";
+import {
+  createNotebookBook,
+  createNotebookPage,
+  createNotebookSection,
+  listNotebookData,
+  updateNotebookPage,
+  type NotebookBookRow,
+  type NotebookPageRow,
+  type NotebookSectionRow,
+  type NotebookStorage,
+} from "@/lib/notebookSupabase";
+import {
+  getFreeNotebookNote,
+  upsertFreeNotebookNote,
+} from "@/lib/notebookFreeNotesSupabase";
 
 /* =========================
    Types & helpers
@@ -28,28 +43,9 @@ type Holiday = {
   label: string;
 };
 
-type LocalNotebook = {
-  id: string;
-  name: string;
-  createdAt: string;
-};
-
-type LocalNotebookPage = {
-  id: string;
-  notebookId: string;
-  title: string;
-  createdAt: string;
-  updatedAt: string;
-  content: string;
-};
-
-type NotebookStorage = {
-  notebooks: LocalNotebook[];
-  pages: LocalNotebookPage[];
-};
-
-const NOTEBOOK_STORAGE_KEY = "tjp_notebooks_v1";
-const FREE_NOTES_STORAGE_KEY = "tjp_notebook_free_notes_v1";
+type LocalNotebook = NotebookBookRow;
+type LocalNotebookSection = NotebookSectionRow;
+type LocalNotebookPage = NotebookPageRow;
 
 function toYMD(date: Date): string {
   const y = date.getFullYear();
@@ -64,6 +60,14 @@ function formatShortDate(dateStr: string, locale?: string) {
     month: "short",
     day: "numeric",
     year: "numeric",
+  });
+}
+
+function formatSavedTime(ts?: number, locale?: string) {
+  if (!ts) return "";
+  return new Date(ts).toLocaleTimeString(locale, {
+    hour: "2-digit",
+    minute: "2-digit",
   });
 }
 
@@ -82,67 +86,14 @@ function getNotebookPreview(raw: any, fallbackText: string): string | null {
   return null;
 }
 
-function createId(): string {
-  if (typeof crypto !== "undefined" && crypto.randomUUID) {
-    return crypto.randomUUID();
-  }
-  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+function stripHtml(input?: string | null): string {
+  if (!input) return "";
+  return String(input).replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
 }
 
-function loadNotebookStorageSafe(): NotebookStorage {
-  if (typeof window === "undefined") {
-    return { notebooks: [], pages: [] };
-  }
-  try {
-    const raw = window.localStorage.getItem(NOTEBOOK_STORAGE_KEY);
-    if (!raw) return { notebooks: [], pages: [] };
-    const parsed = JSON.parse(raw);
-    if (!parsed.notebooks || !parsed.pages) {
-      return { notebooks: [], pages: [] };
-    }
-    return parsed as NotebookStorage;
-  } catch {
-    return { notebooks: [], pages: [] };
-  }
-}
+// IDs generados por Supabase
 
-function saveNotebookStorageSafe(data: NotebookStorage) {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(
-      NOTEBOOK_STORAGE_KEY,
-      JSON.stringify(data)
-    );
-  } catch {
-    // ignore
-  }
-}
-
-// Free notes por fecha
-function loadFreeNotesSafe(): Record<string, string> {
-  if (typeof window === "undefined") return {};
-  try {
-    const raw = window.localStorage.getItem(FREE_NOTES_STORAGE_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object") return {};
-    return parsed as Record<string, string>;
-  } catch {
-    return {};
-  }
-}
-
-function saveFreeNotesSafe(map: Record<string, string>) {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(
-      FREE_NOTES_STORAGE_KEY,
-      JSON.stringify(map)
-    );
-  } catch {
-    // ignore
-  }
-}
+// localStorage eliminado; persistimos en Supabase
 
 /** Helpers de holidays */
 
@@ -254,68 +205,15 @@ export default function NotebookPage() {
   const lang = resolveLocale(locale);
   const isEs = lang === "es";
   const L = (en: string, es: string) => (isEs ? es : en);
+  const userId = useMemo(() => (user as any)?.id || (user as any)?.uid || "", [user]);
 
-  if (planLoading) {
-    return (
-      <main className="min-h-screen bg-slate-950 text-slate-50">
-        <TopNav />
-        <div className="max-w-4xl mx-auto px-6 py-16">
-          <p className="text-sm text-slate-400">{L("Loading…", "Cargando…")}</p>
-        </div>
-      </main>
-    );
-  }
-
-  if (plan !== "advanced") {
-    return (
-      <main className="min-h-screen bg-slate-950 text-slate-50">
-        <TopNav />
-        <div className="max-w-4xl mx-auto px-6 py-16">
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
-            <p className="text-emerald-300 text-[11px] uppercase tracking-[0.3em]">
-              {L("Advanced feature", "Función Advanced")}
-            </p>
-            <h1 className="text-xl font-semibold mt-2">
-              {L(
-                "Notebook is included in Advanced",
-                "El Notebook está incluido en Advanced"
-              )}
-            </h1>
-            <p className="text-sm text-slate-400 mt-2">
-              {L(
-                "Upgrade to Advanced to unlock the full notebook experience, custom pages, and richer journaling.",
-                "Actualiza a Advanced para desbloquear el notebook completo, páginas personalizadas y un journaling más profundo."
-              )}
-            </p>
-            <div className="mt-4 flex flex-wrap gap-3">
-              <Link
-                href="/billing"
-                className="px-4 py-2 rounded-xl bg-emerald-400 text-slate-950 text-xs font-semibold hover:bg-emerald-300 transition"
-              >
-                {L("Upgrade to Advanced", "Actualizar a Advanced")}
-              </Link>
-              <Link
-                href="/plans-comparison"
-                className="px-4 py-2 rounded-xl border border-slate-700 text-slate-200 text-xs hover:border-emerald-400 transition"
-              >
-                {L("Compare plans", "Comparar planes")}
-              </Link>
-            </div>
-          </div>
-        </div>
-      </main>
-    );
-  }
+  // NOTE: We gate rendering below after hooks to avoid hook-order issues.
 
   // Journal entries desde Supabase
   const [entries, setEntries] = useState<JournalEntry[]>([]);
   const [entriesLoading, setEntriesLoading] = useState<boolean>(true);
 
-  // Hidratación (para localStorage)
-  const [hasHydrated, setHasHydrated] = useState(false);
-  useEffect(() => {
-    setHasHydrated(true);
-  }, []);
+  // Sin localStorage: dependemos de Supabase
 
   // Proteger ruta si no hay user
   useEffect(() => {
@@ -326,13 +224,12 @@ export default function NotebookPage() {
 
   // Cargar entries desde Supabase
   useEffect(() => {
-    if (authLoading || !user || accountsLoading || !activeAccountId) return;
+    if (planLoading || plan !== "advanced") return;
+    if (authLoading || !userId || accountsLoading || !activeAccountId) return;
 
     const load = async () => {
       try {
         setEntriesLoading(true);
-        const userId =
-          (user as any)?.uid || (user as any)?.id || (user as any)?.email || "";
         if (!userId) {
           setEntries([]);
         } else {
@@ -348,7 +245,7 @@ export default function NotebookPage() {
     };
 
     void load();
-  }, [authLoading, user, accountsLoading, activeAccountId]);
+  }, [planLoading, plan, authLoading, userId, accountsLoading, activeAccountId]);
 
   const sorted = useMemo(
     () =>
@@ -376,6 +273,57 @@ export default function NotebookPage() {
       sorted.find((e: any) => e.date === selectedJournalDate) ?? null
     );
   }, [sorted, selectedJournalDate]);
+
+  const parsedNotes = useMemo(() => {
+    if (!selectedJournalEntry) return null;
+    const raw = (selectedJournalEntry as any)?.notes;
+    if (!raw || typeof raw !== "string") return null;
+    try {
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === "object" ? (parsed as Record<string, any>) : null;
+    } catch {
+      return null;
+    }
+  }, [selectedJournalEntry]);
+
+  const premarketText = useMemo(
+    () => stripHtml((parsedNotes as any)?.premarket),
+    [parsedNotes]
+  );
+  const liveText = useMemo(
+    () => stripHtml((parsedNotes as any)?.live),
+    [parsedNotes]
+  );
+  const postText = useMemo(
+    () => stripHtml((parsedNotes as any)?.post),
+    [parsedNotes]
+  );
+
+  const entriesFromNotes = useMemo(
+    () =>
+      Array.isArray((parsedNotes as any)?.entries)
+        ? ((parsedNotes as any)?.entries as any[])
+        : [],
+    [parsedNotes]
+  );
+  const exitsFromNotes = useMemo(
+    () =>
+      Array.isArray((parsedNotes as any)?.exits)
+        ? ((parsedNotes as any)?.exits as any[])
+        : [],
+    [parsedNotes]
+  );
+
+  const combinedTags = useMemo(() => {
+    const base = Array.isArray((selectedJournalEntry as any)?.tags)
+      ? ((selectedJournalEntry as any).tags as string[])
+      : [];
+    const fromNotes = Array.isArray((parsedNotes as any)?.tags)
+      ? ((parsedNotes as any).tags as string[])
+      : [];
+    const merged = [...base, ...fromNotes].map((t) => String(t).trim()).filter(Boolean);
+    return Array.from(new Set(merged));
+  }, [selectedJournalEntry, parsedNotes]);
 
   // ---- Estado de notas (premarket / live / post), para resumen UI y AI ----
   const notesStatus = useMemo(() => {
@@ -409,49 +357,115 @@ export default function NotebookPage() {
     };
   }, [selectedJournalEntry]);
 
-  // Custom notebooks (localStorage)
+  // Custom notebooks (Supabase)
   const [nbData, setNbData] = useState<NotebookStorage>({
     notebooks: [],
+    sections: [],
     pages: [],
   });
+  const [nbLoading, setNbLoading] = useState(true);
   const [activeNotebookId, setActiveNotebookId] =
+    useState<string | null>(null);
+  const [activeSectionId, setActiveSectionId] =
     useState<string | null>(null);
   const [activePageId, setActivePageId] =
     useState<string | null>(null);
   const [newNotebookName, setNewNotebookName] =
     useState<string>("");
-  const [isNbLoaded, setIsNbLoaded] = useState(false);
+  const [newSectionName, setNewSectionName] =
+    useState<string>("");
+  const [sectionExpanded, setSectionExpanded] = useState<Record<string, boolean>>({});
+  const pageSaveTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const freeNotesSaveTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const loadedFreeNotesRef = useRef<Record<string, boolean>>({});
+  const [pageSaveState, setPageSaveState] = useState<Record<string, { state: "idle" | "saving" | "saved" | "error"; ts?: number }>>({});
+  const [freeNotesSaveState, setFreeNotesSaveState] = useState<Record<string, { state: "idle" | "saving" | "saved" | "error"; ts?: number }>>({});
 
   useEffect(() => {
-    const loaded = loadNotebookStorageSafe();
-    setNbData(loaded);
-    if (loaded.notebooks.length > 0) {
-      setActiveNotebookId(loaded.notebooks[0].id);
-    }
-    setIsNbLoaded(true);
-  }, []);
+    if (planLoading || plan !== "advanced") return;
+    if (authLoading || !userId || accountsLoading || !activeAccountId) return;
 
-  useEffect(() => {
-    if (!isNbLoaded) return;
-    saveNotebookStorageSafe(nbData);
-  }, [nbData, isNbLoaded]);
+    let alive = true;
+    const load = async () => {
+      setNbLoading(true);
+      try {
+        const data = await listNotebookData(userId, activeAccountId);
+        if (!alive) return;
+        setNbData(data);
+        if (data.notebooks.length > 0) {
+          setActiveNotebookId((prev) => {
+            if (prev && data.notebooks.some((n) => n.id === prev)) return prev;
+            return data.notebooks[0].id;
+          });
+        }
+        if (data.sections.length > 0) {
+          setActiveSectionId((prev) => {
+            if (prev && data.sections.some((s) => s.id === prev)) return prev;
+            return data.sections[0].id;
+          });
+        }
+        setSectionExpanded((prev) => {
+          const next = { ...prev };
+          data.sections.forEach((s) => {
+            if (next[s.id] === undefined) next[s.id] = true;
+          });
+          return next;
+        });
+      } finally {
+        if (alive) setNbLoading(false);
+      }
+    };
+    void load();
+    return () => {
+      alive = false;
+    };
+  }, [
+    planLoading,
+    plan,
+    authLoading,
+    userId,
+    accountsLoading,
+    activeAccountId,
+  ]);
 
-  // Free notes por fecha (libreta rica)
+  // Free notes por fecha (Supabase)
   const [freeNotesByDate, setFreeNotesByDate] =
     useState<Record<string, string>>({});
-  const [freeNotesLoaded, setFreeNotesLoaded] =
-    useState(false);
+  const [freeNotesLoading, setFreeNotesLoading] = useState(false);
 
   useEffect(() => {
-    const loaded = loadFreeNotesSafe();
-    setFreeNotesByDate(loaded);
-    setFreeNotesLoaded(true);
-  }, []);
+    // reset cache when switching accounts
+    setFreeNotesByDate({});
+    loadedFreeNotesRef.current = {};
+  }, [activeAccountId]);
 
   useEffect(() => {
-    if (!freeNotesLoaded) return;
-    saveFreeNotesSafe(freeNotesByDate);
-  }, [freeNotesByDate, freeNotesLoaded]);
+    if (!selectedJournalDate) return;
+    if (authLoading || !userId || accountsLoading || !activeAccountId) return;
+    if (loadedFreeNotesRef.current[selectedJournalDate]) return;
+
+    let alive = true;
+    const loadFreeNotes = async () => {
+      setFreeNotesLoading(true);
+      const content = await getFreeNotebookNote(
+        userId,
+        activeAccountId,
+        selectedJournalDate
+      );
+      if (!alive) return;
+      loadedFreeNotesRef.current[selectedJournalDate] = true;
+      setFreeNotesByDate((prev) => ({
+        ...prev,
+        [selectedJournalDate]: content ?? "",
+      }));
+      setFreeNotesLoading(false);
+    };
+
+    void loadFreeNotes();
+    return () => {
+      alive = false;
+    };
+  }, [selectedJournalDate, authLoading, userId, accountsLoading, activeAccountId]);
 
   const todayStr = useMemo(() => toYMD(new Date()), []);
   const currentYear = useMemo(() => new Date().getFullYear(), []);
@@ -476,9 +490,14 @@ export default function NotebookPage() {
     return byMonth;
   }, [holidays]);
 
+  const activeNotebookSections = useMemo(() => {
+    if (!activeNotebookId) return [] as LocalNotebookSection[];
+    return nbData.sections.filter((s) => s.notebook_id === activeNotebookId);
+  }, [nbData.sections, activeNotebookId]);
+
   const activeNotebookPages = useMemo(() => {
     if (!activeNotebookId) return [] as LocalNotebookPage[];
-    return nbData.pages.filter((p) => p.notebookId === activeNotebookId);
+    return nbData.pages.filter((p) => p.notebook_id === activeNotebookId);
   }, [nbData.pages, activeNotebookId]);
 
   const activeNotebook = useMemo(() => {
@@ -489,15 +508,65 @@ export default function NotebookPage() {
     );
   }, [activeNotebookId, nbData.notebooks]);
 
+  useEffect(() => {
+    if (!activeNotebookId) {
+      setActiveSectionId(null);
+      return;
+    }
+    const firstSection = activeNotebookSections[0];
+    const stillValid = activeNotebookSections.some((s) => s.id === activeSectionId);
+    if (!stillValid) {
+      setActiveSectionId(firstSection?.id ?? null);
+    }
+  }, [activeNotebookId, activeNotebookSections, activeSectionId]);
+
+  useEffect(() => {
+    if (!activeNotebookSections.length) return;
+    setSectionExpanded((prev) => {
+      const next = { ...prev };
+      activeNotebookSections.forEach((s) => {
+        if (next[s.id] === undefined) next[s.id] = true;
+      });
+      return next;
+    });
+  }, [activeNotebookSections]);
+
+  const pagesBySection = useMemo(() => {
+    const map: Record<string, LocalNotebookPage[]> = {};
+    activeNotebookPages.forEach((p) => {
+      const key = p.section_id || "unassigned";
+      if (!map[key]) map[key] = [];
+      map[key].push(p);
+    });
+    Object.values(map).forEach((list) =>
+      list.sort((a, b) => String(b.updated_at || "").localeCompare(String(a.updated_at || "")))
+    );
+    return map;
+  }, [activeNotebookPages]);
+
+  const activeSectionPages = useMemo(() => {
+    if (!activeSectionId) return [] as LocalNotebookPage[];
+    return pagesBySection[activeSectionId] || [];
+  }, [pagesBySection, activeSectionId]);
+
   const activePage = useMemo(() => {
-    if (!activeNotebookId)
-      return null as LocalNotebookPage | null;
-    if (activeNotebookPages.length === 0) return null;
+    if (!activeNotebookId) return null as LocalNotebookPage | null;
+    if (activeSectionPages.length === 0) return null;
     const found = activePageId
-      ? activeNotebookPages.find((p) => p.id === activePageId)
+      ? activeSectionPages.find((p) => p.id === activePageId)
       : null;
-    return found || activeNotebookPages[0];
-  }, [activeNotebookId, activeNotebookPages, activePageId]);
+    return found || activeSectionPages[0];
+  }, [activeNotebookId, activeSectionPages, activePageId]);
+
+  useEffect(() => {
+    if (!activeSectionPages.length) {
+      setActivePageId(null);
+      return;
+    }
+    if (!activePageId || !activeSectionPages.some((p) => p.id === activePageId)) {
+      setActivePageId(activeSectionPages[0].id);
+    }
+  }, [activeSectionPages, activePageId]);
 
   // AI coach state (para la página seleccionada del journal)
   const [aiQuestion, setAiQuestion] = useState("");
@@ -505,16 +574,43 @@ export default function NotebookPage() {
   const [aiLoading, setAiLoading] = useState(false);
 
   const selectedFreeNotes =
-    (selectedJournalDate &&
-      freeNotesByDate[selectedJournalDate]) ||
-    "";
+    (selectedJournalDate && freeNotesByDate[selectedJournalDate]) || "";
+  const freeNotesStatus =
+    (selectedJournalDate && freeNotesSaveState[selectedJournalDate]) || null;
+  const activePageStatus =
+    (activePage?.id && pageSaveState[activePage.id]) || null;
 
   const handleFreeNotesChange = (html: string) => {
-    if (!selectedJournalDate) return;
+    if (!selectedJournalDate || !userId || !activeAccountId) return;
+    setFreeNotesSaveState((prev) => ({
+      ...prev,
+      [selectedJournalDate]: { state: "saving" },
+    }));
     setFreeNotesByDate((prev) => ({
       ...prev,
       [selectedJournalDate]: html,
     }));
+
+    if (freeNotesSaveTimers.current[selectedJournalDate]) {
+      clearTimeout(freeNotesSaveTimers.current[selectedJournalDate]);
+    }
+    freeNotesSaveTimers.current[selectedJournalDate] = setTimeout(() => {
+      void (async () => {
+        const ok = await upsertFreeNotebookNote(
+          userId,
+          activeAccountId,
+          selectedJournalDate,
+          html
+        );
+        setFreeNotesSaveState((prev) => ({
+          ...prev,
+          [selectedJournalDate]: {
+            state: ok ? "saved" : "error",
+            ts: Date.now(),
+          },
+        }));
+      })();
+    }, 400);
   };
 
   const handleAskAi = async () => {
@@ -595,59 +691,178 @@ export default function NotebookPage() {
     }
   };
 
-  // acciones para custom notebooks
-  const handleAddNotebook = () => {
-    if (!isNbLoaded) return;
+  // acciones para custom notebooks (Supabase)
+  const handleAddNotebook = async () => {
+    if (!userId || !activeAccountId) return;
     const name = newNotebookName.trim() || L("Untitled notebook", "Notebook sin título");
-    const id = createId();
-    const now = new Date().toISOString();
+    const created = await createNotebookBook(userId, activeAccountId, name);
+    if (!created) return;
+    const section = await createNotebookSection(userId, created.id, L("General", "General"));
     setNbData((prev) => ({
-      notebooks: [...prev.notebooks, { id, name, createdAt: now }],
+      notebooks: [...prev.notebooks, created],
+      sections: section ? [...prev.sections, section] : prev.sections,
       pages: prev.pages,
     }));
-    setActiveNotebookId(id);
+    setActiveNotebookId(created.id);
+    if (section?.id) {
+      setActiveSectionId(section.id);
+      setSectionExpanded((prev) => ({ ...prev, [section.id]: true }));
+    }
     setActivePageId(null);
     setNewNotebookName("");
     setSubView("custom");
   };
 
-  const handleAddPage = () => {
-    if (!activeNotebookId || !isNbLoaded) return;
-    const id = createId();
-    const now = new Date().toISOString();
-    const newPage: LocalNotebookPage = {
-      id,
-      notebookId: activeNotebookId,
-      title: L("Untitled page", "Página sin título"),
-      createdAt: now,
-      updatedAt: now,
-      content: "",
-    };
+  const handleAddPageToSection = async (targetSectionId?: string | null) => {
+    if (!activeNotebookId || !userId) return;
+
+    let sectionId = targetSectionId || activeSectionId;
+    let newSection: LocalNotebookSection | null = null;
+
+    if (!sectionId) {
+      const fallback = nbData.sections.find((s) => s.notebook_id === activeNotebookId);
+      if (fallback) {
+        sectionId = fallback.id;
+      } else {
+        newSection = await createNotebookSection(
+          userId,
+          activeNotebookId,
+          L("General", "General")
+        );
+        sectionId = newSection?.id ?? null;
+      }
+    }
+
+    if (!sectionId) return;
+    const newPage = await createNotebookPage(
+      userId,
+      activeNotebookId,
+      sectionId,
+      L("Untitled page", "Página sin título")
+    );
+    if (!newPage) return;
+
     setNbData((prev) => ({
       notebooks: prev.notebooks,
+      sections: newSection ? [...prev.sections, newSection] : prev.sections,
       pages: [...prev.pages, newPage],
     }));
-    setActivePageId(id);
+    setActiveSectionId(sectionId);
+    setActivePageId(newPage.id);
+    if (newSection) {
+      setSectionExpanded((prev) => ({ ...prev, [newSection.id]: true }));
+    }
+  };
+
+  const handleAddPage = () => handleAddPageToSection(activeSectionId);
+
+  const handleAddSection = async () => {
+    if (!activeNotebookId || !userId) return;
+    const name = newSectionName.trim() || L("New section", "Nueva sección");
+    const newSection = await createNotebookSection(userId, activeNotebookId, name);
+    if (!newSection) return;
+    setNbData((prev) => ({
+      notebooks: prev.notebooks,
+      sections: [...prev.sections, newSection],
+      pages: prev.pages,
+    }));
+    setActiveSectionId(newSection.id);
+    setSectionExpanded((prev) => ({ ...prev, [newSection.id]: true }));
+    setNewSectionName("");
   };
 
   const updateActivePage = (patch: Partial<LocalNotebookPage>) => {
-    if (!activePage) return;
+    if (!activePage || !userId) return;
     const id = activePage.id;
     const now = new Date().toISOString();
     setNbData((prev) => ({
       notebooks: prev.notebooks,
+      sections: prev.sections,
       pages: prev.pages.map((p) =>
-        p.id === id ? { ...p, ...patch, updatedAt: now } : p
+        p.id === id ? { ...p, ...patch, updated_at: now } : p
       ),
     }));
+
+    if (pageSaveTimers.current[id]) {
+      clearTimeout(pageSaveTimers.current[id]);
+    }
+    setPageSaveState((prev) => ({ ...prev, [id]: { state: "saving" } }));
+    pageSaveTimers.current[id] = setTimeout(() => {
+      void (async () => {
+        try {
+          await updateNotebookPage(userId, id, {
+            title: patch.title ?? activePage.title,
+            content: patch.content ?? activePage.content,
+            section_id: patch.section_id ?? activePage.section_id ?? null,
+          });
+          setPageSaveState((prev) => ({
+            ...prev,
+            [id]: { state: "saved", ts: Date.now() },
+          }));
+        } catch {
+          setPageSaveState((prev) => ({
+            ...prev,
+            [id]: { state: "error", ts: Date.now() },
+          }));
+        }
+      })();
+    }, 400);
   };
 
+  if (planLoading) {
+    return (
+      <main className="min-h-screen bg-slate-950 text-slate-50">
+        <TopNav />
+        <div className="max-w-4xl mx-auto px-6 py-16">
+          <p className="text-sm text-slate-400">{L("Loading…", "Cargando…")}</p>
+        </div>
+      </main>
+    );
+  }
+
+  if (plan !== "advanced") {
+    return (
+      <main className="min-h-screen bg-slate-950 text-slate-50">
+        <TopNav />
+        <div className="max-w-4xl mx-auto px-6 py-16">
+          <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
+            <p className="text-emerald-300 text-[11px] uppercase tracking-[0.3em]">
+              {L("Advanced feature", "Función Advanced")}
+            </p>
+            <h1 className="text-xl font-semibold mt-2">
+              {L(
+                "Notebook is included in Advanced",
+                "El Notebook está incluido en Advanced"
+              )}
+            </h1>
+            <p className="text-sm text-slate-400 mt-2">
+              {L(
+                "Upgrade to Advanced to unlock the full notebook experience, custom pages, and richer journaling.",
+                "Actualiza a Advanced para desbloquear el notebook completo, páginas personalizadas y un journaling más profundo."
+              )}
+            </p>
+            <div className="mt-4 flex flex-wrap gap-3">
+              <Link
+                href="/billing"
+                className="px-4 py-2 rounded-xl bg-emerald-400 text-slate-950 text-xs font-semibold hover:bg-emerald-300 transition"
+              >
+                {L("Upgrade to Advanced", "Actualizar a Advanced")}
+              </Link>
+              <Link
+                href="/plans-comparison"
+                className="px-4 py-2 rounded-xl border border-slate-700 text-slate-200 text-xs hover:border-emerald-400 transition"
+              >
+                {L("Compare plans", "Comparar planes")}
+              </Link>
+            </div>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
   // Loading global
-  if (
-    !hasHydrated ||
-    authLoading ||
-    (user && entriesLoading)
-  ) {
+  if (authLoading || accountsLoading || entriesLoading || nbLoading) {
     return (
       <main className="min-h-screen bg-slate-950 text-slate-50 px-6 md:px-10 py-8">
         <h1 className="text-3xl font-semibold tracking-tight">
@@ -892,21 +1107,13 @@ export default function NotebookPage() {
                             <p className="mt-2">
                               {L("Entries:", "Entradas:")}{" "}
                               <span className="font-semibold">
-                                {Array.isArray(
-                                  (selectedJournalEntry as any).entries
-                                )
-                                  ? (selectedJournalEntry as any).entries.length
-                                  : 0}
+                                {entriesFromNotes.length}
                               </span>
                             </p>
                             <p>
                               {L("Exits:", "Salidas:")}{" "}
                               <span className="font-semibold">
-                                {Array.isArray(
-                                  (selectedJournalEntry as any).exits
-                                )
-                                  ? (selectedJournalEntry as any).exits.length
-                                  : 0}
+                                {exitsFromNotes.length}
                               </span>
                             </p>
                           </div>
@@ -940,28 +1147,87 @@ export default function NotebookPage() {
 
                           <div className="rounded-2xl bg-slate-950/70 border border-slate-800 p-3">
                             <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
-                              {L("Quick description", "Descripción rápida")}
+                              {L("Tags used", "Tags usados")}
                             </p>
-                            <p className="mt-2 text-sm text-slate-200">
-                              {getNotebookPreview(
-                                (selectedJournalEntry as any).notes,
-                                L("Tap to open this notebook page summary.", "Toca para abrir el resumen de esta página.")
-                              ) ??
-                                L(
-                                  "Write a short description in your journal notes to see it here as a quick summary.",
-                                  "Escribe una descripción corta en tus notas del journal para verla aquí como resumen."
-                                )}
-                            </p>
+                            <div className="mt-2 flex flex-wrap gap-2">
+                              {combinedTags.length > 0 ? (
+                                combinedTags.map((tag) => (
+                                  <span
+                                    key={tag}
+                                    className="rounded-full border border-emerald-400/40 bg-emerald-500/10 px-2 py-0.5 text-[11px] text-emerald-200"
+                                  >
+                                    {tag}
+                                  </span>
+                                ))
+                              ) : (
+                                <span className="text-[11px] text-slate-400">
+                                  {L("No tags yet", "Aún sin tags")}
+                                </span>
+                              )}
+                            </div>
                           </div>
+                        </div>
+
+                        <div className="mt-4 grid gap-4 md:grid-cols-3 text-sm text-slate-200">
+                          {[
+                            {
+                              title: L("Premarket notes", "Notas premarket"),
+                              body: premarketText,
+                            },
+                            {
+                              title: L("Inside trade notes", "Notas en sesión"),
+                              body: liveText,
+                            },
+                            {
+                              title: L("After market notes", "Notas post-market"),
+                              body: postText,
+                            },
+                          ].map((card) => (
+                            <div key={card.title} className="rounded-2xl bg-slate-950/70 border border-slate-800 p-3">
+                              <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
+                                {card.title}
+                              </p>
+                              <p className="mt-2 text-sm text-slate-200 line-clamp-5">
+                                {card.body ||
+                                  L(
+                                    "No notes saved yet for this block.",
+                                    "Aún no hay notas guardadas para este bloque."
+                                  )}
+                              </p>
+                            </div>
+                          ))}
                         </div>
 
                         {/* FREE NOTES + AI */}
                         <div className="grid gap-4 lg:grid-cols-[minmax(0,2fr),minmax(0,1.4fr)] mt-4">
                           {/* FREE NOTES */}
                           <div className="space-y-3">
-                            <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
-                              {L("Free notebook space", "Espacio libre del notebook")}
-                            </p>
+                            <div className="flex items-center justify-between">
+                              <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
+                                {L("Free notebook space", "Espacio libre del notebook")}
+                              </p>
+                              {freeNotesStatus?.state ? (
+                                <span
+                                  className={`text-[11px] font-medium ${
+                                    freeNotesStatus.state === "saving"
+                                      ? "text-amber-300"
+                                      : freeNotesStatus.state === "error"
+                                      ? "text-rose-300"
+                                      : "text-emerald-300"
+                                  }`}
+                                >
+                                  {freeNotesStatus.state === "saving" &&
+                                    L("Saving…", "Guardando…")}
+                                  {freeNotesStatus.state === "error" &&
+                                    L("Save failed", "Error al guardar")}
+                                  {freeNotesStatus.state === "saved" &&
+                                    `${L("Saved", "Guardado")} ${formatSavedTime(
+                                      freeNotesStatus.ts,
+                                      lang
+                                    )}`}
+                                </span>
+                              ) : null}
+                            </div>
 
                             <RichNotebookEditor
                               value={selectedFreeNotes}
@@ -1040,56 +1306,66 @@ export default function NotebookPage() {
                   </p>
                   <h2 className="text-xl font-semibold text-slate-50 mt-1">
                     {L(
-                      "Create notebooks and free pages for courses, ideas and notes",
-                      "Crea notebooks y páginas libres para cursos, ideas y notas"
+                      "A OneNote-style workspace for your trading knowledge",
+                      "Un espacio tipo OneNote para tu conocimiento de trading"
                     )}
                   </h2>
                 </div>
 
-                {/* Botones de crear notebook y page */}
-                <div className="flex flex-col gap-2 items-stretch sm:flex-row sm:items-center">
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="text"
-                      placeholder={L("New notebook name", "Nombre del nuevo notebook")}
-                      value={newNotebookName}
-                      onChange={(e) =>
-                        setNewNotebookName(e.target.value)
-                      }
-                      className="rounded-full bg-slate-900/80 border border-slate-700 px-3 py-1.5 text-xs text-slate-100 placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-emerald-400/60"
-                    />
-                    <button
-                      type="button"
-                      onClick={handleAddNotebook}
-                      disabled={!isNbLoaded}
-                      className="rounded-full bg-emerald-500/90 px-3 py-1.5 text-xs font-semibold text-slate-950 hover:bg-emerald-400 disabled:opacity-50 disabled:cursor-not-allowed transition"
-                    >
-                      {L("Create notebook", "Crear notebook")}
-                    </button>
-                  </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <input
+                    type="text"
+                    placeholder={L("New notebook name", "Nombre del nuevo notebook")}
+                    value={newNotebookName}
+                    onChange={(e) => setNewNotebookName(e.target.value)}
+                    className="rounded-full bg-slate-900/80 border border-slate-700 px-3 py-1.5 text-xs text-slate-100 placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-emerald-400/60"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleAddNotebook}
+                    disabled={nbLoading}
+                    className="rounded-full bg-emerald-500/90 px-3 py-1.5 text-xs font-semibold text-slate-950 hover:bg-emerald-400 disabled:opacity-50 disabled:cursor-not-allowed transition"
+                  >
+                    {L("Create notebook", "Crear notebook")}
+                  </button>
+
+                  <input
+                    type="text"
+                    placeholder={L("New section", "Nueva sección")}
+                    value={newSectionName}
+                    onChange={(e) => setNewSectionName(e.target.value)}
+                    className="rounded-full bg-slate-900/80 border border-slate-700 px-3 py-1.5 text-xs text-slate-100 placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-emerald-400/60"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleAddSection}
+                    disabled={!activeNotebookId || nbLoading}
+                    className="rounded-full bg-slate-900/80 border border-emerald-500/60 px-3 py-1.5 text-xs font-semibold text-emerald-200 hover:bg-emerald-500/10 disabled:opacity-40 disabled:cursor-not-allowed transition"
+                  >
+                    {L("Create section", "Crear sección")}
+                  </button>
 
                   <button
                     type="button"
                     onClick={handleAddPage}
-                    disabled={!activeNotebookId || !isNbLoaded}
-                    className="rounded-full bg-slate-900/80 border border-emerald-500/60 px-3 py-1.5 text-xs font-semibold text-emerald-200 hover:bg-emerald-500/10 disabled:opacity-40 disabled:cursor-not-allowed transition"
+                    disabled={!activeNotebookId || nbLoading}
+                    className="rounded-full bg-slate-900/80 border border-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:border-emerald-400/60 hover:text-emerald-100 disabled:opacity-40 disabled:cursor-not-allowed transition"
                   >
-                    {L("Create page", "Crear página")}
+                    {L("New page", "Nueva página")}
                   </button>
                 </div>
               </div>
 
-              <div className="grid gap-4 md:grid-cols-[260px,1fr]">
-                {/* Sidebar notebooks */}
+              <div className="grid gap-4 lg:grid-cols-[220px_320px_1fr]">
+                {/* Notebooks column */}
                 <aside className="rounded-2xl border border-slate-800 bg-slate-950/80 p-3">
-                  {!isNbLoaded ? (
-                    <p className="text-xs text-slate-500">
-                      {L("Loading notebooks…", "Cargando notebooks…")}
-                    </p>
-                  ) : nbData.notebooks.length === 0 ? (
-                    <p className="text-xs text-slate-500">
-                      {L("No custom notebooks yet. Create one to start writing.", "Aún no hay notebooks personalizados. Crea uno para empezar a escribir.")}
-                    </p>
+                  <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500 mb-2">
+                    {L("Notebooks", "Notebooks")}
+                  </p>
+                  {nbLoading ? (
+                    <p className="text-xs text-slate-500">{L("Loading…", "Cargando…")}</p>
+                  ) : nbData.notebooks.length == 0 ? (
+                    <p className="text-xs text-slate-500">{L("No notebooks yet.", "Aún no hay notebooks.")}</p>
                   ) : (
                     <ul className="space-y-1.5">
                       {nbData.notebooks.map((nb) => {
@@ -1102,7 +1378,7 @@ export default function NotebookPage() {
                                 setActiveNotebookId(nb.id);
                                 setActivePageId(null);
                               }}
-                              className={`w-full text-left px-3 py-1.5 rounded-xl text-xs font-medium transition ${
+                              className={`w-full text-left px-3 py-2 rounded-xl text-xs font-medium transition ${
                                 isActive
                                   ? "bg-emerald-500/10 text-emerald-200 border border-emerald-400/60"
                                   : "bg-slate-900/60 text-slate-200 border border-slate-800 hover:border-emerald-400/40 hover:text-emerald-100"
@@ -1117,100 +1393,163 @@ export default function NotebookPage() {
                   )}
                 </aside>
 
-                {/* Main notebook editor */}
-                <section className="rounded-2xl border border-slate-800 bg-slate-950/80 p-4 md:p-5">
-                  {!activeNotebook ? (
-                    <p className="text-sm text-slate-500">
-                      {L("Select a notebook on the left or create a new one.", "Selecciona un notebook a la izquierda o crea uno nuevo.")}
+                {/* Sections + pages column */}
+                <aside className="rounded-2xl border border-slate-800 bg-slate-950/80 p-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
+                      {L("Sections & pages", "Secciones y páginas")}
                     </p>
+                    <span className="text-[11px] text-slate-500">{activeNotebookSections.length}</span>
+                  </div>
+
+                  {activeNotebookSections.length === 0 ? (
+                    <p className="text-xs text-slate-500">{L("Create a section to begin.", "Crea una sección para empezar.")}</p>
                   ) : (
+                    <div className="space-y-2">
+                      {activeNotebookSections.map((section) => {
+                        const isOpen = sectionExpanded[section.id] ?? true;
+                        const sectionPages = pagesBySection[section.id] || [];
+                        return (
+                          <div key={section.id} className="rounded-xl border border-slate-800 bg-slate-900/60 p-2">
+                            <div className="flex items-center justify-between">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setActiveSectionId(section.id);
+                                  setSectionExpanded((prev) => ({
+                                    ...prev,
+                                    [section.id]: !isOpen,
+                                  }));
+                                }}
+                                className="text-left text-xs font-semibold text-slate-100"
+                              >
+                                {section.name}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setActiveSectionId(section.id);
+                                  handleAddPageToSection(section.id);
+                                }}
+                                className="text-[11px] rounded-full border border-emerald-400/50 px-2 py-0.5 text-emerald-200 hover:bg-emerald-500/10"
+                              >
+                                {L("+ Page", "+ Página")}
+                              </button>
+                            </div>
+
+                            <AnimatePresence initial={false}>
+                              {isOpen && (
+                                <motion.div
+                                  initial={{ height: 0, opacity: 0 }}
+                                  animate={{ height: "auto", opacity: 1 }}
+                                  exit={{ height: 0, opacity: 0 }}
+                                  transition={{ duration: 0.2 }}
+                                  className="overflow-hidden"
+                                >
+                                  <div className="mt-2 space-y-1">
+                                    {sectionPages.length === 0 ? (
+                                      <p className="text-[11px] text-slate-500 px-1">
+                                        {L("No pages yet.", "Sin páginas aún.")}
+                                      </p>
+                                    ) : (
+                                      sectionPages.map((p) => {
+                                        const isActive = p.id === activePage?.id;
+                                        return (
+                                          <button
+                                            key={p.id}
+                                            type="button"
+                                            onClick={() => setActivePageId(p.id)}
+                                            className={`w-full text-left rounded-lg px-2 py-1 text-[11px] border transition ${
+                                              isActive
+                                                ? "border-emerald-400/70 bg-emerald-500/10 text-emerald-50"
+                                                : "border-slate-800 bg-slate-900/70 text-slate-200 hover:border-emerald-400/40"
+                                            }`}
+                                          >
+                                            <div className="font-medium truncate">{p.title}</div>
+                                            <p className="text-[10px] text-slate-400">
+                                              {p.updated_at
+                                                ? formatShortDate(p.updated_at.slice(0, 10), lang)
+                                                : "--"}
+                                            </p>
+                                          </button>
+                                        );
+                                      })
+                                    )}
+                                  </div>
+                                </motion.div>
+                              )}
+                            </AnimatePresence>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </aside>
+
+                {/* Editor */}
+                <section className="rounded-2xl border border-slate-800 bg-slate-900/80 p-4 md:p-6 space-y-4">
+                  {activeNotebook ? (
                     <>
                       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
                         <div>
-                          <p className="text-xs uppercase tracking-[0.16em] text-slate-500">
-                            {L("Notebook", "Notebook")}
-                          </p>
-                          <h3 className="text-lg font-semibold text-slate-50">
-                            {activeNotebook.name}
-                          </h3>
-                          <p className="text-[11px] text-slate-500 mt-1">
-                            {L("Created", "Creado")}{" "}
-                            {formatShortDate(
-                              activeNotebook.createdAt.slice(0, 10),
-                              lang
-                            )}
-                          </p>
+                          <p className="text-xs uppercase tracking-[0.18em] text-slate-500">{L("Notebook", "Notebook")}</p>
+                          <h3 className="text-xl font-semibold">{activeNotebook.name}</h3>
                         </div>
-
-                        <div className="flex items-center gap-2">
-                          {activeNotebookPages.length > 0 && (
-                            <select
-                              value={activePageId ?? ""}
-                              onChange={(e) =>
-                                setActivePageId(e.target.value || null)
-                              }
-                              className="rounded-full bg-slate-900/80 border border-slate-700 px-3 py-1.5 text-xs text-slate-100 focus:outline-none focus:ring-1 focus:ring-emerald-400/60"
-                            >
-                                  {activeNotebookPages.map((p) => (
-                                    <option key={p.id} value={p.id}>
-                                      {p.title || L("Untitled page", "Página sin título")}
-                                    </option>
-                                  ))}
-                                </select>
-                              )}
-                        </div>
+                        {activePage && (
+                          <input
+                            type="text"
+                            value={activePage.title}
+                            onChange={(e) => updateActivePage({ title: e.target.value })}
+                            className="rounded-xl bg-slate-950/80 border border-slate-800 px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-emerald-400/60"
+                          />
+                        )}
                       </div>
 
-                      {activeNotebookPages.length === 0 ? (
-                        <p className="text-sm text-slate-500 mt-4">
-                          {L(
-                            "This notebook doesn't have pages yet. Use \"Create page\" to start writing.",
-                            "Este notebook aún no tiene páginas. Usa \"Crear página\" para empezar a escribir."
-                          )}
-                        </p>
-                      ) : activePage ? (
-                        <div className="mt-4 space-y-3">
-                          <div className="space-y-2">
-                            <input
-                              type="text"
-                              value={activePage.title}
-                              onChange={(e) =>
-                                updateActivePage({
-                                  title: e.target.value,
-                                })
-                              }
-                              placeholder={L("Page title", "Título de la página")}
-                              className="w-full rounded-2xl bg-slate-900/90 border border-slate-700 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-emerald-400/60"
-                            />
-                            <p className="text-[11px] text-slate-500">
-                              {L("Last updated", "Última actualización")}{" "}
-                              {formatShortDate(
-                                activePage.updatedAt.slice(0, 10),
-                                lang
-                              )}
+                      {activePage ? (
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between">
+                            <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
+                              {L("Page notes", "Notas de la página")}
                             </p>
+                            {activePageStatus?.state ? (
+                              <span
+                                className={`text-[11px] font-medium ${
+                                  activePageStatus.state === "saving"
+                                    ? "text-amber-300"
+                                    : activePageStatus.state === "error"
+                                    ? "text-rose-300"
+                                    : "text-emerald-300"
+                                }`}
+                              >
+                                {activePageStatus.state === "saving" &&
+                                  L("Saving…", "Guardando…")}
+                                {activePageStatus.state === "error" &&
+                                  L("Save failed", "Error al guardar")}
+                                {activePageStatus.state === "saved" &&
+                                  `${L("Saved", "Guardado")} ${formatSavedTime(
+                                    activePageStatus.ts,
+                                    lang
+                                  )}`}
+                              </span>
+                            ) : null}
                           </div>
-
-                          {/* Editor tipo OneNote simple (texto libre) */}
-                          <div className="relative rounded-[28px] border border-slate-700/80 bg-slate-900/90 shadow-inner shadow-slate-950/50 overflow-hidden">
-                            <div className="absolute inset-0 opacity-35 pointer-events-none bg-[linear-gradient(to_bottom,rgba(148,163,184,0.25)_1px,transparent_1px)] bg-size-[100%_28px]" />
-                            <textarea
-                              value={activePage.content}
-                              onChange={(e) =>
-                                updateActivePage({
-                                  content: e.target.value,
-                                })
-                              }
-                              placeholder={L(
-                                "Write anything here: course notes, reflections, trading lessons, ideas...",
-                                "Escribe aquí: notas de curso, reflexiones, lecciones de trading, ideas..."
-                              )}
-                              className="relative w-full min-h-[220px] md:min-h-80 resize-y bg-transparent px-4 py-4 text-sm text-slate-100 focus:outline-none"
-                            />
-                          </div>
+                          <RichNotebookEditor
+                            value={activePage.content}
+                            onChange={(html) => updateActivePage({ content: html })}
+                            placeholder={L("Write your notes here...", "Escribe tus notas aquí...")}
+                            minHeight={420}
+                          />
                         </div>
-                      ) : null}
+                      ) : (
+                        <p className="text-sm text-slate-500">
+                          {L("Select a page to start writing.", "Selecciona una página para empezar a escribir.")}
+                        </p>
+                      )}
                     </>
+                  ) : (
+                    <p className="text-sm text-slate-500">
+                      {L("Select or create a notebook to start.", "Selecciona o crea un notebook para empezar.")}
+                    </p>
                   )}
                 </section>
               </div>

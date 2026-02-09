@@ -10,6 +10,12 @@ export default function Home() {
   const lang = resolveLocale(locale);
   const isEs = lang === "es";
   const L = (en: string, es: string) => (isEs ? es : en);
+  const cardGradient = "from-emerald-500/10 via-blue-500/10 to-violet-500/12";
+  const cardGlow = "from-emerald-500/14 via-blue-500/10 to-violet-500/14";
+  const cardBase =
+    "relative overflow-hidden rounded-2xl bg-gradient-to-br p-6 shadow-[0_12px_38px_rgba(0,0,0,0.35)] min-h-[140px] h-full";
+  const cardTitleClass = "relative text-white font-semibold text-[13px]";
+  const cardDescClass = "relative text-white/80 text-[11px] mt-2 leading-relaxed";
   const year = new Date().getFullYear();
 
   return (
@@ -382,7 +388,6 @@ export default function Home() {
                         "Start with a clear plan to build structure and targets.",
                         "Empieza con un plan claro para crear estructura y metas."
                       ),
-                      gradient: "from-emerald-500/22 via-indigo-500/18 to-violet-500/22",
                     },
                     {
                       label: L("Log execution + sentiment", "Registrar ejecución + sentimiento"),
@@ -390,7 +395,6 @@ export default function Home() {
                         "Knowing yourself leads to better decisions.",
                         "Conocerte mejor te ayuda a tomar mejores decisiones."
                       ),
-                      gradient: "from-emerald-500/22 via-indigo-500/18 to-violet-500/22",
                     },
                     {
                       label: L("Rules = self‑leadership", "Reglas = auto‑liderazgo"),
@@ -398,7 +402,6 @@ export default function Home() {
                         "Follow the rules you set. Respect your process.",
                         "Cumple tus reglas y respeta tu proceso."
                       ),
-                      gradient: "from-emerald-500/22 via-indigo-500/18 to-violet-500/22",
                     },
                     {
                       label: L("Metrics that reveal your edge", "Métricas que revelan tu edge"),
@@ -406,7 +409,6 @@ export default function Home() {
                         "Understand execution and decisions to improve.",
                         "Entiende tu ejecución y decisiones para mejorar."
                       ),
-                      gradient: "from-emerald-500/22 via-indigo-500/18 to-violet-500/22",
                     },
                     {
                       label: L("AI coach that stays objective", "IA objetiva como coach"),
@@ -414,7 +416,6 @@ export default function Home() {
                         "AI reviews every decision, sentiment, and strategy to suggest a better path.",
                         "La IA revisa cada decisión, sentimiento y estrategia para sugerir un mejor camino."
                       ),
-                      gradient: "from-emerald-500/22 via-indigo-500/18 to-violet-500/22",
                     },
                     {
                       label: L("Turn trading into a business", "Convierte el trading en un negocio"),
@@ -422,7 +423,6 @@ export default function Home() {
                         "Build your business plan: goals, rules, schedule, cost control, and when to scale or pause.",
                         "Crea tu plan de negocio: objetivos, reglas, horario, control de costos y cuándo escalar o pausar."
                       ),
-                      gradient: "from-emerald-500/22 via-indigo-500/18 to-violet-500/22",
                     },
                     {
                       label: L("Reduce uncertainty with process", "Reduce la incertidumbre con proceso"),
@@ -430,7 +430,6 @@ export default function Home() {
                         "Anchors you to a clear flow: setup → entry → management → exit → review.",
                         "Te ancla a un flujo claro: setup → entrada → gestión → salida → revisión."
                       ),
-                      gradient: "from-emerald-500/22 via-indigo-500/18 to-violet-500/22",
                     },
                     {
                       label: L("Risk management that protects capital", "Gestión de riesgo que protege capital"),
@@ -438,16 +437,15 @@ export default function Home() {
                         "Define risk per trade, daily/weekly limits, sizing rules, and when to stop.",
                         "Define riesgo por trade, límites diarios/semanales, sizing y cuándo detenerte."
                       ),
-                      gradient: "from-emerald-500/22 via-indigo-500/18 to-violet-500/22",
                     },
                   ].map((row, i) => (
                     <div
                       key={i}
-                      className={`relative overflow-hidden rounded-2xl bg-gradient-to-br ${row.gradient} p-6 shadow-[0_12px_46px_rgba(0,0,0,0.45)] min-h-[132px] h-full`}
+                      className={`${cardBase} ${cardGradient}`}
                     >
-                      <div className="pointer-events-none absolute -inset-6 rounded-3xl bg-gradient-to-br from-emerald-500/25 via-indigo-500/20 to-violet-500/25 blur-2xl opacity-70 animate-pulse [animation-duration:6s]" />
-                      <div className="relative text-slate-50 font-semibold text-[13px]">{row.label}</div>
-                      <div className="relative text-slate-300 text-[11px] mt-2 leading-relaxed">{row.desc}</div>
+                      <div className={`pointer-events-none absolute -inset-6 rounded-3xl bg-gradient-to-br ${cardGlow} blur-2xl opacity-30 animate-pulse [animation-duration:7s]`} />
+                      <div className={cardTitleClass}>{row.label}</div>
+                      <div className={cardDescClass}>{row.desc}</div>
                     </div>
                   ))}
                 </div>
@@ -491,7 +489,6 @@ export default function Home() {
                     "Imports and maps every leg automatically.",
                     "Importa y mapea cada pierna automáticamente."
                   ),
-                  gradient: "from-emerald-500/22 via-indigo-500/18 to-violet-500/22",
                 },
                 {
                   label: L("Premium selling strategies", "Estrategias de venta de prima"),
@@ -499,7 +496,6 @@ export default function Home() {
                     "Tracks credits, debits, and rollouts in one place.",
                     "Registra créditos, débitos y rollouts en un solo lugar."
                   ),
-                  gradient: "from-emerald-500/22 via-indigo-500/18 to-violet-500/22",
                 },
                 {
                   label: L("Complex options flows", "Flujos complejos de opciones"),
@@ -507,7 +503,6 @@ export default function Home() {
                     "Classifies strategy types and timestamps them.",
                     "Clasifica tipos de estrategia y sus timestamps."
                   ),
-                  gradient: "from-emerald-500/22 via-indigo-500/18 to-violet-500/22",
                 },
                 {
                   label: L("Structured in minutes", "Estructurado en minutos"),
@@ -515,16 +510,15 @@ export default function Home() {
                     "Analytics are ready as soon as the import finishes.",
                     "La analítica queda lista al terminar la importación."
                   ),
-                  gradient: "from-emerald-500/22 via-indigo-500/18 to-violet-500/22",
                 },
               ].map((row, i) => (
                 <div
                   key={i}
-                  className={`relative overflow-hidden rounded-2xl bg-gradient-to-br ${row.gradient} p-6 shadow-[0_12px_46px_rgba(0,0,0,0.45)] min-h-[132px] h-full`}
+                  className={`${cardBase} ${cardGradient}`}
                 >
-                  <div className="pointer-events-none absolute -inset-6 rounded-3xl bg-gradient-to-br from-emerald-500/25 via-indigo-500/20 to-violet-500/25 blur-2xl opacity-70 animate-pulse [animation-duration:6s]" />
-                  <div className="relative text-slate-50 font-semibold text-[13px]">{row.label}</div>
-                  <div className="relative text-slate-300 text-[11px] mt-2 leading-relaxed">{row.desc}</div>
+                  <div className={`pointer-events-none absolute -inset-6 rounded-3xl bg-gradient-to-br ${cardGlow} blur-2xl opacity-30 animate-pulse [animation-duration:7s]`} />
+                  <div className={cardTitleClass}>{row.label}</div>
+                  <div className={cardDescClass}>{row.desc}</div>
                 </div>
               ))}
             </div>
@@ -552,7 +546,6 @@ export default function Home() {
                   "Import trades fast. Single, premium-selling, and complex options strategies are mapped instantly.",
                   "Importa trades rápido. Trades simples, venta de prima y estrategias complejas quedan mapeadas al instante."
                 ),
-                tone: "from-emerald-500/22 via-indigo-500/18 to-violet-500/22",
               },
               {
                 title: L("Unlimited accountability", "Accountability real"),
@@ -560,7 +553,6 @@ export default function Home() {
                   "Rules, goals, and alerts keep you honest and consistent.",
                   "Reglas, metas y alertas te mantienen honesto y consistente."
                 ),
-                tone: "from-emerald-500/22 via-indigo-500/18 to-violet-500/22",
               },
               {
                 title: L("AI trading review", "Revisión con IA"),
@@ -568,7 +560,6 @@ export default function Home() {
                   "AI detects winning patterns and warns you about losing behaviors.",
                   "La IA detecta patrones ganadores y te advierte sobre comportamientos perdedores."
                 ),
-                tone: "from-emerald-500/22 via-indigo-500/18 to-violet-500/22",
               },
               {
                 title: L("Automated analytics statistics", "Analítica automática"),
@@ -576,16 +567,15 @@ export default function Home() {
                   "No manual calculations. Your performance stats are generated instantly.",
                   "Sin cálculos manuales. Tus estadísticas se generan al instante."
                 ),
-                tone: "from-emerald-500/22 via-indigo-500/18 to-violet-500/22",
               },
             ].map((card) => (
               <div
                 key={card.title}
-                className={`relative overflow-hidden rounded-2xl bg-gradient-to-br ${card.tone} p-6 shadow-[0_12px_46px_rgba(0,0,0,0.45)]`}
+                className={`${cardBase} ${cardGradient}`}
               >
-                <div className="pointer-events-none absolute -inset-6 rounded-3xl bg-gradient-to-br from-emerald-500/25 via-indigo-500/20 to-violet-500/25 blur-2xl opacity-70 animate-pulse [animation-duration:6s]" />
-                <p className="relative text-white font-semibold text-[13px]">{card.title}</p>
-                <p className="relative text-white/80 text-[11px] mt-2 leading-relaxed">{card.desc}</p>
+                <div className={`pointer-events-none absolute -inset-6 rounded-3xl bg-gradient-to-br ${cardGlow} blur-2xl opacity-30 animate-pulse [animation-duration:7s]`} />
+                <p className={cardTitleClass}>{card.title}</p>
+                <p className={cardDescClass}>{card.desc}</p>
               </div>
             ))}
           </div>

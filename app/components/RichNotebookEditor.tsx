@@ -4,7 +4,95 @@ import React, { useEffect, useState } from "react";
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
 import { useEditor, EditorContent } from "@tiptap/react";
+import { Mark, mergeAttributes } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
+import Underline from "@tiptap/extension-underline";
+import Link from "@tiptap/extension-link";
+import TextAlign from "@tiptap/extension-text-align";
+import { Table } from "@tiptap/extension-table";
+import TableRow from "@tiptap/extension-table-row";
+import TableHeader from "@tiptap/extension-table-header";
+import TableCell from "@tiptap/extension-table-cell";
+import {
+  Bold,
+  Italic,
+  Underline as UnderlineIcon,
+  Strikethrough,
+  Heading2,
+  List,
+  ListOrdered,
+  Quote,
+  Code,
+  Link2,
+  Table2,
+  Highlighter,
+} from "lucide-react";
+
+declare module "@tiptap/core" {
+  interface Commands<ReturnType> {
+    textStyle: {
+      setFontFamily: (font: string | null) => ReturnType;
+      setFontSize: (size: string | null) => ReturnType;
+      setHighlight: (color: string | null) => ReturnType;
+      unsetTextStyle: () => ReturnType;
+    };
+  }
+}
+
+const TextStyle = Mark.create({
+  name: "textStyle",
+  addAttributes() {
+    return {
+      fontFamily: {
+        default: null,
+        parseHTML: (el) => (el as HTMLElement).style.fontFamily || null,
+      },
+      fontSize: {
+        default: null,
+        parseHTML: (el) => (el as HTMLElement).style.fontSize || null,
+      },
+      backgroundColor: {
+        default: null,
+        parseHTML: (el) => (el as HTMLElement).style.backgroundColor || null,
+      },
+    };
+  },
+  parseHTML() {
+    return [{ tag: "span[style]" }];
+  },
+  renderHTML({ HTMLAttributes }) {
+    const { fontFamily, fontSize, backgroundColor, ...rest } = HTMLAttributes as any;
+    const styles = [
+      fontFamily ? `font-family: ${fontFamily}` : null,
+      fontSize ? `font-size: ${fontSize}` : null,
+      backgroundColor ? `background-color: ${backgroundColor}` : null,
+    ]
+      .filter(Boolean)
+      .join("; ");
+
+    return ["span", mergeAttributes(rest, styles ? { style: styles } : {}), 0];
+  },
+  addCommands() {
+    return {
+      setFontFamily:
+        (font) =>
+        ({ chain }) =>
+          chain().setMark(this.name, { fontFamily: font }).run(),
+      setFontSize:
+        (size) =>
+        ({ chain }) =>
+          chain().setMark(this.name, { fontSize: size }).run(),
+      setHighlight:
+        (color) =>
+        ({ chain }) =>
+          chain().setMark(this.name, { backgroundColor: color }).run(),
+      unsetTextStyle:
+        () =>
+        ({ chain }) =>
+          chain().unsetMark(this.name).run(),
+    };
+  },
+});
 
 type RichNotebookEditorProps = {
   value: string;
@@ -29,6 +117,14 @@ export default function RichNotebookEditor({
         bulletList: { keepMarks: true },
         orderedList: { keepMarks: true },
       }),
+      Underline,
+      TextStyle,
+      Link.configure({ openOnClick: false }),
+      TextAlign.configure({ types: ["heading", "paragraph"] }),
+      Table.configure({ resizable: true }),
+      TableRow,
+      TableHeader,
+      TableCell,
     ],
     content: value || "",
     editable: true,
@@ -75,36 +171,76 @@ export default function RichNotebookEditor({
   }, [editor]);
 
   if (!editor) {
-    // estado mientras se monta el editor
     return (
       <div
-        className="rounded-[28px] border border-slate-700/80 bg-slate-950/90"
+        className="rounded-2xl border border-slate-800/80 bg-slate-950/80 shadow-inner shadow-slate-950/60"
         style={{ minHeight }}
       />
     );
   }
 
   const toolbarButtonBase =
-    "inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium transition";
+    "inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-[11px] font-semibold tracking-wide transition";
+
+  const activeTextStyle = editor.getAttributes("textStyle") as any;
+  const currentFont = activeTextStyle?.fontFamily || "Inter";
+  const currentSize = activeTextStyle?.fontSize || "14px";
+  const isHighlighted = Boolean(activeTextStyle?.backgroundColor);
+
+  const setLink = () => {
+    if (!editor) return;
+    const prev = editor.getAttributes("link").href as string | undefined;
+    const url = window.prompt(L("Link URL", "URL del enlace"), prev || "");
+    if (url === null) return;
+    if (url.trim() === "") {
+      editor.chain().focus().extendMarkRange("link").unsetLink().run();
+      return;
+    }
+    editor.chain().focus().extendMarkRange("link").setLink({ href: url.trim() }).run();
+  };
 
   return (
     <div
-      className="rounded-[28px] border border-slate-700/80 bg-slate-950/90 shadow-inner shadow-slate-950/50 overflow-hidden"
+      className="rounded-2xl border border-slate-800/90 bg-slate-950/80 shadow-[0_20px_60px_rgba(0,0,0,0.35)] overflow-hidden"
       style={{ minHeight }}
     >
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-2 border-b border-slate-800/80 bg-slate-950/90 px-4 py-2">
+        <div className="flex items-center gap-2 mr-2">
+          <select
+            className="rounded-full border border-slate-700 bg-slate-900/80 px-2 py-1 text-[11px] text-slate-200"
+            value={currentFont}
+            onChange={(e) => editor.chain().focus().setFontFamily(e.target.value).run()}
+          >
+            <option value="Inter">Inter</option>
+            <option value="system-ui">System</option>
+            <option value="Georgia">Georgia</option>
+            <option value="Times New Roman">Times New Roman</option>
+            <option value="Menlo">Menlo</option>
+          </select>
+          <select
+            className="rounded-full border border-slate-700 bg-slate-900/80 px-2 py-1 text-[11px] text-slate-200"
+            value={currentSize}
+            onChange={(e) => editor.chain().focus().setFontSize(e.target.value).run()}
+          >
+            {["12px", "14px", "16px", "18px", "20px", "24px"].map((size) => (
+              <option key={size} value={size}>
+                {size.replace("px", "")}
+              </option>
+            ))}
+          </select>
+        </div>
         <button
           type="button"
           onClick={() => editor.chain().focus().toggleBold().run()}
           className={`${toolbarButtonBase} ${
             editor.isActive("bold")
-              ? "bg-slate-100 text-slate-900 border-slate-200"
-              : "bg-slate-900 text-slate-200 border-slate-700 hover:border-emerald-400/60"
+              ? "bg-emerald-200 text-slate-900 border-emerald-200"
+              : "bg-slate-900/70 text-slate-200 border-slate-700 hover:border-emerald-400/60"
           }`}
+          title={L("Bold", "Negrita")}
         >
-          <span className="font-semibold">B</span>
-          <span>{L("Bold", "Negrita")}</span>
+          <Bold size={14} />
         </button>
 
         <button
@@ -112,12 +248,51 @@ export default function RichNotebookEditor({
           onClick={() => editor.chain().focus().toggleItalic().run()}
           className={`${toolbarButtonBase} ${
             editor.isActive("italic")
-              ? "bg-slate-100 text-slate-900 border-slate-200"
-              : "bg-slate-900 text-slate-200 border-slate-700 hover:border-emerald-400/60"
+              ? "bg-emerald-200 text-slate-900 border-emerald-200"
+              : "bg-slate-900/70 text-slate-200 border-slate-700 hover:border-emerald-400/60"
           }`}
+          title={L("Italic", "Itálica")}
         >
-          <span className="italic">I</span>
-          <span>{L("Italic", "Itálica")}</span>
+          <Italic size={14} />
+        </button>
+
+        <button
+          type="button"
+          onClick={() => editor.chain().focus().toggleUnderline().run()}
+          className={`${toolbarButtonBase} ${
+            editor.isActive("underline")
+              ? "bg-emerald-200 text-slate-900 border-emerald-200"
+              : "bg-slate-900/70 text-slate-200 border-slate-700 hover:border-emerald-400/60"
+          }`}
+          title={L("Underline", "Subrayado")}
+        >
+          <UnderlineIcon size={14} />
+        </button>
+
+        <button
+          type="button"
+          onClick={() => editor.chain().focus().toggleStrike().run()}
+          className={`${toolbarButtonBase} ${
+            editor.isActive("strike")
+              ? "bg-emerald-200 text-slate-900 border-emerald-200"
+              : "bg-slate-900/70 text-slate-200 border-slate-700 hover:border-emerald-400/60"
+          }`}
+          title={L("Strike", "Tachar")}
+        >
+          <Strikethrough size={14} />
+        </button>
+
+        <button
+          type="button"
+          onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}
+          className={`${toolbarButtonBase} ${
+            editor.isActive("heading", { level: 2 })
+              ? "bg-emerald-200 text-slate-900 border-emerald-200"
+              : "bg-slate-900/70 text-slate-200 border-slate-700 hover:border-emerald-400/60"
+          }`}
+          title={L("Heading", "Título")}
+        >
+          <Heading2 size={14} />
         </button>
 
         <button
@@ -125,12 +300,12 @@ export default function RichNotebookEditor({
           onClick={() => editor.chain().focus().toggleBulletList().run()}
           className={`${toolbarButtonBase} ${
             editor.isActive("bulletList")
-              ? "bg-slate-100 text-slate-900 border-slate-200"
-              : "bg-slate-900 text-slate-200 border-slate-700 hover:border-emerald-400/60"
+              ? "bg-emerald-200 text-slate-900 border-emerald-200"
+              : "bg-slate-900/70 text-slate-200 border-slate-700 hover:border-emerald-400/60"
           }`}
+          title={L("Bullet", "Viñetas")}
         >
-          <span>•</span>
-          <span>{L("Bullet", "Viñetas")}</span>
+          <List size={14} />
         </button>
 
         <button
@@ -138,12 +313,85 @@ export default function RichNotebookEditor({
           onClick={() => editor.chain().focus().toggleOrderedList().run()}
           className={`${toolbarButtonBase} ${
             editor.isActive("orderedList")
-              ? "bg-slate-100 text-slate-900 border-slate-200"
-              : "bg-slate-900 text-slate-200 border-slate-700 hover:border-emerald-400/60"
+              ? "bg-emerald-200 text-slate-900 border-emerald-200"
+              : "bg-slate-900/70 text-slate-200 border-slate-700 hover:border-emerald-400/60"
           }`}
+          title={L("Numbered", "Numerado")}
         >
-          <span>1.</span>
-          <span>{L("Numbered", "Numerado")}</span>
+          <ListOrdered size={14} />
+        </button>
+
+        <button
+          type="button"
+          onClick={() => editor.chain().focus().toggleBlockquote().run()}
+          className={`${toolbarButtonBase} ${
+            editor.isActive("blockquote")
+              ? "bg-emerald-200 text-slate-900 border-emerald-200"
+              : "bg-slate-900/70 text-slate-200 border-slate-700 hover:border-emerald-400/60"
+          }`}
+          title={L("Quote", "Cita")}
+        >
+          <Quote size={14} />
+        </button>
+
+        <button
+          type="button"
+          onClick={() => editor.chain().focus().toggleCodeBlock().run()}
+          className={`${toolbarButtonBase} ${
+            editor.isActive("codeBlock")
+              ? "bg-emerald-200 text-slate-900 border-emerald-200"
+              : "bg-slate-900/70 text-slate-200 border-slate-700 hover:border-emerald-400/60"
+          }`}
+          title={L("Code", "Código")}
+        >
+          <Code size={14} />
+        </button>
+
+        <button
+          type="button"
+          onClick={() =>
+            editor
+              .chain()
+              .focus()
+              .setHighlight(isHighlighted ? null : "rgba(16,185,129,0.35)")
+              .run()
+          }
+          className={`${toolbarButtonBase} ${
+            isHighlighted
+              ? "bg-emerald-200 text-slate-900 border-emerald-200"
+              : "bg-slate-900/70 text-slate-200 border-slate-700 hover:border-emerald-400/60"
+          }`}
+          title={L("Highlight", "Resaltar")}
+        >
+          <Highlighter size={14} />
+        </button>
+
+        <button
+          type="button"
+          onClick={setLink}
+          className={`${toolbarButtonBase} ${
+            editor.isActive("link")
+              ? "bg-emerald-200 text-slate-900 border-emerald-200"
+              : "bg-slate-900/70 text-slate-200 border-slate-700 hover:border-emerald-400/60"
+          }`}
+          title={L("Link", "Enlace")}
+        >
+          <Link2 size={14} />
+        </button>
+
+        <button
+          type="button"
+          onClick={() =>
+            editor
+              .chain()
+              .focus()
+              .insertTable({ rows: 3, cols: 4, withHeaderRow: true })
+              .run()
+          }
+          className={`${toolbarButtonBase} bg-slate-900/70 text-slate-200 border-slate-700 hover:border-emerald-400/60`}
+          title={L("Insert table", "Insertar tabla")}
+        >
+          <Table2 size={14} />
         </button>
       </div>
 
@@ -157,7 +405,7 @@ export default function RichNotebookEditor({
 
         <EditorContent
           editor={editor}
-          className="prose prose-invert max-w-none text-sm focus:outline-none **:focus-visible:outline-none min-h-[140px]"
+          className="prose prose-invert max-w-none text-sm focus:outline-none **:focus-visible:outline-none min-h-[180px] leading-relaxed"
         />
       </div>
     </div>

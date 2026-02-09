@@ -7,6 +7,8 @@
 // 4) Use the provided analytics only when it clearly supports the user's question.
 // 5) Keep the response compact, actionable, and grounded in the data supplied.
 
+import { supabaseAdmin } from "@/lib/supaBaseAdmin";
+
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -43,6 +45,87 @@ type AiCoachRequestBody = {
 
 function safeString(x: any): string {
   return typeof x === "string" ? x : x == null ? "" : String(x);
+}
+
+type CoachMemoryBundle = {
+  global: string;
+  weekly: string;
+  daily: string;
+};
+
+function toDateKey(value?: string | null): string | null {
+  if (!value) return null;
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toISOString().slice(0, 10);
+}
+
+function isoWeekKey(dateKey: string): string {
+  const d = new Date(`${dateKey}T00:00:00Z`);
+  const dayNum = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  const weekNo = Math.ceil(((d.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
+  return `${d.getUTCFullYear()}-W${String(weekNo).padStart(2, "0")}`;
+}
+
+function resolveScopeKeys(body: AiCoachRequestBody) {
+  const fromSnapshot = toDateKey(body?.fullSnapshot?.asOfDate) || toDateKey(body?.snapshot?.asOfDate);
+  const fromSessions = toDateKey(body?.recentSessions?.[0]?.date) || toDateKey(body?.relevantSessions?.[0]?.date);
+  const fallback = new Date().toISOString().slice(0, 10);
+  const dailyKey = fromSnapshot || fromSessions || fallback;
+  const weeklyKey = isoWeekKey(dailyKey);
+  return { dailyKey, weeklyKey };
+}
+
+async function getCoachMemory(userId: string, keys: { dailyKey: string; weeklyKey: string }): Promise<CoachMemoryBundle> {
+  if (!userId) return { global: "", weekly: "", daily: "" };
+  try {
+    const { data, error } = await supabaseAdmin
+      .from("ai_coach_memory")
+      .select("scope, scope_key, memory")
+      .eq("user_id", userId);
+    if (error || !Array.isArray(data)) return { global: "", weekly: "", daily: "" };
+
+    const globalRow = data.find((r: any) => r.scope === "global");
+    const weeklyRow = data.find((r: any) => r.scope === "weekly" && r.scope_key === keys.weeklyKey);
+    const dailyRow = data.find((r: any) => r.scope === "daily" && r.scope_key === keys.dailyKey);
+
+    return {
+      global: safeString(globalRow?.memory).trim(),
+      weekly: safeString(weeklyRow?.memory).trim(),
+      daily: safeString(dailyRow?.memory).trim(),
+    };
+  } catch {
+    return { global: "", weekly: "", daily: "" };
+  }
+}
+
+async function upsertCoachMemory(params: {
+  userId: string;
+  scope: "global" | "weekly" | "daily";
+  scopeKey?: string | null;
+  memory: string;
+  metadata?: Record<string, any>;
+}) {
+  const { userId, scope, scopeKey, memory, metadata } = params;
+  if (!userId || !memory) return;
+  try {
+    const normalizedScopeKey = scope === "global" ? "global" : scopeKey ?? null;
+    const payload = {
+      user_id: userId,
+      scope,
+      scope_key: normalizedScopeKey,
+      memory,
+      metadata: metadata || {},
+      updated_at: new Date().toISOString(),
+    };
+    await supabaseAdmin.from("ai_coach_memory").upsert(payload, {
+      onConflict: "user_id,scope,scope_key",
+    });
+  } catch {
+    // swallow errors to avoid breaking coach responses
+  }
 }
 
 function clampText(s: any, max = 900): string {
@@ -319,6 +402,29 @@ function buildContextText(body: AiCoachRequestBody): string {
   return joined.length > 14000 ? joined.slice(0, 14000) + "\n…(truncated)" : joined;
 }
 
+async function getRecentCoachFeedback(userId: string): Promise<string> {
+  if (!userId) return "";
+  try {
+    const { data, error } = await supabaseAdmin
+      .from("ai_coach_feedback")
+      .select("rating,note,created_at,thread_id,message_id")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false })
+      .limit(6);
+    if (error || !Array.isArray(data) || !data.length) return "";
+
+    const rows = data.map((r: any) => {
+      const when = safeString(r.created_at).slice(0, 10);
+      const label = r.rating === 1 ? "helpful" : "not helpful";
+      const note = safeString(r.note);
+      return `- ${when}: ${label}${note ? ` · ${note}` : ""}`;
+    });
+    return rows.join("\n");
+  } catch {
+    return "";
+  }
+}
+
 function buildSystemPrompt(params: {
   lang: "es" | "en";
   firstName: string;
@@ -355,6 +461,77 @@ function buildSystemPrompt(params: {
     "Final rule (must follow): ALWAYS end with ONE follow-up question (single line), specific and actionable.",
     "Output in clean Markdown (short headings optional, bullets ok).",
   ].join("\n");
+}
+
+function buildMemorySystemPrompt(lang: "es" | "en", scope: "global" | "weekly" | "daily"): string {
+  const scopeLabel =
+    scope === "daily" ? "del día actual" : scope === "weekly" ? "de la semana actual" : "global";
+  if (lang === "es") {
+    return [
+      "Eres un sistema de memoria para un coach de trading.",
+      `Actualiza una memoria breve y acumulativa del usuario (${scopeLabel}).`,
+      "Incluye SOLO hechos persistentes, patrones, preferencias, reglas, objetivos y errores recurrentes.",
+      "No incluyas datos sensibles (emails, teléfonos) ni cifras exactas si no son clave.",
+      "Escribe en viñetas cortas. Máximo 12 viñetas.",
+      "Si hay conflicto, prioriza lo más reciente.",
+    ].join("\n");
+  }
+  return [
+    "You are the memory system for a trading coach.",
+    `Update a short, cumulative memory of the user (${scopeLabel}).`,
+    "Include ONLY persistent facts, patterns, preferences, rules, goals, and recurring mistakes.",
+    "Do not include sensitive data (emails, phone numbers) or exact figures unless critical.",
+    "Write concise bullet points. Max 12 bullets.",
+    "If there is a conflict, prefer the most recent info.",
+  ].join("\n");
+}
+
+async function buildUpdatedMemory(params: {
+  apiKey: string;
+  baseUrl: string;
+  model: string;
+  lang: "es" | "en";
+  scope: "global" | "weekly" | "daily";
+  existingMemory: string;
+  question: string;
+  coachText: string;
+  contextSnippet: string;
+}): Promise<string> {
+  const { apiKey, baseUrl, model, lang, scope, existingMemory, question, coachText, contextSnippet } = params;
+  const system = buildMemorySystemPrompt(lang, scope);
+  const payload = [
+    { role: "system", content: system },
+    {
+      role: "user",
+      content: [
+        "Previous memory:",
+        existingMemory || "(none)",
+        "",
+        "New question:",
+        question || "(no explicit question)",
+        "",
+        "Coach response:",
+        clampText(coachText, 1600),
+        "",
+        "Context snippet:",
+        clampText(contextSnippet, 3600),
+        "",
+        "Update memory:",
+      ].join("\n"),
+    },
+  ];
+
+  const result = await callOpenAI({
+    apiKey,
+    baseUrl,
+    model,
+    messages: payload,
+    maxTokens: 260,
+    temperature: 0.2,
+  });
+
+  const text = safeString(result.text).trim();
+  return text.length > 1400 ? text.slice(0, 1400) + "…" : text;
 }
 
 function mapChatHistory(chatHistory: ChatHistoryItem[] | undefined): { role: "user" | "assistant"; content: string }[] {
@@ -455,7 +632,17 @@ export async function POST(req: Request) {
       allowTables,
     });
 
-    const contextText = buildContextText(body);
+    const userId = safeString(body.userProfile?.id).trim();
+    const scopeKeys = resolveScopeKeys(body);
+    const existingMemory = userId ? await getCoachMemory(userId, scopeKeys) : { global: "", weekly: "", daily: "" };
+
+    let contextText = buildContextText(body);
+    if (userId) {
+      const feedbackSnippet = await getRecentCoachFeedback(userId);
+      if (feedbackSnippet) {
+        contextText += `\nRecent coach feedback:\n${feedbackSnippet}`;
+      }
+    }
     const history = mapChatHistory(body.chatHistory);
 
     const backStudyContext = safeString(body.backStudyContext).trim();
@@ -485,8 +672,27 @@ export async function POST(req: Request) {
       });
     }
 
+    const memoryBlocks: string[] = [];
+    if (existingMemory.daily) {
+      memoryBlocks.push(`Daily memory (${scopeKeys.dailyKey}):\n${existingMemory.daily}`);
+    }
+    if (existingMemory.weekly) {
+      memoryBlocks.push(`Weekly memory (${scopeKeys.weeklyKey}):\n${existingMemory.weekly}`);
+    }
+    if (existingMemory.global) {
+      memoryBlocks.push(`Global memory:\n${existingMemory.global}`);
+    }
+
     const messages: any[] = [
       { role: "system", content: system },
+      ...(memoryBlocks.length
+        ? [
+            {
+              role: "system",
+              content: `Coach memory (running summary, use as prior context):\n${memoryBlocks.join("\n\n")}`,
+            },
+          ]
+        : []),
       {
         role: "system",
         content:
@@ -520,6 +726,80 @@ export async function POST(req: Request) {
 
     // Ensure it ends with exactly one follow-up question.
     coachText = maybeAppendFollowUp(coachText, language, question);
+
+    if (userId) {
+      try {
+        const memoryModel = process.env.AI_COACH_MODEL || "gpt-4o-mini";
+
+        const updatedGlobal = await buildUpdatedMemory({
+          apiKey,
+          baseUrl,
+          model: memoryModel,
+          lang: language,
+          scope: "global",
+          existingMemory: existingMemory.global,
+          question,
+          coachText,
+          contextSnippet: contextText,
+        });
+
+        const updatedWeekly = await buildUpdatedMemory({
+          apiKey,
+          baseUrl,
+          model: memoryModel,
+          lang: language,
+          scope: "weekly",
+          existingMemory: existingMemory.weekly,
+          question,
+          coachText,
+          contextSnippet: contextText,
+        });
+
+        const updatedDaily = await buildUpdatedMemory({
+          apiKey,
+          baseUrl,
+          model: memoryModel,
+          lang: language,
+          scope: "daily",
+          existingMemory: existingMemory.daily,
+          question,
+          coachText,
+          contextSnippet: contextText,
+        });
+
+        if (updatedGlobal) {
+          await upsertCoachMemory({
+            userId,
+            scope: "global",
+            scopeKey: null,
+            memory: updatedGlobal,
+            metadata: { model: result.model, updatedFrom: "ai-coach" },
+          });
+        }
+
+        if (updatedWeekly) {
+          await upsertCoachMemory({
+            userId,
+            scope: "weekly",
+            scopeKey: scopeKeys.weeklyKey,
+            memory: updatedWeekly,
+            metadata: { model: result.model, updatedFrom: "ai-coach", scopeKey: scopeKeys.weeklyKey },
+          });
+        }
+
+        if (updatedDaily) {
+          await upsertCoachMemory({
+            userId,
+            scope: "daily",
+            scopeKey: scopeKeys.dailyKey,
+            memory: updatedDaily,
+            metadata: { model: result.model, updatedFrom: "ai-coach", scopeKey: scopeKeys.dailyKey },
+          });
+        }
+      } catch {
+        // ignore memory failures to keep response fast
+      }
+    }
 
     return Response.json({
       text: coachText,

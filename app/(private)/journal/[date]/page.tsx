@@ -529,6 +529,11 @@ export default function DailyJournalPage() {
 
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState("");
+  const [autoSaveState, setAutoSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autoSaveReadyRef = useRef(false);
+  const autoSaveIgnoreNextRef = useRef(false);
+  const [autoSaveDirty, setAutoSaveDirty] = useState(false);
 
   const [entryTrades, setEntryTrades] = useState<EntryTradeRow[]>([]);
   const [exitTrades, setExitTrades] = useState<ExitTradeRow[]>([]);
@@ -767,6 +772,8 @@ export default function DailyJournalPage() {
     if (!dateParam || authLoading || accountsLoading || !userId || !activeAccountId) return;
 
     let active = true;
+    autoSaveReadyRef.current = false;
+    autoSaveIgnoreNextRef.current = true;
 
     (async () => {
       try {
@@ -909,6 +916,10 @@ export default function DailyJournalPage() {
         }
       } catch (err) {
         console.error("Error loading journal entry:", err);
+      } finally {
+        if (active) {
+          autoSaveReadyRef.current = true;
+        }
       }
     })();
 
@@ -1272,14 +1283,18 @@ export default function DailyJournalPage() {
      Save (Supabase)
   ========================================================= */
 
-  const handleSave = async (): Promise<boolean> => {
+  const handleSave = async (opts?: { silent?: boolean }): Promise<boolean> => {
     if (!userId) {
-      setMsg(L("Cannot save: no user.", "No se puede guardar: sin usuario."));
+      if (!opts?.silent) {
+        setMsg(L("Cannot save: no user.", "No se puede guardar: sin usuario."));
+      }
       return false;
     }
 
     setSaving(true);
-    setMsg("");
+    if (!opts?.silent) {
+      setMsg("");
+    }
 
     const commissions = toNum((notesExtra as any)?.costs?.commissions);
     const fees = toNum((notesExtra as any)?.costs?.fees);
@@ -1347,8 +1362,10 @@ export default function DailyJournalPage() {
       setPnlFromDb(Number(pnlToSave.toFixed(2)));
       setPnlMode("db");
 
-      setMsg(L("Saved ✅", "Guardado ✅"));
-      setTimeout(() => setMsg(""), 2000);
+      if (!opts?.silent) {
+        setMsg(L("Saved ✅", "Guardado ✅"));
+        setTimeout(() => setMsg(""), 2000);
+      }
       if (userId) {
         void syncMyTrophies(String(userId)).catch((err) => {
           console.warn("[Journal] trophy sync failed:", err);
@@ -1362,7 +1379,9 @@ export default function DailyJournalPage() {
       return true;
     } catch (err: any) {
       console.error(err);
-      setMsg(err?.message ?? L("Save failed", "Error al guardar"));
+      if (!opts?.silent) {
+        setMsg(err?.message ?? L("Save failed", "Error al guardar"));
+      }
       return false;
     } finally {
       setSaving(false);
@@ -1374,6 +1393,46 @@ export default function DailyJournalPage() {
     if (!ok) return;
     router.push("/dashboard");
   };
+
+  /* =========================================================
+     Auto-save (debounced)
+  ========================================================= */
+
+  useEffect(() => {
+    if (!autoSaveReadyRef.current) return;
+    if (autoSaveIgnoreNextRef.current) {
+      autoSaveIgnoreNextRef.current = false;
+      return;
+    }
+    setAutoSaveDirty(true);
+  }, [premarketHtml, insideHtml, afterHtml, entryTrades, exitTrades, entry, notesExtra]);
+
+  useEffect(() => {
+    if (!autoSaveReadyRef.current) return;
+    if (!autoSaveDirty) return;
+    if (!userId || !activeAccountId) return;
+    if (saving) return;
+
+    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    setAutoSaveState("saving");
+
+    autoSaveTimerRef.current = setTimeout(() => {
+      void (async () => {
+        const ok = await handleSave({ silent: true });
+        if (ok) {
+          setAutoSaveState("saved");
+          setAutoSaveDirty(false);
+          setTimeout(() => setAutoSaveState("idle"), 1500);
+        } else {
+          setAutoSaveState("error");
+        }
+      })();
+    }, 10000);
+
+    return () => {
+      if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    };
+  }, [autoSaveDirty, userId, activeAccountId, saving]);
 
   /* =========================================================
      Import / Sync
@@ -2210,6 +2269,15 @@ export default function DailyJournalPage() {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="text-[11px] text-slate-500">
               {msg && <span className="text-emerald-400 mr-3">{msg}</span>}
+              {autoSaveState !== "idle" && (
+                <span className="text-slate-400 mr-3">
+                  {autoSaveState === "saving"
+                    ? L("Auto-saving…", "Auto-guardando…")
+                    : autoSaveState === "saved"
+                    ? L("Auto-saved", "Auto-guardado")
+                    : L("Auto-save failed", "Fallo al auto-guardar")}
+                </span>
+              )}
               {L("Your structure, your rules.", "Tu estructura, tus reglas.")}
             </div>
             <div className="flex gap-2">
@@ -2228,7 +2296,7 @@ export default function DailyJournalPage() {
 
               <button
                 type="button"
-                onClick={handleSave}
+                onClick={() => void handleSave()}
                 disabled={saving}
                 className="px-4 py-2 rounded-xl border border-slate-700 text-slate-200 text-xs hover:border-emerald-400 hover:text-emerald-300 transition disabled:opacity-50"
               >
@@ -2256,7 +2324,7 @@ export default function DailyJournalPage() {
 
   return (
     <main className="min-h-screen bg-slate-950 text-slate-50 px-4 md:px-8 py-6">
-      <div className="mx-auto w-full max-w-[1440px] xl:max-w-[1600px]">
+      <div className="mx-auto w-full max-w-none">
         {/* Top */}
         <div className="flex items-start sm:items-center justify-between gap-4 mb-4">
           <div>
@@ -2273,7 +2341,39 @@ export default function DailyJournalPage() {
               )}
             </p>
           </div>
-          <div className="flex flex-col sm:flex-row gap-2">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2">
+            <div className="mr-0 sm:mr-2">
+              <span
+                className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[11px] ${
+                  autoSaveState === "saving"
+                    ? "border-emerald-400/60 text-emerald-300 bg-emerald-500/10"
+                    : autoSaveState === "saved"
+                    ? "border-sky-400/60 text-sky-300 bg-sky-500/10"
+                    : autoSaveState === "error"
+                    ? "border-red-400/60 text-red-300 bg-red-500/10"
+                    : "border-slate-700 text-slate-300 bg-slate-900/40"
+                }`}
+              >
+                <span
+                  className={`h-2 w-2 rounded-full ${
+                    autoSaveState === "saving"
+                      ? "bg-emerald-300 animate-pulse"
+                      : autoSaveState === "saved"
+                      ? "bg-sky-300"
+                      : autoSaveState === "error"
+                      ? "bg-red-300"
+                      : "bg-slate-500"
+                  }`}
+                />
+                {autoSaveState === "saving"
+                  ? L("Auto-saving…", "Auto-guardando…")
+                  : autoSaveState === "saved"
+                  ? L("Auto-saved", "Auto-guardado")
+                  : autoSaveState === "error"
+                  ? L("Auto-save failed", "Fallo al auto-guardar")
+                  : L("Auto-save on", "Auto-guardado activo")}
+              </span>
+            </div>
             <button
               type="button"
               onClick={() => router.back()}

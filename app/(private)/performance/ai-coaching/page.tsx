@@ -3,7 +3,7 @@
 
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -58,6 +58,15 @@ type ChatMessage = {
   role: "user" | "coach";
   text: string;
   createdAt: string;
+};
+
+type CoachMemoryView = {
+  global?: string;
+  weekly?: string;
+  daily?: string;
+  dailyKey?: string;
+  weeklyKey?: string;
+  updatedAt?: string;
 };
 
 type GrowthPlanRow = {
@@ -268,6 +277,11 @@ function clampText(s: any, max = 900): string {
   return t.length > max ? t.slice(0, max) + "…" : t;
 }
 
+function stripHtml(input?: string | null): string {
+  if (!input) return "";
+  return String(input).replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+}
+
 function parseNotesJson(raw: unknown): Record<string, any> | null {
   if (!raw || typeof raw !== "string") return null;
   try {
@@ -434,6 +448,14 @@ function compactSessionForAi(entry: any) {
 
   const tags = Array.isArray(entry?.tags) ? entry.tags.slice(0, 20) : [];
 
+  const parsedNotes = parseNotesJson(entry?.notes);
+  const premarketFromNotes =
+    typeof parsedNotes?.premarket === "string" ? stripHtml(parsedNotes.premarket) : "";
+  const liveFromNotes =
+    typeof parsedNotes?.live === "string" ? stripHtml(parsedNotes.live) : "";
+  const postFromNotes =
+    typeof parsedNotes?.post === "string" ? stripHtml(parsedNotes.post) : "";
+
   // Common note fields across variations (you can extend later)
   const premarket =
     entry?.premarket ||
@@ -442,7 +464,7 @@ function compactSessionForAi(entry: any) {
       plan: entry?.premarketPlan,
       levels: entry?.premarketLevels,
       catalyst: entry?.premarketCatalyst,
-      notes: entry?.premarketNotes,
+      notes: entry?.premarketNotes || premarketFromNotes,
     };
 
   const live =
@@ -450,7 +472,7 @@ function compactSessionForAi(entry: any) {
     {
       emotions: entry?.liveEmotions,
       mistakes: entry?.liveMistakes,
-      notes: entry?.liveNotes,
+      notes: entry?.liveNotes || liveFromNotes,
     };
 
   const post =
@@ -460,10 +482,10 @@ function compactSessionForAi(entry: any) {
       lessons: entry?.lessons,
       whatWorked: entry?.whatWorked,
       whatFailed: entry?.whatFailed,
-      notes: entry?.postNotes,
+      notes: entry?.postNotes || postFromNotes,
     };
 
-  const notes = entry?.notes ?? entry?.summary ?? entry?.reflection ?? "";
+  const notes = stripHtml(entry?.notes ?? entry?.summary ?? entry?.reflection ?? "");
 
   return {
     date,
@@ -733,7 +755,6 @@ function usd(n: number) {
 
 function AiCoachingPageInner() {
   const router = useRouter();
-  const searchParams = useSearchParams();
   const { user, loading: authLoading } = useAuth();
   const { activeAccountId, loading: accountsLoading } = useTradingAccounts();
   const { plan, loading: planLoading } = useUserPlan();
@@ -742,58 +763,6 @@ function AiCoachingPageInner() {
   const isEs = lang === "es";
   const L = (en: string, es: string) => (isEs ? es : en);
   const quickPrompts = isEs ? QUICK_PROMPTS_ES : QUICK_PROMPTS_EN;
-
-  if (planLoading) {
-    return (
-      <main className="min-h-screen bg-slate-950 text-slate-50">
-        <TopNav />
-        <div className="max-w-4xl mx-auto px-6 py-16">
-          <p className="text-sm text-slate-400">{L("Loading…", "Cargando…")}</p>
-        </div>
-      </main>
-    );
-  }
-
-  if (plan !== "advanced") {
-    return (
-      <main className="min-h-screen bg-slate-950 text-slate-50">
-        <TopNav />
-        <div className="max-w-4xl mx-auto px-6 py-16">
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
-            <p className="text-emerald-300 text-[11px] uppercase tracking-[0.3em]">
-              {L("Advanced feature", "Función Advanced")}
-            </p>
-            <h1 className="text-xl font-semibold mt-2">
-              {L(
-                "AI Coaching is included in Advanced",
-                "AI Coaching está incluido en Advanced"
-              )}
-            </h1>
-            <p className="text-sm text-slate-400 mt-2">
-              {L(
-                "Upgrade to Advanced to unlock action plans, deep analytics insights, and AI-driven coaching.",
-                "Actualiza a Advanced para desbloquear planes de acción, insights avanzados y coaching con IA."
-              )}
-            </p>
-            <div className="mt-4 flex flex-wrap gap-3">
-              <Link
-                href="/billing"
-                className="px-4 py-2 rounded-xl bg-emerald-400 text-slate-950 text-xs font-semibold hover:bg-emerald-300 transition"
-              >
-                {L("Upgrade to Advanced", "Actualizar a Advanced")}
-              </Link>
-              <Link
-                href="/plans-comparison"
-                className="px-4 py-2 rounded-xl border border-slate-700 text-slate-200 text-xs hover:border-emerald-400 transition"
-              >
-                {L("Compare plans", "Comparar planes")}
-              </Link>
-            </div>
-          </div>
-        </div>
-      </main>
-    );
-  }
 
   // Platform data
   const [entries, setEntries] = useState<JournalEntry[]>([]);
@@ -806,10 +775,21 @@ function AiCoachingPageInner() {
   const [threads, setThreads] = useState<AiCoachThreadRow[]>([]);
   const [activeThread, setActiveThread] = useState<AiCoachThreadRow | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [coachMemory, setCoachMemory] = useState<CoachMemoryView | null>(null);
+  const [memoryOpen, setMemoryOpen] = useState(false);
+  const [feedbackByMessage, setFeedbackByMessage] = useState<Record<string, number>>({});
+  const [feedbackSending, setFeedbackSending] = useState<Record<string, boolean>>({});
 
   // UI state
   const [question, setQuestion] = useState("");
   const [coachState, setCoachState] = useState<AiCoachState>({ loading: false, error: null });
+
+  // URL params (avoid hook-order issues from useSearchParams)
+  const [searchParams, setSearchParams] = useState<URLSearchParams | null>(null);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    setSearchParams(new URLSearchParams(window.location.search));
+  }, []);
 
   // Screenshot
   const [screenshotFile, setScreenshotFile] = useState<File | null>(null);
@@ -822,6 +802,64 @@ function AiCoachingPageInner() {
 
   // Scroll to bottom
   const endRef = useRef<HTMLDivElement | null>(null);
+
+  const renderMemoryList = (text?: string) => {
+    const clean = String(text || "").trim();
+    if (!clean) return <p className="text-xs text-slate-500">{L("No memory yet.", "Aún no hay memoria.")}</p>;
+    const rows = clean
+      .split("\n")
+      .map((l) => l.replace(/^[-•]\s*/, "").trim())
+      .filter(Boolean);
+    return (
+      <ul className="space-y-1 text-xs text-slate-200">
+        {rows.map((line, idx) => (
+          <li key={idx} className="leading-relaxed">
+            • {line}
+          </li>
+        ))}
+      </ul>
+    );
+  };
+
+  const fetchCoachMemory = async () => {
+    const session = await supabaseBrowser.auth.getSession();
+    const token = session?.data?.session?.access_token;
+    if (!token) return;
+    const res = await fetch("/api/ai-coach/memory", {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) return;
+    const data = await res.json().catch(() => null);
+    if (data) setCoachMemory(data);
+  };
+
+  const sendFeedback = async (messageId: string, rating: number) => {
+    if (!messageId || !activeThread) return;
+    setFeedbackSending((prev) => ({ ...prev, [messageId]: true }));
+    try {
+      const session = await supabaseBrowser.auth.getSession();
+      const token = session?.data?.session?.access_token;
+      if (!token) return;
+      const res = await fetch("/api/ai-coach/feedback", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          threadId: activeThread.id,
+          messageId,
+          rating,
+        }),
+      });
+      if (res.ok) {
+        setFeedbackByMessage((prev) => ({ ...prev, [messageId]: rating }));
+        await fetchCoachMemory();
+      }
+    } finally {
+      setFeedbackSending((prev) => ({ ...prev, [messageId]: false }));
+    }
+  };
 
   /* ---------- Back-study params from URL ---------- */
   const backStudyParams: BackStudyParams | null = useMemo(() => {
@@ -870,6 +908,7 @@ function AiCoachingPageInner() {
 
   /* ---------- Load everything (ALL from Supabase) ---------- */
   useEffect(() => {
+    if (planLoading || plan !== "advanced") return;
     if (authLoading || !user || accountsLoading || !activeAccountId) return;
 
     let alive = true;
@@ -972,6 +1011,10 @@ function AiCoachingPageInner() {
         const g = userId ? await getProfileGamification(userId) : null;
         if (!alive) return;
         setGamification(g);
+
+        // 8) Coach memory snapshot
+        if (!alive) return;
+        await fetchCoachMemory();
       } catch (err) {
         console.error("[AI Coaching] load error:", err);
         if (!alive) return;
@@ -1291,6 +1334,9 @@ function AiCoachingPageInner() {
       setMessages((prev) => [...prev, coachMsg]);
       setCoachState({ loading: false, error: null });
 
+      // Refresh memory snapshot after response
+      await fetchCoachMemory();
+
       // Optional: clear screenshot after send
       clearScreenshot();
     } catch (err: any) {
@@ -1316,6 +1362,58 @@ function AiCoachingPageInner() {
       <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center">
         <p className="text-sm text-slate-400">{L("Loading coach…", "Cargando coach…")}</p>
       </div>
+    );
+  }
+
+  if (planLoading) {
+    return (
+      <main className="min-h-screen bg-slate-950 text-slate-50">
+        <TopNav />
+        <div className="max-w-4xl mx-auto px-6 py-16">
+          <p className="text-sm text-slate-400">{L("Loading…", "Cargando…")}</p>
+        </div>
+      </main>
+    );
+  }
+
+  if (plan !== "advanced") {
+    return (
+      <main className="min-h-screen bg-slate-950 text-slate-50">
+        <TopNav />
+        <div className="max-w-4xl mx-auto px-6 py-16">
+          <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
+            <p className="text-emerald-300 text-[11px] uppercase tracking-[0.3em]">
+              {L("Advanced feature", "Función Advanced")}
+            </p>
+            <h1 className="text-xl font-semibold mt-2">
+              {L(
+                "AI Coaching is included in Advanced",
+                "AI Coaching está incluido en Advanced"
+              )}
+            </h1>
+            <p className="text-sm text-slate-400 mt-2">
+              {L(
+                "Upgrade to Advanced to unlock action plans, deep analytics insights, and AI-driven coaching.",
+                "Actualiza a Advanced para desbloquear planes de acción, insights avanzados y coaching con IA."
+              )}
+            </p>
+            <div className="mt-4 flex flex-wrap gap-3">
+              <Link
+                href="/billing"
+                className="px-4 py-2 rounded-xl bg-emerald-400 text-slate-950 text-xs font-semibold hover:bg-emerald-300 transition"
+              >
+                {L("Upgrade to Advanced", "Actualizar a Advanced")}
+              </Link>
+              <Link
+                href="/plans-comparison"
+                className="px-4 py-2 rounded-xl border border-slate-700 text-slate-200 text-xs hover:border-emerald-400 transition"
+              >
+                {L("Compare plans", "Comparar planes")}
+              </Link>
+            </div>
+          </div>
+        </div>
+      </main>
     );
   }
 
@@ -1441,6 +1539,51 @@ function AiCoachingPageInner() {
 
             {/* Messages */}
             <div className="flex-1 min-h-0 overflow-y-auto px-4 py-3 space-y-3">
+              {coachMemory && (
+                <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4 shadow-[0_0_30px_rgba(16,185,129,0.12)]">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-xs uppercase tracking-[0.18em] text-emerald-300">
+                        {L("Coach memory snapshot", "Memoria del coach")}
+                      </p>
+                      <p className="text-[11px] text-slate-400">
+                        {L("What the coach has learned about you so far.", "Lo que el coach ha aprendido sobre ti.")}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setMemoryOpen((prev) => !prev)}
+                      className="text-[11px] rounded-full border border-slate-700 px-3 py-1 hover:border-emerald-400 hover:text-emerald-200"
+                    >
+                      {memoryOpen ? L("Hide", "Ocultar") : L("Show", "Ver")}
+                    </button>
+                  </div>
+
+                  {memoryOpen && (
+                    <div className="mt-4 grid gap-3 md:grid-cols-3">
+                      <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+                        <p className="text-[11px] uppercase tracking-[0.12em] text-slate-400 mb-2">
+                          {L("Daily", "Diario")} {coachMemory.dailyKey ? `· ${coachMemory.dailyKey}` : ""}
+                        </p>
+                        {renderMemoryList(coachMemory.daily)}
+                      </div>
+                      <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+                        <p className="text-[11px] uppercase tracking-[0.12em] text-slate-400 mb-2">
+                          {L("Weekly", "Semanal")} {coachMemory.weeklyKey ? `· ${coachMemory.weeklyKey}` : ""}
+                        </p>
+                        {renderMemoryList(coachMemory.weekly)}
+                      </div>
+                      <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+                        <p className="text-[11px] uppercase tracking-[0.12em] text-slate-400 mb-2">
+                          {L("Global", "Global")}
+                        </p>
+                        {renderMemoryList(coachMemory.global)}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {!messages.length && !coachState.error && (
                 <p className="text-xs text-slate-500">
                   {L("Start by typing a question (example:", "Empieza escribiendo una pregunta (ejemplo:")}{" "}
@@ -1467,6 +1610,35 @@ function AiCoachingPageInner() {
                     }`}
                   >
                     {msg.role === "coach" ? <CoachMarkdown text={msg.text} /> : msg.text}
+                    {msg.role === "coach" && (
+                      <div className="mt-3 flex items-center gap-2 text-[11px] text-slate-400">
+                        <span>{L("Helpful?", "¿Útil?")}</span>
+                        <button
+                          type="button"
+                          disabled={feedbackSending[msg.id]}
+                          onClick={() => sendFeedback(msg.id, 1)}
+                          className={`rounded-full border px-2 py-0.5 transition ${
+                            feedbackByMessage[msg.id] === 1
+                              ? "border-emerald-400 text-emerald-200"
+                              : "border-slate-700 hover:border-emerald-400 hover:text-emerald-200"
+                          }`}
+                        >
+                          👍
+                        </button>
+                        <button
+                          type="button"
+                          disabled={feedbackSending[msg.id]}
+                          onClick={() => sendFeedback(msg.id, -1)}
+                          className={`rounded-full border px-2 py-0.5 transition ${
+                            feedbackByMessage[msg.id] === -1
+                              ? "border-rose-400 text-rose-200"
+                              : "border-slate-700 hover:border-rose-400 hover:text-rose-200"
+                          }`}
+                        >
+                          👎
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
               ))}
