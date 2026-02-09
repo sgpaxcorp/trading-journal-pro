@@ -63,7 +63,7 @@ export default function PricingPage() {
   async function handleStart(planId: PlanId) {
     setError(null);
 
-    // If user is not logged in, send to signup and keep plan in query
+    // If user is not logged1 in, send to signup and keep plan in query
     if (!user) {
       router.push(`/signup?plan=${planId}`);
       return;
