@@ -87,6 +87,7 @@ type CalendarCell = {
   entry?: JournalEntry;
   isToday: boolean;
   isCurrentMonth: boolean;
+  holiday?: { date: string; label: string } | null;
 };
 
 type WeekSummary = {
@@ -99,26 +100,109 @@ type WidgetId = GridItemId;
 
 
 // ===== Trading calendar / holidays =====
-const TRADING_HOLIDAYS: string[] = [];
+type Holiday = { date: string; label: string };
 
 function isWeekend(d: Date): boolean {
   const day = d.getDay();
   return day === 0 || day === 6;
 }
 
-function isHoliday(dateStr: string): boolean {
-  return TRADING_HOLIDAYS.includes(dateStr);
+function isTradingDay(dateStr: string, holidaySet: Set<string>): boolean {
+  const d = new Date(dateStr + "T00:00:00");
+  return !isWeekend(d) && !holidaySet.has(dateStr);
 }
 
-function isTradingDay(dateStr: string): boolean {
-  const d = new Date(dateStr + "T00:00:00");
-  return !isWeekend(d) && !isHoliday(dateStr);
+function toYMD(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function getNthWeekdayOfMonth(
+  year: number,
+  month: number,
+  weekday: number,
+  n: number
+): Date {
+  const firstOfMonth = new Date(year, month, 1);
+  const firstWeekdayOffset = (7 + weekday - firstOfMonth.getDay()) % 7;
+  const day = 1 + firstWeekdayOffset + 7 * (n - 1);
+  return new Date(year, month, day);
+}
+
+function getLastWeekdayOfMonth(year: number, month: number, weekday: number): Date {
+  const lastOfMonth = new Date(year, month + 1, 0);
+  const offsetBack = (7 + lastOfMonth.getDay() - weekday) % 7;
+  const day = lastOfMonth.getDate() - offsetBack;
+  return new Date(year, month, day);
+}
+
+function observedDate(date: Date): Date {
+  const day = date.getDay();
+  if (day === 6) {
+    return new Date(date.getFullYear(), date.getMonth(), date.getDate() - 1);
+  }
+  if (day === 0) {
+    return new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1);
+  }
+  return date;
+}
+
+function getUsMarketHolidays(year: number, isEs: boolean): Holiday[] {
+  const label = (en: string, es: string) => (isEs ? es : en);
+  const holidays: Holiday[] = [];
+
+  holidays.push({
+    date: toYMD(observedDate(new Date(year, 0, 1))),
+    label: label("New Year's Day", "Año Nuevo"),
+  });
+  holidays.push({
+    date: toYMD(getNthWeekdayOfMonth(year, 0, 1, 3)),
+    label: label("Martin Luther King Jr. Day", "Día de Martin Luther King Jr."),
+  });
+  holidays.push({
+    date: toYMD(getNthWeekdayOfMonth(year, 1, 1, 3)),
+    label: label("Presidents' Day", "Día de los Presidentes"),
+  });
+  holidays.push({
+    date: toYMD(getLastWeekdayOfMonth(year, 4, 1)),
+    label: label("Memorial Day", "Memorial Day"),
+  });
+  holidays.push({
+    date: toYMD(observedDate(new Date(year, 5, 19))),
+    label: label("Juneteenth", "Juneteenth"),
+  });
+  holidays.push({
+    date: toYMD(observedDate(new Date(year, 6, 4))),
+    label: label("Independence Day", "Día de la Independencia"),
+  });
+  holidays.push({
+    date: toYMD(getNthWeekdayOfMonth(year, 8, 1, 1)),
+    label: label("Labor Day", "Día del Trabajo"),
+  });
+  holidays.push({
+    date: toYMD(getNthWeekdayOfMonth(year, 9, 1, 2)),
+    label: label("Columbus / Indigenous Peoples' Day", "Día de Colón / Pueblos Indígenas"),
+  });
+  holidays.push({
+    date: toYMD(getNthWeekdayOfMonth(year, 10, 4, 4)),
+    label: label("Thanksgiving Day", "Día de Acción de Gracias"),
+  });
+  holidays.push({
+    date: toYMD(observedDate(new Date(year, 11, 25))),
+    label: label("Christmas Day", "Navidad"),
+  });
+
+  holidays.sort((a, b) => a.date.localeCompare(b.date));
+  return holidays;
 }
 
 function buildMonthCalendar(
   entries: JournalEntry[],
   baseDate: Date,
-  localeTag: string
+  localeTag: string,
+  holidayMap: Map<string, Holiday>
 ): { cells: CalendarCell[]; weeks: WeekSummary[]; monthLabel: string } {
   const year = baseDate.getFullYear();
   const month = baseDate.getMonth();
@@ -153,6 +237,7 @@ function buildMonthCalendar(
     let isCurrentMonth = false;
     let entry: JournalEntry | undefined;
     let isToday = false;
+    let holiday: Holiday | null = null;
 
     if (dayNumber !== null) {
       const d = new Date(year, month, dayNumber);
@@ -160,6 +245,7 @@ function buildMonthCalendar(
       isCurrentMonth = true;
       entry = entryMap.get(dateStr);
       isToday = dateStr === todayStrLocal;
+      holiday = dateStr ? holidayMap.get(dateStr) ?? null : null;
 
       if (entry) {
         const rawPnl = (entry as any).pnl;
@@ -169,7 +255,7 @@ function buildMonthCalendar(
       }
     }
 
-    cells.push({ dateStr, dayNumber, entry, isToday, isCurrentMonth });
+    cells.push({ dateStr, dayNumber, entry, isToday, isCurrentMonth, holiday });
   }
 
   const monthLabel = baseDate.toLocaleString(localeTag, { month: "long", year: "numeric" });
@@ -197,7 +283,7 @@ function getDailyTargetPct(plan: GrowthPlan | null): number {
   return Number(raw) || 0;
 }
 
-function calcTradingDayStats(entries: JournalEntry[]) {
+function calcTradingDayStats(entries: JournalEntry[], holidaySet: Set<string>) {
   const today = new Date();
   const year = today.getFullYear();
   const todayStrLocal = formatDateYYYYMMDD(today);
@@ -218,7 +304,7 @@ function calcTradingDayStats(entries: JournalEntry[]) {
     d = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1)
   ) {
     const ds = formatDateYYYYMMDD(d);
-    if (isTradingDay(ds)) allTradingDays.push(ds);
+    if (isTradingDay(ds, holidaySet)) allTradingDays.push(ds);
   }
 
   const pastTradingDays = allTradingDays.filter((d) => d < todayStrLocal);
@@ -415,6 +501,16 @@ export default function DashboardPage() {
   const [calendarCells, setCalendarCells] = useState<CalendarCell[]>([]);
   const [weeks, setWeeks] = useState<WeekSummary[]>([]);
   const [monthLabel, setMonthLabel] = useState("");
+
+  const holidayList = useMemo(() => {
+    const years = new Set([viewDate?.getFullYear() ?? new Date().getFullYear(), new Date().getFullYear()]);
+    const list: Holiday[] = [];
+    years.forEach((y) => list.push(...getUsMarketHolidays(y, isEs)));
+    return list;
+  }, [viewDate, isEs]);
+
+  const holidayMap = useMemo(() => new Map(holidayList.map((h) => [h.date, h])), [holidayList]);
+  const holidaySet = useMemo(() => new Set(holidayList.map((h) => h.date)), [holidayList]);
 
   const [activeWidgets, setActiveWidgets] = useState<WidgetId[]>([
     "progress",
@@ -649,11 +745,11 @@ export default function DashboardPage() {
   // Rebuild calendar
   useEffect(() => {
     if (!viewDate) return;
-    const { cells, weeks, monthLabel } = buildMonthCalendar(entries, viewDate, localeTag);
+    const { cells, weeks, monthLabel } = buildMonthCalendar(entries, viewDate, localeTag, holidayMap);
     setCalendarCells(cells);
     setWeeks(weeks);
     setMonthLabel(monthLabel);
-  }, [entries, viewDate, localeTag]);
+  }, [entries, viewDate, localeTag, holidayMap]);
 
   const weekRowNumbers = useMemo(() => {
     const rows: (number | null)[] = [];
@@ -679,7 +775,7 @@ export default function DashboardPage() {
     return rows;
   }, [calendarCells]);
 
-  const tradingStats = useMemo(() => calcTradingDayStats(entries), [entries]);
+  const tradingStats = useMemo(() => calcTradingDayStats(entries, holidaySet), [entries, holidaySet]);
 
   const filteredEntries = useMemo(() => {
     const planStartStr = getPlanStartDateStr(plan);
@@ -729,11 +825,15 @@ export default function DashboardPage() {
         progressToGoal: 0,
         remainingToGoal: 0,
         aboveGoal: 0,
+        isTradingDay: true,
+        holidayLabel: null as string | null,
       };
     }
 
     const dailyTargetPct = getDailyTargetPct(plan);
     const starting = (plan as any).startingBalance ?? 0;
+    const holiday = holidayMap.get(sessionDateStr) ?? null;
+    const isClosedDay = !!holiday || !isTradingDay(sessionDateStr, holidaySet);
 
     const sumUpTo = (dateStr: string) =>
       filteredEntries
@@ -775,7 +875,8 @@ export default function DashboardPage() {
       }
     }
 
-    const expectedSessionUSD = dailyTargetPct !== 0 ? startOfSessionBalance * (dailyTargetPct / 100) : 0;
+    const expectedSessionUSD =
+      !isClosedDay && dailyTargetPct !== 0 ? startOfSessionBalance * (dailyTargetPct / 100) : 0;
 
     const diffSessionVsGoal = actualSessionUSD - expectedSessionUSD;
     const goalMet = expectedSessionUSD > 0 && actualSessionUSD >= expectedSessionUSD;
@@ -796,14 +897,17 @@ export default function DashboardPage() {
       progressToGoal,
       remainingToGoal,
       aboveGoal,
+      isTradingDay: !isClosedDay,
+      holidayLabel: holiday?.label ?? null,
     };
-  }, [plan, filteredEntries, filteredCashflows, sessionDateStr, serverSeries]);
+  }, [plan, filteredEntries, filteredCashflows, sessionDateStr, serverSeries, holidayMap, holidaySet]);
 
   // Snapshot upsert
   useEffect(() => {
     const userId = (user as any)?.uid || (user as any)?.id || "";
     if (!userId || !activeAccountId) return;
     if (!plan) return;
+    if (!dailyCalcs.isTradingDay) return;
     if (dailyCalcs.dailyTargetPct === 0) return;
 
     let cancelled = false;
@@ -1122,7 +1226,7 @@ export default function DashboardPage() {
           </p>
 
           <div className="mt-2 rounded-xl border border-emerald-400/30 bg-emerald-400/10 p-3">
-            {plan && dailyCalcs.dailyTargetPct !== 0 ? (
+            {plan && dailyCalcs.isTradingDay && dailyCalcs.dailyTargetPct !== 0 ? (
               <>
                 <p className="text-[13px] text-emerald-300 font-medium">
                   {L("Goal:", "Meta:")} {dailyCalcs.dailyTargetPct.toFixed(2)}%{" "}
@@ -1202,6 +1306,25 @@ export default function DashboardPage() {
                   {L("Open today's journal", "Abrir el journal de hoy")}
                 </Link>
               </>
+            ) : plan ? (
+              <div className="space-y-2">
+                <p className="text-[13px] text-emerald-200 font-medium">
+                  {dailyCalcs.holidayLabel
+                    ? L("Market holiday", "Feriado de mercado")
+                    : L("Non-trading day", "Día sin mercado")}
+                </p>
+                <p className="text-[12px] text-slate-400">
+                  {dailyCalcs.holidayLabel
+                    ? `${dailyCalcs.holidayLabel} • ${sessionDateStr}`
+                    : sessionDateStr}
+                </p>
+                <p className="text-[12px] text-slate-500">
+                  {L(
+                    "Daily targets are paused on market holidays.",
+                    "Las metas diarias se pausan en feriados de mercado."
+                  )}
+                </p>
+              </div>
             ) : (
               <p className="text-[13px] text-slate-400">
                 {L(
@@ -1325,12 +1448,15 @@ export default function DashboardPage() {
                   const hasDate = cell.dateStr !== null && cell.dayNumber !== null;
                   const rawPnl = (cell.entry as any)?.pnl ?? 0;
                   const pnl = typeof rawPnl === "number" ? rawPnl : Number(rawPnl) || 0;
+                  const isHolidayCell = !!cell.holiday;
 
                   let bg = "bg-slate-950/90 border-slate-800 text-slate-600";
                   if (hasDate && cell.entry) {
                     if (pnl > 0) bg = "bg-emerald-400/90 border-emerald-300 text-slate-950";
                     else if (pnl < 0) bg = "bg-sky-500/90 border-sky-300 text-slate-950";
                     else bg = "bg-slate-800/90 border-slate-700 text-slate-200";
+                  } else if (hasDate && isHolidayCell) {
+                    bg = "bg-amber-400/10 border-amber-300/50 text-amber-200";
                   }
 
                   const isTodayRing = cell.isToday && hasDate ? "ring-2 ring-emerald-400/90" : "";
@@ -1339,12 +1465,18 @@ export default function DashboardPage() {
                     <div
                       key={dow}
                       onClick={() => hasDate && onDayClick(cell.dateStr)}
+                      title={cell.holiday ? cell.holiday.label : undefined}
                       className={`${bg} ${isTodayRing} border rounded-2xl px-2 py-2 min-h-24 flex flex-col items-start justify-between hover:scale-[1.02] hover:shadow-lg transition ${
                         hasDate ? "cursor-pointer" : "cursor-default opacity-30"
                       }`}
                     >
                       <div className="flex items-center justify-between w-full">
                         <span className="font-semibold">{hasDate ? cell.dayNumber : ""}</span>
+                        {isHolidayCell ? (
+                          <span className="text-[10px] uppercase tracking-wide text-amber-200">
+                            {L("Holiday", "Feriado")}
+                          </span>
+                        ) : null}
                       </div>
 
                       {cell.entry ? (

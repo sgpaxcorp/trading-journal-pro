@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
 import { useEditor, EditorContent } from "@tiptap/react";
@@ -101,6 +101,54 @@ type RichNotebookEditorProps = {
   minHeight?: number;
 };
 
+type TableSize = { rows: number; cols: number };
+
+function TablePicker({
+  onPick,
+  label,
+  ariaLabel,
+  titleLabel,
+}: {
+  onPick: (size: TableSize) => void;
+  label: (rows: number, cols: number) => string;
+  ariaLabel: (rows: number, cols: number) => string;
+  titleLabel: (rows: number, cols: number) => string;
+}) {
+  const [hover, setHover] = useState<TableSize | null>(null);
+
+  return (
+    <div className="absolute left-0 top-full mt-2 w-[210px] rounded-xl border border-slate-800 bg-slate-950 p-3 shadow-xl z-50">
+      <div className="mb-2 text-[11px] text-slate-500">
+        {hover ? `${hover.rows} × ${hover.cols}` : label(6, 6)}
+      </div>
+      <div className="grid grid-cols-6 gap-1">
+        {Array.from({ length: 36 }).map((_, i) => {
+          const r = Math.floor(i / 6) + 1;
+          const c = (i % 6) + 1;
+          const active = !!hover && r <= hover.rows && c <= hover.cols;
+          return (
+            <button
+              key={i}
+              type="button"
+              onMouseEnter={() => setHover({ rows: r, cols: c })}
+              onMouseLeave={() => setHover(null)}
+              onClick={() => onPick({ rows: r, cols: c })}
+              className={
+                "h-6 w-6 rounded border transition " +
+                (active
+                  ? "border-emerald-400 bg-emerald-400/20"
+                  : "border-slate-700 bg-slate-900/70 hover:bg-slate-800/70")
+              }
+              aria-label={ariaLabel(r, c)}
+              title={titleLabel(r, c)}
+            />
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export default function RichNotebookEditor({
   value,
   onChange,
@@ -120,7 +168,11 @@ export default function RichNotebookEditor({
       Underline,
       TextStyle,
       Link.configure({ openOnClick: false }),
-      TextAlign.configure({ types: ["heading", "paragraph"] }),
+      TextAlign.configure({
+        types: ["heading", "paragraph"],
+        alignments: ["left", "center", "right", "justify"],
+        defaultAlignment: "left",
+      }),
       Table.configure({ resizable: true }),
       TableRow,
       TableHeader,
@@ -130,6 +182,14 @@ export default function RichNotebookEditor({
     editable: true,
     autofocus: false,
     immediatelyRender: false, // evita problemas de SSR
+    editorProps: {
+      attributes: {
+        class:
+          "ntj-notebook-editor w-full focus:outline-none text-sm leading-relaxed text-slate-100 px-4 py-3",
+        style: `min-height: ${minHeight}px;`,
+        spellcheck: "true",
+      },
+    },
     onUpdate({ editor }) {
       const html = editor.getHTML();
       if (html !== value && onChange) {
@@ -151,6 +211,9 @@ export default function RichNotebookEditor({
   }, [value, editor]);
 
   const [isEmpty, setIsEmpty] = useState(true);
+  const [tablePickerOpen, setTablePickerOpen] = useState(false);
+  const tableButtonRef = useRef<HTMLButtonElement | null>(null);
+  const tablePickerRef = useRef<HTMLDivElement | null>(null);
 
   // Para mostrar placeholder cuando está vacío
   useEffect(() => {
@@ -170,6 +233,22 @@ export default function RichNotebookEditor({
     };
   }, [editor]);
 
+  useEffect(() => {
+    if (!tablePickerOpen) return;
+    const onDocClick = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (
+        tablePickerRef.current?.contains(target) ||
+        tableButtonRef.current?.contains(target)
+      ) {
+        return;
+      }
+      setTablePickerOpen(false);
+    };
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [tablePickerOpen]);
+
   if (!editor) {
     return (
       <div
@@ -180,7 +259,7 @@ export default function RichNotebookEditor({
   }
 
   const toolbarButtonBase =
-    "inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-[11px] font-semibold tracking-wide transition";
+    "inline-flex h-8 w-8 items-center justify-center rounded-lg border text-[11px] font-semibold tracking-wide transition";
 
   const activeTextStyle = editor.getAttributes("textStyle") as any;
   const currentFont = activeTextStyle?.fontFamily || "Inter";
@@ -200,15 +279,12 @@ export default function RichNotebookEditor({
   };
 
   return (
-    <div
-      className="rounded-2xl border border-slate-800/90 bg-slate-950/80 shadow-[0_20px_60px_rgba(0,0,0,0.35)] overflow-hidden"
-      style={{ minHeight }}
-    >
+    <div className="rounded-2xl border border-slate-800/90 bg-slate-950/80 shadow-[0_20px_60px_rgba(0,0,0,0.35)] overflow-hidden">
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-2 border-b border-slate-800/80 bg-slate-950/90 px-4 py-2">
         <div className="flex items-center gap-2 mr-2">
           <select
-            className="rounded-full border border-slate-700 bg-slate-900/80 px-2 py-1 text-[11px] text-slate-200"
+            className="rounded-lg border border-slate-700 bg-slate-900/80 px-2 py-1 text-[11px] text-slate-200"
             value={currentFont}
             onChange={(e) => editor.chain().focus().setFontFamily(e.target.value).run()}
           >
@@ -219,7 +295,7 @@ export default function RichNotebookEditor({
             <option value="Menlo">Menlo</option>
           </select>
           <select
-            className="rounded-full border border-slate-700 bg-slate-900/80 px-2 py-1 text-[11px] text-slate-200"
+            className="rounded-lg border border-slate-700 bg-slate-900/80 px-2 py-1 text-[11px] text-slate-200"
             value={currentSize}
             onChange={(e) => editor.chain().focus().setFontSize(e.target.value).run()}
           >
@@ -379,24 +455,50 @@ export default function RichNotebookEditor({
           <Link2 size={14} />
         </button>
 
-        <button
-          type="button"
-          onClick={() =>
-            editor
-              .chain()
-              .focus()
-              .insertTable({ rows: 3, cols: 4, withHeaderRow: true })
-              .run()
-          }
-          className={`${toolbarButtonBase} bg-slate-900/70 text-slate-200 border-slate-700 hover:border-emerald-400/60`}
-          title={L("Insert table", "Insertar tabla")}
-        >
-          <Table2 size={14} />
-        </button>
+        <div className="relative" ref={tablePickerRef}>
+          <button
+            ref={tableButtonRef}
+            type="button"
+            onClick={() => setTablePickerOpen((prev) => !prev)}
+            className={`${toolbarButtonBase} bg-slate-900/70 text-slate-200 border-slate-700 hover:border-emerald-400/60`}
+            title={L("Insert table", "Insertar tabla")}
+          >
+            <Table2 size={14} />
+          </button>
+          {tablePickerOpen && (
+            <TablePicker
+              onPick={({ rows, cols }) => {
+                editor
+                  .chain()
+                  .focus()
+                  .insertTable({ rows, cols, withHeaderRow: true })
+                  .run();
+                setTablePickerOpen(false);
+              }}
+              label={(r, c) =>
+                L(`Pick table size`, `Selecciona tamaño`)
+              }
+              ariaLabel={(r, c) =>
+                L(`Insert ${r} by ${c} table`, `Insertar tabla de ${r} × ${c}`)
+              }
+              titleLabel={(r, c) =>
+                L(`Insert ${r}×${c}`, `Insertar ${r}×${c}`)
+              }
+            />
+          )}
+        </div>
       </div>
 
       {/* Área de escritura */}
-      <div className="relative px-4 py-3">
+      <div
+        className="relative cursor-text"
+        onMouseDown={(e) => {
+          if (!editor) return;
+          const target = e.target as HTMLElement;
+          if (target.closest(".ProseMirror")) return;
+          editor.chain().focus().run();
+        }}
+      >
         {placeholder && isEmpty && (
           <div className="pointer-events-none absolute left-4 top-3 text-xs text-slate-500">
             {placeholder}
@@ -405,9 +507,89 @@ export default function RichNotebookEditor({
 
         <EditorContent
           editor={editor}
-          className="prose prose-invert max-w-none text-sm focus:outline-none **:focus-visible:outline-none min-h-[180px] leading-relaxed"
+          className="w-full **:focus-visible:outline-none"
+          style={{ minHeight }}
         />
       </div>
+
+      <style jsx global>{`
+        .ntj-notebook-editor {
+          width: 100%;
+          max-width: 100%;
+          min-height: ${minHeight}px;
+          height: 100%;
+          outline: none;
+          text-align: left;
+          white-space: pre-wrap;
+          word-break: break-word;
+          overflow-wrap: anywhere;
+          caret-color: rgba(226, 232, 240, 0.9);
+        }
+
+        .ntj-notebook-editor p {
+          margin: 0.45rem 0;
+        }
+
+        .ntj-notebook-editor ul,
+        .ntj-notebook-editor ol {
+          padding-left: 1.25rem;
+          margin: 0.6rem 0;
+        }
+
+        .ntj-notebook-editor ul {
+          list-style: disc;
+        }
+
+        .ntj-notebook-editor ol {
+          list-style: decimal;
+        }
+
+        .ntj-notebook-editor li {
+          margin: 0.25rem 0;
+        }
+
+        .ntj-notebook-editor table {
+          width: 100%;
+          border-collapse: collapse;
+          margin: 0.75rem 0;
+          table-layout: fixed;
+        }
+
+        .ntj-notebook-editor th,
+        .ntj-notebook-editor td {
+          border: 1px solid rgba(226, 232, 240, 0.28);
+          padding: 0.5rem 0.6rem;
+          vertical-align: top;
+          word-break: break-word;
+        }
+
+        .ntj-notebook-editor th {
+          background: rgba(2, 6, 23, 0.6);
+          color: rgba(226, 232, 240, 0.95);
+          font-weight: 700;
+        }
+
+        .ntj-notebook-editor td {
+          background: rgba(2, 6, 23, 0.25);
+        }
+
+        .ntj-notebook-editor .selectedCell:after {
+          background: rgba(16, 185, 129, 0.18);
+        }
+
+        .ntj-notebook-editor a {
+          color: rgba(110, 231, 183, 0.95);
+          text-decoration: underline;
+          text-underline-offset: 2px;
+        }
+
+        .ntj-notebook-editor blockquote {
+          border-left: 2px solid rgba(16, 185, 129, 0.6);
+          padding-left: 0.75rem;
+          margin: 0.75rem 0;
+          color: rgba(226, 232, 240, 0.85);
+        }
+      `}</style>
     </div>
   );
 }
