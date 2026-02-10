@@ -100,7 +100,7 @@ type WidgetId = GridItemId;
 
 
 // ===== Trading calendar / holidays =====
-type Holiday = { date: string; label: string };
+type Holiday = { date: string; label: string; marketClosed?: boolean };
 
 function isWeekend(d: Date): boolean {
   const day = d.getDay();
@@ -156,46 +156,83 @@ function getUsMarketHolidays(year: number, isEs: boolean): Holiday[] {
   holidays.push({
     date: toYMD(observedDate(new Date(year, 0, 1))),
     label: label("New Year's Day", "Año Nuevo"),
+    marketClosed: true,
   });
   holidays.push({
     date: toYMD(getNthWeekdayOfMonth(year, 0, 1, 3)),
     label: label("Martin Luther King Jr. Day", "Día de Martin Luther King Jr."),
+    marketClosed: true,
   });
   holidays.push({
     date: toYMD(getNthWeekdayOfMonth(year, 1, 1, 3)),
     label: label("Presidents' Day", "Día de los Presidentes"),
+    marketClosed: true,
+  });
+  // Good Friday (market closed)
+  const easter = getEasterDate(year);
+  const goodFriday = new Date(easter.getFullYear(), easter.getMonth(), easter.getDate() - 2);
+  holidays.push({
+    date: toYMD(goodFriday),
+    label: label("Good Friday", "Viernes Santo"),
+    marketClosed: true,
   });
   holidays.push({
     date: toYMD(getLastWeekdayOfMonth(year, 4, 1)),
     label: label("Memorial Day", "Memorial Day"),
+    marketClosed: true,
   });
   holidays.push({
     date: toYMD(observedDate(new Date(year, 5, 19))),
     label: label("Juneteenth", "Juneteenth"),
+    marketClosed: true,
   });
   holidays.push({
     date: toYMD(observedDate(new Date(year, 6, 4))),
     label: label("Independence Day", "Día de la Independencia"),
+    marketClosed: true,
   });
   holidays.push({
     date: toYMD(getNthWeekdayOfMonth(year, 8, 1, 1)),
     label: label("Labor Day", "Día del Trabajo"),
+    marketClosed: true,
   });
   holidays.push({
     date: toYMD(getNthWeekdayOfMonth(year, 9, 1, 2)),
     label: label("Columbus / Indigenous Peoples' Day", "Día de Colón / Pueblos Indígenas"),
+    marketClosed: true,
   });
   holidays.push({
     date: toYMD(getNthWeekdayOfMonth(year, 10, 4, 4)),
     label: label("Thanksgiving Day", "Día de Acción de Gracias"),
+    marketClosed: true,
   });
   holidays.push({
     date: toYMD(observedDate(new Date(year, 11, 25))),
     label: label("Christmas Day", "Navidad"),
+    marketClosed: true,
   });
 
   holidays.sort((a, b) => a.date.localeCompare(b.date));
   return holidays;
+}
+
+function getEasterDate(year: number): Date {
+  // Anonymous Gregorian algorithm (Meeus/Jones/Butcher)
+  const a = year % 19;
+  const b = Math.floor(year / 100);
+  const c = year % 100;
+  const d = Math.floor(b / 4);
+  const e = b % 4;
+  const f = Math.floor((b + 8) / 25);
+  const g = Math.floor((b - f + 1) / 3);
+  const h = (19 * a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4);
+  const k = c % 4;
+  const l = (32 + 2 * e + 2 * i - h - k) % 7;
+  const m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const month = Math.floor((h + l - 7 * m + 114) / 31);
+  const day = ((h + l - 7 * m + 114) % 31) + 1;
+  return new Date(year, month - 1, day);
 }
 
 function buildMonthCalendar(
@@ -1320,8 +1357,8 @@ export default function DashboardPage() {
                 </p>
                 <p className="text-[12px] text-slate-500">
                   {L(
-                    "Daily targets are paused on market holidays.",
-                    "Las metas diarias se pausan en feriados de mercado."
+                    "Market closed. Daily targets are paused.",
+                    "Mercado cerrado. Las metas diarias se pausan."
                   )}
                 </p>
               </div>
@@ -1449,6 +1486,7 @@ export default function DashboardPage() {
                   const rawPnl = (cell.entry as any)?.pnl ?? 0;
                   const pnl = typeof rawPnl === "number" ? rawPnl : Number(rawPnl) || 0;
                   const isHolidayCell = !!cell.holiday;
+                  const holidayLabel = cell.holiday?.label ?? null;
 
                   let bg = "bg-slate-950/90 border-slate-800 text-slate-600";
                   if (hasDate && cell.entry) {
@@ -1487,7 +1525,22 @@ export default function DashboardPage() {
                           <p className="text-[11px] mt-1 opacity-85">{L("Open journal ↗", "Abrir journal ↗")}</p>
                         </div>
                       ) : hasDate ? (
-                        <p className="mt-auto text-[11px] text-slate-500">{L("Add journal", "Agregar journal")}</p>
+                        <div className="mt-auto space-y-1">
+                          {isHolidayCell ? (
+                            <>
+                              <p className="text-[11px] text-amber-200">
+                                {holidayLabel}
+                              </p>
+                              <p className="text-[10px] uppercase tracking-wide text-amber-200/80">
+                                {L("Market closed", "Mercado cerrado")}
+                              </p>
+                            </>
+                          ) : (
+                            <p className="text-[11px] text-slate-500">
+                              {L("Add journal", "Agregar journal")}
+                            </p>
+                          )}
+                        </div>
                       ) : null}
                     </div>
                   );

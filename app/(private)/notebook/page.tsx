@@ -41,6 +41,7 @@ type NotebookSubView = "journal" | "custom";
 type Holiday = {
   date: string; // YYYY-MM-DD
   label: string;
+  marketClosed?: boolean;
 };
 
 type LocalNotebook = NotebookBookRow;
@@ -121,56 +122,90 @@ function getLastWeekdayOfMonth(
   return new Date(year, month, day);
 }
 
+function observedDate(date: Date): Date {
+  const day = date.getDay();
+  if (day === 6) {
+    return new Date(date.getFullYear(), date.getMonth(), date.getDate() - 1);
+  }
+  if (day === 0) {
+    return new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1);
+  }
+  return date;
+}
+
 function getUsFederalHolidays(year: number, lang: "en" | "es"): Holiday[] {
   const holidays: Holiday[] = [];
   const label = (en: string, es: string) => (lang === "es" ? es : en);
 
   // Fixed-date
   holidays.push(
-    { date: toYMD(new Date(year, 0, 1)), label: label("New Year's Day", "Año Nuevo") },
     {
-      date: toYMD(new Date(year, 5, 19)),
-      label: label("Juneteenth National Independence Day", "Juneteenth"),
+      date: toYMD(observedDate(new Date(year, 0, 1))),
+      label: label("New Year's Day", "Año Nuevo"),
+      marketClosed: true,
     },
-    { date: toYMD(new Date(year, 6, 4)), label: label("Independence Day", "Día de la Independencia") },
-    { date: toYMD(new Date(year, 10, 11)), label: label("Veterans Day", "Día de los Veteranos") },
-    { date: toYMD(new Date(year, 11, 25)), label: label("Christmas Day", "Navidad") }
+    {
+      date: toYMD(observedDate(new Date(year, 5, 19))),
+      label: label("Juneteenth National Independence Day", "Juneteenth"),
+      marketClosed: true,
+    },
+    {
+      date: toYMD(observedDate(new Date(year, 6, 4))),
+      label: label("Independence Day", "Día de la Independencia"),
+      marketClosed: true,
+    },
+    {
+      date: toYMD(observedDate(new Date(year, 10, 11))),
+      label: label("Veterans Day", "Día de los Veteranos"),
+      marketClosed: false,
+    },
+    {
+      date: toYMD(observedDate(new Date(year, 11, 25))),
+      label: label("Christmas Day", "Navidad"),
+      marketClosed: true,
+    }
   );
 
   // MLK – 3rd Monday Jan
   holidays.push({
     date: toYMD(getNthWeekdayOfMonth(year, 0, 1, 3)),
     label: label("Martin Luther King Jr. Day", "Día de Martin Luther King Jr."),
+    marketClosed: true,
   });
 
   // Presidents – 3rd Monday Feb
   holidays.push({
     date: toYMD(getNthWeekdayOfMonth(year, 1, 1, 3)),
     label: label("Presidents' Day", "Día de los Presidentes"),
+    marketClosed: true,
   });
 
   // Memorial – last Monday May
   holidays.push({
     date: toYMD(getLastWeekdayOfMonth(year, 4, 1)),
     label: label("Memorial Day", "Memorial Day"),
+    marketClosed: true,
   });
 
   // Labor – 1st Monday Sep
   holidays.push({
     date: toYMD(getNthWeekdayOfMonth(year, 8, 1, 1)),
     label: label("Labor Day", "Día del Trabajo"),
+    marketClosed: true,
   });
 
   // Columbus / Indigenous – 2nd Monday Oct
   holidays.push({
     date: toYMD(getNthWeekdayOfMonth(year, 9, 1, 2)),
     label: label("Columbus / Indigenous Peoples' Day", "Día de Colón / Pueblos Indígenas"),
+    marketClosed: false,
   });
 
   // Thanksgiving – 4th Thursday Nov
   holidays.push({
     date: toYMD(getNthWeekdayOfMonth(year, 10, 4, 4)),
     label: label("Thanksgiving Day", "Día de Acción de Gracias"),
+    marketClosed: true,
   });
 
   holidays.sort((a, b) => a.date.localeCompare(b.date));
@@ -1596,9 +1631,16 @@ export default function NotebookPage() {
                           key={h.date}
                           className="flex items-baseline justify-between gap-3"
                         >
-                          <span className="leading-snug">
-                            {h.label}
-                          </span>
+                          <div className="leading-snug">
+                            <div className="flex items-center gap-2">
+                              <span>{h.label}</span>
+                              {h.marketClosed ? (
+                                <span className="text-[10px] uppercase tracking-wide text-amber-200">
+                                  {L("Market closed", "Mercado cerrado")}
+                                </span>
+                              ) : null}
+                            </div>
+                          </div>
                           <span className="text-xs tabular-nums text-slate-400">
                             {formatShortDate(h.date, lang)}
                           </span>
