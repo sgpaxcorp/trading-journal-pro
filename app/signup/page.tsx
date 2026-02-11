@@ -9,6 +9,7 @@ import { useAuth } from "@/context/AuthContext";
 import type { PlanId } from "@/lib/types";
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
+import { supabaseBrowser } from "@/lib/supaBaseClient";
 
 // Password fuerte: mínimo 8, mayúscula, minúscula, número y símbolo.
 function validatePassword(password: string, L: (en: string, es: string) => string): string | null {
@@ -30,7 +31,7 @@ function validatePassword(password: string, L: (en: string, es: string) => strin
   return null;
 }
 
-type StepUi = "form" | "created";
+type StepUi = "form" | "verify";
 
 function Stepper({
   current,
@@ -43,7 +44,7 @@ function Stepper({
   const stepIndex =
     current === "form"
       ? 1 // creando cuenta
-      : 2; // cuenta creada → siguiente: escoger plan
+      : 2; // verificar email
 
   const base =
     "flex-1 h-1 rounded-full transition-colors bg-slate-800";
@@ -56,13 +57,16 @@ function Stepper({
           {L("1. Create account", "1. Crear cuenta")}
         </span>
         <span className={stepIndex >= 2 ? "text-emerald-300 font-semibold" : ""}>
-          {L("2. Choose plan", "2. Elegir plan")}
+          {L("2. Verify email", "2. Verificar email")}
         </span>
         <span className={stepIndex >= 3 ? "text-emerald-300 font-semibold" : ""}>
-          {L("3. Pay & confirm", "3. Pagar y confirmar")}
+          {L("3. Choose plan", "3. Elegir plan")}
         </span>
         <span className={stepIndex >= 4 ? "text-emerald-300 font-semibold" : ""}>
-          {L("4. Welcome", "4. Bienvenida")}
+          {L("4. Pay & confirm", "4. Pagar y confirmar")}
+        </span>
+        <span className={stepIndex >= 5 ? "text-emerald-300 font-semibold" : ""}>
+          {L("5. Welcome", "5. Bienvenida")}
         </span>
       </div>
       <div className="flex gap-2">
@@ -70,6 +74,7 @@ function Stepper({
         <div className={`${base} ${stepIndex >= 2 ? active : ""}`} />
         <div className={`${base} ${stepIndex >= 3 ? active : ""}`} />
         <div className={`${base} ${stepIndex >= 4 ? active : ""}`} />
+        <div className={`${base} ${stepIndex >= 5 ? active : ""}`} />
       </div>
     </div>
   );
@@ -102,6 +107,10 @@ function SignUpPageInner() {
   const [error, setError] = useState("");
   const [passwordError, setPasswordError] = useState("");
   const [submittedEmail, setSubmittedEmail] = useState("");
+  const [verificationCode, setVerificationCode] = useState("");
+  const [verifying, setVerifying] = useState(false);
+  const [resending, setResending] = useState(false);
+  const [canResend, setCanResend] = useState(true);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -143,7 +152,8 @@ function SignUpPageInner() {
       }).catch(() => {});
 
       setSubmittedEmail(normalizedEmail);
-      setStepUi("created");
+      setVerificationCode("");
+      setStepUi("verify");
     } catch (err: any) {
       setError(err.message || L("Something went wrong.", "Algo salió mal."));
     } finally {
@@ -151,21 +161,77 @@ function SignUpPageInner() {
     }
   }
 
+  async function handleVerifyCode() {
+    setError("");
+    const emailToVerify = submittedEmail || email.trim();
+    const token = verificationCode.trim();
+    if (!emailToVerify) {
+      setError(L("Missing email for verification.", "Falta el email para verificar."));
+      return;
+    }
+    if (!token) {
+      setError(L("Please enter the verification code.", "Ingresa el código de verificación."));
+      return;
+    }
+
+    try {
+      setVerifying(true);
+      const { data, error } = await supabaseBrowser.auth.verifyOtp({
+        email: emailToVerify,
+        token,
+        type: "signup",
+      });
+      if (error || !data.user) {
+        throw new Error(error?.message || L("Invalid code. Try again.", "Código inválido. Inténtalo de nuevo."));
+      }
+
+      const planParamValue = planFromQuery;
+      router.push(`/billing?plan=${planParamValue}`);
+    } catch (err: any) {
+      setError(err?.message || L("Could not verify the code.", "No se pudo verificar el código."));
+    } finally {
+      setVerifying(false);
+    }
+  }
+
+  async function handleResendCode() {
+    setError("");
+    const emailToVerify = submittedEmail || email.trim();
+    if (!emailToVerify) {
+      setError(L("Missing email for resend.", "Falta el email para reenviar."));
+      return;
+    }
+    try {
+      setResending(true);
+      const { error } = await supabaseBrowser.auth.resend({
+        type: "signup",
+        email: emailToVerify,
+      });
+      if (error) throw new Error(error.message);
+      setCanResend(false);
+      setTimeout(() => setCanResend(true), 30000);
+    } catch (err: any) {
+      setError(err?.message || L("Could not resend the code.", "No se pudo reenviar el código."));
+    } finally {
+      setResending(false);
+    }
+  }
+
   /* =========================
-     Step UI: cuenta creada
+     Step UI: verificar email
   ========================== */
 
-  if (stepUi === "created") {
+  if (stepUi === "verify") {
     return (
       <main className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center px-4">
         <div className="w-full max-w-lg bg-slate-900/90 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-5">
-          <Stepper current="created" L={L} />
+          <Stepper current="verify" L={L} />
 
           <h1 className="text-xl font-semibold text-slate-50 mt-4">
-            {L("Step 1 complete ✅", "Paso 1 completado ✅")}
+            {L("Verify your email", "Verifica tu email")}
           </h1>
           <p className="text-xs text-slate-400">
-            {L("We created your NeuroTrader Journal account for:", "Creamos tu cuenta de NeuroTrader Journal para:")}
+            {L("We sent a 6-digit code to:", "Te enviamos un código de 6 dígitos a:")}
           </p>
           <p className="text-xs font-semibold text-emerald-300 break-all">
             {submittedEmail}
@@ -173,26 +239,55 @@ function SignUpPageInner() {
 
           <p className="text-xs text-slate-400">
             {L(
-              "We also sent you a confirmation email. You can confirm your email now or after you finish paying.",
-              "También te enviamos un correo de confirmación. Puedes confirmarlo ahora o después de pagar."
+              "You must confirm your email before choosing a plan or paying.",
+              "Debes confirmar tu email antes de elegir plan o pagar."
             )}
           </p>
 
-          <div className="space-y-2 text-xs text-slate-300">
-            <p className="font-semibold">{L("What's next?", "¿Qué sigue?")}</p>
-            <ol className="space-y-1 list-decimal list-inside text-[11px]">
-              <li>{L("Step 2: Choose your subscription plan.", "Paso 2: Elige tu plan de suscripción.")}</li>
-              <li>{L("Step 3: Complete payment in Stripe.", "Paso 3: Completa el pago en Stripe.")}</li>
-              <li>{L("Step 4: We'll welcome you and take you to your dashboard.", "Paso 4: Te damos la bienvenida y te llevamos al dashboard.")}</li>
-            </ol>
+          <div className="space-y-3">
+            <div>
+              <label className="block text-[11px] text-slate-400 mb-1">
+                {L("Verification code", "Código de verificación")}
+              </label>
+              <input
+                value={verificationCode}
+                onChange={(e) => setVerificationCode(e.target.value)}
+                inputMode="numeric"
+                maxLength={8}
+                className="w-full rounded-lg bg-slate-950/70 border border-slate-700 px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-400 tracking-[0.3em] text-center"
+                placeholder="123456"
+              />
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3 text-[11px] text-slate-400">
+              <button
+                type="button"
+                onClick={handleResendCode}
+                disabled={resending || !canResend}
+                className="text-emerald-300 hover:text-emerald-200 disabled:text-slate-500"
+              >
+                {resending
+                  ? L("Resending...", "Reenviando...")
+                  : L("Resend code", "Reenviar código")}
+              </button>
+              <span>
+                {L(
+                  "Check spam/promotions if you don't see it.",
+                  "Revisa spam/promociones si no lo ves."
+                )}
+              </span>
+            </div>
           </div>
+
+          {error && <p className="text-[11px] text-red-400">{error}</p>}
 
           <button
             type="button"
-            onClick={() => router.push("/billing")}
-            className="w-full mt-2 px-4 py-2.5 rounded-xl bg-emerald-400 text-slate-950 text-xs font-semibold hover:bg-emerald-300 transition shadow-lg shadow-emerald-500/20"
+            onClick={handleVerifyCode}
+            disabled={verifying}
+            className="w-full mt-2 px-4 py-2.5 rounded-xl bg-emerald-400 text-slate-950 text-xs font-semibold hover:bg-emerald-300 transition shadow-lg shadow-emerald-500/20 disabled:opacity-60"
           >
-            {L("Go to Step 2 – Choose your plan", "Ir al Paso 2 – Elegir plan")}
+            {verifying ? L("Verifying...", "Verificando...") : L("Verify and continue", "Verificar y continuar")}
           </button>
 
           <p className="text-[9px] text-slate-500 text-center">
