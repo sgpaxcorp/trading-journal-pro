@@ -8,9 +8,20 @@ type ChecklistItem = { text: string; done: boolean };
 
 export async function POST(req: NextRequest) {
   try {
+    const authHeader = req.headers.get("authorization") || "";
+    const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+    if (!token) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const { data: authData, error: authErr } = await supabaseAdmin.auth.getUser(token);
+    if (authErr || !authData?.user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const body = await req.json();
 
-    const userId = String(body.userId || "");
+    const userId = authData.user.id;
     const date = String(body.date || "");
     const items = (body.items || []) as ChecklistItem[];
     const notes = body.notes === null || body.notes === undefined ? null : String(body.notes);

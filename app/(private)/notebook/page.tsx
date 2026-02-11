@@ -12,6 +12,7 @@ import TopNav from "@/app/components/TopNav";
 import { useTradingAccounts } from "@/hooks/useTradingAccounts";
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
+import { supabaseBrowser } from "@/lib/supaBaseClient";
 import type { JournalEntry } from "@/lib/journalTypes";
 import { getAllJournalEntries } from "@/lib/journalSupabase";
 import RichNotebookEditor from "@/app/components/RichNotebookEditor";
@@ -682,9 +683,14 @@ export default function NotebookPage() {
 
       const languageHint = detectLanguage(aiQuestion);
 
+      const session = await supabaseBrowser.auth.getSession();
+      const token = session?.data?.session?.access_token;
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (token) headers.Authorization = `Bearer ${token}`;
+
       const res = await fetch("/api/notebook-ai", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({
           question: aiQuestion,
           language: languageHint,

@@ -1,25 +1,43 @@
 // app/api/stripe/create-addon-session/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
+import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {});
+const APP_URL = (process.env.NEXT_PUBLIC_APP_URL || "").trim();
 
 const ADDON_PRICE_ID = process.env.STRIPE_PRICE_OPTIONFLOW_MONTHLY ?? "";
 const ADDON_KEY = "option_flow";
 
+function resolveAppUrl(req: NextRequest) {
+  const origin = req.headers.get("origin") ?? "";
+  if (process.env.NODE_ENV !== "production" && origin.startsWith("http")) {
+    return origin;
+  }
+  if (APP_URL && APP_URL.startsWith("http")) return APP_URL;
+  throw new Error("Missing or invalid NEXT_PUBLIC_APP_URL");
+}
+
 export async function POST(req: NextRequest) {
   try {
+    const authHeader = req.headers.get("authorization") || "";
+    const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+    if (!token) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const { data: authData, error: authErr } = await supabaseAdmin.auth.getUser(token);
+    if (authErr || !authData?.user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const userId = authData.user.id;
+    const email = authData.user.email ?? "";
+
     const body = await req.json();
-
-    const userId = body.userId as string | undefined;
-    const email = body.email as string | undefined;
     const addonKey = (body.addonKey as string | undefined) || ADDON_KEY;
-
-    if (!userId || !email) {
-      return NextResponse.json(
-        { error: "Missing userId or email" },
-        { status: 400 }
-      );
+    if (addonKey !== ADDON_KEY) {
+      return NextResponse.json({ error: "Invalid add-on" }, { status: 400 });
     }
 
     if (!ADDON_PRICE_ID) {
@@ -29,22 +47,28 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const origin = req.headers.get("origin") ?? process.env.NEXT_PUBLIC_APP_URL;
-    if (!origin || !origin.startsWith("http")) {
-      throw new Error("Missing or invalid origin / NEXT_PUBLIC_APP_URL");
-    }
+    const origin = resolveAppUrl(req);
 
     // Ensure customer exists
     let customerId: string | undefined;
-    const existing = await stripe.customers.list({
-      email,
-      limit: 1,
-    });
-    if (existing.data.length > 0) {
-      customerId = existing.data[0].id;
-    } else {
+    const { data: profile } = await supabaseAdmin
+      .from("profiles")
+      .select("stripe_customer_id")
+      .eq("id", userId)
+      .maybeSingle();
+
+    if (profile?.stripe_customer_id) {
+      customerId = String(profile.stripe_customer_id);
+    } else if (email) {
+      const existing = await stripe.customers.list({ email, limit: 1 });
+      if (existing.data.length > 0) {
+        customerId = existing.data[0].id;
+      }
+    }
+
+    if (!customerId) {
       const created = await stripe.customers.create({
-        email,
+        email: email || undefined,
         metadata: {
           supabaseUserId: userId,
         },

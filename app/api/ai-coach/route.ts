@@ -8,6 +8,8 @@
 // 5) Keep the response compact, actionable, and grounded in the data supplied.
 
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
+import { getAuthUser } from "@/lib/authServer";
+import { rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -599,6 +601,29 @@ async function callOpenAI(params: {
 
 export async function POST(req: Request) {
   try {
+    const authUser = await getAuthUser(req);
+    if (!authUser) {
+      return Response.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const rate = rateLimit(`ai-coach:user:${authUser.userId}`, {
+      limit: 10,
+      windowMs: 60_000,
+    });
+    if (!rate.allowed) {
+      const retryAfter = Math.max(1, Math.ceil((rate.resetAt - Date.now()) / 1000));
+      return Response.json(
+        { error: "Rate limit exceeded" },
+        {
+          status: 429,
+          headers: {
+            "Retry-After": String(retryAfter),
+            ...rateLimitHeaders(rate),
+          },
+        }
+      );
+    }
+
     const apiKey =
       process.env.OPENAI_API_KEY ||
       process.env.AI_COACH_OPENAI_API_KEY;
@@ -635,7 +660,7 @@ export async function POST(req: Request) {
       allowTables,
     });
 
-    const userId = safeString(body.userProfile?.id).trim();
+    const userId = authUser.userId;
     const scopeKeys = resolveScopeKeys(body);
     const existingMemory = userId ? await getCoachMemory(userId, scopeKeys) : { global: "", weekly: "", daily: "" };
 

@@ -72,14 +72,21 @@ export default function PricingPage() {
     try {
       setLoadingPlan(planId);
 
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData?.session?.access_token;
+      if (!token) {
+        throw new Error(
+          L("Session not available. Please sign in again.", "Sesión no disponible. Inicia sesión nuevamente.")
+        );
+      }
+
       const res = await fetch("/api/stripe/create-checkout-session", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          userId: user.id,
-          email: user.email,
           planId,
           billingCycle,
         }),

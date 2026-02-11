@@ -8,6 +8,7 @@ import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
+import { supabaseBrowser } from "@/lib/supaBaseClient";
 
 import {
   calcRiskUsd,
@@ -374,9 +375,14 @@ async function generateAndDownloadPDF(
 */
 async function neuroReact(event: string, lang: "en" | "es", data: any) {
   try {
+    const session = await supabaseBrowser.auth.getSession();
+    const token = session?.data?.session?.access_token;
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (token) headers.Authorization = `Bearer ${token}`;
+
     const res = await fetch("/api/neuro-assistant/neuro-reaction", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers,
       body: JSON.stringify({ event, lang, data }),
     });
     if (!res.ok) return null;

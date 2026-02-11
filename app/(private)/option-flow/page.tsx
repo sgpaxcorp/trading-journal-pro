@@ -332,6 +332,136 @@ function escapeHtml(value: string) {
     .replace(/'/g, "&#039;");
 }
 
+const ALLOWED_HTML_TAGS = new Set([
+  "h3",
+  "h4",
+  "p",
+  "strong",
+  "em",
+  "ul",
+  "ol",
+  "li",
+  "table",
+  "thead",
+  "tbody",
+  "tr",
+  "th",
+  "td",
+  "div",
+  "span",
+  "br",
+  "hr",
+  "img",
+  "a",
+]);
+
+const ALLOWED_HTML_ATTRS = new Set([
+  "href",
+  "target",
+  "rel",
+  "src",
+  "alt",
+  "width",
+  "height",
+  "colspan",
+  "rowspan",
+  "style",
+]);
+
+const ALLOWED_STYLE_PROPS = new Set([
+  "width",
+  "border",
+  "border-bottom",
+  "border-collapse",
+  "margin",
+  "margin-top",
+  "margin-bottom",
+  "padding",
+  "text-align",
+  "color",
+  "background",
+  "background-color",
+  "font-weight",
+  "font-size",
+  "line-height",
+]);
+
+function sanitizeStyle(styleValue: string): string {
+  return styleValue
+    .split(";")
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => {
+      const [rawProp, ...rest] = part.split(":");
+      const prop = rawProp?.trim().toLowerCase();
+      const value = rest.join(":").trim();
+      if (!prop || !value) return "";
+      if (!ALLOWED_STYLE_PROPS.has(prop)) return "";
+      if (/expression\s*\(|javascript\s*:/i.test(value)) return "";
+      return `${prop}: ${value}`;
+    })
+    .filter(Boolean)
+    .join("; ");
+}
+
+function isSafeUrl(value: string) {
+  return /^(?:(?:https?|mailto|tel):|data:image\/)/i.test(value);
+}
+
+function sanitizeOptionFlowHtml(html: string) {
+  if (typeof window === "undefined") return "";
+  try {
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_ELEMENT, null);
+    const nodes: Element[] = [];
+    while (walker.nextNode()) {
+      nodes.push(walker.currentNode as Element);
+    }
+
+    nodes.forEach((node) => {
+      const tag = node.tagName.toLowerCase();
+      if (!ALLOWED_HTML_TAGS.has(tag)) {
+        const text = doc.createTextNode(node.textContent || "");
+        node.replaceWith(text);
+        return;
+      }
+
+      [...node.attributes].forEach((attr) => {
+        const name = attr.name.toLowerCase();
+        if (!ALLOWED_HTML_ATTRS.has(name)) {
+          node.removeAttribute(attr.name);
+          return;
+        }
+
+        if ((name === "href" || name === "src") && !isSafeUrl(attr.value)) {
+          node.removeAttribute(attr.name);
+          return;
+        }
+
+        if (name === "style") {
+          const cleanStyle = sanitizeStyle(attr.value);
+          if (cleanStyle) {
+            node.setAttribute("style", cleanStyle);
+          } else {
+            node.removeAttribute("style");
+          }
+        }
+      });
+
+      if (tag === "a") {
+        const target = node.getAttribute("target");
+        if (target === "_blank") {
+          node.setAttribute("rel", "noopener noreferrer");
+        }
+      }
+    });
+
+    return doc.body.innerHTML;
+  } catch {
+    return escapeHtml(html);
+  }
+}
+
 function extractPlanLines(html?: string | null): string[] {
   if (!html) return [];
   try {
@@ -2423,15 +2553,22 @@ export default function OptionFlowPage() {
   }
 
   async function handleCheckout() {
-    if (!userId || !email) return;
+    if (!userId) return;
     setMessage("");
     try {
+      const { data: sessionData } = await supabaseBrowser.auth.getSession();
+      const token = sessionData?.session?.access_token;
+      if (!token) {
+        throw new Error(isEs ? "Sesión no disponible" : "Session not available");
+      }
+
       const res = await fetch("/api/stripe/create-addon-session", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
         body: JSON.stringify({
-          userId,
-          email,
           addonKey: "option_flow",
         }),
       });
@@ -2994,7 +3131,7 @@ export default function OptionFlowPage() {
             )}
             {msg.html && (
               <div className="mt-3 rounded-xl border border-slate-800 bg-slate-950/70 p-3 text-[11.5px] text-slate-100 [&_h3]:mt-4 [&_h3]:text-[12px] [&_h3]:font-semibold [&_h4]:mt-3 [&_h4]:text-[11.5px] [&_h4]:font-semibold [&_p]:mt-2 [&_ul]:mt-2 [&_li]:ml-4 [&_table]:text-[10.5px]">
-                <div dangerouslySetInnerHTML={{ __html: msg.html }} />
+                <div dangerouslySetInnerHTML={{ __html: sanitizeOptionFlowHtml(msg.html) }} />
               </div>
             )}
           </div>

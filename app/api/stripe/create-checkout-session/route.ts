@@ -1,12 +1,22 @@
 // app/api/stripe/create-checkout-session/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
+import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 
 type PlanId = "core" | "advanced";
 type BillingCycle = "monthly" | "annual";
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {
-  });
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {});
+const APP_URL = (process.env.NEXT_PUBLIC_APP_URL || "").trim();
+
+function resolveAppUrl(req: NextRequest) {
+  const origin = req.headers.get("origin") ?? "";
+  if (process.env.NODE_ENV !== "production" && origin.startsWith("http")) {
+    return origin;
+  }
+  if (APP_URL && APP_URL.startsWith("http")) return APP_URL;
+  throw new Error("Missing or invalid NEXT_PUBLIC_APP_URL");
+}
 
 // Price IDs from your Stripe Dashboard (env vars)
 const PRICE_IDS: Record<PlanId, Record<BillingCycle, string>> = {
@@ -23,33 +33,45 @@ const OPTION_FLOW_PRICE = process.env.STRIPE_PRICE_OPTIONFLOW_MONTHLY ?? "";
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
+    const authHeader = req.headers.get("authorization") || "";
+    const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+    if (!token) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
 
-    const userId = body.userId as string | undefined;
-    const email = body.email as string | undefined;
+    const { data: authData, error: authErr } = await supabaseAdmin.auth.getUser(token);
+    if (authErr || !authData?.user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const userId = authData.user.id;
+    const email = authData.user.email ?? "";
+
+    const body = await req.json();
     const planId = body.planId as PlanId | undefined;
-    const billingCycle = (body.billingCycle as BillingCycle | undefined) ?? "monthly";
+    const billingCycle = body.billingCycle as BillingCycle | undefined;
     const couponCodeRaw = body.couponCode as string | undefined; // opcional
     const addonOptionFlow = Boolean(body.addonOptionFlow);
 
-    if (!userId || !email || !planId) {
-      return NextResponse.json(
-        { error: "Missing userId, email or planId" },
-        { status: 400 }
-      );
+    if (!planId) {
+      return NextResponse.json({ error: "Missing planId" }, { status: 400 });
     }
 
     if (planId !== "core" && planId !== "advanced") {
       return NextResponse.json({ error: "Invalid plan" }, { status: 400 });
     }
+    if (billingCycle && billingCycle !== "monthly" && billingCycle !== "annual") {
+      return NextResponse.json({ error: "Invalid billing cycle" }, { status: 400 });
+    }
+    const finalBillingCycle = billingCycle ?? "monthly";
 
-    const priceId = PRICE_IDS[planId][billingCycle];
+    const priceId = PRICE_IDS[planId][finalBillingCycle];
     if (!priceId) {
       console.error(
         "[CHECKOUT] Missing priceId for plan",
         planId,
         "cycle=",
-        billingCycle
+        finalBillingCycle
       );
       return NextResponse.json(
         { error: "Price ID not configured for this plan" },
@@ -63,28 +85,34 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const origin = req.headers.get("origin") ?? process.env.NEXT_PUBLIC_APP_URL;
-    if (!origin || !origin.startsWith("http")) {
-      throw new Error("Missing or invalid origin / NEXT_PUBLIC_APP_URL");
-    }
+    const origin = resolveAppUrl(req);
 
     // =====================================================
     // Ensure we have an existing Customer in Stripe
     // =====================================================
     let customerId: string | undefined;
 
-    // 1) Try to find an existing Customer by email
-    const existing = await stripe.customers.list({
-      email,
-      limit: 1,
-    });
+    // 1) Try profile stripe_customer_id
+    const { data: profile } = await supabaseAdmin
+      .from("profiles")
+      .select("stripe_customer_id")
+      .eq("id", userId)
+      .maybeSingle();
 
-    if (existing.data.length > 0) {
-      customerId = existing.data[0].id;
-    } else {
-      // 2) Create a new Customer if none exists yet
+    if (profile?.stripe_customer_id) {
+      customerId = String(profile.stripe_customer_id);
+    } else if (email) {
+      // 2) Try to find an existing Customer by email
+      const existing = await stripe.customers.list({ email, limit: 1 });
+      if (existing.data.length > 0) {
+        customerId = existing.data[0].id;
+      }
+    }
+
+    if (!customerId) {
+      // 3) Create a new Customer if none exists yet
       const created = await stripe.customers.create({
-        email,
+        email: email || undefined,
         metadata: {
           supabaseUserId: userId,
         },

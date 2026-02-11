@@ -990,11 +990,17 @@ export default function DashboardPage() {
     setChecklistSaveError(null);
 
     try {
+      const { data: sessionData } = await supabaseBrowser.auth.getSession();
+      const token = sessionData?.session?.access_token;
+      if (!token) throw new Error("Unauthorized");
+
       const res = await fetch("/api/checklist/upsert", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
         body: JSON.stringify({
-          userId,
           date: payload.date,
           items: payload.items,
           notes: payload.notes ?? null,

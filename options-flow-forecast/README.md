@@ -17,6 +17,11 @@ cp .env.example .env
 uvicorn app.main:app --reload
 ```
 
+## Security (recommended)
+- Set `OPTIONS_FLOW_API_KEY` and send it as `X-API-Key` from clients.
+- Set `CORS_ALLOW_ORIGINS` to a comma-separated list of trusted origins (e.g. `http://localhost:3000`).
+- Adjust `MAX_UPLOAD_MB` if you need larger uploads.
+
 ## Endpoints
 - `POST /ingest/flow` (multipart): CSV or screenshot
 - `POST /ingest/chart` (multipart): premarket chart screenshot

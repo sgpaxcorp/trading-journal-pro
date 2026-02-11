@@ -20,6 +20,12 @@ export default function ConfirmedPage() {
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,#22c55e33_0,transparent_55%),radial-gradient(circle_at_bottom,#0f172a_0,#020617_70%)]" />
         <div className="absolute -right-20 top-10 w-72 h-72 rounded-full bg-emerald-500/20 blur-3xl" />
         <div className="absolute -left-24 bottom-10 w-64 h-64 rounded-full bg-sky-500/15 blur-3xl" />
+        <motion.div
+          className="absolute left-1/2 top-1/2 h-[520px] w-[520px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[conic-gradient(from_90deg,rgba(16,185,129,0.2),rgba(56,189,248,0.2),rgba(14,165,233,0.08),rgba(16,185,129,0.2))] blur-3xl"
+          initial={{ opacity: 0.15, rotate: 0, scale: 0.9 }}
+          animate={{ opacity: [0.15, 0.3, 0.15], rotate: [0, 25, 0], scale: [0.9, 1.05, 0.9] }}
+          transition={{ duration: 12, repeat: Infinity, ease: "easeInOut" }}
+        />
       </div>
 
       <motion.div
@@ -64,12 +70,12 @@ export default function ConfirmedPage() {
         </motion.div>
 
         <motion.h1
-          className="text-2xl md:text-3xl font-semibold mb-2"
+          className="text-2xl md:text-4xl font-semibold mb-2 text-transparent bg-clip-text bg-gradient-to-r from-emerald-200 via-emerald-400 to-sky-300"
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.35 }}
         >
-          {L("Welcome, your account is live ✅", "Bienvenido, tu cuenta está activa ✅")}
+          {L("Welcome — your training begins now", "Bienvenido — tu entrenamiento comienza ahora")}
         </motion.h1>
 
         <motion.p
@@ -79,8 +85,8 @@ export default function ConfirmedPage() {
           transition={{ delay: 0.45 }}
         >
           {L(
-            "Your account has been created successfully and your email is confirmed.",
-            "Tu cuenta se creó correctamente y tu email está confirmado."
+            "Your account is live and your email is confirmed.",
+            "Tu cuenta está activa y tu email está confirmado."
           )}
         </motion.p>
 
@@ -91,10 +97,27 @@ export default function ConfirmedPage() {
           transition={{ delay: 0.55 }}
         >
           {L(
-            "From now on, every journal entry is a rep for your brain. You're not here to gamble — you're here to train your nervous system to think, execute and recover like a professional trader.",
+            "From now on, every journal entry is a rep for your brain. You're not here to gamble — you're here to train your nervous system to think, execute, and recover like a professional trader.",
             "Desde ahora, cada entrada del journal es una repetición para tu cerebro. No estás aquí para apostar — estás aquí para entrenar tu sistema nervioso a pensar, ejecutar y recuperarte como un trader profesional."
           )}
         </motion.p>
+
+        <motion.div
+          className="mt-4 rounded-2xl border border-emerald-400/30 bg-emerald-500/5 p-4 text-[11px] md:text-xs text-slate-200"
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.65 }}
+        >
+          <p className="text-emerald-200 font-semibold mb-1">
+            {L("Trader psychology code", "Código de psicología del trader")}
+          </p>
+          <p>
+            {L(
+              "Process over outcome. Risk before reward. Calm is a weapon. Consistency is the only edge that compounds.",
+              "Proceso sobre resultado. Riesgo antes de recompensa. La calma es un arma. La consistencia es el único edge que compone."
+            )}
+          </p>
+        </motion.div>
 
         <motion.p
           className="text-[11px] md:text-xs text-slate-400"

@@ -84,9 +84,14 @@ export default function FloatingAskButton() {
 
     try {
       await trackEvent(source ? `/ask-widget/${source}` : "/ask-widget/submit");
+      const { data: sessionData } = await supabaseBrowser.auth.getSession();
+      const token = sessionData?.session?.access_token;
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (token) headers.Authorization = `Bearer ${token}`;
+
       const res = await fetch("/api/ask/ask", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({ message: cleaned }),
       });
 

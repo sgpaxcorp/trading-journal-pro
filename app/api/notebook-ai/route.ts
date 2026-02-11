@@ -1,6 +1,8 @@
 // app/api/notebook-ai/route.ts
 import { NextResponse } from "next/server";
 import OpenAI from "openai";
+import { getAuthUser } from "@/lib/authServer";
+import { rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
 
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -8,6 +10,29 @@ const client = new OpenAI({
 
 export async function POST(req: Request) {
   try {
+    const authUser = await getAuthUser(req);
+    if (!authUser) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const rate = rateLimit(`notebook-ai:user:${authUser.userId}`, {
+      limit: 6,
+      windowMs: 60_000,
+    });
+    if (!rate.allowed) {
+      const retryAfter = Math.max(1, Math.ceil((rate.resetAt - Date.now()) / 1000));
+      return NextResponse.json(
+        { error: "Rate limit exceeded" },
+        {
+          status: 429,
+          headers: {
+            "Retry-After": String(retryAfter),
+            ...rateLimitHeaders(rate),
+          },
+        }
+      );
+    }
+
     const body = await req.json();
     const { question, journal } = body as {
       question: string;

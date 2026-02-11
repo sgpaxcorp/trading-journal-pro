@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException, Depends
+from fastapi import FastAPI, UploadFile, File, HTTPException, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlmodel import Session, select
@@ -21,12 +21,33 @@ init_db()
 
 app = FastAPI(title="options-flow-forecast")
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+
+def parse_cors_origins(raw: str) -> list[str]:
+    if not raw:
+        return []
+    return [o.strip() for o in raw.split(",") if o.strip()]
+
+
+cors_origins = parse_cors_origins(settings.cors_allow_origins)
+if cors_origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=cors_origins,
+        allow_methods=["POST"],
+        allow_headers=["*"],
+    )
+
+
+def require_api_key(x_api_key: str = Header(default="")):
+    expected = settings.options_flow_api_key
+    if expected and x_api_key != expected:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+def enforce_upload_size(data: bytes):
+    max_bytes = int(settings.max_upload_mb) * 1024 * 1024
+    if max_bytes > 0 and len(data) > max_bytes:
+        raise HTTPException(status_code=413, detail="File too large")
 
 
 def load_prompt() -> str:
@@ -40,11 +61,13 @@ async def ingest_flow(
     file: UploadFile = File(...),
     provider: str | None = None,
     symbol: str | None = None,
+    _: None = Depends(require_api_key),
     session: Session = Depends(get_session),
 ):
     data = await file.read()
     if not data:
         raise HTTPException(status_code=400, detail="Empty file")
+    enforce_upload_size(data)
 
     storage = get_storage()
     upload_id, path = storage.save(file.filename, data)
@@ -76,11 +99,13 @@ async def ingest_flow(
 async def ingest_chart(
     file: UploadFile = File(...),
     symbol: str | None = None,
+    _: None = Depends(require_api_key),
     session: Session = Depends(get_session),
 ):
     data = await file.read()
     if not data:
         raise HTTPException(status_code=400, detail="Empty file")
+    enforce_upload_size(data)
 
     storage = get_storage()
     upload_id, path = storage.save(file.filename, data)
@@ -100,7 +125,11 @@ async def ingest_chart(
 
 
 @app.post("/analyze", response_model=AnalyzeResponse)
-async def analyze(req: AnalyzeRequest, session: Session = Depends(get_session)):
+async def analyze(
+    req: AnalyzeRequest,
+    _: None = Depends(require_api_key),
+    session: Session = Depends(get_session),
+):
     flow_upload = session.exec(select(UploadModel).where(UploadModel.id == req.flow_upload_id)).first()
     if not flow_upload:
         return AnalyzeResponse(
@@ -164,7 +193,11 @@ async def analyze(req: AnalyzeRequest, session: Session = Depends(get_session)):
 
 
 @app.post("/feedback")
-async def feedback(req: FeedbackRequest, session: Session = Depends(get_session)):
+async def feedback(
+    req: FeedbackRequest,
+    _: None = Depends(require_api_key),
+    session: Session = Depends(get_session),
+):
     fb = FeedbackModel(
         id=str(uuid.uuid4()),
         analysis_id=req.analysis_id,

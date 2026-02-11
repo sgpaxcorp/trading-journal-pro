@@ -136,13 +136,22 @@ export default function BillingClient({ initialPlan }: BillingClientProps) {
       setLoading(true);
       setError(null);
 
+      const { data: sessionData } = await supabaseBrowser.auth.getSession();
+      const token = sessionData?.session?.access_token;
+      if (!token) {
+        throw new Error(
+          L("Session not available. Please sign in again.", "Sesión no disponible. Inicia sesión nuevamente.")
+        );
+      }
+
       const res = await fetch("/api/stripe/create-checkout-session", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
         body: JSON.stringify({
           planId: selectedPlan,
-          userId: user.id,
-          email: user.email,
           couponCode: couponCode.trim() || undefined,
           addonOptionFlow: !hasActivePlan && addonSelected,
           billingCycle,
@@ -177,13 +186,21 @@ export default function BillingClient({ initialPlan }: BillingClientProps) {
       setLoading(true);
       setError(null);
 
+      const { data: sessionData } = await supabaseBrowser.auth.getSession();
+      const token = sessionData?.session?.access_token;
+      if (!token) {
+        throw new Error(
+          L("Session not available. Please sign in again.", "Sesión no disponible. Inicia sesión nuevamente.")
+        );
+      }
+
       const res = await fetch("/api/stripe/create-addon-session", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          userId: user.id,
-          email: user.email,
-        }),
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ addonKey: "option_flow" }),
       });
 
       const data = await res.json();

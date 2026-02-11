@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
+import { getAuthUser } from "@/lib/authServer";
+import { rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -80,6 +82,29 @@ function getWidgetGlossary(lang: "en" | "es"): string {
 
 export async function POST(req: NextRequest) {
   try {
+    const authUser = await getAuthUser(req);
+    if (!authUser) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const rate = rateLimit(`neuro-assistant:user:${authUser.userId}`, {
+      limit: 30,
+      windowMs: 60_000,
+    });
+    if (!rate.allowed) {
+      const retryAfter = Math.max(1, Math.ceil((rate.resetAt - Date.now()) / 1000));
+      return NextResponse.json(
+        { error: "Rate limit exceeded" },
+        {
+          status: 429,
+          headers: {
+            "Retry-After": String(retryAfter),
+            ...rateLimitHeaders(rate),
+          },
+        }
+      );
+    }
+
     const body = await req.json();
     const question = (body.question as string | undefined) ?? "";
     const contextPath = (body.contextPath as string | undefined) ?? "";

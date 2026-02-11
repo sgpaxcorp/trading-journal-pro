@@ -1361,9 +1361,14 @@ function AiCoachingPageInner() {
           createdAt: m.createdAt,
         }));
 
+      const session = await supabaseBrowser.auth.getSession();
+      const token = session?.data?.session?.access_token;
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (token) headers.Authorization = `Bearer ${token}`;
+
       const res = await fetch("/api/ai-coach", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({
           // Conversation
           threadId: activeThread.id,

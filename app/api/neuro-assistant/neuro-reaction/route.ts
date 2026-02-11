@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
+import { getAuthUser } from "@/lib/authServer";
+import { rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -228,6 +230,29 @@ function systemPrompt(lang: Lang) {
 
 export async function POST(req: NextRequest) {
   try {
+    const authUser = await getAuthUser(req);
+    if (!authUser) {
+      return NextResponse.json({ error: "Unauthorized", text: "" }, { status: 401 });
+    }
+
+    const rate = rateLimit(`neuro-reaction:user:${authUser.userId}`, {
+      limit: 60,
+      windowMs: 60_000,
+    });
+    if (!rate.allowed) {
+      const retryAfter = Math.max(1, Math.ceil((rate.resetAt - Date.now()) / 1000));
+      return NextResponse.json(
+        { error: "Rate limit exceeded", text: "" },
+        {
+          status: 429,
+          headers: {
+            "Retry-After": String(retryAfter),
+            ...rateLimitHeaders(rate),
+          },
+        }
+      );
+    }
+
     const body = await req.json();
     const event = (body.event as string | undefined) ?? "";
     const langRaw = (body.lang as string | undefined) ?? "en";

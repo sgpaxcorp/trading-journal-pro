@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000";
+const API_KEY = process.env.NEXT_PUBLIC_FLOW_API_KEY || "";
 
 export default function HomePage() {
   const [flowFile, setFlowFile] = useState<File | null>(null);
@@ -19,7 +20,11 @@ export default function HomePage() {
     fd.append("provider", "unknown");
     fd.append("symbol", symbol);
 
-    const res = await fetch(`${API_BASE}/ingest/flow`, { method: "POST", body: fd });
+    const res = await fetch(`${API_BASE}/ingest/flow`, {
+      method: "POST",
+      body: fd,
+      headers: API_KEY ? { "x-api-key": API_KEY } : undefined,
+    });
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || "Flow upload failed");
     return data.upload_id;
@@ -31,7 +36,11 @@ export default function HomePage() {
     fd.append("file", chartFile);
     fd.append("symbol", symbol);
 
-    const res = await fetch(`${API_BASE}/ingest/chart`, { method: "POST", body: fd });
+    const res = await fetch(`${API_BASE}/ingest/chart`, {
+      method: "POST",
+      body: fd,
+      headers: API_KEY ? { "x-api-key": API_KEY } : undefined,
+    });
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || "Chart upload failed");
     return data.upload_id;
@@ -45,7 +54,10 @@ export default function HomePage() {
       const chartId = await uploadChart();
       const res = await fetch(`${API_BASE}/analyze`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(API_KEY ? { "x-api-key": API_KEY } : {}),
+        },
         body: JSON.stringify({ symbol, date, flow_upload_id: flowId, chart_upload_id: chartId }),
       });
       const data = await res.json();

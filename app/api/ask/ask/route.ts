@@ -1,5 +1,7 @@
 // app/api/ask/route.ts
 import OpenAI from "openai";
+import { getAuthUser } from "@/lib/authServer";
+import { getClientIp, rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -7,6 +9,29 @@ const openai = new OpenAI({
 
 export async function POST(req: Request) {
   try {
+    const authUser = await getAuthUser(req);
+    const limiterKey = authUser
+      ? `ask:user:${authUser.userId}`
+      : `ask:ip:${getClientIp(req)}`;
+    const rate = rateLimit(limiterKey, {
+      limit: authUser ? 60 : 20,
+      windowMs: 60_000,
+    });
+    if (!rate.allowed) {
+      const retryAfter = Math.max(1, Math.ceil((rate.resetAt - Date.now()) / 1000));
+      return new Response(
+        JSON.stringify({ error: "Rate limit exceeded" }),
+        {
+          status: 429,
+          headers: {
+            "Content-Type": "application/json",
+            "Retry-After": String(retryAfter),
+            ...rateLimitHeaders(rate),
+          },
+        }
+      );
+    }
+
     // Seguridad básica: que exista la key
     if (!process.env.OPENAI_API_KEY) {
       return new Response(

@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { onNeuroPush, type NeuroPush } from "@/app/components/neuroEventBus";
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
+import { supabaseBrowser } from "@/lib/supaBaseClient";
 
 type AssistantState = "idle" | "thinking" | "talking";
 type Lang = "en" | "es";
@@ -244,13 +245,18 @@ export default function NeuroAssistant() {
     setAvatarState("thinking");
 
     try {
+      const session = await supabaseBrowser.auth.getSession();
+      const token = session?.data?.session?.access_token;
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+        // ✅ ayuda extra (no rompe nada) para que el server respete el idioma
+        "Accept-Language": lang === "en" ? "en" : "es",
+      };
+      if (token) headers.Authorization = `Bearer ${token}`;
+
       const res = await fetch("/api/neuro-assistant", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          // ✅ ayuda extra (no rompe nada) para que el server respete el idioma
-          "Accept-Language": lang === "en" ? "en" : "es",
-        },
+        headers,
         body: JSON.stringify({
           question,
           contextPath: pathname,
