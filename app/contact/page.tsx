@@ -66,7 +66,7 @@ export default function ContactPage() {
 
   return (
     <main className={isLight ? "min-h-screen bg-slate-50 text-slate-900" : "min-h-screen bg-slate-950 text-slate-50"}>
-      {hcaptchaSiteKey && <Script src="https://hcaptcha.com/1/api.js" async defer />}
+      {hcaptchaSiteKey && <Script src="https://js.hcaptcha.com/1/api.js" async defer />}
       <div className="max-w-6xl mx-auto px-6 md:px-10 py-10">
         <header className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div className="flex items-center gap-4">
