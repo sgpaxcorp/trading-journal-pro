@@ -296,6 +296,7 @@ export default function PricingPage() {
                   <li>✓ {L("Everything in Core", "Todo lo de Core")}</li>
                   <li>✓ {L("Time-of-day & instrument breakdowns", "Desglose por hora e instrumento")}</li>
                   <li>✓ {L("Risk metrics + streaks", "Métricas de riesgo + rachas")}</li>
+                  <li>✓ {L("Profit & Loss Track (business accounting)", "Profit & Loss Track (contabilidad)")}</li>
                   <li>✓ {L("Advanced alerts & reminders", "Alertas y recordatorios avanzados")}</li>
                   <li>✓ {L("Automated journaling imports", "Importación automática de journaling")}</li>
                   <li>✓ {L("AI coaching & action plans", "AI coaching y planes de acción")}</li>

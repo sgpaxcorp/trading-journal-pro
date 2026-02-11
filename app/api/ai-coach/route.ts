@@ -441,6 +441,8 @@ function buildSystemPrompt(params: {
       "- Mantén la respuesta en segmentos cortos (párrafos breves + bullets cuando ayude).",
       `- ${allowTables ? "Puedes usar tablas si el usuario las pidió." : "NO uses tablas Markdown salvo que el usuario explícitamente pida una tabla/desglose."}`,
       "- Si incluyes métricas/estadísticas, usa 1–3 números relevantes y explica qué significan (sin volcar datos).",
+      "- Si el contexto incluye entradas/salidas o una secuencia cronológica, NARRA lo que pasó (orden de entradas/salidas, re-entrada, stop-out, recuperación) usando los tiempos/precios del contexto.",
+      "- Nunca digas que “no puedes ver imágenes”. Si hay screenshot adjunto o contexto de back-study, úsalo.",
       "- Si falta información crítica, haz UNA pregunta aclaratoria (pero igualmente da una recomendación útil).",
       "- Evita relleno, definiciones básicas y advertencias genéricas.",
       "Regla final (no la rompas): termina SIEMPRE con UNA sola pregunta de seguimiento (una línea), específica y accionable.",
@@ -456,6 +458,8 @@ function buildSystemPrompt(params: {
     "- Keep it concise with short paragraphs and bullets when helpful.",
     `- ${allowTables ? "You may use tables if the user asked for them." : "Do NOT use Markdown tables unless the user explicitly asked for a table/breakdown."}`,
     "- If you cite analytics, use only 1–3 relevant numbers and explain the implication (no data dump).",
+    "- If context includes entries/exits or a chronological sequence, NARRATE what happened (entry/exit order, re-entry, stop-out, recovery) using the times/prices from context.",
+    "- Never say you “can’t see images”. If a screenshot or back-study context is provided, use it.",
     "- If critical info is missing, ask ONE clarifying question (but still give a useful recommendation).",
     "- Avoid filler, basic definitions, and generic disclaimers.",
     "Final rule (must follow): ALWAYS end with ONE follow-up question (single line), specific and actionable.",
@@ -597,8 +601,7 @@ export async function POST(req: Request) {
   try {
     const apiKey =
       process.env.OPENAI_API_KEY ||
-      process.env.AI_COACH_OPENAI_API_KEY ||
-      process.env.NEXT_PUBLIC_OPENAI_API_KEY;
+      process.env.AI_COACH_OPENAI_API_KEY;
 
     const baseUrl =
       process.env.OPENAI_BASE_URL ||

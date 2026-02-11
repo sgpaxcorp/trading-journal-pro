@@ -326,7 +326,8 @@ export async function POST(req: NextRequest) {
 
       const prevPos = posByKey.get(key) ?? 0;
       const delta = action === "BUY" ? qtyAbs : -qtyAbs;
-      const nextPos = prevPos + delta;
+      const nextPosRaw = prevPos + delta;
+      const nextPos = Math.abs(nextPosRaw) < 1e-9 ? 0 : nextPosRaw;
 
       // ensure lots array exists
       if (!lotsByKey.has(key)) lotsByKey.set(key, []);
@@ -423,6 +424,10 @@ export async function POST(req: NextRequest) {
       }
 
       posByKey.set(key, nextPos);
+      if (nextPos === 0) {
+        // Reset lots when flat so new trades aren't treated as averaging down.
+        lotsByKey.set(key, []);
+      }
     }
 
     pnlGross = Number(pnlGross.toFixed(2));

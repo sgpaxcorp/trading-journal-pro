@@ -186,6 +186,12 @@ function toNum(v: any): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+function toNumOrNull(v: any): number | null {
+  if (v === null || v === undefined || v === "") return null;
+  const n = Number(String(v).trim());
+  return Number.isFinite(n) ? n : null;
+}
+
 function entryRowToStored(r: EntryTradeRow): StoredTradeRow {
   return {
     id: (r as any).id,
@@ -609,7 +615,8 @@ export default function DailyJournalPage() {
       if (!raw) return;
       const parsed = JSON.parse(raw) as unknown;
       if (Array.isArray(parsed) && parsed.length) {
-        setActiveWidgets(parsed as JournalWidgetId[]);
+        const withPnl = parsed.includes("pnl") ? parsed : ["pnl", ...parsed];
+        setActiveWidgets(withPnl as JournalWidgetId[]);
       }
     } catch {
       // ignore
@@ -623,6 +630,24 @@ export default function DailyJournalPage() {
       localStorage.setItem(widgetsKey, JSON.stringify(activeWidgets));
     } catch {}
   }, [activeWidgets]);
+
+  // Safety: if P&L is active but missing in stored layout, reset layout to defaults.
+  useEffect(() => {
+    if (!activeWidgets.includes("pnl")) return;
+    if (typeof window === "undefined") return;
+    try {
+      const raw = localStorage.getItem(layoutStorageKey);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as any;
+      const hasPnl = Array.isArray(parsed?.lg) && parsed.lg.some((l: any) => l?.i === "pnl");
+      if (!hasPnl) {
+        localStorage.removeItem(layoutStorageKey);
+        setJournalGridKey((k) => k + 1);
+      }
+    } catch {
+      // ignore
+    }
+  }, [activeWidgets, layoutStorageKey]);
 
   const toggleWidget = (id: JournalWidgetId) => {
     setActiveWidgets((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
@@ -672,9 +697,10 @@ export default function DailyJournalPage() {
           // widgets (only if missing locally)
           const aw: any = (ui as any).activeWidgets ?? (ui as any).active_widgets;
           if (!hasLocalWidgets && Array.isArray(aw) && aw.length) {
-            setActiveWidgets(aw);
+            const withPnl = aw.includes("pnl") ? aw : ["pnl", ...aw];
+            setActiveWidgets(withPnl);
             try {
-              localStorage.setItem(widgetsKey, JSON.stringify(aw));
+              localStorage.setItem(widgetsKey, JSON.stringify(withPnl));
             } catch {}
           }
 
@@ -1140,9 +1166,38 @@ export default function DailyJournalPage() {
   const pnlCalc = useMemo(() => computeAutoPnL(entryTrades, exitTrades), [entryTrades, exitTrades]);
 
   // Broker sync metadata (optional): stored inside journal_entries.notes by /api/journal/sync
-  const brokerCommissions = useMemo(() => toNum((notesExtra as any)?.costs?.commissions), [notesExtra]);
-  const brokerFees = useMemo(() => toNum((notesExtra as any)?.costs?.fees), [notesExtra]);
+  const brokerCommissionsRaw = useMemo(() => toNumOrNull((notesExtra as any)?.costs?.commissions), [notesExtra]);
+  const brokerFeesRaw = useMemo(() => toNumOrNull((notesExtra as any)?.costs?.fees), [notesExtra]);
+  const brokerCommissions = brokerCommissionsRaw ?? 0;
+  const brokerFees = brokerFeesRaw ?? 0;
   const brokerCostsTotal = brokerCommissions + brokerFees;
+
+  // Inputs (allow empty without snapping back to 0)
+  const [commissionsInput, setCommissionsInput] = useState<string>("");
+  const [feesInput, setFeesInput] = useState<string>("");
+
+  useEffect(() => {
+    setCommissionsInput(brokerCommissionsRaw != null ? String(brokerCommissionsRaw) : "");
+  }, [brokerCommissionsRaw]);
+
+  useEffect(() => {
+    setFeesInput(brokerFeesRaw != null ? String(brokerFeesRaw) : "");
+  }, [brokerFeesRaw]);
+
+  const updateCostField = (field: "commissions" | "fees", raw: string) => {
+    const value = raw.trim() === "" ? null : toNum(raw);
+    setNotesExtra((prev) => {
+      const currentCosts = (prev && typeof prev.costs === "object" ? (prev as any).costs : {}) as Record<string, any>;
+      return {
+        ...(prev || {}),
+        costs: {
+          ...currentCosts,
+          [field]: value,
+        },
+      };
+    });
+    setPnlMode("auto");
+  };
 
   const autoGrossPnl = useMemo(() => (Number.isFinite(pnlCalc.total) ? pnlCalc.total : 0), [pnlCalc.total]);
   const autoNetPnl = useMemo(() => autoGrossPnl - brokerCostsTotal, [autoGrossPnl, brokerCostsTotal]);
@@ -1708,6 +1763,40 @@ export default function DailyJournalPage() {
               "Calculado desde Entradas/Salidas (FIFO + multiplicadores + prima)."
             )}
           </p>
+          <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
+            <div>
+              <label className="text-[11px] uppercase tracking-wide text-slate-400">
+                {L("Commissions", "Comisiones")}
+              </label>
+              <input
+                type="number"
+                value={commissionsInput}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setCommissionsInput(val);
+                  updateCostField("commissions", val);
+                }}
+                className="mt-1 w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-[13px] text-slate-100 focus:outline-none focus:border-emerald-400"
+                placeholder="0.00"
+              />
+            </div>
+            <div>
+              <label className="text-[11px] uppercase tracking-wide text-slate-400">
+                {L("Fees", "Fees")}
+              </label>
+              <input
+                type="number"
+                value={feesInput}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setFeesInput(val);
+                  updateCostField("fees", val);
+                }}
+                className="mt-1 w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-[13px] text-slate-100 focus:outline-none focus:border-emerald-400"
+                placeholder="0.00"
+              />
+            </div>
+          </div>
         </WidgetCard>
       ),
     },

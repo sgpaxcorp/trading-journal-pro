@@ -15,7 +15,8 @@ import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
 
 import type { JournalEntry } from "@/lib/journalTypes";
-import { getAllJournalEntries } from "@/lib/journalSupabase";
+import { getAllJournalEntries, getJournalEntryByDate } from "@/lib/journalSupabase";
+import { getJournalTradesForDay } from "@/lib/journalTradesSupabase";
 
 import { supabaseBrowser } from "@/lib/supaBaseClient";
 
@@ -175,6 +176,44 @@ type BackStudyParams = {
   range?: string | null;
 };
 
+function parseNotesJson(raw: unknown): Record<string, any> | null {
+  if (!raw || typeof raw !== "string") return null;
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? (parsed as Record<string, any>) : null;
+  } catch {
+    return null;
+  }
+}
+
+function timeToMinutes(raw: string | null | undefined): number | null {
+  if (!raw) return null;
+  const s = String(raw).trim();
+  if (!s) return null;
+  const match = s.match(/(\d{1,2}):(\d{2})(?:\s*([APap][Mm]))?/);
+  if (!match) return null;
+  const h = Number(match[1]);
+  const m = Number(match[2]);
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return null;
+  const ampm = match[3]?.toUpperCase();
+  let hour = h;
+  if (ampm === "PM" && hour < 12) hour += 12;
+  if (ampm === "AM" && hour === 12) hour = 0;
+  return hour * 60 + m;
+}
+
+function fmtTradeLine(t: any, prefix: string) {
+  const time = t.time ? String(t.time) : "—";
+  const symbol = String(t.symbol ?? "").trim() || "—";
+  const kind = t.kind ? String(t.kind) : "—";
+  const side = t.side ? String(t.side) : "—";
+  const premium = t.premiumSide ? String(t.premiumSide) : "—";
+  const strategy = t.optionStrategy ? String(t.optionStrategy) : "—";
+  const price = Number.isFinite(Number(t.price)) ? Number(t.price).toFixed(2) : "—";
+  const qty = Number.isFinite(Number(t.quantity)) ? Number(t.quantity) : "—";
+  return `${prefix} ${time} | ${symbol} | ${kind} | ${side} | ${premium} | ${strategy} | ${price} x ${qty}`;
+}
+
 /* =========================
    Helpers
 ========================= */
@@ -280,16 +319,6 @@ function clampText(s: any, max = 900): string {
 function stripHtml(input?: string | null): string {
   if (!input) return "";
   return String(input).replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
-}
-
-function parseNotesJson(raw: unknown): Record<string, any> | null {
-  if (!raw || typeof raw !== "string") return null;
-  try {
-    const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === "object" ? (parsed as Record<string, any>) : null;
-  } catch {
-    return null;
-  }
 }
 
 function parseCostsFromNotes(notes: Record<string, any> | null) {
@@ -797,6 +826,7 @@ function AiCoachingPageInner() {
 
   // Profile (name, locale)
   const [coachUserProfile, setCoachUserProfile] = useState<UserProfileForCoach | null>(null);
+  const [backStudyTradeContext, setBackStudyTradeContext] = useState<string | null>(null);
 
   const [dataLoading, setDataLoading] = useState<boolean>(true);
 
@@ -878,6 +908,87 @@ function AiCoachingPageInner() {
     };
   }, [searchParams]);
 
+  useEffect(() => {
+    if (!backStudyParams || !coachUserProfile?.id || !activeAccountId) {
+      setBackStudyTradeContext(null);
+      return;
+    }
+
+    let alive = true;
+    const userId = coachUserProfile.id;
+
+    (async () => {
+      try {
+        const [trades, journalEntry] = await Promise.all([
+          getJournalTradesForDay(userId, backStudyParams.date, activeAccountId),
+          getJournalEntryByDate(userId, backStudyParams.date, activeAccountId),
+        ]);
+        if (!alive) return;
+
+        const entries = Array.isArray(trades?.entries) ? trades.entries : [];
+        const exits = Array.isArray(trades?.exits) ? trades.exits : [];
+
+        const timeline = [
+          ...entries.map((t) => ({ ...t, leg: "ENTRY" })),
+          ...exits.map((t) => ({ ...t, leg: "EXIT" })),
+        ].sort((a, b) => {
+          const ta = timeToMinutes(a.time);
+          const tb = timeToMinutes(b.time);
+          if (ta == null && tb == null) return 0;
+          if (ta == null) return 1;
+          if (tb == null) return -1;
+          return ta - tb;
+        });
+
+        const notes = parseNotesJson(journalEntry?.notes);
+        const premarket = String(notes?.premarket ?? "").trim();
+        const inside = String(notes?.live ?? "").trim();
+        const after = String(notes?.post ?? "").trim();
+        const netPnlRaw = journalEntry?.pnl;
+        const netPnl = Number.isFinite(Number(netPnlRaw)) ? Number(netPnlRaw) : null;
+
+        const lines: string[] = [];
+        lines.push(L("Back-study trade details (from journal_trades):", "Detalle de back-study (desde journal_trades):"));
+        if (netPnl != null) {
+          lines.push(`${L("Session net P&L", "P&L neto de la sesión")}: ${netPnl.toFixed(2)} USD`);
+        }
+        if (entries.length) {
+          lines.push(L("Entries:", "Entradas:"));
+          entries.forEach((t) => lines.push(fmtTradeLine(t, "•")));
+        }
+        if (exits.length) {
+          lines.push(L("Exits:", "Salidas:"));
+          exits.forEach((t) => lines.push(fmtTradeLine(t, "•")));
+        }
+        if (timeline.length) {
+          lines.push(L("Chronological sequence:", "Secuencia cronológica:"));
+          timeline.forEach((t) => lines.push(fmtTradeLine(t, t.leg === "ENTRY" ? "→ ENTRY" : "→ EXIT")));
+        }
+        if (premarket) {
+          lines.push(L("Premarket notes:", "Notas premarket:"));
+          lines.push(premarket);
+        }
+        if (inside) {
+          lines.push(L("Inside-trade notes:", "Notas dentro del trade:"));
+          lines.push(inside);
+        }
+        if (after) {
+          lines.push(L("After-trade notes:", "Notas post-trade:"));
+          lines.push(after);
+        }
+
+        setBackStudyTradeContext(lines.filter(Boolean).join("\n"));
+      } catch (err) {
+        console.warn("[AI Coaching] back-study trade context error:", err);
+        if (alive) setBackStudyTradeContext(null);
+      }
+    })();
+
+    return () => {
+      alive = false;
+    };
+  }, [backStudyParams, coachUserProfile?.id, activeAccountId, lang]);
+
   const backStudyContext: string | null = useMemo(() => {
     if (!backStudyParams) return null;
 
@@ -898,8 +1009,14 @@ function AiCoachingPageInner() {
       ),
     ];
 
+    if (backStudyTradeContext) {
+      lines.push("");
+      lines.push(L("Journal trade details:", "Detalle de trades del journal:"));
+      lines.push(backStudyTradeContext);
+    }
+
     return lines.filter(Boolean).join("\n");
-  }, [backStudyParams, lang]);
+  }, [backStudyParams, backStudyTradeContext, lang]);
 
   /* ---------- Protect route ---------- */
   useEffect(() => {

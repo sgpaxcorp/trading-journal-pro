@@ -433,6 +433,7 @@ export default function BillingClient({ initialPlan }: BillingClientProps) {
               <ul className="relative space-y-1 text-[11px] text-slate-50">
                 <li>• {L("Everything in Core", "Todo lo de Core")}</li>
                 <li>• {L("Advanced analytics & breakdowns", "Analítica avanzada y breakdowns")}</li>
+                <li>• {L("Profit & Loss Track (business accounting)", "Profit & Loss Track (contabilidad)")}</li>
                 <li>• {L("AI coaching & mindset tools", "AI coaching y herramientas de mindset")}</li>
                 <li>• {L("Priority improvements & new features", "Mejoras prioritarias y nuevas features")}</li>
               </ul>

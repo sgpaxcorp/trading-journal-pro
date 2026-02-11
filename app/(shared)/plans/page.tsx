@@ -40,6 +40,7 @@ const PLAN_COPY: Record<
     features: [
       { en: "Everything in Core", es: "Todo lo de Core" },
       { en: "Advanced analytics & breakdowns", es: "Analítica avanzada y breakdowns" },
+      { en: "Profit & Loss Track (business accounting)", es: "Profit & Loss Track (contabilidad)" },
       { en: "AI coaching & mindset tools", es: "AI coaching y herramientas de mindset" },
       { en: "Priority improvements & features", es: "Mejoras y features prioritarios" },
     ],

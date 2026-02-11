@@ -90,6 +90,9 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
       "Analyze your historical data with statistics.",
     "nav.performance.aiCoaching.title": "AI Coaching",
     "nav.performance.aiCoaching.desc": "Coaching ideas based on your metrics.",
+    "nav.performance.profitLoss.title": "Profit & Loss Track",
+    "nav.performance.profitLoss.desc":
+      "Track business expenses, subscriptions, and net profitability.",
     "nav.performance.cashFlow.title": "Cash Flow Tracking",
     "nav.performance.cashFlow.desc": "Track your deposits and withdrawals plan.",
 
@@ -348,6 +351,9 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
       "Analiza tu historial con estadísticas.",
     "nav.performance.aiCoaching.title": "Coaching con IA",
     "nav.performance.aiCoaching.desc": "Ideas de coaching basadas en tus métricas.",
+    "nav.performance.profitLoss.title": "Profit & Loss Track",
+    "nav.performance.profitLoss.desc":
+      "Controla gastos, suscripciones y la rentabilidad neta.",
     "nav.performance.cashFlow.title": "Flujo de caja",
     "nav.performance.cashFlow.desc": "Registra depósitos y retiros.",
 

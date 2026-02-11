@@ -63,6 +63,7 @@ const rows: PlanRow[] = [
   { label: "Calendar results", core: true, advanced: true },
   { label: "Equity curve & balance chart", core: true, advanced: true },
   { label: "Cashflow tracking", core: true, advanced: true },
+  { label: "Profit & Loss Track (business accounting)", core: false, advanced: true },
   { label: "PDF reports", core: false, advanced: true },
   { label: "AI summary report", core: false, advanced: true },
 
@@ -164,6 +165,7 @@ export default function PlansComparison() {
     "Calendar results": "Calendario de resultados",
     "Equity curve & balance chart": "Curva de equity y balance",
     "Cashflow tracking": "Seguimiento de cashflows",
+    "Profit & Loss Track (business accounting)": "Profit & Loss Track (contabilidad)",
     "PDF reports": "Reportes PDF",
     "AI summary report": "Reporte resumen con IA",
     "Core KPIs": "KPIs clave",

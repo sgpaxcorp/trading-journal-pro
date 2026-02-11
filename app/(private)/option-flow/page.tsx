@@ -62,6 +62,21 @@ type AnalysisData = {
     directional?: string[];
     stress?: string[];
   };
+  positioningStress?: {
+    contract?: string;
+    underlying?: string;
+    expiry?: string;
+    strike?: number;
+    type?: string;
+    firstTime?: string | null;
+    lastTime?: string | null;
+    firstOi?: number;
+    lastOi?: number;
+    firstPrice?: number;
+    lastPrice?: number;
+    oiChange?: number;
+    priceChange?: number;
+  }[];
   squeezeScenarios?: {
     upside?: SqueezeScenario;
     downside?: SqueezeScenario;
@@ -119,31 +134,54 @@ const MAX_CSV_BYTES = MAX_CSV_MB * 1024 * 1024;
 
 const ROW_KEYWORDS = [
   "underlying",
+  "underlying symbol",
+  "underlier",
+  "underlier symbol",
   "symbol",
   "ticker",
   "root",
+  "root symbol",
+  "option symbol",
+  "contract",
   "expiry",
   "expiration",
+  "expiration date",
+  "exp date",
   "exp",
   "strike",
+  "strike price",
   "type",
-  "side",
+  "option type",
   "put",
   "call",
+  "call/put",
+  "put/call",
   "cp",
+  "side",
+  "trade side",
+  "aggressor",
+  "at",
+  "print",
   "premium",
   "notional",
   "value",
   "price",
+  "trade price",
+  "bid",
+  "ask",
   "size",
   "qty",
   "quantity",
   "volume",
   "open interest",
+  "oi",
   "timestamp",
   "date",
   "time",
   "trade",
+  "delta",
+  "iv",
+  "implied vol",
 ];
 
 const PROVIDERS: { id: ProviderId; label: string; hint: string }[] = [
@@ -153,6 +191,44 @@ const PROVIDERS: { id: ProviderId; label: string; hint: string }[] = [
   { id: "quantdata", label: "Quantdata", hint: "Quantdata flow export" },
   { id: "other", label: "Other", hint: "Generic CSV with options flow data" },
 ];
+
+type ProviderColumnMap = Record<string, string[]>;
+
+const COMMON_FLOW_COLUMNS: ProviderColumnMap = {
+  underlying: [
+    "underlying",
+    "underlying_symbol",
+    "underlying symbol",
+    "underlier",
+    "underlier_symbol",
+    "underlier symbol",
+    "root",
+    "root_symbol",
+    "root symbol",
+    "ticker",
+    "symbol",
+  ],
+  symbol: ["symbol", "option_symbol", "option symbol", "contract", "ticker", "root"],
+  expiry: ["expiry", "expiration", "expiration date", "exp", "exp date", "date"],
+  strike: ["strike", "strike price", "strk"],
+  type: ["type", "option type", "call_put", "put_call", "call/put", "put/call", "cp"],
+  side: ["side", "trade side", "at", "aggressor", "print"],
+  size: ["size", "qty", "quantity", "volume"],
+  premium: ["premium", "notional", "value", "cost", "total premium"],
+  oi: ["oi", "open interest"],
+  bid: ["bid", "bid price"],
+  ask: ["ask", "ask price"],
+  trade: ["trade", "trade_price", "trade price", "price", "fill", "executed"],
+  time: ["time", "timestamp", "date/time", "datetime"],
+};
+
+const PROVIDER_COLUMN_MAP: Record<ProviderId, ProviderColumnMap> = {
+  unusualwhales: COMMON_FLOW_COLUMNS,
+  optionstrat: COMMON_FLOW_COLUMNS,
+  cheddarflow: COMMON_FLOW_COLUMNS,
+  quantdata: COMMON_FLOW_COLUMNS,
+  other: {},
+};
 
 function isoDate(d: Date): string {
   const y = d.getFullYear();
@@ -451,12 +527,28 @@ function collectFlowBuckets(expirations?: ExpirationBucket[]) {
 function deriveKeyLevelsFromExpirations(
   expirations: ExpirationBucket[],
   limit = 6,
-  lang: Lang = "en"
+  lang: Lang = "en",
+  spot?: number | null
 ): { price?: number; label?: string; reason?: string; side?: string }[] {
   const isEs = lang === "es";
   const rows = expirations.flatMap((exp) => exp.strikes ?? []);
   if (!rows.length) return [];
-  const scored = rows
+  let filteredRows = rows;
+  if (Number.isFinite(Number(spot))) {
+    const strikes = Array.from(
+      new Set(
+        rows
+          .map((row) => Number(row.strike))
+          .filter((n) => Number.isFinite(n))
+      )
+    ).sort((a, b) => a - b);
+    const spotVal = Number(spot);
+    const below = strikes.filter((s) => s <= spotVal).slice(-10);
+    const above = strikes.filter((s) => s >= spotVal).slice(0, 10);
+    const allowed = new Set([...below, ...above]);
+    filteredRows = rows.filter((row) => allowed.has(Number(row.strike)));
+  }
+  const scored = filteredRows
     .map((row) => {
       const premium = parsePremiumValue(row.premiumTotal);
       const size = Number(row.sizeTotal ?? 0);
@@ -656,14 +748,21 @@ async function renderPriceChartDataUrl(
     const closes = candles
       .map((c: any) => Number(c.close))
       .filter((n: number) => Number.isFinite(n));
-    const levelPrices = levels
+    const lastClose = closes[closes.length - 1];
+    let filteredLevels = levels;
+    if (Number.isFinite(lastClose)) {
+      filteredLevels = levels.filter(
+        (level) =>
+          Number.isFinite(level.price) && Math.abs(Number(level.price) - Number(lastClose)) <= 500
+      );
+    }
+    const levelPrices = filteredLevels
       .map((l) => l.price)
       .filter((n: number) => Number.isFinite(n));
-    const allPrices = closes.concat(levelPrices);
+    const allPrices = closes.concat(levelPrices.length ? levelPrices : []);
     const min = Math.min(...allPrices);
     const max = Math.max(...allPrices);
     const range = max - min || 1;
-    const lastClose = closes[closes.length - 1];
 
     const plotWidth = width - padding.left - padding.right;
     const plotHeight = height - padding.top - padding.bottom;
@@ -715,7 +814,7 @@ async function renderPriceChartDataUrl(
     }
 
     // levels
-    levels.forEach((level) => {
+    filteredLevels.forEach((level) => {
       if (!Number.isFinite(level.price)) return;
       const side = (level.side || "").toUpperCase();
       let color = "rgba(148,163,184,0.7)";
@@ -793,6 +892,42 @@ function compactRow(row: Record<string, any>): Record<string, any> {
   return out;
 }
 
+function pickValueByAliases(row: Record<string, any>, aliases: string[]) {
+  const entries = Object.entries(row);
+  const exact = aliases.find((alias) =>
+    entries.some(([key]) => key.toLowerCase() === alias)
+  );
+  if (exact) {
+    const match = entries.find(([key]) => key.toLowerCase() === exact);
+    return match ? match[1] : undefined;
+  }
+  const fuzzy = aliases.find((alias) =>
+    entries.some(([key]) => key.toLowerCase().includes(alias))
+  );
+  if (fuzzy) {
+    const match = entries.find(([key]) => key.toLowerCase().includes(fuzzy));
+    return match ? match[1] : undefined;
+  }
+  return undefined;
+}
+
+function normalizeRowsByProvider(rows: any[], providerId: ProviderId): any[] {
+  const map = PROVIDER_COLUMN_MAP[providerId];
+  if (!map || Object.keys(map).length === 0) return rows;
+  return rows.map((row) => {
+    const normalized: Record<string, any> = { ...row };
+    const lowerKeys = new Set(Object.keys(row).map((k) => k.toLowerCase()));
+    Object.entries(map).forEach(([canonical, aliases]) => {
+      if (lowerKeys.has(canonical.toLowerCase())) return;
+      const value = pickValueByAliases(row, aliases.map((a) => a.toLowerCase()));
+      if (value !== undefined && value !== null && value !== "") {
+        normalized[canonical] = value;
+      }
+    });
+    return normalized;
+  });
+}
+
 async function parseCsvWithWorker(
   file: File,
   underlying: string,
@@ -802,6 +937,34 @@ async function parseCsvWithWorker(
   return new Promise((resolve, reject) => {
     const workerCode = `
       const normalizeSymbol = (value) => value.toUpperCase().replace(/[^A-Z0-9]/g, "");
+      const HEADER_HINTS = [
+        "date",
+        "time",
+        "underlying",
+        "symbol",
+        "ticker",
+        "strike",
+        "type",
+        "expiry",
+        "exp",
+        "side",
+        "bid",
+        "ask",
+        "premium",
+        "size",
+        "volume",
+        "open interest",
+        "oi",
+      ];
+      const scoreHeader = (cols) => {
+        const lower = cols.map((c) => String(c || "").trim().toLowerCase());
+        let score = 0;
+        for (const col of lower) {
+          if (!col) continue;
+          if (HEADER_HINTS.some((hint) => col.includes(hint))) score += 1;
+        }
+        return score;
+      };
       const extractUnderlyingFromValue = (raw) => {
         const cleaned = normalizeSymbol(String(raw || ""));
         if (!cleaned) return null;
@@ -873,6 +1036,8 @@ async function parseCsvWithWorker(
         const chunkSize = 1024 * 512;
         let offset = 0;
         let header = null;
+        let pendingHeader = null;
+        let pendingScore = 0;
         let buffer = "";
         let rows = [];
         let scanned = 0;
@@ -890,8 +1055,25 @@ async function parseCsvWithWorker(
             if (!line.trim()) continue;
             const cols = parseLine(line);
             if (!header) {
-              header = cols.map((c) => c.trim());
-              continue;
+              const cleaned = cols.map((c) => (c ?? "").trim());
+              const nonEmpty = cleaned.filter((c) => c);
+              if (nonEmpty.length <= 1) {
+                continue;
+              }
+              const score = scoreHeader(cleaned);
+              if (!pendingHeader) {
+                pendingHeader = cleaned;
+                pendingScore = score;
+                continue;
+              }
+              if (score >= Math.max(3, pendingScore + 2)) {
+                header = cleaned;
+                pendingHeader = null;
+                continue;
+              }
+              header = pendingHeader;
+              pendingHeader = null;
+              // fall through to treat this line as data row
             }
             const row = {};
             header.forEach((key, idx) => {
@@ -974,6 +1156,117 @@ async function parseCsvWithWorker(
   });
 }
 
+async function parseExcelFile(
+  file: File,
+  maxRows = 2000
+): Promise<{ rows: any[]; scanned: number; matched: number }> {
+  const XLSX = await import("xlsx");
+  const buf = await file.arrayBuffer();
+  const wb = XLSX.read(buf, { type: "array" });
+  const sheetName = wb.SheetNames[0];
+  const ws = wb.Sheets[sheetName];
+  const grid = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" }) as any[][];
+  const trimmed = grid.filter((row) =>
+    Array.isArray(row) && row.some((cell) => String(cell ?? "").trim() !== "")
+  );
+  if (!trimmed.length) {
+    return { rows: [], scanned: 0, matched: 0 };
+  }
+
+  const scoreHeader = (row: any[]) => {
+    const hints = [
+      "date",
+      "time",
+      "underlying",
+      "symbol",
+      "ticker",
+      "strike",
+      "type",
+      "expiry",
+      "exp",
+      "side",
+      "bid",
+      "ask",
+      "premium",
+      "size",
+      "volume",
+      "open interest",
+      "oi",
+    ];
+    let score = 0;
+    row.forEach((cell) => {
+      const text = String(cell ?? "").trim().toLowerCase();
+      if (!text) return;
+      if (hints.some((hint) => text.includes(hint))) score += 1;
+    });
+    return score;
+  };
+
+  let headerRow = trimmed[0] ?? [];
+  let dataRows = trimmed.slice(1);
+
+  // Quantdata exports sometimes include a title row before headers.
+  if (headerRow.length <= 1 && dataRows.length) {
+    headerRow = dataRows[0] ?? [];
+    dataRows = dataRows.slice(1);
+  }
+  if (dataRows.length) {
+    const baseScore = scoreHeader(headerRow);
+    const nextScore = scoreHeader(dataRows[0]);
+    if (nextScore >= Math.max(3, baseScore + 2)) {
+      headerRow = dataRows[0] ?? headerRow;
+      dataRows = dataRows.slice(1);
+    }
+  }
+
+  const header = headerRow.map((cell) => String(cell ?? "").trim());
+  const objects = dataRows.map((row) => {
+    const out: Record<string, any> = {};
+    header.forEach((key, idx) => {
+      if (!key) return;
+      out[key] = row[idx] ?? "";
+    });
+    return out;
+  });
+
+  const sliced = objects.slice(0, Math.max(1, maxRows));
+  return {
+    rows: sliced,
+    scanned: objects.length,
+    matched: sliced.length,
+  };
+}
+
+async function parseFlowFile(
+  file: File,
+  providerId: ProviderId,
+  underlying: string,
+  onProgress: (progress: ParseProgress) => void,
+  maxRows = 2000
+): Promise<{ rows: any[]; scanned: number; matched: number }> {
+  const name = file.name.toLowerCase();
+  const isCsv = name.endsWith(".csv");
+  const isExcel = name.endsWith(".xlsx") || name.endsWith(".xls");
+  if (isCsv) {
+    const parsed = await parseCsvWithWorker(file, underlying, onProgress, maxRows);
+    const normalized = normalizeRowsByProvider(parsed.rows, providerId);
+    return { ...parsed, rows: normalized };
+  }
+  if (isExcel) {
+    onProgress({ percent: 10, scanned: 0, matched: 0 });
+    const parsed = await parseExcelFile(file, maxRows);
+    const normalized = normalizeRowsByProvider(parsed.rows, providerId);
+    const filtered = underlying ? filterRowsByUnderlying(normalized, underlying) : normalized;
+    onProgress({
+      percent: 100,
+      scanned: parsed.scanned,
+      matched: filtered.length,
+    });
+    return { rows: filtered, scanned: parsed.scanned, matched: filtered.length };
+  }
+  return { rows: [], scanned: 0, matched: 0 };
+}
+
 export default function OptionFlowPage() {
   const { user } = useAuth() as any;
   const { activeAccountId } = useTradingAccounts();
@@ -997,6 +1290,7 @@ export default function OptionFlowPage() {
   const [provider, setProvider] = useState<ProviderId>("optionstrat");
   const [tradeIntent, setTradeIntent] = useState<TradeIntent>("0dte");
   const [underlying, setUnderlying] = useState<string>("");
+  const [analyzeAll, setAnalyzeAll] = useState<boolean>(false);
   const [previousClose, setPreviousClose] = useState<number | null>(null);
 
   const [csvFile, setCsvFile] = useState<File | null>(null);
@@ -1039,6 +1333,21 @@ export default function OptionFlowPage() {
     () => PROVIDERS.find((item) => item.id === provider),
     [provider]
   );
+
+  useEffect(() => {
+    if (!fullScreenChat) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [fullScreenChat]);
+
+  useEffect(() => {
+    if (provider === "quantdata") {
+      setAnalyzeAll(true);
+    }
+  }, [provider]);
 
   const statusLabel = paywallEnabled
     ? entitled
@@ -1091,7 +1400,7 @@ export default function OptionFlowPage() {
             `<table style="width:100%;border-collapse:collapse;margin-top:8px;">` +
               `<thead><tr>` +
               `<th style="text-align:left;border-bottom:1px solid rgba(148,163,184,0.4);padding:6px 4px;">${isEs ? "Strike" : "Strike"}</th>` +
-              `<th style="text-align:left;border-bottom:1px solid rgba(148,163,184,0.4);padding:6px 4px;">${isEs ? "Tipo" : "Type"}</th>` +
+              `<th style="text-align:left;border-bottom:1px solid rgba(148,163,184,0.4);padding:6px 4px;">${isEs ? "Tipo (C/P)" : "Type (C/P)"}</th>` +
               `<th style="text-align:left;border-bottom:1px solid rgba(148,163,184,0.4);padding:6px 4px;">${isEs ? "Prints" : "Prints"}</th>` +
               `<th style="text-align:left;border-bottom:1px solid rgba(148,163,184,0.4);padding:6px 4px;">${isEs ? "Size" : "Size"}</th>` +
               `<th style="text-align:left;border-bottom:1px solid rgba(148,163,184,0.4);padding:6px 4px;">${isEs ? "Premium" : "Premium"}</th>` +
@@ -1165,7 +1474,7 @@ export default function OptionFlowPage() {
             const prem = row.premiumTotal ? escapeHtml(row.premiumTotal) : "";
             const prints = row.prints ?? "";
             const size = row.sizeTotal ?? "";
-            return `<tr><td style="padding:4px;">${strike}${type}</td><td style="padding:4px;">${prints}</td><td style="padding:4px;">${size}</td><td style="padding:4px;">${prem}</td></tr>`;
+            return `<tr><td style="padding:4px;">${strike}</td><td style="padding:4px;">${type}</td><td style="padding:4px;">${prints}</td><td style="padding:4px;">${size}</td><td style="padding:4px;">${prem}</td></tr>`;
           })
           .join("");
         return (
@@ -1173,6 +1482,7 @@ export default function OptionFlowPage() {
           `<table style="width:100%;border-collapse:collapse;margin-top:6px;">` +
           `<thead><tr>` +
           `<th style="text-align:left;border-bottom:1px solid rgba(148,163,184,0.4);padding:4px;">${isEs ? "Strike" : "Strike"}</th>` +
+          `<th style="text-align:left;border-bottom:1px solid rgba(148,163,184,0.4);padding:4px;">${isEs ? "Tipo (C/P)" : "Type (C/P)"}</th>` +
           `<th style="text-align:left;border-bottom:1px solid rgba(148,163,184,0.4);padding:4px;">${isEs ? "Prints" : "Prints"}</th>` +
           `<th style="text-align:left;border-bottom:1px solid rgba(148,163,184,0.4);padding:4px;">${isEs ? "Size" : "Size"}</th>` +
           `<th style="text-align:left;border-bottom:1px solid rgba(148,163,184,0.4);padding:4px;">${isEs ? "Premium" : "Premium"}</th>` +
@@ -1246,9 +1556,56 @@ export default function OptionFlowPage() {
       }
     }
 
+    sections.push(
+      `<h3>6) ${isEs ? "Posibles squeezes (OI sube / precio baja)" : "Potential squeezes (OI up / price down)"}</h3>`
+    );
+    if (data.positioningStress && data.positioningStress.length) {
+      sections.push(
+        `<table style="width:100%;border-collapse:collapse;margin-top:8px;">` +
+          `<thead><tr>` +
+          `<th style="text-align:left;border-bottom:1px solid rgba(148,163,184,0.4);padding:6px 4px;">${isEs ? "Contrato" : "Contract"}</th>` +
+          `<th style="text-align:left;border-bottom:1px solid rgba(148,163,184,0.4);padding:6px 4px;">${isEs ? "OI (ini→fin)" : "OI (start→end)"}</th>` +
+          `<th style="text-align:left;border-bottom:1px solid rgba(148,163,184,0.4);padding:6px 4px;">${isEs ? "Precio (ini→fin)" : "Price (start→end)"}</th>` +
+          `<th style="text-align:left;border-bottom:1px solid rgba(148,163,184,0.4);padding:6px 4px;">${isEs ? "Inicio (hora)" : "First (time)"}</th>` +
+          `<th style="text-align:left;border-bottom:1px solid rgba(148,163,184,0.4);padding:6px 4px;">${isEs ? "Final (hora)" : "Last (time)"}</th>` +
+          `</tr></thead><tbody>` +
+          data.positioningStress
+            .map((row) => {
+              const contract = row.contract ? escapeHtml(row.contract) : "—";
+              const firstOi = Number.isFinite(Number(row.firstOi)) ? Number(row.firstOi).toFixed(0) : "—";
+              const lastOi = Number.isFinite(Number(row.lastOi)) ? Number(row.lastOi).toFixed(0) : "—";
+              const oiDelta =
+                Number.isFinite(Number(row.oiChange)) ? Number(row.oiChange).toFixed(0) : "—";
+              const oi = `${firstOi}→${lastOi} (${oiDelta})`;
+              const firstPrice =
+                Number.isFinite(Number(row.firstPrice)) ? Number(row.firstPrice).toFixed(2) : "—";
+              const lastPrice =
+                Number.isFinite(Number(row.lastPrice)) ? Number(row.lastPrice).toFixed(2) : "—";
+              const priceDelta =
+                Number.isFinite(Number(row.priceChange)) ? Number(row.priceChange).toFixed(2) : "—";
+              const price = `${firstPrice}→${lastPrice} (${priceDelta})`;
+              const first = row.firstTime ? new Date(row.firstTime).toLocaleString(localeTag) : "—";
+              const last = row.lastTime ? new Date(row.lastTime).toLocaleString(localeTag) : "—";
+              return `<tr>` +
+                `<td style="padding:4px;border-bottom:1px solid rgba(30,41,59,0.6);">${contract}</td>` +
+                `<td style="padding:4px;border-bottom:1px solid rgba(30,41,59,0.6);">${oi}</td>` +
+                `<td style="padding:4px;border-bottom:1px solid rgba(30,41,59,0.6);">${price}</td>` +
+                `<td style="padding:4px;border-bottom:1px solid rgba(30,41,59,0.6);">${first}</td>` +
+                `<td style="padding:4px;border-bottom:1px solid rgba(30,41,59,0.6);">${last}</td>` +
+              `</tr>`;
+            })
+            .join("") +
+          `</tbody></table>`
+      );
+    } else {
+      sections.push(
+        `<p>${isEs ? "No se detectaron contratos con OI subiendo y precio bajando en la data enviada." : "No contracts found with rising OI and falling price in the provided data."}</p>`
+      );
+    }
+
     if (data.squeezeScenarios) {
       sections.push(
-        `<h3>6) ${isEs ? "Squeeze (condiciones y frenos)" : "Squeeze (conditions & brakes)"}</h3>`
+        `<h3>7) ${isEs ? "Squeeze (condiciones y frenos)" : "Squeeze (conditions & brakes)"}</h3>`
       );
       const upside = data.squeezeScenarios.upside;
       const downside = data.squeezeScenarios.downside;
@@ -1294,7 +1651,7 @@ export default function OptionFlowPage() {
 
     if (data.tradingPlan) {
       sections.push(
-        `<h3>7) ${
+        `<h3>8) ${
           isEs ? "Conclusión / Plan de trading (educativo)" : "Conclusion / Trading plan (educational)"
         }</h3>`
       );
@@ -1333,7 +1690,7 @@ export default function OptionFlowPage() {
 
     if (data.riskNotes && data.riskNotes.length) {
       sections.push(
-        `<h3>8) ${isEs ? "Riesgos / notas" : "Risks / notes"}</h3>`
+        `<h3>9) ${isEs ? "Riesgos / notas" : "Risks / notes"}</h3>`
       );
       sections.push(
         `<ul>` + data.riskNotes.map((note) => `<li>${escapeHtml(note)}</li>`).join("") + `</ul>`
@@ -1342,7 +1699,7 @@ export default function OptionFlowPage() {
 
     if (data.suggestedFocus && data.suggestedFocus.length) {
       sections.push(
-        `<h3>9) ${isEs ? "Enfoque sugerido" : "Suggested focus"}</h3>`
+        `<h3>10) ${isEs ? "Enfoque sugerido" : "Suggested focus"}</h3>`
       );
       sections.push(
         `<ul>` +
@@ -1356,31 +1713,29 @@ export default function OptionFlowPage() {
 
   async function buildPdfDoc(payload: AnalysisData, planHtmlOverride?: string) {
     const doc = new jsPDF({ unit: "pt", format: "letter" });
+    doc.setLineHeightFactor(1.5);
     const margin = 40;
-    let y = margin;
+    const headerHeight = 64;
+    const footerHeight = 24;
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const contentTop = margin + headerHeight;
+    const contentBottom = pageHeight - footerHeight - margin;
+    const tableMargin = {
+      left: margin,
+      right: margin,
+      top: contentTop,
+      bottom: footerHeight + margin,
+    };
+    let y = contentTop;
 
     const logo = await loadLogoData();
-    if (logo) {
-      const fitted = fitSize(logo.width, logo.height, 240, 70);
-      doc.addImage(logo.dataUrl, "PNG", margin, y - 6, fitted.width, fitted.height);
-      y += fitted.height + 10;
-    }
+    const headerTitle = isEs ? "Option Flow Intelligence - Reporte" : "Option Flow Intelligence - Report";
+    const generatedLine = `${isEs ? "Generado" : "Generated"}: ${new Date().toLocaleString(localeTag)}`;
 
     doc.setFontSize(16);
-    doc.text(
-      isEs ? "Option Flow Intelligence - Reporte" : "Option Flow Intelligence - Report",
-      margin,
-      y
-    );
-    y += 16;
-
-    doc.setFontSize(10);
-    doc.text(
-      `${isEs ? "Generado" : "Generated"}: ${new Date().toLocaleString(localeTag)}`,
-      margin,
-      y
-    );
-    y += 12;
+    doc.text(headerTitle, margin, y);
+    y += 22;
 
     const meta = payload.meta ?? {};
     let metaUnderlying = meta.underlying || underlying;
@@ -1405,7 +1760,7 @@ export default function OptionFlowPage() {
       doc.setTextColor(71, 85, 105);
       const metaLines = doc.splitTextToSize(metaLine, 520);
       doc.text(metaLines, margin, y);
-      y += metaLines.length * 11 + 6;
+      y += metaLines.length * 14 + 8;
       doc.setTextColor(0, 0, 0);
     }
 
@@ -1420,18 +1775,18 @@ export default function OptionFlowPage() {
       body: keyStats,
       styles: { fontSize: 9 },
       headStyles: { fillColor: [17, 24, 39] },
-      margin: { left: margin, right: margin },
+      margin: tableMargin,
     });
     y = (doc as any).lastAutoTable.finalY + 16;
 
     const summary = payload.summary || (isEs ? "Sin resumen disponible." : "No summary available.");
     doc.setFontSize(12);
     doc.text(`1) ${isEs ? "Resumen ejecutivo" : "Executive summary"}`, margin, y);
-    y += 12;
+    y += 16;
     doc.setFontSize(10);
     const summaryLines = doc.splitTextToSize(summary, 520);
     doc.text(summaryLines, margin, y);
-    y += summaryLines.length * 12 + 16;
+    y += summaryLines.length * 15 + 16;
 
     if (payload.expirations && payload.expirations.length) {
       doc.setFontSize(12);
@@ -1440,11 +1795,11 @@ export default function OptionFlowPage() {
         margin,
         y
       );
-      y += 12;
+      y += 16;
       payload.expirations.forEach((exp) => {
         doc.setFontSize(11);
         doc.text(`Exp ${exp.expiry || "—"} ${exp.tenor ? `(${exp.tenor})` : ""}`, margin, y);
-        y += 12;
+        y += 14;
         const strikes = exp.strikes ?? [];
         if (strikes.length) {
           autoTable(doc, {
@@ -1452,7 +1807,7 @@ export default function OptionFlowPage() {
             head: [
               [
                 "Strike",
-                isEs ? "Tipo" : "Type",
+                isEs ? "Tipo (C/P)" : "Type (C/P)",
                 "Prints",
                 "Size",
                 "Premium",
@@ -1471,7 +1826,7 @@ export default function OptionFlowPage() {
             ]),
             styles: { fontSize: 8 },
             headStyles: { fillColor: [17, 24, 39] },
-            margin: { left: margin, right: margin },
+            margin: tableMargin,
           });
           y = (doc as any).lastAutoTable.finalY + 14;
         }
@@ -1482,7 +1837,7 @@ export default function OptionFlowPage() {
             520
           );
           doc.text(noteLines, margin, y);
-          y += noteLines.length * 11 + 6;
+          y += noteLines.length * 13 + 8;
         }
       });
       y += 4;
@@ -1495,7 +1850,7 @@ export default function OptionFlowPage() {
         margin,
         y
       );
-      y += 12;
+      y += 16;
       autoTable(doc, {
         startY: y,
         head: [
@@ -1516,7 +1871,7 @@ export default function OptionFlowPage() {
         ]),
         styles: { fontSize: 8 },
         headStyles: { fillColor: [17, 24, 39] },
-        margin: { left: margin, right: margin },
+        margin: tableMargin,
       });
       y = (doc as any).lastAutoTable.finalY + 14;
       y += 4;
@@ -1534,7 +1889,7 @@ export default function OptionFlowPage() {
     let levelLines =
       payload.keyLevels?.filter((lvl) => Number.isFinite(Number(lvl.price))) ?? [];
     if (!levelLines.length && payload.expirations?.length) {
-      levelLines = deriveKeyLevelsFromExpirations(payload.expirations, 6, lang);
+      levelLines = deriveKeyLevelsFromExpirations(payload.expirations, 6, lang, metaClose ?? null);
     }
     if (normalizedUnderlying && levelLines.length) {
       const chartUrl = await renderPriceChartDataUrl(
@@ -1547,9 +1902,9 @@ export default function OptionFlowPage() {
       );
       if (chartUrl) {
         const chartHeight = 240;
-        if (y + chartHeight + 30 > doc.internal.pageSize.getHeight()) {
+        if (y + chartHeight + 30 > contentBottom) {
           doc.addPage();
-          y = margin;
+          y = contentTop;
         }
         doc.setFontSize(12);
         doc.text(
@@ -1561,7 +1916,7 @@ export default function OptionFlowPage() {
         );
         y += 10;
         doc.addImage(chartUrl, "PNG", margin, y, 520, chartHeight);
-        y += chartHeight + 16;
+        y += chartHeight + 18;
       }
     }
 
@@ -1573,11 +1928,12 @@ export default function OptionFlowPage() {
         margin,
         y
       );
-      y += 10;
+      y += 14;
       const buckets = collectFlowBuckets(payload.expirations);
       const makeRows = (rows: ExpirationStrike[]) =>
         rows.slice(0, 8).map((row) => [
-          `${row.strike ?? ""}${row.type ?? ""}`,
+          row.strike ?? "",
+          row.type ?? "",
           row.prints ?? "",
           row.sizeTotal ?? "",
           row.premiumTotal ?? "",
@@ -1586,11 +1942,11 @@ export default function OptionFlowPage() {
         if (!rows.length) return;
         autoTable(doc, {
           startY: y,
-          head: [[title, "Prints", "Size", "Premium"]],
+          head: [[title, isEs ? "Tipo (C/P)" : "Type (C/P)", "Prints", "Size", "Premium"]],
           body: makeRows(rows),
           styles: { fontSize: 8 },
           headStyles: { fillColor: [17, 24, 39] },
-          margin: { left: margin, right: margin },
+          margin: tableMargin,
         });
         y = (doc as any).lastAutoTable.finalY + 8;
       };
@@ -1614,7 +1970,7 @@ export default function OptionFlowPage() {
           y
         );
         doc.setTextColor(0, 0, 0);
-        y += 12;
+        y += 14;
       }
       y += 4;
     }
@@ -1626,7 +1982,7 @@ export default function OptionFlowPage() {
         margin,
         y
       );
-      y += 12;
+      y += 16;
       const gamma = payload.contractsWithPotential.gamma ?? [];
       const directional = payload.contractsWithPotential.directional ?? [];
       const stress = payload.contractsWithPotential.stress ?? [];
@@ -1634,10 +1990,10 @@ export default function OptionFlowPage() {
         if (!items.length) return;
         doc.setFontSize(10);
         doc.text(title, margin, y);
-        y += 12;
+        y += 14;
         const lines = items.flatMap((item) => doc.splitTextToSize(`• ${item}`, 520));
         doc.text(lines, margin, y);
-        y += lines.length * 12 + 6;
+        y += lines.length * 15 + 8;
       };
       addList(isEs ? "Gamma / ATM corto plazo" : "Gamma / short-term ATM", gamma);
       addList(isEs ? "Direccionales / techo-piso" : "Directional / ceiling-floor", directional);
@@ -1645,33 +2001,95 @@ export default function OptionFlowPage() {
       y += 4;
     }
 
-    if (payload.squeezeScenarios) {
-      doc.setFontSize(12);
+    doc.setFontSize(12);
+    doc.text(
+      `6) ${
+        isEs ? "Posibles squeezes (OI sube / precio baja)" : "Potential squeezes (OI up / price down)"
+      }`,
+      margin,
+      y
+    );
+    y += 16;
+    if (payload.positioningStress && payload.positioningStress.length) {
+      autoTable(doc, {
+        startY: y,
+        head: [
+          [
+            isEs ? "Contrato" : "Contract",
+            isEs ? "OI (ini->fin)" : "OI (start->end)",
+            isEs ? "Precio (ini->fin)" : "Price (start->end)",
+            isEs ? "Inicio (hora)" : "First (time)",
+            isEs ? "Final (hora)" : "Last (time)",
+          ],
+        ],
+        body: payload.positioningStress.map((row) => {
+          const firstOi = Number.isFinite(Number(row.firstOi)) ? Number(row.firstOi).toFixed(0) : "";
+          const lastOi = Number.isFinite(Number(row.lastOi)) ? Number(row.lastOi).toFixed(0) : "";
+          const oiDelta = Number.isFinite(Number(row.oiChange)) ? Number(row.oiChange).toFixed(0) : "";
+          const oiText = firstOi && lastOi ? `${firstOi}->${lastOi} (${oiDelta})` : "";
+          const firstPrice =
+            Number.isFinite(Number(row.firstPrice)) ? Number(row.firstPrice).toFixed(2) : "";
+          const lastPrice =
+            Number.isFinite(Number(row.lastPrice)) ? Number(row.lastPrice).toFixed(2) : "";
+          const priceDelta =
+            Number.isFinite(Number(row.priceChange)) ? Number(row.priceChange).toFixed(2) : "";
+          const priceText =
+            firstPrice && lastPrice ? `${firstPrice}->${lastPrice} (${priceDelta})` : "";
+          return [
+            row.contract ?? "",
+            oiText,
+            priceText,
+            row.firstTime ? new Date(row.firstTime).toLocaleString(localeTag) : "",
+            row.lastTime ? new Date(row.lastTime).toLocaleString(localeTag) : "",
+          ];
+        }),
+        styles: { fontSize: 8 },
+        headStyles: { fillColor: [17, 24, 39] },
+        margin: tableMargin,
+      });
+      y = (doc as any).lastAutoTable.finalY + 14;
+      y += 4;
+    } else {
+      doc.setFontSize(9);
+      doc.setTextColor(71, 85, 105);
       doc.text(
-        `6) ${isEs ? "Squeeze (condiciones y frenos)" : "Squeeze (conditions & brakes)"}`,
+        isEs
+          ? "No se detectaron contratos con OI subiendo y precio bajando en la data enviada."
+          : "No contracts found with rising OI and falling price in the provided data.",
         margin,
         y
       );
-      y += 12;
+      doc.setTextColor(0, 0, 0);
+      y += 16;
+    }
+
+    if (payload.squeezeScenarios) {
+      doc.setFontSize(12);
+      doc.text(
+        `7) ${isEs ? "Squeeze (condiciones y frenos)" : "Squeeze (conditions & brakes)"}`,
+        margin,
+        y
+      );
+      y += 16;
       const formatScenario = (label: string, scenario?: SqueezeScenario) => {
         if (!scenario) return;
         doc.setFontSize(10);
         doc.text(label, margin, y);
-        y += 12;
+        y += 14;
         if (scenario.condition) {
           const lines = doc.splitTextToSize(
             `${isEs ? "Condición" : "Condition"}: ${scenario.condition}`,
             520
           );
           doc.text(lines, margin, y);
-          y += lines.length * 12;
+          y += lines.length * 15;
         }
         if (scenario.candidates && scenario.candidates.length) {
           const lines = scenario.candidates.flatMap((item) =>
             doc.splitTextToSize(`• ${item}`, 520)
           );
           doc.text(lines, margin, y);
-          y += lines.length * 12;
+          y += lines.length * 15;
         }
         if (scenario.brakes) {
           const lines = doc.splitTextToSize(
@@ -1679,9 +2097,9 @@ export default function OptionFlowPage() {
             520
           );
           doc.text(lines, margin, y);
-          y += lines.length * 12;
+          y += lines.length * 15;
         }
-        y += 6;
+        y += 8;
       };
       formatScenario(isEs ? "Alza" : "Upside", payload.squeezeScenarios.upside);
       formatScenario(isEs ? "Baja" : "Downside", payload.squeezeScenarios.downside);
@@ -1690,42 +2108,42 @@ export default function OptionFlowPage() {
 
     const planLines = extractPlanLines(planHtmlOverride);
     if (planLines.length || payload.tradingPlan) {
-      if (y + 120 > doc.internal.pageSize.getHeight()) {
+      if (y + 120 > contentBottom) {
         doc.addPage();
-        y = margin;
+        y = contentTop;
       }
       doc.setFontSize(12);
       doc.text(
-        `7) ${
+        `8) ${
           isEs ? "Conclusión / Plan de trading (educativo)" : "Conclusion / Trading plan (educational)"
         }`,
         margin,
         y
       );
-      y += 12;
+      y += 16;
       doc.setFontSize(10);
       if (planLines.length) {
         for (const line of planLines) {
           const chunks = doc.splitTextToSize(line, 520);
           doc.text(chunks, margin, y);
-          y += chunks.length * 12 + 2;
-          if (y + 24 > doc.internal.pageSize.getHeight()) {
+          y += chunks.length * 15 + 4;
+          if (y + 24 > contentBottom) {
             doc.addPage();
-            y = margin;
+            y = contentTop;
           }
         }
       } else if (payload.tradingPlan) {
         if (payload.tradingPlan.headline) {
           const lines = doc.splitTextToSize(payload.tradingPlan.headline, 520);
           doc.text(lines, margin, y);
-          y += lines.length * 12 + 4;
+          y += lines.length * 15 + 6;
         }
         if (payload.tradingPlan.steps && payload.tradingPlan.steps.length) {
           const lines = payload.tradingPlan.steps.flatMap((step) =>
             doc.splitTextToSize(`• ${step}`, 520)
           );
           doc.text(lines, margin, y);
-          y += lines.length * 12 + 4;
+          y += lines.length * 15 + 6;
         }
         if (payload.tradingPlan.invalidation) {
           const lines = doc.splitTextToSize(
@@ -1733,7 +2151,7 @@ export default function OptionFlowPage() {
             520
           );
           doc.text(lines, margin, y);
-          y += lines.length * 12 + 4;
+          y += lines.length * 15 + 6;
         }
         if (payload.tradingPlan.risk) {
           const lines = doc.splitTextToSize(
@@ -1741,7 +2159,7 @@ export default function OptionFlowPage() {
             520
           );
           doc.text(lines, margin, y);
-          y += lines.length * 12 + 4;
+          y += lines.length * 15 + 6;
         }
       }
       doc.setFontSize(9);
@@ -1766,16 +2184,36 @@ export default function OptionFlowPage() {
         "They are not financial advice, investment recommendations, or an invitation to trade. " +
         "Options trading involves high risk and can result in significant losses. " +
         "Each trader is responsible for their own decisions.";
-    const pageHeight = doc.internal.pageSize.getHeight();
     doc.setFontSize(8);
     const disclaimerLines = doc.splitTextToSize(disclaimer, 520);
-    if (y + disclaimerLines.length * 10 + 20 > pageHeight) {
+    if (y + disclaimerLines.length * 12 + 20 > contentBottom) {
       doc.addPage();
-      y = margin;
+      y = contentTop;
     }
     doc.setTextColor(71, 85, 105);
     doc.text(disclaimerLines, margin, y + 10);
     doc.setTextColor(0, 0, 0);
+
+    const pageCount = doc.getNumberOfPages();
+    for (let page = 1; page <= pageCount; page += 1) {
+      doc.setPage(page);
+      if (logo) {
+        const fitted = fitSize(logo.width, logo.height, 160, 44);
+        doc.addImage(logo.dataUrl, "PNG", margin, margin - 6, fitted.width, fitted.height);
+      }
+      doc.setFontSize(9);
+      doc.setTextColor(71, 85, 105);
+      doc.text(headerTitle, margin + 170, margin + 4);
+      doc.text(generatedLine, pageWidth - margin, margin + 4, { align: "right" });
+      doc.text(
+        `${isEs ? "Página" : "Page"} ${page} ${isEs ? "de" : "of"} ${pageCount}`,
+        pageWidth - margin,
+        pageHeight - 10,
+        { align: "right" }
+      );
+      doc.text("Neuro Trader Journal", margin, pageHeight - 10);
+      doc.setTextColor(0, 0, 0);
+    }
 
     return doc;
   }
@@ -1925,8 +2363,8 @@ export default function OptionFlowPage() {
         role: "assistant",
       title: isEs ? "Inteligencia de Flujo de Opciones" : "Option Flow Intelligence",
         body: isEs
-          ? "¿Cómo quieres analizar el flujo de órdenes? Puedes pegar screenshots o subir un CSV (máx 12MB)."
-          : "How do you want to analyze the order flow? Paste screenshots or upload a CSV (max 12MB).",
+          ? "¿Cómo quieres analizar el flujo de órdenes? Puedes pegar screenshots o subir un CSV/XLS/XLSX (máx 12MB)."
+          : "How do you want to analyze the order flow? Paste screenshots or upload a CSV/XLS/XLSX (max 12MB).",
       },
     ]);
   }, [chatLog.length, isEs]);
@@ -2033,17 +2471,19 @@ export default function OptionFlowPage() {
     const hasShots = pastedShots.length > 0;
     const csvTooLarge = csvFile ? csvFile.size > MAX_CSV_BYTES : false;
     let normalizedUnderlying = underlying.trim();
-    const isCsv = csvFile ? csvFile.name.toLowerCase().endsWith(".csv") : true;
+    const fileName = csvFile?.name.toLowerCase() ?? "";
+    const isCsv = fileName.endsWith(".csv");
+    const isExcel = fileName.endsWith(".xlsx") || fileName.endsWith(".xls");
     const note = (noteOverride ?? analysisNotes).trim();
     if (noteOverride !== undefined) {
       setAnalysisNotes(noteOverride);
     }
-    if (hasCsv && !isCsv) {
+    if (hasCsv && !isCsv && !isExcel) {
       appendMessage({
         role: "system",
         body: isEs
-          ? "Solo se admiten archivos CSV por ahora."
-          : "Only CSV files are supported for now.",
+          ? "Solo se admiten archivos CSV/XLS/XLSX por ahora."
+          : "Only CSV/XLS/XLSX files are supported for now.",
       });
       if (!hasShots) return;
     }
@@ -2052,8 +2492,8 @@ export default function OptionFlowPage() {
         role: "system",
         body: formatTemplate(
           isEs
-            ? "El CSV es muy grande ({size}). El máximo es {max} MB. Usa screenshots o exporta un CSV más pequeño."
-            : "CSV is too large ({size}). Max size is {max} MB. Use screenshots or export a smaller CSV.",
+            ? "El archivo es muy grande ({size}). El máximo es {max} MB. Usa screenshots o exporta un archivo más pequeño."
+            : "File is too large ({size}). Max size is {max} MB. Use screenshots or export a smaller file.",
           { size: formatBytes(csvFile?.size || 0), max: MAX_CSV_MB }
         ),
       });
@@ -2062,27 +2502,23 @@ export default function OptionFlowPage() {
       appendMessage({
         role: "system",
         body: isEs
-          ? "Pega screenshots o sube un CSV (máx 12MB) para iniciar el análisis."
-          : "Paste screenshots or upload a CSV (max 12MB) to start the analysis.",
+          ? "Pega screenshots o sube un CSV/XLS/XLSX (máx 12MB) para iniciar el análisis."
+          : "Paste screenshots or upload a CSV/XLS/XLSX (max 12MB) to start the analysis.",
       });
       return;
     }
-    if (!normalizedUnderlying && note) {
+    if (!analyzeAll && !normalizedUnderlying && note) {
       const guess = extractUnderlyingFromValue(note);
       if (guess) {
         normalizedUnderlying = guess;
         setUnderlying(guess);
       }
     }
-
-    if (!normalizedUnderlying) {
-      appendMessage({
-        role: "system",
-        body: isEs
-          ? "Tip: agrega el underlying para auto traer el cierre anterior."
-          : "Tip: add the underlying so we can auto-fetch the previous close.",
-      });
+    if (analyzeAll) {
+      normalizedUnderlying = "";
     }
+
+    // Underlying is optional; only fetch previous close if available.
 
     setAnalyzing(true);
     setSummary("");
@@ -2114,13 +2550,14 @@ export default function OptionFlowPage() {
       let scanned = 0;
       let matched = 0;
 
-      const useCsv = Boolean(hasCsv && csvFile && !csvTooLarge && isCsv);
+      const useFile = Boolean(hasCsv && csvFile && !csvTooLarge && (isCsv || isExcel));
 
-      if (useCsv && csvFile) {
+      if (useFile && csvFile) {
         setParsing(true);
         const maxRows = pastedShots.length > 0 ? MAX_ROWS_WITH_IMAGES : MAX_ROWS_BASE;
-        const parsed = await parseCsvWithWorker(
+        const parsed = await parseFlowFile(
           csvFile,
+          provider,
           normalizedUnderlying,
           (progress) => setParseProgress(progress),
           maxRows
@@ -2139,12 +2576,41 @@ export default function OptionFlowPage() {
           }
         }
 
+        if (normalizedUnderlying && rowsForAnalysis.length === 0 && scanned > 0) {
+          setParsing(true);
+          const fallback = await parseFlowFile(
+            csvFile,
+            provider,
+            "",
+            (progress) => setParseProgress(progress),
+            maxRows
+          );
+          rows = fallback.rows;
+          rowsForAnalysis = fallback.rows;
+          scanned = fallback.scanned;
+          matched = fallback.matched;
+          setParsing(false);
+
+          const found = rowsForAnalysis.map((row) => findUnderlyingInRow(row)).find(Boolean);
+          if (found) {
+            normalizedUnderlying = found;
+            setUnderlying(found);
+          }
+
+          appendMessage({
+            role: "system",
+            body: isEs
+              ? "No encontré filas que coincidan con el activo. Analizaré todo el archivo."
+              : "No rows matched the selected underlying. I'll analyze the entire file.",
+          });
+        }
+
         if (normalizedUnderlying && rowsForAnalysis.length === 0) {
           appendMessage({
             role: "system",
             body: isEs
-              ? "No hay filas que coincidan con ese underlying. Verifica el símbolo o usa screenshots."
-              : "No rows match that underlying. Check the symbol or use screenshots.",
+              ? "No hay filas suficientes para analizar. Verifica el archivo o usa screenshots."
+              : "Not enough rows to analyze. Check the file or use screenshots.",
           });
           if (!hasShots) {
             setAnalyzing(false);
@@ -2154,7 +2620,7 @@ export default function OptionFlowPage() {
         }
       }
 
-      if (!useCsv && csvTooLarge && !hasShots) {
+      if (!useFile && csvTooLarge && !hasShots) {
         setAnalyzing(false);
         setTypingState(null);
         return;
@@ -2203,7 +2669,8 @@ export default function OptionFlowPage() {
         analysisPayload.keyLevels = deriveKeyLevelsFromExpirations(
           analysisPayload.expirations,
           6,
-          lang
+          lang,
+          prevClose ?? null
         );
       }
 
@@ -2406,15 +2873,15 @@ export default function OptionFlowPage() {
       else if (/swing/.test(lower)) setTradeIntent("swing");
 
       const guess = extractUnderlyingFromValue(text);
-      if (guess) setUnderlying(guess);
+      if (guess && !analyzeAll && !underlying.trim()) setUnderlying(guess);
     }
 
     if (!text && !csvFile && pastedShots.length === 0) {
       appendMessage({
         role: "system",
         body: isEs
-          ? "Escribe qué quieres analizar o adjunta un CSV/screenshot."
-          : "Type what you want to analyze or attach a CSV/screenshot.",
+          ? "Escribe qué quieres analizar o adjunta un CSV/XLS/XLSX o screenshots."
+          : "Type what you want to analyze or attach a CSV/XLS/XLSX or screenshots.",
       });
       return;
     }
@@ -2464,8 +2931,8 @@ export default function OptionFlowPage() {
 
   const renderChatPanel = (isFullScreen = false) => (
     <div
-      className={`rounded-3xl border border-slate-800 bg-gradient-to-b from-slate-950/70 via-slate-950/40 to-slate-950/70 p-4 sm:p-6 flex flex-col ${
-        isFullScreen ? "flex-1" : "min-h-[70vh] sm:min-h-[78vh]"
+      className={`rounded-3xl border border-slate-800 bg-gradient-to-b from-slate-950/70 via-slate-950/40 to-slate-950/70 p-4 sm:p-6 flex flex-col min-h-0 ${
+        isFullScreen ? "flex-1 h-full" : "min-h-[70vh] sm:min-h-[78vh]"
       }`}
     >
       <div className="flex items-center justify-between mb-2">
@@ -2482,7 +2949,7 @@ export default function OptionFlowPage() {
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto space-y-3 pr-2">
+      <div className="flex-1 min-h-0 overflow-y-auto space-y-3 pr-2">
         {chatLog.map((msg) => (
           <div
             key={msg.id}
@@ -2594,10 +3061,57 @@ export default function OptionFlowPage() {
 
         <div className="mt-3 flex flex-wrap items-center gap-3">
           <label className="text-[11px] text-slate-400">
-            {isEs ? "CSV (opcional, 12MB máx)" : "CSV (optional, 12MB max)"}
+            {isEs ? "Proveedor" : "Provider"}
+            <select
+              value={provider}
+              onChange={(e) => setProvider(e.target.value as ProviderId)}
+              className="ml-2 rounded-lg border border-slate-800 bg-slate-950/60 px-2 py-1 text-[11px] text-slate-100"
+            >
+              {PROVIDERS.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="text-[11px] text-slate-400">
+            {isEs ? "Ticker (opcional)" : "Ticker (optional)"}
+            <input
+              type="text"
+              value={underlying}
+              disabled={analyzeAll}
+              onChange={(e) => {
+                const next = e.target.value.toUpperCase();
+                setUnderlying(next);
+                if (next.trim()) setAnalyzeAll(false);
+              }}
+              placeholder={isEs ? "Ej: SPX" : "e.g. SPX"}
+              className="ml-2 w-24 rounded-lg border border-slate-800 bg-slate-950/60 px-2 py-1 text-[11px] text-slate-100 placeholder:text-slate-600 disabled:opacity-50"
+            />
+          </label>
+          <label className="flex items-center gap-2 text-[11px] text-slate-400">
+            <input
+              type="checkbox"
+              checked={analyzeAll}
+              onChange={(e) => {
+                const next = e.target.checked;
+                setAnalyzeAll(next);
+                if (next) setUnderlying("");
+              }}
+              className="h-3 w-3 rounded border border-slate-700 bg-slate-950 text-emerald-400"
+            />
+            {isEs
+              ? "Analizar todo el archivo (ignorar ticker)"
+              : "Analyze entire file (ignore ticker)"}
+          </label>
+          {providerMeta?.hint && (
+            <span className="text-[10.5px] text-slate-500">{providerMeta.hint}</span>
+          )}
+          <label className="text-[11px] text-slate-400">
+            {isEs ? "CSV/XLS/XLSX (opcional, 12MB máx)" : "CSV/XLS/XLSX (optional, 12MB max)"}
             <input
               type="file"
-              accept=".csv"
+              accept=".csv,.xls,.xlsx"
               onChange={(e) => setCsvFile(e.target.files?.[0] ?? null)}
               className="ml-2 text-[11px]"
             />
@@ -2619,7 +3133,7 @@ export default function OptionFlowPage() {
             onClick={() => setCsvFile(null)}
             className="text-[11px] text-slate-400 hover:text-emerald-200"
           >
-            {isEs ? "Quitar CSV" : "Remove CSV"}
+            {isEs ? "Quitar archivo" : "Remove file"}
           </button>
           <button
             type="button"
@@ -2629,8 +3143,8 @@ export default function OptionFlowPage() {
           >
             {parsing
               ? isEs
-                ? "Procesando CSV…"
-                : "Processing CSV…"
+                ? "Procesando archivo…"
+                : "Processing file…"
               : analyzing
               ? isEs
                 ? "Analizando…"
@@ -2760,8 +3274,8 @@ export default function OptionFlowPage() {
             </h1>
             <p className="text-[12px] sm:text-[13px] text-slate-400 mt-2 max-w-3xl">
               {isEs
-                ? "Pega screenshots o sube un CSV (máx 12MB) para extraer prints relevantes y armar un plan de premarket."
-                : "Paste screenshots or upload a CSV (max 12MB) to extract key prints and build a premarket plan."}
+                ? "Pega screenshots o sube un CSV/XLS/XLSX (máx 12MB) para extraer prints relevantes y armar un plan de premarket."
+                : "Paste screenshots or upload a CSV/XLS/XLSX (max 12MB) to extract key prints and build a premarket plan."}
             </p>
           </div>
 

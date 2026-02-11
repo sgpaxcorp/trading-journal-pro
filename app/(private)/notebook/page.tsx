@@ -1605,8 +1605,8 @@ export default function NotebookPage() {
                 </h2>
                 <p className="text-slate-400 text-sm mt-1 max-w-xl">
                   {L(
-                    "Overview of the main U.S. federal holidays so you always know which days markets and many offices may be closed.",
-                    "Resumen de los principales feriados federales de EE. UU. para saber qué días los mercados y oficinas pueden estar cerrados."
+                    "Overview of all U.S. federal holidays. Market-closed days are labeled so you can plan around them.",
+                    "Resumen de todos los feriados federales de EE. UU. Los días con mercado cerrado están marcados para que puedas planificar."
                   )}
                 </p>
               </div>

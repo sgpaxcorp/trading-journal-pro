@@ -595,6 +595,12 @@ const performance: NavItem[] = [
     badge: "AI",
   },
   {
+    id: "profit-loss-track",
+    titleKey: "nav.performance.profitLoss.title",
+    descriptionKey: "nav.performance.profitLoss.desc",
+    href: "/performance/profit-loss-track",
+  },
+  {
     id: "plan",
     titleKey: "nav.performance.cashflow.title",
     descriptionKey: "nav.performance.cashflow.desc",
