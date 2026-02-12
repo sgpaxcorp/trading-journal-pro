@@ -1459,6 +1459,7 @@ export default function OptionFlowPage() {
   const [typingState, setTypingState] = useState<null | "analyzing" | "planning">(null);
   const [fullScreenChat, setFullScreenChat] = useState<boolean>(false);
   const [checkoutStatus, setCheckoutStatus] = useState<string | null>(null);
+  const canAnalyze = Boolean(csvFile || pastedShots.length);
 
   const providerMeta = useMemo(
     () => PROVIDERS.find((item) => item.id === provider),
@@ -3368,32 +3369,45 @@ export default function OptionFlowPage() {
           >
             {isEs ? "Quitar archivo" : "Remove file"}
           </button>
-          <button
-            type="button"
-            onClick={handleSend}
-            disabled={analyzing || parsing || planning || savingToJournal}
-            className="ml-auto rounded-2xl bg-emerald-400 px-5 py-2 text-[12.5px] font-semibold text-slate-950 shadow hover:bg-emerald-300 disabled:opacity-60"
-          >
-            {parsing
-              ? isEs
-                ? "Procesando archivo…"
-                : "Processing file…"
-              : analyzing
-              ? isEs
-                ? "Analizando…"
-                : "Analyzing…"
-              : planning
-              ? isEs
-                ? "Armando plan…"
-                : "Building plan…"
-              : savingToJournal
-              ? isEs
-                ? "Guardando…"
-                : "Saving…"
-              : isEs
-              ? "Enviar"
-              : "Send"}
-          </button>
+          <div className="relative group ml-auto">
+            <span className="pointer-events-none absolute -top-9 right-0 whitespace-nowrap rounded-lg border border-emerald-400/40 bg-slate-950/90 px-2 py-1 text-[10px] text-emerald-200 opacity-0 shadow-lg shadow-emerald-500/20 transition group-hover:opacity-100">
+              {isEs
+                ? "Generar reporte con el CSV (usa tu texto como notas)"
+                : "Generate report from CSV (uses your text as notes)"}
+            </span>
+            <button
+              type="button"
+              onClick={handleAnalyzeClick}
+              disabled={!canAnalyze || analyzing || parsing || planning || savingToJournal}
+              className="rounded-2xl bg-emerald-400 px-5 py-2 text-[12.5px] font-semibold text-slate-950 shadow hover:bg-emerald-300 disabled:opacity-60"
+            >
+              {parsing
+                ? isEs
+                  ? "Procesando archivo…"
+                  : "Processing file…"
+                : analyzing
+                ? isEs
+                  ? "Analizando…"
+                  : "Analyzing…"
+                : isEs
+                ? "Analizar"
+                : "Analyze"}
+            </button>
+          </div>
+          <div className="relative group">
+            <span className="pointer-events-none absolute -top-9 right-0 whitespace-nowrap rounded-lg border border-emerald-400/40 bg-slate-950/90 px-2 py-1 text-[10px] text-emerald-200 opacity-0 shadow-lg shadow-emerald-500/20 transition group-hover:opacity-100">
+              {isEs ? "Preguntar sobre el reporte" : "Ask about the report"}
+            </span>
+            <button
+              type="button"
+              onClick={handleSend}
+              disabled={analyzing || parsing || planning || savingToJournal}
+              className="rounded-full border border-slate-700 bg-slate-950/70 px-3 py-2 text-[14px] font-semibold text-slate-100 hover:border-emerald-400 hover:text-emerald-200 disabled:opacity-60"
+              aria-label={isEs ? "Enviar mensaje" : "Send message"}
+            >
+              →
+            </button>
+          </div>
         </div>
 
         {(parsing || parseProgress.percent > 0) && (
