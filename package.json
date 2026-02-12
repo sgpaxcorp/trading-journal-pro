@@ -34,6 +34,7 @@
     "echarts-for-react": "^3.0.5",
     "ffmpeg": "^0.0.4",
     "framer-motion": "^12.23.24",
+    "heic2any": "^0.0.4",
     "hcaptcha": "^0.2.0",
     "jspdf": "^3.0.3",
     "jspdf-autotable": "^5.0.2",

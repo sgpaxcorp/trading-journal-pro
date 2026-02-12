@@ -115,6 +115,7 @@ Reglas:
 - No seas complaciente. Sé directo y breve.
 - Si el resultado real no estaba soportado por el flow, dilo sin rodeos.
 - Menciona si la data era vieja (-1DTE) o incompleta (BID/ASK/OI faltante).
+- Si la data del flow es vieja, aclara que el screenshot/outcome puede ser actual pero el reporte era histórico.
 Devuelve JSON válido con esta forma:
 {
   "verdict": "supports | partially_supports | does_not_support | insufficient_data",
@@ -131,6 +132,7 @@ Rules:
 - Do not be agreeable. Be direct and brief.
 - If the real outcome wasn't supported by the flow, say it plainly.
 - Mention if the data was stale (-1DTE) or incomplete (missing BID/ASK/OI).
+- If the flow data is stale, clarify the outcome screenshot can be current but the report was historical.
 Return valid JSON with this shape:
 {
   "verdict": "supports | partially_supports | does_not_support | insufficient_data",

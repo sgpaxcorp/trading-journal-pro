@@ -25,6 +25,13 @@ type ChatMessage = {
   keyTrades?: any[];
 };
 
+type ChatSession = {
+  id: string;
+  title?: string | null;
+  created_at: string;
+  closed_at?: string | null;
+};
+
 type ExpirationStrike = {
   strike?: number;
   type?: string;
@@ -54,6 +61,18 @@ type SqueezeScenario = {
 type AnalysisData = {
   summary?: string;
   flowBias?: string | null;
+  observations?: string[];
+  inferences?: Array<{
+    statement?: string;
+    support?: string[];
+    confidence?: string;
+    alternatives?: string[];
+  }> | string[];
+  scenarioMatrix?: {
+    bullish?: { trigger?: string; confirmation?: string; invalidation?: string; risk?: string };
+    bearish?: { trigger?: string; confirmation?: string; invalidation?: string; risk?: string };
+    range?: { trigger?: string; confirmation?: string; invalidation?: string; risk?: string };
+  };
   keyLevels?: { price?: number; label?: string; reason?: string; side?: string }[];
   keyTrades?: any[];
   expirations?: ExpirationBucket[];
@@ -987,12 +1006,43 @@ async function renderPriceChartDataUrl(
   }
 }
 
+function isHeicLike(file: File) {
+  const name = file.name.toLowerCase();
+  const type = (file.type || "").toLowerCase();
+  return (
+    type.includes("heic") ||
+    type.includes("heif") ||
+    name.endsWith(".heic") ||
+    name.endsWith(".heif")
+  );
+}
+
+async function ensureImageFile(file: File): Promise<File> {
+  if (!isHeicLike(file)) return file;
+  try {
+    const mod = await import("heic2any");
+    const heic2any = (mod as any).default || mod;
+    const converted = await heic2any({
+      blob: file,
+      toType: "image/jpeg",
+      quality: 0.8,
+    });
+    const blob = Array.isArray(converted) ? converted[0] : converted;
+    return new File([blob], file.name.replace(/\.(heic|heif)$/i, ".jpg"), {
+      type: "image/jpeg",
+    });
+  } catch {
+    return file;
+  }
+}
+
 async function compressScreenshot(file: File, maxWidth = 1400, quality = 0.7): Promise<string> {
+  const safeFile = await ensureImageFile(file);
   const dataUrl = await new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(String(reader.result));
     reader.onerror = () => reject(new Error("Screenshot read failed"));
-    reader.readAsDataURL(file);
+    reader.readAsDataURL(safeFile);
   });
   const img = await new Promise<HTMLImageElement>((resolve, reject) => {
     const image = new Image();
@@ -1441,6 +1491,7 @@ export default function OptionFlowPage() {
   const [keyTrades, setKeyTrades] = useState<any[]>([]);
   const [flowBias, setFlowBias] = useState<string | null>(null);
   const [analysisId, setAnalysisId] = useState<string | null>(null);
+  const analysisIdRef = useRef<string | null>(null);
   const [analysisData, setAnalysisData] = useState<AnalysisData | null>(null);
   const [analysisHtml, setAnalysisHtml] = useState<string>("");
   const [analysisRows, setAnalysisRows] = useState<any[]>([]);
@@ -1465,6 +1516,9 @@ export default function OptionFlowPage() {
 
   const [message, setMessage] = useState<string>("");
   const [chatLog, setChatLog] = useState<ChatMessage[]>([]);
+  const [chatSessionId, setChatSessionId] = useState<string | null>(null);
+  const [chatSessionClosed, setChatSessionClosed] = useState<boolean>(false);
+  const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
   const [typingState, setTypingState] = useState<null | "analyzing" | "planning">(null);
   const [fullScreenChat, setFullScreenChat] = useState<boolean>(false);
   const [checkoutStatus, setCheckoutStatus] = useState<string | null>(null);
@@ -1475,6 +1529,7 @@ export default function OptionFlowPage() {
   const [outcomeSaving, setOutcomeSaving] = useState<boolean>(false);
   const [postMortem, setPostMortem] = useState<any | null>(null);
   const [outcomeNotice, setOutcomeNotice] = useState<string>("");
+  const idleCloseRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const outcomeDue = useMemo(() => {
     const createdAt = analysisData?.meta?.createdAt;
     if (!createdAt) return false;
@@ -1514,8 +1569,150 @@ export default function OptionFlowPage() {
     ? "Acceso temprano"
     : "Early access";
 
-  function appendMessage(msg: Omit<ChatMessage, "id"> & { id?: string }) {
-    setChatLog((prev) => [...prev, { id: msg.id ?? makeId(), ...msg }]);
+  function appendMessage(
+    msg: Omit<ChatMessage, "id"> & { id?: string },
+    opts?: { persist?: boolean }
+  ) {
+    const entry = { id: msg.id ?? makeId(), ...msg };
+    setChatLog((prev) => [...prev, entry].slice(-25));
+    const shouldPersist =
+      opts?.persist !== false && (entry.role === "user" || entry.role === "assistant");
+    if (shouldPersist) {
+      void persistChatMessage(entry);
+      scheduleChatClose();
+    }
+  }
+
+  function scheduleChatClose() {
+    if (idleCloseRef.current) clearTimeout(idleCloseRef.current);
+    idleCloseRef.current = setTimeout(() => {
+      void closeChatSession();
+    }, 10 * 60 * 1000);
+  }
+
+  async function ensureChatSessionId(forceNew = false): Promise<string | null> {
+    if (chatSessionId && !chatSessionClosed && !forceNew) return chatSessionId;
+    try {
+      const { data: sessionData } = await supabaseBrowser.auth.getSession();
+      const token = sessionData?.session?.access_token;
+      if (!token) return null;
+      const res = await fetch("/api/option-flow/chat-sessions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          analysisId: analysisIdRef.current ?? analysisId,
+          title: analysisData?.meta?.underlying
+            ? `${analysisData?.meta?.underlying} · ${new Date().toLocaleDateString(localeTag)}`
+            : null,
+          reportCreatedAt: analysisData?.meta?.createdAt ?? null,
+          forceNew,
+        }),
+      });
+      const body = await res.json();
+      if (!res.ok) return null;
+      if (body?.sessionId) {
+        setChatSessionId(body.sessionId);
+        setChatSessionClosed(false);
+        return body.sessionId as string;
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  async function persistChatMessage(msg: ChatMessage) {
+    const sessionId = await ensureChatSessionId();
+    if (!sessionId) return;
+    try {
+      const { data: sessionData } = await supabaseBrowser.auth.getSession();
+      const token = sessionData?.session?.access_token;
+      if (!token) return;
+      const content = msg.body || msg.title || "";
+      await fetch("/api/option-flow/chat-messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          sessionId,
+          role: msg.role,
+          content,
+          meta: {
+            title: msg.title,
+            body: msg.body,
+            html: msg.html,
+            keyTrades: msg.keyTrades,
+          },
+        }),
+      });
+    } catch {
+      // ignore
+    }
+  }
+
+  async function loadChatSessions() {
+    if (!analysisData && !analysisId) return;
+    try {
+      const { data: sessionData } = await supabaseBrowser.auth.getSession();
+      const token = sessionData?.session?.access_token;
+      if (!token) return;
+      const params = new URLSearchParams();
+      if (analysisId) params.set("analysisId", analysisId);
+      const res = await fetch(`/api/option-flow/chat-sessions?${params.toString()}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const body = await res.json();
+      if (!res.ok) return;
+      setChatSessions(Array.isArray(body?.sessions) ? body.sessions : []);
+    } catch {
+      // ignore
+    }
+  }
+
+  async function openChatSession(session: ChatSession) {
+    try {
+      const { data: sessionData } = await supabaseBrowser.auth.getSession();
+      const token = sessionData?.session?.access_token;
+      if (!token) return;
+      const res = await fetch(`/api/option-flow/chat-messages?sessionId=${session.id}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const body = await res.json();
+      if (!res.ok) return;
+      const msgs = Array.isArray(body?.messages) ? body.messages : [];
+      setChatLog(msgs);
+      setChatSessionId(session.id);
+      setChatSessionClosed(Boolean(session.closed_at));
+      scheduleChatClose();
+    } catch {
+      // ignore
+    }
+  }
+
+  async function closeChatSession() {
+    if (!chatSessionId) return;
+    try {
+      const { data: sessionData } = await supabaseBrowser.auth.getSession();
+      const token = sessionData?.session?.access_token;
+      if (!token) return;
+      await fetch("/api/option-flow/chat-close", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ sessionId: chatSessionId }),
+      });
+      setChatSessionClosed(true);
+      await loadChatSessions();
+    } catch {
+      // ignore
+    }
   }
 
   function buildAnalysisHtml(data: AnalysisData): string {
@@ -1529,6 +1726,68 @@ export default function OptionFlowPage() {
     sections.push(
       `<p>${summary || (isEs ? "Sin resumen disponible." : "No summary available.")}</p>`
     );
+    if (data.observations && data.observations.length) {
+      sections.push(`<h4>${isEs ? "Observaciones" : "Observations"}</h4>`);
+      sections.push(
+        `<ul>` +
+          data.observations.map((obs) => `<li>${escapeHtml(obs)}</li>`).join("") +
+          `</ul>`
+      );
+    }
+    if (data.inferences && data.inferences.length) {
+      sections.push(`<h4>${isEs ? "Inferencias" : "Inferences"}</h4>`);
+      sections.push(
+        `<ul>` +
+          data.inferences
+            .map((inf: any) => {
+              if (typeof inf === "string") return `<li>${escapeHtml(inf)}</li>`;
+              const statement = escapeHtml(inf?.statement ?? "");
+              const support = Array.isArray(inf?.support) ? inf.support.join(", ") : "";
+              const confidence = inf?.confidence ? escapeHtml(inf.confidence) : "";
+              const alternatives = Array.isArray(inf?.alternatives)
+                ? inf.alternatives.join(" / ")
+                : "";
+              const meta = [
+                support ? `Soporte: ${escapeHtml(support)}` : "",
+                confidence ? `Confianza: ${escapeHtml(confidence)}` : "",
+                alternatives ? `Alternativas: ${escapeHtml(alternatives)}` : "",
+              ]
+                .filter(Boolean)
+                .join(" · ");
+              return `<li>${statement}${meta ? `<br /><span>${meta}</span>` : ""}</li>`;
+            })
+            .join("") +
+          `</ul>`
+      );
+    }
+    if (data.scenarioMatrix) {
+      const scenarios = [
+        { key: "bullish", label: isEs ? "Alcista" : "Bullish" },
+        { key: "bearish", label: isEs ? "Bajista" : "Bearish" },
+        { key: "range", label: isEs ? "Rango" : "Range" },
+      ];
+      sections.push(`<h4>${isEs ? "Matriz de escenarios" : "Scenario matrix"}</h4>`);
+      sections.push(
+        `<table>` +
+          `<thead><tr><th>${isEs ? "Escenario" : "Scenario"}</th><th>${
+            isEs ? "Trigger" : "Trigger"
+          }</th><th>${isEs ? "Confirmación" : "Confirmation"}</th><th>${
+            isEs ? "Invalidación" : "Invalidation"
+          }</th><th>${isEs ? "Riesgo" : "Risk"}</th></tr></thead>` +
+          `<tbody>` +
+          scenarios
+            .map((s) => {
+              const row: any = (data.scenarioMatrix as any)?.[s.key] ?? {};
+              return `<tr><td>${s.label}</td><td>${escapeHtml(row?.trigger || "")}</td><td>${escapeHtml(
+                row?.confirmation || ""
+              )}</td><td>${escapeHtml(row?.invalidation || "")}</td><td>${escapeHtml(
+                row?.risk || ""
+              )}</td></tr>`;
+            })
+            .join("") +
+          `</tbody></table>`
+      );
+    }
     if (bias) {
       sections.push(
         `<p><strong>${isEs ? "Sesgo macro" : "Macro bias"}:</strong> ${bias}</p>`
@@ -1940,6 +2199,74 @@ export default function OptionFlowPage() {
     const summaryLines = doc.splitTextToSize(summary, 520);
     doc.text(summaryLines, margin, y);
     y += summaryLines.length * 15 + 16;
+    const observations = payload.observations ?? [];
+    if (observations.length) {
+      if (y + 40 > contentBottom) {
+        doc.addPage();
+        y = contentTop;
+      }
+      doc.setFontSize(11);
+      doc.text(isEs ? "Observaciones" : "Observations", margin, y);
+      y += 14;
+      doc.setFontSize(10);
+      const obsLines = observations.flatMap((obs: string) =>
+        doc.splitTextToSize(`• ${obs}`, 520)
+      );
+      doc.text(obsLines, margin, y);
+      y += obsLines.length * 14 + 10;
+    }
+    const inferences = payload.inferences ?? [];
+    if (inferences.length) {
+      if (y + 40 > contentBottom) {
+        doc.addPage();
+        y = contentTop;
+      }
+      doc.setFontSize(11);
+      doc.text(isEs ? "Inferencias" : "Inferences", margin, y);
+      y += 14;
+      doc.setFontSize(10);
+      const infLines = inferences.flatMap((inf: any) => {
+        if (typeof inf === "string") return doc.splitTextToSize(`• ${inf}`, 520);
+        const statement = inf?.statement ? `• ${inf.statement}` : "•";
+        const support = Array.isArray(inf?.support) && inf.support.length ? `Soporte: ${inf.support.join(", ")}` : "";
+        const confidence = inf?.confidence ? `${isEs ? "Confianza" : "Confidence"}: ${inf.confidence}` : "";
+        const alternatives = Array.isArray(inf?.alternatives) && inf.alternatives.length
+          ? `${isEs ? "Alternativas" : "Alternatives"}: ${inf.alternatives.join(" / ")}`
+          : "";
+        return [
+          ...doc.splitTextToSize(statement, 520),
+          ...doc.splitTextToSize([support, confidence, alternatives].filter(Boolean).join(" · "), 520),
+        ].filter((line) => line.trim().length > 0);
+      });
+      doc.text(infLines, margin, y);
+      y += infLines.length * 14 + 10;
+    }
+    if (payload.scenarioMatrix) {
+      if (y + 80 > contentBottom) {
+        doc.addPage();
+        y = contentTop;
+      }
+      doc.setFontSize(11);
+      doc.text(isEs ? "Matriz de escenarios" : "Scenario matrix", margin, y);
+      y += 12;
+      const scenarios = [
+        { key: "bullish", label: isEs ? "Alcista" : "Bullish" },
+        { key: "bearish", label: isEs ? "Bajista" : "Bearish" },
+        { key: "range", label: isEs ? "Rango" : "Range" },
+      ];
+      autoTable(doc, {
+        startY: y,
+        head: [[isEs ? "Escenario" : "Scenario", "Trigger", isEs ? "Confirmación" : "Confirmation", isEs ? "Invalidación" : "Invalidation", isEs ? "Riesgo" : "Risk"]],
+        body: scenarios.map((s) => {
+          const row: any = (payload.scenarioMatrix as any)?.[s.key] ?? {};
+          return [s.label, row?.trigger ?? "", row?.confirmation ?? "", row?.invalidation ?? "", row?.risk ?? ""];
+        }),
+        styles: { fontSize: 8 },
+        headStyles: { fillColor: [17, 24, 39] },
+        margin: tableMargin,
+      });
+      y = (doc as any).lastAutoTable.finalY + 16;
+    }
 
     if (payload.expirations && payload.expirations.length) {
       doc.setFontSize(12);
@@ -2510,16 +2837,16 @@ export default function OptionFlowPage() {
 
   useEffect(() => {
     if (chatLog.length) return;
-    setChatLog([
+    appendMessage(
       {
-        id: makeId(),
         role: "assistant",
-      title: isEs ? "Inteligencia de Flujo de Opciones" : "Option Flow Intelligence",
+        title: isEs ? "Inteligencia de Flujo de Opciones" : "Option Flow Intelligence",
         body: isEs
           ? "¿Cómo quieres analizar el flujo de órdenes? Puedes pegar screenshots o subir un CSV/XLS/XLSX (máx 12MB)."
           : "How do you want to analyze the order flow? Paste screenshots or upload a CSV/XLS/XLSX (max 12MB).",
       },
-    ]);
+      { persist: false }
+    );
   }, [chatLog.length, isEs]);
 
   useEffect(() => {
@@ -2542,6 +2869,31 @@ export default function OptionFlowPage() {
       if (outcomePreview) URL.revokeObjectURL(outcomePreview);
     };
   }, [outcomePreview]);
+
+  useEffect(() => {
+    return () => {
+      if (idleCloseRef.current) clearTimeout(idleCloseRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!analysisData && !analysisId) return;
+    void loadChatSessions();
+  }, [analysisId, analysisData]);
+
+  useEffect(() => {
+    const handleHide = () => {
+      if (document.visibilityState === "hidden") {
+        void closeChatSession();
+      }
+    };
+    window.addEventListener("pagehide", handleHide);
+    document.addEventListener("visibilitychange", handleHide);
+    return () => {
+      window.removeEventListener("pagehide", handleHide);
+      document.removeEventListener("visibilitychange", handleHide);
+    };
+  }, [chatSessionId]);
 
   function addPastedShots(files: File[]) {
     if (!files.length) return;
@@ -2691,6 +3043,7 @@ export default function OptionFlowPage() {
     setKeyTrades([]);
     setFlowBias(null);
     setAnalysisId(null);
+    analysisIdRef.current = null;
     setAnalysisData(null);
     setAnalysisHtml("");
     setAnalysisRows([]);
@@ -2853,7 +3206,9 @@ export default function OptionFlowPage() {
       setSummary(analysisPayload.summary ?? "");
       setKeyTrades(Array.isArray(analysisPayload.keyTrades) ? analysisPayload.keyTrades : []);
       setFlowBias(analysisPayload.flowBias ?? null);
-      setAnalysisId(body?.uploadId ?? null);
+      const nextAnalysisId = body?.uploadId ?? null;
+      setAnalysisId(nextAnalysisId);
+      analysisIdRef.current = nextAnalysisId;
       setAnalysisData(analysisPayload);
       const formatted = buildAnalysisHtml(analysisPayload);
       setAnalysisHtml(formatted);
@@ -3051,15 +3406,16 @@ export default function OptionFlowPage() {
     setChatInput("");
   }
 
-  function handleOutcomeFileChange(file: File | null) {
+  async function handleOutcomeFileChange(file: File | null) {
     if (outcomePreview) URL.revokeObjectURL(outcomePreview);
     if (!file) {
       setOutcomeFile(null);
       setOutcomePreview(null);
       return;
     }
-    setOutcomeFile(file);
-    setOutcomePreview(URL.createObjectURL(file));
+    const normalized = await ensureImageFile(file);
+    setOutcomeFile(normalized);
+    setOutcomePreview(URL.createObjectURL(normalized));
   }
 
   async function handleOutcomeSubmit() {
@@ -3574,8 +3930,8 @@ export default function OptionFlowPage() {
               {isEs ? "Screenshot (opcional)" : "Screenshot (optional)"}
               <input
                 type="file"
-                accept="image/*"
-                onChange={(e) => handleOutcomeFileChange(e.target.files?.[0] ?? null)}
+                accept="image/*,.heic,.heif"
+                onChange={(e) => void handleOutcomeFileChange(e.target.files?.[0] ?? null)}
                 className="ml-2 text-[11px]"
               />
             </label>
@@ -3651,6 +4007,50 @@ export default function OptionFlowPage() {
               )}
             </div>
           )}
+        </div>
+      )}
+
+      {chatSessions.length > 0 && (
+        <div className="mt-4 rounded-2xl border border-slate-800 bg-slate-950/60 p-4 space-y-2">
+          <div className="flex items-center justify-between">
+            <p className="text-[11px] uppercase tracking-[0.25em] text-slate-400">
+              {isEs ? "Historial de chats" : "Chat history"}
+            </p>
+          </div>
+          <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+            {chatSessions.map((session) => (
+              <div
+                key={session.id}
+                className="rounded-2xl border border-slate-800 bg-slate-950/50 p-3"
+              >
+                <p className="text-[12px] font-semibold text-slate-100">
+                  {session.title || (isEs ? "Chat Option Flow" : "Option Flow Chat")}
+                </p>
+                <p className="text-[11px] text-slate-500">
+                  {new Date(session.created_at).toLocaleString(localeTag)}
+                </p>
+                <div className="mt-2 flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void openChatSession(session)}
+                    className="rounded-xl border border-slate-700 px-3 py-1 text-[10.5px] text-slate-200 hover:border-emerald-400 hover:text-emerald-200"
+                  >
+                    {isEs ? "Abrir" : "Open"}
+                  </button>
+                  {session.closed_at && (
+                    <span className="text-[10px] text-slate-500">
+                      {isEs ? "Archivado" : "Archived"}
+                    </span>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+          <p className="text-[11px] text-slate-500">
+            {isEs
+              ? "Se muestran los últimos 8 chats (vista compacta)."
+              : "Showing the last 8 chats (compact view)."}
+          </p>
         </div>
       )}
 

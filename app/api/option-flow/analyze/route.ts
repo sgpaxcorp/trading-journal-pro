@@ -649,6 +649,8 @@ Usa "sampleRows" solo como contexto si hace falta.
 Identifica niveles reales (con etiqueta pivot/supply/demand/wall/friction), contratos con más potencial y escenarios
 de squeeze con condiciones claras. Evita frases genéricas; usa lecturas breves pero específicas.
 Incluye una conclusión final que resuma el sesgo y el mapa de niveles en 3-5 bullets.
+Incluye "observations" (hechos literales) e "inferences" (con soporte, confianza y alternativas si aplica).
+Incluye "scenarioMatrix" (alcista/bajista/rango) con trigger, confirmación, invalidación y riesgo.
 Si el símbolo subyacente aparece en los prints, incluye el símbolo en keyTrades[].details.symbol (ej: SPX, SPXW, NDX).
 Incluye lectura de prints grandes deep ITM solo como nota (no como nivel clave) si el OI es bajo.
 Si hay mezcla de prints BID/ASK, deja claro si es venta de prima o compra agresiva.
@@ -669,6 +671,15 @@ Devuelve exclusivamente JSON válido con esta forma:
 {
   "summary": "resumen ejecutivo corto",
   "flowBias": "bullish | bearish | mixed | neutral",
+  "observations": ["O1 ...", "O2 ..."],
+  "inferences": [
+    { "statement": "I1 ...", "support": ["O1"], "confidence": "Alta|Media|Baja", "alternatives": ["..."] }
+  ],
+  "scenarioMatrix": {
+    "bullish": { "trigger": "...", "confirmation": "...", "invalidation": "...", "risk": "..." },
+    "bearish": { "trigger": "...", "confirmation": "...", "invalidation": "...", "risk": "..." },
+    "range": { "trigger": "...", "confirmation": "...", "invalidation": "...", "risk": "..." }
+  },
   "expirations": [
     {
       "expiry": "YYYY-MM-DD",
@@ -738,6 +749,8 @@ Use "sampleRows" only as back-up context if needed.
 Identify real levels (label pivot/supply/demand/wall/friction), contracts with most potential, and squeeze scenarios
 with clear conditions. Avoid generic phrases; use concise, specific reads.
 Include a final conclusion summarizing bias and the level map in 3-5 bullets.
+Include "observations" (literal facts) and "inferences" (with support, confidence, and alternatives if needed).
+Include "scenarioMatrix" (bullish/bearish/range) with trigger, confirmation, invalidation, and risk.
 If the underlying symbol appears in prints, include it in keyTrades[].details.symbol (e.g., SPX, SPXW, NDX).
 Include large deep ITM prints only as a note (not a key level) if OI is low.
 If prints mix BID/ASK, clarify whether it's premium selling or aggressive buying.
@@ -758,6 +771,15 @@ Return only valid JSON with this shape:
 {
   "summary": "short executive summary",
   "flowBias": "bullish | bearish | mixed | neutral",
+  "observations": ["O1 ...", "O2 ..."],
+  "inferences": [
+    { "statement": "I1 ...", "support": ["O1"], "confidence": "High|Medium|Low", "alternatives": ["..."] }
+  ],
+  "scenarioMatrix": {
+    "bullish": { "trigger": "...", "confirmation": "...", "invalidation": "...", "risk": "..." },
+    "bearish": { "trigger": "...", "confirmation": "...", "invalidation": "...", "risk": "..." },
+    "range": { "trigger": "...", "confirmation": "...", "invalidation": "...", "risk": "..." }
+  },
   "expirations": [
     {
       "expiry": "YYYY-MM-DD",
@@ -981,6 +1003,12 @@ Return only valid JSON with this shape:
 
     const summary = parsed?.summary ?? raw;
     const keyTrades = Array.isArray(parsed?.keyTrades) ? parsed.keyTrades : [];
+    const observations = Array.isArray(parsed?.observations) ? parsed.observations : [];
+    const inferences = Array.isArray(parsed?.inferences) ? parsed.inferences : [];
+    const scenarioMatrix =
+      parsed?.scenarioMatrix && typeof parsed.scenarioMatrix === "object"
+        ? parsed.scenarioMatrix
+        : null;
     const expirations = filteredExpirations;
     const contractsWithPotential =
       parsed?.contractsWithPotential && typeof parsed.contractsWithPotential === "object"
@@ -1023,6 +1051,9 @@ Return only valid JSON with this shape:
       summary,
       keyTrades,
       flowBias,
+      observations,
+      inferences,
+      scenarioMatrix,
       keyLevels,
       expirations,
       contractsWithPotential,
