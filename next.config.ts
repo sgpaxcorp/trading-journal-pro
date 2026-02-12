@@ -18,7 +18,8 @@ const csp = [
   "img-src 'self' data: https: https://hcaptcha.com https://*.hcaptcha.com",
   "font-src 'self' data: https:",
   "style-src 'self' 'unsafe-inline' https://hcaptcha.com https://*.hcaptcha.com",
-  "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://hcaptcha.com https://*.hcaptcha.com https://js.hcaptcha.com",
+  "script-src 'self' 'unsafe-inline' 'unsafe-eval' blob: https://hcaptcha.com https://*.hcaptcha.com https://js.hcaptcha.com",
+  "worker-src 'self' blob:",
   "connect-src 'self' https: wss: https://hcaptcha.com https://*.hcaptcha.com",
   "frame-src https://hcaptcha.com https://*.hcaptcha.com",
 ].join("; ");

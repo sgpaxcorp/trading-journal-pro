@@ -648,6 +648,7 @@ IMPORTANTE: "keyLevels" YA viene calculado en el payload. Usa esos niveles tal c
 En "tradingPlan" debes mencionar explícitamente los niveles más fuertes de "keyLevels" (con el precio exacto).
 No inventes niveles fuera de "keyLevels". Si necesitas citar niveles, elige de "keyLevels".
 NO inventes datos ni conclusiones fuera del payload. Si falta data, dilo explícitamente.
+No seas complaciente ni le digas al usuario lo que quiere escuchar: sé objetivo con la data.
 Incluye en "riskNotes" un disclosure corto indicando que el análisis se basa solo en la data enviada y puede estar incompleto si faltan prints BID/ASK o filas.
 IMPORTANTE: Solo considera flujo agresivo cuando el print está en ASK (entradas direccionales) o BID (venta de prima).
 Si está en MID/MIXED/UNKNOWN no lo clasifiques como agresivo.
@@ -734,6 +735,7 @@ IMPORTANT: "keyLevels" is ALREADY computed in the payload. Use those exact level
 In "tradingPlan" you must explicitly mention the strongest levels from "keyLevels" (use the exact price values).
 Do not invent levels outside "keyLevels". If you need levels, choose from "keyLevels".
 Do NOT invent data or conclusions outside the payload. If data is missing, say it explicitly.
+Do not be agreeable or tell the user what they want to hear; be objective with the data.
 Include a short disclosure in "riskNotes" stating the analysis is based only on the provided data and may be incomplete if BID/ASK prints or rows are missing.
 IMPORTANT: Only consider aggressive flow when prints are at ASK (directional entries) or BID (premium selling).
 If prints are MID/MIXED/UNKNOWN, do not classify as aggressive.

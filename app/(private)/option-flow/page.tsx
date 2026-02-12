@@ -1434,6 +1434,7 @@ export default function OptionFlowPage() {
   const [analysisId, setAnalysisId] = useState<string | null>(null);
   const [analysisData, setAnalysisData] = useState<AnalysisData | null>(null);
   const [analysisHtml, setAnalysisHtml] = useState<string>("");
+  const [analysisRows, setAnalysisRows] = useState<any[]>([]);
   const [chartDataUrl, setChartDataUrl] = useState<string | null>(null);
   const [archives, setArchives] = useState<OptionFlowArchive[]>([]);
   const [archiveId, setArchiveId] = useState<string | null>(null);
@@ -2664,6 +2665,7 @@ export default function OptionFlowPage() {
     setAnalysisId(null);
     setAnalysisData(null);
     setAnalysisHtml("");
+    setAnalysisRows([]);
     setPlanHtml("");
     setArchiveId(null);
     setArchiveFilePath(null);
@@ -2771,6 +2773,7 @@ export default function OptionFlowPage() {
       );
 
       const compactRows = rowsForAnalysis.map((row) => compactRow(row));
+      setAnalysisRows(compactRows.slice(0, 200));
       const res = await fetch("/api/option-flow/analyze", {
         method: "POST",
         headers: {
@@ -2946,6 +2949,72 @@ export default function OptionFlowPage() {
     }
   }
 
+  async function handleChat(question: string) {
+    if (!analysisData) {
+      appendMessage({
+        role: "system",
+        body: isEs
+          ? "Primero necesito un análisis cargado para responder preguntas."
+          : "I need a loaded analysis before I can answer questions.",
+      });
+      return;
+    }
+    setTypingState("analyzing");
+    try {
+      const { data: sessionData } = await supabaseBrowser.auth.getSession();
+      const token = sessionData?.session?.access_token;
+      if (!token) throw new Error(isEs ? "Sesión no disponible" : "Session not available");
+
+      const history = chatLog.slice(-6).map((msg) => ({
+        role: msg.role,
+        text: msg.body || msg.title || "",
+      }));
+
+      const res = await fetch("/api/option-flow/chat", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          message: question,
+          analysis: analysisData,
+          rows: analysisRows,
+          meta: {
+            provider,
+            underlying: underlying.trim() || analysisData?.meta?.underlying || null,
+            previousClose,
+            tradeIntent,
+          },
+          chatHistory: history,
+          language: lang,
+        }),
+      });
+      const body = await res.json();
+      if (!res.ok) {
+        throw new Error(body?.error || (isEs ? "No se pudo responder." : "Couldn't respond."));
+      }
+
+      appendMessage({
+        role: "assistant",
+        body: body?.reply || (isEs ? "No tengo respuesta todavía." : "No response yet."),
+      });
+    } catch (e: any) {
+      appendMessage({
+        role: "system",
+        body: e?.message || (isEs ? "No se pudo responder." : "Couldn't respond."),
+      });
+    } finally {
+      setTypingState(null);
+    }
+  }
+
+  async function handleAnalyzeClick() {
+    const note = chatInput.trim();
+    await handleAnalyze(note);
+    setChatInput("");
+  }
+
   async function handleSaveToJournal() {
     if (!planHtml) return;
     setSavingToJournal(true);
@@ -2996,6 +3065,7 @@ export default function OptionFlowPage() {
     const wantsJournal =
       /journal|jorunal|premarket widget|envia|enviar|mandar/.test(lower);
     const wantsPlan = /plan|premarket|pre-market|pre market/.test(lower);
+    const hasNewData = Boolean(csvFile || pastedShots.length);
 
     if (text) {
       if (lower.includes("unusual whales")) setProvider("unusualwhales");
@@ -3062,8 +3132,34 @@ export default function OptionFlowPage() {
       return;
     }
 
-    await handleAnalyze(text);
-    setChatInput("");
+    if (text && analysisData && !hasNewData) {
+      await handleChat(text);
+      setChatInput("");
+      return;
+    }
+    if (hasNewData && !analysisData) {
+      appendMessage({
+        role: "system",
+        body: isEs
+          ? "Para generar el reporte con el CSV, usa el botón “Analizar”."
+          : "To generate the report from the CSV, use the “Analyze” button.",
+      });
+      return;
+    }
+
+    if (!analysisData) {
+      appendMessage({
+        role: "system",
+        body: isEs
+          ? "Primero necesito un análisis cargado para responder preguntas."
+          : "I need a loaded analysis before I can answer questions.",
+      });
+      return;
+    }
+    if (text) {
+      await handleChat(text);
+      setChatInput("");
+    }
   }
 
   const renderChatPanel = (isFullScreen = false) => (

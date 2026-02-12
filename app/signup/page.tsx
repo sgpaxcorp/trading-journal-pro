@@ -243,6 +243,12 @@ function SignUpPageInner() {
               "Debes confirmar tu email antes de elegir plan o pagar."
             )}
           </p>
+          <p className="text-[11px] text-slate-400">
+            {L(
+              "Check your spam/junk or promotions folders if you don't see the email.",
+              "Revisa spam/junk o promociones si no ves el email."
+            )}
+          </p>
 
           <div className="space-y-3">
             <div>
