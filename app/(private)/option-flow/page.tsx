@@ -89,6 +89,15 @@ type AnalysisData = {
   };
   riskNotes?: string[];
   suggestedFocus?: string[];
+  dataQuality?: {
+    totalRows?: number;
+    withSide?: number;
+    withPremium?: number;
+    withOi?: number;
+    latestExpiry?: string | null;
+    latestTimestamp?: string | null;
+    isStale?: boolean;
+  };
   meta?: {
     underlying?: string;
     provider?: string;
@@ -1460,6 +1469,18 @@ export default function OptionFlowPage() {
   const [fullScreenChat, setFullScreenChat] = useState<boolean>(false);
   const [checkoutStatus, setCheckoutStatus] = useState<string | null>(null);
   const canAnalyze = Boolean(csvFile || pastedShots.length);
+  const [outcomeText, setOutcomeText] = useState<string>("");
+  const [outcomeFile, setOutcomeFile] = useState<File | null>(null);
+  const [outcomePreview, setOutcomePreview] = useState<string | null>(null);
+  const [outcomeSaving, setOutcomeSaving] = useState<boolean>(false);
+  const [postMortem, setPostMortem] = useState<any | null>(null);
+  const [outcomeNotice, setOutcomeNotice] = useState<string>("");
+  const outcomeDue = useMemo(() => {
+    const createdAt = analysisData?.meta?.createdAt;
+    if (!createdAt) return false;
+    const diff = Date.now() - new Date(createdAt).getTime();
+    return diff >= 6 * 60 * 60 * 1000;
+  }, [analysisData?.meta?.createdAt]);
 
   const providerMeta = useMemo(
     () => PROVIDERS.find((item) => item.id === provider),
@@ -2516,6 +2537,12 @@ export default function OptionFlowPage() {
     };
   }, []);
 
+  useEffect(() => {
+    return () => {
+      if (outcomePreview) URL.revokeObjectURL(outcomePreview);
+    };
+  }, [outcomePreview]);
+
   function addPastedShots(files: File[]) {
     if (!files.length) return;
     setPastedShots((prev) => [
@@ -2674,6 +2701,14 @@ export default function OptionFlowPage() {
     setTypingState("analyzing");
     setParsing(false);
     setParseProgress({ percent: 0, scanned: 0, matched: 0 });
+    setOutcomeText("");
+    setPostMortem(null);
+    setOutcomeNotice("");
+    if (outcomePreview) {
+      URL.revokeObjectURL(outcomePreview);
+    }
+    setOutcomePreview(null);
+    setOutcomeFile(null);
 
     try {
       const { data: sessionData } = await supabaseBrowser.auth.getSession();
@@ -3014,6 +3049,68 @@ export default function OptionFlowPage() {
     const note = chatInput.trim();
     await handleAnalyze(note);
     setChatInput("");
+  }
+
+  function handleOutcomeFileChange(file: File | null) {
+    if (outcomePreview) URL.revokeObjectURL(outcomePreview);
+    if (!file) {
+      setOutcomeFile(null);
+      setOutcomePreview(null);
+      return;
+    }
+    setOutcomeFile(file);
+    setOutcomePreview(URL.createObjectURL(file));
+  }
+
+  async function handleOutcomeSubmit() {
+    if (!analysisData) return;
+    const text = outcomeText.trim();
+    if (!text) {
+      setOutcomeNotice(isEs ? "Describe lo que pasó en el mercado." : "Describe what happened.");
+      return;
+    }
+    setOutcomeNotice("");
+    setOutcomeSaving(true);
+    try {
+      const { data: sessionData } = await supabaseBrowser.auth.getSession();
+      const token = sessionData?.session?.access_token;
+      if (!token) throw new Error(isEs ? "Sesión no disponible" : "Session not available");
+
+      const chartDataUrl = outcomeFile ? await compressScreenshot(outcomeFile, 1400, 0.7) : null;
+
+      const res = await fetch("/api/option-flow/outcome", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          outcomeText: text,
+          analysis: analysisData,
+          chartDataUrl,
+          memoryId: analysisId,
+          meta: {
+            provider,
+            underlying: analysisData?.meta?.underlying || underlying.trim(),
+            tradeIntent,
+            createdAt: analysisData?.meta?.createdAt,
+          },
+          language: lang,
+        }),
+      });
+      const body = await res.json();
+      if (!res.ok) {
+        throw new Error(body?.error || (isEs ? "No se pudo guardar." : "Save failed."));
+      }
+      setPostMortem(body?.postMortem ?? null);
+      setOutcomeNotice(
+        isEs ? "Post‑mortem guardado." : "Post‑mortem saved."
+      );
+    } catch (e: any) {
+      setOutcomeNotice(e?.message || (isEs ? "No se pudo guardar." : "Save failed."));
+    } finally {
+      setOutcomeSaving(false);
+    }
   }
 
   async function handleSaveToJournal() {
@@ -3433,6 +3530,129 @@ export default function OptionFlowPage() {
           </div>
         )}
       </div>
+
+      {analysisData && (
+        <div className="mt-4 rounded-2xl border border-slate-800 bg-slate-950/60 p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <p className="text-[11px] uppercase tracking-[0.25em] text-slate-400">
+              {isEs ? "Resultado real (post‑mortem)" : "Real outcome (post‑mortem)"}
+            </p>
+            <span
+              className={`text-[10px] px-2 py-1 rounded-full border ${
+                outcomeDue
+                  ? "border-emerald-400/60 text-emerald-200 bg-emerald-500/10"
+                  : "border-slate-700 text-slate-400"
+              }`}
+            >
+              {outcomeDue
+                ? isEs
+                  ? "Recomendado ahora"
+                  : "Recommended now"
+                : isEs
+                ? "Opcional"
+                : "Optional"}
+            </span>
+          </div>
+          <p className="text-[11px] text-slate-400">
+            {isEs
+              ? "Envía lo que pasó en el mercado para evaluar objetivamente el reporte."
+              : "Send what happened in the market to objectively evaluate the report."}
+          </p>
+          <textarea
+            value={outcomeText}
+            onChange={(e) => setOutcomeText(e.target.value)}
+            rows={3}
+            className="w-full rounded-xl border border-slate-800 bg-slate-950/70 px-3 py-2 text-[11.5px] text-slate-100 outline-none"
+            placeholder={
+              isEs
+                ? "Ej: SPX 6995 → 5913 → 6960, caída fuerte y rebote rápido."
+                : "e.g., SPX 6995 → 5913 → 6960, sharp drop and fast rebound."
+            }
+          />
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="text-[11px] text-slate-400">
+              {isEs ? "Screenshot (opcional)" : "Screenshot (optional)"}
+              <input
+                type="file"
+                accept="image/*"
+                onChange={(e) => handleOutcomeFileChange(e.target.files?.[0] ?? null)}
+                className="ml-2 text-[11px]"
+              />
+            </label>
+            {outcomePreview && (
+              <img
+                src={outcomePreview}
+                alt="Outcome preview"
+                className="h-12 w-20 rounded-lg border border-slate-800 object-cover"
+              />
+            )}
+            <button
+              type="button"
+              onClick={handleOutcomeSubmit}
+              disabled={outcomeSaving}
+              className="ml-auto rounded-xl border border-emerald-400/60 bg-emerald-500/10 px-3 py-1.5 text-[11px] text-emerald-200 hover:border-emerald-400 hover:text-emerald-100 disabled:opacity-60"
+            >
+              {outcomeSaving
+                ? isEs
+                  ? "Guardando…"
+                  : "Saving…"
+                : isEs
+                ? "Analizar resultado"
+                : "Analyze outcome"}
+            </button>
+          </div>
+          {outcomeNotice && <p className="text-[11px] text-amber-200">{outcomeNotice}</p>}
+          {postMortem && (
+            <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-3 text-[11px] text-slate-200 space-y-2">
+              <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500">
+                {isEs ? "Post‑mortem" : "Post‑mortem"}
+              </p>
+              {postMortem.verdict && (
+                <p>
+                  <span className="text-slate-400">{isEs ? "Veredicto" : "Verdict"}:</span>{" "}
+                  <span className="text-emerald-200">{String(postMortem.verdict)}</span>
+                </p>
+              )}
+              {Array.isArray(postMortem.whatMatched) && postMortem.whatMatched.length > 0 && (
+                <div>
+                  <p className="text-slate-400">{isEs ? "Lo que sí coincidió" : "What matched"}:</p>
+                  <ul className="list-disc ml-4">
+                    {postMortem.whatMatched.map((item: string, idx: number) => (
+                      <li key={idx}>{item}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {Array.isArray(postMortem.whatMissed) && postMortem.whatMissed.length > 0 && (
+                <div>
+                  <p className="text-slate-400">{isEs ? "Lo que no se vio" : "What was missed"}:</p>
+                  <ul className="list-disc ml-4">
+                    {postMortem.whatMissed.map((item: string, idx: number) => (
+                      <li key={idx}>{item}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {Array.isArray(postMortem.missingData) && postMortem.missingData.length > 0 && (
+                <div>
+                  <p className="text-slate-400">{isEs ? "Data faltante" : "Missing data"}:</p>
+                  <ul className="list-disc ml-4">
+                    {postMortem.missingData.map((item: string, idx: number) => (
+                      <li key={idx}>{item}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {postMortem.improvement && (
+                <p>
+                  <span className="text-slate-400">{isEs ? "Mejora" : "Improvement"}:</span>{" "}
+                  {String(postMortem.improvement)}
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {archives.length > 0 && (
         <div className="mt-4 rounded-2xl border border-slate-800 bg-slate-950/60 p-4 space-y-3">

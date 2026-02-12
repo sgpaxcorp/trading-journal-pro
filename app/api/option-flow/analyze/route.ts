@@ -18,6 +18,16 @@ const BYPASS_ENTITLEMENT =
   String(process.env.OPTIONFLOW_BYPASS_ENTITLEMENT ?? "").toLowerCase() === "true" ||
   String(process.env.OPTIONFLOW_BYPASS_ENTITLEMENT ?? "") === "1";
 
+type DataQuality = {
+  totalRows: number;
+  withSide: number;
+  withPremium: number;
+  withOi: number;
+  latestExpiry?: string | null;
+  latestTimestamp?: string | null;
+  isStale?: boolean;
+};
+
 function parsePremiumToNumber(raw?: string | number | null): number {
   if (raw == null) return 0;
   if (typeof raw === "number") return Number.isFinite(raw) ? raw : 0;
@@ -649,6 +659,8 @@ En "tradingPlan" debes mencionar explícitamente los niveles más fuertes de "ke
 No inventes niveles fuera de "keyLevels". Si necesitas citar niveles, elige de "keyLevels".
 NO inventes datos ni conclusiones fuera del payload. Si falta data, dilo explícitamente.
 No seas complaciente ni le digas al usuario lo que quiere escuchar: sé objetivo con la data.
+Si dataQuality.isStale es true (expiraciones ya vencidas o timestamps viejos), indica que la data es vieja (-1DTE o anterior) y que el análisis es histórico.
+Usa recentOutcomes solo como feedback contextual; no debe reemplazar la data actual.
 Incluye en "riskNotes" un disclosure corto indicando que el análisis se basa solo en la data enviada y puede estar incompleto si faltan prints BID/ASK o filas.
 IMPORTANTE: Solo considera flujo agresivo cuando el print está en ASK (entradas direccionales) o BID (venta de prima).
 Si está en MID/MIXED/UNKNOWN no lo clasifiques como agresivo.
@@ -736,6 +748,8 @@ In "tradingPlan" you must explicitly mention the strongest levels from "keyLevel
 Do not invent levels outside "keyLevels". If you need levels, choose from "keyLevels".
 Do NOT invent data or conclusions outside the payload. If data is missing, say it explicitly.
 Do not be agreeable or tell the user what they want to hear; be objective with the data.
+If dataQuality.isStale is true (expired dates or old timestamps), explicitly say the data is old (-1DTE or earlier) and the analysis is historical.
+Use recentOutcomes only as contextual feedback; it must not override current data.
 Include a short disclosure in "riskNotes" stating the analysis is based only on the provided data and may be incomplete if BID/ASK prints or rows are missing.
 IMPORTANT: Only consider aggressive flow when prints are at ASK (directional entries) or BID (premium selling).
 If prints are MID/MIXED/UNKNOWN, do not classify as aggressive.
@@ -829,6 +843,30 @@ Return only valid JSON with this shape:
       recentMemory = [];
     }
 
+    let recentOutcomes: any[] = [];
+    try {
+      if (underlying) {
+        const since = new Date(Date.now() - 45 * 24 * 60 * 60 * 1000).toISOString();
+        const { data } = await supabaseAdmin
+          .from("option_flow_outcomes")
+          .select("created_at, outcome_text, post_mortem")
+          .eq("user_id", userId)
+          .eq("underlying", underlying)
+          .gte("created_at", since)
+          .order("created_at", { ascending: false })
+          .limit(4);
+        if (Array.isArray(data)) {
+          recentOutcomes = data.map((row) => ({
+            date: row.created_at,
+            outcome: row.outcome_text,
+            postMortem: row.post_mortem,
+          }));
+        }
+      }
+    } catch {
+      recentOutcomes = [];
+    }
+
     const ocrRows = await extractRowsFromScreenshots(screenshotDataUrls ?? [], provider, lang);
     const mergedRawRows = [...(rows ?? []), ...ocrRows];
     let normalizedRows = dedupeRows(mergedRawRows.map((row) => normalizeFlowRow(row)));
@@ -852,12 +890,30 @@ Return only valid JSON with this shape:
       spotEstimate
     );
     const positioningStress = computeSqueezeCandidates(normalizedRows, 5);
-    const dataQuality = {
+    const dataQuality: DataQuality = {
       totalRows: normalizedRows.length,
       withSide: normalizedRows.filter((row) => row.side !== "UNKNOWN").length,
       withPremium: normalizedRows.filter((row) => Number.isFinite(row.premium)).length,
       withOi: normalizedRows.filter((row) => Number.isFinite(row.oi)).length,
     };
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const expiryDates = normalizedRows
+    .map((row) => row.expiry)
+    .filter((val): val is string => typeof val === "string" && /^\d{4}-\d{2}-\d{2}$/.test(val));
+  const latestExpiry = expiryDates.sort().slice(-1)[0] ?? null;
+  const latestTimestamp =
+    normalizedRows
+      .map((row) => row.timestamp)
+      .filter((val): val is string => typeof val === "string")
+      .sort()
+      .slice(-1)[0] ?? null;
+  const staleByExpiry = latestExpiry ? latestExpiry < todayIso : false;
+  const staleByTimestamp = latestTimestamp
+    ? Date.now() - new Date(latestTimestamp).getTime() > 24 * 60 * 60 * 1000
+    : false;
+  dataQuality.latestExpiry = latestExpiry;
+  dataQuality.latestTimestamp = latestTimestamp;
+  dataQuality.isStale = Boolean(staleByExpiry || staleByTimestamp);
     const flowFeatures = (() => {
       const askTotal = flowTotals.callPremiumAsk + flowTotals.putPremiumAsk;
       const bidTotal = flowTotals.callPremiumBid + flowTotals.putPremiumBid;
@@ -878,6 +934,7 @@ Return only valid JSON with this shape:
       tradeIntent,
       analystNotes,
       recentMemory,
+      recentOutcomes,
       dataQuality,
       flowTotals,
       flowFeatures,
@@ -975,6 +1032,7 @@ Return only valid JSON with this shape:
       notablePatterns: parsed?.notablePatterns ?? [],
       riskNotes: parsed?.riskNotes ?? [],
       suggestedFocus: parsed?.suggestedFocus ?? [],
+      dataQuality,
       uploadId,
     });
   } catch (err: any) {
