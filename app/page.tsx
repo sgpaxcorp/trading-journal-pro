@@ -26,10 +26,10 @@ export default function Home() {
           <img
             src="/neurotrader-logo.svg"
             alt="Neuro Trader Journal"
-            className="h-10 md:h-12 w-auto object-contain"
+            className="h-20 md:h-24 w-auto object-contain"
             draggable={false}
           />
-          <span className="font-semibold text-sm md:text-base tracking-tight">
+          <span className="text-sm md:text-base font-semibold tracking-tight bg-linear-to-r from-emerald-400 via-sky-400 to-indigo-400 text-transparent bg-clip-text">
             Neuro Trader Journal
           </span>
         </div>

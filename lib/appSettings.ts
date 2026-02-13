@@ -65,6 +65,7 @@ export function applyLocaleAttribute(locale: AppLocale) {
   if (!w) return;
 
   const root = w.document.documentElement;
+  const cookieValue = locale === "en" || locale === "es" ? locale : "auto";
 
   // If user picks "auto", we keep current html lang unless it's missing.
   if (locale === "auto") {
@@ -72,10 +73,20 @@ export function applyLocaleAttribute(locale: AppLocale) {
       const browser = (w.navigator?.language || "en").toLowerCase();
       root.lang = browser.startsWith("es") ? "es" : "en";
     }
+    try {
+      w.document.cookie = `nt_locale=${cookieValue}; path=/; max-age=31536000; samesite=lax`;
+    } catch {
+      // ignore cookie errors
+    }
     return;
   }
 
   root.lang = locale;
+  try {
+    w.document.cookie = `nt_locale=${cookieValue}; path=/; max-age=31536000; samesite=lax`;
+  } catch {
+    // ignore cookie errors
+  }
 }
 
 export function emitAppSettingsChange() {

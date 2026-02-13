@@ -183,8 +183,6 @@ export default function ChallengeDetailPage() {
     void run();
   }, [userId, selectedRunId]);
 
-  if (!definition) return null;
-
   const activeRun = runs.find((r) => r.runId === selectedRunId) || progress;
 
   const requiredLabel = activeRun
@@ -201,6 +199,8 @@ export default function ChallengeDetailPage() {
     if (denom <= 0) return 0;
     return Math.min(100, (activeRun.daysTracked / denom) * 100);
   }, [activeRun]);
+
+  if (!definition) return null;
 
   async function refreshGamification() {
     if (!userId) return;

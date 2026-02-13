@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
+import fs from "node:fs";
+import path from "node:path";
 import { getAuthUser } from "@/lib/authServer";
 import { rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
 
@@ -8,6 +10,197 @@ const openai = new OpenAI({
 });
 
 export const maxDuration = 30;
+
+const USER_MANUAL_FILES: Record<"en" | "es", string[]> = {
+  en: [
+    "docs/user-manual/en/overview.md",
+    "docs/user-manual/en/getting-started.md",
+    "docs/user-manual/en/journal.md",
+    "docs/user-manual/en/workflows.md",
+    "docs/user-manual/en/dashboard-widgets.md",
+    "docs/user-manual/en/analytics.md",
+    "docs/user-manual/en/data-inputs.md",
+    "docs/user-manual/en/reports.md",
+    "docs/user-manual/en/post-mortem.md",
+    "docs/user-manual/en/settings.md",
+  ],
+  es: [
+    "docs/user-manual/es/overview.md",
+    "docs/user-manual/es/getting-started.md",
+    "docs/user-manual/es/journal.md",
+    "docs/user-manual/es/workflows.md",
+    "docs/user-manual/es/dashboard-widgets.md",
+    "docs/user-manual/es/analytics.md",
+    "docs/user-manual/es/data-inputs.md",
+    "docs/user-manual/es/reports.md",
+    "docs/user-manual/es/post-mortem.md",
+    "docs/user-manual/es/settings.md",
+  ],
+};
+
+const MANUAL_ROUTE_MAP: Record<string, string> = {
+  "docs/user-manual/en/overview.md": "/help",
+  "docs/user-manual/en/getting-started.md": "/help/getting-started",
+  "docs/user-manual/en/journal.md": "/help/journal",
+  "docs/user-manual/en/workflows.md": "/help/workflows",
+  "docs/user-manual/en/dashboard-widgets.md": "/help/dashboard-widgets",
+  "docs/user-manual/en/analytics.md": "/help/analytics",
+  "docs/user-manual/en/data-inputs.md": "/help/data-inputs",
+  "docs/user-manual/en/reports.md": "/help/reports",
+  "docs/user-manual/en/post-mortem.md": "/help/post-mortem",
+  "docs/user-manual/en/settings.md": "/help/settings",
+  "docs/user-manual/es/overview.md": "/help",
+  "docs/user-manual/es/getting-started.md": "/help/getting-started",
+  "docs/user-manual/es/journal.md": "/help/journal",
+  "docs/user-manual/es/workflows.md": "/help/workflows",
+  "docs/user-manual/es/dashboard-widgets.md": "/help/dashboard-widgets",
+  "docs/user-manual/es/analytics.md": "/help/analytics",
+  "docs/user-manual/es/data-inputs.md": "/help/data-inputs",
+  "docs/user-manual/es/reports.md": "/help/reports",
+  "docs/user-manual/es/post-mortem.md": "/help/post-mortem",
+  "docs/user-manual/es/settings.md": "/help/settings",
+};
+
+type ManualSection = {
+  id: string;
+  title: string;
+  body: string;
+  source: string;
+};
+
+const manualSectionsCache: Record<"en" | "es", ManualSection[] | null> = {
+  en: null,
+  es: null,
+};
+
+function cleanManualText(text: string): string {
+  return text
+    .split(/\r?\n/)
+    .filter((line) => {
+      const trimmed = line.trim();
+      if (!trimmed) return true;
+      if (trimmed.startsWith("Evidencia:")) return false;
+      if (trimmed.startsWith("TODO:")) return false;
+      return true;
+    })
+    .join("\n")
+    .trim();
+}
+
+function parseManualSections(source: string, content: string): ManualSection[] {
+  const sections: ManualSection[] = [];
+  const lines = content.split(/\r?\n/);
+  let title = path.basename(source);
+  let buffer: string[] = [];
+  let index = 0;
+
+  const pushSection = () => {
+    const body = cleanManualText(buffer.join("\n"));
+    if (!body) {
+      buffer = [];
+      return;
+    }
+    sections.push({
+      id: `${source}#${index}`,
+      title,
+      body,
+      source,
+    });
+    index += 1;
+    buffer = [];
+  };
+
+  for (const line of lines) {
+    const match = line.match(/^(#{1,3})\s+(.*)$/);
+    if (match) {
+      if (buffer.length) pushSection();
+      title = match[2].trim();
+      continue;
+    }
+    buffer.push(line);
+  }
+  if (buffer.length) pushSection();
+  return sections;
+}
+
+function loadManualSections(lang: "en" | "es"): ManualSection[] {
+  if (manualSectionsCache[lang]) return manualSectionsCache[lang] as ManualSection[];
+  const sections: ManualSection[] = [];
+  for (const rel of USER_MANUAL_FILES[lang]) {
+    const filePath = path.join(process.cwd(), rel);
+    try {
+      const raw = fs.readFileSync(filePath, "utf8");
+      const parsed = parseManualSections(rel, raw);
+      sections.push(...parsed);
+    } catch {
+      // ignore missing manual files to avoid breaking the assistant
+    }
+  }
+  manualSectionsCache[lang] = sections;
+  return sections;
+}
+
+const STOPWORDS = new Set([
+  "the","and","for","with","that","this","from","what","why","how","can","where","when","who",
+  "que","como","para","con","sin","una","uno","unos","unas","porque","donde","cuando","cual",
+  "de","del","la","las","el","los","y","o","en","por","es","son","al","a",
+]);
+
+function tokenize(text: string): string[] {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9áéíóúñü\s]/g, " ")
+    .split(/\s+/)
+    .map((t) => t.trim())
+    .filter((t) => t.length >= 3 && !STOPWORDS.has(t));
+}
+
+function scoreSection(section: ManualSection, tokens: string[]): number {
+  if (!tokens.length) return 0;
+  const hay = `${section.title}\n${section.body}`.toLowerCase();
+  let score = 0;
+  for (const token of tokens) {
+    if (hay.includes(token)) {
+      score += 1;
+      if (section.title.toLowerCase().includes(token)) score += 1;
+    }
+  }
+  return score;
+}
+
+function clipText(text: string, maxChars = 1200): string {
+  if (text.length <= maxChars) return text;
+  return text.slice(0, maxChars).trimEnd() + "…";
+}
+
+type ManualContext = {
+  context: string | null;
+  sources: string[];
+};
+
+function buildManualContext(question: string, lang: "en" | "es"): ManualContext {
+  const sections = loadManualSections(lang);
+  if (!sections.length) return { context: null, sources: [] };
+  const tokens = tokenize(question);
+  if (!tokens.length) return { context: null, sources: [] };
+  const ranked = sections
+    .map((s) => ({ s, score: scoreSection(s, tokens) }))
+    .filter((r) => r.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 3);
+
+  const context = ranked
+    .map(
+      (r) =>
+        `Fuente: ${r.s.source} — ${r.s.title}\n${clipText(r.s.body, 1200)}`
+    )
+    .join("\n\n");
+
+  return {
+    context: context || null,
+    sources: ranked.map((r) => r.s.source),
+  };
+}
 
 /* =========================
    Contexto por página
@@ -153,6 +346,7 @@ export async function POST(req: NextRequest) {
             `"Contexto de página actual: ${pageContext}"`,
             "- Si el usuario pregunta por widgets como Mindset ratio, P&L calendar, Green streaks u otros, usa este glosario como referencia:",
             `"Glosario de widgets: ${widgetGlossary}"`,
+            "- Si hay extractos del Manual de Usuario, usalos como fuente de verdad para responder dudas. Si el manual dice UNKNOWN o no hay info, dilo claramente.",
             "- Responde corto y directo: normalmente entre 2 y 5 frases, o a lo sumo 3–4 bullets. No escribas ensayos largos.",
             "- Adapta tus ejemplos al contexto de trading, pero sin inventar datos personales del usuario.",
             "Nunca digas que eres un modelo de IA; actúas como NeuroCandle, el guía dentro de la app.",
@@ -170,15 +364,29 @@ export async function POST(req: NextRequest) {
             `"Current page context: ${pageContext}"`,
             "- If the user asks about widgets such as Mindset ratio, P&L calendar, Green streaks or others, use this glossary as reference:",
             `"Widget glossary: ${widgetGlossary}"`,
+            "- If there are User Manual excerpts, use them as the source of truth. If the manual says UNKNOWN or doesn’t document it, say so clearly.",
             "- Keep answers short and focused: usually 2–5 sentences, or at most 3–4 bullets. Do not write long essays.",
             "- Adapt examples to trading, but never invent personal details about the user.",
             "Never say you are an AI model; you speak as NeuroCandle, the in-app guide.",
           ].join(" ");
 
+    const manual = buildManualContext(question, lang);
+    const manualFallback =
+      lang === "es"
+        ? "Temas del Manual: Resumen, Guia de inicio, Journal, Flujos de trabajo, Dashboard y widgets, Analitica, Importacion de datos, Reportes de Option Flow, Post-mortem, Ajustes. Si la pregunta parece relacionada y no hay detalles, pide aclaracion y menciona que no esta documentado."
+        : "User Manual topics: Overview, Getting Started, Journal, Workflows, Dashboard & Widgets, Analytics, Data Inputs, Option Flow Reports, Post-mortem, Settings. If the question seems related and you lack details, ask a clarifying question and mention it isn't documented.";
+    const manualSystemMessage = manual.context
+      ? `User Manual excerpts (authoritative):\n${manual.context}`
+      : manualFallback;
+
     const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
       {
         role: "system",
         content: systemMessage,
+      },
+      {
+        role: "system",
+        content: manualSystemMessage,
       },
       {
         role: "user",
@@ -198,11 +406,24 @@ export async function POST(req: NextRequest) {
       max_tokens: 350,
     });
 
-    const answer =
+    let answer =
       completion.choices[0]?.message?.content?.trim() ??
       (lang === "es"
         ? "No pude generar una respuesta útil, intenta formular la pregunta de otra forma."
         : "I couldn't generate a helpful answer, try asking in a different way.");
+
+    const link = manual.sources
+      .map((src) => MANUAL_ROUTE_MAP[src])
+      .filter(Boolean)[0];
+
+    const fallbackLink = "/help";
+    const helpLink = link || fallbackLink;
+    const linkLine =
+      lang === "es"
+        ? `Mas info: ${helpLink}`
+        : `More info: ${helpLink}`;
+
+    answer = `${answer}\n\n${linkLine}`;
 
     return NextResponse.json({ answer });
   } catch (err) {

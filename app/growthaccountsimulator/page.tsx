@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
+import Link from "next/link";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { useAppSettings } from "@/lib/appSettings";
@@ -275,12 +276,12 @@ export default function GrowthAccountSimulator() {
           >
             {L("Download PDF report", "Descargar reporte PDF")}
           </button>
-          <a
+          <Link
             href="/"
             className="inline-block px-6 py-2.5 rounded-xl border border-slate-700 text-[10px] text-slate-300 hover:border-emerald-400 hover:text-emerald-300 transition"
           >
             ← {L("Back to Home", "Volver al inicio")}
-          </a>
+          </Link>
         </div>
       </div>
     </main>

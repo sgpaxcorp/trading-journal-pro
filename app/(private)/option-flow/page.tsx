@@ -2140,6 +2140,19 @@ export default function OptionFlowPage() {
       bottom: footerHeight + margin,
     };
     let y = contentTop;
+    const ensureSpace = (minHeight: number) => {
+      if (y + minHeight > contentBottom) {
+        doc.addPage();
+        y = contentTop;
+      }
+    };
+    const writeLines = (lines: string[], lineHeight: number) => {
+      lines.forEach((line) => {
+        ensureSpace(lineHeight);
+        doc.text(line, margin, y);
+        y += lineHeight;
+      });
+    };
 
     const logo = await loadLogoData();
     const headerTitle = isEs ? "Option Flow Intelligence - Reporte" : "Option Flow Intelligence - Report";
@@ -2197,14 +2210,11 @@ export default function OptionFlowPage() {
     y += 16;
     doc.setFontSize(10);
     const summaryLines = doc.splitTextToSize(summary, 520);
-    doc.text(summaryLines, margin, y);
-    y += summaryLines.length * 15 + 16;
+    writeLines(summaryLines, 15);
+    y += 16;
     const observations = payload.observations ?? [];
     if (observations.length) {
-      if (y + 40 > contentBottom) {
-        doc.addPage();
-        y = contentTop;
-      }
+      ensureSpace(40);
       doc.setFontSize(11);
       doc.text(isEs ? "Observaciones" : "Observations", margin, y);
       y += 14;
@@ -2212,15 +2222,12 @@ export default function OptionFlowPage() {
       const obsLines = observations.flatMap((obs: string) =>
         doc.splitTextToSize(`• ${obs}`, 520)
       );
-      doc.text(obsLines, margin, y);
-      y += obsLines.length * 14 + 10;
+      writeLines(obsLines, 14);
+      y += 10;
     }
     const inferences = payload.inferences ?? [];
     if (inferences.length) {
-      if (y + 40 > contentBottom) {
-        doc.addPage();
-        y = contentTop;
-      }
+      ensureSpace(40);
       doc.setFontSize(11);
       doc.text(isEs ? "Inferencias" : "Inferences", margin, y);
       y += 14;
@@ -2238,14 +2245,11 @@ export default function OptionFlowPage() {
           ...doc.splitTextToSize([support, confidence, alternatives].filter(Boolean).join(" · "), 520),
         ].filter((line) => line.trim().length > 0);
       });
-      doc.text(infLines, margin, y);
-      y += infLines.length * 14 + 10;
+      writeLines(infLines, 14);
+      y += 10;
     }
     if (payload.scenarioMatrix) {
-      if (y + 80 > contentBottom) {
-        doc.addPage();
-        y = contentTop;
-      }
+      ensureSpace(80);
       doc.setFontSize(11);
       doc.text(isEs ? "Matriz de escenarios" : "Scenario matrix", margin, y);
       y += 12;
@@ -2269,6 +2273,7 @@ export default function OptionFlowPage() {
     }
 
     if (payload.expirations && payload.expirations.length) {
+      ensureSpace(28);
       doc.setFontSize(12);
       doc.text(
         `2) ${isEs ? "Organización por expiración" : "Expiration breakdown"}`,
@@ -2277,6 +2282,7 @@ export default function OptionFlowPage() {
       );
       y += 16;
       payload.expirations.forEach((exp) => {
+        ensureSpace(20);
         doc.setFontSize(11);
         doc.text(`Exp ${exp.expiry || "—"} ${exp.tenor ? `(${exp.tenor})` : ""}`, margin, y);
         y += 14;
@@ -2316,14 +2322,15 @@ export default function OptionFlowPage() {
             `${isEs ? "Lectura" : "Read"}: ${exp.notes}`,
             520
           );
-          doc.text(noteLines, margin, y);
-          y += noteLines.length * 13 + 8;
+          writeLines(noteLines, 13);
+          y += 8;
         }
       });
       y += 4;
     }
 
     if (payload.keyLevels && payload.keyLevels.length) {
+      ensureSpace(24);
       doc.setFontSize(12);
       doc.text(
         `3) ${isEs ? "Niveles clave (priorizados)" : "Key levels (prioritized)"}`,
@@ -2402,6 +2409,7 @@ export default function OptionFlowPage() {
 
 
     if (payload.expirations && payload.expirations.length) {
+      ensureSpace(24);
       doc.setFontSize(12);
       doc.text(
         `4) ${isEs ? "Mapa de flujo agresivo (ASK/BID)" : "Aggressive flow map (ASK/BID)"}`,
@@ -2456,6 +2464,7 @@ export default function OptionFlowPage() {
     }
 
     if (payload.contractsWithPotential) {
+      ensureSpace(24);
       doc.setFontSize(12);
       doc.text(
         `5) ${isEs ? "Contratos con mayor potencial" : "Contracts with the most potential"}`,
@@ -2468,12 +2477,13 @@ export default function OptionFlowPage() {
       const stress = payload.contractsWithPotential.stress ?? [];
       const addList = (title: string, items: string[]) => {
         if (!items.length) return;
+        ensureSpace(24);
         doc.setFontSize(10);
         doc.text(title, margin, y);
         y += 14;
         const lines = items.flatMap((item) => doc.splitTextToSize(`• ${item}`, 520));
-        doc.text(lines, margin, y);
-        y += lines.length * 15 + 8;
+        writeLines(lines, 15);
+        y += 8;
       };
       addList(isEs ? "Gamma / ATM corto plazo" : "Gamma / short-term ATM", gamma);
       addList(isEs ? "Direccionales / techo-piso" : "Directional / ceiling-floor", directional);
@@ -2481,6 +2491,7 @@ export default function OptionFlowPage() {
       y += 4;
     }
 
+    ensureSpace(24);
     doc.setFontSize(12);
     doc.text(
       `6) ${
@@ -2544,6 +2555,7 @@ export default function OptionFlowPage() {
     }
 
     if (payload.squeezeScenarios) {
+      ensureSpace(24);
       doc.setFontSize(12);
       doc.text(
         `7) ${isEs ? "Squeeze (condiciones y frenos)" : "Squeeze (conditions & brakes)"}`,
@@ -2553,6 +2565,7 @@ export default function OptionFlowPage() {
       y += 16;
       const formatScenario = (label: string, scenario?: SqueezeScenario) => {
         if (!scenario) return;
+        ensureSpace(18);
         doc.setFontSize(10);
         doc.text(label, margin, y);
         y += 14;
@@ -2561,23 +2574,20 @@ export default function OptionFlowPage() {
             `${isEs ? "Condición" : "Condition"}: ${scenario.condition}`,
             520
           );
-          doc.text(lines, margin, y);
-          y += lines.length * 15;
+          writeLines(lines, 15);
         }
         if (scenario.candidates && scenario.candidates.length) {
           const lines = scenario.candidates.flatMap((item) =>
             doc.splitTextToSize(`• ${item}`, 520)
           );
-          doc.text(lines, margin, y);
-          y += lines.length * 15;
+          writeLines(lines, 15);
         }
         if (scenario.brakes) {
           const lines = doc.splitTextToSize(
             `${isEs ? "Freno" : "Brake"}: ${scenario.brakes}`,
             520
           );
-          doc.text(lines, margin, y);
-          y += lines.length * 15;
+          writeLines(lines, 15);
         }
         y += 8;
       };
@@ -2588,10 +2598,7 @@ export default function OptionFlowPage() {
 
     const planLines = extractPlanLines(planHtmlOverride);
     if (planLines.length || payload.tradingPlan) {
-      if (y + 120 > contentBottom) {
-        doc.addPage();
-        y = contentTop;
-      }
+      ensureSpace(120);
       doc.setFontSize(12);
       doc.text(
         `8) ${
@@ -2605,41 +2612,37 @@ export default function OptionFlowPage() {
       if (planLines.length) {
         for (const line of planLines) {
           const chunks = doc.splitTextToSize(line, 520);
-          doc.text(chunks, margin, y);
-          y += chunks.length * 15 + 4;
-          if (y + 24 > contentBottom) {
-            doc.addPage();
-            y = contentTop;
-          }
+          writeLines(chunks, 15);
+          y += 4;
         }
       } else if (payload.tradingPlan) {
         if (payload.tradingPlan.headline) {
           const lines = doc.splitTextToSize(payload.tradingPlan.headline, 520);
-          doc.text(lines, margin, y);
-          y += lines.length * 15 + 6;
+          writeLines(lines, 15);
+          y += 6;
         }
         if (payload.tradingPlan.steps && payload.tradingPlan.steps.length) {
           const lines = payload.tradingPlan.steps.flatMap((step) =>
             doc.splitTextToSize(`• ${step}`, 520)
           );
-          doc.text(lines, margin, y);
-          y += lines.length * 15 + 6;
+          writeLines(lines, 15);
+          y += 6;
         }
         if (payload.tradingPlan.invalidation) {
           const lines = doc.splitTextToSize(
             `${isEs ? "Invalidación" : "Invalidation"}: ${payload.tradingPlan.invalidation}`,
             520
           );
-          doc.text(lines, margin, y);
-          y += lines.length * 15 + 6;
+          writeLines(lines, 15);
+          y += 6;
         }
         if (payload.tradingPlan.risk) {
           const lines = doc.splitTextToSize(
             `${isEs ? "Riesgo" : "Risk"}: ${payload.tradingPlan.risk}`,
             520
           );
-          doc.text(lines, margin, y);
-          y += lines.length * 15 + 6;
+          writeLines(lines, 15);
+          y += 6;
         }
       }
       doc.setFontSize(9);
@@ -3618,7 +3621,7 @@ export default function OptionFlowPage() {
 
   const renderChatPanel = (isFullScreen = false) => (
     <div
-      className={`rounded-3xl border border-slate-800 bg-gradient-to-b from-slate-950/70 via-slate-950/40 to-slate-950/70 p-4 sm:p-6 flex flex-col min-h-0 ${
+      className={`rounded-3xl border border-slate-800 bg-linear-to-b from-slate-950/70 via-slate-950/40 to-slate-950/70 p-4 sm:p-6 flex flex-col min-h-0 ${
         isFullScreen ? "flex-1 h-full" : "min-h-[70vh] sm:min-h-[78vh]"
       }`}
     >
@@ -4108,7 +4111,7 @@ export default function OptionFlowPage() {
 
       <div className="w-full max-w-none mx-auto px-4 sm:px-6 md:px-16 py-6 sm:py-8 space-y-7">
         {fullScreenChat && (
-          <div className="fixed inset-0 z-[60] bg-slate-950/95 backdrop-blur">
+          <div className="fixed inset-0 z-60 bg-slate-950/95 backdrop-blur">
             <div className="w-full max-w-none px-4 sm:px-8 py-6 h-full flex flex-col">
               <div className="flex items-center justify-between mb-4">
                 <div>
