@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, Search } from "lucide-react";
@@ -8,14 +8,17 @@ import { useAuth } from "@/context/AuthContext";
 import { supabaseBrowser } from "@/lib/supaBaseClient";
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
+import { useUserPlan } from "@/hooks/useUserPlan";
 import {
   AlertEvent,
   AlertChannel,
   AlertRule,
   AlertSeverity,
   channelsLabel,
+  createAlertRule,
   dismissAlertEvent,
   fireTestEventFromRule,
+  isCoreRuleLike,
   isEventActive,
   isEventSnoozed,
   listAlertEvents,
@@ -84,6 +87,14 @@ function normalizePremium(raw: any): "none" | "debit" | "credit" {
   if (p.includes("credit")) return "credit";
   if (p.includes("debit")) return "debit";
   return "none";
+}
+
+function isCoreRule(rule: AlertRule) {
+  return isCoreRuleLike({
+    key: rule.key ?? null,
+    trigger_type: rule.trigger_type ?? null,
+    config: (rule.config ?? rule.meta) as Record<string, unknown>,
+  });
 }
 
 const FUTURES_MULTIPLIERS: Record<string, number> = {
@@ -402,6 +413,9 @@ export default function AlarmsConsolePage() {
   const lang = resolveLocale(locale);
   const isEs = lang === "es";
   const L = (en: string, es: string) => (isEs ? es : en);
+  const { plan } = useUserPlan();
+  const planKey = plan === "advanced" ? "advanced" : "core";
+  const customLimit = planKey === "advanced" ? 10 : 2;
 
   const [tab, setTab] = useState<Tab>("active");
   const [busy, setBusy] = useState(false);
@@ -414,6 +428,14 @@ export default function AlarmsConsolePage() {
   const [query, setQuery] = useState("");
   const [severityFilter, setSeverityFilter] = useState<"all" | AlertSeverity>("all");
   const [closePriceByTrade, setClosePriceByTrade] = useState<Record<string, string>>({});
+  const [showCreate, setShowCreate] = useState(false);
+  const [newTitle, setNewTitle] = useState("");
+  const [newMessage, setNewMessage] = useState("");
+  const [newTrigger, setNewTrigger] = useState("MAX_LOSS");
+  const [newSeverity, setNewSeverity] = useState<AlertSeverity>("warning");
+  const [newThreshold, setNewThreshold] = useState("");
+  const [newMinOpen, setNewMinOpen] = useState("");
+  const [newChannels, setNewChannels] = useState({ popup: true, inapp: true, voice: true });
 
   const selectedEvent = useMemo(
     () => events.find((e) => e.id === selectedEventId) ?? null,
@@ -429,6 +451,45 @@ export default function AlarmsConsolePage() {
     () => events.filter((e) => e.kind === "alarm" && e.dismissed && !isEventSnoozed(e)),
     [events]
   );
+
+  const customRulesCount = useMemo(() => rules.filter((r) => !isCoreRule(r)).length, [rules]);
+  const remainingCustom = Math.max(0, customLimit - customRulesCount);
+
+  const alarmTriggerOptions = [
+    {
+      value: "MAX_LOSS",
+      label: L("Max daily loss", "Pérdida diaria máxima"),
+      thresholdLabel: L("Loss limit ($)", "Límite de pérdida ($)"),
+      thresholdKey: "max_loss",
+    },
+    {
+      value: "OPEN_POSITIONS",
+      label: L("Open positions detected", "Posiciones abiertas detectadas"),
+      minOpenLabel: L("Minimum open positions", "Mínimo de posiciones abiertas"),
+    },
+    {
+      value: "OPTIONS_EXPIRING",
+      label: L("Options expiring today", "Opciones vencen hoy"),
+    },
+    {
+      value: "MISSING_SCREENSHOTS",
+      label: L("Missing screenshots", "Faltan screenshots"),
+    },
+    {
+      value: "MISSING_EMOTIONS",
+      label: L("Missing emotions", "Faltan emociones"),
+    },
+    {
+      value: "CHECKLIST",
+      label: L("Checklist missing", "Checklist faltante"),
+    },
+    {
+      value: "IMPULSE",
+      label: L("Impulse tags detected", "Impulso detectado"),
+    },
+  ];
+
+  const selectedTrigger = alarmTriggerOptions.find((t) => t.value === newTrigger) ?? alarmTriggerOptions[0];
 
   const openPositionsRule = useMemo(() => {
     const matchByTrigger = rules.find((r) => String((r as any).trigger_type ?? (r as any).triggerType ?? "").toLowerCase() === "open_positions");
@@ -578,6 +639,76 @@ export default function AlarmsConsolePage() {
       if (!res.ok) {
         setFlash({ type: "error", msg: res.error || L("Failed to update channels", "No se pudieron actualizar los canales") });
       }
+      await refreshAll();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onCreateRule(e: FormEvent) {
+    e.preventDefault();
+    if (!userId) return;
+    if (!newTitle.trim()) {
+      setFlash({ type: "error", msg: L("Title is required.", "El título es obligatorio.") });
+      return;
+    }
+    if (remainingCustom <= 0) {
+      setFlash({
+        type: "error",
+        msg: L(
+          `Limit reached. Your ${planKey === "advanced" ? "Advanced" : "Core"} plan allows up to ${customLimit} custom alarms.`,
+          `Límite alcanzado. Tu plan ${planKey === "advanced" ? "Advanced" : "Core"} permite hasta ${customLimit} alarmas personalizadas.`
+        ),
+      });
+      return;
+    }
+
+    const channels: AlertChannel[] = [];
+    if (newChannels.popup) channels.push("popup");
+    if (newChannels.inapp) channels.push("inapp");
+    if (newChannels.voice) channels.push("voice");
+    if (channels.length === 0) {
+      setFlash({ type: "error", msg: L("Select at least one channel.", "Selecciona al menos un canal.") });
+      return;
+    }
+
+    const config: Record<string, unknown> = { source: "user" };
+    const thresholdRaw = Number(newThreshold);
+    const threshold = Number.isFinite(thresholdRaw) ? Math.abs(thresholdRaw) : null;
+    const minOpenRaw = Number(newMinOpen);
+    const minOpen = Number.isFinite(minOpenRaw) ? Math.max(0, Math.floor(minOpenRaw)) : null;
+
+    if (newTrigger === "MAX_LOSS" && threshold != null) config.max_loss = threshold;
+    if (newTrigger === "MAX_GAIN" && threshold != null) config.max_gain = threshold;
+    if (newTrigger === "DAILY_GOAL" && threshold != null) config.daily_goal = threshold;
+    if (newTrigger === "OPEN_POSITIONS" && minOpen != null && minOpen > 0) {
+      config.min_open_positions = minOpen;
+    }
+
+    setBusy(true);
+    setFlash(null);
+    try {
+      const res = await createAlertRule(userId, {
+        title: newTitle.trim(),
+        message: newMessage.trim(),
+        trigger_type: newTrigger,
+        severity: newSeverity,
+        enabled: true,
+        channels,
+        kind: "alarm",
+        config,
+      });
+
+      if (!res.ok) {
+        setFlash({ type: "error", msg: res.error || L("Failed to create rule.", "No se pudo crear la regla.") });
+        return;
+      }
+
+      setFlash({ type: "success", msg: L("Custom alarm created.", "Alarma personalizada creada.") });
+      setNewTitle("");
+      setNewMessage("");
+      setNewThreshold("");
+      setNewMinOpen("");
       await refreshAll();
     } finally {
       setBusy(false);
@@ -939,6 +1070,164 @@ export default function AlarmsConsolePage() {
               <p className="mt-2 text-sm text-slate-400">{L("Toggle rules on/off and trigger test alarms.", "Activa o desactiva reglas y dispara pruebas.")}</p>
             </div>
             <div className="text-xs text-slate-400">{busy ? L("Working…", "Trabajando…") : ""}</div>
+          </div>
+
+          <div className="mt-4 rounded-xl border border-slate-800 bg-slate-950/30 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <div className="text-[11px] uppercase tracking-[0.28em] text-slate-500">
+                  {L("Create custom alarm", "Crear alarma personalizada")}
+                </div>
+                <p className="mt-1 text-sm text-slate-400">
+                  {L(
+                    "Pick a trigger and optional thresholds. Custom alarms are in addition to core rules.",
+                    "Elige un disparador y umbrales opcionales. Las alarmas personalizadas son adicionales a las reglas core."
+                  )}
+                </p>
+              </div>
+              <div className="flex items-center gap-3 text-xs text-slate-400">
+                <span>
+                  {L("Custom alarms:", "Alarmas personalizadas:")}{" "}
+                  <span className="text-slate-200 font-semibold">{customRulesCount}/{customLimit}</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setShowCreate((v) => !v)}
+                  className="rounded-lg border border-slate-700 bg-slate-900/40 px-3 py-2 text-xs font-semibold text-slate-100 hover:border-emerald-400/60 hover:bg-emerald-500/10"
+                >
+                  {showCreate ? L("Hide form", "Ocultar formulario") : L("Add alarm", "Agregar alarma")}
+                </button>
+              </div>
+            </div>
+
+            {remainingCustom === 0 ? (
+              <div className="mt-3 rounded-lg border border-amber-800 bg-amber-950/30 px-3 py-2 text-xs text-amber-200">
+                {L(
+                  `Limit reached. Your ${planKey === "advanced" ? "Advanced" : "Core"} plan allows up to ${customLimit} custom alarms.`,
+                  `Límite alcanzado. Tu plan ${planKey === "advanced" ? "Advanced" : "Core"} permite hasta ${customLimit} alarmas personalizadas.`
+                )}
+              </div>
+            ) : null}
+
+            {showCreate ? (
+              <form onSubmit={onCreateRule} className="mt-4 grid gap-3 md:grid-cols-2">
+                <div className="space-y-1">
+                  <label className="text-[11px] uppercase tracking-[0.2em] text-slate-500">{L("Title", "Título")}</label>
+                  <input
+                    value={newTitle}
+                    onChange={(e) => setNewTitle(e.target.value)}
+                    placeholder={L("Example: Daily loss exceeded", "Ejemplo: Pérdida diaria excedida")}
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950/40 px-3 py-2 text-xs text-slate-200 placeholder:text-slate-500 focus:border-emerald-400"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[11px] uppercase tracking-[0.2em] text-slate-500">{L("Trigger", "Disparador")}</label>
+                  <select
+                    value={newTrigger}
+                    onChange={(e) => setNewTrigger(e.target.value)}
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950/40 px-3 py-2 text-xs text-slate-200 focus:border-emerald-400"
+                  >
+                    {alarmTriggerOptions.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {selectedTrigger?.thresholdLabel ? (
+                  <div className="space-y-1">
+                    <label className="text-[11px] uppercase tracking-[0.2em] text-slate-500">{selectedTrigger.thresholdLabel}</label>
+                    <input
+                      value={newThreshold}
+                      onChange={(e) => setNewThreshold(e.target.value)}
+                      type="number"
+                      step="0.01"
+                      placeholder="0"
+                      className="w-full rounded-xl border border-slate-700 bg-slate-950/40 px-3 py-2 text-xs text-slate-200 placeholder:text-slate-500 focus:border-emerald-400"
+                    />
+                  </div>
+                ) : null}
+
+                {newTrigger === "OPEN_POSITIONS" ? (
+                  <div className="space-y-1">
+                    <label className="text-[11px] uppercase tracking-[0.2em] text-slate-500">
+                      {L("Minimum open positions (optional)", "Mínimo de posiciones abiertas (opcional)")}
+                    </label>
+                    <input
+                      value={newMinOpen}
+                      onChange={(e) => setNewMinOpen(e.target.value)}
+                      type="number"
+                      step="1"
+                      placeholder="0"
+                      className="w-full rounded-xl border border-slate-700 bg-slate-950/40 px-3 py-2 text-xs text-slate-200 placeholder:text-slate-500 focus:border-emerald-400"
+                    />
+                  </div>
+                ) : null}
+
+                <div className="space-y-1">
+                  <label className="text-[11px] uppercase tracking-[0.2em] text-slate-500">{L("Severity", "Severidad")}</label>
+                  <select
+                    value={newSeverity}
+                    onChange={(e) => setNewSeverity(e.target.value as AlertSeverity)}
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950/40 px-3 py-2 text-xs text-slate-200 focus:border-emerald-400"
+                  >
+                    <option value="info">{L("Info", "Info")}</option>
+                    <option value="warning">{L("Warning", "Advertencia")}</option>
+                    <option value="critical">{L("Critical", "Crítica")}</option>
+                    <option value="success">{L("Success", "Éxito")}</option>
+                  </select>
+                </div>
+
+                <div className="md:col-span-2 space-y-1">
+                  <label className="text-[11px] uppercase tracking-[0.2em] text-slate-500">{L("Message (optional)", "Mensaje (opcional)")}</label>
+                  <textarea
+                    value={newMessage}
+                    onChange={(e) => setNewMessage(e.target.value)}
+                    rows={3}
+                    placeholder={L("Explain what to do when this alarm triggers.", "Explica qué hacer cuando se dispare esta alarma.")}
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950/40 px-3 py-2 text-xs text-slate-200 placeholder:text-slate-500 focus:border-emerald-400"
+                  />
+                </div>
+
+                <div className="md:col-span-2 flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex flex-wrap items-center gap-3 text-xs text-slate-300">
+                    <label className="inline-flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={newChannels.popup}
+                        onChange={(e) => setNewChannels((s) => ({ ...s, popup: e.target.checked }))}
+                      />
+                      {L("Popup", "Pop‑up")}
+                    </label>
+                    <label className="inline-flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={newChannels.inapp}
+                        onChange={(e) => setNewChannels((s) => ({ ...s, inapp: e.target.checked }))}
+                      />
+                      {L("In-app", "In‑app")}
+                    </label>
+                    <label className="inline-flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={newChannels.voice}
+                        onChange={(e) => setNewChannels((s) => ({ ...s, voice: e.target.checked }))}
+                      />
+                      {L("Voice", "Voz")}
+                    </label>
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={busy || !userId || remainingCustom <= 0}
+                    className="rounded-lg border border-emerald-500/50 bg-emerald-500/10 px-4 py-2 text-xs font-semibold text-emerald-200 hover:bg-emerald-500/20 disabled:opacity-50"
+                  >
+                    {L("Create alarm", "Crear alarma")}
+                  </button>
+                </div>
+              </form>
+            ) : null}
           </div>
 
           {rules.length === 0 ? (

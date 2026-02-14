@@ -7,7 +7,7 @@
  *
  * Goals
  * - Provide robust trading analytics by reading trades/journal entries from Supabase.
- * - Compute key KPIs: Win rate, expectancy, P&L distribution, drawdown, streaks, time-based performance, instruments.
+ * - Compute key KPIs: Win rate, expectancy, drawdown, streaks, time-based performance, instruments.
  * - Use a clean UI with charting (ApexCharts) and tables.
  *
  * Notes
@@ -36,6 +36,17 @@ import type { JournalEntry } from "@/lib/journalTypes";
 import { getAllJournalEntries } from "@/lib/journalSupabase";
 import { listDailySnapshots, type DailySnapshotRow } from "@/lib/snapshotSupabase";
 import { listCashflows, signedCashflowAmount, type Cashflow } from "@/lib/cashflowsSupabase";
+import {
+  computeAllKPIs,
+  formatKpiInputs,
+  getKpiText,
+  humanizeKpiFormula,
+  KPI_DIRECTION,
+  type KPIId,
+  type KPIResult,
+  type KPICategory,
+  type Trade as KPITrade,
+} from "@/lib/kpiLibrary";
 
 // ApexCharts needs dynamic import (no SSR)
 const Chart = dynamic(() => import("react-apexcharts"), { ssr: false });
@@ -45,19 +56,20 @@ const Chart = dynamic(() => import("react-apexcharts"), { ssr: false });
 ===================== */
 
 type AnalyticsGroupId =
-  | "overview"
-  | "performance"
-  | "risk"
-  | "distribution"
-  | "time"
-  | "instruments"
-  | "trades"
-  | "statistics";
+ | "overview"
+ | "performance"
+ | "risk"
+ | "time"
+ | "instruments"
+ | "trades"
+ | "statistics";
 
 type Lang = "en" | "es";
 const LL = (lang: Lang, en: string, es: string) => (lang === "es" ? es : en);
 
 type DateRangePreset = "7D" | "30D" | "90D" | "YTD" | "ALL";
+type StatTone = "good" | "bad" | "neutral";
+type KpiViewFilter = "all" | "strong" | "improve";
 
 type DateRange = {
   preset: DateRangePreset;
@@ -873,6 +885,14 @@ function hourLabelFromMinutes(mins: number | null): string | null {
   return `${String(h).padStart(2, "0")}:00`;
 }
 
+function dateTimeFromDateAndMinutes(date: string, mins: number | null): string {
+  if (!looksLikeYYYYMMDD(date)) return `${date}T00:00:00Z`;
+  if (mins == null || !Number.isFinite(mins)) return `${date}T00:00:00Z`;
+  const h = Math.floor(Math.max(0, Math.min(23, mins / 60)));
+  const m = Math.floor(Math.max(0, Math.min(59, mins % 60)));
+  return `${date}T${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:00Z`;
+}
+
 const FUTURES_MULTIPLIERS: Record<string, number> = {
   ES: 50,
   MES: 5,
@@ -1142,6 +1162,24 @@ function computeTradeAnalytics(tradeRows: JournalTradeRow[], sessions: SessionWi
   };
 }
 
+function buildKpiTrades(tradeStats?: TradeAnalytics | null): KPITrade[] {
+  const matched = tradeStats?.matchedTrades ?? [];
+  return matched.map((t, idx) => ({
+    trade_id: `${t.date}-${t.symbol}-${idx}`,
+    symbol: t.symbol,
+    asset_class: t.kind,
+    side: t.side,
+    quantity: t.qty,
+    entry_time: dateTimeFromDateAndMinutes(t.date, t.entryTimeMin),
+    exit_time: dateTimeFromDateAndMinutes(t.date, t.exitTimeMin),
+    entry_price: t.entryPrice,
+    exit_price: t.exitPrice,
+    realized_pnl: t.pnl,
+    fees_commissions: null,
+    planned_risk: null,
+  }));
+}
+
 function buildTradesTable(sessions: SessionWithTrades[]): TradeRow[] {
   return (sessions ?? [])
     .slice()
@@ -1310,6 +1348,7 @@ export default function AnalyticsStatisticsPage() {
   const [entries, setEntries] = useState<JournalEntry[]>([]);
   const [tradeRows, setTradeRows] = useState<JournalTradeRow[]>([]);
   const [activeGroup, setActiveGroup] = useState<AnalyticsGroupId>("overview");
+  const [kpiCategory, setKpiCategory] = useState<"all" | KPICategory>("all");
   const [loadingData, setLoadingData] = useState(true);
   const autoRangeAppliedRef = useRef(false);
 
@@ -1586,6 +1625,7 @@ export default function AnalyticsStatisticsPage() {
   }, [sessionsAll, dateRange.startIso, dateRange.endIso, planStartIso]);
 
   const tradeStats = useMemo(() => computeTradeAnalytics(tradeRows, sessions), [tradeRows, sessions]);
+  const kpiTrades = useMemo(() => buildKpiTrades(tradeStats), [tradeStats]);
 
   // Auto-expand to ALL if range returns zero sessions but data exists
   useEffect(() => {
@@ -1665,6 +1705,11 @@ export default function AnalyticsStatisticsPage() {
     }
     return s.dailyPnl;
   }, [snapshot, serverSeries]);
+
+  const kpiResults = useMemo<KPIResult[]>(() => {
+    const equity = uiEquity.map((p) => ({ time: p.date, equity_value: p.value }));
+    return computeAllKPIs(kpiTrades, equity, undefined, { annualizationDays: 252 });
+  }, [kpiTrades, uiEquity]);
 
   if (loading || !user) {
     return (
@@ -1825,7 +1870,6 @@ export default function AnalyticsStatisticsPage() {
               ["overview", L("Overview", "Resumen")],
               ["performance", L("Performance", "Rendimiento")],
               ["risk", L("Risk", "Riesgo")],
-              ["distribution", L("Distribution", "Distribución")],
               ["time", L("Time", "Tiempo")],
               ["instruments", L("Instruments", "Instrumentos")],
               ["trades", L("Trades", "Operaciones")],
@@ -1873,7 +1917,12 @@ export default function AnalyticsStatisticsPage() {
           <>
             {activeGroup === "overview" && (
               isAdvanced ? (
-                <OverviewSection lang={lang} equity={uiEquity} daily={uiDaily} snapshot={snapshot} />
+                <OverviewSection
+                  lang={lang}
+                  equity={uiEquity}
+                  daily={uiDaily}
+                  snapshot={snapshot}
+                />
               ) : (
                 <div className="relative">
                   <div className="absolute inset-0 z-10 flex items-center justify-center">
@@ -1904,7 +1953,12 @@ export default function AnalyticsStatisticsPage() {
                     </div>
                   </div>
                   <div className="blur-[2px] opacity-60 pointer-events-none select-none">
-                    <OverviewSection lang={lang} equity={uiEquity} daily={uiDaily} snapshot={snapshot} />
+                    <OverviewSection
+                      lang={lang}
+                      equity={uiEquity}
+                      daily={uiDaily}
+                      snapshot={snapshot}
+                    />
                   </div>
                 </div>
               )
@@ -1913,7 +1967,6 @@ export default function AnalyticsStatisticsPage() {
               <>
                 {activeGroup === "performance" && <PerformanceSection lang={lang} snapshot={snapshot} />}
                 {activeGroup === "risk" && <RiskSection lang={lang} snapshot={snapshot} />}
-                {activeGroup === "distribution" && <DistributionSection lang={lang} snapshot={snapshot} />}
                 {activeGroup === "time" && <TimeSection lang={lang} snapshot={snapshot} />}
                 {activeGroup === "instruments" && <InstrumentsSection lang={lang} snapshot={snapshot} />}
                 {activeGroup === "trades" && <TradesSection lang={lang} snapshot={snapshot} />}
@@ -1925,6 +1978,9 @@ export default function AnalyticsStatisticsPage() {
                     cashflows={cashflowsInRange}
                     rangeEndIso={dateRange.endIso}
                     tradeStats={tradeStats}
+                    kpis={kpiResults}
+                    kpiCategory={kpiCategory}
+                    onKpiCategoryChange={setKpiCategory}
                   />
                 )}
               </>
@@ -2036,6 +2092,40 @@ function OverviewSection({
   snapshot: AnalyticsSnapshot | null;
 }) {
   const T = (en: string, es: string) => LL(lang, en, es);
+  const moneyScale = useMemo(() => {
+    if (!snapshot) return 1;
+    const vals = [
+      snapshot.avgNetPerSession,
+      snapshot.maxWin,
+      snapshot.maxLoss,
+      snapshot.maxDrawdown,
+      snapshot.avgWin,
+      snapshot.avgLoss,
+    ].map((v) => Math.abs(Number(v ?? 0)));
+    return Math.max(1, ...vals);
+  }, [snapshot]);
+
+  const toneFromRatio = (ratio: number, direction: "higher" | "lower"): StatTone => {
+    if (!Number.isFinite(ratio)) return "neutral";
+    if (direction === "higher") {
+      if (ratio >= 0.66) return "good";
+      if (ratio <= 0.33) return "bad";
+      return "neutral";
+    }
+    if (ratio <= 0.33) return "good";
+    if (ratio >= 0.66) return "bad";
+    return "neutral";
+  };
+
+  const toneForMoney = (value: number | null | undefined, direction: "higher" | "lower"): StatTone => {
+    if (value == null || !Number.isFinite(value)) return "neutral";
+    return toneFromRatio(value / moneyScale, direction);
+  };
+
+  const toneForRate = (value: number | null | undefined, direction: "higher" | "lower"): StatTone => {
+    if (value == null || !Number.isFinite(value)) return "neutral";
+    return toneFromRatio(value / 100, direction);
+  };
   const eqSeries = useMemo(() => {
     const pts = equity ?? [];
     const data = pts.map((p) => [new Date(p.date).getTime(), p.value]);
@@ -2170,31 +2260,37 @@ function OverviewSection({
             label={T("Avg / session", "Promedio / sesión")}
             value={snapshot ? fmtUsd(snapshot.avgNetPerSession) : "—"}
             help={T("Average net result per session.", "Promedio neto por sesión.")}
+            tone={snapshot ? toneForMoney(snapshot.avgNetPerSession, "higher") : "neutral"}
           />
           <MiniStat
             label={T("Max win", "Máx. ganancia")}
             value={snapshot ? fmtUsd(snapshot.maxWin) : "—"}
             help={T("Best single-session result.", "Mejor resultado en una sesión.")}
+            tone={snapshot ? toneForMoney(snapshot.maxWin, "higher") : "neutral"}
           />
           <MiniStat
             label={T("Max lesson", "Máx. aprendizaje")}
             value={snapshot ? fmtUsd(snapshot.maxLoss) : "—"}
             help={T("Largest drawdown in a single session.", "Mayor caída en una sola sesión.")}
+            tone={snapshot ? toneForMoney(snapshot.maxLoss, "lower") : "neutral"}
           />
           <MiniStat
             label={T("Max drawdown", "Máx. drawdown")}
             value={snapshot ? fmtUsd(snapshot.maxDrawdown) : "—"}
             help={T("Largest peak-to-trough decline in equity.", "Mayor caída desde un pico hasta un valle en equity.")}
+            tone={snapshot ? toneForMoney(snapshot.maxDrawdown, "lower") : "neutral"}
           />
           <MiniStat
             label={T("Avg win", "Promedio ganador")}
             value={snapshot ? fmtUsd(snapshot.avgWin) : "—"}
             help={T("Average winning session result.", "Promedio de sesiones ganadoras.")}
+            tone={snapshot ? toneForMoney(snapshot.avgWin, "higher") : "neutral"}
           />
           <MiniStat
             label={T("Avg lesson", "Promedio aprendizaje")}
             value={snapshot ? fmtUsd(snapshot.avgLoss) : "—"}
             help={T("Average learning session magnitude.", "Promedio de sesiones de aprendizaje.")}
+            tone={snapshot ? toneForMoney(snapshot.avgLoss, "lower") : "neutral"}
           />
           <MiniStat
             label={T("Breakeven rate", "Tasa de plano")}
@@ -2204,8 +2300,29 @@ function OverviewSection({
                 : "—"
             }
             help={T("Share of flat sessions.", "Porcentaje de sesiones planas.")}
+            tone={
+              snapshot && snapshot.totalSessions > 0
+                ? toneForRate((snapshot.breakevens / snapshot.totalSessions) * 100, "lower")
+                : "neutral"
+            }
           />
         </div>
+        <p className="text-[11px] text-slate-500 mt-4 flex flex-wrap items-center gap-3">
+          <span className="inline-flex items-center gap-1">
+            <span className="h-2 w-2 rounded-full bg-emerald-400" />
+            {T("Stronger", "Mejor")}
+          </span>
+          <span className="inline-flex items-center gap-1">
+            <span className="h-2 w-2 rounded-full bg-sky-400" />
+            {T("Needs attention", "A mejorar")}
+          </span>
+          <span className="text-slate-500">
+            {T(
+              "Loss/drawdown metrics are inverted (lower is better).",
+              "Métricas de pérdidas/drawdown están invertidas (menos es mejor)."
+            )}
+          </span>
+        </p>
       </Card>
 
       <Card title={T("Streaks", "Rachas")}>
@@ -2223,58 +2340,177 @@ function OverviewSection({
         </div>
       </Card>
 
-      <Card title={T("Institutional KPIs", "KPIs institucionales")}>
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-sm">
-          <MiniStat
-            label={T("CAGR", "CAGR")}
-            value={snapshot?.cagr != null ? fmtPct(snapshot.cagr) : "—"}
-            help={T("Annualized growth based on the equity curve.", "Crecimiento anualizado basado en la curva de equity.")}
-          />
-          <MiniStat
-            label={T("Sharpe", "Sharpe")}
-            value={snapshot?.sharpe != null ? snapshot.sharpe.toFixed(2) : "—"}
-            help={T("Risk-adjusted return vs total volatility.", "Retorno ajustado por riesgo vs volatilidad total.")}
-          />
-          <MiniStat
-            label={T("Sortino", "Sortino")}
-            value={snapshot?.sortino != null ? snapshot.sortino.toFixed(2) : "—"}
-            help={T("Risk-adjusted return vs downside volatility only.", "Retorno ajustado por riesgo vs volatilidad negativa.")}
-          />
-          <MiniStat
-            label={T("Max DD %", "Máx DD %")}
-            value={snapshot?.maxDrawdownPct != null ? fmtPct(snapshot.maxDrawdownPct) : "—"}
-            help={T("Max drawdown as a percentage of peak equity.", "Máximo drawdown como % del pico de equity.")}
-          />
-          <MiniStat
-            label={T("Recovery factor", "Recovery factor")}
-            value={snapshot?.recoveryFactor != null ? snapshot.recoveryFactor.toFixed(2) : "—"}
-            help={T("Net profit divided by max drawdown.", "Ganancia neta dividido por max drawdown.")}
-          />
-          <MiniStat
-            label={T("Payoff ratio", "Payoff ratio")}
-            value={snapshot?.payoffRatio != null ? snapshot.payoffRatio.toFixed(2) : "—"}
-            help={T("Average win divided by average lesson.", "Promedio ganancia dividido por promedio aprendizaje.")}
-          />
-        </div>
-        <p className="text-[11px] text-slate-500 mt-3">
-          {T(
-            "Sharpe/Sortino use daily equity returns; CAGR is annualized from the first/last equity points.",
-            "Sharpe/Sortino usan retornos diarios de equity; CAGR es anualizado desde el primer/último punto."
-          )}
-        </p>
-      </Card>
     </div>
   );
 }
 
-function MiniStat({ label, value, help }: { label: string; value: string; help: string }) {
+function MiniStat({
+  label,
+  value,
+  help,
+  tone = "neutral",
+}: {
+  label: string;
+  value: string;
+  help: string;
+  tone?: StatTone;
+}) {
+  const toneClasses =
+    tone === "good"
+      ? "border-emerald-400/40 bg-gradient-to-br from-emerald-500/10 via-emerald-950/30 to-slate-950/30 shadow-[0_0_0_1px_rgba(16,185,129,0.08)]"
+      : tone === "bad"
+        ? "border-sky-400/40 bg-gradient-to-br from-sky-500/10 via-sky-950/30 to-slate-950/30 shadow-[0_0_0_1px_rgba(56,189,248,0.08)]"
+        : "border-slate-800 bg-slate-950/40";
+  const valueClass =
+    tone === "good"
+      ? "text-emerald-200"
+      : tone === "bad"
+        ? "text-sky-200"
+        : "text-slate-100";
   return (
-    <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
+    <div className={["rounded-xl border p-3 transition", toneClasses].join(" ")}>
       <div className="text-[11px] text-slate-500 flex items-center">
         <span>{label}</span>
         <InfoDot text={help} />
       </div>
-      <div className="mt-1 text-slate-100 font-semibold">{value}</div>
+      <div className={["mt-1 font-semibold", valueClass].join(" ")}>{value}</div>
+    </div>
+  );
+}
+
+function KpiStatCard({
+  kpi,
+  value,
+  tone = "neutral",
+  isOpen,
+  onToggle,
+  lang,
+}: {
+  kpi: KPIResult;
+  value: string;
+  tone?: StatTone;
+  isOpen: boolean;
+  onToggle: () => void;
+  lang: Lang;
+}) {
+  const T = (en: string, es: string) => LL(lang, en, es);
+  const text = getKpiText(kpi, lang);
+  const formula = humanizeKpiFormula(text.formula, lang);
+  const inputs = formatKpiInputs(kpi.requiredInputs, lang);
+  const toneClasses =
+    tone === "good"
+      ? "border-emerald-400/40 bg-gradient-to-br from-emerald-500/10 via-emerald-950/30 to-slate-950/30 shadow-[0_0_0_1px_rgba(16,185,129,0.08)]"
+      : tone === "bad"
+        ? "border-sky-400/40 bg-gradient-to-br from-sky-500/10 via-sky-950/30 to-slate-950/30 shadow-[0_0_0_1px_rgba(56,189,248,0.08)]"
+        : "border-slate-800 bg-slate-950/40";
+  const valueClass =
+    tone === "good"
+      ? "text-emerald-200"
+      : tone === "bad"
+        ? "text-sky-200"
+        : "text-slate-100";
+
+  const direction = KPI_DIRECTION[kpi.id];
+  const interpretation =
+    direction === "higher"
+      ? T("Higher is better.", "Más alto es mejor.")
+      : direction === "lower"
+        ? T("Lower is better.", "Más bajo es mejor.")
+        : T("Interpret within context.", "Interpretar en contexto.");
+
+  const purpose = [text.notes, text.method].filter(Boolean).join(" ");
+  const edgeCases = kpi.edgeCases?.length ? kpi.edgeCases.join("; ") : "—";
+
+  return (
+    <div className={["rounded-xl border p-3 transition", toneClasses].join(" ")}>
+      <button
+        type="button"
+        onClick={onToggle}
+        className="w-full text-left"
+        aria-expanded={isOpen}
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="text-[11px] text-slate-500">{text.name}</div>
+            <div className={["mt-1 text-base font-semibold", valueClass].join(" ")}>
+              {value}
+            </div>
+          </div>
+          <span className="text-[11px] text-slate-500 mt-1">
+            {isOpen ? T("Hide details", "Ocultar detalles") : T("View details", "Ver detalles")}
+          </span>
+        </div>
+      </button>
+
+      <div
+        className={[
+          "overflow-hidden transition-all duration-300 ease-out",
+          isOpen ? "max-h-[420px] opacity-100 mt-3" : "max-h-0 opacity-0",
+        ].join(" ")}
+      >
+        <div className="grid gap-3 text-xs text-slate-300">
+          <div>
+            <div className="text-[10px] uppercase tracking-[0.25em] text-slate-500">
+              {T("Meaning", "Significado")}
+            </div>
+            <p className="mt-1">{text.definition}</p>
+          </div>
+          <div>
+            <div className="text-[10px] uppercase tracking-[0.25em] text-slate-500">
+              {T("Purpose", "Para qué sirve")}
+            </div>
+            <p className="mt-1">{purpose || "—"}</p>
+          </div>
+          <div>
+            <div className="text-[10px] uppercase tracking-[0.25em] text-slate-500">
+              {T("Interpretation", "Interpretación")}
+            </div>
+            <p className="mt-1">{interpretation}</p>
+          </div>
+          <div>
+            <div className="text-[10px] uppercase tracking-[0.25em] text-slate-500">
+              {T("Formula", "Fórmula")}
+            </div>
+            <p className="mt-1 text-emerald-200">{formula}</p>
+          </div>
+          <div>
+            <div className="text-[10px] uppercase tracking-[0.25em] text-slate-500">
+              {T("Inputs", "Datos necesarios")}
+            </div>
+            {inputs.length ? (
+              <div className="mt-2 flex flex-wrap gap-2">
+                {inputs.map((input) => (
+                  <span
+                    key={input}
+                    className="rounded-full border border-slate-700/60 bg-slate-950/40 px-2 py-0.5 text-[11px] text-slate-200"
+                  >
+                    {input}
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <p className="mt-1">—</p>
+            )}
+          </div>
+          <div>
+            <div className="text-[10px] uppercase tracking-[0.25em] text-slate-500">
+              {T("Example", "Ejemplo")}
+            </div>
+            <p className="mt-1">{text.example}</p>
+          </div>
+          <div>
+            <div className="text-[10px] uppercase tracking-[0.25em] text-slate-500">
+              {T("Edge cases", "Casos especiales")}
+            </div>
+            <p className="mt-1">{edgeCases}</p>
+          </div>
+          {kpi.reason ? (
+            <div className="text-xs text-slate-500">
+              {T("Missing data", "Datos faltantes")}: {kpi.reason}
+            </div>
+          ) : null}
+        </div>
+      </div>
     </div>
   );
 }
@@ -2349,43 +2585,72 @@ function RiskSection({ lang, snapshot }: { lang: Lang; snapshot: AnalyticsSnapsh
   );
 }
 
-function DistributionSection({ lang, snapshot }: { lang: Lang; snapshot: AnalyticsSnapshot | null }) {
-  const T = (en: string, es: string) => LL(lang, en, es);
-  const bins = snapshot?.pnlHistogram ?? [];
-
-  const series = useMemo(() => {
-    return [{ name: T("Count", "Cantidad"), data: bins.map((b) => b.count) }];
-  }, [bins]);
-
-  const options: ApexOptions = useMemo(
-    () => ({
-      chart: { type: "bar", toolbar: { show: false }, foreColor: "#cbd5e1" },
-      xaxis: { categories: bins.map((b) => b.label) },
-      grid: { borderColor: "#1f2937" },
-      theme: { mode: "dark" },
-      plotOptions: { bar: { borderRadius: 4 } },
-      tooltip: { y: { formatter: (v) => String(v) } },
-    }),
-    [bins]
-  );
-
-  return (
-    <Card title={T("P&L distribution", "Distribución de P&L")} right={<span className="text-xs text-slate-500">{T("Histogram of session P&L", "Histograma de P&L por sesión")}</span>}>
-      {bins.length === 0 ? (
-        <p className="text-sm text-slate-400">{T("No data.", "Sin datos.")}</p>
-      ) : (
-        <div className="h-[320px]">
-          <Chart options={options} series={series as any} type="bar" height={320} />
-        </div>
-      )}
-    </Card>
-  );
-}
-
 function TimeSection({ lang, snapshot }: { lang: Lang; snapshot: AnalyticsSnapshot | null }) {
   const T = (en: string, es: string) => LL(lang, en, es);
   const byDOW = snapshot?.byDOW ?? [];
   const byHour = snapshot?.byHour ?? [];
+  const [hourMetric, setHourMetric] = useState<"pnl" | "winRate" | "trades">("pnl");
+
+  const hourMap = useMemo(() => {
+    const m = new Map<string, HourBucket>();
+    for (const row of byHour) m.set(row.hour, row);
+    return m;
+  }, [byHour]);
+
+  const hourLabels = useMemo(() => Array.from({ length: 24 }, (_, i) => `${String(i).padStart(2, "0")}:00`), []);
+
+  const heatSeries = useMemo(() => {
+    const data = hourLabels.map((h) => {
+      const row = hourMap.get(h);
+      if (!row) return { x: h, y: 0 };
+      if (hourMetric === "trades") return { x: h, y: row.trades };
+      if (hourMetric === "winRate") return { x: h, y: row.winRate };
+      return { x: h, y: row.pnl };
+    });
+    return [{ name: T("By hour", "Por hora"), data }];
+  }, [hourLabels, hourMap, hourMetric, lang]);
+
+  const heatOptions: ApexOptions = useMemo(() => {
+    const values = heatSeries[0]?.data?.map((d: any) => Number(d.y ?? 0)) ?? [];
+    const max = Math.max(1, ...values.map((v) => Math.abs(v)));
+    const ranges =
+      hourMetric === "pnl"
+        ? [
+            { from: -max, to: -max * 0.33, color: "#0f172a" },
+            { from: -max * 0.33, to: 0, color: "#1d4ed8" },
+            { from: 0, to: max * 0.33, color: "#22c55e" },
+            { from: max * 0.33, to: max, color: "#16a34a" },
+          ]
+        : [
+            { from: 0, to: max * 0.33, color: "#0f172a" },
+            { from: max * 0.33, to: max * 0.66, color: "#1d4ed8" },
+            { from: max * 0.66, to: max, color: "#22c55e" },
+          ];
+
+    return {
+      chart: { type: "heatmap", toolbar: { show: false }, foreColor: "#cbd5e1" },
+      dataLabels: { enabled: false },
+      plotOptions: {
+        heatmap: {
+          shadeIntensity: 0.6,
+          radius: 2,
+          colorScale: { ranges },
+        },
+      },
+      xaxis: { categories: hourLabels, labels: { rotate: -45 } },
+      tooltip: {
+        y: {
+          formatter: (v: number) => {
+            if (hourMetric === "pnl") return fmtUsd(v);
+            if (hourMetric === "winRate") return `${v.toFixed(2)}%`;
+            return String(v);
+          },
+        },
+      },
+      grid: { borderColor: "#1f2937" },
+      theme: { mode: "dark" },
+    } as ApexOptions;
+  }, [heatSeries, hourMetric, hourLabels, lang]);
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -2420,7 +2685,23 @@ function TimeSection({ lang, snapshot }: { lang: Lang; snapshot: AnalyticsSnapsh
         )}
       </Card>
 
-      <Card title={T("By hour", "Por hora")}>
+      <Card
+        title={T("By hour", "Por hora")}
+        right={(
+          <div className="flex items-center gap-2 text-xs text-slate-400">
+            <span>{T("Metric", "Métrica")}</span>
+            <select
+              value={hourMetric}
+              onChange={(e) => setHourMetric(e.target.value as any)}
+              className="rounded-xl border border-slate-700 bg-slate-950/40 px-3 py-1.5 text-xs text-slate-200 focus:border-emerald-400"
+            >
+              <option value="pnl">{T("P&L", "P&L")}</option>
+              <option value="winRate">{T("Win rate", "Tasa de acierto")}</option>
+              <option value="trades">{T("Trades", "Operaciones")}</option>
+            </select>
+          </div>
+        )}
+      >
         {byHour.length === 0 ? (
           <p className="text-sm text-slate-400">
             {T(
@@ -2429,29 +2710,34 @@ function TimeSection({ lang, snapshot }: { lang: Lang; snapshot: AnalyticsSnapsh
             )}
           </p>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-sm">
-              <thead>
-                <tr className="text-xs text-slate-500 border-b border-slate-800">
-                  <th className="text-left py-2 pr-4">{T("Hour", "Hora")}</th>
-                  <th className="text-right py-2 px-2">{T("P&L", "P&L")}</th>
-                  <th className="text-right py-2 px-2">{T("Trades", "Operaciones")}</th>
-                  <th className="text-right py-2 pl-2">{T("Win rate", "Tasa de acierto")}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {byHour.map((r) => (
-                  <tr key={r.hour} className="border-b border-slate-900/60">
-                    <td className="py-2 pr-4 text-slate-200 font-mono">{r.hour}</td>
-                    <td className={"py-2 px-2 text-right " + (r.pnl >= 0 ? "text-emerald-300" : "text-sky-300")}>
-                      {fmtUsd(r.pnl)}
-                    </td>
-                    <td className="py-2 px-2 text-right text-slate-200">{r.trades}</td>
-                    <td className="py-2 pl-2 text-right text-slate-200">{fmtPct(r.winRate)}</td>
+          <div className="space-y-4">
+            <div className="h-[160px]">
+              <Chart options={heatOptions} series={heatSeries as any} type="heatmap" height={160} />
+            </div>
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-sm">
+                <thead>
+                  <tr className="text-xs text-slate-500 border-b border-slate-800">
+                    <th className="text-left py-2 pr-4">{T("Hour", "Hora")}</th>
+                    <th className="text-right py-2 px-2">{T("P&L", "P&L")}</th>
+                    <th className="text-right py-2 px-2">{T("Trades", "Operaciones")}</th>
+                    <th className="text-right py-2 pl-2">{T("Win rate", "Tasa de acierto")}</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {byHour.map((r) => (
+                    <tr key={r.hour} className="border-b border-slate-900/60">
+                      <td className="py-2 pr-4 text-slate-200 font-mono">{r.hour}</td>
+                      <td className={"py-2 px-2 text-right " + (r.pnl >= 0 ? "text-emerald-300" : "text-sky-300")}>
+                        {fmtUsd(r.pnl)}
+                      </td>
+                      <td className="py-2 px-2 text-right text-slate-200">{r.trades}</td>
+                      <td className="py-2 pl-2 text-right text-slate-200">{fmtPct(r.winRate)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
       </Card>
@@ -2697,6 +2983,9 @@ function StatisticsSection({
   cashflows,
   rangeEndIso,
   tradeStats,
+  kpis,
+  kpiCategory,
+  onKpiCategoryChange,
 }: {
   lang: Lang;
   sessions: SessionWithTrades[];
@@ -2704,8 +2993,13 @@ function StatisticsSection({
   cashflows: Cashflow[];
   rangeEndIso: string;
   tradeStats: TradeAnalytics;
+  kpis: KPIResult[];
+  kpiCategory: "all" | KPICategory;
+  onKpiCategoryChange: (v: "all" | KPICategory) => void;
 }) {
   const T = (en: string, es: string) => LL(lang, en, es);
+  const [kpiView, setKpiView] = useState<KpiViewFilter>("all");
+  const [openKpiId, setOpenKpiId] = useState<KPIId | null>(null);
   // if you have a trade ledger, load it here; for now we infer from sessions
   const ledgerClosedTrades = useMemo(() => [], []);
   const ledgerOpenPositions = useMemo(() => [], []);
@@ -2714,8 +3008,189 @@ function StatisticsSection({
     return computeStatsAgg({ sessions, ledgerClosedTrades, ledgerOpenPositions, dailySnaps, cashflows, tradeStats });
   }, [sessions, ledgerClosedTrades, ledgerOpenPositions, dailySnaps, cashflows, tradeStats]);
 
+  const categoryLabels: Record<KPICategory, string> = {
+    profitability_edge: T("Profitability & Edge", "Rentabilidad y ventaja"),
+    risk_drawdown: T("Risk & Drawdown", "Riesgo y drawdown"),
+    risk_adjusted: T("Risk-Adjusted & Relative", "Riesgo ajustado y relativo"),
+    distribution: T("Stability & Trade Stats", "Estabilidad y métricas por trade"),
+    execution: T("Execution / Costs", "Ejecución / costos"),
+    exposure: T("Exposure & MAE/MFE", "Exposición & MAE/MFE"),
+  };
+
+  const orderedCategories: KPICategory[] = [
+    "profitability_edge",
+    "risk_drawdown",
+    "risk_adjusted",
+    "distribution",
+    "execution",
+    "exposure",
+  ];
+
+  const kpiScores = useMemo(() => {
+    const scoreMap = new Map<KPIId, number>();
+    const byType = new Map<string, { min: number; max: number }>();
+    const candidates = (kpis ?? []).filter(
+      (k) => k.value != null && Number.isFinite(k.value) && KPI_DIRECTION[k.id]
+    );
+
+    for (const k of candidates) {
+      const direction = KPI_DIRECTION[k.id] ?? "higher";
+      const adjusted = direction === "higher" ? (k.value as number) : -(k.value as number);
+      const key = k.dataType;
+      const existing = byType.get(key);
+      if (!existing) {
+        byType.set(key, { min: adjusted, max: adjusted });
+      } else {
+        existing.min = Math.min(existing.min, adjusted);
+        existing.max = Math.max(existing.max, adjusted);
+      }
+    }
+
+    for (const k of candidates) {
+      const direction = KPI_DIRECTION[k.id] ?? "higher";
+      const adjusted = direction === "higher" ? (k.value as number) : -(k.value as number);
+      const stats = byType.get(k.dataType);
+      if (!stats) continue;
+      const range = stats.max - stats.min;
+      const score = range === 0 ? 0.5 : (adjusted - stats.min) / range;
+      scoreMap.set(k.id, score);
+    }
+
+    return scoreMap;
+  }, [kpis]);
+
+  const kpiToneMap = useMemo(() => {
+    const toneMap = new Map<KPIId, StatTone>();
+    for (const k of kpis ?? []) {
+      const score = kpiScores.get(k.id);
+      if (score == null) {
+        toneMap.set(k.id, "neutral");
+      } else if (score >= 0.66) {
+        toneMap.set(k.id, "good");
+      } else if (score <= 0.33) {
+        toneMap.set(k.id, "bad");
+      } else {
+        toneMap.set(k.id, "neutral");
+      }
+    }
+    return toneMap;
+  }, [kpis, kpiScores]);
+
+  useEffect(() => {
+    setOpenKpiId(null);
+  }, [kpiCategory, kpiView]);
+
+  const filteredGroups = useMemo(() => {
+    const groups = orderedCategories.map((cat) => ({
+      category: cat,
+      label: categoryLabels[cat],
+      items: (kpis ?? []).filter((k) => k.category === cat),
+    }));
+    const withCategory = kpiCategory === "all" ? groups : groups.filter((g) => g.category === kpiCategory);
+    if (kpiView === "all") return withCategory;
+    const threshold = kpiView === "strong" ? 0.66 : 0.33;
+    return withCategory.map((g) => ({
+      ...g,
+      items: g.items.filter((k) => {
+        const score = kpiScores.get(k.id);
+        if (score == null) return false;
+        return kpiView === "strong" ? score >= threshold : score <= threshold;
+      }),
+    }));
+  }, [kpis, kpiCategory, kpiView, categoryLabels, kpiScores]);
+
+  const formatKpiValue = (k: KPIResult): string => {
+    if (k.value == null || !Number.isFinite(k.value)) return "—";
+    if (k.dataType === "currency") return fmtUsd(k.value);
+    if (k.dataType === "percent") return fmtPct(k.value);
+    if (k.dataType === "int") return String(Math.round(k.value));
+    if (k.dataType === "duration") return `${k.value.toFixed(2)} ${k.unit}`;
+    return k.value.toFixed(4).replace(/\.?0+$/, "");
+  };
+
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <div className="space-y-6">
+      <Card
+        title={T("Institutional KPIs", "KPIs institucionales")}
+        right={(
+          <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
+            <span>{T("Category", "Categoría")}</span>
+            <select
+              value={kpiCategory}
+              onChange={(e) => onKpiCategoryChange(e.target.value as any)}
+              className="rounded-xl border border-slate-700 bg-slate-950/40 px-3 py-1.5 text-xs text-slate-200 focus:border-emerald-400"
+            >
+              <option value="all">{T("All", "Todas")}</option>
+              {orderedCategories.map((key) => (
+                <option key={key} value={key}>
+                  {categoryLabels[key]}
+                </option>
+              ))}
+            </select>
+            <span className="ml-1">{T("View", "Vista")}</span>
+            <select
+              value={kpiView}
+              onChange={(e) => setKpiView(e.target.value as KpiViewFilter)}
+              className="rounded-xl border border-slate-700 bg-slate-950/40 px-3 py-1.5 text-xs text-slate-200 focus:border-emerald-400"
+            >
+              <option value="all">{T("All KPIs", "Todos los KPIs")}</option>
+              <option value="strong">{T("Stronger KPIs", "KPIs más fuertes")}</option>
+              <option value="improve">{T("Can improve", "Se puede mejorar")}</option>
+            </select>
+          </div>
+        )}
+      >
+        {filteredGroups.every((g) => g.items.length === 0) ? (
+          <p className="text-sm text-slate-400">{T("No KPI data yet.", "Aún no hay KPIs.")}</p>
+        ) : (
+          <div className="space-y-6">
+            {filteredGroups.map((group) => (
+              <div key={group.category}>
+                <div className="text-xs uppercase tracking-[0.28em] text-slate-500">{group.label}</div>
+                <div className="mt-3 grid grid-cols-2 md:grid-cols-3 gap-3 text-sm">
+                  {group.items.map((kpi) => (
+                    <KpiStatCard
+                      key={kpi.id}
+                      kpi={kpi}
+                      value={formatKpiValue(kpi)}
+                      tone={kpiToneMap.get(kpi.id) ?? "neutral"}
+                      isOpen={openKpiId === kpi.id}
+                      onToggle={() => setOpenKpiId((prev) => (prev === kpi.id ? null : kpi.id))}
+                      lang={lang}
+                    />
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="mt-4 space-y-2">
+          <p className="text-[11px] text-slate-500">
+            {T(
+              "Percent KPIs are shown in percent points. Missing data returns a dash.",
+              "Los KPIs en % se muestran en puntos porcentuales. Datos faltantes muestran un guion."
+            )}
+          </p>
+          <p className="text-[11px] text-slate-500 flex flex-wrap items-center gap-3">
+            <span className="inline-flex items-center gap-1">
+              <span className="h-2 w-2 rounded-full bg-emerald-400" />
+              {T("Stronger (relative)", "Más fuerte (relativo)")}
+            </span>
+            <span className="inline-flex items-center gap-1">
+              <span className="h-2 w-2 rounded-full bg-sky-400" />
+              {T("Can improve (relative)", "Se puede mejorar (relativo)")}
+            </span>
+            <span className="text-slate-500">
+              {T(
+                "Color is relative within the current view, not an absolute benchmark.",
+                "El color es relativo dentro de esta vista, no un benchmark absoluto."
+              )}
+            </span>
+          </p>
+        </div>
+      </Card>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
       <Card title={T("Account metrics", "Métricas de cuenta")} right={<span className="text-xs text-slate-500">{T("As of", "Al")} {rangeEndIso}</span>}>
         <div className="grid grid-cols-2 gap-3 text-sm">
           <MiniStat label={T("Account growth", "Crecimiento de cuenta")} value={agg.accountGrowthPct != null ? fmtPct(agg.accountGrowthPct) : "—"} help={T("Change in equity over the range.", "Cambio en equity durante el rango.")} />
@@ -2759,6 +3234,7 @@ function StatisticsSection({
           <MiniStat label={T("P&L per hour", "P&L por hora")} value={agg.pnlPerHour != null ? fmtUsd(agg.pnlPerHour) : "—"} help={T("Net P&L divided by total holding hours.", "P&L neto dividido entre horas en posición.")} />
         </div>
       </Card>
+    </div>
     </div>
   );
 }

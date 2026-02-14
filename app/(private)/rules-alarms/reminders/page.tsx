@@ -1,19 +1,22 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, Search } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
+import { useUserPlan } from "@/hooks/useUserPlan";
 import {
   AlertEvent,
   AlertChannel,
   AlertRule,
   AlertSeverity,
   channelsLabel,
+  createAlertRule,
   dismissAlertEvent,
   fireTestEventFromRule,
+  isCoreRuleLike,
   isEventActive,
   isEventSnoozed,
   listAlertEvents,
@@ -53,6 +56,14 @@ function SeverityPill({ severity }: { severity: AlertSeverity }) {
   );
 }
 
+function isCoreRule(rule: AlertRule) {
+  return isCoreRuleLike({
+    key: rule.key ?? null,
+    trigger_type: rule.trigger_type ?? null,
+    config: (rule.config ?? rule.meta) as Record<string, unknown>,
+  });
+}
+
 function KpiCard({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
     <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
@@ -71,6 +82,9 @@ export default function RemindersConsolePage() {
   const lang = resolveLocale(locale);
   const isEs = lang === "es";
   const L = (en: string, es: string) => (isEs ? es : en);
+  const { plan } = useUserPlan();
+  const planKey = plan === "advanced" ? "advanced" : "core";
+  const customLimit = planKey === "advanced" ? 10 : 2;
 
   const [tab, setTab] = useState<Tab>("active");
   const [busy, setBusy] = useState(false);
@@ -82,6 +96,13 @@ export default function RemindersConsolePage() {
   const [flash, setFlash] = useState<{ type: "success" | "error" | "info"; msg: string } | null>(null);
   const [query, setQuery] = useState("");
   const [severityFilter, setSeverityFilter] = useState<"all" | AlertSeverity>("all");
+  const [showCreate, setShowCreate] = useState(false);
+  const [newTitle, setNewTitle] = useState("");
+  const [newMessage, setNewMessage] = useState("");
+  const [newTrigger, setNewTrigger] = useState("DAILY_GOAL");
+  const [newSeverity, setNewSeverity] = useState<AlertSeverity>("info");
+  const [newThreshold, setNewThreshold] = useState("");
+  const [newChannels, setNewChannels] = useState({ popup: true, inapp: true, voice: true });
 
   const selectedEvent = useMemo(
     () => events.find((e) => e.id === selectedEventId) ?? null,
@@ -97,6 +118,26 @@ export default function RemindersConsolePage() {
     () => events.filter((e) => e.kind === "reminder" && e.dismissed && !isEventSnoozed(e)),
     [events]
   );
+
+  const customRulesCount = useMemo(() => rules.filter((r) => !isCoreRule(r)).length, [rules]);
+  const remainingCustom = Math.max(0, customLimit - customRulesCount);
+
+  const reminderTriggerOptions = [
+    {
+      value: "DAILY_GOAL",
+      label: L("Daily goal achieved", "Meta diaria alcanzada"),
+      thresholdLabel: L("Daily goal ($)", "Meta diaria ($)"),
+      thresholdKey: "daily_goal",
+    },
+    {
+      value: "MAX_GAIN",
+      label: L("Max daily gain", "Ganancia diaria máxima"),
+      thresholdLabel: L("Profit cap ($)", "Límite de ganancia ($)"),
+      thresholdKey: "max_gain",
+    },
+  ];
+
+  const selectedTrigger = reminderTriggerOptions.find((t) => t.value === newTrigger) ?? reminderTriggerOptions[0];
 
   const filteredActiveEvents = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -208,6 +249,69 @@ export default function RemindersConsolePage() {
       if (!res.ok) {
         setFlash({ type: "error", msg: res.error || L("Failed to update channels", "No se pudieron actualizar los canales") });
       }
+      await refreshAll();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onCreateRule(e: FormEvent) {
+    e.preventDefault();
+    if (!userId) return;
+    if (!newTitle.trim()) {
+      setFlash({ type: "error", msg: L("Title is required.", "El título es obligatorio.") });
+      return;
+    }
+    if (remainingCustom <= 0) {
+      setFlash({
+        type: "error",
+        msg: L(
+          `Limit reached. Your ${planKey === "advanced" ? "Advanced" : "Core"} plan allows up to ${customLimit} custom reminders.`,
+          `Límite alcanzado. Tu plan ${planKey === "advanced" ? "Advanced" : "Core"} permite hasta ${customLimit} recordatorios personalizados.`
+        ),
+      });
+      return;
+    }
+
+    const channels: AlertChannel[] = [];
+    if (newChannels.popup) channels.push("popup");
+    if (newChannels.inapp) channels.push("inapp");
+    if (newChannels.voice) channels.push("voice");
+    if (channels.length === 0) {
+      setFlash({ type: "error", msg: L("Select at least one channel.", "Selecciona al menos un canal.") });
+      return;
+    }
+
+    const config: Record<string, unknown> = { source: "user" };
+    const thresholdRaw = Number(newThreshold);
+    const threshold = Number.isFinite(thresholdRaw) ? Math.abs(thresholdRaw) : null;
+
+    if (newTrigger === "DAILY_GOAL" && threshold != null) config.daily_goal = threshold;
+    if (newTrigger === "MAX_GAIN" && threshold != null) config.max_gain = threshold;
+
+    setBusy(true);
+    setFlash(null);
+    try {
+      const res = await createAlertRule(userId, {
+        title: newTitle.trim(),
+        message: newMessage.trim(),
+        trigger_type: newTrigger,
+        severity: newSeverity,
+        enabled: true,
+        channels,
+        kind: "reminder",
+        config,
+      });
+
+      if (!res.ok) {
+        setFlash({ type: "error", msg: res.error || L("Failed to create rule.", "No se pudo crear la regla.") });
+        return;
+      }
+
+      setFlash({ type: "success", msg: L("Custom reminder created.", "Recordatorio personalizado creado.") });
+      setNewTitle("");
+      setNewMessage("");
+      setNewThreshold("");
       await refreshAll();
     } finally {
       setBusy(false);
@@ -451,6 +555,148 @@ export default function RemindersConsolePage() {
               <p className="mt-2 text-sm text-slate-400">{L("Toggle rules on/off and trigger tests.", "Activa o desactiva reglas y dispara pruebas.")}</p>
             </div>
             <div className="text-xs text-slate-400">{busy ? L("Working…", "Trabajando…") : ""}</div>
+          </div>
+
+          <div className="mt-4 rounded-xl border border-slate-800 bg-slate-950/30 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <div className="text-[11px] uppercase tracking-[0.28em] text-slate-500">
+                  {L("Create custom reminder", "Crear recordatorio personalizado")}
+                </div>
+                <p className="mt-1 text-sm text-slate-400">
+                  {L(
+                    "Pick a trigger and optional thresholds. Custom reminders are in addition to core rules.",
+                    "Elige un disparador y umbrales opcionales. Los recordatorios personalizados son adicionales a las reglas core."
+                  )}
+                </p>
+              </div>
+              <div className="flex items-center gap-3 text-xs text-slate-400">
+                <span>
+                  {L("Custom reminders:", "Recordatorios personalizados:")}{" "}
+                  <span className="text-slate-200 font-semibold">{customRulesCount}/{customLimit}</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setShowCreate((v) => !v)}
+                  className="rounded-lg border border-slate-700 bg-slate-900/40 px-3 py-2 text-xs font-semibold text-slate-100 hover:border-emerald-400/60 hover:bg-emerald-500/10"
+                >
+                  {showCreate ? L("Hide form", "Ocultar formulario") : L("Add reminder", "Agregar recordatorio")}
+                </button>
+              </div>
+            </div>
+
+            {remainingCustom === 0 ? (
+              <div className="mt-3 rounded-lg border border-amber-800 bg-amber-950/30 px-3 py-2 text-xs text-amber-200">
+                {L(
+                  `Limit reached. Your ${planKey === "advanced" ? "Advanced" : "Core"} plan allows up to ${customLimit} custom reminders.`,
+                  `Límite alcanzado. Tu plan ${planKey === "advanced" ? "Advanced" : "Core"} permite hasta ${customLimit} recordatorios personalizados.`
+                )}
+              </div>
+            ) : null}
+
+            {showCreate ? (
+              <form onSubmit={onCreateRule} className="mt-4 grid gap-3 md:grid-cols-2">
+                <div className="space-y-1">
+                  <label className="text-[11px] uppercase tracking-[0.2em] text-slate-500">{L("Title", "Título")}</label>
+                  <input
+                    value={newTitle}
+                    onChange={(e) => setNewTitle(e.target.value)}
+                    placeholder={L("Example: Goal reached", "Ejemplo: Meta alcanzada")}
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950/40 px-3 py-2 text-xs text-slate-200 placeholder:text-slate-500 focus:border-emerald-400"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[11px] uppercase tracking-[0.2em] text-slate-500">{L("Trigger", "Disparador")}</label>
+                  <select
+                    value={newTrigger}
+                    onChange={(e) => setNewTrigger(e.target.value)}
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950/40 px-3 py-2 text-xs text-slate-200 focus:border-emerald-400"
+                  >
+                    {reminderTriggerOptions.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {selectedTrigger?.thresholdLabel ? (
+                  <div className="space-y-1">
+                    <label className="text-[11px] uppercase tracking-[0.2em] text-slate-500">{selectedTrigger.thresholdLabel}</label>
+                    <input
+                      value={newThreshold}
+                      onChange={(e) => setNewThreshold(e.target.value)}
+                      type="number"
+                      step="0.01"
+                      placeholder="0"
+                      className="w-full rounded-xl border border-slate-700 bg-slate-950/40 px-3 py-2 text-xs text-slate-200 placeholder:text-slate-500 focus:border-emerald-400"
+                    />
+                  </div>
+                ) : null}
+
+                <div className="space-y-1">
+                  <label className="text-[11px] uppercase tracking-[0.2em] text-slate-500">{L("Severity", "Severidad")}</label>
+                  <select
+                    value={newSeverity}
+                    onChange={(e) => setNewSeverity(e.target.value as AlertSeverity)}
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950/40 px-3 py-2 text-xs text-slate-200 focus:border-emerald-400"
+                  >
+                    <option value="info">{L("Info", "Info")}</option>
+                    <option value="success">{L("Success", "Éxito")}</option>
+                    <option value="warning">{L("Warning", "Advertencia")}</option>
+                    <option value="critical">{L("Critical", "Crítica")}</option>
+                  </select>
+                </div>
+
+                <div className="md:col-span-2 space-y-1">
+                  <label className="text-[11px] uppercase tracking-[0.2em] text-slate-500">{L("Message (optional)", "Mensaje (opcional)")}</label>
+                  <textarea
+                    value={newMessage}
+                    onChange={(e) => setNewMessage(e.target.value)}
+                    rows={3}
+                    placeholder={L("Explain what to do when this reminder triggers.", "Explica qué hacer cuando se dispare este recordatorio.")}
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950/40 px-3 py-2 text-xs text-slate-200 placeholder:text-slate-500 focus:border-emerald-400"
+                  />
+                </div>
+
+                <div className="md:col-span-2 flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex flex-wrap items-center gap-3 text-xs text-slate-300">
+                    <label className="inline-flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={newChannels.popup}
+                        onChange={(e) => setNewChannels((s) => ({ ...s, popup: e.target.checked }))}
+                      />
+                      {L("Popup", "Pop‑up")}
+                    </label>
+                    <label className="inline-flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={newChannels.inapp}
+                        onChange={(e) => setNewChannels((s) => ({ ...s, inapp: e.target.checked }))}
+                      />
+                      {L("In-app", "In‑app")}
+                    </label>
+                    <label className="inline-flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={newChannels.voice}
+                        onChange={(e) => setNewChannels((s) => ({ ...s, voice: e.target.checked }))}
+                      />
+                      {L("Voice", "Voz")}
+                    </label>
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={busy || !userId || remainingCustom <= 0}
+                    className="rounded-lg border border-emerald-500/50 bg-emerald-500/10 px-4 py-2 text-xs font-semibold text-emerald-200 hover:bg-emerald-500/20 disabled:opacity-50"
+                  >
+                    {L("Create reminder", "Crear recordatorio")}
+                  </button>
+                </div>
+              </form>
+            ) : null}
           </div>
 
           {rules.length === 0 ? (

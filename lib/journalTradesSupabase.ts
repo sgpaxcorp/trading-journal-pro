@@ -160,27 +160,77 @@ export async function getJournalTradesForDay(
   const exits: StoredTradeRow[] = [];
 
   for (const row of data ?? []) {
-    const out: any = {
-      id: String(row.id),
-      symbol: row.symbol ?? "",
-      kind: (row.kind ?? "other") as any,
-
-      side: row.side ?? undefined,
-      premiumSide: row.premium ?? undefined,
-      optionStrategy: row.strategy ?? undefined,
-
-      dte: row.dte ?? undefined,
-      emotions: row.emotions ?? undefined,
-      strategyChecklist: row.strategy_checklist ?? undefined,
-
-      price: row.price != null ? Number(row.price) : 0,
-      quantity: row.quantity != null ? Number(row.quantity) : 0,
-      time: row.time ?? "",
-    };
-
+    const out = mapDbRowToStoredTrade(row);
     if (row.leg === "entry") entries.push(out);
     else exits.push(out);
   }
 
   return { entries, exits };
+}
+
+function mapDbRowToStoredTrade(row: any): StoredTradeRow {
+  const out: any = {
+    id: String(row.id),
+    symbol: row.symbol ?? "",
+    kind: (row.kind ?? "other") as any,
+
+    side: row.side ?? undefined,
+    premiumSide: row.premium ?? undefined,
+    optionStrategy: row.strategy ?? undefined,
+
+    dte: row.dte ?? undefined,
+    emotions: row.emotions ?? undefined,
+    strategyChecklist: row.strategy_checklist ?? undefined,
+
+    price: row.price != null ? Number(row.price) : 0,
+    quantity: row.quantity != null ? Number(row.quantity) : 0,
+    time: row.time ?? "",
+  };
+
+  return out as StoredTradeRow;
+}
+
+export async function getJournalTradesForDates(
+  userId: string,
+  dates: string[],
+  accountId?: string | null
+): Promise<Record<string, TradesPayload>> {
+  if (!userId || !Array.isArray(dates) || dates.length === 0) return {};
+
+  const uniqueDates = Array.from(
+    new Set(
+      dates
+        .map((d) => String(d || "").slice(0, 10))
+        .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d))
+    )
+  );
+
+  if (!uniqueDates.length) return {};
+
+  let query = supabaseBrowser
+    .from(TABLE)
+    .select("*")
+    .eq("user_id", userId)
+    .in("journal_date", uniqueDates);
+
+  if (accountId) {
+    query = query.eq("account_id", accountId);
+  }
+
+  const { data, error } = await query.order("journal_date", { ascending: true }).order("id", { ascending: true });
+  if (error) throw error;
+
+  const map: Record<string, TradesPayload> = {};
+
+  for (const row of data ?? []) {
+    const date = String(row.journal_date || "").slice(0, 10);
+    if (!date) continue;
+    if (!map[date]) map[date] = { entries: [], exits: [] };
+    const payload = map[date];
+    const out = mapDbRowToStoredTrade(row);
+    if (row.leg === "entry") payload.entries!.push(out);
+    else payload.exits!.push(out);
+  }
+
+  return map;
 }

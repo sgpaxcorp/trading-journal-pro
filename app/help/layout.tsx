@@ -19,16 +19,10 @@ const NAV_GROUPS = (lang: "en" | "es") => {
         { href: "/help/workflows", label: isEs ? "Flujos de trabajo" : "Workflows" },
         { href: "/help/dashboard-widgets", label: isEs ? "Dashboard y widgets" : "Dashboard & Widgets" },
         { href: "/help/analytics", label: isEs ? "Analitica y rendimiento" : "Analytics & Performance" },
+        { href: "/help/kpis", label: isEs ? "KPIs y metricas" : "KPIs & Metrics" },
       ],
     },
-    {
-      title: isEs ? "Datos y reportes" : "Data & reports",
-      items: [
-        { href: "/help/data-inputs", label: isEs ? "Importacion de datos" : "Data Inputs" },
-        { href: "/help/reports", label: isEs ? "Option Flow reportes" : "Option Flow Reports" },
-        { href: "/help/post-mortem", label: isEs ? "Post-mortem" : "Post-mortem" },
-      ],
-    },
+    // Data & reports removed from sidebar per request.
     {
       title: isEs ? "Cuenta y ajustes" : "Account & settings",
       items: [{ href: "/help/settings", label: isEs ? "Idioma y ajustes" : "Language & Settings" }],

@@ -149,6 +149,63 @@ export function normalizeChannels(v: unknown): AlertChannel[] {
   return Array.from(set);
 }
 
+type UserPlan = "core" | "advanced" | "none";
+
+const ALERT_RULE_LIMITS: Record<UserPlan, Record<AlertKind, number>> = {
+  core: { alarm: 2, reminder: 2 },
+  advanced: { alarm: 10, reminder: 10 },
+  none: { alarm: 2, reminder: 2 },
+};
+
+const CORE_RULE_KEYS = new Set(["open_positions", "options_expiring"]);
+const CORE_RULE_TRIGGERS = new Set(["open_positions", "options_expiring"]);
+
+function normalizePlan(raw: unknown): UserPlan {
+  const v = String(raw ?? "").toLowerCase();
+  if (v === "advanced" || v === "pro") return "advanced";
+  if (v === "core") return "core";
+  return "none";
+}
+
+async function fetchUserPlan(userId: string): Promise<UserPlan> {
+  try {
+    const { data, error } = await supabaseBrowser
+      .from("profiles")
+      .select("plan")
+      .eq("id", userId)
+      .maybeSingle();
+
+    if (error) return "none";
+    return normalizePlan((data as any)?.plan);
+  } catch {
+    return "none";
+  }
+}
+
+export function isCoreRuleLike(input: {
+  key?: string | null;
+  trigger_type?: string | null;
+  config?: Record<string, unknown>;
+}): boolean {
+  const cfg = safeObj(input.config);
+  const source = String(cfg.source ?? cfg.origin ?? "").toLowerCase();
+  if (source === "core" || source === "system") return true;
+  if (cfg.core === true || cfg.system === true) return true;
+
+  const key = String(input.key ?? "").toLowerCase();
+  const trigger = String(input.trigger_type ?? "").toLowerCase();
+  if (CORE_RULE_KEYS.has(key)) return true;
+  if (CORE_RULE_TRIGGERS.has(trigger)) return true;
+
+  if (key.includes("open_positions") || key.includes("options_expiring")) return true;
+  if (trigger.includes("open_positions") || trigger.includes("options_expiring")) return true;
+  return false;
+}
+
+function pluralizeKind(kind: AlertKind) {
+  return kind === "alarm" ? "alarms" : "reminders";
+}
+
 export function channelsLabel(channels: AlertChannel[]) {
   const set = new Set(channels);
   const parts: string[] = [];
@@ -554,6 +611,56 @@ export async function createAlertRule(
     if (rule.kind) cfg.kind = rule.kind;
     if (rule.category) cfg.category = rule.category;
     if (typeof rule.description === "string") cfg.description = rule.description;
+
+    const inferredKind = inferKindFromRule({
+      key: rule.key ?? null,
+      trigger_type: rule.trigger_type ?? null,
+      severity: rule.severity ?? "info",
+      config: cfg,
+    });
+    const kind = normalizeKind(rule.kind ?? inferredKind);
+
+    const isCore = isCoreRuleLike({
+      key: rule.key ?? null,
+      trigger_type: rule.trigger_type ?? null,
+      config: cfg,
+    });
+
+    if (!isCore) {
+      const plan = await fetchUserPlan(userId);
+      const planKey: UserPlan = plan === "advanced" ? "advanced" : "core";
+      const limit = ALERT_RULE_LIMITS[planKey][kind];
+
+      const { data: existing, error: existingErr } = await supabaseBrowser
+        .from("ntj_alert_rules")
+        .select("id,key,trigger_type,severity,config")
+        .eq("user_id", userId);
+
+      if (existingErr) return { ok: false, error: existingErr.message };
+
+      const currentCount = (existing ?? []).filter((r: any) => {
+        const rowConfig = safeObj(r?.config);
+        if (isCoreRuleLike({ key: r?.key ?? null, trigger_type: r?.trigger_type ?? null, config: rowConfig })) {
+          return false;
+        }
+        const rowKind = inferKindFromRule({
+          key: r?.key ?? null,
+          trigger_type: r?.trigger_type ?? null,
+          severity: normalizeSeverity(r?.severity ?? rowConfig.severity),
+          config: rowConfig,
+        });
+        return rowKind === kind;
+      }).length;
+
+      if (currentCount >= limit) {
+        const plural = pluralizeKind(kind);
+        const planLabel = planKey === "advanced" ? "Advanced" : "Core";
+        return {
+          ok: false,
+          error: `Limit reached: your ${planLabel} plan allows up to ${limit} custom ${plural}.`,
+        };
+      }
+    }
 
     const row: any = {
       user_id: userId,

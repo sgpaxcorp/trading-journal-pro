@@ -60,12 +60,17 @@ export default function MessageCenterPage() {
   const [query, setQuery] = useState("");
   const [events, setEvents] = useState<AlertEvent[]>([]);
   const [busy, setBusy] = useState(false);
+  const MAX_EVENTS = 10;
 
   const refresh = useCallback(async () => {
     if (!userId) return;
     setBusy(true);
     try {
-      const res = await listAlertEvents(userId, { includeDismissed: true, includeSnoozed: true, limit: 600 });
+      const res = await listAlertEvents(userId, {
+        includeDismissed: true,
+        includeSnoozed: true,
+        limit: MAX_EVENTS,
+      });
       setEvents(res.ok ? res.data.events : []);
     } finally {
       setBusy(false);
@@ -116,14 +121,14 @@ export default function MessageCenterPage() {
               ? historyEvents
               : events;
 
-    if (!q) return list;
+    if (!q) return list.slice(0, MAX_EVENTS);
     return list.filter((e) => {
       return (
         String(e.title ?? "").toLowerCase().includes(q) ||
         String(e.message ?? "").toLowerCase().includes(q) ||
         String(e.category ?? "").toLowerCase().includes(q)
       );
-    });
+    }).slice(0, MAX_EVENTS);
   }, [events, historyEvents, query, snoozedEvents, tab]);
 
   return (
@@ -143,6 +148,12 @@ export default function MessageCenterPage() {
               {L(
                 "All notifications in one place. Use filters to jump into Alarms or Reminders.",
                 "Todas las notificaciones en un solo lugar. Usa filtros para ir a Alarmas o Recordatorios."
+              )}
+            </p>
+            <p className="mt-1 text-xs text-slate-500">
+              {L(
+                "Showing the latest 10 alerts.",
+                "Mostrando las ultimas 10 alertas."
               )}
             </p>
           </div>

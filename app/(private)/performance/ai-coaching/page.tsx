@@ -17,6 +17,14 @@ import { resolveLocale } from "@/lib/i18n";
 import type { JournalEntry } from "@/lib/journalTypes";
 import { getAllJournalEntries, getJournalEntryByDate } from "@/lib/journalSupabase";
 import { getJournalTradesForDay } from "@/lib/journalTradesSupabase";
+import type { TradesPayload } from "@/lib/journalNotes";
+import { computeAllKPIs, type KPIResult } from "@/lib/kpiLibrary";
+import {
+  buildKpiTrades,
+  computeTradeAnalytics,
+  type JournalTradeRow,
+  type TradeAnalytics,
+} from "@/lib/tradeAnalytics";
 
 import { supabaseBrowser } from "@/lib/supaBaseClient";
 
@@ -157,6 +165,97 @@ type AnalyticsSummary = {
     }
   >;
   tagCounts: Record<string, number>;
+};
+
+type CoachAnalyticsSnapshot = {
+  updatedAtIso: string;
+  range: {
+    startIso: string;
+    endIso: string;
+    source: "ALL" | "PLAN";
+  };
+  totals: {
+    sessions: number;
+    wins: number;
+    losses: number;
+    breakevens: number;
+    winRate: number;
+    grossPnl: number;
+    netPnl: number;
+    totalFees: number;
+    avgNetPerSession: number;
+  };
+  performance: {
+    avgWin: number;
+    avgLoss: number;
+    profitFactor: number | null;
+    expectancy: number | null;
+    bestDay: { date: string; pnl: number } | null;
+    worstDay: { date: string; pnl: number } | null;
+  };
+  risk: {
+    maxDrawdown: number;
+    maxDrawdownPct: number;
+    longestWinStreak: number;
+    longestLossStreak: number;
+    maxWin: number;
+    maxLoss: number;
+  };
+  time: {
+    byDayOfWeek: Array<{ dow: string; sessions: number; pnl: number; winRate: number }>;
+    byHour: Array<{ hour: string; sessions: number; pnl: number; winRate: number }>;
+  };
+  instruments: {
+    byInstrument: Array<{ instrument: string; sessions: number; netPnl: number; avgPnl: number }>;
+  };
+  dataQuality: {
+    hasCashflows: boolean;
+    hasEntryTimestamps: boolean;
+  };
+};
+
+type PeriodWindowStats = {
+  startIso: string;
+  endIso: string;
+  sessions: number;
+  wins: number;
+  losses: number;
+  breakevens: number;
+  winRate: number;
+  netPnl: number;
+  avgNet: number;
+  tradeCount?: number | null;
+  avgHoldMins?: number | null;
+  avgHoldWinMins?: number | null;
+  avgHoldLossMins?: number | null;
+  pnlPerHour?: number | null;
+  tradesWithTime?: number | null;
+  tradesWithoutTime?: number | null;
+  kpis?: Record<string, KPIResult>;
+};
+
+type PeriodComparison = {
+  label: string;
+  current: PeriodWindowStats;
+  previous: PeriodWindowStats;
+  delta: {
+    sessions: number;
+    winRate: number;
+    netPnl: number;
+    avgNet: number;
+    avgHoldWinMins?: number | null;
+    avgHoldLossMins?: number | null;
+    pnlPerHour?: number | null;
+  };
+  kpiDeltas?: Array<{
+    id: string;
+    name: string;
+    dataType: string;
+    unit: string;
+    current: number;
+    previous: number;
+    delta: number;
+  }>;
 };
 
 type UserProfileForCoach = {
@@ -316,6 +415,35 @@ function clampText(s: any, max = 900): string {
   return t.length > max ? t.slice(0, max) + "…" : t;
 }
 
+function isoDate(d: Date): string {
+  return d.toISOString().slice(0, 10);
+}
+
+function addDaysIso(iso: string, days: number): string {
+  const d = new Date(`${iso}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return iso;
+  d.setDate(d.getDate() + days);
+  return isoDate(d);
+}
+
+function startOfMonthIso(iso: string): string {
+  const d = new Date(`${iso}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return iso;
+  d.setDate(1);
+  return isoDate(d);
+}
+
+function daysInMonth(year: number, monthIndex: number): number {
+  return new Date(year, monthIndex + 1, 0).getDate();
+}
+
+function shiftMonthsIso(iso: string, deltaMonths: number): string {
+  const d = new Date(`${iso}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return iso;
+  d.setMonth(d.getMonth() + deltaMonths);
+  return isoDate(d);
+}
+
 function stripHtml(input?: string | null): string {
   if (!input) return "";
   return String(input).replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
@@ -464,7 +592,27 @@ function sessionNetPnl(entry: any): number {
 }
 
 /* A compact session object to send to the backend (keeps tokens reasonable) */
-function compactSessionForAi(entry: any) {
+function normalizeTradeForCoach(raw: any) {
+  const priceNum = Number(raw?.price);
+  const qtyNum = Number(raw?.quantity);
+  const dteNum = Number(raw?.dte);
+
+  return {
+    time: clampText(raw?.time, 12),
+    symbol: safeUpper(String(raw?.symbol ?? "")),
+    kind: String(raw?.kind ?? "").trim(),
+    side: String(raw?.side ?? "").trim(),
+    premium: String(raw?.premiumSide ?? raw?.premium ?? "").trim(),
+    strategy: String(raw?.optionStrategy ?? raw?.strategy ?? "").trim(),
+    price: Number.isFinite(priceNum) ? Number(priceNum.toFixed(2)) : null,
+    quantity: Number.isFinite(qtyNum) ? qtyNum : null,
+    dte: Number.isFinite(dteNum) ? dteNum : null,
+    emotions: Array.isArray(raw?.emotions) ? raw.emotions.slice(0, 6) : [],
+    checklist: Array.isArray(raw?.strategyChecklist) ? raw.strategyChecklist.slice(0, 6) : [],
+  };
+}
+
+function compactSessionForAi(entry: any, tradesForDate?: TradesPayload | null) {
   const date = String(entry?.date || "");
   const pnl = sessionNetPnl(entry);
 
@@ -516,6 +664,18 @@ function compactSessionForAi(entry: any) {
 
   const notes = stripHtml(entry?.notes ?? entry?.summary ?? entry?.reflection ?? "");
 
+  const notesEntries = Array.isArray(parsedNotes?.entries) ? parsedNotes?.entries : [];
+  const notesExits = Array.isArray(parsedNotes?.exits) ? parsedNotes?.exits : [];
+  const tradesEntries = Array.isArray(tradesForDate?.entries) && tradesForDate?.entries?.length
+    ? tradesForDate.entries
+    : notesEntries;
+  const tradesExits = Array.isArray(tradesForDate?.exits) && tradesForDate?.exits?.length
+    ? tradesForDate.exits
+    : notesExits;
+
+  const normalizedEntries = (tradesEntries || []).slice(0, 8).map(normalizeTradeForCoach);
+  const normalizedExits = (tradesExits || []).slice(0, 8).map(normalizeTradeForCoach);
+
   return {
     date,
     pnl,
@@ -541,6 +701,12 @@ function compactSessionForAi(entry: any) {
       notes: clampText(post?.notes, 340),
     },
     notes: clampText(notes, 520),
+    trades: {
+      entries: normalizedEntries,
+      exits: normalizedExits,
+      entryCount: Array.isArray(tradesEntries) ? tradesEntries.length : 0,
+      exitCount: Array.isArray(tradesExits) ? tradesExits.length : 0,
+    },
   };
 }
 
@@ -663,6 +829,371 @@ function buildAnalyticsSummaryFromEntries(entries: JournalEntry[]): AnalyticsSum
   }
 
   return { base, byDayOfWeek, byInstrument, tagCounts };
+}
+
+function looksLikeYYYYMMDD(raw: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/.test(raw);
+}
+
+function sessionGrossPnl(entry: any): number {
+  const notes = parseNotesJson(entry?.notes);
+  const noteGross = Number(notes?.pnl?.gross ?? notes?.pnl_gross);
+  if (Number.isFinite(noteGross)) return noteGross;
+
+  const directGross = Number(entry?.pnlGross ?? entry?.pnl_gross ?? entry?.pnlUsd);
+  if (Number.isFinite(directGross)) return directGross;
+
+  const directNet = Number(entry?.pnlNet ?? entry?.netPnl ?? entry?.pnl);
+  if (Number.isFinite(directNet)) return directNet;
+
+  return 0;
+}
+
+function sessionFeesUsd(entry: any): number {
+  const notes = parseNotesJson(entry?.notes);
+  const costs = parseCostsFromNotes(notes);
+  const directFees = Number(entry?.feesUsd ?? entry?.fees ?? 0);
+  const fees = Number.isFinite(directFees) ? directFees : 0;
+  return fees + costs.fees + costs.commissions;
+}
+
+function computeStreaksFromSessions(sessions: Array<{ pnlNet: number }>): { win: number; loss: number } {
+  let bestWin = 0;
+  let bestLoss = 0;
+  let curWin = 0;
+  let curLoss = 0;
+
+  for (const s of sessions) {
+    if (s.pnlNet > 0) {
+      curWin += 1;
+      curLoss = 0;
+      bestWin = Math.max(bestWin, curWin);
+    } else if (s.pnlNet < 0) {
+      curLoss += 1;
+      curWin = 0;
+      bestLoss = Math.max(bestLoss, curLoss);
+    } else {
+      curWin = 0;
+      curLoss = 0;
+    }
+  }
+
+  return { win: bestWin, loss: bestLoss };
+}
+
+function computeEquityCurveFromSessions(
+  sessions: Array<{ date: string; pnlNet: number }>,
+  cashflows: Cashflow[],
+  startingBalance: number,
+  planStartIso?: string | null
+) {
+  const start = planStartIso && looksLikeYYYYMMDD(planStartIso) ? planStartIso : "";
+
+  const tradeByDate: Record<string, number> = {};
+  for (const s of sessions) {
+    if (!looksLikeYYYYMMDD(s.date)) continue;
+    if (start && s.date < start) continue;
+    tradeByDate[s.date] = (tradeByDate[s.date] || 0) + (Number.isFinite(s.pnlNet) ? s.pnlNet : 0);
+  }
+
+  const cashByDate: Record<string, number> = {};
+  for (const cf of cashflows ?? []) {
+    const d = String(cf?.date || "").slice(0, 10);
+    if (!looksLikeYYYYMMDD(d)) continue;
+    if (start && d < start) continue;
+    const net = signedCashflowAmount(cf);
+    if (!net) continue;
+    cashByDate[d] = (cashByDate[d] || 0) + net;
+  }
+
+  const dates = Array.from(new Set([...Object.keys(tradeByDate), ...Object.keys(cashByDate)])).sort();
+  let equity = startingBalance;
+
+  return dates.map((d) => {
+    equity += (tradeByDate[d] || 0) + (cashByDate[d] || 0);
+    return { date: d, value: Number(equity.toFixed(2)) };
+  });
+}
+
+function computeMaxDrawdown(equity: Array<{ value: number }>) {
+  let peak = -Infinity;
+  let maxDd = 0;
+  let maxDdPct = 0;
+
+  for (const p of equity) {
+    const v = Number(p.value);
+    if (!Number.isFinite(v)) continue;
+    if (v > peak) peak = v;
+    const dd = peak - v;
+    if (dd > maxDd) maxDd = dd;
+    if (peak > 0) {
+      const ddPct = (dd / peak) * 100;
+      if (ddPct > maxDdPct) maxDdPct = ddPct;
+    }
+  }
+
+  return { maxDd, maxDdPct };
+}
+
+function computeWindowStats(
+  sessions: Array<{ date: string; pnlNet: number }>,
+  tradeRows: JournalTradeRow[],
+  startIso: string,
+  endIso: string
+): PeriodWindowStats {
+  const filtered = sessions.filter((s) => s.date >= startIso && s.date <= endIso);
+
+  const winsArr = filtered.map((s) => s.pnlNet).filter((p) => p > 0);
+  const lossArr = filtered.map((s) => s.pnlNet).filter((p) => p < 0).map((p) => Math.abs(p));
+
+  const sum = (arr: number[]) => arr.reduce((a, b) => a + b, 0);
+  const netPnl = sum(filtered.map((s) => s.pnlNet));
+  const wins = winsArr.length;
+  const losses = lossArr.length;
+  const breakevens = Math.max(0, filtered.length - wins - losses);
+  const denom = wins + losses;
+  const winRate = denom > 0 ? (wins / denom) * 100 : 0;
+  const avgNet = filtered.length ? netPnl / filtered.length : 0;
+
+  let tradeCount: number | null = null;
+  let avgHoldMins: number | null = null;
+  let avgHoldWinMins: number | null = null;
+  let avgHoldLossMins: number | null = null;
+  let pnlPerHour: number | null = null;
+  let tradesWithTime: number | null = null;
+  let tradesWithoutTime: number | null = null;
+  let kpis: Record<string, KPIResult> | undefined;
+
+  if (tradeRows.length) {
+    const tradesInRange = tradeRows.filter((r) => {
+      const d = String(r.journal_date || "").slice(0, 10);
+      return d >= startIso && d <= endIso;
+    });
+
+    if (tradesInRange.length) {
+      const tradeStats = computeTradeAnalytics(tradesInRange, filtered);
+      tradeCount = tradeStats.tradeCount;
+      avgHoldMins = tradeStats.hold.avgHoldMins;
+      avgHoldWinMins = tradeStats.hold.avgHoldWinMins;
+      avgHoldLossMins = tradeStats.hold.avgHoldLossMins;
+      pnlPerHour = tradeStats.pnlPerHour;
+
+      tradesWithTime = tradeStats.matchedTrades.filter(
+        (t) => t.entryTimeMin != null && t.exitTimeMin != null
+      ).length;
+      tradesWithoutTime = tradeStats.tradeCount - tradesWithTime;
+
+      const kpiTrades = buildKpiTrades(tradeStats);
+      if (kpiTrades.length) {
+        const results = computeAllKPIs(kpiTrades, [], undefined, { annualizationDays: 252 });
+        const focusIds = new Set([
+          "profit_factor",
+          "expectancy",
+          "payoff_ratio",
+          "profit_per_trade",
+          "avg_trade_duration_minutes",
+        ]);
+        kpis = {};
+        for (const r of results) {
+          if (!focusIds.has(r.id)) continue;
+          if (r.value == null) continue;
+          kpis[r.id] = r;
+        }
+      }
+    }
+  }
+
+  return {
+    startIso,
+    endIso,
+    sessions: filtered.length,
+    wins,
+    losses,
+    breakevens,
+    winRate,
+    netPnl,
+    avgNet,
+    tradeCount,
+    avgHoldMins,
+    avgHoldWinMins,
+    avgHoldLossMins,
+    pnlPerHour,
+    tradesWithTime,
+    tradesWithoutTime,
+    kpis,
+  };
+}
+
+function buildCoachAnalyticsSnapshot(
+  entries: JournalEntry[],
+  cashflows: Cashflow[],
+  planStartIso: string | null,
+  startingBalance: number
+): CoachAnalyticsSnapshot {
+  const sessions = (entries as any[])
+    .map((e) => {
+      const date = String(e?.date ?? e?.trade_date ?? e?.created_at ?? "").slice(0, 10);
+      if (!looksLikeYYYYMMDD(date)) return null;
+      return {
+        date,
+        pnlNet: sessionNetPnl(e),
+        pnlGross: sessionGrossPnl(e),
+        feesUsd: sessionFeesUsd(e),
+        instrument: safeUpper(String(e?.mainInstrument ?? e?.instrument ?? e?.symbol ?? "")),
+        createdAt: String(e?.created_at ?? e?.createdAt ?? ""),
+      };
+    })
+    .filter(Boolean) as Array<{
+    date: string;
+    pnlNet: number;
+    pnlGross: number;
+    feesUsd: number;
+    instrument: string;
+    createdAt: string;
+  }>;
+
+  const rangeSource = planStartIso ? "PLAN" : "ALL";
+  const filtered = planStartIso
+    ? sessions.filter((s) => !planStartIso || s.date >= planStartIso)
+    : sessions;
+
+  const winsArr = filtered.map((s) => s.pnlNet).filter((p) => p > 0);
+  const lossArr = filtered.map((s) => s.pnlNet).filter((p) => p < 0).map((p) => Math.abs(p));
+
+  const sum = (arr: number[]) => arr.reduce((a, b) => a + b, 0);
+  const netPnl = sum(filtered.map((s) => s.pnlNet));
+  const grossPnl = sum(filtered.map((s) => s.pnlGross));
+  const totalFees = sum(filtered.map((s) => s.feesUsd));
+
+  const wins = winsArr.length;
+  const losses = lossArr.length;
+  const breakevens = Math.max(0, filtered.length - wins - losses);
+  const denom = wins + losses;
+  const winRate = denom > 0 ? (wins / denom) * 100 : 0;
+
+  const avgWin = winsArr.length ? sum(winsArr) / winsArr.length : 0;
+  const avgLoss = lossArr.length ? sum(lossArr) / lossArr.length : 0;
+  const profitFactor = lossArr.length ? sum(winsArr) / sum(lossArr) : null;
+  const pWin = denom > 0 ? wins / denom : 0;
+  const expectancy = avgWin || avgLoss ? pWin * avgWin - (1 - pWin) * avgLoss : null;
+
+  let bestDay: { date: string; pnl: number } | null = null;
+  let worstDay: { date: string; pnl: number } | null = null;
+  for (const s of filtered) {
+    if (!bestDay || s.pnlNet > bestDay.pnl) bestDay = { date: s.date, pnl: s.pnlNet };
+    if (!worstDay || s.pnlNet < worstDay.pnl) worstDay = { date: s.date, pnl: s.pnlNet };
+  }
+
+  const streaks = computeStreaksFromSessions(filtered);
+  const maxWin = winsArr.length ? Math.max(...winsArr) : 0;
+  const maxLoss = lossArr.length ? Math.max(...lossArr) : 0;
+
+  const equityCurve = computeEquityCurveFromSessions(filtered, cashflows, startingBalance, planStartIso);
+  const dd = computeMaxDrawdown(equityCurve);
+
+  const byInstrumentMap: Record<string, { sessions: number; netPnl: number }> = {};
+  for (const s of filtered) {
+    const key = s.instrument || "(none)";
+    if (!byInstrumentMap[key]) byInstrumentMap[key] = { sessions: 0, netPnl: 0 };
+    byInstrumentMap[key].sessions += 1;
+    byInstrumentMap[key].netPnl += s.pnlNet;
+  }
+  const byInstrument = Object.entries(byInstrumentMap)
+    .map(([instrument, v]) => ({
+      instrument,
+      sessions: v.sessions,
+      netPnl: v.netPnl,
+      avgPnl: v.sessions ? v.netPnl / v.sessions : 0,
+    }))
+    .sort((a, b) => b.sessions - a.sessions)
+    .slice(0, 10);
+
+  const dowLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const byDowMap: Record<string, { sessions: number; pnl: number; wins: number }> = {};
+  for (const s of filtered) {
+    const d = new Date(`${s.date}T00:00:00`);
+    if (Number.isNaN(d.getTime())) continue;
+    const dow = dowLabels[d.getDay()];
+    if (!byDowMap[dow]) byDowMap[dow] = { sessions: 0, pnl: 0, wins: 0 };
+    const bucket = byDowMap[dow];
+    bucket.sessions += 1;
+    bucket.pnl += s.pnlNet;
+    if (s.pnlNet > 0) bucket.wins += 1;
+  }
+  const byDayOfWeek = Object.entries(byDowMap).map(([dow, b]) => {
+    const lossesCount = Math.max(0, b.sessions - b.wins);
+    const denom = b.wins + lossesCount;
+    const winRate = denom ? (b.wins / denom) * 100 : 0;
+    return { dow, sessions: b.sessions, pnl: b.pnl, winRate };
+  });
+
+  const byHourMap: Record<string, { sessions: number; pnl: number; wins: number }> = {};
+  for (const s of filtered) {
+    if (!s.createdAt) continue;
+    const d = new Date(s.createdAt);
+    if (Number.isNaN(d.getTime())) continue;
+    const hour = `${String(d.getHours()).padStart(2, "0")}:00`;
+    if (!byHourMap[hour]) byHourMap[hour] = { sessions: 0, pnl: 0, wins: 0 };
+    const bucket = byHourMap[hour];
+    bucket.sessions += 1;
+    bucket.pnl += s.pnlNet;
+    if (s.pnlNet > 0) bucket.wins += 1;
+  }
+  const byHour = Object.entries(byHourMap)
+    .map(([hour, b]) => {
+      const lossesCount = Math.max(0, b.sessions - b.wins);
+      const denom = b.wins + lossesCount;
+      const winRate = denom ? (b.wins / denom) * 100 : 0;
+      return { hour, sessions: b.sessions, pnl: b.pnl, winRate };
+    })
+    .sort((a, b) => (a.hour < b.hour ? -1 : a.hour > b.hour ? 1 : 0));
+
+  return {
+    updatedAtIso: new Date().toISOString(),
+    range: {
+      startIso: planStartIso || "",
+      endIso: new Date().toISOString().slice(0, 10),
+      source: rangeSource,
+    },
+    totals: {
+      sessions: filtered.length,
+      wins,
+      losses,
+      breakevens,
+      winRate,
+      grossPnl,
+      netPnl,
+      totalFees,
+      avgNetPerSession: filtered.length ? netPnl / filtered.length : 0,
+    },
+    performance: {
+      avgWin,
+      avgLoss,
+      profitFactor,
+      expectancy,
+      bestDay,
+      worstDay,
+    },
+    risk: {
+      maxDrawdown: dd.maxDd,
+      maxDrawdownPct: dd.maxDdPct,
+      longestWinStreak: streaks.win,
+      longestLossStreak: streaks.loss,
+      maxWin,
+      maxLoss,
+    },
+    time: {
+      byDayOfWeek,
+      byHour,
+    },
+    instruments: {
+      byInstrument,
+    },
+    dataQuality: {
+      hasCashflows: (cashflows ?? []).length > 0,
+      hasEntryTimestamps: byHour.length > 0,
+    },
+  };
 }
 
 /* Build a lightweight snapshot used for quick UI cards */
@@ -797,6 +1328,8 @@ function AiCoachingPageInner() {
   const [entries, setEntries] = useState<JournalEntry[]>([]);
   const [growthPlan, setGrowthPlan] = useState<GrowthPlanRow | null>(null);
   const [cashflows, setCashflows] = useState<Cashflow[]>([]);
+  const [tradesByDate, setTradesByDate] = useState<Record<string, TradesPayload>>({});
+  const [tradeRows, setTradeRows] = useState<JournalTradeRow[]>([]);
   const [fullSnapshot, setFullSnapshot] = useState<AiCoachSnapshot | null>(null);
   const [gamification, setGamification] = useState<ProfileGamification | null>(null);
 
@@ -1162,6 +1695,8 @@ function AiCoachingPageInner() {
     [entries]
   );
 
+  const planStartIso = useMemo(() => planStartIsoFromPlan(growthPlan), [growthPlan]);
+
   const recentSessions = useMemo(() => {
     if (!entries.length) return [];
     const sorted = [...entries].sort((a: any, b: any) =>
@@ -1170,14 +1705,81 @@ function AiCoachingPageInner() {
     return sorted.slice(-25).reverse();
   }, [entries]);
 
+  useEffect(() => {
+    if (!coachUserProfile?.id || !activeAccountId) {
+      setTradeRows([]);
+      return;
+    }
+
+    let alive = true;
+    (async () => {
+      try {
+        let q = supabaseBrowser
+          .from("journal_trades")
+          .select("journal_date, leg, symbol, kind, side, premium, strategy, price, quantity, time")
+          .eq("user_id", coachUserProfile.id)
+          .order("journal_date", { ascending: true });
+
+        if (activeAccountId) q = q.eq("account_id", activeAccountId);
+        if (planStartIso && looksLikeYYYYMMDD(planStartIso)) q = q.gte("journal_date", planStartIso);
+
+        const { data, error } = await q;
+        if (error) throw error;
+        if (!alive) return;
+        setTradeRows((data ?? []) as JournalTradeRow[]);
+      } catch (err) {
+        console.error("[AI Coaching] journal_trades load error:", err);
+        if (!alive) return;
+        setTradeRows([]);
+      }
+    })();
+
+    return () => {
+      alive = false;
+    };
+  }, [coachUserProfile?.id, activeAccountId, planStartIso]);
+
+  useEffect(() => {
+    if (!recentSessions.length || !tradeRows.length) {
+      setTradesByDate({});
+      return;
+    }
+
+    const recentDates = new Set(
+      recentSessions.map((s: any) => String(s?.date || "").slice(0, 10)).filter(looksLikeYYYYMMDD)
+    );
+    const map: Record<string, TradesPayload> = {};
+
+    for (const row of tradeRows) {
+      const date = String(row.journal_date || "").slice(0, 10);
+      if (!recentDates.has(date)) continue;
+      if (!map[date]) map[date] = { entries: [], exits: [] };
+      const payload = map[date];
+      const out: any = {
+        id: `${row.journal_date}-${row.symbol}-${row.leg}-${row.time || ""}`,
+        symbol: row.symbol ?? "",
+        kind: (row.kind ?? "other") as any,
+        side: row.side ?? undefined,
+        premiumSide: row.premium ?? undefined,
+        optionStrategy: row.strategy ?? undefined,
+        price: row.price != null ? Number(row.price) : 0,
+        quantity: row.quantity != null ? Number(row.quantity) : 0,
+        time: row.time ?? "",
+      };
+      if (String(row.leg ?? "").toLowerCase().includes("exit")) payload.exits!.push(out);
+      else payload.entries!.push(out);
+    }
+
+    setTradesByDate(map);
+  }, [recentSessions, tradeRows]);
+
   const planSnapshot: PlanSnapshot | null = useMemo(() => {
     if (!growthPlan) return null;
 
     const startingBalance = toNum(growthPlan.starting_balance, 0);
     const targetBalance = toNum(growthPlan.target_balance, 0);
 
-    const planStart = planStartIsoFromPlan(growthPlan);
-    const planStartDate = planStart || null;
+    const planStartDate = planStartIso || null;
 
     const filtered = planStartDate ? entries.filter((e: any) => String(e.date || "") >= planStartDate) : entries;
 
@@ -1223,7 +1825,201 @@ function AiCoachingPageInner() {
 
       planStartDate,
     };
-  }, [growthPlan, entries, cashflows]);
+  }, [growthPlan, entries, cashflows, planStartIso]);
+
+  const analyticsSnapshot = useMemo(() => {
+    const startingBalance = planSnapshot?.effectiveStartingBalance ?? toNum(growthPlan?.starting_balance, 0);
+    return buildCoachAnalyticsSnapshot(entries, cashflows, planStartIso, startingBalance);
+  }, [entries, cashflows, growthPlan, planSnapshot?.effectiveStartingBalance, planStartIso]);
+
+  const sessionsForTradeAnalytics = useMemo(() => {
+    return (entries as any[])
+      .map((e) => {
+        const date = String(e?.date ?? e?.trade_date ?? e?.created_at ?? "").slice(0, 10);
+        if (!looksLikeYYYYMMDD(date)) return null;
+        if (planStartIso && date < planStartIso) return null;
+        return { date, pnlNet: sessionNetPnl(e) };
+      })
+      .filter(Boolean) as Array<{ date: string; pnlNet: number }>;
+  }, [entries, planStartIso]);
+
+  const tradeStats = useMemo<TradeAnalytics | null>(() => {
+    if (!tradeRows.length) return null;
+    return computeTradeAnalytics(tradeRows, sessionsForTradeAnalytics);
+  }, [tradeRows, sessionsForTradeAnalytics]);
+
+  const equityCurve = useMemo(() => {
+    const startingBalance = planSnapshot?.effectiveStartingBalance ?? toNum(growthPlan?.starting_balance, 0);
+    return computeEquityCurveFromSessions(sessionsForTradeAnalytics, cashflows, startingBalance, planStartIso);
+  }, [sessionsForTradeAnalytics, cashflows, planSnapshot?.effectiveStartingBalance, growthPlan, planStartIso]);
+
+  const kpiResults = useMemo<KPIResult[]>(() => {
+    if (!tradeStats) return [];
+    const kpiTrades = buildKpiTrades(tradeStats);
+    if (!kpiTrades.length) return [];
+    const equityPoints = equityCurve.map((p) => ({ time: p.date, equity_value: p.value }));
+    return computeAllKPIs(kpiTrades, equityPoints, undefined, { annualizationDays: 252 });
+  }, [tradeStats, equityCurve]);
+
+  const kpiResultsForCoach = useMemo(() => {
+    if (!kpiResults.length) return [];
+    const priority: string[] = [
+      "net_pnl",
+      "win_rate",
+      "avg_win",
+      "avg_loss",
+      "profit_factor",
+      "expectancy",
+      "payoff_ratio",
+      "profit_per_trade",
+      "max_drawdown_percent",
+      "max_consecutive_losses",
+      "avg_trade_duration_minutes",
+      "best_trade_pnl",
+      "worst_trade_pnl",
+      "sharpe_ratio",
+      "sortino_ratio",
+    ];
+
+    const byId = new Map(kpiResults.map((k) => [String(k.id), k]));
+    const picked: KPIResult[] = [];
+
+    for (const id of priority) {
+      const k = byId.get(id);
+      if (k && k.value != null) picked.push(k);
+    }
+
+    if (picked.length < 20) {
+      for (const k of kpiResults) {
+        if (k.value == null) continue;
+        if (picked.some((p) => p.id === k.id)) continue;
+        picked.push(k);
+        if (picked.length >= 20) break;
+      }
+    }
+
+    return picked;
+  }, [kpiResults]);
+
+  const tradeStatsSummary = useMemo(() => {
+    if (!tradeStats || tradeStats.tradeCount === 0) return null;
+    const tradesWithTime = tradeStats.matchedTrades.filter(
+      (t) => t.entryTimeMin != null && t.exitTimeMin != null
+    ).length;
+    const tradesWithoutTime = tradeStats.tradeCount - tradesWithTime;
+    return {
+      tradeCount: tradeStats.tradeCount,
+      tradeDays: tradeStats.tradeDays,
+      avgPnlPerTrade: tradeStats.avgPnlPerTrade,
+      pnlPerHour: tradeStats.pnlPerHour,
+      hold: tradeStats.hold,
+      tradesWithTime,
+      tradesWithoutTime,
+    };
+  }, [tradeStats]);
+
+  const periodComparisons = useMemo<PeriodComparison[]>(() => {
+    if (!sessionsForTradeAnalytics.length) return [];
+
+    const todayIso = isoDate(new Date());
+
+    const last7Start = addDaysIso(todayIso, -6);
+    const prev7Start = addDaysIso(todayIso, -13);
+    const prev7End = addDaysIso(todayIso, -7);
+
+    const last30Start = addDaysIso(todayIso, -29);
+    const prev30Start = addDaysIso(todayIso, -59);
+    const prev30End = addDaysIso(todayIso, -30);
+
+    const currentMonthStart = startOfMonthIso(todayIso);
+    const prevMonthAnchor = shiftMonthsIso(todayIso, -1);
+    const prevMonthStart = startOfMonthIso(prevMonthAnchor);
+    const d = new Date(`${todayIso}T00:00:00`);
+    const prevMonth = new Date(`${prevMonthAnchor}T00:00:00`);
+    const maxPrevDay = daysInMonth(prevMonth.getFullYear(), prevMonth.getMonth());
+    const dayOfMonth = d.getDate();
+    const prevMonthEnd = addDaysIso(prevMonthStart, Math.max(0, Math.min(dayOfMonth, maxPrevDay) - 1));
+
+    const mkDelta = (cur: PeriodWindowStats, prev: PeriodWindowStats) => ({
+      sessions: cur.sessions - prev.sessions,
+      winRate: cur.winRate - prev.winRate,
+      netPnl: cur.netPnl - prev.netPnl,
+      avgNet: cur.avgNet - prev.avgNet,
+      avgHoldWinMins:
+        cur.avgHoldWinMins != null && prev.avgHoldWinMins != null ? cur.avgHoldWinMins - prev.avgHoldWinMins : null,
+      avgHoldLossMins:
+        cur.avgHoldLossMins != null && prev.avgHoldLossMins != null ? cur.avgHoldLossMins - prev.avgHoldLossMins : null,
+      pnlPerHour:
+        cur.pnlPerHour != null && prev.pnlPerHour != null ? cur.pnlPerHour - prev.pnlPerHour : null,
+    });
+
+    const mkKpiDeltas = (cur: PeriodWindowStats, prev: PeriodWindowStats) => {
+      const out: Array<{
+        id: string;
+        name: string;
+        dataType: string;
+        unit: string;
+        current: number;
+        previous: number;
+        delta: number;
+      }> = [];
+
+      const ids = ["profit_factor", "expectancy", "payoff_ratio", "profit_per_trade", "avg_trade_duration_minutes"];
+      for (const id of ids) {
+        const c = cur.kpis?.[id];
+        const p = prev.kpis?.[id];
+        if (!c || !p) continue;
+        if (c.value == null || p.value == null) continue;
+        out.push({
+          id,
+          name: c.name,
+          dataType: c.dataType,
+          unit: c.unit,
+          current: c.value,
+          previous: p.value,
+          delta: c.value - p.value,
+        });
+      }
+
+      // Keep it small: top 3 by absolute delta
+      return out
+        .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta))
+        .slice(0, 3);
+    };
+
+    const last7 = computeWindowStats(sessionsForTradeAnalytics, tradeRows, last7Start, todayIso);
+    const prev7 = computeWindowStats(sessionsForTradeAnalytics, tradeRows, prev7Start, prev7End);
+
+    const last30 = computeWindowStats(sessionsForTradeAnalytics, tradeRows, last30Start, todayIso);
+    const prev30 = computeWindowStats(sessionsForTradeAnalytics, tradeRows, prev30Start, prev30End);
+
+    const mtd = computeWindowStats(sessionsForTradeAnalytics, tradeRows, currentMonthStart, todayIso);
+    const prevMtd = computeWindowStats(sessionsForTradeAnalytics, tradeRows, prevMonthStart, prevMonthEnd);
+
+    return [
+      {
+        label: "Last 7D vs previous 7D",
+        current: last7,
+        previous: prev7,
+        delta: mkDelta(last7, prev7),
+        kpiDeltas: mkKpiDeltas(last7, prev7),
+      },
+      {
+        label: "Last 30D vs previous 30D",
+        current: last30,
+        previous: prev30,
+        delta: mkDelta(last30, prev30),
+        kpiDeltas: mkKpiDeltas(last30, prev30),
+      },
+      {
+        label: "Month-to-date vs previous month-to-date",
+        current: mtd,
+        previous: prevMtd,
+        delta: mkDelta(mtd, prevMtd),
+        kpiDeltas: mkKpiDeltas(mtd, prevMtd),
+      },
+    ];
+  }, [sessionsForTradeAnalytics, tradeRows]);
 
   /* ---------- Keep chat scrolled to bottom ---------- */
   useEffect(() => {
@@ -1347,9 +2143,11 @@ function AiCoachingPageInner() {
       if (screenshotFile) screenshotBase64 = await fileToDataUrl(screenshotFile);
 
       // 3) Compact sessions for tokens
-      const compactRecent = recentSessions.map((s: any) => compactSessionForAi(s));
+      const compactRecent = recentSessions.map((s: any) =>
+        compactSessionForAi(s, tradesByDate[String(s?.date || "").slice(0, 10)] || null)
+      );
       const relevant = findRelevantSessions(entries, finalQuestion, 8).map((s: any) =>
-        compactSessionForAi(s)
+        compactSessionForAi(s, tradesByDate[String(s?.date || "").slice(0, 10)] || null)
       );
 
       // 4) Include short chat history for continuity
@@ -1383,6 +2181,10 @@ function AiCoachingPageInner() {
           // Core context
           snapshot,
           analyticsSummary,
+          analyticsSnapshot,
+          kpiResults: kpiResultsForCoach,
+          tradeStatsSummary,
+          periodComparisons,
           recentSessions: compactRecent,
           relevantSessions: relevant,
 
@@ -1410,6 +2212,7 @@ function AiCoachingPageInner() {
             mode: "conversational-trading-coach",
             askFollowupQuestion: true,
             shortSegments: true,
+            strictEvidenceMode: true,
           },
           coachingFocus: {
             useChallengesAndGamification: true,

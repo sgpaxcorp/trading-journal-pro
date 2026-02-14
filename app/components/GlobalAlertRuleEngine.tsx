@@ -869,6 +869,7 @@ async function ensureCoreRules(userId: string, rules: AlertRule[]): Promise<Aler
         channels: Array.from(rule.channels),
         kind: rule.kind,
         category: rule.category,
+        config: { source: "core" },
       });
     } catch {
       // ignore
