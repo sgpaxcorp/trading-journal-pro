@@ -74,11 +74,20 @@ function getPlanStartDateStr(plan: unknown): string | null {
 }
 
 function getWeekOfYear(date: Date): number {
-  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
-  const dayNum = d.getUTCDay() || 7;
-  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
-  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-  return Math.ceil(((d.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
+  // Sunday-based week number (week 1 contains Jan 1).
+  const year = date.getFullYear();
+  const d = new Date(Date.UTC(year, date.getMonth(), date.getDate()));
+  const day = d.getUTCDay(); // 0=Sun
+
+  const weekStart = new Date(d);
+  weekStart.setUTCDate(d.getUTCDate() - day);
+
+  const yearStart = new Date(Date.UTC(year, 0, 1));
+  const yearStartSunday = new Date(yearStart);
+  yearStartSunday.setUTCDate(yearStart.getUTCDate() - yearStart.getUTCDay());
+
+  const diff = weekStart.getTime() - yearStartSunday.getTime();
+  return Math.floor(diff / (7 * 86400000)) + 1;
 }
 
 type CalendarCell = {
@@ -103,8 +112,9 @@ type WidgetId = GridItemId;
 type Holiday = { date: string; label: string; marketClosed?: boolean };
 
 function isWeekend(d: Date): boolean {
+  // Treat Sunday as a trading day (futures); only Saturdays are non-trading weekends.
   const day = d.getDay();
-  return day === 0 || day === 6;
+  return day === 6;
 }
 
 function isTradingDay(dateStr: string, holidaySet: Set<string>): boolean {
