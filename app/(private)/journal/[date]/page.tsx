@@ -495,6 +495,18 @@ export default function DailyJournalPage() {
 
   const dateParam = Array.isArray(params?.date) ? params.date[0] : (params?.date as string);
 
+  const toIsoDate = (d: Date) => d.toISOString().slice(0, 10);
+
+  const nextJournalDate = (iso: string, direction: 1 | -1) => {
+    const base = new Date(`${iso}T00:00:00`);
+    if (Number.isNaN(base.getTime())) return null;
+    const d = new Date(base);
+    do {
+      d.setDate(d.getDate() + direction);
+    } while (d.getDay() === 6); // skip Saturdays only
+    return toIsoDate(d);
+  };
+
   // UI state (rich text)
   const [premarketHtml, setPremarketHtml] = useState<string>("");
   const [insideHtml, setInsideHtml] = useState<string>("");
@@ -968,6 +980,9 @@ export default function DailyJournalPage() {
       return dateParam;
     }
   }, [dateParam]);
+
+  const prevDateIso = useMemo(() => (dateParam ? nextJournalDate(dateParam, -1) : null), [dateParam]);
+  const nextDateIso = useMemo(() => (dateParam ? nextJournalDate(dateParam, 1) : null), [dateParam]);
 
   /* =========================================================
      Entries handlers
@@ -2413,6 +2428,26 @@ export default function DailyJournalPage() {
 
   return (
     <main className="min-h-screen bg-slate-950 text-slate-50 px-4 md:px-8 py-6">
+      {prevDateIso && (
+        <button
+          type="button"
+          aria-label={L("Previous day", "Día anterior")}
+          onClick={() => router.push(`/journal/${prevDateIso}`)}
+          className="fixed left-3 md:left-5 top-1/2 -translate-y-1/2 z-40 h-11 w-11 rounded-full border border-slate-700 bg-slate-950/80 text-slate-200 shadow-lg hover:border-emerald-400 hover:text-emerald-300 transition"
+        >
+          ←
+        </button>
+      )}
+      {nextDateIso && (
+        <button
+          type="button"
+          aria-label={L("Next day", "Día siguiente")}
+          onClick={() => router.push(`/journal/${nextDateIso}`)}
+          className="fixed right-3 md:right-5 top-1/2 -translate-y-1/2 z-40 h-11 w-11 rounded-full border border-slate-700 bg-slate-950/80 text-slate-200 shadow-lg hover:border-emerald-400 hover:text-emerald-300 transition"
+        >
+          →
+        </button>
+      )}
       <div className="mx-auto w-full max-w-none">
         {/* Top */}
         <div className="flex items-start sm:items-center justify-between gap-4 mb-4">

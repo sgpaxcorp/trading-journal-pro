@@ -794,19 +794,19 @@ export default function DashboardPage() {
       let weekNo: number | null = null;
       let fallback: number | null = null;
 
-      for (let col = 0; col < 7; col++) {
-        const idx = row * 7 + col;
-        const cell = calendarCells[idx];
-        if (!cell || !cell.dateStr || cell.dayNumber === null) continue;
+        for (let col = 0; col < 7; col++) {
+          const idx = row * 7 + col;
+          const cell = calendarCells[idx];
+          if (!cell || !cell.dateStr || cell.dayNumber === null) continue;
 
-        const cellDate = new Date(cell.dateStr + "T00:00:00");
-        const dow = cellDate.getDay();
-        if (fallback === null) fallback = getWeekOfYear(cellDate);
-        if (dow === 1) {
-          weekNo = getWeekOfYear(cellDate);
-          break;
+          const cellDate = new Date(cell.dateStr + "T00:00:00");
+          const dow = cellDate.getDay();
+          if (fallback === null) fallback = getWeekOfYear(cellDate);
+          if (dow === 0) {
+            weekNo = getWeekOfYear(cellDate);
+            break;
+          }
         }
-      }
       rows.push(weekNo ?? fallback);
     }
     return rows;
@@ -1467,8 +1467,9 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          <div className="grid grid-cols-[auto_repeat(5,minmax(0,1fr))] gap-2 mb-2 text-[12px] text-slate-500">
+          <div className="grid grid-cols-[auto_repeat(6,minmax(0,1fr))] gap-2 mb-2 text-[12px] text-slate-500">
             <div className="text-left">{L("Week", "Semana")}</div>
+            <div className="text-center">{L("Sun", "Dom")}</div>
             <div className="text-center">{L("Mon", "Lun")}</div>
             <div className="text-center">{L("Tue", "Mar")}</div>
             <div className="text-center">{L("Wed", "Mié")}</div>
@@ -1478,12 +1479,12 @@ export default function DashboardPage() {
 
           <div className="space-y-2 text-[14px]">
             {Array.from({ length: 6 }).map((_, rowIdx) => (
-              <div key={rowIdx} className="grid grid-cols-[auto_repeat(5,minmax(0,1fr))] gap-2">
+              <div key={rowIdx} className="grid grid-cols-[auto_repeat(6,minmax(0,1fr))] gap-2">
                 <div className="flex items-center pl-1 text-[12px] text-emerald-300 font-semibold">
                   {weekRowNumbers[rowIdx] ? `W${weekRowNumbers[rowIdx]}` : ""}
                 </div>
 
-                {[1, 2, 3, 4, 5].map((dow) => {
+                {[0, 1, 2, 3, 4, 5].map((dow) => {
                   const idx = rowIdx * 7 + dow;
                   const cell = calendarCells[idx];
                   if (!cell) return <div key={dow} className="min-h-24" />;
