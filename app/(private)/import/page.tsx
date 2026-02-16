@@ -26,6 +26,9 @@ type ImportHistoryItem = {
   imported_rows: number | null; // inserted
   updated_rows: number | null;  // ✅ NEW
   duplicates: number | null;    // skipped (ledger)
+  order_history_events?: number | null;
+  order_history_duplicates?: number | null;
+  order_history_import_id?: string | null;
   started_at: string; // ISO
   finished_at: string | null; // ISO
   duration_ms: number | null;
@@ -36,8 +39,8 @@ const BROKERS: { id: BrokerId; name: string; hint: { en: string; es: string } }[
     id: "thinkorswim",
     name: "Thinkorswim (Schwab/TOS)",
     hint: {
-      en: "Export: Account Statement / Trade History (Excel/CSV).",
-      es: "Exporta: Account Statement / Trade History (Excel/CSV).",
+      en: "Export: Account Statement / Trade History / Account Order History (Excel/CSV).",
+      es: "Exporta: Account Statement / Trade History / Account Order History (Excel/CSV).",
     },
   },
   {
@@ -113,6 +116,7 @@ export default function ImportPage() {
   const [broker, setBroker] = useState<BrokerId>("thinkorswim");
   const [comment, setComment] = useState<string>("");
   const [file, setFile] = useState<File | null>(null);
+  const [sourceTz, setSourceTz] = useState<string>("America/New_York");
 
   const [dragOver, setDragOver] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -232,6 +236,9 @@ export default function ImportPage() {
       form.append("broker", broker);
       form.append("comment", comment.trim());
       form.append("file", file);
+      if (broker === "thinkorswim") {
+        form.append("sourceTz", sourceTz);
+      }
 
       const res = await fetch("/api/broker-import", {
         method: "POST",
@@ -252,11 +259,27 @@ export default function ImportPage() {
       const inserted = typeof data?.inserted === "number" ? data.inserted : null;
       const updated = typeof data?.updated === "number" ? data.updated : null;
       const duplicates = typeof data?.duplicates === "number" ? data.duplicates : null;
+      const orderEvents =
+        typeof data?.orderHistory?.eventsSaved === "number"
+          ? data.orderHistory.eventsSaved
+          : typeof data?.orderHistory?.events === "number"
+            ? data.orderHistory.events
+            : null;
+      const orderDupes =
+        typeof data?.orderHistory?.duplicates === "number"
+          ? data.orderHistory.duplicates
+          : null;
 
       const parts: string[] = [];
       if (inserted !== null) parts.push(isEs ? `Importadas ${inserted} filas` : `Imported ${inserted} rows`);
       if (duplicates !== null) parts.push(isEs ? `${duplicates} duplicados omitidos` : `${duplicates} duplicates skipped`);
       if (updated !== null) parts.push(isEs ? `${updated} actualizadas` : `${updated} updated`);
+      if (orderEvents !== null)
+        parts.push(
+          isEs
+            ? `Ordenes ${orderEvents} (${orderDupes ?? 0} duplicadas)`
+            : `Order history ${orderEvents} (${orderDupes ?? 0} duplicates)`
+        );
 
       setStatusMsg(
         parts.length
@@ -343,6 +366,32 @@ export default function ImportPage() {
                       {brokerMeta?.hint ? (isEs ? brokerMeta.hint.es : brokerMeta.hint.en) : ""}
                     </p>
                   </div>
+
+                  {broker === "thinkorswim" && (
+                    <div>
+                      <label className="text-xs font-semibold text-slate-200">
+                        {L("Order history timezone (ToS)", "Zona horaria (Order History)")}
+                      </label>
+                      <select
+                        value={sourceTz}
+                        onChange={(e) => setSourceTz(e.target.value)}
+                        className="mt-2 w-full rounded-xl bg-slate-950/40 border border-slate-700 px-3 py-2 text-xs outline-none focus:border-emerald-400"
+                        disabled={importing}
+                      >
+                        <option value="America/New_York">America/New_York (ET)</option>
+                        <option value="America/Chicago">America/Chicago (CT)</option>
+                        <option value="America/Denver">America/Denver (MT)</option>
+                        <option value="America/Los_Angeles">America/Los_Angeles (PT)</option>
+                        <option value="UTC">UTC</option>
+                      </select>
+                      <p className="mt-2 text-[11px] text-slate-400">
+                        {L(
+                          "Used only for Thinkorswim Account Order History imports.",
+                          "Se usa solo para importaciones de Account Order History (ToS)."
+                        )}
+                      </p>
+                    </div>
+                  )}
 
                   <div>
                     <label className="text-xs font-semibold text-slate-200">
@@ -488,16 +537,23 @@ export default function ImportPage() {
                               {h.finished_at ? ` • ${formatDuration(h.duration_ms, localeTag)}` : ""}
                             </div>
                           </div>
-                          <StatusPill
-                            status={h.status}
-                            label={
-                              h.status === "success"
-                                ? L("Success", "Éxito")
-                                : h.status === "failed"
-                                  ? L("Failed", "Fallido")
-                                  : L("Processing", "Procesando")
-                            }
-                          />
+                          <div className="flex flex-col items-end gap-1">
+                            {h.order_history_events && h.order_history_events > 0 ? (
+                              <span className="rounded-full border border-sky-400/30 bg-sky-400/10 px-2 py-0.5 text-[10px] font-semibold text-sky-200">
+                                {L("Audit-ready", "Listo para auditoría")}
+                              </span>
+                            ) : null}
+                            <StatusPill
+                              status={h.status}
+                              label={
+                                h.status === "success"
+                                  ? L("Success", "Éxito")
+                                  : h.status === "failed"
+                                    ? L("Failed", "Fallido")
+                                    : L("Processing", "Procesando")
+                              }
+                            />
+                          </div>
                         </div>
 
                         {/* ✅ 3 tiles */}
@@ -522,6 +578,18 @@ export default function ImportPage() {
                           <div className="mt-2 text-[11px] text-slate-300">
                             <span className="font-semibold text-slate-200">{L("Note:", "Nota:")}</span>{" "}
                             {h.comment}
+                          </div>
+                        ) : null}
+
+                        {typeof h.order_history_events === "number" ? (
+                          <div className="mt-2 text-[11px] text-slate-300">
+                            <span className="font-semibold text-slate-200">
+                              {L("Order history events:", "Eventos de órdenes:")}
+                            </span>{" "}
+                            {h.order_history_events}
+                            {typeof h.order_history_duplicates === "number"
+                              ? ` (${L("duplicates", "duplicados")}: ${h.order_history_duplicates})`
+                              : ""}
                           </div>
                         ) : null}
 

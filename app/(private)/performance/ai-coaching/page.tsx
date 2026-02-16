@@ -275,6 +275,14 @@ type BackStudyParams = {
   range?: string | null;
 };
 
+type YahooCandle = {
+  time: number; // ms since epoch (UTC)
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+};
+
 function parseNotesJson(raw: unknown): Record<string, any> | null {
   if (!raw || typeof raw !== "string") return null;
   try {
@@ -311,6 +319,98 @@ function fmtTradeLine(t: any, prefix: string) {
   const price = Number.isFinite(Number(t.price)) ? Number(t.price).toFixed(2) : "—";
   const qty = Number.isFinite(Number(t.quantity)) ? Number(t.quantity) : "—";
   return `${prefix} ${time} | ${symbol} | ${kind} | ${side} | ${premium} | ${strategy} | ${price} x ${qty}`;
+}
+
+function safeUpper(s: string | null | undefined) {
+  return (s || "").trim().toUpperCase();
+}
+
+function normalizeUnderlyingForYahoo(symbol: string): string {
+  const raw = safeUpper(symbol).replace(/\s+/g, "");
+  if (!raw) return raw;
+
+  let s = raw.replace(/^[\.\-]/, "").replace(/^\//, "");
+
+  // Common index mappings
+  if (s === "SPX" || s === "SPXW") return "^SPX";
+  if (s === "NDX") return "^NDX";
+  if (s === "RUT") return "^RUT";
+  if (s === "DJI" || s === "DOW" || s === "DJX") return "^DJI";
+
+  const FUT_ROOTS = [
+    "ES",
+    "MES",
+    "NQ",
+    "MNQ",
+    "YM",
+    "MYM",
+    "RTY",
+    "M2K",
+    "CL",
+    "MCL",
+    "GC",
+    "MGC",
+    "SI",
+  ];
+
+  if (FUT_ROOTS.some((r) => s.startsWith(r))) {
+    if (!s.endsWith("=F")) return `${s}=F`;
+  }
+
+  return s;
+}
+
+const LOCAL_TZ_OFFSET_MIN = new Date().getTimezoneOffset();
+
+function shiftMsToLocal(ms: number): number {
+  return ms - LOCAL_TZ_OFFSET_MIN * 60 * 1000;
+}
+
+function minutesFromMsLocal(ms: number): number {
+  const d = new Date(shiftMsToLocal(ms));
+  return d.getUTCHours() * 60 + d.getUTCMinutes();
+}
+
+function minutesToClock(mins: number): string {
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
+function mapTfToInterval(tf?: string | null): string {
+  if (!tf) return "5m";
+  if (tf === "1m") return "1m";
+  if (tf === "5m") return "5m";
+  if (tf === "15m") return "15m";
+  if (tf === "1h" || tf === "4h") return "60m";
+  if (tf === "1d") return "1d";
+  return "5m";
+}
+
+function getLocalDayRangeSeconds(dateStr: string): { period1: number; period2: number } | null {
+  const start = new Date(`${dateStr}T00:00:00`);
+  if (Number.isNaN(start.getTime())) return null;
+  const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+  return {
+    period1: Math.floor(start.getTime() / 1000),
+    period2: Math.floor(end.getTime() / 1000),
+  };
+}
+
+function findClosestCandle(
+  candles: YahooCandle[],
+  targetMinutes: number
+): { candle: YahooCandle; minutes: number; delta: number } | null {
+  let best: { candle: YahooCandle; minutes: number; delta: number } | null = null;
+  for (const c of candles) {
+    const mins = minutesFromMsLocal(c.time);
+    const delta = mins - targetMinutes;
+    const abs = Math.abs(delta);
+    if (!best || abs < Math.abs(best.delta)) {
+      best = { candle: c, minutes: mins, delta };
+    }
+  }
+  return best;
 }
 
 /* =========================
@@ -405,10 +505,6 @@ function CoachMarkdown({ text }: { text: string }) {
     </ReactMarkdown>
   );
 }
-function safeUpper(s: string | null | undefined): string {
-  return (s || "").trim().toUpperCase();
-}
-
 function clampText(s: any, max = 900): string {
   const t = (s ?? "").toString();
   if (!t) return "";
@@ -1360,6 +1456,7 @@ function AiCoachingPageInner() {
   // Profile (name, locale)
   const [coachUserProfile, setCoachUserProfile] = useState<UserProfileForCoach | null>(null);
   const [backStudyTradeContext, setBackStudyTradeContext] = useState<string | null>(null);
+  const [backStudyUnderlyingContext, setBackStudyUnderlyingContext] = useState<string | null>(null);
 
   const [dataLoading, setDataLoading] = useState<boolean>(true);
 
@@ -1522,6 +1619,137 @@ function AiCoachingPageInner() {
     };
   }, [backStudyParams, coachUserProfile?.id, activeAccountId, lang]);
 
+  useEffect(() => {
+    if (!backStudyParams?.symbol || !backStudyParams?.date) {
+      setBackStudyUnderlyingContext(null);
+      return;
+    }
+
+    let alive = true;
+
+    (async () => {
+      const range = getLocalDayRangeSeconds(backStudyParams.date);
+      if (!range) {
+        if (alive) setBackStudyUnderlyingContext(null);
+        return;
+      }
+
+      const yfSymbol = normalizeUnderlyingForYahoo(backStudyParams.symbol);
+      const interval = mapTfToInterval(backStudyParams.tf);
+      const url = `/api/yahoo-chart?symbol=${encodeURIComponent(
+        yfSymbol
+      )}&interval=${encodeURIComponent(interval)}&period1=${range.period1}&period2=${range.period2}`;
+
+      let candles: YahooCandle[] = [];
+      try {
+        const res = await fetch(url);
+        if (res.ok) {
+          const data = await res.json();
+          candles = Array.isArray(data?.candles) ? data.candles : [];
+        }
+      } catch (err) {
+        console.warn("[AI Coaching] yahoo intraday error:", err);
+      }
+
+      if (!alive) return;
+
+      const ordered = candles
+        .filter((c) => Number.isFinite(c?.close))
+        .sort((a, b) => a.time - b.time);
+
+      if (!ordered.length) {
+        setBackStudyUnderlyingContext(
+          L(
+            "Underlying intraday data unavailable for that date.",
+            "Datos intradía del subyacente no disponibles para esa fecha."
+          )
+        );
+        return;
+      }
+
+      const entryMins = timeToMinutes(backStudyParams.entryTime ?? null);
+      const exitMins = timeToMinutes(backStudyParams.exitTime ?? null);
+      const fmt = (v: number) => (Number.isFinite(v) ? v.toFixed(2) : "—");
+
+      const lines: string[] = [];
+      lines.push(
+        L(
+          "Underlying intraday snapshot (underlying only — not option prices):",
+          "Snapshot intradía del subyacente (solo subyacente — no precios de opciones):"
+        )
+      );
+      lines.push(
+        L(
+          "Use this only for underlying context; option prices may diverge.",
+          "Usa esto solo como contexto del subyacente; los precios de opciones pueden divergir."
+        )
+      );
+
+      const pushCheckpoint = (label: string, minutes: number) => {
+        const match = findClosestCandle(ordered, minutes);
+        if (!match || !Number.isFinite(match.candle.close)) return null;
+        const delta =
+          match.delta === 0
+            ? ""
+            : ` (${L("closest", "más cercana")} ${minutesToClock(match.minutes)}, Δ${
+                match.delta > 0 ? "+" : ""
+              }${match.delta}m)`;
+        lines.push(
+          `- ${label} ${minutesToClock(minutes)} → ${fmt(match.candle.close)}${delta}`
+        );
+        return match;
+      };
+
+      let entryMatch: ReturnType<typeof findClosestCandle> | null = null;
+      let exitMatch: ReturnType<typeof findClosestCandle> | null = null;
+
+      if (entryMins != null) {
+        entryMatch = pushCheckpoint(L("Entry", "Entrada"), entryMins);
+        [15, 30, 60].forEach((delta) => {
+          const m = entryMins + delta;
+          if (m < 24 * 60) {
+            pushCheckpoint(L(`+${delta}m after entry`, `+${delta}m tras entrada`), m);
+          }
+        });
+      }
+
+      if (exitMins != null) {
+        exitMatch = pushCheckpoint(L("Exit", "Salida"), exitMins);
+      }
+
+      const first = ordered[0];
+      const last = ordered[ordered.length - 1];
+      lines.push(
+        `${L("First candle", "Primera vela")}: ${minutesToClock(
+          minutesFromMsLocal(first.time)
+        )} → ${fmt(first.close)}`
+      );
+      lines.push(
+        `${L("Last candle", "Última vela")}: ${minutesToClock(
+          minutesFromMsLocal(last.time)
+        )} → ${fmt(last.close)}`
+      );
+
+      if (entryMatch && exitMatch && Number.isFinite(entryMatch.candle.close)) {
+        const diff = exitMatch.candle.close - entryMatch.candle.close;
+        const pct = entryMatch.candle.close
+          ? (diff / entryMatch.candle.close) * 100
+          : null;
+        lines.push(
+          `${L("Entry → Exit change", "Cambio Entrada → Salida")}: ${
+            diff >= 0 ? "+" : ""
+          }${fmt(diff)}${pct != null ? ` (${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%)` : ""}`
+        );
+      }
+
+      setBackStudyUnderlyingContext(lines.join("\n"));
+    })();
+
+    return () => {
+      alive = false;
+    };
+  }, [backStudyParams, lang]);
+
   const backStudyContext: string | null = useMemo(() => {
     if (!backStudyParams) return null;
 
@@ -1548,8 +1776,14 @@ function AiCoachingPageInner() {
       lines.push(backStudyTradeContext);
     }
 
+    if (backStudyUnderlyingContext) {
+      lines.push("");
+      lines.push(L("Underlying intraday context:", "Contexto intradía del subyacente:"));
+      lines.push(backStudyUnderlyingContext);
+    }
+
     return lines.filter(Boolean).join("\n");
-  }, [backStudyParams, backStudyTradeContext, lang]);
+  }, [backStudyParams, backStudyTradeContext, backStudyUnderlyingContext, lang]);
 
   /* ---------- Protect route ---------- */
   useEffect(() => {

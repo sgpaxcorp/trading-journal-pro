@@ -498,13 +498,16 @@ export default function DailyJournalPage() {
   const toIsoDate = (d: Date) => d.toISOString().slice(0, 10);
 
   const nextJournalDate = (iso: string, direction: 1 | -1) => {
-    const base = new Date(`${iso}T00:00:00`);
-    if (Number.isNaN(base.getTime())) return null;
-    const d = new Date(base);
+    const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!m) return null;
+    const y = Number(m[1]);
+    const mo = Number(m[2]);
+    const d0 = Number(m[3]);
+    const d = new Date(Date.UTC(y, mo - 1, d0));
     do {
-      d.setDate(d.getDate() + direction);
-    } while (d.getDay() === 6); // skip Saturdays only
-    return toIsoDate(d);
+      d.setUTCDate(d.getUTCDate() + direction);
+    } while (d.getUTCDay() === 6); // skip Saturdays only
+    return d.toISOString().slice(0, 10);
   };
 
   // UI state (rich text)

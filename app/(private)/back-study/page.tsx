@@ -1,8 +1,8 @@
 // app/back-study/page.tsx
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState, useRef } from "react";
-import { useRouter } from "next/navigation";
+import { FormEvent, useEffect, useMemo, useState, useRef, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 
 import TopNav from "@/app/components/TopNav";
 import { useAuth } from "@/context/AuthContext";
@@ -19,6 +19,7 @@ import {
   CandlestickSeries,
   createSeriesMarkers,
 } from "lightweight-charts";
+import OrderHistoryAuditPanel from "../audit/order-history/OrderHistoryAuditPanel";
 
 /* =========================
    Types
@@ -583,14 +584,19 @@ function InteractiveCandleChart({
    Main Back-Study page
 ========================= */
 
-export default function BackStudyPage() {
+function BackStudyPageInner() {
   const { user, loading } = useAuth();
   const { activeAccountId, loading: accountsLoading } = useTradingAccounts();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { locale } = useAppSettings();
   const lang = resolveLocale(locale);
   const isEs = lang === "es";
   const L = (en: string, es: string) => (isEs ? es : en);
+
+  const activeTab =
+    searchParams.get("tab") === "audit" ? "audit" : "backtest";
+  const isAuditTab = activeTab === "audit";
 
   const rangeLabels = useMemo<Record<ChartRangeId, string>>(
     () => ({
@@ -618,6 +624,7 @@ export default function BackStudyPage() {
 
   // Load journal sessions from Supabase
   useEffect(() => {
+    if (isAuditTab) return;
     if (loading || !user || accountsLoading || !activeAccountId) return;
 
     let isMounted = true;
@@ -654,7 +661,7 @@ export default function BackStudyPage() {
     return () => {
       isMounted = false;
     };
-  }, [loading, user, accountsLoading, activeAccountId]);
+  }, [loading, user, accountsLoading, activeAccountId, isAuditTab]);
 
   const sessions: SessionWithTrades[] = useMemo(() => {
     return entries.map((s) => {
@@ -925,12 +932,13 @@ export default function BackStudyPage() {
   };
 
   useEffect(() => {
+    if (isAuditTab) return;
     if (!selectedTrade) return;
     void loadReplay();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTrade, timeframe, chartRange]);
 
-  if (loading || !user || entriesLoading) {
+  if (loading || !user || (!isAuditTab && entriesLoading)) {
     return (
       <main className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center">
         <p className="text-slate-400 text-sm">{L("Loading back-study…", "Cargando back-study…")}</p>
@@ -950,13 +958,20 @@ export default function BackStudyPage() {
                 {L("Back-Studying", "Back-Study")}
               </p>
               <h1 className="text-3xl md:text-4xl font-semibold mt-1">
-                {L("Chart replays from your journal", "Replays de charts desde tu journal")}
+                {isAuditTab
+                  ? L("Order history audit", "Auditoría de órdenes")
+                  : L("Chart replays from your journal", "Replays de charts desde tu journal")}
               </h1>
               <p className="text-sm md:text-base text-slate-400 mt-2 max-w-xl">
-                {L(
-                  "Each entry in the Entries/Exits widgets becomes a trade. The chart marks the exact entry (green arrow) and exit (blue arrow) using the times and prices you saved in the daily journal.",
-                  "Cada entrada en los widgets de Entradas/Salidas se convierte en un trade. El chart marca la entrada (flecha verde) y la salida (flecha azul) usando horas y precios guardados en tu journal."
-                )}
+                {isAuditTab
+                  ? L(
+                      "Analyze your imported order history with deterministic checks (no AI).",
+                      "Analiza tu historial de órdenes importado con reglas determinísticas (sin AI)."
+                    )
+                  : L(
+                      "Each entry in the Entries/Exits widgets becomes a trade. The chart marks the exact entry (green arrow) and exit (blue arrow) using the times and prices you saved in the daily journal.",
+                      "Cada entrada en los widgets de Entradas/Salidas se convierte en un trade. El chart marca la entrada (flecha verde) y la salida (flecha azul) usando horas y precios guardados en tu journal."
+                    )}
               </p>
             </div>
 
@@ -969,36 +984,71 @@ export default function BackStudyPage() {
             </button>
           </header>
 
-          {entriesError && (
-            <section className="rounded-2xl border border-rose-500/60 bg-rose-950/40 p-4 md:p-5">
-              <p className="text-sm text-rose-200">{entriesError}</p>
-              <p className="text-xs text-rose-300/80 mt-1">
-                {L("Check your connection or try again later.", "Revisa tu conexión o intenta más tarde.")}
-              </p>
-            </section>
-          )}
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => router.push("/back-study?tab=backtest")}
+              className={`rounded-full px-4 py-2 text-sm font-semibold transition border ${
+                !isAuditTab
+                  ? "bg-emerald-500 text-slate-950 border-emerald-400"
+                  : "border-slate-700 text-slate-200 hover:border-emerald-400 hover:text-emerald-300"
+              }`}
+              aria-pressed={!isAuditTab}
+            >
+              {L("Back testing", "Back testing")}
+            </button>
+            <button
+              type="button"
+              onClick={() => router.push("/back-study?tab=audit")}
+              className={`rounded-full px-4 py-2 text-sm font-semibold transition border ${
+                isAuditTab
+                  ? "bg-emerald-500 text-slate-950 border-emerald-400"
+                  : "border-slate-700 text-slate-200 hover:border-emerald-400 hover:text-emerald-300"
+              }`}
+              aria-pressed={isAuditTab}
+            >
+              {L("Audit", "Auditoría")}
+            </button>
+          </div>
 
-          {!entriesError && trades.length === 0 ? (
-            <section className="rounded-2xl border border-slate-800 bg-slate-900/80 p-4 md:p-5">
-              <p className="text-sm text-slate-200 mb-1">
-                {L("No trades found for back-study.", "No se encontraron trades para back-study.")}
-              </p>
-              <p className="text-sm text-slate-400">
-                {L(
-                  "Make sure you have Entries and Exits saved in the journal (notes JSON) so they can be replayed here.",
-                  "Asegúrate de tener Entradas y Salidas guardadas en el journal (notes JSON) para poder reproducirlas aquí."
-                )}
-              </p>
-            </section>
+          {isAuditTab ? (
+            <OrderHistoryAuditPanel
+              wrapperClassName="w-full"
+              innerClassName="max-w-6xl mx-auto space-y-6"
+            />
           ) : (
-            !entriesError && (
-              <>
-                {/* Controls */}
-                <section className="rounded-2xl border border-slate-800 bg-slate-900/80 p-4 md:p-5 shadow-[0_0_30px_rgba(15,23,42,0.8)]">
-                  <form
-                    onSubmit={handleLoad}
-                    className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end"
-                  >
+            <>
+              {entriesError && (
+                <section className="rounded-2xl border border-rose-500/60 bg-rose-950/40 p-4 md:p-5">
+                  <p className="text-sm text-rose-200">{entriesError}</p>
+                  <p className="text-xs text-rose-300/80 mt-1">
+                    {L("Check your connection or try again later.", "Revisa tu conexión o intenta más tarde.")}
+                  </p>
+                </section>
+              )}
+
+              {!entriesError && trades.length === 0 && (
+                <section className="rounded-2xl border border-slate-800 bg-slate-900/80 p-4 md:p-5">
+                  <p className="text-sm text-slate-200 mb-1">
+                    {L("No trades found for back-study.", "No se encontraron trades para back-study.")}
+                  </p>
+                  <p className="text-sm text-slate-400">
+                    {L(
+                      "Make sure you have Entries and Exits saved in the journal (notes JSON) so they can be replayed here.",
+                      "Asegúrate de tener Entradas y Salidas guardadas en el journal (notes JSON) para poder reproducirlas aquí."
+                    )}
+                  </p>
+                </section>
+              )}
+
+              {!entriesError && trades.length > 0 && (
+                <div className="space-y-6">
+                  {/* Controls */}
+                  <section className="rounded-2xl border border-slate-800 bg-slate-900/80 p-4 md:p-5 shadow-[0_0_30px_rgba(15,23,42,0.8)]">
+                    <form
+                      onSubmit={handleLoad}
+                      className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end"
+                    >
                     {/* Session selector */}
                     <div className="flex flex-col gap-1">
                       <label className="text-xs text-slate-400">{L("Session", "Sesión")}</label>
@@ -1133,66 +1183,30 @@ export default function BackStudyPage() {
                         </button>
                       </div>
                     </div>
-                  </form>
-                </section>
+                    </form>
+                  </section>
 
-                {/* Charts */}
-                {selectedTrade && (
-                  <section className="space-y-4">
-                    {/* Underlying */}
-                    <div>
-                      {underlyingState.loading ? (
-                        <p className="text-sm text-slate-400">
-                          {L("Loading underlying chart…", "Cargando chart del underlying…")}
-                        </p>
-                      ) : underlyingState.error ? (
-                        <p className="text-sm text-sky-300">
-                          {underlyingState.error}
-                        </p>
-                      ) : (
-                        <InteractiveCandleChart
-                          title={L("Underlying asset", "Activo subyacente")}
-                          symbol={normalizeSymbolForYahoo(
-                            selectedTrade.underlyingSymbol,
-                            selectedTrade.kind
-                          )}
-                          candles={underlyingState.candles}
-                          selectedDate={selectedTrade.date}
-                          entryTime={selectedTrade.entryTime}
-                          exitTime={selectedTrade.exitTime}
-                          entryPrice={selectedTrade.entryPrice ?? undefined}
-                          exitPrice={selectedTrade.exitPrice ?? undefined}
-                          entryColor="#22c55e"
-                          exitColor="#38bdf8"
-                          entryLabel={L("Entry", "Entrada")}
-                          exitLabel={L("Exit", "Salida")}
-                          zoomInLabel={L("Zoom in", "Acercar")}
-                          zoomOutLabel={L("Zoom out", "Alejar")}
-                          zoomResetLabel={L("Reset zoom", "Reiniciar zoom")}
-                          emptyLabel={L("No chart data for this symbol/timeframe.", "No hay datos de chart para este símbolo/timeframe.")}
-                        />
-                      )}
-                    </div>
-
-                    {/* Contract */}
-                    {selectedTrade.contractSymbol && (
+                  {/* Charts */}
+                  {selectedTrade && (
+                    <section className="space-y-4">
+                      {/* Underlying */}
                       <div>
-                        {contractState.loading ? (
+                        {underlyingState.loading ? (
                           <p className="text-sm text-slate-400">
-                            {L("Loading contract chart…", "Cargando chart del contrato…")}
+                            {L("Loading underlying chart…", "Cargando chart del underlying…")}
                           </p>
-                        ) : contractState.error ? (
+                        ) : underlyingState.error ? (
                           <p className="text-sm text-sky-300">
-                            {contractState.error}
+                            {underlyingState.error}
                           </p>
                         ) : (
                           <InteractiveCandleChart
-                            title={L("Contract used", "Contrato usado")}
+                            title={L("Underlying asset", "Activo subyacente")}
                             symbol={normalizeSymbolForYahoo(
-                              selectedTrade.contractSymbol,
-                              "option"
+                              selectedTrade.underlyingSymbol,
+                              selectedTrade.kind
                             )}
-                            candles={contractState.candles}
+                            candles={underlyingState.candles}
                             selectedDate={selectedTrade.date}
                             entryTime={selectedTrade.entryTime}
                             exitTime={selectedTrade.exitTime}
@@ -1209,14 +1223,65 @@ export default function BackStudyPage() {
                           />
                         )}
                       </div>
-                    )}
-                  </section>
-                )}
-              </>
-            )
+
+                      {/* Contract */}
+                      {selectedTrade.contractSymbol && (
+                        <div>
+                          {contractState.loading ? (
+                            <p className="text-sm text-slate-400">
+                              {L("Loading contract chart…", "Cargando chart del contrato…")}
+                            </p>
+                          ) : contractState.error ? (
+                            <p className="text-sm text-sky-300">
+                              {contractState.error}
+                            </p>
+                          ) : (
+                            <InteractiveCandleChart
+                              title={L("Contract used", "Contrato usado")}
+                              symbol={normalizeSymbolForYahoo(
+                                selectedTrade.contractSymbol,
+                                "option"
+                              )}
+                              candles={contractState.candles}
+                              selectedDate={selectedTrade.date}
+                              entryTime={selectedTrade.entryTime}
+                              exitTime={selectedTrade.exitTime}
+                              entryPrice={selectedTrade.entryPrice ?? undefined}
+                              exitPrice={selectedTrade.exitPrice ?? undefined}
+                              entryColor="#22c55e"
+                              exitColor="#38bdf8"
+                              entryLabel={L("Entry", "Entrada")}
+                              exitLabel={L("Exit", "Salida")}
+                              zoomInLabel={L("Zoom in", "Acercar")}
+                              zoomOutLabel={L("Zoom out", "Alejar")}
+                              zoomResetLabel={L("Reset zoom", "Reiniciar zoom")}
+                              emptyLabel={L("No chart data for this symbol/timeframe.", "No hay datos de chart para este símbolo/timeframe.")}
+                            />
+                          )}
+                        </div>
+                      )}
+                    </section>
+                  )}
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>
     </main>
+  );
+}
+
+export default function BackStudyPage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center">
+          <p className="text-slate-400 text-sm">Loading back-study…</p>
+        </main>
+      }
+    >
+      <BackStudyPageInner />
+    </Suspense>
   );
 }

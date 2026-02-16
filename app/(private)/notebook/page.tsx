@@ -29,7 +29,9 @@ import {
 } from "@/lib/notebookSupabase";
 import {
   getFreeNotebookNote,
+  listFreeNotebookNotes,
   upsertFreeNotebookNote,
+  type FreeNotebookNoteRow,
 } from "@/lib/notebookFreeNotesSupabase";
 
 /* =========================
@@ -91,6 +93,61 @@ function getNotebookPreview(raw: any, fallbackText: string): string | null {
 function stripHtml(input?: string | null): string {
   if (!input) return "";
   return String(input).replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function clampText(input: string, max = 900): string {
+  if (!input) return "";
+  if (input.length <= max) return input;
+  return `${input.slice(0, max).trim()}…`;
+}
+
+function parseNotesJson(raw: unknown): Record<string, any> | null {
+  if (!raw) return null;
+  if (typeof raw === "object") return raw as Record<string, any>;
+  if (typeof raw !== "string") return null;
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? (parsed as Record<string, any>) : null;
+  } catch {
+    return null;
+  }
+}
+
+const NOTEBOOK_STOPWORDS = new Set([
+  "the", "and", "for", "with", "from", "this", "that", "what", "where", "when", "why", "how",
+  "que", "qué", "como", "cómo", "donde", "dónde", "cuando", "cuándo", "por", "para", "con",
+  "del", "las", "los", "una", "uno", "unas", "unos", "sobre", "esto", "esta", "este",
+  "please", "pls", "quiero", "busca", "buscar", "encuentra", "find", "locate", "show",
+]);
+
+function tokenizeForSearch(input: string): string[] {
+  if (!input) return [];
+  return input
+    .toLowerCase()
+    .replace(/[^a-z0-9áéíóúüñ]+/gi, " ")
+    .split(" ")
+    .map((t) => t.trim())
+    .filter((t) => t.length >= 3 && !NOTEBOOK_STOPWORDS.has(t));
+}
+
+function extractQuotedPhrases(input: string): string[] {
+  const phrases: string[] = [];
+  const matches = input.match(/"([^"]+)"|'([^']+)'/g);
+  if (!matches) return phrases;
+  for (const m of matches) {
+    const cleaned = m.replace(/^["']|["']$/g, "").trim();
+    if (cleaned.length >= 3) phrases.push(cleaned);
+  }
+  return phrases;
+}
+
+function buildSnippet(text: string, token: string, max = 140): string {
+  if (!text) return "";
+  const idx = text.toLowerCase().indexOf(token.toLowerCase());
+  if (idx < 0) return text.slice(0, max).trim();
+  const start = Math.max(0, idx - 40);
+  const end = Math.min(text.length, idx + max);
+  return text.slice(start, end).trim();
 }
 
 // IDs generados por Supabase
@@ -468,12 +525,31 @@ export default function NotebookPage() {
   const [freeNotesByDate, setFreeNotesByDate] =
     useState<Record<string, string>>({});
   const [freeNotesLoading, setFreeNotesLoading] = useState(false);
+  const [allFreeNotes, setAllFreeNotes] = useState<FreeNotebookNoteRow[]>([]);
 
   useEffect(() => {
     // reset cache when switching accounts
     setFreeNotesByDate({});
     loadedFreeNotesRef.current = {};
+    setAllFreeNotes([]);
   }, [activeAccountId]);
+
+  useEffect(() => {
+    if (planLoading || plan !== "advanced") return;
+    if (authLoading || !userId || accountsLoading || !activeAccountId) return;
+
+    let alive = true;
+    const loadAll = async () => {
+      const rows = await listFreeNotebookNotes(userId, activeAccountId);
+      if (!alive) return;
+      setAllFreeNotes(rows);
+    };
+
+    void loadAll();
+    return () => {
+      alive = false;
+    };
+  }, [planLoading, plan, authLoading, userId, accountsLoading, activeAccountId]);
 
   useEffect(() => {
     if (!selectedJournalDate) return;
@@ -650,36 +726,136 @@ export default function NotebookPage() {
   };
 
   const handleAskAi = async () => {
-    if (!selectedJournalEntry || !aiQuestion.trim()) return;
-    if (!selectedJournalDate) return;
+    if (!aiQuestion.trim()) return;
 
     setAiLoading(true);
     setAiAnswer(null);
 
     try {
-      const anyEntry = selectedJournalEntry as any;
-      const notes = anyEntry.notes || {};
+      const anyEntry = (selectedJournalEntry as any) ?? {};
+      const notes = parseNotesJson(anyEntry.notes) ?? (anyEntry.notes || {});
 
       const structuredNotes = {
-        premarket:
+        premarket: clampText(stripHtml(
           notes.premarket ||
-          notes.preMarket ||
-          notes.pre ||
-          anyEntry.premarket ||
-          "",
-        live:
+            notes.preMarket ||
+            notes.pre ||
+            anyEntry.premarket ||
+            ""
+        )),
+        live: clampText(stripHtml(
           notes.live ||
-          notes.session ||
-          notes.during ||
-          anyEntry.live ||
-          "",
-        post:
+            notes.session ||
+            notes.during ||
+            anyEntry.live ||
+            ""
+        )),
+        post: clampText(stripHtml(
           notes.post ||
-          notes.postMarket ||
-          notes.after ||
-          anyEntry.post ||
-          "",
+            notes.postMarket ||
+            notes.after ||
+            anyEntry.post ||
+            ""
+        )),
       };
+
+      const notebookNameById = new Map(nbData.notebooks.map((n) => [n.id, n.name]));
+      const sectionNameById = new Map(nbData.sections.map((s) => [s.id, s.name]));
+
+      const journalIndex = entries.flatMap((entry: any) => {
+        const parsed = parseNotesJson(entry?.notes);
+        const dateStr = String(entry?.date || "").slice(0, 10);
+        if (!dateStr) return [];
+
+        const pre = clampText(stripHtml(parsed?.premarket ?? entry?.premarket ?? ""));
+        const live = clampText(stripHtml(parsed?.live ?? entry?.live ?? ""));
+        const post = clampText(stripHtml(parsed?.post ?? entry?.post ?? ""));
+
+        const rows: any[] = [];
+        if (pre) rows.push({ source: "journal", date: dateStr, block: "premarket", text: pre });
+        if (live) rows.push({ source: "journal", date: dateStr, block: "inside", text: live });
+        if (post) rows.push({ source: "journal", date: dateStr, block: "after", text: post });
+        return rows;
+      });
+
+      const freeNotesIndex = (allFreeNotes?.length ? allFreeNotes : []).map((row) => ({
+        source: "free_notes",
+        date: row.entry_date,
+        block: "free",
+        text: clampText(stripHtml(row.content || "")),
+      })).filter((row) => row.text);
+
+      if (
+        selectedJournalDate &&
+        selectedFreeNotes &&
+        !freeNotesIndex.some((n) => n.date === selectedJournalDate)
+      ) {
+        freeNotesIndex.push({
+          source: "free_notes",
+          date: selectedJournalDate,
+          block: "free",
+          text: clampText(stripHtml(selectedFreeNotes)),
+        });
+      }
+
+      const customIndex = nbData.pages.map((p) => ({
+        source: "custom",
+        notebook: notebookNameById.get(p.notebook_id) || "Notebook",
+        section: p.section_id ? sectionNameById.get(p.section_id) || null : null,
+        page: p.title || "Untitled page",
+        text: clampText(stripHtml(p.content || "")),
+      })).filter((row) => row.text);
+
+      const notebookIndex = [
+        ...journalIndex,
+        ...freeNotesIndex,
+        ...customIndex,
+      ];
+
+      const tokens = tokenizeForSearch(aiQuestion);
+      const phrases = extractQuotedPhrases(aiQuestion);
+
+      const searchHits = notebookIndex
+        .map((item) => {
+          const hay = item.text.toLowerCase();
+          let score = 0;
+          for (const phrase of phrases) {
+            if (hay.includes(phrase.toLowerCase())) score += 10;
+          }
+          for (const token of tokens) {
+            if (hay.includes(token)) score += 1;
+          }
+          return { item, score };
+        })
+        .filter((x) => x.score > 0)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 12)
+        .map(({ item, score }) => {
+          const token = phrases[0] || tokens[0] || "";
+          const snippet = token ? buildSnippet(item.text, token) : item.text.slice(0, 160).trim();
+          let location = "";
+          if (item.source === "journal") {
+            const blockLabel =
+              item.block === "premarket"
+                ? "Premarket"
+                : item.block === "inside"
+                ? "Inside trade"
+                : item.block === "after"
+                ? "After market"
+                : "Notes";
+            location = `Journal ${item.date} · ${blockLabel}`;
+          } else if (item.source === "free_notes") {
+            location = `Journal ${item.date} · Free notebook`;
+          } else {
+            const parts = [
+              `Notebook "${item.notebook}"`,
+              item.section ? `Section "${item.section}"` : null,
+              `Page "${item.page}"`,
+            ].filter(Boolean);
+            location = parts.join(" > ");
+          }
+          return { location, snippet, source: item.source, score };
+        });
 
       const languageHint = detectLanguage(aiQuestion);
 
@@ -694,15 +870,28 @@ export default function NotebookPage() {
         body: JSON.stringify({
           question: aiQuestion,
           language: languageHint,
-          journal: {
-            date: anyEntry.date,
-            pnl: anyEntry.pnl || 0,
-            entries: anyEntry.entries ?? [],
-            exits: anyEntry.exits ?? [],
-            notes,
-            structuredNotes,
-            freeNotes: selectedFreeNotes,
-            rawEntry: anyEntry,
+          notebook: {
+            selectedDate: anyEntry.date || selectedJournalDate || null,
+            selectedNotes: structuredNotes,
+            selectedFreeNotes: clampText(stripHtml(selectedFreeNotes || "")),
+            selectedTags: combinedTags,
+            activePage: (() => {
+              const page = nbData.pages.find((p) => p.id === activePageId);
+              if (!page) return null;
+              return {
+                notebook: notebookNameById.get(page.notebook_id) || "Notebook",
+                section: page.section_id ? sectionNameById.get(page.section_id) || null : null,
+                page: page.title || "Untitled page",
+                text: clampText(stripHtml(page.content || "")),
+              };
+            })(),
+            indexStats: {
+              journalBlocks: journalIndex.length,
+              freeNotesBlocks: freeNotesIndex.length,
+              customPages: customIndex.length,
+              totalBlocks: notebookIndex.length,
+            },
+            searchHits,
           },
         }),
       });
@@ -1289,8 +1478,8 @@ export default function NotebookPage() {
                               </p>
                               <p className="text-sm text-emerald-50 mt-0.5">
                                 {L(
-                                  "Ask a question about this day. You can write in English or Spanish.",
-                                  "Haz una pregunta sobre este día. Puedes escribir en español o inglés."
+                                  "Ask a question about your notebook. It can also locate where something is written.",
+                                  "Haz una pregunta sobre tu notebook. También puede decirte dónde está algo escrito."
                                 )}
                               </p>
                             </div>
@@ -1315,7 +1504,7 @@ export default function NotebookPage() {
                             >
                               {aiLoading
                                 ? L("Thinking…", "Pensando…")
-                                : L("Ask AI about this page", "Preguntar al AI sobre esta página")}
+                                : L("Ask AI about your notebook", "Preguntar al AI sobre tu notebook")}
                             </button>
 
                             {aiAnswer && (

@@ -19,6 +19,7 @@ const NAV_GROUPS = (lang: "en" | "es") => {
         { href: "/help/workflows", label: isEs ? "Flujos de trabajo" : "Workflows" },
         { href: "/help/dashboard-widgets", label: isEs ? "Dashboard y widgets" : "Dashboard & Widgets" },
         { href: "/help/analytics", label: isEs ? "Analitica y rendimiento" : "Analytics & Performance" },
+        { href: "/help/audit", label: isEs ? "Auditoría" : "Audit" },
         { href: "/help/kpis", label: isEs ? "KPIs y metricas" : "KPIs & Metrics" },
       ],
     },

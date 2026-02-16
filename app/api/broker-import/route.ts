@@ -3,8 +3,22 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 import * as XLSX from "xlsx";
 import { createHash } from "crypto";
+import {
+  detectTosOrderHistoryFromRows,
+  parseTosOrderHistoryFromRows,
+} from "@/lib/brokers/tos/parseTosOrderHistory";
+import type { NormalizedOrderEvent } from "@/lib/brokers/types";
 
 export const runtime = "nodejs";
+
+async function resolveActiveAccountId(userId: string): Promise<string | null> {
+  const { data } = await supabaseAdmin
+    .from("user_preferences")
+    .select("active_account_id")
+    .eq("user_id", userId)
+    .maybeSingle();
+  return (data as any)?.active_account_id ?? null;
+}
 
 /**
  * Multi-broker import (Thinkorswim + Tradovate Fills)
@@ -55,6 +69,13 @@ function parseNumber(v: unknown): number {
 }
 function safeCost(v: unknown): number {
   return Math.abs(parseNumber(v));
+}
+function eventHashBase(parts: Array<string | number | null | undefined>) {
+  return sha256(
+    parts
+      .map((p) => (p == null ? "" : String(p)))
+      .join("|")
+  );
 }
 
 /* -------------------- CSV / Excel -------------------- */
@@ -507,9 +528,188 @@ export async function POST(req: NextRequest) {
     if (!isCsv && !isExcel)
       throw new Error("Unsupported file type. Please upload CSV / XLS / XLSX.");
 
+    const fileBuffer = Buffer.from(await file.arrayBuffer());
+    const fileText = isCsv ? fileBuffer.toString("utf8") : null;
     const rows = isCsv
-      ? rowsFromCsvText(await file.text())
-      : rowsFromExcelBuffer(Buffer.from(await file.arrayBuffer()));
+      ? rowsFromCsvText(fileText ?? "")
+      : rowsFromExcelBuffer(fileBuffer);
+
+    const rowsAsStrings = rows.map((r) => (r ?? []).map((c: any) => String(c ?? "")));
+
+    /* ============================================================
+       THINKORSWIM ORDER HISTORY (MVP, deterministic)
+    ============================================================ */
+    let orderHistorySummary: null | {
+      importId: string;
+      eventsSaved: number;
+      duplicates: number;
+      warnings: string[];
+      stats: { rows_found: number; rows_parsed: number };
+    } = null;
+
+    if (broker === "thinkorswim") {
+      const orderHistoryHeader = detectTosOrderHistoryFromRows(rowsAsStrings);
+      if (orderHistoryHeader) {
+        const sourceTzRaw = String(form.get("sourceTz") ?? form.get("source_tz") ?? "");
+        const sourceTz = sourceTzRaw.trim() || "America/New_York";
+        const accountId = (await resolveActiveAccountId(userId)) ?? null;
+        if (!accountId) {
+          throw new Error("No active account selected. Please choose an account first.");
+        }
+
+        const parsed = parseTosOrderHistoryFromRows(rowsAsStrings, { sourceTz });
+        const fileHash = createHash("sha256").update(fileBuffer).digest("hex");
+        const { data: existingDup } = await supabaseAdmin
+          .from("broker_imports")
+          .select("id")
+          .eq("user_id", userId)
+          .eq("account_id", accountId)
+          .eq("broker", "thinkorswim")
+          .eq("import_type", "order_history")
+          .eq("file_hash", fileHash)
+          .limit(1);
+        const duplicateImportId = existingDup?.[0]?.id ?? null;
+        const isDuplicateFile = Boolean(duplicateImportId);
+
+        const { data: importRow, error: importErr } = await supabaseAdmin
+          .from("broker_imports")
+          .insert({
+            user_id: userId,
+            account_id: accountId,
+            broker: "thinkorswim",
+            import_type: "order_history",
+            source_tz: sourceTz,
+            filename: file.name ?? null,
+            file_hash: fileHash,
+            meta: {
+              rows_found: parsed.stats.rows_found,
+              rows_parsed: parsed.stats.rows_parsed,
+              events_saved: 0,
+              warnings: parsed.warnings.slice(0, 12),
+              duplicate_of: duplicateImportId,
+            },
+          })
+          .select("id")
+          .single();
+
+        if (importErr || !importRow?.id) {
+          throw new Error(importErr?.message ?? "Failed to create broker import");
+        }
+
+        const importId = importRow.id as string;
+        const eventsWithHash = parsed.events.map((e: NormalizedOrderEvent) => ({
+          user_id: userId,
+          account_id: accountId,
+          broker: "thinkorswim",
+          import_id: importId,
+          date: e.date,
+          ts_utc: e.ts_utc,
+          ts_source: e.ts_source ?? null,
+          source_tz: e.source_tz ?? null,
+          event_type: e.event_type,
+          status: e.status ?? null,
+          side: e.side ?? null,
+          pos_effect: e.pos_effect ?? null,
+          qty: e.qty ?? null,
+          symbol: e.symbol ?? null,
+          instrument_key: e.instrument_key,
+          asset_kind: e.asset_kind ?? null,
+          order_type: e.order_type ?? null,
+          limit_price: e.limit_price ?? null,
+          stop_price: e.stop_price ?? null,
+          oco_id: e.oco_id ?? null,
+          replace_id: e.replace_id ?? null,
+          event_hash: eventHashBase([
+            userId,
+            accountId,
+            "thinkorswim",
+            e.event_type,
+            e.ts_utc,
+            e.status ?? "",
+            e.side ?? "",
+            e.pos_effect ?? "",
+            e.qty ?? "",
+            e.symbol ?? "",
+            e.instrument_key ?? "",
+            e.order_type ?? "",
+            e.limit_price ?? "",
+            e.stop_price ?? "",
+            e.oco_id ?? "",
+            e.replace_id ?? "",
+          ]),
+          raw: e.raw ?? {},
+        }));
+
+        let eventsSaved = 0;
+        let duplicatesCount = 0;
+
+        if (!isDuplicateFile) {
+          const uniqueMap = new Map<string, any>();
+          let duplicatesInFile = 0;
+          for (const row of eventsWithHash) {
+            if (!row.event_hash) continue;
+            if (uniqueMap.has(row.event_hash)) {
+              duplicatesInFile += 1;
+              continue;
+            }
+            uniqueMap.set(row.event_hash, row);
+          }
+
+          const uniqueRows = Array.from(uniqueMap.values());
+          const existingHashSet = new Set<string>();
+          const hashes = uniqueRows.map((r) => r.event_hash).filter(Boolean);
+
+          for (const part of chunk(hashes, 800)) {
+            const { data, error } = await supabaseAdmin
+              .from("broker_order_events")
+              .select("event_hash")
+              .eq("user_id", userId)
+              .eq("account_id", accountId)
+              .eq("broker", "thinkorswim")
+              .in("event_hash", part);
+            if (error) throw new Error(error.message ?? "Failed to query existing order events");
+            for (const it of data ?? []) {
+              const h = String((it as any).event_hash ?? "").trim();
+              if (h) existingHashSet.add(h);
+            }
+          }
+
+          const toInsert = uniqueRows.filter((r) => !existingHashSet.has(String(r.event_hash)));
+          duplicatesCount = duplicatesInFile + (uniqueRows.length - toInsert.length);
+
+          for (const part of chunk(toInsert, 800)) {
+            const { error } = await supabaseAdmin.from("broker_order_events").insert(part);
+            if (error) throw new Error(error.message ?? "Failed to insert order events");
+          }
+          eventsSaved = toInsert.length;
+        } else {
+          duplicatesCount = parsed.events.length;
+          eventsSaved = 0;
+        }
+
+        await supabaseAdmin
+          .from("broker_imports")
+          .update({
+            meta: {
+              rows_found: parsed.stats.rows_found,
+              rows_parsed: parsed.stats.rows_parsed,
+              events_saved: eventsSaved,
+              events_skipped: duplicatesCount,
+              warnings: parsed.warnings.slice(0, 12),
+              duplicate_of: duplicateImportId,
+            },
+          })
+          .eq("id", importId);
+
+        orderHistorySummary = {
+          importId,
+          eventsSaved,
+          duplicates: duplicatesCount,
+          warnings: parsed.warnings,
+          stats: parsed.stats,
+        };
+      }
+    }
 
     /* ============================================================
        TRADOVATE BRANCH
@@ -674,8 +874,44 @@ export async function POST(req: NextRequest) {
        THINKORSWIM BRANCH (your existing logic)
     ============================================================ */
     const detected = findHeaderRowThinkorswim(rows);
-    if (!detected)
+    if (!detected) {
+      if (orderHistorySummary) {
+        const durationMs = Date.now() - startedAt;
+        await supabaseAdmin
+          .from("trade_import_batches")
+          .update({
+            status: "success",
+            imported_rows: orderHistorySummary.eventsSaved,
+            updated_rows: 0,
+            duplicates: orderHistorySummary.duplicates,
+            order_history_events: orderHistorySummary.eventsSaved,
+            order_history_duplicates: orderHistorySummary.duplicates,
+            order_history_import_id: orderHistorySummary.importId,
+            finished_at: new Date().toISOString(),
+            duration_ms: durationMs,
+          })
+          .eq("id", batchId);
+
+        return NextResponse.json(
+          {
+            ok: true,
+            batchId,
+            broker,
+            inserted: orderHistorySummary.eventsSaved,
+            updated: 0,
+            duplicates: orderHistorySummary.duplicates,
+            orderHistory: orderHistorySummary,
+            message:
+              orderHistorySummary.eventsSaved > 0
+                ? `Order history import complete — ${orderHistorySummary.eventsSaved} events saved.`
+                : `Order history already imported — ${orderHistorySummary.duplicates} duplicate events skipped.`,
+          },
+          { status: 200 }
+        );
+      }
+
       throw new Error("Could not detect statement headers in this file.");
+    }
 
     const { headerRowIdx, cols } = detected;
     const dataRows = rows.slice(headerRowIdx + 1);
@@ -950,44 +1186,48 @@ export async function POST(req: NextRequest) {
     const duplicatesForHistory = tradeDuplicatesInFile + ledgerDuplicates;
 
     // 2) Finalize batch — SUCCESS
-    const { error: updErr } = await supabaseAdmin
-      .from("trade_import_batches")
-      .update({
-        status: "success",
-        imported_rows: tradeInserted,
-        updated_rows: tradeUpdated,
-        duplicates: duplicatesForHistory,
-        finished_at: new Date().toISOString(),
-        duration_ms: durationMs,
-      })
-      .eq("id", batchId);
+      const { error: updErr } = await supabaseAdmin
+        .from("trade_import_batches")
+        .update({
+          status: "success",
+          imported_rows: tradeInserted,
+          updated_rows: tradeUpdated,
+          duplicates: duplicatesForHistory,
+          order_history_events: orderHistorySummary?.eventsSaved ?? 0,
+          order_history_duplicates: orderHistorySummary?.duplicates ?? 0,
+          order_history_import_id: orderHistorySummary?.importId ?? null,
+          finished_at: new Date().toISOString(),
+          duration_ms: durationMs,
+        })
+        .eq("id", batchId);
 
-    if (updErr) {
+      if (updErr) {
+        return NextResponse.json(
+          {
+            ok: true,
+            batchId,
+            broker,
+            warning: `Import done but failed to finalize batch: ${updErr.message}`,
+            message: `Import complete — ${tradeInserted} new, ${tradeUpdated} updated, ${tradeDuplicatesInFile} duplicates skipped.`,
+          },
+          { status: 200 }
+        );
+      }
+
       return NextResponse.json(
         {
           ok: true,
           batchId,
           broker,
-          warning: `Import done but failed to finalize batch: ${updErr.message}`,
-          message: `Import complete — ${tradeInserted} new, ${tradeUpdated} updated, ${tradeDuplicatesInFile} duplicates skipped.`,
+          inserted: tradeInserted,
+          updated: tradeUpdated,
+          duplicates: duplicatesForHistory,
+          orderHistory: orderHistorySummary ?? undefined,
+          message:
+            `Import complete — ${tradeInserted} new, ${tradeUpdated} updated, ` +
+            `${tradeDuplicatesInFile} duplicates skipped. Ledger: ${ledgerInserted} new, ${ledgerUpdated} updated, ${ledgerDuplicates} duplicates skipped.`,
         },
         { status: 200 }
-      );
-    }
-
-    return NextResponse.json(
-      {
-        ok: true,
-        batchId,
-        broker,
-        inserted: tradeInserted,
-        updated: tradeUpdated,
-        duplicates: duplicatesForHistory,
-        message:
-          `Import complete — ${tradeInserted} new, ${tradeUpdated} updated, ` +
-          `${tradeDuplicatesInFile} duplicates skipped. Ledger: ${ledgerInserted} new, ${ledgerUpdated} updated, ${ledgerDuplicates} duplicates skipped.`,
-      },
-      { status: 200 }
     );
   } catch (e: any) {
     const durationMs = Date.now() - startedAt;

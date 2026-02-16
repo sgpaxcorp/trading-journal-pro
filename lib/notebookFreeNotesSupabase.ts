@@ -65,3 +65,27 @@ export async function upsertFreeNotebookNote(
   }
   return true;
 }
+
+export async function listFreeNotebookNotes(
+  userId: string,
+  accountId: string | null
+): Promise<FreeNotebookNoteRow[]> {
+  if (!userId) return [];
+
+  let q = supabaseBrowser
+    .from(FREE_NOTES_TABLE)
+    .select("entry_date, content, updated_at")
+    .eq("user_id", userId);
+
+  if (accountId) {
+    q = q.eq("account_id", accountId);
+  } else {
+    q = q.is("account_id", null);
+  }
+
+  const { data, error } = await q.order("entry_date", { ascending: true });
+  if (error || !Array.isArray(data)) {
+    return [];
+  }
+  return data as FreeNotebookNoteRow[];
+}

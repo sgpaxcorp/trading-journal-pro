@@ -10,6 +10,17 @@ export async function GET(req: NextRequest) {
   const symbol = searchParams.get("symbol");
   const interval = searchParams.get("interval") || DEFAULT_INTERVAL;
   const range = searchParams.get("range") || DEFAULT_RANGE;
+  const period1Raw = searchParams.get("period1");
+  const period2Raw = searchParams.get("period2");
+
+  const period1 = period1Raw ? Number(period1Raw) : null;
+  const period2 = period2Raw ? Number(period2Raw) : null;
+  const hasPeriodRange =
+    Number.isFinite(period1) &&
+    Number.isFinite(period2) &&
+    period1 !== null &&
+    period2 !== null &&
+    period2 > period1;
 
   if (!symbol) {
     return NextResponse.json(
@@ -18,9 +29,18 @@ export async function GET(req: NextRequest) {
     );
   }
 
+  const query = new URLSearchParams();
+  query.set("interval", interval);
+  if (hasPeriodRange) {
+    query.set("period1", String(Math.floor(period1 as number)));
+    query.set("period2", String(Math.floor(period2 as number)));
+  } else {
+    query.set("range", range);
+  }
+
   const yahooUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(
     symbol
-  )}?interval=${interval}&range=${range}`;
+  )}?${query.toString()}`;
 
   try {
     const res = await fetch(yahooUrl, {

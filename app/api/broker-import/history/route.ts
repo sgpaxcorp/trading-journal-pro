@@ -22,7 +22,7 @@ export async function GET(req: NextRequest) {
     const { data, error } = await supabaseAdmin
       .from("trade_import_batches")
       .select(
-        "id, broker, filename, comment, status, imported_rows, updated_rows, duplicates, started_at, finished_at, duration_ms, error"
+        "id, broker, filename, comment, status, imported_rows, updated_rows, duplicates, order_history_events, order_history_duplicates, order_history_import_id, started_at, finished_at, duration_ms, error"
       )
       .eq("user_id", userId)
       .order("started_at", { ascending: false })
