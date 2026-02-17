@@ -30,6 +30,12 @@ const PRICE_IDS: Record<PlanId, Record<BillingCycle, string>> = {
   },
 };
 const OPTION_FLOW_PRICE = process.env.STRIPE_PRICE_OPTIONFLOW_MONTHLY ?? "";
+const TESTER_PROMO_CODES = new Set(
+  String(process.env.STRIPE_TESTER_PROMO_CODES ?? "")
+    .split(",")
+    .map((v) => v.trim().toUpperCase())
+    .filter(Boolean)
+);
 
 function normalizePartnerCode(raw: unknown) {
   return String(raw ?? "")
@@ -37,6 +43,96 @@ function normalizePartnerCode(raw: unknown) {
     .toUpperCase()
     .replace(/[^A-Z0-9_-]/g, "")
     .slice(0, 24);
+}
+
+function normalizePromoCode(raw: unknown) {
+  return String(raw ?? "")
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, "")
+    .slice(0, 64);
+}
+
+function isTruthy(value: unknown) {
+  const v = String(value ?? "").trim().toLowerCase();
+  return v === "1" || v === "true" || v === "yes";
+}
+
+function isFreeCoupon(coupon: Stripe.Coupon) {
+  return Number(coupon.percent_off ?? 0) >= 100;
+}
+
+type ResolvedDiscount = {
+  discounts: Stripe.Checkout.SessionCreateParams.Discount[];
+  couponId: string | null;
+  promotionCodeId: string | null;
+  normalizedCode: string;
+  isTesterAllAccess: boolean;
+  isFree: boolean;
+};
+
+async function resolveStripeDiscount(inputCode: string) {
+  const normalizedCode = normalizePromoCode(inputCode);
+  if (!normalizedCode) return null;
+
+  const promoList = await stripe.promotionCodes.list({
+    code: normalizedCode,
+    active: true,
+    limit: 10,
+  });
+
+  const promo = promoList.data.find(
+    (p) =>
+      String(p.code ?? "")
+        .trim()
+        .toUpperCase() === normalizedCode
+  );
+
+  if (promo) {
+    const promoCouponRef = promo.promotion?.coupon;
+    const promoCoupon =
+      typeof promoCouponRef === "string"
+        ? await stripe.coupons.retrieve(promoCouponRef)
+        : promoCouponRef;
+
+    if (!promoCoupon?.valid) {
+      throw new Error("This coupon is no longer valid.");
+    }
+
+    const promoTesterFlag =
+      isTruthy((promo.metadata as any)?.grant_all_access) ||
+      isTruthy((promo.metadata as any)?.tester_all_access) ||
+      isTruthy((promoCoupon.metadata as any)?.grant_all_access) ||
+      isTruthy((promoCoupon.metadata as any)?.tester_all_access);
+
+    return {
+      discounts: [{ promotion_code: promo.id }] as Stripe.Checkout.SessionCreateParams.Discount[],
+      couponId: promoCoupon.id,
+      promotionCodeId: promo.id,
+      normalizedCode,
+      isTesterAllAccess: TESTER_PROMO_CODES.has(normalizedCode) || promoTesterFlag,
+      isFree: isFreeCoupon(promoCoupon),
+    } as ResolvedDiscount;
+  }
+
+  // Backward-compatible fallback: allow raw coupon IDs.
+  const coupon = await stripe.coupons.retrieve(normalizedCode);
+  if (!coupon.valid) {
+    throw new Error("This coupon is no longer valid.");
+  }
+
+  const couponTesterFlag =
+    isTruthy((coupon.metadata as any)?.grant_all_access) ||
+    isTruthy((coupon.metadata as any)?.tester_all_access);
+
+  return {
+    discounts: [{ coupon: coupon.id }] as Stripe.Checkout.SessionCreateParams.Discount[],
+    couponId: coupon.id,
+    promotionCodeId: null,
+    normalizedCode,
+    isTesterAllAccess: TESTER_PROMO_CODES.has(normalizedCode) || couponTesterFlag,
+    isFree: isFreeCoupon(coupon),
+  } as ResolvedDiscount;
 }
 
 export async function POST(req: NextRequest) {
@@ -73,26 +169,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Invalid billing cycle" }, { status: 400 });
     }
     const finalBillingCycle = billingCycle ?? "monthly";
-
-    const priceId = PRICE_IDS[planId][finalBillingCycle];
-    if (!priceId) {
-      console.error(
-        "[CHECKOUT] Missing priceId for plan",
-        planId,
-        "cycle=",
-        finalBillingCycle
-      );
-      return NextResponse.json(
-        { error: "Price ID not configured for this plan" },
-        { status: 500 }
-      );
-    }
-    if (addonOptionFlow && !OPTION_FLOW_PRICE) {
-      return NextResponse.json(
-        { error: "Option Flow price ID not configured" },
-        { status: 500 }
-      );
-    }
 
     const origin = resolveAppUrl(req);
 
@@ -150,26 +226,35 @@ export async function POST(req: NextRequest) {
     }
 
     // =====================================================
-    // Optional: coupon logic (using Stripe "coupon" objects)
+    // Optional: coupon / promotion code logic
     // =====================================================
     let discounts:
       | Stripe.Checkout.SessionCreateParams.Discount[]
       | undefined;
 
-    const couponCode = couponCodeRaw?.trim();
+    let effectivePlanId: PlanId = planId;
+    let effectiveAddonOptionFlow = addonOptionFlow;
+    let promoDiscountInfo: ResolvedDiscount | null = null;
+
+    const couponCode = normalizePromoCode(couponCodeRaw);
     if (couponCode) {
       try {
-        // Aquí asumimos que couponCode == ID del cupón en Stripe (ej: "SOTERO")
-        const coupon = await stripe.coupons.retrieve(couponCode);
+        promoDiscountInfo = await resolveStripeDiscount(couponCode);
+        discounts = promoDiscountInfo?.discounts;
 
-        if (!coupon.valid) {
-          return NextResponse.json(
-            { error: "This coupon is no longer valid." },
-            { status: 400 }
-          );
+        if (promoDiscountInfo?.isTesterAllAccess) {
+          if (!promoDiscountInfo.isFree) {
+            return NextResponse.json(
+              {
+                error:
+                  "Tester promo code is configured but it is not 100% off. Please update the Stripe promo code.",
+              },
+              { status: 400 }
+            );
+          }
+          effectivePlanId = "advanced";
+          effectiveAddonOptionFlow = true;
         }
-
-        discounts = [{ coupon: coupon.id }];
       } catch (err) {
         console.error("[CHECKOUT] Invalid coupon code", couponCode, err);
         return NextResponse.json(
@@ -177,6 +262,26 @@ export async function POST(req: NextRequest) {
           { status: 400 }
         );
       }
+    }
+
+    const priceId = PRICE_IDS[effectivePlanId][finalBillingCycle];
+    if (!priceId) {
+      console.error(
+        "[CHECKOUT] Missing priceId for plan",
+        effectivePlanId,
+        "cycle=",
+        finalBillingCycle
+      );
+      return NextResponse.json(
+        { error: "Price ID not configured for this plan" },
+        { status: 500 }
+      );
+    }
+    if (effectiveAddonOptionFlow && !OPTION_FLOW_PRICE) {
+      return NextResponse.json(
+        { error: "Option Flow price ID not configured" },
+        { status: 500 }
+      );
     }
 
     // =====================================================
@@ -188,7 +293,7 @@ export async function POST(req: NextRequest) {
         quantity: 1,
       },
     ];
-    if (addonOptionFlow) {
+    if (effectiveAddonOptionFlow) {
       lineItems.push({
         price: OPTION_FLOW_PRICE,
         quantity: 1,
@@ -200,25 +305,35 @@ export async function POST(req: NextRequest) {
       customer: customerId, // ✅ usamos solo customer
       line_items: lineItems,
       discounts,
-      allow_promotion_codes: false,
+      allow_promotion_codes: true,
       success_url: `${origin}/confirmed?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${origin}/pricing`,
       metadata: {
         supabaseUserId: userId,
-        planId,
+        planId: effectivePlanId,
+        requestedPlanId: planId,
         billingCycle: finalBillingCycle,
-        couponCode: couponCode ?? "",
-        addonOptionFlow: addonOptionFlow ? "true" : "false",
+        couponCode,
+        couponId: promoDiscountInfo?.couponId ?? "",
+        promotionCodeId: promoDiscountInfo?.promotionCodeId ?? "",
+        addonOptionFlow: effectiveAddonOptionFlow ? "true" : "false",
+        testerAllAccess:
+          promoDiscountInfo?.isTesterAllAccess ? "true" : "false",
         partnerCode: partnerCode || "",
         partnerUserId: partnerUserId ?? "",
       },
       subscription_data: {
         metadata: {
           supabaseUserId: userId,
-          planId,
+          planId: effectivePlanId,
+          requestedPlanId: planId,
           billingCycle: finalBillingCycle,
-          couponCode: couponCode ?? "",
-          addonOptionFlow: addonOptionFlow ? "true" : "false",
+          couponCode,
+          couponId: promoDiscountInfo?.couponId ?? "",
+          promotionCodeId: promoDiscountInfo?.promotionCodeId ?? "",
+          addonOptionFlow: effectiveAddonOptionFlow ? "true" : "false",
+          testerAllAccess:
+            promoDiscountInfo?.isTesterAllAccess ? "true" : "false",
           partnerCode: partnerCode || "",
           partnerUserId: partnerUserId ?? "",
         },

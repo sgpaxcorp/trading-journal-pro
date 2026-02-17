@@ -91,6 +91,16 @@ function isAddonPurchase(params: { addonKey?: string | null; priceId?: string | 
   return addonKey === ADDON_KEY || (!!ADDON_PRICE_ID && priceId === ADDON_PRICE_ID);
 }
 
+function isTruthy(value: unknown) {
+  const v = String(value ?? "").trim().toLowerCase();
+  return v === "1" || v === "true" || v === "yes";
+}
+
+function hasAddonLineItem(subscription?: Stripe.Subscription | null) {
+  if (!subscription || !ADDON_PRICE_ID) return false;
+  return subscription.items.data.some((item) => item.price?.id === ADDON_PRICE_ID);
+}
+
 function normalizeBillingCycle(raw?: string | null): "monthly" | "annual" | null {
   const v = String(raw ?? "").trim().toLowerCase();
   if (v === "monthly" || v === "month") return "monthly";
@@ -204,6 +214,7 @@ export async function POST(req: NextRequest) {
           (session.metadata?.userId as string | undefined);
 
         const sessionAddonKey = session.metadata?.addonKey as string | undefined;
+        const sessionAddonOptionFlow = isTruthy(session.metadata?.addonOptionFlow);
 
         // 🔹 Tomar plan de varias posibles keys
         let planIdMeta =
@@ -249,9 +260,16 @@ export async function POST(req: NextRequest) {
           });
         }
 
+        if (!subscription && typeof subscriptionId === "string") {
+          subscription = await stripe.subscriptions.retrieve(subscriptionId);
+        }
+
         const subAddonKey =
           subscription?.metadata?.addonKey as string | undefined;
         const subPriceId = subscription?.items?.data?.[0]?.price?.id ?? null;
+        const subAddonOptionFlow = isTruthy(subscription?.metadata?.addonOptionFlow);
+        const includesOptionFlowAddon =
+          sessionAddonOptionFlow || subAddonOptionFlow || hasAddonLineItem(subscription);
 
         // ✅ Add-on flow (Option Flow)
         if (isAddonPurchase({ addonKey: sessionAddonKey || subAddonKey, priceId: subPriceId })) {
@@ -324,6 +342,20 @@ export async function POST(req: NextRequest) {
                 "[WEBHOOK] profiles updated successfully by email",
                 email
               );
+
+              if (includesOptionFlowAddon) {
+                const resolvedUserId =
+                  (await resolveUserIdByEmail(email)) || (await resolveUserIdByCustomer(customerId));
+                if (resolvedUserId) {
+                  await upsertEntitlement({
+                    userId: resolvedUserId,
+                    status: "active",
+                    stripeCustomerId: customerId,
+                    stripeSubscriptionId: subscriptionId ?? null,
+                    stripePriceId: ADDON_PRICE_ID || null,
+                  });
+                }
+              }
 
               // 🔔 Enviar emails DESPUÉS de marcar la suscripción como activa
               try {
@@ -427,6 +459,16 @@ export async function POST(req: NextRequest) {
           );
         }
 
+        if (includesOptionFlowAddon) {
+          await upsertEntitlement({
+            userId,
+            status: "active",
+            stripeCustomerId: customerId,
+            stripeSubscriptionId: subscriptionId ?? null,
+            stripePriceId: ADDON_PRICE_ID || null,
+          });
+        }
+
         // 3) Enviar emails si tenemos email
         if (email) {
           try {
@@ -461,6 +503,11 @@ export async function POST(req: NextRequest) {
         const status = subscription.status;
         const subPriceId = subscription.items?.data?.[0]?.price?.id ?? null;
         const addonKey = subscription.metadata?.addonKey as string | undefined;
+        const standaloneAddon = isAddonPurchase({ addonKey, priceId: subPriceId });
+        const includesOptionFlowAddon =
+          standaloneAddon ||
+          isTruthy(subscription.metadata?.addonOptionFlow) ||
+          hasAddonLineItem(subscription);
 
         console.log(
           "[WEBHOOK] customer.subscription.deleted:",
@@ -468,7 +515,7 @@ export async function POST(req: NextRequest) {
           status
         );
 
-        if (isAddonPurchase({ addonKey, priceId: subPriceId })) {
+        if (standaloneAddon) {
           const resolvedUserId =
             (subscription.metadata?.supabaseUserId as string | undefined) ||
             (subscription.metadata?.userId as string | undefined) ||
@@ -525,6 +572,22 @@ export async function POST(req: NextRequest) {
           }
         }
 
+        if (includesOptionFlowAddon) {
+          const resolvedUserId =
+            (subscription.metadata?.supabaseUserId as string | undefined) ||
+            (subscription.metadata?.userId as string | undefined) ||
+            (await resolveUserIdByCustomer(customerId));
+          if (resolvedUserId) {
+            await upsertEntitlement({
+              userId: resolvedUserId,
+              status: "canceled",
+              stripeCustomerId: customerId,
+              stripeSubscriptionId: subscription.id,
+              stripePriceId: ADDON_PRICE_ID || null,
+            });
+          }
+        }
+
         break;
       }
 
@@ -534,6 +597,11 @@ export async function POST(req: NextRequest) {
         const status = subscription.status;
         const subPriceId = subscription.items?.data?.[0]?.price?.id ?? null;
         const addonKey = subscription.metadata?.addonKey as string | undefined;
+        const standaloneAddon = isAddonPurchase({ addonKey, priceId: subPriceId });
+        const includesOptionFlowAddon =
+          standaloneAddon ||
+          isTruthy(subscription.metadata?.addonOptionFlow) ||
+          hasAddonLineItem(subscription);
 
         console.log(
           "[WEBHOOK] customer.subscription.updated:",
@@ -541,7 +609,7 @@ export async function POST(req: NextRequest) {
           status
         );
 
-        if (isAddonPurchase({ addonKey, priceId: subPriceId })) {
+        if (standaloneAddon) {
           const resolvedUserId =
             (subscription.metadata?.supabaseUserId as string | undefined) ||
             (subscription.metadata?.userId as string | undefined) ||
@@ -601,6 +669,22 @@ export async function POST(req: NextRequest) {
                 metaError
               );
             }
+          }
+        }
+
+        if (includesOptionFlowAddon) {
+          const resolvedUserId =
+            (subscription.metadata?.supabaseUserId as string | undefined) ||
+            (subscription.metadata?.userId as string | undefined) ||
+            (await resolveUserIdByCustomer(customerId));
+          if (resolvedUserId) {
+            await upsertEntitlement({
+              userId: resolvedUserId,
+              status,
+              stripeCustomerId: customerId,
+              stripeSubscriptionId: subscription.id,
+              stripePriceId: ADDON_PRICE_ID || null,
+            });
           }
         }
 

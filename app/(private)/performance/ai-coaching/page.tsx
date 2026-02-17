@@ -126,6 +126,12 @@ type PlanSnapshot = {
   planStartDate: string | null;
 };
 
+type AccountSeriesTotals = {
+  tradingPnl: number;
+  cashflowNet: number;
+  currentBalance: number;
+};
+
 type AnalyticsSummary = {
   base: {
     totalSessions: number;
@@ -577,12 +583,11 @@ function dateIsoFromAny(v: any): string | null {
 
 function planStartIsoFromPlan(plan: GrowthPlanRow | null): string | null {
   if (!plan) return null;
-  // Use the newest of created_at / updated_at as "effective plan start".
-  // This avoids stale rows or migrations that keep an old created_at.
+  // Keep this consistent with /api/account/series and Balance Chart.
+  // Plan start is anchored to created_at; fallback to updated_at only if needed.
   const c = dateIsoFromAny(plan.created_at);
   const u = dateIsoFromAny(plan.updated_at);
-  if (c && u) return c > u ? c : u;
-  return u || c || null;
+  return c || u || null;
 }
 
 function formatDayLabel(dow: string) {
@@ -1424,6 +1429,7 @@ function AiCoachingPageInner() {
   const [entries, setEntries] = useState<JournalEntry[]>([]);
   const [growthPlan, setGrowthPlan] = useState<GrowthPlanRow | null>(null);
   const [cashflows, setCashflows] = useState<Cashflow[]>([]);
+  const [accountSeriesTotals, setAccountSeriesTotals] = useState<AccountSeriesTotals | null>(null);
   const [tradesByDate, setTradesByDate] = useState<Record<string, TradesPayload>>({});
   const [tradeRows, setTradeRows] = useState<JournalTradeRow[]>([]);
   const [fullSnapshot, setFullSnapshot] = useState<AiCoachSnapshot | null>(null);
@@ -1886,6 +1892,36 @@ function AiCoachingPageInner() {
         if (!alive) return;
         setCashflows(cfs || []);
 
+        // 5.1) Authoritative account totals (same source as Balance Chart)
+        try {
+          const { data: sessionData } = await supabaseBrowser.auth.getSession();
+          const token = sessionData?.session?.access_token;
+          if (token && activeAccountId) {
+            const res = await fetch(`/api/account/series?accountId=${encodeURIComponent(activeAccountId)}`, {
+              headers: { Authorization: `Bearer ${token}` },
+            });
+            if (res.ok) {
+              const body = await res.json();
+              const totals = body?.totals;
+              if (totals) {
+                setAccountSeriesTotals({
+                  tradingPnl: toNum(totals.tradingPnl, 0),
+                  cashflowNet: toNum(totals.cashflowNet, 0),
+                  currentBalance: toNum(totals.currentBalance, 0),
+                });
+              } else {
+                setAccountSeriesTotals(null);
+              }
+            } else {
+              setAccountSeriesTotals(null);
+            }
+          } else {
+            setAccountSeriesTotals(null);
+          }
+        } catch {
+          setAccountSeriesTotals(null);
+        }
+
         // 6) Full snapshot (platform-wide)
         const full = userId ? await buildAiCoachSnapshot(userId, activeAccountId) : null;
         if (!alive) return;
@@ -1905,6 +1941,7 @@ function AiCoachingPageInner() {
         setEntries([]);
         setGrowthPlan(null);
         setCashflows([]);
+        setAccountSeriesTotals(null);
         setFullSnapshot(null);
         setGamification(null);
       } finally {
@@ -2017,9 +2054,12 @@ function AiCoachingPageInner() {
 
     const filtered = planStartDate ? entries.filter((e: any) => String(e.date || "") >= planStartDate) : entries;
 
-    const tradingPnlSincePlan = filtered.reduce((sum, e: any) => sum + sessionNetPnl(e), 0);
+    const tradingPnlFromEntries = filtered.reduce((sum, e: any) => sum + sessionNetPnl(e), 0);
+    const netCashflowsFromRows = (cashflows || []).reduce((sum, cf) => sum + signedCashflowAmount(cf), 0);
 
-    const netCashflows = (cashflows || []).reduce((sum, cf) => sum + signedCashflowAmount(cf), 0);
+    // Prefer account-series totals so this card matches Balance Chart exactly.
+    const tradingPnlSincePlan = accountSeriesTotals?.tradingPnl ?? tradingPnlFromEntries;
+    const netCashflows = accountSeriesTotals?.cashflowNet ?? netCashflowsFromRows;
 
     const baselineProfitTarget = targetBalance - startingBalance;
 
@@ -2027,7 +2067,7 @@ function AiCoachingPageInner() {
     const effectiveStartingBalance = startingBalance + netCashflows;
     const effectiveTargetBalance = effectiveStartingBalance + baselineProfitTarget;
 
-    const currentBalance = effectiveStartingBalance + tradingPnlSincePlan;
+    const currentBalance = accountSeriesTotals?.currentBalance ?? (effectiveStartingBalance + tradingPnlSincePlan);
 
     const progressPct =
       baselineProfitTarget > 0
@@ -2059,7 +2099,7 @@ function AiCoachingPageInner() {
 
       planStartDate,
     };
-  }, [growthPlan, entries, cashflows, planStartIso]);
+  }, [growthPlan, entries, cashflows, planStartIso, accountSeriesTotals]);
 
   const analyticsSnapshot = useMemo(() => {
     const startingBalance = planSnapshot?.effectiveStartingBalance ?? toNum(growthPlan?.starting_balance, 0);

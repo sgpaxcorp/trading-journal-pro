@@ -551,7 +551,6 @@ export default function DailyJournalPage() {
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState("");
   const [autoSaveState, setAutoSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
-  const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autoSaveReadyRef = useRef(false);
   const autoSaveIgnoreNextRef = useRef(false);
   const [autoSaveDirty, setAutoSaveDirty] = useState(false);
@@ -1365,6 +1364,7 @@ export default function DailyJournalPage() {
     }
 
     setSaving(true);
+    setAutoSaveState("saving");
     if (!opts?.silent) {
       setMsg("");
     }
@@ -1434,6 +1434,9 @@ export default function DailyJournalPage() {
       setNotesExtra(nextExtra);
       setPnlFromDb(Number(pnlToSave.toFixed(2)));
       setPnlMode("db");
+      setAutoSaveDirty(false);
+      setAutoSaveState("saved");
+      setTimeout(() => setAutoSaveState("idle"), 1500);
 
       if (!opts?.silent) {
         setMsg(L("Saved ✅", "Guardado ✅"));
@@ -1452,6 +1455,7 @@ export default function DailyJournalPage() {
       return true;
     } catch (err: any) {
       console.error(err);
+      setAutoSaveState("error");
       if (!opts?.silent) {
         setMsg(err?.message ?? L("Save failed", "Error al guardar"));
       }
@@ -1468,7 +1472,7 @@ export default function DailyJournalPage() {
   };
 
   /* =========================================================
-     Auto-save (debounced)
+     Manual save dirty tracking (auto-save disabled)
   ========================================================= */
 
   useEffect(() => {
@@ -1478,34 +1482,8 @@ export default function DailyJournalPage() {
       return;
     }
     setAutoSaveDirty(true);
+    setAutoSaveState("idle");
   }, [premarketHtml, insideHtml, afterHtml, entryTrades, exitTrades, entry, notesExtra]);
-
-  useEffect(() => {
-    if (!autoSaveReadyRef.current) return;
-    if (!autoSaveDirty) return;
-    if (!userId || !activeAccountId) return;
-    if (saving) return;
-
-    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
-    setAutoSaveState("saving");
-
-    autoSaveTimerRef.current = setTimeout(() => {
-      void (async () => {
-        const ok = await handleSave({ silent: true });
-        if (ok) {
-          setAutoSaveState("saved");
-          setAutoSaveDirty(false);
-          setTimeout(() => setAutoSaveState("idle"), 1500);
-        } else {
-          setAutoSaveState("error");
-        }
-      })();
-    }, 10000);
-
-    return () => {
-      if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
-    };
-  }, [autoSaveDirty, userId, activeAccountId, saving]);
 
   /* =========================================================
      Import / Sync
@@ -2376,13 +2354,15 @@ export default function DailyJournalPage() {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="text-[11px] text-slate-500">
               {msg && <span className="text-emerald-400 mr-3">{msg}</span>}
-              {autoSaveState !== "idle" && (
+              {(saving || autoSaveDirty || autoSaveState === "saved" || autoSaveState === "error") && (
                 <span className="text-slate-400 mr-3">
-                  {autoSaveState === "saving"
-                    ? L("Auto-saving…", "Auto-guardando…")
+                  {saving
+                    ? L("Saving…", "Guardando…")
+                    : autoSaveDirty
+                    ? L("Unsaved changes", "Cambios sin guardar")
                     : autoSaveState === "saved"
-                    ? L("Auto-saved", "Auto-guardado")
-                    : L("Auto-save failed", "Fallo al auto-guardar")}
+                    ? L("Saved", "Guardado")
+                    : L("Save failed", "Fallo al guardar")}
                 </span>
               )}
               {L("Your structure, your rules.", "Tu estructura, tus reglas.")}
@@ -2472,8 +2452,10 @@ export default function DailyJournalPage() {
             <div className="mr-0 sm:mr-2">
               <span
                 className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[11px] ${
-                  autoSaveState === "saving"
+                  saving || autoSaveState === "saving"
                     ? "border-emerald-400/60 text-emerald-300 bg-emerald-500/10"
+                    : autoSaveDirty
+                    ? "border-amber-400/60 text-amber-300 bg-amber-500/10"
                     : autoSaveState === "saved"
                     ? "border-sky-400/60 text-sky-300 bg-sky-500/10"
                     : autoSaveState === "error"
@@ -2483,8 +2465,10 @@ export default function DailyJournalPage() {
               >
                 <span
                   className={`h-2 w-2 rounded-full ${
-                    autoSaveState === "saving"
+                    saving || autoSaveState === "saving"
                       ? "bg-emerald-300 animate-pulse"
+                      : autoSaveDirty
+                      ? "bg-amber-300"
                       : autoSaveState === "saved"
                       ? "bg-sky-300"
                       : autoSaveState === "error"
@@ -2492,13 +2476,15 @@ export default function DailyJournalPage() {
                       : "bg-slate-500"
                   }`}
                 />
-                {autoSaveState === "saving"
-                  ? L("Auto-saving…", "Auto-guardando…")
+                {saving || autoSaveState === "saving"
+                  ? L("Saving…", "Guardando…")
+                  : autoSaveDirty
+                  ? L("Unsaved changes", "Cambios sin guardar")
                   : autoSaveState === "saved"
-                  ? L("Auto-saved", "Auto-guardado")
+                  ? L("Saved", "Guardado")
                   : autoSaveState === "error"
-                  ? L("Auto-save failed", "Fallo al auto-guardar")
-                  : L("Auto-save on", "Auto-guardado activo")}
+                  ? L("Save failed", "Fallo al guardar")
+                  : L("Manual save mode", "Modo guardado manual")}
               </span>
             </div>
             <button
@@ -2514,6 +2500,14 @@ export default function DailyJournalPage() {
             >
               {L("← Back to dashboard", "← Volver al dashboard")}
             </Link>
+            <button
+              type="button"
+              onClick={() => void handleSave()}
+              disabled={saving}
+              className="shrink-0 px-3 py-2 rounded-xl bg-emerald-400 text-slate-950 text-sm font-semibold hover:bg-emerald-300 transition disabled:opacity-50"
+            >
+              {saving ? L("Saving…", "Guardando…") : L("Save", "Guardar")}
+            </button>
           </div>
         </div>
 

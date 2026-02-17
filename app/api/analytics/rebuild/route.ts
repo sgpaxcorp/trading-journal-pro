@@ -16,8 +16,52 @@ const DATE_COL = "date";                    // <- "YYYY-MM-DD"
 const PNL_COL = "pnl";                      // <- numeric
 const NOTES_COL = "notes";                  // <- string JSON {entries:[], exits:[]}
 const TAGS_COL = "tags";                    // <- text[] opcional
-const PLAN_COL = "respectedPlan";           // <- boolean opcional (ajusta si es respected_plan)
+const PLAN_COL = "respected_plan";          // <- boolean opcional (ajusta si es respected_plan)
+const LEGACY_PLAN_COL = "respectedPlan";
+const EMOTION_COL = "emotion";
 const EMOTIONS_COL = "emotions";            // <- text[] opcional
+
+function normalizeStringArray(raw: unknown): string[] | null {
+  if (raw == null) return null;
+  if (Array.isArray(raw)) return raw.map((x) => String(x).trim()).filter(Boolean);
+  if (typeof raw === "string") {
+    const trimmed = raw.trim();
+    if (!trimmed) return null;
+    if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (Array.isArray(parsed)) {
+          return parsed.map((x) => String(x).trim()).filter(Boolean);
+        }
+      } catch {
+        // fall through
+      }
+    }
+    if (trimmed.includes(",")) {
+      return trimmed.split(",").map((x) => x.trim()).filter(Boolean);
+    }
+    return [trimmed];
+  }
+  return null;
+}
+
+function extractRespectedPlan(row: any): boolean | null {
+  const raw =
+    row?.[PLAN_COL] ??
+    row?.[LEGACY_PLAN_COL] ??
+    row?.plan_respected ??
+    row?.planRespected ??
+    row?.followedPlan ??
+    row?.respectedPlan ??
+    row?.respected_plan;
+  if (raw == null) return null;
+  return Boolean(raw);
+}
+
+function extractEmotions(row: any): string[] | null {
+  const raw = row?.[EMOTIONS_COL] ?? row?.[EMOTION_COL] ?? row?.emotional_state ?? row?.emotions;
+  return normalizeStringArray(raw);
+}
 
 function safeUpper(s: string) {
   return (s || "").trim().toUpperCase();
@@ -39,6 +83,12 @@ function normalizeSide(s: any): TradeRow["side"] {
 }
 
 function parseNotesTrades(notesRaw: unknown): { entries: any[]; exits: any[] } {
+  if (notesRaw && typeof notesRaw === "object") {
+    const parsed = notesRaw as any;
+    const entries = Array.isArray(parsed?.entries) ? parsed.entries : [];
+    const exits = Array.isArray(parsed?.exits) ? parsed.exits : [];
+    return { entries, exits };
+  }
   if (typeof notesRaw !== "string") return { entries: [], exits: [] };
   try {
     const parsed = JSON.parse(notesRaw);
@@ -74,7 +124,7 @@ async function fetchSessions(userId: string): Promise<SessionRow[]> {
   // Ajusta el select según tu tabla real
   const { data, error } = await supabaseAdmin
     .from(JOURNAL_TABLE)
-    .select(`${DATE_COL}, ${PNL_COL}, ${NOTES_COL}, ${TAGS_COL}, ${PLAN_COL}, ${EMOTIONS_COL}`)
+    .select("*")
     .eq(USER_ID_COL, userId)
     .order(DATE_COL, { ascending: true });
 
@@ -90,11 +140,10 @@ async function fetchSessions(userId: string): Promise<SessionRow[]> {
     const ent = (entries || []).map(toTradeRow).filter(Boolean) as TradeRow[];
     const ex = (exits || []).map(toTradeRow).filter(Boolean) as TradeRow[];
 
-    const tags = Array.isArray(r[TAGS_COL]) ? (r[TAGS_COL] as string[]) : null;
-    const emotions = Array.isArray(r[EMOTIONS_COL]) ? (r[EMOTIONS_COL] as string[]) : null;
+    const tags = normalizeStringArray(r[TAGS_COL]) ?? null;
+    const emotions = extractEmotions(r);
 
-    const respectedPlan =
-      r[PLAN_COL] == null ? null : Boolean(r[PLAN_COL]);
+    const respectedPlan = extractRespectedPlan(r);
 
     return {
       date,
