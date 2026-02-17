@@ -25,6 +25,18 @@ export default function PricingPage() {
   const [loadingPlan, setLoadingPlan] = useState<PlanId | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [billingCycle, setBillingCycle] = useState<"monthly" | "annual">("monthly");
+  const [partnerCode, setPartnerCode] = useState("");
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const code = String(params.get("partner") ?? params.get("ref") ?? "")
+      .trim()
+      .toUpperCase()
+      .replace(/[^A-Z0-9_-]/g, "")
+      .slice(0, 24);
+    setPartnerCode(code);
+  }, []);
 
   const PRICES = {
     core: { monthly: 14.99, annual: 149.99 },
@@ -89,6 +101,7 @@ export default function PricingPage() {
         body: JSON.stringify({
           planId,
           billingCycle,
+          partnerCode: partnerCode || undefined,
         }),
       });
 

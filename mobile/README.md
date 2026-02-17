@@ -1,12 +1,19 @@
-# Neuro Trader Journal · Mobile (iPhone)
+# Neuro Trader · Mobile (iPhone)
 
-This is a separate mobile app scaffold inside:
+This is the mobile app workspace:
 
 `/Users/SGPAX/Dev/trading-journal-pro/mobile`
 
 It does **not** modify or replace the web app.
 
-## Run on iPhone simulator (Xcode)
+## Architecture decision (for scale)
+
+- Keep app source in `/mobile` (cross-platform).
+- Keep native folders generated (`/mobile/ios`, `/mobile/android`) and treat them as build artifacts.
+- Recreate native iOS from config with `npm run ios:prebuild`.
+- Ship production builds from Release (embedded JS bundle), not from Metro.
+
+## Run on iPhone (stable flow)
 
 1. `cd /Users/SGPAX/Dev/trading-journal-pro/mobile`
 2. Copy env file:
@@ -14,25 +21,65 @@ It does **not** modify or replace the web app.
 3. Fill Supabase values in `.env`:
    - `EXPO_PUBLIC_SUPABASE_URL`
    - `EXPO_PUBLIC_SUPABASE_ANON_KEY`
-4. Start iOS:
-   - `npm run ios`
+   - `EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY`
+   - `EXPO_PUBLIC_API_URL` (default: `https://www.neurotrader-journal.com`)
+4. Regenerate native iOS project from config:
+   - `npm run ios:prebuild`
+5. Install pods:
+   - `npx pod-install ios`
+6. Open workspace in Xcode:
+   - `open ios/NeuroTrader.xcworkspace`
+7. Run on iPhone:
+   - `npm run ios:device`
 
-## Current scaffold
+## If you want live reload (dev server)
 
-- Tabs:
-  - Dashboard
+1. Terminal A:
+   - `npm run start -- --dev-client --tunnel -c`
+2. Terminal B:
+   - `npm run ios:device`
+
+## Production binary (no Metro required)
+
+- `npm run ios:release` (auto-increments build number)
+- Full reset + reinstall on iPhone:
+  - `npm run ios:clean-run`
+
+The project includes a config plugin (`plugins/with-device-debug-bundling.js`) so Debug builds on physical devices always embed a JS fallback and avoid `No script URL provided`.
+
+## Current app flow
+
+- First screen is native auth (`Sign in` / `Create account`).
+- Tabs after login:
+  - Home
   - Calendar
   - Analytics
-  - AI Coaching
-  - Other
-- Module placeholders prepared for:
-  - Calendar / Statistics / Balance chart
-  - Journal + Inside trade notes (inside Other)
-  - AI Coaching bridge with audit
-  - Resources library
-  - Forum / Global ranking / Notebook / Cashflow / Profit & Loss / Balance chart / Audit
+  - AI Coach
+  - Settings
+- All screens are native (no WebView).
 
-## Product rule kept
+## Update playbook (when you ship changes)
 
-- Broker file imports stay on web/desktop in phase 1.
-- Mobile focuses on read/write workflow and coaching loop.
+1. JS/UI-only update (no native dependency/config changes):
+   - `npm run ios:release`
+2. Native-related update (new package, app config/plugin change, strange iOS cache behavior):
+   - `npm run ios:sync-native`
+   - `npm run ios:release`
+3. If Xcode still shows stale behavior:
+   - Delete app from iPhone.
+   - Run `npm run ios:clean-run` again.
+
+For App Store/TestFlight distribution, build with Archive from `ios/NeuroTrader.xcworkspace` (Release), then upload in Xcode Organizer.
+
+## Automatic versioning
+
+- `npm run version:bump`
+  - keeps marketing version (`expo.version`) as-is
+  - increments:
+    - `expo.ios.buildNumber`
+    - `expo.android.versionCode`
+- `npm run version:bump:marketing`
+  - bumps patch version (e.g. `1.0.3` -> `1.0.4`)
+  - also increments `buildNumber` and `versionCode`
+
+`ios:release` already runs `version:bump` automatically before building.

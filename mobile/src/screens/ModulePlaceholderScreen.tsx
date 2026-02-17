@@ -1,6 +1,8 @@
-import { RouteProp } from "@react-navigation/native";
+import { RouteProp, useNavigation } from "@react-navigation/native";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
+import { useLanguage } from "../lib/LanguageContext";
+import { t } from "../lib/i18n";
 import { COLORS } from "../theme";
 
 type Params = {
@@ -15,22 +17,28 @@ type Props = {
 };
 
 export function ModulePlaceholderScreen({ route }: Props) {
+  const { language } = useLanguage();
+  const navigation = useNavigation();
+
   return (
     <View style={styles.root}>
       <View style={styles.card}>
-        <Text style={styles.badge}>MVP stage</Text>
+        <Text style={styles.badge}>{t(language, "Overview", "Resumen")}</Text>
         <Text style={styles.title}>{route.params.title}</Text>
         <Text style={styles.description}>{route.params.description}</Text>
 
         <View style={styles.ruleBox}>
-          <Text style={styles.ruleTitle}>Rule kept</Text>
           <Text style={styles.ruleText}>
-            Este desarrollo móvil es separado. No se modifica la app web existente.
+            {t(
+              language,
+              "This section will show your data as soon as you start using the feature.",
+              "Esta sección mostrará tu data cuando empieces a usar la función."
+            )}
           </Text>
         </View>
 
-        <Pressable style={styles.cta}>
-          <Text style={styles.ctaText}>Ready for next implementation step</Text>
+        <Pressable style={styles.cta} onPress={() => navigation.goBack()}>
+          <Text style={styles.ctaText}>{t(language, "Go back", "Volver")}</Text>
         </Pressable>
       </View>
     </View>
@@ -83,11 +91,6 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.surface,
     padding: 10,
     gap: 4,
-  },
-  ruleTitle: {
-    color: COLORS.primary,
-    fontWeight: "700",
-    fontSize: 12,
   },
   ruleText: {
     color: COLORS.textMuted,

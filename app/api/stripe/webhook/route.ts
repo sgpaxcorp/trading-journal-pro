@@ -6,6 +6,7 @@ import {
   sendWelcomeEmailByEmail,
   sendSubscriptionReceiptEmailByEmail,
 } from "@/lib/email";
+import { createPartnerCommission, getPartnerProfile } from "@/lib/partnerProgram";
 
 type PlanId = "core" | "advanced";
 
@@ -65,10 +66,103 @@ async function resolveUserIdByCustomer(customerId?: string | null): Promise<stri
   return String(data[0].id);
 }
 
+async function resolvePartnerUserIdByCode(code?: string | null): Promise<string | null> {
+  const cleanCode = String(code ?? "")
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9_-]/g, "")
+    .slice(0, 24);
+  if (!cleanCode) return null;
+
+  const { data, error } = await supabaseAdmin
+    .from("partner_profiles")
+    .select("user_id,status")
+    .eq("referral_code", cleanCode)
+    .maybeSingle();
+
+  if (error || !data) return null;
+  if (String((data as any).status ?? "active") !== "active") return null;
+  return String((data as any).user_id ?? "") || null;
+}
+
 function isAddonPurchase(params: { addonKey?: string | null; priceId?: string | null }) {
   const addonKey = String(params.addonKey || "");
   const priceId = String(params.priceId || "");
   return addonKey === ADDON_KEY || (!!ADDON_PRICE_ID && priceId === ADDON_PRICE_ID);
+}
+
+function normalizeBillingCycle(raw?: string | null): "monthly" | "annual" | null {
+  const v = String(raw ?? "").trim().toLowerCase();
+  if (v === "monthly" || v === "month") return "monthly";
+  if (v === "annual" || v === "year" || v === "yearly") return "annual";
+  return null;
+}
+
+async function maybeCreatePartnerCommissionFromInvoice(invoice: Stripe.Invoice) {
+  const rawSubscription = (invoice as any)?.subscription;
+  const subscriptionId =
+    typeof rawSubscription === "string"
+      ? rawSubscription
+      : typeof rawSubscription?.id === "string"
+      ? rawSubscription.id
+      : null;
+  if (!subscriptionId) return;
+
+  const customerId = typeof invoice.customer === "string" ? invoice.customer : null;
+  const paidAmount = Number(invoice.amount_paid || 0) / 100;
+  if (!Number.isFinite(paidAmount) || paidAmount <= 0) return;
+
+  const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+  const subMeta = subscription.metadata ?? {};
+  const subPriceId = subscription.items?.data?.[0]?.price?.id ?? null;
+  const addonKey = subMeta?.addonKey as string | undefined;
+  if (isAddonPurchase({ addonKey, priceId: subPriceId })) return;
+
+  const billingCycle =
+    normalizeBillingCycle(subMeta.billingCycle) ||
+    normalizeBillingCycle(subscription.items?.data?.[0]?.price?.recurring?.interval) ||
+    null;
+  if (!billingCycle) return;
+
+  let partnerUserId = String(subMeta.partnerUserId ?? "").trim();
+  if (!partnerUserId) {
+    partnerUserId = (await resolvePartnerUserIdByCode(subMeta.partnerCode)) ?? "";
+  }
+  if (!partnerUserId) return;
+
+  const partnerProfile = await getPartnerProfile(partnerUserId);
+  if (!partnerProfile || partnerProfile.status !== "active") return;
+
+  const referredUserId = await resolveUserIdByCustomer(customerId);
+  if (referredUserId && referredUserId === partnerUserId) return;
+
+  const paidAtMs = Number(invoice.status_transitions?.paid_at || 0) * 1000;
+  const paidAt = paidAtMs > 0 ? new Date(paidAtMs) : new Date();
+  const availableOn = new Date(paidAt.getTime() + 15 * 24 * 60 * 60 * 1000).toISOString();
+  const commissionRate = billingCycle === "annual" ? 30 : 20;
+
+  await createPartnerCommission({
+    partnerUserId,
+    referredUserId,
+    stripeCustomerId: customerId,
+    stripeSubscriptionId: subscriptionId,
+    stripeInvoiceId: invoice.id,
+    stripeCheckoutSessionId: null,
+    planId: String(subMeta.planId ?? "").trim() || null,
+    billingCycle,
+    grossAmount: paidAmount,
+    commissionRate,
+    payoutMethod: partnerProfile.payout_preference,
+    description:
+      billingCycle === "annual"
+        ? "Annual referred subscription (first-year commission)."
+        : "Monthly referred subscription payment.",
+    availableOn,
+    meta: {
+      invoiceNumber: invoice.number ?? null,
+      currency: invoice.currency ?? "usd",
+    },
+  });
 }
 
 export async function POST(req: NextRequest) {
@@ -510,6 +604,16 @@ export async function POST(req: NextRequest) {
           }
         }
 
+        break;
+      }
+
+      case "invoice.paid": {
+        const invoice = event.data.object as Stripe.Invoice;
+        try {
+          await maybeCreatePartnerCommissionFromInvoice(invoice);
+        } catch (err) {
+          console.error("[WEBHOOK] Could not create partner commission from invoice.paid:", err);
+        }
         break;
       }
 

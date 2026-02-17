@@ -1,60 +1,543 @@
-import { ModuleTile } from "../components/ModuleTile";
+import { useEffect, useMemo, useState } from "react";
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
+
 import { ScreenScaffold } from "../components/ScreenScaffold";
+import { apiGet } from "../lib/api";
+import { useLanguage } from "../lib/LanguageContext";
+import { t } from "../lib/i18n";
+import { COLORS } from "../theme";
 
 type AnalyticsScreenProps = {
   onOpenModule: (title: string, description: string) => void;
 };
 
-export function AnalyticsScreen({ onOpenModule }: AnalyticsScreenProps) {
+type DayOfWeekBucket = {
+  dow: string;
+  pnl: number;
+  trades: number;
+  winRate: number;
+};
+
+type HourBucket = {
+  hour: string;
+  pnl: number;
+  trades: number;
+  winRate: number;
+};
+
+type SymbolBucket = {
+  symbol: string;
+  pnl: number;
+  trades: number;
+  winRate: number;
+};
+
+type AnalyticsSnapshot = {
+  updatedAtIso?: string;
+  totalSessions?: number;
+  totalTrades?: number;
+  wins?: number;
+  losses?: number;
+  breakevens?: number;
+  winRate?: number;
+  grossPnl?: number;
+  netPnl?: number;
+  totalFees?: number;
+  avgNetPerSession?: number;
+  profitFactor?: number | null;
+  expectancy?: number;
+  avgWin?: number;
+  avgLoss?: number;
+  maxWin?: number;
+  maxLoss?: number;
+  maxDrawdown?: number;
+  maxDrawdownPct?: number;
+  longestWinStreak?: number;
+  longestLossStreak?: number;
+  cagr?: number | null;
+  sharpe?: number | null;
+  sortino?: number | null;
+  recoveryFactor?: number | null;
+  payoffRatio?: number | null;
+  byDOW?: DayOfWeekBucket[];
+  byHour?: HourBucket[];
+  bySymbol?: SymbolBucket[];
+};
+
+type EdgeRow = {
+  symbol?: string | null;
+  time_bucket?: string | null;
+  dow?: string | null;
+  dte_bucket?: string | null;
+  edge_score?: number | null;
+  confidence?: number | null;
+  n_sessions?: number | null;
+  win_rate_shrunk?: number | null;
+  expectancy?: number | null;
+};
+
+export function AnalyticsScreen({}: AnalyticsScreenProps) {
+  const { language } = useLanguage();
+  const [loading, setLoading] = useState(true);
+  const [snapshot, setSnapshot] = useState<AnalyticsSnapshot | null>(null);
+  const [topEdges, setTopEdges] = useState<EdgeRow[]>([]);
+  const [section, setSection] = useState<"overview" | "performance" | "risk" | "time">("overview");
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    async function load() {
+      try {
+        setLoading(true);
+        setError(null);
+        const res = await apiGet<{ snapshot: AnalyticsSnapshot | null; topEdges: EdgeRow[] }>(
+          "/api/analytics/snapshot"
+        );
+        if (!active) return;
+        setSnapshot(res.snapshot);
+        setTopEdges(res.topEdges ?? []);
+      } catch (err: any) {
+        if (!active) return;
+        setError(err?.message ?? "Failed to load analytics.");
+      } finally {
+        if (!active) return;
+        setLoading(false);
+      }
+    }
+    load();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const formatUsd = (value: number) =>
+    new Intl.NumberFormat(language === "es" ? "es-ES" : "en-US", {
+      style: "currency",
+      currency: "USD",
+      maximumFractionDigits: 2,
+    }).format(value);
+
+  const formatPct = (value?: number | null) => {
+    if (value == null || !Number.isFinite(value)) return "—";
+    const pct = Math.abs(value) > 1 ? value : value * 100;
+    return `${pct.toFixed(1)}%`;
+  };
+
+  const formatValue = (value?: number | null) =>
+    value == null || !Number.isFinite(value) ? "—" : formatUsd(value);
+
+  const toneFor = (value?: number | null, positiveIsGood = true) => {
+    if (value == null || !Number.isFinite(value)) return "neutral";
+    if (value === 0) return "neutral";
+    const positive = value > 0;
+    return positiveIsGood ? (positive ? "positive" : "negative") : positive ? "negative" : "positive";
+  };
+
+  const hourCells = useMemo(() => {
+    const map = new Map((snapshot?.byHour ?? []).map((h) => [h.hour, h]));
+    return Array.from({ length: 24 }, (_, h) => {
+      const label = `${String(h).padStart(2, "0")}:00`;
+      const row = map.get(label);
+      return {
+        label,
+        pnl: row?.pnl ?? 0,
+        trades: row?.trades ?? 0,
+      };
+    });
+  }, [snapshot]);
+
+  const maxAbsHour = useMemo(() => {
+    return hourCells.reduce((acc, cell) => Math.max(acc, Math.abs(cell.pnl || 0)), 0);
+  }, [hourCells]);
+
+  const dayRows = useMemo(() => snapshot?.byDOW ?? [], [snapshot]);
+  const topSymbols = useMemo(() => (snapshot?.bySymbol ?? []).slice(0, 5), [snapshot]);
+  const edgesTop = useMemo(() => topEdges.slice(0, 4), [topEdges]);
+
   return (
     <ScreenScaffold
-      title="Analytics & Statistics"
-      subtitle="Navegación móvil por los tabs de Analytics: overview, performance, risk, time, instruments, trades y statistics."
+      title={t(language, "Analytics", "Analíticas")}
+      subtitle={t(
+        language,
+        "Institutional KPIs, performance, and risk overview.",
+        "KPIs institucionales, performance y riesgo."
+      )}
     >
-      <ModuleTile
-        title="Overview"
-        description="Snapshot general: P&L, win rate, streaks, expectancy, deposits/withdrawals."
-        iconName="analytics-outline"
-        onPress={() =>
-          onOpenModule(
-            "Overview",
-            "Integración pendiente: espejo del tab overview con cards mobile-first."
-          )
-        }
-      />
-      <ModuleTile
-        title="Performance / Risk / Time"
-        description="Subtabs para lectura rápida por bloque."
-        iconName="pulse-outline"
-        onPress={() =>
-          onOpenModule(
-            "Performance / Risk / Time",
-            "Integración pendiente: tabs segmentados para no saturar pantalla pequeña."
-          )
-        }
-      />
-      <ModuleTile
-        title="Instruments / Trades"
-        description="Breakdown por símbolo/instrumento y detalles de ejecución."
-        iconName="layers-outline"
-        onPress={() =>
-          onOpenModule(
-            "Instruments / Trades",
-            "Integración pendiente: tablas convertidas a cards + filtros táctiles."
-          )
-        }
-      />
-      <ModuleTile
-        title="Statistics (KPI Library)"
-        description="Todos los KPIs y explicación corta por métrica."
-        iconName="stats-chart-outline"
-        onPress={() =>
-          onOpenModule(
-            "Statistics (KPI Library)",
-            "Integración pendiente: lista KPI optimizada para scroll móvil."
-          )
-        }
-      />
+      <View style={styles.banner}>
+        <Text style={styles.bannerTitle}>{t(language, "Quick stats", "Resumen rápido")}</Text>
+        {loading ? (
+          <View style={styles.loadingRow}>
+            <ActivityIndicator color={COLORS.primary} />
+            <Text style={styles.loadingText}>{t(language, "Loading…", "Cargando…")}</Text>
+          </View>
+        ) : snapshot ? (
+          <View style={styles.kpiRow}>
+            <View style={styles.kpiCard}>
+              <Text style={styles.kpiLabel}>{t(language, "Net P&L", "P&L neto")}</Text>
+              <Text style={styles.kpiValue}>{formatValue(snapshot.netPnl)}</Text>
+            </View>
+            <View style={styles.kpiCard}>
+              <Text style={styles.kpiLabel}>{t(language, "Win rate", "Win rate")}</Text>
+              <Text style={styles.kpiValue}>{formatPct(snapshot.winRate)}</Text>
+            </View>
+          </View>
+        ) : (
+          <Text style={styles.bannerText}>
+            {t(
+              language,
+              "No data yet. Start logging trades to unlock analytics.",
+              "Aún no hay datos. Registra trades para desbloquear analíticas."
+            )}
+          </Text>
+        )}
+        {error ? <Text style={styles.errorText}>{error}</Text> : null}
+      </View>
+
+      <View style={styles.segmentRow}>
+        {([
+          { id: "overview", label: t(language, "Overview", "Resumen") },
+          { id: "performance", label: t(language, "Performance", "Performance") },
+          { id: "risk", label: t(language, "Risk", "Riesgo") },
+          { id: "time", label: t(language, "Time", "Tiempo") },
+        ] as const).map((item) => (
+          <Pressable
+            key={item.id}
+            onPress={() => setSection(item.id)}
+            style={[styles.segmentButton, section === item.id && styles.segmentButtonActive]}
+          >
+            <Text style={styles.segmentLabel}>{item.label}</Text>
+          </Pressable>
+        ))}
+      </View>
+
+      {section === "overview" && (
+        <View style={styles.sectionCard}>
+          <Text style={styles.sectionTitle}>{t(language, "Overview", "Resumen")}</Text>
+          <View style={styles.statGrid}>
+            <StatCard label={t(language, "Total trades", "Total trades")} value={String(snapshot?.totalTrades ?? "—")} tone="neutral" />
+            <StatCard label={t(language, "Win rate", "Win rate")} value={formatPct(snapshot?.winRate)} tone="positive" />
+            <StatCard label={t(language, "Net P&L", "P&L neto")} value={formatValue(snapshot?.netPnl)} tone={toneFor(snapshot?.netPnl)} />
+            <StatCard label={t(language, "Avg / session", "Promedio / sesión")} value={formatValue(snapshot?.avgNetPerSession)} tone={toneFor(snapshot?.avgNetPerSession)} />
+            <StatCard label={t(language, "Max drawdown", "Max drawdown")} value={formatValue(snapshot?.maxDrawdown)} tone={toneFor(snapshot?.maxDrawdown, false)} />
+            <StatCard label={t(language, "Profit factor", "Profit factor")} value={snapshot?.profitFactor != null ? snapshot.profitFactor.toFixed(2) : "—"} tone={toneFor(snapshot?.profitFactor)} />
+          </View>
+
+          {edgesTop.length ? (
+            <View style={styles.subSection}>
+              <Text style={styles.subTitle}>{t(language, "Top edges", "Mejores edges")}</Text>
+              {edgesTop.map((edge, idx) => (
+                <View key={`edge-${idx}`} style={styles.edgeRow}>
+                  <Text style={styles.edgeLabel}>
+                    {(edge.symbol || edge.time_bucket || edge.dow || edge.dte_bucket || "Edge").toString()}
+                  </Text>
+                  <Text style={styles.edgeValue}>
+                    {edge.edge_score != null ? edge.edge_score.toFixed(2) : "—"}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          ) : null}
+        </View>
+      )}
+
+      {section === "performance" && (
+        <View style={styles.sectionCard}>
+          <Text style={styles.sectionTitle}>{t(language, "Performance", "Performance")}</Text>
+          <View style={styles.statGrid}>
+            <StatCard label={t(language, "Gross P&L", "P&L bruto")} value={formatValue(snapshot?.grossPnl)} tone={toneFor(snapshot?.grossPnl)} />
+            <StatCard label={t(language, "Net P&L", "P&L neto")} value={formatValue(snapshot?.netPnl)} tone={toneFor(snapshot?.netPnl)} />
+            <StatCard label={t(language, "Profit factor", "Profit factor")} value={snapshot?.profitFactor != null ? snapshot.profitFactor.toFixed(2) : "—"} tone={toneFor(snapshot?.profitFactor)} />
+            <StatCard label={t(language, "Expectancy", "Expectancy")} value={formatValue(snapshot?.expectancy)} tone={toneFor(snapshot?.expectancy)} />
+            <StatCard label={t(language, "Avg win", "Promedio gana")} value={formatValue(snapshot?.avgWin)} tone={toneFor(snapshot?.avgWin)} />
+            <StatCard label={t(language, "Avg loss", "Promedio pierde")} value={formatValue(snapshot?.avgLoss)} tone={toneFor(snapshot?.avgLoss, false)} />
+            <StatCard label={t(language, "Max win", "Mayor ganancia")} value={formatValue(snapshot?.maxWin)} tone={toneFor(snapshot?.maxWin)} />
+            <StatCard label={t(language, "Max loss", "Mayor pérdida")} value={formatValue(snapshot?.maxLoss)} tone={toneFor(snapshot?.maxLoss, false)} />
+          </View>
+        </View>
+      )}
+
+      {section === "risk" && (
+        <View style={styles.sectionCard}>
+          <Text style={styles.sectionTitle}>{t(language, "Risk", "Riesgo")}</Text>
+          <View style={styles.statGrid}>
+            <StatCard label={t(language, "Max drawdown", "Max drawdown")} value={formatValue(snapshot?.maxDrawdown)} tone={toneFor(snapshot?.maxDrawdown, false)} />
+            <StatCard label={t(language, "Max DD %", "Max DD %")} value={formatPct(snapshot?.maxDrawdownPct)} tone={toneFor(snapshot?.maxDrawdownPct, false)} />
+            <StatCard label={t(language, "Recovery factor", "Recovery factor")} value={snapshot?.recoveryFactor != null ? snapshot.recoveryFactor.toFixed(2) : "—"} tone={toneFor(snapshot?.recoveryFactor)} />
+            <StatCard label={t(language, "Sharpe", "Sharpe")} value={snapshot?.sharpe != null ? snapshot.sharpe.toFixed(2) : "—"} tone={toneFor(snapshot?.sharpe)} />
+            <StatCard label={t(language, "Sortino", "Sortino")} value={snapshot?.sortino != null ? snapshot.sortino.toFixed(2) : "—"} tone={toneFor(snapshot?.sortino)} />
+            <StatCard label={t(language, "Payoff ratio", "Payoff ratio")} value={snapshot?.payoffRatio != null ? snapshot.payoffRatio.toFixed(2) : "—"} tone={toneFor(snapshot?.payoffRatio)} />
+            <StatCard label={t(language, "CAGR", "CAGR")} value={formatPct(snapshot?.cagr)} tone={toneFor(snapshot?.cagr)} />
+          </View>
+        </View>
+      )}
+
+      {section === "time" && (
+        <View style={styles.sectionCard}>
+          <Text style={styles.sectionTitle}>{t(language, "Timing & behavior", "Timing y conducta")}</Text>
+          <View style={styles.subSection}>
+            <Text style={styles.subTitle}>{t(language, "By day of week", "Por día de semana")}</Text>
+            {dayRows.length ? (
+              dayRows.map((row) => (
+                <View key={row.dow} style={styles.edgeRow}>
+                  <Text style={styles.edgeLabel}>{row.dow}</Text>
+                  <Text style={[styles.edgeValue, row.pnl < 0 && styles.lossValue]}>
+                    {row.pnl >= 0 ? "+" : "-"}{formatUsd(Math.abs(row.pnl))}
+                  </Text>
+                </View>
+              ))
+            ) : (
+              <Text style={styles.bannerText}>{t(language, "No timing data yet.", "Aún no hay datos de tiempo.")}</Text>
+            )}
+          </View>
+
+          <View style={styles.subSection}>
+            <Text style={styles.subTitle}>{t(language, "Best hours heatmap", "Mapa de horas")}</Text>
+            <View style={styles.heatGrid}>
+              {hourCells.map((cell) => {
+                const intensity = maxAbsHour > 0 ? Math.min(1, Math.abs(cell.pnl) / maxAbsHour) : 0;
+                const bg =
+                  cell.pnl > 0
+                    ? `rgba(30,230,168,${0.12 + intensity * 0.5})`
+                    : cell.pnl < 0
+                    ? `rgba(46,144,255,${0.12 + intensity * 0.5})`
+                    : COLORS.surface;
+                const border =
+                  cell.pnl > 0 ? "#1EE6A8" : cell.pnl < 0 ? "#2E90FF" : COLORS.border;
+                return (
+                  <View key={cell.label} style={[styles.heatCell, { backgroundColor: bg, borderColor: border }]}>
+                    <Text style={styles.heatLabel}>{cell.label.slice(0, 2)}</Text>
+                    <Text style={styles.heatValue}>
+                      {cell.pnl === 0 && cell.trades === 0 ? "—" : cell.pnl >= 0 ? `+${cell.pnl.toFixed(0)}` : `${cell.pnl.toFixed(0)}`}
+                    </Text>
+                  </View>
+                );
+              })}
+            </View>
+          </View>
+
+          {topSymbols.length ? (
+            <View style={styles.subSection}>
+              <Text style={styles.subTitle}>{t(language, "Top symbols", "Top símbolos")}</Text>
+              {topSymbols.map((row) => (
+                <View key={row.symbol} style={styles.edgeRow}>
+                  <Text style={styles.edgeLabel}>{row.symbol}</Text>
+                  <Text style={[styles.edgeValue, row.pnl < 0 && styles.lossValue]}>
+                    {row.pnl >= 0 ? "+" : "-"}{formatUsd(Math.abs(row.pnl))}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          ) : null}
+        </View>
+      )}
     </ScreenScaffold>
   );
 }
+
+function StatCard({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string;
+  tone: "positive" | "negative" | "neutral";
+}) {
+  return (
+    <View
+      style={[
+        styles.statCard,
+        tone === "positive" && styles.statCardPositive,
+        tone === "negative" && styles.statCardNegative,
+      ]}
+    >
+      <Text style={styles.statLabel}>{label}</Text>
+      <Text style={styles.statValue}>{value}</Text>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  banner: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.surface,
+    padding: 12,
+    gap: 6,
+  },
+  bannerTitle: {
+    color: COLORS.primary,
+    fontSize: 12,
+    fontWeight: "700",
+    letterSpacing: 1.2,
+    textTransform: "uppercase",
+  },
+  bannerText: {
+    color: COLORS.textMuted,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  loadingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  loadingText: {
+    color: COLORS.textMuted,
+    fontSize: 12,
+  },
+  kpiRow: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  kpiCard: {
+    flex: 1,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.card,
+    padding: 10,
+    gap: 4,
+  },
+  kpiLabel: {
+    color: COLORS.textMuted,
+    fontSize: 10,
+    textTransform: "uppercase",
+    letterSpacing: 1.2,
+    fontWeight: "700",
+  },
+  kpiValue: {
+    color: COLORS.textPrimary,
+    fontSize: 16,
+    fontWeight: "700",
+  },
+  segmentRow: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  segmentButton: {
+    flex: 1,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.surface,
+    paddingVertical: 6,
+    alignItems: "center",
+  },
+  segmentButtonActive: {
+    borderColor: COLORS.primary,
+    backgroundColor: "#0F2C2A",
+  },
+  segmentLabel: {
+    color: COLORS.textPrimary,
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  sectionCard: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.card,
+    padding: 12,
+    gap: 10,
+  },
+  sectionTitle: {
+    color: COLORS.textPrimary,
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  statGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  statCard: {
+    width: "48%",
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.surface,
+    padding: 10,
+    gap: 4,
+  },
+  statCardPositive: {
+    borderColor: "#1EE6A8",
+    backgroundColor: "#0F2C2A",
+  },
+  statCardNegative: {
+    borderColor: "#2E90FF",
+    backgroundColor: "#0B1E3A",
+  },
+  statLabel: {
+    color: COLORS.textMuted,
+    fontSize: 10,
+    textTransform: "uppercase",
+    letterSpacing: 1.2,
+    fontWeight: "700",
+  },
+  statValue: {
+    color: COLORS.textPrimary,
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  subSection: {
+    gap: 6,
+  },
+  subTitle: {
+    color: COLORS.textMuted,
+    fontSize: 11,
+    textTransform: "uppercase",
+    letterSpacing: 1.2,
+    fontWeight: "700",
+  },
+  edgeRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingVertical: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+  },
+  edgeLabel: {
+    color: COLORS.textPrimary,
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  edgeValue: {
+    color: COLORS.primary,
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  lossValue: {
+    color: "#7EB3FF",
+  },
+  heatGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+  },
+  heatCell: {
+    width: "14%",
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    paddingVertical: 6,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 2,
+  },
+  heatLabel: {
+    color: COLORS.textMuted,
+    fontSize: 9,
+  },
+  heatValue: {
+    color: COLORS.textPrimary,
+    fontSize: 10,
+    fontWeight: "700",
+  },
+  errorText: {
+    color: COLORS.danger,
+    fontSize: 12,
+  },
+});

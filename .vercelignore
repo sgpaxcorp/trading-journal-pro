@@ -1,0 +1,7 @@
+# Ignore mobile app for web deployments
+mobile
+mobile/**
+
+# Optional large dirs
+node_modules
+.next

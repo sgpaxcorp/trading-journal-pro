@@ -14,9 +14,10 @@ import { listMyEntitlements } from "@/lib/entitlementsSupabase";
 
 type BillingClientProps = {
   initialPlan: PlanId; // "core" | "advanced"
+  initialPartnerCode?: string;
 };
 
-export default function BillingClient({ initialPlan }: BillingClientProps) {
+export default function BillingClient({ initialPlan, initialPartnerCode = "" }: BillingClientProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { user, loading: authLoading } = useAuth();
@@ -36,6 +37,13 @@ export default function BillingClient({ initialPlan }: BillingClientProps) {
   const [addonLoading, setAddonLoading] = useState(false);
   const [addonSelected, setAddonSelected] = useState(false);
   const [billingCycle, setBillingCycle] = useState<"monthly" | "annual">("monthly");
+  const [partnerCode, setPartnerCode] = useState(
+    String(initialPartnerCode || "")
+      .trim()
+      .toUpperCase()
+      .replace(/[^A-Z0-9_-]/g, "")
+      .slice(0, 24)
+  );
 
   const PRICES = {
     core: { monthly: 14.99, annual: 149.99 },
@@ -49,6 +57,12 @@ export default function BillingClient({ initialPlan }: BillingClientProps) {
     const cycle = searchParams?.get("cycle");
     if (cycle === "annual") setBillingCycle("annual");
     if (cycle === "monthly") setBillingCycle("monthly");
+    const partner = String(searchParams?.get("partner") ?? searchParams?.get("ref") ?? "")
+      .trim()
+      .toUpperCase()
+      .replace(/[^A-Z0-9_-]/g, "")
+      .slice(0, 24);
+    if (partner) setPartnerCode(partner);
   }, [searchParams]);
 
   const normalizePlan = (raw: unknown): PlanId | "none" => {
@@ -155,6 +169,7 @@ export default function BillingClient({ initialPlan }: BillingClientProps) {
           couponCode: couponCode.trim() || undefined,
           addonOptionFlow: !hasActivePlan && addonSelected,
           billingCycle,
+          partnerCode: partnerCode || undefined,
         }),
       });
 
@@ -297,6 +312,13 @@ export default function BillingClient({ initialPlan }: BillingClientProps) {
                   {L("Annual (save 2 months)", "Anual (ahorra 2 meses)")}
                 </button>
               </div>
+
+              {partnerCode ? (
+                <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-[11px] text-emerald-200">
+                  {L("Partner referral applied:", "Referido partner aplicado:")}{" "}
+                  <span className="font-semibold">{partnerCode}</span>
+                </div>
+              ) : null}
 
               {hasActivePlan && (
                 <div className="rounded-2xl border border-slate-800 bg-slate-900/70 px-4 py-3 text-xs">

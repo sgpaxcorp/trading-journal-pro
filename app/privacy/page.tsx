@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
+import PublicHomeLogoLink from "@/app/components/PublicHomeLogoLink";
 
 const CONTENT = {
   en: {
@@ -194,24 +195,26 @@ export default function PrivacyPolicyPage() {
 
   return (
     <main className={isLight ? "min-h-screen bg-slate-50 text-slate-900" : "min-h-screen bg-slate-950 text-slate-50"}>
+      <div className="fixed left-6 top-10 z-20 hidden xl:block">
+        <PublicHomeLogoLink size="lg" showLabel={false} />
+      </div>
       <div className="max-w-5xl mx-auto px-6 md:px-10 py-12 space-y-10">
+        <div className="xl:hidden">
+          <PublicHomeLogoLink size="md" showLabel={false} />
+        </div>
         <header className="flex flex-col gap-4">
-          <div className="flex items-center gap-4">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/neurotrader-logo.svg" alt="Neuro Trader" className="h-28 md:h-32 w-auto" />
-            <div>
-              <p className="text-[11px] uppercase tracking-[0.3em] text-emerald-400">
-                {isEs ? "Privacidad" : "Privacy"}
-              </p>
-              <h1 className="text-3xl md:text-4xl font-semibold">
-                {isEs ? "Política de Privacidad" : "Privacy Policy"}
-              </h1>
-              <p className="text-sm text-slate-400 mt-2">
-                {isEs
-                  ? "Última actualización: 7 de febrero de 2026."
-                  : "Last updated: February 7, 2026."}
-              </p>
-            </div>
+          <div>
+            <p className="text-[11px] uppercase tracking-[0.3em] text-emerald-400">
+              {isEs ? "Privacidad" : "Privacy"}
+            </p>
+            <h1 className="text-3xl md:text-4xl font-semibold">
+              {isEs ? "Política de Privacidad" : "Privacy Policy"}
+            </h1>
+            <p className="text-sm text-slate-400 mt-2">
+              {isEs
+                ? "Última actualización: 7 de febrero de 2026."
+                : "Last updated: February 7, 2026."}
+            </p>
           </div>
 
           <p className="text-sm text-slate-400 max-w-3xl">{content.intro}</p>

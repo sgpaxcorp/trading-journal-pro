@@ -31,6 +31,14 @@ const PRICE_IDS: Record<PlanId, Record<BillingCycle, string>> = {
 };
 const OPTION_FLOW_PRICE = process.env.STRIPE_PRICE_OPTIONFLOW_MONTHLY ?? "";
 
+function normalizePartnerCode(raw: unknown) {
+  return String(raw ?? "")
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9_-]/g, "")
+    .slice(0, 24);
+}
+
 export async function POST(req: NextRequest) {
   try {
     const authHeader = req.headers.get("authorization") || "";
@@ -52,6 +60,7 @@ export async function POST(req: NextRequest) {
     const billingCycle = body.billingCycle as BillingCycle | undefined;
     const couponCodeRaw = body.couponCode as string | undefined; // opcional
     const addonOptionFlow = Boolean(body.addonOptionFlow);
+    const partnerCode = normalizePartnerCode(body.partnerCode);
 
     if (!planId) {
       return NextResponse.json({ error: "Missing planId" }, { status: 400 });
@@ -86,6 +95,26 @@ export async function POST(req: NextRequest) {
     }
 
     const origin = resolveAppUrl(req);
+
+    let partnerUserId: string | null = null;
+    if (partnerCode) {
+      const { data: partnerRow, error: partnerErr } = await supabaseAdmin
+        .from("partner_profiles")
+        .select("user_id,status")
+        .eq("referral_code", partnerCode)
+        .maybeSingle();
+      if (partnerErr) {
+        return NextResponse.json({ error: "Could not validate partner code." }, { status: 500 });
+      }
+      if (!partnerRow || String((partnerRow as any).status ?? "active") !== "active") {
+        return NextResponse.json({ error: "Invalid partner code." }, { status: 400 });
+      }
+      const partnerId = String((partnerRow as any).user_id ?? "");
+      if (!partnerId || partnerId === userId) {
+        return NextResponse.json({ error: "Invalid partner referral." }, { status: 400 });
+      }
+      partnerUserId = partnerId;
+    }
 
     // =====================================================
     // Ensure we have an existing Customer in Stripe
@@ -177,15 +206,21 @@ export async function POST(req: NextRequest) {
       metadata: {
         supabaseUserId: userId,
         planId,
+        billingCycle: finalBillingCycle,
         couponCode: couponCode ?? "",
         addonOptionFlow: addonOptionFlow ? "true" : "false",
+        partnerCode: partnerCode || "",
+        partnerUserId: partnerUserId ?? "",
       },
       subscription_data: {
         metadata: {
           supabaseUserId: userId,
           planId,
+          billingCycle: finalBillingCycle,
           couponCode: couponCode ?? "",
           addonOptionFlow: addonOptionFlow ? "true" : "false",
+          partnerCode: partnerCode || "",
+          partnerUserId: partnerUserId ?? "",
         },
       },
     });

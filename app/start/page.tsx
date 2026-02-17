@@ -8,14 +8,17 @@ type SearchParams = {
   [key: string]: string | string[] | undefined;
 };
 
-export default function StartPage({
+type StartPageProps = {
+  searchParams?: Promise<SearchParams>;
+};
+
+export default async function StartPage({
   searchParams,
-}: {
-  searchParams: SearchParams;
-}) {
-  const rawPlan = Array.isArray(searchParams.plan)
-    ? searchParams.plan[0]
-    : searchParams.plan;
+}: StartPageProps) {
+  const params = searchParams ? await searchParams : {};
+  const rawPlan = Array.isArray(params.plan)
+    ? params.plan[0]
+    : params.plan;
 
   let initialPlan: PlanId = "core";
   if (rawPlan === "advanced" || rawPlan === "core") {

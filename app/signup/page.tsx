@@ -93,6 +93,12 @@ function SignUpPageInner() {
   const planParam = searchParams.get("plan");
   const planFromQuery: PlanId =
     planParam === "advanced" ? "advanced" : "core";
+  const partnerRaw = searchParams.get("partner") ?? searchParams.get("ref");
+  const partnerCode = String(partnerRaw ?? "")
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9_-]/g, "")
+    .slice(0, 24);
 
   const [stepUi, setStepUi] = useState<StepUi>("form");
 
@@ -186,7 +192,10 @@ function SignUpPageInner() {
       }
 
       const planParamValue = planFromQuery;
-      router.push(`/billing?plan=${planParamValue}`);
+      const q = new URLSearchParams();
+      q.set("plan", planParamValue);
+      if (partnerCode) q.set("partner", partnerCode);
+      router.push(`/billing?${q.toString()}`);
     } catch (err: any) {
       setError(err?.message || L("Could not verify the code.", "No se pudo verificar el código."));
     } finally {
@@ -243,6 +252,12 @@ function SignUpPageInner() {
               "Debes confirmar tu email antes de elegir plan o pagar."
             )}
           </p>
+          {partnerCode ? (
+            <p className="text-xs text-emerald-300">
+              {L("Partner referral code applied:", "Código de partner aplicado:")}{" "}
+              <span className="font-semibold">{partnerCode}</span>
+            </p>
+          ) : null}
           <p className="text-[11px] text-slate-400">
             {L(
               "Check your spam/junk or promotions folders if you don't see the email.",
@@ -329,6 +344,12 @@ function SignUpPageInner() {
             "Primero crea tu cuenta de NeuroTrader Journal con un email válido. Luego irás al Paso 2 para elegir tu plan y pagar de forma segura con Stripe."
           )}
         </p>
+        {partnerCode ? (
+          <p className="text-xs text-emerald-300">
+            {L("Partner referral code applied:", "Código de partner aplicado:")}{" "}
+            <span className="font-semibold">{partnerCode}</span>
+          </p>
+        ) : null}
 
         <form onSubmit={handleSubmit} className="space-y-4">
           {/* First / last name */}

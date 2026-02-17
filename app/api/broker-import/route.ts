@@ -921,7 +921,8 @@ export async function POST(req: NextRequest) {
 
     // Build ledger rows + trade rows
     const txnRowsAll: any[] = [];
-    const tradeByHash = new Map<string, any>();
+    const tradeRowsAll: any[] = [];
+    const tradeOccurrenceByKey = new Map<string, number>();
 
     for (const r of dataRows) {
       const dateCell = safeStr(r[cols.date]);
@@ -989,7 +990,7 @@ export async function POST(req: NextRequest) {
           (description.toUpperCase().match(/\b[A-Z]{1,6}\b/)?.[0] ?? "UNKNOWN");
         const contract_code = opt?.contract_code ?? symbol;
 
-        const trade_hash = ref_num
+        const baseTradeHash = ref_num
           ? sha256([userId, broker, "REF", ref_num].join("|"))
           : sha256(
               [
@@ -1004,12 +1005,18 @@ export async function POST(req: NextRequest) {
               ].join("|")
             );
 
-        if (tradeByHash.has(trade_hash)) {
-          tradeDuplicatesInFile++;
-          continue;
-        }
+        const occurrenceKey = ref_num
+          ? `REF|${ref_num}`
+          : `NREF|${contract_code}|${executed_at}|${side}|${String(qty)}|${String(price)}`;
+        const tradeOccurrence = (tradeOccurrenceByKey.get(occurrenceKey) ?? 0) + 1;
+        tradeOccurrenceByKey.set(occurrenceKey, tradeOccurrence);
 
-        tradeByHash.set(trade_hash, {
+        const trade_hash =
+          tradeOccurrence === 1
+            ? baseTradeHash
+            : sha256([baseTradeHash, "OCC", String(tradeOccurrence)].join("|"));
+
+        tradeRowsAll.push({
           user_id: userId,
           broker,
 
@@ -1156,7 +1163,6 @@ export async function POST(req: NextRequest) {
     ledgerDuplicates = ledgerDuplicatesInFile + ledgerDuplicatesNoRef;
 
     /* trades upsert with counts */
-    const tradeRowsAll = Array.from(tradeByHash.values());
     const tradeHashes = tradeRowsAll.map((x) => x.trade_hash).filter(Boolean);
 
     const existingTradeHash = new Set<string>();
