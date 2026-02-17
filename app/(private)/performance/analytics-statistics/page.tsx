@@ -505,6 +505,28 @@ function parseCreatedAtIso(entry: any): string {
   return iso;
 }
 
+function normalizeChecklistItems(items: any): Array<{ text: string; done: boolean }> {
+  if (!Array.isArray(items)) return [];
+  return items
+    .map((it) => {
+      if (typeof it === "string") {
+        const text = it.trim();
+        return text ? { text, done: false } : null;
+      }
+      if (it && typeof it === "object") {
+        const text = String((it as any).text ?? "").trim();
+        if (!text) return null;
+        return { text, done: !!(it as any).done };
+      }
+      return null;
+    })
+    .filter((x): x is { text: string; done: boolean } => !!x);
+}
+
+function normalizeRuleLabel(label: any): string {
+  return String(label ?? "").trim();
+}
+
 function buildSessionsFromEntries(entries: JournalEntry[], tradeDates?: Set<string>): SessionWithTrades[] {
   const out: SessionWithTrades[] = [];
 
@@ -1363,6 +1385,16 @@ export default function AnalyticsStatisticsPage() {
   // Growth plan context
   const [planStartingBalance, setPlanStartingBalance] = useState<number>(0);
   const [planStartIso, setPlanStartIso] = useState<string>("");
+  const [planRules, setPlanRules] = useState<any[]>([]);
+  const [planMaxDailyLossPct, setPlanMaxDailyLossPct] = useState<number>(0);
+
+  const [processScore, setProcessScore] = useState<number | null>(null);
+  const [processChecklistMeta, setProcessChecklistMeta] = useState<{
+    date: string | null;
+    completed: number;
+    total: number;
+    pct: number | null;
+  } | null>(null);
 
   useEffect(() => {
     if (!loading && !user) router.replace("/signin");
@@ -1382,7 +1414,7 @@ export default function AnalyticsStatisticsPage() {
       if (!userId || accountsLoading || !activeAccountId) return;
 
       try {
-        const SELECT_GROWTH_PLAN = "starting_balance,created_at,updated_at" as const;
+        const SELECT_GROWTH_PLAN = "starting_balance,created_at,updated_at,max_daily_loss_percent,rules" as const;
         const { data, error } = await supabaseBrowser
           .from("growth_plans")
           .select(SELECT_GROWTH_PLAN)
@@ -1407,10 +1439,14 @@ export default function AnalyticsStatisticsPage() {
 
         setPlanStartingBalance(starting);
         setPlanStartIso(looksLikeYYYYMMDD(startIso) ? startIso : "");
+        setPlanRules(Array.isArray(row?.rules) ? row.rules : []);
+        setPlanMaxDailyLossPct(toNumberMaybe(row?.max_daily_loss_percent ?? 0));
       } catch (err) {
         console.error("[AnalyticsStatistics] growth_plans fetch exception:", err);
         setPlanStartingBalance(0);
         setPlanStartIso("");
+        setPlanRules([]);
+        setPlanMaxDailyLossPct(0);
       }
     }
 
@@ -1624,6 +1660,110 @@ export default function AnalyticsStatisticsPage() {
     return ranged.filter((s) => s.date >= planStartIso);
   }, [sessionsAll, dateRange.startIso, dateRange.endIso, planStartIso]);
 
+  // Process compliance score (latest session in range)
+  useEffect(() => {
+    let alive = true;
+
+    async function run() {
+      if (!userId) {
+        setProcessScore(null);
+        setProcessChecklistMeta(null);
+        return;
+      }
+
+      const latest = sessions?.[sessions.length - 1];
+      if (!latest?.date) {
+        setProcessScore(null);
+        setProcessChecklistMeta(null);
+        return;
+      }
+
+      try {
+        const { data } = await supabaseBrowser
+          .from("daily_checklists")
+          .select("items")
+          .eq("user_id", userId)
+          .eq("date", latest.date)
+          .maybeSingle();
+
+        if (!alive) return;
+
+        const checklistItems = normalizeChecklistItems(data?.items);
+        const checklistTotal = checklistItems.length;
+        const checklistDone = checklistItems.filter((i) => i.done).length;
+        const checklistPct =
+          checklistTotal > 0 ? Math.round((checklistDone / checklistTotal) * 100) : null;
+
+        const rulesRaw = Array.isArray(planRules) ? planRules : [];
+        const activeRules = rulesRaw.filter((r) => (r as any)?.isActive !== false);
+        const maxDailyLossPct = Number(planMaxDailyLossPct ?? 0);
+        const dailyLossLimit =
+          Number.isFinite(maxDailyLossPct) && Number.isFinite(planStartingBalance) && maxDailyLossPct > 0 && planStartingBalance > 0
+            ? (planStartingBalance * maxDailyLossPct) / 100
+            : null;
+
+        const entry = entries.find((e) => parseDateIso(e) === latest.date);
+        const pnl = Number(entry?.pnl);
+
+        const ruleEvaluations = activeRules.map((r) => {
+          const label = normalizeRuleLabel((r as any)?.label ?? (r as any)?.text ?? "Rule");
+          const labelLower = label.toLowerCase();
+          let status: "pass" | "fail" | "unknown" = "unknown";
+
+          if (labelLower.includes("max daily loss") || labelLower.includes("pérdida diaria") || labelLower.includes("daily loss")) {
+            if (!Number.isFinite(pnl) || dailyLossLimit == null) {
+              status = "unknown";
+            } else if (pnl < -dailyLossLimit) {
+              status = "fail";
+            } else {
+              status = "pass";
+            }
+          } else if (labelLower.includes("risk") || labelLower.includes("riesgo")) {
+            status = "unknown";
+          } else if (labelLower.includes("revenge")) {
+            status = "unknown";
+          } else if (labelLower.includes("proceso") || labelLower.includes("process")) {
+            status = "unknown";
+          }
+
+          return { label, status };
+        });
+
+        const evaluable = ruleEvaluations.filter((r) => r.status !== "unknown");
+        const rulesScore =
+          evaluable.length > 0
+            ? Math.round((evaluable.filter((r) => r.status === "pass").length / evaluable.length) * 100)
+            : null;
+
+        let score: number | null = null;
+        if (checklistPct != null && rulesScore != null) {
+          score = Math.round(checklistPct * 0.6 + rulesScore * 0.4);
+        } else if (checklistPct != null) {
+          score = checklistPct;
+        } else if (rulesScore != null) {
+          score = rulesScore;
+        }
+
+        setProcessScore(score);
+        setProcessChecklistMeta({
+          date: latest.date,
+          completed: checklistDone,
+          total: checklistTotal,
+          pct: checklistPct,
+        });
+      } catch (err) {
+        if (!alive) return;
+        setProcessScore(null);
+        setProcessChecklistMeta(null);
+      }
+    }
+
+    run();
+    return () => {
+      alive = false;
+    };
+  }, [userId, sessions, entries, planRules, planMaxDailyLossPct, planStartingBalance]);
+
   const tradeStats = useMemo(() => computeTradeAnalytics(tradeRows, sessions), [tradeRows, sessions]);
   const kpiTrades = useMemo(() => buildKpiTrades(tradeStats), [tradeStats]);
 
@@ -1650,6 +1790,21 @@ export default function AnalyticsStatisticsPage() {
       return true;
     });
   }, [cashflows, dateRange.startIso, dateRange.endIso]);
+
+  const overviewCashflowTotals = useMemo(() => {
+    let deposits = 0;
+    let withdrawals = 0;
+    for (const cf of cashflowsInRange ?? []) {
+      const net = cashflowSignedUsd(cf);
+      if (!Number.isFinite(net) || net === 0) continue;
+      if (net > 0) deposits += Math.abs(net);
+      else withdrawals += Math.abs(net);
+    }
+    return {
+      deposits: deposits > 0 ? deposits : null,
+      withdrawals: withdrawals > 0 ? withdrawals : null,
+    };
+  }, [cashflowsInRange]);
 
   // Build snapshot
   useEffect(() => {
@@ -1829,6 +1984,21 @@ export default function AnalyticsStatisticsPage() {
               "Suma del P&L neto (después de comisiones) en el rango seleccionado."
             )}
           />
+          <KpiCard
+            label={L("Process score", "Score de proceso")}
+            value={processScore != null ? `${processScore}%` : "—"}
+            sub={
+              processChecklistMeta?.date && processChecklistMeta.total > 0
+                ? `${L("Latest", "Último")}: ${processChecklistMeta.date} · ${processChecklistMeta.completed}/${processChecklistMeta.total}`
+                : processChecklistMeta?.date
+                ? `${L("Latest", "Último")}: ${processChecklistMeta.date}`
+                : ""
+            }
+            help={L(
+              "Compliance score for the latest session in range, based on daily checklist completion and evaluable non‑negotiable rules.",
+              "Score de cumplimiento para la última sesión del rango, basado en checklist diario y reglas no‑negociables evaluables."
+            )}
+          />
           {isAdvanced ? (
             <KpiCard
               label={L("Expectancy", "Expectativa")}
@@ -1922,6 +2092,8 @@ export default function AnalyticsStatisticsPage() {
                   equity={uiEquity}
                   daily={uiDaily}
                   snapshot={snapshot}
+                  totalDeposits={overviewCashflowTotals.deposits}
+                  totalWithdrawals={overviewCashflowTotals.withdrawals}
                 />
               ) : (
                 <div className="relative">
@@ -1958,6 +2130,8 @@ export default function AnalyticsStatisticsPage() {
                       equity={uiEquity}
                       daily={uiDaily}
                       snapshot={snapshot}
+                      totalDeposits={overviewCashflowTotals.deposits}
+                      totalWithdrawals={overviewCashflowTotals.withdrawals}
                     />
                   </div>
                 </div>
@@ -2085,11 +2259,15 @@ function OverviewSection({
   equity,
   daily,
   snapshot,
+  totalDeposits,
+  totalWithdrawals,
 }: {
   lang: Lang;
   equity: EquityPoint[];
   daily: DailyPnlPoint[];
   snapshot: AnalyticsSnapshot | null;
+  totalDeposits: number | null;
+  totalWithdrawals: number | null;
 }) {
   const T = (en: string, es: string) => LL(lang, en, es);
   const moneyScale = useMemo(() => {
@@ -2305,6 +2483,16 @@ function OverviewSection({
                 ? toneForRate((snapshot.breakevens / snapshot.totalSessions) * 100, "lower")
                 : "neutral"
             }
+          />
+          <MiniStat
+            label={T("Total deposits", "Total depósitos")}
+            value={totalDeposits != null ? fmtUsd(totalDeposits) : "—"}
+            help={T("Cash added in the selected range.", "Capital agregado en el rango seleccionado.")}
+          />
+          <MiniStat
+            label={T("Total withdrawals", "Total retiros")}
+            value={totalWithdrawals != null ? fmtUsd(totalWithdrawals) : "—"}
+            help={T("Cash withdrawn in the selected range.", "Capital retirado en el rango seleccionado.")}
           />
         </div>
         <p className="text-[11px] text-slate-500 mt-4 flex flex-wrap items-center gap-3">

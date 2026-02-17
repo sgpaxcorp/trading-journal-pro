@@ -35,6 +35,28 @@ function chunk<T>(arr: T[], size: number) {
   return out;
 }
 
+function normalizeChecklistItems(items: any): Array<{ text: string; done: boolean }> {
+  if (!Array.isArray(items)) return [];
+  return items
+    .map((it) => {
+      if (typeof it === "string") {
+        const text = it.trim();
+        return text ? { text, done: false } : null;
+      }
+      if (it && typeof it === "object") {
+        const text = String((it as any).text ?? "").trim();
+        if (!text) return null;
+        return { text, done: !!(it as any).done };
+      }
+      return null;
+    })
+    .filter((x): x is { text: string; done: boolean } => !!x);
+}
+
+function normalizeRuleLabel(label: any): string {
+  return String(label ?? "").trim();
+}
+
 export async function GET(req: NextRequest) {
   try {
     const authHeader = req.headers.get("authorization") || "";
@@ -109,6 +131,122 @@ export async function GET(req: NextRequest) {
 
     const audit = auditOrderEvents(deduped as NormalizedOrderEvent[]);
 
+    // ---- Growth plan + checklist compliance ----
+    let growthPlan: any | null = null;
+    let journalEntry: any | null = null;
+    let checklistRow: any | null = null;
+
+    const { data: planRows } = await supabaseAdmin
+      .from("growth_plans")
+      .select("rules, steps, max_daily_loss_percent, starting_balance, max_risk_per_trade_percent, max_risk_per_trade_usd")
+      .eq("user_id", userId)
+      .order("updated_at", { ascending: false })
+      .limit(1);
+
+    growthPlan = (planRows ?? [])[0] ?? null;
+
+    const { data: journalRow } = await supabaseAdmin
+      .from("journal_entries")
+      .select("pnl, respected_plan")
+      .eq("user_id", userId)
+      .eq("date", date)
+      .eq("account_id", accountId)
+      .maybeSingle();
+
+    journalEntry = journalRow ?? null;
+
+    const { data: checklistData } = await supabaseAdmin
+      .from("daily_checklists")
+      .select("items, notes")
+      .eq("user_id", userId)
+      .eq("date", date)
+      .maybeSingle();
+
+    checklistRow = checklistData ?? null;
+
+    const checklistItems = normalizeChecklistItems(checklistRow?.items);
+    const checklistTotal = checklistItems.length;
+    const checklistDone = checklistItems.filter((i) => i.done).length;
+    const checklistPct =
+      checklistTotal > 0 ? Math.round((checklistDone / checklistTotal) * 100) : null;
+    const checklistMissing = checklistItems
+      .filter((i) => !i.done)
+      .map((i) => i.text)
+      .filter(Boolean);
+
+    const rulesRaw: any[] = Array.isArray(growthPlan?.rules) ? growthPlan.rules : [];
+    const activeRules = rulesRaw.filter((r) => (r as any)?.isActive !== false);
+
+    const maxDailyLossPct = Number(growthPlan?.max_daily_loss_percent ?? 0);
+    const startingBalance = Number(growthPlan?.starting_balance ?? 0);
+    const dailyLossLimit =
+      Number.isFinite(maxDailyLossPct) && Number.isFinite(startingBalance) && maxDailyLossPct > 0 && startingBalance > 0
+        ? (startingBalance * maxDailyLossPct) / 100
+        : null;
+
+    const ruleEvaluations = activeRules.map((r) => {
+      const label = normalizeRuleLabel((r as any)?.label ?? (r as any)?.text ?? "Rule");
+      const labelLower = label.toLowerCase();
+      let status: "pass" | "fail" | "unknown" = "unknown";
+      let reason = "No evaluable con los datos actuales.";
+
+      if (labelLower.includes("max daily loss") || labelLower.includes("pérdida diaria") || labelLower.includes("daily loss")) {
+        const pnl = Number(journalEntry?.pnl);
+        if (!Number.isFinite(pnl) || dailyLossLimit == null) {
+          status = "unknown";
+          reason = "Falta P&L diario o límite de pérdida diaria.";
+        } else if (pnl < -dailyLossLimit) {
+          status = "fail";
+          reason = `P&L ${pnl.toFixed(2)} excede el límite diario ${dailyLossLimit.toFixed(2)}.`;
+        } else {
+          status = "pass";
+          reason = `P&L ${pnl.toFixed(2)} dentro del límite diario ${dailyLossLimit.toFixed(2)}.`;
+        }
+      } else if (labelLower.includes("risk") || labelLower.includes("riesgo")) {
+        status = "unknown";
+        reason = "No hay datos de riesgo por trade en el audit.";
+      } else if (labelLower.includes("revenge")) {
+        status = "unknown";
+        reason = "No hay señal objetiva de revenge trading en los datos del audit.";
+      } else if (labelLower.includes("proceso") || labelLower.includes("process")) {
+        status = "unknown";
+        reason = "Regla cualitativa. Requiere evaluación manual.";
+      }
+
+      return { label, status, reason };
+    });
+
+    const evaluable = ruleEvaluations.filter((r) => r.status !== "unknown");
+    const rulesScore =
+      evaluable.length > 0
+        ? Math.round(
+            (evaluable.filter((r) => r.status === "pass").length / evaluable.length) * 100
+          )
+        : null;
+
+    let complianceScore: number | null = null;
+    if (checklistPct != null && rulesScore != null) {
+      complianceScore = Math.round(checklistPct * 0.6 + rulesScore * 0.4);
+    } else if (checklistPct != null) {
+      complianceScore = checklistPct;
+    } else if (rulesScore != null) {
+      complianceScore = rulesScore;
+    }
+
+    const planCompliance = {
+      score: complianceScore,
+      weights: { checklist: 0.6, rules: 0.4 },
+      checklist: {
+        total: checklistTotal,
+        completed: checklistDone,
+        completion_pct: checklistPct,
+        missing_items: checklistMissing.slice(0, 12),
+      },
+      rules: ruleEvaluations,
+      respected_plan: typeof journalEntry?.respected_plan === "boolean" ? journalEntry.respected_plan : null,
+      plan_present: !!growthPlan,
+    };
+
     return NextResponse.json({
       date,
       accountId,
@@ -116,6 +254,7 @@ export async function GET(req: NextRequest) {
       symbol: symbol || null,
       events: deduped,
       audit,
+      plan_compliance: planCompliance,
     });
   } catch (err: any) {
     return NextResponse.json({ error: err?.message ?? "Server error" }, { status: 500 });

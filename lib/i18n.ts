@@ -121,7 +121,7 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
        Resources dropdown
     ------------------ */
     "nav.resources.library.title": "Library",
-    "nav.resources.library.desc": "Hand-picked books and videos.",
+    "nav.resources.library.desc": "Save and organize your learning resources.",
     "nav.resources.audit.title": "Audit",
     "nav.resources.audit.desc": "Order history checks and evidence.",
 
@@ -382,7 +382,7 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
        Resources dropdown
     ------------------ */
     "nav.resources.library.title": "Biblioteca",
-    "nav.resources.library.desc": "Libros y videos seleccionados.",
+    "nav.resources.library.desc": "Guarda y organiza tus recursos de aprendizaje.",
     "nav.resources.audit.title": "Auditoría",
     "nav.resources.audit.desc": "Checks de órdenes y evidencia.",
 

@@ -102,6 +102,20 @@ export default function OrderHistoryAuditPanel({
   const evidence = result?.audit?.evidence;
   const insights = result?.audit?.insights as string[] | undefined;
   const summary = result?.audit?.summary as string | undefined;
+  const compliance = result?.plan_compliance as
+    | {
+        score: number | null;
+        checklist: {
+          total: number;
+          completed: number;
+          completion_pct: number | null;
+          missing_items: string[];
+        };
+        rules: Array<{ label: string; status: "pass" | "fail" | "unknown"; reason: string }>;
+        respected_plan: boolean | null;
+        plan_present: boolean;
+      }
+    | undefined;
   const trades = result?.audit?.trades as Array<{
     index: number;
     entry_ts: string | null;
@@ -268,6 +282,92 @@ export default function OrderHistoryAuditPanel({
             <p className="mt-3 text-sm text-slate-400">
               {L("No trades detected in this audit.", "No se detectaron trades en esta auditoría.")}
             </p>
+          )}
+        </div>
+
+        <div className="mt-6 rounded-3xl border border-slate-800 bg-slate-950/70 p-5">
+          <p className="text-[11px] uppercase tracking-[0.18em] text-emerald-300">
+            {L("Process compliance", "Cumplimiento de proceso")}
+          </p>
+          {!compliance ? (
+            <p className="mt-3 text-sm text-slate-400">
+              {L("Run the audit to see compliance.", "Ejecuta la auditoría para ver cumplimiento.")}
+            </p>
+          ) : (
+            <div className="mt-4 space-y-4">
+              <div className="grid gap-3 md:grid-cols-3">
+                <MetricCard
+                  label={L("Compliance score", "Score de cumplimiento")}
+                  value={compliance.score != null ? `${compliance.score}%` : "—"}
+                />
+                <MetricCard
+                  label={L("Checklist completion", "Checklist completado")}
+                  value={
+                    compliance.checklist.total > 0
+                      ? `${compliance.checklist.completed}/${compliance.checklist.total} (${compliance.checklist.completion_pct ?? 0}%)`
+                      : "—"
+                  }
+                />
+                <MetricCard
+                  label={L("Plan confirmed", "Plan confirmado")}
+                  value={
+                    compliance.respected_plan == null
+                      ? L("Unknown", "Desconocido")
+                      : compliance.respected_plan
+                      ? L("Yes", "Sí")
+                      : L("No", "No")
+                  }
+                />
+              </div>
+
+              {compliance.checklist.missing_items?.length ? (
+                <div className="rounded-2xl border border-slate-800 bg-slate-950/40 p-4">
+                  <p className="text-xs uppercase tracking-[0.18em] text-slate-300">
+                    {L("Missing checklist items", "Checklist pendiente")}
+                  </p>
+                  <ul className="mt-2 space-y-1 text-sm text-slate-200">
+                    {compliance.checklist.missing_items.map((item, idx) => (
+                      <li key={idx}>• {item}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+
+              <div className="rounded-2xl border border-slate-800 bg-slate-950/40 p-4">
+                <p className="text-xs uppercase tracking-[0.18em] text-slate-300">
+                  {L("Non‑negotiable rules", "Reglas no negociables")}
+                </p>
+                {compliance.rules?.length ? (
+                  <ul className="mt-2 space-y-2 text-sm">
+                    {compliance.rules.map((rule, idx) => {
+                      const color =
+                        rule.status === "pass"
+                          ? "text-emerald-300"
+                          : rule.status === "fail"
+                          ? "text-rose-300"
+                          : "text-slate-300";
+                      return (
+                        <li key={idx} className="flex flex-col gap-1">
+                          <span className={color}>
+                            {rule.status === "pass"
+                              ? L("PASS", "CUMPLE")
+                              : rule.status === "fail"
+                              ? L("FAIL", "FALLA")
+                              : L("UNKNOWN", "DESCONOCIDO")}{" "}
+                            · {rule.label}
+                          </span>
+                          <span className="text-xs text-slate-400">{rule.reason}</span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                ) : (
+                  <p className="mt-2 text-sm text-slate-400">
+                    {L("No active rules found in Growth Plan.", "No hay reglas activas en el Growth Plan.")}
+                  </p>
+                )}
+              </div>
+            </div>
           )}
         </div>
 

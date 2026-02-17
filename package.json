@@ -8,7 +8,10 @@
     "start": "next start",
     "lint": "eslint",
     "test:e2e": "playwright test",
-    "test:unit": "vitest run"
+    "test:unit": "vitest run",
+    "mobile:start": "npm --prefix mobile run start",
+    "mobile:ios": "npm --prefix mobile run ios",
+    "mobile:android": "npm --prefix mobile run android"
   },
   "dependencies": {
     "@hcaptcha/react-hcaptcha": "^2.0.2",

@@ -476,14 +476,17 @@ export async function POST(req: NextRequest) {
 
   const userId = authData.user.id;
 
-  const form = await req.formData();
+  const form = (await req.formData()) as unknown as {
+    get: (name: string) => FormDataEntryValue | null;
+  };
+  const getFormValue = (name: string) => form.get(name);
 
-  const brokerRaw = String(form.get("broker") ?? "").trim().toLowerCase();
+  const brokerRaw = String(getFormValue("broker") ?? "").trim().toLowerCase();
   const broker: Broker = brokerRaw === "tradovate" ? "tradovate" : "thinkorswim";
 
-  const comment = String(form.get("comment") ?? "").trim() || null;
+  const comment = String(getFormValue("comment") ?? "").trim() || null;
 
-  const file = form.get("file");
+  const file = getFormValue("file");
   if (!(file instanceof File))
     return NextResponse.json({ error: "Missing file" }, { status: 400 });
 
@@ -550,7 +553,7 @@ export async function POST(req: NextRequest) {
     if (broker === "thinkorswim") {
       const orderHistoryHeader = detectTosOrderHistoryFromRows(rowsAsStrings);
       if (orderHistoryHeader) {
-        const sourceTzRaw = String(form.get("sourceTz") ?? form.get("source_tz") ?? "");
+        const sourceTzRaw = String(getFormValue("sourceTz") ?? getFormValue("source_tz") ?? "");
         const sourceTz = sourceTzRaw.trim() || "America/New_York";
         const accountId = (await resolveActiveAccountId(userId)) ?? null;
         if (!accountId) {
