@@ -11,6 +11,9 @@ type AnalyticsScreenProps = {
   onOpenModule: (title: string, description: string) => void;
 };
 
+type SeriesPoint = { date: string; value: number };
+type AccountSeriesResponse = { series: SeriesPoint[]; daily: SeriesPoint[] };
+
 type DayOfWeekBucket = {
   dow: string;
   pnl: number;
@@ -81,6 +84,7 @@ export function AnalyticsScreen({}: AnalyticsScreenProps) {
   const [loading, setLoading] = useState(true);
   const [snapshot, setSnapshot] = useState<AnalyticsSnapshot | null>(null);
   const [topEdges, setTopEdges] = useState<EdgeRow[]>([]);
+  const [series, setSeries] = useState<AccountSeriesResponse | null>(null);
   const [section, setSection] = useState<"overview" | "performance" | "risk" | "time">("overview");
   const [error, setError] = useState<string | null>(null);
 
@@ -90,12 +94,14 @@ export function AnalyticsScreen({}: AnalyticsScreenProps) {
       try {
         setLoading(true);
         setError(null);
-        const res = await apiGet<{ snapshot: AnalyticsSnapshot | null; topEdges: EdgeRow[] }>(
-          "/api/analytics/snapshot"
-        );
+        const [snapRes, seriesRes] = await Promise.all([
+          apiGet<{ snapshot: AnalyticsSnapshot | null; topEdges: EdgeRow[] }>("/api/analytics/snapshot"),
+          apiGet<AccountSeriesResponse>("/api/account/series"),
+        ]);
         if (!active) return;
-        setSnapshot(res.snapshot);
-        setTopEdges(res.topEdges ?? []);
+        setSnapshot(snapRes.snapshot);
+        setTopEdges(snapRes.topEdges ?? []);
+        setSeries(seriesRes ?? null);
       } catch (err: any) {
         if (!active) return;
         setError(err?.message ?? "Failed to load analytics.");
@@ -153,6 +159,16 @@ export function AnalyticsScreen({}: AnalyticsScreenProps) {
   const dayRows = useMemo(() => snapshot?.byDOW ?? [], [snapshot]);
   const topSymbols = useMemo(() => (snapshot?.bySymbol ?? []).slice(0, 5), [snapshot]);
   const edgesTop = useMemo(() => topEdges.slice(0, 4), [topEdges]);
+
+  const balanceSeries = useMemo(() => {
+    const points = series?.series ?? [];
+    return points.slice(Math.max(0, points.length - 30));
+  }, [series]);
+
+  const dailySeries = useMemo(() => {
+    const points = series?.daily ?? [];
+    return points.slice(Math.max(0, points.length - 14));
+  }, [series]);
 
   return (
     <ScreenScaffold
@@ -237,6 +253,28 @@ export function AnalyticsScreen({}: AnalyticsScreenProps) {
               ))}
             </View>
           ) : null}
+
+          <View style={styles.subSection}>
+            <Text style={styles.subTitle}>{t(language, "Balance chart", "Balance chart")}</Text>
+            {balanceSeries.length ? (
+              <SparkBarChart
+                values={balanceSeries.map((p) => p.value)}
+                positiveColor="#1EE6A8"
+                negativeColor="#2E90FF"
+              />
+            ) : (
+              <Text style={styles.bannerText}>{t(language, "No balance data yet.", "Aún no hay datos de balance.")}</Text>
+            )}
+          </View>
+
+          <View style={styles.subSection}>
+            <Text style={styles.subTitle}>{t(language, "Daily P&L (last 14)", "P&L diario (últimos 14)")}</Text>
+            {dailySeries.length ? (
+              <DailyBarChart values={dailySeries.map((p) => p.value)} />
+            ) : (
+              <Text style={styles.bannerText}>{t(language, "No daily data yet.", "Aún no hay datos diarios.")}</Text>
+            )}
+          </View>
         </View>
       )}
 
@@ -353,6 +391,62 @@ function StatCard({
     >
       <Text style={styles.statLabel}>{label}</Text>
       <Text style={styles.statValue}>{value}</Text>
+    </View>
+  );
+}
+
+function SparkBarChart({
+  values,
+  positiveColor,
+  negativeColor,
+}: {
+  values: number[];
+  positiveColor: string;
+  negativeColor: string;
+}) {
+  const max = values.reduce((acc, v) => Math.max(acc, Math.abs(v)), 0) || 1;
+  return (
+    <View style={styles.chartRow}>
+      {values.map((v, idx) => {
+        const height = Math.max(6, Math.round((Math.abs(v) / max) * 60));
+        return (
+          <View key={`spark-${idx}`} style={styles.chartBarWrap}>
+            <View
+              style={[
+                styles.chartBar,
+                {
+                  height,
+                  backgroundColor: v >= 0 ? positiveColor : negativeColor,
+                },
+              ]}
+            />
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
+function DailyBarChart({ values }: { values: number[] }) {
+  const max = values.reduce((acc, v) => Math.max(acc, Math.abs(v)), 0) || 1;
+  return (
+    <View style={styles.chartRow}>
+      {values.map((v, idx) => {
+        const height = Math.max(6, Math.round((Math.abs(v) / max) * 60));
+        return (
+          <View key={`daily-${idx}`} style={styles.chartBarWrap}>
+            <View
+              style={[
+                styles.chartBar,
+                {
+                  height,
+                  backgroundColor: v >= 0 ? "#1EE6A8" : "#2E90FF",
+                },
+              ]}
+            />
+          </View>
+        );
+      })}
     </View>
   );
 }
@@ -535,6 +629,21 @@ const styles = StyleSheet.create({
     color: COLORS.textPrimary,
     fontSize: 10,
     fontWeight: "700",
+  },
+  chartRow: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    gap: 4,
+    paddingTop: 6,
+  },
+  chartBarWrap: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "flex-end",
+  },
+  chartBar: {
+    width: "100%",
+    borderRadius: 6,
   },
   errorText: {
     color: COLORS.danger,
