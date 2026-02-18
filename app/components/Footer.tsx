@@ -19,28 +19,27 @@ export default function Footer() {
   const isLight = theme === "light";
 
   const footerClass = isLight
-    ? "w-full bg-slate-50/90 text-slate-600 px-7 md:px-12 py-8 border-t border-slate-200 mt-auto"
-    : "w-full bg-[#0b0c14] text-slate-300 px-7 md:px-12 py-8 border-t border-slate-800 mt-auto";
+    ? "w-full bg-slate-50/90 text-slate-600 px-6 md:px-10 lg:px-16 py-8 border-t border-slate-200 mt-auto"
+    : "w-full bg-[#0b0c14] text-slate-300 px-6 md:px-10 lg:px-16 py-8 border-t border-slate-800 mt-auto";
 
   const socialBtnClass = isLight
     ? "p-2 rounded-md bg-white border border-slate-200 text-slate-500 hover:bg-slate-100 hover:border-slate-300 transition"
     : "p-2 rounded-md bg-slate-900 hover:bg-slate-800 transition";
 
-  const brandChipClass = isLight
-    ? "h-7 w-7 rounded-md bg-emerald-500/90 flex items-center justify-center text-white text-xs font-black"
-    : "h-7 w-7 rounded-md bg-emerald-400/90 flex items-center justify-center text-slate-950 text-xs font-black";
-
-  const brandNameClass =
-    "text-sm md:text-base font-semibold tracking-tight bg-linear-to-r from-emerald-400 via-sky-400 to-indigo-400 text-transparent bg-clip-text";
+  const brandLogoSrc = "/neurotrader%20logo%20for%20Web.png";
 
   return (
     <footer className={footerClass}>
-      <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-10">
+      <div className="w-full grid grid-cols-1 md:grid-cols-3 gap-10">
         {/* Col 1: Logo + description */}
         <div className="space-y-3">
           <div className="flex items-center gap-2">
-            <div className={brandChipClass}>NTJ</div>
-            <span className={brandNameClass}>{t("footer.brand", lang)}</span>
+            <img
+              src={brandLogoSrc}
+              alt="Neuro Trader Journal"
+              className="h-10 md:h-12 w-auto object-contain"
+              draggable={false}
+            />
           </div>
           <p className={isLight ? "text-[12px] text-slate-500 leading-relaxed" : "text-[12px] text-slate-400 leading-relaxed"}>
             {t("footer.description", lang)}

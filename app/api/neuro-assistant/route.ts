@@ -11,30 +11,31 @@ const openai = new OpenAI({
 
 export const maxDuration = 30;
 
+const DOCS_ROOT = path.resolve(process.cwd(), "docs", "user-manual");
 const USER_MANUAL_FILES: Record<"en" | "es", string[]> = {
   en: [
-    "docs/user-manual/en/overview.md",
-    "docs/user-manual/en/getting-started.md",
-    "docs/user-manual/en/journal.md",
-    "docs/user-manual/en/workflows.md",
-    "docs/user-manual/en/dashboard-widgets.md",
-    "docs/user-manual/en/analytics.md",
-    "docs/user-manual/en/data-inputs.md",
-    "docs/user-manual/en/reports.md",
-    "docs/user-manual/en/post-mortem.md",
-    "docs/user-manual/en/settings.md",
+    "overview.md",
+    "getting-started.md",
+    "journal.md",
+    "workflows.md",
+    "dashboard-widgets.md",
+    "analytics.md",
+    "data-inputs.md",
+    "reports.md",
+    "post-mortem.md",
+    "settings.md",
   ],
   es: [
-    "docs/user-manual/es/overview.md",
-    "docs/user-manual/es/getting-started.md",
-    "docs/user-manual/es/journal.md",
-    "docs/user-manual/es/workflows.md",
-    "docs/user-manual/es/dashboard-widgets.md",
-    "docs/user-manual/es/analytics.md",
-    "docs/user-manual/es/data-inputs.md",
-    "docs/user-manual/es/reports.md",
-    "docs/user-manual/es/post-mortem.md",
-    "docs/user-manual/es/settings.md",
+    "overview.md",
+    "getting-started.md",
+    "journal.md",
+    "workflows.md",
+    "dashboard-widgets.md",
+    "analytics.md",
+    "data-inputs.md",
+    "reports.md",
+    "post-mortem.md",
+    "settings.md",
   ],
 };
 
@@ -127,10 +128,11 @@ function loadManualSections(lang: "en" | "es"): ManualSection[] {
   if (manualSectionsCache[lang]) return manualSectionsCache[lang] as ManualSection[];
   const sections: ManualSection[] = [];
   for (const rel of USER_MANUAL_FILES[lang]) {
-    const filePath = path.join(process.cwd(), rel);
+    const filePath = path.join(DOCS_ROOT, lang, rel);
+    const sourceKey = `docs/user-manual/${lang}/${rel}`;
     try {
       const raw = fs.readFileSync(filePath, "utf8");
-      const parsed = parseManualSections(rel, raw);
+      const parsed = parseManualSections(sourceKey, raw);
       sections.push(...parsed);
     } catch {
       // ignore missing manual files to avoid breaking the assistant

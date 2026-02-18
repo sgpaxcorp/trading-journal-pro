@@ -481,3 +481,83 @@ export async function sendSubscriptionReceiptEmailByEmail(args: {
     html,
   });
 }
+
+/**
+ * Confirmación de cancelación (auto-renew OFF).
+ */
+export async function sendSubscriptionCancellationEmail(args: {
+  email: string;
+  name?: string | null;
+  periodEnd?: string | null;
+}) {
+  const safeName = args.name || "trader";
+  const subject = "Your NeuroTrader Journal cancellation is scheduled";
+  const periodText = args.periodEnd
+    ? new Date(args.periodEnd).toLocaleDateString("en-US")
+    : "the end of your current billing period";
+
+  const text = [
+    `Hi ${safeName},`,
+    "",
+    "We have scheduled your subscription to cancel at the end of the current billing period.",
+    `Access remains active through ${periodText}.`,
+    "",
+    "If you change your mind, you can re-enable auto‑renew anytime from Billing.",
+    "",
+    "Thank you for trading with us,",
+    "NeuroTrader Journal Team",
+  ].join("\n");
+
+  const html = buildNeuroTraderHtml({
+    title: "Cancellation scheduled",
+    preheader: "Your subscription will remain active until the period ends.",
+    greeting: `Hi ${safeName},`,
+    highlight: `Access remains active through <strong>${periodText}</strong>.`,
+    paragraphs: [
+      "We’ve scheduled your subscription to cancel at the end of the current billing period. You won’t be charged again unless you re‑enable auto‑renew.",
+      "If you want to keep your plan active, you can turn auto‑renew back on from Billing at any time.",
+    ],
+    ctaLabel: "Open billing",
+    ctaUrl: "https://neurotrader-journal.com/billing",
+  });
+
+  await sendEmailBase({ to: args.email, subject, text, html });
+}
+
+/**
+ * Win‑back: coupon 30% off.
+ */
+export async function sendSubscriptionWinbackEmail(args: {
+  email: string;
+  name?: string | null;
+  promotionCode: string;
+}) {
+  const safeName = args.name || "trader";
+  const subject = "Come back to NeuroTrader Journal with 30% off";
+
+  const text = [
+    `Hi ${safeName},`,
+    "",
+    "We’d love to have you back. Here is a 30% off code for your next subscription:",
+    args.promotionCode,
+    "",
+    "Use it at checkout in the app.",
+    "",
+    "NeuroTrader Journal Team",
+  ].join("\n");
+
+  const html = buildNeuroTraderHtml({
+    title: "30% off your return",
+    preheader: "Your comeback code is ready.",
+    greeting: `Hi ${safeName},`,
+    highlight: `Promo code: <strong>${args.promotionCode}</strong>`,
+    paragraphs: [
+      "We’d love to have you back. Use this 30% off code on your next subscription checkout.",
+      "If you need help reactivating, reply to this email and our team will assist you.",
+    ],
+    ctaLabel: "Resume subscription",
+    ctaUrl: "https://neurotrader-journal.com/billing",
+  });
+
+  await sendEmailBase({ to: args.email, subject, text, html });
+}

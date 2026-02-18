@@ -1,77 +1,60 @@
-import Link from "next/link";
-import PublicHomeLogoLink from "@/app/components/PublicHomeLogoLink";
+"use client";
 
-export const dynamic = "force-static";
+import Link from "next/link";
+import { useAppSettings } from "@/lib/appSettings";
+import { resolveLocale } from "@/lib/i18n";
 
 export default function PartnerTermsPage() {
+  const { locale } = useAppSettings();
+  const lang = resolveLocale(locale);
+  const isEs = lang === "es";
+  const L = (en: string, es: string) => (isEs ? es : en);
+
   return (
-    <main className="min-h-screen bg-slate-950 text-slate-100">
-      <div className="fixed left-6 top-10 z-20 hidden xl:block">
-        <PublicHomeLogoLink size="lg" showLabel={false} />
+    <main className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center px-6 py-12">
+      <div className="fixed inset-0 -z-10">
+        <div className="absolute inset-0 bg-slate-950" />
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,#22c55e22_0,transparent_55%),radial-gradient(circle_at_bottom,#0f172a_0,#020817_70%)]" />
+        <div className="absolute inset-0 opacity-[0.04] bg-[linear-gradient(to_right,#38bdf855_1px,transparent_1px),linear-gradient(to_bottom,#38bdf833_1px,transparent_1px)] bg-size-[80px_80px]" />
       </div>
-      <div className="mx-auto w-full max-w-4xl px-4 sm:px-6 lg:px-8 py-10">
-        <div className="mb-5 xl:hidden">
-          <PublicHomeLogoLink size="md" showLabel={false} />
+
+      <div className="w-full max-w-2xl bg-slate-900/90 border border-slate-800 rounded-2xl p-8 shadow-2xl">
+        <div className="flex items-center gap-4">
+          <img
+            src="/neurotrader-logo.svg"
+            alt="Neuro Trader Journal"
+            className="h-14 w-auto"
+            draggable={false}
+          />
+          <div>
+            <p className="text-[11px] uppercase tracking-[0.28em] text-emerald-300/90">
+              {L("Partner Program", "Programa Partner")}
+            </p>
+            <h1 className="text-2xl md:text-3xl font-semibold">
+              {L("Coming soon", "Próximamente")}
+            </h1>
+          </div>
         </div>
-        <p className="text-[11px] uppercase tracking-[0.28em] text-emerald-300/90">Partner Program</p>
-        <h1 className="mt-2 text-3xl font-semibold tracking-tight">Partner Terms & Agreement</h1>
-        <p className="mt-3 text-sm text-slate-300">
-          This page defines the partner commission terms used by the platform MVP.
+
+        <p className="mt-5 text-sm text-slate-300 leading-relaxed">
+          {L(
+            "Partner terms are being finalized. This page will be available once the program launches.",
+            "Los términos partner están en proceso. Esta página estará disponible cuando lancemos el programa."
+          )}
         </p>
 
-        <div className="mt-6 space-y-5 rounded-2xl border border-slate-800 bg-slate-900/60 p-6 text-sm leading-6 text-slate-200">
-          <section>
-            <h2 className="text-lg font-semibold text-slate-100">1) Commission model</h2>
-            <ul className="mt-2 list-disc space-y-1 pl-5 text-slate-300">
-              <li>Annual subscription: partner earns 30% of the first-year charge.</li>
-              <li>Monthly subscription: partner earns 20% of each paid monthly invoice.</li>
-            </ul>
-          </section>
-
-          <section>
-            <h2 className="text-lg font-semibold text-slate-100">2) Payout methods</h2>
-            <ul className="mt-2 list-disc space-y-1 pl-5 text-slate-300">
-              <li>App credit: can be requested from the partner dashboard.</li>
-              <li>Cash: requires a payout request from the partner dashboard.</li>
-              <li>
-                Cash payout windows follow partner policy and settlement timing tied to user payments.
-              </li>
-            </ul>
-          </section>
-
-          <section>
-            <h2 className="text-lg font-semibold text-slate-100">3) Agreement acceptance</h2>
-            <p className="mt-2 text-slate-300">
-              To activate partner status, the user must explicitly accept these terms and sign with legal name
-              inside <code className="rounded bg-slate-800 px-1.5 py-0.5 text-slate-100">/partners</code>.
-            </p>
-          </section>
-
-          <section>
-            <h2 className="text-lg font-semibold text-slate-100">4) Operational notes (MVP)</h2>
-            <p className="mt-2 text-slate-300">
-              This MVP focuses on deterministic tracking and partner dashboard operations. Manual review can be
-              applied for payouts when needed.
-            </p>
-          </section>
-
-          <section className="border-t border-slate-800 pt-4">
-            <h2 className="text-lg font-semibold text-slate-100">Resumen rápido (Español)</h2>
-            <ul className="mt-2 list-disc space-y-1 pl-5 text-slate-300">
-              <li>Anual: 30% del total del primer año.</li>
-              <li>Mensual: 20% de cada mensualidad pagada.</li>
-              <li>El partner puede solicitar pago en crédito o cash desde su dashboard.</li>
-              <li>Para activar partner: aceptar términos y firmar con nombre legal en la página de partner.</li>
-            </ul>
-          </section>
-        </div>
-
-        <div className="mt-6">
+        <div className="mt-6 flex flex-col sm:flex-row gap-3">
           <Link
             href="/partners"
-            className="inline-flex items-center rounded-xl border border-slate-700 px-4 py-2 text-sm font-semibold text-slate-200 hover:border-emerald-400 hover:text-emerald-300 transition"
+            className="px-5 py-2.5 rounded-xl border border-slate-700 text-slate-200 text-xs font-semibold hover:border-emerald-400 transition text-center"
           >
-            ← Back to partners
+            {L("Back to Partner Program", "Volver al programa Partner")}
+          </Link>
+          <Link
+            href="/contact"
+            className="px-5 py-2.5 rounded-xl bg-emerald-400 text-slate-950 text-xs font-semibold hover:bg-emerald-300 transition text-center"
+          >
+            {L("Contact us", "Contactarnos")}
           </Link>
         </div>
       </div>

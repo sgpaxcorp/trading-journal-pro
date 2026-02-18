@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 
 import { ScreenScaffold } from "../components/ScreenScaffold";
 import { apiGet } from "../lib/api";
 import { useLanguage } from "../lib/LanguageContext";
 import { t } from "../lib/i18n";
-import { COLORS } from "../theme";
+import { type ThemeColors } from "../theme";
+import { useTheme } from "../lib/ThemeContext";
 
 type DayCell = {
   label: string;
@@ -172,24 +173,27 @@ type CalendarScreenProps = {
 
 export function CalendarScreen({}: CalendarScreenProps) {
   const { language } = useLanguage();
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const [daily, setDaily] = useState<Array<{ date: string; value: number }>>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const today = new Date();
+  const [monthCursor, setMonthCursor] = useState(() => new Date(today.getFullYear(), today.getMonth(), 1));
   const monthLabel = useMemo(
     () =>
-      today.toLocaleDateString(language === "es" ? "es-ES" : "en-US", {
+      monthCursor.toLocaleDateString(language === "es" ? "es-ES" : "en-US", {
         month: "long",
         year: "numeric",
       }),
-    [language, today]
+    [language, monthCursor]
   );
-  const days = useMemo(() => buildCalendarDays(today), [today]);
+  const days = useMemo(() => buildCalendarDays(monthCursor), [monthCursor]);
   const pnlMap = useMemo(() => new Map(daily.map((d) => [d.date, d.value])), [daily]);
   const holidayMap = useMemo(() => {
-    const holidays = getUsMarketHolidays(today.getFullYear(), language === "es");
+    const holidays = getUsMarketHolidays(monthCursor.getFullYear(), language === "es");
     return new Map(holidays.map((h) => [h.date, h]));
-  }, [today, language]);
+  }, [monthCursor, language]);
 
   useEffect(() => {
     let active = true;
@@ -226,7 +230,27 @@ export function CalendarScreen({}: CalendarScreenProps) {
     >
       <View style={styles.calendarShell}>
         <View style={styles.monthHeader}>
-          <Text style={styles.monthTitle}>{monthLabel}</Text>
+          <View style={styles.monthRow}>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() =>
+                setMonthCursor((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1))
+              }
+              style={styles.monthNav}
+            >
+              <Text style={styles.monthNavText}>‹</Text>
+            </Pressable>
+            <Text style={styles.monthTitle}>{monthLabel}</Text>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() =>
+                setMonthCursor((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1))
+              }
+              style={styles.monthNav}
+            >
+              <Text style={styles.monthNavText}>›</Text>
+            </Pressable>
+          </View>
           <Text style={styles.monthSubtitle}>
             {loading
               ? t(language, "Loading daily results…", "Cargando resultados diarios…")
@@ -246,7 +270,7 @@ export function CalendarScreen({}: CalendarScreenProps) {
 
         {loading ? (
           <View style={styles.loadingRow}>
-            <ActivityIndicator color={COLORS.primary} />
+            <ActivityIndicator color={colors.primary} />
             <Text style={styles.loadingText}>{t(language, "Loading…", "Cargando…")}</Text>
           </View>
         ) : (
@@ -296,112 +320,137 @@ export function CalendarScreen({}: CalendarScreenProps) {
   );
 }
 
-const styles = StyleSheet.create({
-  calendarShell: {
-    flex: 1,
-    gap: 12,
-  },
-  monthHeader: {
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    backgroundColor: COLORS.card,
-    padding: 12,
-    gap: 4,
-  },
-  monthTitle: {
-    color: COLORS.textPrimary,
-    fontSize: 18,
-    fontWeight: "700",
-    textTransform: "capitalize",
-  },
-  monthSubtitle: {
-    color: COLORS.textMuted,
-    fontSize: 12,
-  },
-  weekdays: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    paddingHorizontal: 4,
-  },
-  weekdayLabel: {
-    color: COLORS.textMuted,
-    fontSize: 11,
-    width: "13%",
-    textAlign: "center",
-  },
-  grid: {
-    flex: 1,
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 6,
-    alignContent: "space-between",
-  },
-  dayCell: {
-    width: "13%",
-    aspectRatio: 1,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    backgroundColor: COLORS.surface,
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 2,
-  },
-  todayCell: {
-    borderColor: COLORS.primary,
-    backgroundColor: "#0F2C2A",
-  },
-  mutedCell: {
-    opacity: 0.4,
-  },
-  dayLabel: {
-    color: COLORS.textPrimary,
-    fontSize: 12,
-    fontWeight: "600",
-  },
-  mutedLabel: {
-    color: COLORS.textMuted,
-  },
-  pnlLabel: {
-    color: COLORS.textMuted,
-    fontSize: 9,
-  },
-  winCell: {
-    borderColor: "#1EE6A8",
-    backgroundColor: "#0F2C2A",
-  },
-  lossCell: {
-    borderColor: "#2E90FF",
-    backgroundColor: "#0B1E3A",
-  },
-  holidayCell: {
-    borderColor: "#D6B36A",
-    backgroundColor: "#2A1D0B",
-  },
-  holidayTag: {
-    color: "#F2D7A3",
-    fontSize: 8,
-    textTransform: "uppercase",
-    letterSpacing: 1.1,
-    fontWeight: "700",
-  },
-  holidayName: {
-    color: "#F2D7A3",
-    fontSize: 8,
-    textAlign: "center",
-  },
-  loadingRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  loadingText: {
-    color: COLORS.textMuted,
-    fontSize: 12,
-  },
-  errorText: {
-    color: COLORS.danger,
-    fontSize: 12,
-  },
-});
+const createStyles = (colors: ThemeColors) =>
+  StyleSheet.create({
+    calendarShell: {
+      flex: 1,
+      gap: 12,
+    },
+    monthHeader: {
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.card,
+      padding: 12,
+      gap: 4,
+    },
+    monthRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: 8,
+    },
+    monthTitle: {
+      color: colors.textPrimary,
+      fontSize: 18,
+      fontWeight: "700",
+      textTransform: "capitalize",
+      flex: 1,
+      textAlign: "center",
+    },
+    monthNav: {
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    monthNavText: {
+      color: colors.textPrimary,
+      fontSize: 18,
+      fontWeight: "700",
+    },
+    monthSubtitle: {
+      color: colors.textMuted,
+      fontSize: 12,
+    },
+    weekdays: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      paddingHorizontal: 4,
+    },
+    weekdayLabel: {
+      color: colors.textMuted,
+      fontSize: 11,
+      width: "13%",
+      textAlign: "center",
+    },
+    grid: {
+      flex: 1,
+      flexDirection: "row",
+      flexWrap: "wrap",
+      justifyContent: "space-between",
+    },
+    dayCell: {
+      flexBasis: "14.2857%",
+      maxWidth: "14.2857%",
+      aspectRatio: 1,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 2,
+      marginBottom: 6,
+    },
+    todayCell: {
+      borderColor: colors.primary,
+      backgroundColor: "#0F2C2A",
+    },
+    mutedCell: {
+      opacity: 0.4,
+    },
+    dayLabel: {
+      color: colors.textPrimary,
+      fontSize: 12,
+      fontWeight: "600",
+    },
+    mutedLabel: {
+      color: colors.textMuted,
+    },
+    pnlLabel: {
+      color: colors.textMuted,
+      fontSize: 9,
+    },
+    winCell: {
+      borderColor: "#1EE6A8",
+      backgroundColor: "#0F2C2A",
+    },
+    lossCell: {
+      borderColor: "#2E90FF",
+      backgroundColor: "#0B1E3A",
+    },
+    holidayCell: {
+      borderColor: "#D6B36A",
+      backgroundColor: "#2A1D0B",
+    },
+    holidayTag: {
+      color: "#F2D7A3",
+      fontSize: 8,
+      textTransform: "uppercase",
+      letterSpacing: 1.1,
+      fontWeight: "700",
+    },
+    holidayName: {
+      color: "#F2D7A3",
+      fontSize: 8,
+      textAlign: "center",
+    },
+    loadingRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+    },
+    loadingText: {
+      color: colors.textMuted,
+      fontSize: 12,
+    },
+    errorText: {
+      color: colors.danger,
+      fontSize: 12,
+    },
+  });

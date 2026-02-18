@@ -13,8 +13,23 @@ type DocSection = {
   body: string;
 };
 
+const DOCS_ROOT = path.resolve(process.cwd(), "docs", "user-manual");
+
+function resolveDocPath(source: string): string {
+  if (!source.startsWith("docs/user-manual/")) {
+    throw new Error("Invalid doc source");
+  }
+  const rel = source.replace(/^docs\/user-manual\//, "");
+  const safeRel = rel.replace(/^(?:\.\.[/\\])+/, "");
+  const full = path.join(DOCS_ROOT, safeRel);
+  if (!full.startsWith(DOCS_ROOT)) {
+    throw new Error("Invalid doc path");
+  }
+  return full;
+}
+
 function loadDoc(source: string): string {
-  const filePath = path.join(process.cwd(), source);
+  const filePath = resolveDocPath(source);
   return fs.readFileSync(filePath, "utf8");
 }
 

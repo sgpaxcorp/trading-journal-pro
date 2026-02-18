@@ -28,7 +28,7 @@ type ResourceCreateInput = {
 type ResourceUpdateInput = Partial<Pick<ResourceLibraryItemRow, "kind" | "title" | "url" | "author" | "content">>;
 
 function isMissingTableError(err: { code?: string } | null | undefined): boolean {
-  return err?.code === "42P01";
+  return err?.code === "42P01" || err?.code === "PGRST116" || err?.code === "PGRST301";
 }
 
 export async function listResourceLibraryItems(
@@ -48,7 +48,12 @@ export async function listResourceLibraryItems(
   const { data, error } = await q.order("created_at", { ascending: false });
   if (error) {
     if (!isMissingTableError(error)) {
-      console.error("[resourcesLibrarySupabase] list error:", error);
+      console.error("[resourcesLibrarySupabase] list error:", {
+        message: (error as any)?.message,
+        details: (error as any)?.details,
+        hint: (error as any)?.hint,
+        code: (error as any)?.code,
+      });
     }
     return [];
   }

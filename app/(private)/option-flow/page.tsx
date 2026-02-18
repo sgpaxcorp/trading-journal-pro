@@ -202,6 +202,10 @@ const ROW_KEYWORDS = [
   "quantity",
   "volume",
   "open interest",
+  "open_interest",
+  "openinterest",
+  "open int",
+  "openint",
   "oi",
   "timestamp",
   "date",
@@ -243,7 +247,7 @@ const COMMON_FLOW_COLUMNS: ProviderColumnMap = {
   side: ["side", "trade side", "at", "aggressor", "print"],
   size: ["size", "qty", "quantity", "volume"],
   premium: ["premium", "notional", "value", "cost", "total premium"],
-  oi: ["oi", "open interest"],
+  oi: ["oi", "open interest", "open_interest", "openinterest", "open int", "openint"],
   bid: ["bid", "bid price"],
   ask: ["ask", "ask price"],
   trade: ["trade", "trade_price", "trade price", "price", "fill", "executed"],
@@ -1081,6 +1085,23 @@ function compactRow(row: Record<string, any>): Record<string, any> {
   return out;
 }
 
+function isHeaderLikeRow(row: Record<string, any>): boolean {
+  const entries = Object.entries(row);
+  if (!entries.length) return false;
+  let matches = 0;
+  let checked = 0;
+  for (const [key, value] of entries) {
+    const k = String(key ?? "").trim().toLowerCase();
+    if (!k) continue;
+    const v = String(value ?? "").trim().toLowerCase();
+    if (!v) continue;
+    checked += 1;
+    if (v === k) matches += 1;
+  }
+  if (!checked) return false;
+  return matches / checked >= 0.7;
+}
+
 function pickValueByAliases(row: Record<string, any>, aliases: string[]) {
   const entries = Object.entries(row);
   const exact = aliases.find((alias) =>
@@ -1143,6 +1164,10 @@ async function parseCsvWithWorker(
         "size",
         "volume",
         "open interest",
+        "open_interest",
+        "openinterest",
+        "open int",
+        "openint",
         "oi",
       ];
       const scoreHeader = (cols) => {
@@ -1380,6 +1405,10 @@ async function parseExcelFile(
       "size",
       "volume",
       "open interest",
+      "open_interest",
+      "openinterest",
+      "open int",
+      "openint",
       "oi",
     ];
     let score = 0;
@@ -1438,13 +1467,15 @@ async function parseFlowFile(
   const isExcel = name.endsWith(".xlsx") || name.endsWith(".xls");
   if (isCsv) {
     const parsed = await parseCsvWithWorker(file, underlying, onProgress, maxRows);
-    const normalized = normalizeRowsByProvider(parsed.rows, providerId);
+    const cleaned = parsed.rows.filter((row) => !isHeaderLikeRow(row));
+    const normalized = normalizeRowsByProvider(cleaned, providerId);
     return { ...parsed, rows: normalized };
   }
   if (isExcel) {
     onProgress({ percent: 10, scanned: 0, matched: 0 });
     const parsed = await parseExcelFile(file, maxRows);
-    const normalized = normalizeRowsByProvider(parsed.rows, providerId);
+    const cleaned = parsed.rows.filter((row) => !isHeaderLikeRow(row));
+    const normalized = normalizeRowsByProvider(cleaned, providerId);
     const filtered = underlying ? filterRowsByUnderlying(normalized, underlying) : normalized;
     onProgress({
       percent: 100,

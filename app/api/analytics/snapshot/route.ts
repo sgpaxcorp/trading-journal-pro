@@ -19,8 +19,14 @@ const EMOTIONS_COL = "emotions";
 function isMissingColumnError(err: any, column?: string) {
   if (!err) return false;
   if (err.code === "42703") return true;
+  if (String(err.code || "").startsWith("PGRST")) {
+    // PostgREST schema cache / unknown column errors
+    return true;
+  }
   const msg = String(err.message || "").toLowerCase();
   if (!msg) return false;
+  if (msg.includes("schema cache") && msg.includes("column")) return true;
+  if (msg.includes("could not find") && msg.includes("column")) return true;
   if (msg.includes("does not exist") && msg.includes("column")) return true;
   if (column && msg.includes(column.toLowerCase())) return true;
   return false;
@@ -87,6 +93,107 @@ function normalizeSide(s: any): TradeRow["side"] {
   return v === "SHORT" ? "short" : "long";
 }
 
+function timeBucket30m(raw?: string | null): string | null {
+  if (!raw) return null;
+  const parts = String(raw).trim().split(":");
+  if (parts.length < 2) return null;
+  const h = Number(parts[0]);
+  const m = Number(parts[1]);
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return null;
+  if (h < 0 || h > 23 || m < 0 || m > 59) return null;
+  const bucket = m < 30 ? 0 : 30;
+  return `${String(h).padStart(2, "0")}:${bucket === 0 ? "00" : "30"}`;
+}
+
+function computeSessionStats(pnls: number[]) {
+  const clean = pnls.filter((v) => Number.isFinite(v));
+  const total = clean.reduce((a, b) => a + b, 0);
+  const wins = clean.filter((v) => v > 0);
+  const losses = clean.filter((v) => v < 0);
+  const breakevens = clean.filter((v) => v === 0);
+  const grossProfit = wins.reduce((a, b) => a + b, 0);
+  const grossLossAbs = Math.abs(losses.reduce((a, b) => a + b, 0));
+  const avgWin = wins.length ? grossProfit / wins.length : null;
+  const avgLoss = losses.length ? grossLossAbs / losses.length : null;
+  const maxWin = clean.length ? Math.max(...clean) : null;
+  const maxLoss = clean.length ? Math.min(...clean) : null;
+  const expectancy = clean.length ? total / clean.length : null;
+  const profitFactor = grossLossAbs > 0 ? grossProfit / grossLossAbs : null;
+  return {
+    total,
+    wins: wins.length,
+    losses: losses.length,
+    breakevens: breakevens.length,
+    grossProfit,
+    grossLossAbs,
+    avgWin,
+    avgLoss,
+    maxWin,
+    maxLoss,
+    expectancy,
+    profitFactor,
+  };
+}
+
+function stddev(values: number[]) {
+  if (values.length < 2) return null;
+  const mean = values.reduce((a, b) => a + b, 0) / values.length;
+  const variance = values.reduce((acc, v) => acc + (v - mean) ** 2, 0) / (values.length - 1);
+  return Math.sqrt(variance);
+}
+
+function downsideDeviation(values: number[]) {
+  const neg = values.filter((v) => v < 0);
+  if (!neg.length) return null;
+  const squared = neg.map((v) => v * v);
+  const mean = squared.reduce((a, b) => a + b, 0) / squared.length;
+  return Math.sqrt(mean);
+}
+
+function computeStreaks(values: number[]) {
+  let winStreak = 0;
+  let lossStreak = 0;
+  let maxWin = 0;
+  let maxLoss = 0;
+  for (const v of values) {
+    if (v > 0) {
+      winStreak += 1;
+      lossStreak = 0;
+    } else if (v < 0) {
+      lossStreak += 1;
+      winStreak = 0;
+    } else {
+      winStreak = 0;
+      lossStreak = 0;
+    }
+    if (winStreak > maxWin) maxWin = winStreak;
+    if (lossStreak > maxLoss) maxLoss = lossStreak;
+  }
+  return { maxWin, maxLoss };
+}
+
+function computeDrawdown(pnls: number[], startBalance = 0) {
+  let cum = 0;
+  let peak = Number.isFinite(startBalance) ? startBalance : 0;
+  let maxDd = 0;
+  let maxDdPct: number | null = null;
+  for (const pnl of pnls) {
+    cum += pnl;
+    const equity = (Number.isFinite(startBalance) ? startBalance : 0) + cum;
+    if (equity > peak) peak = equity;
+    const dd = equity - peak; // <= 0
+    if (dd < maxDd) maxDd = dd;
+    if (peak > 0 && dd < 0) {
+      const pct = (dd / peak) * 100;
+      if (maxDdPct == null || pct < maxDdPct) maxDdPct = pct;
+    }
+  }
+  return {
+    maxDrawdown: maxDd < 0 ? maxDd : 0,
+    maxDrawdownPct: maxDdPct,
+  };
+}
+
 function parseNotesTrades(notesRaw: unknown): { entries: any[]; exits: any[] } {
   if (notesRaw && typeof notesRaw === "object") {
     const parsed = notesRaw as any;
@@ -122,6 +229,7 @@ function toTradeRow(t: any): TradeRow | null {
     time: typeof t?.time === "string" ? t.time : undefined,
     dte: t?.dte == null ? null : Number(t.dte),
     expiry: typeof t?.expiry === "string" ? t.expiry : null,
+    optionStrategy: typeof t?.optionStrategy === "string" ? t.optionStrategy : typeof t?.strategy === "string" ? t.strategy : null,
   };
 }
 
@@ -238,16 +346,25 @@ export async function GET(req: NextRequest) {
     if (snapErr) throw snapErr;
 
     const force = searchParams.get("force") === "1";
+    const payloadMetaMethod = (snap as any)?.payload?.meta?.tradeCountMethod;
     const missingCritical =
       !snap ||
       snap.sessions_count == null ||
       snap.trades_count == null ||
       snap.total_pnl == null ||
       snap.payload == null ||
-      (snap.sessions_count === 0 && snap.trades_count === 0 && snap.total_pnl === 0);
+      (snap.sessions_count === 0 && snap.trades_count === 0 && snap.total_pnl === 0) ||
+      payloadMetaMethod !== "round_trip_grouped";
+
+    let sessionsCache: SessionRow[] | null = null;
+    const ensureSessions = async () => {
+      if (sessionsCache) return sessionsCache;
+      sessionsCache = await fetchSessions(userId, email, accountId);
+      return sessionsCache;
+    };
 
     if (!snap || missingCritical || force) {
-      const sessions = await fetchSessions(userId, email, accountId);
+      const sessions = await ensureSessions();
       if (!sessions.length) {
         return NextResponse.json({ snapshot: null, topEdges: [] });
       }
@@ -411,7 +528,7 @@ export async function GET(req: NextRequest) {
     const drawdownCurve = Array.isArray(payload?.drawdownCurve) ? payload.drawdownCurve : [];
     const maxDrawdown =
       drawdownCurve.length > 0
-        ? Math.min(...drawdownCurve.map((d: any) => Number(d?.value ?? 0)))
+        ? Math.min(...drawdownCurve.map((d: any) => Number(d?.dd ?? d?.value ?? 0)))
         : null;
 
     const byHourMap = new Map<string, { pnl: number; trades: number; winRateSum: number; sessions: number }>();
@@ -459,14 +576,14 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    const byHour = Array.from(byHourMap.entries()).map(([hour, agg]) => ({
+    let byHour = Array.from(byHourMap.entries()).map(([hour, agg]) => ({
       hour,
       pnl: Number(agg.pnl.toFixed(2)),
       trades: agg.trades,
       winRate: agg.sessions ? Number((agg.winRateSum / agg.sessions).toFixed(2)) : 0,
     }));
 
-    const byDOW = Array.from(byDowMap.entries()).map(([dow, agg]) => ({
+    let byDOW = Array.from(byDowMap.entries()).map(([dow, agg]) => ({
       dow,
       pnl: Number(agg.pnl.toFixed(2)),
       trades: agg.trades,
@@ -483,19 +600,165 @@ export async function GET(req: NextRequest) {
       .sort((a, b) => b.pnl - a.pnl)
       .slice(0, 12);
 
+    if (byDOW.length === 0 && Array.isArray(payload?.dowBars)) {
+      byDOW = payload.dowBars.map((row: any) => ({
+        dow: String(row?.label ?? row?.dow ?? ""),
+        pnl: Number((Number(row?.avgPnl ?? 0) * Number(row?.sessions ?? 0)).toFixed(2)),
+        trades: Number(row?.sessions ?? 0),
+        winRate: Number(row?.winRate ?? 0),
+      }));
+    }
+
+    if (byHour.length === 0) {
+      const sessions = await ensureSessions();
+      if (sessions.length) {
+        const hourAgg = new Map<string, { pnl: number; trades: number; wins: number; sessions: number }>();
+        for (const s of sessions) {
+          const allTrades = [...(s.entries ?? []), ...(s.exits ?? [])];
+          const firstTime = allTrades.find((t) => t.time)?.time;
+          const bucket = timeBucket30m(firstTime ?? undefined);
+          if (!bucket) continue;
+          const pnl = Number(s.pnl ?? 0) || 0;
+          const trades = allTrades.length;
+          const agg = hourAgg.get(bucket) || { pnl: 0, trades: 0, wins: 0, sessions: 0 };
+          agg.pnl += pnl;
+          agg.trades += trades;
+          agg.sessions += 1;
+          if (pnl > 0) agg.wins += 1;
+          hourAgg.set(bucket, agg);
+        }
+        byHour = Array.from(hourAgg.entries()).map(([hour, agg]) => ({
+          hour,
+          pnl: Number(agg.pnl.toFixed(2)),
+          trades: agg.trades,
+          winRate: agg.sessions ? Number(((agg.wins / agg.sessions) * 100).toFixed(2)) : 0,
+        }));
+      }
+    }
+
+    let summary = payload?.summary || {};
+    let summaryUpdated = false;
+    if (
+      summary.avgWin == null ||
+      summary.avgLoss == null ||
+      summary.maxWin == null ||
+      summary.maxLoss == null ||
+      summary.wins == null ||
+      summary.losses == null ||
+      summary.breakevens == null ||
+      summary.grossPnl == null ||
+      summary.payoffRatio == null ||
+      summary.maxDrawdown == null
+    ) {
+      const sessions = await ensureSessions();
+      if (sessions.length) {
+        const pnls = sessions.map((s) => Number(s.pnl ?? 0)).filter((v) => Number.isFinite(v));
+        const stats = computeSessionStats(pnls);
+        const streaks = computeStreaks(pnls);
+
+        let startBalance = Number(summary.startBalance ?? 0);
+        if (!Number.isFinite(startBalance) || startBalance <= 0) {
+          let planQuery = supabaseAdmin
+            .from("growth_plans")
+            .select("starting_balance,created_at,updated_at")
+            .eq("user_id", userId)
+            .order("updated_at", { ascending: false })
+            .order("created_at", { ascending: false })
+            .limit(1);
+          if (accountId) planQuery = planQuery.eq("account_id", accountId);
+          const { data: planRows } = await planQuery;
+          const plan = (planRows ?? [])[0] as any | undefined;
+          startBalance = Number(plan?.starting_balance ?? 0) || 0;
+        }
+
+        const dd = computeDrawdown(pnls, startBalance);
+        const mean = pnls.length ? pnls.reduce((a, b) => a + b, 0) / pnls.length : 0;
+        const sd = stddev(pnls);
+        const downside = downsideDeviation(pnls);
+        const sharpe = sd && sd > 0 ? (mean / sd) * Math.sqrt(pnls.length) : null;
+        const sortino = downside && downside > 0 ? (mean / downside) * Math.sqrt(pnls.length) : null;
+        const payoffRatio =
+          stats.avgWin != null && stats.avgLoss != null && stats.avgLoss > 0
+            ? stats.avgWin / stats.avgLoss
+            : null;
+        const recoveryFactor =
+          dd.maxDrawdown != null && dd.maxDrawdown < 0 ? stats.total / Math.abs(dd.maxDrawdown) : null;
+
+        let cagr: number | null = null;
+        const firstDate = sessions[0]?.date;
+        const lastDate = sessions[sessions.length - 1]?.date;
+        if (startBalance > 0 && firstDate && lastDate) {
+          const start = new Date(firstDate + "T00:00:00Z").getTime();
+          const end = new Date(lastDate + "T00:00:00Z").getTime();
+          const years = (end - start) / (365.25 * 24 * 3600 * 1000);
+          const endBalance = startBalance + stats.total;
+          if (years > 0 && endBalance > 0) {
+            cagr = Math.pow(endBalance / startBalance, 1 / years) - 1;
+          }
+        }
+
+        summary = {
+          ...summary,
+          grossPnl: Number(stats.grossProfit.toFixed(2)),
+          avgWin: stats.avgWin != null ? Number(stats.avgWin.toFixed(2)) : null,
+          avgLoss: stats.avgLoss != null ? Number(stats.avgLoss.toFixed(2)) : null,
+          maxWin: stats.maxWin != null ? Number(stats.maxWin.toFixed(2)) : null,
+          maxLoss: stats.maxLoss != null ? Number(stats.maxLoss.toFixed(2)) : null,
+          wins: stats.wins,
+          losses: stats.losses,
+          breakevens: stats.breakevens,
+          payoffRatio: payoffRatio != null ? Number(payoffRatio.toFixed(3)) : null,
+          expectancy: stats.expectancy != null ? Number(stats.expectancy.toFixed(3)) : null,
+          profitFactor: stats.profitFactor != null ? Number(stats.profitFactor.toFixed(3)) : null,
+          maxDrawdown: Number(dd.maxDrawdown.toFixed(2)),
+          maxDrawdownPct: dd.maxDrawdownPct != null ? Number(dd.maxDrawdownPct.toFixed(2)) : null,
+          longestWinStreak: streaks.maxWin,
+          longestLossStreak: streaks.maxLoss,
+          sharpe: sharpe != null ? Number(sharpe.toFixed(3)) : null,
+          sortino: sortino != null ? Number(sortino.toFixed(3)) : null,
+          recoveryFactor: recoveryFactor != null ? Number(recoveryFactor.toFixed(3)) : null,
+          cagr: cagr != null ? Number((cagr * 100).toFixed(3)) / 100 : null,
+        };
+        summaryUpdated = true;
+      }
+    }
+
+    if (summaryUpdated) {
+      const nextPayload = { ...(payload || {}), summary };
+      await supabaseAdmin
+        .from("analytics_snapshots")
+        .update({ payload: nextPayload })
+        .eq("user_id", userId)
+        .eq("as_of_date", snap.as_of_date);
+    }
+
     const normalized = {
       updatedAtIso: snap.as_of_date,
       totalSessions: snap.sessions_count ?? 0,
       totalTrades: snap.trades_count ?? 0,
+      wins: summary?.wins ?? null,
+      losses: summary?.losses ?? null,
+      breakevens: summary?.breakevens ?? null,
       winRate: snap.win_rate ?? 0,
+      grossPnl: summary?.grossPnl ?? null,
       netPnl: snap.total_pnl ?? 0,
+      totalFees: summary?.totalFees ?? null,
       avgNetPerSession: snap.avg_pnl ?? 0,
-      profitFactor: snap.profit_factor ?? null,
-      expectancy: snap.expectancy ?? 0,
-      maxWin: snap.best_day_pnl ?? null,
-      maxLoss: snap.worst_day_pnl ?? null,
-      maxDrawdown: maxDrawdown != null ? Number(maxDrawdown.toFixed(2)) : null,
-      maxDrawdownPct: null,
+      profitFactor: summary?.profitFactor ?? snap.profit_factor ?? null,
+      expectancy: summary?.expectancy ?? snap.expectancy ?? 0,
+      avgWin: summary?.avgWin ?? null,
+      avgLoss: summary?.avgLoss ?? null,
+      maxWin: summary?.maxWin ?? snap.best_day_pnl ?? null,
+      maxLoss: summary?.maxLoss ?? snap.worst_day_pnl ?? null,
+      maxDrawdown: summary?.maxDrawdown ?? (maxDrawdown != null ? Number(maxDrawdown.toFixed(2)) : null),
+      maxDrawdownPct: summary?.maxDrawdownPct ?? null,
+      longestWinStreak: summary?.longestWinStreak ?? null,
+      longestLossStreak: summary?.longestLossStreak ?? null,
+      recoveryFactor: summary?.recoveryFactor ?? null,
+      sharpe: summary?.sharpe ?? null,
+      sortino: summary?.sortino ?? null,
+      payoffRatio: summary?.payoffRatio ?? null,
+      cagr: summary?.cagr ?? null,
       byHour,
       byDOW,
       bySymbol,

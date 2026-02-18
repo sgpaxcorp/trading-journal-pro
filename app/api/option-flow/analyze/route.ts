@@ -169,7 +169,7 @@ function normalizeFlowRow(row: Record<string, any>) {
   ]);
   const sizeRaw = pickField(row, ["size", "qty", "quantity", "volume"]);
   const premiumRaw = pickField(row, ["premium", "notional", "value", "cost"]);
-  const oiRaw = pickField(row, ["oi", "open interest"]);
+  const oiRaw = pickField(row, ["oi", "open interest", "open_interest", "openinterest"]);
   const bidRaw = pickField(row, ["bid"]);
   const askRaw = pickField(row, ["ask"]);
   const tradeRaw = pickField(

@@ -30,6 +30,7 @@ const rows: PlanRow[] = [
   { label: "Trading accounts", core: "5", advanced: "Unlimited" },
   { label: "Data storage", core: "1GB", advanced: "5GB" },
   { label: "Support", core: "Email support", advanced: "Priority email & chat" },
+  { label: "Mobile app (iOS)", core: true, advanced: true },
 
   {
     section: "PLANNING & RULES",
@@ -151,6 +152,7 @@ export default function PlansComparison() {
     "Unlimited": "Ilimitadas",
     "Data storage": "Almacenamiento",
     Support: "Soporte",
+    "Mobile app (iOS)": "Aplicación móvil (iOS)",
     "Growth plan & daily targets": "Plan de crecimiento y metas diarias",
     "Setup rules & triggers": "Reglas y disparadores de setup",
     "Alerts & reminders": "Alertas y recordatorios",

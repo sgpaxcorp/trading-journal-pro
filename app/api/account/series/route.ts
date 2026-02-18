@@ -30,6 +30,19 @@ function looksLikeYYYYMMDD(s: string): boolean {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(s || ""));
 }
 
+function isMissingColumnError(err: any, column?: string) {
+  if (!err) return false;
+  if (err.code === "42703") return true;
+  if (String(err.code || "").startsWith("PGRST")) return true;
+  const msg = String(err.message || "").toLowerCase();
+  if (!msg) return false;
+  if (msg.includes("schema cache") && msg.includes("column")) return true;
+  if (msg.includes("could not find") && msg.includes("column")) return true;
+  if (msg.includes("does not exist") && msg.includes("column")) return true;
+  if (column && msg.includes(column.toLowerCase())) return true;
+  return false;
+}
+
 function listDatesBetween(startIso: string, endIso: string): string[] {
   const out: string[] = [];
   if (!looksLikeYYYYMMDD(startIso) || !looksLikeYYYYMMDD(endIso)) return out;
@@ -99,6 +112,15 @@ async function queryCashflows(table: string, userId: string, accountId?: string 
     error = retry.error;
   }
 
+  // If account_id column doesn't exist, retry without account filter
+  if (error && accountId && isMissingColumnError(error, "account_id")) {
+    let retry = supabaseAdmin.from(table).select("*").eq("user_id", userId);
+    retry = retry.order("date", { ascending: true }).order("created_at", { ascending: true });
+    const res = await retry;
+    data = res.data as any[] | null;
+    error = res.error;
+  }
+
   return { data: (data ?? []) as any[], error };
 }
 
@@ -145,6 +167,16 @@ async function listJournalEntries(userId: string, email?: string | null, account
   if (accountId) q = q.eq("account_id", accountId);
 
   let { data, error } = await q;
+
+  if (error && accountId && isMissingColumnError(error, "account_id")) {
+    const retry = await supabaseAdmin
+      .from("journal_entries")
+      .select("date, pnl")
+      .eq("user_id", userId)
+      .order("date", { ascending: true });
+    data = retry.data as any[] | null;
+    error = retry.error;
+  }
 
   if (error) throw error;
 
@@ -193,14 +225,27 @@ export async function GET(req: NextRequest) {
       .eq("user_id", userId)
       .maybeSingle();
     const accountId = requestedAccountId || (pref as any)?.active_account_id || null;
-    const { data: planRows, error: planErr } = await supabaseAdmin
+    let planQuery = supabaseAdmin
       .from("growth_plans")
       .select("starting_balance,target_balance,daily_target_pct,daily_goal_percent,loss_days_per_week,trading_days,created_at,updated_at")
       .eq("user_id", userId)
-      .eq("account_id", accountId)
       .order("updated_at", { ascending: false })
       .order("created_at", { ascending: false })
       .limit(1);
+    if (accountId) planQuery = planQuery.eq("account_id", accountId);
+    let { data: planRows, error: planErr } = await planQuery;
+
+    if (planErr && accountId && isMissingColumnError(planErr, "account_id")) {
+      const retry = await supabaseAdmin
+        .from("growth_plans")
+        .select("starting_balance,target_balance,daily_target_pct,daily_goal_percent,loss_days_per_week,trading_days,created_at,updated_at")
+        .eq("user_id", userId)
+        .order("updated_at", { ascending: false })
+        .order("created_at", { ascending: false })
+        .limit(1);
+      planRows = retry.data as any[] | null;
+      planErr = retry.error;
+    }
 
     if (planErr) throw planErr;
 

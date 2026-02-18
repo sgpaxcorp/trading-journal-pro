@@ -28,6 +28,7 @@ const PLAN_COPY: Record<
       { en: "Daily P&L tracking", es: "Seguimiento diario de P&L" },
       { en: "Basic analytics & calendar", es: "Analítica básica y calendario" },
       { en: "Growth plan basics", es: "Fundamentos del Growth Plan" },
+      { en: "Mobile app (iOS)", es: "Aplicación móvil (iOS)" },
     ],
   },
   advanced: {
@@ -43,6 +44,7 @@ const PLAN_COPY: Record<
       { en: "Profit & Loss Track (business accounting)", es: "Profit & Loss Track (contabilidad)" },
       { en: "AI coaching & mindset tools", es: "AI coaching y herramientas de mindset" },
       { en: "Priority improvements & features", es: "Mejoras y features prioritarios" },
+      { en: "Mobile app (iOS)", es: "Aplicación móvil (iOS)" },
     ],
   },
 };

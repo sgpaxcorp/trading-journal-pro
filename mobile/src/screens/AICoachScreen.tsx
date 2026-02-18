@@ -16,7 +16,8 @@ import { useLanguage } from "../lib/LanguageContext";
 import { t } from "../lib/i18n";
 import { useSupabaseUser } from "../lib/useSupabaseUser";
 import { supabaseMobile } from "../lib/supabase";
-import { COLORS } from "../theme";
+import { type ThemeColors } from "../theme";
+import { useTheme } from "../lib/ThemeContext";
 
 type AICoachScreenProps = {
   onOpenModule: (title: string, description: string) => void;
@@ -40,6 +41,8 @@ type CoachMessage = {
 
 export function AICoachScreen({}: AICoachScreenProps) {
   const { language } = useLanguage();
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const user = useSupabaseUser();
   const [threads, setThreads] = useState<CoachThread[]>([]);
   const [activeThread, setActiveThread] = useState<CoachThread | null>(null);
@@ -268,7 +271,7 @@ export function AICoachScreen({}: AICoachScreenProps) {
 
       {loadingThreads ? (
         <View style={styles.loadingRow}>
-          <ActivityIndicator color={COLORS.primary} />
+          <ActivityIndicator color={colors.primary} />
           <Text style={styles.loadingText}>{t(language, "Loading sessions…", "Cargando sesiones…")}</Text>
         </View>
       ) : (
@@ -293,7 +296,7 @@ export function AICoachScreen({}: AICoachScreenProps) {
         <Text style={styles.cardTitle}>{t(language, "Conversation", "Conversación")}</Text>
         {loadingMessages ? (
           <View style={styles.loadingRow}>
-            <ActivityIndicator color={COLORS.primary} />
+            <ActivityIndicator color={colors.primary} />
             <Text style={styles.loadingText}>{t(language, "Loading messages…", "Cargando mensajes…")}</Text>
           </View>
         ) : (
@@ -328,7 +331,7 @@ export function AICoachScreen({}: AICoachScreenProps) {
           <TextInput
             style={styles.input}
             placeholder={t(language, "Ask your coach…", "Pregunta al coach…")}
-            placeholderTextColor={COLORS.textMuted}
+            placeholderTextColor={colors.textMuted}
             value={input}
             onChangeText={setInput}
             multiline
@@ -342,147 +345,148 @@ export function AICoachScreen({}: AICoachScreenProps) {
   );
 }
 
-const styles = StyleSheet.create({
-  headerRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  kicker: {
-    color: COLORS.textMuted,
-    fontSize: 11,
-    textTransform: "uppercase",
-    letterSpacing: 1.2,
-    fontWeight: "700",
-  },
-  newButton: {
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: COLORS.primary,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-  },
-  newButtonText: {
-    color: COLORS.primary,
-    fontSize: 12,
-    fontWeight: "700",
-  },
-  threadList: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-  },
-  threadCard: {
-    flexBasis: "48%",
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    backgroundColor: COLORS.surface,
-    padding: 10,
-    gap: 4,
-  },
-  threadCardActive: {
-    borderColor: COLORS.primary,
-    backgroundColor: "#0F2C2A",
-  },
-  threadTitle: {
-    color: COLORS.textPrimary,
-    fontSize: 12,
-    fontWeight: "700",
-  },
-  threadDate: {
-    color: COLORS.textMuted,
-    fontSize: 10,
-  },
-  chatCard: {
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    backgroundColor: COLORS.surface,
-    padding: 12,
-    gap: 6,
-    minHeight: 280,
-  },
-  cardTitle: {
-    color: COLORS.primary,
-    fontSize: 12,
-    fontWeight: "700",
-    letterSpacing: 1.2,
-    textTransform: "uppercase",
-  },
-  bubble: {
-    borderRadius: 12,
-    paddingVertical: 8,
-    paddingHorizontal: 10,
-    marginBottom: 6,
-    maxWidth: "85%",
-  },
-  bubbleUser: {
-    alignSelf: "flex-end",
-    backgroundColor: "#0F2C2A",
-    borderWidth: 1,
-    borderColor: "#1EE6A8",
-  },
-  bubbleCoach: {
-    alignSelf: "flex-start",
-    backgroundColor: COLORS.card,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-  },
-  bubbleText: {
-    color: COLORS.textPrimary,
-    fontSize: 12,
-    lineHeight: 18,
-  },
-  bubbleMeta: {
-    marginTop: 4,
-    color: COLORS.textMuted,
-    fontSize: 9,
-  },
-  emptyText: {
-    color: COLORS.textMuted,
-    fontSize: 12,
-    lineHeight: 18,
-  },
-  inputRow: {
-    flexDirection: "row",
-    alignItems: "flex-end",
-    gap: 8,
-  },
-  input: {
-    flex: 1,
-    minHeight: 48,
-    maxHeight: 140,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    backgroundColor: COLORS.surface,
-    color: COLORS.textPrimary,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 13,
-  },
-  sendButton: {
-    borderRadius: 10,
-    backgroundColor: COLORS.primary,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-  },
-  sendButtonDisabled: {
-    opacity: 0.6,
-  },
-  sendButtonText: {
-    color: "#061122",
-    fontSize: 12,
-    fontWeight: "700",
-  },
-  loadingRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  loadingText: {
-    color: COLORS.textMuted,
-    fontSize: 12,
-  },
-});
+const createStyles = (colors: ThemeColors) =>
+  StyleSheet.create({
+    headerRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+    },
+    kicker: {
+      color: colors.textMuted,
+      fontSize: 11,
+      textTransform: "uppercase",
+      letterSpacing: 1.2,
+      fontWeight: "700",
+    },
+    newButton: {
+      borderRadius: 999,
+      borderWidth: 1,
+      borderColor: colors.primary,
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+    },
+    newButtonText: {
+      color: colors.primary,
+      fontSize: 12,
+      fontWeight: "700",
+    },
+    threadList: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: 8,
+    },
+    threadCard: {
+      flexBasis: "48%",
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+      padding: 10,
+      gap: 4,
+    },
+    threadCardActive: {
+      borderColor: colors.primary,
+      backgroundColor: "#0F2C2A",
+    },
+    threadTitle: {
+      color: colors.textPrimary,
+      fontSize: 12,
+      fontWeight: "700",
+    },
+    threadDate: {
+      color: colors.textMuted,
+      fontSize: 10,
+    },
+    chatCard: {
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+      padding: 12,
+      gap: 6,
+      minHeight: 280,
+    },
+    cardTitle: {
+      color: colors.primary,
+      fontSize: 12,
+      fontWeight: "700",
+      letterSpacing: 1.2,
+      textTransform: "uppercase",
+    },
+    bubble: {
+      borderRadius: 12,
+      paddingVertical: 8,
+      paddingHorizontal: 10,
+      marginBottom: 6,
+      maxWidth: "85%",
+    },
+    bubbleUser: {
+      alignSelf: "flex-end",
+      backgroundColor: "#0F2C2A",
+      borderWidth: 1,
+      borderColor: "#1EE6A8",
+    },
+    bubbleCoach: {
+      alignSelf: "flex-start",
+      backgroundColor: colors.card,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    bubbleText: {
+      color: colors.textPrimary,
+      fontSize: 12,
+      lineHeight: 18,
+    },
+    bubbleMeta: {
+      marginTop: 4,
+      color: colors.textMuted,
+      fontSize: 9,
+    },
+    emptyText: {
+      color: colors.textMuted,
+      fontSize: 12,
+      lineHeight: 18,
+    },
+    inputRow: {
+      flexDirection: "row",
+      alignItems: "flex-end",
+      gap: 8,
+    },
+    input: {
+      flex: 1,
+      minHeight: 48,
+      maxHeight: 140,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+      color: colors.textPrimary,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      fontSize: 13,
+    },
+    sendButton: {
+      borderRadius: 10,
+      backgroundColor: colors.primary,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+    },
+    sendButtonDisabled: {
+      opacity: 0.6,
+    },
+    sendButtonText: {
+      color: "#061122",
+      fontSize: 12,
+      fontWeight: "700",
+    },
+    loadingRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+    },
+    loadingText: {
+      color: colors.textMuted,
+      fontSize: 12,
+    },
+  });

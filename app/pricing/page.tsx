@@ -254,6 +254,7 @@ export default function PricingPage() {
                 <li>✓ {L("Automated journaling imports", "Importación automática de journaling")}</li>
                 <li>✓ {L("Back-study module & challenges", "Módulo back-study y retos")}</li>
                 <li>✓ {L("Global ranking (opt-in)", "Ranking global (opcional)")}</li>
+                <li>✓ {L("Mobile app (iOS)", "Aplicación móvil (iOS)")}</li>
                 <li>✓ {L("1GB data storage", "1GB de almacenamiento")}</li>
               </ul>
               <button
@@ -322,6 +323,7 @@ export default function PricingPage() {
                   <li>✓ {L("AI coaching & action plans", "AI coaching y planes de acción")}</li>
                   <li>✓ {L("PDF reports + AI summary", "Reportes PDF + resumen IA")}</li>
                   <li>✓ {L("Priority email & chat support", "Soporte prioritario por email y chat")}</li>
+                  <li>✓ {L("Mobile app (iOS)", "Aplicación móvil (iOS)")}</li>
                 </ul>
                 <button
                   onClick={() => handleStart("advanced")}

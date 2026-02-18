@@ -1431,6 +1431,8 @@ export default function DailyJournalPage() {
         exits: storedExits,
       } as any, activeAccountId);
 
+      // Avoid re-marking the form as dirty from our own save-side state updates.
+      autoSaveIgnoreNextRef.current = true;
       setNotesExtra(nextExtra);
       setPnlFromDb(Number(pnlToSave.toFixed(2)));
       setPnlMode("db");

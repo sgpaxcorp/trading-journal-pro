@@ -117,6 +117,7 @@ function toTradeRow(t: any): TradeRow | null {
     time: typeof t?.time === "string" ? t.time : undefined,
     dte: t?.dte == null ? null : Number(t.dte),
     expiry: typeof t?.expiry === "string" ? t.expiry : null,
+    optionStrategy: typeof t?.optionStrategy === "string" ? t.optionStrategy : typeof t?.strategy === "string" ? t.strategy : null,
   };
 }
 

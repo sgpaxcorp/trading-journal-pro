@@ -1,25 +1,29 @@
 import { Alert, Linking, Platform, Pressable, StyleSheet, Switch, Text, TextInput, View } from "react-native";
-import { useEffect, useState } from "react";
-import { useStripe } from "@stripe/stripe-react-native";
+import { Ionicons } from "@expo/vector-icons";
+import { useEffect, useMemo, useState } from "react";
 import * as Notifications from "expo-notifications";
 import * as Device from "expo-device";
 import Constants from "expo-constants";
 
 import { ScreenScaffold } from "../components/ScreenScaffold";
-import { apiPost } from "../lib/api";
+import { apiGet, apiPost } from "../lib/api";
 import { useLanguage } from "../lib/LanguageContext";
 import { t } from "../lib/i18n";
 import { useSupabaseUser } from "../lib/useSupabaseUser";
 import { supabaseMobile } from "../lib/supabase";
-import { COLORS } from "../theme";
+import { LIGHT_COLORS, type ThemeColors } from "../theme";
+import { useTheme } from "../lib/ThemeContext";
+
+type Entitlement = {
+  entitlement_key?: string | null;
+  status?: string | null;
+  metadata?: Record<string, any> | null;
+};
 
 export function SettingsScreen() {
   const { language, setLanguage } = useLanguage();
+  const { colors, mode: themeMode, setMode } = useTheme();
   const user = useSupabaseUser();
-  const stripe = useStripe();
-  const [planId, setPlanId] = useState<"core" | "advanced">("core");
-  const [billingCycle, setBillingCycle] = useState<"monthly" | "annual">("monthly");
-  const [billingLoading, setBillingLoading] = useState(false);
   const [profileLoading, setProfileLoading] = useState(false);
   const [profileSaving, setProfileSaving] = useState(false);
   const [profileError, setProfileError] = useState<string | null>(null);
@@ -37,6 +41,9 @@ export function SettingsScreen() {
   const [notificationLoading, setNotificationLoading] = useState(false);
   const [notificationStatus, setNotificationStatus] = useState<"granted" | "denied" | "undetermined">("undetermined");
   const [pushToken, setPushToken] = useState<string | null>(null);
+  const [planLoading, setPlanLoading] = useState(false);
+  const [currentPlan, setCurrentPlan] = useState<"core" | "advanced" | null>(null);
+  const [planStatus, setPlanStatus] = useState<string | null>(null);
 
   async function handleSignOut() {
     if (!supabaseMobile) {
@@ -164,6 +171,71 @@ export function SettingsScreen() {
     };
   }, [user?.id, language]);
 
+  useEffect(() => {
+    if (!user?.id) return;
+    let active = true;
+
+    const normalizePlan = (raw: unknown): "core" | "advanced" | null => {
+      const v = String(raw ?? "").toLowerCase();
+      if (v.includes("advanced")) return "advanced";
+      if (v.includes("core")) return "core";
+      return null;
+    };
+
+    const isActiveStatus = (status?: string | null) => {
+      const s = String(status ?? "").toLowerCase();
+      return ["active", "trialing", "past_due"].includes(s);
+    };
+
+    async function loadPlan() {
+      try {
+        setPlanLoading(true);
+        let plan: "core" | "advanced" | null = null;
+        let status: string | null = null;
+
+        if (supabaseMobile) {
+          const { data, error } = await supabaseMobile
+            .from("profiles")
+            .select("plan, subscription_status")
+            .eq("id", user.id)
+            .maybeSingle();
+          if (!error && data) {
+            plan = normalizePlan((data as any)?.plan);
+            status = String((data as any)?.subscription_status ?? "");
+          }
+        }
+
+        if (!plan || !isActiveStatus(status)) {
+          const res = await apiGet<{ entitlements: Entitlement[] }>("/api/entitlements/list");
+          const entitlements = res?.entitlements ?? [];
+          const activeEntitlements = entitlements.filter((e) => isActiveStatus(e.status));
+          const entPlan =
+            activeEntitlements.find((e) => normalizePlan(e.entitlement_key)) ??
+            activeEntitlements.find((e) => normalizePlan(e.metadata?.planId || e.metadata?.plan));
+
+          if (entPlan) {
+            plan = normalizePlan(entPlan.entitlement_key || entPlan.metadata?.planId || entPlan.metadata?.plan);
+            status = entPlan.status ?? status;
+          }
+        }
+
+        if (!active) return;
+        setCurrentPlan(plan);
+        setPlanStatus(status);
+      } catch {
+        if (!active) return;
+      } finally {
+        if (!active) return;
+        setPlanLoading(false);
+      }
+    }
+
+    loadPlan();
+    return () => {
+      active = false;
+    };
+  }, [user?.id]);
+
   async function handleSaveProfile() {
     if (!supabaseMobile || !user?.id) return;
     const sb = supabaseMobile;
@@ -226,48 +298,6 @@ export function SettingsScreen() {
     }
   }
 
-  async function handleSubscribe() {
-    try {
-      setBillingLoading(true);
-      const res = await apiPost<{
-        customerId: string;
-        ephemeralKey: string;
-        paymentIntentClientSecret: string;
-      }>("/api/stripe/mobile/subscribe", {
-        planId,
-        billingCycle,
-        addonOptionFlow: false,
-      });
-
-      const init = await stripe.initPaymentSheet({
-        merchantDisplayName: "Neuro Trader",
-        customerId: res.customerId,
-        customerEphemeralKeySecret: res.ephemeralKey,
-        paymentIntentClientSecret: res.paymentIntentClientSecret,
-        allowsDelayedPaymentMethods: true,
-      });
-
-      if (init.error) {
-        Alert.alert(t(language, "Payment setup failed", "Fallo al preparar pago"), init.error.message);
-        return;
-      }
-
-      const present = await stripe.presentPaymentSheet();
-      if (present.error) {
-        Alert.alert(t(language, "Payment failed", "Pago fallido"), present.error.message);
-        return;
-      }
-
-      Alert.alert(
-        t(language, "Subscription active", "Suscripción activa"),
-        t(language, "Your plan is now active.", "Tu plan ya está activo.")
-      );
-    } catch (err: any) {
-      Alert.alert(t(language, "Billing error", "Error de facturación"), err?.message ?? "Unknown error");
-    } finally {
-      setBillingLoading(false);
-    }
-  }
 
   async function handleToggleNotifications(nextValue: boolean) {
     if (notificationLoading) return;
@@ -319,6 +349,9 @@ export function SettingsScreen() {
     }
   }
 
+
+  const styles = useMemo(() => createStyles(colors), [colors]);
+
   return (
     <ScreenScaffold
       title={t(language, "Settings", "Ajustes")}
@@ -344,28 +377,28 @@ export function SettingsScreen() {
             <TextInput
               style={styles.input}
               placeholder={t(language, "First name", "Nombre")}
-              placeholderTextColor={COLORS.textMuted}
+              placeholderTextColor={colors.textMuted}
               value={profile.firstName}
               onChangeText={(value) => setProfile((prev) => ({ ...prev, firstName: value }))}
             />
             <TextInput
               style={styles.input}
               placeholder={t(language, "Last name", "Apellido")}
-              placeholderTextColor={COLORS.textMuted}
+              placeholderTextColor={colors.textMuted}
               value={profile.lastName}
               onChangeText={(value) => setProfile((prev) => ({ ...prev, lastName: value }))}
             />
             <TextInput
               style={styles.input}
               placeholder={t(language, "Phone", "Teléfono")}
-              placeholderTextColor={COLORS.textMuted}
+              placeholderTextColor={colors.textMuted}
               value={profile.phone}
               onChangeText={(value) => setProfile((prev) => ({ ...prev, phone: value }))}
             />
             <TextInput
               style={styles.input}
               placeholder={t(language, "Address", "Dirección")}
-              placeholderTextColor={COLORS.textMuted}
+              placeholderTextColor={colors.textMuted}
               value={profile.address}
               onChangeText={(value) => setProfile((prev) => ({ ...prev, address: value }))}
             />
@@ -388,7 +421,7 @@ export function SettingsScreen() {
         <TextInput
           style={styles.input}
           placeholder={t(language, "New password", "Nueva contraseña")}
-          placeholderTextColor={COLORS.textMuted}
+          placeholderTextColor={colors.textMuted}
           secureTextEntry
           value={password}
           onChangeText={setPassword}
@@ -396,7 +429,7 @@ export function SettingsScreen() {
         <TextInput
           style={styles.input}
           placeholder={t(language, "Confirm password", "Confirmar contraseña")}
-          placeholderTextColor={COLORS.textMuted}
+          placeholderTextColor={colors.textMuted}
           secureTextEntry
           value={passwordConfirm}
           onChangeText={setPasswordConfirm}
@@ -412,45 +445,52 @@ export function SettingsScreen() {
         </Pressable>
       </View>
 
-      {false ? (
-        <View style={styles.billingCard}>
-          <Text style={styles.billingTitle}>{t(language, "Choose your plan", "Elige tu plan")}</Text>
-          <View style={styles.billingRow}>
-            {(["core", "advanced"] as const).map((plan) => (
-              <Pressable
-                key={plan}
-                onPress={() => setPlanId(plan)}
-                style={[styles.billingOption, planId === plan && styles.billingOptionActive]}
-              >
-                <Text style={styles.billingOptionText}>{plan === "core" ? "Core" : "Advanced"}</Text>
-              </Pressable>
-            ))}
-          </View>
-          <View style={styles.billingRow}>
-            {(["monthly", "annual"] as const).map((cycle) => (
-              <Pressable
-                key={cycle}
-                onPress={() => setBillingCycle(cycle)}
-                style={[styles.billingOption, billingCycle === cycle && styles.billingOptionActive]}
-              >
-                <Text style={styles.billingOptionText}>
-                  {cycle === "monthly" ? t(language, "Monthly", "Mensual") : t(language, "Annual", "Anual")}
-                </Text>
-              </Pressable>
-            ))}
-          </View>
-
-          <Pressable
-            style={[styles.subscribeButton, billingLoading && styles.subscribeButtonDisabled]}
-            onPress={handleSubscribe}
-            disabled={billingLoading}
-          >
-            <Text style={styles.subscribeButtonText}>
-              {billingLoading ? t(language, "Processing…", "Procesando…") : t(language, "Start subscription", "Activar plan")}
+      <View style={styles.sectionCard}>
+        <Text style={styles.sectionTitle}>{t(language, "Subscription", "Suscripción")}</Text>
+        {planLoading ? (
+          <Text style={styles.sectionHint}>{t(language, "Loading subscription…", "Cargando suscripción…")}</Text>
+        ) : currentPlan ? (
+          <>
+            <Text style={styles.sectionHint}>
+              {t(
+                language,
+                `Current plan: ${currentPlan.toUpperCase()}`,
+                `Plan actual: ${currentPlan.toUpperCase()}`
+              )}
             </Text>
-          </Pressable>
-        </View>
-      ) : null}
+            {planStatus ? (
+              <Text style={styles.sectionHint}>
+                {t(language, `Status: ${planStatus}`, `Estado: ${planStatus}`)}
+              </Text>
+            ) : null}
+            <Text style={styles.sectionHint}>
+              {t(
+                language,
+                "Manage renewals or cancellation in the web app.",
+                "Administra la renovación o cancelación en la web."
+              )}
+            </Text>
+            <Pressable
+              style={styles.saveButton}
+              onPress={() => Linking.openURL("https://neurotrader-journal.com/billing")}
+            >
+              <Text style={styles.saveButtonText}>
+                {t(language, "Open billing on web", "Abrir billing en la web")}
+              </Text>
+            </Pressable>
+          </>
+        ) : (
+          <Text style={styles.sectionHint}>
+            {t(
+              language,
+              "Plan details are syncing. Please refresh in a moment.",
+              "El plan se está sincronizando. Actualiza en un momento."
+            )}
+          </Text>
+        )}
+      </View>
+
+      {false ? null : null}
 
       <View style={styles.sectionCard}>
         <Text style={styles.sectionTitle}>{t(language, "Notifications", "Notificaciones")}</Text>
@@ -469,7 +509,7 @@ export function SettingsScreen() {
             value={notificationEnabled}
             onValueChange={handleToggleNotifications}
             disabled={!notificationReady || notificationLoading}
-            trackColor={{ false: COLORS.border, true: COLORS.primary }}
+            trackColor={{ false: colors.border, true: colors.primary }}
             thumbColor={notificationEnabled ? "#0D1F1A" : "#1F2A3A"}
           />
         </View>
@@ -482,6 +522,28 @@ export function SettingsScreen() {
             )}
           </Text>
         ) : null}
+      </View>
+
+      <View style={styles.sectionCard}>
+        <View style={styles.themeHeader}>
+          <Text style={styles.sectionTitle}>{t(language, "Appearance", "Apariencia")}</Text>
+          <Ionicons
+            name="moon"
+            size={18}
+            color={colors.primary}
+          />
+        </View>
+        <View style={styles.toggleRow}>
+          <Text style={styles.toggleLabel}>
+            {themeMode === "light" ? t(language, "Light mode", "Modo claro") : t(language, "Neuro mode", "Modo neuro")}
+          </Text>
+          <Switch
+            value={themeMode === "light"}
+            onValueChange={(value) => setMode(value ? "light" : "neuro")}
+            trackColor={{ false: colors.border, true: colors.primary }}
+            thumbColor={themeMode === "light" ? "#0D1F1A" : "#1F2A3A"}
+          />
+        </View>
       </View>
 
       <View style={styles.languageRow}>
@@ -509,179 +571,149 @@ export function SettingsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  profileCard: {
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    backgroundColor: COLORS.card,
-    padding: 12,
-    gap: 4,
-  },
-  profileTitle: {
-    color: COLORS.primary,
-    fontSize: 12,
-    fontWeight: "700",
-    letterSpacing: 1.2,
-    textTransform: "uppercase",
-  },
-  profileText: {
-    color: COLORS.textMuted,
-    fontSize: 12,
-  },
-  sectionCard: {
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    backgroundColor: COLORS.card,
-    padding: 12,
-    gap: 8,
-  },
-  sectionTitle: {
-    color: COLORS.textPrimary,
-    fontSize: 14,
-    fontWeight: "700",
-  },
-  sectionHint: {
-    color: COLORS.textMuted,
-    fontSize: 12,
-  },
-  toggleRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginTop: 6,
-  },
-  toggleLabel: {
-    color: COLORS.textPrimary,
-    fontSize: 13,
-    fontWeight: "600",
-  },
-  input: {
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    backgroundColor: COLORS.surface,
-    color: COLORS.textPrimary,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 13,
-  },
-  saveButton: {
-    borderRadius: 10,
-    backgroundColor: COLORS.primary,
-    alignItems: "center",
-    paddingVertical: 10,
-  },
-  saveButtonDisabled: {
-    opacity: 0.6,
-  },
-  saveButtonText: {
-    color: "#061122",
-    fontSize: 12,
-    fontWeight: "700",
-  },
-  errorText: {
-    color: COLORS.danger,
-    fontSize: 12,
-  },
-  languageRow: {
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    backgroundColor: COLORS.surface,
-    padding: 12,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  languageLabel: {
-    color: COLORS.textPrimary,
-    fontSize: 14,
-    fontWeight: "600",
-  },
-  languageButtons: {
-    flexDirection: "row",
-    gap: 8,
-  },
-  languageButton: {
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    backgroundColor: COLORS.background,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-  },
-  languageButtonActive: {
-    borderColor: COLORS.primary,
-    backgroundColor: "#0F2C2A",
-  },
-  languageButtonText: {
-    color: COLORS.textPrimary,
-    fontSize: 12,
-    fontWeight: "700",
-  },
-  signOutButton: {
-    marginTop: 4,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: "#8A3153",
-    backgroundColor: "#2A1020",
-    alignItems: "center",
-    paddingVertical: 10,
-  },
-  signOutText: {
-    color: "#FF9FBD",
-    fontWeight: "700",
-    fontSize: 13,
-  },
-  billingCard: {
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    backgroundColor: COLORS.card,
-    padding: 12,
-    gap: 10,
-  },
-  billingTitle: {
-    color: COLORS.textPrimary,
-    fontSize: 14,
-    fontWeight: "700",
-  },
-  billingRow: {
-    flexDirection: "row",
-    gap: 8,
-  },
-  billingOption: {
-    flex: 1,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    backgroundColor: COLORS.surface,
-    paddingVertical: 8,
-    alignItems: "center",
-  },
-  billingOptionActive: {
-    borderColor: COLORS.primary,
-    backgroundColor: "#0F2C2A",
-  },
-  billingOptionText: {
-    color: COLORS.textPrimary,
-    fontSize: 12,
-    fontWeight: "700",
-  },
-  subscribeButton: {
-    borderRadius: 10,
-    backgroundColor: COLORS.primary,
-    alignItems: "center",
-    paddingVertical: 10,
-  },
-  subscribeButtonDisabled: {
-    opacity: 0.6,
-  },
-  subscribeButtonText: {
-    color: "#061122",
-    fontSize: 12,
-    fontWeight: "700",
-  },
-});
+const createStyles = (colors: ThemeColors) => {
+  const isLight = colors.background === LIGHT_COLORS.background;
+  return StyleSheet.create({
+    profileCard: {
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.card,
+      padding: 12,
+      gap: 4,
+    },
+    profileTitle: {
+      color: colors.primary,
+      fontSize: 12,
+      fontWeight: "700",
+      letterSpacing: 1.2,
+      textTransform: "uppercase",
+    },
+    profileText: {
+      color: colors.textMuted,
+      fontSize: 12,
+    },
+    sectionCard: {
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.card,
+      padding: 12,
+      gap: 8,
+    },
+    sectionTitle: {
+      color: colors.textPrimary,
+      fontSize: 14,
+      fontWeight: "700",
+    },
+    sectionHint: {
+      color: colors.textMuted,
+      fontSize: 12,
+    },
+    toggleRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      marginTop: 6,
+    },
+    themeHeader: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+    },
+    toggleLabel: {
+      color: colors.textPrimary,
+      fontSize: 13,
+      fontWeight: "600",
+    },
+    input: {
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+      color: colors.textPrimary,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      fontSize: 13,
+    },
+    saveButton: {
+      borderRadius: 10,
+      backgroundColor: colors.primary,
+      alignItems: "center",
+      paddingVertical: 10,
+    },
+    dangerButton: {
+      borderRadius: 10,
+      backgroundColor: "#7F1D1D",
+      alignItems: "center",
+      paddingVertical: 10,
+    },
+    saveButtonDisabled: {
+      opacity: 0.6,
+    },
+    saveButtonText: {
+      color: isLight ? "#F5FBFF" : "#061122",
+      fontSize: 12,
+      fontWeight: "700",
+    },
+    dangerButtonText: {
+      color: "#FEE2E2",
+      fontSize: 12,
+      fontWeight: "700",
+    },
+    errorText: {
+      color: colors.danger,
+      fontSize: 12,
+    },
+    languageRow: {
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+      padding: 12,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+    },
+    languageLabel: {
+      color: colors.textPrimary,
+      fontSize: 14,
+      fontWeight: "600",
+    },
+    languageButtons: {
+      flexDirection: "row",
+      gap: 8,
+    },
+    languageButton: {
+      borderRadius: 999,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.background,
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+    },
+    languageButtonActive: {
+      borderColor: colors.primary,
+      backgroundColor: isLight ? "#E2F3EE" : "#0F2C2A",
+    },
+    languageButtonText: {
+      color: colors.textPrimary,
+      fontSize: 12,
+      fontWeight: "700",
+    },
+    signOutButton: {
+      marginTop: 4,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: isLight ? "#E3B6C6" : "#8A3153",
+      backgroundColor: isLight ? "#FFE6EE" : "#2A1020",
+      alignItems: "center",
+      paddingVertical: 10,
+    },
+    signOutText: {
+      color: isLight ? "#8A3153" : "#FF9FBD",
+      fontWeight: "700",
+      fontSize: 13,
+    },
+  });
+};

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { StatusBar } from "expo-status-bar";
 import { NavigationContainer, useNavigation } from "@react-navigation/native";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
@@ -6,8 +6,7 @@ import { createNativeStackNavigator, type NativeStackNavigationProp } from "@rea
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import type { Session } from "@supabase/supabase-js";
-import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
-import { StripeProvider } from "@stripe/stripe-react-native";
+import { ActivityIndicator, Image, StyleSheet, Text, View } from "react-native";
 import * as Notifications from "expo-notifications";
 
 import { DashboardScreen } from "./src/screens/DashboardScreen";
@@ -16,10 +15,12 @@ import { AnalyticsScreen } from "./src/screens/AnalyticsScreen";
 import { AICoachScreen } from "./src/screens/AICoachScreen";
 import { SettingsScreen } from "./src/screens/MoreScreen";
 import { AuthScreen, type AuthMode } from "./src/screens/AuthScreen";
-import { COLORS } from "./src/theme";
+import { ThemeProvider, useTheme } from "./src/lib/ThemeContext";
 import { LanguageProvider } from "./src/lib/LanguageContext";
 import { hasSupabaseConfig, supabaseMobile } from "./src/lib/supabase";
 import { ModulePlaceholderScreen } from "./src/screens/ModulePlaceholderScreen";
+
+const headerIcon = require("./assets/neurotrader-logo-icon.png");
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -49,6 +50,7 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
 
 function MainTabs() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const { colors } = useTheme();
 
   function openModule(title: string, description: string) {
     const parent = navigation.getParent<NativeStackNavigationProp<RootStackParamList>>();
@@ -62,14 +64,17 @@ function MainTabs() {
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
-        headerStyle: { backgroundColor: COLORS.surface },
-        headerTintColor: COLORS.textPrimary,
+        headerStyle: { backgroundColor: colors.surface },
+        headerTintColor: colors.textPrimary,
         headerTitleStyle: { fontWeight: "700" },
-        tabBarStyle: { backgroundColor: COLORS.surface, borderTopColor: COLORS.border },
-        tabBarActiveTintColor: COLORS.primary,
-        tabBarInactiveTintColor: COLORS.textMuted,
+        headerTitle: () => (
+          <Text style={[styles.headerText, { color: colors.textPrimary }]}>{route.name}</Text>
+        ),
+        tabBarStyle: { backgroundColor: colors.surface, borderTopColor: colors.border },
+        tabBarActiveTintColor: colors.primary,
+        tabBarInactiveTintColor: colors.textMuted,
         tabBarLabelStyle: { fontSize: 11, fontWeight: "600" },
-        sceneStyle: { backgroundColor: COLORS.background },
+        sceneStyle: { backgroundColor: colors.background },
         tabBarIcon: ({ color, size }) => {
           if (route.name === "Dashboard") return <Ionicons name="home-outline" size={size} color={color} />;
           if (route.name === "Calendar") return <Ionicons name="calendar-outline" size={size} color={color} />;
@@ -91,15 +96,35 @@ function MainTabs() {
       <Tab.Screen name="AICoach" options={{ title: "AI Coach" }}>
         {() => <AICoachScreen onOpenModule={openModule} />}
       </Tab.Screen>
-      <Tab.Screen name="Settings" component={SettingsScreen} options={{ title: "Settings" }} />
+      <Tab.Screen name="Settings" options={{ title: "Settings" }}>
+        {() => <SettingsScreen />}
+      </Tab.Screen>
     </Tab.Navigator>
   );
 }
 
-export default function App() {
+function AppShell() {
   const [mode, setMode] = useState<AuthMode>("signin");
   const [session, setSession] = useState<Session | null>(null);
   const [authReady, setAuthReady] = useState(false);
+  const { colors, mode: themeMode } = useTheme();
+  const loadingStyles = useMemo(
+    () =>
+      StyleSheet.create({
+        loading: {
+          flex: 1,
+          backgroundColor: colors.background,
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 8,
+        },
+        loadingText: {
+          color: colors.textMuted,
+          fontSize: 12,
+        },
+      }),
+    [colors]
+  );
 
   useEffect(() => {
     if (!supabaseMobile) {
@@ -128,57 +153,57 @@ export default function App() {
   }, []);
 
   const shouldShowMainTabs = Boolean(session) || !hasSupabaseConfig;
-  const stripeKey = process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY ?? "";
 
+  return (
+    <NavigationContainer>
+      <StatusBar style={themeMode === "light" ? "dark" : "light"} />
+      {!authReady ? (
+        <View style={loadingStyles.loading}>
+          <ActivityIndicator color={colors.primary} />
+          <Text style={loadingStyles.loadingText}>Loading...</Text>
+        </View>
+      ) : shouldShowMainTabs ? (
+        <Stack.Navigator
+          screenOptions={{
+            headerStyle: { backgroundColor: colors.surface },
+            headerTintColor: colors.textPrimary,
+            contentStyle: { backgroundColor: colors.background },
+          }}
+        >
+          <Stack.Screen name="Tabs" options={{ headerShown: false }}>
+            {() => <MainTabs />}
+          </Stack.Screen>
+          <Stack.Screen
+            name="Module"
+            component={ModulePlaceholderScreen}
+            options={({ route }) => ({ title: route.params.title })}
+          />
+        </Stack.Navigator>
+      ) : (
+        <AuthScreen
+          mode={mode}
+          onToggleMode={() => setMode((current) => (current === "signin" ? "signup" : "signin"))}
+        />
+      )}
+    </NavigationContainer>
+  );
+}
+
+export default function App() {
   return (
     <SafeAreaProvider>
       <LanguageProvider>
-        <StripeProvider publishableKey={stripeKey}>
-          <NavigationContainer>
-            <StatusBar style="light" />
-            {!authReady ? (
-              <View style={styles.loading}>
-                <ActivityIndicator color={COLORS.primary} />
-                <Text style={styles.loadingText}>Loading...</Text>
-              </View>
-            ) : shouldShowMainTabs ? (
-              <Stack.Navigator
-                screenOptions={{
-                  headerStyle: { backgroundColor: COLORS.surface },
-                  headerTintColor: COLORS.textPrimary,
-                  contentStyle: { backgroundColor: COLORS.background },
-                }}
-              >
-                <Stack.Screen name="Tabs" component={MainTabs} options={{ headerShown: false }} />
-                <Stack.Screen
-                  name="Module"
-                  component={ModulePlaceholderScreen}
-                  options={({ route }) => ({ title: route.params.title })}
-                />
-              </Stack.Navigator>
-            ) : (
-              <AuthScreen
-                mode={mode}
-                onToggleMode={() => setMode((current) => (current === "signin" ? "signup" : "signin"))}
-              />
-            )}
-          </NavigationContainer>
-        </StripeProvider>
+        <ThemeProvider>
+          <AppShell />
+        </ThemeProvider>
       </LanguageProvider>
     </SafeAreaProvider>
   );
 }
 
 const styles = StyleSheet.create({
-  loading: {
-    flex: 1,
-    backgroundColor: COLORS.background,
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-  },
-  loadingText: {
-    color: COLORS.textMuted,
-    fontSize: 12,
+  headerText: {
+    fontSize: 16,
+    fontWeight: "700",
   },
 });

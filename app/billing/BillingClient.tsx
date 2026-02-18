@@ -17,6 +17,18 @@ type BillingClientProps = {
   initialPartnerCode?: string;
 };
 
+type SubscriptionInfo = {
+  id: string;
+  status: string;
+  cancel_at_period_end: boolean;
+  current_period_start: string | null;
+  current_period_end: string | null;
+  price_id: string | null;
+  interval: string | null;
+  billing_cycle: "monthly" | "annual" | null;
+  plan: PlanId | null;
+};
+
 export default function BillingClient({ initialPlan, initialPartnerCode = "" }: BillingClientProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -44,6 +56,13 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
       .replace(/[^A-Z0-9_-]/g, "")
       .slice(0, 24)
   );
+  const [subscriptionInfo, setSubscriptionInfo] = useState<SubscriptionInfo | null>(null);
+  const [subscriptionLoading, setSubscriptionLoading] = useState(false);
+  const [autoRenewEnabled, setAutoRenewEnabled] = useState(true);
+  const [cancelReason, setCancelReason] = useState("");
+  const [cancelDetail, setCancelDetail] = useState("");
+  const [cancelLoading, setCancelLoading] = useState(false);
+  const [cancelNotice, setCancelNotice] = useState<string | null>(null);
 
   const PRICES = {
     core: { monthly: 14.99, annual: 149.99 },
@@ -134,6 +153,50 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
 
     return () => {
       cancelled = true;
+    };
+  }, [user?.id]);
+
+  async function getAuthToken() {
+    const { data: sessionData } = await supabaseBrowser.auth.getSession();
+    const token = sessionData?.session?.access_token;
+    if (!token) {
+      throw new Error(
+        L("Session not available. Please sign in again.", "Sesión no disponible. Inicia sesión nuevamente.")
+      );
+    }
+    return token;
+  }
+
+  useEffect(() => {
+    if (!user?.id) return;
+    let active = true;
+
+    async function loadSubscription() {
+      setSubscriptionLoading(true);
+      try {
+        const token = await getAuthToken();
+        const res = await fetch("/api/stripe/subscription", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Failed to load subscription.");
+        if (!active) return;
+        const info = data.subscription as SubscriptionInfo | null;
+        setSubscriptionInfo(info);
+        if (info) {
+          setAutoRenewEnabled(!info.cancel_at_period_end);
+        }
+      } catch (err) {
+        if (!active) return;
+      } finally {
+        if (!active) return;
+        setSubscriptionLoading(false);
+      }
+    }
+
+    loadSubscription();
+    return () => {
+      active = false;
     };
   }, [user?.id]);
 
@@ -230,6 +293,83 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
     }
   }
 
+  async function handleToggleAutoRenew(nextValue: boolean) {
+    if (!subscriptionInfo) return;
+    if (cancelLoading) return;
+    try {
+      setCancelNotice(null);
+      setCancelLoading(true);
+      const token = await getAuthToken();
+      const res = await fetch("/api/stripe/subscription/auto-renew", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ enabled: nextValue }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to update auto-renew.");
+      setAutoRenewEnabled(!data.cancel_at_period_end);
+      setSubscriptionInfo((prev) =>
+        prev ? { ...prev, cancel_at_period_end: Boolean(data.cancel_at_period_end) } : prev
+      );
+    } catch (err: any) {
+      setCancelNotice(err?.message ?? L("Failed to update auto-renew.", "No se pudo actualizar auto-renovación."));
+    } finally {
+      setCancelLoading(false);
+    }
+  }
+
+  async function handleCancelSubscription() {
+    if (!subscriptionInfo) return;
+    if (!cancelReason.trim()) {
+      setCancelNotice(L("Please select a reason.", "Selecciona un motivo."));
+      return;
+    }
+    const confirmed = window.confirm(
+      L(
+        "Are you sure you want to cancel auto-renew? You will keep access until the period ends.",
+        "¿Seguro que quieres cancelar la auto-renovación? Mantendrás acceso hasta que termine el período."
+      )
+    );
+    if (!confirmed) return;
+
+    try {
+      setCancelNotice(null);
+      setCancelLoading(true);
+      const token = await getAuthToken();
+      const res = await fetch("/api/stripe/subscription/cancel", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          reason: cancelReason.trim(),
+          detail: cancelDetail.trim(),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to cancel subscription.");
+      setSubscriptionInfo((prev) =>
+        prev
+          ? {
+              ...prev,
+              cancel_at_period_end: true,
+              current_period_end: data.current_period_end ?? prev.current_period_end,
+            }
+          : prev
+      );
+      setAutoRenewEnabled(false);
+      setCancelNotice(L("Cancellation scheduled.", "Cancelación programada."));
+    } catch (err: any) {
+      setCancelNotice(err?.message ?? L("Failed to cancel subscription.", "No se pudo cancelar la suscripción."));
+    } finally {
+      setCancelLoading(false);
+    }
+  }
+
   const isButtonDisabled = loading || authLoading;
   const hasActivePlan = currentPlan !== "none" && currentStatus === "active";
   const isCurrentSelection = hasActivePlan && selectedPlan === currentPlan;
@@ -244,6 +384,14 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
     : currentPlan === "none"
     ? L("inactive", "inactivo")
     : L("active", "activo");
+  const formatDate = (value: string | null) => {
+    if (!value) return "—";
+    try {
+      return new Date(value).toLocaleDateString(isEs ? "es-ES" : "en-US");
+    } catch {
+      return value;
+    }
+  };
 
   return (
     <main className="min-h-screen bg-slate-950 text-slate-50 flex justify-center px-4 py-10">
@@ -390,6 +538,7 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
                 <li>• {L("Full daily journal & calendar", "Diario diario completo y calendario")}</li>
                 <li>• {L("Back-study module", "Módulo de back-study")}</li>
                 <li>• {L("Basic analytics", "Analítica básica")}</li>
+                <li>• {L("Mobile app (iOS)", "Aplicación móvil (iOS)")}</li>
               </ul>
             </motion.button>
 
@@ -435,10 +584,12 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
 
               <div className="relative flex items-center justify-between mb-1">
                 <p className="text-xs font-semibold text-slate-50">{L("Advanced", "Advanced")}</p>
-                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 border border-emerald-400/80 px-2.5 py-0.5 text-[9px] text-emerald-100 font-semibold">
-                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                  {L("Most popular", "Más popular")}
-                </span>
+                {!hasActivePlan || currentPlan !== "advanced" ? (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 border border-emerald-400/80 px-2.5 py-0.5 text-[9px] text-emerald-100 font-semibold">
+                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                    {L("Most popular", "Más popular")}
+                  </span>
+                ) : null}
               </div>
 
               <div className="relative flex items-center gap-2 mb-1">
@@ -475,6 +626,7 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
                 <li>• {L("Profit & Loss Track (business accounting)", "Profit & Loss Track (contabilidad)")}</li>
                 <li>• {L("AI coaching & mindset tools", "AI coaching y herramientas de mindset")}</li>
                 <li>• {L("Priority improvements & new features", "Mejoras prioritarias y nuevas features")}</li>
+                <li>• {L("Mobile app (iOS)", "Aplicación móvil (iOS)")}</li>
               </ul>
             </motion.button>
           </div>
@@ -655,6 +807,130 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
                   {L("Open Option Flow", "Abrir Option Flow")}
                 </button>
               </div>
+            </div>
+          </div>
+
+          {/* Manage subscription */}
+          <div className="mt-8 border-t border-slate-800/80 pt-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">
+                  {L("Subscription settings", "Ajustes de suscripción")}
+                </p>
+                <h2 className="text-lg font-semibold text-slate-100">
+                  {L("Auto‑renew & cancellation", "Auto‑renovación y cancelación")}
+                </h2>
+                <p className="text-xs text-slate-400 mt-1">
+                  {L(
+                    "Control renewals, schedule cancellation, and tell us why you’re leaving.",
+                    "Controla renovaciones, programa cancelación y dinos el motivo."
+                  )}
+                </p>
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5 space-y-4">
+              {subscriptionLoading ? (
+                <p className="text-xs text-slate-400">{L("Loading subscription…", "Cargando suscripción…")}</p>
+              ) : !subscriptionInfo ? (
+                <p className="text-xs text-slate-400">{L("No active subscription found.", "No hay suscripción activa.")}</p>
+              ) : (
+                <>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs text-slate-200">
+                    <div className="rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-2">
+                      <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500">{L("Status", "Estado")}</p>
+                      <p className="mt-1 text-slate-100">{subscriptionInfo.status}</p>
+                    </div>
+                    <div className="rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-2">
+                      <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500">
+                        {L("Next renewal", "Próxima renovación")}
+                      </p>
+                      <p className="mt-1 text-slate-100">
+                        {subscriptionInfo.cancel_at_period_end
+                          ? L("Auto‑renew off", "Auto‑renovación apagada")
+                          : formatDate(subscriptionInfo.current_period_end)}
+                      </p>
+                    </div>
+                    <div className="rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-2">
+                      <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500">{L("Plan", "Plan")}</p>
+                      <p className="mt-1 text-slate-100">
+                        {(subscriptionInfo.plan || currentPlan || "—").toUpperCase()}
+                        {subscriptionInfo.billing_cycle ? ` · ${subscriptionInfo.billing_cycle}` : ""}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col md:flex-row md:items-center gap-3">
+                    <div className="flex-1 rounded-xl border border-slate-800 bg-slate-950/60 px-4 py-3">
+                      <p className="text-[11px] text-slate-400 mb-2">
+                        {L("Auto‑renew", "Auto‑renovación")}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => handleToggleAutoRenew(!autoRenewEnabled)}
+                        disabled={cancelLoading}
+                        className={`px-4 py-2 rounded-full text-xs font-semibold transition ${
+                          autoRenewEnabled
+                            ? "bg-emerald-400 text-slate-950 hover:bg-emerald-300"
+                            : "border border-slate-700 text-slate-300 hover:border-emerald-400"
+                        }`}
+                      >
+                        {autoRenewEnabled
+                          ? L("Auto‑renew ON", "Auto‑renovación ON")
+                          : L("Auto‑renew OFF", "Auto‑renovación OFF")}
+                      </button>
+                    </div>
+
+                    <div className="flex-1 rounded-xl border border-slate-800 bg-slate-950/60 px-4 py-3">
+                      <p className="text-[11px] text-slate-400 mb-2">
+                        {L("Cancellation reason", "Motivo de cancelación")}
+                      </p>
+                      <select
+                        value={cancelReason}
+                        onChange={(e) => setCancelReason(e.target.value)}
+                        className="w-full rounded-md bg-slate-950/90 border border-slate-700 px-3 py-2 text-xs text-slate-100 outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400/60"
+                      >
+                        <option value="">{L("Select a reason", "Selecciona un motivo")}</option>
+                        <option value="too_expensive">{L("Too expensive", "Muy caro")}</option>
+                        <option value="not_using">{L("Not using enough", "No lo estoy usando")}</option>
+                        <option value="missing_features">{L("Missing features", "Faltan features")}</option>
+                        <option value="technical_issues">{L("Technical issues", "Problemas técnicos")}</option>
+                        <option value="other">{L("Other", "Otro")}</option>
+                      </select>
+                      <textarea
+                        value={cancelDetail}
+                        onChange={(e) => setCancelDetail(e.target.value)}
+                        placeholder={L("Optional details", "Detalles (opcional)")}
+                        className="mt-2 w-full rounded-md bg-slate-950/90 border border-slate-700 px-3 py-2 text-xs text-slate-100 outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400/60"
+                        rows={3}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={handleCancelSubscription}
+                      disabled={cancelLoading || subscriptionInfo.cancel_at_period_end}
+                      className="rounded-xl bg-rose-500/80 px-4 py-2 text-xs font-semibold text-white hover:bg-rose-500 disabled:opacity-60 disabled:cursor-not-allowed"
+                    >
+                      {subscriptionInfo.cancel_at_period_end
+                        ? L("Cancellation scheduled", "Cancelación programada")
+                        : cancelLoading
+                        ? L("Processing…", "Procesando…")
+                        : L("Cancel subscription", "Cancelar suscripción")}
+                    </button>
+                    {subscriptionInfo.cancel_at_period_end && subscriptionInfo.current_period_end ? (
+                      <span className="text-[11px] text-slate-400">
+                        {L("Access until", "Acceso hasta")} {formatDate(subscriptionInfo.current_period_end)}
+                      </span>
+                    ) : null}
+                    {cancelNotice ? (
+                      <span className="text-[11px] text-slate-300">{cancelNotice}</span>
+                    ) : null}
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </div>

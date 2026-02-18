@@ -11,6 +11,7 @@ export type TradeRow = {
   time?: string;      // "HH:mm" or "HH:mm:ss"
   dte?: number | null;
   expiry?: string | null; // "YYYY-MM-DD"
+  optionStrategy?: string | null;
 };
 
 export type SessionRow = {
@@ -87,6 +88,78 @@ const DAY_LABELS: Record<number, string> = {
 
 function safeUpper(s: string) {
   return (s || "").trim().toUpperCase();
+}
+
+function parseUnderlying(symbol: string): string {
+  const m = safeUpper(symbol).match(/^[A-Z]+/);
+  return m ? m[0] : safeUpper(symbol);
+}
+
+function inferExpiryFromSymbol(symbol: string): string | null {
+  const m = safeUpper(symbol).match(/(\\d{6})/);
+  if (!m) return null;
+  const raw = m[1];
+  const yy = Number(raw.slice(0, 2));
+  const mm = Number(raw.slice(2, 4));
+  const dd = Number(raw.slice(4, 6));
+  if (!yy || mm < 1 || mm > 12 || dd < 1 || dd > 31) return null;
+  const year = 2000 + yy;
+  const iso = `${year}-${String(mm).padStart(2, "0")}-${String(dd).padStart(2, "0")}`;
+  return iso;
+}
+
+function tradeGroupKey(t: TradeRow): string {
+  const sym = safeUpper(t.symbol);
+  if (t.kind === "option") {
+    const underlying = parseUnderlying(sym);
+    const expiry = t.expiry ?? inferExpiryFromSymbol(sym) ?? "NA";
+    const strategy = safeUpper(String(t.optionStrategy ?? "SINGLE"));
+    return `OPT|${underlying}|${expiry}|${strategy}`;
+  }
+  return `${t.kind}|${sym}`;
+}
+
+function timeToMinutes(raw?: string): number {
+  if (!raw) return 9999;
+  const parts = String(raw).trim().split(":");
+  if (parts.length < 2) return 9999;
+  const h = Number(parts[0]);
+  const m = Number(parts[1]);
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return 9999;
+  return h * 60 + m;
+}
+
+function roundTripTrades(entries: TradeRow[], exits: TradeRow[]): number {
+  const groups = new Map<string, { events: { t: number; type: "entry" | "exit"; qty: number }[] }>();
+  const push = (row: TradeRow, type: "entry" | "exit") => {
+    const key = tradeGroupKey(row);
+    const qty = Math.abs(Number(row.quantity ?? 0)) || 0;
+    if (!qty) return;
+    const t = timeToMinutes(row.time);
+    if (!groups.has(key)) groups.set(key, { events: [] });
+    groups.get(key)!.events.push({ t, type, qty });
+  };
+
+  entries.forEach((e) => push(e, "entry"));
+  exits.forEach((e) => push(e, "exit"));
+
+  let total = 0;
+  for (const group of groups.values()) {
+    const events = group.events.sort((a, b) => a.t - b.t);
+    let openAbs = 0;
+    for (const ev of events) {
+      const prev = openAbs;
+      if (ev.type === "entry") {
+        openAbs += ev.qty;
+      } else {
+        openAbs = Math.max(0, openAbs - ev.qty);
+      }
+      if (prev > 0 && openAbs === 0 && ev.type === "exit") {
+        total += 1;
+      }
+    }
+  }
+  return total;
 }
 
 function clamp(x: number, a: number, b: number) {
@@ -389,7 +462,7 @@ function buildEdgesAgg(sessions: SessionRow[]) {
     const planRespected = s.respectedPlan == null ? null : !!s.respectedPlan;
 
     const allTrades = [...(s.entries ?? []), ...(s.exits ?? [])];
-    const tradesCount = allTrades.length;
+    const tradesCount = roundTripTrades(s.entries ?? [], s.exits ?? []);
 
     // time bucket: take first trade time if present, else null
     // (Later we can compute per-trade edges too, but per-session is stable/cheap)
@@ -573,7 +646,10 @@ export function buildSnapshotAndEdges(input: {
   const pnls = sessions.map((s) => s.pnl ?? 0);
   const sessions_count = sessions.length;
 
-  const trades_count = sessions.reduce((acc, s) => acc + (s.entries?.length ?? 0) + (s.exits?.length ?? 0), 0);
+  const trades_count = sessions.reduce(
+    (acc, s) => acc + roundTripTrades(s.entries ?? [], s.exits ?? []),
+    0
+  );
 
   const total_pnl = pnls.reduce((a, b) => a + b, 0);
   const avg_pnl = sessions_count ? total_pnl / sessions_count : 0;
@@ -676,6 +752,7 @@ export function buildSnapshotAndEdges(input: {
     heatmap,
     meta: {
       generatedAt: new Date().toISOString(),
+      tradeCountMethod: "round_trip_grouped",
     },
   };
 

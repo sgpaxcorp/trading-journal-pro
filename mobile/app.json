@@ -5,11 +5,11 @@
     "scheme": "com.sgpax.neurotraderjournal",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/apple-touch-icon.png",
+    "icon": "./assets/neurotrader-logo-icon.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "splash": {
-      "image": "./assets/apple-touch-icon.png",
+      "image": "./assets/neurotrader-logo-icon.png",
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
@@ -24,7 +24,7 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/apple-touch-icon.png",
+        "foregroundImage": "./assets/neurotrader-logo-icon.png",
         "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true,
@@ -37,13 +37,6 @@
     "plugins": [
       "expo-secure-store",
       "expo-notifications",
-      [
-        "@stripe/stripe-react-native",
-        {
-          "merchantIdentifier": "merchant.com.sgpax.neurotrader",
-          "enableGooglePay": false
-        }
-      ],
       "./plugins/with-device-debug-bundling"
     ]
   }

@@ -6,7 +6,8 @@ import { ScreenScaffold } from "../components/ScreenScaffold";
 import { apiGet } from "../lib/api";
 import { useLanguage } from "../lib/LanguageContext";
 import { t } from "../lib/i18n";
-import { COLORS } from "../theme";
+import { type ThemeColors } from "../theme";
+import { useTheme } from "../lib/ThemeContext";
 
 type DashboardScreenProps = {
   onOpenModule: (title: string, description: string) => void;
@@ -42,6 +43,8 @@ type ChecklistResponse = {
 
 export function DashboardScreen({ onOpenModule }: DashboardScreenProps) {
   const { language } = useLanguage();
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const [loading, setLoading] = useState(true);
   const [series, setSeries] = useState<AccountSeriesResponse | null>(null);
   const [snapshot, setSnapshot] = useState<AnalyticsSnapshot | null>(null);
@@ -142,7 +145,7 @@ export function DashboardScreen({ onOpenModule }: DashboardScreenProps) {
     >
       {loading ? (
         <View style={styles.loadingRow}>
-          <ActivityIndicator color={COLORS.primary} />
+          <ActivityIndicator color={colors.primary} />
           <Text style={styles.loadingText}>{t(language, "Loading data…", "Cargando datos…")}</Text>
         </View>
       ) : (
@@ -305,135 +308,136 @@ export function DashboardScreen({ onOpenModule }: DashboardScreenProps) {
   );
 }
 
-const styles = StyleSheet.create({
-  summaryRow: {
-    flexDirection: "row",
-    gap: 10,
-  },
-  summaryCard: {
-    flex: 1,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    backgroundColor: COLORS.card,
-    padding: 12,
-    gap: 4,
-  },
-  summaryLabel: {
-    color: COLORS.textMuted,
-    fontSize: 11,
-    textTransform: "uppercase",
-    letterSpacing: 1.2,
-    fontWeight: "700",
-  },
-  summaryValue: {
-    color: COLORS.textPrimary,
-    fontSize: 18,
-    fontWeight: "700",
-  },
-  summaryHint: {
-    color: COLORS.textMuted,
-    fontSize: 12,
-  },
-  weeklyRow: {
-    marginTop: 8,
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 6,
-  },
-  weekCell: {
-    flexBasis: "30%",
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    backgroundColor: COLORS.surface,
-    paddingVertical: 6,
-    paddingHorizontal: 8,
-    gap: 2,
-  },
-  weekCellWin: {
-    borderColor: "#1EE6A8",
-    backgroundColor: "#0F2C2A",
-  },
-  weekCellLoss: {
-    borderColor: "#2E90FF",
-    backgroundColor: "#0B1E3A",
-  },
-  weekCellFlat: {
-    borderColor: COLORS.border,
-    backgroundColor: COLORS.card,
-  },
-  weekCellLabel: {
-    color: COLORS.textMuted,
-    fontSize: 10,
-    textTransform: "uppercase",
-    letterSpacing: 1.2,
-    fontWeight: "700",
-  },
-  weekCellValue: {
-    color: COLORS.textPrimary,
-    fontSize: 11,
-    fontWeight: "600",
-  },
-  panel: {
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    backgroundColor: COLORS.surface,
-    padding: 12,
-    gap: 6,
-  },
-  panelTitle: {
-    color: COLORS.primary,
-    fontSize: 12,
-    fontWeight: "700",
-    letterSpacing: 1.2,
-    textTransform: "uppercase",
-  },
-  panelText: {
-    color: COLORS.textMuted,
-    fontSize: 12,
-    lineHeight: 18,
-  },
-  checklist: {
-    marginTop: 6,
-    gap: 6,
-  },
-  checklistRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  checkDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-  },
-  checkDotDone: {
-    backgroundColor: COLORS.primary,
-    borderColor: COLORS.primary,
-  },
-  checkDotPending: {
-    backgroundColor: COLORS.surface,
-  },
-  checklistText: {
-    color: COLORS.textPrimary,
-    fontSize: 12,
-    flexShrink: 1,
-  },
-  loadingRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  loadingText: {
-    color: COLORS.textMuted,
-    fontSize: 12,
-  },
-  errorText: {
-    color: COLORS.danger,
-    fontSize: 12,
-  },
-});
+const createStyles = (colors: ThemeColors) =>
+  StyleSheet.create({
+    summaryRow: {
+      flexDirection: "row",
+      gap: 10,
+    },
+    summaryCard: {
+      flex: 1,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.card,
+      padding: 12,
+      gap: 4,
+    },
+    summaryLabel: {
+      color: colors.textMuted,
+      fontSize: 11,
+      textTransform: "uppercase",
+      letterSpacing: 1.2,
+      fontWeight: "700",
+    },
+    summaryValue: {
+      color: colors.textPrimary,
+      fontSize: 18,
+      fontWeight: "700",
+    },
+    summaryHint: {
+      color: colors.textMuted,
+      fontSize: 12,
+    },
+    weeklyRow: {
+      marginTop: 8,
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: 6,
+    },
+    weekCell: {
+      flexBasis: "30%",
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+      paddingVertical: 6,
+      paddingHorizontal: 8,
+      gap: 2,
+    },
+    weekCellWin: {
+      borderColor: "#1EE6A8",
+      backgroundColor: "#0F2C2A",
+    },
+    weekCellLoss: {
+      borderColor: "#2E90FF",
+      backgroundColor: "#0B1E3A",
+    },
+    weekCellFlat: {
+      borderColor: colors.border,
+      backgroundColor: colors.card,
+    },
+    weekCellLabel: {
+      color: colors.textMuted,
+      fontSize: 10,
+      textTransform: "uppercase",
+      letterSpacing: 1.2,
+      fontWeight: "700",
+    },
+    weekCellValue: {
+      color: colors.textPrimary,
+      fontSize: 11,
+      fontWeight: "600",
+    },
+    panel: {
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+      padding: 12,
+      gap: 6,
+    },
+    panelTitle: {
+      color: colors.primary,
+      fontSize: 12,
+      fontWeight: "700",
+      letterSpacing: 1.2,
+      textTransform: "uppercase",
+    },
+    panelText: {
+      color: colors.textMuted,
+      fontSize: 12,
+      lineHeight: 18,
+    },
+    checklist: {
+      marginTop: 6,
+      gap: 6,
+    },
+    checklistRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+    },
+    checkDot: {
+      width: 10,
+      height: 10,
+      borderRadius: 6,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    checkDotDone: {
+      backgroundColor: colors.primary,
+      borderColor: colors.primary,
+    },
+    checkDotPending: {
+      backgroundColor: colors.surface,
+    },
+    checklistText: {
+      color: colors.textPrimary,
+      fontSize: 12,
+      flexShrink: 1,
+    },
+    loadingRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+    },
+    loadingText: {
+      color: colors.textMuted,
+      fontSize: 12,
+    },
+    errorText: {
+      color: colors.danger,
+      fontSize: 12,
+    },
+  });

@@ -1,12 +1,15 @@
 import { useMemo, useState } from "react";
-import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Image, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 
 import { useLanguage } from "../lib/LanguageContext";
 import { t } from "../lib/i18n";
 import { supabaseMobile } from "../lib/supabase";
-import { COLORS } from "../theme";
+import { type ThemeColors } from "../theme";
+import { useTheme } from "../lib/ThemeContext";
 
 export type AuthMode = "signin" | "signup";
+
+const logo = require("../../assets/apple-touch-icon.png");
 
 type AuthScreenProps = {
   mode: AuthMode;
@@ -15,6 +18,8 @@ type AuthScreenProps = {
 
 export function AuthScreen({ mode, onToggleMode }: AuthScreenProps) {
   const { language } = useLanguage();
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const isSignUp = mode === "signup";
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -82,6 +87,9 @@ export function AuthScreen({ mode, onToggleMode }: AuthScreenProps) {
 
   return (
     <View style={styles.root}>
+      <View style={styles.logoWrap}>
+        <Image source={logo} style={styles.logo} resizeMode="contain" />
+      </View>
       <View style={styles.card}>
         <Text style={styles.kicker}>Neuro Trader</Text>
         <Text style={styles.title}>
@@ -102,7 +110,7 @@ export function AuthScreen({ mode, onToggleMode }: AuthScreenProps) {
           autoCapitalize="none"
           autoCorrect={false}
           placeholder={t(language, "Email", "Correo")}
-          placeholderTextColor={COLORS.textMuted}
+          placeholderTextColor={colors.textMuted}
           style={styles.input}
         />
         <TextInput
@@ -110,7 +118,7 @@ export function AuthScreen({ mode, onToggleMode }: AuthScreenProps) {
           onChangeText={setPassword}
           secureTextEntry
           placeholder={t(language, "Password", "Contraseña")}
-          placeholderTextColor={COLORS.textMuted}
+          placeholderTextColor={colors.textMuted}
           style={styles.input}
         />
 
@@ -133,75 +141,87 @@ export function AuthScreen({ mode, onToggleMode }: AuthScreenProps) {
   );
 }
 
-const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-    backgroundColor: COLORS.background,
-    padding: 16,
-    justifyContent: "center",
-  },
-  card: {
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    backgroundColor: COLORS.card,
-    padding: 16,
-    gap: 10,
-  },
-  kicker: {
-    color: COLORS.primary,
-    fontSize: 11,
-    fontWeight: "700",
-    letterSpacing: 1.4,
-    textTransform: "uppercase",
-  },
-  title: {
-    color: COLORS.textPrimary,
-    fontSize: 24,
-    fontWeight: "700",
-  },
-  subtitle: {
-    color: COLORS.textMuted,
-    fontSize: 13,
-    lineHeight: 18,
-    marginBottom: 4,
-  },
-  input: {
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    backgroundColor: COLORS.surface,
-    color: COLORS.textPrimary,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 14,
-  },
-  primaryButton: {
-    backgroundColor: COLORS.primary,
-    borderRadius: 10,
-    paddingVertical: 11,
-    alignItems: "center",
-    marginTop: 4,
-  },
-  primaryButtonText: {
-    color: "#061122",
-    fontWeight: "700",
-    fontSize: 14,
-  },
-  linkText: {
-    color: COLORS.textPrimary,
-    textAlign: "center",
-    marginTop: 2,
-    fontSize: 12,
-  },
-  errorText: {
-    color: COLORS.danger,
-    fontSize: 12,
-    textAlign: "center",
-  },
-  statusText: {
-    color: COLORS.primary,
-    fontSize: 12,
-    textAlign: "center",
-  },
-});
+const createStyles = (colors: ThemeColors) =>
+  StyleSheet.create({
+    root: {
+      flex: 1,
+      backgroundColor: colors.background,
+      padding: 16,
+      paddingTop: 12,
+      justifyContent: "flex-start",
+    },
+    card: {
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.card,
+      padding: 16,
+      gap: 10,
+    },
+    logoWrap: {
+      alignItems: "center",
+      justifyContent: "center",
+      marginBottom: 6,
+    },
+    logo: {
+      width: 350,
+      height: 350,
+      borderRadius: 36,
+    },
+    kicker: {
+      color: colors.primary,
+      fontSize: 11,
+      fontWeight: "700",
+      letterSpacing: 1.4,
+      textTransform: "uppercase",
+    },
+    title: {
+      color: colors.textPrimary,
+      fontSize: 24,
+      fontWeight: "700",
+    },
+    subtitle: {
+      color: colors.textMuted,
+      fontSize: 13,
+      lineHeight: 18,
+      marginBottom: 4,
+    },
+    input: {
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+      color: colors.textPrimary,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      fontSize: 14,
+    },
+    primaryButton: {
+      backgroundColor: colors.primary,
+      borderRadius: 10,
+      paddingVertical: 11,
+      alignItems: "center",
+      marginTop: 4,
+    },
+    primaryButtonText: {
+      color: "#061122",
+      fontWeight: "700",
+      fontSize: 14,
+    },
+    linkText: {
+      color: colors.textPrimary,
+      textAlign: "center",
+      marginTop: 2,
+      fontSize: 12,
+    },
+    errorText: {
+      color: colors.danger,
+      fontSize: 12,
+      textAlign: "center",
+    },
+    statusText: {
+      color: colors.primary,
+      fontSize: 12,
+      textAlign: "center",
+    },
+  });

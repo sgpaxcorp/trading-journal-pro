@@ -11,6 +11,8 @@ import { getGrowthPlanSupabaseByAccount, type GrowthPlan } from "@/lib/growthPla
 import type { JournalEntry } from "@/lib/journalTypes";
 import { getAllJournalEntries } from "@/lib/journalSupabase";
 import { upsertDailySnapshot } from "@/lib/snapshotSupabase";
+import { getJournalTradesForDates } from "@/lib/journalTradesSupabase";
+import { parseNotes, type TradesPayload } from "@/lib/journalNotes";
 
 // ✅ Cashflows (deposits/withdrawals)
 import { listCashflows, signedCashflowAmount, type Cashflow } from "@/lib/cashflowsSupabase";
@@ -56,6 +58,14 @@ function toDateOnlyStr(value: unknown): string | null {
   const d = new Date(value as any);
   if (Number.isNaN(d.getTime())) return null;
   return formatDateYYYYMMDD(d);
+}
+
+function stripHtml(raw: string): string {
+  if (!raw) return "";
+  return raw
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function getPlanStartDateStr(plan: unknown): string | null {
@@ -548,6 +558,8 @@ export default function DashboardPage() {
   const [calendarCells, setCalendarCells] = useState<CalendarCell[]>([]);
   const [weeks, setWeeks] = useState<WeekSummary[]>([]);
   const [monthLabel, setMonthLabel] = useState("");
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  const [monthTrades, setMonthTrades] = useState<Record<string, TradesPayload>>({});
 
   const holidayList = useMemo(() => {
     const years = new Set([viewDate?.getFullYear() ?? new Date().getFullYear(), new Date().getFullYear()]);
@@ -797,6 +809,59 @@ export default function DashboardPage() {
     setWeeks(weeks);
     setMonthLabel(monthLabel);
   }, [entries, viewDate, localeTag, holidayMap]);
+
+  // Load trades for the visible month (for quick summary panel)
+  useEffect(() => {
+    if (!user || !activeAccountId || !viewDate) return;
+    const userId = (user as any)?.uid || (user as any)?.id || "";
+    if (!userId) return;
+
+    const year = viewDate.getFullYear();
+    const month = viewDate.getMonth();
+
+    const monthDates = Array.from(
+      new Set(
+        entries
+          .map((e) => String((e as any)?.date || "").slice(0, 10))
+          .filter((ds) => {
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(ds)) return false;
+            const d = new Date(ds + "T00:00:00");
+            return d.getFullYear() === year && d.getMonth() === month;
+          })
+      )
+    );
+
+    if (monthDates.length === 0) {
+      setMonthTrades({});
+      setSelectedDate(null);
+      return;
+    }
+
+    let alive = true;
+    (async () => {
+      try {
+        const payload = await getJournalTradesForDates(userId, monthDates, activeAccountId);
+        if (!alive) return;
+        setMonthTrades(payload || {});
+
+        if (!selectedDate || !monthDates.includes(selectedDate)) {
+          const today = formatDateYYYYMMDD(new Date());
+          if (monthDates.includes(today)) {
+            setSelectedDate(today);
+          } else {
+            setSelectedDate(monthDates[0] || null);
+          }
+        }
+      } catch (err) {
+        if (!alive) return;
+        setMonthTrades({});
+      }
+    })();
+
+    return () => {
+      alive = false;
+    };
+  }, [entries, viewDate, user, activeAccountId]);
 
   const weekRowNumbers = useMemo(() => {
     const rows: (number | null)[] = [];
@@ -1116,6 +1181,12 @@ export default function DashboardPage() {
   };
 
   const onDayClick = (dateStr: string | null) => {
+    if (!dateStr) return;
+    setSelectedDate(dateStr);
+    router.push(`/journal/${dateStr}`);
+  };
+
+  const onOpenJournal = (dateStr: string | null) => {
     if (!dateStr) return;
     router.push(`/journal/${dateStr}`);
   };
@@ -1459,6 +1530,16 @@ export default function DashboardPage() {
     }
 
     if (id === "calendar") {
+      const selectedEntry =
+        selectedDate && entries.length
+          ? entries.find((e) => String((e as any).date).slice(0, 10) === selectedDate)
+          : null;
+      const selectedTrades = selectedDate ? monthTrades[selectedDate] : null;
+      const selectedNotes = parseNotes(selectedEntry?.notes ?? "");
+      const premarketText = stripHtml(String(selectedNotes?.premarket ?? ""));
+      const insideText = stripHtml(String(selectedNotes?.live ?? ""));
+      const afterText = stripHtml(String(selectedNotes?.post ?? ""));
+
       return (
         <div className="h-full flex flex-col">
           <div className="flex items-center justify-between mb-4">
@@ -1515,13 +1596,14 @@ export default function DashboardPage() {
                   }
 
                   const isTodayRing = cell.isToday && hasDate ? "ring-2 ring-emerald-400/90" : "";
+                  const isSelected = hasDate && selectedDate === cell.dateStr ? "ring-2 ring-sky-300/90" : "";
 
                   return (
                     <div
                       key={dow}
                       onClick={() => hasDate && onDayClick(cell.dateStr)}
                       title={cell.holiday ? cell.holiday.label : undefined}
-                      className={`${bg} ${isTodayRing} border rounded-2xl px-2 py-2 min-h-24 flex flex-col items-start justify-between hover:scale-[1.02] hover:shadow-lg transition ${
+                      className={`${bg} ${isTodayRing} ${isSelected} border rounded-2xl px-2 py-2 min-h-24 flex flex-col items-start justify-between hover:scale-[1.02] hover:shadow-lg transition ${
                         hasDate ? "cursor-pointer" : "cursor-default opacity-30"
                       }`}
                     >
@@ -1539,7 +1621,16 @@ export default function DashboardPage() {
                           <p className="text-[16px] font-semibold leading-none">
                             {pnl > 0 ? `+$${pnl.toFixed(0)}` : pnl < 0 ? `-$${Math.abs(pnl).toFixed(0)}` : "$0"}
                           </p>
-                          <p className="text-[11px] mt-1 opacity-85">{L("Open journal ↗", "Abrir journal ↗")}</p>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onOpenJournal(cell.dateStr);
+                            }}
+                            className="text-[11px] mt-1 opacity-85 underline decoration-dotted"
+                          >
+                            {L("Open journal ↗", "Abrir journal ↗")}
+                          </button>
                         </div>
                       ) : hasDate ? (
                         <div className="mt-auto space-y-1">
@@ -1564,6 +1655,103 @@ export default function DashboardPage() {
                 })}
               </div>
             ))}
+          </div>
+
+          <div className="mt-4 rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">
+                  {L("Day summary", "Resumen del día")}
+                </p>
+                <h3 className="text-lg font-semibold text-slate-50">
+                  {selectedDate ? selectedDate : L("Select a day", "Selecciona un día")}
+                </h3>
+              </div>
+              {selectedDate ? (
+                <button
+                  type="button"
+                  onClick={() => onOpenJournal(selectedDate)}
+                  className="rounded-full border border-emerald-400/60 bg-emerald-500/10 px-4 py-2 text-xs font-semibold text-emerald-200 hover:bg-emerald-500/20"
+                >
+                  {L("Open journal", "Abrir journal")}
+                </button>
+              ) : null}
+            </div>
+
+            {!selectedDate ? (
+              <p className="text-xs text-slate-400 mt-3">
+                {L(
+                  "Click any day in the calendar to preview notes and entries/exits.",
+                  "Haz clic en un día del calendario para ver notas y entradas/salidas."
+                )}
+              </p>
+            ) : (
+              <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3 text-xs text-slate-200">
+                <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+                  <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500">
+                    {L("Premarket", "Premarket")}
+                  </p>
+                  <p className="mt-2 text-slate-300">
+                    {premarketText ? premarketText.slice(0, 180) : L("No notes.", "Sin notas.")}
+                  </p>
+                </div>
+                <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+                  <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500">
+                    {L("Inside trade", "Inside trade")}
+                  </p>
+                  <p className="mt-2 text-slate-300">
+                    {insideText ? insideText.slice(0, 180) : L("No notes.", "Sin notas.")}
+                  </p>
+                </div>
+                <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+                  <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500">
+                    {L("After trade", "After trade")}
+                  </p>
+                  <p className="mt-2 text-slate-300">
+                    {afterText ? afterText.slice(0, 180) : L("No notes.", "Sin notas.")}
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {selectedDate ? (
+              <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3 text-xs text-slate-200">
+                <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+                  <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500">
+                    {L("Entries", "Entradas")}
+                  </p>
+                  {selectedTrades?.entries?.length ? (
+                    <ul className="mt-2 space-y-1">
+                      {selectedTrades.entries.slice(0, 5).map((row, idx) => (
+                        <li key={row.id || idx} className="flex items-center justify-between">
+                          <span>{row.symbol} · {row.side ?? "—"}</span>
+                          <span>{row.quantity} @ {row.price}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="mt-2 text-slate-400">{L("No entries logged.", "Sin entradas registradas.")}</p>
+                  )}
+                </div>
+                <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+                  <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500">
+                    {L("Exits", "Salidas")}
+                  </p>
+                  {selectedTrades?.exits?.length ? (
+                    <ul className="mt-2 space-y-1">
+                      {selectedTrades.exits.slice(0, 5).map((row, idx) => (
+                        <li key={row.id || idx} className="flex items-center justify-between">
+                          <span>{row.symbol} · {row.side ?? "—"}</span>
+                          <span>{row.quantity} @ {row.price}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="mt-2 text-slate-400">{L("No exits logged.", "Sin salidas registradas.")}</p>
+                  )}
+                </div>
+              </div>
+            ) : null}
           </div>
         </div>
       );

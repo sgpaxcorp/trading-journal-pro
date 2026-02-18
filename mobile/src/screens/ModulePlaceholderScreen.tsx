@@ -1,9 +1,11 @@
 import { RouteProp, useNavigation } from "@react-navigation/native";
 import { Pressable, StyleSheet, Text, View } from "react-native";
+import { useMemo } from "react";
 
 import { useLanguage } from "../lib/LanguageContext";
 import { t } from "../lib/i18n";
-import { COLORS } from "../theme";
+import { type ThemeColors } from "../theme";
+import { useTheme } from "../lib/ThemeContext";
 
 type Params = {
   Module: {
@@ -19,6 +21,8 @@ type Props = {
 export function ModulePlaceholderScreen({ route }: Props) {
   const { language } = useLanguage();
   const navigation = useNavigation();
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
 
   return (
     <View style={styles.root}>
@@ -45,69 +49,70 @@ export function ModulePlaceholderScreen({ route }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-    backgroundColor: COLORS.background,
-    padding: 16,
-  },
-  card: {
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    backgroundColor: COLORS.card,
-    padding: 16,
-    gap: 10,
-  },
-  badge: {
-    alignSelf: "flex-start",
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: "#3568D4",
-    backgroundColor: "#17316A",
-    color: "#A7C3FF",
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    fontSize: 10,
-    textTransform: "uppercase",
-    letterSpacing: 1.2,
-    fontWeight: "700",
-  },
-  title: {
-    color: COLORS.textPrimary,
-    fontSize: 22,
-    fontWeight: "700",
-  },
-  description: {
-    color: COLORS.textMuted,
-    fontSize: 14,
-    lineHeight: 20,
-  },
-  ruleBox: {
-    marginTop: 2,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    backgroundColor: COLORS.surface,
-    padding: 10,
-    gap: 4,
-  },
-  ruleText: {
-    color: COLORS.textMuted,
-    fontSize: 12,
-    lineHeight: 18,
-  },
-  cta: {
-    marginTop: 6,
-    alignSelf: "flex-start",
-    borderRadius: 10,
-    backgroundColor: COLORS.primary,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-  },
-  ctaText: {
-    color: "#061122",
-    fontSize: 12,
-    fontWeight: "700",
-  },
-});
+const createStyles = (colors: ThemeColors) =>
+  StyleSheet.create({
+    root: {
+      flex: 1,
+      backgroundColor: colors.background,
+      padding: 16,
+    },
+    card: {
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.card,
+      padding: 16,
+      gap: 10,
+    },
+    badge: {
+      alignSelf: "flex-start",
+      borderRadius: 999,
+      borderWidth: 1,
+      borderColor: "#3568D4",
+      backgroundColor: "#17316A",
+      color: "#A7C3FF",
+      paddingHorizontal: 8,
+      paddingVertical: 4,
+      fontSize: 10,
+      textTransform: "uppercase",
+      letterSpacing: 1.2,
+      fontWeight: "700",
+    },
+    title: {
+      color: colors.textPrimary,
+      fontSize: 22,
+      fontWeight: "700",
+    },
+    description: {
+      color: colors.textMuted,
+      fontSize: 14,
+      lineHeight: 20,
+    },
+    ruleBox: {
+      marginTop: 2,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+      padding: 10,
+      gap: 4,
+    },
+    ruleText: {
+      color: colors.textMuted,
+      fontSize: 12,
+      lineHeight: 18,
+    },
+    cta: {
+      marginTop: 6,
+      alignSelf: "flex-start",
+      borderRadius: 10,
+      backgroundColor: colors.primary,
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+    },
+    ctaText: {
+      color: "#061122",
+      fontSize: 12,
+      fontWeight: "700",
+    },
+  });
