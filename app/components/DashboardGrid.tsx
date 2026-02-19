@@ -17,6 +17,7 @@ const DEFAULT_STORAGE_KEY = "tjp_dashboard_layout_v3";
 ================================ */
 export const GRID_IDS = [
   "progress",
+  "plan-progress",
   "streak",
   "actions",
   "calendar",
@@ -41,11 +42,13 @@ const defaultLayout: Layout[] = [
   // Nuevos widgets al final
   { i: "trading-days", x: 0, y: 42, w: 4, h: 10 },
   { i: "economic-news", x: 4, y: 42, w: 8, h: 12 },
+  { i: "plan-progress", x: 0, y: 54, w: 6, h: 10 },
 ];
 
 /** Min height per widget */
 const MIN_H: Record<GridItemId, number> = {
   progress: 7,
+  "plan-progress": 7,
   streak: 7,
   actions: 7,
   calendar: 22,

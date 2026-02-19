@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Linking, Pressable, StyleSheet, Text, View } from "react-native";
 
 import { ModuleTile } from "../components/ModuleTile";
 import { ScreenScaffold } from "../components/ScreenScaffold";
@@ -8,6 +8,7 @@ import { useLanguage } from "../lib/LanguageContext";
 import { t } from "../lib/i18n";
 import { type ThemeColors } from "../theme";
 import { useTheme } from "../lib/ThemeContext";
+import { parseNotes, type TradesPayload, type StoredTradeRow } from "../lib/journalNotes";
 
 type DashboardScreenProps = {
   onOpenModule: (title: string, description: string) => void;
@@ -16,30 +17,26 @@ type DashboardScreenProps = {
 type SeriesPoint = { date: string; value: number };
 
 type AccountSeriesResponse = {
+  plan?: {
+    startingBalance: number;
+    targetBalance: number;
+    dailyTargetPct?: number;
+    planStartIso?: string;
+  };
   totals: { tradingPnl: number; cashflowNet: number; currentBalance: number };
   daily: SeriesPoint[];
 };
 
-type AnalyticsSnapshot = {
-  totalTrades: number;
-  winRate: number;
-  netPnl: number;
+type JournalEntry = {
+  date?: string | null;
+  notes?: string | null;
 };
 
-type AnalyticsSnapshotResponse = {
-  snapshot: AnalyticsSnapshot | null;
+type JournalListResponse = {
+  entries: JournalEntry[];
 };
 
-type ChecklistItem = {
-  text: string;
-  done: boolean;
-};
-
-type ChecklistResponse = {
-  date: string;
-  items: ChecklistItem[];
-  notes: string | null;
-};
+const WEB_PLAN_SUMMARY_URL = "https://www.neurotrader-journal.com/performance/plan-summary";
 
 export function DashboardScreen({ onOpenModule }: DashboardScreenProps) {
   const { language } = useLanguage();
@@ -47,9 +44,10 @@ export function DashboardScreen({ onOpenModule }: DashboardScreenProps) {
   const styles = useMemo(() => createStyles(colors), [colors]);
   const [loading, setLoading] = useState(true);
   const [series, setSeries] = useState<AccountSeriesResponse | null>(null);
-  const [snapshot, setSnapshot] = useState<AnalyticsSnapshot | null>(null);
-  const [checklist, setChecklist] = useState<ChecklistResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [journalEntries, setJournalEntries] = useState<JournalEntry[]>([]);
+  const [journalLoading, setJournalLoading] = useState(false);
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -58,15 +56,11 @@ export function DashboardScreen({ onOpenModule }: DashboardScreenProps) {
       try {
         setLoading(true);
         setError(null);
-        const [seriesRes, snapshotRes, checklistRes] = await Promise.all([
+        const [seriesRes] = await Promise.all([
           apiGet<AccountSeriesResponse>("/api/account/series"),
-          apiGet<AnalyticsSnapshotResponse>("/api/analytics/snapshot"),
-          apiGet<ChecklistResponse>("/api/checklist/today"),
         ]);
         if (!active) return;
         setSeries(seriesRes ?? null);
-        setSnapshot(snapshotRes?.snapshot ?? null);
-        setChecklist(checklistRes ?? null);
       } catch (err: any) {
         if (!active) return;
         setError(err?.message ?? "Failed to load data.");
@@ -77,6 +71,51 @@ export function DashboardScreen({ onOpenModule }: DashboardScreenProps) {
     }
 
     load();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    async function loadJournalEntries() {
+      try {
+        setJournalLoading(true);
+        const today = new Date();
+        const toDate = today.toISOString().slice(0, 10);
+        const from = new Date(today);
+        from.setDate(today.getDate() - 45);
+        const fromDate = from.toISOString().slice(0, 10);
+        const res = await apiGet<JournalListResponse>(
+          `/api/journal/list?fromDate=${fromDate}&toDate=${toDate}`
+        );
+        if (!active) return;
+        const entries = res?.entries ?? [];
+        setJournalEntries(entries);
+
+        const availableDates = entries
+          .map((entry) => String(entry?.date ?? "").slice(0, 10))
+          .filter((value) => value.length === 10)
+          .sort();
+
+        const todayStr = today.toISOString().slice(0, 10);
+        if (!selectedDate || !availableDates.includes(selectedDate)) {
+          if (availableDates.includes(todayStr)) {
+            setSelectedDate(todayStr);
+          } else {
+            setSelectedDate(availableDates[availableDates.length - 1] ?? null);
+          }
+        }
+      } catch {
+        if (!active) return;
+        setJournalEntries([]);
+      } finally {
+        if (!active) return;
+        setJournalLoading(false);
+      }
+    }
+
+    loadJournalEntries();
     return () => {
       active = false;
     };
@@ -105,11 +144,30 @@ export function DashboardScreen({ onOpenModule }: DashboardScreenProps) {
     return { total, days };
   }, [dailyMap]);
 
-  const checklistStats = useMemo(() => {
-    const items = checklist?.items ?? [];
-    const done = items.filter((item) => item.done).length;
-    return { items, done, total: items.length };
-  }, [checklist]);
+  const daySummaryDates = useMemo(() => {
+    const dates = journalEntries
+      .map((entry) => String(entry?.date ?? "").slice(0, 10))
+      .filter((value) => value.length === 10)
+      .sort();
+    return dates;
+  }, [journalEntries]);
+
+  const selectedEntry = selectedDate
+    ? journalEntries.find((entry) => String(entry?.date ?? "").slice(0, 10) === selectedDate) ?? null
+    : null;
+  const selectedNotes: TradesPayload = parseNotes(selectedEntry?.notes ?? null);
+  const premarketText = String(selectedNotes?.premarket ?? "").trim();
+  const insideText = String(selectedNotes?.live ?? "").trim();
+  const afterText = String(selectedNotes?.post ?? "").trim();
+  const entryRows: StoredTradeRow[] = Array.isArray(selectedNotes?.entries) ? selectedNotes.entries : [];
+  const exitRows: StoredTradeRow[] = Array.isArray(selectedNotes?.exits) ? selectedNotes.exits : [];
+
+  const daySummaryIndex = selectedDate ? daySummaryDates.indexOf(selectedDate) : -1;
+  const prevSummaryDate = daySummaryIndex > 0 ? daySummaryDates[daySummaryIndex - 1] : null;
+  const nextSummaryDate =
+    daySummaryIndex >= 0 && daySummaryIndex < daySummaryDates.length - 1
+      ? daySummaryDates[daySummaryIndex + 1]
+      : null;
 
   const formatUsd = (value: number) =>
     new Intl.NumberFormat(language === "es" ? "es-ES" : "en-US", {
@@ -117,12 +175,6 @@ export function DashboardScreen({ onOpenModule }: DashboardScreenProps) {
       currency: "USD",
       maximumFractionDigits: 2,
     }).format(value);
-
-  const formatPct = (value: number) => {
-    if (!Number.isFinite(value)) return "—";
-    const pct = Math.abs(value) > 1 ? value : value * 100;
-    return `${pct.toFixed(1)}%`;
-  };
 
   const formatSigned = (value: number) => {
     const sign = value > 0 ? "+" : value < 0 ? "-" : "";
@@ -133,6 +185,23 @@ export function DashboardScreen({ onOpenModule }: DashboardScreenProps) {
     const sign = value > 0 ? "+" : value < 0 ? "-" : "";
     return `${sign}$${Math.abs(value).toFixed(0)}`;
   };
+
+  const planProgress = useMemo(() => {
+    const plan = series?.plan;
+    const totals = series?.totals;
+    if (!plan || !totals) return null;
+    const start = Number(plan.startingBalance ?? 0);
+    const target = Number(plan.targetBalance ?? 0);
+    const current = Number(totals.currentBalance ?? 0);
+    if (!Number.isFinite(start) || !Number.isFinite(target) || target === start) return null;
+    const progress = ((current - start) / (target - start)) * 100;
+    return {
+      start,
+      target,
+      current,
+      progress,
+    };
+  }, [series]);
 
   return (
     <ScreenScaffold
@@ -151,7 +220,7 @@ export function DashboardScreen({ onOpenModule }: DashboardScreenProps) {
       ) : (
         <>
           <View style={styles.summaryRow}>
-            <View style={styles.summaryCard}>
+            <View style={[styles.summaryCard, styles.weeklyCard]}>
               <Text style={styles.summaryLabel}>{t(language, "Weekly P&L", "P&L semanal")}</Text>
               <Text style={styles.summaryValue}>{formatSigned(weeklySummary.total)}</Text>
               <Text style={styles.summaryHint}>
@@ -182,128 +251,124 @@ export function DashboardScreen({ onOpenModule }: DashboardScreenProps) {
                 })}
               </View>
             </View>
-            <View style={styles.summaryCard}>
-              <Text style={styles.summaryLabel}>{t(language, "Win rate", "Win rate")}</Text>
-              <Text style={styles.summaryValue}>{snapshot ? formatPct(snapshot.winRate) : "—"}</Text>
-              <Text style={styles.summaryHint}>
-                {t(language, "Based on closed trades.", "Basado en trades cerrados.")}
+            <Pressable
+              style={[styles.summaryCard, styles.planCard]}
+              onPress={() => Linking.openURL(WEB_PLAN_SUMMARY_URL)}
+            >
+              <Text style={styles.planLabel}>{t(language, "Plan progress", "Progreso del plan")}</Text>
+              <Text style={styles.planValue}>
+                {planProgress ? `${planProgress.progress.toFixed(1)}%` : "—"}
               </Text>
-            </View>
-          </View>
-
-          <View style={styles.summaryRow}>
-            <View style={styles.summaryCard}>
-              <Text style={styles.summaryLabel}>{t(language, "Net P&L", "P&L neto")}</Text>
-              <Text style={styles.summaryValue}>
-                {snapshot ? formatUsd(snapshot.netPnl) : "—"}
+              <Text style={styles.planHint}>
+                {planProgress
+                  ? t(
+                      language,
+                      `Start ${formatUsd(planProgress.start)} → Target ${formatUsd(planProgress.target)}`,
+                      `Inicio ${formatUsd(planProgress.start)} → Meta ${formatUsd(planProgress.target)}`
+                    )
+                  : t(language, "Set a growth plan to track progress.", "Configura tu plan para ver progreso.")}
               </Text>
-              <Text style={styles.summaryHint}>
-                {t(language, "All-time net performance.", "Performance neta total.")}
+              <Text style={styles.planLink}>
+                {t(language, "Open plan phases →", "Ver fases del plan →")}
               </Text>
-            </View>
-            <View style={styles.summaryCard}>
-              <Text style={styles.summaryLabel}>{t(language, "Total trades", "Total trades")}</Text>
-              <Text style={styles.summaryValue}>
-                {snapshot ? String(snapshot.totalTrades) : "—"}
-              </Text>
-              <Text style={styles.summaryHint}>
-                {t(language, "Closed trades in your journal.", "Trades cerrados en tu journal.")}
-              </Text>
-            </View>
+            </Pressable>
           </View>
 
           {error ? <Text style={styles.errorText}>{error}</Text> : null}
         </>
       )}
 
-      <View style={styles.panel}>
-        <Text style={styles.panelTitle}>{t(language, "Today checklist", "Checklist de hoy")}</Text>
-        {checklistStats.total > 0 ? (
-          <>
-            <Text style={styles.panelText}>
-              {t(
-                language,
-                `${checklistStats.done} of ${checklistStats.total} completed`,
-                `${checklistStats.done} de ${checklistStats.total} completados`
-              )}
+      <View style={styles.daySummaryCard}>
+        <View style={styles.daySummaryHeader}>
+          <View>
+            <Text style={styles.daySummaryEyebrow}>{t(language, "Day summary", "Resumen del día")}</Text>
+            <Text style={styles.daySummaryTitle}>
+              {selectedDate ?? t(language, "Select a day", "Selecciona un día")}
             </Text>
-            <View style={styles.checklist}>
-              {checklistStats.items.map((item, idx) => (
-                <View key={`check-${idx}`} style={styles.checklistRow}>
-                  <View style={[styles.checkDot, item.done ? styles.checkDotDone : styles.checkDotPending]} />
-                  <Text style={styles.checklistText}>{item.text}</Text>
-                </View>
-              ))}
-            </View>
-          </>
-        ) : (
-          <Text style={styles.panelText}>
+          </View>
+          <View style={styles.daySummaryNav}>
+            <Pressable
+              style={[styles.dayNavButton, !prevSummaryDate && styles.dayNavDisabled]}
+              onPress={() => prevSummaryDate && setSelectedDate(prevSummaryDate)}
+              disabled={!prevSummaryDate}
+            >
+              <Text style={styles.dayNavText}>‹</Text>
+            </Pressable>
+            <Pressable
+              style={[styles.dayNavButton, !nextSummaryDate && styles.dayNavDisabled]}
+              onPress={() => nextSummaryDate && setSelectedDate(nextSummaryDate)}
+              disabled={!nextSummaryDate}
+            >
+              <Text style={styles.dayNavText}>›</Text>
+            </Pressable>
+          </View>
+        </View>
+
+        {!selectedDate ? (
+          <Text style={styles.daySummaryHint}>
             {t(
               language,
-              "No checklist yet. Add your pre-market rules to stay consistent today.",
-              "Aún no hay checklist. Agrega tus reglas pre-market para mantener consistencia hoy."
+              "No journal days found in the last 45 days.",
+              "No hay días de journal en los últimos 45 días."
             )}
           </Text>
+        ) : (
+          <>
+            <View style={styles.daySummaryRow}>
+              <View style={styles.daySummaryNote}>
+                <Text style={styles.daySummaryLabel}>{t(language, "Premarket", "Premarket")}</Text>
+                <Text style={styles.daySummaryBody}>
+                  {premarketText ? premarketText.slice(0, 160) : t(language, "No notes.", "Sin notas.")}
+                </Text>
+              </View>
+              <View style={styles.daySummaryNote}>
+                <Text style={styles.daySummaryLabel}>{t(language, "Inside trade", "Inside trade")}</Text>
+                <Text style={styles.daySummaryBody}>
+                  {insideText ? insideText.slice(0, 160) : t(language, "No notes.", "Sin notas.")}
+                </Text>
+              </View>
+            </View>
+            <View style={styles.daySummaryRow}>
+              <View style={styles.daySummaryNote}>
+                <Text style={styles.daySummaryLabel}>{t(language, "After trade", "After trade")}</Text>
+                <Text style={styles.daySummaryBody}>
+                  {afterText ? afterText.slice(0, 160) : t(language, "No notes.", "Sin notas.")}
+                </Text>
+              </View>
+            </View>
+            <View style={styles.daySummaryTrades}>
+              <View style={styles.daySummaryTradeCard}>
+                <Text style={styles.daySummaryLabel}>{t(language, "Entries", "Entradas")}</Text>
+                {entryRows.length ? (
+                  entryRows.slice(0, 5).map((row, idx) => (
+                    <Text key={`entry-${idx}`} style={styles.daySummaryBody}>
+                      {row.symbol} · {row.side ?? "—"} · {row.quantity ?? "—"} @ {row.price ?? "—"}
+                    </Text>
+                  ))
+                ) : (
+                  <Text style={styles.daySummaryBody}>{t(language, "No entries logged.", "Sin entradas.")}</Text>
+                )}
+              </View>
+              <View style={styles.daySummaryTradeCard}>
+                <Text style={styles.daySummaryLabel}>{t(language, "Exits", "Salidas")}</Text>
+                {exitRows.length ? (
+                  exitRows.slice(0, 5).map((row, idx) => (
+                    <Text key={`exit-${idx}`} style={styles.daySummaryBody}>
+                      {row.symbol} · {row.side ?? "—"} · {row.quantity ?? "—"} @ {row.price ?? "—"}
+                    </Text>
+                  ))
+                ) : (
+                  <Text style={styles.daySummaryBody}>{t(language, "No exits logged.", "Sin salidas.")}</Text>
+                )}
+              </View>
+            </View>
+          </>
         )}
+        {journalLoading ? (
+          <Text style={styles.loadingText}>{t(language, "Syncing journal…", "Sincronizando journal…")}</Text>
+        ) : null}
       </View>
 
-      <ModuleTile
-        title={t(language, "Open Journal", "Abrir Journal")}
-        description={t(
-          language,
-          "Write pre-market, inside trade, and after-trade notes.",
-          "Escribe pre-market, inside trade y after trade."
-        )}
-        iconName="reader-outline"
-        onPress={() =>
-          onOpenModule(
-            t(language, "Journal", "Journal"),
-            t(
-              language,
-              "This space will show your daily entries and allow fast updates on the go.",
-              "Aquí verás tus entradas diarias y podrás actualizar rápido."
-            )
-          )
-        }
-      />
-      <ModuleTile
-        title={t(language, "Review Analytics", "Revisar Analytics")}
-        description={t(
-          language,
-          "Track KPIs, performance, and risk.",
-          "Monitorea KPIs, performance y riesgo."
-        )}
-        iconName="stats-chart-outline"
-        onPress={() =>
-          onOpenModule(
-            t(language, "Analytics", "Analíticas"),
-            t(
-              language,
-              "Detailed KPIs and performance reports will appear here once trades are logged.",
-              "Los KPIs y reportes detallados aparecerán aquí cuando tengas trades registrados."
-            )
-          )
-        }
-      />
-      <ModuleTile
-        title={t(language, "Message Center", "Centro de mensajes")}
-        description={t(
-          language,
-          "See alerts, reminders, and important updates.",
-          "Ver alertas, recordatorios y actualizaciones."
-        )}
-        iconName="mail-outline"
-        onPress={() =>
-          onOpenModule(
-            t(language, "Message Center", "Centro de mensajes"),
-            t(
-              language,
-              "Your alerts and reminders will show up here.",
-              "Tus alertas y recordatorios aparecerán aquí."
-            )
-          )
-        }
-      />
     </ScreenScaffold>
   );
 }
@@ -313,6 +378,7 @@ const createStyles = (colors: ThemeColors) =>
     summaryRow: {
       flexDirection: "row",
       gap: 10,
+      alignItems: "stretch",
     },
     summaryCard: {
       flex: 1,
@@ -322,6 +388,13 @@ const createStyles = (colors: ThemeColors) =>
       backgroundColor: colors.card,
       padding: 12,
       gap: 4,
+    },
+    weeklyCard: {
+      flex: 1.15,
+    },
+    planCard: {
+      flex: 0.85,
+      justifyContent: "space-between",
     },
     summaryLabel: {
       color: colors.textMuted,
@@ -339,21 +412,48 @@ const createStyles = (colors: ThemeColors) =>
       color: colors.textMuted,
       fontSize: 12,
     },
+    planLabel: {
+      color: colors.textMuted,
+      fontSize: 10,
+      textTransform: "uppercase",
+      letterSpacing: 1.2,
+      fontWeight: "700",
+    },
+    planValue: {
+      color: colors.textPrimary,
+      fontSize: 16,
+      fontWeight: "700",
+    },
+    planHint: {
+      color: colors.textMuted,
+      fontSize: 11,
+      lineHeight: 16,
+    },
+    planLink: {
+      color: colors.primary,
+      fontSize: 11,
+      fontWeight: "700",
+      marginTop: 6,
+    },
     weeklyRow: {
       marginTop: 8,
       flexDirection: "row",
       flexWrap: "wrap",
-      gap: 6,
+      gap: 8,
     },
     weekCell: {
-      flexBasis: "30%",
+      flexBasis: "31%",
+      minWidth: 86,
       borderRadius: 10,
       borderWidth: 1,
       borderColor: colors.border,
       backgroundColor: colors.surface,
-      paddingVertical: 6,
+      paddingVertical: 8,
       paddingHorizontal: 8,
-      gap: 2,
+      gap: 4,
+      alignItems: "center",
+      justifyContent: "center",
+      aspectRatio: 1,
     },
     weekCellWin: {
       borderColor: "#1EE6A8",
@@ -376,56 +476,99 @@ const createStyles = (colors: ThemeColors) =>
     },
     weekCellValue: {
       color: colors.textPrimary,
-      fontSize: 11,
-      fontWeight: "600",
+      fontSize: 12,
+      fontWeight: "700",
+      fontVariant: ["tabular-nums"],
     },
-    panel: {
-      borderRadius: 12,
+    daySummaryCard: {
+      borderRadius: 14,
       borderWidth: 1,
       borderColor: colors.border,
       backgroundColor: colors.surface,
       padding: 12,
-      gap: 6,
+      gap: 10,
     },
-    panelTitle: {
-      color: colors.primary,
-      fontSize: 12,
-      fontWeight: "700",
+    daySummaryHeader: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "center",
+      gap: 12,
+    },
+    daySummaryEyebrow: {
+      color: colors.textMuted,
+      fontSize: 11,
       letterSpacing: 1.2,
       textTransform: "uppercase",
+      fontWeight: "700",
     },
-    panelText: {
-      color: colors.textMuted,
-      fontSize: 12,
-      lineHeight: 18,
+    daySummaryTitle: {
+      color: colors.textPrimary,
+      fontSize: 18,
+      fontWeight: "700",
     },
-    checklist: {
-      marginTop: 6,
-      gap: 6,
-    },
-    checklistRow: {
+    daySummaryNav: {
       flexDirection: "row",
-      alignItems: "center",
       gap: 8,
     },
-    checkDot: {
-      width: 10,
-      height: 10,
-      borderRadius: 6,
+    dayNavButton: {
+      width: 34,
+      height: 34,
+      borderRadius: 17,
       borderWidth: 1,
       borderColor: colors.border,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: colors.card,
     },
-    checkDotDone: {
-      backgroundColor: colors.primary,
-      borderColor: colors.primary,
+    dayNavDisabled: {
+      opacity: 0.4,
     },
-    checkDotPending: {
-      backgroundColor: colors.surface,
+    dayNavText: {
+      color: colors.textPrimary,
+      fontSize: 16,
+      fontWeight: "700",
     },
-    checklistText: {
+    daySummaryHint: {
+      color: colors.textMuted,
+      fontSize: 12,
+    },
+    daySummaryRow: {
+      flexDirection: "row",
+      gap: 10,
+    },
+    daySummaryNote: {
+      flex: 1,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.card,
+      padding: 10,
+      gap: 6,
+    },
+    daySummaryTrades: {
+      flexDirection: "row",
+      gap: 10,
+    },
+    daySummaryTradeCard: {
+      flex: 1,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.card,
+      padding: 10,
+      gap: 6,
+    },
+    daySummaryLabel: {
       color: colors.textPrimary,
       fontSize: 12,
-      flexShrink: 1,
+      fontWeight: "700",
+      textTransform: "uppercase",
+      letterSpacing: 1.1,
+    },
+    daySummaryBody: {
+      color: colors.textMuted,
+      fontSize: 11,
+      lineHeight: 16,
     },
     loadingRow: {
       flexDirection: "row",

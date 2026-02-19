@@ -72,6 +72,11 @@ export type GrowthPlan = {
 
   startingBalance: number;
   targetBalance: number;
+  targetDate?: string | null; // YYYY-MM-DD
+  planStyle?: "conservative" | "balanced" | "aggressive" | null;
+  planMode?: "auto" | "manual" | null;
+  targetMultiple?: number | null;
+  planStartDate?: string | null; // YYYY-MM-DD
 
   dailyTargetPct?: number;
   dailyGoalPercent?: number;
@@ -86,6 +91,26 @@ export type GrowthPlan = {
 
   steps?: GrowthPlanSteps;
   rules?: GrowthPlanRule[];
+
+  plannedWithdrawals?: Array<{
+    id: string;
+    targetEquity: number;
+    amount: number;
+    status?: "pending" | "taken" | "skipped";
+    achievedAt?: string | null;
+    decidedAt?: string | null;
+  }>;
+  planPhases?: Array<{
+    id: string;
+    title?: string | null;
+    targetEquity: number;
+    targetDate?: string | null; // YYYY-MM-DD
+    status?: "pending" | "completed";
+    completedAt?: string | null;
+  }>;
+
+  resetCount?: number;
+  lastResetAt?: string | null;
 
   selectedPlan?: "suggested" | "chosen";
   version?: number;
@@ -203,6 +228,14 @@ function normalizePlan(raw: any, userId: string): GrowthPlan {
 
     startingBalance: num(raw?.starting_balance ?? raw?.startingBalance, 0),
     targetBalance: num(raw?.target_balance ?? raw?.targetBalance, 0),
+    targetDate: raw?.target_date ?? raw?.targetDate ?? null,
+    planStyle: raw?.plan_style ?? raw?.planStyle ?? null,
+    planMode: raw?.plan_mode ?? raw?.planMode ?? null,
+    targetMultiple:
+      raw?.target_multiple != null
+        ? num(raw?.target_multiple, 0)
+        : null,
+    planStartDate: raw?.plan_start_date ?? raw?.planStartDate ?? null,
 
     dailyTargetPct: dailyPct,
     dailyGoalPercent: dailyPct, // alias
@@ -219,6 +252,20 @@ function normalizePlan(raw: any, userId: string): GrowthPlan {
     steps,
     rules,
 
+    plannedWithdrawals: Array.isArray(raw?.planned_withdrawals)
+      ? raw.planned_withdrawals
+      : Array.isArray(raw?.plannedWithdrawals)
+        ? raw.plannedWithdrawals
+        : [],
+    planPhases: Array.isArray(raw?.plan_phases)
+      ? raw.plan_phases
+      : Array.isArray(raw?.planPhases)
+        ? raw.planPhases
+        : [],
+
+    resetCount: num(raw?.reset_count ?? raw?.resetCount ?? 0, 0),
+    lastResetAt: raw?.last_reset_at ?? raw?.lastResetAt ?? null,
+
     selectedPlan:
       raw?.selected_plan === "suggested" || raw?.selected_plan === "chosen"
         ? raw.selected_plan
@@ -231,12 +278,25 @@ function normalizePlan(raw: any, userId: string): GrowthPlan {
 }
 
 function toDb(plan: GrowthPlan) {
+  const targetMultiple =
+    plan.targetMultiple != null
+      ? plan.targetMultiple
+      : plan.startingBalance > 0 && plan.targetBalance > 0
+        ? plan.targetBalance / plan.startingBalance
+        : null;
   return {
     user_id: plan.user_id,
     account_id: plan.accountId ?? null,
 
     starting_balance: num(plan.startingBalance, 0),
     target_balance: num(plan.targetBalance, 0),
+    target_date: plan.targetDate ?? null,
+    plan_style: plan.planStyle ?? null,
+    plan_mode: plan.planMode ?? null,
+    target_multiple: targetMultiple,
+    plan_start_date: plan.planStartDate ?? null,
+    planned_withdrawals: plan.plannedWithdrawals ?? [],
+    plan_phases: plan.planPhases ?? [],
 
     daily_target_pct: plan.dailyTargetPct ?? plan.dailyGoalPercent ?? null,
     daily_goal_percent: plan.dailyGoalPercent ?? plan.dailyTargetPct ?? null,
@@ -257,8 +317,24 @@ function toDb(plan: GrowthPlan) {
     rules: plan.rules ?? getDefaultSuggestedRules(),
     selected_plan: plan.selectedPlan ?? null,
 
+    reset_count: plan.resetCount ?? 0,
+    last_reset_at: plan.lastResetAt ?? null,
+
     version: plan.version ?? 2,
   };
+}
+
+export function computeAdjustedTarget(plan: GrowthPlan | null, cashflowNet: number) {
+  if (!plan) return 0;
+  const base = num(plan.startingBalance, 0) + num(cashflowNet, 0);
+  const mult =
+    plan.targetMultiple != null && Number.isFinite(plan.targetMultiple)
+      ? plan.targetMultiple
+      : plan.startingBalance > 0 && plan.targetBalance > 0
+        ? plan.targetBalance / plan.startingBalance
+        : null;
+  if (!mult || !Number.isFinite(mult)) return plan.targetBalance ?? 0;
+  return Math.max(0, Number((base * mult).toFixed(2)));
 }
 
 /** Obtiene user id actual (requiere sesión activa) */
@@ -351,8 +427,21 @@ export async function upsertGrowthPlanSupabase(
     .single();
 
   if (error) {
-    console.error(LOG, "upsertGrowthPlanSupabase error", error);
-    throw error;
+    console.error(LOG, "upsertGrowthPlanSupabase error", {
+      message: (error as any)?.message,
+      details: (error as any)?.details,
+      hint: (error as any)?.hint,
+      code: (error as any)?.code,
+    });
+    const msg = [
+      (error as any)?.message,
+      (error as any)?.details,
+      (error as any)?.hint,
+      (error as any)?.code,
+    ]
+      .filter(Boolean)
+      .join(" | ");
+    throw new Error(msg || "Growth plan upsert failed");
   }
 
   return normalizePlan(data, userId);

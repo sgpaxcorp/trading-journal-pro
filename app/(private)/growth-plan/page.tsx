@@ -27,7 +27,7 @@ import { listCashflows, signedCashflowAmount } from "@/lib/cashflowsSupabase";
 import { syncMyTrophies } from "@/lib/trophiesSupabase";
 import { useTradingAccounts } from "@/hooks/useTradingAccounts";
 
-import { pushNeuroMessage, openNeuroPanel } from "@/app/components/neuroEventBus";
+import { pushNeuroMessage } from "@/app/components/neuroEventBus";
 
 /* ================= Helpers ================= */
 const toNum = (s: string, fb = 0) => {
@@ -399,6 +399,27 @@ function uuid() {
   return Math.random().toString(16).slice(2) + "-" + Date.now().toString(16);
 }
 
+function isoToday(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function monthsBetween(startIso: string, endIso: string): number {
+  const s = new Date(startIso);
+  const e = new Date(endIso);
+  if (!Number.isFinite(s.getTime()) || !Number.isFinite(e.getTime())) return 0;
+  return (e.getFullYear() - s.getFullYear()) * 12 + (e.getMonth() - s.getMonth());
+}
+
+function addMonthsToIso(startIso: string, monthsToAdd: number): string {
+  const d = new Date(startIso);
+  if (!Number.isFinite(d.getTime())) return startIso;
+  const y = d.getFullYear();
+  const m = d.getMonth();
+  const day = Math.min(d.getDate(), 28); // avoid overflow
+  const next = new Date(y, m + monthsToAdd, day);
+  return next.toISOString().slice(0, 10);
+}
+
 /* ================= Wizard ================= */
 type WizardStep = 0 | 1 | 2 | 3 | 4;
 
@@ -421,6 +442,24 @@ const STEP_TITLES_ES: Record<WizardStep, string> = {
 };
 
 type AssistantLang = "en" | "es"; // stored in Supabase (inside growth plan record)
+
+type PlannedWithdrawal = {
+  id: string;
+  targetEquity: number;
+  amount: number;
+  status?: "pending" | "taken" | "skipped";
+  achievedAt?: string | null;
+  decidedAt?: string | null;
+};
+
+type PlanPhase = {
+  id: string;
+  title?: string | null;
+  targetEquity: number;
+  targetDate?: string | null;
+  status?: "pending" | "completed";
+  completedAt?: string | null;
+};
 
 export default function GrowthPlanPage() {
   const { user, loading } = useAuth();
@@ -446,11 +485,19 @@ export default function GrowthPlanPage() {
   // Strings for inputs
   const [startingBalanceStr, setStartingBalanceStr] = useState("5000");
   const [targetBalanceStr, setTargetBalanceStr] = useState("60000");
+  const [targetDateStr, setTargetDateStr] = useState("");
+  const [planStyle, setPlanStyle] = useState<"conservative" | "balanced" | "aggressive">("balanced");
+  const [planMode, setPlanMode] = useState<"auto" | "manual">("auto");
+  const [phaseCadence, setPhaseCadence] = useState<"monthly" | "quarterly" | "biannual" | "yearly">("monthly");
+  const [guidedMode, setGuidedMode] = useState(true);
   const [dailyGoalPercentStr, setDailyGoalPercentStr] = useState("1");
   const [maxDailyLossPercentStr, setMaxDailyLossPercentStr] = useState("1");
   const [tradingDaysStr, setTradingDaysStr] = useState("60");
   const [maxOnePercentLossDaysStr, setMaxOnePercentLossDaysStr] = useState("0");
   const [lossDaysPerWeekStr, setLossDaysPerWeekStr] = useState("0");
+  const [plannedWithdrawals, setPlannedWithdrawals] = useState<PlannedWithdrawal[]>([]);
+  const [planPhases, setPlanPhases] = useState<PlanPhase[]>([]);
+  const [planStartDate, setPlanStartDate] = useState<string | null>(null);
 
   // Risk
   const [riskPerTradePctStr, setRiskPerTradePctStr] = useState("2");
@@ -473,6 +520,8 @@ export default function GrowthPlanPage() {
   const maxOnePercentLossDays = clampInt(toNum(maxOnePercentLossDaysStr, 0), 0);
   const lossDaysPerWeek = clampInt(toNum(lossDaysPerWeekStr, 0), 0, 5);
   const riskPerTradePct = Math.max(0, toNum(riskPerTradePctStr, 0));
+  const targetMultiple =
+    startingBalance > 0 && targetBalance > 0 ? targetBalance / startingBalance : 0;
 
   const baseBalanceForDollars = useMemo(() => {
     // If editing an existing plan AND the user hasn't changed the starting balance from what we loaded,
@@ -486,6 +535,286 @@ export default function GrowthPlanPage() {
   const riskUsd = useMemo(() => calcRiskUsd(baseBalanceForDollars, riskPerTradePct), [baseBalanceForDollars, riskPerTradePct]);
 
   const onlyNum = (s: string) => s.replace(/[^\d.]/g, "");
+
+  type GuidedTask = {
+    id: string;
+    label: string;
+    done: boolean;
+    anchor?: string;
+    optional?: boolean;
+  };
+
+  const prepareCount = useMemo(
+    () => (stepsData.prepare?.checklist ?? []).filter((i) => (i.text ?? "").trim().length > 0).length,
+    [stepsData.prepare]
+  );
+  const analysisStylesCount = useMemo(
+    () => (stepsData.analysis?.styles ?? []).length,
+    [stepsData.analysis]
+  );
+  const strategyCount = useMemo(
+    () => (stepsData.strategy?.strategies ?? []).filter((s) => (s.name ?? "").trim().length > 0).length,
+    [stepsData.strategy]
+  );
+  const journalNotesLen = useMemo(
+    () => (stepsData.execution_and_journal?.notes ?? "").trim().length,
+    [stepsData.execution_and_journal]
+  );
+
+  const guidedTasksByStep = useMemo<Record<WizardStep, GuidedTask[]>>(() => {
+    const needManualPhase = planMode === "manual";
+    const hasManualPhase = planPhases.some((p) => (p.targetEquity ?? 0) > 0);
+    const needsDailyGoal = selectedPlan === "chosen";
+    return {
+      0: [
+        {
+          id: "starting_balance",
+          label: L("Enter starting balance", "Ingresa balance inicial"),
+          done: startingBalance > 0,
+          anchor: "gp-starting-balance",
+        },
+        {
+          id: "target_balance",
+          label: L("Enter target balance", "Ingresa balance objetivo"),
+          done: targetBalance > 0,
+          anchor: "gp-target-balance",
+        },
+        {
+          id: "target_date",
+          label: L("Pick a target date (recommended)", "Elige fecha meta (recomendado)"),
+          done: !!targetDateStr,
+          anchor: "gp-target-date",
+          optional: true,
+        },
+        {
+          id: "plan_mode",
+          label: L("Choose plan mode", "Elige modo del plan"),
+          done: !!planMode,
+          anchor: "gp-plan-mode",
+        },
+        {
+          id: "trading_days",
+          label: L("Set your trading days", "Define tus días de trading"),
+          done: tradingDays > 0,
+          anchor: "gp-trading-days",
+        },
+        {
+          id: "max_daily_loss",
+          label: L("Set max daily loss", "Define pérdida diaria máx"),
+          done: maxDailyLossPercent > 0,
+          anchor: "gp-max-daily-loss",
+        },
+        {
+          id: "risk_per_trade",
+          label: L("Set risk per trade", "Define riesgo por trade"),
+          done: riskPerTradePct > 0,
+          anchor: "gp-risk-per-trade",
+        },
+        {
+          id: "plan_choice",
+          label: L("Choose suggested vs your plan", "Elige plan sugerido o tu plan"),
+          done: !!selectedPlan,
+          anchor: "gp-plan-choice",
+        },
+        {
+          id: "daily_goal",
+          label: L("Set daily goal % (if chosen plan)", "Define meta diaria % (si elegiste tu plan)"),
+          done: !needsDailyGoal || dailyGoalPercentChosen > 0,
+          anchor: "gp-daily-goal",
+        },
+        {
+          id: "manual_phases",
+          label: L("Add manual phases", "Agrega fases manuales"),
+          done: !needManualPhase || hasManualPhase,
+          anchor: "gp-plan-phases",
+        },
+      ],
+      1: [
+        {
+          id: "prepare_checklist",
+          label: L("Add at least 3 checklist items", "Agrega al menos 3 items"),
+          done: prepareCount >= 3,
+          anchor: "gp-prepare-checklist",
+        },
+      ],
+      2: [
+        {
+          id: "analysis_styles",
+          label: L("Select your analysis style(s)", "Selecciona tu estilo de análisis"),
+          done: analysisStylesCount > 0,
+          anchor: "gp-analysis-styles",
+        },
+        {
+          id: "analysis_other",
+          label: L("Describe 'Other' if selected", "Describe 'Otro' si lo usas"),
+          done:
+            !(stepsData.analysis?.styles ?? []).includes("other") ||
+            (stepsData.analysis?.otherStyleText ?? "").trim().length > 0,
+          anchor: "gp-analysis-other",
+          optional: true,
+        },
+      ],
+      3: [
+        {
+          id: "strategy",
+          label: L("Add at least 1 strategy", "Agrega al menos 1 estrategia"),
+          done: strategyCount > 0,
+          anchor: "gp-strategy-list",
+        },
+      ],
+      4: [
+        {
+          id: "journal_notes",
+          label: L("Describe how you will journal", "Describe cómo llevarás el journal"),
+          done: journalNotesLen >= 20,
+          anchor: "gp-journal-notes",
+        },
+        {
+          id: "commitment",
+          label: L("Confirm your commitment", "Confirma tu compromiso"),
+          done: committed,
+          anchor: "gp-commitment",
+        },
+      ],
+    };
+  }, [
+    L,
+    startingBalance,
+    targetBalance,
+    targetDateStr,
+    planMode,
+    tradingDays,
+    maxDailyLossPercent,
+    riskPerTradePct,
+    selectedPlan,
+    dailyGoalPercentChosen,
+    planPhases,
+    prepareCount,
+    analysisStylesCount,
+    stepsData.analysis,
+    strategyCount,
+    journalNotesLen,
+    committed,
+  ]);
+
+  const stepCompletion = useMemo(() => {
+    return STEP_ORDER.reduce<Record<WizardStep, boolean>>((acc, s) => {
+      const tasks = guidedTasksByStep[s] ?? [];
+      const required = tasks.filter((t) => !t.optional);
+      acc[s] = required.every((t) => t.done);
+      return acc;
+    }, {} as Record<WizardStep, boolean>);
+  }, [guidedTasksByStep]);
+
+  const guideProgress = useMemo(() => {
+    const doneCount = STEP_ORDER.filter((s) => stepCompletion[s]).length;
+    return doneCount / STEP_ORDER.length;
+  }, [stepCompletion]);
+
+  const currentTasks = guidedTasksByStep[step] ?? [];
+  const nextTask = currentTasks.find((t) => !t.done && !t.optional) ?? currentTasks.find((t) => !t.done);
+
+  const scrollToAnchor = (anchor?: string) => {
+    if (!anchor) return;
+    window.setTimeout(() => {
+      const el = document.getElementById(anchor);
+      if (!el) return;
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      (el as any)?.focus?.();
+    }, 80);
+  };
+
+  const addPlannedWithdrawal = () => {
+    setPlannedWithdrawals((prev) => [
+      ...prev,
+      {
+        id: crypto.randomUUID(),
+        targetEquity: Math.max(0, targetBalance || 0),
+        amount: 0,
+        status: "pending",
+      },
+    ]);
+  };
+
+  const updatePlannedWithdrawal = (id: string, patch: Partial<PlannedWithdrawal>) => {
+    setPlannedWithdrawals((prev) =>
+      prev.map((item) => (item.id === id ? { ...item, ...patch } : item))
+    );
+  };
+
+  const removePlannedWithdrawal = (id: string) => {
+    setPlannedWithdrawals((prev) => prev.filter((item) => item.id !== id));
+  };
+
+  const addPlanPhase = () => {
+    setPlanPhases((prev) => [
+      ...prev,
+      {
+        id: crypto.randomUUID(),
+        title: "",
+        targetEquity: Math.max(0, targetBalance || 0),
+        targetDate: null,
+        status: "pending",
+      },
+    ]);
+  };
+
+  const updatePlanPhase = (id: string, patch: Partial<PlanPhase>) => {
+    setPlanPhases((prev) => prev.map((p) => (p.id === id ? { ...p, ...patch } : p)));
+  };
+
+  const removePlanPhase = (id: string) => {
+    setPlanPhases((prev) => prev.filter((p) => p.id !== id));
+  };
+
+  const autoBuildPlanPhases = () => {
+    if (startingBalance <= 0 || targetBalance <= 0) {
+      setError(L("Enter starting and target balances first.", "Primero ingresa balance inicial y objetivo."));
+      return;
+    }
+
+    const startIso = planStartDate || isoToday();
+    const hasTargetDate = !!targetDateStr;
+    const targetIso = hasTargetDate ? targetDateStr : "";
+
+    const totalMonthsRaw = hasTargetDate ? monthsBetween(startIso, targetIso) + 1 : Math.max(1, Math.round(tradingDays / 21) || 6);
+    const totalMonths = Math.max(1, totalMonthsRaw);
+
+    const cadenceMonths =
+      phaseCadence === "quarterly" ? 3 : phaseCadence === "biannual" ? 6 : phaseCadence === "yearly" ? 12 : 1;
+    const phasesCount = Math.min(24, Math.max(1, Math.ceil(totalMonths / cadenceMonths)));
+
+    const multiple = targetBalance / startingBalance;
+    if (!Number.isFinite(multiple) || multiple <= 0) {
+      setError(L("Target must be greater than starting balance.", "La meta debe ser mayor que el balance inicial."));
+      return;
+    }
+
+    const nextPhases: PlanPhase[] = [];
+    for (let i = 1; i <= phasesCount; i++) {
+      const fraction = i / phasesCount;
+      const targetEquity = Math.round(startingBalance * Math.pow(multiple, fraction));
+      const monthOffset = Math.min(totalMonths - 1, i * cadenceMonths - 1);
+      const targetDate = hasTargetDate ? (i === phasesCount ? targetIso : addMonthsToIso(startIso, monthOffset)) : null;
+
+      nextPhases.push({
+        id: uuid(),
+        title: `${L("Phase", "Fase")} ${i}`,
+        targetEquity,
+        targetDate,
+        status: "pending",
+      });
+    }
+
+    setPlanPhases(nextPhases);
+    setError("");
+    pushNeuroMessage(
+      L(
+        "Phases generated. Review and adjust if needed.",
+        "Fases generadas. Revísalas y ajusta si hace falta."
+      )
+    );
+  };
 
   useEffect(() => {
     if (!loading && !user) router.replace("/signin");
@@ -506,6 +835,13 @@ export default function GrowthPlanPage() {
 
           setStartingBalanceStr(String(existing.startingBalance ?? 5000));
           setTargetBalanceStr(String(existing.targetBalance ?? 60000));
+          setTargetDateStr(
+            String((existing as any).targetDate ?? (existing as any).target_date ?? "").slice(0, 10)
+          );
+          const style = (existing as any).planStyle ?? (existing as any).plan_style ?? "balanced";
+          setPlanStyle(style === "conservative" || style === "aggressive" ? style : "balanced");
+          const mode = (existing as any).planMode ?? (existing as any).plan_mode ?? "auto";
+          setPlanMode(mode === "manual" ? "manual" : "auto");
 
           const dailyPct = (existing.dailyTargetPct ?? existing.dailyGoalPercent ?? 1) as number;
           setDailyGoalPercentStr(String(dailyPct));
@@ -524,6 +860,24 @@ export default function GrowthPlanPage() {
           setRules(existing.rules && existing.rules.length ? existing.rules : getDefaultSuggestedRules());
 
           setLoadedStartingBalance(Number(existing.startingBalance ?? 0));
+          setPlanStartDate(
+            String((existing as any).planStartDate ?? (existing as any).plan_start_date ?? (existing as any).createdAt ?? (existing as any).created_at ?? "")
+              .slice(0, 10) || null
+          );
+          setPlannedWithdrawals(
+            Array.isArray((existing as any).plannedWithdrawals)
+              ? (existing as any).plannedWithdrawals
+              : Array.isArray((existing as any).planned_withdrawals)
+                ? (existing as any).planned_withdrawals
+                : []
+          );
+          setPlanPhases(
+            Array.isArray((existing as any).planPhases)
+              ? (existing as any).planPhases
+              : Array.isArray((existing as any).plan_phases)
+                ? (existing as any).plan_phases
+                : []
+          );
 
           // ✅ Load net cashflows since plan start (for $ conversions)
           const cashflowUserId = String((user as any)?.id || (user as any)?.uid || "");
@@ -570,12 +924,14 @@ export default function GrowthPlanPage() {
               "Cargamos tu plan. Vamos paso a paso: Meta y números → Preparación → Análisis → Estrategia → Journal y compromiso."
             );
           pushNeuroMessage(t);
-          openNeuroPanel();
-        } else {
+                  } else {
           // new plan
           setHasExistingPlan(false);
           setLoadedStartingBalance(null);
           setCashflowNet(0);
+          setPlanStartDate(isoToday());
+          setPlannedWithdrawals([]);
+          setPlanPhases([]);
 
           const t =
             (await neuroReact("growth_plan_loaded", assistantLang, {
@@ -587,8 +943,7 @@ export default function GrowthPlanPage() {
               "Bienvenido. Empieza ingresando tus números de cuenta y reglas de riesgo. Luego construimos tu proceso paso a paso."
             );
           pushNeuroMessage(t);
-          openNeuroPanel();
-        }
+                  }
       } catch (e) {
         console.error("[GrowthPlan] load error", e);
       }
@@ -651,8 +1006,7 @@ export default function GrowthPlanPage() {
           )}). Si quieres 2%, reduce tamaño o usa contratos más baratos.`
         );
       pushNeuroMessage(text);
-      openNeuroPanel();
-    })();
+          })();
   }, [riskPerTradePct, riskUsd, baseBalanceForDollars, user, assistantLang]);
 
   // Field help throttle (so Neuro doesn’t spam)
@@ -666,8 +1020,7 @@ export default function GrowthPlanPage() {
     const text = await neuroReact("field_help", assistantLang, { field, ...extra });
     if (text) {
       pushNeuroMessage(text);
-      openNeuroPanel();
-    }
+          }
   }
 
   if (loading || !user) {
@@ -753,8 +1106,7 @@ export default function GrowthPlanPage() {
         "Descargado. Este calendario es estructura, no promesa. Ahora elige qué plan vas a aprobar."
       );
     pushNeuroMessage(text);
-    openNeuroPanel();
-  };
+      };
 
   const onDownloadPdfChosen = async () => {
     await generateAndDownloadPDF(
@@ -779,8 +1131,7 @@ export default function GrowthPlanPage() {
         "Descargado. Excelente: tu plan ya es medible. Enfócate en ejecutar el proceso."
       );
     pushNeuroMessage(text);
-    openNeuroPanel();
-  };
+      };
 
   function toggleRule(id: string) {
     setRules((prev) => prev.map((r) => (r.id === id ? { ...r, isActive: !r.isActive } : r)));
@@ -804,8 +1155,7 @@ export default function GrowthPlanPage() {
         `Regla agregada: "${t}". Reglas claras te protegen cuando aparecen emociones.`
       )
     );
-    openNeuroPanel();
-  }
+      }
 
   function updatePrepareChecklist(items: GrowthPlanChecklistItem[]) {
     setStepsData((prev) => ({
@@ -822,22 +1172,18 @@ export default function GrowthPlanPage() {
   }
 
   const canGoNext = useMemo(() => {
-    if (step === 0) {
-      return (
-        startingBalance > 0 &&
-        targetBalance > 0 &&
-        tradingDays > 0 &&
-        maxDailyLossPercent > 0 &&
-        riskPerTradePct > 0
-      );
-    }
-    return true;
-  }, [step, startingBalance, targetBalance, tradingDays, maxDailyLossPercent, riskPerTradePct]);
+    if (step !== 0) return true;
+    const required = (guidedTasksByStep[0] ?? []).filter((t) => !t.optional);
+    return required.every((t) => t.done);
+  }, [step, guidedTasksByStep]);
 
   async function goNext() {
     setError("");
     if (!canGoNext) {
       setError(L("Complete required fields before continuing.", "Completa los campos requeridos antes de continuar."));
+      const required = (guidedTasksByStep[0] ?? []).filter((t) => !t.optional);
+      const firstMissing = required.find((t) => !t.done);
+      if (firstMissing?.anchor) scrollToAnchor(firstMissing.anchor);
       return;
     }
     const next = (Math.min(4, step + 1) as WizardStep);
@@ -846,8 +1192,7 @@ export default function GrowthPlanPage() {
       (await neuroReact("wizard_step_next", assistantLang, { to: stepTitles[next] })) ||
       (isEs ? `Siguiente: ${stepTitles[next]}.` : `Next: ${stepTitles[next]}.`);
     pushNeuroMessage(t);
-    openNeuroPanel();
-  }
+      }
 
   async function goBack() {
     setError("");
@@ -857,8 +1202,7 @@ export default function GrowthPlanPage() {
       (await neuroReact("wizard_step_back", assistantLang, { to: stepTitles[prev] })) ||
       (isEs ? `Volver a: ${stepTitles[prev]}.` : `Back to: ${stepTitles[prev]}.`);
     pushNeuroMessage(t);
-    openNeuroPanel();
-  }
+      }
 
   async function onStepClick(s: WizardStep) {
     setStep(s);
@@ -866,8 +1210,7 @@ export default function GrowthPlanPage() {
       (await neuroReact("wizard_step_clicked", assistantLang, { to: stepTitles[s] })) ||
       (isEs ? `Abierto: ${stepTitles[s]}.` : `Opened: ${stepTitles[s]}.`);
     pushNeuroMessage(t);
-    openNeuroPanel();
-  }
+      }
 
   const approveEnabled =
     step === 4 &&
@@ -925,9 +1268,17 @@ export default function GrowthPlanPage() {
     const mergedSteps: any = { ...(stepsData as any) };
     mergedSteps._ui = { ...(mergedSteps._ui ?? {}), lang: assistantLang };
 
+    const effectivePlanStart = planStartDate || isoToday();
     const payload: Partial<GrowthPlan> = {
       startingBalance,
       targetBalance,
+      targetDate: targetDateStr || null,
+      planStyle,
+      planMode,
+      targetMultiple: targetMultiple > 0 ? targetMultiple : null,
+      planStartDate: effectivePlanStart,
+      plannedWithdrawals,
+      planPhases,
       dailyGoalPercent: dailyPctForSave,
       dailyTargetPct: dailyPctForSave,
       maxDailyLossPercent,
@@ -966,13 +1317,26 @@ export default function GrowthPlanPage() {
         );
 
       pushNeuroMessage(msg);
-      openNeuroPanel();
-      router.push("/dashboard");
+            router.push("/dashboard");
     } catch (e) {
       console.error("[GrowthPlan] save error", e);
-      setError(L("There was a problem saving your growth plan. Please try again.", "Hubo un problema guardando tu plan. Intenta de nuevo."));
+      const msg = String((e as any)?.message ?? "");
+      if (msg.includes("plan_mode") || msg.includes("plan_phases") || msg.includes("column") || msg.includes("schema")) {
+        setError(
+          L(
+            "Database schema is missing new Growth Plan fields. Apply the latest migration and try again.",
+            "Faltan columnas nuevas del Growth Plan en la base de datos. Aplica la migración más reciente y vuelve a intentar."
+          )
+        );
+      } else {
+        setError(
+          L(
+            "There was a problem saving your growth plan. Please try again.",
+            "Hubo un problema guardando tu plan. Intenta de nuevo."
+          )
+        );
+      }
       pushNeuroMessage(L("Save failed. Please try again in a moment.", "Error al guardar. Intenta nuevamente en un momento."));
-      openNeuroPanel();
     }
   };
 
@@ -999,8 +1363,7 @@ export default function GrowthPlanPage() {
                     setAssistantLang("en");
                     persistAssistantLang("en");
                     pushNeuroMessage(L("Neuro language set to EN.", "Idioma de Neuro: EN."));
-                    openNeuroPanel();
-                  }}
+                                      }}
                   className={`px-3 py-1 rounded-full transition ${
                     assistantLang === "en"
                       ? "bg-emerald-400 text-slate-950 font-semibold"
@@ -1015,8 +1378,7 @@ export default function GrowthPlanPage() {
                     setAssistantLang("es");
                     persistAssistantLang("es");
                     pushNeuroMessage(L("Neuro language set to ES.", "Idioma de Neuro: ES."));
-                    openNeuroPanel();
-                  }}
+                                      }}
                   className={`px-3 py-1 rounded-full transition ${
                     assistantLang === "es"
                       ? "bg-emerald-400 text-slate-950 font-semibold"
@@ -1053,6 +1415,134 @@ export default function GrowthPlanPage() {
           ) : null}
         </div>
 
+        {/* Guided Mode */}
+        {guidedMode ? (
+          <div className="rounded-2xl border border-emerald-400/25 bg-emerald-400/5 p-4 space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-[11px] text-emerald-300 uppercase tracking-[0.28em]">
+                  {L("Plan Coach", "Coach del Plan")}
+                </p>
+                <p className="text-sm text-slate-300">
+                  {L(
+                    "We’ll guide you step‑by‑step. Complete the items below to unlock the next section.",
+                    "Te guío paso a paso. Completa lo siguiente para desbloquear la próxima sección."
+                  )}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setGuidedMode(false)}
+                className="rounded-full border border-slate-700 px-3 py-1 text-xs text-slate-300 hover:border-emerald-400 hover:text-emerald-300"
+              >
+                {L("Hide", "Ocultar")}
+              </button>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <div className="h-2 flex-1 rounded-full bg-slate-800 overflow-hidden">
+                <div
+                  className="h-full rounded-full bg-emerald-400 transition"
+                  style={{ width: `${Math.min(100, Math.max(6, guideProgress * 100))}%` }}
+                />
+              </div>
+              <span className="text-xs text-slate-400">
+                {Math.round(guideProgress * 100)}%
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+              {currentTasks.map((task) => (
+                <button
+                  key={task.id}
+                  type="button"
+                  onClick={() => scrollToAnchor(task.anchor)}
+                  className={`flex items-center justify-between gap-2 rounded-xl border px-3 py-2 text-left text-sm transition ${
+                    task.done
+                      ? "border-emerald-400/40 bg-emerald-400/10 text-emerald-200"
+                      : "border-slate-800 bg-slate-950/40 text-slate-300 hover:border-emerald-400/60"
+                  }`}
+                >
+                  <span>
+                    {task.done ? "✓ " : "• "} {task.label}
+                    {task.optional ? (
+                      <span className="ml-2 text-[10px] uppercase tracking-[0.2em] text-slate-500">
+                        {L("Optional", "Opcional")}
+                      </span>
+                    ) : null}
+                  </span>
+                  <span className="text-xs text-slate-500">{task.done ? L("Done", "Listo") : L("Go", "Ir")}</span>
+                </button>
+              ))}
+            </div>
+
+            {step === 0 && planMode === "manual" ? (
+              <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-800 bg-slate-950/40 p-3 text-sm text-slate-300">
+                <span className="text-xs uppercase tracking-[0.2em] text-slate-500">
+                  {L("Quick build", "Crear rápido")}
+                </span>
+                <select
+                  value={phaseCadence}
+                  onChange={(e) => setPhaseCadence(e.target.value as any)}
+                  className="rounded-lg border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-200"
+                >
+                  <option value="monthly">{L("Monthly", "Mensual")}</option>
+                  <option value="quarterly">{L("Quarterly", "Trimestral")}</option>
+                  <option value="biannual">{L("Bi‑annual", "Semestral")}</option>
+                  <option value="yearly">{L("Yearly", "Anual")}</option>
+                </select>
+                <button
+                  type="button"
+                  onClick={autoBuildPlanPhases}
+                  className="rounded-lg border border-emerald-400/60 px-3 py-1 text-xs font-semibold text-emerald-200 hover:border-emerald-400"
+                >
+                  {L("Auto‑build phases", "Auto‑crear fases")}
+                </button>
+                <span className="text-xs text-slate-500">
+                  {L("Uses target date or trading days.", "Usa fecha meta o días de trading.")}
+                </span>
+              </div>
+            ) : null}
+
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  if (nextTask?.anchor) {
+                    scrollToAnchor(nextTask.anchor);
+                    return;
+                  }
+                  const nextStep = (Math.min(4, step + 1) as WizardStep);
+                  setStep(nextStep);
+                  scrollToAnchor(`gp-step-${nextStep}`);
+                }}
+                className="rounded-xl bg-emerald-400 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-emerald-300"
+              >
+                {nextTask?.anchor
+                  ? L("Go to next item", "Ir al siguiente item")
+                  : step < 4
+                    ? L("Continue to next step", "Continuar al próximo paso")
+                    : L("Ready to save", "Listo para guardar")}
+              </button>
+              <button
+                type="button"
+                onClick={() => setStep(0)}
+                className="rounded-xl border border-slate-700 px-4 py-2 text-sm text-slate-300 hover:border-emerald-400 hover:text-emerald-300"
+              >
+                {L("Back to numbers", "Volver a números")}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setGuidedMode(true)}
+            className="self-start rounded-full border border-slate-800 px-3 py-1 text-xs text-slate-400 hover:border-emerald-400 hover:text-emerald-300"
+          >
+            {L("Show Plan Coach", "Mostrar Coach del Plan")}
+          </button>
+        )}
+
         {/* Stepper (FIXED: numeric array to avoid "01/11/21") */}
         <div className="flex flex-wrap gap-2">
           {STEP_ORDER.map((s, idx) => (
@@ -1073,11 +1563,12 @@ export default function GrowthPlanPage() {
 
         {/* ================= STEP 0 ================= */}
         {step === 0 && (
-          <div className="space-y-5">
+          <div id="gp-step-0" className="space-y-5">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="block mb-1 text-slate-300">{L("Starting balance (USD)", "Balance inicial (USD)")}</label>
                 <input
+                  id="gp-starting-balance"
                   inputMode="decimal"
                   value={startingBalanceStr}
                   onFocus={() => fieldHelp("starting_balance")}
@@ -1097,6 +1588,7 @@ export default function GrowthPlanPage() {
               <div>
                 <label className="block mb-1 text-slate-300">{L("Target balance (USD)", "Balance objetivo (USD)")}</label>
                 <input
+                  id="gp-target-balance"
                   inputMode="decimal"
                   value={targetBalanceStr}
                   onFocus={() => fieldHelp("target_balance")}
@@ -1108,10 +1600,81 @@ export default function GrowthPlanPage() {
               </div>
 
               <div>
+                <label className="block mb-1 text-slate-300">{L("Target date (optional)", "Fecha meta (opcional)")}</label>
+                <input
+                  id="gp-target-date"
+                  type="date"
+                  value={targetDateStr}
+                  onChange={(e) => setTargetDateStr(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-slate-100 focus:border-emerald-400 outline-none"
+                />
+                <p className="text-slate-500 mt-1">
+                  {L("Used to compute monthly/weekly target pacing.", "Se usa para calcular el ritmo mensual/semanal.")}
+                </p>
+              </div>
+
+              <div>
+                <label className="block mb-1 text-slate-300">{L("Plan style", "Estilo del plan")}</label>
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    { id: "conservative", labelEn: "Conservative", labelEs: "Conservador" },
+                    { id: "balanced", labelEn: "Balanced", labelEs: "Balanceado" },
+                    { id: "aggressive", labelEn: "Aggressive", labelEs: "Agresivo" },
+                  ].map((opt) => (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => setPlanStyle(opt.id as any)}
+                      className={`rounded-full border px-3 py-1 text-xs transition ${
+                        planStyle === opt.id
+                          ? "border-emerald-400 bg-emerald-400/10 text-emerald-200"
+                          : "border-slate-700 text-slate-300 hover:border-emerald-400/60"
+                      }`}
+                    >
+                      {L(opt.labelEn, opt.labelEs)}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-slate-500 mt-1">
+                  {L("Defines pacing and expected aggressiveness.", "Define el ritmo y nivel de agresividad esperado.")}
+                </p>
+              </div>
+
+              <div id="gp-plan-mode">
+                <label className="block mb-1 text-slate-300">{L("Plan mode", "Modo del plan")}</label>
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    { id: "auto", labelEn: "Automatic (date-based)", labelEs: "Automático (por fecha)" },
+                    { id: "manual", labelEn: "Manual phases", labelEs: "Fases manuales" },
+                  ].map((opt) => (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => setPlanMode(opt.id as any)}
+                      className={`rounded-full border px-3 py-1 text-xs transition ${
+                        planMode === opt.id
+                          ? "border-emerald-400 bg-emerald-400/10 text-emerald-200"
+                          : "border-slate-700 text-slate-300 hover:border-emerald-400/60"
+                      }`}
+                    >
+                      {L(opt.labelEn, opt.labelEs)}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-slate-500 mt-1">
+                  {L(
+                    "Automatic uses your target date. Manual lets you define short‑term phases.",
+                    "Automático usa tu fecha meta. Manual te deja definir fases corto plazo."
+                  )}
+                </p>
+              </div>
+
+              <div>
                 <label className="block mb-1 text-slate-300">
                   {L("Trading days you commit to follow this plan", "Días de trading que te comprometes a seguir")}
                 </label>
                 <input
+                  id="gp-trading-days"
                   inputMode="numeric"
                   value={tradingDaysStr}
                   onFocus={() => fieldHelp("trading_days")}
@@ -1125,6 +1688,7 @@ export default function GrowthPlanPage() {
               <div>
                 <label className="block mb-1 text-slate-300">{L("Max daily loss (%)", "Pérdida diaria máx (%)")}</label>
                 <input
+                  id="gp-max-daily-loss"
                   inputMode="decimal"
                   value={maxDailyLossPercentStr}
                   onFocus={() => fieldHelp("max_daily_loss")}
@@ -1162,6 +1726,7 @@ export default function GrowthPlanPage() {
                   {L("Daily goal (%) (only if you choose “Your chosen plan”)", "Meta diaria (%) (solo si eliges “Tu plan”)")}
                 </label>
                 <input
+                  id="gp-daily-goal"
                   inputMode="decimal"
                   value={dailyGoalPercentStr}
                   onFocus={() => fieldHelp("daily_goal_percent")}
@@ -1175,6 +1740,7 @@ export default function GrowthPlanPage() {
               <div className="md:col-span-2">
                 <label className="block mb-1 text-slate-300">{L("Max risk per trade (%) (suggested: 2%)", "Riesgo máximo por trade (%) (sugerido: 2%)")}</label>
                 <input
+                  id="gp-risk-per-trade"
                   inputMode="decimal"
                   value={riskPerTradePctStr}
                   onFocus={() => fieldHelp("risk_per_trade")}
@@ -1189,6 +1755,194 @@ export default function GrowthPlanPage() {
                   {L("per trade.", "por trade.")}
                 </p>
               </div>
+
+              <div id="gp-planned-withdrawals" className="md:col-span-2 rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-[11px] text-slate-500 tracking-widest uppercase">
+                      {L("Planned withdrawals (optional)", "Retiros planificados (opcional)")}
+                    </p>
+                    <p className="text-sm text-slate-400">
+                      {L(
+                        "Set equity milestones where you plan to withdraw profits.",
+                        "Define metas de equity donde planeas retirar ganancias."
+                      )}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={addPlannedWithdrawal}
+                    className="rounded-lg border border-emerald-400/60 px-3 py-1 text-xs font-semibold text-emerald-200 hover:border-emerald-400"
+                  >
+                    {L("Add withdrawal", "Agregar retiro")}
+                  </button>
+                </div>
+
+                {plannedWithdrawals.length === 0 ? (
+                  <p className="mt-3 text-sm text-slate-500">
+                    {L("No planned withdrawals yet.", "Aún no hay retiros planificados.")}
+                  </p>
+                ) : (
+                  <div className="mt-4 space-y-3">
+                    {plannedWithdrawals.map((item) => (
+                      <div key={item.id} className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                        <div className="md:col-span-2">
+                          <label className="block mb-1 text-xs text-slate-400">
+                            {L("Target equity", "Equity objetivo")}
+                          </label>
+                          <input
+                            inputMode="decimal"
+                            value={String(item.targetEquity ?? "")}
+                            onChange={(e) =>
+                              updatePlannedWithdrawal(item.id, {
+                                targetEquity: toNum(onlyNum(e.target.value), 0),
+                              })
+                            }
+                            className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-slate-100 focus:border-emerald-400 outline-none"
+                            placeholder="0"
+                          />
+                        </div>
+                        <div>
+                          <label className="block mb-1 text-xs text-slate-400">
+                            {L("Withdrawal amount", "Monto del retiro")}
+                          </label>
+                          <input
+                            inputMode="decimal"
+                            value={String(item.amount ?? "")}
+                            onChange={(e) =>
+                              updatePlannedWithdrawal(item.id, {
+                                amount: toNum(onlyNum(e.target.value), 0),
+                              })
+                            }
+                            className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-slate-100 focus:border-emerald-400 outline-none"
+                            placeholder="0"
+                          />
+                        </div>
+                        <div className="flex items-end gap-2">
+                          <button
+                            type="button"
+                            onClick={() => removePlannedWithdrawal(item.id)}
+                            className="rounded-lg border border-slate-700 px-3 py-2 text-xs text-slate-300 hover:border-rose-400 hover:text-rose-300"
+                          >
+                            {L("Remove", "Quitar")}
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {planMode === "manual" ? (
+                <div id="gp-plan-phases" className="md:col-span-2 rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-[11px] text-slate-500 tracking-widest uppercase">
+                        {L("Manual phases (short‑term milestones)", "Fases manuales (metas corto plazo)")}
+                      </p>
+                      <p className="text-sm text-slate-400">
+                        {L(
+                          "Define phases that build into your long‑term target.",
+                          "Define fases que alimentan tu meta de largo plazo."
+                        )}
+                      </p>
+                    </div>
+                  <button
+                    type="button"
+                    onClick={addPlanPhase}
+                    className="rounded-lg border border-emerald-400/60 px-3 py-1 text-xs font-semibold text-emerald-200 hover:border-emerald-400"
+                  >
+                    {L("Add phase", "Agregar fase")}
+                  </button>
+                </div>
+
+                <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-slate-800 bg-slate-950/40 p-3 text-xs text-slate-300">
+                  <span className="uppercase tracking-[0.2em] text-slate-500">
+                    {L("Auto build", "Auto crear")}
+                  </span>
+                  <select
+                    value={phaseCadence}
+                    onChange={(e) => setPhaseCadence(e.target.value as any)}
+                    className="rounded-lg border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-200"
+                  >
+                    <option value="monthly">{L("Monthly", "Mensual")}</option>
+                    <option value="quarterly">{L("Quarterly", "Trimestral")}</option>
+                    <option value="biannual">{L("Bi‑annual", "Semestral")}</option>
+                    <option value="yearly">{L("Yearly", "Anual")}</option>
+                  </select>
+                  <button
+                    type="button"
+                    onClick={autoBuildPlanPhases}
+                    className="rounded-lg border border-emerald-400/60 px-3 py-1 text-xs font-semibold text-emerald-200 hover:border-emerald-400"
+                  >
+                    {L("Generate phases", "Generar fases")}
+                  </button>
+                  <span className="text-slate-500">
+                    {L("Uses target date or trading days.", "Usa fecha meta o días de trading.")}
+                  </span>
+                </div>
+
+                {planPhases.length === 0 ? (
+                  <p className="mt-3 text-sm text-slate-500">
+                    {L("No phases yet.", "Aún no hay fases.")}
+                  </p>
+                  ) : (
+                    <div className="mt-4 space-y-3">
+                      {planPhases.map((phase) => (
+                        <div key={phase.id} className="grid grid-cols-1 md:grid-cols-5 gap-3">
+                          <div className="md:col-span-2">
+                            <label className="block mb-1 text-xs text-slate-400">
+                              {L("Phase name", "Nombre de fase")}
+                            </label>
+                            <input
+                              value={phase.title ?? ""}
+                              onChange={(e) => updatePlanPhase(phase.id, { title: e.target.value })}
+                              className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-slate-100 focus:border-emerald-400 outline-none"
+                              placeholder={L("Phase 1", "Fase 1")}
+                            />
+                          </div>
+                          <div>
+                            <label className="block mb-1 text-xs text-slate-400">
+                              {L("Target equity", "Equity objetivo")}
+                            </label>
+                            <input
+                              inputMode="decimal"
+                              value={String(phase.targetEquity ?? "")}
+                              onChange={(e) =>
+                                updatePlanPhase(phase.id, {
+                                  targetEquity: toNum(onlyNum(e.target.value), 0),
+                                })
+                              }
+                              className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-slate-100 focus:border-emerald-400 outline-none"
+                              placeholder="0"
+                            />
+                          </div>
+                          <div>
+                            <label className="block mb-1 text-xs text-slate-400">
+                              {L("Target date (optional)", "Fecha objetivo (opcional)")}
+                            </label>
+                            <input
+                              type="date"
+                              value={phase.targetDate ?? ""}
+                              onChange={(e) => updatePlanPhase(phase.id, { targetDate: e.target.value || null })}
+                              className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-slate-100 focus:border-emerald-400 outline-none"
+                            />
+                          </div>
+                          <div className="flex items-end gap-2">
+                            <button
+                              type="button"
+                              onClick={() => removePlanPhase(phase.id)}
+                              className="rounded-lg border border-slate-700 px-3 py-2 text-xs text-slate-300 hover:border-rose-400 hover:text-rose-300"
+                            >
+                              {L("Remove", "Quitar")}
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : null}
 
               <div className="md:col-span-2">
                 <label className="block mb-1 text-slate-300">
@@ -1207,7 +1961,7 @@ export default function GrowthPlanPage() {
             </div>
 
             {/* Plan previews (kept) */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div id="gp-plan-choice" className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               <div className="bg-slate-950/80 border border-emerald-500/15 rounded-2xl p-4 space-y-3">
                 <div className="flex items-center justify-between">
                   <p className="font-semibold text-emerald-300">
@@ -1226,8 +1980,7 @@ export default function GrowthPlanPage() {
                             "Seleccionado: Plan sugerido. Este busca caer exactamente en tu meta."
                           )
                         );
-                        openNeuroPanel();
-                      }}
+                                              }}
                       className="h-4 w-4 accent-emerald-400"
                     />
                     {L("Select", "Seleccionar")}
@@ -1281,8 +2034,7 @@ export default function GrowthPlanPage() {
                             "Seleccionado: Tu plan elegido. Usa tu porcentaje de meta diaria."
                           )
                         );
-                        openNeuroPanel();
-                      }}
+                                              }}
                       className="h-4 w-4 accent-sky-400"
                     />
                     {L("Select", "Seleccionar")}
@@ -1386,7 +2138,7 @@ export default function GrowthPlanPage() {
 
         {/* ================= STEP 1 ================= */}
         {step === 1 && (
-          <div className="bg-slate-950/70 border border-slate-800 rounded-2xl p-4 space-y-2">
+          <div id="gp-step-1" className="bg-slate-950/70 border border-slate-800 rounded-2xl p-4 space-y-2">
             <p className="font-semibold text-emerald-300">
               {L("1) Prepare Before Trading", "1) Preparación antes de operar")}
             </p>
@@ -1397,7 +2149,7 @@ export default function GrowthPlanPage() {
               )}
             </p>
 
-            <div className="space-y-2">
+            <div id="gp-prepare-checklist" className="space-y-2">
               {(stepsData.prepare?.checklist ?? []).map((it, idx) => (
                 <div key={it.id} className="flex gap-2">
                   <input
@@ -1422,8 +2174,7 @@ export default function GrowthPlanPage() {
                             "Item eliminado. Mantén la lista corta y accionable."
                           )
                         );
-                        openNeuroPanel();
-                      }}
+                                              }}
                     className="px-3 py-2 rounded-xl border border-slate-700 text-slate-300 hover:border-red-400/60 hover:text-red-300 transition"
                   >
                     ✕
@@ -1444,8 +2195,7 @@ export default function GrowthPlanPage() {
                     "Checklist agregado. Escríbelo como algo que puedas verificar antes de entrar."
                   )
                 );
-                openNeuroPanel();
-              }}
+                              }}
               className="px-4 py-2 rounded-xl border border-emerald-400 text-emerald-300 hover:bg-emerald-400/10 transition"
             >
               {L("+ Add item", "+ Agregar item")}
@@ -1468,7 +2218,7 @@ export default function GrowthPlanPage() {
 
         {/* ================= STEP 2 ================= */}
         {step === 2 && (
-          <div className="bg-slate-950/70 border border-slate-800 rounded-2xl p-4 space-y-2">
+          <div id="gp-step-2" className="bg-slate-950/70 border border-slate-800 rounded-2xl p-4 space-y-2">
             <p className="font-semibold text-emerald-300">
               {L("2) Analysis", "2) Análisis")}
             </p>
@@ -1479,7 +2229,7 @@ export default function GrowthPlanPage() {
               )}
             </p>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <div id="gp-analysis-styles" className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               {[
                 { k: "technical", label: L("Technical", "Técnico") },
                 { k: "fundamental", label: L("Fundamental", "Fundamental") },
@@ -1514,6 +2264,7 @@ export default function GrowthPlanPage() {
             </div>
 
             <input
+              id="gp-analysis-other"
               value={stepsData.analysis?.otherStyleText ?? ""}
               onFocus={() => fieldHelp("analysis_other")}
               onChange={(e) =>
@@ -1540,7 +2291,7 @@ export default function GrowthPlanPage() {
 
         {/* ================= STEP 3 ================= */}
         {step === 3 && (
-          <div className="bg-slate-950/70 border border-slate-800 rounded-2xl p-4 space-y-2">
+          <div id="gp-step-3" className="bg-slate-950/70 border border-slate-800 rounded-2xl p-4 space-y-2">
             <p className="font-semibold text-emerald-300">
               {L("3) Strategy", "3) Estrategia")}
             </p>
@@ -1551,7 +2302,7 @@ export default function GrowthPlanPage() {
               )}
             </p>
 
-            <div className="space-y-3">
+            <div id="gp-strategy-list" className="space-y-3">
               {(stepsData.strategy?.strategies ?? []).map((s, idx) => (
                 <div key={idx} className="rounded-2xl border border-slate-800 bg-slate-900/40 p-3 space-y-2">
                   <div className="flex items-center justify-between gap-2">
@@ -1578,8 +2329,7 @@ export default function GrowthPlanPage() {
                             "Estrategia eliminada. Deja solo lo que realmente operas."
                           )
                         );
-                        openNeuroPanel();
-                      }}
+                                              }}
                       className="px-3 py-2 rounded-xl border border-slate-700 text-slate-300 hover:border-red-400/60 hover:text-red-300 transition"
                     >
                       ✕
@@ -1631,8 +2381,7 @@ export default function GrowthPlanPage() {
                     "Estrategia agregada. Tip: escribe criterios SI/NO, no sensaciones."
                   )
                 );
-                openNeuroPanel();
-              }}
+                              }}
               className="px-4 py-2 rounded-xl border border-emerald-400 text-emerald-300 hover:bg-emerald-400/10 transition"
             >
               {L("+ Add strategy", "+ Agregar estrategia")}
@@ -1655,7 +2404,7 @@ export default function GrowthPlanPage() {
 
         {/* ================= STEP 4 ================= */}
         {step === 4 && (
-          <div className="bg-slate-950/70 border border-slate-800 rounded-2xl p-4 space-y-2">
+          <div id="gp-step-4" className="bg-slate-950/70 border border-slate-800 rounded-2xl p-4 space-y-2">
             <p className="font-semibold text-emerald-300">
               {L("4) Journal & Commit", "4) Journal y compromiso")}
             </p>
@@ -1667,6 +2416,7 @@ export default function GrowthPlanPage() {
             </p>
 
             <textarea
+              id="gp-journal-notes"
               value={stepsData.execution_and_journal?.notes ?? ""}
               onFocus={() => fieldHelp("journal_notes")}
               onChange={(e) =>
@@ -1682,7 +2432,7 @@ export default function GrowthPlanPage() {
               )}
             />
 
-            <label className="flex items-start gap-2 text-slate-300 cursor-pointer mt-2">
+            <label id="gp-commitment" className="flex items-start gap-2 text-slate-300 cursor-pointer mt-2">
               <input
                 type="checkbox"
                 checked={committed}
@@ -1697,8 +2447,7 @@ export default function GrowthPlanPage() {
                         "Compromiso confirmado ✅. El siguiente paso es Aprobar y Guardar tu plan."
                       )
                     );
-                    openNeuroPanel();
-                  }
+                                      }
                 }}
                 className="mt-0.5 h-4 w-4 rounded border-slate-500 bg-slate-900 accent-emerald-400"
               />

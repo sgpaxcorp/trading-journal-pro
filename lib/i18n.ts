@@ -88,6 +88,8 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     "nav.performance.analyticsStatistics.title": "Analytics Statistics",
     "nav.performance.analyticsStatistics.desc":
       "Analyze your historical data with statistics.",
+    "nav.performance.planSummary.title": "Plan Summary",
+    "nav.performance.planSummary.desc": "Structured overview of your Growth Plan.",
     "nav.performance.aiCoaching.title": "AI Coaching",
     "nav.performance.aiCoaching.desc": "Coaching ideas based on your metrics.",
     "nav.performance.profitLoss.title": "Profit & Loss Track",
@@ -351,6 +353,8 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     "nav.performance.analyticsStatistics.title": "Estadísticas",
     "nav.performance.analyticsStatistics.desc":
       "Analiza tu historial con estadísticas.",
+    "nav.performance.planSummary.title": "Resumen del plan",
+    "nav.performance.planSummary.desc": "Vista estructurada de tu Growth Plan.",
     "nav.performance.aiCoaching.title": "Coaching con IA",
     "nav.performance.aiCoaching.desc": "Ideas de coaching basadas en tus métricas.",
     "nav.performance.profitLoss.title": "Profit & Loss Track",

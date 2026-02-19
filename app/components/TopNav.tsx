@@ -582,6 +582,12 @@ const performance: NavItem[] = [
     href: "/performance/balance-chart",
   },
   {
+    id: "plan-summary",
+    titleKey: "nav.performance.planSummary.title",
+    descriptionKey: "nav.performance.planSummary.desc",
+    href: "/performance/plan-summary",
+  },
+  {
     id: "analytics-statistics",
     titleKey: "nav.performance.analytics.title",
     descriptionKey: "nav.performance.analytics.desc",

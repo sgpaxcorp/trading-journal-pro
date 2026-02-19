@@ -275,43 +275,43 @@ export function CalendarScreen({}: CalendarScreenProps) {
           </View>
         ) : (
           <View style={styles.grid}>
-          {days.map((cell, index) => {
-            const pnl = cell.isoDate ? pnlMap.get(cell.isoDate) : null;
-            const holiday = cell.isoDate ? holidayMap.get(cell.isoDate) : null;
-            const isPositive = pnl != null && pnl > 0;
-            const isNegative = pnl != null && pnl < 0;
-            const isHoliday = !!holiday;
-            return (
-              <View
-                key={`day-${index}`}
-                style={[
-                  styles.dayCell,
-                  cell.isToday && styles.todayCell,
-                  cell.isMuted && styles.mutedCell,
-                  isPositive && styles.winCell,
-                  isNegative && styles.lossCell,
-                  isHoliday && styles.holidayCell,
-                ]}
-              >
-                <Text style={[styles.dayLabel, cell.isMuted && styles.mutedLabel]}>
-                  {cell.label}
-                </Text>
-                {isHoliday ? (
-                  <>
-                    <Text style={styles.holidayTag}>
-                      {language === "es" ? "Feriado" : "Holiday"}
-                    </Text>
-                    <Text style={styles.holidayName} numberOfLines={1}>
-                      {holiday?.label}
-                    </Text>
-                  </>
-                ) : pnl != null ? (
-                  <Text style={styles.pnlLabel}>{pnl.toFixed(0)}</Text>
-                ) : null}
-              </View>
-            );
-          })}
-        </View>
+            {days.map((cell, index) => {
+              const pnl = cell.isoDate ? pnlMap.get(cell.isoDate) : null;
+              const holiday = cell.isoDate ? holidayMap.get(cell.isoDate) : null;
+              const isPositive = pnl != null && pnl > 0;
+              const isNegative = pnl != null && pnl < 0;
+              const isHoliday = !!holiday;
+              return (
+                <View
+                  key={`day-${index}`}
+                  style={[
+                    styles.dayCell,
+                    cell.isToday && styles.todayCell,
+                    cell.isMuted && styles.mutedCell,
+                    isPositive && styles.winCell,
+                    isNegative && styles.lossCell,
+                    isHoliday && styles.holidayCell,
+                  ]}
+                >
+                  <Text style={[styles.dayLabel, cell.isMuted && styles.mutedLabel]}>
+                    {cell.label}
+                  </Text>
+                  {isHoliday ? (
+                    <>
+                      <Text style={styles.holidayTag}>
+                        {language === "es" ? "Feriado" : "Holiday"}
+                      </Text>
+                      <Text style={styles.holidayName} numberOfLines={1}>
+                        {holiday?.label}
+                      </Text>
+                    </>
+                  ) : pnl != null ? (
+                    <Text style={styles.pnlLabel}>{pnl.toFixed(0)}</Text>
+                  ) : null}
+                </View>
+              );
+            })}
+          </View>
         )}
 
         {error ? <Text style={styles.errorText}>{error}</Text> : null}

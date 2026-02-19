@@ -327,6 +327,14 @@ function looksLikeYYYYMMDD(s: string): boolean {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(s || ""));
 }
 
+function monthsBetween(startIso: string, endIso: string): number {
+  if (!startIso || !endIso) return 0;
+  const s = new Date(`${startIso}T00:00:00Z`);
+  const e = new Date(`${endIso}T00:00:00Z`);
+  if (Number.isNaN(s.getTime()) || Number.isNaN(e.getTime())) return 0;
+  return (e.getUTCFullYear() - s.getUTCFullYear()) * 12 + (e.getUTCMonth() - s.getUTCMonth());
+}
+
 function sum(nums: number[]): number {
   return nums.reduce((acc, n) => acc + (Number.isFinite(n) ? n : 0), 0);
 }
@@ -1366,6 +1374,7 @@ export default function AnalyticsStatisticsPage() {
   const cashflowUserIds = useMemo(() => resolveCashflowUserIds(user), [user]);
 
   const [dateRange, setDateRange] = useState<DateRange>(() => getDefaultRange("30D"));
+  const [scopeMode, setScopeMode] = useState<"plan" | "all">("plan");
 
   const [entries, setEntries] = useState<JournalEntry[]>([]);
   const [tradeRows, setTradeRows] = useState<JournalTradeRow[]>([]);
@@ -1385,8 +1394,16 @@ export default function AnalyticsStatisticsPage() {
   // Growth plan context
   const [planStartingBalance, setPlanStartingBalance] = useState<number>(0);
   const [planStartIso, setPlanStartIso] = useState<string>("");
+  const [planTargetBalance, setPlanTargetBalance] = useState<number>(0);
+  const [planTargetDate, setPlanTargetDate] = useState<string>("");
+  const [planMode, setPlanMode] = useState<"auto" | "manual" | "">("");
   const [planRules, setPlanRules] = useState<any[]>([]);
   const [planMaxDailyLossPct, setPlanMaxDailyLossPct] = useState<number>(0);
+
+  const effectivePlanStart = useMemo(
+    () => (scopeMode === "plan" ? planStartIso : ""),
+    [scopeMode, planStartIso]
+  );
 
   const [processScore, setProcessScore] = useState<number | null>(null);
   const [processChecklistMeta, setProcessChecklistMeta] = useState<{
@@ -1414,7 +1431,8 @@ export default function AnalyticsStatisticsPage() {
       if (!userId || accountsLoading || !activeAccountId) return;
 
       try {
-        const SELECT_GROWTH_PLAN = "starting_balance,created_at,updated_at,max_daily_loss_percent,rules" as const;
+        const SELECT_GROWTH_PLAN =
+          "starting_balance,target_balance,target_date,plan_start_date,plan_mode,created_at,updated_at,max_daily_loss_percent,rules" as const;
         const { data, error } = await supabaseBrowser
           .from("growth_plans")
           .select(SELECT_GROWTH_PLAN)
@@ -1435,10 +1453,16 @@ export default function AnalyticsStatisticsPage() {
 
         const row = (data as any)?.[0];
         const starting = toNumberMaybe(row?.starting_balance ?? 0);
-        const startIso = String(row?.created_at ?? row?.updated_at ?? "").slice(0, 10);
+        const startIso = String(row?.plan_start_date ?? row?.created_at ?? row?.updated_at ?? "").slice(0, 10);
+        const target = toNumberMaybe(row?.target_balance ?? 0);
+        const targetDate = String(row?.target_date ?? "").slice(0, 10);
+        const mode = String(row?.plan_mode ?? "");
 
         setPlanStartingBalance(starting);
         setPlanStartIso(looksLikeYYYYMMDD(startIso) ? startIso : "");
+        setPlanTargetBalance(target);
+        setPlanTargetDate(looksLikeYYYYMMDD(targetDate) ? targetDate : "");
+        setPlanMode(mode === "manual" ? "manual" : mode === "auto" ? "auto" : "");
         setPlanRules(Array.isArray(row?.rules) ? row.rules : []);
         setPlanMaxDailyLossPct(toNumberMaybe(row?.max_daily_loss_percent ?? 0));
       } catch (err) {
@@ -1575,7 +1599,9 @@ export default function AnalyticsStatisticsPage() {
 
       // We fetch from plan start if available (to compute baseline inside the selected range),
       // and filter to the current end date client-side.
-      const fromDate = looksLikeYYYYMMDD(planStartIso) ? planStartIso : (dateRange.startIso || undefined);
+      const fromDate = looksLikeYYYYMMDD(effectivePlanStart)
+        ? effectivePlanStart
+        : (dateRange.startIso || undefined);
       const end = looksLikeYYYYMMDD(dateRange.endIso) ? dateRange.endIso : "";
 
       try {
@@ -1609,7 +1635,7 @@ export default function AnalyticsStatisticsPage() {
     return () => {
       alive = false;
     };
-  }, [cashflowUserIds.primary, cashflowUserIds.secondary, planStartIso, dateRange.startIso, dateRange.endIso, accountsLoading, activeAccountId]);
+  }, [cashflowUserIds.primary, cashflowUserIds.secondary, effectivePlanStart, dateRange.startIso, dateRange.endIso, accountsLoading, activeAccountId]);
 
   // Server series (authoritative)
   useEffect(() => {
@@ -1656,9 +1682,9 @@ export default function AnalyticsStatisticsPage() {
   const sessions = useMemo(() => {
     // Apply range and also clamp to plan start if present
     const ranged = filterByRange(sessionsAll, dateRange.startIso, dateRange.endIso);
-    if (!planStartIso) return ranged;
-    return ranged.filter((s) => s.date >= planStartIso);
-  }, [sessionsAll, dateRange.startIso, dateRange.endIso, planStartIso]);
+    if (!effectivePlanStart) return ranged;
+    return ranged.filter((s) => s.date >= effectivePlanStart);
+  }, [sessionsAll, dateRange.startIso, dateRange.endIso, effectivePlanStart]);
 
   // Process compliance score (latest session in range)
   useEffect(() => {
@@ -1806,12 +1832,16 @@ export default function AnalyticsStatisticsPage() {
     };
   }, [cashflowsInRange]);
 
+  const cashflowNetForPlan = useMemo(() => {
+    return (cashflows ?? []).reduce((acc, cf: any) => acc + cashflowSignedUsd(cf), 0);
+  }, [cashflows]);
+
   // Build snapshot
   useEffect(() => {
     // We recompute snapshot when sessions/cashflows/range changes.
-    const snap = computeSnapshot(entries, sessionsAll, sessions, cashflows, planStartingBalance, planStartIso, dateRange, tradeStats);
+    const snap = computeSnapshot(entries, sessionsAll, sessions, cashflows, planStartingBalance, effectivePlanStart, dateRange, tradeStats);
     setSnapshot(snap);
-  }, [entries, sessionsAll, sessions, cashflows, planStartingBalance, planStartIso, dateRange, tradeStats]);
+  }, [entries, sessionsAll, sessions, cashflows, planStartingBalance, effectivePlanStart, dateRange, tradeStats]);
 
   // Derived display data
   const uiTotals = useMemo(() => {
@@ -1851,6 +1881,47 @@ export default function AnalyticsStatisticsPage() {
     }
     return s.equityCurve;
   }, [snapshot, serverSeries]);
+
+  const currentEquity = useMemo(() => {
+    if (!uiEquity.length) return 0;
+    return uiEquity[uiEquity.length - 1]?.value ?? 0;
+  }, [uiEquity]);
+
+  const monthlyPlanTracker = useMemo(() => {
+    if (scopeMode !== "plan") return null;
+    if (planMode === "manual") return null;
+    if (!planStartIso || !planTargetDate) return null;
+    if (!planStartingBalance || !planTargetBalance) return null;
+
+    const totalMonthsRaw = monthsBetween(planStartIso, planTargetDate);
+    const totalMonths = Math.max(1, totalMonthsRaw + 1);
+    const targetMultiple = planTargetBalance / planStartingBalance;
+    if (!Number.isFinite(targetMultiple) || targetMultiple <= 0) return null;
+
+    const base = planStartingBalance + (cashflowNetForPlan || 0);
+    const monthlyRate = Math.pow(targetMultiple, 1 / totalMonths) - 1;
+
+    const anchorEnd = looksLikeYYYYMMDD(dateRange.endIso) ? dateRange.endIso : isoDate(new Date());
+    const currentMonthIndex = Math.min(
+      totalMonths,
+      Math.max(1, monthsBetween(planStartIso, anchorEnd) + 1)
+    );
+
+    const prevTarget = base * Math.pow(1 + monthlyRate, currentMonthIndex - 1);
+    const monthTarget = base * Math.pow(1 + monthlyRate, currentMonthIndex);
+    const span = Math.max(1, monthTarget - prevTarget);
+    const progress = Math.max(0, Math.min(1.25, (currentEquity - prevTarget) / span));
+    const remaining = Math.max(0, monthTarget - currentEquity);
+
+    return {
+      totalMonths,
+      currentMonthIndex,
+      monthTarget,
+      remaining,
+      progress,
+      monthlyRate,
+    };
+  }, [scopeMode, planStartIso, planTargetDate, planStartingBalance, planTargetBalance, cashflowNetForPlan, dateRange.endIso, currentEquity]);
 
   const uiDaily = useMemo(() => {
     const s = snapshot;
@@ -1934,6 +2005,26 @@ export default function AnalyticsStatisticsPage() {
                   ].join(" ")}
                 >
                   {p}
+                </button>
+              ))}
+            </div>
+            <div className="ml-3 inline-flex rounded-xl border border-slate-800 bg-slate-950/60 p-1">
+              {[
+                { id: "plan", labelEn: "Plan scope", labelEs: "Plan" },
+                { id: "all", labelEn: "All‑time scope", labelEs: "Histórico" },
+              ].map((opt) => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => setScopeMode(opt.id as "plan" | "all")}
+                  className={[
+                    "px-3 py-1.5 text-xs rounded-lg transition",
+                    scopeMode === opt.id
+                      ? "bg-emerald-400 text-slate-950 font-semibold"
+                      : "text-slate-300 hover:text-slate-50",
+                  ].join(" ")}
+                >
+                  {L(opt.labelEn, opt.labelEs)}
                 </button>
               ))}
             </div>
@@ -2032,6 +2123,62 @@ export default function AnalyticsStatisticsPage() {
             </div>
           )}
         </section>
+
+        {monthlyPlanTracker ? (
+          <section className="mb-6 grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
+              <p className="text-[11px] uppercase tracking-[0.3em] text-slate-500">
+                {L("Plan monthly pacing", "Ritmo mensual del plan")}
+              </p>
+              <p className="mt-2 text-sm text-slate-400">
+                {L("Month", "Mes")} {monthlyPlanTracker.currentMonthIndex}/{monthlyPlanTracker.totalMonths}
+              </p>
+              <p className="text-2xl font-semibold text-slate-100">
+                {fmtUsd(monthlyPlanTracker.monthTarget)}
+              </p>
+              <div className="mt-3 h-2 w-full rounded-full bg-slate-800 overflow-hidden">
+                <div
+                  className="h-2 bg-linear-to-r from-emerald-400 via-emerald-300 to-sky-400"
+                  style={{ width: `${Math.min(100, monthlyPlanTracker.progress * 100)}%` }}
+                />
+              </div>
+              <p className="mt-2 text-xs text-slate-500">
+                {L("Remaining this month:", "Falta este mes:")}{" "}
+                <span className="text-slate-200">{fmtUsd(monthlyPlanTracker.remaining)}</span>
+              </p>
+            </div>
+
+            <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
+              <p className="text-[11px] uppercase tracking-[0.3em] text-slate-500">
+                {L("Compound pace", "Ritmo compuesto")}
+              </p>
+              <p className="mt-2 text-sm text-slate-400">
+                {L("Target date:", "Fecha meta:")}{" "}
+                <span className="text-slate-200">{planTargetDate}</span>
+              </p>
+              <p className="text-2xl font-semibold text-emerald-300">
+                {(monthlyPlanTracker.monthlyRate * 100).toFixed(2)}% / {L("month", "mes")}
+              </p>
+              <p className="mt-2 text-xs text-slate-500">
+                {L("Based on long‑term target and plan start.", "Basado en tu meta y fecha de inicio.")}
+              </p>
+            </div>
+
+            <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
+              <p className="text-[11px] uppercase tracking-[0.3em] text-slate-500">
+                {L("Scope", "Alcance")}
+              </p>
+              <p className="mt-2 text-sm text-slate-400">
+                {scopeMode === "plan"
+                  ? L("Tracking from plan start.", "Trackeando desde inicio del plan.")
+                  : L("All‑time scope selected.", "Alcance histórico seleccionado.")}
+              </p>
+              <p className="mt-4 text-xs text-slate-500">
+                {L("Switch to All‑time to compare against your full trading history.", "Cambia a Histórico para comparar contra todo tu historial.")}
+              </p>
+            </div>
+          </section>
+        ) : null}
 
         {/* Tabs */}
         <section className="mb-6">

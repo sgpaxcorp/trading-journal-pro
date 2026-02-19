@@ -7,12 +7,13 @@ import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 
 import { useAuth } from "@/context/AuthContext";
-import { getGrowthPlanSupabaseByAccount, type GrowthPlan } from "@/lib/growthPlanSupabase";
+import { computeAdjustedTarget, getGrowthPlanSupabaseByAccount, upsertGrowthPlanSupabase, type GrowthPlan } from "@/lib/growthPlanSupabase";
 import type { JournalEntry } from "@/lib/journalTypes";
 import { getAllJournalEntries } from "@/lib/journalSupabase";
 import { upsertDailySnapshot } from "@/lib/snapshotSupabase";
 import { getJournalTradesForDates } from "@/lib/journalTradesSupabase";
 import { parseNotes, type TradesPayload } from "@/lib/journalNotes";
+import { createAlertRule } from "@/lib/alertsSupabase";
 
 // ✅ Cashflows (deposits/withdrawals)
 import { listCashflows, signedCashflowAmount, type Cashflow } from "@/lib/cashflowsSupabase";
@@ -73,6 +74,8 @@ function getPlanStartDateStr(plan: unknown): string | null {
   if (!p) return null;
 
   return (
+    toDateOnlyStr(p.planStartDate) ||
+    toDateOnlyStr(p.plan_start_date) ||
     toDateOnlyStr(p.createdAt) ||
     toDateOnlyStr(p.created_at) ||
     toDateOnlyStr(p.createdAtIso) ||
@@ -98,6 +101,33 @@ function getWeekOfYear(date: Date): number {
 
   const diff = weekStart.getTime() - yearStartSunday.getTime();
   return Math.floor(diff / (7 * 86400000)) + 1;
+}
+
+function monthsBetween(startIso: string, endIso: string): number {
+  if (!startIso || !endIso) return 0;
+  const s = new Date(`${startIso}T00:00:00Z`);
+  const e = new Date(`${endIso}T00:00:00Z`);
+  if (Number.isNaN(s.getTime()) || Number.isNaN(e.getTime())) return 0;
+  return (e.getUTCFullYear() - s.getUTCFullYear()) * 12 + (e.getUTCMonth() - s.getUTCMonth());
+}
+
+function normalizePhases(raw: any): Array<{
+  id: string;
+  title?: string | null;
+  targetEquity: number;
+  targetDate?: string | null;
+  status?: "pending" | "completed";
+  completedAt?: string | null;
+}> {
+  const list = Array.isArray(raw) ? raw : [];
+  return list.map((item) => ({
+    id: item.id || crypto.randomUUID(),
+    title: item.title ?? null,
+    targetEquity: Math.max(0, Number(item.targetEquity) || 0),
+    targetDate: item.targetDate ? String(item.targetDate).slice(0, 10) : null,
+    status: item.status ?? "pending",
+    completedAt: item.completedAt ?? null,
+  }));
 }
 
 type CalendarCell = {
@@ -541,6 +571,7 @@ export default function DashboardPage() {
 
   const ALL_WIDGETS: { id: WidgetId; label: string }[] = [
     { id: "progress", label: L("Account Progress", "Progreso de cuenta") },
+    { id: "plan-progress", label: L("Plan Progress", "Progreso del plan") },
     { id: "daily-target", label: L("Daily Target", "Meta diaria") },
     { id: "calendar", label: L("P&L Calendar", "Calendario P&L") },
     { id: "weekly", label: L("Weekly Summary", "Resumen semanal") },
@@ -573,6 +604,7 @@ export default function DashboardPage() {
 
   const [activeWidgets, setActiveWidgets] = useState<WidgetId[]>([
     "progress",
+    "plan-progress",
     "daily-target",
     "calendar",
     "weekly",
@@ -589,6 +621,8 @@ export default function DashboardPage() {
   const [creatingAccount, setCreatingAccount] = useState(false);
   const [accountMessage, setAccountMessage] = useState<string | null>(null);
   const [widgetsLoaded, setWidgetsLoaded] = useState(false);
+  const phaseAlertBusyRef = useRef(false);
+  const phaseRuleIdRef = useRef<string | null>(null);
 
   // ✅ Checklist (today) — UI type ONLY
   const [todayChecklist, setTodayChecklist] = useState<UiChecklistItem[]>([]);
@@ -645,7 +679,12 @@ export default function DashboardPage() {
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed)) {
           const valid = parsed.filter((id: any) => ALL_WIDGETS.some((w) => w.id === id)) as WidgetId[];
-          if (valid.length > 0) setActiveWidgets(valid);
+          if (valid.length > 0) {
+            const withNew = valid.includes("plan-progress")
+              ? valid
+              : [...valid, "plan-progress" as WidgetId];
+            setActiveWidgets(withNew);
+          }
         }
       }
     } catch (err) {
@@ -1124,7 +1163,7 @@ export default function DashboardPage() {
 
   const { starting, target, currentBalance, progressPct, clampedProgress } = useMemo(() => {
     const startingLocal = (plan as any)?.startingBalance ?? 0;
-    const targetLocal = (plan as any)?.targetBalance ?? 0;
+    const targetLocal = plan ? computeAdjustedTarget(plan, cashflowNet ?? 0) : 0;
 
     const totalPnlLocal = filteredEntries.reduce((sum, e) => {
       const pnlRaw = (e as any).pnl;
@@ -1150,6 +1189,209 @@ export default function DashboardPage() {
       clampedProgress: clampedProgressLocal,
     };
   }, [plan, filteredEntries, cashflowNet]);
+
+  const planStartStr = useMemo(() => getPlanStartDateStr(plan) || "", [plan]);
+  const targetDateStr = useMemo(
+    () => String((plan as any)?.targetDate ?? (plan as any)?.target_date ?? "").slice(0, 10),
+    [plan]
+  );
+
+  const phaseMetrics = useMemo(() => {
+    if (!plan || !planStartStr || !targetDateStr) return null;
+
+    const totalMonthsRaw = monthsBetween(planStartStr, targetDateStr);
+    const totalMonths = Math.max(1, totalMonthsRaw + 1);
+
+    const todayStr = formatDateYYYYMMDD(new Date());
+    const currentMonthIndex = Math.min(
+      totalMonths,
+      Math.max(1, monthsBetween(planStartStr, todayStr) + 1)
+    );
+
+    const targetMultiple =
+      (plan as any).targetMultiple ??
+      ((plan as any)?.startingBalance > 0 && (plan as any)?.targetBalance > 0
+        ? (plan as any).targetBalance / (plan as any).startingBalance
+        : 0);
+
+    if (!targetMultiple || !Number.isFinite(targetMultiple) || targetMultiple <= 0) return null;
+
+    const adjustedStart = (plan as any).startingBalance + (cashflowNet ?? 0);
+    const monthlyRate = Math.pow(targetMultiple, 1 / totalMonths) - 1;
+
+    const prevTarget = adjustedStart * Math.pow(1 + monthlyRate, currentMonthIndex - 1);
+    const monthTarget = adjustedStart * Math.pow(1 + monthlyRate, currentMonthIndex);
+    const monthDelta = Math.max(1, monthTarget - prevTarget);
+    const monthProgress = Math.max(0, Math.min(1.25, (currentBalance - prevTarget) / monthDelta));
+
+    const remainingToMonth = Math.max(0, monthTarget - currentBalance);
+
+    const nextMidIndex = Math.min(totalMonths, Math.ceil(currentMonthIndex / 6) * 6);
+    const midTarget = adjustedStart * Math.pow(1 + monthlyRate, nextMidIndex);
+
+    return {
+      totalMonths,
+      currentMonthIndex,
+      monthTarget,
+      monthProgress,
+      remainingToMonth,
+      monthlyRate,
+      midIndex: nextMidIndex,
+      midTarget,
+    };
+  }, [plan, planStartStr, targetDateStr, cashflowNet, currentBalance]);
+
+  const manualPhases = useMemo(() => {
+    return normalizePhases((plan as any)?.planPhases ?? (plan as any)?.plan_phases);
+  }, [plan]);
+
+  const manualPhaseMetrics = useMemo(() => {
+    if (!plan || manualPhases.length === 0) return null;
+
+    const sorted = [...manualPhases].sort((a, b) => a.targetEquity - b.targetEquity);
+    const current = sorted.find((p) => currentBalance < p.targetEquity) || sorted[sorted.length - 1];
+
+    const currentIndex = sorted.findIndex((p) => p.id === current.id);
+    const prevTarget = currentIndex > 0 ? sorted[currentIndex - 1].targetEquity : (plan as any)?.startingBalance ?? 0;
+    const span = Math.max(1, current.targetEquity - prevTarget);
+    const progress = Math.max(0, Math.min(1.25, (currentBalance - prevTarget) / span));
+
+    return {
+      current,
+      prevTarget,
+      progress,
+      remaining: Math.max(0, current.targetEquity - currentBalance),
+    };
+  }, [plan, manualPhases, currentBalance]);
+
+  async function ensurePhaseRuleId(userId: string): Promise<string | null> {
+    if (!userId) return null;
+    if (phaseRuleIdRef.current) return phaseRuleIdRef.current;
+
+    try {
+      const { data: existing, error } = await supabaseBrowser
+        .from("ntj_alert_rules")
+        .select("id")
+        .eq("user_id", userId)
+        .eq("key", "plan_phase_completed")
+        .maybeSingle();
+
+      if (!error && existing?.id) {
+        phaseRuleIdRef.current = String(existing.id);
+        return phaseRuleIdRef.current;
+      }
+    } catch {
+      // ignore
+    }
+
+    const res = await createAlertRule(userId, {
+      key: "plan_phase_completed",
+      trigger_type: "PLAN_PHASE_COMPLETED",
+      title: L("Plan phase completed", "Fase de plan completada"),
+      message: L(
+        "You completed a plan phase. Log the outcome and update the next target.",
+        "Completaste una fase del plan. Registra el resultado y ajusta la próxima meta."
+      ),
+      severity: "info",
+      enabled: true,
+      channels: ["popup", "inapp"],
+      kind: "reminder",
+      category: "achievement",
+      config: { source: "system", core: true },
+    });
+
+    if (res.ok) {
+      phaseRuleIdRef.current = res.data.ruleId;
+      return res.data.ruleId;
+    }
+    return null;
+  }
+
+  // Phase completion detector (manual mode) → marks phase completed + pushes alert event
+  useEffect(() => {
+    const userId = (user as any)?.id || (user as any)?.uid || "";
+    if (!userId || !activeAccountId) return;
+    if (!plan || (plan as any).planMode !== "manual") return;
+    if (!manualPhases.length) return;
+    if (phaseAlertBusyRef.current) return;
+
+    const newlyCompleted = manualPhases.filter(
+      (p) => (p.status ?? "pending") !== "completed" && currentBalance >= p.targetEquity
+    );
+    if (newlyCompleted.length === 0) return;
+
+    phaseAlertBusyRef.current = true;
+
+    (async () => {
+      const nowIso = new Date().toISOString();
+      const todayISO = formatDateYYYYMMDD(new Date());
+
+      const rawPhases = Array.isArray((plan as any)?.planPhases)
+        ? (plan as any).planPhases
+        : Array.isArray((plan as any)?.plan_phases)
+          ? (plan as any).plan_phases
+          : [];
+
+      const nextPhases = rawPhases.map((p: any) => {
+        const id = String(p?.id ?? "");
+        const match = newlyCompleted.find((n) => n.id === id);
+        if (!match) return p;
+        return {
+          ...p,
+          status: "completed",
+          completedAt: p.completedAt ?? nowIso,
+        };
+      });
+
+      try {
+        await upsertGrowthPlanSupabase({ planPhases: nextPhases }, activeAccountId);
+        setPlan((prev) => (prev ? ({ ...(prev as any), planPhases: nextPhases } as any) : prev));
+      } catch (e) {
+        console.warn("[dashboard] phase update failed", e);
+      }
+
+      const ruleId = await ensurePhaseRuleId(userId);
+      if (ruleId) {
+        for (const phase of newlyCompleted) {
+          const title = L("Plan phase completed", "Fase de plan completada");
+          const message = L(
+            `Phase "${phase.title || "Phase"}" reached ${phase.targetEquity.toFixed(2)}.`,
+            `Fase "${phase.title || "Fase"}" alcanzó ${phase.targetEquity.toFixed(2)}.`
+          );
+          try {
+            await supabaseBrowser.from("ntj_alert_events").insert({
+              user_id: userId,
+              rule_id: ruleId,
+              status: "active",
+              triggered_at: nowIso,
+              date: todayISO,
+              payload: {
+                kind: "reminder",
+                category: "achievement",
+                title,
+                message,
+                phase_id: phase.id,
+                phase_title: phase.title ?? null,
+                target_equity: phase.targetEquity,
+                triggered_at: nowIso,
+                date: todayISO,
+              },
+            });
+          } catch (e) {
+            console.warn("[dashboard] phase alert insert failed", e);
+          }
+        }
+
+        try {
+          window.dispatchEvent(new Event("ntj_alert_engine_run_now"));
+        } catch {
+          // ignore
+        }
+      }
+    })().finally(() => {
+      phaseAlertBusyRef.current = false;
+    });
+  }, [plan, manualPhases, currentBalance, activeAccountId, user, L]);
 
   const greenStreak = calcGreenStreak(filteredEntries);
 
@@ -1247,6 +1489,140 @@ export default function DashboardPage() {
               <Link href="/growth-plan" className="text-emerald-400 underline">
                 {L("Create your plan now.", "Crea tu plan ahora.")}
               </Link>
+            </p>
+          )}
+        </>
+      );
+    }
+
+    if (id === "plan-progress") {
+      return (
+        <>
+          <p className="text-slate-400 text-[14px] font-medium">
+            {L("Plan Progress (Phases)", "Progreso del plan (fases)")}
+          </p>
+
+          {!plan ? (
+            <p className="text-[14px] text-slate-500 mt-2">
+              {L("No growth plan set yet.", "Aún no tienes un plan de crecimiento.")}{" "}
+              <Link href="/growth-plan" className="text-emerald-400 underline">
+                {L("Create your plan now.", "Crea tu plan ahora.")}
+              </Link>
+            </p>
+          ) : plan?.planMode === "manual" ? (
+            manualPhaseMetrics ? (
+            <div className="mt-3 space-y-3">
+              <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-3">
+                <p className="text-[12px] text-slate-500">
+                  {L("Current phase", "Fase actual")}
+                </p>
+                <p className="text-[16px] text-slate-100 font-semibold">
+                  {manualPhaseMetrics.current.title || L("Phase", "Fase")}
+                </p>
+                <p className="text-[12px] text-slate-500 mt-1">
+                  {L("Target:", "Meta:")}{" "}
+                  <span className="text-emerald-300">${manualPhaseMetrics.current.targetEquity.toFixed(2)}</span>
+                </p>
+                {manualPhaseMetrics.current.targetDate ? (
+                  <p className="text-[12px] text-slate-500 mt-1">
+                    {L("Target date:", "Fecha objetivo:")}{" "}
+                    <span className="text-slate-200">{manualPhaseMetrics.current.targetDate}</span>
+                  </p>
+                ) : null}
+                <p className="text-[12px] text-slate-500 mt-1">
+                  {L("Progress:", "Progreso:")}{" "}
+                  <span className="text-slate-200">{(manualPhaseMetrics.progress * 100).toFixed(1)}%</span>
+                </p>
+              </div>
+
+              <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-3">
+                <p className="text-[12px] text-slate-500">
+                  {L("Phase progress", "Progreso de fase")}
+                </p>
+                <div className="mt-2 h-2 w-full rounded-full bg-slate-800 overflow-hidden">
+                  <div
+                    className="h-2 bg-linear-to-r from-emerald-400 via-emerald-300 to-sky-400"
+                    style={{ width: `${Math.min(100, manualPhaseMetrics.progress * 100)}%` }}
+                  />
+                </div>
+                <p className="text-[12px] text-slate-500 mt-1">
+                  {L("Remaining:", "Falta:")}{" "}
+                  <span className="text-slate-200">${manualPhaseMetrics.remaining.toFixed(2)}</span>
+                </p>
+              </div>
+            </div>
+            ) : (
+              <p className="text-[13px] text-slate-500 mt-2">
+                {L("Add manual phases to activate this widget.", "Agrega fases manuales para activar este widget.")}{" "}
+                <Link href="/growth-plan" className="text-emerald-400 underline">
+                  {L("Edit Growth Plan", "Editar Growth Plan")}
+                </Link>
+              </p>
+            )
+          ) : !targetDateStr ? (
+            <p className="text-[13px] text-slate-500 mt-2">
+              {L(
+                "Add a target date to activate monthly and mid‑term milestones.",
+                "Agrega una fecha meta para activar metas mensuales y de mediano plazo."
+              )}{" "}
+              <Link href="/growth-plan" className="text-emerald-400 underline">
+                {L("Edit Growth Plan", "Editar Growth Plan")}
+              </Link>
+            </p>
+          ) : phaseMetrics ? (
+            <div className="mt-3 space-y-3">
+              <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-3">
+                <p className="text-[12px] text-slate-500">
+                  {L("Long‑term target", "Meta largo plazo")}
+                </p>
+                <p className="text-[16px] text-emerald-300 font-semibold">
+                  ${target.toFixed(2)}
+                </p>
+                <p className="text-[12px] text-slate-500 mt-1">
+                  {L("Target date:", "Fecha meta:")}{" "}
+                  <span className="text-slate-200">{targetDateStr}</span>
+                </p>
+              </div>
+
+              <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-3">
+                <p className="text-[12px] text-slate-500">
+                  {L("Monthly milestone", "Meta mensual")} ·{" "}
+                  {L("Month", "Mes")} {phaseMetrics.currentMonthIndex}/{phaseMetrics.totalMonths}
+                </p>
+                <p className="text-[16px] text-slate-100 font-semibold">
+                  ${phaseMetrics.monthTarget.toFixed(2)}
+                </p>
+                <div className="mt-2 h-2 w-full rounded-full bg-slate-800 overflow-hidden">
+                  <div
+                    className="h-2 bg-linear-to-r from-emerald-400 via-emerald-300 to-sky-400"
+                    style={{ width: `${Math.min(100, phaseMetrics.monthProgress * 100)}%` }}
+                  />
+                </div>
+                <p className="text-[12px] text-slate-500 mt-1">
+                  {L("Remaining this month:", "Falta este mes:")}{" "}
+                  <span className="text-slate-200">${phaseMetrics.remainingToMonth.toFixed(2)}</span>
+                </p>
+              </div>
+
+              <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-3">
+                <p className="text-[12px] text-slate-500">
+                  {L("Mid‑term milestone", "Meta mediano plazo")} ·{" "}
+                  {L("Month", "Mes")} {phaseMetrics.midIndex}
+                </p>
+                <p className="text-[16px] text-slate-100 font-semibold">
+                  ${phaseMetrics.midTarget.toFixed(2)}
+                </p>
+                <p className="text-[12px] text-slate-500 mt-1">
+                  {L("Compounded pacing:", "Ritmo compuesto:")}{" "}
+                  <span className="text-slate-200">
+                    {(phaseMetrics.monthlyRate * 100).toFixed(2)}%/{L("month", "mes")}
+                  </span>
+                </p>
+              </div>
+            </div>
+          ) : (
+            <p className="text-[13px] text-slate-500 mt-2">
+              {L("Phase tracking requires a target date and valid plan numbers.", "El tracking por fases requiere fecha meta y números válidos.")}
             </p>
           )}
         </>

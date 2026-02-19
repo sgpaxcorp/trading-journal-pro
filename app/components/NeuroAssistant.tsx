@@ -23,12 +23,14 @@ const AVATAR_SRC: Record<AvatarState, { webm?: string; mp4: string }> = {
 function NeuroAvatarButton({
   state,
   open,
+  unread = 0,
   size = 104, // ✅ más compacto
   onToggle,
   ariaLabel,
 }: {
   state: AvatarState;
   open: boolean;
+  unread?: number;
   size?: number;
   onToggle: () => void;
   ariaLabel: string;
@@ -94,6 +96,14 @@ function NeuroAvatarButton({
       style={{ width: size, height: size }}
     >
       <div className={["relative w-full h-full", pulse].join(" ")}>
+        {unread > 0 ? (
+          <span
+            className="absolute -top-1 -right-1 z-50 rounded-full bg-emerald-400 text-slate-950 text-[10px] font-semibold px-1.5 py-0.5 shadow"
+            aria-label="Neuro unread messages"
+          >
+            {unread > 9 ? "9+" : unread}
+          </span>
+        ) : null}
         {/* ✅ Halo más fuerte, bordes más transparentes */}
         <div
           className="absolute inset-0 rounded-full"
@@ -175,6 +185,7 @@ export default function NeuroAssistant() {
   const prefLang: Lang = resolveLocale(locale) === "es" ? "es" : "en";
 
   const [open, setOpen] = useState(false);
+  const [unread, setUnread] = useState(0);
   const [state, setState] = useState<AssistantState>("idle");
   const [avatarState, setAvatarState] = useState<AvatarState>("idle");
 
@@ -199,16 +210,24 @@ export default function NeuroAssistant() {
     return `calc(${rightPadding}px + ${AVATAR_SIZE}px + ${gap}px)`;
   }, []);
 
+  const openRef = useRef(open);
+  useEffect(() => {
+    openRef.current = open;
+  }, [open]);
+
   useEffect(() => {
     const off = onNeuroPush((p: NeuroPush) => {
       if (p.kind === "neuro_open") {
         setOpen(true);
+        setUnread(0);
         return;
       }
 
       if (p.kind === "neuro_push") {
-        setOpen(true);
         setMessages((prev) => [...prev, { role: "assistant", text: p.text }]);
+        if (!openRef.current) {
+          setUnread((u) => u + 1);
+        }
 
         setState("talking");
         setAvatarState("speaking");
@@ -309,8 +328,15 @@ export default function NeuroAssistant() {
       <NeuroAvatarButton
         state={avatarState}
         open={open}
+        unread={unread}
         size={AVATAR_SIZE}
-        onToggle={() => setOpen((o) => !o)}
+        onToggle={() =>
+          setOpen((o) => {
+            const next = !o;
+            if (next) setUnread(0);
+            return next;
+          })
+        }
         ariaLabel={L("Open Neuro Assistant", "Abrir asistente Neuro")}
       />
 

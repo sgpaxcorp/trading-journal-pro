@@ -1175,7 +1175,8 @@ for (const rule of enabled) {
   if (!triggered) {
     const existingPayload = safeObj(existing?.payload);
     const isTest = !!existingPayload.test;
-    const isDismissed = (existing?.status ?? "") === "dismissed";
+    const statusNorm = String(existing?.status ?? "").toLowerCase();
+    const isDismissed = statusNorm === "dismissed" || statusNorm === "ack";
 
     if (existing?.id && !isDismissed && !isTest) {
       const nowISO = new Date().toISOString();
@@ -1272,7 +1273,8 @@ for (const rule of enabled) {
 
   // Existing event today: update payload (respect dismissed)
   if (existing?.id) {
-    if ((existing.status ?? "") === "dismissed") continue;
+    const statusNorm = String(existing.status ?? "").toLowerCase();
+    if (statusNorm === "dismissed" || statusNorm === "ack") continue;
 
     const upd = await supabaseBrowser
       .from("ntj_alert_events")
