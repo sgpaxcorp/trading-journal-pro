@@ -45,6 +45,7 @@ export function GlobalRankingScreen() {
   const [rows, setRows] = useState<LeaderboardRow[]>([]);
   const [profile, setProfile] = useState<PublicProfile | null>(null);
   const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -52,8 +53,10 @@ export function GlobalRankingScreen() {
 
     let cancelled = false;
 
-    async function loadRanking() {
-      setLoading(true);
+    async function loadRanking(isRefresh = false) {
+      if (!isRefresh) {
+        setLoading(true);
+      }
       setError(null);
 
       let leaderboard: any[] | null = null;
@@ -135,7 +138,9 @@ export function GlobalRankingScreen() {
           }
         }
 
-        setLoading(false);
+        if (!isRefresh) {
+          setLoading(false);
+        }
       }
     }
 
@@ -145,6 +150,89 @@ export function GlobalRankingScreen() {
       cancelled = true;
     };
   }, [language, user?.id]);
+
+  async function handleRefresh() {
+    if (!supabaseMobile || !user?.id) return;
+    setRefreshing(true);
+    setError(null);
+    try {
+      let leaderboard: any[] | null = null;
+      let lbError: any = null;
+
+      const primary = await supabaseMobile.rpc("nt_public_leaderboard", {
+        limit_num: DEFAULT_LIMIT,
+        offset_num: 0,
+      });
+
+      leaderboard = primary.data;
+      lbError = primary.error;
+
+      if (lbError) {
+        const alt = await supabaseMobile.rpc("nt_public_leaderboard", {
+          p_limit: DEFAULT_LIMIT,
+          p_offset: 0,
+        });
+        leaderboard = alt.data;
+        lbError = alt.error;
+      }
+
+      let profileRow: any = null;
+      let profileError: any = null;
+
+      const profileRes = await supabaseMobile.rpc("nt_public_user_profile", {
+        target_user: user.id,
+      });
+
+      profileRow = profileRes.data;
+      profileError = profileRes.error;
+
+      if (profileError) {
+        const altProfile = await supabaseMobile.rpc("nt_public_user_profile", {
+          p_user_id: user.id,
+        });
+        profileRow = altProfile.data;
+        profileError = altProfile.error;
+      }
+
+      if (lbError) {
+        setError(
+          t(
+            language,
+            "We couldn't load the leaderboard.",
+            "No pudimos cargar el ranking."
+          )
+        );
+      } else {
+        const parsed = (leaderboard ?? []).map((row: any, idx: number) => ({
+          rank: typeof row?.rank === "number" ? row.rank : idx + 1,
+          user_id: String(row?.user_id ?? ""),
+          display_name: String(row?.display_name ?? "Trader"),
+          avatar_url: (row?.avatar_url ?? null) as string | null,
+          tier: String(row?.tier ?? "Bronze"),
+          xp_total: Number(row?.xp_total ?? 0),
+          trophies_count: Number(row?.trophies_count ?? row?.trophies_total ?? 0),
+        }));
+        setRows(parsed);
+      }
+
+      if (!profileError && profileRow) {
+        const row = Array.isArray(profileRow) ? profileRow[0] : profileRow;
+        if (row) {
+          setProfile({
+            user_id: String(row.user_id ?? user.id),
+            display_name: String(row.display_name ?? "Trader"),
+            avatar_url: (row.avatar_url ?? null) as string | null,
+            tier: String(row.tier ?? "Bronze"),
+            xp_total: Number(row.xp_total ?? 0),
+            trophies_count: Number(row.trophies_count ?? row.trophies_total ?? 0),
+            level: Number(row.level ?? 1),
+          });
+        }
+      }
+    } finally {
+      setRefreshing(false);
+    }
+  }
 
   const myRank = useMemo(() => {
     if (!user?.id) return null;
@@ -161,6 +249,8 @@ export function GlobalRankingScreen() {
         "Top traders by XP and trophies earned.",
         "Top traders por XP y trofeos ganados."
       )}
+      refreshing={refreshing}
+      onRefresh={handleRefresh}
     >
       {loading ? (
         <View style={styles.loadingRow}>

@@ -152,14 +152,21 @@ type WidgetId = GridItemId;
 type Holiday = { date: string; label: string; marketClosed?: boolean };
 
 function isWeekend(d: Date): boolean {
-  // Treat Sunday as a trading day (futures); only Saturdays are non-trading weekends.
+  // Stock market weekends: Saturday + Sunday
   const day = d.getDay();
-  return day === 6;
+  return day === 0 || day === 6;
 }
 
 function isTradingDay(dateStr: string, holidaySet: Set<string>): boolean {
   const d = new Date(dateStr + "T00:00:00");
   return !isWeekend(d) && !holidaySet.has(dateStr);
+}
+
+function isFuturesTradingDay(dateStr: string, holidaySet: Set<string>): boolean {
+  const d = new Date(dateStr + "T00:00:00");
+  const day = d.getDay();
+  // Futures trade Sunday–Friday (no Saturdays), excluding full market holidays.
+  return day !== 6 && !holidaySet.has(dateStr);
 }
 
 function toYMD(date: Date): string {
@@ -244,11 +251,6 @@ function getUsMarketHolidays(year: number, isEs: boolean): Holiday[] {
   holidays.push({
     date: toYMD(getNthWeekdayOfMonth(year, 8, 1, 1)),
     label: label("Labor Day", "Día del Trabajo"),
-    marketClosed: true,
-  });
-  holidays.push({
-    date: toYMD(getNthWeekdayOfMonth(year, 9, 1, 2)),
-    label: label("Columbus / Indigenous Peoples' Day", "Día de Colón / Pueblos Indígenas"),
     marketClosed: true,
   });
   holidays.push({
@@ -381,7 +383,9 @@ function calcTradingDayStats(entries: JournalEntry[], holidaySet: Set<string>) {
       .map((e) => String((e as any).date).slice(0, 10))
   );
 
-  const allTradingDays: string[] = [];
+  const stockDays: string[] = [];
+  const futuresDays: string[] = [];
+
   const jan1 = new Date(year, 0, 1);
   const dec31 = new Date(year, 11, 31);
 
@@ -391,20 +395,37 @@ function calcTradingDayStats(entries: JournalEntry[], holidaySet: Set<string>) {
     d = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1)
   ) {
     const ds = formatDateYYYYMMDD(d);
-    if (isTradingDay(ds, holidaySet)) allTradingDays.push(ds);
+    if (isTradingDay(ds, holidaySet)) stockDays.push(ds);
+    if (isFuturesTradingDay(ds, holidaySet)) futuresDays.push(ds);
   }
 
-  const pastTradingDays = allTradingDays.filter((d) => d < todayStrLocal);
-  const remainingTradingDays = allTradingDays.filter((d) => d >= todayStrLocal);
+  const pastStockDays = stockDays.filter((d) => d < todayStrLocal);
+  const remainingStockDays = stockDays.filter((d) => d >= todayStrLocal);
 
-  const tradedDaysSoFar = pastTradingDays.filter((d) => tradedDatesSet.has(d));
-  const missedDaysSoFar = pastTradingDays.filter((d) => !tradedDatesSet.has(d));
+  const tradedDaysSoFar = pastStockDays.filter((d) => tradedDatesSet.has(d));
+  const missedDaysSoFar = pastStockDays.filter((d) => !tradedDatesSet.has(d));
+
+  const remainingFuturesDays = futuresDays.filter((d) => d >= todayStrLocal);
+
+  const daysInYear = Math.round((dec31.getTime() - jan1.getTime()) / 86400000) + 1;
+  const dayOfYear = Math.floor((today.getTime() - jan1.getTime()) / 86400000) + 1;
+  const remainingCryptoDays = Math.max(0, daysInYear - dayOfYear + 1);
 
   return {
-    totalTradingDays: allTradingDays.length,
-    remainingTradingDays: remainingTradingDays.length,
-    tradedDays: tradedDaysSoFar.length,
-    missedDays: missedDaysSoFar.length,
+    stock: {
+      total: stockDays.length,
+      remaining: remainingStockDays.length,
+      tradedDays: tradedDaysSoFar.length,
+      missedDays: missedDaysSoFar.length,
+    },
+    futures: {
+      total: futuresDays.length,
+      remaining: remainingFuturesDays.length,
+    },
+    crypto: {
+      total: daysInYear,
+      remaining: remainingCryptoDays,
+    },
   };
 }
 
@@ -572,6 +593,7 @@ export default function DashboardPage() {
   const ALL_WIDGETS: { id: WidgetId; label: string }[] = [
     { id: "progress", label: L("Account Progress", "Progreso de cuenta") },
     { id: "plan-progress", label: L("Plan Progress", "Progreso del plan") },
+    { id: "plan-system", label: L("Trading System", "Sistema de trading") },
     { id: "daily-target", label: L("Daily Target", "Meta diaria") },
     { id: "calendar", label: L("P&L Calendar", "Calendario P&L") },
     { id: "weekly", label: L("Weekly Summary", "Resumen semanal") },
@@ -605,6 +627,7 @@ export default function DashboardPage() {
   const [activeWidgets, setActiveWidgets] = useState<WidgetId[]>([
     "progress",
     "plan-progress",
+    "plan-system",
     "daily-target",
     "calendar",
     "weekly",
@@ -624,6 +647,13 @@ export default function DashboardPage() {
   const phaseAlertBusyRef = useRef(false);
   const phaseRuleIdRef = useRef<string | null>(null);
 
+  const widgetTitleClass =
+    "widget-title drag-handle select-none cursor-move text-[14px] font-semibold tracking-wide flex items-center gap-2 group";
+  const widgetTitleTextClass =
+    "text-transparent bg-clip-text bg-gradient-to-r from-emerald-300 via-cyan-300 to-emerald-400";
+  const widgetDragHintClass =
+    "text-slate-500 text-[11px] opacity-0 group-hover:opacity-100 transition";
+
   // ✅ Checklist (today) — UI type ONLY
   const [todayChecklist, setTodayChecklist] = useState<UiChecklistItem[]>([]);
   const [todayChecklistNotes, setTodayChecklistNotes] = useState<string | null>(null);
@@ -638,6 +668,57 @@ export default function DashboardPage() {
 
   // Rolling day ONLY for daily-target + actions
   const [rollingTodayStr, setRollingTodayStr] = useState(() => formatDateYYYYMMDD(new Date()));
+
+  const planSystemLists = useMemo(() => {
+    const system = plan?.steps?.execution_and_journal?.system;
+    const clean = (arr: any[] | undefined) =>
+      (arr ?? []).filter((i) => (i?.text ?? "").toString().trim().length > 0);
+    const doList = clean(system?.doList as any[]);
+    const dontList = clean(system?.dontList as any[]);
+    const orderList = clean(system?.orderList as any[]);
+    const all = [...doList, ...dontList, ...orderList];
+    return {
+      doList,
+      dontList,
+      orderList,
+      all,
+      allKey: all.map((i) => i.id).join("|"),
+    };
+  }, [plan]);
+
+  const systemChecklistKey = useMemo(() => {
+    const uid = (user as any)?.uid ?? "anon";
+    return `tjpro_plan_system_checks_${uid}_${rollingTodayStr}`;
+  }, [user, rollingTodayStr]);
+
+  const [systemChecks, setSystemChecks] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const ids = new Set(planSystemLists.all.map((i) => i.id));
+    let parsed: Record<string, boolean> = {};
+    try {
+      const raw = window.localStorage.getItem(systemChecklistKey);
+      if (raw) parsed = JSON.parse(raw);
+    } catch {
+      parsed = {};
+    }
+    const cleaned: Record<string, boolean> = {};
+    ids.forEach((id) => {
+      cleaned[id] = !!parsed[id];
+    });
+    setSystemChecks(cleaned);
+  }, [systemChecklistKey, planSystemLists.allKey]);
+
+  const toggleSystemCheck = (id: string) => {
+    setSystemChecks((prev) => {
+      const next = { ...prev, [id]: !prev[id] };
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem(systemChecklistKey, JSON.stringify(next));
+      }
+      return next;
+    });
+  };
 
   // Debounce autosave
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -680,10 +761,13 @@ export default function DashboardPage() {
         if (Array.isArray(parsed)) {
           const valid = parsed.filter((id: any) => ALL_WIDGETS.some((w) => w.id === id)) as WidgetId[];
           if (valid.length > 0) {
-            const withNew = valid.includes("plan-progress")
+            const withPlan = valid.includes("plan-progress")
               ? valid
               : [...valid, "plan-progress" as WidgetId];
-            setActiveWidgets(withNew);
+            const withSystem = withPlan.includes("plan-system")
+              ? withPlan
+              : [...withPlan, "plan-system" as WidgetId];
+            setActiveWidgets(withSystem);
           }
         }
       }
@@ -1441,8 +1525,11 @@ export default function DashboardPage() {
     if (id === "progress") {
       return (
         <>
-          <p className="text-slate-400 text-[14px] font-medium">
-            {L("Account Progress", "Progreso de cuenta")}
+          <p className={widgetTitleClass}>
+            <span className={widgetTitleTextClass}>
+              {L("Account Progress", "Progreso de cuenta")}
+            </span>
+            <span className={widgetDragHintClass}>⠿</span>
           </p>
 
           {plan ? (
@@ -1498,8 +1585,11 @@ export default function DashboardPage() {
     if (id === "plan-progress") {
       return (
         <>
-          <p className="text-slate-400 text-[14px] font-medium">
-            {L("Plan Progress (Phases)", "Progreso del plan (fases)")}
+          <p className={widgetTitleClass}>
+            <span className={widgetTitleTextClass}>
+              {L("Plan Progress (Phases)", "Progreso del plan (fases)")}
+            </span>
+            <span className={widgetDragHintClass}>⠿</span>
           </p>
 
           {!plan ? (
@@ -1629,11 +1719,119 @@ export default function DashboardPage() {
       );
     }
 
+    if (id === "plan-system") {
+      const { doList, dontList, orderList } = planSystemLists;
+      const hasItems = doList.length + dontList.length + orderList.length > 0;
+
+      return (
+        <>
+          <p className={widgetTitleClass}>
+            <span className={widgetTitleTextClass}>
+              {L("Trading System", "Sistema de trading")}
+            </span>
+            <span className={widgetDragHintClass}>⠿</span>
+          </p>
+
+          {!plan ? (
+            <p className="text-[14px] text-slate-500 mt-2">
+              {L("No growth plan set yet.", "Aún no tienes un plan de crecimiento.")}{" "}
+              <Link href="/growth-plan" className="text-emerald-400 underline">
+                {L("Create your plan now.", "Crea tu plan ahora.")}
+              </Link>
+            </p>
+          ) : !hasItems ? (
+            <p className="text-[14px] text-slate-500 mt-2">
+              {L("Add your execution system (Do / Don't / Order) to activate this widget.", "Agrega tu sistema (Hacer / No hacer / Orden) para activar este widget.")}{" "}
+              <Link href="/growth-plan" className="text-emerald-400 underline">
+                {L("Edit Growth Plan", "Editar Growth Plan")}
+              </Link>
+            </p>
+          ) : (
+            <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-3">
+                <p className="text-[11px] uppercase tracking-[0.2em] text-emerald-300">
+                  {L("Do", "Hacer")}
+                </p>
+                <div className="mt-2 space-y-1 text-[13px] text-slate-200">
+                  {doList.length ? (
+                    doList.map((i) => (
+                      <label key={i.id} className="flex items-start gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={!!systemChecks[i.id]}
+                          onChange={() => toggleSystemCheck(i.id)}
+                          className="mt-1 h-4 w-4 accent-emerald-400"
+                        />
+                        <span className={systemChecks[i.id] ? "line-through opacity-80" : ""}>{i.text}</span>
+                      </label>
+                    ))
+                  ) : (
+                    <div className="text-slate-500">{L("—", "—")}</div>
+                  )}
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-3">
+                <p className="text-[11px] uppercase tracking-[0.2em] text-rose-300">
+                  {L("Don't", "No hacer")}
+                </p>
+                <div className="mt-2 space-y-1 text-[13px] text-slate-200">
+                  {dontList.length ? (
+                    dontList.map((i) => (
+                      <label key={i.id} className="flex items-start gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={!!systemChecks[i.id]}
+                          onChange={() => toggleSystemCheck(i.id)}
+                          className="mt-1 h-4 w-4 accent-rose-400"
+                        />
+                        <span className={systemChecks[i.id] ? "line-through opacity-80" : ""}>{i.text}</span>
+                      </label>
+                    ))
+                  ) : (
+                    <div className="text-slate-500">{L("—", "—")}</div>
+                  )}
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-3">
+                <p className="text-[11px] uppercase tracking-[0.2em] text-sky-300">
+                  {L("Order", "Orden")}
+                </p>
+                <div className="mt-2 space-y-1 text-[13px] text-slate-200">
+                  {orderList.length ? (
+                    orderList.map((i, idx) => (
+                      <label key={i.id} className="flex items-start gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={!!systemChecks[i.id]}
+                          onChange={() => toggleSystemCheck(i.id)}
+                          className="mt-1 h-4 w-4 accent-sky-400"
+                        />
+                        <span className={systemChecks[i.id] ? "line-through opacity-80" : ""}>
+                          {idx + 1}. {i.text}
+                        </span>
+                      </label>
+                    ))
+                  ) : (
+                    <div className="text-slate-500">{L("—", "—")}</div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+        </>
+      );
+    }
+
     if (id === "streak") {
       return (
         <>
-          <p className="text-slate-400 text-[14px] font-medium">
-            {L("Green Streak & Performance", "Racha verde y rendimiento")}
+          <p className={widgetTitleClass}>
+            <span className={widgetTitleTextClass}>
+              {L("Green Streak & Performance", "Racha verde y rendimiento")}
+            </span>
+            <span className={widgetDragHintClass}>⠿</span>
           </p>
 
           <p className="text-5xl font-semibold text-emerald-400 mt-1">
@@ -1666,8 +1864,11 @@ export default function DashboardPage() {
         <>
           <div className="flex items-start justify-between gap-3">
             <div>
-              <p className="text-slate-400 text-[14px] font-medium">
-                {L("Today's Checklist", "Checklist de hoy")}
+              <p className={widgetTitleClass}>
+                <span className={widgetTitleTextClass}>
+                  {L("Today's Checklist", "Checklist de hoy")}
+                </span>
+                <span className={widgetDragHintClass}>⠿</span>
               </p>
               <p className="text-[12px] text-slate-500 mt-1">
                 {rollingTodayStr}
@@ -1721,8 +1922,11 @@ export default function DashboardPage() {
     if (id === "daily-target") {
       return (
         <>
-          <p className="text-slate-400 text-[14px] font-medium">
-            {L("Daily Target (Today)", "Meta diaria (hoy)")}
+          <p className={widgetTitleClass}>
+            <span className={widgetTitleTextClass}>
+              {L("Daily Target (Today)", "Meta diaria (hoy)")}
+            </span>
+            <span className={widgetDragHintClass}>⠿</span>
           </p>
 
           <div className="mt-2 rounded-xl border border-emerald-400/30 bg-emerald-400/10 p-3">
@@ -1841,28 +2045,49 @@ export default function DashboardPage() {
 
     // --- rest unchanged (placeholders / your original widgets) ---
     if (id === "trading-days") {
-      const { totalTradingDays, remainingTradingDays, tradedDays, missedDays } = tradingStats;
+      const { stock, futures, crypto } = tradingStats;
       return (
         <>
-          <p className="text-slate-400 text-[14px] font-medium">
-            {L("Trading Days", "Días de trading")} – {new Date().getFullYear()}
+          <p className={widgetTitleClass}>
+            <span className={widgetTitleTextClass}>
+              {L("Trading Days", "Días de trading")} – {new Date().getFullYear()}
+            </span>
+            <span className={widgetDragHintClass}>⠿</span>
           </p>
           <div className="mt-3 space-y-2 text-[14px] text-slate-300">
             <div className="flex items-center justify-between">
-              <span>{L("Total trading days", "Total de días de trading")}</span>
-              <span className="font-semibold">{totalTradingDays}</span>
+              <span>{L("Stock market total", "Total stock market")}</span>
+              <span className="font-semibold">{stock.total}</span>
             </div>
             <div className="flex items-center justify-between">
-              <span>{L("Days traded", "Días operados")}</span>
-              <span className="font-semibold text-emerald-300">{tradedDays}</span>
+              <span>{L("Stock days remaining", "Stock restantes")}</span>
+              <span className="font-semibold text-emerald-400">{stock.remaining}</span>
             </div>
             <div className="flex items-center justify-between">
-              <span>{L("Days not traded (so far)", "Días sin operar (hasta ahora)")}</span>
-              <span className="font-semibold text-sky-300">{missedDays}</span>
+              <span>{L("Futures total (Sun–Fri)", "Futuros total (Dom–Vie)")}</span>
+              <span className="font-semibold">{futures.total}</span>
             </div>
             <div className="flex items-center justify-between">
-              <span>{L("Trading days remaining", "Días de trading restantes")}</span>
-              <span className="font-semibold text-emerald-400">{remainingTradingDays}</span>
+              <span>{L("Futures remaining", "Futuros restantes")}</span>
+              <span className="font-semibold text-emerald-400">{futures.remaining}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span>{L("Crypto total (24/7)", "Cripto total (24/7)")}</span>
+              <span className="font-semibold">{crypto.total}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span>{L("Crypto remaining", "Cripto restantes")}</span>
+              <span className="font-semibold text-emerald-400">{crypto.remaining}</span>
+            </div>
+            <div className="pt-2 border-t border-slate-800/60 space-y-1 text-[13px] text-slate-400">
+              <div className="flex items-center justify-between">
+                <span>{L("Days traded (stock)", "Días operados (stock)")}</span>
+                <span className="font-semibold text-emerald-300">{stock.tradedDays}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span>{L("Days not traded (stock)", "Días sin operar (stock)")}</span>
+                <span className="font-semibold text-sky-300">{stock.missedDays}</span>
+              </div>
             </div>
           </div>
         </>
@@ -1879,8 +2104,11 @@ export default function DashboardPage() {
       ];
       return (
         <>
-          <p className="text-slate-400 text-[14px] font-medium">
-            {L("Economic News Calendar", "Calendario de noticias económicas")}
+          <p className={widgetTitleClass}>
+            <span className={widgetTitleTextClass}>
+              {L("Economic News Calendar", "Calendario de noticias económicas")}
+            </span>
+            <span className={widgetDragHintClass}>⠿</span>
           </p>
           <p className="text-[12px] text-slate-500 mt-1">
             {L(
@@ -1920,7 +2148,12 @@ export default function DashboardPage() {
         <div className="h-full flex flex-col">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <p className="text-xs text-slate-400">{L("P&L Calendar", "Calendario P&L")}</p>
+              <p className={widgetTitleClass}>
+                <span className={widgetTitleTextClass}>
+                  {L("P&L Calendar", "Calendario P&L")}
+                </span>
+                <span className={widgetDragHintClass}>⠿</span>
+              </p>
               <h2 className="text-2xl font-semibold text-slate-50">{monthLabel}</h2>
             </div>
 
@@ -2136,9 +2369,12 @@ export default function DashboardPage() {
     if (id === "weekly") {
       return (
         <>
-          <h3 className="text-xl font-semibold text-slate-50 mb-1">
-            {L("Weekly Summary", "Resumen semanal")}
-          </h3>
+          <p className={widgetTitleClass}>
+            <span className={widgetTitleTextClass}>
+              {L("Weekly Summary", "Resumen semanal")}
+            </span>
+            <span className={widgetDragHintClass}>⠿</span>
+          </p>
           <p className="text-[12px] text-emerald-300 mb-3">
             {L(
               `You are currently in week ${currentWeekOfYear} of ${new Date().getFullYear()}.`,

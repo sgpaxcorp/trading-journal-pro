@@ -15,6 +15,18 @@ export type JournalUiSettings = {
    * react-grid-layout layout object as JSON (whatever your JournalGrid stores in localStorage).
    */
   layout?: any;
+
+  /**
+   * Customizable journal checklist presets (per user).
+   */
+  checklists?: {
+    premarket?: string[];
+    inside?: string[];
+    after?: string[];
+    strategy?: string[];
+    impulses?: string[];
+    states?: string[];
+  };
 };
 
 export async function getJournalUiSettings(

@@ -420,6 +420,111 @@ function addMonthsToIso(startIso: string, monthsToAdd: number): string {
   return next.toISOString().slice(0, 10);
 }
 
+function toYMD(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function observedDate(date: Date): Date {
+  const day = date.getDay();
+  if (day === 6) return new Date(date.getFullYear(), date.getMonth(), date.getDate() - 1);
+  if (day === 0) return new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1);
+  return date;
+}
+
+function getNthWeekdayOfMonth(year: number, month: number, weekday: number, n: number): Date {
+  const firstOfMonth = new Date(year, month, 1);
+  const firstWeekdayOffset = (7 + weekday - firstOfMonth.getDay()) % 7;
+  const day = 1 + firstWeekdayOffset + 7 * (n - 1);
+  return new Date(year, month, day);
+}
+
+function getLastWeekdayOfMonth(year: number, month: number, weekday: number): Date {
+  const lastOfMonth = new Date(year, month + 1, 0);
+  const offsetBack = (7 + lastOfMonth.getDay() - weekday) % 7;
+  const day = lastOfMonth.getDate() - offsetBack;
+  return new Date(year, month, day);
+}
+
+function getEasterDate(year: number): Date {
+  const a = year % 19;
+  const b = Math.floor(year / 100);
+  const c = year % 100;
+  const d = Math.floor(b / 4);
+  const e = b % 4;
+  const f = Math.floor((b + 8) / 25);
+  const g = Math.floor((b - f + 1) / 3);
+  const h = (19 * a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4);
+  const k = c % 4;
+  const l = (32 + 2 * e + 2 * i - h - k) % 7;
+  const m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const month = Math.floor((h + l - 7 * m + 114) / 31);
+  const day = ((h + l - 7 * m + 114) % 31) + 1;
+  return new Date(year, month - 1, day);
+}
+
+function getUsMarketHolidayDates(year: number): string[] {
+  const holidays: string[] = [];
+  holidays.push(toYMD(observedDate(new Date(year, 0, 1)))); // New Year
+  holidays.push(toYMD(getNthWeekdayOfMonth(year, 0, 1, 3))); // MLK
+  holidays.push(toYMD(getNthWeekdayOfMonth(year, 1, 1, 3))); // Presidents
+  const easter = getEasterDate(year);
+  const goodFriday = new Date(easter.getFullYear(), easter.getMonth(), easter.getDate() - 2);
+  holidays.push(toYMD(goodFriday)); // Good Friday
+  holidays.push(toYMD(getLastWeekdayOfMonth(year, 4, 1))); // Memorial Day
+  holidays.push(toYMD(observedDate(new Date(year, 5, 19)))); // Juneteenth
+  holidays.push(toYMD(observedDate(new Date(year, 6, 4)))); // Independence Day
+  holidays.push(toYMD(getNthWeekdayOfMonth(year, 8, 1, 1))); // Labor Day
+  holidays.push(toYMD(getNthWeekdayOfMonth(year, 10, 4, 4))); // Thanksgiving
+  holidays.push(toYMD(observedDate(new Date(year, 11, 25)))); // Christmas
+  return holidays;
+}
+
+function computeTradingDayCounts(year: number) {
+  const jan1 = new Date(year, 0, 1);
+  const dec31 = new Date(year, 11, 31);
+  const today = new Date();
+  const todayStr = toYMD(today);
+  const holidaySet = new Set(getUsMarketHolidayDates(year));
+
+  let stockTotal = 0;
+  let stockRemaining = 0;
+  let futuresTotal = 0;
+  let futuresRemaining = 0;
+
+  for (let d = new Date(jan1); d <= dec31; d = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1)) {
+    const ds = toYMD(d);
+    const dow = d.getDay();
+    const isStock = dow !== 0 && dow !== 6 && !holidaySet.has(ds);
+    const isFutures = dow !== 6 && !holidaySet.has(ds); // Sunday–Friday
+    if (isStock) {
+      stockTotal++;
+      if (ds >= todayStr) stockRemaining++;
+    }
+    if (isFutures) {
+      futuresTotal++;
+      if (ds >= todayStr) futuresRemaining++;
+    }
+  }
+
+  const daysInYear = Math.round((dec31.getTime() - jan1.getTime()) / 86400000) + 1;
+  const dayOfYear = Math.floor((today.getTime() - jan1.getTime()) / 86400000) + 1;
+  const cryptoRemaining = Math.max(0, daysInYear - dayOfYear + 1);
+
+  return {
+    year,
+    stockTotal,
+    stockRemaining,
+    futuresTotal,
+    futuresRemaining,
+    cryptoTotal: daysInYear,
+    cryptoRemaining,
+  };
+}
+
 /* ================= Wizard ================= */
 type WizardStep = 0 | 1 | 2 | 3 | 4;
 
@@ -429,16 +534,16 @@ const STEP_TITLES_EN: Record<WizardStep, string> = {
   0: "Goal & Numbers",
   1: "Prepare",
   2: "Analysis",
-  3: "Strategy",
-  4: "Journal & Commit",
+  3: "Journal",
+  4: "Execution System & Strategy",
 };
 
 const STEP_TITLES_ES: Record<WizardStep, string> = {
   0: "Meta y números",
   1: "Preparación",
   2: "Análisis",
-  3: "Estrategia",
-  4: "Journal y compromiso",
+  3: "Journal",
+  4: "Sistema de ejecución y estrategia",
 };
 
 type AssistantLang = "en" | "es"; // stored in Supabase (inside growth plan record)
@@ -536,6 +641,8 @@ export default function GrowthPlanPage() {
 
   const onlyNum = (s: string) => s.replace(/[^\d.]/g, "");
 
+  const tradingDayCounts = useMemo(() => computeTradingDayCounts(new Date().getFullYear()), []);
+
   type GuidedTask = {
     id: string;
     label: string;
@@ -559,6 +666,22 @@ export default function GrowthPlanPage() {
   const journalNotesLen = useMemo(
     () => (stepsData.execution_and_journal?.notes ?? "").trim().length,
     [stepsData.execution_and_journal]
+  );
+  const systemDoCount = useMemo(
+    () => (stepsData.execution_and_journal?.system?.doList ?? []).filter((i) => (i.text ?? "").trim().length > 0).length,
+    [stepsData.execution_and_journal]
+  );
+  const systemDontCount = useMemo(
+    () => (stepsData.execution_and_journal?.system?.dontList ?? []).filter((i) => (i.text ?? "").trim().length > 0).length,
+    [stepsData.execution_and_journal]
+  );
+  const systemOrderCount = useMemo(
+    () => (stepsData.execution_and_journal?.system?.orderList ?? []).filter((i) => (i.text ?? "").trim().length > 0).length,
+    [stepsData.execution_and_journal]
+  );
+  const nonNegotiableCount = useMemo(
+    () => rules.filter((r) => (r.label ?? "").trim().length > 0 && (r.isActive ?? true)).length,
+    [rules]
   );
 
   const guidedTasksByStep = useMemo<Record<WizardStep, GuidedTask[]>>(() => {
@@ -656,18 +779,42 @@ export default function GrowthPlanPage() {
       ],
       3: [
         {
+          id: "journal_notes",
+          label: L("Describe how you will journal", "Describe cómo llevarás el journal"),
+          done: journalNotesLen >= 20,
+          anchor: "gp-journal-notes",
+        },
+      ],
+      4: [
+        {
+          id: "system_do",
+          label: L("Add at least 1 'Do' action", "Agrega al menos 1 acción 'Hacer'"),
+          done: systemDoCount > 0,
+          anchor: "gp-system-do",
+        },
+        {
+          id: "system_dont",
+          label: L("Add at least 1 'Don't' rule", "Agrega al menos 1 regla 'No hacer'"),
+          done: systemDontCount > 0,
+          anchor: "gp-system-dont",
+        },
+        {
+          id: "system_order",
+          label: L("Add at least 1 ordered step", "Agrega al menos 1 paso en orden"),
+          done: systemOrderCount > 0,
+          anchor: "gp-system-order",
+        },
+        {
           id: "strategy",
           label: L("Add at least 1 strategy", "Agrega al menos 1 estrategia"),
           done: strategyCount > 0,
           anchor: "gp-strategy-list",
         },
-      ],
-      4: [
         {
-          id: "journal_notes",
-          label: L("Describe how you will journal", "Describe cómo llevarás el journal"),
-          done: journalNotesLen >= 20,
-          anchor: "gp-journal-notes",
+          id: "non_negotiable_rules",
+          label: L("Add at least 1 non‑negotiable rule", "Agrega al menos 1 regla no negociable"),
+          done: nonNegotiableCount > 0,
+          anchor: "gp-rules",
         },
         {
           id: "commitment",
@@ -692,8 +839,12 @@ export default function GrowthPlanPage() {
     prepareCount,
     analysisStylesCount,
     stepsData.analysis,
-    strategyCount,
     journalNotesLen,
+    systemDoCount,
+    systemDontCount,
+    systemOrderCount,
+    strategyCount,
+    nonNegotiableCount,
     committed,
   ]);
 
@@ -920,8 +1071,8 @@ export default function GrowthPlanPage() {
               step: stepTitles[0],
             })) ||
             L(
-              "Loaded your Growth Plan. We'll go step-by-step: Goal & Numbers → Prepare → Analysis → Strategy → Journal & Commit.",
-              "Cargamos tu plan. Vamos paso a paso: Meta y números → Preparación → Análisis → Estrategia → Journal y compromiso."
+              "Loaded your Growth Plan. We'll go step-by-step: Goal & Numbers → Prepare → Analysis → Journal → Execution System & Strategy.",
+              "Cargamos tu plan. Vamos paso a paso: Meta y números → Preparación → Análisis → Journal → Sistema de ejecución y estrategia."
             );
           pushNeuroMessage(t);
                   } else {
@@ -1171,6 +1322,32 @@ export default function GrowthPlanPage() {
     }));
   }
 
+  function updateExecutionSystemList(
+    key: "doList" | "dontList" | "orderList",
+    items: GrowthPlanChecklistItem[]
+  ) {
+    setStepsData((prev) => ({
+      ...prev,
+      execution_and_journal: {
+        ...(prev.execution_and_journal ?? {}),
+        system: {
+          ...(prev.execution_and_journal?.system ?? {}),
+          [key]: items,
+        },
+      },
+    }));
+  }
+
+  function moveExecutionOrderItem(index: number, direction: -1 | 1) {
+    const list = [...(stepsData.execution_and_journal?.system?.orderList ?? [])];
+    const nextIndex = index + direction;
+    if (nextIndex < 0 || nextIndex >= list.length) return;
+    const item = list[index];
+    list.splice(index, 1);
+    list.splice(nextIndex, 0, item);
+    updateExecutionSystemList("orderList", list);
+  }
+
   const canGoNext = useMemo(() => {
     if (step !== 0) return true;
     const required = (guidedTasksByStep[0] ?? []).filter((t) => !t.optional);
@@ -1396,7 +1573,7 @@ export default function GrowthPlanPage() {
               "This turns your plan into a system:",
               "Esto convierte tu plan en un sistema:"
             )}{" "}
-            <b>{L("Prepare → Analysis → Strategy → Journal", "Preparar → Análisis → Estrategia → Journal")}</b>.{" "}
+            <b>{L("Prepare → Analysis → Journal → Execution System", "Preparar → Análisis → Journal → Sistema de ejecución")}</b>.{" "}
             {L(
               "Neuro and AI Coach will use this to coach you based on real execution.",
               "Neuro y el Coach IA usarán esto para guiarte según tu ejecución real."
@@ -1683,6 +1860,29 @@ export default function GrowthPlanPage() {
                   className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-slate-100 focus:border-emerald-400 outline-none"
                   placeholder="0"
                 />
+                <div className="mt-2 rounded-lg border border-slate-800 bg-slate-950/40 p-2 text-[11px] text-slate-400 space-y-1">
+                  <div className="text-slate-500 uppercase tracking-[0.2em]">
+                    {L("This year", "Este año")} {tradingDayCounts.year}
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span>{L("Stock market (Mon–Fri)", "Stock market (Lun–Vie)")}</span>
+                    <span className="font-semibold text-emerald-300">
+                      {tradingDayCounts.stockTotal} {L("total", "total")} · {tradingDayCounts.stockRemaining} {L("remaining", "restantes")}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span>{L("Futures (Sun–Fri)", "Futuros (Dom–Vie)")}</span>
+                    <span className="font-semibold text-emerald-300">
+                      {tradingDayCounts.futuresTotal} {L("total", "total")} · {tradingDayCounts.futuresRemaining} {L("remaining", "restantes")}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span>{L("Crypto (24/7)", "Cripto (24/7)")}</span>
+                    <span className="font-semibold text-emerald-300">
+                      {tradingDayCounts.cryptoTotal} {L("total", "total")} · {tradingDayCounts.cryptoRemaining} {L("remaining", "restantes")}
+                    </span>
+                  </div>
+                </div>
               </div>
 
               <div>
@@ -2075,64 +2275,6 @@ export default function GrowthPlanPage() {
               </div>
             </div>
 
-            {/* Rules */}
-            <div className="bg-slate-950/70 border border-slate-800 rounded-2xl p-4 space-y-3">
-              <p className="font-semibold text-slate-100">{L("Rules (Non-negotiables)", "Reglas (No negociables)")}</p>
-
-              <div className="space-y-2">
-                {rules.map((r) => (
-                  <label
-                    key={r.id}
-                    className="flex items-start gap-2 rounded-xl border border-slate-800 bg-slate-900/40 px-3 py-2 cursor-pointer"
-                    onClick={() => {
-                      // click area still works; actual toggle on checkbox below
-                    }}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={r.isActive ?? true}
-                      onChange={() => {
-                        toggleRule(r.id);
-                        fieldHelp("rules");
-                      }}
-                      className="mt-1 h-4 w-4 accent-emerald-400"
-                    />
-                    <div className="space-y-0.5">
-                      <div className="text-slate-100">
-                        {r.label}{" "}
-                        {r.isSuggested ? (
-                          <span className="text-[10px] ml-2 text-emerald-300/90 border border-emerald-500/20 px-2 py-px rounded-full">
-                            {L("suggested", "sugerida")}
-                          </span>
-                        ) : (
-                          <span className="text-[10px] ml-2 text-slate-400 border border-slate-700 px-2 py-px rounded-full">
-                            {L("custom", "personalizada")}
-                          </span>
-                        )}
-                      </div>
-                      {r.description ? <div className="text-xs text-slate-400">{r.description}</div> : null}
-                    </div>
-                  </label>
-                ))}
-              </div>
-
-              <div className="flex gap-2">
-                <input
-                  value={newRuleText}
-                  onFocus={() => fieldHelp("add_rule")}
-                  onChange={(e) => setNewRuleText(e.target.value)}
-                  className="flex-1 px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-slate-100 focus:border-emerald-400 outline-none"
-                  placeholder={L("Add your own rule (e.g., No revenge trading)", "Agrega tu propia regla (ej., No revenge trading)")}
-                />
-                <button
-                  type="button"
-                  onClick={addRule}
-                  className="px-4 py-2 rounded-xl bg-emerald-400 text-slate-950 font-semibold hover:bg-emerald-300 transition"
-                >
-                  {L("Add", "Agregar")}
-                </button>
-              </div>
-            </div>
           </div>
         )}
 
@@ -2207,7 +2349,7 @@ export default function GrowthPlanPage() {
               onChange={(e) =>
                 setStepsData((p) => ({ ...p, prepare: { ...(p.prepare ?? {}), notes: e.target.value } }))
               }
-              className="w-full mt-3 min-h-[110px] px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-slate-100 focus:border-emerald-400 outline-none"
+              className="w-full mt-3 min-h-27.5 px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-slate-100 focus:border-emerald-400 outline-none"
               placeholder={L(
                 "Optional notes (what invalidates trading today, what you must avoid, etc.)",
                 "Notas opcionales (qué invalida operar hoy, qué debes evitar, etc.)"
@@ -2280,7 +2422,7 @@ export default function GrowthPlanPage() {
               onChange={(e) =>
                 setStepsData((p) => ({ ...p, analysis: { ...(p.analysis ?? {}), notes: e.target.value } }))
               }
-              className="w-full mt-3 min-h-[130px] px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-slate-100 focus:border-emerald-400 outline-none"
+              className="w-full mt-3 min-h-32.5 px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-slate-100 focus:border-emerald-400 outline-none"
               placeholder={L(
                 "Describe your analysis process (confirmations, invalidations, what you avoid).",
                 "Describe tu proceso de análisis (confirmaciones, invalidaciones, qué evitas)."
@@ -2293,125 +2435,12 @@ export default function GrowthPlanPage() {
         {step === 3 && (
           <div id="gp-step-3" className="bg-slate-950/70 border border-slate-800 rounded-2xl p-4 space-y-2">
             <p className="font-semibold text-emerald-300">
-              {L("3) Strategy", "3) Estrategia")}
+              {L("3) Journal", "3) Journal")}
             </p>
             <p className="text-slate-400 text-sm">
               {L(
-                "Define your setups with entry/exit/management. The clearer this is, the sharper the coaching.",
-                "Define tus setups con entrada/salida/gestión. Mientras más claro, más preciso el coaching."
-              )}
-            </p>
-
-            <div id="gp-strategy-list" className="space-y-3">
-              {(stepsData.strategy?.strategies ?? []).map((s, idx) => (
-                <div key={idx} className="rounded-2xl border border-slate-800 bg-slate-900/40 p-3 space-y-2">
-                  <div className="flex items-center justify-between gap-2">
-                    <input
-                      value={s.name}
-                      onFocus={() => fieldHelp("strategy_name")}
-                      onChange={(e) => {
-                        const arr = [...(stepsData.strategy?.strategies ?? [])];
-                        arr[idx] = { ...arr[idx], name: e.target.value };
-                        updateStrategies(arr);
-                      }}
-                      className="flex-1 px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-slate-100 focus:border-emerald-400 outline-none"
-                      placeholder={L("Strategy name", "Nombre de estrategia")}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const arr = [...(stepsData.strategy?.strategies ?? [])];
-                        arr.splice(idx, 1);
-                        updateStrategies(arr);
-                        pushNeuroMessage(
-                          L(
-                            "Strategy removed. Keep only what you actually trade.",
-                            "Estrategia eliminada. Deja solo lo que realmente operas."
-                          )
-                        );
-                                              }}
-                      className="px-3 py-2 rounded-xl border border-slate-700 text-slate-300 hover:border-red-400/60 hover:text-red-300 transition"
-                    >
-                      ✕
-                    </button>
-                  </div>
-
-                  {[
-                    ["setup", L("Setup / Context", "Setup / Contexto")],
-                    ["entryRules", L("Entry rules (conditions)", "Reglas de entrada (condiciones)")],
-                    ["exitRules", L("Exit rules (TP / SL)", "Reglas de salida (TP / SL)")],
-                    ["managementRules", L("Management (trail, scale, etc.)", "Gestión (trail, scale, etc.)")],
-                    ["invalidation", L("Invalidation (when NOT valid)", "Invalidación (cuando NO es válido)")],
-                  ].map(([k, label]) => (
-                    <textarea
-                      key={k}
-                      value={(s as any)[k] ?? ""}
-                      onFocus={() => fieldHelp(`strategy_${k}`)}
-                      onChange={(e) => {
-                        const arr = [...(stepsData.strategy?.strategies ?? [])];
-                        arr[idx] = { ...arr[idx], [k]: e.target.value };
-                        updateStrategies(arr);
-                      }}
-                      className="w-full min-h-[72px] px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-slate-100 focus:border-emerald-400 outline-none"
-                      placeholder={label}
-                    />
-                  ))}
-                </div>
-              ))}
-            </div>
-
-            <button
-              type="button"
-              onClick={() => {
-                const arr = [...(stepsData.strategy?.strategies ?? [])];
-                arr.unshift({
-                  name: L("New Strategy", "Nueva estrategia"),
-                  setup: "",
-                  entryRules: "",
-                  exitRules: "",
-                  managementRules: "",
-                  invalidation: "",
-                  instruments: [],
-                  timeframe: "",
-                });
-                updateStrategies(arr);
-                pushNeuroMessage(
-                  L(
-                    "Strategy added. Tip: write entries as YES/NO criteria, not vibes.",
-                    "Estrategia agregada. Tip: escribe criterios SI/NO, no sensaciones."
-                  )
-                );
-                              }}
-              className="px-4 py-2 rounded-xl border border-emerald-400 text-emerald-300 hover:bg-emerald-400/10 transition"
-            >
-              {L("+ Add strategy", "+ Agregar estrategia")}
-            </button>
-
-            <textarea
-              value={stepsData.strategy?.notes ?? ""}
-              onFocus={() => fieldHelp("strategy_notes")}
-              onChange={(e) =>
-                setStepsData((p) => ({ ...p, strategy: { ...(p.strategy ?? {}), notes: e.target.value } }))
-              }
-              className="w-full mt-3 min-h-[130px] px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-slate-100 focus:border-emerald-400 outline-none"
-              placeholder={L(
-                "General strategy notes (when to stop, what to avoid, etc.)",
-                "Notas generales de estrategia (cuándo parar, qué evitar, etc.)"
-              )}
-            />
-          </div>
-        )}
-
-        {/* ================= STEP 4 ================= */}
-        {step === 4 && (
-          <div id="gp-step-4" className="bg-slate-950/70 border border-slate-800 rounded-2xl p-4 space-y-2">
-            <p className="font-semibold text-emerald-300">
-              {L("4) Journal & Commit", "4) Journal y compromiso")}
-            </p>
-            <p className="text-slate-400 text-sm">
-              {L(
-                "AI Coach will compare your journal execution against this plan (imports, emotions, rules, screenshots).",
-                "El Coach IA comparará tu ejecución del journal con este plan (importaciones, emociones, reglas, screenshots)."
+                "Describe how you will journal every session. This becomes your evidence log for discipline.",
+                "Describe cómo llevarás el journal en cada sesión. Esto será tu evidencia de disciplina."
               )}
             </p>
 
@@ -2425,12 +2454,365 @@ export default function GrowthPlanPage() {
                   execution_and_journal: { ...(p.execution_and_journal ?? {}), notes: e.target.value },
                 }))
               }
-              className="w-full mt-2 min-h-[150px] px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-slate-100 focus:border-emerald-400 outline-none"
+              className="w-full mt-2 min-h-37.5 px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-slate-100 focus:border-emerald-400 outline-none"
               placeholder={L(
                 "Describe how you will journal: imports, emotions, reasons for entry, rules followed/broken, screenshots, etc.",
                 "Describe cómo llevarás el journal: importaciones, emociones, razones de entrada, reglas seguidas/rotas, screenshots, etc."
               )}
             />
+          </div>
+        )}
+
+        {/* ================= STEP 4 ================= */}
+        {step === 4 && (
+          <div id="gp-step-4" className="bg-slate-950/70 border border-slate-800 rounded-2xl p-4 space-y-2">
+            <p className="font-semibold text-emerald-300">
+              {L("4) Execution System & Strategy", "4) Sistema de ejecución y estrategia")}
+            </p>
+            <p className="text-slate-400 text-sm">
+              {L(
+                "Build your execution system, non‑negotiables, and strategy. This becomes the checklist you review before each session.",
+                "Construye tu sistema de ejecución, no negociables y estrategia. Esto se convierte en el checklist que revisas antes de cada sesión."
+              )}
+            </p>
+
+            <div className="mt-3 rounded-2xl border border-slate-800 bg-slate-900/40 p-3 space-y-2">
+              <p className="text-slate-100 font-semibold">
+                {L("Execution System", "Sistema de ejecución")}
+              </p>
+              <p className="text-slate-400 text-sm">
+                {L(
+                  "Write exactly what you will do, what you will NOT do, and the order you must follow. This becomes your dashboard system widget.",
+                  "Escribe exactamente qué harás, qué NO harás y el orden que debes seguir. Esto se mostrará como widget en el dashboard."
+                )}
+              </p>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-2">
+                {/* DO */}
+                <div id="gp-system-do" className="rounded-xl border border-slate-800 bg-slate-950/60 p-3 space-y-2">
+                  <p className="text-[11px] uppercase tracking-[0.2em] text-emerald-300">
+                    {L("Do", "Hacer")}
+                  </p>
+                  {(stepsData.execution_and_journal?.system?.doList ?? []).map((item, idx) => (
+                    <div key={item.id} className="flex items-center gap-2">
+                      <input
+                        value={item.text}
+                        onFocus={() => fieldHelp("system_do")}
+                        onChange={(e) => {
+                          const items = [...(stepsData.execution_and_journal?.system?.doList ?? [])];
+                          items[idx] = { ...items[idx], text: e.target.value };
+                          updateExecutionSystemList("doList", items);
+                        }}
+                        className="flex-1 px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-slate-100 focus:border-emerald-400 outline-none"
+                        placeholder={L("Add a rule you must do", "Agrega una regla que debes hacer")}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const items = [...(stepsData.execution_and_journal?.system?.doList ?? [])];
+                          items.splice(idx, 1);
+                          updateExecutionSystemList("doList", items);
+                        }}
+                        className="px-2 py-2 rounded-lg border border-slate-700 text-slate-300 hover:border-red-400/60 hover:text-red-300 transition"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const items = [...(stepsData.execution_and_journal?.system?.doList ?? [])];
+                      items.push({ id: uuid(), text: L("New DO rule", "Nueva regla de HACER"), isSuggested: false, isActive: true });
+                      updateExecutionSystemList("doList", items);
+                      fieldHelp("system_do");
+                    }}
+                    className="px-3 py-2 rounded-lg border border-emerald-400 text-emerald-300 hover:bg-emerald-400/10 transition text-sm"
+                  >
+                    {L("+ Add", "+ Agregar")}
+                  </button>
+                </div>
+
+                {/* DON'T */}
+                <div id="gp-system-dont" className="rounded-xl border border-slate-800 bg-slate-950/60 p-3 space-y-2">
+                  <p className="text-[11px] uppercase tracking-[0.2em] text-rose-300">
+                    {L("Don't", "No hacer")}
+                  </p>
+                  {(stepsData.execution_and_journal?.system?.dontList ?? []).map((item, idx) => (
+                    <div key={item.id} className="flex items-center gap-2">
+                      <input
+                        value={item.text}
+                        onFocus={() => fieldHelp("system_dont")}
+                        onChange={(e) => {
+                          const items = [...(stepsData.execution_and_journal?.system?.dontList ?? [])];
+                          items[idx] = { ...items[idx], text: e.target.value };
+                          updateExecutionSystemList("dontList", items);
+                        }}
+                        className="flex-1 px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-slate-100 focus:border-emerald-400 outline-none"
+                        placeholder={L("Add a rule you must avoid", "Agrega una regla que debes evitar")}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const items = [...(stepsData.execution_and_journal?.system?.dontList ?? [])];
+                          items.splice(idx, 1);
+                          updateExecutionSystemList("dontList", items);
+                        }}
+                        className="px-2 py-2 rounded-lg border border-slate-700 text-slate-300 hover:border-red-400/60 hover:text-red-300 transition"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const items = [...(stepsData.execution_and_journal?.system?.dontList ?? [])];
+                      items.push({ id: uuid(), text: L("New DON'T rule", "Nueva regla de NO HACER"), isSuggested: false, isActive: true });
+                      updateExecutionSystemList("dontList", items);
+                      fieldHelp("system_dont");
+                    }}
+                    className="px-3 py-2 rounded-lg border border-emerald-400 text-emerald-300 hover:bg-emerald-400/10 transition text-sm"
+                  >
+                    {L("+ Add", "+ Agregar")}
+                  </button>
+                </div>
+
+                {/* ORDER */}
+                <div id="gp-system-order" className="rounded-xl border border-slate-800 bg-slate-950/60 p-3 space-y-2">
+                  <p className="text-[11px] uppercase tracking-[0.2em] text-sky-300">
+                    {L("Order", "Orden")}
+                  </p>
+                  {(stepsData.execution_and_journal?.system?.orderList ?? []).map((item, idx) => (
+                    <div key={item.id} className="flex items-center gap-2">
+                      <span className="text-xs text-slate-400 w-5 text-right">{idx + 1}.</span>
+                      <input
+                        value={item.text}
+                        onFocus={() => fieldHelp("system_order")}
+                        onChange={(e) => {
+                          const items = [...(stepsData.execution_and_journal?.system?.orderList ?? [])];
+                          items[idx] = { ...items[idx], text: e.target.value };
+                          updateExecutionSystemList("orderList", items);
+                        }}
+                        className="flex-1 px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-slate-100 focus:border-emerald-400 outline-none"
+                        placeholder={L("Step you must follow in order", "Paso que debes seguir en orden")}
+                      />
+                      <div className="flex flex-col gap-1">
+                        <button
+                          type="button"
+                          onClick={() => moveExecutionOrderItem(idx, -1)}
+                          className="px-2 py-1 rounded-lg border border-slate-700 text-slate-300 hover:border-emerald-400/60 hover:text-emerald-300 transition"
+                          title={L("Move up", "Subir")}
+                        >
+                          ↑
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => moveExecutionOrderItem(idx, 1)}
+                          className="px-2 py-1 rounded-lg border border-slate-700 text-slate-300 hover:border-emerald-400/60 hover:text-emerald-300 transition"
+                          title={L("Move down", "Bajar")}
+                        >
+                          ↓
+                        </button>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const items = [...(stepsData.execution_and_journal?.system?.orderList ?? [])];
+                          items.splice(idx, 1);
+                          updateExecutionSystemList("orderList", items);
+                        }}
+                        className="px-2 py-2 rounded-lg border border-slate-700 text-slate-300 hover:border-red-400/60 hover:text-red-300 transition"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const items = [...(stepsData.execution_and_journal?.system?.orderList ?? [])];
+                      items.push({ id: uuid(), text: L("New step", "Nuevo paso"), isSuggested: false, isActive: true });
+                      updateExecutionSystemList("orderList", items);
+                      fieldHelp("system_order");
+                    }}
+                    className="px-3 py-2 rounded-lg border border-emerald-400 text-emerald-300 hover:bg-emerald-400/10 transition text-sm"
+                  >
+                    {L("+ Add", "+ Agregar")}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Rules (Non-negotiables) */}
+            <div id="gp-rules" className="mt-3 bg-slate-950/70 border border-slate-800 rounded-2xl p-4 space-y-3">
+              <p className="font-semibold text-slate-100">{L("Rules (Non-negotiables)", "Reglas (No negociables)")}</p>
+
+              <div className="space-y-2">
+                {rules.map((r) => (
+                  <label
+                    key={r.id}
+                    className="flex items-start gap-2 rounded-xl border border-slate-800 bg-slate-900/40 px-3 py-2 cursor-pointer"
+                    onClick={() => {
+                      // click area still works; actual toggle on checkbox below
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={r.isActive ?? true}
+                      onChange={() => {
+                        toggleRule(r.id);
+                        fieldHelp("rules");
+                      }}
+                      className="mt-1 h-4 w-4 accent-emerald-400"
+                    />
+                    <div className="space-y-0.5">
+                      <div className="text-slate-100">
+                        {r.label}{" "}
+                        {r.isSuggested ? (
+                          <span className="text-[10px] ml-2 text-emerald-300/90 border border-emerald-500/20 px-2 py-px rounded-full">
+                            {L("suggested", "sugerida")}
+                          </span>
+                        ) : (
+                          <span className="text-[10px] ml-2 text-slate-400 border border-slate-700 px-2 py-px rounded-full">
+                            {L("custom", "personalizada")}
+                          </span>
+                        )}
+                      </div>
+                      {r.description ? <div className="text-xs text-slate-400">{r.description}</div> : null}
+                    </div>
+                  </label>
+                ))}
+              </div>
+
+              <div className="flex gap-2">
+                <input
+                  value={newRuleText}
+                  onFocus={() => fieldHelp("add_rule")}
+                  onChange={(e) => setNewRuleText(e.target.value)}
+                  className="flex-1 px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-slate-100 focus:border-emerald-400 outline-none"
+                  placeholder={L("Add your own rule (e.g., No revenge trading)", "Agrega tu propia regla (ej., No revenge trading)")}
+                />
+                <button
+                  type="button"
+                  onClick={addRule}
+                  className="px-4 py-2 rounded-xl bg-emerald-400 text-slate-950 font-semibold hover:bg-emerald-300 transition"
+                >
+                  {L("Add", "Agregar")}
+                </button>
+              </div>
+            </div>
+
+            {/* Strategy */}
+            <div className="mt-3 bg-slate-950/70 border border-slate-800 rounded-2xl p-4 space-y-2">
+              <p className="font-semibold text-emerald-300">
+                {L("Strategy (Setups)", "Estrategia (setups)")}
+              </p>
+              <p className="text-slate-400 text-sm">
+                {L(
+                  "Define your setups with entry/exit/management. The clearer this is, the sharper the coaching.",
+                  "Define tus setups con entrada/salida/gestión. Mientras más claro, más preciso el coaching."
+                )}
+              </p>
+
+              <div id="gp-strategy-list" className="space-y-3">
+                {(stepsData.strategy?.strategies ?? []).map((s, idx) => (
+                  <div key={idx} className="rounded-2xl border border-slate-800 bg-slate-900/40 p-3 space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <input
+                        value={s.name}
+                        onFocus={() => fieldHelp("strategy_name")}
+                        onChange={(e) => {
+                          const arr = [...(stepsData.strategy?.strategies ?? [])];
+                          arr[idx] = { ...arr[idx], name: e.target.value };
+                          updateStrategies(arr);
+                        }}
+                        className="flex-1 px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-slate-100 focus:border-emerald-400 outline-none"
+                        placeholder={L("Strategy name", "Nombre de estrategia")}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const arr = [...(stepsData.strategy?.strategies ?? [])];
+                          arr.splice(idx, 1);
+                          updateStrategies(arr);
+                          pushNeuroMessage(
+                            L(
+                              "Strategy removed. Keep only what you actually trade.",
+                              "Estrategia eliminada. Deja solo lo que realmente operas."
+                            )
+                          );
+                        }}
+                        className="px-3 py-2 rounded-xl border border-slate-700 text-slate-300 hover:border-red-400/60 hover:text-red-300 transition"
+                      >
+                        ✕
+                      </button>
+                    </div>
+
+                    {[
+                      ["setup", L("Setup / Context", "Setup / Contexto")],
+                      ["entryRules", L("Entry rules (conditions)", "Reglas de entrada (condiciones)")],
+                      ["exitRules", L("Exit rules (TP / SL)", "Reglas de salida (TP / SL)")],
+                      ["managementRules", L("Management (trail, scale, etc.)", "Gestión (trail, scale, etc.)")],
+                      ["invalidation", L("Invalidation (when NOT valid)", "Invalidación (cuando NO es válido)")],
+                    ].map(([k, label]) => (
+                      <textarea
+                        key={k}
+                        value={(s as any)[k] ?? ""}
+                        onFocus={() => fieldHelp(`strategy_${k}`)}
+                        onChange={(e) => {
+                          const arr = [...(stepsData.strategy?.strategies ?? [])];
+                          arr[idx] = { ...arr[idx], [k]: e.target.value };
+                          updateStrategies(arr);
+                        }}
+                        className="w-full min-h-18 px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-slate-100 focus:border-emerald-400 outline-none"
+                        placeholder={label}
+                      />
+                    ))}
+                  </div>
+                ))}
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  const arr = [...(stepsData.strategy?.strategies ?? [])];
+                  arr.unshift({
+                    name: L("New Strategy", "Nueva estrategia"),
+                    setup: "",
+                    entryRules: "",
+                    exitRules: "",
+                    managementRules: "",
+                    invalidation: "",
+                    instruments: [],
+                    timeframe: "",
+                  });
+                  updateStrategies(arr);
+                  pushNeuroMessage(
+                    L(
+                      "Strategy added. Tip: write entries as YES/NO criteria, not vibes.",
+                      "Estrategia agregada. Tip: escribe criterios SI/NO, no sensaciones."
+                    )
+                  );
+                }}
+                className="px-4 py-2 rounded-xl border border-emerald-400 text-emerald-300 hover:bg-emerald-400/10 transition"
+              >
+                {L("+ Add strategy", "+ Agregar estrategia")}
+              </button>
+
+              <textarea
+                value={stepsData.strategy?.notes ?? ""}
+                onFocus={() => fieldHelp("strategy_notes")}
+                onChange={(e) =>
+                  setStepsData((p) => ({ ...p, strategy: { ...(p.strategy ?? {}), notes: e.target.value } }))
+                }
+                className="w-full mt-3 min-h-32.5 px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-slate-100 focus:border-emerald-400 outline-none"
+                placeholder={L(
+                  "General strategy notes (when to stop, what to avoid, etc.)",
+                  "Notas generales de estrategia (cuándo parar, qué evitar, etc.)"
+                )}
+              />
+            </div>
 
             <label id="gp-commitment" className="flex items-start gap-2 text-slate-300 cursor-pointer mt-2">
               <input

@@ -71,14 +71,17 @@ export function LibraryScreen() {
   const styles = useMemo(() => createStyles(colors), [colors]);
   const [items, setItems] = useState<ResourceItem[]>([]);
   const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!user?.id || !supabaseMobile) return;
     let cancelled = false;
 
-    async function loadResources() {
-      setLoading(true);
+    async function loadResources(isRefresh = false) {
+      if (!isRefresh) {
+        setLoading(true);
+      }
       setError(null);
 
       const accountId = await fetchActiveAccountId();
@@ -89,7 +92,6 @@ export function LibraryScreen() {
         .eq("user_id", user.id);
 
       if (accountId) query = query.eq("account_id", accountId);
-      else query = query.is("account_id", null);
 
       const { data, error: loadError } = await query.order("created_at", {
         ascending: false,
@@ -109,7 +111,9 @@ export function LibraryScreen() {
         } else {
           setItems(Array.isArray(data) ? (data as ResourceItem[]) : []);
         }
-        setLoading(false);
+        if (!isRefresh) {
+          setLoading(false);
+        }
       }
     }
 
@@ -120,6 +124,36 @@ export function LibraryScreen() {
     };
   }, [language, user?.id]);
 
+  async function handleRefresh() {
+    if (!user?.id || !supabaseMobile) return;
+    setRefreshing(true);
+    try {
+      const accountId = await fetchActiveAccountId();
+      let query = supabaseMobile
+        .from(TABLE)
+        .select("*")
+        .eq("user_id", user.id);
+      if (accountId) query = query.eq("account_id", accountId);
+      const { data, error: loadError } = await query.order("created_at", {
+        ascending: false,
+      });
+      if (loadError) {
+        setError(
+          t(
+            language,
+            "We couldn't load your library yet.",
+            "No pudimos cargar tu biblioteca aún."
+          )
+        );
+        setItems([]);
+      } else {
+        setItems(Array.isArray(data) ? (data as ResourceItem[]) : []);
+      }
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
   return (
     <ScreenScaffold
       title={t(language, "Library", "Biblioteca")}
@@ -128,6 +162,8 @@ export function LibraryScreen() {
         "Your saved links, books, and notes from the web app.",
         "Tus links, libros y notas guardadas desde la web."
       )}
+      refreshing={refreshing}
+      onRefresh={handleRefresh}
     >
       {loading ? (
         <View style={styles.loadingRow}>

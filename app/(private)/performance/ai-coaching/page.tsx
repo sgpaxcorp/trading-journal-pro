@@ -299,6 +299,19 @@ function parseNotesJson(raw: unknown): Record<string, any> | null {
   }
 }
 
+function toShortList(raw: any, max = 6): string[] {
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw.map((x) => String(x)).filter(Boolean).slice(0, max);
+  if (typeof raw === "string") return raw.split(",").map((x) => x.trim()).filter(Boolean).slice(0, max);
+  return [];
+}
+
+function clampRating(raw: any): number | null {
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return null;
+  return Math.max(1, Math.min(5, Math.round(n)));
+}
+
 function timeToMinutes(raw: string | null | undefined): number | null {
   if (!raw) return null;
   const s = String(raw).trim();
@@ -734,6 +747,34 @@ function compactSessionForAi(entry: any, tradesForDate?: TradesPayload | null) {
   const postFromNotes =
     typeof parsedNotes?.post === "string" ? stripHtml(parsedNotes.post) : "";
 
+  const rawChecklists =
+    parsedNotes?.checklists ||
+    parsedNotes?.journal_checklists ||
+    parsedNotes?.journalChecklists ||
+    parsedNotes?.checklist ||
+    {};
+  const rawMindset =
+    parsedNotes?.mindset ||
+    parsedNotes?.journal_mindset ||
+    parsedNotes?.journalMindset ||
+    {};
+
+  const checklist = {
+    premarket: toShortList(rawChecklists?.premarket, 6),
+    inside: toShortList(rawChecklists?.inside, 6),
+    after: toShortList(rawChecklists?.after, 6),
+    strategy: toShortList(rawChecklists?.strategy, 6),
+    impulses: toShortList(rawChecklists?.impulses, 6),
+    states: toShortList(rawChecklists?.states, 6),
+  };
+
+  const mindset = {
+    emotional_balance: clampRating(rawMindset?.emotional_balance),
+    impulse_control: clampRating(rawMindset?.impulse_control),
+    setup_quality: clampRating(rawMindset?.setup_quality),
+    probability: clampRating(rawMindset?.probability),
+  };
+
   // Common note fields across variations (you can extend later)
   const premarket =
     entry?.premarket ||
@@ -802,6 +843,8 @@ function compactSessionForAi(entry: any, tradesForDate?: TradesPayload | null) {
       notes: clampText(post?.notes, 340),
     },
     notes: clampText(notes, 520),
+    checklists: checklist,
+    mindset,
     trades: {
       entries: normalizedEntries,
       exits: normalizedExits,

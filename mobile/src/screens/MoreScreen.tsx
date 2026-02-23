@@ -1,6 +1,6 @@
 import { Alert, Linking, Platform, Pressable, StyleSheet, Switch, Text, TextInput, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as Notifications from "expo-notifications";
 import * as Device from "expo-device";
 import Constants from "expo-constants";
@@ -11,7 +11,7 @@ import { useLanguage } from "../lib/LanguageContext";
 import { t } from "../lib/i18n";
 import { useSupabaseUser } from "../lib/useSupabaseUser";
 import { supabaseMobile } from "../lib/supabase";
-import { LIGHT_COLORS, type ThemeColors } from "../theme";
+import { type ThemeColors } from "../theme";
 import { useTheme } from "../lib/ThemeContext";
 
 type Entitlement = {
@@ -44,6 +44,15 @@ export function SettingsScreen() {
   const [planLoading, setPlanLoading] = useState(false);
   const [currentPlan, setCurrentPlan] = useState<"core" | "advanced" | null>(null);
   const [planStatus, setPlanStatus] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   async function handleSignOut() {
     if (!supabaseMobile) {
@@ -66,43 +75,38 @@ export function SettingsScreen() {
     );
   }
 
-  useEffect(() => {
+  const loadProfile = useCallback(async () => {
     if (!supabaseMobile || !user?.id) return;
     const sb = supabaseMobile;
     const userId = user.id;
-    let active = true;
-
-    async function loadProfile() {
-      try {
-        setProfileLoading(true);
-        setProfileError(null);
-        const { data, error } = await sb
-          .from("profiles")
-          .select("first_name,last_name,phone,postal_address")
-          .eq("id", userId)
-          .maybeSingle();
-        if (error) throw error;
-        if (!active) return;
-        setProfile({
-          firstName: data?.first_name ?? "",
-          lastName: data?.last_name ?? "",
-          phone: data?.phone ?? "",
-          address: data?.postal_address ?? "",
-        });
-      } catch (err: any) {
-        if (!active) return;
-        setProfileError(err?.message ?? "Failed to load profile.");
-      } finally {
-        if (!active) return;
-        setProfileLoading(false);
-      }
+    try {
+      setProfileLoading(true);
+      setProfileError(null);
+      const { data, error } = await sb
+        .from("profiles")
+        .select("first_name,last_name,phone,postal_address")
+        .eq("id", userId)
+        .maybeSingle();
+      if (error) throw error;
+      if (!mountedRef.current) return;
+      setProfile({
+        firstName: data?.first_name ?? "",
+        lastName: data?.last_name ?? "",
+        phone: data?.phone ?? "",
+        address: data?.postal_address ?? "",
+      });
+    } catch (err: any) {
+      if (!mountedRef.current) return;
+      setProfileError(err?.message ?? "Failed to load profile.");
+    } finally {
+      if (!mountedRef.current) return;
+      setProfileLoading(false);
     }
-
-    loadProfile();
-    return () => {
-      active = false;
-    };
   }, [user?.id]);
+
+  useEffect(() => {
+    loadProfile();
+  }, [loadProfile]);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -171,70 +175,65 @@ export function SettingsScreen() {
     };
   }, [user?.id, language]);
 
-  useEffect(() => {
+  const normalizePlan = useCallback((raw: unknown): "core" | "advanced" | null => {
+    const v = String(raw ?? "").toLowerCase();
+    if (v.includes("advanced")) return "advanced";
+    if (v.includes("core")) return "core";
+    return null;
+  }, []);
+
+  const isActiveStatus = useCallback((status?: string | null) => {
+    const s = String(status ?? "").toLowerCase();
+    return ["active", "trialing", "past_due"].includes(s);
+  }, []);
+
+  const loadPlan = useCallback(async () => {
     if (!user?.id) return;
-    let active = true;
+    try {
+      setPlanLoading(true);
+      let plan: "core" | "advanced" | null = null;
+      let status: string | null = null;
 
-    const normalizePlan = (raw: unknown): "core" | "advanced" | null => {
-      const v = String(raw ?? "").toLowerCase();
-      if (v.includes("advanced")) return "advanced";
-      if (v.includes("core")) return "core";
-      return null;
-    };
-
-    const isActiveStatus = (status?: string | null) => {
-      const s = String(status ?? "").toLowerCase();
-      return ["active", "trialing", "past_due"].includes(s);
-    };
-
-    async function loadPlan() {
-      try {
-        setPlanLoading(true);
-        let plan: "core" | "advanced" | null = null;
-        let status: string | null = null;
-
-        if (supabaseMobile) {
-          const { data, error } = await supabaseMobile
-            .from("profiles")
-            .select("plan, subscription_status")
-            .eq("id", user.id)
-            .maybeSingle();
-          if (!error && data) {
-            plan = normalizePlan((data as any)?.plan);
-            status = String((data as any)?.subscription_status ?? "");
-          }
+      if (supabaseMobile) {
+        const { data, error } = await supabaseMobile
+          .from("profiles")
+          .select("plan, subscription_status")
+          .eq("id", user.id)
+          .maybeSingle();
+        if (!error && data) {
+          plan = normalizePlan((data as any)?.plan);
+          status = String((data as any)?.subscription_status ?? "");
         }
-
-        if (!plan || !isActiveStatus(status)) {
-          const res = await apiGet<{ entitlements: Entitlement[] }>("/api/entitlements/list");
-          const entitlements = res?.entitlements ?? [];
-          const activeEntitlements = entitlements.filter((e) => isActiveStatus(e.status));
-          const entPlan =
-            activeEntitlements.find((e) => normalizePlan(e.entitlement_key)) ??
-            activeEntitlements.find((e) => normalizePlan(e.metadata?.planId || e.metadata?.plan));
-
-          if (entPlan) {
-            plan = normalizePlan(entPlan.entitlement_key || entPlan.metadata?.planId || entPlan.metadata?.plan);
-            status = entPlan.status ?? status;
-          }
-        }
-
-        if (!active) return;
-        setCurrentPlan(plan);
-        setPlanStatus(status);
-      } catch {
-        if (!active) return;
-      } finally {
-        if (!active) return;
-        setPlanLoading(false);
       }
-    }
 
+      if (!plan || !isActiveStatus(status)) {
+        const res = await apiGet<{ entitlements: Entitlement[] }>("/api/entitlements/list");
+        const entitlements = res?.entitlements ?? [];
+        const activeEntitlements = entitlements.filter((e) => isActiveStatus(e.status));
+        const entPlan =
+          activeEntitlements.find((e) => normalizePlan(e.entitlement_key)) ??
+          activeEntitlements.find((e) => normalizePlan(e.metadata?.planId || e.metadata?.plan));
+
+        if (entPlan) {
+          plan = normalizePlan(entPlan.entitlement_key || entPlan.metadata?.planId || entPlan.metadata?.plan);
+          status = entPlan.status ?? status;
+        }
+      }
+
+      if (!mountedRef.current) return;
+      setCurrentPlan(plan);
+      setPlanStatus(status);
+    } catch {
+      if (!mountedRef.current) return;
+    } finally {
+      if (!mountedRef.current) return;
+      setPlanLoading(false);
+    }
+  }, [isActiveStatus, normalizePlan, user?.id]);
+
+  useEffect(() => {
     loadPlan();
-    return () => {
-      active = false;
-    };
-  }, [user?.id]);
+  }, [loadPlan]);
 
   async function handleSaveProfile() {
     if (!supabaseMobile || !user?.id) return;
@@ -351,6 +350,14 @@ export function SettingsScreen() {
 
 
   const styles = useMemo(() => createStyles(colors), [colors]);
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await Promise.all([loadProfile(), loadPlan()]);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [loadPlan, loadProfile]);
 
   return (
     <ScreenScaffold
@@ -360,6 +367,8 @@ export function SettingsScreen() {
         "Manage your account, preferences, and security.",
         "Gestiona tu cuenta, preferencias y seguridad."
       )}
+      refreshing={refreshing}
+      onRefresh={handleRefresh}
     >
       <View style={styles.profileCard}>
         <Text style={styles.profileTitle}>{t(language, "Account", "Cuenta")}</Text>
@@ -510,7 +519,7 @@ export function SettingsScreen() {
             onValueChange={handleToggleNotifications}
             disabled={!notificationReady || notificationLoading}
             trackColor={{ false: colors.border, true: colors.primary }}
-            thumbColor={notificationEnabled ? "#0D1F1A" : "#1F2A3A"}
+            thumbColor={notificationEnabled ? colors.card : colors.border}
           />
         </View>
         {notificationStatus !== "granted" ? (
@@ -541,7 +550,7 @@ export function SettingsScreen() {
             value={themeMode === "light"}
             onValueChange={(value) => setMode(value ? "light" : "neuro")}
             trackColor={{ false: colors.border, true: colors.primary }}
-            thumbColor={themeMode === "light" ? "#0D1F1A" : "#1F2A3A"}
+            thumbColor={themeMode === "light" ? colors.card : colors.border}
           />
         </View>
       </View>
@@ -572,7 +581,6 @@ export function SettingsScreen() {
 }
 
 const createStyles = (colors: ThemeColors) => {
-  const isLight = colors.background === LIGHT_COLORS.background;
   return StyleSheet.create({
     profileCard: {
       borderRadius: 12,
@@ -644,7 +652,7 @@ const createStyles = (colors: ThemeColors) => {
     },
     dangerButton: {
       borderRadius: 10,
-      backgroundColor: "#7F1D1D",
+      backgroundColor: colors.danger,
       alignItems: "center",
       paddingVertical: 10,
     },
@@ -652,7 +660,7 @@ const createStyles = (colors: ThemeColors) => {
       opacity: 0.6,
     },
     saveButtonText: {
-      color: isLight ? "#F5FBFF" : "#061122",
+      color: colors.onPrimary,
       fontSize: 12,
       fontWeight: "700",
     },
@@ -694,7 +702,7 @@ const createStyles = (colors: ThemeColors) => {
     },
     languageButtonActive: {
       borderColor: colors.primary,
-      backgroundColor: isLight ? "#E2F3EE" : "#0F2C2A",
+      backgroundColor: colors.successSoft,
     },
     languageButtonText: {
       color: colors.textPrimary,
@@ -705,13 +713,13 @@ const createStyles = (colors: ThemeColors) => {
       marginTop: 4,
       borderRadius: 10,
       borderWidth: 1,
-      borderColor: isLight ? "#E3B6C6" : "#8A3153",
-      backgroundColor: isLight ? "#FFE6EE" : "#2A1020",
+      borderColor: colors.dangerBorder,
+      backgroundColor: colors.dangerSoft,
       alignItems: "center",
       paddingVertical: 10,
     },
     signOutText: {
-      color: isLight ? "#8A3153" : "#FF9FBD",
+      color: colors.dangerText,
       fontWeight: "700",
       fontSize: 13,
     },

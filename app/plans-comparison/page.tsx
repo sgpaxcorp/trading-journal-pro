@@ -66,7 +66,9 @@ const rows: PlanRow[] = [
   { label: "Cashflow tracking", core: true, advanced: true },
   { label: "Profit & Loss Track (business accounting)", core: false, advanced: true },
   { label: "PDF reports", core: false, advanced: true },
-  { label: "AI summary report", core: false, advanced: true },
+  { label: "Weekly coaching report (email + in-app, Saturdays 9 AM EST)", core: "Bi-weekly", advanced: "Weekly" },
+  { label: "Monthly performance report (auto, 1st of each month, 9 AM EST)", core: true, advanced: true },
+  { label: "Annual performance report (auto, Jan 1, 9 AM EST)", core: false, advanced: true },
 
   {
     section: "ANALYTICS",

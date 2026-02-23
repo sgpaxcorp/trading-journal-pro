@@ -45,6 +45,8 @@ type OpenPosition = {
   strategy?: string | null;
   dte?: number | null;
   journal_date?: string | null;
+  opened_at?: string | null;
+  raw?: any;
   source?: "trades" | "journal" | "notes" | string | null;
 };
 
@@ -273,6 +275,19 @@ function extractExpiringOptionsFromEvent(e: AlertEvent | null): OpenPosition[] {
     meta?.options_expiring ??
     [];
   return safeArr(list);
+}
+
+function pickJournalDateFromPositions(positions: OpenPosition[]): string | null {
+  for (const p of positions) {
+    const jd = p?.journal_date;
+    if (jd) return jd;
+    const opened = p?.opened_at || p?.raw?.opened_at || p?.raw?.open_time;
+    if (opened) {
+      const d = new Date(opened);
+      if (!Number.isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+    }
+  }
+  return null;
 }
 
 async function closeTradeAtPrice(userId: string, tradeId: string, closeAtISO: string, closePrice?: number | null) {
@@ -804,6 +819,7 @@ export default function AlarmsConsolePage() {
 
   const auditOpenPositions = extractOpenPositionsFromEvent(selectedEvent);
   const auditExpiring = extractExpiringOptionsFromEvent(selectedEvent);
+  const detailOpenJournalDate = useMemo(() => pickJournalDateFromPositions(auditOpenPositions), [auditOpenPositions]);
   const auditOpenCount = useMemo(() => {
     const payload: any = selectedEvent?.payload ?? {};
     const stats = payload?.stats ?? payload?.meta ?? {};
@@ -1012,6 +1028,14 @@ export default function AlarmsConsolePage() {
                   </div>
 
                   <div className="flex flex-wrap gap-2">
+                    {detailOpenJournalDate ? (
+                      <Link
+                        href={`/journal/${detailOpenJournalDate}`}
+                        className="rounded-lg border border-slate-700 bg-slate-900/40 px-3 py-2 text-xs font-semibold text-slate-100 hover:border-emerald-400/60 hover:bg-emerald-500/10"
+                      >
+                        {L("Open journal", "Abrir journal")}
+                      </Link>
+                    ) : null}
                     <button
                       className="rounded-lg border border-slate-700 bg-slate-900/40 px-3 py-2 text-xs font-semibold text-slate-100 hover:border-emerald-400/60 hover:bg-emerald-500/10"
                       onClick={() => onSnooze(selectedEvent.id, 60)}

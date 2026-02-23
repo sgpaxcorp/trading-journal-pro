@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { StatusBar } from "expo-status-bar";
 import { NavigationContainer, useNavigation } from "@react-navigation/native";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
@@ -6,7 +6,7 @@ import { createNativeStackNavigator, type NativeStackNavigationProp } from "@rea
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import type { Session } from "@supabase/supabase-js";
-import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Linking, Pressable, StyleSheet, Text, View } from "react-native";
 import * as Notifications from "expo-notifications";
 
 import { DashboardScreen } from "./src/screens/DashboardScreen";
@@ -16,15 +16,18 @@ import { AICoachScreen } from "./src/screens/AICoachScreen";
 import { SettingsScreen } from "./src/screens/MoreScreen";
 import { OtherScreen } from "./src/screens/OtherScreen";
 import { GlobalRankingScreen } from "./src/screens/GlobalRankingScreen";
-import { LibraryScreen } from "./src/screens/LibraryScreen";
+import { JournalDateScreen } from "./src/screens/JournalDateScreen";
 import { TrophiesScreen } from "./src/screens/TrophiesScreen";
 import { NotebookScreen } from "./src/screens/NotebookScreen";
 import { ChallengesScreen } from "./src/screens/ChallengesScreen";
 import { AuthScreen, type AuthMode } from "./src/screens/AuthScreen";
 import { ThemeProvider, useTheme } from "./src/lib/ThemeContext";
 import { LanguageProvider } from "./src/lib/LanguageContext";
+import { useLanguage } from "./src/lib/LanguageContext";
 import { hasSupabaseConfig, supabaseMobile } from "./src/lib/supabase";
 import { ModulePlaceholderScreen } from "./src/screens/ModulePlaceholderScreen";
+import { MoreSheet } from "./src/components/MoreSheet";
+import { t } from "./src/lib/i18n";
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -48,7 +51,7 @@ type RootStackParamList = {
   Tabs: undefined;
   Module: { title: string; description: string };
   Settings: undefined;
-  Library: undefined;
+  JournalDate: undefined;
   GlobalRanking: undefined;
   Trophies: undefined;
   Notebook: undefined;
@@ -57,21 +60,24 @@ type RootStackParamList = {
 
 const Tab = createBottomTabNavigator<MainTabParamList>();
 const Stack = createNativeStackNavigator<RootStackParamList>();
+const WEB_BASE = "https://www.neurotrader-journal.com";
 
 function MainTabs() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { colors } = useTheme();
+  const { language } = useLanguage();
+  const [moreOpen, setMoreOpen] = useState(false);
 
-  function openModule(title: string, description: string) {
+  const openModule = useCallback((title: string, description: string) => {
     const parent = navigation.getParent<NativeStackNavigationProp<RootStackParamList>>();
     if (parent) {
       parent.navigate("Module", { title, description });
       return;
     }
     navigation.navigate("Module", { title, description });
-  }
+  }, [navigation]);
 
-  function openSettings() {
+  const openSettings = useCallback(() => {
     const parent = navigation.getParent<NativeStackNavigationProp<RootStackParamList>>();
     if (parent) {
       parent.navigate("Settings");
@@ -79,102 +85,204 @@ function MainTabs() {
     }
     // fallback if navigation is already the stack
     (navigation as unknown as NativeStackNavigationProp<RootStackParamList>).navigate("Settings");
-  }
+  }, [navigation]);
 
-  function openLibrary() {
+  const openJournalDate = useCallback(() => {
     const parent = navigation.getParent<NativeStackNavigationProp<RootStackParamList>>();
     if (parent) {
-      parent.navigate("Library");
+      parent.navigate("JournalDate");
       return;
     }
-    navigation.navigate("Library");
-  }
+    navigation.navigate("JournalDate");
+  }, [navigation]);
 
-  function openGlobalRanking() {
+  const openGlobalRanking = useCallback(() => {
     const parent = navigation.getParent<NativeStackNavigationProp<RootStackParamList>>();
     if (parent) {
       parent.navigate("GlobalRanking");
       return;
     }
     navigation.navigate("GlobalRanking");
-  }
+  }, [navigation]);
 
-  function openTrophies() {
+  const openTrophies = useCallback(() => {
     const parent = navigation.getParent<NativeStackNavigationProp<RootStackParamList>>();
     if (parent) {
       parent.navigate("Trophies");
       return;
     }
     navigation.navigate("Trophies");
-  }
+  }, [navigation]);
 
-  function openNotebook() {
+  const openNotebook = useCallback(() => {
     const parent = navigation.getParent<NativeStackNavigationProp<RootStackParamList>>();
     if (parent) {
       parent.navigate("Notebook");
       return;
     }
     navigation.navigate("Notebook");
-  }
+  }, [navigation]);
 
-  function openChallenges() {
+  const openChallenges = useCallback(() => {
     const parent = navigation.getParent<NativeStackNavigationProp<RootStackParamList>>();
     if (parent) {
       parent.navigate("Challenges");
       return;
     }
     navigation.navigate("Challenges");
-  }
+  }, [navigation]);
+
+  const handleMoreSelect = useCallback((action: () => void) => {
+    setMoreOpen(false);
+    setTimeout(action, 120);
+  }, []);
+
+  const moreItems = useMemo(
+    () => [
+      {
+        key: "settings",
+        label: t(language, "Settings", "Ajustes"),
+        iconName: "settings-outline" as const,
+        onPress: () => handleMoreSelect(openSettings),
+      },
+      {
+        key: "trophies",
+        label: t(language, "Trophies", "Trofeos"),
+        iconName: "trophy-outline" as const,
+        onPress: () => handleMoreSelect(openTrophies),
+      },
+      {
+        key: "ranking",
+        label: t(language, "Global ranking", "Ranking global"),
+        iconName: "globe-outline" as const,
+        onPress: () => handleMoreSelect(openGlobalRanking),
+      },
+      {
+        key: "journal",
+        label: t(language, "Journal", "Journal"),
+        iconName: "book-outline" as const,
+        onPress: () => handleMoreSelect(openJournalDate),
+      },
+      {
+        key: "notebook",
+        label: t(language, "Notebook", "Notebook"),
+        iconName: "document-text-outline" as const,
+        onPress: () => handleMoreSelect(openNotebook),
+      },
+      {
+        key: "challenges",
+        label: t(language, "Challenges", "Retos"),
+        iconName: "flame-outline" as const,
+        onPress: () => handleMoreSelect(openChallenges),
+      },
+      {
+        key: "about",
+        label: t(language, "About us", "Sobre nosotros"),
+        iconName: "information-circle-outline" as const,
+        onPress: () => handleMoreSelect(() => Linking.openURL(`${WEB_BASE}/about`)),
+      },
+      {
+        key: "terms",
+        label: t(language, "Terms", "Términos"),
+        iconName: "document-text-outline" as const,
+        onPress: () => handleMoreSelect(() => Linking.openURL(`${WEB_BASE}/terms`)),
+      },
+      {
+        key: "privacy",
+        label: t(language, "Privacy", "Privacidad"),
+        iconName: "shield-checkmark-outline" as const,
+        onPress: () => handleMoreSelect(() => Linking.openURL(`${WEB_BASE}/privacy`)),
+      },
+    ],
+    [
+      handleMoreSelect,
+      language,
+      openChallenges,
+      openGlobalRanking,
+      openJournalDate,
+      openNotebook,
+      openSettings,
+      openTrophies,
+    ]
+  );
 
   return (
-    <Tab.Navigator
-      screenOptions={({ route }) => ({
-        headerStyle: { backgroundColor: colors.surface },
-        headerTintColor: colors.textPrimary,
-        headerTitleStyle: { fontWeight: "700" },
-        headerTitle: () => (
-          <Text style={[styles.headerText, { color: colors.textPrimary }]}>{route.name}</Text>
-        ),
-        tabBarStyle: { backgroundColor: colors.surface, borderTopColor: colors.border },
-        tabBarActiveTintColor: colors.primary,
-        tabBarInactiveTintColor: colors.textMuted,
-        tabBarLabelStyle: { fontSize: 11, fontWeight: "600" },
-        sceneStyle: { backgroundColor: colors.background },
-        tabBarIcon: ({ color, size }) => {
-          if (route.name === "Dashboard") return <Ionicons name="home-outline" size={size} color={color} />;
-          if (route.name === "Calendar") return <Ionicons name="calendar-outline" size={size} color={color} />;
-          if (route.name === "Analytics") return <Ionicons name="stats-chart-outline" size={size} color={color} />;
-          if (route.name === "AICoach") return <Ionicons name="sparkles-outline" size={size} color={color} />;
-          return <Ionicons name="ellipsis-horizontal-circle-outline" size={size} color={color} />;
-        },
-      })}
-    >
-      <Tab.Screen name="Dashboard" options={{ title: "Home" }}>
-        {() => <DashboardScreen onOpenModule={openModule} />}
-      </Tab.Screen>
-      <Tab.Screen name="Calendar" options={{ title: "Calendar" }}>
-        {() => <CalendarScreen onOpenModule={openModule} />}
-      </Tab.Screen>
-      <Tab.Screen name="Analytics" options={{ title: "Analytics" }}>
-        {() => <AnalyticsScreen onOpenModule={openModule} />}
-      </Tab.Screen>
-      <Tab.Screen name="AICoach" options={{ title: "AI Coach" }}>
-        {() => <AICoachScreen onOpenModule={openModule} />}
-      </Tab.Screen>
-      <Tab.Screen name="Other" options={{ title: "Other" }}>
-        {() => (
-          <OtherScreen
-            onOpenModule={openModule}
-            onOpenSettings={openSettings}
-            onOpenLibrary={openLibrary}
-            onOpenGlobalRanking={openGlobalRanking}
-            onOpenTrophies={openTrophies}
-            onOpenNotebook={openNotebook}
-            onOpenChallenges={openChallenges}
-          />
-        )}
-      </Tab.Screen>
-    </Tab.Navigator>
+    <>
+      <Tab.Navigator
+        screenOptions={({ route }) => ({
+          headerStyle: { backgroundColor: colors.surface },
+          headerTintColor: colors.textPrimary,
+          headerTitleStyle: { fontWeight: "700" },
+          headerTitle: () => (
+            <Text style={[styles.headerText, { color: colors.textPrimary }]}>{route.name}</Text>
+          ),
+          tabBarStyle: { backgroundColor: colors.surface, borderTopColor: colors.border },
+          tabBarActiveTintColor: colors.primary,
+          tabBarInactiveTintColor: colors.textMuted,
+          tabBarLabelStyle: { fontSize: 11, fontWeight: "600" },
+          sceneStyle: { backgroundColor: colors.background },
+          tabBarIcon: ({ color, size }) => {
+            if (route.name === "Dashboard") return <Ionicons name="home-outline" size={size} color={color} />;
+            if (route.name === "Calendar") return <Ionicons name="calendar-outline" size={size} color={color} />;
+            if (route.name === "Analytics") return <Ionicons name="stats-chart-outline" size={size} color={color} />;
+            if (route.name === "AICoach") return <Ionicons name="sparkles-outline" size={size} color={color} />;
+            return <Ionicons name="ellipsis-horizontal-circle-outline" size={size} color={color} />;
+          },
+        })}
+      >
+        <Tab.Screen name="Dashboard" options={{ title: "Home" }}>
+          {() => <DashboardScreen onOpenModule={openModule} />}
+        </Tab.Screen>
+        <Tab.Screen name="Calendar" options={{ title: "Calendar" }}>
+          {() => <CalendarScreen onOpenModule={openModule} />}
+        </Tab.Screen>
+        <Tab.Screen name="Analytics" options={{ title: "Analytics" }}>
+          {() => <AnalyticsScreen onOpenModule={openModule} />}
+        </Tab.Screen>
+        <Tab.Screen name="AICoach" options={{ title: "AI Coach" }}>
+          {() => <AICoachScreen onOpenModule={openModule} />}
+        </Tab.Screen>
+        <Tab.Screen
+          name="Other"
+          options={{
+            title: "More",
+            tabBarButton: (props) => (
+              <Pressable
+                {...props}
+                onPress={() => setMoreOpen(true)}
+                accessibilityRole="button"
+                accessibilityLabel="More"
+              />
+            ),
+          }}
+          listeners={{
+            tabPress: (e) => {
+              e.preventDefault();
+              setMoreOpen(true);
+            },
+          }}
+        >
+          {() => (
+            <OtherScreen
+              onOpenModule={openModule}
+              onOpenSettings={openSettings}
+              onOpenGlobalRanking={openGlobalRanking}
+              onOpenTrophies={openTrophies}
+              onOpenNotebook={openNotebook}
+              onOpenChallenges={openChallenges}
+              onOpenJournalDate={openJournalDate}
+            />
+          )}
+        </Tab.Screen>
+      </Tab.Navigator>
+
+      <MoreSheet
+        visible={moreOpen}
+        title={t(language, "More", "Más")}
+        items={moreItems}
+        onClose={() => setMoreOpen(false)}
+      />
+    </>
   );
 }
 
@@ -259,9 +367,9 @@ function AppShell() {
             options={{ title: "Settings" }}
           />
           <Stack.Screen
-            name="Library"
-            component={LibraryScreen}
-            options={{ title: "Library" }}
+            name="JournalDate"
+            component={JournalDateScreen}
+            options={{ title: "Journal" }}
           />
           <Stack.Screen
             name="GlobalRanking"

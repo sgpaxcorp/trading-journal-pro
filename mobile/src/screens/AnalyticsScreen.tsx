@@ -82,11 +82,28 @@ type EdgeRow = {
 
 type AnalyticsStyles = ReturnType<typeof createStyles>;
 
+const hexToRgba = (hex: string, alpha: number) => {
+  const raw = hex.replace("#", "");
+  const value =
+    raw.length === 3
+      ? raw
+          .split("")
+          .map((c) => c + c)
+          .join("")
+      : raw;
+  const bigint = parseInt(value, 16);
+  const r = (bigint >> 16) & 255;
+  const g = (bigint >> 8) & 255;
+  const b = bigint & 255;
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+};
+
 export function AnalyticsScreen({}: AnalyticsScreenProps) {
   const { language } = useLanguage();
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [snapshot, setSnapshot] = useState<AnalyticsSnapshot | null>(null);
   const [topEdges, setTopEdges] = useState<EdgeRow[]>([]);
   const [series, setSeries] = useState<AccountSeriesResponse | null>(null);
@@ -95,9 +112,13 @@ export function AnalyticsScreen({}: AnalyticsScreenProps) {
 
   useEffect(() => {
     let active = true;
-    async function load() {
+    async function load(isRefresh = false) {
       try {
-        setLoading(true);
+        if (isRefresh) {
+          setRefreshing(true);
+        } else {
+          setLoading(true);
+        }
         setError(null);
         const [snapRes, seriesRes] = await Promise.all([
           apiGet<{ snapshot: AnalyticsSnapshot | null; topEdges: EdgeRow[] }>("/api/analytics/snapshot"),
@@ -112,7 +133,11 @@ export function AnalyticsScreen({}: AnalyticsScreenProps) {
         setError(err?.message ?? "Failed to load analytics.");
       } finally {
         if (!active) return;
-        setLoading(false);
+        if (isRefresh) {
+          setRefreshing(false);
+        } else {
+          setLoading(false);
+        }
       }
     }
     load();
@@ -120,6 +145,28 @@ export function AnalyticsScreen({}: AnalyticsScreenProps) {
       active = false;
     };
   }, []);
+
+  async function handleRefresh() {
+    let active = true;
+    try {
+      setRefreshing(true);
+      setError(null);
+      const [snapRes, seriesRes] = await Promise.all([
+        apiGet<{ snapshot: AnalyticsSnapshot | null; topEdges: EdgeRow[] }>("/api/analytics/snapshot"),
+        apiGet<AccountSeriesResponse>("/api/account/series"),
+      ]);
+      if (!active) return;
+      setSnapshot(snapRes.snapshot);
+      setTopEdges(snapRes.topEdges ?? []);
+      setSeries(seriesRes ?? null);
+    } catch (err: any) {
+      if (!active) return;
+      setError(err?.message ?? "Failed to refresh analytics.");
+    } finally {
+      if (!active) return;
+      setRefreshing(false);
+    }
+  }
 
   const formatUsd = (value: number) =>
     new Intl.NumberFormat(language === "es" ? "es-ES" : "en-US", {
@@ -183,6 +230,8 @@ export function AnalyticsScreen({}: AnalyticsScreenProps) {
         "Institutional KPIs, performance, and risk overview.",
         "KPIs institucionales, performance y riesgo."
       )}
+      refreshing={refreshing}
+      onRefresh={handleRefresh}
     >
       <View style={styles.banner}>
         <Text style={styles.bannerTitle}>{t(language, "Quick stats", "Resumen rápido")}</Text>
@@ -265,8 +314,8 @@ export function AnalyticsScreen({}: AnalyticsScreenProps) {
               <SparkBarChart
                 styles={styles}
                 values={balanceSeries.map((p) => p.value)}
-                positiveColor="#1EE6A8"
-                negativeColor="#2E90FF"
+                positiveColor={colors.success}
+                negativeColor={colors.info}
               />
             ) : (
               <Text style={styles.bannerText}>{t(language, "No balance data yet.", "Aún no hay datos de balance.")}</Text>
@@ -276,7 +325,12 @@ export function AnalyticsScreen({}: AnalyticsScreenProps) {
           <View style={styles.subSection}>
             <Text style={styles.subTitle}>{t(language, "Daily P&L (last 14)", "P&L diario (últimos 14)")}</Text>
             {dailySeries.length ? (
-              <DailyBarChart styles={styles} values={dailySeries.map((p) => p.value)} />
+              <DailyBarChart
+                styles={styles}
+                values={dailySeries.map((p) => p.value)}
+                positiveColor={colors.success}
+                negativeColor={colors.info}
+              />
             ) : (
               <Text style={styles.bannerText}>{t(language, "No daily data yet.", "Aún no hay datos diarios.")}</Text>
             )}
@@ -341,12 +395,12 @@ export function AnalyticsScreen({}: AnalyticsScreenProps) {
                 const intensity = maxAbsHour > 0 ? Math.min(1, Math.abs(cell.pnl) / maxAbsHour) : 0;
                 const bg =
                   cell.pnl > 0
-                    ? `rgba(30,230,168,${0.12 + intensity * 0.5})`
+                    ? hexToRgba(colors.success, 0.12 + intensity * 0.5)
                     : cell.pnl < 0
-                    ? `rgba(46,144,255,${0.12 + intensity * 0.5})`
+                    ? hexToRgba(colors.info, 0.12 + intensity * 0.5)
                     : colors.surface;
                 const border =
-                  cell.pnl > 0 ? "#1EE6A8" : cell.pnl < 0 ? "#2E90FF" : colors.border;
+                  cell.pnl > 0 ? colors.success : cell.pnl < 0 ? colors.info : colors.border;
                 return (
                   <View key={cell.label} style={[styles.heatCell, { backgroundColor: bg, borderColor: border }]}>
                     <Text style={styles.heatLabel}>{cell.label.slice(0, 2)}</Text>
@@ -437,7 +491,17 @@ function SparkBarChart({
   );
 }
 
-function DailyBarChart({ values, styles }: { values: number[]; styles: AnalyticsStyles }) {
+function DailyBarChart({
+  values,
+  styles,
+  positiveColor,
+  negativeColor,
+}: {
+  values: number[];
+  styles: AnalyticsStyles;
+  positiveColor: string;
+  negativeColor: string;
+}) {
   const max = values.reduce((acc, v) => Math.max(acc, Math.abs(v)), 0) || 1;
   return (
     <View style={styles.chartRow}>
@@ -450,7 +514,7 @@ function DailyBarChart({ values, styles }: { values: number[]; styles: Analytics
                 styles.chartBar,
                 {
                   height,
-                  backgroundColor: v >= 0 ? "#1EE6A8" : "#2E90FF",
+                  backgroundColor: v >= 0 ? positiveColor : negativeColor,
                 },
               ]}
             />
@@ -532,7 +596,7 @@ const createStyles = (colors: ThemeColors) =>
     },
     segmentButtonActive: {
       borderColor: colors.primary,
-      backgroundColor: "#0F2C2A",
+      backgroundColor: colors.successSoft,
     },
     segmentLabel: {
       color: colors.textPrimary,
@@ -567,12 +631,12 @@ const createStyles = (colors: ThemeColors) =>
       gap: 4,
     },
     statCardPositive: {
-      borderColor: "#1EE6A8",
-      backgroundColor: "#0F2C2A",
+      borderColor: colors.success,
+      backgroundColor: colors.successSoft,
     },
     statCardNegative: {
-      borderColor: "#2E90FF",
-      backgroundColor: "#0B1E3A",
+      borderColor: colors.info,
+      backgroundColor: colors.infoSoft,
     },
     statLabel: {
       color: colors.textMuted,
@@ -615,7 +679,7 @@ const createStyles = (colors: ThemeColors) =>
       fontWeight: "700",
     },
     lossValue: {
-      color: "#7EB3FF",
+      color: colors.info,
     },
     heatGrid: {
       flexDirection: "row",

@@ -715,6 +715,32 @@ function buildRecentSessionsSnippet(recentSessions: any[], n = 8): string {
       if (liveBits.length) detailLines.push(`  live: ${liveBits.join(" | ")}`);
       if (postBits.length) detailLines.push(`  post: ${postBits.join(" | ")}`);
 
+      const checklist = s?.checklists || {};
+      const checklistBits: string[] = [];
+      if (Array.isArray(checklist?.premarket) && checklist.premarket.length)
+        checklistBits.push(`pre: ${checklist.premarket.slice(0, 4).join(", ")}`);
+      if (Array.isArray(checklist?.inside) && checklist.inside.length)
+        checklistBits.push(`in: ${checklist.inside.slice(0, 4).join(", ")}`);
+      if (Array.isArray(checklist?.after) && checklist.after.length)
+        checklistBits.push(`post: ${checklist.after.slice(0, 4).join(", ")}`);
+      if (Array.isArray(checklist?.strategy) && checklist.strategy.length)
+        checklistBits.push(`strategy: ${checklist.strategy.slice(0, 4).join(", ")}`);
+      if (Array.isArray(checklist?.impulses) && checklist.impulses.length)
+        checklistBits.push(`impulses: ${checklist.impulses.slice(0, 4).join(", ")}`);
+      if (checklistBits.length) detailLines.push(`  checklist: ${checklistBits.join(" | ")}`);
+
+      const mindset = s?.mindset || {};
+      const mindBits: string[] = [];
+      if (Number.isFinite(mindset?.emotional_balance))
+        mindBits.push(`emotion ${Number(mindset.emotional_balance)}/5`);
+      if (Number.isFinite(mindset?.impulse_control))
+        mindBits.push(`impulse ${Number(mindset.impulse_control)}/5`);
+      if (Number.isFinite(mindset?.setup_quality))
+        mindBits.push(`setup ${Number(mindset.setup_quality)}/5`);
+      if (Number.isFinite(mindset?.probability))
+        mindBits.push(`prob ${Number(mindset.probability)}/5`);
+      if (mindBits.length) detailLines.push(`  mindset: ${mindBits.join(" | ")}`);
+
       const tradesSummary = buildTradesSummary(s?.trades);
       if (tradesSummary) detailLines.push(`  trades: ${tradesSummary}`);
 

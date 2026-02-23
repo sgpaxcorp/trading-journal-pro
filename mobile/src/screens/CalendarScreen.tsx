@@ -144,11 +144,6 @@ function getUsMarketHolidays(year: number, isEs: boolean): Holiday[] {
     marketClosed: true,
   });
   holidays.push({
-    date: toYMD(getNthWeekdayOfMonth(year, 9, 1, 2)),
-    label: label("Columbus / Indigenous Peoples' Day", "Día de Colón / Pueblos Indígenas"),
-    marketClosed: true,
-  });
-  holidays.push({
     date: toYMD(getNthWeekdayOfMonth(year, 10, 4, 4)),
     label: label("Thanksgiving Day", "Día de Acción de Gracias"),
     marketClosed: true,
@@ -177,6 +172,7 @@ export function CalendarScreen({}: CalendarScreenProps) {
   const styles = useMemo(() => createStyles(colors), [colors]);
   const [daily, setDaily] = useState<Array<{ date: string; value: number }>>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const today = new Date();
   const [monthCursor, setMonthCursor] = useState(() => new Date(today.getFullYear(), today.getMonth(), 1));
@@ -197,9 +193,13 @@ export function CalendarScreen({}: CalendarScreenProps) {
 
   useEffect(() => {
     let active = true;
-    async function load() {
+    async function load(isRefresh = false) {
       try {
-        setLoading(true);
+        if (isRefresh) {
+          setRefreshing(true);
+        } else {
+          setLoading(true);
+        }
         setError(null);
         const res = await apiGet<AccountSeriesResponse>("/api/account/series");
         if (!active) return;
@@ -209,7 +209,11 @@ export function CalendarScreen({}: CalendarScreenProps) {
         setError(err?.message ?? "Failed to load calendar.");
       } finally {
         if (!active) return;
-        setLoading(false);
+        if (isRefresh) {
+          setRefreshing(false);
+        } else {
+          setLoading(false);
+        }
       }
     }
     load();
@@ -217,6 +221,19 @@ export function CalendarScreen({}: CalendarScreenProps) {
       active = false;
     };
   }, []);
+
+  async function handleRefresh() {
+    setError(null);
+    setRefreshing(true);
+    try {
+      const res = await apiGet<AccountSeriesResponse>("/api/account/series");
+      setDaily(res.daily ?? []);
+    } catch (err: any) {
+      setError(err?.message ?? "Failed to refresh calendar.");
+    } finally {
+      setRefreshing(false);
+    }
+  }
 
   return (
     <ScreenScaffold
@@ -227,6 +244,8 @@ export function CalendarScreen({}: CalendarScreenProps) {
         "Sigue tu desempeño diario y abre cada día del journal."
       )}
       scrollable={false}
+      refreshing={refreshing}
+      onRefresh={handleRefresh}
     >
       <View style={styles.calendarShell}>
         <View style={styles.monthHeader}>
@@ -399,7 +418,7 @@ const createStyles = (colors: ThemeColors) =>
     },
     todayCell: {
       borderColor: colors.primary,
-      backgroundColor: "#0F2C2A",
+      backgroundColor: colors.successSoft,
     },
     mutedCell: {
       opacity: 0.4,
@@ -417,26 +436,26 @@ const createStyles = (colors: ThemeColors) =>
       fontSize: 9,
     },
     winCell: {
-      borderColor: "#1EE6A8",
-      backgroundColor: "#0F2C2A",
+      borderColor: colors.success,
+      backgroundColor: colors.successSoft,
     },
     lossCell: {
-      borderColor: "#2E90FF",
-      backgroundColor: "#0B1E3A",
+      borderColor: colors.info,
+      backgroundColor: colors.infoSoft,
     },
     holidayCell: {
-      borderColor: "#D6B36A",
-      backgroundColor: "#2A1D0B",
+      borderColor: colors.warning,
+      backgroundColor: colors.warningSoft,
     },
     holidayTag: {
-      color: "#F2D7A3",
+      color: colors.warning,
       fontSize: 8,
       textTransform: "uppercase",
       letterSpacing: 1.1,
       fontWeight: "700",
     },
     holidayName: {
-      color: "#F2D7A3",
+      color: colors.warning,
       fontSize: 8,
       textAlign: "center",
     },

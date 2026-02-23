@@ -9,6 +9,8 @@ import { t } from "../lib/i18n";
 import { type ThemeColors } from "../theme";
 import { useTheme } from "../lib/ThemeContext";
 import { parseNotes, type TradesPayload, type StoredTradeRow } from "../lib/journalNotes";
+import { supabaseMobile } from "../lib/supabase";
+import { useSupabaseUser } from "../lib/useSupabaseUser";
 
 type DashboardScreenProps = {
   onOpenModule: (title: string, description: string) => void;
@@ -36,25 +38,98 @@ type JournalListResponse = {
   entries: JournalEntry[];
 };
 
-const WEB_PLAN_SUMMARY_URL = "https://www.neurotrader-journal.com/performance/plan-summary";
+type AccountsResponse = {
+  activeAccountId: string | null;
+};
+
+type TradingSystemItem = {
+  id?: string;
+  text?: string;
+};
+
+type TradingSystemPayload = {
+  doList: TradingSystemItem[];
+  dontList: TradingSystemItem[];
+  orderList: TradingSystemItem[];
+};
+
+type PlanRow = {
+  steps?: any;
+};
+
+const WEB_GROWTH_PLAN_URL = "https://www.neurotrader-journal.com/growth-plan";
+
+const HERO_MESSAGES = [
+  {
+    title: { en: "Train like a pro today", es: "Entrena como profesional hoy" },
+    subtitle: {
+      en: "Process before outcome. Trade the plan, not the noise.",
+      es: "Proceso antes que resultado. Opera el plan, no el ruido.",
+    },
+  },
+  {
+    title: { en: "One clean trade is enough", es: "Un trade limpio es suficiente" },
+    subtitle: {
+      en: "Patience is the edge. Wait for your A+ setup.",
+      es: "La paciencia es el edge. Espera tu setup A+.",
+    },
+  },
+  {
+    title: { en: "Protect capital first", es: "Protege el capital primero" },
+    subtitle: {
+      en: "Risk small, execute sharp, review honestly.",
+      es: "Riesgo pequeño, ejecución clara, revisión honesta.",
+    },
+  },
+  {
+    title: { en: "Consistency compounds", es: "La consistencia compone" },
+    subtitle: {
+      en: "Win your routine today; results will follow.",
+      es: "Gana tu rutina hoy; el resultado llegará.",
+    },
+  },
+];
+
+const FOCUS_RULES = [
+  { en: "No revenge trading", es: "No revenge trading" },
+  { en: "Max 2% risk per trade", es: "Máximo 2% de riesgo por trade" },
+  { en: "Process > outcome", es: "Proceso > resultado" },
+];
 
 export function DashboardScreen({ onOpenModule }: DashboardScreenProps) {
   const { language } = useLanguage();
   const { colors } = useTheme();
+  const user = useSupabaseUser();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [series, setSeries] = useState<AccountSeriesResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [journalEntries, setJournalEntries] = useState<JournalEntry[]>([]);
   const [journalLoading, setJournalLoading] = useState(false);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  const [systemLoading, setSystemLoading] = useState(false);
+  const [systemData, setSystemData] = useState<TradingSystemPayload | null>(null);
+
+  async function fetchActiveAccountId(): Promise<string | null> {
+    try {
+      const res = await apiGet<AccountsResponse>("/api/trading-accounts/list");
+      return res.activeAccountId ?? null;
+    } catch {
+      return null;
+    }
+  }
 
   useEffect(() => {
     let active = true;
 
-    async function load() {
+    async function load(isRefresh = false) {
       try {
-        setLoading(true);
+        if (isRefresh) {
+          setRefreshing(true);
+        } else {
+          setLoading(true);
+        }
         setError(null);
         const [seriesRes] = await Promise.all([
           apiGet<AccountSeriesResponse>("/api/account/series"),
@@ -66,7 +141,11 @@ export function DashboardScreen({ onOpenModule }: DashboardScreenProps) {
         setError(err?.message ?? "Failed to load data.");
       } finally {
         if (!active) return;
-        setLoading(false);
+        if (isRefresh) {
+          setRefreshing(false);
+        } else {
+          setLoading(false);
+        }
       }
     }
 
@@ -77,10 +156,85 @@ export function DashboardScreen({ onOpenModule }: DashboardScreenProps) {
   }, []);
 
   useEffect(() => {
+    if (!user?.id || !supabaseMobile) return;
+    let cancelled = false;
+
+    async function loadTradingSystem() {
+      setSystemLoading(true);
+      const accountId = await fetchActiveAccountId();
+
+      const tables = ["growth_plans", "ntj_growth_plans"];
+      let plan: PlanRow | null = null;
+
+      for (const table of tables) {
+        let query = supabaseMobile
+          .from(table)
+          .select("steps, updated_at, created_at")
+          .eq("user_id", user.id)
+          .order("updated_at", { ascending: false })
+          .order("created_at", { ascending: false })
+          .limit(1);
+
+        if (accountId) query = query.eq("account_id", accountId);
+        else query = query.is("account_id", null);
+
+        const { data, error: loadError } = await query;
+
+        if (loadError && accountId) {
+          const alt = await supabaseMobile
+            .from(table)
+            .select("steps, updated_at, created_at")
+            .eq("user_id", user.id)
+            .order("updated_at", { ascending: false })
+            .order("created_at", { ascending: false })
+            .limit(1);
+          if (!alt.error && alt.data && alt.data.length > 0) {
+            plan = alt.data[0] as PlanRow;
+            break;
+          }
+        }
+
+        if (!loadError && data && data.length > 0) {
+          plan = data[0] as PlanRow;
+          break;
+        }
+      }
+
+      if (!cancelled) {
+        if (!plan?.steps) {
+          setSystemData(null);
+          setSystemLoading(false);
+          return;
+        }
+
+        const system = plan?.steps?.execution_and_journal?.system ?? {};
+        const doList = Array.isArray(system.doList) ? system.doList : [];
+        const dontList = Array.isArray(system.dontList) ? system.dontList : [];
+        const orderList = Array.isArray(system.orderList) ? system.orderList : [];
+
+        setSystemData({
+          doList: doList.filter((i: any) => (i?.text ?? "").trim().length > 0),
+          dontList: dontList.filter((i: any) => (i?.text ?? "").trim().length > 0),
+          orderList: orderList.filter((i: any) => (i?.text ?? "").trim().length > 0),
+        });
+        setSystemLoading(false);
+      }
+    }
+
+    void loadTradingSystem();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id]);
+
+  useEffect(() => {
     let active = true;
-    async function loadJournalEntries() {
+    async function loadJournalEntries(isRefresh = false) {
       try {
-        setJournalLoading(true);
+        if (!isRefresh) {
+          setJournalLoading(true);
+        }
         const today = new Date();
         const toDate = today.toISOString().slice(0, 10);
         const from = new Date(today);
@@ -111,7 +265,9 @@ export function DashboardScreen({ onOpenModule }: DashboardScreenProps) {
         setJournalEntries([]);
       } finally {
         if (!active) return;
-        setJournalLoading(false);
+        if (!isRefresh) {
+          setJournalLoading(false);
+        }
       }
     }
 
@@ -129,8 +285,6 @@ export function DashboardScreen({ onOpenModule }: DashboardScreenProps) {
     const sunday = new Date(today);
     sunday.setDate(today.getDate() - dayOfWeek);
     sunday.setHours(0, 0, 0, 0);
-    const friday = new Date(sunday);
-    friday.setDate(sunday.getDate() + 5);
 
     const days = Array.from({ length: 6 }, (_, idx) => {
       const date = new Date(sunday);
@@ -169,16 +323,15 @@ export function DashboardScreen({ onOpenModule }: DashboardScreenProps) {
       ? daySummaryDates[daySummaryIndex + 1]
       : null;
 
-  const formatUsd = (value: number) =>
-    new Intl.NumberFormat(language === "es" ? "es-ES" : "en-US", {
+  const formatSigned = (value: number) => {
+    const sign = value > 0 ? "+" : value < 0 ? "-" : "";
+    const abs = Math.abs(value);
+    const formatted = new Intl.NumberFormat(language === "es" ? "es-ES" : "en-US", {
       style: "currency",
       currency: "USD",
       maximumFractionDigits: 2,
-    }).format(value);
-
-  const formatSigned = (value: number) => {
-    const sign = value > 0 ? "+" : value < 0 ? "-" : "";
-    return `${sign}${formatUsd(Math.abs(value))}`;
+    }).format(abs);
+    return `${sign}${formatted}`;
   };
 
   const formatSignedShort = (value: number) => {
@@ -186,22 +339,52 @@ export function DashboardScreen({ onOpenModule }: DashboardScreenProps) {
     return `${sign}$${Math.abs(value).toFixed(0)}`;
   };
 
-  const planProgress = useMemo(() => {
-    const plan = series?.plan;
-    const totals = series?.totals;
-    if (!plan || !totals) return null;
-    const start = Number(plan.startingBalance ?? 0);
-    const target = Number(plan.targetBalance ?? 0);
-    const current = Number(totals.currentBalance ?? 0);
-    if (!Number.isFinite(start) || !Number.isFinite(target) || target === start) return null;
-    const progress = ((current - start) / (target - start)) * 100;
-    return {
-      start,
-      target,
-      current,
-      progress,
-    };
-  }, [series]);
+  const heroMessage = useMemo(() => {
+    const today = new Date();
+    const start = new Date(today.getFullYear(), 0, 0);
+    const dayOfYear = Math.floor((today.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
+    const idx = dayOfYear % HERO_MESSAGES.length;
+    return HERO_MESSAGES[idx];
+  }, []);
+
+  async function handleRefresh() {
+    setError(null);
+    setRefreshing(true);
+    try {
+      const today = new Date();
+      const toDate = today.toISOString().slice(0, 10);
+      const from = new Date(today);
+      from.setDate(today.getDate() - 45);
+      const fromDate = from.toISOString().slice(0, 10);
+
+      const [seriesRes, journalRes] = await Promise.all([
+        apiGet<AccountSeriesResponse>("/api/account/series"),
+        apiGet<JournalListResponse>(`/api/journal/list?fromDate=${fromDate}&toDate=${toDate}`),
+      ]);
+
+      setSeries(seriesRes ?? null);
+      const entries = journalRes?.entries ?? [];
+      setJournalEntries(entries);
+
+      const availableDates = entries
+        .map((entry) => String(entry?.date ?? "").slice(0, 10))
+        .filter((value) => value.length === 10)
+        .sort();
+
+      const todayStr = today.toISOString().slice(0, 10);
+      if (!selectedDate || !availableDates.includes(selectedDate)) {
+        if (availableDates.includes(todayStr)) {
+          setSelectedDate(todayStr);
+        } else {
+          setSelectedDate(availableDates[availableDates.length - 1] ?? null);
+        }
+      }
+    } catch (err: any) {
+      setError(err?.message ?? "Failed to refresh.");
+    } finally {
+      setRefreshing(false);
+    }
+  }
 
   return (
     <ScreenScaffold
@@ -211,6 +394,8 @@ export function DashboardScreen({ onOpenModule }: DashboardScreenProps) {
         "Your daily overview: progress, streaks, and key actions.",
         "Tu resumen diario: progreso, rachas y acciones clave."
       )}
+      refreshing={refreshing}
+      onRefresh={handleRefresh}
     >
       {loading ? (
         <View style={styles.loadingRow}>
@@ -219,12 +404,18 @@ export function DashboardScreen({ onOpenModule }: DashboardScreenProps) {
         </View>
       ) : (
         <>
+          <View style={styles.heroCard}>
+            <Text style={styles.heroEyebrow}>{t(language, "Daily focus", "Enfoque del día")}</Text>
+            <Text style={styles.heroTitle}>{heroMessage.title[language]}</Text>
+            <Text style={styles.heroSubtitle}>{heroMessage.subtitle[language]}</Text>
+          </View>
+
           <View style={styles.summaryRow}>
             <View style={[styles.summaryCard, styles.weeklyCard]}>
               <Text style={styles.summaryLabel}>{t(language, "Weekly P&L", "P&L semanal")}</Text>
               <Text style={styles.summaryValue}>{formatSigned(weeklySummary.total)}</Text>
               <Text style={styles.summaryHint}>
-                {t(language, "Current trading week (Sun–Fri).", "Semana actual de trading (Dom–Vie).")}
+                {t(language, "Current week (Sun–Fri).", "Semana actual (Dom–Vie).")}
               </Text>
               <View style={styles.weeklyRow}>
                 {weeklySummary.days.map((day, idx) => {
@@ -241,9 +432,16 @@ export function DashboardScreen({ onOpenModule }: DashboardScreenProps) {
                       ]}
                     >
                       <Text style={styles.weekCellLabel}>
-                        {language === "es" ? ["D", "L", "M", "X", "J", "V"][idx] : ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri"][idx]}
+                        {language === "es"
+                          ? ["D", "L", "M", "X", "J", "V"][idx]
+                          : ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri"][idx]}
                       </Text>
-                      <Text style={styles.weekCellValue}>
+                      <Text
+                        style={styles.weekCellValue}
+                        numberOfLines={1}
+                        adjustsFontSizeToFit
+                        minimumFontScale={0.7}
+                      >
                         {day.pnl == null ? "—" : day.pnl === 0 ? "$0" : formatSignedShort(day.pnl)}
                       </Text>
                     </View>
@@ -251,27 +449,66 @@ export function DashboardScreen({ onOpenModule }: DashboardScreenProps) {
                 })}
               </View>
             </View>
-            <Pressable
-              style={[styles.summaryCard, styles.planCard]}
-              onPress={() => Linking.openURL(WEB_PLAN_SUMMARY_URL)}
-            >
-              <Text style={styles.planLabel}>{t(language, "Plan progress", "Progreso del plan")}</Text>
-              <Text style={styles.planValue}>
-                {planProgress ? `${planProgress.progress.toFixed(1)}%` : "—"}
+          </View>
+
+          <View style={[styles.summaryCard, styles.focusCard]}>
+            <Text style={styles.planLabel}>{t(language, "Focus of the day", "Focus del día")}</Text>
+            <View style={styles.focusList}>
+              {FOCUS_RULES.map((rule) => (
+                <View key={rule.en} style={styles.focusRow}>
+                  <View style={styles.focusDot} />
+                  <Text style={styles.focusText}>{rule[language]}</Text>
+                </View>
+              ))}
+            </View>
+          </View>
+
+          <View style={styles.systemCard}>
+            <Text style={styles.systemTitle}>{t(language, "Trading System", "Sistema de trading")}</Text>
+            {systemLoading ? (
+              <Text style={styles.systemHint}>
+                {t(language, "Loading system…", "Cargando sistema…")}
               </Text>
-              <Text style={styles.planHint}>
-                {planProgress
-                  ? t(
-                      language,
-                      `Start ${formatUsd(planProgress.start)} → Target ${formatUsd(planProgress.target)}`,
-                      `Inicio ${formatUsd(planProgress.start)} → Meta ${formatUsd(planProgress.target)}`
-                    )
-                  : t(language, "Set a growth plan to track progress.", "Configura tu plan para ver progreso.")}
+            ) : !systemData ||
+              (systemData.doList.length + systemData.dontList.length + systemData.orderList.length === 0) ? (
+              <Text style={styles.systemHint}>
+                {t(
+                  language,
+                  "Add your Do/Don't/Order rules in Growth Plan.",
+                  "Agrega tus reglas Hacer/No hacer/Orden en Growth Plan."
+                )}{" "}
+                <Text style={styles.systemLink} onPress={() => Linking.openURL(WEB_GROWTH_PLAN_URL)}>
+                  {t(language, "Open Growth Plan →", "Abrir Growth Plan →")}
+                </Text>
               </Text>
-              <Text style={styles.planLink}>
-                {t(language, "Open plan phases →", "Ver fases del plan →")}
-              </Text>
-            </Pressable>
+            ) : (
+              <View style={styles.systemGrid}>
+                <View style={styles.systemSection}>
+                  <Text style={styles.systemLabel}>{t(language, "Do", "Hacer")}</Text>
+                  {(systemData.doList.length ? systemData.doList : [{ text: "—" }]).map((item, idx) => (
+                    <Text key={`do-${idx}`} style={styles.systemItem}>
+                      • {item.text}
+                    </Text>
+                  ))}
+                </View>
+                <View style={styles.systemSection}>
+                  <Text style={styles.systemLabelDont}>{t(language, "Don't", "No hacer")}</Text>
+                  {(systemData.dontList.length ? systemData.dontList : [{ text: "—" }]).map((item, idx) => (
+                    <Text key={`dont-${idx}`} style={styles.systemItem}>
+                      • {item.text}
+                    </Text>
+                  ))}
+                </View>
+                <View style={styles.systemSection}>
+                  <Text style={styles.systemLabelOrder}>{t(language, "Order", "Orden")}</Text>
+                  {(systemData.orderList.length ? systemData.orderList : [{ text: "—" }]).map((item, idx) => (
+                    <Text key={`order-${idx}`} style={styles.systemItem}>
+                      {idx + 1}. {item.text}
+                    </Text>
+                  ))}
+                </View>
+              </View>
+            )}
           </View>
 
           {error ? <Text style={styles.errorText}>{error}</Text> : null}
@@ -377,8 +614,33 @@ const createStyles = (colors: ThemeColors) =>
   StyleSheet.create({
     summaryRow: {
       flexDirection: "row",
-      gap: 10,
+      gap: 8,
       alignItems: "stretch",
+    },
+    heroCard: {
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+      padding: 14,
+      gap: 6,
+    },
+    heroEyebrow: {
+      color: colors.textMuted,
+      fontSize: 11,
+      textTransform: "uppercase",
+      letterSpacing: 1.2,
+      fontWeight: "700",
+    },
+    heroTitle: {
+      color: colors.textPrimary,
+      fontSize: 20,
+      fontWeight: "700",
+    },
+    heroSubtitle: {
+      color: colors.textMuted,
+      fontSize: 13,
+      lineHeight: 18,
     },
     summaryCard: {
       flex: 1,
@@ -386,15 +648,18 @@ const createStyles = (colors: ThemeColors) =>
       borderWidth: 1,
       borderColor: colors.border,
       backgroundColor: colors.card,
-      padding: 12,
-      gap: 4,
+      padding: 10,
+      gap: 3,
     },
     weeklyCard: {
-      flex: 1.15,
+      flex: 1,
     },
-    planCard: {
-      flex: 0.85,
+    focusCard: {
+      marginTop: 8,
       justifyContent: "space-between",
+      paddingHorizontal: 12,
+      paddingVertical: 12,
+      gap: 6,
     },
     summaryLabel: {
       color: colors.textMuted,
@@ -405,7 +670,7 @@ const createStyles = (colors: ThemeColors) =>
     },
     summaryValue: {
       color: colors.textPrimary,
-      fontSize: 18,
+      fontSize: 16,
       fontWeight: "700",
     },
     summaryHint: {
@@ -421,7 +686,7 @@ const createStyles = (colors: ThemeColors) =>
     },
     planValue: {
       color: colors.textPrimary,
-      fontSize: 16,
+      fontSize: 13,
       fontWeight: "700",
     },
     planHint: {
@@ -435,33 +700,53 @@ const createStyles = (colors: ThemeColors) =>
       fontWeight: "700",
       marginTop: 6,
     },
-    weeklyRow: {
-      marginTop: 8,
+    focusList: {
+      gap: 6,
+      marginTop: 4,
+    },
+    focusRow: {
       flexDirection: "row",
-      flexWrap: "wrap",
-      gap: 8,
+      alignItems: "center",
+      gap: 6,
+    },
+    focusDot: {
+      width: 6,
+      height: 6,
+      borderRadius: 999,
+      backgroundColor: colors.primary,
+    },
+    focusText: {
+      color: colors.textPrimary,
+      fontSize: 11,
+      fontWeight: "600",
+    },
+    weeklyRow: {
+      marginTop: 6,
+      flexDirection: "row",
+      flexWrap: "nowrap",
+      justifyContent: "space-between",
     },
     weekCell: {
-      flexBasis: "31%",
-      minWidth: 86,
-      borderRadius: 10,
+      width: "15%",
+      minWidth: 48,
+      height: 56,
+      borderRadius: 12,
       borderWidth: 1,
       borderColor: colors.border,
       backgroundColor: colors.surface,
-      paddingVertical: 8,
-      paddingHorizontal: 8,
-      gap: 4,
+      paddingVertical: 4,
+      paddingHorizontal: 4,
+      gap: 2,
       alignItems: "center",
       justifyContent: "center",
-      aspectRatio: 1,
     },
     weekCellWin: {
-      borderColor: "#1EE6A8",
-      backgroundColor: "#0F2C2A",
+      borderColor: colors.success,
+      backgroundColor: colors.successSoft,
     },
     weekCellLoss: {
-      borderColor: "#2E90FF",
-      backgroundColor: "#0B1E3A",
+      borderColor: colors.info,
+      backgroundColor: colors.infoSoft,
     },
     weekCellFlat: {
       borderColor: colors.border,
@@ -469,16 +754,17 @@ const createStyles = (colors: ThemeColors) =>
     },
     weekCellLabel: {
       color: colors.textMuted,
-      fontSize: 10,
+      fontSize: 8,
       textTransform: "uppercase",
-      letterSpacing: 1.2,
+      letterSpacing: 0.6,
       fontWeight: "700",
     },
     weekCellValue: {
       color: colors.textPrimary,
-      fontSize: 12,
+      fontSize: 10,
       fontWeight: "700",
       fontVariant: ["tabular-nums"],
+      textAlign: "center",
     },
     daySummaryCard: {
       borderRadius: 14,

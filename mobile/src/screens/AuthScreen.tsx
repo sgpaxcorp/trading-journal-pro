@@ -123,7 +123,7 @@ export function AuthScreen({ mode, onToggleMode }: AuthScreenProps) {
         />
 
         <Pressable style={styles.primaryButton} onPress={handleSubmit} disabled={busy}>
-          {busy ? <ActivityIndicator color="#061122" /> : <Text style={styles.primaryButtonText}>{submitLabel}</Text>}
+          {busy ? <ActivityIndicator color={colors.onPrimary} /> : <Text style={styles.primaryButtonText}>{submitLabel}</Text>}
         </Pressable>
 
         <Pressable onPress={onToggleMode}>
@@ -204,7 +204,7 @@ const createStyles = (colors: ThemeColors) =>
       marginTop: 4,
     },
     primaryButtonText: {
-      color: "#061122",
+      color: colors.onPrimary,
       fontWeight: "700",
       fontSize: 14,
     },

@@ -18,6 +18,12 @@ import {
 
 type Tab = "all" | "alarms" | "reminders" | "snoozed" | "history";
 
+type OpenPosition = {
+  journal_date?: string | null;
+  opened_at?: string | null;
+  raw?: any;
+};
+
 function SeverityPill({ severity }: { severity: AlertSeverity }) {
   const label = severity.toUpperCase();
   const cls =
@@ -44,6 +50,32 @@ function fmtDate(d?: string | null) {
       ? document.documentElement.lang || undefined
       : undefined;
   return new Date(t).toLocaleString(locale);
+}
+
+function extractOpenPositionsFromEvent(e: AlertEvent | null): OpenPosition[] {
+  const payload: any = e?.payload ?? {};
+  const meta = payload?.meta ?? payload?.stats ?? {};
+  const list =
+    payload?.open_positions_list ??
+    payload?.open_positions ??
+    meta?.open_positions_list ??
+    meta?.open_positions ??
+    payload?.meta?.open_positions ??
+    [];
+  return Array.isArray(list) ? list : [];
+}
+
+function pickJournalDateFromPositions(positions: OpenPosition[]): string | null {
+  for (const p of positions) {
+    const jd = p?.journal_date;
+    if (jd) return jd;
+    const opened = p?.opened_at || p?.raw?.opened_at || p?.raw?.open_time;
+    if (opened) {
+      const d = new Date(opened);
+      if (!Number.isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+    }
+  }
+  return null;
 }
 
 export default function MessageCenterPage() {
@@ -245,6 +277,7 @@ export default function MessageCenterPage() {
                     : L("Dismissed", "Descartada");
 
                 const link = e.kind === "alarm" ? "/rules-alarms/alarms" : "/rules-alarms/reminders";
+                const openJournalDate = pickJournalDateFromPositions(extractOpenPositionsFromEvent(e));
 
                 return (
                   <div key={e.id} className="flex flex-wrap items-start justify-between gap-4 bg-slate-900/40 px-4 py-4">
@@ -264,6 +297,14 @@ export default function MessageCenterPage() {
                       <span className="rounded-full border border-slate-700 px-3 py-1 text-[11px] text-slate-300">
                         {status}
                       </span>
+                      {openJournalDate ? (
+                        <Link
+                          href={`/journal/${openJournalDate}`}
+                          className="rounded-lg border border-emerald-700/50 bg-emerald-950/30 px-3 py-2 text-xs font-semibold text-emerald-100 hover:bg-emerald-950/50"
+                        >
+                          {L("Open journal", "Abrir journal")}
+                        </Link>
+                      ) : null}
                       <Link
                         href={link}
                         className="rounded-lg border border-slate-700 bg-slate-900/40 px-3 py-2 text-xs font-semibold text-slate-100 hover:border-emerald-400/60 hover:bg-emerald-500/10"

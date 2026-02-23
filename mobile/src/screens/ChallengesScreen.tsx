@@ -60,6 +60,7 @@ export function ChallengesScreen() {
   const styles = useMemo(() => createStyles(colors), [colors]);
   const [runs, setRuns] = useState<ChallengeRun[]>([]);
   const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -67,8 +68,10 @@ export function ChallengesScreen() {
 
     let cancelled = false;
 
-    async function loadChallenges() {
-      setLoading(true);
+    async function loadChallenges(isRefresh = false) {
+      if (!isRefresh) {
+        setLoading(true);
+      }
       setError(null);
 
       const { data, error: runErr } = await supabaseMobile
@@ -99,7 +102,9 @@ export function ChallengesScreen() {
           }
           setRuns(Object.values(latestByChallenge));
         }
-        setLoading(false);
+        if (!isRefresh) {
+          setLoading(false);
+        }
       }
     }
 
@@ -110,6 +115,42 @@ export function ChallengesScreen() {
     };
   }, [language, user?.id]);
 
+  async function handleRefresh() {
+    if (!supabaseMobile || !user?.id) return;
+    setRefreshing(true);
+    setError(null);
+    try {
+      const { data, error: runErr } = await supabaseMobile
+        .from("challenge_runs")
+        .select(
+          "id,challenge_id,status,duration_days,required_green_days,days_tracked,process_green_days,max_loss_breaks,xp_earned,current_streak,best_streak,last_tracked_date,started_at,ended_at,created_at"
+        )
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false });
+
+      if (runErr) {
+        setError(
+          t(
+            language,
+            "We couldn't load challenges yet.",
+            "No pudimos cargar los retos aún."
+          )
+        );
+        setRuns([]);
+      } else {
+        const latestByChallenge: Record<string, ChallengeRun> = {};
+        for (const row of (data as ChallengeRun[]) || []) {
+          if (!latestByChallenge[row.challenge_id]) {
+            latestByChallenge[row.challenge_id] = row;
+          }
+        }
+        setRuns(Object.values(latestByChallenge));
+      }
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
   return (
     <ScreenScaffold
       title={t(language, "Challenges", "Retos")}
@@ -118,6 +159,8 @@ export function ChallengesScreen() {
         "Track your active challenges and streaks.",
         "Sigue tus retos activos y rachas."
       )}
+      refreshing={refreshing}
+      onRefresh={handleRefresh}
     >
       {loading ? (
         <View style={styles.loadingRow}>

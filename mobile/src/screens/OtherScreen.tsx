@@ -11,11 +11,11 @@ import { Linking, StyleSheet, View } from "react-native";
 type OtherScreenProps = {
   onOpenModule: (title: string, description: string) => void;
   onOpenSettings: () => void;
-  onOpenLibrary: () => void;
   onOpenGlobalRanking: () => void;
   onOpenTrophies: () => void;
   onOpenNotebook: () => void;
   onOpenChallenges: () => void;
+  onOpenJournalDate: () => void;
 };
 
 const WEB_BASE = "https://www.neurotrader-journal.com";
@@ -23,11 +23,11 @@ const WEB_BASE = "https://www.neurotrader-journal.com";
 export function OtherScreen({
   onOpenModule,
   onOpenSettings,
-  onOpenLibrary,
   onOpenGlobalRanking,
   onOpenTrophies,
   onOpenNotebook,
   onOpenChallenges,
+  onOpenJournalDate,
 }: OtherScreenProps) {
   const { language } = useLanguage();
   const { colors } = useTheme();
@@ -61,16 +61,7 @@ export function OtherScreen({
             "Abre tus entradas diarias del journal."
           )}
           iconName="reader-outline"
-          onPress={() =>
-            onOpenModule(
-              t(language, "Journal", "Journal"),
-              t(
-                language,
-                "Daily journal editor will appear here once synced.",
-                "El editor diario aparecerá aquí cuando esté sincronizado."
-              )
-            )
-          }
+          onPress={onOpenJournalDate}
         />
         <ModuleTile
           title={t(language, "Global ranking", "Ranking global")}
@@ -91,16 +82,6 @@ export function OtherScreen({
           )}
           iconName="medal-outline"
           onPress={onOpenTrophies}
-        />
-        <ModuleTile
-          title={t(language, "Resources", "Recursos")}
-          description={t(
-            language,
-            "Saved videos, books, and trading links.",
-            "Videos, libros y enlaces guardados."
-          )}
-          iconName="library-outline"
-          onPress={onOpenLibrary}
         />
         <ModuleTile
           title={t(language, "Notebook", "Notebook")}

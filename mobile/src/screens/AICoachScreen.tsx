@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -51,38 +51,60 @@ export function AICoachScreen({}: AICoachScreenProps) {
   const [loadingThreads, setLoadingThreads] = useState(true);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [sending, setSending] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const listRef = useRef<FlatList<CoachMessage>>(null);
 
-  useEffect(() => {
-    if (!supabaseMobile || !user?.id) return;
+  const createNewThread = useCallback(async () => {
+    if (!supabaseMobile || !user?.id) return null;
     const sb = supabaseMobile;
-    const userId = user.id;
-    let active = true;
+    const { data, error } = await sb
+      .from("ai_coach_threads")
+      .insert({ user_id: user.id, title: "AI Coaching", summary: null })
+      .select("id,title,summary,created_at,updated_at")
+      .single();
+    if (error) return null;
+    return data as CoachThread;
+  }, [user?.id]);
 
+  const fetchThreads = useCallback(async () => {
+    if (!supabaseMobile || !user?.id) return null;
+    const { data, error } = await supabaseMobile
+      .from("ai_coach_threads")
+      .select("id,title,summary,created_at,updated_at")
+      .eq("user_id", user.id)
+      .order("updated_at", { ascending: false })
+      .limit(20);
+    if (error) throw error;
+    return (data || []) as CoachThread[];
+  }, [user?.id]);
+
+  const fetchMessages = useCallback(async (threadId: string) => {
+    if (!supabaseMobile) return null;
+    const { data, error } = await supabaseMobile
+      .from("ai_coach_messages")
+      .select("id,thread_id,role,content,created_at")
+      .eq("thread_id", threadId)
+      .order("created_at", { ascending: true })
+      .limit(200);
+    if (error) throw error;
+    return (data || []) as CoachMessage[];
+  }, []);
+
+  useEffect(() => {
+    let active = true;
     async function loadThreads() {
       try {
         setLoadingThreads(true);
-        const { data, error } = await sb
-          .from("ai_coach_threads")
-          .select("id,title,summary,created_at,updated_at")
-          .eq("user_id", userId)
-          .order("updated_at", { ascending: false })
-          .limit(20);
-
-        if (error) throw error;
+        let rows = await fetchThreads();
         if (!active) return;
-
-        const rows = (data || []) as CoachThread[];
-        if (!rows.length) {
+        if (!rows || !rows.length) {
           const created = await createNewThread();
           if (created) {
-            setThreads([created]);
-            setActiveThread(created);
+            rows = [created];
           }
-          return;
         }
-        setThreads(rows);
-        setActiveThread(rows[0]);
+        setThreads(rows ?? []);
+        setActiveThread(rows?.[0] ?? null);
       } catch {
         if (!active) return;
       } finally {
@@ -95,26 +117,18 @@ export function AICoachScreen({}: AICoachScreenProps) {
     return () => {
       active = false;
     };
-  }, [user?.id]);
+  }, [createNewThread, fetchThreads]);
 
   useEffect(() => {
-    if (!supabaseMobile || !activeThread?.id) return;
-    const sb = supabaseMobile;
-    const threadId = activeThread.id;
+    if (!activeThread?.id) return;
     let active = true;
 
     async function loadMessages() {
       try {
         setLoadingMessages(true);
-        const { data, error } = await sb
-          .from("ai_coach_messages")
-          .select("id,thread_id,role,content,created_at")
-          .eq("thread_id", threadId)
-          .order("created_at", { ascending: true })
-          .limit(200);
-        if (error) throw error;
+        const data = await fetchMessages(activeThread.id);
         if (!active) return;
-        setMessages((data || []) as CoachMessage[]);
+        setMessages(data ?? []);
         setTimeout(() => listRef.current?.scrollToEnd({ animated: false }), 50);
       } catch {
         if (!active) return;
@@ -128,19 +142,35 @@ export function AICoachScreen({}: AICoachScreenProps) {
     return () => {
       active = false;
     };
-  }, [activeThread?.id]);
+  }, [activeThread?.id, fetchMessages]);
 
-  async function createNewThread() {
-    if (!supabaseMobile || !user?.id) return null;
-    const sb = supabaseMobile;
-    const { data, error } = await sb
-      .from("ai_coach_threads")
-      .insert({ user_id: user.id, title: "AI Coaching", summary: null })
-      .select("id,title,summary,created_at,updated_at")
-      .single();
-    if (error) return null;
-    return data as CoachThread;
-  }
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      let rows = await fetchThreads();
+      if (!rows || !rows.length) {
+        const created = await createNewThread();
+        if (created) {
+          rows = [created];
+        }
+      }
+      const nextThreads = rows ?? [];
+      const preserved =
+        (activeThread && nextThreads.find((t) => t.id === activeThread.id)) ?? nextThreads[0] ?? null;
+      setThreads(nextThreads);
+      setActiveThread(preserved);
+      if (preserved?.id) {
+        const data = await fetchMessages(preserved.id);
+        setMessages(data ?? []);
+      } else {
+        setMessages([]);
+      }
+    } catch {
+      // ignore refresh errors
+    } finally {
+      setRefreshing(false);
+    }
+  }, [activeThread, createNewThread, fetchMessages, fetchThreads]);
 
   async function handleNewThread() {
     const created = await createNewThread();
@@ -261,6 +291,8 @@ export function AICoachScreen({}: AICoachScreenProps) {
         "Live coaching based on your journal, plan, and performance.",
         "Coaching en vivo basado en tu journal, plan y desempeño."
       )}
+      refreshing={refreshing}
+      onRefresh={handleRefresh}
     >
       <View style={styles.headerRow}>
         <Text style={styles.kicker}>{t(language, "Sessions", "Sesiones")}</Text>
@@ -387,7 +419,7 @@ const createStyles = (colors: ThemeColors) =>
     },
     threadCardActive: {
       borderColor: colors.primary,
-      backgroundColor: "#0F2C2A",
+      backgroundColor: colors.successSoft,
     },
     threadTitle: {
       color: colors.textPrimary,
@@ -423,9 +455,9 @@ const createStyles = (colors: ThemeColors) =>
     },
     bubbleUser: {
       alignSelf: "flex-end",
-      backgroundColor: "#0F2C2A",
+      backgroundColor: colors.successSoft,
       borderWidth: 1,
-      borderColor: "#1EE6A8",
+      borderColor: colors.success,
     },
     bubbleCoach: {
       alignSelf: "flex-start",
@@ -476,7 +508,7 @@ const createStyles = (colors: ThemeColors) =>
       opacity: 0.6,
     },
     sendButtonText: {
-      color: "#061122",
+      color: colors.onPrimary,
       fontSize: 12,
       fontWeight: "700",
     },

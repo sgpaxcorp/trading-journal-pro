@@ -227,7 +227,9 @@ export async function GET(req: NextRequest) {
     const accountId = requestedAccountId || (pref as any)?.active_account_id || null;
     let planQuery = supabaseAdmin
       .from("growth_plans")
-      .select("starting_balance,target_balance,daily_target_pct,daily_goal_percent,loss_days_per_week,trading_days,created_at,updated_at")
+      .select(
+        "starting_balance,target_balance,daily_target_pct,daily_goal_percent,loss_days_per_week,trading_days,created_at,updated_at,target_date,plan_mode,plan_phases"
+      )
       .eq("user_id", userId)
       .order("updated_at", { ascending: false })
       .order("created_at", { ascending: false })
@@ -238,7 +240,9 @@ export async function GET(req: NextRequest) {
     if (planErr && accountId && isMissingColumnError(planErr, "account_id")) {
       const retry = await supabaseAdmin
         .from("growth_plans")
-        .select("starting_balance,target_balance,daily_target_pct,daily_goal_percent,loss_days_per_week,trading_days,created_at,updated_at")
+        .select(
+          "starting_balance,target_balance,daily_target_pct,daily_goal_percent,loss_days_per_week,trading_days,created_at,updated_at,target_date,plan_mode,plan_phases"
+        )
         .eq("user_id", userId)
         .order("updated_at", { ascending: false })
         .order("created_at", { ascending: false })
@@ -348,6 +352,9 @@ export async function GET(req: NextRequest) {
         targetBalance,
         dailyTargetPct,
         planStartIso: startIso,
+        targetDate: String(plan?.target_date ?? plan?.targetDate ?? ""),
+        planMode: String(plan?.plan_mode ?? plan?.planMode ?? ""),
+        planPhases: plan?.plan_phases ?? plan?.planPhases ?? null,
       },
       totals: {
         tradingPnl: Number(totalTradingPnl.toFixed(2)),

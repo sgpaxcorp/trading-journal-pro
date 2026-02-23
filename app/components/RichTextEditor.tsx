@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
 
@@ -8,6 +8,7 @@ import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Underline from "@tiptap/extension-underline";
 import Link from "@tiptap/extension-link";
+import Image from "@tiptap/extension-image";
 import Placeholder from "@tiptap/extension-placeholder";
 import { Table } from "@tiptap/extension-table";
 import { TableRow } from "@tiptap/extension-table-row";
@@ -151,6 +152,7 @@ export default function RichTextEditor({
   const L = (en: string, es: string) => (isEs ? es : en);
   const effectivePlaceholder = placeholder ?? L("Write…", "Escribe…");
   const [tableOpen, setTableOpen] = useState(false);
+  const editorRef = useRef<any>(null);
 
   const extensions = useMemo(
     () => [
@@ -163,6 +165,10 @@ export default function RichTextEditor({
         openOnClick: false,
         autolink: true,
         linkOnPaste: true,
+      }),
+      Image.configure({
+        inline: false,
+        allowBase64: true,
       }),
       Placeholder.configure({ placeholder: effectivePlaceholder }),
       Table.configure({
@@ -191,12 +197,53 @@ export default function RichTextEditor({
           "nt-rte__content focus:outline-none px-4 py-3 text-[15px] leading-relaxed text-slate-100",
         style: `min-height: ${minHeight}px;`,
       },
+      handlePaste: (_view, event) => {
+        const items = Array.from(event.clipboardData?.items ?? []);
+        const imageItem = items.find((item) => item.type.startsWith("image/"));
+        if (!imageItem) return false;
+        const file = imageItem.getAsFile();
+        if (!file) return false;
+        event.preventDefault();
+        const reader = new FileReader();
+        reader.onload = () => {
+          const src = reader.result as string;
+          if (!src) return;
+          editorRef.current?.chain().focus().setImage({ src }).run();
+        };
+        reader.readAsDataURL(file);
+        return true;
+      },
+      handleDrop: (view, event, _slice, moved) => {
+        if (moved) return false;
+        const files = Array.from(event.dataTransfer?.files ?? []);
+        const imageFile = files.find((file) => file.type.startsWith("image/"));
+        if (!imageFile) return false;
+        event.preventDefault();
+        const coords = view.posAtCoords({ left: event.clientX, top: event.clientY });
+        const insertPos = coords?.pos;
+        const reader = new FileReader();
+        reader.onload = () => {
+          const src = reader.result as string;
+          if (!src) return;
+          const chain = editorRef.current?.chain().focus();
+          if (!chain) return;
+          if (typeof insertPos === "number") {
+            chain.insertContentAt(insertPos, { type: "image", attrs: { src } }).run();
+          } else {
+            chain.setImage({ src }).run();
+          }
+        };
+        reader.readAsDataURL(imageFile);
+        return true;
+      },
     },
   });
 
   // Notify parent when ready
   useEffect(() => {
-    if (!editor || !onReady) return;
+    if (!editor) return;
+    editorRef.current = editor;
+    if (!onReady) return;
     try {
       onReady(editor);
     } catch {
@@ -489,6 +536,14 @@ export default function RichTextEditor({
           padding-left: 0.75rem;
           margin: 0.75rem 0;
           color: rgba(226, 232, 240, 0.85);
+        }
+
+        .nt-rte .ProseMirror img {
+          max-width: 100%;
+          height: auto;
+          border-radius: 12px;
+          border: 1px solid rgba(148, 163, 184, 0.25);
+          margin: 0.6rem 0;
         }
       `}</style>
     </div>

@@ -86,6 +86,7 @@ export function NotebookScreen() {
   const [sections, setSections] = useState<NotebookSection[]>([]);
   const [freeNotes, setFreeNotes] = useState<FreeNote[]>([]);
   const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -93,8 +94,10 @@ export function NotebookScreen() {
 
     let cancelled = false;
 
-    async function loadNotebook() {
-      setLoading(true);
+    async function loadNotebook(isRefresh = false) {
+      if (!isRefresh) {
+        setLoading(true);
+      }
       setError(null);
 
       const accountId = await fetchActiveAccountId();
@@ -160,7 +163,9 @@ export function NotebookScreen() {
         setSections(sectionRows);
         setPages(pageRows);
         setFreeNotes(Array.isArray(freeRows) ? (freeRows as FreeNote[]) : []);
-        setLoading(false);
+        if (!isRefresh) {
+          setLoading(false);
+        }
       }
     }
 
@@ -170,6 +175,78 @@ export function NotebookScreen() {
       cancelled = true;
     };
   }, [language, user?.id]);
+
+  async function handleRefresh() {
+    if (!supabaseMobile || !user?.id) return;
+    setRefreshing(true);
+    setError(null);
+    try {
+      const accountId = await fetchActiveAccountId();
+
+      let bookQuery = supabaseMobile
+        .from(BOOKS_TABLE)
+        .select("id, name, account_id")
+        .eq("user_id", user.id);
+
+      if (accountId) bookQuery = bookQuery.eq("account_id", accountId);
+
+      const { data: bookRows, error: bookErr } = await bookQuery.order("created_at", {
+        ascending: true,
+      });
+
+      const safeBooks = Array.isArray(bookRows) ? (bookRows as any[]) : [];
+      const bookIds = safeBooks.map((b) => b.id);
+
+      let sectionRows: NotebookSection[] = [];
+      let pageRows: NotebookPage[] = [];
+
+      if (bookIds.length > 0) {
+        const { data: secData } = await supabaseMobile
+          .from(SECTIONS_TABLE)
+          .select("id, name, notebook_id")
+          .in("notebook_id", bookIds)
+          .order("created_at", { ascending: true });
+
+        const { data: pageData } = await supabaseMobile
+          .from(PAGES_TABLE)
+          .select("id, notebook_id, section_id, title, content, created_at, updated_at")
+          .in("notebook_id", bookIds)
+          .order("updated_at", { ascending: false });
+
+        sectionRows = Array.isArray(secData) ? (secData as NotebookSection[]) : [];
+        pageRows = Array.isArray(pageData) ? (pageData as NotebookPage[]) : [];
+      }
+
+      let freeQuery = supabaseMobile
+        .from(FREE_NOTES_TABLE)
+        .select("entry_date, content, updated_at, account_id")
+        .eq("user_id", user.id);
+
+      if (accountId) freeQuery = freeQuery.eq("account_id", accountId);
+      else freeQuery = freeQuery.is("account_id", null);
+
+      const { data: freeRows } = await freeQuery.order("entry_date", {
+        ascending: false,
+      });
+
+      if (bookErr) {
+        setError(
+          t(
+            language,
+            "We couldn't load notebook data.",
+            "No pudimos cargar el notebook."
+          )
+        );
+      }
+
+      setBooks(safeBooks.map((b) => ({ id: b.id, name: b.name })));
+      setSections(sectionRows);
+      setPages(pageRows);
+      setFreeNotes(Array.isArray(freeRows) ? (freeRows as FreeNote[]) : []);
+    } finally {
+      setRefreshing(false);
+    }
+  }
 
   const bookNameById = useMemo(() => {
     const map = new Map<string, string>();
@@ -191,6 +268,8 @@ export function NotebookScreen() {
         "Review your notebook entries from the web app.",
         "Revisa tus notas del notebook desde la web."
       )}
+      refreshing={refreshing}
+      onRefresh={handleRefresh}
     >
       {loading ? (
         <View style={styles.loadingRow}>

@@ -8,6 +8,7 @@ import { useTheme } from "../lib/ThemeContext";
 import type { ThemeColors } from "../theme";
 import { useSupabaseUser } from "../lib/useSupabaseUser";
 import { apiGet } from "../lib/api";
+import { supabaseMobile } from "../lib/supabase";
 
 type TrophiesApiResponse = {
   definitions: TrophyDefinition[];
@@ -53,15 +54,21 @@ export function TrophiesScreen() {
   const [earned, setEarned] = useState<TrophyItem[]>([]);
   const [locked, setLocked] = useState<TrophyItem[]>([]);
   const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [lockedEmptyLabel, setLockedEmptyLabel] = useState<string>(
+    t(language, "All trophies unlocked.", "Todos los trofeos desbloqueados.")
+  );
 
   useEffect(() => {
     if (!user?.id) return;
 
     let cancelled = false;
 
-    async function loadTrophies() {
-      setLoading(true);
+    async function loadTrophies(isRefresh = false) {
+      if (!isRefresh) {
+        setLoading(true);
+      }
       setError(null);
 
       let defs: TrophyDefinition[] = [];
@@ -75,6 +82,34 @@ export function TrophiesScreen() {
       } catch (err) {
         loadError = err;
         console.warn("[TrophiesScreen] API error:", err);
+      }
+
+      if (loadError && supabaseMobile) {
+        try {
+          let rpcRes = await supabaseMobile.rpc("nt_public_user_trophies", {
+            target_user: user.id,
+          });
+          if (rpcRes.error) {
+            rpcRes = await supabaseMobile.rpc("nt_public_user_trophies", {
+              p_user_id: user.id,
+            });
+          }
+          if (!rpcRes.error && Array.isArray(rpcRes.data)) {
+            loadError = null;
+            defs = [];
+            earnedRows = rpcRes.data.map((row: any) => ({
+              trophy_id: String(row?.trophy_id ?? ""),
+              title: String(row?.title ?? "Trophy"),
+              description: String(row?.description ?? ""),
+              tier: String(row?.tier ?? "Bronze"),
+              xp: Number(row?.xp ?? 0),
+              category: String(row?.category ?? "General"),
+              earned_at: row?.earned_at ? String(row.earned_at) : null,
+            })) as TrophyItem[];
+          }
+        } catch (fallbackErr) {
+          console.warn("[TrophiesScreen] fallback error:", fallbackErr);
+        }
       }
 
       if (!cancelled) {
@@ -128,7 +163,18 @@ export function TrophiesScreen() {
 
         setEarned(earnedList);
         setLocked(lockedList);
-        setLoading(false);
+        setLockedEmptyLabel(
+          defs && defs.length > 0
+            ? t(language, "All trophies unlocked.", "Todos los trofeos desbloqueados.")
+            : t(
+                language,
+                "Locked trophies sync on web.",
+                "Los trofeos bloqueados se sincronizan en la web."
+              )
+        );
+        if (!isRefresh) {
+          setLoading(false);
+        }
       }
     }
 
@@ -139,6 +185,113 @@ export function TrophiesScreen() {
     };
   }, [language, user?.id]);
 
+  async function handleRefresh() {
+    if (!user?.id) return;
+    setRefreshing(true);
+    setError(null);
+    try {
+      let defs: TrophyDefinition[] = [];
+      let earnedRows: TrophyItem[] = [];
+      let loadError: any = null;
+
+      try {
+        const res = await apiGet<TrophiesApiResponse>("/api/trophies/mobile");
+        defs = Array.isArray(res.definitions) ? res.definitions : [];
+        earnedRows = Array.isArray(res.earned) ? res.earned : [];
+      } catch (err) {
+        loadError = err;
+      }
+
+      if (loadError && supabaseMobile) {
+        try {
+          let rpcRes = await supabaseMobile.rpc("nt_public_user_trophies", {
+            target_user: user.id,
+          });
+          if (rpcRes.error) {
+            rpcRes = await supabaseMobile.rpc("nt_public_user_trophies", {
+              p_user_id: user.id,
+            });
+          }
+          if (!rpcRes.error && Array.isArray(rpcRes.data)) {
+            loadError = null;
+            defs = [];
+            earnedRows = rpcRes.data.map((row: any) => ({
+              trophy_id: String(row?.trophy_id ?? ""),
+              title: String(row?.title ?? "Trophy"),
+              description: String(row?.description ?? ""),
+              tier: String(row?.tier ?? "Bronze"),
+              xp: Number(row?.xp ?? 0),
+              category: String(row?.category ?? "General"),
+              earned_at: row?.earned_at ? String(row.earned_at) : null,
+            })) as TrophyItem[];
+          }
+        } catch {
+          // ignore
+        }
+      }
+
+      if (loadError) {
+        setError(
+          t(
+            language,
+            "We couldn't load trophies yet.",
+            "No pudimos cargar los trofeos aún."
+          )
+        );
+        return;
+      }
+
+      const earnedList: TrophyItem[] = (earnedRows ?? []).map((row: any) => ({
+        trophy_id: String(row?.trophy_id ?? ""),
+        title: String(row?.title ?? "Trophy"),
+        description: String(row?.description ?? ""),
+        tier: String(row?.tier ?? "Bronze"),
+        xp: Number(row?.xp ?? 0),
+        category: String(row?.category ?? "General"),
+        earned_at: row?.earned_at ? String(row.earned_at) : null,
+        locked: false,
+        secret: row?.secret ?? null,
+      }));
+
+      const earnedIds = new Set(earnedList.map((item) => item.trophy_id));
+      const lockedList: TrophyItem[] = (defs ?? [])
+        .filter((def: any) => !earnedIds.has(String(def.id)))
+        .map((def: any) => ({
+          trophy_id: String(def.id),
+          title: def.secret
+            ? t(language, "Secret trophy", "Trofeo secreto")
+            : String(def.title ?? "Trophy"),
+          description: def.secret
+            ? t(
+                language,
+                "Keep trading and journaling to reveal this trophy.",
+                "Sigue operando y haciendo journal para revelar este trofeo."
+              )
+            : String(def.description ?? ""),
+          tier: String(def.tier ?? "Bronze"),
+          xp: Number(def.xp ?? 0),
+          category: String(def.category ?? "General"),
+          earned_at: null,
+          locked: true,
+          secret: def.secret ?? null,
+        }));
+
+      setEarned(earnedList);
+      setLocked(lockedList);
+      setLockedEmptyLabel(
+        defs && defs.length > 0
+          ? t(language, "All trophies unlocked.", "Todos los trofeos desbloqueados.")
+          : t(
+              language,
+              "Locked trophies sync on web.",
+              "Los trofeos bloqueados se sincronizan en la web."
+            )
+      );
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
   return (
     <ScreenScaffold
       title={t(language, "Trophies", "Trofeos")}
@@ -147,6 +300,8 @@ export function TrophiesScreen() {
         "Track earned and locked trophies.",
         "Revisa tus trofeos ganados y bloqueados."
       )}
+      refreshing={refreshing}
+      onRefresh={handleRefresh}
     >
       {loading ? (
         <View style={styles.loadingRow}>
@@ -169,7 +324,7 @@ export function TrophiesScreen() {
           <Section
             title={t(language, "Locked trophies", "Trofeos bloqueados")}
             items={locked}
-            emptyLabel={t(language, "All trophies unlocked.", "Todos los trofeos desbloqueados.")}
+            emptyLabel={lockedEmptyLabel}
             styles={styles}
             language={language}
           />

@@ -6,10 +6,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 
-import JournalGrid, {
-  type JournalWidgetId,
-  type JournalWidgetDef,
-} from "@/app/components/JournalGrid";
+import type { JournalWidgetId, JournalWidgetDef } from "@/app/components/JournalGrid";
 
 import RichTextEditor from "@/app/components/RichTextEditor";
 
@@ -36,6 +33,7 @@ import {
 import {
   getJournalUiSettings,
   saveJournalUiSettings,
+  type JournalUiSettings,
 } from "@/lib/journalUiSettingsSupabase";
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
@@ -103,6 +101,242 @@ const STRATEGY_LABELS: Record<OptionStrategy, { en: string; es: string }> = {
   covered_call: { en: "Covered call", es: "Covered call" },
   cash_secured_put: { en: "Cash-secured put", es: "Cash‑secured put" },
   other: { en: "Other option strategy", es: "Otra estrategia de opciones" },
+};
+
+type ProcessPhase = "premarket" | "inside" | "after";
+const PROCESS_PHASES: ProcessPhase[] = ["premarket", "inside", "after"];
+const PROCESS_LABELS: Record<ProcessPhase, { en: string; es: string }> = {
+  premarket: { en: "Premarket", es: "Premarket" },
+  inside: { en: "In‑Trade", es: "En trade" },
+  after: { en: "After‑Trade", es: "Post‑trade" },
+};
+
+type JournalChecklistPresets = {
+  premarket: string[];
+  inside: string[];
+  after: string[];
+  strategy: string[];
+  impulses: string[];
+  states: string[];
+};
+
+const DEFAULT_CHECKLIST_PRESETS: JournalChecklistPresets = {
+  premarket: [
+    "News/events checked",
+    "Key levels marked",
+    "Bias & plan defined",
+    "Risk & size set",
+    "No‑trade conditions set",
+  ],
+  inside: [
+    "Entry matched setup",
+    "Stop placed immediately",
+    "Position size respected",
+    "Managed per plan",
+    "No averaging down",
+  ],
+  after: [
+    "Screenshots saved",
+    "Journal updated",
+    "Mistakes noted",
+    "Lesson captured",
+    "Next action defined",
+  ],
+  strategy: [
+    "A+ setup",
+    "R/R ≥ 2R",
+    "Clear invalidation",
+    "Followed plan",
+    "Entry at level",
+  ],
+  impulses: [
+    "FOMO",
+    "Revenge trade",
+    "Chased price",
+    "Overtrading",
+    "Moved stop impulsively",
+  ],
+  states: [
+    "Calm",
+    "Focused",
+    "Confident",
+    "Anxious",
+    "Impatient",
+    "Overconfident",
+  ],
+};
+
+const PROCESS_ITEM_LABELS: Record<string, string> = {
+  "News/events checked": "Noticias/eventos revisados",
+  "Key levels marked": "Niveles clave marcados",
+  "Bias & plan defined": "Sesgo y plan definidos",
+  "Risk & size set": "Riesgo y tamaño definidos",
+  "No‑trade conditions set": "Condiciones de no‑trade definidas",
+  "Entry matched setup": "Entrada coincidió con el setup",
+  "Stop placed immediately": "Stop colocado de inmediato",
+  "Position size respected": "Tamaño de posición respetado",
+  "Managed per plan": "Gestionado según el plan",
+  "No averaging down": "Sin promediar en contra",
+  "Screenshots saved": "Capturas guardadas",
+  "Journal updated": "Journal actualizado",
+  "Mistakes noted": "Errores anotados",
+  "Lesson captured": "Lección capturada",
+  "Next action defined": "Próxima acción definida",
+};
+
+const STRATEGY_ITEM_LABELS: Record<string, string> = {
+  "A+ setup": "Setup A+",
+  "R/R ≥ 2R": "R/B ≥ 2R",
+  "Clear invalidation": "Invalidación clara",
+  "Followed plan": "Plan seguido",
+  "Entry at level": "Entrada en nivel",
+};
+
+const IMPULSE_ITEM_LABELS: Record<string, string> = {
+  FOMO: "FOMO",
+  "Revenge trade": "Trade de revancha",
+  "Chased price": "Perseguí el precio",
+  Overtrading: "Sobre‑trading",
+  "Moved stop impulsively": "Moví el stop impulsivamente",
+};
+
+const STATE_ITEM_LABELS: Record<string, string> = {
+  Calm: "Calma",
+  Focused: "Enfocado",
+  Confident: "Confiado",
+  Anxious: "Ansioso",
+  Impatient: "Impaciente",
+  Overconfident: "Sobreconfiado",
+};
+
+const EXIT_REASON_TAGS = [
+  "Stop Loss Placed",
+  "Take Profit Hit",
+  "Manual Exit",
+  "Moved stop to profit",
+  "Stopped out (loss)",
+  "Move stop to breakeven",
+];
+
+const EXIT_REASON_LABELS: Record<string, string> = {
+  "Stop Loss Placed": "Stop loss colocado",
+  "Take Profit Hit": "Take profit ejecutado",
+  "Manual Exit": "Salida manual",
+  "Moved stop to profit": "Stop movido a profit",
+  "Stopped out (loss)": "Stop ejecutado (pérdida)",
+  "Move stop to breakeven": "Mover stop a BE",
+};
+
+const TAG_PREFIX: Record<ProcessPhase | "strategy", string> = {
+  premarket: "PRE:",
+  inside: "IN:",
+  after: "POST:",
+  strategy: "STRAT:",
+};
+
+const normalizeChecklistPresets = (raw?: any): JournalChecklistPresets => {
+  const asList = (v: any, fallback: string[]) =>
+    Array.isArray(v) ? v.map((x) => String(x).trim()).filter(Boolean) : fallback;
+  return {
+    premarket: asList(raw?.premarket, DEFAULT_CHECKLIST_PRESETS.premarket),
+    inside: asList(raw?.inside, DEFAULT_CHECKLIST_PRESETS.inside),
+    after: asList(raw?.after, DEFAULT_CHECKLIST_PRESETS.after),
+    strategy: asList(raw?.strategy, DEFAULT_CHECKLIST_PRESETS.strategy),
+    impulses: asList(raw?.impulses, DEFAULT_CHECKLIST_PRESETS.impulses),
+    states: asList(raw?.states, DEFAULT_CHECKLIST_PRESETS.states),
+  };
+};
+
+const checklistTag = (prefix: string | null, item: string) =>
+  prefix ? `${prefix} ${item}`.trim() : item.trim();
+
+type MindsetRatings = {
+  emotional_balance: number | null;
+  impulse_control: number | null;
+  setup_quality: number | null;
+  probability: number | null;
+};
+
+const DEFAULT_MINDSET: MindsetRatings = {
+  emotional_balance: 3,
+  impulse_control: 3,
+  setup_quality: 3,
+  probability: 3,
+};
+
+type AfterTradeReview = {
+  checklist: Record<string, boolean>;
+  ratings: {
+    execution: number | null;
+    patience: number | null;
+    clarity: number | null;
+  };
+  notes: {
+    didWell: string;
+    improve: string;
+  };
+};
+
+const AFTER_REVIEW_ITEMS = [
+  { id: "followed_exit_plan", en: "Followed my exit plan", es: "Seguí mi plan de salida" },
+  { id: "exit_at_level", en: "Exited at my planned level", es: "Salí en el nivel planificado" },
+  { id: "exit_emotion", en: "Exited due to fear/anxiety", es: "Salí por miedo/ansiedad" },
+  { id: "moved_stop_no_plan", en: "Moved stop without a plan", es: "Moví el stop sin plan" },
+  { id: "let_winner_run", en: "Let the winner run as planned", es: "Dejé correr la ganancia según el plan" },
+  { id: "partials_ok", en: "Managed partials correctly", es: "Manejé parciales correctamente" },
+  { id: "size_ok", en: "Respected position size", es: "Respeté el tamaño de posición" },
+  { id: "fomo_revenge", en: "FOMO or revenge present", es: "Hubo FOMO o revancha" },
+  { id: "early_exit", en: "Exited early to lock profits", es: "Salí temprano para asegurar ganancias" },
+  { id: "discipline_pressure", en: "Maintained discipline under pressure", es: "Mantuve disciplina bajo presión" },
+];
+
+const DEFAULT_AFTER_REVIEW: AfterTradeReview = {
+  checklist: Object.fromEntries(AFTER_REVIEW_ITEMS.map((item) => [item.id, false])),
+  ratings: {
+    execution: 3,
+    patience: 3,
+    clarity: 3,
+  },
+  notes: {
+    didWell: "",
+    improve: "",
+  },
+};
+
+const clampRating = (v: any) => {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return null;
+  return Math.max(1, Math.min(5, Math.round(n)));
+};
+
+const normalizeMindset = (raw?: any): MindsetRatings => ({
+  emotional_balance: clampRating(raw?.emotional_balance) ?? DEFAULT_MINDSET.emotional_balance,
+  impulse_control: clampRating(raw?.impulse_control) ?? DEFAULT_MINDSET.impulse_control,
+  setup_quality: clampRating(raw?.setup_quality) ?? DEFAULT_MINDSET.setup_quality,
+  probability: clampRating(raw?.probability) ?? DEFAULT_MINDSET.probability,
+});
+
+const normalizeAfterReview = (raw?: any): AfterTradeReview => {
+  const checklist: Record<string, boolean> = { ...DEFAULT_AFTER_REVIEW.checklist };
+  if (raw?.checklist && typeof raw.checklist === "object") {
+    for (const item of AFTER_REVIEW_ITEMS) {
+      if (item.id in raw.checklist) {
+        checklist[item.id] = !!raw.checklist[item.id];
+      }
+    }
+  }
+  return {
+    checklist,
+    ratings: {
+      execution: clampRating(raw?.ratings?.execution) ?? DEFAULT_AFTER_REVIEW.ratings.execution,
+      patience: clampRating(raw?.ratings?.patience) ?? DEFAULT_AFTER_REVIEW.ratings.patience,
+      clarity: clampRating(raw?.ratings?.clarity) ?? DEFAULT_AFTER_REVIEW.ratings.clarity,
+    },
+    notes: {
+      didWell: typeof raw?.notes?.didWell === "string" ? raw.notes.didWell : DEFAULT_AFTER_REVIEW.notes.didWell,
+      improve: typeof raw?.notes?.improve === "string" ? raw.notes.improve : DEFAULT_AFTER_REVIEW.notes.improve,
+    },
+  };
 };
 
 // ✅ Normalizers for DB -> UI
@@ -447,19 +681,34 @@ function computeAutoPnL(entries: EntryTradeRow[], exits: ExitTradeRow[]) {
    Widget shell
 ========================================================= */
 
-function WidgetCard({ title, children, right }: { title: string; children: React.ReactNode; right?: React.ReactNode }) {
+function WidgetCard({
+  title,
+  children,
+  right,
+  subtitle,
+  compact = false,
+}: {
+  title: string;
+  children: React.ReactNode;
+  right?: React.ReactNode;
+  subtitle?: string;
+  compact?: boolean;
+}) {
+  const headerClass = compact ? "px-2.5 py-0.5" : "px-4 py-2";
+  const bodyClass = compact ? "p-2" : "p-4";
+  const titleClass = compact ? "text-[12px]" : "text-sm";
   return (
     <div className="bg-slate-900/95 border border-slate-800 rounded-2xl h-full flex flex-col overflow-hidden shadow-sm min-h-0">
-      <div className="flex items-center justify-between px-4 py-2 border-b border-slate-800 bg-slate-950/40">
+      <div className={`flex items-center justify-between ${headerClass} border-b border-slate-800 bg-slate-950/40`}>
         <div className="flex items-center gap-2">
-          <span className="drag-handle cursor-move select-none inline-flex items-center justify-center px-2 py-1 rounded-md border border-slate-700 text-[11px] text-slate-400">
-            ⇕
-          </span>
-          <p className="text-slate-200 text-sm font-medium">{title}</p>
+          <div>
+            <p className={`text-slate-100 ${titleClass} font-semibold`}>{title}</p>
+            {subtitle && <p className="text-[11px] text-slate-400">{subtitle}</p>}
+          </div>
         </div>
         <div>{right}</div>
       </div>
-      <div className="p-4 flex-1 min-h-0 overflow-auto">{children}</div>
+      <div className={`${bodyClass} flex-1 min-h-0 overflow-auto`}>{children}</div>
     </div>
   );
 }
@@ -545,6 +794,21 @@ export default function DailyJournalPage() {
   // This prevents the UI 'Save' action from accidentally wiping sync metadata.
   const [notesExtra, setNotesExtra] = useState<Record<string, any>>({});
 
+  const [processPhase, setProcessPhase] = useState<ProcessPhase>("premarket");
+  const [checklistPresets, setChecklistPresets] = useState<JournalChecklistPresets>(DEFAULT_CHECKLIST_PRESETS);
+  const [mindset, setMindset] = useState<MindsetRatings>(DEFAULT_MINDSET);
+  const [afterReview, setAfterReview] = useState<AfterTradeReview>(DEFAULT_AFTER_REVIEW);
+  const [editProcess, setEditProcess] = useState(false);
+  const [editMindset, setEditMindset] = useState(false);
+  const [newChecklistItem, setNewChecklistItem] = useState({
+    premarket: "",
+    inside: "",
+    after: "",
+    strategy: "",
+    impulses: "",
+    states: "",
+  });
+
   const [templates, setTemplates] = useState<JournalTemplate[]>([]);
   const [newTemplateName, setNewTemplateName] = useState("");
 
@@ -594,85 +858,48 @@ export default function DailyJournalPage() {
   }, []);
 
   /* =========================================================
-     Widgets active state
+     Wizard + UI presets (no widgets)
   ========================================================= */
 
-  const ALL_WIDGETS: { id: JournalWidgetId; label: string; defaultOn: boolean }[] = [
-    { id: "pnl", label: L("Day P&L", "P&L del día"), defaultOn: true },
-    { id: "premarket", label: L("Premarket Prep", "Preparación premarket"), defaultOn: true },
-    { id: "inside", label: L("Inside the Trade", "Dentro del trade"), defaultOn: true },
-    { id: "after", label: L("After-trade Analysis", "Análisis post‑trade"), defaultOn: true },
-    { id: "entries", label: L("Entries", "Entradas"), defaultOn: true },
-    { id: "exits", label: L("Exits", "Salidas"), defaultOn: true },
-    { id: "emotional", label: L("Emotional State", "Estado emocional"), defaultOn: true },
-    { id: "strategy", label: L("Strategy / Probability", "Estrategia / Probabilidad"), defaultOn: true },
-    { id: "screenshots", label: L("Screenshots", "Screenshots"), defaultOn: true },
-    { id: "templates", label: L("Templates", "Plantillas"), defaultOn: true },
-    { id: "actions", label: L("Actions", "Acciones"), defaultOn: true },
-  ];
-
-  const widgetsKey = "journal_widgets_active_v1";
-  const layoutStorageKey = "journal_layout_v1";
+  const checklistStorageKey = "journal_checklists_v1";
   const UI_PAGE_KEY = "journal";
 
-  // IMPORTANT (SSR hydration): Next.js can pre-render this "use client" page on the server.
-  // If we read localStorage during the initial render, the server HTML can differ from the
-  // client's first render (stored toggles), causing a hydration mismatch.
-  // So we render a deterministic default first, then hydrate from localStorage/Supabase in effects.
-  const DEFAULT_ACTIVE_WIDGETS = ALL_WIDGETS.filter((w) => w.defaultOn).map((w) => w.id) as JournalWidgetId[];
-  const [activeWidgets, setActiveWidgets] = useState<JournalWidgetId[]>(DEFAULT_ACTIVE_WIDGETS);
+  const uiSettingsRef = useRef<JournalUiSettings>({});
 
-  // Fast client-side hydrate from localStorage (Supabase will override if it has saved UI).
+  const commitUiSettings = (patch: Partial<JournalUiSettings>) => {
+    if (!userId) return;
+    const next: JournalUiSettings = {
+      ...uiSettingsRef.current,
+      ...patch,
+      checklists: patch.checklists ?? uiSettingsRef.current.checklists,
+    };
+    uiSettingsRef.current = next;
+    saveJournalUiSettings(userId, UI_PAGE_KEY, next).catch((e) =>
+      console.error("[journal] save ui settings failed:", e)
+    );
+  };
+
+  // Fast client-side hydrate for checklist presets
   useEffect(() => {
     try {
-      const raw = localStorage.getItem(widgetsKey);
+      const raw = localStorage.getItem(checklistStorageKey);
       if (!raw) return;
-      const parsed = JSON.parse(raw) as unknown;
-      if (Array.isArray(parsed) && parsed.length) {
-        const withPnl = parsed.includes("pnl") ? parsed : ["pnl", ...parsed];
-        setActiveWidgets(withPnl as JournalWidgetId[]);
-      }
+      const parsed = JSON.parse(raw);
+      const normalized = normalizeChecklistPresets(parsed);
+      setChecklistPresets(normalized);
+      uiSettingsRef.current = { ...uiSettingsRef.current, checklists: normalized };
     } catch {
       // ignore
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Keep localStorage in sync (fast UI)
   useEffect(() => {
     try {
-      localStorage.setItem(widgetsKey, JSON.stringify(activeWidgets));
+      localStorage.setItem(checklistStorageKey, JSON.stringify(checklistPresets));
     } catch {}
-  }, [activeWidgets]);
-
-  // Safety: if P&L is active but missing in stored layout, reset layout to defaults.
-  useEffect(() => {
-    if (!activeWidgets.includes("pnl")) return;
-    if (typeof window === "undefined") return;
-    try {
-      const raw = localStorage.getItem(layoutStorageKey);
-      if (!raw) return;
-      const parsed = JSON.parse(raw) as any;
-      const hasPnl = Array.isArray(parsed?.lg) && parsed.lg.some((l: any) => l?.i === "pnl");
-      if (!hasPnl) {
-        localStorage.removeItem(layoutStorageKey);
-        setJournalGridKey((k) => k + 1);
-      }
-    } catch {
-      // ignore
-    }
-  }, [activeWidgets, layoutStorageKey]);
-
-  const toggleWidget = (id: JournalWidgetId) => {
-    setActiveWidgets((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
-  };
-
-  /* =========================================================
-     ✅ FIX 1: If user clears cookies/site data, localStorage is wiped.
-     Solution: store templates + layout + widget toggles in Supabase.
-  ========================================================= */
-
-  const [journalGridKey, setJournalGridKey] = useState(0);
+    uiSettingsRef.current = { ...uiSettingsRef.current, checklists: checklistPresets };
+  }, [checklistPresets]);
 
   // Load UI settings + templates from Supabase
   useEffect(() => {
@@ -682,25 +909,16 @@ export default function DailyJournalPage() {
 
     (async () => {
       try {
-        // 1) UI settings (layout + widget toggles)
-        // Local-first: if localStorage already has settings, keep them.
-        // Supabase is the fallback when localStorage is empty (e.g., cookies/site data cleared).
-        let hasLocalWidgets = false;
-        let hasLocalLayout = false;
+        let hasLocalChecklists = false;
 
         try {
-          const raw = localStorage.getItem(widgetsKey);
+          const raw = localStorage.getItem(checklistStorageKey);
           if (raw) {
             const parsed = JSON.parse(raw);
-            if (Array.isArray(parsed) && parsed.length) hasLocalWidgets = true;
-          }
-        } catch {}
-
-        try {
-          const raw = localStorage.getItem(layoutStorageKey);
-          if (raw) {
-            JSON.parse(raw);
-            hasLocalLayout = true;
+            const normalized = normalizeChecklistPresets(parsed);
+            hasLocalChecklists = true;
+            setChecklistPresets(normalized);
+            uiSettingsRef.current = { ...uiSettingsRef.current, checklists: normalized };
           }
         } catch {}
 
@@ -708,28 +926,18 @@ export default function DailyJournalPage() {
         if (!alive) return;
 
         if (ui) {
-          // widgets (only if missing locally)
-          const aw: any = (ui as any).activeWidgets ?? (ui as any).active_widgets;
-          if (!hasLocalWidgets && Array.isArray(aw) && aw.length) {
-            const withPnl = aw.includes("pnl") ? aw : ["pnl", ...aw];
-            setActiveWidgets(withPnl);
+          const rawChecklists: any = (ui as any).checklists ?? (ui as any).checklist_presets;
+          if (!hasLocalChecklists && rawChecklists && typeof rawChecklists === "object") {
+            const normalized = normalizeChecklistPresets(rawChecklists);
+            setChecklistPresets(normalized);
             try {
-              localStorage.setItem(widgetsKey, JSON.stringify(withPnl));
+              localStorage.setItem(checklistStorageKey, JSON.stringify(normalized));
             } catch {}
-          }
-
-          // layout (only if missing locally)
-          const lay: any = (ui as any).layout;
-          if (!hasLocalLayout && lay && typeof lay === "object") {
-            try {
-              localStorage.setItem(layoutStorageKey, JSON.stringify(lay));
-            } catch {}
-            // force remount so JournalGrid re-reads localStorage
-            setJournalGridKey((k) => k + 1);
+            uiSettingsRef.current = { ...uiSettingsRef.current, checklists: normalized };
           }
         }
 
-        // 2) Templates
+        // Templates
         const tpls = await listJournalTemplates(userId);
         if (!alive) return;
         setTemplates(tpls);
@@ -743,56 +951,20 @@ export default function DailyJournalPage() {
     };
   }, [userId, authLoading]);
 
-  // Persist activeWidgets to Supabase (debounced)
+  // Persist checklist presets to Supabase (debounced)
   useEffect(() => {
     if (!userId) return;
     const t = setTimeout(() => {
-      saveJournalUiSettings(userId, UI_PAGE_KEY, { activeWidgets: activeWidgets as any }).catch((e) =>
-        console.error("[journal] save activeWidgets failed:", e)
-      );
-    }, 200);
+      commitUiSettings({ checklists: checklistPresets });
+    }, 300);
     return () => clearTimeout(t);
-  }, [userId, activeWidgets]);
+  }, [userId, checklistPresets]);
 
-  // Persist grid layout to Supabase WITHOUT touching JournalGrid internals.
-  // JournalGrid already writes to localStorage; we just observe changes.
-  const lastLayoutStrRef = useRef<string | null>(null);
-  const saveLayoutTimerRef = useRef<any>(null);
+  const [currentStep, setCurrentStep] = useState(0);
 
   useEffect(() => {
-    if (!userId || typeof window === "undefined") return;
-
-    lastLayoutStrRef.current = localStorage.getItem(layoutStorageKey);
-
-    const interval = setInterval(() => {
-      try {
-        const cur = localStorage.getItem(layoutStorageKey);
-        if (!cur || cur === lastLayoutStrRef.current) return;
-
-        lastLayoutStrRef.current = cur;
-
-        // debounce writes
-        if (saveLayoutTimerRef.current) clearTimeout(saveLayoutTimerRef.current);
-        saveLayoutTimerRef.current = setTimeout(() => {
-          try {
-            const json = JSON.parse(cur);
-            saveJournalUiSettings(userId, UI_PAGE_KEY, { layout: json }).catch((e) =>
-              console.error("[journal] save layout failed:", e)
-            );
-          } catch {
-            // ignore invalid JSON
-          }
-        }, 250);
-      } catch {
-        // ignore
-      }
-    }, 500);
-
-    return () => {
-      clearInterval(interval);
-      if (saveLayoutTimerRef.current) clearTimeout(saveLayoutTimerRef.current);
-    };
-  }, [userId]);
+    setCurrentStep(0);
+  }, [dateParam]);
 
   /* =========================================================
      Route protection
@@ -868,8 +1040,22 @@ export default function DailyJournalPage() {
                 try {
                   const { premarket, live, post, entries, exits, ...rest } = parsed as any;
                   setNotesExtra(rest && typeof rest === "object" ? (rest as any) : {});
+                  const storedMindset = (rest as any)?.mindset ?? (rest as any)?.journal_mindset ?? null;
+                  if (storedMindset && typeof storedMindset === "object") {
+                    setMindset(normalizeMindset(storedMindset));
+                  } else {
+                    setMindset(DEFAULT_MINDSET);
+                  }
+                  const storedAfterReview = (rest as any)?.after_review ?? null;
+                  if (storedAfterReview && typeof storedAfterReview === "object") {
+                    setAfterReview(normalizeAfterReview(storedAfterReview));
+                  } else {
+                    setAfterReview(DEFAULT_AFTER_REVIEW);
+                  }
                 } catch {
                   setNotesExtra({});
+                  setMindset(DEFAULT_MINDSET);
+                  setAfterReview(DEFAULT_AFTER_REVIEW);
                 }
               } else {
                 // Legacy plain string
@@ -877,6 +1063,8 @@ export default function DailyJournalPage() {
                 setInsideHtml("");
                 setAfterHtml("");
                 setNotesExtra({});
+                setMindset(DEFAULT_MINDSET);
+                setAfterReview(DEFAULT_AFTER_REVIEW);
               }
             } catch {
               // Legacy plain string
@@ -884,12 +1072,16 @@ export default function DailyJournalPage() {
               setInsideHtml("");
               setAfterHtml("");
               setNotesExtra({});
+              setMindset(DEFAULT_MINDSET);
+              setAfterReview(DEFAULT_AFTER_REVIEW);
             }
           } else {
             setPremarketHtml("");
             setInsideHtml("");
             setAfterHtml("");
             setNotesExtra({});
+            setMindset(DEFAULT_MINDSET);
+            setAfterReview(DEFAULT_AFTER_REVIEW);
           }
         } else {
           // No journal_entries row yet (import-only day, first open, etc.)
@@ -901,6 +1093,8 @@ export default function DailyJournalPage() {
           setInsideHtml("");
           setAfterHtml("");
           setNotesExtra({});
+          setMindset(DEFAULT_MINDSET);
+          setAfterReview(DEFAULT_AFTER_REVIEW);
         }
 
         const storedEntries = Array.isArray((storedTrades as any)?.entries)
@@ -1249,107 +1443,61 @@ export default function DailyJournalPage() {
       const tags = exists ? current.filter((t) => t !== tag) : [...current, tag];
       return { ...prev, tags };
     });
-
-  const emotionTags = [
-    "Calm",
-    "Greedy",
-    "Desperate",
-    "Adrenaline",
-    "Confident",
-    "Fearful",
-    "Angry",
-    "FOMO",
-    "Revenge trade",
-    "Focus",
-    "Patience",
-    "Discipline",
-    "Anxiety",
-    "Overconfident",
-  ];
-
-  const emotionTagLabels: Record<string, string> = {
-    Calm: "Calma",
-    Greedy: "Codicia",
-    Desperate: "Desesperado",
-    Adrenaline: "Adrenalina",
-    Confident: "Confiado",
-    Fearful: "Miedo",
-    Angry: "Enojo",
-    FOMO: "FOMO",
-    "Revenge trade": "Trade de revancha",
-    Focus: "Enfoque",
-    Patience: "Paciencia",
-    Discipline: "Disciplina",
-    Anxiety: "Ansiedad",
-    Overconfident: "Sobreconfiado",
-  };
-
-  const probabilityTags = [
-    "Exploratory Trade",
-    "50% Probability",
-    "Trade with Edge",
-    "High Probability",
-    "Low Probability",
-    "Setup not perfect",
-    "Good Risk-Reward",
-    "Poor Risk-Reward",
-    "Followed Plan",
-    "Deviated from Plan",
-    "Clear Setup",
-    "Unclear Setup",
-  ];
-
-  const probabilityTagLabels: Record<string, string> = {
-    "Exploratory Trade": "Trade exploratorio",
-    "50% Probability": "Probabilidad 50%",
-    "Trade with Edge": "Trade con edge",
-    "High Probability": "Alta probabilidad",
-    "Low Probability": "Baja probabilidad",
-    "Setup not perfect": "Setup no perfecto",
-    "Good Risk-Reward": "Buen R/R",
-    "Poor Risk-Reward": "Mal R/R",
-    "Followed Plan": "Siguió el plan",
-    "Deviated from Plan": "Se desvió del plan",
-    "Clear Setup": "Setup claro",
-    "Unclear Setup": "Setup poco claro",
-  };
-
-  const exitReasonTags = [
-    "Stop Loss Placed",
-    "Take Profit Hit",
-    "Manual Exit",
-    "Moved stop to profit",
-    "Stopped out (loss)",
-    "Move stop to breakeven",
-  ];
-
-  const exitReasonTagLabels: Record<string, string> = {
-    "Stop Loss Placed": "Stop loss colocado",
-    "Take Profit Hit": "Take profit ejecutado",
-    "Manual Exit": "Salida manual",
-    "Moved stop to profit": "Stop movido a profit",
-    "Stopped out (loss)": "Stop ejecutado (pérdida)",
-    "Move stop to breakeven": "Mover stop a BE",
-  };
-
-  const strategyTagLabels: Record<string, string> = {
-    "Respect Strategy": "Respeta la estrategia",
-    "Not follow my plan": "No seguí mi plan",
-    "No respect my plan": "No respeté mi plan",
-    "Planned stop was in place": "Stop planificado en su lugar",
-    "Used planned position sizing": "Usé tamaño de posición planificado",
-    "Risk-to-reward ≥ 2R (planned)": "Riesgo/beneficio ≥ 2R (plan)",
-    "Risk-to-reward < 1.5R (tight)": "Riesgo/beneficio < 1.5R (ajustado)",
-    "Is Vix high?": "¿VIX alto?",
-    "Is Vix low?": "¿VIX bajo?",
-    "Earnings play": "Trade por earnings",
-    "News-driven trade": "Trade por noticias",
-    "Momentum trade": "Trade de momentum",
-    "Reversal trade": "Trade de reversión",
-    "Scalping trade": "Trade de scalping",
-  };
-
   const tagLabel = (tag: string, map: Record<string, string>) => (isEs ? map[tag] ?? tag : tag);
+
+  const SECTION_PREFIX: Record<keyof JournalChecklistPresets, string | null> = {
+    premarket: TAG_PREFIX.premarket,
+    inside: TAG_PREFIX.inside,
+    after: TAG_PREFIX.after,
+    strategy: TAG_PREFIX.strategy,
+    impulses: null,
+    states: null,
+  };
+
+  const normalizeItemText = (raw: string) => raw.trim().replace(/\s+/g, " ");
+
+  const addChecklistItem = (section: keyof JournalChecklistPresets) => {
+    const raw = newChecklistItem[section];
+    const text = normalizeItemText(raw);
+    if (!text) return;
+    setChecklistPresets((prev) => {
+      const existing = prev[section] || [];
+      if (existing.some((i) => i.toLowerCase() === text.toLowerCase())) return prev;
+      return { ...prev, [section]: [...existing, text] };
+    });
+    setNewChecklistItem((prev) => ({ ...prev, [section]: "" }));
+  };
+
+  const removeChecklistItem = (section: keyof JournalChecklistPresets, item: string) => {
+    setChecklistPresets((prev) => ({
+      ...prev,
+      [section]: (prev[section] || []).filter((i) => i !== item),
+    }));
+    const prefix = SECTION_PREFIX[section];
+    const tag = checklistTag(prefix, item);
+    setEntry((prev) => ({
+      ...prev,
+      tags: (prev.tags || []).filter((t) => t !== tag),
+    }));
+  };
+
+  const isChecklistSelected = (section: keyof JournalChecklistPresets, item: string) => {
+    const prefix = SECTION_PREFIX[section];
+    const tag = checklistTag(prefix, item);
+    return (entry.tags || []).includes(tag);
+  };
+
+  const toggleChecklistItem = (section: keyof JournalChecklistPresets, item: string) => {
+    const prefix = SECTION_PREFIX[section];
+    const tag = checklistTag(prefix, item);
+    toggleTag(tag);
+  };
+
+  const extractPrefixed = (tags: string[], prefix: string) =>
+    tags
+      .filter((t) => t.startsWith(prefix))
+      .map((t) => t.slice(prefix.length).trim())
+      .filter(Boolean);
 
   /* =========================================================
      Save (Supabase)
@@ -1402,6 +1550,21 @@ export default function DailyJournalPage() {
     } catch {
       // ignore
     }
+
+    // Mindset + checklist snapshot for AI Coach and future analytics
+    const tags = Array.isArray(entry.tags) ? entry.tags : [];
+    const checklistSnapshot = {
+      premarket: extractPrefixed(tags, TAG_PREFIX.premarket),
+      inside: extractPrefixed(tags, TAG_PREFIX.inside),
+      after: extractPrefixed(tags, TAG_PREFIX.after),
+      strategy: extractPrefixed(tags, TAG_PREFIX.strategy),
+      impulses: checklistPresets.impulses.filter((t) => tags.includes(t)),
+      states: checklistPresets.states.filter((t) => tags.includes(t)),
+    };
+
+    nextExtra.mindset = { ...mindset };
+    nextExtra.checklists = checklistSnapshot;
+    nextExtra.after_review = { ...afterReview };
 
     const notesPayload = JSON.stringify({
       ...nextExtra,
@@ -1485,7 +1648,7 @@ export default function DailyJournalPage() {
     }
     setAutoSaveDirty(true);
     setAutoSaveState("idle");
-  }, [premarketHtml, insideHtml, afterHtml, entryTrades, exitTrades, entry, notesExtra]);
+  }, [premarketHtml, insideHtml, afterHtml, entryTrades, exitTrades, entry, notesExtra, mindset, afterReview]);
 
   /* =========================================================
      Import / Sync
@@ -1599,6 +1762,10 @@ export default function DailyJournalPage() {
           if (parsedNotes && typeof parsedNotes === "object") {
             const { premarket, live, post, entries, exits, ...rest } = parsedNotes as any;
             setNotesExtra(rest && typeof rest === "object" ? (rest as any) : {});
+            const storedMindset = (rest as any)?.mindset ?? (rest as any)?.journal_mindset ?? null;
+            if (storedMindset && typeof storedMindset === "object") {
+              setMindset(normalizeMindset(storedMindset));
+            }
           }
         }
       } catch {
@@ -1711,6 +1878,56 @@ export default function DailyJournalPage() {
     }
   };
 
+  const ratingLabel = (v: number | null | undefined) => (Number.isFinite(Number(v)) ? `${Number(v)}/5` : "—");
+  const tagPillClass = (checked: boolean) =>
+    [
+      "inline-flex items-center gap-1 px-2 py-1 rounded-full border transition",
+      checked
+        ? "bg-emerald-500/15 border-emerald-400/60 text-emerald-100"
+        : "bg-slate-800/70 border-slate-600 text-slate-200 hover:border-slate-400/70",
+    ].join(" ");
+  const tagCheckboxClass =
+    "h-4 w-4 rounded border-slate-500 bg-slate-900 text-emerald-400 shrink-0";
+
+  const RatingSlider = ({
+    label,
+    value,
+    onChange,
+    left,
+    right,
+  }: {
+    label: string;
+    value: number | null;
+    onChange: (v: number) => void;
+    left: string;
+    right: string;
+  }) => {
+    const val = Number.isFinite(Number(value)) ? Number(value) : 3;
+    return (
+      <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+        <div className="flex items-center justify-between mb-2">
+          <p className="text-sm text-slate-200 font-medium">{label}</p>
+          <span className="text-[11px] px-2 py-0.5 rounded-full bg-slate-900 border border-slate-700 text-slate-300">
+            {ratingLabel(value)}
+          </span>
+        </div>
+        <input
+          type="range"
+          min={1}
+          max={5}
+          step={1}
+          value={val}
+          onChange={(e) => onChange(Number(e.target.value))}
+          className="w-full accent-emerald-400"
+        />
+        <div className="flex items-center justify-between text-[11px] text-slate-500 mt-1">
+          <span>{left}</span>
+          <span>{right}</span>
+        </div>
+      </div>
+    );
+  };
+
   /* =========================================================
      Averages + PnL
   ========================================================= */
@@ -1733,7 +1950,7 @@ export default function DailyJournalPage() {
               "Premarket prep: bias, levels, planned setups, rules…",
               "Preparación premarket: sesgo, niveles, setups planificados, reglas…"
             )}
-            minHeight={260}
+            minHeight={180}
           />
         </WidgetCard>
       ),
@@ -1744,55 +1961,51 @@ export default function DailyJournalPage() {
       title: L("Day P&L", "P&L del día"),
       defaultLayout: { i: "pnl", x: 7, y: 0, w: 5, h: 3, minW: 3, minH: 2 },
       render: () => (
-        <WidgetCard title={L("Day P&L", "P&L del día")}>
-          <label className="text-slate-400 text-xs uppercase tracking-wide">
-            {L("Day P&L (USD) — AUTO", "P&L del día (USD) — AUTO")}
-          </label>
-          <input
-            type="text"
-            value={pnlInput}
-            readOnly
-            className="mt-2 w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-slate-100 text-[16px] focus:outline-none focus:border-emerald-400 opacity-90"
-            placeholder={L("Auto-calculated", "Calculado automáticamente")}
-          />
-          <p className="text-xs text-slate-500 mt-2">
-            {L(
-              "Calculated from Entries/Exits (FIFO + multipliers + premium).",
-              "Calculado desde Entradas/Salidas (FIFO + multiplicadores + prima)."
-            )}
-          </p>
-          <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
-            <div>
-              <label className="text-[11px] uppercase tracking-wide text-slate-400">
+        <WidgetCard title={L("Day P&L", "P&L del día")} compact>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+            <div className="rounded-lg border border-slate-800 bg-slate-950/70 p-2">
+              <p className="text-[12px] uppercase tracking-wide text-slate-300">
+                {L("Auto P&L", "P&L Auto")}
+              </p>
+              <div className="mt-1 rounded-md bg-slate-950 border border-slate-700 px-2 py-1 text-[16px] font-semibold text-slate-100">
+                {pnlInput?.trim() ? pnlInput : "—"}
+              </div>
+            </div>
+            <div className="rounded-lg border border-slate-800 bg-slate-950/70 p-2">
+              <label className="text-[12px] uppercase tracking-wide text-slate-300">
                 {L("Commissions", "Comisiones")}
               </label>
-              <input
-                type="number"
-                value={commissionsInput}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  setCommissionsInput(val);
-                  updateCostField("commissions", val);
-                }}
-                className="mt-1 w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-[13px] text-slate-100 focus:outline-none focus:border-emerald-400"
-                placeholder="0.00"
-              />
+              <div className="mt-1 flex items-center gap-1 rounded-md bg-slate-950 border border-slate-700 px-2 py-1 text-[13px] text-slate-100 focus-within:border-emerald-400">
+                <input
+                  type="number"
+                  value={commissionsInput}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setCommissionsInput(val);
+                    updateCostField("commissions", val);
+                  }}
+                  className="w-full bg-transparent text-[14px] text-slate-100 focus:outline-none"
+                  placeholder="0.00"
+                />
+              </div>
             </div>
-            <div>
-              <label className="text-[11px] uppercase tracking-wide text-slate-400">
+            <div className="rounded-lg border border-slate-800 bg-slate-950/70 p-2">
+              <label className="text-[12px] uppercase tracking-wide text-slate-300">
                 {L("Fees", "Fees")}
               </label>
-              <input
-                type="number"
-                value={feesInput}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  setFeesInput(val);
-                  updateCostField("fees", val);
-                }}
-                className="mt-1 w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-[13px] text-slate-100 focus:outline-none focus:border-emerald-400"
-                placeholder="0.00"
-              />
+              <div className="mt-1 flex items-center gap-1 rounded-md bg-slate-950 border border-slate-700 px-2 py-1 text-[13px] text-slate-100 focus-within:border-emerald-400">
+                <input
+                  type="number"
+                  value={feesInput}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setFeesInput(val);
+                    updateCostField("fees", val);
+                  }}
+                  className="w-full bg-transparent text-[14px] text-slate-100 focus:outline-none"
+                  placeholder="0.00"
+                />
+              </div>
             </div>
           </div>
         </WidgetCard>
@@ -2160,7 +2373,7 @@ export default function DailyJournalPage() {
               "During the trade: execution notes, management decisions, mistakes, emotions…",
               "Durante el trade: notas de ejecución, decisiones de manejo, errores, emociones…"
             )}
-            minHeight={260}
+            minHeight={180}
             onReady={(ed: any) => {
               insideEditorRef.current = ed;
             }}
@@ -2182,25 +2395,237 @@ export default function DailyJournalPage() {
               "Post-trade: what went right/wrong, process corrections, rule breaks, next actions…",
               "Post-trade: qué salió bien/mal, correcciones de proceso, rompimientos de reglas, próximos pasos…"
             )}
-            minHeight={260}
+            minHeight={180}
           />
+          <details className="mt-4 rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+            <summary className="cursor-pointer text-sm font-semibold text-slate-200">
+              {L("After‑Trade Checklist (optional)", "Checklist post‑trade (opcional)")}
+            </summary>
+            <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-2 text-[13px]">
+              {AFTER_REVIEW_ITEMS.map((item) => (
+                <label
+                  key={item.id}
+                  className={tagPillClass(!!afterReview.checklist[item.id]) + " px-3 py-2 rounded-lg"}
+                >
+                  <input
+                    type="checkbox"
+                    checked={!!afterReview.checklist[item.id]}
+                    onChange={() =>
+                      setAfterReview((prev) => ({
+                        ...prev,
+                        checklist: { ...prev.checklist, [item.id]: !prev.checklist[item.id] },
+                      }))
+                    }
+                    className={`${tagCheckboxClass} mt-0.5`}
+                  />
+                  <span className="text-slate-200">{L(item.en, item.es)}</span>
+                </label>
+              ))}
+            </div>
+
+            <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3">
+              <RatingSlider
+                label={L("Exit execution", "Ejecución de salida")}
+                value={afterReview.ratings.execution}
+                onChange={(v) =>
+                  setAfterReview((prev) => ({ ...prev, ratings: { ...prev.ratings, execution: v } }))
+                }
+                left={L("Poor", "Baja")}
+                right={L("Excellent", "Excelente")}
+              />
+              <RatingSlider
+                label={L("Patience", "Paciencia")}
+                value={afterReview.ratings.patience}
+                onChange={(v) =>
+                  setAfterReview((prev) => ({ ...prev, ratings: { ...prev.ratings, patience: v } }))
+                }
+                left={L("Low", "Baja")}
+                right={L("High", "Alta")}
+              />
+              <RatingSlider
+                label={L("Mental clarity", "Claridad mental")}
+                value={afterReview.ratings.clarity}
+                onChange={(v) =>
+                  setAfterReview((prev) => ({ ...prev, ratings: { ...prev.ratings, clarity: v } }))
+                }
+                left={L("Foggy", "Nublada")}
+                right={L("Clear", "Clara")}
+              />
+            </div>
+
+            <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label className="text-[11px] uppercase tracking-wide text-slate-400">
+                  {L("What I did well", "Lo que hice bien")}
+                </label>
+                <textarea
+                  rows={2}
+                  value={afterReview.notes.didWell}
+                  onChange={(e) =>
+                    setAfterReview((prev) => ({ ...prev, notes: { ...prev.notes, didWell: e.target.value } }))
+                  }
+                  className="mt-2 w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-[14px] text-slate-100 focus:outline-none focus:border-emerald-400"
+                  placeholder={L("Short and direct…", "Corto y directo…")}
+                />
+              </div>
+              <div>
+                <label className="text-[11px] uppercase tracking-wide text-slate-400">
+                  {L("What to fix next time", "Qué corregir la próxima vez")}
+                </label>
+                <textarea
+                  rows={2}
+                  value={afterReview.notes.improve}
+                  onChange={(e) =>
+                    setAfterReview((prev) => ({ ...prev, notes: { ...prev.notes, improve: e.target.value } }))
+                  }
+                  className="mt-2 w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-[14px] text-slate-100 focus:outline-none focus:border-emerald-400"
+                  placeholder={L("One clear improvement…", "Una mejora clara…")}
+                />
+              </div>
+            </div>
+          </details>
         </WidgetCard>
       ),
     },
 
     {
       id: "emotional",
-      title: L("Emotional state", "Estado emocional"),
-      defaultLayout: { i: "emotional", x: 7, y: 16, w: 5, h: 4, minW: 3, minH: 3 },
+      title: L("Mindset & Impulse", "Mentalidad e impulsos"),
+      defaultLayout: { i: "emotional", x: 7, y: 16, w: 5, h: 6, minW: 3, minH: 4 },
       render: () => (
-        <WidgetCard title={L("Emotional state & impulses", "Estado emocional e impulsos")}>
-          <div className="flex flex-wrap gap-2 text-[13px] leading-snug">
-            {emotionTags.map((t) => (
-              <label key={t} className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-slate-950 border border-slate-700">
-                <input type="checkbox" onChange={() => toggleTag(t)} checked={entry.tags?.includes(t)} className="h-4 w-4 rounded border-slate-600 bg-slate-950 shrink-0" />
-                <span className="wrap-break-word">{tagLabel(t, emotionTagLabels)}</span>
-              </label>
-            ))}
+        <WidgetCard
+          title={L("Mindset & Impulse", "Mentalidad e impulsos")}
+          right={
+            <button
+              type="button"
+              onClick={() => setEditMindset((v) => !v)}
+              className="px-2 py-1 rounded-md border border-slate-700 text-[11px] text-slate-300 hover:text-white hover:border-slate-500"
+            >
+              {editMindset ? L("Done", "Listo") : L("Customize", "Personalizar")}
+            </button>
+          }
+        >
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <RatingSlider
+              label={L("Emotional balance", "Balance emocional")}
+              value={mindset.emotional_balance}
+              onChange={(v) => setMindset((prev) => ({ ...prev, emotional_balance: v }))}
+              left={L("Unstable", "Inestable")}
+              right={L("Calm", "Calmado")}
+            />
+            <RatingSlider
+              label={L("Impulse control", "Control de impulsos")}
+              value={mindset.impulse_control}
+              onChange={(v) => setMindset((prev) => ({ ...prev, impulse_control: v }))}
+              left={L("Reactive", "Reactivo")}
+              right={L("Disciplined", "Disciplinado")}
+            />
+          </div>
+
+          <div className="mt-4">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-slate-200 text-sm font-semibold">
+                {L("State tags", "Estado")}
+              </p>
+              {editMindset && (
+                <span className="text-[11px] text-slate-500">
+                  {L("Add or remove tags", "Añadir o quitar etiquetas")}
+                </span>
+              )}
+            </div>
+            <div className="flex flex-wrap gap-2 text-[13px] leading-snug">
+              {checklistPresets.states.map((t) => (
+                <label key={t} className={tagPillClass(!!entry.tags?.includes(t))}>
+                  <input
+                    type="checkbox"
+                    onChange={() => toggleTag(t)}
+                    checked={entry.tags?.includes(t)}
+                    className={tagCheckboxClass}
+                  />
+                  <span className="wrap-break-word">{tagLabel(t, STATE_ITEM_LABELS)}</span>
+                  {editMindset && (
+                    <button
+                      type="button"
+                      onClick={() => removeChecklistItem("states", t)}
+                      className="ml-1 text-slate-500 hover:text-rose-400"
+                      title={L("Remove", "Eliminar")}
+                    >
+                      ✕
+                    </button>
+                  )}
+                </label>
+              ))}
+            </div>
+            {editMindset && (
+              <div className="mt-2 flex gap-2">
+                <input
+                  value={newChecklistItem.states}
+                  onChange={(e) => setNewChecklistItem((prev) => ({ ...prev, states: e.target.value }))}
+                  placeholder={L("Add state tag", "Añadir etiqueta")}
+                  className="flex-1 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-xs text-slate-100 focus:outline-none focus:border-emerald-400"
+                />
+                <button
+                  type="button"
+                  onClick={() => addChecklistItem("states")}
+                  className="px-3 py-1.5 rounded-lg bg-emerald-500 text-slate-950 text-xs font-semibold hover:bg-emerald-400"
+                >
+                  {L("Add", "Añadir")}
+                </button>
+              </div>
+            )}
+          </div>
+
+          <div className="border-t border-slate-800 pt-3 mt-4">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-slate-200 text-sm font-semibold">
+                {L("Impulse triggers", "Impulsos")}
+              </p>
+              {editMindset && (
+                <span className="text-[11px] text-slate-500">
+                  {L("Track only what matters", "Solo lo importante")}
+                </span>
+              )}
+            </div>
+            <div className="flex flex-wrap gap-2 text-[13px] leading-snug">
+              {checklistPresets.impulses.map((t) => (
+                <label key={t} className={tagPillClass(!!entry.tags?.includes(t))}>
+                  <input
+                    type="checkbox"
+                    onChange={() => toggleTag(t)}
+                    checked={entry.tags?.includes(t)}
+                    className={tagCheckboxClass}
+                  />
+                  <span className="wrap-break-word">{tagLabel(t, IMPULSE_ITEM_LABELS)}</span>
+                  {editMindset && (
+                    <button
+                      type="button"
+                      onClick={() => removeChecklistItem("impulses", t)}
+                      className="ml-1 text-slate-500 hover:text-rose-400"
+                      title={L("Remove", "Eliminar")}
+                    >
+                      ✕
+                    </button>
+                  )}
+                </label>
+              ))}
+            </div>
+            {editMindset && (
+              <div className="mt-2 flex gap-2">
+                <input
+                  value={newChecklistItem.impulses}
+                  onChange={(e) => setNewChecklistItem((prev) => ({ ...prev, impulses: e.target.value }))}
+                  placeholder={L("Add impulse tag", "Añadir impulso")}
+                  className="flex-1 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-xs text-slate-100 focus:outline-none focus:border-emerald-400"
+                />
+                <button
+                  type="button"
+                  onClick={() => addChecklistItem("impulses")}
+                  className="px-3 py-1.5 rounded-lg bg-emerald-500 text-slate-950 text-xs font-semibold hover:bg-emerald-400"
+                >
+                  {L("Add", "Añadir")}
+                </button>
+              </div>
+            )}
           </div>
         </WidgetCard>
       ),
@@ -2208,91 +2633,160 @@ export default function DailyJournalPage() {
 
     {
       id: "strategy",
-      title: L("Strategy / Probability", "Estrategia / Probabilidad"),
-      defaultLayout: { i: "strategy", x: 7, y: 20, w: 5, h: 6, minW: 3, minH: 3 },
+      title: L("Process & Strategy", "Proceso y estrategia"),
+      defaultLayout: { i: "strategy", x: 7, y: 22, w: 5, h: 8, minW: 3, minH: 4 },
       render: () => (
-        <WidgetCard title={L("Strategy checklist + Probability", "Checklist de estrategia + Probabilidad")}>
-          <div className="mb-4">
+        <WidgetCard
+          title={L("Process & Strategy", "Proceso y estrategia")}
+          right={
+            <button
+              type="button"
+              onClick={() => setEditProcess((v) => !v)}
+              className="px-2 py-1 rounded-md border border-slate-700 text-[11px] text-slate-300 hover:text-white hover:border-slate-500"
+            >
+              {editProcess ? L("Done", "Listo") : L("Customize", "Personalizar")}
+            </button>
+          }
+        >
+          <div className="flex items-center gap-2 mb-3">
+            {PROCESS_PHASES.map((phase) => {
+              const on = processPhase === phase;
+              return (
+                <button
+                  key={phase}
+                  type="button"
+                  onClick={() => setProcessPhase(phase)}
+                  className={`px-3 py-1 rounded-full text-xs border ${on ? "bg-emerald-500 text-slate-950 border-emerald-400" : "bg-slate-950 text-slate-300 border-slate-700 hover:border-slate-500"}`}
+                >
+                  {PROCESS_LABELS[phase][lang]}
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="flex flex-wrap gap-2 text-[13px] leading-snug">
+            {checklistPresets[processPhase].map((t) => (
+              <label key={`${processPhase}-${t}`} className={tagPillClass(isChecklistSelected(processPhase, t))}>
+                <input
+                  type="checkbox"
+                  onChange={() => toggleChecklistItem(processPhase, t)}
+                  checked={isChecklistSelected(processPhase, t)}
+                  className={tagCheckboxClass}
+                />
+                <span className="wrap-break-word">{tagLabel(t, PROCESS_ITEM_LABELS)}</span>
+                {editProcess && (
+                  <button
+                    type="button"
+                    onClick={() => removeChecklistItem(processPhase, t)}
+                    className="ml-1 text-slate-500 hover:text-rose-400"
+                    title={L("Remove", "Eliminar")}
+                  >
+                    ✕
+                  </button>
+                )}
+              </label>
+            ))}
+          </div>
+
+          {editProcess && (
+            <div className="mt-2 flex gap-2">
+              <input
+                value={newChecklistItem[processPhase]}
+                onChange={(e) => setNewChecklistItem((prev) => ({ ...prev, [processPhase]: e.target.value }))}
+                placeholder={L("Add checklist item", "Añadir item")}
+                className="flex-1 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-xs text-slate-100 focus:outline-none focus:border-emerald-400"
+              />
+              <button
+                type="button"
+                onClick={() => addChecklistItem(processPhase)}
+                className="px-3 py-1.5 rounded-lg bg-emerald-500 text-slate-950 text-xs font-semibold hover:bg-emerald-400"
+              >
+                {L("Add", "Añadir")}
+              </button>
+            </div>
+          )}
+
+          <div className="border-t border-slate-800 pt-3 mt-4">
             <p className="text-slate-200 text-sm font-semibold mb-2">
               {L("Strategy checklist", "Checklist de estrategia")}
             </p>
             <div className="flex flex-wrap gap-2 text-[13px] leading-snug">
-              {[
-                "Respect Strategy",
-                "Not follow my plan",
-                "No respect my plan",
-                "Planned stop was in place",
-                "Used planned position sizing",
-                "Risk-to-reward ≥ 2R (planned)",
-                "Risk-to-reward < 1.5R (tight)",
-                "Is Vix high?",
-                "Is Vix low?",
-                "Earnings play",
-                "News-driven trade",
-                "Momentum trade",
-                "Reversal trade",
-                "Scalping trade",
-              ].map((t) => (
-                <label key={t} className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-slate-950 border border-slate-700">
-                  <input type="checkbox" onChange={() => toggleTag(t)} checked={entry.tags?.includes(t)} className="h-4 w-4 rounded border-slate-600 bg-slate-950 shrink-0" />
-                  <span className="wrap-break-word">{tagLabel(t, strategyTagLabels)}</span>
+              {checklistPresets.strategy.map((t) => (
+                <label key={t} className={tagPillClass(isChecklistSelected("strategy", t))}>
+                  <input
+                    type="checkbox"
+                    onChange={() => toggleChecklistItem("strategy", t)}
+                    checked={isChecklistSelected("strategy", t)}
+                    className={tagCheckboxClass}
+                  />
+                  <span className="wrap-break-word">{tagLabel(t, STRATEGY_ITEM_LABELS)}</span>
+                  {editProcess && (
+                    <button
+                      type="button"
+                      onClick={() => removeChecklistItem("strategy", t)}
+                      className="ml-1 text-slate-500 hover:text-rose-400"
+                      title={L("Remove", "Eliminar")}
+                    >
+                      ✕
+                    </button>
+                  )}
                 </label>
               ))}
             </div>
+            {editProcess && (
+              <div className="mt-2 flex gap-2">
+                <input
+                  value={newChecklistItem.strategy}
+                  onChange={(e) => setNewChecklistItem((prev) => ({ ...prev, strategy: e.target.value }))}
+                  placeholder={L("Add strategy item", "Añadir estrategia")}
+                  className="flex-1 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-xs text-slate-100 focus:outline-none focus:border-emerald-400"
+                />
+                <button
+                  type="button"
+                  onClick={() => addChecklistItem("strategy")}
+                  className="px-3 py-1.5 rounded-lg bg-emerald-500 text-slate-950 text-xs font-semibold hover:bg-emerald-400"
+                >
+                  {L("Add", "Añadir")}
+                </button>
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
+              <RatingSlider
+                label={L("Setup quality", "Calidad del setup")}
+                value={mindset.setup_quality}
+                onChange={(v) => setMindset((prev) => ({ ...prev, setup_quality: v }))}
+                left={L("Weak", "Débil")}
+                right={L("Strong", "Fuerte")}
+              />
+              <RatingSlider
+                label={L("Probability rating", "Probabilidad")}
+                value={mindset.probability}
+                onChange={(v) => setMindset((prev) => ({ ...prev, probability: v }))}
+                left={L("Low", "Baja")}
+                right={L("High", "Alta")}
+              />
+            </div>
           </div>
 
-          <div className="border-t border-slate-800 pt-3 mt-2">
+          <div className="border-t border-slate-800 pt-3 mt-4">
             <p className="text-slate-200 text-sm font-semibold mb-2">
-              {L("Exit / Stop-loss evidence", "Evidencia de salida / stop-loss")}
+              {L("Exit evidence", "Evidencia de salida")}
             </p>
             <div className="flex flex-wrap gap-2 text-[13px] leading-snug">
-              {exitReasonTags.map((t) => (
-                <label key={t} className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-slate-950 border border-slate-700">
-                  <input type="checkbox" onChange={() => toggleTag(t)} checked={entry.tags?.includes(t)} className="h-4 w-4 rounded border-slate-600 bg-slate-950 shrink-0" />
-                  <span className="wrap-break-word">{tagLabel(t, exitReasonTagLabels)}</span>
+              {EXIT_REASON_TAGS.map((t) => (
+                <label key={t} className={tagPillClass(!!entry.tags?.includes(t))}>
+                  <input
+                    type="checkbox"
+                    onChange={() => toggleTag(t)}
+                    checked={entry.tags?.includes(t)}
+                    className={tagCheckboxClass}
+                  />
+                  <span className="wrap-break-word">{tagLabel(t, EXIT_REASON_LABELS)}</span>
                 </label>
               ))}
             </div>
           </div>
-
-          <div className="border-t border-slate-800 pt-3 mt-3">
-            <p className="text-slate-200 text-sm font-semibold mb-2">
-              {L("Probability & stats flags", "Señales de probabilidad y stats")}
-            </p>
-            <div className="flex flex-wrap gap-2 text-[13px] leading-snug">
-              {probabilityTags.map((t) => (
-                <label key={t} className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-slate-950 border border-slate-700">
-                  <input type="checkbox" onChange={() => toggleTag(t)} checked={entry.tags?.includes(t)} className="h-4 w-4 rounded border-slate-600 bg-slate-950 shrink-0" />
-                  <span className="wrap-break-word">{tagLabel(t, probabilityTagLabels)}</span>
-                </label>
-              ))}
-            </div>
-          </div>
-        </WidgetCard>
-      ),
-    },
-
-    {
-      id: "screenshots",
-      title: L("Screenshots", "Screenshots"),
-      defaultLayout: { i: "screenshots", x: 0, y: 24, w: 12, h: 6, minW: 6, minH: 5 },
-      render: () => (
-        <WidgetCard title={L("Screenshots (links / notes)", "Screenshots (links / notas)")}>
-          <textarea
-            rows={8}
-            value={(entry.screenshots || []).join("\n")}
-            onChange={(e) =>
-              setEntry((p) => ({
-                ...p,
-                screenshots: e.target.value
-                  .split("\n")
-                  .map((s) => s.trim())
-                  .filter(Boolean),
-              }))
-            }
-            className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-[15px] text-slate-100 focus:outline-none focus:border-emerald-400 resize-y"
-            placeholder={L("Paste here URLs/notes…", "Pega aquí URLs/notas…")}
-          />
         </WidgetCard>
       ),
     },
@@ -2347,69 +2841,48 @@ export default function DailyJournalPage() {
       ),
     },
 
-    {
-      id: "actions",
-      title: L("Actions", "Acciones"),
-      defaultLayout: { i: "actions", x: 0, y: 35, w: 12, h: 4, minW: 6, minH: 3 },
-      render: () => (
-        <WidgetCard title={L("Actions", "Acciones")}>
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="text-[11px] text-slate-500">
-              {msg && <span className="text-emerald-400 mr-3">{msg}</span>}
-              {(saving || autoSaveDirty || autoSaveState === "saved" || autoSaveState === "error") && (
-                <span className="text-slate-400 mr-3">
-                  {saving
-                    ? L("Saving…", "Guardando…")
-                    : autoSaveDirty
-                    ? L("Unsaved changes", "Cambios sin guardar")
-                    : autoSaveState === "saved"
-                    ? L("Saved", "Guardado")
-                    : L("Save failed", "Fallo al guardar")}
-                </span>
-              )}
-              {L("Your structure, your rules.", "Tu estructura, tus reglas.")}
-            </div>
-            <div className="flex gap-2">
-              <button type="button" onClick={handleGoToImport} className="px-4 py-2 rounded-xl border border-slate-700 text-slate-200 text-xs hover:border-sky-400 hover:text-sky-300 transition">
-                {L("Import", "Importar")}
-              </button>
-
-              <button
-                type="button"
-                onClick={handleSyncFromImport}
-                disabled={syncing}
-                className="px-4 py-2 rounded-xl border border-slate-700 text-slate-200 text-xs hover:border-amber-400 hover:text-amber-300 transition disabled:opacity-50"
-              >
-                {syncing ? L("Syncing…", "Sincronizando…") : L("Sync", "Sincronizar")}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => void handleSave()}
-                disabled={saving}
-                className="px-4 py-2 rounded-xl border border-slate-700 text-slate-200 text-xs hover:border-emerald-400 hover:text-emerald-300 transition disabled:opacity-50"
-              >
-                {L("Save", "Guardar")}
-              </button>
-
-              <button
-                type="button"
-                onClick={handleSaveAndBack}
-                disabled={saving}
-                className="px-6 py-2 rounded-xl bg-emerald-400 text-slate-950 text-sm font-semibold hover:bg-emerald-300 transition disabled:opacity-50"
-              >
-                {L("Save & return to dashboard", "Guardar y volver al dashboard")}
-              </button>
-            </div>
-          </div>
-        </WidgetCard>
-      ),
-    },
   ];
 
   /* =========================================================
      Render
   ========================================================= */
+
+  const sectionMap = useMemo(
+    () => Object.fromEntries(WIDGETS.map((w) => [w.id, w])),
+    [WIDGETS]
+  );
+
+  const WIZARD_STEPS = useMemo(
+    () => [
+      {
+        key: "session",
+        label: L("Premarket + In‑Trade", "Premarket + En‑trade"),
+        description: L(
+          "Premarket + in‑trade notes with mindset and trade evidence in one flow.",
+          "Premarket + en‑trade con mindset y evidencia del trade en un solo flujo."
+        ),
+        sections: ["premarket", "inside", "emotional", "strategy", "entries", "exits", "templates"] as JournalWidgetId[],
+      },
+      {
+        key: "after",
+        label: L("After‑Trade", "Post‑trade"),
+        description: L("Lessons, mistakes, and next actions.", "Lecciones, errores y próximos pasos."),
+        sections: ["after"] as JournalWidgetId[],
+      },
+    ],
+    [lang]
+  );
+
+  const stepCount = WIZARD_STEPS.length;
+  const activeStep = WIZARD_STEPS[Math.min(currentStep, stepCount - 1)] || WIZARD_STEPS[0];
+  const gridMode = activeStep?.key === "session";
+  const fullWidthSections = useMemo(
+    () => new Set<JournalWidgetId>(gridMode ? ["entries", "exits"] : []),
+    [gridMode]
+  );
+
+  const goPrevStep = () => setCurrentStep((s) => Math.max(0, s - 1));
+  const goNextStep = () => setCurrentStep((s) => Math.min(stepCount - 1, s + 1));
 
   return (
     <main className="min-h-screen bg-slate-950 text-slate-50 px-4 md:px-8 py-6">
@@ -2502,49 +2975,152 @@ export default function DailyJournalPage() {
             >
               {L("← Back to dashboard", "← Volver al dashboard")}
             </Link>
-            <button
-              type="button"
-              onClick={() => void handleSave()}
-              disabled={saving}
-              className="shrink-0 px-3 py-2 rounded-xl bg-emerald-400 text-slate-950 text-sm font-semibold hover:bg-emerald-300 transition disabled:opacity-50"
-            >
-              {saving ? L("Saving…", "Guardando…") : L("Save", "Guardar")}
-            </button>
           </div>
         </div>
 
-        {/* Widget toggles */}
-        <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-3 mb-5">
-          <p className="text-xs text-slate-400 mb-2">
-            {L(
-              "Customize this journal page: toggle widgets on/off.",
-              "Personaliza esta página: activa o desactiva los widgets."
+        {/* Wizard */}
+        <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-2 mb-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2 overflow-x-auto">
+              {WIZARD_STEPS.map((step, idx) => {
+                const on = idx === currentStep;
+                return (
+                  <button
+                    key={step.key}
+                    type="button"
+                    onClick={() => setCurrentStep(idx)}
+                    className={`px-3 py-1 rounded-full text-[11px] border whitespace-nowrap transition ${
+                      on
+                        ? "bg-emerald-400 text-slate-950 border-emerald-400"
+                        : "bg-slate-950 text-slate-300 border-slate-700 hover:border-emerald-400"
+                    }`}
+                  >
+                    {idx + 1}. {step.label}
+                  </button>
+                );
+              })}
+              <span className="text-[10px] text-slate-400 ml-1">
+                {L("Step", "Paso")} {currentStep + 1} {L("of", "de")} {stepCount}
+              </span>
+            </div>
+
+            <div className="flex items-center flex-wrap justify-center gap-1.5">
+              <button
+                type="button"
+                onClick={handleGoToImport}
+                className="px-3 py-1.5 rounded-lg border border-slate-700 text-slate-200 text-[11px] hover:border-sky-400 hover:text-sky-300 transition"
+              >
+                {L("Import", "Importar")}
+              </button>
+              <button
+                type="button"
+                onClick={handleSyncFromImport}
+                disabled={syncing}
+                className="px-3 py-1.5 rounded-lg border border-slate-700 text-slate-200 text-[11px] hover:border-amber-400 hover:text-amber-300 transition disabled:opacity-50"
+              >
+                {syncing ? L("Syncing…", "Sincronizando…") : L("Sync", "Sincronizar")}
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleSave()}
+                disabled={saving}
+                className="px-3 py-1.5 rounded-lg border border-slate-700 text-slate-200 text-[11px] hover:border-emerald-400 hover:text-emerald-300 transition disabled:opacity-50"
+              >
+                {L("Save", "Guardar")}
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveAndBack}
+                disabled={saving}
+                className="px-4 py-1.5 rounded-lg bg-emerald-400 text-slate-950 text-[12px] font-semibold hover:bg-emerald-300 transition disabled:opacity-50"
+              >
+                {L("Save & return to dashboard", "Guardar y volver al dashboard")}
+              </button>
+            </div>
+
+            {activeStep?.key === "session" && (
+              <div className="relative rounded-2xl border border-emerald-400/25 bg-slate-950/80 px-3.5 py-3 max-w-[420px] shadow-[0_0_32px_rgba(16,185,129,0.18)]">
+                <div className="absolute inset-0 rounded-2xl bg-gradient-to-r from-emerald-500/10 via-transparent to-sky-500/10 pointer-events-none" />
+                <div className="relative grid grid-cols-3 gap-2">
+                  <div className="rounded-lg border border-emerald-400/40 bg-slate-900/70 px-3 py-2 shadow-[0_0_16px_rgba(16,185,129,0.25)]">
+                    <p className="text-[10px] uppercase tracking-wide text-emerald-200/80">
+                      {L("Auto P&L", "P&L Auto")}
+                    </p>
+                    <div className="mt-1 text-[16px] font-semibold text-emerald-100 leading-none">
+                      {pnlInput?.trim() ? pnlInput : "—"}
+                    </div>
+                  </div>
+                  <div className="rounded-lg border border-slate-800 bg-slate-900/70 px-3 py-2">
+                    <label className="text-[10px] uppercase tracking-wide text-slate-300">
+                      {L("Commissions", "Comisiones")}
+                    </label>
+                    <input
+                      type="number"
+                      value={commissionsInput}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setCommissionsInput(val);
+                        updateCostField("commissions", val);
+                      }}
+                      className="mt-1 w-full px-2 py-1 rounded-md bg-slate-950 border border-slate-700 text-[11px] text-slate-100 focus:outline-none focus:border-emerald-400"
+                      placeholder="0.00"
+                    />
+                  </div>
+                  <div className="rounded-lg border border-slate-800 bg-slate-900/70 px-3 py-2">
+                    <label className="text-[10px] uppercase tracking-wide text-slate-300">
+                      {L("Fees", "Fees")}
+                    </label>
+                    <input
+                      type="number"
+                      value={feesInput}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setFeesInput(val);
+                        updateCostField("fees", val);
+                      }}
+                      className="mt-1 w-full px-2 py-1 rounded-md bg-slate-950 border border-slate-700 text-[11px] text-slate-100 focus:outline-none focus:border-emerald-400"
+                      placeholder="0.00"
+                    />
+                  </div>
+                </div>
+              </div>
             )}
-          </p>
-          <div className="flex flex-wrap gap-2">
-            {ALL_WIDGETS.map((w) => {
-              const on = activeWidgets.includes(w.id);
-              return (
-                <button
-                  key={w.id}
-                  type="button"
-                  onClick={() => toggleWidget(w.id)}
-                  className={`px-3 py-1.5 rounded-full text-xs border transition ${
-                    on
-                      ? "bg-emerald-400 text-slate-950 border-emerald-400"
-                      : "bg-slate-950 text-slate-300 border-slate-700 hover:border-emerald-400"
-                  }`}
-                >
-                  {on ? "✓ " : "+ "}
-                  {w.label}
-                </button>
-              );
-            })}
+          </div>
+
+          <div className="mt-1 text-[9px] text-slate-500">
+            {activeStep?.description}
           </div>
         </div>
 
-        {/* Grid */}
-        <JournalGrid key={journalGridKey} storageKey={layoutStorageKey} widgets={WIDGETS} activeIds={activeWidgets} />
+        <div className={gridMode ? "grid grid-cols-1 lg:grid-cols-2 gap-4" : "space-y-4"}>
+          {activeStep?.sections.map((id) => (
+            <div key={id} className={gridMode && fullWidthSections.has(id) ? "lg:col-span-2" : ""}>
+              {sectionMap[id]?.render()}
+            </div>
+          ))}
+        </div>
+
+        <div className="flex items-center justify-between mt-6">
+          <button
+            type="button"
+            onClick={goPrevStep}
+            disabled={currentStep === 0}
+            className="px-4 py-2 rounded-xl border border-slate-700 text-slate-300 text-sm hover:border-emerald-400 hover:text-emerald-300 transition disabled:opacity-50"
+          >
+            {L("← Previous", "← Anterior")}
+          </button>
+          <span className="text-xs text-slate-500">
+            {activeStep?.label}
+          </span>
+          <button
+            type="button"
+            onClick={goNextStep}
+            disabled={currentStep >= stepCount - 1}
+            className="px-4 py-2 rounded-xl bg-emerald-400 text-slate-950 text-sm font-semibold hover:bg-emerald-300 transition disabled:opacity-50"
+          >
+            {currentStep >= stepCount - 1 ? L("Done", "Listo") : L("Next →", "Siguiente →")}
+          </button>
+        </div>
       </div>
     </main>
   );

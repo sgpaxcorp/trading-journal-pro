@@ -42,6 +42,14 @@ export type GrowthPlanChecklistItem = {
   isActive?: boolean;
 };
 
+export type GrowthPlanExecutionSystem = {
+  title?: string;
+  doList?: GrowthPlanChecklistItem[];
+  dontList?: GrowthPlanChecklistItem[];
+  orderList?: GrowthPlanChecklistItem[];
+  notes?: string;
+};
+
 export type GrowthPlanSteps = {
   prepare?: {
     title?: string;
@@ -63,6 +71,7 @@ export type GrowthPlanSteps = {
     title?: string;
     requiredFields?: string[];
     notes?: string;
+    system?: GrowthPlanExecutionSystem;
   };
 };
 
@@ -169,6 +178,16 @@ export function getDefaultPrepareChecklist(): GrowthPlanChecklistItem[] {
   ];
 }
 
+export function getDefaultExecutionSystem(): GrowthPlanExecutionSystem {
+  return {
+    title: "",
+    doList: [],
+    dontList: [],
+    orderList: [],
+    notes: "",
+  };
+}
+
 export function getDefaultSteps(): GrowthPlanSteps {
   return {
     prepare: {
@@ -191,6 +210,7 @@ export function getDefaultSteps(): GrowthPlanSteps {
       title: "Registrar transacciones y emociones",
       requiredFields: ["import_trades", "emotions", "journal_notes"],
       notes: "",
+      system: getDefaultExecutionSystem(),
     },
   };
 }
@@ -221,6 +241,12 @@ function normalizePlan(raw: any, userId: string): GrowthPlan {
   if (!Array.isArray(steps.execution_and_journal.requiredFields)) {
     steps.execution_and_journal.requiredFields = ["import_trades", "emotions", "journal_notes"];
   }
+  if (!steps.execution_and_journal.system || typeof steps.execution_and_journal.system !== "object") {
+    steps.execution_and_journal.system = getDefaultExecutionSystem();
+  }
+  if (!Array.isArray(steps.execution_and_journal.system.doList)) steps.execution_and_journal.system.doList = [];
+  if (!Array.isArray(steps.execution_and_journal.system.dontList)) steps.execution_and_journal.system.dontList = [];
+  if (!Array.isArray(steps.execution_and_journal.system.orderList)) steps.execution_and_journal.system.orderList = [];
 
   return {
     user_id: userId,

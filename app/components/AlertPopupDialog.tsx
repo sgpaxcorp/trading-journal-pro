@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useMemo } from "react";
+import Link from "next/link";
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
 
@@ -29,6 +30,12 @@ type Props = {
   onResolve?: (resolution: "keep_open" | "close_at_zero" | string) => void | Promise<void>;
 };
 
+type OpenPosition = {
+  journal_date?: string | null;
+  opened_at?: string | null;
+  raw?: any;
+};
+
 function severityPill(sev: AlertPopupData["severity"]) {
   switch (sev) {
     case "critical":
@@ -40,6 +47,31 @@ function severityPill(sev: AlertPopupData["severity"]) {
     default:
       return "bg-slate-500/20 text-slate-200 border-slate-500/40";
   }
+}
+
+function extractOpenPositionsFromPayload(payload: any): OpenPosition[] {
+  const meta = payload?.meta ?? payload?.stats ?? {};
+  const list =
+    payload?.open_positions_list ??
+    payload?.open_positions ??
+    meta?.open_positions_list ??
+    meta?.open_positions ??
+    payload?.meta?.open_positions ??
+    [];
+  return Array.isArray(list) ? list : [];
+}
+
+function pickJournalDateFromPositions(positions: OpenPosition[]): string | null {
+  for (const p of positions) {
+    const jd = p?.journal_date;
+    if (jd) return jd;
+    const opened = p?.opened_at || p?.raw?.opened_at || p?.raw?.open_time;
+    if (opened) {
+      const d = new Date(opened);
+      if (!Number.isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+    }
+  }
+  return null;
 }
 
 export default function AlertPopupDialog({ open, busy, data, onClose, onSnooze, onDismiss, onResolve }: Props) {
@@ -54,6 +86,11 @@ export default function AlertPopupDialog({ open, busy, data, onClose, onSnooze, 
     if (Number.isNaN(dt.getTime())) return null;
     return dt.toLocaleString(isEs ? "es-ES" : "en-US");
   }, [data?.triggered_at]);
+
+  const openJournalDate = useMemo(() => {
+    const positions = extractOpenPositionsFromPayload(data?.payload ?? {});
+    return pickJournalDateFromPositions(positions);
+  }, [data?.payload]);
 
   if (!open || !data) return null;
 
@@ -132,6 +169,14 @@ export default function AlertPopupDialog({ open, busy, data, onClose, onSnooze, 
 
           <div className="mt-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
             <div className="flex flex-wrap gap-2">
+              {openJournalDate ? (
+                <Link
+                  href={`/journal/${openJournalDate}`}
+                  className="rounded-lg border border-emerald-700/50 bg-emerald-950/30 px-3 py-2 text-sm text-emerald-100 hover:bg-emerald-950/50"
+                >
+                  {L("Open journal", "Abrir journal")}
+                </Link>
+              ) : null}
               {onSnooze ? (
                 <>
                   <button

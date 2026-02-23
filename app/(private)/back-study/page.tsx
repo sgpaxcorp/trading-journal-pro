@@ -12,6 +12,8 @@ import { resolveLocale } from "@/lib/i18n";
 
 import type { JournalEntry } from "@/lib/journalLocal";
 import { getAllJournalEntries } from "@/lib/journalSupabase";
+import { getJournalTradesForDates } from "@/lib/journalTradesSupabase";
+import type { TradesPayload } from "@/lib/journalNotes";
 
 import { type InstrumentType } from "@/lib/journalNotes";
 import {
@@ -71,8 +73,8 @@ type EntryTradeRow = {
   symbol: string;
   kind: InstrumentType;
   side: SideType;
-  price: string;
-  quantity: string;
+  price: string | number;
+  quantity: string | number;
   time: string;
   dte?: number | null;
   expiry?: string | null;
@@ -94,6 +96,12 @@ type TradeView = {
   exitTime: string;
   entryPrice: number | null;
   exitPrice: number | null;
+  entryAvgPrice: number | null;
+  exitAvgPrice: number | null;
+  entryQty: number;
+  exitQty: number;
+  entries: EntryTradeRow[];
+  exits: ExitTradeRow[];
   underlyingSymbol: string;
   contractSymbol?: string;
 };
@@ -112,13 +120,44 @@ function safeUpper(s: string | undefined | null): string {
   return (s || "").trim().toUpperCase();
 }
 
-// Local timezone offset (minutes from UTC)
-const LOCAL_TZ_OFFSET_MIN = new Date().getTimezoneOffset();
+type TimeMode = "local" | "et";
 
-function shiftMsToLocal(ms: number): number {
-  // Yahoo timestamps come as UTC. We shift them to local time (browser)
-  // so that chart + markers all use the same clock.
-  return ms - LOCAL_TZ_OFFSET_MIN * 60 * 1000;
+function getTimeZoneOffsetMinutes(date: Date, timeZone: string): number {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).formatToParts(date);
+
+  const v: Record<string, string> = {};
+  parts.forEach((p) => {
+    if (p.type !== "literal") v[p.type] = p.value;
+  });
+
+  const utcTs = Date.UTC(
+    Number(v.year),
+    Number(v.month) - 1,
+    Number(v.day),
+    Number(v.hour),
+    Number(v.minute),
+    Number(v.second)
+  );
+
+  return (utcTs - date.getTime()) / 60000;
+}
+
+function shiftMsByMode(ms: number, mode: TimeMode): number {
+  if (mode === "local") {
+    const offset = new Date(ms).getTimezoneOffset();
+    return ms - offset * 60 * 1000;
+  }
+  const offset = getTimeZoneOffsetMinutes(new Date(ms), "America/New_York");
+  return ms + offset * 60 * 1000;
 }
 
 /**
@@ -147,11 +186,26 @@ function parseTimeToMinutesFlexible(t: string): number | null {
   return hour * 60 + minutes;
 }
 
+function toNumber(value: string | number | null | undefined): number | null {
+  if (value == null) return null;
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  const n = Number.parseFloat(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function getSessionLabel(timeStr: string): "RTH" | "ETH" | null {
+  const mins = parseTimeToMinutesFlexible(timeStr);
+  if (mins == null) return null;
+  const rthStart = 9 * 60 + 30;
+  const rthEnd = 16 * 60;
+  return mins >= rthStart && mins <= rthEnd ? "RTH" : "ETH";
+}
+
 /**
  * Convert candle timestamp (Yahoo UTC) → minutes of day in local time.
  */
-function minutesFromMsLocal(ms: number): number {
-  const d = new Date(shiftMsToLocal(ms));
+function minutesFromMsWithMode(ms: number, mode: TimeMode): number {
+  const d = new Date(shiftMsByMode(ms, mode));
   return d.getUTCHours() * 60 + d.getUTCMinutes();
 }
 
@@ -167,16 +221,36 @@ function parseNotesTrades(notesRaw: unknown): {
     }
 
     const entries = Array.isArray((parsed as any).entries)
-      ? (parsed as any).entries
+      ? normalizeTradeRows((parsed as any).entries)
       : [];
     const exits = Array.isArray((parsed as any).exits)
-      ? (parsed as any).exits
+      ? normalizeTradeRows((parsed as any).exits)
       : [];
 
     return { entries, exits };
   } catch {
     return { entries: [], exits: [] };
   }
+}
+
+function normalizeSide(raw: any): SideType {
+  const s = String(raw ?? "").toLowerCase();
+  if (s === "short") return "short";
+  return "long";
+}
+
+function normalizeTradeRows(rows: any[]): EntryTradeRow[] {
+  return rows.map((r) => ({
+    id: r?.id ?? crypto.randomUUID(),
+    symbol: String(r?.symbol ?? ""),
+    kind: (r?.kind ?? "stock") as InstrumentType,
+    side: normalizeSide(r?.side),
+    price: r?.price ?? "",
+    quantity: r?.quantity ?? "",
+    time: String(r?.time ?? ""),
+    dte: r?.dte ?? null,
+    expiry: r?.expiry ?? null,
+  }));
 }
 
 function parseSPXOptionSymbol(raw: string) {
@@ -198,6 +272,13 @@ function parseSPXOptionSymbol(raw: string) {
   if (Number.isNaN(expiry.getTime())) return null;
 
   return { underlying, expiry, right, strike };
+}
+
+function parseGenericOptionUnderlying(raw: string) {
+  const s = safeUpper(raw).replace(/\s+/g, "");
+  const m = s.match(/^([A-Z]{1,6})\d{6}[CP]\d+/);
+  if (!m) return null;
+  return m[1];
 }
 
 /**
@@ -268,6 +349,27 @@ function getYahooParams(tfId: TimeframeId, rangeId: ChartRangeId) {
   };
 }
 
+const RANGE_DAYS: Record<ChartRangeId, number> = {
+  "1D": 1,
+  "5D": 5,
+  "1W": 7,
+  "1M": 30,
+  "3M": 90,
+  "6M": 180,
+  "1Y": 365,
+};
+
+function getPeriodWindow(anchorDate: string, rangeId: ChartRangeId) {
+  if (!anchorDate) return null;
+  const base = new Date(`${anchorDate}T00:00:00Z`);
+  if (!Number.isFinite(base.getTime())) return null;
+  const days = RANGE_DAYS[rangeId] ?? 30;
+  const span = days * 86400000;
+  const period1 = Math.floor((base.getTime() - span) / 1000);
+  const period2 = Math.floor((base.getTime() + span) / 1000);
+  return { period1, period2 };
+}
+
 /* =========================
    Interactive chart
 ========================= */
@@ -277,10 +379,9 @@ type InteractiveCandleChartProps = {
   symbol: string;
   candles: Candle[];
   selectedDate: string;
-  entryTime: string;
-  exitTime: string;
-  entryPrice?: number | null;
-  exitPrice?: number | null;
+  entryPoints: Array<{ time: string; price?: number | null; label?: string }>;
+  exitPoints: Array<{ time: string; price?: number | null; label?: string }>;
+  timeMode: TimeMode;
   entryColor?: string;
   exitColor?: string;
   entryLabel?: string;
@@ -296,10 +397,9 @@ function InteractiveCandleChart({
   symbol,
   candles,
   selectedDate,
-  entryTime,
-  exitTime,
-  entryPrice,
-  exitPrice,
+  entryPoints,
+  exitPoints,
+  timeMode,
   entryColor = "#22c55e",
   exitColor = "#38bdf8",
   entryLabel = "Entry",
@@ -389,7 +489,7 @@ function InteractiveCandleChart({
 
     // Map candles to local time for the chart
     const data = candles.map((c) => ({
-      time: Math.floor(shiftMsToLocal(c.time) / 1000),
+      time: Math.floor(shiftMsByMode(c.time, timeMode) / 1000),
       open: c.open,
       high: c.high,
       low: c.low,
@@ -414,67 +514,58 @@ function InteractiveCandleChart({
     }
 
     // --- Markers (entry/exit) matching by local time ---
-    const entryMinutesLocal = parseTimeToMinutesFlexible(entryTime);
-    const exitMinutesLocal = parseTimeToMinutesFlexible(exitTime);
-
-    let entryIdx: number | null = null;
-    let exitIdx: number | null = null;
-
     const filtered = candles
       .map((c, idx) => ({ c, idx }))
       .filter(({ c }) => {
-        const d = new Date(shiftMsToLocal(c.time));
+        const d = new Date(shiftMsByMode(c.time, timeMode));
         const isoDay = d.toISOString().slice(0, 10);
         return isoDay === selectedDate;
       });
 
-    if (entryMinutesLocal != null) {
+    const findNearest = (targetMinutes: number | null) => {
+      if (targetMinutes == null) return null;
       let bestDiff = Infinity;
+      let bestIdx: number | null = null;
       filtered.forEach(({ c, idx }) => {
-        const mins = minutesFromMsLocal(c.time);
-        const diff = Math.abs(mins - entryMinutesLocal);
+        const mins = minutesFromMsWithMode(c.time, timeMode);
+        const diff = Math.abs(mins - targetMinutes);
         if (diff < bestDiff) {
           bestDiff = diff;
-          entryIdx = idx;
+          bestIdx = idx;
         }
       });
-    }
-
-    if (exitMinutesLocal != null) {
-      let bestDiff = Infinity;
-      filtered.forEach(({ c, idx }) => {
-        const mins = minutesFromMsLocal(c.time);
-        const diff = Math.abs(mins - exitMinutesLocal);
-        if (diff < bestDiff) {
-          bestDiff = diff;
-          exitIdx = idx;
-        }
-      });
-    }
+      return bestIdx;
+    };
 
     const markers: any[] = [];
 
-    if (entryIdx != null && entryIdx >= 0) {
-      const c = candles[entryIdx];
+    entryPoints.forEach((pt, i) => {
+      const mins = parseTimeToMinutesFlexible(pt.time || "");
+      const idx = findNearest(mins);
+      if (idx == null) return;
+      const c = candles[idx];
       markers.push({
-        time: Math.floor(shiftMsToLocal(c.time) / 1000),
+        time: Math.floor(shiftMsByMode(c.time, timeMode) / 1000),
         position: "belowBar",
         color: entryColor,
         shape: "arrowUp",
-        text: `${entryLabel} ${entryPrice != null ? entryPrice.toFixed(2) : ""}`.trim(),
+        text: `${pt.label || entryLabel} ${pt.price != null ? pt.price.toFixed(2) : ""}`.trim(),
       });
-    }
+    });
 
-    if (exitIdx != null && exitIdx >= 0) {
-      const c = candles[exitIdx];
+    exitPoints.forEach((pt, i) => {
+      const mins = parseTimeToMinutesFlexible(pt.time || "");
+      const idx = findNearest(mins);
+      if (idx == null) return;
+      const c = candles[idx];
       markers.push({
-        time: Math.floor(shiftMsToLocal(c.time) / 1000),
+        time: Math.floor(shiftMsByMode(c.time, timeMode) / 1000),
         position: "aboveBar",
         color: exitColor,
         shape: "arrowDown",
-        text: `${exitLabel} ${exitPrice != null ? exitPrice.toFixed(2) : ""}`.trim(),
+        text: `${pt.label || exitLabel} ${pt.price != null ? pt.price.toFixed(2) : ""}`.trim(),
       });
-    }
+    });
 
     if (markersPluginRef.current) {
       markersPluginRef.current.setMarkers(markers);
@@ -482,10 +573,9 @@ function InteractiveCandleChart({
   }, [
     candles,
     selectedDate,
-    entryTime,
-    exitTime,
-    entryPrice,
-    exitPrice,
+    entryPoints,
+    exitPoints,
+    timeMode,
     entryColor,
     exitColor,
   ]);
@@ -614,6 +704,7 @@ function BackStudyPageInner() {
   const [entriesLoading, setEntriesLoading] = useState(false);
   const [entriesError, setEntriesError] = useState<string | null>(null);
   const [entries, setEntries] = useState<JournalEntry[]>([]);
+  const [journalTradesMap, setJournalTradesMap] = useState<Record<string, TradesPayload>>({});
 
   // Redirect if not logged in
   useEffect(() => {
@@ -644,6 +735,19 @@ function BackStudyPageInner() {
         if (isMounted) {
           setEntries(all ?? []);
         }
+
+        const dates = (all ?? []).map((e) => String((e as any)?.date || "").slice(0, 10)).filter(Boolean);
+        if (dates.length) {
+          try {
+            const tradesMap = await getJournalTradesForDates(user.id, dates, activeAccountId);
+            if (isMounted) setJournalTradesMap(tradesMap ?? {});
+          } catch (err) {
+            console.warn("Error loading journal_trades for back-study:", err);
+            if (isMounted) setJournalTradesMap({});
+          }
+        } else {
+          if (isMounted) setJournalTradesMap({});
+        }
       } catch (err) {
         console.error("Error loading journal entries for back-study:", err);
         if (isMounted) {
@@ -665,14 +769,22 @@ function BackStudyPageInner() {
 
   const sessions: SessionWithTrades[] = useMemo(() => {
     return entries.map((s) => {
-      const { entries: ent, exits: ex } = parseNotesTrades(s.notes);
+      const dateKey = String((s as any)?.date || "").slice(0, 10);
+      const fromDb = journalTradesMap[dateKey] ?? {};
+      const fromNotes = parseNotesTrades(s.notes);
+
+      const entRaw = (fromDb.entries && fromDb.entries.length ? fromDb.entries : fromNotes.entries) || [];
+      const exRaw = (fromDb.exits && fromDb.exits.length ? fromDb.exits : fromNotes.exits) || [];
+      const ent = normalizeTradeRows(entRaw);
+      const ex = normalizeTradeRows(exRaw);
+
       return {
         ...s,
-        entries: ent || [],
-        exits: ex || [],
+        entries: ent,
+        exits: ex,
       };
     });
-  }, [entries]);
+  }, [entries, journalTradesMap]);
 
   const trades: TradeView[] = useMemo(() => {
     const list: TradeView[] = [];
@@ -702,10 +814,19 @@ function BackStudyPageInner() {
         );
         if (!entList.length && !exList.length) return;
 
-        const entryRow = entList[0] || exList[0];
+        const sortByTime = (a: EntryTradeRow, b: EntryTradeRow) => {
+          const ta = parseTimeToMinutesFlexible(a.time || "") ?? 0;
+          const tb = parseTimeToMinutesFlexible(b.time || "") ?? 0;
+          return ta - tb;
+        };
+
+        const entSorted = [...entList].sort(sortByTime);
+        const exSorted = [...exList].sort(sortByTime);
+
+        const entryRow = entSorted[0] || exSorted[0];
         const exitRow =
-          exList[exList.length - 1] ||
-          entList[entList.length - 1] ||
+          exSorted[exSorted.length - 1] ||
+          entSorted[entSorted.length - 1] ||
           entryRow;
 
         const kind =
@@ -716,23 +837,43 @@ function BackStudyPageInner() {
         const entryTime = entryRow?.time || "09:30";
         const exitTime = exitRow?.time || entryTime;
 
-        const entryPriceNum = Number.parseFloat(entryRow?.price ?? "");
-        const exitPriceNum = Number.parseFloat(exitRow?.price ?? "");
+        const entryPrice = toNumber(entryRow?.price);
+        const exitPrice = toNumber(exitRow?.price);
 
-        const entryPrice = Number.isFinite(entryPriceNum)
-          ? entryPriceNum
-          : null;
-        const exitPrice = Number.isFinite(exitPriceNum)
-          ? exitPriceNum
-          : null;
+        const entryPrices = entSorted
+          .map((t) => toNumber(t.price))
+          .filter((v): v is number => Number.isFinite(v));
+        const exitPrices = exSorted
+          .map((t) => toNumber(t.price))
+          .filter((v): v is number => Number.isFinite(v));
+
+        const entryAvgPrice = entryPrices.length
+          ? entryPrices.reduce((a, b) => a + b, 0) / entryPrices.length
+          : entryPrice;
+        const exitAvgPrice = exitPrices.length
+          ? exitPrices.reduce((a, b) => a + b, 0) / exitPrices.length
+          : exitPrice;
+
+        const entryQty = entSorted
+          .map((t) => toNumber(t.quantity))
+          .filter((v): v is number => Number.isFinite(v))
+          .reduce((a, b) => a + b, 0);
+        const exitQty = exSorted
+          .map((t) => toNumber(t.quantity))
+          .filter((v): v is number => Number.isFinite(v))
+          .reduce((a, b) => a + b, 0);
 
         let underlyingSymbol = sym;
         let contractSymbol: string | undefined;
 
         if ((kind as string) === "option") {
           const parsed = parseSPXOptionSymbol(sym);
+          const generic = parseGenericOptionUnderlying(sym);
           if (parsed) {
             underlyingSymbol = parsed.underlying;
+            contractSymbol = sym;
+          } else if (generic) {
+            underlyingSymbol = generic;
             contractSymbol = sym;
           } else {
             underlyingSymbol = sym;
@@ -751,6 +892,12 @@ function BackStudyPageInner() {
           exitTime,
           entryPrice,
           exitPrice,
+          entryAvgPrice: Number.isFinite(entryAvgPrice) ? entryAvgPrice : null,
+          exitAvgPrice: Number.isFinite(exitAvgPrice) ? exitAvgPrice : null,
+          entryQty: Number.isFinite(entryQty) ? entryQty : 0,
+          exitQty: Number.isFinite(exitQty) ? exitQty : 0,
+          entries: entSorted,
+          exits: exSorted,
           underlyingSymbol,
           contractSymbol,
         });
@@ -764,6 +911,8 @@ function BackStudyPageInner() {
   const [selectedTradeId, setSelectedTradeId] = useState<string>("");
   const [timeframe, setTimeframe] = useState<TimeframeId>("5m");
   const [chartRange, setChartRange] = useState<ChartRangeId>("1Y");
+  const [timeMode, setTimeMode] = useState<TimeMode>("et");
+  const candleCacheRef = useRef<Map<string, Candle[]>>(new Map());
 
   useEffect(() => {
     if (!trades.length) {
@@ -783,6 +932,26 @@ function BackStudyPageInner() {
   const tradesForDate = trades.filter((t) => t.date === selectedDate);
   const selectedTrade = trades.find((t) => t.id === selectedTradeId) || null;
 
+  const entryPoints = useMemo(() => {
+    if (!selectedTrade) return [];
+    return (selectedTrade.entries ?? []).map((e, i) => ({
+      time: e.time || "",
+      price: toNumber(e.price),
+      label: `${L("Entry", "Entrada")} ${i + 1}`,
+    }));
+  }, [selectedTrade, lang]);
+
+  const exitPoints = useMemo(() => {
+    if (!selectedTrade) return [];
+    return (selectedTrade.exits ?? []).map((e, i) => ({
+      time: e.time || "",
+      price: toNumber(e.price),
+      label: `${L("Exit", "Salida")} ${i + 1}`,
+    }));
+  }, [selectedTrade, lang]);
+
+  const entrySessionLabel = selectedTrade ? getSessionLabel(selectedTrade.entryTime) : null;
+
   const [underlyingState, setUnderlyingState] = useState<ChartState>({
     loading: false,
     error: null,
@@ -801,16 +970,34 @@ function BackStudyPageInner() {
     symbol: string,
     tfId: TimeframeId,
     rangeId: ChartRangeId,
-    kind?: InstrumentType
+    kind?: InstrumentType,
+    anchorDate?: string
   ): Promise<Candle[]> => {
     const { interval, range } = getYahooParams(tfId, rangeId);
     const yfSymbol = normalizeSymbolForYahoo(symbol, kind);
+    const window = anchorDate ? getPeriodWindow(anchorDate, rangeId) : null;
 
-    const url = `/api/yahoo-chart?symbol=${encodeURIComponent(
-      yfSymbol
-    )}&interval=${encodeURIComponent(interval)}&range=${encodeURIComponent(
-      range
-    )}`;
+    const cacheKey = [
+      yfSymbol,
+      interval,
+      window?.period1 ?? "",
+      window?.period2 ?? "",
+      range,
+    ].join("|");
+
+    const cached = candleCacheRef.current.get(cacheKey);
+    if (cached) return cached;
+
+    const url =
+      window && window.period1 && window.period2
+        ? `/api/yahoo-chart?symbol=${encodeURIComponent(
+            yfSymbol
+          )}&interval=${encodeURIComponent(interval)}&period1=${window.period1}&period2=${window.period2}`
+        : `/api/yahoo-chart?symbol=${encodeURIComponent(
+            yfSymbol
+          )}&interval=${encodeURIComponent(interval)}&range=${encodeURIComponent(
+            range
+          )}`;
 
     try {
       const res = await fetch(url);
@@ -829,7 +1016,9 @@ function BackStudyPageInner() {
       }
 
       const data = await res.json();
-      return Array.isArray((data as any).candles) ? (data as any).candles : [];
+      const candles = Array.isArray((data as any).candles) ? (data as any).candles : [];
+      candleCacheRef.current.set(cacheKey, candles);
+      return candles;
     } catch (err) {
       console.warn("Yahoo Finance request failed:", err);
       return [];
@@ -854,7 +1043,8 @@ function BackStudyPageInner() {
         underlyingSymbol,
         timeframe,
         chartRange,
-        kind
+        kind,
+        selectedTrade.date
       );
       setUnderlyingState({
         loading: false,
@@ -877,7 +1067,8 @@ function BackStudyPageInner() {
           contractSymbol,
           timeframe,
           chartRange,
-          "option"
+          "option",
+          selectedTrade.date
         );
         if (cc.length) {
           setContractState({
@@ -890,7 +1081,8 @@ function BackStudyPageInner() {
             underlyingSymbol,
             timeframe,
             chartRange,
-            kind
+            kind,
+            selectedTrade.date
           );
           setContractState({
             loading: false,
@@ -1094,22 +1286,56 @@ function BackStudyPageInner() {
                         ))}
                       </select>
                       {selectedTrade && (
-                        <p className="text-[11px] text-slate-400 mt-1">
-                          {L("Underlying:", "Underlying:")}{" "}
-                          <span className="font-mono text-slate-200">
-                            {selectedTrade.underlyingSymbol}
-                          </span>
-                          {selectedTrade.contractSymbol &&
-                            selectedTrade.contractSymbol !==
-                              selectedTrade.underlyingSymbol && (
-                              <>
-                                {" · "}{L("Contract:", "Contrato:")}{" "}
-                                <span className="font-mono text-slate-200">
-                                  {selectedTrade.contractSymbol}
-                                </span>
-                              </>
-                            )}
-                        </p>
+                        <div className="mt-1 space-y-1 text-[11px] text-slate-400">
+                          <p>
+                            {L("Underlying:", "Underlying:")}{" "}
+                            <span className="font-mono text-slate-200">
+                              {selectedTrade.underlyingSymbol}
+                            </span>
+                            {selectedTrade.contractSymbol &&
+                              selectedTrade.contractSymbol !==
+                                selectedTrade.underlyingSymbol && (
+                                <>
+                                  {" · "}{L("Contract:", "Contrato:")}{" "}
+                                  <span className="font-mono text-slate-200">
+                                    {selectedTrade.contractSymbol}
+                                  </span>
+                                </>
+                              )}
+                          </p>
+                          <p>
+                            {L("Entries:", "Entradas:")}{" "}
+                            <span className="text-slate-200">{selectedTrade.entries.length}</span>
+                            {" · "}
+                            {L("Exits:", "Salidas:")}{" "}
+                            <span className="text-slate-200">{selectedTrade.exits.length}</span>
+                            {" · "}
+                            {L("Session:", "Sesión:")}{" "}
+                            <span className="text-slate-200">
+                              {entrySessionLabel ?? "—"} {timeMode === "et" ? "(ET)" : "(Local)"}
+                            </span>
+                          </p>
+                          <p>
+                            {L("Avg entry:", "Promedio entrada:")}{" "}
+                            <span className="text-emerald-200">
+                              {selectedTrade.entryAvgPrice != null
+                                ? selectedTrade.entryAvgPrice.toFixed(2)
+                                : "—"}
+                            </span>
+                            {" · "}
+                            {L("Avg exit:", "Promedio salida:")}{" "}
+                            <span className="text-sky-200">
+                              {selectedTrade.exitAvgPrice != null
+                                ? selectedTrade.exitAvgPrice.toFixed(2)
+                                : "—"}
+                            </span>
+                            {" · "}
+                            {L("Qty:", "Qty:")}{" "}
+                            <span className="text-slate-200">
+                              {selectedTrade.entryQty || selectedTrade.exitQty || 0}
+                            </span>
+                          </p>
+                        </div>
                       )}
                     </div>
 
@@ -1165,6 +1391,34 @@ function BackStudyPageInner() {
                         </div>
                       </div>
 
+                      <div className="flex flex-col gap-1">
+                        <span className="text-[11px] text-slate-400 uppercase tracking-[0.15em]">
+                          {L("Time mode", "Modo horario")}
+                        </span>
+                        <div className="flex flex-wrap gap-1">
+                          {[
+                            { id: "et", label: L("Market time (ET)", "Hora mercado (ET)") },
+                            { id: "local", label: L("My local time", "Mi hora local") },
+                          ].map((opt) => {
+                            const active = timeMode === (opt.id as TimeMode);
+                            return (
+                              <button
+                                key={opt.id}
+                                type="button"
+                                onClick={() => setTimeMode(opt.id as TimeMode)}
+                                className={`px-2.5 py-1 rounded-full text-[11px] border transition ${
+                                  active
+                                    ? "bg-violet-400 text-slate-950 border-violet-300"
+                                    : "bg-slate-950 text-slate-200 border-slate-700 hover:border-violet-400 hover:text-violet-300"
+                                }`}
+                              >
+                                {opt.label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
                       <div className="flex flex-col gap-2">
                         <button
                           type="submit"
@@ -1208,10 +1462,9 @@ function BackStudyPageInner() {
                             )}
                             candles={underlyingState.candles}
                             selectedDate={selectedTrade.date}
-                            entryTime={selectedTrade.entryTime}
-                            exitTime={selectedTrade.exitTime}
-                            entryPrice={selectedTrade.entryPrice ?? undefined}
-                            exitPrice={selectedTrade.exitPrice ?? undefined}
+                            entryPoints={entryPoints}
+                            exitPoints={exitPoints}
+                            timeMode={timeMode}
                             entryColor="#22c55e"
                             exitColor="#38bdf8"
                             entryLabel={L("Entry", "Entrada")}
@@ -1244,10 +1497,9 @@ function BackStudyPageInner() {
                               )}
                               candles={contractState.candles}
                               selectedDate={selectedTrade.date}
-                              entryTime={selectedTrade.entryTime}
-                              exitTime={selectedTrade.exitTime}
-                              entryPrice={selectedTrade.entryPrice ?? undefined}
-                              exitPrice={selectedTrade.exitPrice ?? undefined}
+                              entryPoints={entryPoints}
+                              exitPoints={exitPoints}
+                              timeMode={timeMode}
                               entryColor="#22c55e"
                               exitColor="#38bdf8"
                               entryLabel={L("Entry", "Entrada")}

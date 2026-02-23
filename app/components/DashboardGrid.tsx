@@ -18,6 +18,7 @@ const DEFAULT_STORAGE_KEY = "tjp_dashboard_layout_v3";
 export const GRID_IDS = [
   "progress",
   "plan-progress",
+  "plan-system",
   "streak",
   "actions",
   "calendar",
@@ -43,12 +44,14 @@ const defaultLayout: Layout[] = [
   { i: "trading-days", x: 0, y: 42, w: 4, h: 10 },
   { i: "economic-news", x: 4, y: 42, w: 8, h: 12 },
   { i: "plan-progress", x: 0, y: 54, w: 6, h: 10 },
+  { i: "plan-system", x: 6, y: 54, w: 6, h: 10 },
 ];
 
 /** Min height per widget */
 const MIN_H: Record<GridItemId, number> = {
   progress: 7,
   "plan-progress": 7,
+  "plan-system": 7,
   streak: 7,
   actions: 7,
   calendar: 22,
@@ -251,9 +254,6 @@ export default function DashboardGrid({
             key={id}
             className="bg-slate-900/95 border border-slate-800 rounded-2xl p-4 overflow-hidden"
           >
-            <div className="drag-handle cursor-move text-[12px] text-slate-400 mb-2">
-              {L("Drag", "Arrastrar")} · {id}
-            </div>
             <div className="text-[14px] h-full min-h-0 overflow-auto pr-1">
               {renderItem(id)}
             </div>

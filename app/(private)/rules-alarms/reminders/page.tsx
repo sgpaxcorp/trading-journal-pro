@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { ArrowLeft, Search } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { useAppSettings } from "@/lib/appSettings";
@@ -27,6 +28,12 @@ import {
 import TopNav from "@/app/components/TopNav";
 
 type Tab = "active" | "rules" | "history";
+
+type OpenPosition = {
+  journal_date?: string | null;
+  opened_at?: string | null;
+  raw?: any;
+};
 
 function fmtDate(d?: string | null) {
   if (!d) return "—";
@@ -62,6 +69,32 @@ function isCoreRule(rule: AlertRule) {
     trigger_type: rule.trigger_type ?? null,
     config: (rule.config ?? rule.meta) as Record<string, unknown>,
   });
+}
+
+function extractOpenPositionsFromEvent(e: AlertEvent | null): OpenPosition[] {
+  const payload: any = e?.payload ?? {};
+  const meta = payload?.meta ?? payload?.stats ?? {};
+  const list =
+    payload?.open_positions_list ??
+    payload?.open_positions ??
+    meta?.open_positions_list ??
+    meta?.open_positions ??
+    payload?.meta?.open_positions ??
+    [];
+  return Array.isArray(list) ? list : [];
+}
+
+function pickJournalDateFromPositions(positions: OpenPosition[]): string | null {
+  for (const p of positions) {
+    const jd = p?.journal_date;
+    if (jd) return jd;
+    const opened = p?.opened_at || p?.raw?.opened_at || p?.raw?.open_time;
+    if (opened) {
+      const d = new Date(opened);
+      if (!Number.isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+    }
+  }
+  return null;
 }
 
 function KpiCard({ label, value, sub }: { label: string; value: string; sub?: string }) {
@@ -108,6 +141,10 @@ export default function RemindersConsolePage() {
     () => events.find((e) => e.id === selectedEventId) ?? null,
     [events, selectedEventId]
   );
+  const detailOpenJournalDate = useMemo(() => {
+    const positions = extractOpenPositionsFromEvent(selectedEvent);
+    return pickJournalDateFromPositions(positions);
+  }, [selectedEvent]);
 
   const activeEvents = useMemo(() => events.filter((e) => e.kind === "reminder" && isEventActive(e)), [events]);
   const snoozedEvents = useMemo(
@@ -504,6 +541,14 @@ export default function RemindersConsolePage() {
                   </div>
 
                   <div className="flex flex-wrap gap-2">
+                    {detailOpenJournalDate ? (
+                      <Link
+                        href={`/journal/${detailOpenJournalDate}`}
+                        className="rounded-lg border border-slate-700 bg-slate-900/40 px-3 py-2 text-xs font-semibold text-slate-100 hover:border-emerald-400/60 hover:bg-emerald-500/10"
+                      >
+                        {L("Open journal", "Abrir journal")}
+                      </Link>
+                    ) : null}
                     <button
                       className="rounded-lg border border-slate-700 bg-slate-900/40 px-3 py-2 text-xs font-semibold text-slate-100 hover:border-emerald-400/60 hover:bg-emerald-500/10"
                       onClick={() => onSnooze(selectedEvent.id, 60)}
