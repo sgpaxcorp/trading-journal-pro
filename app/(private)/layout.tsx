@@ -32,6 +32,10 @@ export default function PrivateLayout({ children }: PrivateLayoutProps) {
   const [subscriptionStatus, setSubscriptionStatus] = useState<string>("pending");
   const [onboardingCompleted, setOnboardingCompleted] = useState<boolean>(false);
   const [profileChecked, setProfileChecked] = useState(false);
+  const isStatusActive = (status?: string | null) => {
+    const v = String(status ?? "").toLowerCase().trim();
+    return v === "active" || v === "trialing" || v === "paid";
+  };
 
   // Intentos de re-check para darle tiempo al webhook
   const [refreshAttempts, setRefreshAttempts] = useState(0);
@@ -83,6 +87,7 @@ export default function PrivateLayout({ children }: PrivateLayoutProps) {
     if (loading || !user) return;
 
     const fetchProfile = async () => {
+      const metaStatus = String((user as any)?.user_metadata?.subscriptionStatus ?? "").toLowerCase();
       const { data, error } = await supabaseBrowser
         .from("profiles")
         .select("subscription_status, onboarding_completed")
@@ -108,14 +113,14 @@ export default function PrivateLayout({ children }: PrivateLayoutProps) {
       }
 
       if (missingProfile || hasError) {
-        setSubscriptionStatus("pending");
+        setSubscriptionStatus(metaStatus || "pending");
         setOnboardingCompleted(false);
         setProfileChecked(true);
         return;
       }
 
       const status =
-        (data.subscription_status as string | undefined) ?? "pending";
+        ((data.subscription_status as string | undefined) ?? metaStatus) || "pending";
       const onboarding =
         (data.onboarding_completed as boolean | undefined) ?? false;
 
@@ -131,7 +136,9 @@ export default function PrivateLayout({ children }: PrivateLayoutProps) {
   useEffect(() => {
     if (loading || !user || !profileChecked) return;
 
-    const isActive = subscriptionStatus === "active";
+    const metaStatus = String((user as any)?.user_metadata?.subscriptionStatus ?? "").toLowerCase();
+    const effectiveStatus = subscriptionStatus || metaStatus;
+    const isActive = isStatusActive(effectiveStatus);
     const isOnAllowedRoute = ALLOW_WITHOUT_ACTIVE_SUB.some((p) =>
       pathname.startsWith(p)
     );
@@ -192,7 +199,9 @@ export default function PrivateLayout({ children }: PrivateLayoutProps) {
   ]);
 
   const userId: string | null = user?.id ?? null;
-  const isActive = subscriptionStatus === "active";
+  const metaStatus = String((user as any)?.user_metadata?.subscriptionStatus ?? "").toLowerCase();
+  const effectiveStatus = subscriptionStatus || metaStatus;
+  const isActive = isStatusActive(effectiveStatus);
   const isOnAllowedRoute = ALLOW_WITHOUT_ACTIVE_SUB.some((p) =>
     pathname.startsWith(p)
   );

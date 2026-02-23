@@ -164,9 +164,10 @@ type AccountSeriesResponse = {
 
 type CalendarScreenProps = {
   onOpenModule: (title: string, description: string) => void;
+  onOpenJournalDate: (date: string) => void;
 };
 
-export function CalendarScreen({}: CalendarScreenProps) {
+export function CalendarScreen({ onOpenJournalDate }: CalendarScreenProps) {
   const { language } = useLanguage();
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
@@ -300,9 +301,45 @@ export function CalendarScreen({}: CalendarScreenProps) {
               const isPositive = pnl != null && pnl > 0;
               const isNegative = pnl != null && pnl < 0;
               const isHoliday = !!holiday;
+              const content = (
+                <>
+                  <Text style={[styles.dayLabel, cell.isMuted && styles.mutedLabel]}>{cell.label}</Text>
+                  {isHoliday ? (
+                    <>
+                      <Text style={styles.holidayTag}>{language === "es" ? "Feriado" : "Holiday"}</Text>
+                      <Text style={styles.holidayName} numberOfLines={1}>
+                        {holiday?.label}
+                      </Text>
+                    </>
+                  ) : pnl != null ? (
+                    <Text style={styles.pnlLabel}>{pnl.toFixed(0)}</Text>
+                  ) : null}
+                </>
+              );
+
+              if (!cell.isoDate) {
+                return (
+                  <View
+                    key={`day-${index}`}
+                    style={[
+                      styles.dayCell,
+                      cell.isToday && styles.todayCell,
+                      cell.isMuted && styles.mutedCell,
+                      isPositive && styles.winCell,
+                      isNegative && styles.lossCell,
+                      isHoliday && styles.holidayCell,
+                    ]}
+                  >
+                    {content}
+                  </View>
+                );
+              }
+
               return (
-                <View
+                <Pressable
                   key={`day-${index}`}
+                  accessibilityRole="button"
+                  onPress={() => onOpenJournalDate(cell.isoDate!)}
                   style={[
                     styles.dayCell,
                     cell.isToday && styles.todayCell,
@@ -312,22 +349,8 @@ export function CalendarScreen({}: CalendarScreenProps) {
                     isHoliday && styles.holidayCell,
                   ]}
                 >
-                  <Text style={[styles.dayLabel, cell.isMuted && styles.mutedLabel]}>
-                    {cell.label}
-                  </Text>
-                  {isHoliday ? (
-                    <>
-                      <Text style={styles.holidayTag}>
-                        {language === "es" ? "Feriado" : "Holiday"}
-                      </Text>
-                      <Text style={styles.holidayName} numberOfLines={1}>
-                        {holiday?.label}
-                      </Text>
-                    </>
-                  ) : pnl != null ? (
-                    <Text style={styles.pnlLabel}>{pnl.toFixed(0)}</Text>
-                  ) : null}
-                </View>
+                  {content}
+                </Pressable>
               );
             })}
           </View>

@@ -14,6 +14,7 @@ import { useSupabaseUser } from "../lib/useSupabaseUser";
 
 type DashboardScreenProps = {
   onOpenModule: (title: string, description: string) => void;
+  onOpenJournalDate: (date: string) => void;
 };
 
 type SeriesPoint = { date: string; value: number };
@@ -96,7 +97,7 @@ const FOCUS_RULES = [
   { en: "Process > outcome", es: "Proceso > resultado" },
 ];
 
-export function DashboardScreen({ onOpenModule }: DashboardScreenProps) {
+export function DashboardScreen({ onOpenModule, onOpenJournalDate }: DashboardScreenProps) {
   const { language } = useLanguage();
   const { colors } = useTheme();
   const user = useSupabaseUser();
@@ -422,8 +423,10 @@ export function DashboardScreen({ onOpenModule }: DashboardScreenProps) {
                   const isPositive = day.pnl != null && day.pnl > 0;
                   const isNegative = day.pnl != null && day.pnl < 0;
                   return (
-                    <View
+                    <Pressable
                       key={`weekly-${day.iso}-${idx}`}
+                      accessibilityRole="button"
+                      onPress={() => onOpenJournalDate(day.iso)}
                       style={[
                         styles.weekCell,
                         isPositive && styles.weekCellWin,
@@ -444,7 +447,7 @@ export function DashboardScreen({ onOpenModule }: DashboardScreenProps) {
                       >
                         {day.pnl == null ? "—" : day.pnl === 0 ? "$0" : formatSignedShort(day.pnl)}
                       </Text>
-                    </View>
+                    </Pressable>
                   );
                 })}
               </View>

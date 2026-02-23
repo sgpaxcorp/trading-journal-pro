@@ -51,7 +51,7 @@ type RootStackParamList = {
   Tabs: undefined;
   Module: { title: string; description: string };
   Settings: undefined;
-  JournalDate: undefined;
+  JournalDate: { date?: string } | undefined;
   GlobalRanking: undefined;
   Trophies: undefined;
   Notebook: undefined;
@@ -87,13 +87,13 @@ function MainTabs() {
     (navigation as unknown as NativeStackNavigationProp<RootStackParamList>).navigate("Settings");
   }, [navigation]);
 
-  const openJournalDate = useCallback(() => {
+  const openJournalDate = useCallback((date?: string) => {
     const parent = navigation.getParent<NativeStackNavigationProp<RootStackParamList>>();
     if (parent) {
-      parent.navigate("JournalDate");
+      parent.navigate("JournalDate", date ? { date } : undefined);
       return;
     }
-    navigation.navigate("JournalDate");
+    navigation.navigate("JournalDate", date ? { date } : undefined);
   }, [navigation]);
 
   const openGlobalRanking = useCallback(() => {
@@ -231,10 +231,10 @@ function MainTabs() {
         })}
       >
         <Tab.Screen name="Dashboard" options={{ title: "Home" }}>
-          {() => <DashboardScreen onOpenModule={openModule} />}
+          {() => <DashboardScreen onOpenModule={openModule} onOpenJournalDate={openJournalDate} />}
         </Tab.Screen>
         <Tab.Screen name="Calendar" options={{ title: "Calendar" }}>
-          {() => <CalendarScreen onOpenModule={openModule} />}
+          {() => <CalendarScreen onOpenModule={openModule} onOpenJournalDate={openJournalDate} />}
         </Tab.Screen>
         <Tab.Screen name="Analytics" options={{ title: "Analytics" }}>
           {() => <AnalyticsScreen onOpenModule={openModule} />}

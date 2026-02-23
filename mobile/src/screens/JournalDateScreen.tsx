@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { useRoute } from "@react-navigation/native";
 
 import { ScreenScaffold } from "../components/ScreenScaffold";
 import { useLanguage } from "../lib/LanguageContext";
@@ -280,6 +281,7 @@ export function JournalDateScreen() {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const user = useSupabaseUser();
+  const route = useRoute<any>();
   const [date, setDate] = useState(() => new Date());
   const [premarket, setPremarket] = useState("");
   const [live, setLive] = useState("");
@@ -302,6 +304,16 @@ export function JournalDateScreen() {
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const isoDate = toYmd(date);
+
+  useEffect(() => {
+    const dateParam = route?.params?.date;
+    if (!dateParam || typeof dateParam !== "string") return;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateParam)) return;
+    const next = new Date(`${dateParam}T12:00:00`);
+    if (!Number.isNaN(next.getTime())) {
+      setDate(next);
+    }
+  }, [route?.params?.date]);
 
   const checklistLabel = (item: string) =>
     language === "es" && CHECKLIST_LABELS[item] ? CHECKLIST_LABELS[item] : item;
