@@ -6,7 +6,8 @@ import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {});
 const APP_URL = (process.env.NEXT_PUBLIC_APP_URL || "").trim();
 
-const ADDON_PRICE_ID = process.env.STRIPE_PRICE_OPTIONFLOW_MONTHLY ?? "";
+const ADDON_PRICE_ID_MONTHLY = process.env.STRIPE_PRICE_OPTIONFLOW_MONTHLY ?? "";
+const ADDON_PRICE_ID_ANNUAL = process.env.STRIPE_PRICE_OPTIONFLOW_ANNUAL ?? "";
 const ADDON_KEY = "option_flow";
 
 function resolveAppUrl(req: NextRequest) {
@@ -40,7 +41,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Invalid add-on" }, { status: 400 });
     }
 
-    if (!ADDON_PRICE_ID) {
+    const billingCycle = (body?.billingCycle as "monthly" | "annual" | undefined) || "monthly";
+    const priceId =
+      billingCycle === "annual" ? ADDON_PRICE_ID_ANNUAL || ADDON_PRICE_ID_MONTHLY : ADDON_PRICE_ID_MONTHLY;
+
+    if (!priceId) {
       return NextResponse.json(
         { error: "Price ID not configured for add-on" },
         { status: 500 }
@@ -81,7 +86,7 @@ export async function POST(req: NextRequest) {
       customer: customerId,
       line_items: [
         {
-          price: ADDON_PRICE_ID,
+          price: priceId,
           quantity: 1,
         },
       ],

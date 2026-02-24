@@ -256,7 +256,12 @@ function normalizePlan(raw: any, userId: string): GrowthPlan {
     targetBalance: num(raw?.target_balance ?? raw?.targetBalance, 0),
     targetDate: raw?.target_date ?? raw?.targetDate ?? null,
     planStyle: raw?.plan_style ?? raw?.planStyle ?? null,
-    planMode: raw?.plan_mode ?? raw?.planMode ?? null,
+    planMode:
+      raw?.plan_mode === "auto" || raw?.plan_mode === "manual"
+        ? raw.plan_mode
+        : raw?.planMode === "auto" || raw?.planMode === "manual"
+          ? raw.planMode
+          : null,
     targetMultiple:
       raw?.target_multiple != null
         ? num(raw?.target_multiple, 0)
@@ -318,7 +323,10 @@ function toDb(plan: GrowthPlan) {
     target_balance: num(plan.targetBalance, 0),
     target_date: plan.targetDate ?? null,
     plan_style: plan.planStyle ?? null,
-    plan_mode: plan.planMode ?? null,
+    plan_mode:
+      plan.planMode === "auto" || plan.planMode === "manual"
+        ? plan.planMode
+        : null,
     target_multiple: targetMultiple,
     plan_start_date: plan.planStartDate ?? null,
     planned_withdrawals: plan.plannedWithdrawals ?? [],

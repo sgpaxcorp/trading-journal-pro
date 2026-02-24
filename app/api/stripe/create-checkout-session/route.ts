@@ -29,7 +29,10 @@ const PRICE_IDS: Record<PlanId, Record<BillingCycle, string>> = {
     annual: process.env.STRIPE_PRICE_ADVANCED_ANNUAL ?? "",
   },
 };
-const OPTION_FLOW_PRICE = process.env.STRIPE_PRICE_OPTIONFLOW_MONTHLY ?? "";
+const OPTION_FLOW_PRICES = {
+  monthly: process.env.STRIPE_PRICE_OPTIONFLOW_MONTHLY ?? "",
+  annual: process.env.STRIPE_PRICE_OPTIONFLOW_ANNUAL ?? "",
+};
 const TESTER_PROMO_CODES = new Set(
   String(process.env.STRIPE_TESTER_PROMO_CODES ?? "")
     .split(",")
@@ -277,7 +280,7 @@ export async function POST(req: NextRequest) {
         { status: 500 }
       );
     }
-    if (effectiveAddonOptionFlow && !OPTION_FLOW_PRICE) {
+    if (effectiveAddonOptionFlow && !OPTION_FLOW_PRICES[finalBillingCycle]) {
       return NextResponse.json(
         { error: "Option Flow price ID not configured" },
         { status: 500 }
@@ -295,7 +298,7 @@ export async function POST(req: NextRequest) {
     ];
     if (effectiveAddonOptionFlow) {
       lineItems.push({
-        price: OPTION_FLOW_PRICE,
+        price: OPTION_FLOW_PRICES[finalBillingCycle],
         quantity: 1,
       });
     }

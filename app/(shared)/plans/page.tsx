@@ -19,7 +19,7 @@ const PLAN_COPY: Record<
 > = {
   core: {
     name: "Core",
-    priceLabel: "$14.99 / month",
+    priceLabel: "$15.99 / month",
     description: {
       en: "Core trading journal and essential performance stats.",
       es: "Diario de trading base y estadísticas esenciales de performance.",
@@ -35,7 +35,7 @@ const PLAN_COPY: Record<
   },
   advanced: {
     name: "Professional",
-    priceLabel: "$24.99 / month",
+    priceLabel: "$26.99 / month",
     description: {
       en: "Advanced analytics, psychology tools and AI coaching for serious traders.",
       es: "Analítica avanzada, psicología y AI coaching para traders serios.",

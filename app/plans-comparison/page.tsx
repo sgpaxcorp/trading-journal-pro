@@ -134,8 +134,8 @@ export default function PlansComparison() {
   const [billingCycle, setBillingCycle] = useState<"monthly" | "annual">("monthly");
 
   const PRICES = {
-    core: { monthly: 14.99, annual: 149.99 },
-    advanced: { monthly: 24.99, annual: 249.99 },
+    core: { monthly: 15.99, annual: 159.90 },
+    advanced: { monthly: 26.99, annual: 269.90 },
   } as const;
 
   const priceFor = (planId: "core" | "advanced") =>

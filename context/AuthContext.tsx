@@ -178,25 +178,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       // 2) Crear/actualizar fila en public.profiles
-      const { error: profileError } = await supabaseBrowser
-        .from("profiles")
-        .upsert({
-          id: sbUser.id,
-          email: normalizedEmail,
-          first_name: firstName,
-          last_name: lastName,
-          phone,
-          postal_address: normalizedAddress,
+      // Nota: si el signup requiere verificación de email, no hay sesión activa aún,
+      // por lo que RLS bloqueará el upsert. En ese caso lo dejamos para /api/profile/ensure.
+      if (data.session?.access_token) {
+        const { error: profileError } = await supabaseBrowser
+          .from("profiles")
+          .upsert({
+            id: sbUser.id,
+            email: normalizedEmail,
+            first_name: firstName,
+            last_name: lastName,
+            phone,
+            postal_address: normalizedAddress,
 
-          // Campos de suscripción
-          plan, // core | advanced (PlanId)
-          subscription_status: "pending", // hasta que Stripe confirme
-          stripe_customer_id: null, // se llenará luego desde el webhook
-          stripe_subscription_id: null, // se llenará luego desde el webhook
-        });
+            // Campos de suscripción
+            plan, // core | advanced (PlanId)
+            subscription_status: "pending", // hasta que Stripe confirme
+            stripe_customer_id: null, // se llenará luego desde el webhook
+            stripe_subscription_id: null, // se llenará luego desde el webhook
+          });
 
-      if (profileError) {
-        console.error("Error upserting profile:", profileError);
+        if (profileError) {
+          console.error(
+            "Error upserting profile:",
+            profileError?.message || profileError
+          );
+        }
+      } else {
+        console.info(
+          "Profile upsert deferred until email confirmation (no active session)."
+        );
       }
 
       // 3) Emails mock

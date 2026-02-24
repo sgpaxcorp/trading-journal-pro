@@ -39,7 +39,6 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
   const L = (en: string, es: string) => (isEs ? es : en);
 
   const [selectedPlan, setSelectedPlan] = useState<PlanId>(initialPlan);
-  const [couponCode, setCouponCode] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [currentPlan, setCurrentPlan] = useState<PlanId | "none">(initialPlan);
@@ -65,8 +64,12 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
   const [cancelNotice, setCancelNotice] = useState<string | null>(null);
 
   const PRICES = {
-    core: { monthly: 14.99, annual: 149.99 },
-    advanced: { monthly: 24.99, annual: 249.99 },
+    core: { monthly: 15.99, annual: 159.90 },
+    advanced: { monthly: 26.99, annual: 269.90 },
+  } as const;
+  const OPTION_FLOW_PRICES = {
+    monthly: 6.99,
+    annual: 69.90,
   } as const;
 
   const priceFor = (planId: PlanId) =>
@@ -229,7 +232,6 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
         },
         body: JSON.stringify({
           planId: selectedPlan,
-          couponCode: couponCode.trim() || undefined,
           addonOptionFlow: !hasActivePlan && addonSelected,
           billingCycle,
           partnerCode: partnerCode || undefined,
@@ -278,7 +280,7 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ addonKey: "option_flow" }),
+        body: JSON.stringify({ addonKey: "option_flow", billingCycle }),
       });
 
       const data = await res.json();
@@ -662,29 +664,16 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
               </div>
 
               <div className="flex flex-col md:flex-row md:items-center gap-3">
-                <div className="flex-1">
-                  <label className="block text-[10px] text-slate-400 mb-1">
-                    {L("Coupon code (optional)", "Código de cupón (opcional)")}
-                  </label>
-                  <input
-                    value={couponCode}
-                    onChange={(e) =>
-                      setCouponCode(e.target.value.toUpperCase())
-                    }
-                    placeholder={L("Enter coupon code", "Ingresa tu cupón")}
-                    className="w-full rounded-md bg-slate-950/90 border border-slate-700 px-3 py-2 text-xs text-slate-100 outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400/60"
-                  />
-                </div>
-
                 <button
                   type="button"
                   onClick={handleCheckout}
                   disabled={isButtonDisabled}
                   className="w-full md:w-auto min-w-[180px] px-6 py-2.5 rounded-xl bg-emerald-400 text-slate-950 text-xs md:text-sm font-semibold hover:bg-emerald-300 disabled:opacity-60 disabled:cursor-not-allowed transition whitespace-nowrap text-center leading-none"
                 >
-                  {loading || authLoading
-                    ? L("Checking…", "Verificando…")
-                    : L("Checkout with Stripe", "Pagar con Stripe")}
+                  <span>{L("Checkout with Stripe", "Pagar con Stripe")}</span>
+                  {(loading || authLoading) && (
+                    <span className="ml-2 inline-flex h-3 w-3 animate-spin rounded-full border-2 border-slate-950 border-t-transparent" />
+                  )}
                 </button>
               </div>
 
@@ -698,33 +687,22 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
 
           {/* Coupon + CTA (existing subscribers) */}
           {hasActivePlan && (
-            <div className="mt-6 border-t border-slate-800/80 pt-5 space-y-3">
+          <div className="mt-6 border-t border-slate-800/80 pt-5 space-y-3">
               <div className="flex flex-col md:flex-row md:items-center gap-3">
-                <div className="flex-1">
-                  <label className="block text-[10px] text-slate-400 mb-1">
-                    {L("Coupon code (optional)", "Código de cupón (opcional)")}
-                  </label>
-                  <input
-                    value={couponCode}
-                    onChange={(e) =>
-                      setCouponCode(e.target.value.toUpperCase())
-                    }
-                    placeholder={L("Enter coupon code", "Ingresa tu cupón")}
-                    className="w-full rounded-md bg-slate-950/90 border border-slate-700 px-3 py-2 text-xs text-slate-100 outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400/60"
-                  />
-                </div>
-
                 <button
                   type="button"
                   onClick={handleCheckout}
                   disabled={isButtonDisabled || isCurrentSelection}
                   className="w-full md:w-auto min-w-[180px] px-6 py-2.5 rounded-xl bg-emerald-400 text-slate-950 text-xs md:text-sm font-semibold hover:bg-emerald-300 disabled:opacity-60 disabled:cursor-not-allowed transition whitespace-nowrap text-center leading-none"
                 >
-                  {loading || authLoading
-                    ? L("Checking…", "Verificando…")
-                    : isCurrentSelection
-                    ? L("Current plan", "Plan actual")
-                    : `${L("Continue with", "Continuar con")} ${selectedPlan === "core" ? L("Core", "Core") : L("Advanced", "Advanced")}`}
+                  <span>
+                    {isCurrentSelection
+                      ? L("Current plan", "Plan actual")
+                      : `${L("Continue with", "Continuar con")} ${selectedPlan === "core" ? L("Core", "Core") : L("Advanced", "Advanced")}`}
+                  </span>
+                  {(loading || authLoading) && (
+                    <span className="ml-2 inline-flex h-3 w-3 animate-spin rounded-full border-2 border-slate-950 border-t-transparent" />
+                  )}
                 </button>
               </div>
 
@@ -771,9 +749,13 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
 
             <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
               <div>
-                <p className="text-sm font-semibold text-slate-100">$5.00</p>
+                <p className="text-sm font-semibold text-slate-100">
+                  ${billingCycle === "annual" ? OPTION_FLOW_PRICES.annual.toFixed(2) : OPTION_FLOW_PRICES.monthly.toFixed(2)}
+                </p>
                 <p className="text-[11px] text-slate-400">
-                  {L("Monthly add-on", "Add-on mensual")}
+                  {billingCycle === "annual"
+                    ? L("Annual add-on", "Add-on anual")
+                    : L("Monthly add-on", "Add-on mensual")}
                 </p>
               </div>
 

@@ -28,10 +28,11 @@ type DropdownProps = {
   items: NavItem[];
   theme: Theme;
   lang: Locale;
+  dataTour?: string;
 };
 
 /* ========== Reusable Dropdown component (main nav menus) ========== */
-function Dropdown({ title, titleKey, items, theme, lang }: DropdownProps) {
+function Dropdown({ title, titleKey, items, theme, lang, dataTour }: DropdownProps) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
 
@@ -80,6 +81,7 @@ function Dropdown({ title, titleKey, items, theme, lang }: DropdownProps) {
       <button
         type="button"
         onClick={() => setOpen((prev) => !prev)}
+        data-tour={dataTour}
         className={`nt-menu-button flex items-center gap-1 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${buttonClass}`}
       >
         {label}
@@ -143,6 +145,9 @@ function HelpMenu({ theme, lang }: { theme: Theme; lang: Locale }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
   const L = (en: string, es: string) => (lang === "es" ? es : en);
+  const { user } = useAuth() as any;
+  const router = useRouter();
+  const [resettingTour, setResettingTour] = useState(false);
 
   const isLight = theme === "light";
 
@@ -168,6 +173,35 @@ function HelpMenu({ theme, lang }: { theme: Theme; lang: Locale }) {
   const linkClass = isLight
     ? "border-slate-300 text-slate-700 hover:border-emerald-400 hover:text-emerald-700"
     : "border-slate-700 text-slate-200 hover:border-emerald-400 hover:text-emerald-300";
+
+  const handleActivateTour = async () => {
+    if (!user?.id || typeof window === "undefined") return;
+    setResettingTour(true);
+    try {
+      const key = `ntj_app_tour_${user.id}`;
+      localStorage.removeItem(key);
+      Object.keys(localStorage)
+        .filter((k) => k.startsWith(`ntj_intro_${user.id}`))
+        .forEach((k) => localStorage.removeItem(k));
+
+      await supabaseBrowser.auth.updateUser({
+        data: { onboardingCompleted: false },
+      });
+
+      await supabaseBrowser
+        .from("profiles")
+        .update({ onboarding_completed: false })
+        .eq("id", user.id);
+    } catch (err) {
+      console.warn("[HelpMenu] Failed to reset tour", err);
+    } finally {
+      setResettingTour(false);
+      router.replace("/dashboard");
+      setTimeout(() => {
+        window.location.reload();
+      }, 60);
+    }
+  };
 
   return (
     <div className="relative" ref={ref}>
@@ -212,12 +246,16 @@ function HelpMenu({ theme, lang }: { theme: Theme; lang: Locale }) {
             >
               {t("help.link.gettingStarted", lang)}
             </Link>
-            <Link
-              href="/quick-tour/page/dashboard"
-              className={`px-2 py-1 rounded-lg border transition ${linkClass}`}
+            <button
+              type="button"
+              onClick={() => void handleActivateTour()}
+              disabled={resettingTour || !user?.id}
+              className={`px-2 py-1 rounded-lg border transition ${linkClass} ${
+                resettingTour ? "opacity-60 cursor-not-allowed" : ""
+              }`}
             >
-              {t("help.link.dashboardTour", lang)}
-            </Link>
+              {t("help.link.activateTour", lang)}
+            </button>
           </div>
         </div>
       )}
@@ -681,6 +719,7 @@ export default function TopNav() {
           href="/dashboard"
           className="shrink-0 flex items-center"
           aria-label={L("Go to dashboard", "Ir al dashboard")}
+          data-tour="nav-brand"
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
@@ -698,17 +737,18 @@ export default function TopNav() {
             items={performance}
             theme={theme}
             lang={lang}
+            dataTour="nav-performance"
           />
 
-          <Link href="/notebook" className={linkClass}>
+          <Link href="/notebook" className={linkClass} data-tour="nav-notebook">
             {t("nav.notebook", lang)}
           </Link>
 
-          <Link href="/back-study" className={linkClass}>
+          <Link href="/back-study" className={linkClass} data-tour="nav-back-study">
             {t("nav.backStudy", lang)}
           </Link>
 
-          <Link href="/option-flow" className={linkClass}>
+          <Link href="/option-flow" className={linkClass} data-tour="nav-option-flow">
             {t("nav.optionFlow", lang)}
           </Link>
 
@@ -717,27 +757,31 @@ export default function TopNav() {
             items={challenges}
             theme={theme}
             lang={lang}
+            dataTour="nav-challenges"
           />
           <Dropdown
             titleKey="nav.resources"
             items={resources}
             theme={theme}
             lang={lang}
+            dataTour="nav-resources"
           />
           <Dropdown
             titleKey="nav.rules"
             items={rules}
             theme={theme}
             lang={lang}
+            dataTour="nav-rules"
           />
           <Dropdown
             titleKey="nav.forum"
             items={forum}
             theme={theme}
             lang={lang}
+            dataTour="nav-forum"
           />
 
-          <Link href="/globalranking" className={linkClass}>
+          <Link href="/globalranking" className={linkClass} data-tour="nav-global-ranking">
             {t("nav.globalRanking", lang)}
           </Link>
         </div>

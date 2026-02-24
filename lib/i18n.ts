@@ -166,6 +166,7 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     "help.bullet3": "Edit your growth plan to update targets and calculations.",
     "help.link.gettingStarted": "Getting started guide",
     "help.link.dashboardTour": "Dashboard tour",
+    "help.link.activateTour": "Activate quick tour",
 
     /* -----------------
        Account menu (TopNav avatar dropdown) - canonical
@@ -428,6 +429,7 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     "help.bullet3": "Edita tu plan de crecimiento para actualizar cálculos.",
     "help.link.gettingStarted": "Guía de inicio",
     "help.link.dashboardTour": "Tour del dashboard",
+    "help.link.activateTour": "Activar tour rápido",
 
     /* -----------------
        Account menu

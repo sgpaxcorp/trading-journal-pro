@@ -6,6 +6,8 @@ import { useAuth } from "@/context/AuthContext";
 import { supabaseBrowser } from "@/lib/supaBaseClient";
 import { syncMyTrophies } from "@/lib/trophiesSupabase";
 import CandleAssistant from "@/app/components/NeuroAssistant";
+import AppTour from "@/app/components/AppTour";
+import PageIntro from "@/app/components/PageIntro";
 import GlobalAlertPopups from "@/app/components/GlobalAlertPopups";
 import GlobalAlertRuleEngine from "@/app/components/GlobalAlertRuleEngine";
 import GlobalRealtimeNotifications from "@/app/components/GlobalRealtimeNotifications";
@@ -132,7 +134,7 @@ export default function PrivateLayout({ children }: PrivateLayoutProps) {
     fetchProfile();
   }, [loading, user]);
 
-  /* 3) Profile checker + gating: suscripción + quick tour */
+  /* 3) Profile checker + gating: suscripción */
   useEffect(() => {
     if (loading || !user || !profileChecked) return;
 
@@ -143,13 +145,8 @@ export default function PrivateLayout({ children }: PrivateLayoutProps) {
       pathname.startsWith(p)
     );
 
-    // Si la suscripción está activa → manejar quick-tour y salir
-    if (isActive) {
-      if (!onboardingCompleted && pathname !== "/quick-tour") {
-        router.replace("/quick-tour");
-      }
-      return;
-    }
+    // Si la suscripción está activa → continuar
+    if (isActive) return;
 
     // Si NO está activa pero estamos en una ruta que se permite sin sub activa,
     // no hacemos nada (ej. /billing, /billing/success, etc.)
@@ -259,6 +256,12 @@ export default function PrivateLayout({ children }: PrivateLayoutProps) {
   return (
     <>
       <div className="ntj-fullwidth">{children}</div>
+      {userId && isActive && profileChecked ? (
+        <>
+          <AppTour onboardingCompleted={onboardingCompleted} />
+          <PageIntro />
+        </>
+      ) : null}
 
       {/* ✅ GLOBAL Rules & Alarms engine + delivery */}
       {userId && isActive && profileChecked ? (

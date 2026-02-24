@@ -252,6 +252,7 @@ export default function DashboardGrid({
         return (
           <div
             key={id}
+            data-tour={`dash-widget-${id}`}
             className="bg-slate-900/95 border border-slate-800 rounded-2xl p-4 overflow-hidden"
           >
             <div className="text-[14px] h-full min-h-0 overflow-auto pr-1">

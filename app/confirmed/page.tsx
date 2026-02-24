@@ -271,12 +271,12 @@ export default function ConfirmedPage() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.8 }}
         >
-          {/* Botón principal → Quick Tour */}
+          {/* Botón principal → Dashboard */}
           <Link
-            href="/quick-tour"
+            href="/dashboard"
             className="inline-flex px-6 py-2.5 rounded-xl bg-emerald-400 text-slate-950 text-xs md:text-sm font-semibold hover:bg-emerald-300 shadow-lg shadow-emerald-500/25"
           >
-            {L("Start the journey", "Comenzar el recorrido")}
+            {L("Go to dashboard", "Ir al dashboard")}
           </Link>
         </motion.div>
 

@@ -30,7 +30,7 @@ const buildSteps = (L: (en: string, es: string) => string): { id: Step; label: s
 const buildPlanCopy = (L: (en: string, es: string) => string): Record<PlanId, { name: string; price: string; description: string }> => ({
   core: {
     name: L("Core", "Core"),
-    price: L("$14.99 / month", "$14.99 / mes"),
+    price: L("$15.99 / month", "$15.99 / mes"),
     description: L(
       "Ideal for active traders who want structure, clear goals and emotional control without overcomplicating things.",
       "Ideal para traders activos que buscan estructura, metas claras y control emocional sin complicarse."
@@ -38,7 +38,7 @@ const buildPlanCopy = (L: (en: string, es: string) => string): Record<PlanId, { 
   },
   advanced: {
     name: L("Advanced", "Advanced"),
-    price: L("$24.99 / month", "$24.99 / mes"),
+    price: L("$26.99 / month", "$26.99 / mes"),
     description: L(
       "For full-time and funded traders who need deep analytics, advanced alerts and reports ready for prop firms.",
       "Para traders full-time o fondeados que necesitan analítica profunda, alertas avanzadas y reportes listos para prop firms."
@@ -90,6 +90,10 @@ export default function StartClient({ initialPlan }: StartClientProps) {
   const [verifying, setVerifying] = useState(false);
   const [resending, setResending] = useState(false);
   const [canResend, setCanResend] = useState(true);
+  const isStatusActive = (status?: string | null) => {
+    const v = String(status ?? "").toLowerCase().trim();
+    return v === "active" || v === "trialing" || v === "paid";
+  };
 
   // Detectar si ya hay usuario logueado
   useEffect(() => {
@@ -110,9 +114,38 @@ export default function StartClient({ initialPlan }: StartClientProps) {
         }));
 
         const isConfirmed = Boolean((data.user as any)?.email_confirmed_at);
-        const targetStep: Step = isConfirmed ? 3 : 2;
-        // Si hay usuario, nos aseguramos que al menos estemos en Step 2/3
-        setCurrentStep((prev) => (prev < targetStep ? targetStep : prev));
+        if (isConfirmed) {
+          try {
+            const { data: profile } = await supabase
+              .from("profiles")
+              .select("subscription_status, plan")
+              .eq("id", data.user.id)
+              .maybeSingle();
+
+            const metaStatus = String((data.user as any)?.user_metadata?.subscriptionStatus ?? "").toLowerCase();
+            const status = String(profile?.subscription_status ?? metaStatus ?? "");
+
+            if (isStatusActive(status)) {
+              router.replace("/dashboard");
+              return;
+            }
+
+            const planFromProfile = String(profile?.plan ?? "").toLowerCase();
+            const planParam = planFromProfile === "advanced" || planFromProfile === "core"
+              ? planFromProfile
+              : initialPlan;
+            router.replace(`/billing?plan=${planParam}`);
+            return;
+          } catch {
+            // If profile lookup fails, keep user in plan step.
+            const targetStep: Step = 3;
+            setCurrentStep((prev) => (prev < targetStep ? targetStep : prev));
+          }
+        } else {
+          const targetStep: Step = 2;
+          // Si hay usuario, nos aseguramos que al menos estemos en Step 2/3
+          setCurrentStep((prev) => (prev < targetStep ? targetStep : prev));
+        }
       }
     }
 

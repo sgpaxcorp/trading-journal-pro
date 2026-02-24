@@ -307,7 +307,11 @@ export default function JournalGrid({
       resizeHandles={["se", "s", "e"]}
     >
       {activeWidgets.map((w) => (
-        <div key={w.id} className="min-h-0 h-full w-full flex flex-col">
+        <div
+          key={w.id}
+          data-tour={`journal-${w.id}`}
+          className="min-h-0 h-full w-full flex flex-col"
+        >
           {w.render()}
         </div>
       ))}

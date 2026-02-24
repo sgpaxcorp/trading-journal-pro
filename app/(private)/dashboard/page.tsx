@@ -130,6 +130,64 @@ function normalizePhases(raw: any): Array<{
   }));
 }
 
+type AutoPhase = {
+  targetEquity: number;
+  targetDate: string | null;
+};
+
+function getUsMarketHolidayDates(year: number): string[] {
+  return getUsMarketHolidays(year, false).map((h) => h.date);
+}
+
+function listTradingDaysBetween(startIso: string, endIso: string): string[] {
+  const s = new Date(startIso);
+  const e = new Date(endIso);
+  if (!Number.isFinite(s.getTime()) || !Number.isFinite(e.getTime())) return [];
+  const start = s <= e ? s : e;
+  const end = s <= e ? e : s;
+  const years: number[] = [];
+  for (let y = start.getFullYear(); y <= end.getFullYear(); y++) years.push(y);
+  const holidaySet = new Set(years.flatMap(getUsMarketHolidayDates));
+
+  const days: string[] = [];
+  for (let d = new Date(start); d <= end; d = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1)) {
+    const ds = toYMD(d);
+    if (isTradingDay(ds, holidaySet)) days.push(ds);
+  }
+  return days;
+}
+
+function buildAutoPhases(
+  starting: number,
+  target: number,
+  startIso: string,
+  targetIso: string,
+  cadence: "weekly" | "monthly" | "quarterly" | "biannual"
+): AutoPhase[] {
+  if (starting <= 0 || target <= 0) return [];
+  const tradingDays = listTradingDaysBetween(startIso, targetIso);
+  if (tradingDays.length === 0) return [];
+  const totalTradingDays = tradingDays.length;
+  const cadenceTradingDays =
+    cadence === "weekly" ? 5 : cadence === "monthly" ? 21 : cadence === "quarterly" ? 63 : 126;
+  const phasesCount = Math.max(1, Math.ceil(totalTradingDays / cadenceTradingDays));
+  const multiple = target / starting;
+  if (!Number.isFinite(multiple) || multiple <= 0) return [];
+
+  const rows: AutoPhase[] = [];
+  for (let i = 1; i <= phasesCount; i++) {
+    const dayIndex =
+      i === phasesCount
+        ? totalTradingDays - 1
+        : Math.min(totalTradingDays - 1, i * cadenceTradingDays - 1);
+    const fraction = (dayIndex + 1) / totalTradingDays;
+    const targetEquity = Math.round(starting * Math.pow(multiple, fraction));
+    const targetDate = tradingDays[dayIndex] ?? tradingDays[tradingDays.length - 1] ?? targetIso;
+    rows.push({ targetEquity, targetDate });
+  }
+  return rows;
+}
+
 type CalendarCell = {
   dateStr: string | null;
   dayNumber: number | null;
@@ -1247,6 +1305,7 @@ export default function DashboardPage() {
 
   const { starting, target, currentBalance, progressPct, clampedProgress } = useMemo(() => {
     const startingLocal = (plan as any)?.startingBalance ?? 0;
+    const adjustedStart = plan ? startingLocal + (cashflowNet ?? 0) : startingLocal;
     const targetLocal = plan ? computeAdjustedTarget(plan, cashflowNet ?? 0) : 0;
 
     const totalPnlLocal = filteredEntries.reduce((sum, e) => {
@@ -1255,30 +1314,86 @@ export default function DashboardPage() {
       return sum + pnl;
     }, 0);
 
-    // ✅ Current account balance = starting balance + trading P&L + net cashflows (deposits/withdrawals)
-    const currentBalanceLocal = plan ? startingLocal + totalPnlLocal + (cashflowNet ?? 0) : startingLocal;
+    const latestSeriesValue = (() => {
+      if (!serverSeries || serverSeries.length === 0) return null;
+      const sorted = [...serverSeries].sort((a, b) => String(a.date).localeCompare(String(b.date)));
+      const last = sorted[sorted.length - 1];
+      const v = Number(last?.value);
+      return Number.isFinite(v) ? v : null;
+    })();
+
+    // ✅ Current account balance prefers authoritative equity series (if present)
+    const fallbackBalance = plan ? adjustedStart + totalPnlLocal : startingLocal;
+    const currentBalanceLocal = latestSeriesValue ?? fallbackBalance;
 
     const progressPctLocal =
-      plan && targetLocal > startingLocal
-        ? ((currentBalanceLocal - startingLocal) / (targetLocal - startingLocal)) * 100
+      plan && targetLocal > adjustedStart
+        ? ((currentBalanceLocal - adjustedStart) / (targetLocal - adjustedStart)) * 100
         : 0;
 
     const clampedProgressLocal = Math.max(0, Math.min(Number.isFinite(progressPctLocal) ? progressPctLocal : 0, 150));
 
     return {
-      starting: startingLocal,
+      starting: adjustedStart,
       target: targetLocal,
       currentBalance: currentBalanceLocal,
       progressPct: progressPctLocal,
       clampedProgress: clampedProgressLocal,
     };
-  }, [plan, filteredEntries, cashflowNet]);
+  }, [plan, filteredEntries, cashflowNet, serverSeries]);
 
   const planStartStr = useMemo(() => getPlanStartDateStr(plan) || "", [plan]);
   const targetDateStr = useMemo(
     () => String((plan as any)?.targetDate ?? (plan as any)?.target_date ?? "").slice(0, 10),
     [plan]
   );
+
+  const autoPhaseCadence = useMemo(() => {
+    const raw =
+      (plan as any)?.steps?._ui?.autoPhaseCadence ??
+      (plan as any)?.autoPhaseCadence ??
+      (plan as any)?.planCadence ??
+      "";
+    const cleaned = String(raw || "").toLowerCase();
+    return ["weekly", "monthly", "quarterly", "biannual"].includes(cleaned) ? (cleaned as any) : "monthly";
+  }, [plan]);
+
+  const autoCadenceLabel =
+    autoPhaseCadence === "weekly"
+      ? L("Weekly", "Semanal")
+      : autoPhaseCadence === "monthly"
+        ? L("Monthly", "Mensual")
+        : autoPhaseCadence === "quarterly"
+          ? L("Quarterly", "Trimestral")
+          : L("Bi-annual", "Semestral");
+  const autoCadenceUnit =
+    autoPhaseCadence === "weekly"
+      ? L("Week", "Semana")
+      : autoPhaseCadence === "monthly"
+        ? L("Month", "Mes")
+        : autoPhaseCadence === "quarterly"
+          ? L("Quarter", "Trimestre")
+          : L("Semester", "Semestre");
+
+  const autoPhases = useMemo(() => {
+    if (!plan || (plan as any)?.planMode !== "auto") return [];
+    if (!planStartStr || !targetDateStr) return [];
+    const rawPhases = Array.isArray((plan as any)?.planPhases)
+      ? (plan as any).planPhases
+      : Array.isArray((plan as any)?.plan_phases)
+        ? (plan as any).plan_phases
+        : [];
+    if (rawPhases.length > 0) {
+      return normalizePhases(rawPhases).map((p) => ({
+        targetEquity: p.targetEquity,
+        targetDate: p.targetDate ?? null,
+      }));
+    }
+    const starting = Number((plan as any)?.startingBalance ?? 0) || 0;
+    const target = Number((plan as any)?.targetBalance ?? 0) || 0;
+    if (starting <= 0 || target <= 0) return [];
+    return buildAutoPhases(starting, target, planStartStr, targetDateStr, autoPhaseCadence);
+  }, [plan, planStartStr, targetDateStr, autoPhaseCadence]);
 
   const phaseMetrics = useMemo(() => {
     if (!plan || !planStartStr || !targetDateStr) return null;
@@ -1324,6 +1439,26 @@ export default function DashboardPage() {
       midTarget,
     };
   }, [plan, planStartStr, targetDateStr, cashflowNet, currentBalance]);
+
+  const autoPhaseMetrics = useMemo(() => {
+    if (!plan || (plan as any)?.planMode !== "auto") return null;
+    if (!autoPhases.length) return null;
+    const sorted = [...autoPhases].sort((a, b) => a.targetEquity - b.targetEquity);
+    const current = sorted.find((p) => currentBalance < p.targetEquity) || sorted[sorted.length - 1];
+    const currentIndex = sorted.findIndex((p) => p === current);
+    const baseStart = Number((plan as any)?.startingBalance ?? 0) + (cashflowNet ?? 0);
+    const prevTarget = currentIndex > 0 ? sorted[currentIndex - 1].targetEquity : baseStart;
+    const span = Math.max(1, current.targetEquity - prevTarget);
+    const progress = Math.max(0, Math.min(1.25, (currentBalance - prevTarget) / span));
+    return {
+      current,
+      index: currentIndex + 1,
+      total: sorted.length,
+      prevTarget,
+      progress,
+      remaining: Math.max(0, current.targetEquity - currentBalance),
+    };
+  }, [plan, autoPhases, currentBalance, cashflowNet]);
 
   const manualPhases = useMemo(() => {
     return normalizePhases((plan as any)?.planPhases ?? (plan as any)?.plan_phases);
@@ -1573,7 +1708,7 @@ export default function DashboardPage() {
           ) : (
             <p className="text-[14px] text-slate-500 mt-2">
               {L("No growth plan set yet.", "Aún no tienes un plan de crecimiento.")}{" "}
-              <Link href="/growth-plan" className="text-emerald-400 underline">
+              <Link href="/growth-plan" data-tour="dash-edit-growth-plan" className="text-emerald-400 underline">
                 {L("Create your plan now.", "Crea tu plan ahora.")}
               </Link>
             </p>
@@ -1595,7 +1730,7 @@ export default function DashboardPage() {
           {!plan ? (
             <p className="text-[14px] text-slate-500 mt-2">
               {L("No growth plan set yet.", "Aún no tienes un plan de crecimiento.")}{" "}
-              <Link href="/growth-plan" className="text-emerald-400 underline">
+              <Link href="/growth-plan" data-tour="dash-edit-growth-plan" className="text-emerald-400 underline">
                 {L("Create your plan now.", "Crea tu plan ahora.")}
               </Link>
             </p>
@@ -1644,7 +1779,7 @@ export default function DashboardPage() {
             ) : (
               <p className="text-[13px] text-slate-500 mt-2">
                 {L("Add manual phases to activate this widget.", "Agrega fases manuales para activar este widget.")}{" "}
-                <Link href="/growth-plan" className="text-emerald-400 underline">
+                <Link href="/growth-plan" data-tour="dash-edit-growth-plan" className="text-emerald-400 underline">
                   {L("Edit Growth Plan", "Editar Growth Plan")}
                 </Link>
               </p>
@@ -1652,13 +1787,50 @@ export default function DashboardPage() {
           ) : !targetDateStr ? (
             <p className="text-[13px] text-slate-500 mt-2">
               {L(
-                "Add a target date to activate monthly and mid‑term milestones.",
-                "Agrega una fecha meta para activar metas mensuales y de mediano plazo."
+                "Add a target date to activate auto milestones.",
+                "Agrega una fecha meta para activar metas automáticas."
               )}{" "}
-              <Link href="/growth-plan" className="text-emerald-400 underline">
+              <Link href="/growth-plan" data-tour="dash-edit-growth-plan" className="text-emerald-400 underline">
                 {L("Edit Growth Plan", "Editar Growth Plan")}
               </Link>
             </p>
+          ) : autoPhaseMetrics ? (
+            <div className="mt-3 space-y-3">
+              <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-3">
+                <p className="text-[12px] text-slate-500">
+                  {L("Current milestone", "Meta actual")} · {autoCadenceUnit} {autoPhaseMetrics.index}/{autoPhaseMetrics.total}
+                </p>
+                <p className="text-[16px] text-slate-100 font-semibold">
+                  ${autoPhaseMetrics.current.targetEquity.toFixed(2)}
+                </p>
+                {autoPhaseMetrics.current.targetDate ? (
+                  <p className="text-[12px] text-slate-500 mt-1">
+                    {L("Target date:", "Fecha objetivo:")}{" "}
+                    <span className="text-slate-200">{autoPhaseMetrics.current.targetDate}</span>
+                  </p>
+                ) : null}
+                <p className="text-[12px] text-slate-500 mt-1">
+                  {L("Cadence:", "Cadencia:")}{" "}
+                  <span className="text-slate-200">{autoCadenceLabel}</span>
+                </p>
+              </div>
+
+              <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-3">
+                <p className="text-[12px] text-slate-500">
+                  {L("Milestone progress", "Progreso de meta")}
+                </p>
+                <div className="mt-2 h-2 w-full rounded-full bg-slate-800 overflow-hidden">
+                  <div
+                    className="h-2 bg-linear-to-r from-emerald-400 via-emerald-300 to-sky-400"
+                    style={{ width: `${Math.min(100, autoPhaseMetrics.progress * 100)}%` }}
+                  />
+                </div>
+                <p className="text-[12px] text-slate-500 mt-1">
+                  {L("Remaining:", "Falta:")}{" "}
+                  <span className="text-slate-200">${autoPhaseMetrics.remaining.toFixed(2)}</span>
+                </p>
+              </div>
+            </div>
           ) : phaseMetrics ? (
             <div className="mt-3 space-y-3">
               <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-3">
@@ -1735,14 +1907,14 @@ export default function DashboardPage() {
           {!plan ? (
             <p className="text-[14px] text-slate-500 mt-2">
               {L("No growth plan set yet.", "Aún no tienes un plan de crecimiento.")}{" "}
-              <Link href="/growth-plan" className="text-emerald-400 underline">
+              <Link href="/growth-plan" data-tour="dash-edit-growth-plan" className="text-emerald-400 underline">
                 {L("Create your plan now.", "Crea tu plan ahora.")}
               </Link>
             </p>
           ) : !hasItems ? (
             <p className="text-[14px] text-slate-500 mt-2">
               {L("Add your execution system (Do / Don't / Order) to activate this widget.", "Agrega tu sistema (Hacer / No hacer / Orden) para activar este widget.")}{" "}
-              <Link href="/growth-plan" className="text-emerald-400 underline">
+              <Link href="/growth-plan" data-tour="dash-edit-growth-plan" className="text-emerald-400 underline">
                 {L("Edit Growth Plan", "Editar Growth Plan")}
               </Link>
             </p>
@@ -2463,6 +2635,7 @@ export default function DashboardPage() {
           <div className="flex flex-wrap items-center gap-3">
             <Link
               href="/growth-plan"
+              data-tour="dash-edit-growth-plan"
               className="px-4 py-2 rounded-xl bg-emerald-400 text-slate-950 text-[14px] font-semibold hover:bg-emerald-300 transition"
             >
               {L("Edit growth plan", "Editar plan de crecimiento")}

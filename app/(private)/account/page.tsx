@@ -69,6 +69,10 @@ export default function AccountPage() {
 
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState("");
+  const [deletingAccount, setDeletingAccount] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleteDone, setDeleteDone] = useState<string | null>(null);
 
   /* ---------- Auth protection ---------- */
   useEffect(() => {
@@ -830,6 +834,72 @@ export default function AccountPage() {
               {accountsError && <p className="text-[11px] text-red-400 mt-2">{accountsError}</p>}
             </>
           )}
+        </section>
+
+        <section className="mt-8 rounded-2xl border border-rose-500/40 bg-rose-500/5 p-5">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-sm font-semibold text-rose-200">{L("Delete account", "Eliminar cuenta")}</p>
+              <p className="text-xs text-rose-200/80 mt-1 max-w-xl">
+                {L(
+                  "This permanently deletes your user and ALL related data (journal, analytics, trades, resources, trophies, etc.). This cannot be undone.",
+                  "Esto elimina permanentemente tu usuario y TODA tu data (journal, analíticas, trades, recursos, trofeos, etc.). No se puede deshacer."
+                )}
+              </p>
+              <p className="text-[11px] text-rose-200/70 mt-2">
+                {L("Type DELETE to confirm.", "Escribe DELETE para confirmar.")}
+              </p>
+            </div>
+          </div>
+          <div className="mt-4 grid gap-3 md:grid-cols-[1fr_auto]">
+            <input
+              value={deleteConfirm}
+              onChange={(e) => setDeleteConfirm(e.target.value)}
+              className="w-full rounded-md bg-slate-950 border border-rose-500/40 px-3 py-2 text-xs text-slate-100 outline-none focus:border-rose-300"
+              placeholder="DELETE"
+            />
+            <button
+              type="button"
+              disabled={deleteConfirm.trim().toUpperCase() !== "DELETE" || deletingAccount}
+              onClick={async () => {
+                const ok = window.confirm(
+                  L(
+                    "Final confirmation: delete your account and all data?",
+                    "Confirmación final: ¿eliminar tu cuenta y toda la data?"
+                  )
+                );
+                if (!ok) return;
+                setDeleteError(null);
+                setDeleteDone(null);
+                setDeletingAccount(true);
+                try {
+                  const session = await supabaseBrowser.auth.getSession();
+                  const token = session?.data?.session?.access_token;
+                  if (!token) throw new Error(L("Not authenticated.", "No autenticado."));
+
+                  const res = await fetch("/api/account/delete", {
+                    method: "POST",
+                    headers: { Authorization: `Bearer ${token}` },
+                  });
+                  const json = await res.json().catch(() => ({}));
+                  if (!res.ok) throw new Error(json?.error || L("Delete failed.", "No se pudo eliminar."));
+
+                  setDeleteDone(L("Account deleted. Signing out…", "Cuenta eliminada. Cerrando sesión…"));
+                  await supabaseBrowser.auth.signOut();
+                  router.replace("/");
+                } catch (err: any) {
+                  setDeleteError(err?.message || L("Delete failed.", "No se pudo eliminar."));
+                } finally {
+                  setDeletingAccount(false);
+                }
+              }}
+              className="rounded-xl bg-rose-500 text-white px-4 py-2 text-xs font-semibold hover:bg-rose-400 transition disabled:opacity-60"
+            >
+              {deletingAccount ? L("Deleting…", "Eliminando…") : L("Delete account", "Eliminar cuenta")}
+            </button>
+          </div>
+          {deleteError && <p className="text-[11px] text-rose-300 mt-2">{deleteError}</p>}
+          {deleteDone && <p className="text-[11px] text-emerald-300 mt-2">{deleteDone}</p>}
         </section>
       </div>
     </main>

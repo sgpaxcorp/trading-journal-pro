@@ -22,7 +22,10 @@ const PRICE_IDS: Record<PlanId, Record<BillingCycle, string>> = {
   },
 };
 
-const OPTION_FLOW_PRICE = process.env.STRIPE_PRICE_OPTIONFLOW_MONTHLY ?? "";
+const OPTION_FLOW_PRICES = {
+  monthly: process.env.STRIPE_PRICE_OPTIONFLOW_MONTHLY ?? "",
+  annual: process.env.STRIPE_PRICE_OPTIONFLOW_ANNUAL ?? "",
+};
 
 export async function POST(req: NextRequest) {
   try {
@@ -49,7 +52,7 @@ export async function POST(req: NextRequest) {
     if (!billingCycle || !PRICE_IDS[planId][billingCycle]) {
       return NextResponse.json({ error: "Invalid billing cycle" }, { status: 400 });
     }
-    if (addonOptionFlow && !OPTION_FLOW_PRICE) {
+    if (addonOptionFlow && !OPTION_FLOW_PRICES[billingCycle]) {
       return NextResponse.json({ error: "Option Flow price not configured" }, { status: 500 });
     }
 
@@ -83,7 +86,7 @@ export async function POST(req: NextRequest) {
       { price: PRICE_IDS[planId][billingCycle], quantity: 1 },
     ];
     if (addonOptionFlow) {
-      lineItems.push({ price: OPTION_FLOW_PRICE, quantity: 1 });
+      lineItems.push({ price: OPTION_FLOW_PRICES[billingCycle], quantity: 1 });
     }
 
     const subscription = await stripe.subscriptions.create({

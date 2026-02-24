@@ -39,8 +39,13 @@ export default function PricingPage() {
   }, []);
 
   const PRICES = {
-    core: { monthly: 14.99, annual: 149.99 },
-    advanced: { monthly: 24.99, annual: 249.99 },
+    core: { monthly: 15.99, annual: 159.90 },
+    advanced: { monthly: 26.99, annual: 269.90 },
+  } as const;
+
+  const OPTION_FLOW = {
+    monthly: 6.99,
+    annual: 69.90,
   } as const;
 
   const priceFor = (planId: PlanId) =>
@@ -262,7 +267,10 @@ export default function PricingPage() {
                 disabled={loadingPlan !== null}
                 className="mt-5 w-full py-2 rounded-xl bg-emerald-400 text-slate-950 text-xs font-semibold hover:bg-emerald-300 transition disabled:opacity-60 disabled:cursor-not-allowed"
               >
-                {loadingPlan === "core" ? L("Redirecting...", "Redirigiendo...") : L("Start Core", "Empezar Core")}
+                <span>{L("Start Core", "Empezar Core")}</span>
+                {loadingPlan === "core" && (
+                  <span className="ml-2 inline-flex h-3 w-3 animate-spin rounded-full border-2 border-slate-950 border-t-transparent" />
+                )}
               </button>
 
               <Link
@@ -330,9 +338,10 @@ export default function PricingPage() {
                   disabled={loadingPlan !== null}
                   className="mt-5 w-full py-2 rounded-xl bg-emerald-400 text-slate-950 text-xs font-semibold hover:bg-emerald-300 transition disabled:opacity-60 disabled:cursor-not-allowed"
                 >
-                  {loadingPlan === "advanced"
-                    ? L("Redirecting...", "Redirigiendo...")
-                    : L("Start Advanced", "Empezar Advanced")}
+                  <span>{L("Start Advanced", "Empezar Advanced")}</span>
+                  {loadingPlan === "advanced" && (
+                    <span className="ml-2 inline-flex h-3 w-3 animate-spin rounded-full border-2 border-slate-950 border-t-transparent" />
+                  )}
                 </button>
 
                 <Link
@@ -348,6 +357,50 @@ export default function PricingPage() {
                     "Si tratas el trading como un negocio, este es tu plan."
                   )}
                 </p>
+              </div>
+            </div>
+          </div>
+
+          {/* ADD-ON */}
+          <div className="w-full max-w-5xl mt-6">
+            <div className="rounded-2xl border border-slate-800 bg-slate-950/80 p-5 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+              <div>
+                <p className="text-[10px] uppercase tracking-[0.2em] text-slate-400">
+                  {L("Add-on", "Add-on")}
+                </p>
+                <h3 className="text-sm font-semibold text-slate-50">
+                  {L("Option Flow Intelligence", "Option Flow Intelligence")}
+                </h3>
+                <p className="text-[10px] text-slate-300 mt-1">
+                  {L(
+                    "Add deep options flow analytics to any plan (Core or Advanced).",
+                    "Agrega analítica profunda de options flow a cualquier plan (Core o Advanced)."
+                  )}
+                </p>
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="rounded-xl border border-emerald-400/40 bg-emerald-500/10 px-4 py-2 text-center">
+                  <div className="text-emerald-300 text-[10px] uppercase tracking-[0.15em]">
+                    {billingCycle === "monthly" ? L("Monthly", "Mensual") : L("Annual", "Anual")}
+                  </div>
+                  <div className="text-emerald-200 text-2xl font-semibold leading-none">
+                    ${
+                      billingCycle === "monthly"
+                        ? OPTION_FLOW.monthly.toFixed(2)
+                        : OPTION_FLOW.annual.toFixed(2)
+                    }
+                  </div>
+                  <div className="text-[9px] text-slate-400">
+                    {billingCycle === "monthly"
+                      ? L("per month", "por mes")
+                      : L("per year", "por año")}
+                  </div>
+                </div>
+                <div className="text-[9px] text-slate-500">
+                  {billingCycle === "annual"
+                    ? L("Billed annually", "Facturado anual")
+                    : L("Billed monthly", "Facturado mensual")}
+                </div>
               </div>
             </div>
           </div>

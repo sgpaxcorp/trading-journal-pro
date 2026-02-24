@@ -150,28 +150,51 @@ function buildBalancedPlanSuggested(
   return { rows, requiredGoalPct: goalPct };
 }
 
-function buildPlanUsingChosenGoal(
+type CadenceTarget = {
+  targetEquity: number;
+  targetDate: string | null;
+};
+
+function buildCadenceTargets(
   starting: number,
-  totalDays: number,
+  target: number,
+  startIso: string,
+  targetIso: string,
+  cadence: "weekly" | "monthly" | "quarterly" | "biannual",
   lossDaysPerWeek: number,
-  lossPct: number,
-  chosenGoalPct: number
-): { rows: PlanRow[]; finalBalance: number } {
-  let bal = starting;
-  const rows: PlanRow[] = [];
-  const perWeek = clampInt(lossDaysPerWeek, 0, 5);
+  maxDailyLossPercent: number
+): CadenceTarget[] {
+  if (starting <= 0 || target <= 0) return [];
+  const tradingDays = listTradingDaysBetween(startIso, targetIso);
+  if (tradingDays.length === 0) return [];
+  const totalTradingDays = tradingDays.length;
+  const cadenceTradingDays =
+    cadence === "weekly" ? 5 : cadence === "monthly" ? 21 : cadence === "quarterly" ? 63 : 126;
+  const phasesCount = Math.max(1, Math.ceil(totalTradingDays / cadenceTradingDays));
 
-  for (let d = 1; d <= totalDays; d++) {
-    const dayInWeek = (d - 1) % 5;
-    const isLoss = perWeek > 0 && dayInWeek < perWeek;
-    const pct = isLoss ? -lossPct : chosenGoalPct;
-    const expectedUSD = bal * (pct / 100);
-    const endBalance = bal + expectedUSD;
-    rows.push({ day: d, type: isLoss ? "loss" : "goal", pct, expectedUSD, endBalance });
-    bal = endBalance;
+  const plan = buildBalancedPlanSuggested(
+    starting,
+    target,
+    totalTradingDays,
+    lossDaysPerWeek,
+    Math.max(0, maxDailyLossPercent)
+  );
+  const planRows = plan.rows;
+  if (planRows.length === 0) return [];
+
+  const milestones: CadenceTarget[] = [];
+  for (let i = 1; i <= phasesCount; i++) {
+    const dayIndex =
+      i === phasesCount
+        ? totalTradingDays - 1
+        : Math.min(totalTradingDays - 1, i * cadenceTradingDays - 1);
+    const targetEquity = Math.round(
+      planRows[dayIndex]?.endBalance ?? planRows[planRows.length - 1]?.endBalance ?? target
+    );
+    const targetDate = tradingDays[dayIndex] ?? tradingDays[tradingDays.length - 1] ?? targetIso;
+    milestones.push({ targetEquity, targetDate });
   }
-
-  return { rows, finalBalance: bal };
+  return milestones;
 }
 
 async function loadLogoDataURL(src = "/logo.png"): Promise<string | null> {
@@ -196,13 +219,10 @@ async function generateAndDownloadPDF(
     startingBalance: number;
     targetBalance?: number;
     tradingDays: number;
-    dailyGoalPercentChosen: number;
     maxDailyLossPercent: number;
     lossDaysPerWeek: number;
-    mode: "suggested" | "chosen";
-    requiredGoalPct?: number;
+    requiredGoalPct: number;
     explainRequired?: { goalDays: number; totalLossDays: number; prodLoss: number };
-    projectedFinalBalance?: number;
   },
   lang: "en" | "es"
 ) {
@@ -223,10 +243,7 @@ async function generateAndDownloadPDF(
 
   doc.setFont("helvetica", "bold");
   doc.setFontSize(28);
-  const title =
-    meta.mode === "suggested"
-      ? L("Growth Plan – Suggested (Exact Target)", "Plan de crecimiento – Sugerido (Meta exacta)")
-      : L("Growth Plan – Built with Your Daily Goal", "Plan de crecimiento – Con tu meta diaria");
+  const title = L("Growth Plan – Suggested (Exact Target)", "Plan de crecimiento – Sugerido (Meta exacta)");
   doc.text(title, M, y);
   y += 32;
 
@@ -241,64 +258,41 @@ async function generateAndDownloadPDF(
   y += 20;
 
   const chunks: string[] = [];
-  if (meta.mode === "suggested") {
+  chunks.push(
+    L(
+      `You start with ${currency(meta.startingBalance)} and want to reach ${currency(
+        meta.targetBalance || 0
+      )} in ${meta.tradingDays} trading day(s).`,
+      `Comienzas con ${currency(meta.startingBalance)} y quieres llegar a ${currency(
+        meta.targetBalance || 0
+      )} en ${meta.tradingDays} día(s) de trading.`
+    )
+  );
+  chunks.push(
+    L(
+      `This plan computes the average goal-day return needed to finish exactly at your target, while loss-days apply your max daily loss (${meta.maxDailyLossPercent}%).`,
+      `Este plan calcula el retorno promedio necesario en días de meta para terminar exactamente en el objetivo, mientras que los días de pérdida aplican tu pérdida diaria máxima (${meta.maxDailyLossPercent}%).`
+    )
+  );
+  if (meta.explainRequired) {
+    const { goalDays, totalLossDays, prodLoss } = meta.explainRequired;
+    const required = meta.requiredGoalPct ?? 0;
     chunks.push(
       L(
-        `You start with ${currency(meta.startingBalance)} and want to reach ${currency(
-          meta.targetBalance || 0
-        )} in ${meta.tradingDays} trading day(s).`,
-        `Comienzas con ${currency(meta.startingBalance)} y quieres llegar a ${currency(
-          meta.targetBalance || 0
-        )} en ${meta.tradingDays} día(s) de trading.`
+        `Weekly pattern assumes ${meta.lossDaysPerWeek} loss day(s) per 5 trading days → ${totalLossDays} loss day(s) and ${goalDays} goal-day(s).`,
+        `El patrón semanal asume ${meta.lossDaysPerWeek} día(s) de pérdida por cada 5 días de trading → ${totalLossDays} día(s) de pérdida y ${goalDays} día(s) de meta.`
       )
     );
     chunks.push(
       L(
-        `This suggested plan computes the average goal-day return needed to finish exactly at your target, while loss-days apply your max daily loss (${meta.maxDailyLossPercent}%).`,
-        `Este plan sugerido calcula el retorno promedio necesario en días de meta para terminar exactamente en el objetivo, mientras que los días de pérdida aplican tu pérdida diaria máxima (${meta.maxDailyLossPercent}%).`
+        `Required r satisfies: (1 + r)^G = Target / (Start × Π(1 − L)). With Π(1 − L) ≈ ${prodLoss.toFixed(
+          6
+        )}, r ≈ ${required.toFixed(3)}% (applied on goal-days only).`,
+        `El r requerido cumple: (1 + r)^G = Objetivo / (Inicio × Π(1 − L)). Con Π(1 − L) ≈ ${prodLoss.toFixed(
+          6
+        )}, r ≈ ${required.toFixed(3)}% (aplicado solo en días de meta).`
       )
     );
-    if (meta.explainRequired) {
-      const { goalDays, totalLossDays, prodLoss } = meta.explainRequired;
-      const required = meta.requiredGoalPct ?? 0;
-      chunks.push(
-        L(
-          `Weekly pattern assumes ${meta.lossDaysPerWeek} loss day(s) per 5 trading days → ${totalLossDays} loss day(s) and ${goalDays} goal-day(s).`,
-          `El patrón semanal asume ${meta.lossDaysPerWeek} día(s) de pérdida por cada 5 días de trading → ${totalLossDays} día(s) de pérdida y ${goalDays} día(s) de meta.`
-        )
-      );
-      chunks.push(
-        L(
-          `Required r satisfies: (1 + r)^G = Target / (Start × Π(1 − L)). With Π(1 − L) ≈ ${prodLoss.toFixed(
-            6
-          )}, r ≈ ${required.toFixed(3)}% (applied on goal-days only).`,
-          `El r requerido cumple: (1 + r)^G = Objetivo / (Inicio × Π(1 − L)). Con Π(1 − L) ≈ ${prodLoss.toFixed(
-            6
-          )}, r ≈ ${required.toFixed(3)}% (aplicado solo en días de meta).`
-        )
-      );
-    }
-  } else {
-    chunks.push(
-      L(
-        `You start with ${currency(meta.startingBalance)} and trade for ${meta.tradingDays} day(s) using your selected daily goal of ${meta.dailyGoalPercentChosen}%.`,
-        `Comienzas con ${currency(meta.startingBalance)} y operas por ${meta.tradingDays} día(s) usando tu meta diaria seleccionada de ${meta.dailyGoalPercentChosen}%.`
-      )
-    );
-    chunks.push(
-      L(
-        `On loss-days we apply your max daily loss of ${meta.maxDailyLossPercent}%. Weekly pattern places ${meta.lossDaysPerWeek} loss day(s) within each 5-day trading week.`,
-        `En días de pérdida aplicamos tu pérdida diaria máxima de ${meta.maxDailyLossPercent}%. El patrón semanal coloca ${meta.lossDaysPerWeek} día(s) de pérdida dentro de cada semana de 5 días.`
-      )
-    );
-    if (typeof meta.projectedFinalBalance === "number") {
-      chunks.push(
-        L(
-          `Projected ending balance: ${currency(meta.projectedFinalBalance)}.`,
-          `Balance final proyectado: ${currency(meta.projectedFinalBalance)}.`
-        )
-      );
-    }
   }
 
   const paragraph = chunks.join(" ");
@@ -308,20 +302,12 @@ async function generateAndDownloadPDF(
 
   const summaryBody: Array<[string, string]> = [
     [L("Starting balance", "Balance inicial"), currency(meta.startingBalance)],
+    [L("Target balance", "Balance objetivo"), currency(meta.targetBalance || 0)],
     [L("Trading days", "Días de trading"), String(meta.tradingDays)],
-    [L("Daily goal (selected)", "Meta diaria (seleccionada)"), `${meta.dailyGoalPercentChosen}%`],
+    [L("Required goal-day %", "% requerido en días de meta"), `${meta.requiredGoalPct.toFixed(3)}%`],
     [L("Max daily loss (%)", "Pérdida diaria máx (%)"), `${meta.maxDailyLossPercent}%`],
     [L("Loss days per week", "Días de pérdida por semana"), String(meta.lossDaysPerWeek)],
   ];
-
-  if (meta.mode === "suggested") {
-    summaryBody.splice(1, 0, [L("Target balance", "Balance objetivo"), currency(meta.targetBalance || 0)]);
-    if (typeof meta.requiredGoalPct === "number") {
-      summaryBody.push([L("Required goal-day %", "% requerido en días de meta"), `${meta.requiredGoalPct.toFixed(3)}%`]);
-    }
-  } else if (typeof meta.projectedFinalBalance === "number") {
-    summaryBody.push([L("Projected ending balance", "Balance final proyectado"), currency(meta.projectedFinalBalance)]);
-  }
 
   autoTable(doc, {
     startY: y + 6,
@@ -352,10 +338,10 @@ async function generateAndDownloadPDF(
     didDrawPage: () => {
       doc.setFontSize(16);
       doc.setFont("helvetica", "bold");
-      const h =
-        meta.mode === "suggested"
-          ? L("Daily Schedule – Suggested Plan (Exact Target)", "Calendario diario – Plan sugerido (Meta exacta)")
-          : L("Daily Schedule – Plan Using Your Daily Goal", "Calendario diario – Plan con tu meta diaria");
+      const h = L(
+        "Daily Schedule – Suggested Plan (Exact Target)",
+        "Calendario diario – Plan sugerido (Meta exacta)"
+      );
       doc.text(h, M, 40);
       doc.setFont("helvetica", "normal");
       doc.setFontSize(10);
@@ -363,9 +349,7 @@ async function generateAndDownloadPDF(
     },
   });
 
-  const filename =
-    meta.mode === "suggested" ? "growth-plan-suggested.pdf" : "growth-plan-chosen-goal.pdf";
-  doc.save(filename);
+  doc.save("growth-plan.pdf");
 }
 
 /* ================= Neuro Reaction =================
@@ -418,6 +402,21 @@ function addMonthsToIso(startIso: string, monthsToAdd: number): string {
   const day = Math.min(d.getDate(), 28); // avoid overflow
   const next = new Date(y, m + monthsToAdd, day);
   return next.toISOString().slice(0, 10);
+}
+
+function addDaysToIso(startIso: string, daysToAdd: number): string {
+  const d = new Date(startIso);
+  if (!Number.isFinite(d.getTime())) return startIso;
+  const next = new Date(d.getFullYear(), d.getMonth(), d.getDate() + daysToAdd);
+  return next.toISOString().slice(0, 10);
+}
+
+function daysBetweenIso(startIso: string, endIso: string): number {
+  const s = new Date(startIso);
+  const e = new Date(endIso);
+  if (!Number.isFinite(s.getTime()) || !Number.isFinite(e.getTime())) return 0;
+  const ms = e.getTime() - s.getTime();
+  return Math.max(0, Math.floor(ms / 86400000));
 }
 
 function toYMD(date: Date): string {
@@ -483,46 +482,28 @@ function getUsMarketHolidayDates(year: number): string[] {
   return holidays;
 }
 
-function computeTradingDayCounts(year: number) {
-  const jan1 = new Date(year, 0, 1);
-  const dec31 = new Date(year, 11, 31);
-  const today = new Date();
-  const todayStr = toYMD(today);
-  const holidaySet = new Set(getUsMarketHolidayDates(year));
+function listTradingDaysBetween(startIso: string, endIso: string): string[] {
+  const s = new Date(startIso);
+  const e = new Date(endIso);
+  if (!Number.isFinite(s.getTime()) || !Number.isFinite(e.getTime())) return [];
+  const start = s <= e ? s : e;
+  const end = s <= e ? e : s;
+  const years: number[] = [];
+  for (let y = start.getFullYear(); y <= end.getFullYear(); y++) years.push(y);
+  const holidaySet = new Set(years.flatMap(getUsMarketHolidayDates));
 
-  let stockTotal = 0;
-  let stockRemaining = 0;
-  let futuresTotal = 0;
-  let futuresRemaining = 0;
-
-  for (let d = new Date(jan1); d <= dec31; d = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1)) {
+  const days: string[] = [];
+  for (let d = new Date(start); d <= end; d = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1)) {
     const ds = toYMD(d);
     const dow = d.getDay();
     const isStock = dow !== 0 && dow !== 6 && !holidaySet.has(ds);
-    const isFutures = dow !== 6 && !holidaySet.has(ds); // Sunday–Friday
-    if (isStock) {
-      stockTotal++;
-      if (ds >= todayStr) stockRemaining++;
-    }
-    if (isFutures) {
-      futuresTotal++;
-      if (ds >= todayStr) futuresRemaining++;
-    }
+    if (isStock) days.push(ds);
   }
+  return days;
+}
 
-  const daysInYear = Math.round((dec31.getTime() - jan1.getTime()) / 86400000) + 1;
-  const dayOfYear = Math.floor((today.getTime() - jan1.getTime()) / 86400000) + 1;
-  const cryptoRemaining = Math.max(0, daysInYear - dayOfYear + 1);
-
-  return {
-    year,
-    stockTotal,
-    stockRemaining,
-    futuresTotal,
-    futuresRemaining,
-    cryptoTotal: daysInYear,
-    cryptoRemaining,
-  };
+function computeTradingDaysBetween(startIso: string, endIso: string) {
+  return listTradingDaysBetween(startIso, endIso).length;
 }
 
 /* ================= Wizard ================= */
@@ -575,6 +556,10 @@ export default function GrowthPlanPage() {
   const isEs = lang === "es";
   const L = (en: string, es: string) => (isEs ? es : en);
   const stepTitles = isEs ? STEP_TITLES_ES : STEP_TITLES_EN;
+  const inputBase =
+    "w-full rounded-lg bg-slate-950 border border-slate-700 text-slate-100 focus:border-emerald-400 outline-none px-2.5 py-1.5 text-sm";
+  const inputSmall =
+    "rounded-lg border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-200";
 
   const [step, setStep] = useState<WizardStep>(0);
   const [error, setError] = useState("");
@@ -588,27 +573,26 @@ export default function GrowthPlanPage() {
   const [assistantLang, setAssistantLang] = useState<AssistantLang>(lang);
 
   // Strings for inputs
-  const [startingBalanceStr, setStartingBalanceStr] = useState("5000");
-  const [targetBalanceStr, setTargetBalanceStr] = useState("60000");
+  const [startingBalanceStr, setStartingBalanceStr] = useState("");
+  const [targetBalanceStr, setTargetBalanceStr] = useState("");
   const [targetDateStr, setTargetDateStr] = useState("");
-  const [planStyle, setPlanStyle] = useState<"conservative" | "balanced" | "aggressive">("balanced");
-  const [planMode, setPlanMode] = useState<"auto" | "manual">("auto");
-  const [phaseCadence, setPhaseCadence] = useState<"monthly" | "quarterly" | "biannual" | "yearly">("monthly");
+  const planMode: "auto" = "auto";
+  const [phaseCadence, setPhaseCadence] = useState<"weekly" | "monthly" | "quarterly" | "biannual">("monthly");
+  const [tradingDaysTouched, setTradingDaysTouched] = useState(false);
   const [guidedMode, setGuidedMode] = useState(true);
-  const [dailyGoalPercentStr, setDailyGoalPercentStr] = useState("1");
-  const [maxDailyLossPercentStr, setMaxDailyLossPercentStr] = useState("1");
-  const [tradingDaysStr, setTradingDaysStr] = useState("60");
-  const [maxOnePercentLossDaysStr, setMaxOnePercentLossDaysStr] = useState("0");
-  const [lossDaysPerWeekStr, setLossDaysPerWeekStr] = useState("0");
+  const [maxDailyLossPercentStr, setMaxDailyLossPercentStr] = useState("");
+  const [tradingDaysStr, setTradingDaysStr] = useState("");
+  const [lossDaysPerWeekStr, setLossDaysPerWeekStr] = useState("");
   const [plannedWithdrawals, setPlannedWithdrawals] = useState<PlannedWithdrawal[]>([]);
   const [planPhases, setPlanPhases] = useState<PlanPhase[]>([]);
   const [planStartDate, setPlanStartDate] = useState<string | null>(null);
+  const [autoPhasesGenerated, setAutoPhasesGenerated] = useState(false);
+  const [step0Stage, setStep0Stage] = useState(0);
 
   // Risk
-  const [riskPerTradePctStr, setRiskPerTradePctStr] = useState("2");
+  const [riskPerTradePctStr, setRiskPerTradePctStr] = useState("");
 
-  // Plan selection + commit
-  const [selectedPlan, setSelectedPlan] = useState<"suggested" | "chosen" | null>(null);
+  // Commit
   const [committed, setCommitted] = useState(false);
 
   // Steps + rules
@@ -619,10 +603,8 @@ export default function GrowthPlanPage() {
   // normalized numbers
   const startingBalance = toNum(startingBalanceStr, 0);
   const targetBalance = toNum(targetBalanceStr, 0);
-  const dailyGoalPercentChosen = toNum(dailyGoalPercentStr, 0);
   const maxDailyLossPercent = toNum(maxDailyLossPercentStr, 0);
   const tradingDays = clampInt(toNum(tradingDaysStr, 0), 0);
-  const maxOnePercentLossDays = clampInt(toNum(maxOnePercentLossDaysStr, 0), 0);
   const lossDaysPerWeek = clampInt(toNum(lossDaysPerWeekStr, 0), 0, 5);
   const riskPerTradePct = Math.max(0, toNum(riskPerTradePctStr, 0));
   const targetMultiple =
@@ -641,7 +623,14 @@ export default function GrowthPlanPage() {
 
   const onlyNum = (s: string) => s.replace(/[^\d.]/g, "");
 
-  const tradingDayCounts = useMemo(() => computeTradingDayCounts(new Date().getFullYear()), []);
+  useEffect(() => {
+    if (!targetDateStr) return;
+    if (tradingDaysTouched) return;
+    const startIso = planStartDate || isoToday();
+    const count = computeTradingDaysBetween(startIso, targetDateStr);
+    if (!Number.isFinite(count) || count <= 0) return;
+    setTradingDaysStr(String(count));
+  }, [targetDateStr, planStartDate, tradingDaysTouched]);
 
   type GuidedTask = {
     id: string;
@@ -685,11 +674,23 @@ export default function GrowthPlanPage() {
   );
 
   const guidedTasksByStep = useMemo<Record<WizardStep, GuidedTask[]>>(() => {
-    const needManualPhase = planMode === "manual";
-    const hasManualPhase = planPhases.some((p) => (p.targetEquity ?? 0) > 0);
-    const needsDailyGoal = selectedPlan === "chosen";
+    const lossDaysSet = lossDaysPerWeekStr.trim().length > 0;
+    const requiredGoalReady =
+      computeRequiredGoalPct(
+        Math.max(0, startingBalance),
+        Math.max(0, targetBalance),
+        tradingDays,
+        lossDaysPerWeek,
+        Math.max(0, maxDailyLossPercent)
+      ).goalPctDecimal > 0;
     return {
       0: [
+        {
+          id: "plan_mode",
+          label: L("Plan mode (automatic)", "Modo del plan (automático)"),
+          done: true,
+          anchor: "gp-plan-mode",
+        },
         {
           id: "starting_balance",
           label: L("Enter starting balance", "Ingresa balance inicial"),
@@ -704,16 +705,9 @@ export default function GrowthPlanPage() {
         },
         {
           id: "target_date",
-          label: L("Pick a target date (recommended)", "Elige fecha meta (recomendado)"),
+          label: L("Pick a target date", "Elige fecha meta"),
           done: !!targetDateStr,
           anchor: "gp-target-date",
-          optional: true,
-        },
-        {
-          id: "plan_mode",
-          label: L("Choose plan mode", "Elige modo del plan"),
-          done: !!planMode,
-          anchor: "gp-plan-mode",
         },
         {
           id: "trading_days",
@@ -728,28 +722,28 @@ export default function GrowthPlanPage() {
           anchor: "gp-max-daily-loss",
         },
         {
+          id: "loss_days_per_week",
+          label: L("Set loss days per week", "Define días de pérdida por semana"),
+          done: lossDaysSet,
+          anchor: "gp-loss-days",
+        },
+        {
           id: "risk_per_trade",
           label: L("Set risk per trade", "Define riesgo por trade"),
           done: riskPerTradePct > 0,
           anchor: "gp-risk-per-trade",
         },
         {
-          id: "plan_choice",
-          label: L("Choose suggested vs your plan", "Elige plan sugerido o tu plan"),
-          done: !!selectedPlan,
-          anchor: "gp-plan-choice",
+          id: "required_goal",
+          label: L("Review required goal %", "Revisa % requerido"),
+          done: requiredGoalReady,
+          anchor: "gp-required-goal",
         },
         {
-          id: "daily_goal",
-          label: L("Set daily goal % (if chosen plan)", "Define meta diaria % (si elegiste tu plan)"),
-          done: !needsDailyGoal || dailyGoalPercentChosen > 0,
-          anchor: "gp-daily-goal",
-        },
-        {
-          id: "manual_phases",
-          label: L("Add manual phases", "Agrega fases manuales"),
-          done: !needManualPhase || hasManualPhase,
-          anchor: "gp-plan-phases",
+          id: "phase_builder",
+          label: L("Generate milestones", "Genera las metas"),
+          done: autoPhasesGenerated,
+          anchor: "gp-phase-builder",
         },
       ],
       1: [
@@ -829,13 +823,11 @@ export default function GrowthPlanPage() {
     startingBalance,
     targetBalance,
     targetDateStr,
-    planMode,
     tradingDays,
     maxDailyLossPercent,
     riskPerTradePct,
-    selectedPlan,
-    dailyGoalPercentChosen,
-    planPhases,
+    lossDaysPerWeekStr,
+    autoPhasesGenerated,
     prepareCount,
     analysisStylesCount,
     stepsData.analysis,
@@ -865,106 +857,27 @@ export default function GrowthPlanPage() {
   const currentTasks = guidedTasksByStep[step] ?? [];
   const nextTask = currentTasks.find((t) => !t.done && !t.optional) ?? currentTasks.find((t) => !t.done);
 
-  const scrollToAnchor = (anchor?: string) => {
-    if (!anchor) return;
-    window.setTimeout(() => {
-      const el = document.getElementById(anchor);
-      if (!el) return;
-      el.scrollIntoView({ behavior: "smooth", block: "center" });
-      (el as any)?.focus?.();
-    }, 80);
-  };
-
-  const addPlannedWithdrawal = () => {
-    setPlannedWithdrawals((prev) => [
-      ...prev,
-      {
-        id: crypto.randomUUID(),
-        targetEquity: Math.max(0, targetBalance || 0),
-        amount: 0,
-        status: "pending",
-      },
-    ]);
-  };
-
-  const updatePlannedWithdrawal = (id: string, patch: Partial<PlannedWithdrawal>) => {
-    setPlannedWithdrawals((prev) =>
-      prev.map((item) => (item.id === id ? { ...item, ...patch } : item))
-    );
-  };
-
-  const removePlannedWithdrawal = (id: string) => {
-    setPlannedWithdrawals((prev) => prev.filter((item) => item.id !== id));
-  };
-
-  const addPlanPhase = () => {
-    setPlanPhases((prev) => [
-      ...prev,
-      {
-        id: crypto.randomUUID(),
-        title: "",
-        targetEquity: Math.max(0, targetBalance || 0),
-        targetDate: null,
-        status: "pending",
-      },
-    ]);
-  };
-
-  const updatePlanPhase = (id: string, patch: Partial<PlanPhase>) => {
-    setPlanPhases((prev) => prev.map((p) => (p.id === id ? { ...p, ...patch } : p)));
-  };
-
-  const removePlanPhase = (id: string) => {
-    setPlanPhases((prev) => prev.filter((p) => p.id !== id));
-  };
-
-  const autoBuildPlanPhases = () => {
+  const buildAutoPhasesPreview = () => {
     if (startingBalance <= 0 || targetBalance <= 0) {
       setError(L("Enter starting and target balances first.", "Primero ingresa balance inicial y objetivo."));
       return;
     }
-
-    const startIso = planStartDate || isoToday();
-    const hasTargetDate = !!targetDateStr;
-    const targetIso = hasTargetDate ? targetDateStr : "";
-
-    const totalMonthsRaw = hasTargetDate ? monthsBetween(startIso, targetIso) + 1 : Math.max(1, Math.round(tradingDays / 21) || 6);
-    const totalMonths = Math.max(1, totalMonthsRaw);
-
-    const cadenceMonths =
-      phaseCadence === "quarterly" ? 3 : phaseCadence === "biannual" ? 6 : phaseCadence === "yearly" ? 12 : 1;
-    const phasesCount = Math.min(24, Math.max(1, Math.ceil(totalMonths / cadenceMonths)));
-
-    const multiple = targetBalance / startingBalance;
-    if (!Number.isFinite(multiple) || multiple <= 0) {
-      setError(L("Target must be greater than starting balance.", "La meta debe ser mayor que el balance inicial."));
+    if (!targetDateStr) {
+      setError(L("Pick a target date to build auto phases.", "Elige una fecha meta para crear fases automáticas."));
       return;
     }
-
-    const nextPhases: PlanPhase[] = [];
-    for (let i = 1; i <= phasesCount; i++) {
-      const fraction = i / phasesCount;
-      const targetEquity = Math.round(startingBalance * Math.pow(multiple, fraction));
-      const monthOffset = Math.min(totalMonths - 1, i * cadenceMonths - 1);
-      const targetDate = hasTargetDate ? (i === phasesCount ? targetIso : addMonthsToIso(startIso, monthOffset)) : null;
-
-      nextPhases.push({
-        id: uuid(),
-        title: `${L("Phase", "Fase")} ${i}`,
-        targetEquity,
-        targetDate,
-        status: "pending",
-      });
+    if (maxDailyLossPercent <= 0) {
+      setError(L("Set max daily loss first.", "Define la pérdida diaria máx primero."));
+      return;
     }
-
-    setPlanPhases(nextPhases);
+    if (!lossDaysSet) {
+      setError(L("Set loss days per week first.", "Define los días de pérdida por semana primero."));
+      return;
+    }
+    setAutoPhasesGenerated(true);
     setError("");
-    pushNeuroMessage(
-      L(
-        "Phases generated. Review and adjust if needed.",
-        "Fases generadas. Revísalas y ajusta si hace falta."
-      )
-    );
+    const msg = L("Auto phases generated.", "Fases automáticas generadas.");
+    pushNeuroMessage(msg);
   };
 
   useEffect(() => {
@@ -989,22 +902,12 @@ export default function GrowthPlanPage() {
           setTargetDateStr(
             String((existing as any).targetDate ?? (existing as any).target_date ?? "").slice(0, 10)
           );
-          const style = (existing as any).planStyle ?? (existing as any).plan_style ?? "balanced";
-          setPlanStyle(style === "conservative" || style === "aggressive" ? style : "balanced");
-          const mode = (existing as any).planMode ?? (existing as any).plan_mode ?? "auto";
-          setPlanMode(mode === "manual" ? "manual" : "auto");
-
-          const dailyPct = (existing.dailyTargetPct ?? existing.dailyGoalPercent ?? 1) as number;
-          setDailyGoalPercentStr(String(dailyPct));
-
           setMaxDailyLossPercentStr(String(existing.maxDailyLossPercent ?? 1));
           setTradingDaysStr(String(existing.tradingDays ?? 60));
-          setMaxOnePercentLossDaysStr(String(existing.maxOnePercentLossDays ?? 0));
           setLossDaysPerWeekStr(String(existing.lossDaysPerWeek ?? 0));
 
           setRiskPerTradePctStr(String(existing.maxRiskPerTradePercent ?? 2));
 
-          setSelectedPlan(existing.selectedPlan ?? null);
           setCommitted(false);
 
           setStepsData(existing.steps ?? getDefaultSteps());
@@ -1064,6 +967,11 @@ export default function GrowthPlanPage() {
           const anySteps = (existing.steps as any) || {};
           const savedLang = (anySteps?._ui?.lang as AssistantLang | undefined) ?? "en";
           setAssistantLang(savedLang);
+          const savedCadence = String(anySteps?._ui?.autoPhaseCadence ?? "");
+          if (["weekly", "monthly", "quarterly", "biannual"].includes(savedCadence)) {
+            setPhaseCadence(savedCadence as any);
+          }
+          setAutoPhasesGenerated(true);
 
           const t =
             (await neuroReact("growth_plan_loaded", savedLang, {
@@ -1075,14 +983,23 @@ export default function GrowthPlanPage() {
               "Cargamos tu plan. Vamos paso a paso: Meta y números → Preparación → Análisis → Journal → Sistema de ejecución y estrategia."
             );
           pushNeuroMessage(t);
-                  } else {
+        } else {
           // new plan
           setHasExistingPlan(false);
+          setStartingBalanceStr("");
+          setTargetBalanceStr("");
+          setTargetDateStr("");
+          setMaxDailyLossPercentStr("");
+          setTradingDaysStr("");
+          setTradingDaysTouched(false);
+          setLossDaysPerWeekStr("");
+          setRiskPerTradePctStr("");
           setLoadedStartingBalance(null);
           setCashflowNet(0);
           setPlanStartDate(isoToday());
           setPlannedWithdrawals([]);
           setPlanPhases([]);
+          setAutoPhasesGenerated(false);
 
           const t =
             (await neuroReact("growth_plan_loaded", assistantLang, {
@@ -1174,14 +1091,6 @@ export default function GrowthPlanPage() {
           }
   }
 
-  if (loading || !user) {
-    return (
-      <main className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center">
-        <p className="text-base text-slate-400">{L("Loading…", "Cargando…")}</p>
-      </main>
-    );
-  }
-
   const explainRequired = useMemo(() => {
     const calc = computeRequiredGoalPct(
       Math.max(0, startingBalance),
@@ -1210,34 +1119,79 @@ export default function GrowthPlanPage() {
     [startingBalance, targetBalance, tradingDays, lossDaysPerWeek, maxDailyLossPercent]
   );
 
-  const { rows: chosenRows, finalBalance: chosenFinalBalance } = useMemo(
-    () =>
-      buildPlanUsingChosenGoal(
-        Math.max(0, startingBalance),
-        tradingDays,
-        lossDaysPerWeek,
-        Math.max(0, maxDailyLossPercent),
-        Math.max(0, dailyGoalPercentChosen)
-      ),
-    [startingBalance, tradingDays, lossDaysPerWeek, maxDailyLossPercent, dailyGoalPercentChosen]
-  );
-
-  const dailyGoalDollar =
-    baseBalanceForDollars > 0 ? (baseBalanceForDollars * (dailyGoalPercentChosen || 0)) / 100 : 0;
   const maxLossDollar =
     baseBalanceForDollars > 0 ? (baseBalanceForDollars * (maxDailyLossPercent || 0)) / 100 : 0;
+  const requiredGoalDollar =
+    baseBalanceForDollars > 0 ? (baseBalanceForDollars * (requiredGoalPct || 0)) / 100 : 0;
+
+  const autoPhases = useMemo(() => {
+    if (!autoPhasesGenerated) return [];
+    if (!targetDateStr) return [];
+    if (startingBalance <= 0 || targetBalance <= 0) return [];
+    const startIso = planStartDate || isoToday();
+    return buildCadenceTargets(
+      startingBalance,
+      targetBalance,
+      startIso,
+      targetDateStr,
+      phaseCadence,
+      lossDaysPerWeek,
+      Math.max(0, maxDailyLossPercent)
+    );
+  }, [
+    autoPhasesGenerated,
+    targetDateStr,
+    startingBalance,
+    targetBalance,
+    planStartDate,
+    phaseCadence,
+    lossDaysPerWeek,
+    maxDailyLossPercent,
+  ]);
+
+  const autoPhasePreview = useMemo(() => {
+    if (!targetDateStr) return null;
+    if (startingBalance <= 0 || targetBalance <= 0) return null;
+    const startIso = planStartDate || isoToday();
+    const tradingDays = listTradingDaysBetween(startIso, targetDateStr);
+    if (tradingDays.length === 0) return null;
+    const total = tradingDays.length;
+    const cadenceTradingDays =
+      phaseCadence === "weekly" ? 5 : phaseCadence === "monthly" ? 21 : phaseCadence === "quarterly" ? 63 : 126;
+    const dayNumber = Math.min(total, cadenceTradingDays);
+    const weekIndex = Math.ceil(dayNumber / 5);
+    const weekTotal = Math.ceil(total / 5);
+    const monthIndex = Math.ceil(dayNumber / 21);
+    const monthTotal = Math.ceil(total / 21);
+    return { total, dayNumber, weekIndex, weekTotal, monthIndex, monthTotal };
+  }, [targetDateStr, planStartDate, startingBalance, targetBalance, phaseCadence]);
+
+  const tradingDaysFromToday = useMemo(() => {
+    if (!targetDateStr) return null;
+    const today = isoToday();
+    const count = computeTradingDaysBetween(today, targetDateStr);
+    if (!Number.isFinite(count) || count <= 0) return null;
+    return { today, count };
+  }, [targetDateStr]);
+
+  const autoCadenceUnit =
+    phaseCadence === "weekly"
+      ? L("Week", "Semana")
+      : phaseCadence === "monthly"
+        ? L("Month", "Mes")
+        : phaseCadence === "quarterly"
+          ? L("Quarter", "Trimestre")
+          : L("Semester", "Semestre");
 
   // PDF events
   const onDownloadPdfSuggested = async () => {
     await generateAndDownloadPDF(
       suggestedRows,
       {
-        mode: "suggested",
         name: (user as any)?.name || L("User", "Usuario"),
         startingBalance,
         targetBalance,
         tradingDays,
-        dailyGoalPercentChosen,
         maxDailyLossPercent,
         lossDaysPerWeek,
         requiredGoalPct,
@@ -1253,36 +1207,446 @@ export default function GrowthPlanPage() {
     const text =
       (await neuroReact("pdf_downloaded", assistantLang, { mode: "suggested" })) ||
       L(
-        "Downloaded. This schedule is structure—not a promise. Now choose which plan you will approve.",
-        "Descargado. Este calendario es estructura, no promesa. Ahora elige qué plan vas a aprobar."
+        "Downloaded. This schedule is structure—not a promise. Now commit to execute it.",
+        "Descargado. Este calendario es estructura, no promesa. Ahora comprométete a ejecutarlo."
       );
     pushNeuroMessage(text);
       };
 
-  const onDownloadPdfChosen = async () => {
-    await generateAndDownloadPDF(
-      chosenRows,
-      {
-        mode: "chosen",
-        name: (user as any)?.name || L("User", "Usuario"),
-        startingBalance,
-        tradingDays,
-        dailyGoalPercentChosen,
-        maxDailyLossPercent,
-        lossDaysPerWeek,
-        projectedFinalBalance: chosenFinalBalance,
-      },
-      lang
-    );
+  const lossDaysSet = lossDaysPerWeekStr.trim().length > 0;
+  const canGeneratePhases =
+    startingBalance > 0 &&
+    targetBalance > 0 &&
+    !!targetDateStr &&
+    maxDailyLossPercent > 0 &&
+    lossDaysSet;
+  const step0Stages = [
+    {
+      id: "plan_mode",
+      anchor: "gp-plan-mode",
+      title: L("Plan mode", "Modo del plan"),
+      description: L(
+        "This plan is always automatic (date-based) to keep your pace realistic.",
+        "Este plan es automático (por fecha) para mantener un ritmo realista."
+      ),
+      isComplete: true,
+      content: (
+        <div id="gp-plan-mode" className="rounded-xl border border-slate-800 bg-slate-900/50 p-3">
+          <p className="text-sm text-slate-100 font-semibold">
+            {L("Automatic (date-based)", "Automático (por fecha)")}
+          </p>
+          <p className="text-xs text-slate-400 mt-1">
+            {L(
+              "We use your target date to calculate trading days and pacing.",
+              "Usamos tu fecha meta para calcular días de trading y el ritmo."
+            )}
+          </p>
+        </div>
+      ),
+    },
+    {
+      id: "starting_balance",
+      anchor: "gp-starting-balance",
+      title: L("Starting balance", "Balance inicial"),
+      description: L(
+        "This is the money you currently have in your broker account.",
+        "Este es el dinero que tienes ahora en tu cuenta de broker."
+      ),
+      isComplete: startingBalance > 0,
+      content: (
+        <div>
+          <label className="block mb-1 text-slate-300">{L("Starting balance (USD)", "Balance inicial (USD)")}</label>
+          <input
+            id="gp-starting-balance"
+            inputMode="decimal"
+            value={startingBalanceStr}
+            onFocus={() => fieldHelp("starting_balance")}
+            onChange={(e) => {
+              setStartingBalanceStr(onlyNum(e.target.value));
+              setAutoPhasesGenerated(false);
+            }}
+            onBlur={() => {
+              if (!startingBalanceStr.trim()) return;
+              setStartingBalanceStr(String(Math.max(0, startingBalance)));
+            }}
+            className={inputBase}
+            placeholder="0"
+          />
+        </div>
+      ),
+    },
+    {
+      id: "target_balance",
+      anchor: "gp-target-balance",
+      title: L("Target balance", "Balance objetivo"),
+      description: L(
+        "This is the balance you want to reach.",
+        "Este es el balance al que quieres llegar."
+      ),
+      isComplete: targetBalance > 0,
+      content: (
+        <div>
+          <label className="block mb-1 text-slate-300">{L("Target balance (USD)", "Balance objetivo (USD)")}</label>
+          <input
+            id="gp-target-balance"
+            inputMode="decimal"
+            value={targetBalanceStr}
+            onFocus={() => fieldHelp("target_balance")}
+            onChange={(e) => {
+              setTargetBalanceStr(onlyNum(e.target.value));
+              setAutoPhasesGenerated(false);
+            }}
+            onBlur={() => {
+              if (!targetBalanceStr.trim()) return;
+              setTargetBalanceStr(String(Math.max(0, targetBalance)));
+            }}
+            className={inputBase}
+            placeholder="0"
+          />
+        </div>
+      ),
+    },
+    {
+      id: "target_date",
+      anchor: "gp-target-date",
+      title: L("Target date", "Fecha objetivo"),
+      description: L(
+        "Pick a realistic date you want to reach your target.",
+        "Elige una fecha realista en la que quieres llegar a tu meta."
+      ),
+      isComplete: !!targetDateStr,
+      content: (
+        <div>
+          <label className="block mb-1 text-slate-300">{L("Target date", "Fecha objetivo")}</label>
+          <input
+            id="gp-target-date"
+            type="date"
+            value={targetDateStr}
+            onChange={(e) => {
+              setTargetDateStr(e.target.value);
+              setTradingDaysTouched(false);
+              setAutoPhasesGenerated(false);
+            }}
+            className={inputBase}
+          />
+        </div>
+      ),
+    },
+    {
+      id: "trading_days",
+      anchor: "gp-trading-days",
+      title: L("Trading days", "Días de trading"),
+      description: L(
+        "We calculate this from your target date. You can edit it if needed.",
+        "Lo calculamos desde tu fecha meta. Puedes editarlo si hace falta."
+      ),
+      isComplete: tradingDays > 0,
+      content: (
+        <div>
+          <label className="block mb-1 text-slate-300">
+            {L("Trading days you commit to follow this plan", "Días de trading que te comprometes a seguir")}
+          </label>
+          <input
+            id="gp-trading-days"
+            inputMode="numeric"
+            value={tradingDaysStr}
+            onFocus={() => fieldHelp("trading_days")}
+            onChange={(e) => {
+              setTradingDaysTouched(true);
+              setTradingDaysStr(onlyNum(e.target.value));
+            }}
+            onBlur={() => {
+              if (!tradingDaysStr.trim()) return;
+              setTradingDaysStr(String(clampInt(tradingDays, 0)));
+            }}
+            className={inputBase}
+            placeholder="0"
+          />
+          {tradingDaysFromToday ? (
+            <p className="text-slate-500 mt-1 text-xs">
+              {L(
+                `From today (${tradingDaysFromToday.today}) to target: ${tradingDaysFromToday.count} trading days (NYSE holidays excluded).`,
+                `Desde hoy (${tradingDaysFromToday.today}) hasta la meta: ${tradingDaysFromToday.count} días de trading (feriados NYSE excluidos).`
+              )}
+            </p>
+          ) : null}
+        </div>
+      ),
+    },
+    {
+      id: "max_daily_loss",
+      anchor: "gp-max-daily-loss",
+      title: L("Max daily loss", "Pérdida diaria máxima"),
+      description: L(
+        "Your daily safety brake. When hit, you stop trading for the day.",
+        "Tu freno de seguridad diario. Al alcanzarlo, paras de operar ese día."
+      ),
+      isComplete: maxDailyLossPercent > 0,
+      content: (
+        <div>
+          <label className="block mb-1 text-slate-300">{L("Max daily loss (%)", "Pérdida diaria máx (%)")}</label>
+          <input
+            id="gp-max-daily-loss"
+            inputMode="decimal"
+            value={maxDailyLossPercentStr}
+            onFocus={() => fieldHelp("max_daily_loss")}
+            onChange={(e) => {
+              setMaxDailyLossPercentStr(onlyNum(e.target.value));
+              setAutoPhasesGenerated(false);
+            }}
+            onBlur={() => {
+              if (!maxDailyLossPercentStr.trim()) return;
+              setMaxDailyLossPercentStr(String(Math.max(0, maxDailyLossPercent)));
+            }}
+            className={inputBase}
+            placeholder="0.00"
+          />
+          <p className="text-xs text-slate-500 mt-1">
+            {L("Approx:", "Aprox.")} <span className="text-slate-200">{currency(maxLossDollar)}</span>
+          </p>
+        </div>
+      ),
+    },
+    {
+      id: "loss_days_per_week",
+      anchor: "gp-loss-days",
+      title: L("Loss days per week", "Días de pérdida por semana"),
+      description: L(
+        "How many losing days you expect per 5 trading days.",
+        "Cuántos días de pérdida esperas por cada 5 días de trading."
+      ),
+      isComplete: lossDaysSet,
+      content: (
+        <div>
+          <label className="block mb-1 text-slate-300">{L("Loss days per week", "Días de pérdida por semana")}</label>
+          <input
+            id="gp-loss-days"
+            inputMode="numeric"
+            value={lossDaysPerWeekStr}
+            onFocus={() => fieldHelp("loss_days_per_week")}
+            onChange={(e) => {
+              setLossDaysPerWeekStr(onlyNum(e.target.value));
+              setAutoPhasesGenerated(false);
+            }}
+            onBlur={() => {
+              if (!lossDaysPerWeekStr.trim()) return;
+              setLossDaysPerWeekStr(String(clampInt(lossDaysPerWeek, 0, 5)));
+            }}
+            className={inputBase}
+            placeholder="0..5"
+          />
+        </div>
+      ),
+    },
+    {
+      id: "risk_per_trade",
+      anchor: "gp-risk-per-trade",
+      title: L("Risk per trade", "Riesgo por trade"),
+      description: L(
+        "This keeps each trade aligned with your risk plan.",
+        "Esto mantiene cada trade alineado con tu plan de riesgo."
+      ),
+      isComplete: riskPerTradePct > 0,
+      content: (
+        <div>
+          <label className="block mb-1 text-slate-300">
+            {L("Max risk per trade (%)", "Riesgo máximo por trade (%)")}
+          </label>
+          <input
+            id="gp-risk-per-trade"
+            inputMode="decimal"
+            value={riskPerTradePctStr}
+            onFocus={() => fieldHelp("risk_per_trade")}
+            onChange={(e) => setRiskPerTradePctStr(onlyNum(e.target.value))}
+            onBlur={() => {
+              if (!riskPerTradePctStr.trim()) return;
+              setRiskPerTradePctStr(String(Math.max(0, riskPerTradePct)));
+            }}
+            className={inputBase}
+            placeholder="2"
+          />
+          <p className="text-xs text-slate-500 mt-1">
+            {L("Approx:", "Aprox.")} <span className="text-slate-200">{currency(riskUsd)}</span>
+          </p>
+        </div>
+      ),
+    },
+    {
+      id: "required_goal",
+      anchor: "gp-required-goal",
+      title: L("Required goal-day %", "% requerido en días de meta"),
+      description: L(
+        "This is the daily % you need on goal-days to hit your target.",
+        "Este es el % diario que necesitas en días de meta para llegar al objetivo."
+      ),
+      isComplete: requiredGoalPct > 0,
+      content: (
+        <div id="gp-required-goal" className="rounded-xl border border-slate-800 bg-slate-900/50 p-3">
+          <p className="text-[22px] font-semibold text-emerald-300">
+            {requiredGoalPct.toFixed(3)}%
+          </p>
+          <p className="text-xs text-slate-500 mt-1">
+            {L("Approx goal-day $:", "Aprox $ por día meta:")}{" "}
+            <span className="text-slate-200">{currency(requiredGoalDollar)}</span>
+          </p>
+          <div className="mt-3">
+            <button
+              onClick={onDownloadPdfSuggested}
+              className="px-4 py-2 rounded-xl border border-emerald-400 text-emerald-300 hover:bg-emerald-400/10 transition"
+            >
+              {L("Download PDF", "Descargar PDF")}
+            </button>
+          </div>
+        </div>
+      ),
+    },
+    {
+      id: "phase_builder",
+      anchor: "gp-phase-builder",
+      title: L("Cadence & milestones", "Cadencia y metas"),
+      description: L(
+        "Choose how often you want milestones. We use trading days to build them.",
+        "Elige cada cuánto quieres metas. Usamos días de trading para construirlas."
+      ),
+      isComplete: autoPhasesGenerated,
+      content: (
+        <div id="gp-phase-builder" className="rounded-xl border border-slate-800 bg-slate-900/50 p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <p className="text-[11px] text-slate-500 tracking-widest uppercase">
+                {L("Cadence", "Cadencia")}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={buildAutoPhasesPreview}
+              disabled={!canGeneratePhases}
+              className={`rounded-lg border px-3 py-1 text-xs font-semibold transition ${
+                canGeneratePhases
+                  ? "border-emerald-400/60 text-emerald-200 hover:border-emerald-400"
+                  : "border-slate-700 text-slate-500 cursor-not-allowed"
+              }`}
+            >
+              {L("Generate phases", "Generar fases")}
+            </button>
+          </div>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <select
+              value={phaseCadence}
+              onChange={(e) => {
+                setPhaseCadence(e.target.value as any);
+                setAutoPhasesGenerated(false);
+              }}
+              className={inputSmall}
+            >
+              <option value="weekly">{L("Weekly", "Semanal")}</option>
+              <option value="monthly">{L("Monthly", "Mensual")}</option>
+              <option value="quarterly">{L("Quarterly", "Trimestral")}</option>
+              <option value="biannual">{L("Bi‑annual", "Semestral")}</option>
+            </select>
+            <span className="text-xs text-slate-500">
+              {L("Based on trading days (NYSE holidays excluded).", "Basado en días de trading (feriados NYSE excluidos).")}
+            </span>
+            <span className="text-[11px] text-slate-500">
+              {L("Weekly=5 · Monthly=21 · Quarterly=63 · Bi‑annual=126", "Semanal=5 · Mensual=21 · Trimestral=63 · Semestral=126")}
+            </span>
+          </div>
+          {!autoPhasesGenerated ? (
+            <p className="mt-3 text-xs text-slate-500">
+              {canGeneratePhases
+                ? L(
+                    "Click “Generate phases” to preview your milestones.",
+                    "Presiona “Generar fases” para ver tus metas."
+                  )
+                : L(
+                    "Complete target date + max daily loss + loss days per week first.",
+                    "Completa fecha meta + pérdida diaria máx + días de pérdida por semana primero."
+                  )}
+            </p>
+          ) : autoPhases.length === 0 ? (
+            <p className="mt-3 text-xs text-slate-500">
+              {L(
+                "Enter starting balance, target balance, and target date first.",
+                "Primero ingresa balance inicial, meta y fecha objetivo."
+              )}
+            </p>
+          ) : (
+            <div className="mt-3 rounded-xl border border-slate-800 bg-slate-950/40 p-3">
+              <p className="text-[12px] text-slate-500">
+                {L("First milestone", "Primera meta")} · {autoCadenceUnit} 1/{autoPhases.length}
+              </p>
+              <p className="text-[18px] text-emerald-300 font-semibold">
+                {currency(autoPhases[0].targetEquity)}
+              </p>
+              {autoPhases[0].targetDate ? (
+                <p className="text-[12px] text-slate-500 mt-1">
+                  {L("Target date:", "Fecha objetivo:")}{" "}
+                  <span className="text-slate-200">{autoPhases[0].targetDate}</span>
+                </p>
+              ) : null}
+              {autoPhasePreview ? (
+                <p className="text-[11px] text-slate-500 mt-1">
+                  {L("Trading days:", "Días de trading:")}{" "}
+                  <span className="text-slate-200">
+                    {autoPhasePreview.dayNumber}/{autoPhasePreview.total}
+                  </span>{" "}
+                  {phaseCadence === "weekly"
+                    ? L(
+                        `≈ Month ${autoPhasePreview.monthIndex}/${autoPhasePreview.monthTotal}`,
+                        `≈ Mes ${autoPhasePreview.monthIndex}/${autoPhasePreview.monthTotal}`
+                      )
+                    : L(
+                        `≈ Week ${autoPhasePreview.weekIndex}/${autoPhasePreview.weekTotal}`,
+                        `≈ Semana ${autoPhasePreview.weekIndex}/${autoPhasePreview.weekTotal}`
+                      )}
+                </p>
+              ) : null}
+              <p className="text-[11px] text-slate-500 mt-2">
+                {L(
+                  "Milestones follow the minimum % required by your loss rules.",
+                  "Las metas siguen el % mínimo requerido según tus reglas de pérdida."
+                )}
+              </p>
+            </div>
+          )}
+        </div>
+      ),
+    },
+  ];
 
-    const text =
-      (await neuroReact("pdf_downloaded", assistantLang, { mode: "chosen" })) ||
-      L(
-        "Downloaded. Great—now your plan is measurable. Focus on executing the process.",
-        "Descargado. Excelente: tu plan ya es medible. Enfócate en ejecutar el proceso."
-      );
-    pushNeuroMessage(text);
-      };
+  const step0Total = step0Stages.length;
+  const safeStage = Math.min(step0Stage, step0Total - 1);
+  const step0Current = step0Stages[safeStage];
+  const step0CanNext = !!step0Current?.isComplete;
+  const step0CanBack = safeStage > 0;
+  const goStep0Next = () => {
+    if (!step0CanNext) return;
+    setStep0Stage((prev) => Math.min(prev + 1, step0Total - 1));
+  };
+  const goStep0Back = () => {
+    if (!step0CanBack) return;
+    setStep0Stage((prev) => Math.max(0, prev - 1));
+  };
+
+  const step0AnchorIndex = step0Stages.reduce<Record<string, number>>((acc, stage, idx) => {
+    if (stage.anchor) acc[stage.anchor] = idx;
+    return acc;
+  }, {});
+
+  const scrollToAnchor = (anchor?: string) => {
+    if (!anchor) return;
+    const stageIndex = step0AnchorIndex[anchor];
+    if (typeof stageIndex === "number") {
+      setStep(0);
+      setStep0Stage(stageIndex);
+    }
+    window.setTimeout(() => {
+      const el = document.getElementById(anchor);
+      if (!el) return;
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      (el as any)?.focus?.();
+    }, 80);
+  };
 
   function toggleRule(id: string) {
     setRules((prev) => prev.map((r) => (r.id === id ? { ...r, isActive: !r.isActive } : r)));
@@ -1391,14 +1755,15 @@ export default function GrowthPlanPage() {
 
   const approveEnabled =
     step === 4 &&
-    !!selectedPlan &&
     committed &&
     startingBalance > 0 &&
     targetBalance > 0 &&
+    !!targetDateStr &&
     tradingDays > 0 &&
     maxDailyLossPercent > 0 &&
     riskPerTradePct > 0 &&
-    (selectedPlan === "suggested" || dailyGoalPercentChosen > 0);
+    lossDaysSet &&
+    autoPhasesGenerated;
 
   const handleApproveAndSave = async () => {
     setError("");
@@ -1406,19 +1771,14 @@ export default function GrowthPlanPage() {
     if (
       startingBalance <= 0 ||
       targetBalance <= 0 ||
+      !targetDateStr ||
       tradingDays <= 0 ||
       maxDailyLossPercent <= 0 ||
-      riskPerTradePct <= 0
+      riskPerTradePct <= 0 ||
+      !lossDaysSet ||
+      !autoPhasesGenerated
     ) {
-      setError(L("Please enter valid, positive values first.", "Ingresa valores válidos y positivos primero."));
-      return;
-    }
-    if (!selectedPlan) {
-      setError(L("Select which plan you want to approve (Suggested or Your chosen plan).", "Selecciona qué plan quieres aprobar (Sugerido o Tu plan)."));
-      return;
-    }
-    if (selectedPlan === "chosen" && dailyGoalPercentChosen <= 0) {
-      setError(L("Daily goal (%) must be greater than 0 for your chosen plan.", "La meta diaria (%) debe ser mayor que 0 para tu plan elegido."));
+      setError(L("Please complete all required fields first.", "Completa todos los campos requeridos primero."));
       return;
     }
     if (!committed) {
@@ -1436,33 +1796,38 @@ export default function GrowthPlanPage() {
       if (!confirmed) return;
     }
 
-    const dailyPctForSave =
-      selectedPlan === "suggested"
-        ? Math.max(0, requiredGoalPct)
-        : Math.max(0, dailyGoalPercentChosen);
+    const dailyPctForSave = Math.max(0, requiredGoalPct);
+    const autoPhasePayload =
+      autoPhasesGenerated && autoPhases.length > 0
+        ? autoPhases.map((phase, idx) => ({
+            id: uuid(),
+            title: `${L("Phase", "Fase")} ${idx + 1}`,
+            targetEquity: phase.targetEquity,
+            targetDate: phase.targetDate ?? null,
+            status: "pending" as const,
+          }))
+        : planPhases;
 
     // persist assistant lang inside steps._ui.lang (Supabase only)
     const mergedSteps: any = { ...(stepsData as any) };
-    mergedSteps._ui = { ...(mergedSteps._ui ?? {}), lang: assistantLang };
+    mergedSteps._ui = { ...(mergedSteps._ui ?? {}), lang: assistantLang, autoPhaseCadence: phaseCadence };
 
     const effectivePlanStart = planStartDate || isoToday();
     const payload: Partial<GrowthPlan> = {
       startingBalance,
       targetBalance,
       targetDate: targetDateStr || null,
-      planStyle,
-      planMode,
+      planMode: "auto",
       targetMultiple: targetMultiple > 0 ? targetMultiple : null,
       planStartDate: effectivePlanStart,
       plannedWithdrawals,
-      planPhases,
+      planPhases: autoPhasePayload,
       dailyGoalPercent: dailyPctForSave,
       dailyTargetPct: dailyPctForSave,
       maxDailyLossPercent,
       tradingDays,
-      maxOnePercentLossDays,
       lossDaysPerWeek,
-      selectedPlan,
+      selectedPlan: "suggested",
       maxRiskPerTradePercent: riskPerTradePct,
       maxRiskPerTradeUSD: riskUsd,
       steps: mergedSteps,
@@ -1480,7 +1845,7 @@ export default function GrowthPlanPage() {
 
       const msg =
         (await neuroReact("growth_plan_saved", assistantLang, {
-          selectedPlan,
+          selectedPlan: "suggested",
           riskPct: riskPerTradePct,
           riskUsd,
         })) ||
@@ -1516,6 +1881,14 @@ export default function GrowthPlanPage() {
       pushNeuroMessage(L("Save failed. Please try again in a moment.", "Error al guardar. Intenta nuevamente en un momento."));
     }
   };
+
+  if (loading || !user) {
+    return (
+      <main className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center">
+        <p className="text-base text-slate-400">{L("Loading…", "Cargando…")}</p>
+      </main>
+    );
+  }
 
   return (
     <main className="min-h-screen bg-slate-950 text-slate-50 flex justify-center px-6 py-10">
@@ -1594,13 +1967,13 @@ export default function GrowthPlanPage() {
 
         {/* Guided Mode */}
         {guidedMode ? (
-          <div className="rounded-2xl border border-emerald-400/25 bg-emerald-400/5 p-4 space-y-3">
+          <div className="rounded-xl border border-emerald-400/25 bg-emerald-400/5 p-3 space-y-2">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <p className="text-[11px] text-emerald-300 uppercase tracking-[0.28em]">
+                <p className="text-[10px] text-emerald-300 uppercase tracking-[0.28em]">
                   {L("Plan Coach", "Coach del Plan")}
                 </p>
-                <p className="text-sm text-slate-300">
+                <p className="text-xs text-slate-300">
                   {L(
                     "We’ll guide you step‑by‑step. Complete the items below to unlock the next section.",
                     "Te guío paso a paso. Completa lo siguiente para desbloquear la próxima sección."
@@ -1610,76 +1983,51 @@ export default function GrowthPlanPage() {
               <button
                 type="button"
                 onClick={() => setGuidedMode(false)}
-                className="rounded-full border border-slate-700 px-3 py-1 text-xs text-slate-300 hover:border-emerald-400 hover:text-emerald-300"
+                className="rounded-full border border-slate-700 px-2.5 py-1 text-[11px] text-slate-300 hover:border-emerald-400 hover:text-emerald-300"
               >
                 {L("Hide", "Ocultar")}
               </button>
             </div>
 
             <div className="flex items-center gap-3">
-              <div className="h-2 flex-1 rounded-full bg-slate-800 overflow-hidden">
+              <div className="h-1.5 flex-1 rounded-full bg-slate-800 overflow-hidden">
                 <div
                   className="h-full rounded-full bg-emerald-400 transition"
                   style={{ width: `${Math.min(100, Math.max(6, guideProgress * 100))}%` }}
                 />
               </div>
-              <span className="text-xs text-slate-400">
+              <span className="text-[11px] text-slate-400">
                 {Math.round(guideProgress * 100)}%
               </span>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-              {currentTasks.map((task) => (
-                <button
-                  key={task.id}
-                  type="button"
-                  onClick={() => scrollToAnchor(task.anchor)}
-                  className={`flex items-center justify-between gap-2 rounded-xl border px-3 py-2 text-left text-sm transition ${
-                    task.done
-                      ? "border-emerald-400/40 bg-emerald-400/10 text-emerald-200"
-                      : "border-slate-800 bg-slate-950/40 text-slate-300 hover:border-emerald-400/60"
-                  }`}
-                >
-                  <span>
-                    {task.done ? "✓ " : "• "} {task.label}
-                    {task.optional ? (
-                      <span className="ml-2 text-[10px] uppercase tracking-[0.2em] text-slate-500">
-                        {L("Optional", "Opcional")}
-                      </span>
-                    ) : null}
-                  </span>
-                  <span className="text-xs text-slate-500">{task.done ? L("Done", "Listo") : L("Go", "Ir")}</span>
-                </button>
-              ))}
-            </div>
-
-            {step === 0 && planMode === "manual" ? (
-              <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-800 bg-slate-950/40 p-3 text-sm text-slate-300">
-                <span className="text-xs uppercase tracking-[0.2em] text-slate-500">
-                  {L("Quick build", "Crear rápido")}
+            {nextTask ? (
+              <button
+                type="button"
+                onClick={() => scrollToAnchor(nextTask.anchor)}
+                className={`flex items-center justify-between gap-2 rounded-lg border px-2.5 py-1.5 text-left text-xs transition ${
+                  nextTask.done
+                    ? "border-emerald-400/40 bg-emerald-400/10 text-emerald-200"
+                    : "border-slate-800 bg-slate-950/40 text-slate-300 hover:border-emerald-400/60"
+                }`}
+              >
+                <span>
+                  {nextTask.done ? "✓ " : "• "} {nextTask.label}
+                  {nextTask.optional ? (
+                    <span className="ml-2 text-[10px] uppercase tracking-[0.2em] text-slate-500">
+                      {L("Optional", "Opcional")}
+                    </span>
+                  ) : null}
                 </span>
-                <select
-                  value={phaseCadence}
-                  onChange={(e) => setPhaseCadence(e.target.value as any)}
-                  className="rounded-lg border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-200"
-                >
-                  <option value="monthly">{L("Monthly", "Mensual")}</option>
-                  <option value="quarterly">{L("Quarterly", "Trimestral")}</option>
-                  <option value="biannual">{L("Bi‑annual", "Semestral")}</option>
-                  <option value="yearly">{L("Yearly", "Anual")}</option>
-                </select>
-                <button
-                  type="button"
-                  onClick={autoBuildPlanPhases}
-                  className="rounded-lg border border-emerald-400/60 px-3 py-1 text-xs font-semibold text-emerald-200 hover:border-emerald-400"
-                >
-                  {L("Auto‑build phases", "Auto‑crear fases")}
-                </button>
-                <span className="text-xs text-slate-500">
-                  {L("Uses target date or trading days.", "Usa fecha meta o días de trading.")}
+                <span className="text-[11px] text-slate-500">
+                  {nextTask.done ? L("Done", "Listo") : L("Go", "Ir")}
                 </span>
-              </div>
-            ) : null}
+              </button>
+            ) : (
+              <p className="text-[11px] text-slate-500">
+                {L("All items complete for this step.", "Todos los items están completos en este paso.")}
+              </p>
+            )}
 
             <div className="flex flex-wrap items-center gap-2">
               <button
@@ -1703,7 +2051,10 @@ export default function GrowthPlanPage() {
               </button>
               <button
                 type="button"
-                onClick={() => setStep(0)}
+                onClick={() => {
+                  setStep(0);
+                  setStep0Stage(0);
+                }}
                 className="rounded-xl border border-slate-700 px-4 py-2 text-sm text-slate-300 hover:border-emerald-400 hover:text-emerald-300"
               >
                 {L("Back to numbers", "Volver a números")}
@@ -1741,540 +2092,49 @@ export default function GrowthPlanPage() {
         {/* ================= STEP 0 ================= */}
         {step === 0 && (
           <div id="gp-step-0" className="space-y-5">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block mb-1 text-slate-300">{L("Starting balance (USD)", "Balance inicial (USD)")}</label>
-                <input
-                  id="gp-starting-balance"
-                  inputMode="decimal"
-                  value={startingBalanceStr}
-                  onFocus={() => fieldHelp("starting_balance")}
-                  onChange={(e) => setStartingBalanceStr(onlyNum(e.target.value))}
-                  onBlur={() => setStartingBalanceStr(String(Math.max(0, startingBalance)))}
-                  className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-slate-100 focus:border-emerald-400 outline-none"
-                  placeholder="0"
-                />
-                <p className="text-slate-500 mt-1">
-                  {L(
-                    "This should match your broker account balance you’re starting from.",
-                    "Debe coincidir con el balance con el que arrancas en tu broker."
-                  )}
-                </p>
-              </div>
-
-              <div>
-                <label className="block mb-1 text-slate-300">{L("Target balance (USD)", "Balance objetivo (USD)")}</label>
-                <input
-                  id="gp-target-balance"
-                  inputMode="decimal"
-                  value={targetBalanceStr}
-                  onFocus={() => fieldHelp("target_balance")}
-                  onChange={(e) => setTargetBalanceStr(onlyNum(e.target.value))}
-                  onBlur={() => setTargetBalanceStr(String(Math.max(0, targetBalance)))}
-                  className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-slate-100 focus:border-emerald-400 outline-none"
-                  placeholder="0"
-                />
-              </div>
-
-              <div>
-                <label className="block mb-1 text-slate-300">{L("Target date (optional)", "Fecha meta (opcional)")}</label>
-                <input
-                  id="gp-target-date"
-                  type="date"
-                  value={targetDateStr}
-                  onChange={(e) => setTargetDateStr(e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-slate-100 focus:border-emerald-400 outline-none"
-                />
-                <p className="text-slate-500 mt-1">
-                  {L("Used to compute monthly/weekly target pacing.", "Se usa para calcular el ritmo mensual/semanal.")}
-                </p>
-              </div>
-
-              <div>
-                <label className="block mb-1 text-slate-300">{L("Plan style", "Estilo del plan")}</label>
-                <div className="flex flex-wrap gap-2">
-                  {[
-                    { id: "conservative", labelEn: "Conservative", labelEs: "Conservador" },
-                    { id: "balanced", labelEn: "Balanced", labelEs: "Balanceado" },
-                    { id: "aggressive", labelEn: "Aggressive", labelEs: "Agresivo" },
-                  ].map((opt) => (
-                    <button
-                      key={opt.id}
-                      type="button"
-                      onClick={() => setPlanStyle(opt.id as any)}
-                      className={`rounded-full border px-3 py-1 text-xs transition ${
-                        planStyle === opt.id
-                          ? "border-emerald-400 bg-emerald-400/10 text-emerald-200"
-                          : "border-slate-700 text-slate-300 hover:border-emerald-400/60"
-                      }`}
-                    >
-                      {L(opt.labelEn, opt.labelEs)}
-                    </button>
-                  ))}
-                </div>
-                <p className="text-slate-500 mt-1">
-                  {L("Defines pacing and expected aggressiveness.", "Define el ritmo y nivel de agresividad esperado.")}
-                </p>
-              </div>
-
-              <div id="gp-plan-mode">
-                <label className="block mb-1 text-slate-300">{L("Plan mode", "Modo del plan")}</label>
-                <div className="flex flex-wrap gap-2">
-                  {[
-                    { id: "auto", labelEn: "Automatic (date-based)", labelEs: "Automático (por fecha)" },
-                    { id: "manual", labelEn: "Manual phases", labelEs: "Fases manuales" },
-                  ].map((opt) => (
-                    <button
-                      key={opt.id}
-                      type="button"
-                      onClick={() => setPlanMode(opt.id as any)}
-                      className={`rounded-full border px-3 py-1 text-xs transition ${
-                        planMode === opt.id
-                          ? "border-emerald-400 bg-emerald-400/10 text-emerald-200"
-                          : "border-slate-700 text-slate-300 hover:border-emerald-400/60"
-                      }`}
-                    >
-                      {L(opt.labelEn, opt.labelEs)}
-                    </button>
-                  ))}
-                </div>
-                <p className="text-slate-500 mt-1">
-                  {L(
-                    "Automatic uses your target date. Manual lets you define short‑term phases.",
-                    "Automático usa tu fecha meta. Manual te deja definir fases corto plazo."
-                  )}
-                </p>
-              </div>
-
-              <div>
-                <label className="block mb-1 text-slate-300">
-                  {L("Trading days you commit to follow this plan", "Días de trading que te comprometes a seguir")}
-                </label>
-                <input
-                  id="gp-trading-days"
-                  inputMode="numeric"
-                  value={tradingDaysStr}
-                  onFocus={() => fieldHelp("trading_days")}
-                  onChange={(e) => setTradingDaysStr(onlyNum(e.target.value))}
-                  onBlur={() => setTradingDaysStr(String(clampInt(tradingDays, 0)))}
-                  className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-slate-100 focus:border-emerald-400 outline-none"
-                  placeholder="0"
-                />
-                <div className="mt-2 rounded-lg border border-slate-800 bg-slate-950/40 p-2 text-[11px] text-slate-400 space-y-1">
-                  <div className="text-slate-500 uppercase tracking-[0.2em]">
-                    {L("This year", "Este año")} {tradingDayCounts.year}
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span>{L("Stock market (Mon–Fri)", "Stock market (Lun–Vie)")}</span>
-                    <span className="font-semibold text-emerald-300">
-                      {tradingDayCounts.stockTotal} {L("total", "total")} · {tradingDayCounts.stockRemaining} {L("remaining", "restantes")}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span>{L("Futures (Sun–Fri)", "Futuros (Dom–Vie)")}</span>
-                    <span className="font-semibold text-emerald-300">
-                      {tradingDayCounts.futuresTotal} {L("total", "total")} · {tradingDayCounts.futuresRemaining} {L("remaining", "restantes")}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span>{L("Crypto (24/7)", "Cripto (24/7)")}</span>
-                    <span className="font-semibold text-emerald-300">
-                      {tradingDayCounts.cryptoTotal} {L("total", "total")} · {tradingDayCounts.cryptoRemaining} {L("remaining", "restantes")}
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              <div>
-                <label className="block mb-1 text-slate-300">{L("Max daily loss (%)", "Pérdida diaria máx (%)")}</label>
-                <input
-                  id="gp-max-daily-loss"
-                  inputMode="decimal"
-                  value={maxDailyLossPercentStr}
-                  onFocus={() => fieldHelp("max_daily_loss")}
-                  onChange={(e) => setMaxDailyLossPercentStr(onlyNum(e.target.value))}
-                  onBlur={() => setMaxDailyLossPercentStr(String(Math.max(0, maxDailyLossPercent)))}
-                  className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-slate-100 focus:border-emerald-400 outline-none"
-                  placeholder="0.00"
-                />
-                <p className="text-slate-500 mt-1">
-                  {L(
-                    "Your daily safety brake. When hit, you stop trading for the day.",
-                    "Tu freno de seguridad diario. Al alcanzarlo, paras de operar ese día."
-                  )}
-                </p>
-              </div>
-
-              <div>
-                <label className="block mb-1 text-slate-300">{L("Loss days per week (preview)", "Días de pérdida por semana (preview)")}</label>
-                <input
-                  inputMode="numeric"
-                  value={lossDaysPerWeekStr}
-                  onFocus={() => fieldHelp("loss_days_per_week")}
-                  onChange={(e) => setLossDaysPerWeekStr(onlyNum(e.target.value))}
-                  onBlur={() => setLossDaysPerWeekStr(String(clampInt(lossDaysPerWeek, 0, 5)))}
-                  className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-slate-100 focus:border-emerald-400 outline-none"
-                  placeholder="0..5"
-                />
-                <p className="text-slate-500 mt-1">
-                  {L("Distributed across each 5-day trading week.", "Distribuido en cada semana de 5 días de trading.")}
-                </p>
-              </div>
-
-              <div>
-                <label className="block mb-1 text-slate-300">
-                  {L("Daily goal (%) (only if you choose “Your chosen plan”)", "Meta diaria (%) (solo si eliges “Tu plan”)")}
-                </label>
-                <input
-                  id="gp-daily-goal"
-                  inputMode="decimal"
-                  value={dailyGoalPercentStr}
-                  onFocus={() => fieldHelp("daily_goal_percent")}
-                  onChange={(e) => setDailyGoalPercentStr(onlyNum(e.target.value))}
-                  onBlur={() => setDailyGoalPercentStr(String(Math.max(0, dailyGoalPercentChosen)))}
-                  className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-slate-100 focus:border-emerald-400 outline-none"
-                  placeholder="0.00"
-                />
-              </div>
-
-              <div className="md:col-span-2">
-                <label className="block mb-1 text-slate-300">{L("Max risk per trade (%) (suggested: 2%)", "Riesgo máximo por trade (%) (sugerido: 2%)")}</label>
-                <input
-                  id="gp-risk-per-trade"
-                  inputMode="decimal"
-                  value={riskPerTradePctStr}
-                  onFocus={() => fieldHelp("risk_per_trade")}
-                  onChange={(e) => setRiskPerTradePctStr(onlyNum(e.target.value))}
-                  onBlur={() => setRiskPerTradePctStr(String(Math.max(0, riskPerTradePct)))}
-                  className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-slate-100 focus:border-emerald-400 outline-none"
-                  placeholder="2"
-                />
-                <p className="text-slate-400 mt-1">
-                  {L("With your equity base,", "Con tu equity base,")} {riskPerTradePct || 0}% ≈{" "}
-                  <b className="text-emerald-300">{currency(riskUsd)}</b>{" "}
-                  {L("per trade.", "por trade.")}
-                </p>
-              </div>
-
-              <div id="gp-planned-withdrawals" className="md:col-span-2 rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-[11px] text-slate-500 tracking-widest uppercase">
-                      {L("Planned withdrawals (optional)", "Retiros planificados (opcional)")}
-                    </p>
-                    <p className="text-sm text-slate-400">
-                      {L(
-                        "Set equity milestones where you plan to withdraw profits.",
-                        "Define metas de equity donde planeas retirar ganancias."
-                      )}
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={addPlannedWithdrawal}
-                    className="rounded-lg border border-emerald-400/60 px-3 py-1 text-xs font-semibold text-emerald-200 hover:border-emerald-400"
-                  >
-                    {L("Add withdrawal", "Agregar retiro")}
-                  </button>
-                </div>
-
-                {plannedWithdrawals.length === 0 ? (
-                  <p className="mt-3 text-sm text-slate-500">
-                    {L("No planned withdrawals yet.", "Aún no hay retiros planificados.")}
+            <div className="rounded-2xl border border-slate-800 bg-slate-950/40 p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">
+                    {L("Step", "Paso")} {safeStage + 1}/{step0Total}
                   </p>
-                ) : (
-                  <div className="mt-4 space-y-3">
-                    {plannedWithdrawals.map((item) => (
-                      <div key={item.id} className="grid grid-cols-1 md:grid-cols-4 gap-3">
-                        <div className="md:col-span-2">
-                          <label className="block mb-1 text-xs text-slate-400">
-                            {L("Target equity", "Equity objetivo")}
-                          </label>
-                          <input
-                            inputMode="decimal"
-                            value={String(item.targetEquity ?? "")}
-                            onChange={(e) =>
-                              updatePlannedWithdrawal(item.id, {
-                                targetEquity: toNum(onlyNum(e.target.value), 0),
-                              })
-                            }
-                            className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-slate-100 focus:border-emerald-400 outline-none"
-                            placeholder="0"
-                          />
-                        </div>
-                        <div>
-                          <label className="block mb-1 text-xs text-slate-400">
-                            {L("Withdrawal amount", "Monto del retiro")}
-                          </label>
-                          <input
-                            inputMode="decimal"
-                            value={String(item.amount ?? "")}
-                            onChange={(e) =>
-                              updatePlannedWithdrawal(item.id, {
-                                amount: toNum(onlyNum(e.target.value), 0),
-                              })
-                            }
-                            className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-slate-100 focus:border-emerald-400 outline-none"
-                            placeholder="0"
-                          />
-                        </div>
-                        <div className="flex items-end gap-2">
-                          <button
-                            type="button"
-                            onClick={() => removePlannedWithdrawal(item.id)}
-                            className="rounded-lg border border-slate-700 px-3 py-2 text-xs text-slate-300 hover:border-rose-400 hover:text-rose-300"
-                          >
-                            {L("Remove", "Quitar")}
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
+                  <p className="text-lg font-semibold text-slate-100">{step0Current.title}</p>
+                  <p className="text-sm text-slate-400">{step0Current.description}</p>
+                </div>
+                <span className="text-[11px] text-slate-500">{L("Required", "Requerido")}</span>
               </div>
 
-              {planMode === "manual" ? (
-                <div id="gp-plan-phases" className="md:col-span-2 rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-[11px] text-slate-500 tracking-widest uppercase">
-                        {L("Manual phases (short‑term milestones)", "Fases manuales (metas corto plazo)")}
-                      </p>
-                      <p className="text-sm text-slate-400">
-                        {L(
-                          "Define phases that build into your long‑term target.",
-                          "Define fases que alimentan tu meta de largo plazo."
-                        )}
-                      </p>
-                    </div>
-                  <button
-                    type="button"
-                    onClick={addPlanPhase}
-                    className="rounded-lg border border-emerald-400/60 px-3 py-1 text-xs font-semibold text-emerald-200 hover:border-emerald-400"
-                  >
-                    {L("Add phase", "Agregar fase")}
-                  </button>
-                </div>
-
-                <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-slate-800 bg-slate-950/40 p-3 text-xs text-slate-300">
-                  <span className="uppercase tracking-[0.2em] text-slate-500">
-                    {L("Auto build", "Auto crear")}
-                  </span>
-                  <select
-                    value={phaseCadence}
-                    onChange={(e) => setPhaseCadence(e.target.value as any)}
-                    className="rounded-lg border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-200"
-                  >
-                    <option value="monthly">{L("Monthly", "Mensual")}</option>
-                    <option value="quarterly">{L("Quarterly", "Trimestral")}</option>
-                    <option value="biannual">{L("Bi‑annual", "Semestral")}</option>
-                    <option value="yearly">{L("Yearly", "Anual")}</option>
-                  </select>
-                  <button
-                    type="button"
-                    onClick={autoBuildPlanPhases}
-                    className="rounded-lg border border-emerald-400/60 px-3 py-1 text-xs font-semibold text-emerald-200 hover:border-emerald-400"
-                  >
-                    {L("Generate phases", "Generar fases")}
-                  </button>
-                  <span className="text-slate-500">
-                    {L("Uses target date or trading days.", "Usa fecha meta o días de trading.")}
-                  </span>
-                </div>
-
-                {planPhases.length === 0 ? (
-                  <p className="mt-3 text-sm text-slate-500">
-                    {L("No phases yet.", "Aún no hay fases.")}
-                  </p>
-                  ) : (
-                    <div className="mt-4 space-y-3">
-                      {planPhases.map((phase) => (
-                        <div key={phase.id} className="grid grid-cols-1 md:grid-cols-5 gap-3">
-                          <div className="md:col-span-2">
-                            <label className="block mb-1 text-xs text-slate-400">
-                              {L("Phase name", "Nombre de fase")}
-                            </label>
-                            <input
-                              value={phase.title ?? ""}
-                              onChange={(e) => updatePlanPhase(phase.id, { title: e.target.value })}
-                              className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-slate-100 focus:border-emerald-400 outline-none"
-                              placeholder={L("Phase 1", "Fase 1")}
-                            />
-                          </div>
-                          <div>
-                            <label className="block mb-1 text-xs text-slate-400">
-                              {L("Target equity", "Equity objetivo")}
-                            </label>
-                            <input
-                              inputMode="decimal"
-                              value={String(phase.targetEquity ?? "")}
-                              onChange={(e) =>
-                                updatePlanPhase(phase.id, {
-                                  targetEquity: toNum(onlyNum(e.target.value), 0),
-                                })
-                              }
-                              className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-slate-100 focus:border-emerald-400 outline-none"
-                              placeholder="0"
-                            />
-                          </div>
-                          <div>
-                            <label className="block mb-1 text-xs text-slate-400">
-                              {L("Target date (optional)", "Fecha objetivo (opcional)")}
-                            </label>
-                            <input
-                              type="date"
-                              value={phase.targetDate ?? ""}
-                              onChange={(e) => updatePlanPhase(phase.id, { targetDate: e.target.value || null })}
-                              className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-slate-100 focus:border-emerald-400 outline-none"
-                            />
-                          </div>
-                          <div className="flex items-end gap-2">
-                            <button
-                              type="button"
-                              onClick={() => removePlanPhase(phase.id)}
-                              className="rounded-lg border border-slate-700 px-3 py-2 text-xs text-slate-300 hover:border-rose-400 hover:text-rose-300"
-                            >
-                              {L("Remove", "Quitar")}
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ) : null}
-
-              <div className="md:col-span-2">
-                <label className="block mb-1 text-slate-300">
-                  {L("Max -1% loss days before review (optional)", "Máx. días de pérdida -1% antes de revisar (opcional)")}
-                </label>
-                <input
-                  inputMode="numeric"
-                  value={maxOnePercentLossDaysStr}
-                  onFocus={() => fieldHelp("max_one_percent_loss_days")}
-                  onChange={(e) => setMaxOnePercentLossDaysStr(onlyNum(e.target.value))}
-                  onBlur={() => setMaxOnePercentLossDaysStr(String(clampInt(maxOnePercentLossDays, 0)))}
-                  className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-slate-100 focus:border-emerald-400 outline-none"
-                  placeholder="0"
-                />
+              <div key={step0Current.id} className="mt-4 gp-step-animate">
+                {step0Current.content}
               </div>
-            </div>
 
-            {/* Plan previews (kept) */}
-            <div id="gp-plan-choice" className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <div className="bg-slate-950/80 border border-emerald-500/15 rounded-2xl p-4 space-y-3">
-                <div className="flex items-center justify-between">
-                  <p className="font-semibold text-emerald-300">
-                    {L("Suggested plan (Exact Target)", "Plan sugerido (Meta exacta)")}
-                  </p>
-                  <label className="flex items-center gap-2 text-emerald-300 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="plan-select"
-                      checked={selectedPlan === "suggested"}
-                      onChange={() => {
-                        setSelectedPlan("suggested");
-                        pushNeuroMessage(
-                          L(
-                            "Selected: Suggested plan. This one aims to land exactly on your target.",
-                            "Seleccionado: Plan sugerido. Este busca caer exactamente en tu meta."
-                          )
-                        );
-                                              }}
-                      className="h-4 w-4 accent-emerald-400"
-                    />
-                    {L("Select", "Seleccionar")}
-                  </label>
-                </div>
-
-                <table className="w-full border-collapse">
-                  <tbody>
-                    <tr className="border-b border-slate-800">
-                      <td className="py-1.5 pr-3 text-slate-400">{L("Starting", "Inicio")}</td>
-                      <td className="py-1.5 text-slate-100">{currency(startingBalance)}</td>
-                    </tr>
-                    <tr className="border-b border-slate-800">
-                      <td className="py-1.5 pr-3 text-slate-400">{L("Target", "Meta")}</td>
-                      <td className="py-1.5 text-emerald-400 font-semibold">{currency(targetBalance)}</td>
-                    </tr>
-                    <tr className="border-t border-slate-800">
-                      <td className="py-1.5 pr-3 text-slate-400">{L("Loss days/week", "Días de pérdida/sem")}</td>
-                      <td className="py-1.5 text-slate-100">{lossDaysPerWeek}</td>
-                    </tr>
-                    <tr className="border-t border-slate-800">
-                      <td className="py-1.5 pr-3 text-slate-400">{L("Required goal-day %", "% requerido en días de meta")}</td>
-                      <td className="py-1.5 text-slate-100">
-                        {Number.isFinite(explainRequired.goalPct) ? `${explainRequired.goalPct.toFixed(3)}%` : "—"}
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-
+              <div className="mt-4 flex items-center justify-between">
                 <button
-                  onClick={onDownloadPdfSuggested}
-                  className="px-4 py-2 rounded-xl border border-emerald-400 text-emerald-300 hover:bg-emerald-400/10 transition"
+                  type="button"
+                  onClick={goStep0Back}
+                  disabled={!step0CanBack}
+                  className={`rounded-xl border px-4 py-2 text-sm ${
+                    step0CanBack
+                      ? "border-slate-700 text-slate-300 hover:border-emerald-400 hover:text-emerald-300"
+                      : "border-slate-800 text-slate-600 cursor-not-allowed"
+                  }`}
                 >
-                  {L("Download PDF (Suggested)", "Descargar PDF (Sugerido)")}
+                  {L("Back", "Atrás")}
                 </button>
-              </div>
-
-              <div className="bg-slate-950/80 border border-sky-500/20 rounded-2xl p-4 space-y-3">
-                <div className="flex items-center justify-between">
-                  <p className="font-semibold text-sky-300">{L("Your chosen plan", "Tu plan elegido")}</p>
-                  <label className="flex items-center gap-2 text-sky-300 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="plan-select"
-                      checked={selectedPlan === "chosen"}
-                      onChange={() => {
-                        setSelectedPlan("chosen");
-                        pushNeuroMessage(
-                          L(
-                            "Selected: Your chosen plan. This uses your daily goal percent.",
-                            "Seleccionado: Tu plan elegido. Usa tu porcentaje de meta diaria."
-                          )
-                        );
-                                              }}
-                      className="h-4 w-4 accent-sky-400"
-                    />
-                    {L("Select", "Seleccionar")}
-                  </label>
-                </div>
-
-                <table className="w-full border-collapse">
-                  <tbody>
-                    <tr className="border-b border-slate-800">
-                      <td className="py-1.5 pr-3 text-slate-400">{L("Starting", "Inicio")}</td>
-                      <td className="py-1.5 text-slate-100">{currency(startingBalance)}</td>
-                    </tr>
-                    <tr className="border-b border-slate-800">
-                      <td className="py-1.5 pr-3 text-slate-400">{L("Daily goal", "Meta diaria")}</td>
-                      <td className="py-1.5 text-emerald-300">
-                        {dailyGoalPercentChosen || 0}% ({currency(dailyGoalDollar)})
-                      </td>
-                    </tr>
-                    <tr className="border-b border-slate-800">
-                      <td className="py-1.5 pr-3 text-slate-400">{L("Max daily loss", "Pérdida diaria máx")}</td>
-                      <td className="py-1.5 text-sky-300">
-                        {maxDailyLossPercent || 0}% ({currency(maxLossDollar)})
-                      </td>
-                    </tr>
-                    <tr className="border-b border-slate-800">
-                      <td className="py-1.5 pr-3 text-slate-400">{L("Projected ending", "Final proyectado")}</td>
-                      <td className="py-1.5 text-slate-100">{currency(chosenFinalBalance)}</td>
-                    </tr>
-                  </tbody>
-                </table>
-
                 <button
-                  onClick={onDownloadPdfChosen}
-                  className="px-4 py-2 rounded-xl border border-sky-400 text-sky-300 hover:bg-sky-400/10 transition"
+                  type="button"
+                  onClick={goStep0Next}
+                  disabled={!step0CanNext}
+                  className={`rounded-xl px-4 py-2 text-sm font-semibold ${
+                    step0CanNext
+                      ? "bg-emerald-400 text-slate-950 hover:bg-emerald-300"
+                      : "bg-slate-800 text-slate-600 cursor-not-allowed"
+                  }`}
                 >
-                  {L("Download PDF (Chosen)", "Descargar PDF (Elegido)")}
+                  {safeStage >= step0Total - 1 ? L("Done", "Listo") : L("Next", "Siguiente")}
                 </button>
               </div>
             </div>
-
           </div>
         )}
 
@@ -2895,6 +2755,22 @@ export default function GrowthPlanPage() {
             {L("Next", "Siguiente")}
           </button>
         </div>
+
+        <style jsx>{`
+          @keyframes gpStepIn {
+            from {
+              opacity: 0;
+              transform: translateY(6px);
+            }
+            to {
+              opacity: 1;
+              transform: translateY(0);
+            }
+          }
+          .gp-step-animate {
+            animation: gpStepIn 220ms ease;
+          }
+        `}</style>
       </div>
     </main>
   );

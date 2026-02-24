@@ -250,6 +250,60 @@ const normalizeChecklistPresets = (raw?: any): JournalChecklistPresets => {
 const checklistTag = (prefix: string | null, item: string) =>
   prefix ? `${prefix} ${item}`.trim() : item.trim();
 
+const mergeChecklistPresetsWithTags = (
+  tags: string[] | undefined | null,
+  presets: JournalChecklistPresets
+): JournalChecklistPresets => {
+  const next: JournalChecklistPresets = {
+    premarket: [...presets.premarket],
+    inside: [...presets.inside],
+    after: [...presets.after],
+    strategy: [...presets.strategy],
+    impulses: [...presets.impulses],
+    states: [...presets.states],
+  };
+
+  const addUnique = (key: keyof JournalChecklistPresets, item: string) => {
+    const clean = item.trim();
+    if (!clean) return;
+    const exists = next[key].some((t) => t.toLowerCase() === clean.toLowerCase());
+    if (!exists) next[key].push(clean);
+  };
+
+  const list = Array.isArray(tags) ? tags : [];
+  for (const raw of list) {
+    const t = String(raw ?? "").trim();
+    if (!t) continue;
+
+    if (t.startsWith(TAG_PREFIX.premarket)) {
+      addUnique("premarket", t.replace(TAG_PREFIX.premarket, "").trim());
+      continue;
+    }
+    if (t.startsWith(TAG_PREFIX.inside)) {
+      addUnique("inside", t.replace(TAG_PREFIX.inside, "").trim());
+      continue;
+    }
+    if (t.startsWith(TAG_PREFIX.after)) {
+      addUnique("after", t.replace(TAG_PREFIX.after, "").trim());
+      continue;
+    }
+    if (t.startsWith(TAG_PREFIX.strategy)) {
+      addUnique("strategy", t.replace(TAG_PREFIX.strategy, "").trim());
+      continue;
+    }
+
+    if (t in IMPULSE_ITEM_LABELS) {
+      addUnique("impulses", t);
+    } else if (t in STATE_ITEM_LABELS) {
+      addUnique("states", t);
+    } else {
+      addUnique("states", t);
+    }
+  }
+
+  return next;
+};
+
 type MindsetRatings = {
   emotional_balance: number | null;
   impulse_control: number | null;
@@ -258,10 +312,10 @@ type MindsetRatings = {
 };
 
 const DEFAULT_MINDSET: MindsetRatings = {
-  emotional_balance: 3,
-  impulse_control: 3,
-  setup_quality: 3,
-  probability: 3,
+  emotional_balance: null,
+  impulse_control: null,
+  setup_quality: null,
+  probability: null,
 };
 
 type AfterTradeReview = {
@@ -310,10 +364,10 @@ const clampRating = (v: any) => {
 };
 
 const normalizeMindset = (raw?: any): MindsetRatings => ({
-  emotional_balance: clampRating(raw?.emotional_balance) ?? DEFAULT_MINDSET.emotional_balance,
-  impulse_control: clampRating(raw?.impulse_control) ?? DEFAULT_MINDSET.impulse_control,
-  setup_quality: clampRating(raw?.setup_quality) ?? DEFAULT_MINDSET.setup_quality,
-  probability: clampRating(raw?.probability) ?? DEFAULT_MINDSET.probability,
+  emotional_balance: clampRating(raw?.emotional_balance),
+  impulse_control: clampRating(raw?.impulse_control),
+  setup_quality: clampRating(raw?.setup_quality),
+  probability: clampRating(raw?.probability),
 });
 
 const normalizeAfterReview = (raw?: any): AfterTradeReview => {
@@ -1052,6 +1106,42 @@ export default function DailyJournalPage() {
                   } else {
                     setAfterReview(DEFAULT_AFTER_REVIEW);
                   }
+
+                  const entryTags = Array.isArray((existing as any)?.tags) ? (existing as any).tags : [];
+                  const checklists = (rest as any)?.checklists;
+                  const extraTags: string[] = [];
+                  if (checklists && typeof checklists === "object") {
+                    if (Array.isArray(checklists.premarket)) {
+                      extraTags.push(
+                        ...checklists.premarket.map((t: any) => checklistTag(TAG_PREFIX.premarket, String(t)))
+                      );
+                    }
+                    if (Array.isArray(checklists.inside)) {
+                      extraTags.push(
+                        ...checklists.inside.map((t: any) => checklistTag(TAG_PREFIX.inside, String(t)))
+                      );
+                    }
+                    if (Array.isArray(checklists.after)) {
+                      extraTags.push(
+                        ...checklists.after.map((t: any) => checklistTag(TAG_PREFIX.after, String(t)))
+                      );
+                    }
+                    if (Array.isArray(checklists.strategy)) {
+                      extraTags.push(
+                        ...checklists.strategy.map((t: any) => checklistTag(TAG_PREFIX.strategy, String(t)))
+                      );
+                    }
+                    if (Array.isArray(checklists.impulses)) {
+                      extraTags.push(...checklists.impulses.map((t: any) => String(t)));
+                    }
+                    if (Array.isArray(checklists.states)) {
+                      extraTags.push(...checklists.states.map((t: any) => String(t)));
+                    }
+                  }
+                  const allTags = [...entryTags, ...extraTags].filter(Boolean);
+                  if (allTags.length) {
+                    setChecklistPresets((prev) => mergeChecklistPresetsWithTags(allTags, prev));
+                  }
                 } catch {
                   setNotesExtra({});
                   setMindset(DEFAULT_MINDSET);
@@ -1082,6 +1172,11 @@ export default function DailyJournalPage() {
             setNotesExtra({});
             setMindset(DEFAULT_MINDSET);
             setAfterReview(DEFAULT_AFTER_REVIEW);
+          }
+
+          const entryTags = Array.isArray((existing as any)?.tags) ? (existing as any).tags : [];
+          if (entryTags.length) {
+            setChecklistPresets((prev) => mergeChecklistPresetsWithTags(entryTags, prev));
           }
         } else {
           // No journal_entries row yet (import-only day, first open, etc.)
@@ -1562,7 +1657,8 @@ export default function DailyJournalPage() {
       states: checklistPresets.states.filter((t) => tags.includes(t)),
     };
 
-    nextExtra.mindset = { ...mindset };
+    const hasMindset = Object.values(mindset || {}).some((v) => v !== null && v !== undefined);
+    nextExtra.mindset = hasMindset ? { ...mindset } : null;
     nextExtra.checklists = checklistSnapshot;
     nextExtra.after_review = { ...afterReview };
 
@@ -2909,7 +3005,7 @@ export default function DailyJournalPage() {
       <div className="mx-auto w-full max-w-none">
         {/* Top */}
         <div className="flex items-start sm:items-center justify-between gap-4 mb-4">
-          <div>
+          <div data-tour="journal-date-header">
             <p className="text-emerald-400 text-xs uppercase tracking-[0.25em]">
               {L("Daily Journal", "Journal diario")}
             </p>
@@ -3004,7 +3100,7 @@ export default function DailyJournalPage() {
               </span>
             </div>
 
-            <div className="flex items-center flex-wrap justify-center gap-1.5">
+            <div className="flex items-center flex-wrap justify-center gap-1.5" data-tour="journal-save">
               <button
                 type="button"
                 onClick={handleGoToImport}
