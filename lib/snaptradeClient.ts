@@ -76,8 +76,9 @@ export async function snaptradeRequest<T>(
 
   const queryString = buildQueryString(query);
   const requestPath = path.startsWith("/api/v1") ? path : `/api/v1${path.startsWith("/") ? "" : "/"}${path}`;
+  const isRead = method === "GET" || method === "DELETE";
   const sigObject = {
-    content: opts?.body ?? {},
+    content: isRead ? "" : opts?.body ?? {},
     path: requestPath,
     query: queryString,
   };
