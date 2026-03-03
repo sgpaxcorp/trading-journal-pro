@@ -137,6 +137,7 @@ export default function ImportPage() {
   const [snaptradeOrders, setSnaptradeOrders] = useState<any[] | null>(null);
   const [snaptradeBroker, setSnaptradeBroker] = useState<string>("");
   const [snaptradeImporting, setSnaptradeImporting] = useState(false);
+  const [showSnaptradeHelp, setShowSnaptradeHelp] = useState(true);
 
   const brokerMeta = useMemo(() => BROKERS.find((b) => b.id === broker), [broker]);
 
@@ -188,7 +189,10 @@ export default function ImportPage() {
     });
     const data = await res.json().catch(() => ({} as any));
     if (!res.ok) {
-      throw new Error(data?.error ?? "SnapTrade error");
+      const detail = data?.detail || data?.error || data?.message || "SnapTrade error";
+      const code = data?.code || data?.status_code;
+      const msg = code ? `${detail} (${code})` : detail;
+      throw new Error(msg);
     }
     return data;
   }
@@ -833,6 +837,56 @@ export default function ImportPage() {
                 </button>
               </div>
             </div>
+
+            {showSnaptradeHelp ? (
+              <div className="mt-4 rounded-xl border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-[11px] text-amber-100">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="font-semibold">
+                      {L(
+                        "Important: allow cookies & pop‑ups to complete broker login.",
+                        "Importante: permite cookies y pop‑ups para completar el login del bróker."
+                      )}
+                    </div>
+                    <ul className="mt-1 list-disc pl-4 text-[11px] text-amber-100/90">
+                      <li>
+                        {L(
+                          "If the portal stays stuck, open in a new tab and allow cookies for SnapTrade.",
+                          "Si el portal se queda pegado, ábrelo en una nueva pestaña y permite cookies para SnapTrade."
+                        )}
+                      </li>
+                      <li>
+                        {L(
+                          "Safari: Settings → Privacy → temporarily disable “Prevent cross‑site tracking”.",
+                          "Safari: Ajustes → Privacidad → desactiva temporalmente “Evitar seguimiento entre sitios”."
+                        )}
+                      </li>
+                      <li>
+                        {L(
+                          "Chrome: allow third‑party cookies for app.snaptrade.com.",
+                          "Chrome: permite cookies de terceros para app.snaptrade.com."
+                        )}
+                      </li>
+                    </ul>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowSnaptradeHelp(false)}
+                    className="rounded-lg border border-amber-300/40 px-2 py-1 text-[10px] font-semibold text-amber-100 hover:bg-amber-400/10"
+                  >
+                    {L("Hide", "Ocultar")}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setShowSnaptradeHelp(true)}
+                className="mt-4 text-[11px] font-semibold text-amber-200/80 hover:text-amber-200"
+              >
+                {L("Show connection tips", "Mostrar tips de conexión")}
+              </button>
+            )}
 
             {snaptradeStatus ? (
               <div className="mt-3 rounded-xl border border-emerald-400/30 bg-emerald-400/10 px-3 py-2 text-xs text-emerald-100">

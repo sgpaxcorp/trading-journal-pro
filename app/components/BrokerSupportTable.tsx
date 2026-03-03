@@ -114,7 +114,13 @@ export function BrokerSupportTable({
                 {group.items.map((item) => (
                   <tr key={`${group.region}-${item.name}`} className="border-b border-slate-900/70">
                     <td className="py-2 pr-3 text-slate-100">{item.name}</td>
-                    <td className="py-2 pr-3 text-slate-400">{item.region}</td>
+                    <td className="py-2 pr-3 text-slate-400">
+                      {item.region === "US"
+                        ? L("US", "EE. UU.")
+                        : item.region === "International"
+                          ? L("International", "Internacional")
+                          : L("CSV only", "Solo CSV")}
+                    </td>
                     <td className="py-2 pr-3 text-center">
                       <Check active={item.snaptrade} />
                     </td>

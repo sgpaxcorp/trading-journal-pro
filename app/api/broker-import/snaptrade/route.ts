@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 import { getSnaptradeUser } from "@/lib/snaptradeStorage";
-import { snaptradeRequest } from "@/lib/snaptradeClient";
+import { formatSnaptradeError, snaptradeRequest } from "@/lib/snaptradeClient";
 import { createHash } from "crypto";
 
 export const runtime = "nodejs";
@@ -242,6 +242,6 @@ export async function POST(req: NextRequest) {
       })
       .eq("id", batchId);
 
-    return NextResponse.json({ error: err?.message ?? "SnapTrade import failed" }, { status: 500 });
+    return NextResponse.json(formatSnaptradeError(err), { status: 500 });
   }
 }

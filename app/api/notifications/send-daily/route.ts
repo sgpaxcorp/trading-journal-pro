@@ -83,6 +83,17 @@ async function sendExpoMessages(messages: Array<Record<string, unknown>>) {
   return results;
 }
 
+async function fetchExpoReceipts(receiptIds: string[]) {
+  if (receiptIds.length === 0) return null;
+  const res = await fetch("https://exp.host/--/api/v2/push/getReceipts", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ids: receiptIds }),
+  });
+  const body = await res.json().catch(() => ({}));
+  return { ok: res.ok, status: res.status, body };
+}
+
 export async function POST(req: NextRequest) {
   try {
     const url = new URL(req.url);
@@ -160,6 +171,17 @@ export async function POST(req: NextRequest) {
     }
 
     const results = await sendExpoMessages(messages);
+    const receiptIds = results
+      .flatMap((r) => (Array.isArray((r as any)?.body?.data) ? (r as any).body.data : []))
+      .filter((item: any) => item?.status === "ok" && typeof item?.id === "string")
+      .map((item: any) => item.id as string);
+
+    if (force && receiptIds.length > 0) {
+      await new Promise((resolve) => setTimeout(resolve, 1200));
+      const receipts = await fetchExpoReceipts(receiptIds);
+      return NextResponse.json({ ok: true, sent: messages.length, results, receipts });
+    }
+
     return NextResponse.json({ ok: true, sent: messages.length, results });
   } catch (err: any) {
     return NextResponse.json({ error: err?.message || "Unknown error" }, { status: 500 });

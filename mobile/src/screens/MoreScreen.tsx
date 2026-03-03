@@ -384,13 +384,51 @@ export function SettingsScreen() {
         );
         return;
       }
-      await apiPost("/api/notifications/send-daily?force=1", {
+      const res = await apiPost<{
+        ok?: boolean;
+        sent?: number;
+        results?: Array<{ ok: boolean; status: number; body?: any }>;
+        receipts?: { ok: boolean; status: number; body?: any };
+      }>("/api/notifications/send-daily?force=1", {
         expoPushToken: tokenToUse,
         locale: language,
       });
+      const resultItems =
+        res?.results?.flatMap((r) => (Array.isArray(r?.body?.data) ? r.body.data : [])) ?? [];
+      const firstError = resultItems.find((item: any) => item?.status === "error");
+      if (firstError) {
+        Alert.alert(
+          t(language, "Push error", "Error de notificación"),
+          firstError?.message ? String(firstError.message) : JSON.stringify(firstError)
+        );
+        return;
+      }
+
+      const receiptData = res?.receipts?.body?.data ?? null;
+      if (receiptData && typeof receiptData === "object") {
+        const receiptEntries = Object.values(receiptData);
+        const receiptError = receiptEntries.find((entry: any) => entry?.status === "error");
+        if (receiptError) {
+          Alert.alert(
+            t(language, "Push receipt error", "Error en el recibo"),
+            receiptError?.message ? String(receiptError.message) : JSON.stringify(receiptError)
+          );
+          return;
+        }
+      }
+
+      const detail =
+        typeof res?.sent === "number"
+          ? `${t(language, "Sent", "Enviadas")}: ${res.sent}`
+          : "";
       Alert.alert(
         t(language, "Test sent", "Prueba enviada"),
-        t(language, "If notifications are enabled, it should arrive shortly.", "Si están activas, llegará en breve.")
+        detail ||
+          t(
+            language,
+            "If notifications are enabled, it should arrive shortly.",
+            "Si están activas, llegará en breve."
+          )
       );
     } catch (err: any) {
       Alert.alert(

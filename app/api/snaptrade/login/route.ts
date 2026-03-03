@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getAuthUser } from "@/lib/authServer";
 import { ensureSnaptradeUser } from "@/lib/snaptradeStorage";
-import { snaptradeRequest } from "@/lib/snaptradeClient";
+import { formatSnaptradeError, snaptradeRequest } from "@/lib/snaptradeClient";
 
 export const runtime = "nodejs";
 
@@ -40,6 +40,6 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ url });
   } catch (err: any) {
-    return NextResponse.json({ error: err?.message ?? "SnapTrade error" }, { status: 500 });
+    return NextResponse.json(formatSnaptradeError(err), { status: 500 });
   }
 }
