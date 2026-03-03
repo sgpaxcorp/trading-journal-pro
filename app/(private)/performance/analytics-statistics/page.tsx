@@ -36,6 +36,7 @@ import type { JournalEntry } from "@/lib/journalTypes";
 import { getAllJournalEntries } from "@/lib/journalSupabase";
 import { listDailySnapshots, type DailySnapshotRow } from "@/lib/snapshotSupabase";
 import { listCashflows, signedCashflowAmount, type Cashflow } from "@/lib/cashflowsSupabase";
+import { buildCashflowAdjustedDailyReturns } from "@/lib/performanceReturns";
 import {
   computeAllKPIs,
   formatKpiInputs,
@@ -353,6 +354,14 @@ function stddev(nums: number[]): number {
   return Math.sqrt(variance);
 }
 
+function downsideDeviation(nums: number[], threshold = 0): number {
+  const v = nums.filter((n) => Number.isFinite(n));
+  if (v.length === 0) return 0;
+  const diffs = v.map((n) => Math.min(0, n - threshold));
+  const variance = mean(diffs.map((d) => d * d));
+  return Math.sqrt(variance);
+}
+
 function median(nums: number[]): number {
   const v = nums.filter((n) => Number.isFinite(n)).sort((a, b) => a - b);
   if (v.length === 0) return 0;
@@ -652,6 +661,49 @@ function computeEquityCurve(
   return { equityCurve, dailyPnl };
 }
 
+function computePerformanceReturns(
+  sessionsAll: SessionWithTrades[],
+  cashflowsAll: Cashflow[],
+  startingBalance: number,
+  planStartIso: string,
+  startIso: string,
+  endIso: string
+): number[] {
+  const planStart = looksLikeYYYYMMDD(planStartIso) ? planStartIso : "";
+  const start = looksLikeYYYYMMDD(startIso) ? startIso : "";
+  const end = looksLikeYYYYMMDD(endIso) ? endIso : "";
+  if (!start || !end) return [];
+
+  const dailyPnl = (sessionsAll ?? [])
+    .filter((s) => {
+      if (!looksLikeYYYYMMDD(s.date)) return false;
+      if (planStart && s.date < planStart) return false;
+      if (end && s.date > end) return false;
+      return true;
+    })
+    .map((s) => ({ date: s.date, pnl: toNumberMaybe(s.pnlNet) }));
+
+  const cashflows = (cashflowsAll ?? [])
+    .map((cf) => ({
+      date: cashflowDateIso(cf),
+      net: cashflowSignedUsd(cf),
+    }))
+    .filter((cf) => looksLikeYYYYMMDD(cf.date))
+    .filter((cf) => {
+      if (planStart && cf.date < planStart) return false;
+      if (end && cf.date > end) return false;
+      return true;
+    });
+
+  return buildCashflowAdjustedDailyReturns({
+    startIso: start,
+    endIso: end,
+    startingBalance,
+    dailyPnl,
+    cashflows,
+  });
+}
+
 function computeDrawdown(equity: EquityPoint[]): number {
   let peak = -Infinity;
   let maxDd = 0;
@@ -706,8 +758,7 @@ function computeSharpe(returns: number[]): number | null {
 function computeSortino(returns: number[]): number | null {
   if (!returns.length) return null;
   const meanDaily = mean(returns);
-  const downside = returns.filter((r) => r < 0);
-  const downsideSd = stddev(downside);
+  const downsideSd = downsideDeviation(returns, 0);
   if (!Number.isFinite(downsideSd) || downsideSd === 0) return null;
   return (meanDaily * 252) / (downsideSd * Math.sqrt(252));
 }
@@ -1267,11 +1318,25 @@ function computeSnapshot(
   const { equityCurve, dailyPnl } = computeEquityCurve(sessionsAll, cashflows, startingBalance, planStartIso, range.startIso, range.endIso);
   const maxDrawdown = computeDrawdown(equityCurve);
   const maxDrawdownPct = computeDrawdownPct(equityCurve);
-  const returns = computeDailyReturns(equityCurve);
+  const rangeStart = looksLikeYYYYMMDD(range.startIso) ? range.startIso : "";
+  const rangeEnd = looksLikeYYYYMMDD(range.endIso) ? range.endIso : "";
+  const effectiveStart = planStartIso && rangeStart && planStartIso > rangeStart ? planStartIso : rangeStart;
+  const performanceReturns = effectiveStart && rangeEnd
+    ? computePerformanceReturns(
+        sessionsAll,
+        cashflows,
+        startingBalance,
+        planStartIso,
+        effectiveStart,
+        rangeEnd
+      )
+    : [];
+  const returns = performanceReturns.length ? performanceReturns : computeDailyReturns(equityCurve);
   const sharpe = computeSharpe(returns);
   const sortino = computeSortino(returns);
   const cagr = computeCagr(equityCurve);
-  const recoveryFactor = computeRecoveryFactor(netPnl, maxDrawdown);
+  const totalAbs = equityCurve.length ? equityCurve[equityCurve.length - 1]!.value - equityCurve[0]!.value : netPnl;
+  const recoveryFactor = computeRecoveryFactor(totalAbs, maxDrawdown);
   const payoffRatio = computePayoffRatio(avgWin, avgLoss);
   const streaks = computeStreaks(sessions);
 
@@ -1932,10 +1997,33 @@ export default function AnalyticsStatisticsPage() {
     return s.dailyPnl;
   }, [snapshot, serverSeries]);
 
+  const performanceReturns = useMemo(() => {
+    const rangeStart = looksLikeYYYYMMDD(dateRange.startIso) ? dateRange.startIso : "";
+    const rangeEnd = looksLikeYYYYMMDD(dateRange.endIso) ? dateRange.endIso : "";
+    const planStartForReturns = effectivePlanStart || rangeStart;
+    const effectiveStart = planStartForReturns && rangeStart && planStartForReturns > rangeStart
+      ? planStartForReturns
+      : rangeStart;
+    const startingBalanceForReturns = effectivePlanStart
+      ? planStartingBalance
+      : (uiEquity[0]?.value ?? planStartingBalance);
+    return computePerformanceReturns(
+      sessionsAll,
+      cashflows,
+      startingBalanceForReturns,
+      planStartForReturns,
+      effectiveStart,
+      rangeEnd
+    );
+  }, [sessionsAll, cashflows, planStartingBalance, effectivePlanStart, dateRange.startIso, dateRange.endIso, uiEquity]);
+
   const kpiResults = useMemo<KPIResult[]>(() => {
     const equity = uiEquity.map((p) => ({ time: p.date, equity_value: p.value }));
-    return computeAllKPIs(kpiTrades, equity, undefined, { annualizationDays: 252 });
-  }, [kpiTrades, uiEquity]);
+    return computeAllKPIs(kpiTrades, equity, undefined, {
+      annualizationDays: 252,
+      returnsSeries: performanceReturns,
+    });
+  }, [kpiTrades, uiEquity, performanceReturns]);
 
   if (loading || !user) {
     return (

@@ -128,6 +128,11 @@ export type KPIComputeConfig = {
   omegaThreshold?: number; // in percent units (default 0)
   varConfidence?: number; // default 0.95
   downsideThreshold?: number; // percent (default 0)
+  /**
+   * Optional daily return series override (percent units).
+   * Use this to pass cashflow-adjusted returns so KPIs match "real" performance.
+   */
+  returnsSeries?: number[];
 };
 
 export type KPIDefinition = {
@@ -174,6 +179,7 @@ const DEFAULT_CONFIG: Required<KPIComputeConfig> = {
   omegaThreshold: 0,
   varConfidence: 0.95,
   downsideThreshold: 0,
+  returnsSeries: [],
 };
 
 function cfgWithDefaults(cfg?: KPIComputeConfig): Required<KPIComputeConfig> {
@@ -183,6 +189,7 @@ function cfgWithDefaults(cfg?: KPIComputeConfig): Required<KPIComputeConfig> {
     omegaThreshold: cfg?.omegaThreshold ?? DEFAULT_CONFIG.omegaThreshold,
     varConfidence: cfg?.varConfidence ?? DEFAULT_CONFIG.varConfidence,
     downsideThreshold: cfg?.downsideThreshold ?? DEFAULT_CONFIG.downsideThreshold,
+    returnsSeries: cfg?.returnsSeries ?? DEFAULT_CONFIG.returnsSeries,
   };
 }
 
@@ -312,6 +319,17 @@ function tradeReturns(trades: Trade[]): number[] {
   return out;
 }
 
+function resolveReturnSeries(
+  trades: Trade[],
+  equity?: EquityPoint[],
+  cfg?: KPIComputeConfig
+): number[] {
+  const override = cfg?.returnsSeries?.filter((n) => Number.isFinite(n)) ?? [];
+  if (override.length) return override;
+  const fromEquity = dailyReturnsFromEquity(equity);
+  return fromEquity.length ? fromEquity : tradeReturns(trades);
+}
+
 function rMultiples(trades: Trade[]): number[] {
   const out: number[] = [];
   for (const t of trades) {
@@ -384,6 +402,19 @@ function drawdownSeries(equity?: EquityPoint[]): { pct: number; durationDays: nu
     out.push({ pct, durationDays: duration, recoveryDays: 0 });
   }
 
+  return out;
+}
+
+function drawdownPoints(equity?: EquityPoint[]): number[] {
+  const pts = equityPoints(equity);
+  if (pts.length < 2) return [];
+  let peak = pts[0].value;
+  const out: number[] = [];
+  for (const p of pts) {
+    if (p.value > peak) peak = p.value;
+    const ddPct = peak > 0 ? ((peak - p.value) / peak) * 100 : 0;
+    out.push(ddPct);
+  }
   return out;
 }
 
@@ -2118,14 +2149,20 @@ export function computeKPI_cagr(trades: Trade[], equity?: EquityPoint[], cfg?: K
 export function computeKPI_win_rate(trades: Trade[]): KPIResult {
   if (!hasTrades(trades)) return buildResult("win_rate", null, "No trades.");
   const wins = trades.filter((t) => (safeNumber(t.realized_pnl) ?? 0) > 0).length;
-  const value = (wins / trades.length) * 100;
+  const losses = trades.filter((t) => (safeNumber(t.realized_pnl) ?? 0) < 0).length;
+  const denom = wins + losses;
+  if (denom === 0) return buildResult("win_rate", null, "No wins or losses.");
+  const value = (wins / denom) * 100;
   return buildResult("win_rate", value);
 }
 
 export function computeKPI_loss_rate(trades: Trade[]): KPIResult {
   if (!hasTrades(trades)) return buildResult("loss_rate", null, "No trades.");
   const losses = trades.filter((t) => (safeNumber(t.realized_pnl) ?? 0) < 0).length;
-  const value = (losses / trades.length) * 100;
+  const wins = trades.filter((t) => (safeNumber(t.realized_pnl) ?? 0) > 0).length;
+  const denom = wins + losses;
+  if (denom === 0) return buildResult("loss_rate", null, "No wins or losses.");
+  const value = (losses / denom) * 100;
   return buildResult("loss_rate", value);
 }
 
@@ -2196,10 +2233,9 @@ export function computeKPI_max_drawdown_percent(trades: Trade[], equity?: Equity
 }
 
 export function computeKPI_avg_drawdown_percent(trades: Trade[], equity?: EquityPoint[]): KPIResult {
-  const series = drawdownSeries(equity);
-  if (series.length === 0) return buildResult("avg_drawdown_percent", null, "Missing equity curve.");
-  const avg = mean(series.map((s) => s.pct * 100));
-  return buildResult("avg_drawdown_percent", avg);
+  const points = drawdownPoints(equity);
+  if (points.length === 0) return buildResult("avg_drawdown_percent", null, "Missing equity curve.");
+  return buildResult("avg_drawdown_percent", mean(points));
 }
 
 export function computeKPI_drawdown_duration_avg_days(trades: Trade[], equity?: EquityPoint[]): KPIResult {
@@ -2256,26 +2292,23 @@ export function computeKPI_mar_ratio(trades: Trade[], equity?: EquityPoint[], cf
 }
 
 export function computeKPI_var_95(trades: Trade[], equity?: EquityPoint[], cfg?: KPIComputeConfig): KPIResult {
-  const returns = dailyReturnsFromEquity(equity);
-  const fallback = returns.length ? returns : tradeReturns(trades);
+  const fallback = resolveReturnSeries(trades, equity, cfg);
   if (fallback.length === 0) return buildResult("var_95", null, "No returns.");
-  const v = quantile(fallback, 1 - (cfgWithDefaults(cfg).varConfidence));
+  const v = quantile(fallback, 1 - cfgWithDefaults(cfg).varConfidence);
   return buildResult("var_95", v);
 }
 
 export function computeKPI_cvar_95(trades: Trade[], equity?: EquityPoint[], cfg?: KPIComputeConfig): KPIResult {
-  const returns = dailyReturnsFromEquity(equity);
-  const fallback = returns.length ? returns : tradeReturns(trades);
+  const fallback = resolveReturnSeries(trades, equity, cfg);
   if (fallback.length === 0) return buildResult("cvar_95", null, "No returns.");
-  const v = quantile(fallback, 1 - (cfgWithDefaults(cfg).varConfidence));
+  const v = quantile(fallback, 1 - cfgWithDefaults(cfg).varConfidence);
   const tail = fallback.filter((r) => r <= v);
   if (tail.length === 0) return buildResult("cvar_95", null, "No tail losses.");
   return buildResult("cvar_95", mean(tail));
 }
 
-export function computeKPI_tail_ratio(trades: Trade[], equity?: EquityPoint[]): KPIResult {
-  const returns = dailyReturnsFromEquity(equity);
-  const fallback = returns.length ? returns : tradeReturns(trades);
+export function computeKPI_tail_ratio(trades: Trade[], equity?: EquityPoint[], cfg?: KPIComputeConfig): KPIResult {
+  const fallback = resolveReturnSeries(trades, equity, cfg);
   if (fallback.length === 0) return buildResult("tail_ratio", null, "No returns.");
   const p95 = quantile(fallback, 0.95);
   const p5 = quantile(fallback, 0.05);
@@ -2296,7 +2329,7 @@ export function computeKPI_risk_of_ruin(trades: Trade[]): KPIResult {
 }
 
 export function computeKPI_sharpe_ratio(trades: Trade[], equity?: EquityPoint[], cfg?: KPIComputeConfig): KPIResult {
-  const returns = dailyReturnsFromEquity(equity);
+  const returns = resolveReturnSeries(trades, equity, cfg);
   if (returns.length === 0) return buildResult("sharpe_ratio", null, "Missing equity curve.");
   const c = cfgWithDefaults(cfg);
   const rfDaily = (c.riskFreeRate * 100) / c.annualizationDays;
@@ -2308,7 +2341,7 @@ export function computeKPI_sharpe_ratio(trades: Trade[], equity?: EquityPoint[],
 }
 
 export function computeKPI_sortino_ratio(trades: Trade[], equity?: EquityPoint[], cfg?: KPIComputeConfig): KPIResult {
-  const returns = dailyReturnsFromEquity(equity);
+  const returns = resolveReturnSeries(trades, equity, cfg);
   if (returns.length === 0) return buildResult("sortino_ratio", null, "Missing equity curve.");
   const c = cfgWithDefaults(cfg);
   const threshold = c.downsideThreshold;
@@ -2366,8 +2399,7 @@ export function computeKPI_tracking_error(trades: Trade[], equity?: EquityPoint[
 }
 
 export function computeKPI_omega_ratio(trades: Trade[], equity?: EquityPoint[], cfg?: KPIComputeConfig): KPIResult {
-  const returns = dailyReturnsFromEquity(equity);
-  const fallback = returns.length ? returns : tradeReturns(trades);
+  const fallback = resolveReturnSeries(trades, equity, cfg);
   if (fallback.length === 0) return buildResult("omega_ratio", null, "No returns.");
   const threshold = cfgWithDefaults(cfg).omegaThreshold;
   const gains = sum(fallback.map((r) => Math.max(0, r - threshold)));
@@ -2376,9 +2408,8 @@ export function computeKPI_omega_ratio(trades: Trade[], equity?: EquityPoint[], 
   return buildResult("omega_ratio", gains / losses);
 }
 
-export function computeKPI_gain_to_pain_ratio(trades: Trade[], equity?: EquityPoint[]): KPIResult {
-  const returns = dailyReturnsFromEquity(equity);
-  const fallback = returns.length ? returns : tradeReturns(trades);
+export function computeKPI_gain_to_pain_ratio(trades: Trade[], equity?: EquityPoint[], cfg?: KPIComputeConfig): KPIResult {
+  const fallback = resolveReturnSeries(trades, equity, cfg);
   if (fallback.length === 0) return buildResult("gain_to_pain_ratio", null, "No returns.");
   const gains = sum(fallback.filter((r) => r > 0));
   const losses = sum(fallback.filter((r) => r < 0));
@@ -2387,8 +2418,7 @@ export function computeKPI_gain_to_pain_ratio(trades: Trade[], equity?: EquityPo
 }
 
 export function computeKPI_kappa_3_ratio(trades: Trade[], equity?: EquityPoint[], cfg?: KPIComputeConfig): KPIResult {
-  const returns = dailyReturnsFromEquity(equity);
-  const fallback = returns.length ? returns : tradeReturns(trades);
+  const fallback = resolveReturnSeries(trades, equity, cfg);
   if (fallback.length === 0) return buildResult("kappa_3_ratio", null, "No returns.");
   const threshold = cfgWithDefaults(cfg).downsideThreshold;
   const lpm3 = mean(fallback.map((r) => Math.max(0, threshold - r) ** 3));
@@ -2679,7 +2709,7 @@ export function computeAllKPIs(
     computeKPI_mar_ratio(trades, equity, cfg),
     computeKPI_var_95(trades, equity, cfg),
     computeKPI_cvar_95(trades, equity, cfg),
-    computeKPI_tail_ratio(trades, equity),
+    computeKPI_tail_ratio(trades, equity, cfg),
     computeKPI_risk_of_ruin(trades),
     computeKPI_sharpe_ratio(trades, equity, cfg),
     computeKPI_sortino_ratio(trades, equity, cfg),
@@ -2689,7 +2719,7 @@ export function computeAllKPIs(
     computeKPI_beta(trades, equity, benchmark),
     computeKPI_tracking_error(trades, equity, benchmark),
     computeKPI_omega_ratio(trades, equity, cfg),
-    computeKPI_gain_to_pain_ratio(trades, equity),
+    computeKPI_gain_to_pain_ratio(trades, equity, cfg),
     computeKPI_kappa_3_ratio(trades, equity, cfg),
     computeKPI_return_std_dev(trades),
     computeKPI_skewness(trades),

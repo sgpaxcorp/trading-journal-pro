@@ -87,20 +87,13 @@ function getPlanStartDateStr(plan: unknown): string | null {
 }
 
 function getWeekOfYear(date: Date): number {
-  // Sunday-based week number (week 1 contains Jan 1).
-  const year = date.getFullYear();
-  const d = new Date(Date.UTC(year, date.getMonth(), date.getDate()));
-  const day = d.getUTCDay(); // 0=Sun
-
-  const weekStart = new Date(d);
-  weekStart.setUTCDate(d.getUTCDate() - day);
-
-  const yearStart = new Date(Date.UTC(year, 0, 1));
-  const yearStartSunday = new Date(yearStart);
-  yearStartSunday.setUTCDate(yearStart.getUTCDate() - yearStart.getUTCDay());
-
-  const diff = weekStart.getTime() - yearStartSunday.getTime();
-  return Math.floor(diff / (7 * 86400000)) + 1;
+  // ISO week number (Monday-based, week 1 contains first Thursday).
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const day = d.getUTCDay() || 7; // 1..7 (Mon..Sun)
+  d.setUTCDate(d.getUTCDate() + 4 - day);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  const diffDays = Math.floor((d.getTime() - yearStart.getTime()) / 86400000) + 1;
+  return Math.ceil(diffDays / 7);
 }
 
 function monthsBetween(startIso: string, endIso: string): number {
@@ -651,12 +644,11 @@ export default function DashboardPage() {
   const ALL_WIDGETS: { id: WidgetId; label: string }[] = [
     { id: "progress", label: L("Account Progress", "Progreso de cuenta") },
     { id: "plan-progress", label: L("Plan Progress", "Progreso del plan") },
-    { id: "plan-system", label: L("Trading System", "Sistema de trading") },
     { id: "daily-target", label: L("Daily Target", "Meta diaria") },
     { id: "calendar", label: L("P&L Calendar", "Calendario P&L") },
     { id: "weekly", label: L("Weekly Summary", "Resumen semanal") },
     { id: "streak", label: L("Green Streak", "Racha verde") },
-    { id: "actions", label: L("Checklist", "Checklist") },
+    { id: "actions", label: L("Trading System", "Sistema de trading") },
     { id: "trading-days", label: L("Trading Days (Year)", "Días de trading (año)") },
   ];
 
@@ -685,7 +677,6 @@ export default function DashboardPage() {
   const [activeWidgets, setActiveWidgets] = useState<WidgetId[]>([
     "progress",
     "plan-progress",
-    "plan-system",
     "daily-target",
     "calendar",
     "weekly",
@@ -722,61 +713,19 @@ export default function DashboardPage() {
 
   // Keep original frozen todayStr (other widgets untouched)
   const [todayStr] = useState(() => formatDateYYYYMMDD(new Date()));
-  const [currentWeekOfYear] = useState(() => getWeekOfYear(new Date()));
 
   // Rolling day ONLY for daily-target + actions
   const [rollingTodayStr, setRollingTodayStr] = useState(() => formatDateYYYYMMDD(new Date()));
 
-  const planSystemLists = useMemo(() => {
+  const systemRules = useMemo(() => {
     const system = plan?.steps?.execution_and_journal?.system;
     const clean = (arr: any[] | undefined) =>
       (arr ?? []).filter((i) => (i?.text ?? "").toString().trim().length > 0);
-    const doList = clean(system?.doList as any[]);
-    const dontList = clean(system?.dontList as any[]);
-    const orderList = clean(system?.orderList as any[]);
-    const all = [...doList, ...dontList, ...orderList];
     return {
-      doList,
-      dontList,
-      orderList,
-      all,
-      allKey: all.map((i) => i.id).join("|"),
+      doList: clean(system?.doList as any[]),
+      dontList: clean(system?.dontList as any[]),
     };
   }, [plan]);
-
-  const systemChecklistKey = useMemo(() => {
-    const uid = (user as any)?.uid ?? "anon";
-    return `tjpro_plan_system_checks_${uid}_${rollingTodayStr}`;
-  }, [user, rollingTodayStr]);
-
-  const [systemChecks, setSystemChecks] = useState<Record<string, boolean>>({});
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const ids = new Set(planSystemLists.all.map((i) => i.id));
-    let parsed: Record<string, boolean> = {};
-    try {
-      const raw = window.localStorage.getItem(systemChecklistKey);
-      if (raw) parsed = JSON.parse(raw);
-    } catch {
-      parsed = {};
-    }
-    const cleaned: Record<string, boolean> = {};
-    ids.forEach((id) => {
-      cleaned[id] = !!parsed[id];
-    });
-    setSystemChecks(cleaned);
-  }, [systemChecklistKey, planSystemLists.allKey]);
-
-  const toggleSystemCheck = (id: string) => {
-    setSystemChecks((prev) => {
-      const next = { ...prev, [id]: !prev[id] };
-      if (typeof window !== "undefined") {
-        window.localStorage.setItem(systemChecklistKey, JSON.stringify(next));
-      }
-      return next;
-    });
-  };
 
   // Debounce autosave
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -822,10 +771,7 @@ export default function DashboardPage() {
             const withPlan = valid.includes("plan-progress")
               ? valid
               : [...valid, "plan-progress" as WidgetId];
-            const withSystem = withPlan.includes("plan-system")
-              ? withPlan
-              : [...withPlan, "plan-system" as WidgetId];
-            setActiveWidgets(withSystem);
+            setActiveWidgets(withPlan);
           }
         }
       }
@@ -942,7 +888,7 @@ export default function DashboardPage() {
           setTodayChecklist([]);
           setTodayChecklistNotes(null);
           setChecklistSaving(false);
-          setChecklistSaveError(L("Failed to load checklist.", "No se pudo cargar el checklist."));
+          setChecklistSaveError(L("Failed to load Trading System.", "No se pudo cargar el sistema de trading."));
         }
       }
     };
@@ -1044,29 +990,25 @@ export default function DashboardPage() {
     };
   }, [entries, viewDate, user, activeAccountId]);
 
-  const weekRowNumbers = useMemo(() => {
-    const rows: (number | null)[] = [];
+  const weekRows = useMemo(() => {
+    const rows: Array<{ rowIndex: number; weekOfYear: number }> = [];
     for (let row = 0; row < 6; row++) {
-      let weekNo: number | null = null;
-      let fallback: number | null = null;
-
-        for (let col = 0; col < 7; col++) {
-          const idx = row * 7 + col;
-          const cell = calendarCells[idx];
-          if (!cell || !cell.dateStr || cell.dayNumber === null) continue;
-
-          const cellDate = new Date(cell.dateStr + "T00:00:00");
-          const dow = cellDate.getDay();
-          if (fallback === null) fallback = getWeekOfYear(cellDate);
-          if (dow === 0) {
-            weekNo = getWeekOfYear(cellDate);
-            break;
-          }
-        }
-      rows.push(weekNo ?? fallback);
+      const rowCells = calendarCells.slice(row * 7, row * 7 + 7);
+      const firstCell = rowCells.find((c) => c?.dateStr && c.dayNumber !== null);
+      if (!firstCell?.dateStr) continue;
+      const d = new Date(firstCell.dateStr + "T00:00:00");
+      rows.push({ rowIndex: row, weekOfYear: getWeekOfYear(d) });
     }
     return rows;
   }, [calendarCells]);
+
+  const currentWeekOfYear = useMemo(() => getWeekOfYear(new Date()), []);
+
+  const weekRowLabelByIndex = useMemo(() => {
+    const map = new Map<number, number>();
+    weekRows.forEach((row) => map.set(row.rowIndex, row.weekOfYear));
+    return map;
+  }, [weekRows]);
 
   const tradingStats = useMemo(() => calcTradingDayStats(entries, holidaySet), [entries, holidaySet]);
 
@@ -1271,8 +1213,8 @@ export default function DashboardPage() {
       console.warn("[checklist] autosave failed:", err);
       setChecklistSaveError(
         L(
-          "Could not save checklist (retrying on next change).",
-          "No se pudo guardar el checklist (reintentando en el próximo cambio)."
+          "Could not save Trading System (retrying on next change).",
+          "No se pudo guardar el sistema de trading (reintentando en el próximo cambio)."
         )
       );
       lastPayloadRef.current = ""; // allow retry
@@ -1432,6 +1374,7 @@ export default function DashboardPage() {
       totalMonths,
       currentMonthIndex,
       monthTarget,
+      monthStartTarget: prevTarget,
       monthProgress,
       remainingToMonth,
       monthlyRate,
@@ -1482,6 +1425,57 @@ export default function DashboardPage() {
       remaining: Math.max(0, current.targetEquity - currentBalance),
     };
   }, [plan, manualPhases, currentBalance]);
+
+  const accountStage = useMemo(() => {
+    if (manualPhaseMetrics) {
+      return {
+        mode: "manual",
+        label: manualPhaseMetrics.current.title || L("Phase", "Fase"),
+        start: manualPhaseMetrics.prevTarget,
+        target: manualPhaseMetrics.current.targetEquity,
+        progress: manualPhaseMetrics.progress,
+        remaining: manualPhaseMetrics.remaining,
+      };
+    }
+    if (phaseMetrics) {
+      return {
+        mode: "monthly",
+        label: `${L("Month", "Mes")} ${phaseMetrics.currentMonthIndex}/${phaseMetrics.totalMonths}`,
+        start: phaseMetrics.monthStartTarget,
+        target: phaseMetrics.monthTarget,
+        progress: phaseMetrics.monthProgress,
+        remaining: phaseMetrics.remainingToMonth,
+      };
+    }
+    if (autoPhaseMetrics) {
+      return {
+        mode: "auto",
+        label: `${autoCadenceUnit} ${autoPhaseMetrics.index}/${autoPhaseMetrics.total}`,
+        start: autoPhaseMetrics.prevTarget,
+        target: autoPhaseMetrics.current.targetEquity,
+        progress: autoPhaseMetrics.progress,
+        remaining: autoPhaseMetrics.remaining,
+      };
+    }
+    return {
+      mode: "overall",
+      label: L("Full plan", "Plan completo"),
+      start: starting,
+      target,
+      progress: progressPct / 100,
+      remaining: Math.max(0, target - currentBalance),
+    };
+  }, [
+    L,
+    manualPhaseMetrics,
+    autoPhaseMetrics,
+    autoCadenceUnit,
+    phaseMetrics,
+    starting,
+    target,
+    progressPct,
+    currentBalance,
+  ]);
 
   async function ensurePhaseRuleId(userId: string): Promise<string | null> {
     if (!userId) return null;
@@ -1658,6 +1652,9 @@ export default function DashboardPage() {
   // ===== Render widgets =====
   const renderItem = (id: WidgetId) => {
     if (id === "progress") {
+      const stageProgressPct = Math.max(0, accountStage.progress * 100);
+      const stageClampedProgress = Math.max(0, Math.min(150, stageProgressPct));
+      const isStageBased = accountStage.mode !== "overall";
       return (
         <>
           <p className={widgetTitleClass}>
@@ -1669,12 +1666,31 @@ export default function DashboardPage() {
 
           {plan ? (
             <>
-              <p className="text-[16px] text-slate-300 mt-2">
-                {L("Start:", "Inicio:")}{" "}
-                <span className="text-slate-50 font-semibold">${starting.toFixed(2)}</span> ·{" "}
-                {L("Target:", "Meta:")}{" "}
-                <span className="text-emerald-400 font-semibold">${target.toFixed(2)}</span>
-              </p>
+              {isStageBased ? (
+                <>
+                  <p className="text-[12px] text-slate-500 mt-2">
+                    {L("Current stage:", "Etapa actual:")}{" "}
+                    <span className="text-slate-200 font-semibold">{accountStage.label}</span>
+                  </p>
+                  <p className="text-[16px] text-slate-300 mt-1">
+                    {L("Stage start:", "Inicio etapa:")}{" "}
+                    <span className="text-slate-50 font-semibold">${accountStage.start.toFixed(2)}</span> ·{" "}
+                    {L("Stage target:", "Meta etapa:")}{" "}
+                    <span className="text-emerald-400 font-semibold">${accountStage.target.toFixed(2)}</span>
+                  </p>
+                  <p className="text-[12px] text-slate-500 mt-1">
+                    {L("Plan target:", "Meta del plan:")}{" "}
+                    <span className="text-slate-200">${target.toFixed(2)}</span>
+                  </p>
+                </>
+              ) : (
+                <p className="text-[16px] text-slate-300 mt-2">
+                  {L("Start:", "Inicio:")}{" "}
+                  <span className="text-slate-50 font-semibold">${starting.toFixed(2)}</span> ·{" "}
+                  {L("Target:", "Meta:")}{" "}
+                  <span className="text-emerald-400 font-semibold">${target.toFixed(2)}</span>
+                </p>
+              )}
 
               <p className="text-[16px] text-slate-300 mt-1">
                 {L("Current balance:", "Balance actual:")}{" "}
@@ -1684,20 +1700,35 @@ export default function DashboardPage() {
               <div className="mt-4 h-4 w-full rounded-full bg-slate-800 overflow-hidden">
                 <div
                   className="h-4 bg-linear-to-r from-emerald-400 via-emerald-300 to-sky-400"
-                  style={{ width: `${clampedProgress}%` }}
+                  style={{ width: `${isStageBased ? stageClampedProgress : clampedProgress}%` }}
                 />
               </div>
 
               <p className="text-[14px] text-slate-400 mt-2 leading-snug">
-                {clampedProgress <= 0
+                {(isStageBased ? stageClampedProgress : clampedProgress) <= 0
+                  ? isStageBased
+                    ? L(
+                        "You are at 0% of this stage. Let the first sessions set the tone.",
+                        "Estás en 0% de esta etapa. Deja que las primeras sesiones marquen el ritmo."
+                      )
+                    : L(
+                        "You are at 0% of this plan. Let the first sessions set the tone.",
+                        "Estás en 0% de este plan. Deja que las primeras sesiones marquen el ritmo."
+                      )
+                  : (isStageBased ? stageClampedProgress : clampedProgress) < 100
+                  ? isStageBased
+                    ? L(
+                        `You have completed ${stageProgressPct.toFixed(1)}% of this stage target.`,
+                        `Has completado ${stageProgressPct.toFixed(1)}% de la meta de esta etapa.`
+                      )
+                    : L(
+                        `You have completed ${progressPct.toFixed(1)}% of your target based on data since this plan started.`,
+                        `Has completado ${progressPct.toFixed(1)}% de tu meta según los datos desde que inició este plan.`
+                      )
+                  : isStageBased
                   ? L(
-                      "You are at 0% of this plan. Let the first sessions set the tone.",
-                      "Estás en 0% de este plan. Deja que las primeras sesiones marquen el ritmo."
-                    )
-                  : clampedProgress < 100
-                  ? L(
-                      `You have completed ${progressPct.toFixed(1)}% of your target based on data since this plan started.`,
-                      `Has completado ${progressPct.toFixed(1)}% de tu meta según los datos desde que inició este plan.`
+                      "Stage completed. Keep momentum for the next target.",
+                      "Etapa completada. Mantén el impulso para la próxima meta."
                     )
                   : L(
                       "You have exceeded this target. Time to define the next structured goal.",
@@ -1891,111 +1922,6 @@ export default function DashboardPage() {
       );
     }
 
-    if (id === "plan-system") {
-      const { doList, dontList, orderList } = planSystemLists;
-      const hasItems = doList.length + dontList.length + orderList.length > 0;
-
-      return (
-        <>
-          <p className={widgetTitleClass}>
-            <span className={widgetTitleTextClass}>
-              {L("Trading System", "Sistema de trading")}
-            </span>
-            <span className={widgetDragHintClass}>⠿</span>
-          </p>
-
-          {!plan ? (
-            <p className="text-[14px] text-slate-500 mt-2">
-              {L("No growth plan set yet.", "Aún no tienes un plan de crecimiento.")}{" "}
-              <Link href="/growth-plan" data-tour="dash-edit-growth-plan" className="text-emerald-400 underline">
-                {L("Create your plan now.", "Crea tu plan ahora.")}
-              </Link>
-            </p>
-          ) : !hasItems ? (
-            <p className="text-[14px] text-slate-500 mt-2">
-              {L("Add your execution system (Do / Don't / Order) to activate this widget.", "Agrega tu sistema (Hacer / No hacer / Orden) para activar este widget.")}{" "}
-              <Link href="/growth-plan" data-tour="dash-edit-growth-plan" className="text-emerald-400 underline">
-                {L("Edit Growth Plan", "Editar Growth Plan")}
-              </Link>
-            </p>
-          ) : (
-            <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3">
-              <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-3">
-                <p className="text-[11px] uppercase tracking-[0.2em] text-emerald-300">
-                  {L("Do", "Hacer")}
-                </p>
-                <div className="mt-2 space-y-1 text-[13px] text-slate-200">
-                  {doList.length ? (
-                    doList.map((i) => (
-                      <label key={i.id} className="flex items-start gap-2 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={!!systemChecks[i.id]}
-                          onChange={() => toggleSystemCheck(i.id)}
-                          className="mt-1 h-4 w-4 accent-emerald-400"
-                        />
-                        <span className={systemChecks[i.id] ? "line-through opacity-80" : ""}>{i.text}</span>
-                      </label>
-                    ))
-                  ) : (
-                    <div className="text-slate-500">{L("—", "—")}</div>
-                  )}
-                </div>
-              </div>
-
-              <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-3">
-                <p className="text-[11px] uppercase tracking-[0.2em] text-rose-300">
-                  {L("Don't", "No hacer")}
-                </p>
-                <div className="mt-2 space-y-1 text-[13px] text-slate-200">
-                  {dontList.length ? (
-                    dontList.map((i) => (
-                      <label key={i.id} className="flex items-start gap-2 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={!!systemChecks[i.id]}
-                          onChange={() => toggleSystemCheck(i.id)}
-                          className="mt-1 h-4 w-4 accent-rose-400"
-                        />
-                        <span className={systemChecks[i.id] ? "line-through opacity-80" : ""}>{i.text}</span>
-                      </label>
-                    ))
-                  ) : (
-                    <div className="text-slate-500">{L("—", "—")}</div>
-                  )}
-                </div>
-              </div>
-
-              <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-3">
-                <p className="text-[11px] uppercase tracking-[0.2em] text-sky-300">
-                  {L("Order", "Orden")}
-                </p>
-                <div className="mt-2 space-y-1 text-[13px] text-slate-200">
-                  {orderList.length ? (
-                    orderList.map((i, idx) => (
-                      <label key={i.id} className="flex items-start gap-2 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={!!systemChecks[i.id]}
-                          onChange={() => toggleSystemCheck(i.id)}
-                          className="mt-1 h-4 w-4 accent-sky-400"
-                        />
-                        <span className={systemChecks[i.id] ? "line-through opacity-80" : ""}>
-                          {idx + 1}. {i.text}
-                        </span>
-                      </label>
-                    ))
-                  ) : (
-                    <div className="text-slate-500">{L("—", "—")}</div>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
-        </>
-      );
-    }
-
     if (id === "streak") {
       return (
         <>
@@ -2032,13 +1958,15 @@ export default function DashboardPage() {
 
     // ✅ Checklist widget (autosave)
     if (id === "actions") {
+      const { doList, dontList } = systemRules;
+      const hasRules = doList.length + dontList.length > 0;
       return (
         <>
           <div className="flex items-start justify-between gap-3">
             <div>
               <p className={widgetTitleClass}>
                 <span className={widgetTitleTextClass}>
-                  {L("Today's Checklist", "Checklist de hoy")}
+                  {L("Trading System", "Sistema de trading")}
                 </span>
                 <span className={widgetDragHintClass}>⠿</span>
               </p>
@@ -2058,27 +1986,90 @@ export default function DashboardPage() {
             <p className="text-[12px] text-rose-300 mt-2">{checklistSaveError}</p>
           ) : null}
 
-          <ul className="mt-3 space-y-2 text-[14px] text-slate-200">
-            {todayChecklist.slice(0, 12).map((it, idx) => (
-              <li key={idx}>
-                <button
-                  type="button"
-                  onClick={() => toggleChecklistItem(idx)}
-                  className="w-full flex items-start gap-3 text-left rounded-xl border border-slate-800 bg-slate-900/40 hover:bg-slate-900/70 transition px-3 py-2"
-                >
-                  <span
-                    className={`mt-0.5 inline-flex h-5 w-5 items-center justify-center rounded-md border ${
-                      it.done ? "bg-emerald-400 text-slate-950 border-emerald-300" : "border-slate-700 text-slate-400"
-                    }`}
-                  >
-                    {it.done ? "✓" : ""}
-                  </span>
+          <div className="mt-3 grid grid-cols-1 lg:grid-cols-3 gap-3">
+            <div className="lg:col-span-2">
+              <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">
+                {L("Steps (daily)", "Pasos (diarios)")}
+              </p>
+              {todayChecklist.length ? (
+                <ul className="mt-2 space-y-2 text-[14px] text-slate-200">
+                  {todayChecklist.slice(0, 12).map((it, idx) => (
+                    <li key={idx}>
+                      <button
+                        type="button"
+                        onClick={() => toggleChecklistItem(idx)}
+                        className="w-full flex items-start gap-3 text-left rounded-xl border border-slate-800 bg-slate-900/40 hover:bg-slate-900/70 transition px-3 py-2"
+                      >
+                        <span
+                          className={`mt-0.5 inline-flex h-5 w-5 items-center justify-center rounded-md border ${
+                            it.done ? "bg-emerald-400 text-slate-950 border-emerald-300" : "border-slate-700 text-slate-400"
+                          }`}
+                        >
+                          {it.done ? "✓" : ""}
+                        </span>
 
-                  <span className={it.done ? "line-through opacity-80" : ""}>{it.text}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
+                        <span className={it.done ? "line-through opacity-80" : ""}>{it.text}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="mt-2 text-[13px] text-slate-500">
+                  {L("Add your Trading System steps in Growth Plan.", "Agrega tus pasos del Sistema de Trading en el Growth Plan.")}{" "}
+                  <Link href="/growth-plan" data-tour="dash-edit-growth-plan" className="text-emerald-400 underline">
+                    {L("Edit Growth Plan", "Editar Growth Plan")}
+                  </Link>
+                </p>
+              )}
+            </div>
+
+            <div className="space-y-3">
+              <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-3">
+                <p className="text-[11px] uppercase tracking-[0.2em] text-emerald-300">
+                  {L("Do", "Hacer")}
+                </p>
+                <div className="mt-2 space-y-1 text-[13px] text-slate-200">
+                  {doList.length ? (
+                    doList.map((i) => (
+                      <div key={i.id} className="flex items-start gap-2">
+                        <span className="text-emerald-400">•</span>
+                        <span>{i.text}</span>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="text-slate-500">{L("—", "—")}</div>
+                  )}
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-3">
+                <p className="text-[11px] uppercase tracking-[0.2em] text-rose-300">
+                  {L("Don't", "No hacer")}
+                </p>
+                <div className="mt-2 space-y-1 text-[13px] text-slate-200">
+                  {dontList.length ? (
+                    dontList.map((i) => (
+                      <div key={i.id} className="flex items-start gap-2">
+                        <span className="text-rose-400">•</span>
+                        <span>{i.text}</span>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="text-slate-500">{L("—", "—")}</div>
+                  )}
+                </div>
+              </div>
+
+              {!hasRules && plan ? (
+                <p className="text-[12px] text-slate-500">
+                  {L("Add your Do/Don't rules in Growth Plan.", "Agrega tus reglas de Hacer/No hacer en el Growth Plan.")}{" "}
+                  <Link href="/growth-plan" data-tour="dash-edit-growth-plan" className="text-emerald-400 underline">
+                    {L("Edit Growth Plan", "Editar Growth Plan")}
+                  </Link>
+                </p>
+              ) : null}
+            </div>
+          </div>
 
           <Link
             href={`/journal/${rollingTodayStr}`}
@@ -2353,7 +2344,7 @@ export default function DashboardPage() {
             {Array.from({ length: 6 }).map((_, rowIdx) => (
               <div key={rowIdx} className="grid grid-cols-[auto_repeat(6,minmax(0,1fr))] gap-2">
                 <div className="flex items-center pl-1 text-[12px] text-emerald-300 font-semibold">
-                  {weekRowNumbers[rowIdx] ? `W${weekRowNumbers[rowIdx]}` : ""}
+                  {weekRowLabelByIndex.get(rowIdx) ? `W${weekRowLabelByIndex.get(rowIdx)}` : ""}
                 </div>
 
                 {[0, 1, 2, 3, 4, 5].map((dow) => {
@@ -2539,6 +2530,10 @@ export default function DashboardPage() {
     }
 
     if (id === "weekly") {
+      const isCurrentMonthView =
+        viewDate &&
+        viewDate.getFullYear() === new Date().getFullYear() &&
+        viewDate.getMonth() === new Date().getMonth();
       return (
         <>
           <p className={widgetTitleClass}>
@@ -2554,14 +2549,15 @@ export default function DashboardPage() {
             )}
           </p>
 
-          {weeks.map((w) => {
-            const weekNumber = weekRowNumbers[w.index] ?? w.index + 1;
+          {weekRows.map((row) => {
+            const w = weeks[row.rowIndex];
+            const weekNumber = row.weekOfYear;
             const label = `${L("Week", "Semana")} ${weekNumber}`;
-            const isCurrentWeek = weekNumber === currentWeekOfYear;
+            const isCurrentWeek = isCurrentMonthView && weekNumber === currentWeekOfYear;
 
             if (w.daysWithTrades === 0 && w.pnl === 0) {
               return (
-                <div key={w.index} className="flex items-center justify-between text-[14px] text-slate-600">
+                <div key={row.rowIndex} className="flex items-center justify-between text-[14px] text-slate-600">
                   <span className="text-slate-500">{label}</span>
                   <span>$0 · 0 {L("days", "días")}</span>
                 </div>
@@ -2570,7 +2566,7 @@ export default function DashboardPage() {
 
             const positive = w.pnl > 0;
             return (
-              <div key={w.index} className="flex items-center justify-between text-[14px]">
+              <div key={row.rowIndex} className="flex items-center justify-between text-[14px]">
                 <span className={isCurrentWeek ? "text-emerald-300 font-semibold" : "text-emerald-200"}>{label}</span>
                 <span className={positive ? "text-emerald-400 font-semibold" : "text-sky-400 font-semibold"}>
                   {positive ? "+" : "-"}${Math.abs(w.pnl).toFixed(2)} · {w.daysWithTrades}{" "}

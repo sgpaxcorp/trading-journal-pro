@@ -12,24 +12,40 @@ type PlanId = "core" | "advanced";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {});
 const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET!;
-const ADDON_KEY = "option_flow";
-const ADDON_PRICE_ID = process.env.STRIPE_PRICE_OPTIONFLOW_MONTHLY ?? "";
+const ADDON_CONFIG = {
+  option_flow: {
+    monthly: process.env.STRIPE_PRICE_OPTIONFLOW_MONTHLY ?? "",
+    annual: process.env.STRIPE_PRICE_OPTIONFLOW_ANNUAL ?? "",
+  },
+  broker_sync: {
+    monthly: process.env.STRIPE_PRICE_BROKER_SYNC_MONTHLY ?? "",
+    annual: process.env.STRIPE_PRICE_BROKER_SYNC_ANNUAL ?? "",
+  },
+} as const;
+type AddonKey = keyof typeof ADDON_CONFIG;
+
+const ADDON_PRICE_ID_TO_KEY = new Map<string, AddonKey>();
+Object.entries(ADDON_CONFIG).forEach(([key, cfg]) => {
+  if (cfg.monthly) ADDON_PRICE_ID_TO_KEY.set(cfg.monthly, key as AddonKey);
+  if (cfg.annual) ADDON_PRICE_ID_TO_KEY.set(cfg.annual, key as AddonKey);
+});
 
 async function upsertEntitlement(params: {
   userId: string;
+  entitlementKey: AddonKey;
   status: string;
   stripeCustomerId?: string | null;
   stripeSubscriptionId?: string | null;
   stripePriceId?: string | null;
 }) {
-  const { userId, status, stripeCustomerId, stripeSubscriptionId, stripePriceId } = params;
+  const { userId, entitlementKey, status, stripeCustomerId, stripeSubscriptionId, stripePriceId } = params;
   if (!userId) return;
 
   try {
     await supabaseAdmin.from("user_entitlements").upsert(
       {
         user_id: userId,
-        entitlement_key: ADDON_KEY,
+        entitlement_key: entitlementKey,
         status,
         source: "stripe",
         stripe_customer_id: stripeCustomerId ?? null,
@@ -85,10 +101,15 @@ async function resolvePartnerUserIdByCode(code?: string | null): Promise<string 
   return String((data as any).user_id ?? "") || null;
 }
 
+function resolveAddonKeyFromPriceId(priceId?: string | null): AddonKey | null {
+  if (!priceId) return null;
+  return ADDON_PRICE_ID_TO_KEY.get(String(priceId)) ?? null;
+}
+
 function isAddonPurchase(params: { addonKey?: string | null; priceId?: string | null }) {
-  const addonKey = String(params.addonKey || "");
+  const addonKey = String(params.addonKey || "") as AddonKey;
   const priceId = String(params.priceId || "");
-  return addonKey === ADDON_KEY || (!!ADDON_PRICE_ID && priceId === ADDON_PRICE_ID);
+  return Boolean(ADDON_CONFIG[addonKey]) || (!!priceId && !!resolveAddonKeyFromPriceId(priceId));
 }
 
 function isTruthy(value: unknown) {
@@ -96,9 +117,21 @@ function isTruthy(value: unknown) {
   return v === "1" || v === "true" || v === "yes";
 }
 
-function hasAddonLineItem(subscription?: Stripe.Subscription | null) {
-  if (!subscription || !ADDON_PRICE_ID) return false;
-  return subscription.items.data.some((item) => item.price?.id === ADDON_PRICE_ID);
+function hasAddonLineItem(subscription: Stripe.Subscription | null | undefined, addonKey: AddonKey) {
+  if (!subscription) return false;
+  const cfg = ADDON_CONFIG[addonKey];
+  if (!cfg) return false;
+  const ids = new Set([cfg.monthly, cfg.annual].filter(Boolean));
+  return subscription.items.data.some((item) => item.price?.id && ids.has(item.price.id));
+}
+
+function resolveAddonPriceId(subscription: Stripe.Subscription | null | undefined, addonKey: AddonKey) {
+  const cfg = ADDON_CONFIG[addonKey];
+  if (!cfg) return null;
+  if (!subscription) return cfg.monthly || cfg.annual || null;
+  const ids = new Set([cfg.monthly, cfg.annual].filter(Boolean));
+  const hit = subscription.items.data.find((item) => item.price?.id && ids.has(item.price.id));
+  return hit?.price?.id ?? cfg.monthly || cfg.annual || null;
 }
 
 function normalizeBillingCycle(raw?: string | null): "monthly" | "annual" | null {
@@ -215,6 +248,7 @@ export async function POST(req: NextRequest) {
 
         const sessionAddonKey = session.metadata?.addonKey as string | undefined;
         const sessionAddonOptionFlow = isTruthy(session.metadata?.addonOptionFlow);
+        const sessionAddonBrokerSync = isTruthy(session.metadata?.addonBrokerSync);
 
         // 🔹 Tomar plan de varias posibles keys
         let planIdMeta =
@@ -268,21 +302,34 @@ export async function POST(req: NextRequest) {
           subscription?.metadata?.addonKey as string | undefined;
         const subPriceId = subscription?.items?.data?.[0]?.price?.id ?? null;
         const subAddonOptionFlow = isTruthy(subscription?.metadata?.addonOptionFlow);
+        const subAddonBrokerSync = isTruthy(subscription?.metadata?.addonBrokerSync);
         const includesOptionFlowAddon =
-          sessionAddonOptionFlow || subAddonOptionFlow || hasAddonLineItem(subscription);
+          sessionAddonOptionFlow || subAddonOptionFlow || hasAddonLineItem(subscription, "option_flow");
+        const includesBrokerSyncAddon =
+          sessionAddonBrokerSync || subAddonBrokerSync || hasAddonLineItem(subscription, "broker_sync");
 
-        // ✅ Add-on flow (Option Flow)
+        // ✅ Add-on flow (standalone add-on checkout)
         if (isAddonPurchase({ addonKey: sessionAddonKey || subAddonKey, priceId: subPriceId })) {
+          const keyFromSession =
+            sessionAddonKey && ADDON_CONFIG[sessionAddonKey as AddonKey]
+              ? (sessionAddonKey as AddonKey)
+              : undefined;
+          const keyFromSub =
+            subAddonKey && ADDON_CONFIG[subAddonKey as AddonKey]
+              ? (subAddonKey as AddonKey)
+              : undefined;
+          const resolvedKey = keyFromSession || keyFromSub || resolveAddonKeyFromPriceId(subPriceId);
           const resolvedUserId =
             userId || (await resolveUserIdByEmail(email)) || (await resolveUserIdByCustomer(customerId));
 
-          if (resolvedUserId) {
+          if (resolvedUserId && resolvedKey) {
             await upsertEntitlement({
               userId: resolvedUserId,
+              entitlementKey: resolvedKey,
               status: "active",
               stripeCustomerId: customerId,
               stripeSubscriptionId: subscriptionId ?? null,
-              stripePriceId: subPriceId ?? ADDON_PRICE_ID ?? null,
+              stripePriceId: subPriceId ?? resolveAddonPriceId(subscription, resolvedKey),
             });
           } else {
             console.warn("[WEBHOOK] Add-on purchase without userId/email", {
@@ -343,17 +390,30 @@ export async function POST(req: NextRequest) {
                 email
               );
 
-              if (includesOptionFlowAddon) {
+              if (includesOptionFlowAddon || includesBrokerSyncAddon) {
                 const resolvedUserId =
                   (await resolveUserIdByEmail(email)) || (await resolveUserIdByCustomer(customerId));
-                if (resolvedUserId) {
-                  await upsertEntitlement({
-                    userId: resolvedUserId,
-                    status: "active",
-                    stripeCustomerId: customerId,
-                    stripeSubscriptionId: subscriptionId ?? null,
-                    stripePriceId: ADDON_PRICE_ID || null,
-                  });
+                if (resolvedUserId && subscription) {
+                  if (includesOptionFlowAddon) {
+                    await upsertEntitlement({
+                      userId: resolvedUserId,
+                      entitlementKey: "option_flow",
+                      status: "active",
+                      stripeCustomerId: customerId,
+                      stripeSubscriptionId: subscriptionId ?? null,
+                      stripePriceId: resolveAddonPriceId(subscription, "option_flow"),
+                    });
+                  }
+                  if (includesBrokerSyncAddon) {
+                    await upsertEntitlement({
+                      userId: resolvedUserId,
+                      entitlementKey: "broker_sync",
+                      status: "active",
+                      stripeCustomerId: customerId,
+                      stripeSubscriptionId: subscriptionId ?? null,
+                      stripePriceId: resolveAddonPriceId(subscription, "broker_sync"),
+                    });
+                  }
                 }
               }
 
@@ -459,15 +519,7 @@ export async function POST(req: NextRequest) {
           );
         }
 
-        if (includesOptionFlowAddon) {
-          await upsertEntitlement({
-            userId,
-            status: "active",
-            stripeCustomerId: customerId,
-            stripeSubscriptionId: subscriptionId ?? null,
-            stripePriceId: ADDON_PRICE_ID || null,
-          });
-        }
+        // Entitlements for add-ons handled below (includes option flow + broker sync)
 
         // 3) Enviar emails si tenemos email
         if (email) {
@@ -491,6 +543,33 @@ export async function POST(req: NextRequest) {
           }
         }
 
+        if (includesOptionFlowAddon || includesBrokerSyncAddon) {
+          const resolvedUserId =
+            userId || (await resolveUserIdByEmail(email)) || (await resolveUserIdByCustomer(customerId));
+          if (resolvedUserId && subscription) {
+            if (includesOptionFlowAddon) {
+              await upsertEntitlement({
+                userId: resolvedUserId,
+                entitlementKey: "option_flow",
+                status: "active",
+                stripeCustomerId: customerId,
+                stripeSubscriptionId: subscription.id,
+                stripePriceId: resolveAddonPriceId(subscription, "option_flow"),
+              });
+            }
+            if (includesBrokerSyncAddon) {
+              await upsertEntitlement({
+                userId: resolvedUserId,
+                entitlementKey: "broker_sync",
+                status: "active",
+                stripeCustomerId: customerId,
+                stripeSubscriptionId: subscription.id,
+                stripePriceId: resolveAddonPriceId(subscription, "broker_sync"),
+              });
+            }
+          }
+        }
+
         console.log(
           `[WEBHOOK] Subscription active for user ${userId} with plan ${planId}.`
         );
@@ -507,7 +586,11 @@ export async function POST(req: NextRequest) {
         const includesOptionFlowAddon =
           standaloneAddon ||
           isTruthy(subscription.metadata?.addonOptionFlow) ||
-          hasAddonLineItem(subscription);
+          hasAddonLineItem(subscription, "option_flow");
+        const includesBrokerSyncAddon =
+          standaloneAddon ||
+          isTruthy(subscription.metadata?.addonBrokerSync) ||
+          hasAddonLineItem(subscription, "broker_sync");
 
         console.log(
           "[WEBHOOK] customer.subscription.deleted:",
@@ -516,18 +599,24 @@ export async function POST(req: NextRequest) {
         );
 
         if (standaloneAddon) {
+          const keyFromMeta =
+            addonKey && ADDON_CONFIG[addonKey as AddonKey]
+              ? (addonKey as AddonKey)
+              : undefined;
+          const resolvedKey = keyFromMeta || resolveAddonKeyFromPriceId(subPriceId);
           const resolvedUserId =
             (subscription.metadata?.supabaseUserId as string | undefined) ||
             (subscription.metadata?.userId as string | undefined) ||
             (await resolveUserIdByCustomer(customerId));
 
-          if (resolvedUserId) {
+          if (resolvedUserId && resolvedKey) {
             await upsertEntitlement({
               userId: resolvedUserId,
+              entitlementKey: resolvedKey,
               status: "canceled",
               stripeCustomerId: customerId,
               stripeSubscriptionId: subscription.id,
-              stripePriceId: subPriceId ?? ADDON_PRICE_ID ?? null,
+              stripePriceId: subPriceId ?? resolveAddonPriceId(subscription, resolvedKey),
             });
           }
 
@@ -572,19 +661,32 @@ export async function POST(req: NextRequest) {
           }
         }
 
-        if (includesOptionFlowAddon) {
+        if (includesOptionFlowAddon || includesBrokerSyncAddon) {
           const resolvedUserId =
             (subscription.metadata?.supabaseUserId as string | undefined) ||
             (subscription.metadata?.userId as string | undefined) ||
             (await resolveUserIdByCustomer(customerId));
           if (resolvedUserId) {
-            await upsertEntitlement({
-              userId: resolvedUserId,
-              status: "canceled",
-              stripeCustomerId: customerId,
-              stripeSubscriptionId: subscription.id,
-              stripePriceId: ADDON_PRICE_ID || null,
-            });
+            if (includesOptionFlowAddon) {
+              await upsertEntitlement({
+                userId: resolvedUserId,
+                entitlementKey: "option_flow",
+                status: "canceled",
+                stripeCustomerId: customerId,
+                stripeSubscriptionId: subscription.id,
+                stripePriceId: resolveAddonPriceId(subscription, "option_flow"),
+              });
+            }
+            if (includesBrokerSyncAddon) {
+              await upsertEntitlement({
+                userId: resolvedUserId,
+                entitlementKey: "broker_sync",
+                status: "canceled",
+                stripeCustomerId: customerId,
+                stripeSubscriptionId: subscription.id,
+                stripePriceId: resolveAddonPriceId(subscription, "broker_sync"),
+              });
+            }
           }
         }
 
@@ -601,7 +703,11 @@ export async function POST(req: NextRequest) {
         const includesOptionFlowAddon =
           standaloneAddon ||
           isTruthy(subscription.metadata?.addonOptionFlow) ||
-          hasAddonLineItem(subscription);
+          hasAddonLineItem(subscription, "option_flow");
+        const includesBrokerSyncAddon =
+          standaloneAddon ||
+          isTruthy(subscription.metadata?.addonBrokerSync) ||
+          hasAddonLineItem(subscription, "broker_sync");
 
         console.log(
           "[WEBHOOK] customer.subscription.updated:",
@@ -610,18 +716,24 @@ export async function POST(req: NextRequest) {
         );
 
         if (standaloneAddon) {
+          const keyFromMeta =
+            addonKey && ADDON_CONFIG[addonKey as AddonKey]
+              ? (addonKey as AddonKey)
+              : undefined;
+          const resolvedKey = keyFromMeta || resolveAddonKeyFromPriceId(subPriceId);
           const resolvedUserId =
             (subscription.metadata?.supabaseUserId as string | undefined) ||
             (subscription.metadata?.userId as string | undefined) ||
             (await resolveUserIdByCustomer(customerId));
 
-          if (resolvedUserId) {
+          if (resolvedUserId && resolvedKey) {
             await upsertEntitlement({
               userId: resolvedUserId,
+              entitlementKey: resolvedKey,
               status,
               stripeCustomerId: customerId,
               stripeSubscriptionId: subscription.id,
-              stripePriceId: subPriceId ?? ADDON_PRICE_ID ?? null,
+              stripePriceId: subPriceId ?? resolveAddonPriceId(subscription, resolvedKey),
             });
           }
 
@@ -672,19 +784,32 @@ export async function POST(req: NextRequest) {
           }
         }
 
-        if (includesOptionFlowAddon) {
+        if (includesOptionFlowAddon || includesBrokerSyncAddon) {
           const resolvedUserId =
             (subscription.metadata?.supabaseUserId as string | undefined) ||
             (subscription.metadata?.userId as string | undefined) ||
             (await resolveUserIdByCustomer(customerId));
           if (resolvedUserId) {
-            await upsertEntitlement({
-              userId: resolvedUserId,
-              status,
-              stripeCustomerId: customerId,
-              stripeSubscriptionId: subscription.id,
-              stripePriceId: ADDON_PRICE_ID || null,
-            });
+            if (includesOptionFlowAddon) {
+              await upsertEntitlement({
+                userId: resolvedUserId,
+                entitlementKey: "option_flow",
+                status,
+                stripeCustomerId: customerId,
+                stripeSubscriptionId: subscription.id,
+                stripePriceId: resolveAddonPriceId(subscription, "option_flow"),
+              });
+            }
+            if (includesBrokerSyncAddon) {
+              await upsertEntitlement({
+                userId: resolvedUserId,
+                entitlementKey: "broker_sync",
+                status,
+                stripeCustomerId: customerId,
+                stripeSubscriptionId: subscription.id,
+                stripePriceId: resolveAddonPriceId(subscription, "broker_sync"),
+              });
+            }
           }
         }
 

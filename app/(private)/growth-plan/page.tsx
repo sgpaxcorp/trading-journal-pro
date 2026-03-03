@@ -51,6 +51,43 @@ const todayLong = () => {
   return new Date().toLocaleDateString(locale, { year: "numeric", month: "long", day: "2-digit" });
 };
 
+const isoDate = (d = new Date()) => {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+};
+
+async function pushInboxEvent(params: {
+  userId: string;
+  title: string;
+  message: string;
+  category?: string;
+}) {
+  const { userId, title, message, category } = params;
+  if (!userId || !message) return;
+  try {
+    const session = await supabaseBrowser.auth.getSession();
+    const token = session?.data?.session?.access_token;
+    if (!token) return;
+
+    await fetch("/api/alerts/inbox", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        title,
+        message,
+        category: category ?? "ai_coach",
+      }),
+    });
+  } catch (err) {
+    console.warn("[GrowthPlan] inbox event failed:", err);
+  }
+}
+
 function toDateOnlyStr(value: unknown): string | null {
   if (!value) return null;
   const s = String(value);
@@ -153,14 +190,20 @@ function buildBalancedPlanSuggested(
 type CadenceTarget = {
   targetEquity: number;
   targetDate: string | null;
+  monthIndex?: number;
+  weekIndex?: number;
+  weeksInMonth?: number;
+  monthGoal?: number;
+  monthLabel?: string;
+  monthStartBalance?: number;
+  monthEndBalance?: number;
 };
 
-function buildCadenceTargets(
+function buildWeeklyMilestonesFromMonthlyGoals(
   starting: number,
   target: number,
   startIso: string,
   targetIso: string,
-  cadence: "weekly" | "monthly" | "quarterly" | "biannual",
   lossDaysPerWeek: number,
   maxDailyLossPercent: number
 ): CadenceTarget[] {
@@ -168,9 +211,6 @@ function buildCadenceTargets(
   const tradingDays = listTradingDaysBetween(startIso, targetIso);
   if (tradingDays.length === 0) return [];
   const totalTradingDays = tradingDays.length;
-  const cadenceTradingDays =
-    cadence === "weekly" ? 5 : cadence === "monthly" ? 21 : cadence === "quarterly" ? 63 : 126;
-  const phasesCount = Math.max(1, Math.ceil(totalTradingDays / cadenceTradingDays));
 
   const plan = buildBalancedPlanSuggested(
     starting,
@@ -182,22 +222,60 @@ function buildCadenceTargets(
   const planRows = plan.rows;
   if (planRows.length === 0) return [];
 
-  const milestones: CadenceTarget[] = [];
-  for (let i = 1; i <= phasesCount; i++) {
-    const dayIndex =
-      i === phasesCount
-        ? totalTradingDays - 1
-        : Math.min(totalTradingDays - 1, i * cadenceTradingDays - 1);
-    const targetEquity = Math.round(
-      planRows[dayIndex]?.endBalance ?? planRows[planRows.length - 1]?.endBalance ?? target
-    );
-    const targetDate = tradingDays[dayIndex] ?? tradingDays[tradingDays.length - 1] ?? targetIso;
-    milestones.push({ targetEquity, targetDate });
+  const monthMap = new Map<string, number[]>();
+  for (let i = 0; i < tradingDays.length; i++) {
+    const monthKey = tradingDays[i]?.slice(0, 7) ?? "";
+    if (!monthKey) continue;
+    const list = monthMap.get(monthKey) ?? [];
+    list.push(i);
+    monthMap.set(monthKey, list);
   }
+
+  const milestones: CadenceTarget[] = [];
+  let monthIndex = 0;
+  for (const [monthKey, indices] of monthMap.entries()) {
+    if (!indices.length) continue;
+    monthIndex += 1;
+    const startIndex = indices[0];
+    const endIndex = indices[indices.length - 1];
+    const monthStartBalance = startIndex > 0 ? planRows[startIndex - 1]?.endBalance ?? starting : starting;
+    const monthEndBalance = planRows[endIndex]?.endBalance ?? planRows[planRows.length - 1]?.endBalance ?? target;
+    const monthGoalProfit = Math.round(monthEndBalance - monthStartBalance);
+    const weeksInMonth = Math.max(1, Math.ceil(indices.length / 5));
+
+    for (let w = 1; w <= weeksInMonth; w++) {
+      const weekEndIndex = Math.min(endIndex, startIndex + w * 5 - 1);
+      const fraction = w / weeksInMonth;
+      const targetEquity = Math.round(
+        monthStartBalance + (monthEndBalance - monthStartBalance) * fraction
+      );
+      const targetDate = tradingDays[weekEndIndex] ?? tradingDays[tradingDays.length - 1] ?? targetIso;
+      milestones.push({
+        targetEquity,
+        targetDate,
+        monthIndex,
+        weekIndex: w,
+        weeksInMonth,
+        monthGoal: monthGoalProfit,
+        monthLabel: monthKey,
+        monthStartBalance,
+        monthEndBalance,
+      });
+    }
+  }
+
   return milestones;
 }
 
-async function loadLogoDataURL(src = "/logo.png"): Promise<string | null> {
+function formatMonthLabel(monthKey: string, lang: "en" | "es"): string {
+  if (!monthKey) return "";
+  const d = new Date(`${monthKey}-01T00:00:00Z`);
+  if (Number.isNaN(d.getTime())) return monthKey;
+  const locale = lang === "es" ? "es-ES" : "en-US";
+  return new Intl.DateTimeFormat(locale, { month: "short", year: "numeric" }).format(d);
+}
+
+async function loadLogoDataURL(src = "/neurotrader%20logo%20for%20Web.png"): Promise<string | null> {
   try {
     const res = await fetch(src);
     if (!res.ok) return null;
@@ -231,11 +309,17 @@ async function generateAndDownloadPDF(
   const L = (en: string, es: string) => (lang === "es" ? es : en);
 
   let y = 48;
-  const logo = await loadLogoDataURL("/logo.png");
+  const logo = await loadLogoDataURL();
   if (logo) {
     try {
-      doc.addImage(logo, "PNG", M, y, 128, 36, undefined, "FAST");
-      y += 56;
+      const props = doc.getImageProperties(logo);
+      const maxW = 200;
+      const maxH = 48;
+      const scale = Math.min(maxW / props.width, maxH / props.height);
+      const w = props.width * scale;
+      const h = props.height * scale;
+      doc.addImage(logo, "PNG", M, y, w, h, undefined, "FAST");
+      y += h + 20;
     } catch {
       y += 8;
     }
@@ -270,27 +354,16 @@ async function generateAndDownloadPDF(
   );
   chunks.push(
     L(
-      `This plan computes the average goal-day return needed to finish exactly at your target, while loss-days apply your max daily loss (${meta.maxDailyLossPercent}%).`,
-      `Este plan calcula el retorno promedio necesario en días de meta para terminar exactamente en el objetivo, mientras que los días de pérdida aplican tu pérdida diaria máxima (${meta.maxDailyLossPercent}%).`
+      `The schedule below shows a suggested path based on your limits.`,
+      `El calendario de abajo muestra una ruta sugerida basada en tus límites.`
     )
   );
   if (meta.explainRequired) {
-    const { goalDays, totalLossDays, prodLoss } = meta.explainRequired;
-    const required = meta.requiredGoalPct ?? 0;
+    const { goalDays, totalLossDays } = meta.explainRequired;
     chunks.push(
       L(
-        `Weekly pattern assumes ${meta.lossDaysPerWeek} loss day(s) per 5 trading days → ${totalLossDays} loss day(s) and ${goalDays} goal-day(s).`,
-        `El patrón semanal asume ${meta.lossDaysPerWeek} día(s) de pérdida por cada 5 días de trading → ${totalLossDays} día(s) de pérdida y ${goalDays} día(s) de meta.`
-      )
-    );
-    chunks.push(
-      L(
-        `Required r satisfies: (1 + r)^G = Target / (Start × Π(1 − L)). With Π(1 − L) ≈ ${prodLoss.toFixed(
-          6
-        )}, r ≈ ${required.toFixed(3)}% (applied on goal-days only).`,
-        `El r requerido cumple: (1 + r)^G = Objetivo / (Inicio × Π(1 − L)). Con Π(1 − L) ≈ ${prodLoss.toFixed(
-          6
-        )}, r ≈ ${required.toFixed(3)}% (aplicado solo en días de meta).`
+        `Weekly pattern assumes ${meta.lossDaysPerWeek} loss day(s) per 5 trading days -> ${totalLossDays} loss day(s) and ${goalDays} goal-day(s).`,
+        `El patrón semanal asume ${meta.lossDaysPerWeek} día(s) de pérdida por cada 5 días de trading -> ${totalLossDays} día(s) de pérdida y ${goalDays} día(s) de meta.`
       )
     );
   }
@@ -300,12 +373,31 @@ async function generateAndDownloadPDF(
   doc.text(wrapped, M, y);
   y += 18 + wrapped.length * 16;
 
+  doc.setFontSize(10);
+  doc.setTextColor("#64748b");
+  const disclaimer = L(
+    "Projection only. This is not investment advice.",
+    "Solo proyección. Esto no es recomendación de inversión."
+  );
+  const disclaimerWrapped = doc.splitTextToSize(disclaimer, 612 - M * 2);
+  doc.text(disclaimerWrapped, M, y);
+  y += 18 + disclaimerWrapped.length * 14;
+  doc.setTextColor("#0f172a");
+  doc.setFontSize(12);
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(13);
+  doc.text(L("Plan summary", "Resumen de tu plan"), M, y);
+  y += 14;
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(12);
+
   const summaryBody: Array<[string, string]> = [
     [L("Starting balance", "Balance inicial"), currency(meta.startingBalance)],
     [L("Target balance", "Balance objetivo"), currency(meta.targetBalance || 0)],
     [L("Trading days", "Días de trading"), String(meta.tradingDays)],
-    [L("Required goal-day %", "% requerido en días de meta"), `${meta.requiredGoalPct.toFixed(3)}%`],
-    [L("Max daily loss (%)", "Pérdida diaria máx (%)"), `${meta.maxDailyLossPercent}%`],
+    [L("Estimated daily goal (goal-days only)", "Meta diaria estimada (solo días de meta)"), `${meta.requiredGoalPct.toFixed(3)}%`],
+    [L("Max daily loss (%)", "Pérdida diaria máxima (%)"), `${meta.maxDailyLossPercent}%`],
     [L("Loss days per week", "Días de pérdida por semana"), String(meta.lossDaysPerWeek)],
   ];
 
@@ -318,6 +410,20 @@ async function generateAndDownloadPDF(
     columns: [{ header: L("Field", "Campo") }, { header: L("Value", "Valor") }],
     theme: "grid",
   });
+
+  y = (doc as any).lastAutoTable?.finalY ? (doc as any).lastAutoTable.finalY + 18 : y + 24;
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(13);
+  doc.text(L("How to read the table", "Cómo leer la tabla"), M, y);
+  y += 16;
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(11);
+  const guide = L(
+    "Each row is one trading day. Type shows Goal-day or Loss-day. % applied is the estimated daily goal for goal-days. Expected (USD) is the projected result for that day. Ending balance is the projected balance after the day.",
+    "Cada fila es un día de trading. Tipo indica Día de Meta o Día de Pérdida. % aplicado es la meta diaria estimada solo en días de meta. Esperado (USD) es el resultado proyectado para ese día. Balance final es el balance estimado al cierre."
+  );
+  const guideWrapped = doc.splitTextToSize(guide, 612 - M * 2);
+  doc.text(guideWrapped, M, y);
 
   doc.addPage();
   const tableData = rows.map((r) => [
@@ -332,7 +438,7 @@ async function generateAndDownloadPDF(
     margin: { left: M, right: M, top: 56 },
     styles: { fontSize: 12, cellPadding: 6 },
     headStyles: { fillColor: [241, 245, 249], textColor: [15, 23, 42] },
-    head: [[L("Day", "Día"), L("Type", "Tipo"), L("% applied", "% aplicado"), L("Expected (USD)", "Esperado (USD)"), L("Ending balance (USD)", "Balance final (USD)")]],
+    head: [[L("Day", "Día"), L("Type", "Tipo de día"), L("% applied", "Meta diaria (%)"), L("Expected (USD)", "Esperado (USD)"), L("Ending balance (USD)", "Balance final (USD)")]],
     body: tableData,
     theme: "grid",
     didDrawPage: () => {
@@ -385,38 +491,6 @@ function uuid() {
 
 function isoToday(): string {
   return new Date().toISOString().slice(0, 10);
-}
-
-function monthsBetween(startIso: string, endIso: string): number {
-  const s = new Date(startIso);
-  const e = new Date(endIso);
-  if (!Number.isFinite(s.getTime()) || !Number.isFinite(e.getTime())) return 0;
-  return (e.getFullYear() - s.getFullYear()) * 12 + (e.getMonth() - s.getMonth());
-}
-
-function addMonthsToIso(startIso: string, monthsToAdd: number): string {
-  const d = new Date(startIso);
-  if (!Number.isFinite(d.getTime())) return startIso;
-  const y = d.getFullYear();
-  const m = d.getMonth();
-  const day = Math.min(d.getDate(), 28); // avoid overflow
-  const next = new Date(y, m + monthsToAdd, day);
-  return next.toISOString().slice(0, 10);
-}
-
-function addDaysToIso(startIso: string, daysToAdd: number): string {
-  const d = new Date(startIso);
-  if (!Number.isFinite(d.getTime())) return startIso;
-  const next = new Date(d.getFullYear(), d.getMonth(), d.getDate() + daysToAdd);
-  return next.toISOString().slice(0, 10);
-}
-
-function daysBetweenIso(startIso: string, endIso: string): number {
-  const s = new Date(startIso);
-  const e = new Date(endIso);
-  if (!Number.isFinite(s.getTime()) || !Number.isFinite(e.getTime())) return 0;
-  const ms = e.getTime() - s.getTime();
-  return Math.max(0, Math.floor(ms / 86400000));
 }
 
 function toYMD(date: Date): string {
@@ -513,18 +587,18 @@ const STEP_ORDER: WizardStep[] = [0, 1, 2, 3, 4];
 
 const STEP_TITLES_EN: Record<WizardStep, string> = {
   0: "Goal & Numbers",
-  1: "Prepare",
+  1: "Trading System",
   2: "Analysis",
   3: "Journal",
-  4: "Execution System & Strategy",
+  4: "Strategy & Rules",
 };
 
 const STEP_TITLES_ES: Record<WizardStep, string> = {
   0: "Meta y números",
-  1: "Preparación",
+  1: "Sistema de Trading",
   2: "Análisis",
   3: "Journal",
-  4: "Sistema de ejecución y estrategia",
+  4: "Estrategia y reglas",
 };
 
 type AssistantLang = "en" | "es"; // stored in Supabase (inside growth plan record)
@@ -558,8 +632,6 @@ export default function GrowthPlanPage() {
   const stepTitles = isEs ? STEP_TITLES_ES : STEP_TITLES_EN;
   const inputBase =
     "w-full rounded-lg bg-slate-950 border border-slate-700 text-slate-100 focus:border-emerald-400 outline-none px-2.5 py-1.5 text-sm";
-  const inputSmall =
-    "rounded-lg border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-200";
 
   const [step, setStep] = useState<WizardStep>(0);
   const [error, setError] = useState("");
@@ -577,7 +649,6 @@ export default function GrowthPlanPage() {
   const [targetBalanceStr, setTargetBalanceStr] = useState("");
   const [targetDateStr, setTargetDateStr] = useState("");
   const planMode: "auto" = "auto";
-  const [phaseCadence, setPhaseCadence] = useState<"weekly" | "monthly" | "quarterly" | "biannual">("monthly");
   const [tradingDaysTouched, setTradingDaysTouched] = useState(false);
   const [guidedMode, setGuidedMode] = useState(true);
   const [maxDailyLossPercentStr, setMaxDailyLossPercentStr] = useState("");
@@ -626,11 +697,11 @@ export default function GrowthPlanPage() {
   useEffect(() => {
     if (!targetDateStr) return;
     if (tradingDaysTouched) return;
-    const startIso = planStartDate || isoToday();
+    const startIso = isoToday();
     const count = computeTradingDaysBetween(startIso, targetDateStr);
     if (!Number.isFinite(count) || count <= 0) return;
     setTradingDaysStr(String(count));
-  }, [targetDateStr, planStartDate, tradingDaysTouched]);
+  }, [targetDateStr, tradingDaysTouched]);
 
   type GuidedTask = {
     id: string;
@@ -640,7 +711,7 @@ export default function GrowthPlanPage() {
     optional?: boolean;
   };
 
-  const prepareCount = useMemo(
+  const tradingSystemCount = useMemo(
     () => (stepsData.prepare?.checklist ?? []).filter((i) => (i.text ?? "").trim().length > 0).length,
     [stepsData.prepare]
   );
@@ -662,10 +733,6 @@ export default function GrowthPlanPage() {
   );
   const systemDontCount = useMemo(
     () => (stepsData.execution_and_journal?.system?.dontList ?? []).filter((i) => (i.text ?? "").trim().length > 0).length,
-    [stepsData.execution_and_journal]
-  );
-  const systemOrderCount = useMemo(
-    () => (stepsData.execution_and_journal?.system?.orderList ?? []).filter((i) => (i.text ?? "").trim().length > 0).length,
     [stepsData.execution_and_journal]
   );
   const nonNegotiableCount = useMemo(
@@ -748,10 +815,22 @@ export default function GrowthPlanPage() {
       ],
       1: [
         {
-          id: "prepare_checklist",
-          label: L("Add at least 3 checklist items", "Agrega al menos 3 items"),
-          done: prepareCount >= 3,
-          anchor: "gp-prepare-checklist",
+          id: "trading_system_steps",
+          label: L("Add at least 3 trading system steps", "Agrega al menos 3 pasos del sistema"),
+          done: tradingSystemCount >= 3,
+          anchor: "gp-trading-system",
+        },
+        {
+          id: "system_do",
+          label: L("Add at least 1 'Do' action", "Agrega al menos 1 acción 'Hacer'"),
+          done: systemDoCount > 0,
+          anchor: "gp-system-do",
+        },
+        {
+          id: "system_dont",
+          label: L("Add at least 1 'Don't' rule", "Agrega al menos 1 regla 'No hacer'"),
+          done: systemDontCount > 0,
+          anchor: "gp-system-dont",
         },
       ],
       2: [
@@ -780,24 +859,6 @@ export default function GrowthPlanPage() {
         },
       ],
       4: [
-        {
-          id: "system_do",
-          label: L("Add at least 1 'Do' action", "Agrega al menos 1 acción 'Hacer'"),
-          done: systemDoCount > 0,
-          anchor: "gp-system-do",
-        },
-        {
-          id: "system_dont",
-          label: L("Add at least 1 'Don't' rule", "Agrega al menos 1 regla 'No hacer'"),
-          done: systemDontCount > 0,
-          anchor: "gp-system-dont",
-        },
-        {
-          id: "system_order",
-          label: L("Add at least 1 ordered step", "Agrega al menos 1 paso en orden"),
-          done: systemOrderCount > 0,
-          anchor: "gp-system-order",
-        },
         {
           id: "strategy",
           label: L("Add at least 1 strategy", "Agrega al menos 1 estrategia"),
@@ -828,13 +889,12 @@ export default function GrowthPlanPage() {
     riskPerTradePct,
     lossDaysPerWeekStr,
     autoPhasesGenerated,
-    prepareCount,
+    tradingSystemCount,
     analysisStylesCount,
     stepsData.analysis,
     journalNotesLen,
     systemDoCount,
     systemDontCount,
-    systemOrderCount,
     strategyCount,
     nonNegotiableCount,
     committed,
@@ -967,10 +1027,6 @@ export default function GrowthPlanPage() {
           const anySteps = (existing.steps as any) || {};
           const savedLang = (anySteps?._ui?.lang as AssistantLang | undefined) ?? "en";
           setAssistantLang(savedLang);
-          const savedCadence = String(anySteps?._ui?.autoPhaseCadence ?? "");
-          if (["weekly", "monthly", "quarterly", "biannual"].includes(savedCadence)) {
-            setPhaseCadence(savedCadence as any);
-          }
           setAutoPhasesGenerated(true);
 
           const t =
@@ -979,8 +1035,8 @@ export default function GrowthPlanPage() {
               step: stepTitles[0],
             })) ||
             L(
-              "Loaded your Growth Plan. We'll go step-by-step: Goal & Numbers → Prepare → Analysis → Journal → Execution System & Strategy.",
-              "Cargamos tu plan. Vamos paso a paso: Meta y números → Preparación → Análisis → Journal → Sistema de ejecución y estrategia."
+              "Loaded your Growth Plan. We'll go step-by-step: Goal & Numbers → Prepare → Analysis → Journal → Strategy & Rules.",
+              "Cargamos tu plan. Vamos paso a paso: Meta y números → Preparación → Análisis → Journal → Estrategia y reglas."
             );
           pushNeuroMessage(t);
         } else {
@@ -1129,12 +1185,11 @@ export default function GrowthPlanPage() {
     if (!targetDateStr) return [];
     if (startingBalance <= 0 || targetBalance <= 0) return [];
     const startIso = planStartDate || isoToday();
-    return buildCadenceTargets(
+    return buildWeeklyMilestonesFromMonthlyGoals(
       startingBalance,
       targetBalance,
       startIso,
       targetDateStr,
-      phaseCadence,
       lossDaysPerWeek,
       Math.max(0, maxDailyLossPercent)
     );
@@ -1144,27 +1199,105 @@ export default function GrowthPlanPage() {
     startingBalance,
     targetBalance,
     planStartDate,
-    phaseCadence,
     lossDaysPerWeek,
     maxDailyLossPercent,
   ]);
 
-  const autoPhasePreview = useMemo(() => {
-    if (!targetDateStr) return null;
-    if (startingBalance <= 0 || targetBalance <= 0) return null;
-    const startIso = planStartDate || isoToday();
-    const tradingDays = listTradingDaysBetween(startIso, targetDateStr);
-    if (tradingDays.length === 0) return null;
-    const total = tradingDays.length;
-    const cadenceTradingDays =
-      phaseCadence === "weekly" ? 5 : phaseCadence === "monthly" ? 21 : phaseCadence === "quarterly" ? 63 : 126;
-    const dayNumber = Math.min(total, cadenceTradingDays);
-    const weekIndex = Math.ceil(dayNumber / 5);
-    const weekTotal = Math.ceil(total / 5);
-    const monthIndex = Math.ceil(dayNumber / 21);
-    const monthTotal = Math.ceil(total / 21);
-    return { total, dayNumber, weekIndex, weekTotal, monthIndex, monthTotal };
-  }, [targetDateStr, planStartDate, startingBalance, targetBalance, phaseCadence]);
+  const firstMonthMeta = useMemo(() => {
+    if (!autoPhases.length) return null;
+    const first = autoPhases[0];
+    const monthIndex = first.monthIndex ?? 1;
+    const monthPhases = autoPhases.filter((p) => (p.monthIndex ?? monthIndex) === monthIndex);
+    const monthGoal =
+      first.monthGoal ??
+      monthPhases[monthPhases.length - 1]?.monthGoal ??
+      monthPhases[monthPhases.length - 1]?.targetEquity ??
+      null;
+    const weeksInMonth = first.weeksInMonth ?? monthPhases.length;
+    const weekIndex = first.weekIndex ?? 1;
+    const weeklyPct = weeksInMonth > 0 ? 100 / weeksInMonth : null;
+    const weeklyGoal =
+      monthGoal && weeksInMonth > 0 ? monthGoal / weeksInMonth : null;
+    return { monthIndex, monthGoal, weeksInMonth, weekIndex, weeklyPct, weeklyGoal };
+  }, [autoPhases]);
+
+  type MonthSummary = {
+    monthIndex: number;
+    monthLabel: string;
+    startBalance: number;
+    endBalance: number;
+    profit: number;
+    endDate: string | null;
+  };
+
+  const monthSummaries = useMemo<MonthSummary[]>(() => {
+    if (!autoPhases.length) return [];
+    const map = new Map<number, MonthSummary & { maxWeek: number }>();
+    for (const phase of autoPhases) {
+      const idx = phase.monthIndex ?? 1;
+      const startBalance =
+        phase.monthStartBalance ??
+        (phase.monthGoal != null ? phase.targetEquity - phase.monthGoal : phase.targetEquity);
+      const endBalance = phase.monthEndBalance ?? phase.targetEquity;
+      const monthLabel = phase.monthLabel ?? "";
+      const weekIndex = phase.weekIndex ?? 0;
+      const existing = map.get(idx);
+      if (!existing) {
+        map.set(idx, {
+          monthIndex: idx,
+          monthLabel,
+          startBalance,
+          endBalance,
+          profit: endBalance - startBalance,
+          endDate: phase.targetDate ?? null,
+          maxWeek: weekIndex,
+        });
+        continue;
+      }
+      if (weekIndex >= existing.maxWeek) {
+        existing.endBalance = endBalance;
+        existing.profit = endBalance - existing.startBalance;
+        existing.endDate = phase.targetDate ?? existing.endDate;
+        existing.maxWeek = weekIndex;
+      }
+    }
+    return Array.from(map.values())
+      .sort((a, b) => a.monthIndex - b.monthIndex)
+      .map(({ maxWeek, ...rest }) => rest);
+  }, [autoPhases]);
+
+  type QuarterSummary = {
+    label: string;
+    rangeLabel: string;
+    startBalance: number;
+    endBalance: number;
+    profit: number;
+    endDate: string | null;
+  };
+
+  const quarterSummaries = useMemo<QuarterSummary[]>(() => {
+    if (monthSummaries.length === 0) return [];
+    const out: QuarterSummary[] = [];
+    for (let i = 0; i < monthSummaries.length; i += 3) {
+      const slice = monthSummaries.slice(i, i + 3);
+      if (!slice.length) continue;
+      const start = slice[0];
+      const end = slice[slice.length - 1];
+      const label = `Q${Math.floor(i / 3) + 1}`;
+      const rangeLabel = `${formatMonthLabel(start.monthLabel, lang)}–${formatMonthLabel(end.monthLabel, lang)}`;
+      const startBalance = start.startBalance;
+      const endBalance = end.endBalance;
+      out.push({
+        label,
+        rangeLabel,
+        startBalance,
+        endBalance,
+        profit: endBalance - startBalance,
+        endDate: end.endDate,
+      });
+    }
+    return out;
+  }, [monthSummaries, lang]);
 
   const tradingDaysFromToday = useMemo(() => {
     if (!targetDateStr) return null;
@@ -1174,14 +1307,7 @@ export default function GrowthPlanPage() {
     return { today, count };
   }, [targetDateStr]);
 
-  const autoCadenceUnit =
-    phaseCadence === "weekly"
-      ? L("Week", "Semana")
-      : phaseCadence === "monthly"
-        ? L("Month", "Mes")
-        : phaseCadence === "quarterly"
-          ? L("Quarter", "Trimestre")
-          : L("Semester", "Semestre");
+  const autoCadenceUnit = L("Week", "Semana");
 
   // PDF events
   const onDownloadPdfSuggested = async () => {
@@ -1220,6 +1346,17 @@ export default function GrowthPlanPage() {
     !!targetDateStr &&
     maxDailyLossPercent > 0 &&
     lossDaysSet;
+
+  useEffect(() => {
+    if (canGeneratePhases) {
+      if (!autoPhasesGenerated) {
+        setAutoPhasesGenerated(true);
+        setError("");
+      }
+      return;
+    }
+    if (autoPhasesGenerated) setAutoPhasesGenerated(false);
+  }, [canGeneratePhases, autoPhasesGenerated]);
   const step0Stages = [
     {
       id: "plan_mode",
@@ -1326,6 +1463,7 @@ export default function GrowthPlanPage() {
               setTargetDateStr(e.target.value);
               setTradingDaysTouched(false);
               setAutoPhasesGenerated(false);
+              setPlanStartDate(isoToday());
             }}
             className={inputBase}
           />
@@ -1505,8 +1643,8 @@ export default function GrowthPlanPage() {
       anchor: "gp-phase-builder",
       title: L("Cadence & milestones", "Cadencia y metas"),
       description: L(
-        "Choose how often you want milestones. We use trading days to build them.",
-        "Elige cada cuánto quieres metas. Usamos días de trading para construirlas."
+        "Weekly checkpoints aligned to monthly goals, based on trading days.",
+        "Checkpoints semanales alineados a metas mensuales, basados en días de trading."
       ),
       isComplete: autoPhasesGenerated,
       content: (
@@ -1517,46 +1655,26 @@ export default function GrowthPlanPage() {
                 {L("Cadence", "Cadencia")}
               </p>
             </div>
-            <button
-              type="button"
-              onClick={buildAutoPhasesPreview}
-              disabled={!canGeneratePhases}
-              className={`rounded-lg border px-3 py-1 text-xs font-semibold transition ${
-                canGeneratePhases
-                  ? "border-emerald-400/60 text-emerald-200 hover:border-emerald-400"
-                  : "border-slate-700 text-slate-500 cursor-not-allowed"
-              }`}
-            >
-              {L("Generate phases", "Generar fases")}
-            </button>
+            <span className="text-xs text-slate-500">
+              {canGeneratePhases
+                ? L("Auto-generated", "Generado automáticamente")
+                : L("Waiting for required inputs", "Esperando datos requeridos")}
+            </span>
           </div>
           <div className="mt-2 flex flex-wrap items-center gap-2">
-            <select
-              value={phaseCadence}
-              onChange={(e) => {
-                setPhaseCadence(e.target.value as any);
-                setAutoPhasesGenerated(false);
-              }}
-              className={inputSmall}
-            >
-              <option value="weekly">{L("Weekly", "Semanal")}</option>
-              <option value="monthly">{L("Monthly", "Mensual")}</option>
-              <option value="quarterly">{L("Quarterly", "Trimestral")}</option>
-              <option value="biannual">{L("Bi‑annual", "Semestral")}</option>
-            </select>
+            <span className="text-xs text-slate-200 font-semibold">
+              {L("Weekly checkpoints · Monthly goals", "Checkpoints semanales · Metas mensuales")}
+            </span>
             <span className="text-xs text-slate-500">
               {L("Based on trading days (NYSE holidays excluded).", "Basado en días de trading (feriados NYSE excluidos).")}
-            </span>
-            <span className="text-[11px] text-slate-500">
-              {L("Weekly=5 · Monthly=21 · Quarterly=63 · Bi‑annual=126", "Semanal=5 · Mensual=21 · Trimestral=63 · Semestral=126")}
             </span>
           </div>
           {!autoPhasesGenerated ? (
             <p className="mt-3 text-xs text-slate-500">
               {canGeneratePhases
                 ? L(
-                    "Click “Generate phases” to preview your milestones.",
-                    "Presiona “Generar fases” para ver tus metas."
+                    "Your milestones are generated automatically once required inputs are set.",
+                    "Tus metas se generan automáticamente cuando completas los datos requeridos."
                   )
                 : L(
                     "Complete target date + max daily loss + loss days per week first.",
@@ -1573,38 +1691,86 @@ export default function GrowthPlanPage() {
           ) : (
             <div className="mt-3 rounded-xl border border-slate-800 bg-slate-950/40 p-3">
               <p className="text-[12px] text-slate-500">
-                {L("First milestone", "Primera meta")} · {autoCadenceUnit} 1/{autoPhases.length}
+                {L("First checkpoint", "Primer checkpoint")} · {autoCadenceUnit}{" "}
+                {firstMonthMeta?.weekIndex ?? 1}/{firstMonthMeta?.weeksInMonth ?? autoPhases.length}
+                {firstMonthMeta?.monthIndex ? (
+                  <span className="text-slate-400">
+                    {" "}
+                    · {L("Month", "Mes")} {firstMonthMeta.monthIndex}
+                  </span>
+                ) : null}
               </p>
               <p className="text-[18px] text-emerald-300 font-semibold">
                 {currency(autoPhases[0].targetEquity)}
               </p>
+              {firstMonthMeta?.monthGoal ? (
+                <p className="text-[12px] text-slate-500 mt-1">
+                  {L("Month goal (profit):", "Meta del mes (ganancia):")}{" "}
+                  <span className="text-slate-200">{currency(firstMonthMeta.monthGoal)}</span>
+                </p>
+              ) : null}
+              {firstMonthMeta?.weeklyPct ? (
+                <p className="text-[11px] text-slate-500">
+                  {L("Weekly share:", "Porción semanal:")}{" "}
+                  <span className="text-slate-200">
+                    {firstMonthMeta.weeklyPct.toFixed(1)}%
+                  </span>
+                </p>
+              ) : null}
+              {firstMonthMeta?.weeklyGoal ? (
+                <p className="text-[11px] text-slate-500">
+                  {L("Weekly goal (profit):", "Meta semanal (ganancia):")}{" "}
+                  <span className="text-slate-200">
+                    {currency(firstMonthMeta.weeklyGoal)}
+                  </span>
+                </p>
+              ) : null}
               {autoPhases[0].targetDate ? (
                 <p className="text-[12px] text-slate-500 mt-1">
                   {L("Target date:", "Fecha objetivo:")}{" "}
                   <span className="text-slate-200">{autoPhases[0].targetDate}</span>
                 </p>
               ) : null}
-              {autoPhasePreview ? (
-                <p className="text-[11px] text-slate-500 mt-1">
-                  {L("Trading days:", "Días de trading:")}{" "}
-                  <span className="text-slate-200">
-                    {autoPhasePreview.dayNumber}/{autoPhasePreview.total}
-                  </span>{" "}
-                  {phaseCadence === "weekly"
-                    ? L(
-                        `≈ Month ${autoPhasePreview.monthIndex}/${autoPhasePreview.monthTotal}`,
-                        `≈ Mes ${autoPhasePreview.monthIndex}/${autoPhasePreview.monthTotal}`
-                      )
-                    : L(
-                        `≈ Week ${autoPhasePreview.weekIndex}/${autoPhasePreview.weekTotal}`,
-                        `≈ Semana ${autoPhasePreview.weekIndex}/${autoPhasePreview.weekTotal}`
-                      )}
-                </p>
+              {quarterSummaries.length ? (
+                <div className="mt-3">
+                  <p className="text-[11px] text-slate-500 tracking-widest uppercase">
+                    {L("Quarter summary", "Resumen trimestral")}
+                  </p>
+                  <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                    {quarterSummaries.map((q) => (
+                      <div key={q.label} className="rounded-lg border border-slate-800 bg-slate-950/40 p-2">
+                        <p className="text-[11px] text-slate-400">
+                          {q.label} · {q.rangeLabel}
+                        </p>
+                        <p className="text-[11px] text-slate-300">
+                          {L("Start", "Inicio")}: <span className="text-slate-200">{currency(q.startBalance)}</span>
+                        </p>
+                        <p className="text-[11px] text-slate-300">
+                          {L("Target", "Meta")}: <span className="text-slate-200">{currency(q.endBalance)}</span>
+                        </p>
+                        <p className="text-[11px] text-emerald-300">
+                          {L("Profit", "Ganancia")}: <span>{currency(q.profit)}</span>
+                        </p>
+                        {q.endDate ? (
+                          <p className="text-[10px] text-slate-500">
+                            {L("End date", "Fecha fin")}: <span className="text-slate-300">{q.endDate}</span>
+                          </p>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
+                </div>
               ) : null}
               <p className="text-[11px] text-slate-500 mt-2">
                 {L(
                   "Milestones follow the minimum % required by your loss rules.",
                   "Las metas siguen el % mínimo requerido según tus reglas de pérdida."
+                )}
+              </p>
+              <p className="text-[11px] text-slate-500">
+                {L(
+                  "Weekly checkpoints split the monthly goal evenly.",
+                  "Los checkpoints semanales dividen la meta mensual en partes iguales."
                 )}
               </p>
             </div>
@@ -1679,6 +1845,16 @@ export default function GrowthPlanPage() {
     }));
   }
 
+  function movePrepareChecklistItem(index: number, direction: -1 | 1) {
+    const list = [...(stepsData.prepare?.checklist ?? [])];
+    const nextIndex = index + direction;
+    if (nextIndex < 0 || nextIndex >= list.length) return;
+    const item = list[index];
+    list.splice(index, 1);
+    list.splice(nextIndex, 0, item);
+    updatePrepareChecklist(list);
+  }
+
   function updateStrategies(strategies: GrowthPlanStrategy[]) {
     setStepsData((prev) => ({
       ...prev,
@@ -1702,15 +1878,6 @@ export default function GrowthPlanPage() {
     }));
   }
 
-  function moveExecutionOrderItem(index: number, direction: -1 | 1) {
-    const list = [...(stepsData.execution_and_journal?.system?.orderList ?? [])];
-    const nextIndex = index + direction;
-    if (nextIndex < 0 || nextIndex >= list.length) return;
-    const item = list[index];
-    list.splice(index, 1);
-    list.splice(nextIndex, 0, item);
-    updateExecutionSystemList("orderList", list);
-  }
 
   const canGoNext = useMemo(() => {
     if (step !== 0) return true;
@@ -1799,18 +1966,24 @@ export default function GrowthPlanPage() {
     const dailyPctForSave = Math.max(0, requiredGoalPct);
     const autoPhasePayload =
       autoPhasesGenerated && autoPhases.length > 0
-        ? autoPhases.map((phase, idx) => ({
-            id: uuid(),
-            title: `${L("Phase", "Fase")} ${idx + 1}`,
-            targetEquity: phase.targetEquity,
-            targetDate: phase.targetDate ?? null,
-            status: "pending" as const,
-          }))
+        ? autoPhases.map((phase, idx) => {
+            const weekLabel =
+              phase.weekIndex && phase.monthIndex
+                ? L(`Week ${phase.weekIndex} (Month ${phase.monthIndex})`, `Semana ${phase.weekIndex} (Mes ${phase.monthIndex})`)
+                : L(`Week ${idx + 1}`, `Semana ${idx + 1}`);
+            return {
+              id: uuid(),
+              title: weekLabel,
+              targetEquity: phase.targetEquity,
+              targetDate: phase.targetDate ?? null,
+              status: "pending" as const,
+            };
+          })
         : planPhases;
 
     // persist assistant lang inside steps._ui.lang (Supabase only)
     const mergedSteps: any = { ...(stepsData as any) };
-    mergedSteps._ui = { ...(mergedSteps._ui ?? {}), lang: assistantLang, autoPhaseCadence: phaseCadence };
+    mergedSteps._ui = { ...(mergedSteps._ui ?? {}), lang: assistantLang, autoPhaseCadence: "weekly" };
 
     const effectivePlanStart = planStartDate || isoToday();
     const payload: Partial<GrowthPlan> = {
@@ -1859,6 +2032,30 @@ export default function GrowthPlanPage() {
         );
 
       pushNeuroMessage(msg);
+
+      const coachSummary =
+        (await neuroReact("growth_plan_post_save_summary", assistantLang, {
+          dailyGoalPercent: dailyPctForSave,
+          maxDailyLossPercent,
+          lossDaysPerWeek,
+          targetBalance,
+          startingBalance,
+          tradingDays,
+        })) || "";
+      if (coachSummary) {
+        pushNeuroMessage(coachSummary);
+      }
+
+      const inboxTitle = L("AI Coaching update", "Actualización de AI Coaching");
+      const inboxMessage = coachSummary || msg;
+      if (user?.id && inboxMessage) {
+        void pushInboxEvent({
+          userId: String(user.id),
+          title: inboxTitle,
+          message: inboxMessage,
+          category: "ai_coach",
+        });
+      }
             router.push("/dashboard");
     } catch (e) {
       console.error("[GrowthPlan] save error", e);
@@ -1946,7 +2143,7 @@ export default function GrowthPlanPage() {
               "This turns your plan into a system:",
               "Esto convierte tu plan en un sistema:"
             )}{" "}
-            <b>{L("Prepare → Analysis → Journal → Execution System", "Preparar → Análisis → Journal → Sistema de ejecución")}</b>.{" "}
+            <b>{L("Prepare → Analysis → Journal → Strategy & Rules", "Preparar → Análisis → Journal → Estrategia y reglas")}</b>.{" "}
             {L(
               "Neuro and AI Coach will use this to coach you based on real execution.",
               "Neuro y el Coach IA usarán esto para guiarte según tu ejecución real."
@@ -2142,18 +2339,19 @@ export default function GrowthPlanPage() {
         {step === 1 && (
           <div id="gp-step-1" className="bg-slate-950/70 border border-slate-800 rounded-2xl p-4 space-y-2">
             <p className="font-semibold text-emerald-300">
-              {L("1) Prepare Before Trading", "1) Preparación antes de operar")}
+              {L("1) Trading System", "1) Sistema de Trading")}
             </p>
             <p className="text-slate-400 text-sm">
               {L(
-                "Build your checklist. AI Coach will compare your execution against this.",
-                "Construye tu checklist. El Coach IA comparará tu ejecución contra esto."
+                "Write your ordered steps and your Do/Don't rules. This becomes your daily system.",
+                "Escribe tus pasos en orden y tus reglas de Hacer / No hacer. Esto se convierte en tu sistema diario."
               )}
             </p>
 
-            <div id="gp-prepare-checklist" className="space-y-2">
+            <div id="gp-trading-system" className="space-y-2">
               {(stepsData.prepare?.checklist ?? []).map((it, idx) => (
-                <div key={it.id} className="flex gap-2">
+                <div key={it.id} className="flex items-center gap-2">
+                  <span className="text-xs text-slate-400 w-5 text-right">{idx + 1}.</span>
                   <input
                     value={it.text}
                     onFocus={() => fieldHelp("prepare_checklist")}
@@ -2163,20 +2361,39 @@ export default function GrowthPlanPage() {
                       updatePrepareChecklist(items);
                     }}
                     className="flex-1 px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-slate-100 focus:border-emerald-400 outline-none"
+                    placeholder={L("Add a step (e.g., review calendar)", "Agrega un paso (ej., revisar calendario)")}
                   />
+                  <div className="flex flex-col gap-1">
+                    <button
+                      type="button"
+                      onClick={() => movePrepareChecklistItem(idx, -1)}
+                      className="px-2 py-1 rounded-lg border border-slate-700 text-slate-300 hover:border-emerald-400/60 hover:text-emerald-300 transition"
+                      title={L("Move up", "Subir")}
+                    >
+                      ↑
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => movePrepareChecklistItem(idx, 1)}
+                      className="px-2 py-1 rounded-lg border border-slate-700 text-slate-300 hover:border-emerald-400/60 hover:text-emerald-300 transition"
+                      title={L("Move down", "Bajar")}
+                    >
+                      ↓
+                    </button>
+                  </div>
                   <button
                     type="button"
-                      onClick={() => {
-                        const items = [...(stepsData.prepare?.checklist ?? [])];
-                        items.splice(idx, 1);
-                        updatePrepareChecklist(items);
-                        pushNeuroMessage(
-                          L(
-                            "Checklist item removed. Keep the list short and actionable.",
-                            "Item eliminado. Mantén la lista corta y accionable."
-                          )
-                        );
-                                              }}
+                    onClick={() => {
+                      const items = [...(stepsData.prepare?.checklist ?? [])];
+                      items.splice(idx, 1);
+                      updatePrepareChecklist(items);
+                      pushNeuroMessage(
+                        L(
+                          "Step removed. Keep the system short and actionable.",
+                          "Paso eliminado. Mantén el sistema corto y accionable."
+                        )
+                      );
+                    }}
                     className="px-3 py-2 rounded-xl border border-slate-700 text-slate-300 hover:border-red-400/60 hover:text-red-300 transition"
                   >
                     ✕
@@ -2189,19 +2406,111 @@ export default function GrowthPlanPage() {
               type="button"
               onClick={() => {
                 const items = [...(stepsData.prepare?.checklist ?? [])];
-                items.push({ id: uuid(), text: L("New checklist item", "Nuevo item de checklist"), isSuggested: false, isActive: true });
+                items.push({ id: uuid(), text: L("New step", "Nuevo paso"), isSuggested: false, isActive: true });
                 updatePrepareChecklist(items);
                 pushNeuroMessage(
                   L(
-                    "Added a checklist item. Write it as something you can verify before entering.",
-                    "Checklist agregado. Escríbelo como algo que puedas verificar antes de entrar."
+                    "Step added. Write it as a clear action you must follow.",
+                    "Paso agregado. Escríbelo como una acción clara que debes seguir."
                   )
                 );
-                              }}
+              }}
               className="px-4 py-2 rounded-xl border border-emerald-400 text-emerald-300 hover:bg-emerald-400/10 transition"
             >
-              {L("+ Add item", "+ Agregar item")}
+              {L("+ Add step", "+ Agregar paso")}
             </button>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-4">
+              {/* DO */}
+              <div id="gp-system-do" className="rounded-xl border border-slate-800 bg-slate-950/60 p-3 space-y-2">
+                <p className="text-[11px] uppercase tracking-[0.2em] text-emerald-300">
+                  {L("Do", "Hacer")}
+                </p>
+                {(stepsData.execution_and_journal?.system?.doList ?? []).map((item, idx) => (
+                  <div key={item.id} className="flex items-center gap-2">
+                    <input
+                      value={item.text}
+                      onFocus={() => fieldHelp("system_do")}
+                      onChange={(e) => {
+                        const items = [...(stepsData.execution_and_journal?.system?.doList ?? [])];
+                        items[idx] = { ...items[idx], text: e.target.value };
+                        updateExecutionSystemList("doList", items);
+                      }}
+                      className="flex-1 px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-slate-100 focus:border-emerald-400 outline-none"
+                      placeholder={L("Add a rule you must do", "Agrega una regla que debes hacer")}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const items = [...(stepsData.execution_and_journal?.system?.doList ?? [])];
+                        items.splice(idx, 1);
+                        updateExecutionSystemList("doList", items);
+                      }}
+                      className="px-2 py-2 rounded-lg border border-slate-700 text-slate-300 hover:border-red-400/60 hover:text-red-300 transition"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const items = [...(stepsData.execution_and_journal?.system?.doList ?? [])];
+                    items.push({ id: uuid(), text: L("New DO rule", "Nueva regla de HACER"), isSuggested: false, isActive: true });
+                    updateExecutionSystemList("doList", items);
+                    fieldHelp("system_do");
+                  }}
+                  className="px-3 py-2 rounded-lg border border-emerald-400 text-emerald-300 hover:bg-emerald-400/10 transition text-sm"
+                >
+                  {L("+ Add", "+ Agregar")}
+                </button>
+              </div>
+
+              {/* DON'T */}
+              <div id="gp-system-dont" className="rounded-xl border border-slate-800 bg-slate-950/60 p-3 space-y-2">
+                <p className="text-[11px] uppercase tracking-[0.2em] text-rose-300">
+                  {L("Don't", "No hacer")}
+                </p>
+                {(stepsData.execution_and_journal?.system?.dontList ?? []).map((item, idx) => (
+                  <div key={item.id} className="flex items-center gap-2">
+                    <input
+                      value={item.text}
+                      onFocus={() => fieldHelp("system_dont")}
+                      onChange={(e) => {
+                        const items = [...(stepsData.execution_and_journal?.system?.dontList ?? [])];
+                        items[idx] = { ...items[idx], text: e.target.value };
+                        updateExecutionSystemList("dontList", items);
+                      }}
+                      className="flex-1 px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-slate-100 focus:border-emerald-400 outline-none"
+                      placeholder={L("Add a rule you must avoid", "Agrega una regla que debes evitar")}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const items = [...(stepsData.execution_and_journal?.system?.dontList ?? [])];
+                        items.splice(idx, 1);
+                        updateExecutionSystemList("dontList", items);
+                      }}
+                      className="px-2 py-2 rounded-lg border border-slate-700 text-slate-300 hover:border-red-400/60 hover:text-red-300 transition"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const items = [...(stepsData.execution_and_journal?.system?.dontList ?? [])];
+                    items.push({ id: uuid(), text: L("New DON'T rule", "Nueva regla de NO HACER"), isSuggested: false, isActive: true });
+                    updateExecutionSystemList("dontList", items);
+                    fieldHelp("system_dont");
+                  }}
+                  className="px-3 py-2 rounded-lg border border-emerald-400 text-emerald-300 hover:bg-emerald-400/10 transition text-sm"
+                >
+                  {L("+ Add", "+ Agregar")}
+                </button>
+              </div>
+            </div>
 
             <textarea
               value={stepsData.prepare?.notes ?? ""}
@@ -2211,8 +2520,8 @@ export default function GrowthPlanPage() {
               }
               className="w-full mt-3 min-h-27.5 px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-slate-100 focus:border-emerald-400 outline-none"
               placeholder={L(
-                "Optional notes (what invalidates trading today, what you must avoid, etc.)",
-                "Notas opcionales (qué invalida operar hoy, qué debes evitar, etc.)"
+                "Optional notes (exceptions, special cases, reminders).",
+                "Notas opcionales (excepciones, casos especiales, recordatorios)."
               )}
             />
           </div>
@@ -2327,182 +2636,14 @@ export default function GrowthPlanPage() {
         {step === 4 && (
           <div id="gp-step-4" className="bg-slate-950/70 border border-slate-800 rounded-2xl p-4 space-y-2">
             <p className="font-semibold text-emerald-300">
-              {L("4) Execution System & Strategy", "4) Sistema de ejecución y estrategia")}
+              {L("4) Strategy & Rules", "4) Estrategia y reglas")}
             </p>
             <p className="text-slate-400 text-sm">
               {L(
-                "Build your execution system, non‑negotiables, and strategy. This becomes the checklist you review before each session.",
-                "Construye tu sistema de ejecución, no negociables y estrategia. Esto se convierte en el checklist que revisas antes de cada sesión."
+                "Define your non‑negotiable rules and your strategies. This is the playbook you execute.",
+                "Define tus reglas no negociables y tus estrategias. Este es el playbook que ejecutas."
               )}
             </p>
-
-            <div className="mt-3 rounded-2xl border border-slate-800 bg-slate-900/40 p-3 space-y-2">
-              <p className="text-slate-100 font-semibold">
-                {L("Execution System", "Sistema de ejecución")}
-              </p>
-              <p className="text-slate-400 text-sm">
-                {L(
-                  "Write exactly what you will do, what you will NOT do, and the order you must follow. This becomes your dashboard system widget.",
-                  "Escribe exactamente qué harás, qué NO harás y el orden que debes seguir. Esto se mostrará como widget en el dashboard."
-                )}
-              </p>
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-2">
-                {/* DO */}
-                <div id="gp-system-do" className="rounded-xl border border-slate-800 bg-slate-950/60 p-3 space-y-2">
-                  <p className="text-[11px] uppercase tracking-[0.2em] text-emerald-300">
-                    {L("Do", "Hacer")}
-                  </p>
-                  {(stepsData.execution_and_journal?.system?.doList ?? []).map((item, idx) => (
-                    <div key={item.id} className="flex items-center gap-2">
-                      <input
-                        value={item.text}
-                        onFocus={() => fieldHelp("system_do")}
-                        onChange={(e) => {
-                          const items = [...(stepsData.execution_and_journal?.system?.doList ?? [])];
-                          items[idx] = { ...items[idx], text: e.target.value };
-                          updateExecutionSystemList("doList", items);
-                        }}
-                        className="flex-1 px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-slate-100 focus:border-emerald-400 outline-none"
-                        placeholder={L("Add a rule you must do", "Agrega una regla que debes hacer")}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const items = [...(stepsData.execution_and_journal?.system?.doList ?? [])];
-                          items.splice(idx, 1);
-                          updateExecutionSystemList("doList", items);
-                        }}
-                        className="px-2 py-2 rounded-lg border border-slate-700 text-slate-300 hover:border-red-400/60 hover:text-red-300 transition"
-                      >
-                        ✕
-                      </button>
-                    </div>
-                  ))}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const items = [...(stepsData.execution_and_journal?.system?.doList ?? [])];
-                      items.push({ id: uuid(), text: L("New DO rule", "Nueva regla de HACER"), isSuggested: false, isActive: true });
-                      updateExecutionSystemList("doList", items);
-                      fieldHelp("system_do");
-                    }}
-                    className="px-3 py-2 rounded-lg border border-emerald-400 text-emerald-300 hover:bg-emerald-400/10 transition text-sm"
-                  >
-                    {L("+ Add", "+ Agregar")}
-                  </button>
-                </div>
-
-                {/* DON'T */}
-                <div id="gp-system-dont" className="rounded-xl border border-slate-800 bg-slate-950/60 p-3 space-y-2">
-                  <p className="text-[11px] uppercase tracking-[0.2em] text-rose-300">
-                    {L("Don't", "No hacer")}
-                  </p>
-                  {(stepsData.execution_and_journal?.system?.dontList ?? []).map((item, idx) => (
-                    <div key={item.id} className="flex items-center gap-2">
-                      <input
-                        value={item.text}
-                        onFocus={() => fieldHelp("system_dont")}
-                        onChange={(e) => {
-                          const items = [...(stepsData.execution_and_journal?.system?.dontList ?? [])];
-                          items[idx] = { ...items[idx], text: e.target.value };
-                          updateExecutionSystemList("dontList", items);
-                        }}
-                        className="flex-1 px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-slate-100 focus:border-emerald-400 outline-none"
-                        placeholder={L("Add a rule you must avoid", "Agrega una regla que debes evitar")}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const items = [...(stepsData.execution_and_journal?.system?.dontList ?? [])];
-                          items.splice(idx, 1);
-                          updateExecutionSystemList("dontList", items);
-                        }}
-                        className="px-2 py-2 rounded-lg border border-slate-700 text-slate-300 hover:border-red-400/60 hover:text-red-300 transition"
-                      >
-                        ✕
-                      </button>
-                    </div>
-                  ))}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const items = [...(stepsData.execution_and_journal?.system?.dontList ?? [])];
-                      items.push({ id: uuid(), text: L("New DON'T rule", "Nueva regla de NO HACER"), isSuggested: false, isActive: true });
-                      updateExecutionSystemList("dontList", items);
-                      fieldHelp("system_dont");
-                    }}
-                    className="px-3 py-2 rounded-lg border border-emerald-400 text-emerald-300 hover:bg-emerald-400/10 transition text-sm"
-                  >
-                    {L("+ Add", "+ Agregar")}
-                  </button>
-                </div>
-
-                {/* ORDER */}
-                <div id="gp-system-order" className="rounded-xl border border-slate-800 bg-slate-950/60 p-3 space-y-2">
-                  <p className="text-[11px] uppercase tracking-[0.2em] text-sky-300">
-                    {L("Order", "Orden")}
-                  </p>
-                  {(stepsData.execution_and_journal?.system?.orderList ?? []).map((item, idx) => (
-                    <div key={item.id} className="flex items-center gap-2">
-                      <span className="text-xs text-slate-400 w-5 text-right">{idx + 1}.</span>
-                      <input
-                        value={item.text}
-                        onFocus={() => fieldHelp("system_order")}
-                        onChange={(e) => {
-                          const items = [...(stepsData.execution_and_journal?.system?.orderList ?? [])];
-                          items[idx] = { ...items[idx], text: e.target.value };
-                          updateExecutionSystemList("orderList", items);
-                        }}
-                        className="flex-1 px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-slate-100 focus:border-emerald-400 outline-none"
-                        placeholder={L("Step you must follow in order", "Paso que debes seguir en orden")}
-                      />
-                      <div className="flex flex-col gap-1">
-                        <button
-                          type="button"
-                          onClick={() => moveExecutionOrderItem(idx, -1)}
-                          className="px-2 py-1 rounded-lg border border-slate-700 text-slate-300 hover:border-emerald-400/60 hover:text-emerald-300 transition"
-                          title={L("Move up", "Subir")}
-                        >
-                          ↑
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => moveExecutionOrderItem(idx, 1)}
-                          className="px-2 py-1 rounded-lg border border-slate-700 text-slate-300 hover:border-emerald-400/60 hover:text-emerald-300 transition"
-                          title={L("Move down", "Bajar")}
-                        >
-                          ↓
-                        </button>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const items = [...(stepsData.execution_and_journal?.system?.orderList ?? [])];
-                          items.splice(idx, 1);
-                          updateExecutionSystemList("orderList", items);
-                        }}
-                        className="px-2 py-2 rounded-lg border border-slate-700 text-slate-300 hover:border-red-400/60 hover:text-red-300 transition"
-                      >
-                        ✕
-                      </button>
-                    </div>
-                  ))}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const items = [...(stepsData.execution_and_journal?.system?.orderList ?? [])];
-                      items.push({ id: uuid(), text: L("New step", "Nuevo paso"), isSuggested: false, isActive: true });
-                      updateExecutionSystemList("orderList", items);
-                      fieldHelp("system_order");
-                    }}
-                    className="px-3 py-2 rounded-lg border border-emerald-400 text-emerald-300 hover:bg-emerald-400/10 transition text-sm"
-                  >
-                    {L("+ Add", "+ Agregar")}
-                  </button>
-                </div>
-              </div>
-            </div>
 
             {/* Rules (Non-negotiables) */}
             <div id="gp-rules" className="mt-3 bg-slate-950/70 border border-slate-800 rounded-2xl p-4 space-y-3">

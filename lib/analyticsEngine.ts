@@ -311,7 +311,7 @@ function computeProfitFactor(pnls: number[]) {
     if (p > 0) gp += p;
     if (p < 0) gl += Math.abs(p);
   }
-  if (gl === 0) return gp > 0 ? 999 : null;
+  if (gl === 0) return null;
   return gp / gl;
 }
 

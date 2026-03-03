@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supaBaseClient";
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
+import { PlanComparisonTable } from "@/app/components/PlanComparisonTable";
 
 type PlanId = "core" | "advanced";
 
@@ -46,6 +47,10 @@ export default function PricingPage() {
   const OPTION_FLOW = {
     monthly: 6.99,
     annual: 69.90,
+  } as const;
+  const BROKER_SYNC = {
+    monthly: 5.0,
+    annual: 50.0,
   } as const;
 
   const priceFor = (planId: PlanId) =>
@@ -401,6 +406,193 @@ export default function PricingPage() {
                     ? L("Billed annually", "Facturado anual")
                     : L("Billed monthly", "Facturado mensual")}
                 </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="w-full max-w-5xl mt-4">
+            <div className="rounded-2xl border border-slate-800 bg-slate-950/80 p-5 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+              <div>
+                <p className="text-[10px] uppercase tracking-[0.2em] text-slate-400">
+                  {L("Add-on", "Add-on")}
+                </p>
+                <h3 className="text-sm font-semibold text-slate-50">
+                  {L("Broker Sync (SnapTrade)", "Broker Sync (SnapTrade)")}
+                </h3>
+                <p className="text-[10px] text-slate-300 mt-1">
+                  {L(
+                    "Connect your broker and sync transactions directly into your Journal.",
+                    "Conecta tu bróker y sincroniza transacciones directamente en tu Journal."
+                  )}
+                </p>
+                <p className="mt-2 text-[10px] text-slate-400">
+                  {L(
+                    "Supported brokers: Thinkorswim (Schwab/TOS), Interactive Brokers (IBKR), Tradovate, NinjaTrader, Webull, Binance, Coinbase.",
+                    "Brokers soportados: Thinkorswim (Schwab/TOS), Interactive Brokers (IBKR), Tradovate, NinjaTrader, Webull, Binance, Coinbase."
+                  )}
+                </p>
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="rounded-xl border border-emerald-400/40 bg-emerald-500/10 px-4 py-2 text-center">
+                  <div className="text-emerald-300 text-[10px] uppercase tracking-[0.15em]">
+                    {billingCycle === "monthly" ? L("Monthly", "Mensual") : L("Annual", "Anual")}
+                  </div>
+                  <div className="text-emerald-200 text-2xl font-semibold leading-none">
+                    ${
+                      billingCycle === "monthly"
+                        ? BROKER_SYNC.monthly.toFixed(2)
+                        : BROKER_SYNC.annual.toFixed(2)
+                    }
+                  </div>
+                  <div className="text-[9px] text-slate-400">
+                    {billingCycle === "monthly"
+                      ? L("per month", "por mes")
+                      : L("per year", "por año")}
+                  </div>
+                </div>
+                <div className="text-[9px] text-slate-500">
+                  {billingCycle === "annual"
+                    ? L("Billed annually", "Facturado anual")
+                    : L("Billed monthly", "Facturado mensual")}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="w-full max-w-6xl mt-10">
+            <div className="flex items-end justify-between mb-4">
+              <div>
+                <p className="text-emerald-400 text-[10px] uppercase tracking-[0.2em]">
+                  {L("Comparison", "Comparación")}
+                </p>
+                <h2 className="text-lg md:text-xl font-semibold">
+                  {L("Full plan comparison", "Comparación completa de planes")}
+                </h2>
+                <p className="text-[10px] md:text-xs text-slate-400">
+                  {L(
+                    "Everything included, line by line, in Core vs Advanced.",
+                    "Todo incluido, línea por línea, en Core vs Advanced."
+                  )}
+                </p>
+              </div>
+              <Link href="/plans-comparison" className="text-[10px] md:text-xs text-slate-400 hover:text-emerald-400">
+                {L("Open full comparison →", "Ver comparación completa →")}
+              </Link>
+            </div>
+            <PlanComparisonTable
+              billingCycle={billingCycle}
+              priceFor={priceFor}
+              L={L}
+              lang={lang}
+              showCtas={false}
+            />
+          </div>
+
+          <div className="w-full max-w-6xl mt-12">
+            <div className="flex flex-col gap-2 mb-5">
+              <p className="text-emerald-400 text-[10px] uppercase tracking-[0.2em]">
+                {L("Coming soon", "Próximamente")}
+              </p>
+              <h2 className="text-lg md:text-xl font-semibold">
+                {L("Roadmap highlights", "Highlights del roadmap")}
+              </h2>
+              <p className="text-[10px] md:text-xs text-slate-400">
+                {L(
+                  "New programs, community features, and broker automation are in motion.",
+                  "Nuevos programas, comunidad y automatización con brokers están en camino."
+                )}
+              </p>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="rounded-2xl border border-slate-800 bg-slate-950/90 p-5">
+                <div className="text-[10px] uppercase tracking-[0.2em] text-emerald-400">
+                  {L("Newsletter", "Newsletter")}
+                </div>
+                <h3 className="text-sm font-semibold mt-1">
+                  {L("Monthly discipline insights", "Disciplina mensual")}
+                </h3>
+                <p className="text-[10px] text-slate-300 mt-2">
+                  {L(
+                    "Articles and playbooks focused on trader discipline and execution.",
+                    "Artículos y playbooks enfocados en disciplina y ejecución."
+                  )}
+                </p>
+                <span className="mt-3 inline-flex rounded-full border border-emerald-400/40 bg-emerald-500/10 px-2 py-0.5 text-[9px] text-emerald-200">
+                  {L("Coming soon", "Próximamente")}
+                </span>
+              </div>
+
+              <div className="rounded-2xl border border-slate-800 bg-slate-950/90 p-5">
+                <div className="text-[10px] uppercase tracking-[0.2em] text-emerald-400">
+                  {L("Neuro Clubs", "Neuro Clubs")}
+                </div>
+                <h3 className="text-sm font-semibold mt-1">
+                  {L("Shared stats & competitions", "Estadísticas compartidas y retos")}
+                </h3>
+                <p className="text-[10px] text-slate-300 mt-2">
+                  {L(
+                    "Communities can share journal stats, compare progress, and run score-based competitions (no P&L).",
+                    "Comunidades podrán compartir estadísticas, comparar progreso y competir por puntuación (sin P&L)."
+                  )}
+                </p>
+                <span className="mt-3 inline-flex rounded-full border border-emerald-400/40 bg-emerald-500/10 px-2 py-0.5 text-[9px] text-emerald-200">
+                  {L("Coming soon", "Próximamente")}
+                </span>
+              </div>
+
+              <div className="rounded-2xl border border-slate-800 bg-slate-950/90 p-5">
+                <div className="text-[10px] uppercase tracking-[0.2em] text-emerald-400">
+                  {L("Neuro Store", "Neuro Store")}
+                </div>
+                <h3 className="text-sm font-semibold mt-1">
+                  {L("Merch drops", "Merch oficial")}
+                </h3>
+                <p className="text-[10px] text-slate-300 mt-2">
+                  {L(
+                    "Limited merch for traders focused on discipline and process.",
+                    "Merch limitado para traders enfocados en disciplina y proceso."
+                  )}
+                </p>
+                <span className="mt-3 inline-flex rounded-full border border-emerald-400/40 bg-emerald-500/10 px-2 py-0.5 text-[9px] text-emerald-200">
+                  {L("Coming soon", "Próximamente")}
+                </span>
+              </div>
+
+              <div className="rounded-2xl border border-slate-800 bg-slate-950/90 p-5">
+                <div className="text-[10px] uppercase tracking-[0.2em] text-emerald-400">
+                  {L("Neuro Arena", "Neuro Arena")}
+                </div>
+                <h3 className="text-sm font-semibold mt-1">
+                  {L("Competitive stat challenges", "Competencias por estadísticas")}
+                </h3>
+                <p className="text-[10px] text-slate-300 mt-2">
+                  {L(
+                    "Timeboxed events with prizes for the best stats (hats, shirts, keychains).",
+                    "Eventos con premios para los mejores stats (gorras, camisas, llaveros)."
+                  )}
+                </p>
+                <span className="mt-3 inline-flex rounded-full border border-emerald-400/40 bg-emerald-500/10 px-2 py-0.5 text-[9px] text-emerald-200">
+                  {L("Coming soon", "Próximamente")}
+                </span>
+              </div>
+
+              <div className="rounded-2xl border border-slate-800 bg-slate-950/90 p-5 md:col-span-2">
+                <div className="text-[10px] uppercase tracking-[0.2em] text-emerald-400">
+                  {L("Direct broker import", "Importación directa")}
+                </div>
+                <h3 className="text-sm font-semibold mt-1">
+                  {L("Automatic broker sync", "Sync automático con brokers")}
+                </h3>
+                <p className="text-[10px] text-slate-300 mt-2">
+                  {L(
+                    "Automatic imports from brokers without CSV files.",
+                    "Importaciones automáticas desde brokers sin archivos CSV."
+                  )}
+                </p>
+                <span className="mt-3 inline-flex rounded-full border border-emerald-400/40 bg-emerald-500/10 px-2 py-0.5 text-[9px] text-emerald-200">
+                  {L("Coming soon", "Próximamente")}
+                </span>
               </div>
             </div>
           </div>

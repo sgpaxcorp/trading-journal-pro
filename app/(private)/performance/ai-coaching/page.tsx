@@ -19,6 +19,7 @@ import { getAllJournalEntries, getJournalEntryByDate } from "@/lib/journalSupaba
 import { getJournalTradesForDay } from "@/lib/journalTradesSupabase";
 import type { TradesPayload } from "@/lib/journalNotes";
 import { computeAllKPIs, type KPIResult } from "@/lib/kpiLibrary";
+import { buildCashflowAdjustedDailyReturns } from "@/lib/performanceReturns";
 import {
   buildKpiTrades,
   computeTradeAnalytics,
@@ -2165,18 +2166,45 @@ function AiCoachingPageInner() {
     return computeTradeAnalytics(tradeRows, sessionsForTradeAnalytics);
   }, [tradeRows, sessionsForTradeAnalytics]);
 
+  const effectiveStartingBalance = useMemo(
+    () => planSnapshot?.effectiveStartingBalance ?? toNum(growthPlan?.starting_balance, 0),
+    [planSnapshot?.effectiveStartingBalance, growthPlan]
+  );
+
   const equityCurve = useMemo(() => {
-    const startingBalance = planSnapshot?.effectiveStartingBalance ?? toNum(growthPlan?.starting_balance, 0);
-    return computeEquityCurveFromSessions(sessionsForTradeAnalytics, cashflows, startingBalance, planStartIso);
-  }, [sessionsForTradeAnalytics, cashflows, planSnapshot?.effectiveStartingBalance, growthPlan, planStartIso]);
+    return computeEquityCurveFromSessions(sessionsForTradeAnalytics, cashflows, effectiveStartingBalance, planStartIso);
+  }, [sessionsForTradeAnalytics, cashflows, effectiveStartingBalance, planStartIso]);
+
+  const performanceReturns = useMemo(() => {
+    if (!equityCurve.length) return [];
+    const planStartCandidate = planStartIso ?? "";
+    const planStart = looksLikeYYYYMMDD(planStartCandidate) ? planStartCandidate : "";
+    const startIso = planStart || equityCurve[0].date;
+    const endIso = equityCurve[equityCurve.length - 1]?.date ?? startIso;
+    const dailyPnl = sessionsForTradeAnalytics.map((s) => ({ date: s.date, pnl: s.pnlNet }));
+    const cashflowPoints = (cashflows ?? []).map((cf) => ({
+      date: String(cf?.date ?? "").slice(0, 10),
+      net: signedCashflowAmount(cf),
+    }));
+    return buildCashflowAdjustedDailyReturns({
+      startIso,
+      endIso,
+      startingBalance: effectiveStartingBalance,
+      dailyPnl,
+      cashflows: cashflowPoints,
+    });
+  }, [equityCurve, sessionsForTradeAnalytics, cashflows, planStartIso, effectiveStartingBalance]);
 
   const kpiResults = useMemo<KPIResult[]>(() => {
     if (!tradeStats) return [];
     const kpiTrades = buildKpiTrades(tradeStats);
     if (!kpiTrades.length) return [];
     const equityPoints = equityCurve.map((p) => ({ time: p.date, equity_value: p.value }));
-    return computeAllKPIs(kpiTrades, equityPoints, undefined, { annualizationDays: 252 });
-  }, [tradeStats, equityCurve]);
+    return computeAllKPIs(kpiTrades, equityPoints, undefined, {
+      annualizationDays: 252,
+      returnsSeries: performanceReturns,
+    });
+  }, [tradeStats, equityCurve, performanceReturns]);
 
   const kpiResultsForCoach = useMemo(() => {
     if (!kpiResults.length) return [];

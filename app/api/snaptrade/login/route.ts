@@ -1,0 +1,51 @@
+import { NextResponse } from "next/server";
+import { getAuthUser } from "@/lib/authServer";
+import { ensureSnaptradeUser } from "@/lib/snaptradeStorage";
+import { snaptradeRequest } from "@/lib/snaptradeClient";
+import { hasActiveEntitlement } from "@/lib/entitlementsServer";
+
+export const runtime = "nodejs";
+
+export async function POST(req: Request) {
+  try {
+    const auth = await getAuthUser(req);
+    if (!auth) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    const entitled = await hasActiveEntitlement(auth.userId, "broker_sync");
+    if (!entitled) {
+      return NextResponse.json({ error: "Broker sync add-on required" }, { status: 402 });
+    }
+
+    const body = await req.json().catch(() => ({} as any));
+    const row = await ensureSnaptradeUser(auth.userId);
+
+    const payload: Record<string, unknown> = {};
+    if (body?.broker) payload.broker = body.broker;
+    if (body?.immediateRedirect !== undefined) payload.immediateRedirect = body.immediateRedirect;
+    if (body?.customRedirect) payload.customRedirect = body.customRedirect;
+    if (body?.connectionType) payload.connectionType = body.connectionType;
+    if (body?.darkMode !== undefined) payload.darkMode = body.darkMode;
+
+    const data = await snaptradeRequest<{ redirectURI?: string; redirectUri?: string; url?: string }>(
+      "/snapTrade/login",
+      "POST",
+      {
+        query: {
+          userId: row.snaptrade_user_id,
+          userSecret: row.snaptrade_user_secret,
+        },
+        body: payload,
+      }
+    );
+
+    const url = data?.redirectURI || data?.redirectUri || data?.url || "";
+    if (!url) {
+      return NextResponse.json({ error: "Missing redirect URI" }, { status: 500 });
+    }
+
+    return NextResponse.json({ url });
+  } catch (err: any) {
+    return NextResponse.json({ error: err?.message ?? "SnapTrade error" }, { status: 500 });
+  }
+}

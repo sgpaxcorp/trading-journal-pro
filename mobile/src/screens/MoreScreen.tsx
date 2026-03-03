@@ -31,7 +31,6 @@ export function SettingsScreen() {
     firstName: "",
     lastName: "",
     phone: "",
-    address: "",
   });
   const [password, setPassword] = useState("");
   const [passwordConfirm, setPasswordConfirm] = useState("");
@@ -41,6 +40,7 @@ export function SettingsScreen() {
   const [notificationLoading, setNotificationLoading] = useState(false);
   const [notificationStatus, setNotificationStatus] = useState<"granted" | "denied" | "undetermined">("undetermined");
   const [pushToken, setPushToken] = useState<string | null>(null);
+  const [testNotifLoading, setTestNotifLoading] = useState(false);
   const [planLoading, setPlanLoading] = useState(false);
   const [currentPlan, setCurrentPlan] = useState<"core" | "advanced" | null>(null);
   const [planStatus, setPlanStatus] = useState<string | null>(null);
@@ -84,7 +84,7 @@ export function SettingsScreen() {
       setProfileError(null);
       const { data, error } = await sb
         .from("profiles")
-        .select("first_name,last_name,phone,postal_address")
+        .select("first_name,last_name,phone")
         .eq("id", userId)
         .maybeSingle();
       if (error) throw error;
@@ -93,7 +93,6 @@ export function SettingsScreen() {
         firstName: data?.first_name ?? "",
         lastName: data?.last_name ?? "",
         phone: data?.phone ?? "",
-        address: data?.postal_address ?? "",
       });
     } catch (err: any) {
       if (!mountedRef.current) return;
@@ -248,7 +247,6 @@ export function SettingsScreen() {
           first_name: profile.firstName.trim(),
           last_name: profile.lastName.trim(),
           phone: profile.phone.trim(),
-          postal_address: profile.address.trim(),
         })
         .eq("id", userId);
       if (error) throw error;
@@ -348,6 +346,62 @@ export function SettingsScreen() {
     }
   }
 
+  async function handleTestNotification() {
+    if (notificationLoading || testNotifLoading) return;
+    if (notificationStatus !== "granted") {
+      Alert.alert(
+        t(language, "Enable notifications", "Habilita notificaciones"),
+        t(
+          language,
+          "Please allow notifications in Settings to receive reminders.",
+          "Activa notificaciones en Ajustes para recibir recordatorios."
+        )
+      );
+      return;
+    }
+    try {
+      setTestNotifLoading(true);
+      let tokenToUse = pushToken;
+      if (!tokenToUse) {
+        const projectId =
+          Constants.easConfig?.projectId ||
+          Constants.expoConfig?.extra?.eas?.projectId ||
+          process.env.EXPO_PUBLIC_EXPO_PROJECT_ID;
+        const tokenData = projectId
+          ? await Notifications.getExpoPushTokenAsync({ projectId })
+          : await Notifications.getExpoPushTokenAsync();
+        tokenToUse = tokenData.data;
+        setPushToken(tokenToUse);
+      }
+      if (!tokenToUse) {
+        Alert.alert(
+          t(language, "Notification setup required", "Configuración necesaria"),
+          t(
+            language,
+            "We could not register this device for reminders yet.",
+            "No pudimos registrar este dispositivo para recordatorios."
+          )
+        );
+        return;
+      }
+      await apiPost("/api/notifications/send-daily?force=1", {
+        expoPushToken: tokenToUse,
+        locale: language,
+      });
+      Alert.alert(
+        t(language, "Test sent", "Prueba enviada"),
+        t(language, "If notifications are enabled, it should arrive shortly.", "Si están activas, llegará en breve.")
+      );
+    } catch (err: any) {
+      Alert.alert(
+        t(language, "Test failed", "Prueba fallida"),
+        err?.message ?? "Error"
+      );
+    } finally {
+      setTestNotifLoading(false);
+    }
+  }
+
 
   const styles = useMemo(() => createStyles(colors), [colors]);
   const handleRefresh = useCallback(async () => {
@@ -403,13 +457,6 @@ export function SettingsScreen() {
               placeholderTextColor={colors.textMuted}
               value={profile.phone}
               onChangeText={(value) => setProfile((prev) => ({ ...prev, phone: value }))}
-            />
-            <TextInput
-              style={styles.input}
-              placeholder={t(language, "Address", "Dirección")}
-              placeholderTextColor={colors.textMuted}
-              value={profile.address}
-              onChangeText={(value) => setProfile((prev) => ({ ...prev, address: value }))}
             />
             {profileError ? <Text style={styles.errorText}>{profileError}</Text> : null}
             <Pressable
@@ -506,8 +553,8 @@ export function SettingsScreen() {
         <Text style={styles.sectionHint}>
           {t(
             language,
-            "Daily reminder at 9:00 AM EST.",
-            "Recordatorio diario a las 9:00 AM EST."
+            "Daily reminder at 9:00 AM ET (30 min before open) + daily goal alerts.",
+            "Recordatorio diario a las 9:00 AM ET (30 min antes de abrir) + alertas de meta diaria."
           )}
         </Text>
         <View style={styles.toggleRow}>
@@ -531,6 +578,17 @@ export function SettingsScreen() {
             )}
           </Text>
         ) : null}
+        <Pressable
+          style={[styles.saveButton, testNotifLoading && styles.saveButtonDisabled]}
+          onPress={handleTestNotification}
+          disabled={testNotifLoading}
+        >
+          <Text style={styles.saveButtonText}>
+            {testNotifLoading
+              ? t(language, "Sending…", "Enviando…")
+              : t(language, "Send test notification", "Enviar notificación de prueba")}
+          </Text>
+        </Pressable>
       </View>
 
       <View style={styles.sectionCard}>

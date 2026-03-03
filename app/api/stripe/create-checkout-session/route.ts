@@ -33,6 +33,10 @@ const OPTION_FLOW_PRICES = {
   monthly: process.env.STRIPE_PRICE_OPTIONFLOW_MONTHLY ?? "",
   annual: process.env.STRIPE_PRICE_OPTIONFLOW_ANNUAL ?? "",
 };
+const BROKER_SYNC_PRICES = {
+  monthly: process.env.STRIPE_PRICE_BROKER_SYNC_MONTHLY ?? "",
+  annual: process.env.STRIPE_PRICE_BROKER_SYNC_ANNUAL ?? "",
+};
 const TESTER_PROMO_CODES = new Set(
   String(process.env.STRIPE_TESTER_PROMO_CODES ?? "")
     .split(",")
@@ -159,6 +163,7 @@ export async function POST(req: NextRequest) {
     const billingCycle = body.billingCycle as BillingCycle | undefined;
     const couponCodeRaw = body.couponCode as string | undefined; // opcional
     const addonOptionFlow = Boolean(body.addonOptionFlow);
+    const addonBrokerSync = Boolean(body.addonBrokerSync);
     const partnerCode = normalizePartnerCode(body.partnerCode);
 
     if (!planId) {
@@ -237,6 +242,7 @@ export async function POST(req: NextRequest) {
 
     let effectivePlanId: PlanId = planId;
     let effectiveAddonOptionFlow = addonOptionFlow;
+    let effectiveAddonBrokerSync = addonBrokerSync;
     let promoDiscountInfo: ResolvedDiscount | null = null;
 
     const couponCode = normalizePromoCode(couponCodeRaw);
@@ -257,6 +263,7 @@ export async function POST(req: NextRequest) {
           }
           effectivePlanId = "advanced";
           effectiveAddonOptionFlow = true;
+          effectiveAddonBrokerSync = true;
         }
       } catch (err) {
         console.error("[CHECKOUT] Invalid coupon code", couponCode, err);
@@ -286,6 +293,12 @@ export async function POST(req: NextRequest) {
         { status: 500 }
       );
     }
+    if (effectiveAddonBrokerSync && !BROKER_SYNC_PRICES[finalBillingCycle]) {
+      return NextResponse.json(
+        { error: "Broker sync price ID not configured" },
+        { status: 500 }
+      );
+    }
 
     // =====================================================
     // Create Checkout Session
@@ -299,6 +312,12 @@ export async function POST(req: NextRequest) {
     if (effectiveAddonOptionFlow) {
       lineItems.push({
         price: OPTION_FLOW_PRICES[finalBillingCycle],
+        quantity: 1,
+      });
+    }
+    if (effectiveAddonBrokerSync) {
+      lineItems.push({
+        price: BROKER_SYNC_PRICES[finalBillingCycle],
         quantity: 1,
       });
     }
@@ -320,6 +339,7 @@ export async function POST(req: NextRequest) {
         couponId: promoDiscountInfo?.couponId ?? "",
         promotionCodeId: promoDiscountInfo?.promotionCodeId ?? "",
         addonOptionFlow: effectiveAddonOptionFlow ? "true" : "false",
+        addonBrokerSync: effectiveAddonBrokerSync ? "true" : "false",
         testerAllAccess:
           promoDiscountInfo?.isTesterAllAccess ? "true" : "false",
         partnerCode: partnerCode || "",
@@ -335,6 +355,7 @@ export async function POST(req: NextRequest) {
           couponId: promoDiscountInfo?.couponId ?? "",
           promotionCodeId: promoDiscountInfo?.promotionCodeId ?? "",
           addonOptionFlow: effectiveAddonOptionFlow ? "true" : "false",
+          addonBrokerSync: effectiveAddonBrokerSync ? "true" : "false",
           testerAllAccess:
             promoDiscountInfo?.isTesterAllAccess ? "true" : "false",
           partnerCode: partnerCode || "",

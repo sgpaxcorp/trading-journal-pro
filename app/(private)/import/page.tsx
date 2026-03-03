@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
+import { listMyEntitlements } from "@/lib/entitlementsSupabase";
 
 type BrokerId =
   | "thinkorswim"
@@ -126,9 +127,51 @@ export default function ImportPage() {
   const [history, setHistory] = useState<ImportHistoryItem[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
 
+  const [snaptradeStatus, setSnaptradeStatus] = useState<string | null>(null);
+  const [snaptradeError, setSnaptradeError] = useState<string | null>(null);
+  const [snaptradeConnecting, setSnaptradeConnecting] = useState(false);
+  const [snaptradeAccounts, setSnaptradeAccounts] = useState<any[] | null>(null);
+  const [snaptradeAccountId, setSnaptradeAccountId] = useState<string>("");
+  const [snaptradeHoldings, setSnaptradeHoldings] = useState<any[] | null>(null);
+  const [snaptradeActivities, setSnaptradeActivities] = useState<any[] | null>(null);
+  const [snaptradeBalances, setSnaptradeBalances] = useState<any | null>(null);
+  const [snaptradeOrders, setSnaptradeOrders] = useState<any[] | null>(null);
+  const [snaptradeBroker, setSnaptradeBroker] = useState<string>("");
+  const [snaptradeImporting, setSnaptradeImporting] = useState(false);
+  const [snaptradeEntitled, setSnaptradeEntitled] = useState<boolean | null>(null);
+
   const brokerMeta = useMemo(() => BROKERS.find((b) => b.id === broker), [broker]);
+  const snaptradeLocked = snaptradeEntitled === false;
+  const snaptradeChecking = snaptradeEntitled === null;
 
   const router = useRouter();
+
+  useEffect(() => {
+    let active = true;
+    async function loadEntitlements() {
+      try {
+        const { data } = await supabase.auth.getUser();
+        const userId = data?.user?.id;
+        if (!userId) {
+          if (active) setSnaptradeEntitled(false);
+          return;
+        }
+        const entitlements = await listMyEntitlements(userId);
+        const ok = entitlements.some(
+          (e) =>
+            e.entitlement_key === "broker_sync" &&
+            (e.status === "active" || e.status === "trialing")
+        );
+        if (active) setSnaptradeEntitled(ok);
+      } catch {
+        if (active) setSnaptradeEntitled(false);
+      }
+    }
+    loadEntitlements();
+    return () => {
+      active = false;
+    };
+  }, []);
 
   async function getToken(): Promise<string | null> {
     const { data, error } = await supabase.auth.getSession();
@@ -158,6 +201,186 @@ export default function ImportPage() {
       setHistory([]);
     } finally {
       setHistoryLoading(false);
+    }
+  }
+
+  async function callSnaptrade(path: string, opts?: RequestInit) {
+    if (snaptradeEntitled === false) {
+      throw new Error(L("Broker sync add-on required.", "Requiere el add-on de Broker Sync."));
+    }
+    const token = await getToken();
+    if (!token) {
+      throw new Error(L("Unauthorized. Please log out and log in again.", "No autorizado. Cierra sesión e inicia de nuevo."));
+    }
+    const res = await fetch(path, {
+      ...opts,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+        ...(opts?.headers ?? {}),
+      },
+    });
+    const data = await res.json().catch(() => ({} as any));
+    if (!res.ok) {
+      throw new Error(data?.error ?? "SnapTrade error");
+    }
+    return data;
+  }
+
+  async function onSnaptradeConnect() {
+    try {
+      setSnaptradeError(null);
+      setSnaptradeStatus(null);
+      setSnaptradeConnecting(true);
+      await callSnaptrade("/api/snaptrade/register", { method: "POST" });
+      const loginData = await callSnaptrade("/api/snaptrade/login", {
+        method: "POST",
+        body: JSON.stringify({
+          broker: snaptradeBroker.trim() || undefined,
+          connectionType: "read",
+          immediateRedirect: true,
+          darkMode: true,
+        }),
+      });
+      const url = loginData?.url || loginData?.redirectURI || loginData?.redirectUri || "";
+      if (!url) {
+        throw new Error(L("Missing SnapTrade redirect URL.", "Falta el enlace de conexión de SnapTrade."));
+      }
+      window.open(url, "_blank", "noopener,noreferrer");
+      setSnaptradeStatus(
+        L(
+          "Connection Portal opened in a new tab. Complete the broker login, then return to refresh accounts.",
+          "Portal abierto en otra pestaña. Completa el login del bróker y vuelve para refrescar cuentas."
+        )
+      );
+    } catch (err: any) {
+      setSnaptradeError(err?.message ?? "SnapTrade error");
+    } finally {
+      setSnaptradeConnecting(false);
+    }
+  }
+
+  async function onSnaptradeLoadAccounts() {
+    try {
+      setSnaptradeError(null);
+      setSnaptradeStatus(null);
+      const data = await callSnaptrade("/api/snaptrade/accounts", { method: "GET" });
+      const list = Array.isArray(data?.accounts) ? data.accounts : Array.isArray(data) ? data : [];
+      setSnaptradeAccounts(list);
+      if (!snaptradeAccountId && list.length > 0) {
+        setSnaptradeAccountId(String(list[0]?.id ?? ""));
+      }
+      setSnaptradeStatus(
+        list.length
+          ? L(`Loaded ${list.length} account(s).`, `Cargadas ${list.length} cuenta(s).`)
+          : L("No accounts found yet.", "Aún no hay cuentas conectadas.")
+      );
+    } catch (err: any) {
+      setSnaptradeError(err?.message ?? "SnapTrade error");
+    }
+  }
+
+  async function onSnaptradeLoadHoldings() {
+    if (!snaptradeAccountId) return;
+    try {
+      setSnaptradeError(null);
+      const data = await callSnaptrade(`/api/snaptrade/accounts/${snaptradeAccountId}/holdings`, {
+        method: "GET",
+      });
+      setSnaptradeHoldings(Array.isArray(data?.holdings) ? data.holdings : data?.data ?? data);
+    } catch (err: any) {
+      setSnaptradeError(err?.message ?? "SnapTrade error");
+    }
+  }
+
+  async function onSnaptradeLoadBalances() {
+    if (!snaptradeAccountId) return;
+    try {
+      setSnaptradeError(null);
+      const data = await callSnaptrade(`/api/snaptrade/accounts/${snaptradeAccountId}/balances`, {
+        method: "GET",
+      });
+      setSnaptradeBalances(data?.balances ?? data);
+    } catch (err: any) {
+      setSnaptradeError(err?.message ?? "SnapTrade error");
+    }
+  }
+
+  async function onSnaptradeLoadActivities() {
+    if (!snaptradeAccountId) return;
+    try {
+      setSnaptradeError(null);
+      const end = new Date();
+      const start = new Date();
+      start.setDate(end.getDate() - 30);
+      const qs = new URLSearchParams({
+        startDate: start.toISOString().slice(0, 10),
+        endDate: end.toISOString().slice(0, 10),
+      });
+      const data = await callSnaptrade(
+        `/api/snaptrade/accounts/${snaptradeAccountId}/activities?${qs.toString()}`,
+        { method: "GET" }
+      );
+      setSnaptradeActivities(Array.isArray(data?.activities) ? data.activities : data?.data ?? data);
+    } catch (err: any) {
+      setSnaptradeError(err?.message ?? "SnapTrade error");
+    }
+  }
+
+  async function onSnaptradeLoadOrders() {
+    if (!snaptradeAccountId) return;
+    try {
+      setSnaptradeError(null);
+      const data = await callSnaptrade(`/api/snaptrade/accounts/${snaptradeAccountId}/orders/recent`, {
+        method: "GET",
+      });
+      setSnaptradeOrders(Array.isArray(data?.orders) ? data.orders : data);
+    } catch (err: any) {
+      setSnaptradeError(err?.message ?? "SnapTrade error");
+    }
+  }
+
+  async function onSnaptradeImportTrades() {
+    if (!snaptradeAccountId) return;
+    try {
+      setSnaptradeError(null);
+      setSnaptradeStatus(null);
+      setSnaptradeImporting(true);
+      const end = new Date();
+      const start = new Date();
+      start.setDate(end.getDate() - 30);
+      const token = await getToken();
+      if (!token) throw new Error(L("Unauthorized. Please log out and log in again.", "No autorizado."));
+
+      const res = await fetch("/api/broker-import/snaptrade", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          accountId: snaptradeAccountId,
+          startDate: start.toISOString().slice(0, 10),
+          endDate: end.toISOString().slice(0, 10),
+          broker: "snaptrade",
+          comment: "SnapTrade import (30d)",
+        }),
+      });
+      const data = await res.json().catch(() => ({} as any));
+      if (!res.ok) {
+        throw new Error(data?.error ?? "SnapTrade import failed");
+      }
+      setSnaptradeStatus(
+        L(
+          `Imported ${data?.inserted ?? 0} trades (${data?.updated ?? 0} updated, ${data?.duplicates ?? 0} duplicates).`,
+          `Importadas ${data?.inserted ?? 0} operaciones (${data?.updated ?? 0} actualizadas, ${data?.duplicates ?? 0} duplicadas).`
+        )
+      );
+      loadHistory();
+    } catch (err: any) {
+      setSnaptradeError(err?.message ?? "SnapTrade error");
+    } finally {
+      setSnaptradeImporting(false);
     }
   }
 
@@ -605,6 +828,171 @@ export default function ImportPage() {
               )}
             </aside>
           </div>
+
+          <section className="mt-6 rounded-2xl border border-slate-800 bg-slate-900/60 p-6 shadow-2xl">
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div>
+                <div className="text-xs font-semibold text-emerald-200">SnapTrade (Beta)</div>
+                <p className="mt-1 text-[11px] text-slate-400">
+                  {L(
+                    "Connect your broker via SnapTrade to test what data we can receive (accounts, holdings, activities).",
+                    "Conecta tu bróker via SnapTrade para probar qué datos podemos recibir (cuentas, holdings, actividades)."
+                  )}
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  value={snaptradeBroker}
+                  onChange={(e) => setSnaptradeBroker(e.target.value)}
+                  placeholder={L("Broker slug (optional)", "Broker slug (opcional)")}
+                  className="w-48 rounded-xl border border-slate-700 bg-slate-950/40 px-3 py-2 text-xs text-slate-100 outline-none focus:border-emerald-400"
+                  disabled={snaptradeLocked || snaptradeChecking || snaptradeConnecting}
+                />
+                <button
+                  type="button"
+                  onClick={onSnaptradeConnect}
+                  className="rounded-xl bg-emerald-400 px-4 py-2 text-xs font-semibold text-slate-950 hover:bg-emerald-300 disabled:opacity-60"
+                  disabled={snaptradeConnecting || snaptradeLocked || snaptradeChecking}
+                >
+                  {snaptradeConnecting ? L("Connecting...", "Conectando...") : L("Connect broker", "Conectar bróker")}
+                </button>
+                <button
+                  type="button"
+                  onClick={onSnaptradeLoadAccounts}
+                  className="rounded-xl border border-slate-700 bg-slate-950/30 px-4 py-2 text-xs font-semibold text-slate-100 hover:bg-slate-950/50"
+                  disabled={snaptradeLocked || snaptradeChecking}
+                >
+                  {L("Refresh accounts", "Refrescar cuentas")}
+                </button>
+              </div>
+            </div>
+
+            {snaptradeLocked ? (
+              <div className="mt-3 rounded-xl border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-xs text-amber-100 flex flex-wrap items-center justify-between gap-3">
+                <span>
+                  {L(
+                    "Broker Sync add-on required to connect via SnapTrade.",
+                    "Necesitas el add-on Broker Sync para conectar vía SnapTrade."
+                  )}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => router.push("/billing")}
+                  className="rounded-lg border border-amber-300/60 px-3 py-1 text-[11px] text-amber-100 hover:bg-amber-400/10"
+                >
+                  {L("Open Billing", "Abrir facturación")}
+                </button>
+              </div>
+            ) : snaptradeChecking ? (
+              <div className="mt-3 rounded-xl border border-slate-700 bg-slate-950/30 px-3 py-2 text-xs text-slate-300">
+                {L("Checking add-on status…", "Verificando estado del add-on…")}
+              </div>
+            ) : null}
+
+            {snaptradeStatus ? (
+              <div className="mt-3 rounded-xl border border-emerald-400/30 bg-emerald-400/10 px-3 py-2 text-xs text-emerald-100">
+                {snaptradeStatus}
+              </div>
+            ) : null}
+
+            {snaptradeError ? (
+              <div className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-200">
+                {snaptradeError}
+              </div>
+            ) : null}
+
+            <div className="mt-4 grid gap-3 lg:grid-cols-[1fr_1fr]">
+              <div className="rounded-xl border border-slate-800 bg-slate-950/30 p-3">
+                <div className="text-xs font-semibold text-slate-100">{L("Accounts", "Cuentas")}</div>
+                <p className="mt-1 text-[11px] text-slate-400">
+                  {L("Select an account to pull holdings and activities.", "Selecciona una cuenta para ver holdings y actividades.")}
+                </p>
+                <select
+                  value={snaptradeAccountId}
+                  onChange={(e) => setSnaptradeAccountId(e.target.value)}
+                  className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950/40 px-3 py-2 text-xs text-slate-100 outline-none focus:border-emerald-400"
+                  disabled={snaptradeLocked || snaptradeChecking}
+                >
+                  <option value="">{L("Select account", "Selecciona cuenta")}</option>
+                  {(snaptradeAccounts ?? []).map((acc: any) => (
+                    <option key={String(acc?.id ?? acc?.accountId ?? Math.random())} value={String(acc?.id ?? acc?.accountId ?? "")}>
+                      {String(acc?.name ?? acc?.account_name ?? acc?.institution_name ?? acc?.id ?? "Account")}
+                    </option>
+                  ))}
+                </select>
+
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={onSnaptradeLoadHoldings}
+                    className="rounded-xl border border-slate-700 bg-slate-950/30 px-3 py-2 text-[11px] font-semibold text-slate-100 hover:bg-slate-950/50"
+                    disabled={!snaptradeAccountId || snaptradeLocked || snaptradeChecking}
+                  >
+                    {L("Load holdings", "Cargar holdings")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onSnaptradeLoadBalances}
+                    className="rounded-xl border border-slate-700 bg-slate-950/30 px-3 py-2 text-[11px] font-semibold text-slate-100 hover:bg-slate-950/50"
+                    disabled={!snaptradeAccountId || snaptradeLocked || snaptradeChecking}
+                  >
+                    {L("Load balances", "Cargar balances")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onSnaptradeLoadActivities}
+                    className="rounded-xl border border-slate-700 bg-slate-950/30 px-3 py-2 text-[11px] font-semibold text-slate-100 hover:bg-slate-950/50"
+                    disabled={!snaptradeAccountId || snaptradeLocked || snaptradeChecking}
+                  >
+                    {L("Load activities (30d)", "Cargar actividades (30d)")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onSnaptradeLoadOrders}
+                    className="rounded-xl border border-slate-700 bg-slate-950/30 px-3 py-2 text-[11px] font-semibold text-slate-100 hover:bg-slate-950/50"
+                    disabled={!snaptradeAccountId || snaptradeLocked || snaptradeChecking}
+                  >
+                    {L("Load recent orders", "Cargar órdenes recientes")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onSnaptradeImportTrades}
+                    className="rounded-xl bg-emerald-400 px-3 py-2 text-[11px] font-semibold text-slate-950 hover:bg-emerald-300 disabled:opacity-60"
+                    disabled={!snaptradeAccountId || snaptradeImporting || snaptradeLocked || snaptradeChecking}
+                  >
+                    {snaptradeImporting ? L("Importing...", "Importando...") : L("Import trades (30d)", "Importar trades (30d)")}
+                  </button>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-slate-800 bg-slate-950/30 p-3">
+                <div className="text-xs font-semibold text-slate-100">{L("Raw data preview", "Vista previa raw")}</div>
+                <div className="mt-2 grid gap-3">
+                  {snaptradeBalances ? (
+                    <pre className="max-h-44 overflow-auto rounded-lg border border-slate-800 bg-slate-950/40 p-2 text-[10px] text-slate-200">
+                      {JSON.stringify(snaptradeBalances, null, 2)}
+                    </pre>
+                  ) : null}
+                  {snaptradeOrders ? (
+                    <pre className="max-h-44 overflow-auto rounded-lg border border-slate-800 bg-slate-950/40 p-2 text-[10px] text-slate-200">
+                      {JSON.stringify(snaptradeOrders, null, 2)}
+                    </pre>
+                  ) : null}
+                  {snaptradeHoldings ? (
+                    <pre className="max-h-44 overflow-auto rounded-lg border border-slate-800 bg-slate-950/40 p-2 text-[10px] text-slate-200">
+                      {JSON.stringify(snaptradeHoldings, null, 2)}
+                    </pre>
+                  ) : null}
+                  {snaptradeActivities ? (
+                    <pre className="max-h-44 overflow-auto rounded-lg border border-slate-800 bg-slate-950/40 p-2 text-[10px] text-slate-200">
+                      {JSON.stringify(snaptradeActivities, null, 2)}
+                    </pre>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+          </section>
         </div>
       </main>
     </>

@@ -51,7 +51,6 @@ type TradingSystemItem = {
 type TradingSystemPayload = {
   doList: TradingSystemItem[];
   dontList: TradingSystemItem[];
-  orderList: TradingSystemItem[];
 };
 
 type PlanRow = {
@@ -211,12 +210,9 @@ export function DashboardScreen({ onOpenModule, onOpenJournalDate }: DashboardSc
         const system = plan?.steps?.execution_and_journal?.system ?? {};
         const doList = Array.isArray(system.doList) ? system.doList : [];
         const dontList = Array.isArray(system.dontList) ? system.dontList : [];
-        const orderList = Array.isArray(system.orderList) ? system.orderList : [];
-
         setSystemData({
           doList: doList.filter((i: any) => (i?.text ?? "").trim().length > 0),
           dontList: dontList.filter((i: any) => (i?.text ?? "").trim().length > 0),
-          orderList: orderList.filter((i: any) => (i?.text ?? "").trim().length > 0),
         });
         setSystemLoading(false);
       }
@@ -473,12 +469,12 @@ export function DashboardScreen({ onOpenModule, onOpenJournalDate }: DashboardSc
                 {t(language, "Loading system…", "Cargando sistema…")}
               </Text>
             ) : !systemData ||
-              (systemData.doList.length + systemData.dontList.length + systemData.orderList.length === 0) ? (
+              (systemData.doList.length + systemData.dontList.length === 0) ? (
               <Text style={styles.systemHint}>
                 {t(
                   language,
-                  "Add your Do/Don't/Order rules in Growth Plan.",
-                  "Agrega tus reglas Hacer/No hacer/Orden en Growth Plan."
+                  "Add your Do/Don't rules in Growth Plan.",
+                  "Agrega tus reglas Hacer/No hacer en Growth Plan."
                 )}{" "}
                 <Text style={styles.systemLink} onPress={() => Linking.openURL(WEB_GROWTH_PLAN_URL)}>
                   {t(language, "Open Growth Plan →", "Abrir Growth Plan →")}
@@ -499,14 +495,6 @@ export function DashboardScreen({ onOpenModule, onOpenJournalDate }: DashboardSc
                   {(systemData.dontList.length ? systemData.dontList : [{ text: "—" }]).map((item, idx) => (
                     <Text key={`dont-${idx}`} style={styles.systemItem}>
                       • {item.text}
-                    </Text>
-                  ))}
-                </View>
-                <View style={styles.systemSection}>
-                  <Text style={styles.systemLabelOrder}>{t(language, "Order", "Orden")}</Text>
-                  {(systemData.orderList.length ? systemData.orderList : [{ text: "—" }]).map((item, idx) => (
-                    <Text key={`order-${idx}`} style={styles.systemItem}>
-                      {idx + 1}. {item.text}
                     </Text>
                   ))}
                 </View>

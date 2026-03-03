@@ -47,6 +47,8 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
   const [addonActive, setAddonActive] = useState(false);
   const [addonLoading, setAddonLoading] = useState(false);
   const [addonSelected, setAddonSelected] = useState(false);
+  const [brokerAddonActive, setBrokerAddonActive] = useState(false);
+  const [brokerAddonSelected, setBrokerAddonSelected] = useState(false);
   const [billingCycle, setBillingCycle] = useState<"monthly" | "annual">("monthly");
   const [partnerCode, setPartnerCode] = useState(
     String(initialPartnerCode || "")
@@ -70,6 +72,10 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
   const OPTION_FLOW_PRICES = {
     monthly: 6.99,
     annual: 69.90,
+  } as const;
+  const BROKER_SYNC_PRICES = {
+    monthly: 5.0,
+    annual: 50.0,
   } as const;
 
   const priceFor = (planId: PlanId) =>
@@ -143,7 +149,15 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
             e.entitlement_key === "option_flow" &&
             (e.status === "active" || e.status === "trialing")
         );
-        if (!cancelled) setAddonActive(active);
+        const brokerActive = entitlements.some(
+          (e) =>
+            e.entitlement_key === "broker_sync" &&
+            (e.status === "active" || e.status === "trialing")
+        );
+        if (!cancelled) {
+          setAddonActive(active);
+          setBrokerAddonActive(brokerActive);
+        }
       } catch (err) {
         console.warn("[Billing] addon entitlement load error:", err);
       } finally {
@@ -233,6 +247,7 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
         body: JSON.stringify({
           planId: selectedPlan,
           addonOptionFlow: !hasActivePlan && addonSelected,
+          addonBrokerSync: !hasActivePlan && brokerAddonSelected,
           billingCycle,
           partnerCode: partnerCode || undefined,
         }),
@@ -255,7 +270,7 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
     }
   }
 
-  async function handleAddonCheckout() {
+  async function handleAddonCheckout(addonKey: "option_flow" | "broker_sync") {
     if (authLoading) return;
     if (!user) {
       setError(L("You need to sign in before starting checkout.", "Debes iniciar sesión antes de iniciar el checkout."));
@@ -280,7 +295,7 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ addonKey: "option_flow", billingCycle }),
+        body: JSON.stringify({ addonKey, billingCycle }),
       });
 
       const data = await res.json();
@@ -654,6 +669,11 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
                       {L("Option Flow add-on", "Add-on Option Flow")}
                     </span>
                   )}
+                  {brokerAddonSelected && (
+                    <span className="rounded-full border border-slate-600 bg-slate-950/70 px-3 py-1 text-[11px] text-slate-200">
+                      {L("Broker Sync add-on", "Add-on Broker Sync")}
+                    </span>
+                  )}
                 </div>
                 <p className="mt-3 text-[11px] text-slate-400">
                   {L(
@@ -722,7 +742,7 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
           )}
 
           {/* Add-ons */}
-          <div className="mt-8 border-t border-slate-800/80 pt-6 space-y-4">
+          <div className="mt-8 border-t border-slate-800/80 pt-6 space-y-6">
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">
@@ -777,7 +797,7 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
                 ) : (
                   <button
                     type="button"
-                    onClick={handleAddonCheckout}
+                    onClick={() => handleAddonCheckout("option_flow")}
                     disabled={isButtonDisabled || addonActive}
                     className="rounded-xl bg-emerald-400 px-4 py-2 text-xs font-semibold text-slate-950 hover:bg-emerald-300 disabled:opacity-60 disabled:cursor-not-allowed"
                   >
@@ -792,6 +812,82 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
                   className="rounded-xl border border-slate-700 px-4 py-2 text-xs text-slate-300 hover:border-emerald-400 hover:text-emerald-200"
                 >
                   {L("Open Option Flow", "Abrir Option Flow")}
+                </button>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-lg font-semibold text-slate-100">
+                  {L("Broker Sync (SnapTrade)", "Broker Sync (SnapTrade)")}
+                </h2>
+                <p className="text-xs text-slate-400 mt-1">
+                  {L(
+                    "Connect your broker and sync transactions directly into the Journal.",
+                    "Conecta tu bróker y sincroniza transacciones directo al Journal."
+                  )}
+                </p>
+                <p className="mt-1 text-[11px] text-slate-500">
+                  {L(
+                    "Supported: Thinkorswim (Schwab/TOS), Interactive Brokers (IBKR), Tradovate, NinjaTrader, Webull, Binance, Coinbase.",
+                    "Soporta: Thinkorswim (Schwab/TOS), Interactive Brokers (IBKR), Tradovate, NinjaTrader, Webull, Binance, Coinbase."
+                  )}
+                </p>
+              </div>
+              <span className="rounded-full border border-slate-700 bg-slate-950/70 px-3 py-1 text-[11px] text-slate-300">
+                {addonLoading
+                  ? L("Checking…", "Verificando…")
+                  : brokerAddonActive
+                  ? L("Active", "Activo")
+                  : L("Optional", "Opcional")}
+              </span>
+            </div>
+
+            <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+              <div>
+                <p className="text-sm font-semibold text-slate-100">
+                  ${billingCycle === "annual" ? BROKER_SYNC_PRICES.annual.toFixed(2) : BROKER_SYNC_PRICES.monthly.toFixed(2)}
+                </p>
+                <p className="text-[11px] text-slate-400">
+                  {billingCycle === "annual"
+                    ? L("Annual add-on", "Add-on anual")
+                    : L("Monthly add-on", "Add-on mensual")}
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-3">
+                {!hasActivePlan ? (
+                  <button
+                    type="button"
+                    onClick={() => setBrokerAddonSelected((prev) => !prev)}
+                    className={`rounded-xl px-4 py-2 text-xs font-semibold transition ${
+                      brokerAddonSelected
+                        ? "bg-emerald-400 text-slate-950 hover:bg-emerald-300"
+                        : "border border-slate-700 text-slate-200 hover:border-emerald-400"
+                    }`}
+                  >
+                    {brokerAddonSelected
+                      ? L("Remove Broker Sync", "Quitar Broker Sync")
+                      : L("Add Broker Sync", "Agregar Broker Sync")}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => handleAddonCheckout("broker_sync")}
+                    disabled={isButtonDisabled || brokerAddonActive}
+                    className="rounded-xl bg-emerald-400 px-4 py-2 text-xs font-semibold text-slate-950 hover:bg-emerald-300 disabled:opacity-60 disabled:cursor-not-allowed"
+                  >
+                    {brokerAddonActive
+                      ? L("Already active", "Ya activo")
+                      : L("Add Broker Sync", "Agregar Broker Sync")}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => router.push("/import")}
+                  className="rounded-xl border border-slate-700 px-4 py-2 text-xs text-slate-300 hover:border-emerald-400 hover:text-emerald-200"
+                >
+                  {L("Open Imports", "Abrir Importaciones")}
                 </button>
               </div>
             </div>

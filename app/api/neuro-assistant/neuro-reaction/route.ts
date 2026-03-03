@@ -174,8 +174,58 @@ const WIZARD_EVENTS: Record<string, Record<Lang, (to?: string) => string>> = {
 
 function isDeterministicEvent(event: string) {
   if (event === "field_help") return true;
+  if (event === "growth_plan_post_save_summary") return true;
   if (event in WIZARD_EVENTS) return true;
   return false;
+}
+
+function formatPct(val: unknown) {
+  const num = typeof val === "number" ? val : Number(val);
+  if (!Number.isFinite(num)) return null;
+  return `${num.toFixed(2)}%`;
+}
+
+function buildPlanCoachSummary(lang: Lang, data: any) {
+  const goalPct = formatPct(data?.dailyGoalPercent);
+  const lossPct = formatPct(data?.maxDailyLossPercent);
+  const lossDaysRaw = Number(data?.lossDaysPerWeek);
+  const lossDays = Number.isFinite(lossDaysRaw) ? Math.max(0, Math.round(lossDaysRaw)) : null;
+
+  const parts: string[] = [];
+  if (goalPct) {
+    parts.push(lang === "es" ? `meta diaria de ${goalPct}` : `daily goal of ${goalPct}`);
+  }
+  if (lossPct) {
+    parts.push(lang === "es" ? `pérdida máx ${lossPct}` : `max daily loss ${lossPct}`);
+  }
+  if (lossDays !== null) {
+    parts.push(
+      lang === "es"
+        ? `${lossDays} día(s) rojos/semana`
+        : `${lossDays} loss day(s)/week`
+    );
+  }
+
+  const firstGoal =
+    parts.length > 0
+      ? parts.join(lang === "es" ? ", " : ", ")
+      : lang === "es"
+      ? "ejecutar tu checklist con disciplina esta semana"
+      : "execute your checklist with discipline this week";
+
+  if (lang === "es") {
+    return (
+      `Plan guardado. Pasa por AI Coaching: hay un resumen importante de tu plan. ` +
+      `Primera meta: ${firstGoal}. Emocionalmente: calma y disciplina — pausa tras pérdida, ` +
+      `evita impulsos y sigue tu checklist.`
+    );
+  }
+
+  return (
+    `Plan saved. Please visit AI Coaching—there’s an important summary of your plan. ` +
+    `First target: ${firstGoal}. Emotionally: stay calm and disciplined — pause after a loss, ` +
+    `avoid impulses, and follow your checklist.`
+  );
 }
 
 function deterministicReply(event: string, lang: Lang, data: any): string {
@@ -193,6 +243,10 @@ function deterministicReply(event: string, lang: Lang, data: any): string {
   if (event in WIZARD_EVENTS) {
     const to = typeof data?.to === "string" ? data.to : undefined;
     return WIZARD_EVENTS[event][lang](to);
+  }
+
+  if (event === "growth_plan_post_save_summary") {
+    return buildPlanCoachSummary(lang, data);
   }
 
   return "";

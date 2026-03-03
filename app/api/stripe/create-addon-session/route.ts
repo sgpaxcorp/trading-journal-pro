@@ -6,9 +6,24 @@ import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {});
 const APP_URL = (process.env.NEXT_PUBLIC_APP_URL || "").trim();
 
-const ADDON_PRICE_ID_MONTHLY = process.env.STRIPE_PRICE_OPTIONFLOW_MONTHLY ?? "";
-const ADDON_PRICE_ID_ANNUAL = process.env.STRIPE_PRICE_OPTIONFLOW_ANNUAL ?? "";
-const ADDON_KEY = "option_flow";
+const ADDON_CONFIG: Record<
+  string,
+  { monthly: string; annual: string; successPath: string; cancelPath?: string }
+> = {
+  option_flow: {
+    monthly: process.env.STRIPE_PRICE_OPTIONFLOW_MONTHLY ?? "",
+    annual: process.env.STRIPE_PRICE_OPTIONFLOW_ANNUAL ?? "",
+    successPath: "/option-flow?checkout=success",
+    cancelPath: "/option-flow?checkout=cancel",
+  },
+  broker_sync: {
+    monthly: process.env.STRIPE_PRICE_BROKER_SYNC_MONTHLY ?? "",
+    annual: process.env.STRIPE_PRICE_BROKER_SYNC_ANNUAL ?? "",
+    successPath: "/import?addon=broker_sync&checkout=success",
+    cancelPath: "/import?addon=broker_sync&checkout=cancel",
+  },
+};
+const DEFAULT_ADDON_KEY = "option_flow";
 
 function resolveAppUrl(req: NextRequest) {
   const origin = req.headers.get("origin") ?? "";
@@ -36,14 +51,15 @@ export async function POST(req: NextRequest) {
     const email = authData.user.email ?? "";
 
     const body = await req.json();
-    const addonKey = (body.addonKey as string | undefined) || ADDON_KEY;
-    if (addonKey !== ADDON_KEY) {
+    const addonKey = (body.addonKey as string | undefined) || DEFAULT_ADDON_KEY;
+    const addonCfg = ADDON_CONFIG[addonKey];
+    if (!addonCfg) {
       return NextResponse.json({ error: "Invalid add-on" }, { status: 400 });
     }
 
     const billingCycle = (body?.billingCycle as "monthly" | "annual" | undefined) || "monthly";
     const priceId =
-      billingCycle === "annual" ? ADDON_PRICE_ID_ANNUAL || ADDON_PRICE_ID_MONTHLY : ADDON_PRICE_ID_MONTHLY;
+      billingCycle === "annual" ? addonCfg.annual || addonCfg.monthly : addonCfg.monthly;
 
     if (!priceId) {
       return NextResponse.json(
@@ -81,6 +97,9 @@ export async function POST(req: NextRequest) {
       customerId = created.id;
     }
 
+    const successUrl = `${origin}${addonCfg.successPath}`;
+    const cancelUrl = `${origin}${addonCfg.cancelPath ?? addonCfg.successPath}`;
+
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
       customer: customerId,
@@ -91,8 +110,8 @@ export async function POST(req: NextRequest) {
         },
       ],
       allow_promotion_codes: true,
-      success_url: `${origin}/option-flow?checkout=success`,
-      cancel_url: `${origin}/option-flow?checkout=cancel`,
+      success_url: successUrl,
+      cancel_url: cancelUrl,
       metadata: {
         supabaseUserId: userId,
         addonKey,

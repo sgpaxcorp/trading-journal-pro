@@ -7,10 +7,44 @@ export const runtime = "nodejs";
 type PushRow = {
   expo_push_token: string;
   locale: string | null;
+  user_id?: string | null;
 };
+
+const NY_TZ = "America/New_York";
 
 function isExpoPushToken(token: string) {
   return token.startsWith("ExponentPushToken") || token.startsWith("ExpoPushToken");
+}
+
+function getNewYorkTimeParts() {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: NY_TZ,
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(new Date());
+  const weekday = parts.find((p) => p.type === "weekday")?.value ?? "Mon";
+  const hour = Number(parts.find((p) => p.type === "hour")?.value ?? "0");
+  const minute = Number(parts.find((p) => p.type === "minute")?.value ?? "0");
+  return { weekday, hour, minute };
+}
+
+function shouldSendNowNY() {
+  const { weekday, hour } = getNewYorkTimeParts();
+  if (weekday === "Sat" || weekday === "Sun") return false;
+  return hour === 9;
+}
+
+function tryDecodeUserId(token: string) {
+  try {
+    const [, payload] = token.split(".");
+    if (!payload) return null;
+    const decoded = JSON.parse(Buffer.from(payload, "base64").toString("utf8"));
+    return typeof decoded?.sub === "string" ? decoded.sub : null;
+  } catch {
+    return null;
+  }
 }
 
 function buildMessage(locale: string | null) {
@@ -18,12 +52,12 @@ function buildMessage(locale: string | null) {
   if (isEs) {
     return {
       title: "Neuro Trader Journal",
-      body: "No te olvides de llenar tu plan pre‑market en Neuro Trader Journal.",
+      body: "El mercado abre en 30 minutos. Tiempo para prepararte.",
     };
   }
   return {
     title: "Neuro Trader Journal",
-    body: "Don't forget to fill out your pre‑market plan in Neuro Trader Journal.",
+    body: "Market opens in 30 minutes. Time to prepare.",
   };
 }
 
@@ -51,23 +85,63 @@ async function sendExpoMessages(messages: Array<Record<string, unknown>>) {
 
 export async function POST(req: NextRequest) {
   try {
+    const url = new URL(req.url);
+    const forceParam = url.searchParams.get("force");
+    const force = forceParam === "1" || forceParam === "true";
+    const body = force ? await req.json().catch(() => ({})) : {};
+    const bodyToken =
+      typeof (body as any)?.expoPushToken === "string" ? String((body as any).expoPushToken).trim() : "";
+    const bodyLocale =
+      typeof (body as any)?.locale === "string" ? String((body as any).locale).trim() : null;
+    const forceBodyToken = force && bodyToken && isExpoPushToken(bodyToken);
+
     const secret = process.env.CRON_SECRET || "";
     const authHeader = req.headers.get("authorization") || "";
     const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
-    if (!secret || token !== secret) {
+    const vercelCronHeader = req.headers.get("x-vercel-cron");
+    const isVercelCron = Boolean(vercelCronHeader) && vercelCronHeader !== "false";
+    const hasValidSecret = secret && token === secret;
+    let userId: string | null = null;
+
+    if (force && token && !hasValidSecret) {
+      const { data: authData, error: authErr } = await supabaseAdmin.auth.getUser(token);
+      if (!authErr && authData?.user?.id) {
+        userId = authData.user.id;
+      } else {
+        userId = tryDecodeUserId(token);
+      }
+    }
+
+    if (!force && !isVercelCron && !hasValidSecret) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    if (force && !isVercelCron && !hasValidSecret && !userId && !forceBodyToken) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { data, error } = await supabaseAdmin
-      .from("push_tokens")
-      .select("expo_push_token, locale")
-      .eq("daily_reminder_enabled", true);
-
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+    if (!force && !shouldSendNowNY()) {
+      return NextResponse.json({ ok: true, sent: 0, detail: "Outside 9:00 AM ET window." });
     }
 
-    const rows = (data ?? []) as PushRow[];
+    let rows: PushRow[] = [];
+    if (forceBodyToken) {
+      rows = [{ expo_push_token: bodyToken, locale: bodyLocale, user_id: userId }];
+    } else {
+      let query = supabaseAdmin
+        .from("push_tokens")
+        .select("expo_push_token, locale, user_id")
+        .eq("daily_reminder_enabled", true);
+      if (userId) {
+        query = query.eq("user_id", userId);
+      }
+      const { data, error } = await query;
+
+      if (error) {
+        return NextResponse.json({ error: error.message }, { status: 500 });
+      }
+      rows = (data ?? []) as PushRow[];
+    }
+
     const messages = rows
       .filter((row) => isExpoPushToken(row.expo_push_token))
       .map((row) => {
