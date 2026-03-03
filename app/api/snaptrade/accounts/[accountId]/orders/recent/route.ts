@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { getAuthUser } from "@/lib/authServer";
 import { getSnaptradeUser } from "@/lib/snaptradeStorage";
 import { snaptradeRequest } from "@/lib/snaptradeClient";
@@ -7,8 +7,8 @@ import { hasActiveEntitlement } from "@/lib/entitlementsServer";
 export const runtime = "nodejs";
 
 export async function GET(
-  req: Request,
-  { params }: { params: { accountId: string } }
+  req: NextRequest,
+  context: { params: { accountId: string } | Promise<{ accountId: string }> }
 ) {
   try {
     const auth = await getAuthUser(req);
@@ -25,7 +25,8 @@ export async function GET(
       return NextResponse.json({ error: "SnapTrade not connected" }, { status: 400 });
     }
 
-    const accountId = String(params?.accountId || "");
+    const { accountId: accountIdParam } = await Promise.resolve(context.params);
+    const accountId = String(accountIdParam || "");
     if (!accountId) {
       return NextResponse.json({ error: "Missing accountId" }, { status: 400 });
     }

@@ -131,7 +131,7 @@ function resolveAddonPriceId(subscription: Stripe.Subscription | null | undefine
   if (!subscription) return cfg.monthly || cfg.annual || null;
   const ids = new Set([cfg.monthly, cfg.annual].filter(Boolean));
   const hit = subscription.items.data.find((item) => item.price?.id && ids.has(item.price.id));
-  return hit?.price?.id ?? cfg.monthly || cfg.annual || null;
+  return hit?.price?.id ?? (cfg.monthly || cfg.annual || null);
 }
 
 function normalizeBillingCycle(raw?: string | null): "monthly" | "annual" | null {
