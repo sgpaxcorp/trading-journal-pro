@@ -23,11 +23,26 @@ export async function ensureSnaptradeUser(userId: string): Promise<SnaptradeUser
   if (existing?.snaptrade_user_secret) return existing;
 
   const snaptradeUserId = userId;
-  const resp = await snaptradeRequest<{ userId?: string; userSecret: string }>(
-    "/snapTrade/registerUser",
-    "POST",
-    { body: { userId: snaptradeUserId } }
-  );
+  let resp: { userId?: string; userSecret: string };
+  try {
+    resp = await snaptradeRequest<{ userId?: string; userSecret: string }>("/snapTrade/registerUser", "POST", {
+      body: { userId: snaptradeUserId },
+    });
+  } catch (err: any) {
+    const msg = String(err?.message ?? err);
+    const alreadyExists = msg.toLowerCase().includes("already exists") || msg.includes("(1010)");
+    if (!alreadyExists) {
+      throw err;
+    }
+    // User exists on SnapTrade but not locally (likely env swap). Remove and recreate.
+    await snaptradeRequest("/snapTrade/deleteUser", "DELETE", {
+      query: { userId: snaptradeUserId },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    resp = await snaptradeRequest<{ userId?: string; userSecret: string }>("/snapTrade/registerUser", "POST", {
+      body: { userId: snaptradeUserId },
+    });
+  }
 
   const row: SnaptradeUserRow = {
     user_id: userId,

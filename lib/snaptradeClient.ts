@@ -66,8 +66,9 @@ export async function snaptradeRequest<T>(
   const text = await res.text();
   const data = text ? JSON.parse(text) : {};
   if (!res.ok) {
-    const err = (data && (data.error || data.message)) || `SnapTrade error ${res.status}`;
-    throw new Error(err);
+    const base = (data && (data.detail || data.error || data.message)) || `SnapTrade error ${res.status}`;
+    const code = data && (data.code || data.status_code) ? ` (${data.code || data.status_code})` : "";
+    throw new Error(`${base}${code}`);
   }
   return data as T;
 }
