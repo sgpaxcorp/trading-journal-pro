@@ -138,6 +138,7 @@ export default function ImportPage() {
   const [snaptradeBroker, setSnaptradeBroker] = useState<string>("");
   const [snaptradeImporting, setSnaptradeImporting] = useState(false);
   const [showSnaptradeHelp, setShowSnaptradeHelp] = useState(true);
+  const [snaptradeResetting, setSnaptradeResetting] = useState(false);
 
   const brokerMeta = useMemo(() => BROKERS.find((b) => b.id === broker), [broker]);
 
@@ -227,6 +228,34 @@ export default function ImportPage() {
       setSnaptradeError(err?.message ?? "SnapTrade error");
     } finally {
       setSnaptradeConnecting(false);
+    }
+  }
+
+  async function onSnaptradeReset() {
+    const ok = window.confirm(
+      L(
+        "This will remove your SnapTrade link and let you connect again. Continue?",
+        "Esto eliminará tu enlace de SnapTrade y te permitirá conectar de nuevo. ¿Deseas continuar?"
+      )
+    );
+    if (!ok) return;
+    try {
+      setSnaptradeError(null);
+      setSnaptradeStatus(null);
+      setSnaptradeResetting(true);
+      await callSnaptrade("/api/snaptrade/reset", { method: "POST" });
+      setSnaptradeAccounts(null);
+      setSnaptradeAccountId("");
+      setSnaptradeStatus(
+        L(
+          "SnapTrade link reset. Click “Connect broker” to start again.",
+          "Enlace SnapTrade reiniciado. Presiona “Conectar bróker” para comenzar de nuevo."
+        )
+      );
+    } catch (err: any) {
+      setSnaptradeError(err?.message ?? "SnapTrade error");
+    } finally {
+      setSnaptradeResetting(false);
     }
   }
 
@@ -834,6 +863,14 @@ export default function ImportPage() {
                   disabled={false}
                 >
                   {L("Refresh accounts", "Refrescar cuentas")}
+                </button>
+                <button
+                  type="button"
+                  onClick={onSnaptradeReset}
+                  className="rounded-xl border border-amber-300/40 bg-amber-400/10 px-4 py-2 text-xs font-semibold text-amber-100 hover:bg-amber-400/20 disabled:opacity-60"
+                  disabled={snaptradeResetting}
+                >
+                  {snaptradeResetting ? L("Resetting...", "Reiniciando...") : L("Reset link", "Reiniciar enlace")}
                 </button>
               </div>
             </div>
