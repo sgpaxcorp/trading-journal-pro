@@ -25,9 +25,13 @@ export async function GET(
     if (!auth) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
-    const entitled = await hasActiveEntitlement(auth.userId, "broker_sync");
-    if (!entitled) {
-      return NextResponse.json({ error: "Broker sync add-on required" }, { status: 402 });
+    const brokerSyncFree =
+      process.env.BROKER_SYNC_FREE === "true" || process.env.NEXT_PUBLIC_BROKER_SYNC_FREE === "true";
+    if (!brokerSyncFree) {
+      const entitled = await hasActiveEntitlement(auth.userId, "broker_sync");
+      if (!entitled) {
+        return NextResponse.json({ error: "Broker sync add-on required" }, { status: 402 });
+      }
     }
 
     const row = await getSnaptradeUser(auth.userId);
