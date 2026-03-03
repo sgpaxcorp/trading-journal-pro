@@ -32,19 +32,9 @@ export function formatSnaptradeError(err: any) {
   return { error: err?.message ?? "SnapTrade error" };
 }
 
-function stableJson(value: any): string {
-  if (value === null || value === undefined) return "null";
-  if (typeof value !== "object") return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map((v) => stableJson(v)).join(",")}]`;
-  const keys = Object.keys(value).sort();
-  const entries = keys.map((k) => `${JSON.stringify(k)}:${stableJson(value[k])}`);
-  return `{${entries.join(",")}}`;
-}
-
-function buildQueryString(params: Record<string, string | number | boolean | null | undefined>) {
-  const entries = Object.entries(params).filter(([, v]) => v !== undefined && v !== null);
-  const sorted = entries.sort(([a], [b]) => a.localeCompare(b));
-  return sorted
+function buildQueryString(entries: Array<[string, string | number | boolean | null | undefined]>) {
+  return entries
+    .filter(([, v]) => v !== undefined && v !== null)
     .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`)
     .join("&");
 }
@@ -68,13 +58,13 @@ export async function snaptradeRequest<T>(
 ): Promise<T> {
   const { clientId, consumerKey } = getSnapTradeKeys();
   const timestamp = Math.floor(Date.now() / 1000);
-  const query = {
-    clientId,
-    timestamp,
-    ...(opts?.query ?? {}),
-  };
+  const queryEntries: Array<[string, string | number | boolean | null | undefined]> = [
+    ["clientId", clientId],
+    ["timestamp", timestamp],
+    ...Object.entries(opts?.query ?? {}),
+  ];
 
-  const queryString = buildQueryString(query);
+  const queryString = buildQueryString(queryEntries);
   const requestPath = path.startsWith("/api/v1") ? path : `/api/v1${path.startsWith("/") ? "" : "/"}${path}`;
   const isRead = method === "GET" || method === "DELETE";
   const sigObject = {
@@ -82,8 +72,8 @@ export async function snaptradeRequest<T>(
     path: requestPath,
     query: queryString,
   };
-  // SnapTrade docs show deterministic JSON (sorted keys, no spaces)
-  const sigContent = stableJson(sigObject);
+  // Follow SnapTrade JS example (JSON.stringify with insertion order)
+  const sigContent = JSON.stringify(sigObject);
   const signature = crypto
     .createHmac("sha256", encodeURI(consumerKey))
     .update(sigContent)
