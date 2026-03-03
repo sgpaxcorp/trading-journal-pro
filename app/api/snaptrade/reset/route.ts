@@ -14,13 +14,20 @@ export async function POST(req: Request) {
     }
 
     const row = await getSnaptradeUser(auth.userId);
-    if (!row) {
-      return NextResponse.json({ ok: true, reset: false, reason: "not_connected" });
-    }
+    const targetUserId = row?.snaptrade_user_id || auth.userId;
 
-    await snaptradeRequest("/snapTrade/deleteUser", "DELETE", {
-      query: { userId: row.snaptrade_user_id },
-    });
+    try {
+      await snaptradeRequest("/snapTrade/deleteUser", "DELETE", {
+        query: { userId: targetUserId },
+      });
+    } catch (err: any) {
+      const msg = String(err?.message ?? err);
+      const notFound =
+        msg.toLowerCase().includes("not found") ||
+        msg.toLowerCase().includes("does not exist") ||
+        msg.includes("(1011)");
+      if (!notFound) throw err;
+    }
 
     await supabaseAdmin.from("snaptrade_users").delete().eq("user_id", auth.userId);
 
