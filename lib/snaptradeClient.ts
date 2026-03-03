@@ -4,20 +4,14 @@ const SNAPTRADE_BASE_URL = "https://api.snaptrade.com/api/v1";
 
 type SnapTradeMethod = "GET" | "POST" | "PUT" | "DELETE";
 
-function stableStringify(value: any): string {
-  if (value === null || value === undefined) return "null";
-  if (typeof value !== "object") return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map((v) => stableStringify(v)).join(",")}]`;
-  const keys = Object.keys(value).sort();
-  const entries = keys.map((k) => `${JSON.stringify(k)}:${stableStringify(value[k])}`);
-  return `{${entries.join(",")}}`;
-}
-
-function buildQuery(params: Record<string, string | number | boolean | null | undefined>) {
-  const keys = Object.keys(params).filter((k) => params[k] !== undefined && params[k] !== null).sort();
-  return keys
-    .map((k) => `${encodeURIComponent(k)}=${encodeURIComponent(String(params[k]))}`)
-    .join("&");
+function buildQueryString(params: Record<string, string | number | boolean | null | undefined>) {
+  const entries = Object.entries(params).filter(([, v]) => v !== undefined && v !== null);
+  const sorted = entries.sort(([a], [b]) => a.localeCompare(b));
+  const qs = new URLSearchParams();
+  for (const [key, value] of sorted) {
+    qs.set(key, String(value));
+  }
+  return qs.toString();
 }
 
 function getSnapTradeKeys() {
@@ -40,20 +34,24 @@ export async function snaptradeRequest<T>(
   const { clientId, consumerKey } = getSnapTradeKeys();
   const timestamp = Math.floor(Date.now() / 1000);
   const query = {
-    ...(opts?.query ?? {}),
     clientId,
     timestamp,
+    ...(opts?.query ?? {}),
   };
 
-  const queryString = buildQuery(query);
+  const queryString = buildQueryString(query);
   const requestPath = path.startsWith("/api/v1") ? path : `/api/v1${path.startsWith("/") ? "" : "/"}${path}`;
   const sigObject = {
     content: opts?.body ?? {},
     path: requestPath,
     query: queryString,
   };
-  const sigContent = stableStringify(sigObject);
-  const signature = crypto.createHmac("sha256", consumerKey).update(sigContent).digest("base64");
+  // SnapTrade docs use JSON.stringify for the signed content
+  const sigContent = JSON.stringify(sigObject);
+  const signature = crypto
+    .createHmac("sha256", encodeURI(consumerKey))
+    .update(sigContent)
+    .digest("base64");
 
   const url = `${SNAPTRADE_BASE_URL}${path.startsWith("/") ? "" : "/"}${path}?${queryString}`;
   const res = await fetch(url, {
