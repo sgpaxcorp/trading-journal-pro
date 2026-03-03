@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getAuthUser } from "@/lib/authServer";
 import { getSnaptradeUser } from "@/lib/snaptradeStorage";
-import { formatSnaptradeError, snaptradeRequest } from "@/lib/snaptradeClient";
+import { formatSnaptradeError, snaptradeDeleteUser } from "@/lib/snaptradeClient";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 
 export const runtime = "nodejs";
@@ -17,9 +17,7 @@ export async function POST(req: Request) {
     const targetUserId = row?.snaptrade_user_id || auth.userId;
 
     try {
-      await snaptradeRequest("/snapTrade/deleteUser", "DELETE", {
-        query: { userId: targetUserId },
-      });
+      await snaptradeDeleteUser(targetUserId);
     } catch (err: any) {
       const msg = String(err?.message ?? err);
       const notFound =

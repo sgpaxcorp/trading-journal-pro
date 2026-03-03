@@ -1,8 +1,4 @@
-import crypto from "crypto";
-
-const SNAPTRADE_BASE_URL = "https://api.snaptrade.com/api/v1";
-
-type SnapTradeMethod = "GET" | "POST" | "PUT" | "DELETE";
+import { Snaptrade } from "snaptrade-typescript-sdk";
 
 export class SnaptradeApiError extends Error {
   status?: number;
@@ -29,72 +25,111 @@ export function formatSnaptradeError(err: any) {
       status: err.status ?? null,
     };
   }
-  return { error: err?.message ?? "SnapTrade error" };
+
+  const data = err?.response?.data || err?.body || err?.data || err?.response || err;
+  const detail = data?.detail || data?.error || data?.message || err?.message || "SnapTrade error";
+  const code = data?.code || data?.status_code;
+  const status = err?.response?.status || data?.status_code;
+  return {
+    error: detail,
+    detail,
+    code: code ?? null,
+    status: status ?? null,
+  };
 }
 
-function buildQueryString(entries: Array<[string, string | number | boolean | null | undefined]>) {
-  return entries
-    .filter(([, v]) => v !== undefined && v !== null)
-    .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`)
-    .join("&");
-}
+let client: Snaptrade | null = null;
 
-function getSnapTradeKeys() {
+function getSnaptradeClient() {
   const clientId = process.env.SNAPTRADE_CLIENT_ID;
   const consumerKey = process.env.SNAPTRADE_CONSUMER_KEY;
   if (!clientId || !consumerKey) {
     throw new Error("Missing SnapTrade env (SNAPTRADE_CLIENT_ID / SNAPTRADE_CONSUMER_KEY)");
   }
-  return { clientId, consumerKey };
+  if (!client) {
+    client = new Snaptrade({ clientId, consumerKey });
+  }
+  return client;
 }
 
-export async function snaptradeRequest<T>(
-  path: string,
-  method: SnapTradeMethod,
-  opts?: {
-    query?: Record<string, string | number | boolean | null | undefined>;
-    body?: Record<string, unknown> | null;
-  }
-): Promise<T> {
-  const { clientId, consumerKey } = getSnapTradeKeys();
-  const timestamp = Math.floor(Date.now() / 1000);
-  const queryEntries: Array<[string, string | number | boolean | null | undefined]> = [
-    ["clientId", clientId],
-    ["timestamp", timestamp],
-    ...Object.entries(opts?.query ?? {}),
-  ];
+async function unwrap<T>(promise: Promise<{ data: T }>): Promise<T> {
+  const res = await promise;
+  return res.data as T;
+}
 
-  const queryString = buildQueryString(queryEntries);
-  const requestPath = path.startsWith("/api/v1") ? path : `/api/v1${path.startsWith("/") ? "" : "/"}${path}`;
-  const isRead = method === "GET" || method === "DELETE";
-  const sigObject = {
-    content: isRead ? "" : opts?.body ?? {},
-    path: requestPath,
-    query: queryString,
-  };
-  // Follow SnapTrade JS example (JSON.stringify with insertion order)
-  const sigContent = JSON.stringify(sigObject);
-  const signature = crypto
-    .createHmac("sha256", encodeURI(consumerKey))
-    .update(sigContent)
-    .digest("base64");
+export async function snaptradeRegisterUser(userId: string) {
+  const api = getSnaptradeClient();
+  return unwrap<{ userId?: string; userSecret: string }>(api.authentication.registerSnapTradeUser({ userId }));
+}
 
-  const url = `${SNAPTRADE_BASE_URL}${path.startsWith("/") ? "" : "/"}${path}?${queryString}`;
-  const res = await fetch(url, {
-    method,
-    headers: {
-      "Content-Type": "application/json",
-      Signature: signature,
-    },
-    body: method === "GET" || method === "DELETE" ? undefined : JSON.stringify(opts?.body ?? {}),
-  });
+export async function snaptradeDeleteUser(userId: string) {
+  const api = getSnaptradeClient();
+  return unwrap<unknown>(api.authentication.deleteSnapTradeUser({ userId }));
+}
 
-  const text = await res.text();
-  const data = text ? JSON.parse(text) : {};
-  if (!res.ok) {
-    const detail = (data && (data.detail || data.error || data.message)) || `SnapTrade error ${res.status}`;
-    const code = data && (data.code || data.status_code);
-    throw new SnaptradeApiError(detail, { status: res.status, code, detail, raw: data });
-  }
-  return data as T;
+export async function snaptradeLogin(params: {
+  userId: string;
+  userSecret: string;
+  broker?: string;
+  immediateRedirect?: boolean;
+  customRedirect?: string;
+  connectionType?: "read" | "trade";
+  darkMode?: boolean;
+  reconnect?: boolean;
+  showCloseButton?: boolean;
+  connectionPortalVersion?: string;
+}) {
+  const api = getSnaptradeClient();
+  return unwrap<{ redirectURI?: string; redirectUri?: string; url?: string; sessionId?: string }>(
+    api.authentication.loginSnapTradeUser(params)
+  );
+}
+
+export async function snaptradeListAccounts(userId: string, userSecret: string) {
+  const api = getSnaptradeClient();
+  return unwrap<any[]>(api.accountInformation.listUserAccounts({ userId, userSecret }));
+}
+
+export async function snaptradeGetHoldings(userId: string, userSecret: string, accountId: string) {
+  const api = getSnaptradeClient();
+  return unwrap<any>(api.accountInformation.getUserHoldings({ userId, userSecret, accountId }));
+}
+
+export async function snaptradeGetBalances(userId: string, userSecret: string, accountId: string) {
+  const api = getSnaptradeClient();
+  return unwrap<any>(api.accountInformation.getUserAccountBalance({ userId, userSecret, accountId }));
+}
+
+export async function snaptradeGetActivities(
+  userId: string,
+  userSecret: string,
+  accountId: string,
+  startDate: string,
+  endDate: string,
+  opts?: { limit?: number; offset?: number }
+) {
+  const api = getSnaptradeClient();
+  return unwrap<any>(
+    api.accountInformation.getAccountActivities({
+      userId,
+      userSecret,
+      accountId,
+      startDate,
+      endDate,
+      limit: opts?.limit,
+      offset: opts?.offset,
+    })
+  );
+}
+
+export async function snaptradeGetOrders(userId: string, userSecret: string, accountId: string, days?: number) {
+  const api = getSnaptradeClient();
+  return unwrap<any>(
+    api.accountInformation.getUserAccountOrders({
+      userId,
+      userSecret,
+      accountId,
+      days,
+    })
+  );
 }

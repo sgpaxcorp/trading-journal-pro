@@ -63,6 +63,7 @@
     "slate": "^0.123.0",
     "slate-react": "^0.123.0",
     "stripe": "^20.0.0",
+    "snaptrade-typescript-sdk": "^9.0.119",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {

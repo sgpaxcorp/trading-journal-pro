@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getAuthUser } from "@/lib/authServer";
 import { getSnaptradeUser } from "@/lib/snaptradeStorage";
-import { formatSnaptradeError, snaptradeRequest } from "@/lib/snaptradeClient";
+import { formatSnaptradeError, snaptradeListAccounts } from "@/lib/snaptradeClient";
 
 export const runtime = "nodejs";
 
@@ -16,13 +16,7 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: "SnapTrade not connected" }, { status: 400 });
     }
 
-    const data = await snaptradeRequest<any>("/accounts", "GET", {
-      query: {
-        userId: row.snaptrade_user_id,
-        userSecret: row.snaptrade_user_secret,
-      },
-    });
-
+    const data = await snaptradeListAccounts(row.snaptrade_user_id, row.snaptrade_user_secret);
     return NextResponse.json({ accounts: data });
   } catch (err: any) {
     return NextResponse.json(formatSnaptradeError(err), { status: 500 });

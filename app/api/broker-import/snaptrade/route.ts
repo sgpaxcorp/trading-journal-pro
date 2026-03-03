@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 import { getSnaptradeUser } from "@/lib/snaptradeStorage";
-import { formatSnaptradeError, snaptradeRequest } from "@/lib/snaptradeClient";
+import { formatSnaptradeError, snaptradeGetActivities } from "@/lib/snaptradeClient";
 import { createHash } from "crypto";
 
 export const runtime = "nodejs";
@@ -84,16 +84,14 @@ export async function POST(req: NextRequest) {
       throw new Error("SnapTrade not connected");
     }
 
-    const data = await snaptradeRequest<any>(`/accounts/${accountId}/activities`, "GET", {
-      query: {
-        userId: snaptradeUser.snaptrade_user_id,
-        userSecret: snaptradeUser.snaptrade_user_secret,
-        startDate,
-        endDate,
-        limit: 1000,
-        offset: 0,
-      },
-    });
+    const data = await snaptradeGetActivities(
+      snaptradeUser.snaptrade_user_id,
+      snaptradeUser.snaptrade_user_secret,
+      accountId,
+      startDate,
+      endDate,
+      { limit: 1000, offset: 0 }
+    );
 
     const activities: any[] = Array.isArray(data)
       ? data

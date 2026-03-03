@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthUser } from "@/lib/authServer";
 import { getSnaptradeUser } from "@/lib/snaptradeStorage";
-import { formatSnaptradeError, snaptradeRequest } from "@/lib/snaptradeClient";
+import { formatSnaptradeError, snaptradeGetHoldings } from "@/lib/snaptradeClient";
 
 export const runtime = "nodejs";
 
@@ -30,14 +30,8 @@ export async function GET(
       return NextResponse.json({ error: "Missing accountId" }, { status: 400 });
     }
 
-    const data = await snaptradeRequest<any>(`/accounts/${accountId}/holdings`, "GET", {
-      query: {
-        userId: row.snaptrade_user_id,
-        userSecret: row.snaptrade_user_secret,
-      },
-    });
-
-    return NextResponse.json({ holdings: data });
+    const data = await snaptradeGetHoldings(row.snaptrade_user_id, row.snaptrade_user_secret, accountId);
+    return NextResponse.json({ holdings: data?.holdings ?? data });
   } catch (err: any) {
     return NextResponse.json(formatSnaptradeError(err), { status: 500 });
   }

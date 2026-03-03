@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthUser } from "@/lib/authServer";
 import { getSnaptradeUser } from "@/lib/snaptradeStorage";
-import { formatSnaptradeError, snaptradeRequest } from "@/lib/snaptradeClient";
+import { formatSnaptradeError, snaptradeGetActivities } from "@/lib/snaptradeClient";
 
 export const runtime = "nodejs";
 
@@ -34,16 +34,19 @@ export async function GET(
     const startDate = searchParams.get("startDate") || undefined;
     const endDate = searchParams.get("endDate") || undefined;
 
-    const data = await snaptradeRequest<any>(`/accounts/${accountId}/activities`, "GET", {
-      query: {
-        userId: row.snaptrade_user_id,
-        userSecret: row.snaptrade_user_secret,
-        startDate,
-        endDate,
-      },
-    });
+    if (!startDate || !endDate) {
+      return NextResponse.json({ error: "Missing startDate/endDate" }, { status: 400 });
+    }
 
-    return NextResponse.json({ activities: data });
+    const data = await snaptradeGetActivities(
+      row.snaptrade_user_id,
+      row.snaptrade_user_secret,
+      accountId,
+      startDate,
+      endDate
+    );
+
+    return NextResponse.json({ activities: data?.activities ?? data });
   } catch (err: any) {
     return NextResponse.json(formatSnaptradeError(err), { status: 500 });
   }

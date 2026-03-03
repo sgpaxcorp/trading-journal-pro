@@ -1,5 +1,5 @@
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
-import { snaptradeRequest } from "@/lib/snaptradeClient";
+import { snaptradeDeleteUser, snaptradeRegisterUser } from "@/lib/snaptradeClient";
 
 type SnaptradeUserRow = {
   user_id: string;
@@ -25,9 +25,7 @@ export async function ensureSnaptradeUser(userId: string): Promise<SnaptradeUser
   const snaptradeUserId = userId;
   let resp: { userId?: string; userSecret: string };
   try {
-    resp = await snaptradeRequest<{ userId?: string; userSecret: string }>("/snapTrade/registerUser", "POST", {
-      body: { userId: snaptradeUserId },
-    });
+    resp = await snaptradeRegisterUser(snaptradeUserId);
   } catch (err: any) {
     const msg = String(err?.message ?? err);
     const alreadyExists = msg.toLowerCase().includes("already exists") || msg.includes("(1010)");
@@ -35,13 +33,9 @@ export async function ensureSnaptradeUser(userId: string): Promise<SnaptradeUser
       throw err;
     }
     // User exists on SnapTrade but not locally (likely env swap). Remove and recreate.
-    await snaptradeRequest("/snapTrade/deleteUser", "DELETE", {
-      query: { userId: snaptradeUserId },
-    });
+    await snaptradeDeleteUser(snaptradeUserId);
     await new Promise((resolve) => setTimeout(resolve, 1200));
-    resp = await snaptradeRequest<{ userId?: string; userSecret: string }>("/snapTrade/registerUser", "POST", {
-      body: { userId: snaptradeUserId },
-    });
+    resp = await snaptradeRegisterUser(snaptradeUserId);
   }
 
   const row: SnaptradeUserRow = {

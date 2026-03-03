@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthUser } from "@/lib/authServer";
 import { getSnaptradeUser } from "@/lib/snaptradeStorage";
-import { formatSnaptradeError, snaptradeRequest } from "@/lib/snaptradeClient";
+import { formatSnaptradeError, snaptradeGetOrders } from "@/lib/snaptradeClient";
 
 export const runtime = "nodejs";
 
@@ -43,15 +43,10 @@ export async function GET(
     const { searchParams } = new URL(req.url);
     const extra = queryToObject(searchParams);
 
-    const data = await snaptradeRequest<any>(`/accounts/${accountId}/orders`, "GET", {
-      query: {
-        userId: row.snaptrade_user_id,
-        userSecret: row.snaptrade_user_secret,
-        ...extra,
-      },
-    });
-
-    return NextResponse.json({ orders: data });
+    const daysRaw = extra?.days ? Number(extra.days) : undefined;
+    const days = Number.isFinite(daysRaw) ? daysRaw : undefined;
+    const data = await snaptradeGetOrders(row.snaptrade_user_id, row.snaptrade_user_secret, accountId, days);
+    return NextResponse.json({ orders: data?.orders ?? data });
   } catch (err: any) {
     return NextResponse.json(formatSnaptradeError(err), { status: 500 });
   }
