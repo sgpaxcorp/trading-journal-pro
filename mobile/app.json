@@ -38,6 +38,12 @@
       "expo-secure-store",
       "expo-notifications",
       "./plugins/with-device-debug-bundling"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "323bd3c3-8378-43a9-b50b-157c6cfd1059"
+      }
+    },
+    "owner": "stevenotero"
   }
 }
