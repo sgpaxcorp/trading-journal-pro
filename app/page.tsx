@@ -4,6 +4,7 @@ import Link from "next/link";
 import FloatingAskButton from "./components/FloatingAskButton";
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
+import { BrokerSupportTable } from "./components/BrokerSupportTable";
 
 export default function Home() {
   const { locale } = useAppSettings();
@@ -523,6 +524,15 @@ export default function Home() {
               ))}
             </div>
           </div>
+
+          <BrokerSupportTable
+            L={L}
+            title={L("Supported brokers for Broker Sync & CSV import", "Brokers soportados para Broker Sync y CSV")}
+            subtitle={L(
+              "If your broker is not listed, use CSV import or wait for SnapTrade coverage.",
+              "Si tu bróker no está listado, usa importación CSV o espera cobertura de SnapTrade."
+            )}
+          />
         </div>
       </section>
 

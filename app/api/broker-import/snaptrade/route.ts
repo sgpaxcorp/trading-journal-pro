@@ -3,7 +3,6 @@ import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 import { getSnaptradeUser } from "@/lib/snaptradeStorage";
 import { snaptradeRequest } from "@/lib/snaptradeClient";
 import { createHash } from "crypto";
-import { hasActiveEntitlement } from "@/lib/entitlementsServer";
 
 export const runtime = "nodejs";
 
@@ -47,11 +46,6 @@ export async function POST(req: NextRequest) {
   if (authErr || !authData?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const userId = authData.user.id;
-  const entitled = await hasActiveEntitlement(userId, "broker_sync");
-  if (!entitled) {
-    return NextResponse.json({ error: "Broker sync add-on required" }, { status: 402 });
-  }
-
   const body = await req.json().catch(() => ({} as any));
   const accountId = String(body?.accountId ?? "").trim();
   const brokerLabel = String(body?.broker ?? "snaptrade").trim() || "snaptrade";

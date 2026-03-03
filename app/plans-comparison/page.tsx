@@ -6,6 +6,7 @@ import { useState } from "react";
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
 import { PlanComparisonTable } from "../components/PlanComparisonTable";
+import { BrokerSupportTable } from "../components/BrokerSupportTable";
 
 export default function PlansComparison() {
   const year = new Date().getFullYear();
@@ -105,6 +106,17 @@ export default function PlansComparison() {
           lang={lang}
           showCtas
         />
+
+        <div className="mt-10">
+          <BrokerSupportTable
+            L={L}
+            title={L("Check broker support before you add Broker Sync", "Verifica brokers antes de activar Broker Sync")}
+            subtitle={L(
+              "SnapTrade coverage plus CSV-only brokers listed below.",
+              "Cobertura SnapTrade y brokers solo CSV listados abajo."
+            )}
+          />
+        </div>
       </div>
 
      
