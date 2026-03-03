@@ -829,8 +829,8 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
                 </p>
                 <p className="mt-1 text-[11px] text-slate-500">
                   {L(
-                    "Supported: Thinkorswim (Schwab/TOS), Interactive Brokers (IBKR), Tradovate, NinjaTrader, Webull, Binance, Coinbase.",
-                    "Soporta: Thinkorswim (Schwab/TOS), Interactive Brokers (IBKR), Tradovate, NinjaTrader, Webull, Binance, Coinbase."
+                    "Supported (US): Alpaca, Alpaca Paper, Chase, E*Trade, Empower, Fidelity, Moomoo, Public, Robinhood, Schwab, Schwab OAuth, tastytrade, TD Direct Investing, TradeStation, TradeStation Paper, Tradier, Vanguard US, Webull US, Webull US OAuth, Wells Fargo. International: Interactive Brokers, Coinbase (crypto).",
+                    "Soporta (US): Alpaca, Alpaca Paper, Chase, E*Trade, Empower, Fidelity, Moomoo, Public, Robinhood, Schwab, Schwab OAuth, tastytrade, TD Direct Investing, TradeStation, TradeStation Paper, Tradier, Vanguard US, Webull US, Webull US OAuth, Wells Fargo. Internacionales: Interactive Brokers, Coinbase (crypto)."
                   )}
                 </p>
               </div>

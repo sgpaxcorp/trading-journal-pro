@@ -427,8 +427,8 @@ export default function PricingPage() {
                 </p>
                 <p className="mt-2 text-[10px] text-slate-400">
                   {L(
-                    "Supported brokers: Thinkorswim (Schwab/TOS), Interactive Brokers (IBKR), Tradovate, NinjaTrader, Webull, Binance, Coinbase.",
-                    "Brokers soportados: Thinkorswim (Schwab/TOS), Interactive Brokers (IBKR), Tradovate, NinjaTrader, Webull, Binance, Coinbase."
+                    "Supported brokers (US): Alpaca, Alpaca Paper, Chase, E*Trade, Empower, Fidelity, Moomoo, Public, Robinhood, Schwab, Schwab OAuth, tastytrade, TD Direct Investing, TradeStation, TradeStation Paper, Tradier, Vanguard US, Webull US, Webull US OAuth, Wells Fargo. International: Interactive Brokers, Coinbase (crypto).",
+                    "Brokers soportados (US): Alpaca, Alpaca Paper, Chase, E*Trade, Empower, Fidelity, Moomoo, Public, Robinhood, Schwab, Schwab OAuth, tastytrade, TD Direct Investing, TradeStation, TradeStation Paper, Tradier, Vanguard US, Webull US, Webull US OAuth, Wells Fargo. Internacionales: Interactive Brokers, Coinbase (crypto)."
                   )}
                 </p>
               </div>

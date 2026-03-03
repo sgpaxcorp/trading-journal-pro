@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAuthUser } from "@/lib/authServer";
 import { getSnaptradeUser } from "@/lib/snaptradeStorage";
 import { snaptradeRequest } from "@/lib/snaptradeClient";
-import { hasActiveEntitlement } from "@/lib/entitlementsServer";
 
 export const runtime = "nodejs";
 
@@ -18,10 +17,6 @@ export async function GET(
     const brokerSyncFree =
       process.env.BROKER_SYNC_FREE === "true" || process.env.NEXT_PUBLIC_BROKER_SYNC_FREE === "true";
     if (!brokerSyncFree) {
-      const entitled = await hasActiveEntitlement(auth.userId, "broker_sync");
-      if (!entitled) {
-        return NextResponse.json({ error: "Broker sync add-on required" }, { status: 402 });
-      }
     }
 
     const row = await getSnaptradeUser(auth.userId);

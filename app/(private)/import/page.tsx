@@ -7,7 +7,6 @@ import { useRouter } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
-import { listMyEntitlements } from "@/lib/entitlementsSupabase";
 
 type BrokerId =
   | "thinkorswim"
@@ -138,40 +137,10 @@ export default function ImportPage() {
   const [snaptradeOrders, setSnaptradeOrders] = useState<any[] | null>(null);
   const [snaptradeBroker, setSnaptradeBroker] = useState<string>("");
   const [snaptradeImporting, setSnaptradeImporting] = useState(false);
-  const [snaptradeEntitled, setSnaptradeEntitled] = useState<boolean | null>(null);
 
   const brokerMeta = useMemo(() => BROKERS.find((b) => b.id === broker), [broker]);
-  const snaptradeLocked = snaptradeEntitled === false;
-  const snaptradeChecking = snaptradeEntitled === null;
 
   const router = useRouter();
-
-  useEffect(() => {
-    let active = true;
-    async function loadEntitlements() {
-      try {
-        const { data } = await supabase.auth.getUser();
-        const userId = data?.user?.id;
-        if (!userId) {
-          if (active) setSnaptradeEntitled(false);
-          return;
-        }
-        const entitlements = await listMyEntitlements(userId);
-        const ok = entitlements.some(
-          (e) =>
-            e.entitlement_key === "broker_sync" &&
-            (e.status === "active" || e.status === "trialing")
-        );
-        if (active) setSnaptradeEntitled(ok);
-      } catch {
-        if (active) setSnaptradeEntitled(false);
-      }
-    }
-    loadEntitlements();
-    return () => {
-      active = false;
-    };
-  }, []);
 
   async function getToken(): Promise<string | null> {
     const { data, error } = await supabase.auth.getSession();
@@ -205,9 +174,6 @@ export default function ImportPage() {
   }
 
   async function callSnaptrade(path: string, opts?: RequestInit) {
-    if (snaptradeEntitled === false) {
-      throw new Error(L("Broker sync add-on required.", "Requiere el add-on de Broker Sync."));
-    }
     const token = await getToken();
     if (!token) {
       throw new Error(L("Unauthorized. Please log out and log in again.", "No autorizado. Cierra sesión e inicia de nuevo."));
@@ -847,13 +813,13 @@ export default function ImportPage() {
                   onChange={(e) => setSnaptradeBroker(e.target.value)}
                   placeholder={L("Broker slug (optional)", "Broker slug (opcional)")}
                   className="w-48 rounded-xl border border-slate-700 bg-slate-950/40 px-3 py-2 text-xs text-slate-100 outline-none focus:border-emerald-400"
-                  disabled={snaptradeLocked || snaptradeChecking || snaptradeConnecting}
+                  disabled={snaptradeConnecting}
                 />
                 <button
                   type="button"
                   onClick={onSnaptradeConnect}
                   className="rounded-xl bg-emerald-400 px-4 py-2 text-xs font-semibold text-slate-950 hover:bg-emerald-300 disabled:opacity-60"
-                  disabled={snaptradeConnecting || snaptradeLocked || snaptradeChecking}
+                  disabled={snaptradeConnecting}
                 >
                   {snaptradeConnecting ? L("Connecting...", "Conectando...") : L("Connect broker", "Conectar bróker")}
                 </button>
@@ -861,34 +827,12 @@ export default function ImportPage() {
                   type="button"
                   onClick={onSnaptradeLoadAccounts}
                   className="rounded-xl border border-slate-700 bg-slate-950/30 px-4 py-2 text-xs font-semibold text-slate-100 hover:bg-slate-950/50"
-                  disabled={snaptradeLocked || snaptradeChecking}
+                  disabled={false}
                 >
                   {L("Refresh accounts", "Refrescar cuentas")}
                 </button>
               </div>
             </div>
-
-            {snaptradeLocked ? (
-              <div className="mt-3 rounded-xl border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-xs text-amber-100 flex flex-wrap items-center justify-between gap-3">
-                <span>
-                  {L(
-                    "Broker Sync add-on required to connect via SnapTrade.",
-                    "Necesitas el add-on Broker Sync para conectar vía SnapTrade."
-                  )}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => router.push("/billing")}
-                  className="rounded-lg border border-amber-300/60 px-3 py-1 text-[11px] text-amber-100 hover:bg-amber-400/10"
-                >
-                  {L("Open Billing", "Abrir facturación")}
-                </button>
-              </div>
-            ) : snaptradeChecking ? (
-              <div className="mt-3 rounded-xl border border-slate-700 bg-slate-950/30 px-3 py-2 text-xs text-slate-300">
-                {L("Checking add-on status…", "Verificando estado del add-on…")}
-              </div>
-            ) : null}
 
             {snaptradeStatus ? (
               <div className="mt-3 rounded-xl border border-emerald-400/30 bg-emerald-400/10 px-3 py-2 text-xs text-emerald-100">
@@ -912,7 +856,7 @@ export default function ImportPage() {
                   value={snaptradeAccountId}
                   onChange={(e) => setSnaptradeAccountId(e.target.value)}
                   className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950/40 px-3 py-2 text-xs text-slate-100 outline-none focus:border-emerald-400"
-                  disabled={snaptradeLocked || snaptradeChecking}
+                  disabled={false}
                 >
                   <option value="">{L("Select account", "Selecciona cuenta")}</option>
                   {(snaptradeAccounts ?? []).map((acc: any) => (
@@ -927,7 +871,7 @@ export default function ImportPage() {
                     type="button"
                     onClick={onSnaptradeLoadHoldings}
                     className="rounded-xl border border-slate-700 bg-slate-950/30 px-3 py-2 text-[11px] font-semibold text-slate-100 hover:bg-slate-950/50"
-                    disabled={!snaptradeAccountId || snaptradeLocked || snaptradeChecking}
+                    disabled={!snaptradeAccountId}
                   >
                     {L("Load holdings", "Cargar holdings")}
                   </button>
@@ -935,7 +879,7 @@ export default function ImportPage() {
                     type="button"
                     onClick={onSnaptradeLoadBalances}
                     className="rounded-xl border border-slate-700 bg-slate-950/30 px-3 py-2 text-[11px] font-semibold text-slate-100 hover:bg-slate-950/50"
-                    disabled={!snaptradeAccountId || snaptradeLocked || snaptradeChecking}
+                    disabled={!snaptradeAccountId}
                   >
                     {L("Load balances", "Cargar balances")}
                   </button>
@@ -943,7 +887,7 @@ export default function ImportPage() {
                     type="button"
                     onClick={onSnaptradeLoadActivities}
                     className="rounded-xl border border-slate-700 bg-slate-950/30 px-3 py-2 text-[11px] font-semibold text-slate-100 hover:bg-slate-950/50"
-                    disabled={!snaptradeAccountId || snaptradeLocked || snaptradeChecking}
+                    disabled={!snaptradeAccountId}
                   >
                     {L("Load activities (30d)", "Cargar actividades (30d)")}
                   </button>
@@ -951,7 +895,7 @@ export default function ImportPage() {
                     type="button"
                     onClick={onSnaptradeLoadOrders}
                     className="rounded-xl border border-slate-700 bg-slate-950/30 px-3 py-2 text-[11px] font-semibold text-slate-100 hover:bg-slate-950/50"
-                    disabled={!snaptradeAccountId || snaptradeLocked || snaptradeChecking}
+                    disabled={!snaptradeAccountId}
                   >
                     {L("Load recent orders", "Cargar órdenes recientes")}
                   </button>
@@ -959,7 +903,7 @@ export default function ImportPage() {
                     type="button"
                     onClick={onSnaptradeImportTrades}
                     className="rounded-xl bg-emerald-400 px-3 py-2 text-[11px] font-semibold text-slate-950 hover:bg-emerald-300 disabled:opacity-60"
-                    disabled={!snaptradeAccountId || snaptradeImporting || snaptradeLocked || snaptradeChecking}
+                    disabled={!snaptradeAccountId || snaptradeImporting}
                   >
                     {snaptradeImporting ? L("Importing...", "Importando...") : L("Import trades (30d)", "Importar trades (30d)")}
                   </button>
