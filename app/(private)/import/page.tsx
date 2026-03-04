@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import TopNav from "@/app/components/TopNav";
 import { supabase } from "@/lib/supaBaseClient";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
@@ -143,6 +143,7 @@ export default function ImportPage() {
   const brokerMeta = useMemo(() => BROKERS.find((b) => b.id === broker), [broker]);
 
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   async function getToken(): Promise<string | null> {
     const { data, error } = await supabase.auth.getSession();
@@ -203,6 +204,7 @@ export default function ImportPage() {
       setSnaptradeError(null);
       setSnaptradeStatus(null);
       setSnaptradeConnecting(true);
+      const redirectUrl = `${window.location.origin}/import?snaptrade=connected`;
       await callSnaptrade("/api/snaptrade/register", { method: "POST" });
       const loginData = await callSnaptrade("/api/snaptrade/login", {
         method: "POST",
@@ -211,13 +213,18 @@ export default function ImportPage() {
           connectionType: "read",
           immediateRedirect: true,
           darkMode: true,
+          customRedirect: redirectUrl,
         }),
       });
       const url = loginData?.url || loginData?.redirectURI || loginData?.redirectUri || "";
       if (!url) {
         throw new Error(L("Missing SnapTrade redirect URL.", "Falta el enlace de conexión de SnapTrade."));
       }
-      window.open(url, "_blank", "noopener,noreferrer");
+      const win = window.open(url, "_blank", "noopener,noreferrer");
+      if (!win) {
+        window.location.href = url;
+        return;
+      }
       setSnaptradeStatus(
         L(
           "Connection Portal opened in a new tab. Complete the broker login, then return to refresh accounts.",
@@ -387,6 +394,19 @@ export default function ImportPage() {
     loadHistory();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (!searchParams) return;
+    const flag = searchParams.get("snaptrade");
+    if (flag === "connected") {
+      onSnaptradeLoadAccounts();
+      setSnaptradeStatus(
+        L("Connection completed. Loading accounts...", "Conexión completada. Cargando cuentas...")
+      );
+      router.replace("/import");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   // ✅ FIX: si escoges el MISMO file, el input no dispara onChange.
   function onPickFileClick() {
