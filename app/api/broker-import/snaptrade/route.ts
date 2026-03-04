@@ -31,6 +31,14 @@ function normalizeInstrumentType(activity: any): string {
   return "stock";
 }
 
+function toSafeIso(input?: string | null): string {
+  if (!input) return new Date().toISOString();
+  // accept YYYY-MM-DD or full ISO
+  const d = input.length === 10 ? new Date(`${input}T00:00:00Z`) : new Date(input);
+  if (Number.isNaN(d.getTime())) return new Date().toISOString();
+  return d.toISOString();
+}
+
 function buildTradeHash(parts: Array<string | number | null | undefined>) {
   return sha256(parts.map((p) => (p == null ? "" : String(p))).join("|"));
 }
@@ -123,8 +131,8 @@ export async function POST(req: NextRequest) {
       }
       if (!Number.isFinite(price) || price === 0) continue;
 
-      const tradeDate = String(a?.trade_date || a?.settlement_date || "").trim();
-      const executed_at = tradeDate ? new Date(`${tradeDate}T00:00:00Z`).toISOString() : new Date().toISOString();
+      const tradeDate = String(a?.trade_date || a?.settlement_date || a?.created_at || a?.timestamp || "").trim();
+      const executed_at = toSafeIso(tradeDate);
 
       const instrument_type = normalizeInstrumentType(a);
       const contract_code = symbolRaw;
