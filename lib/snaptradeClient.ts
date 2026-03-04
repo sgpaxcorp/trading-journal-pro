@@ -52,9 +52,10 @@ function getSnaptradeClient() {
   return client;
 }
 
-async function unwrap<T>(promise: Promise<{ data: T }>): Promise<T> {
+async function unwrap<T>(promise: Promise<any>): Promise<T> {
   const res = await promise;
-  return res.data as T;
+  const data = res?.data ?? res?.body ?? res;
+  return data as T;
 }
 
 export async function snaptradeRegisterUser(userId: string) {
@@ -75,9 +76,9 @@ export async function snaptradeLogin(params: {
   customRedirect?: string;
   connectionType?: "read" | "trade";
   darkMode?: boolean;
-  reconnect?: boolean;
+  reconnect?: string;
   showCloseButton?: boolean;
-  connectionPortalVersion?: string;
+  connectionPortalVersion?: "v4" | "v3" | "v2";
 }) {
   const api = getSnaptradeClient();
   return unwrap<{ redirectURI?: string; redirectUri?: string; url?: string; sessionId?: string }>(
