@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import TopNav from "@/app/components/TopNav";
 import { supabase } from "@/lib/supaBaseClient";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
@@ -143,7 +143,6 @@ export default function ImportPage() {
   const brokerMeta = useMemo(() => BROKERS.find((b) => b.id === broker), [broker]);
 
   const router = useRouter();
-  const searchParams = useSearchParams();
 
   async function getToken(): Promise<string | null> {
     const { data, error } = await supabase.auth.getSession();
@@ -396,17 +395,17 @@ export default function ImportPage() {
   }, []);
 
   useEffect(() => {
-    if (!searchParams) return;
-    const flag = searchParams.get("snaptrade");
-    if (flag === "connected") {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("snaptrade") === "connected") {
       onSnaptradeLoadAccounts();
       setSnaptradeStatus(
         L("Connection completed. Loading accounts...", "Conexión completada. Cargando cuentas...")
       );
-      router.replace("/import");
+      window.history.replaceState({}, "", "/import");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams]);
+  }, []);
 
   // ✅ FIX: si escoges el MISMO file, el input no dispara onChange.
   function onPickFileClick() {
