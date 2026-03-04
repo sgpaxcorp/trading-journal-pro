@@ -357,10 +357,8 @@ function inferIsOpen(row: any): boolean {
   const qtyOpen = pickNumber(row, ["qty_open", "open_qty", "remaining_qty"], NaN);
   if (Number.isFinite(qtyOpen)) return qtyOpen > 0;
 
-  // fallback: if it has an entry/open time and no close fields, assume open
-  const openedAt = pickDateISO(row, ["opened_at", "open_time", "entry_time", "created_at"]);
-  if (openedAt) return true;
-
+  // Do not assume "open" just because it has an entry timestamp.
+  // Trade rows often represent fills/transactions and would trigger false positives.
   return false;
 }
 
@@ -839,6 +837,11 @@ async function fetchDailyStats(userId: string, dayISO: string): Promise<DailySta
     base.open_positions_list = mergedOpen;
     base.options_expiring_today = mergedExpiring;
     base.open_positions = mergedOpen.length;
+  }
+  if (!hasTradesOpen && mergedOpen.length === 0) {
+    base.open_positions_list = [];
+    base.options_expiring_today = [];
+    base.open_positions = 0;
   }
 
   return base;

@@ -1,4 +1,5 @@
 import { Snaptrade } from "snaptrade-typescript-sdk";
+import type { AuthenticationApiLoginSnapTradeUserRequest } from "snaptrade-typescript-sdk";
 
 export class SnaptradeApiError extends Error {
   status?: number;
@@ -68,18 +69,7 @@ export async function snaptradeDeleteUser(userId: string) {
   return unwrap<unknown>(api.authentication.deleteSnapTradeUser({ userId }));
 }
 
-export async function snaptradeLogin(params: {
-  userId: string;
-  userSecret: string;
-  broker?: string;
-  immediateRedirect?: boolean;
-  customRedirect?: string;
-  connectionType?: "read" | "trade";
-  darkMode?: boolean;
-  reconnect?: string;
-  showCloseButton?: boolean;
-  connectionPortalVersion?: "v4" | "v3" | "v2";
-}) {
+export async function snaptradeLogin(params: AuthenticationApiLoginSnapTradeUserRequest) {
   const api = getSnaptradeClient();
   return unwrap<{ redirectURI?: string; redirectUri?: string; url?: string; sessionId?: string }>(
     api.authentication.loginSnapTradeUser(params)
