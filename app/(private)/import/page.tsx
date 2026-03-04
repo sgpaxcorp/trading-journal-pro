@@ -90,6 +90,31 @@ function formatDuration(ms: number | null, locale: string) {
   return locale.startsWith("es") ? `${s} s` : `${s} s`;
 }
 
+function formatMoney(value: number | null | undefined) {
+  if (typeof value !== "number" || Number.isNaN(value)) return "—";
+  const abs = Math.abs(value);
+  if (abs >= 1000000) return `$${(value / 1000000).toFixed(2)}M`;
+  if (abs >= 1000) return `$${(value / 1000).toFixed(1)}K`;
+  return `$${value.toFixed(2)}`;
+}
+
+function extractPositions(raw: any): any[] {
+  if (!raw) return [];
+  if (Array.isArray(raw)) {
+    return raw.flatMap((item) => {
+      if (Array.isArray(item?.positions)) return item.positions;
+      if (Array.isArray(item?.holdings)) return item.holdings;
+      return item ? [item] : [];
+    });
+  }
+  if (Array.isArray(raw?.positions)) return raw.positions;
+  if (Array.isArray(raw?.holdings)) return raw.holdings;
+  if (Array.isArray(raw?.accounts)) {
+    return raw.accounts.flatMap((acc: any) => acc?.positions ?? acc?.holdings ?? []);
+  }
+  return [];
+}
+
 function StatusPill({ status, label }: { status: ImportHistoryItem["status"]; label: string }) {
   const cls =
     status === "success"
@@ -117,6 +142,7 @@ export default function ImportPage() {
   const [comment, setComment] = useState<string>("");
   const [file, setFile] = useState<File | null>(null);
   const [sourceTz, setSourceTz] = useState<string>("America/New_York");
+  const [activeImportTab, setActiveImportTab] = useState<"csv" | "broker">("csv");
 
   const [dragOver, setDragOver] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -139,8 +165,32 @@ export default function ImportPage() {
   const [snaptradeImporting, setSnaptradeImporting] = useState(false);
   const [showSnaptradeHelp, setShowSnaptradeHelp] = useState(true);
   const [snaptradeResetting, setSnaptradeResetting] = useState(false);
+  const [snaptradeSyncing, setSnaptradeSyncing] = useState(false);
+
+  const [syncHoldings, setSyncHoldings] = useState(true);
+  const [syncBalances, setSyncBalances] = useState(true);
+  const [syncActivities, setSyncActivities] = useState(true);
+  const [syncOrders, setSyncOrders] = useState(false);
+  const [syncImportTrades, setSyncImportTrades] = useState(false);
 
   const brokerMeta = useMemo(() => BROKERS.find((b) => b.id === broker), [broker]);
+  const snaptradePositions = useMemo(() => {
+    const positions = extractPositions(snaptradeHoldings);
+    return positions.slice(0, 10);
+  }, [snaptradeHoldings]);
+  const snaptradeBalancesSummary = useMemo(() => {
+    if (!snaptradeBalances || typeof snaptradeBalances !== "object") return null;
+    const cash = (snaptradeBalances as any)?.cash ?? (snaptradeBalances as any)?.total_cash;
+    const buyingPower =
+      (snaptradeBalances as any)?.buying_power ??
+      (snaptradeBalances as any)?.buyingPower ??
+      (snaptradeBalances as any)?.available_cash;
+    const equity =
+      (snaptradeBalances as any)?.equity ??
+      (snaptradeBalances as any)?.total_equity ??
+      (snaptradeBalances as any)?.net_liquidation_value;
+    return { cash, buyingPower, equity };
+  }, [snaptradeBalances]);
 
   const router = useRouter();
 
@@ -345,6 +395,30 @@ export default function ImportPage() {
     }
   }
 
+  async function onSnaptradeSyncSelected() {
+    if (!snaptradeAccountId) return;
+    try {
+      setSnaptradeError(null);
+      setSnaptradeStatus(null);
+      setSnaptradeSyncing(true);
+      if (syncHoldings) await onSnaptradeLoadHoldings();
+      if (syncBalances) await onSnaptradeLoadBalances();
+      if (syncActivities) await onSnaptradeLoadActivities();
+      if (syncOrders) await onSnaptradeLoadOrders();
+      if (syncImportTrades) await onSnaptradeImportTrades();
+      setSnaptradeStatus(
+        L(
+          "Sync completed. Review the preview and adjust as needed.",
+          "Sincronización completada. Revisa la vista previa y ajusta si es necesario."
+        )
+      );
+    } catch (err: any) {
+      setSnaptradeError(err?.message ?? "SnapTrade error");
+    } finally {
+      setSnaptradeSyncing(false);
+    }
+  }
+
   async function onSnaptradeImportTrades() {
     if (!snaptradeAccountId) return;
     try {
@@ -398,6 +472,7 @@ export default function ImportPage() {
     if (typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
     if (params.get("snaptrade") === "connected") {
+      setActiveImportTab("broker");
       onSnaptradeLoadAccounts();
       setSnaptradeStatus(
         L("Connection completed. Loading accounts...", "Conexión completada. Cargando cuentas...")
@@ -584,6 +659,39 @@ export default function ImportPage() {
             </div>
           </div>
 
+          <div className="mb-6 flex flex-wrap items-center gap-2 rounded-2xl border border-slate-800 bg-slate-900/50 p-2">
+            <button
+              type="button"
+              onClick={() => setActiveImportTab("csv")}
+              className={[
+                "rounded-xl px-4 py-2 text-xs font-semibold transition",
+                activeImportTab === "csv"
+                  ? "bg-emerald-400 text-slate-950"
+                  : "border border-slate-700 bg-slate-950/30 text-slate-200 hover:bg-slate-950/60",
+              ].join(" ")}
+            >
+              {L("CSV Import", "Importar CSV")}
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveImportTab("broker")}
+              className={[
+                "rounded-xl px-4 py-2 text-xs font-semibold transition",
+                activeImportTab === "broker"
+                  ? "bg-emerald-400 text-slate-950"
+                  : "border border-slate-700 bg-slate-950/30 text-slate-200 hover:bg-slate-950/60",
+              ].join(" ")}
+            >
+              {L("Broker Sync", "Sincronizar bróker")}
+            </button>
+            <div className="ml-auto text-[11px] text-slate-400">
+              {activeImportTab === "csv"
+                ? L("Upload broker exports (CSV/XLSX).", "Sube exportaciones del bróker (CSV/XLSX).")
+                : L("Connect and sync via SnapTrade.", "Conecta y sincroniza con SnapTrade.")}
+            </div>
+          </div>
+
+          {activeImportTab === "csv" ? (
           <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
             {/* Left card */}
             <section className="rounded-2xl border border-slate-800 bg-slate-900/60 p-6 shadow-2xl">
@@ -846,8 +954,10 @@ export default function ImportPage() {
               )}
             </aside>
           </div>
+          ) : null}
 
-          <section className="mt-6 rounded-2xl border border-slate-800 bg-slate-900/60 p-6 shadow-2xl">
+          {activeImportTab === "broker" ? (
+          <section className="rounded-2xl border border-slate-800 bg-slate-900/60 p-6 shadow-2xl">
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div>
                 <div className="text-xs font-semibold text-emerald-200">SnapTrade (Beta)</div>
@@ -956,11 +1066,11 @@ export default function ImportPage() {
               </div>
             ) : null}
 
-            <div className="mt-4 grid gap-3 lg:grid-cols-[1fr_1fr]">
-              <div className="rounded-xl border border-slate-800 bg-slate-950/30 p-3">
+            <div className="mt-4 grid gap-3 lg:grid-cols-[1.05fr_0.95fr]">
+              <div className="rounded-xl border border-slate-800 bg-slate-950/30 p-4">
                 <div className="text-xs font-semibold text-slate-100">{L("Accounts", "Cuentas")}</div>
                 <p className="mt-1 text-[11px] text-slate-400">
-                  {L("Select an account to pull holdings and activities.", "Selecciona una cuenta para ver holdings y actividades.")}
+                  {L("Select an account, then choose what to sync.", "Selecciona una cuenta y luego elige qué sincronizar.")}
                 </p>
                 <select
                   value={snaptradeAccountId}
@@ -976,77 +1086,169 @@ export default function ImportPage() {
                   ))}
                 </select>
 
-                <div className="mt-3 flex flex-wrap items-center gap-2">
+                <div className="mt-4 rounded-xl border border-slate-800 bg-slate-950/40 p-3">
+                  <div className="text-[11px] font-semibold text-slate-200">
+                    {L("Sync scope", "Qué sincronizar")}
+                  </div>
+                  <div className="mt-2 grid gap-2 text-[11px] text-slate-200">
+                    <label className="flex items-center gap-2">
+                      <input type="checkbox" checked={syncHoldings} onChange={(e) => setSyncHoldings(e.target.checked)} />
+                      {L("Holdings (open positions)", "Holdings (posiciones abiertas)")}
+                    </label>
+                    <label className="flex items-center gap-2">
+                      <input type="checkbox" checked={syncBalances} onChange={(e) => setSyncBalances(e.target.checked)} />
+                      {L("Balances", "Balances")}
+                    </label>
+                    <label className="flex items-center gap-2">
+                      <input type="checkbox" checked={syncActivities} onChange={(e) => setSyncActivities(e.target.checked)} />
+                      {L("Activities (last 30 days)", "Actividades (últimos 30 días)")}
+                    </label>
+                    <label className="flex items-center gap-2">
+                      <input type="checkbox" checked={syncOrders} onChange={(e) => setSyncOrders(e.target.checked)} />
+                      {L("Recent orders", "Órdenes recientes")}
+                    </label>
+                    <label className="flex items-center gap-2">
+                      <input type="checkbox" checked={syncImportTrades} onChange={(e) => setSyncImportTrades(e.target.checked)} />
+                      {L("Import trades (30d)", "Importar trades (30d)")}
+                    </label>
+                  </div>
+                </div>
+
+                <div className="mt-4 flex flex-wrap items-center gap-2">
                   <button
                     type="button"
-                    onClick={onSnaptradeLoadHoldings}
-                    className="rounded-xl border border-slate-700 bg-slate-950/30 px-3 py-2 text-[11px] font-semibold text-slate-100 hover:bg-slate-950/50"
-                    disabled={!snaptradeAccountId}
+                    onClick={onSnaptradeSyncSelected}
+                    className="rounded-xl bg-emerald-400 px-4 py-2 text-[11px] font-semibold text-slate-950 hover:bg-emerald-300 disabled:opacity-60"
+                    disabled={!snaptradeAccountId || snaptradeSyncing}
                   >
-                    {L("Load holdings", "Cargar holdings")}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={onSnaptradeLoadBalances}
-                    className="rounded-xl border border-slate-700 bg-slate-950/30 px-3 py-2 text-[11px] font-semibold text-slate-100 hover:bg-slate-950/50"
-                    disabled={!snaptradeAccountId}
-                  >
-                    {L("Load balances", "Cargar balances")}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={onSnaptradeLoadActivities}
-                    className="rounded-xl border border-slate-700 bg-slate-950/30 px-3 py-2 text-[11px] font-semibold text-slate-100 hover:bg-slate-950/50"
-                    disabled={!snaptradeAccountId}
-                  >
-                    {L("Load activities (30d)", "Cargar actividades (30d)")}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={onSnaptradeLoadOrders}
-                    className="rounded-xl border border-slate-700 bg-slate-950/30 px-3 py-2 text-[11px] font-semibold text-slate-100 hover:bg-slate-950/50"
-                    disabled={!snaptradeAccountId}
-                  >
-                    {L("Load recent orders", "Cargar órdenes recientes")}
+                    {snaptradeSyncing ? L("Syncing...", "Sincronizando...") : L("Sync selected", "Sincronizar selección")}
                   </button>
                   <button
                     type="button"
                     onClick={onSnaptradeImportTrades}
-                    className="rounded-xl bg-emerald-400 px-3 py-2 text-[11px] font-semibold text-slate-950 hover:bg-emerald-300 disabled:opacity-60"
+                    className="rounded-xl border border-emerald-300/40 bg-emerald-400/10 px-3 py-2 text-[11px] font-semibold text-emerald-100 hover:bg-emerald-400/20 disabled:opacity-60"
                     disabled={!snaptradeAccountId || snaptradeImporting}
                   >
-                    {snaptradeImporting ? L("Importing...", "Importando...") : L("Import trades (30d)", "Importar trades (30d)")}
+                    {snaptradeImporting ? L("Importing...", "Importando...") : L("Import trades only", "Solo importar trades")}
                   </button>
                 </div>
               </div>
 
-              <div className="rounded-xl border border-slate-800 bg-slate-950/30 p-3">
-                <div className="text-xs font-semibold text-slate-100">{L("Raw data preview", "Vista previa raw")}</div>
-                <div className="mt-2 grid gap-3">
-                  {snaptradeBalances ? (
-                    <pre className="max-h-44 overflow-auto rounded-lg border border-slate-800 bg-slate-950/40 p-2 text-[10px] text-slate-200">
-                      {JSON.stringify(snaptradeBalances, null, 2)}
-                    </pre>
-                  ) : null}
-                  {snaptradeOrders ? (
-                    <pre className="max-h-44 overflow-auto rounded-lg border border-slate-800 bg-slate-950/40 p-2 text-[10px] text-slate-200">
-                      {JSON.stringify(snaptradeOrders, null, 2)}
-                    </pre>
-                  ) : null}
-                  {snaptradeHoldings ? (
-                    <pre className="max-h-44 overflow-auto rounded-lg border border-slate-800 bg-slate-950/40 p-2 text-[10px] text-slate-200">
-                      {JSON.stringify(snaptradeHoldings, null, 2)}
-                    </pre>
-                  ) : null}
-                  {snaptradeActivities ? (
-                    <pre className="max-h-44 overflow-auto rounded-lg border border-slate-800 bg-slate-950/40 p-2 text-[10px] text-slate-200">
-                      {JSON.stringify(snaptradeActivities, null, 2)}
-                    </pre>
-                  ) : null}
+              <div className="rounded-xl border border-slate-800 bg-slate-950/30 p-4">
+                <div className="text-xs font-semibold text-slate-100">{L("Preview", "Vista previa")}</div>
+                <div className="mt-3 grid gap-3">
+                  <div className="rounded-lg border border-slate-800 bg-slate-950/40 p-3">
+                    <div className="text-[11px] font-semibold text-slate-200">
+                      {L("Open positions", "Posiciones abiertas")}
+                    </div>
+                    {snaptradePositions.length ? (
+                      <div className="mt-2 overflow-hidden rounded-lg border border-slate-800">
+                        <div className="grid grid-cols-[1.2fr_0.7fr_0.7fr_0.8fr] gap-2 bg-slate-950/50 px-2 py-1 text-[10px] text-slate-400">
+                          <span>{L("Symbol", "Símbolo")}</span>
+                          <span>{L("Qty", "Cant.")}</span>
+                          <span>{L("Avg", "Prom.")}</span>
+                          <span>{L("Mkt Val", "Val. Mkt")}</span>
+                        </div>
+                        <div className="max-h-40 overflow-auto">
+                          {snaptradePositions.map((pos: any, idx: number) => {
+                            const symbol =
+                              pos?.symbol?.symbol ??
+                              pos?.symbol?.ticker ??
+                              pos?.symbol ??
+                              pos?.instrument?.symbol ??
+                              pos?.instrument?.ticker ??
+                              pos?.ticker ??
+                              pos?.name ??
+                              "—";
+                            const qty = pos?.quantity ?? pos?.qty ?? pos?.units ?? "—";
+                            const avg =
+                              pos?.average_purchase_price ??
+                              pos?.averagePurchasePrice ??
+                              pos?.avg_price ??
+                              pos?.price ??
+                              pos?.avgCost;
+                            const value =
+                              pos?.market_value ??
+                              pos?.marketValue ??
+                              pos?.value ??
+                              pos?.marketValueUsd;
+                            return (
+                              <div
+                                key={`${symbol}-${idx}`}
+                                className="grid grid-cols-[1.2fr_0.7fr_0.7fr_0.8fr] gap-2 border-t border-slate-800 px-2 py-1 text-[11px] text-slate-200"
+                              >
+                                <span className="truncate">{String(symbol)}</span>
+                                <span>{String(qty)}</span>
+                                <span>{formatMoney(typeof avg === "number" ? avg : undefined)}</span>
+                                <span>{formatMoney(typeof value === "number" ? value : undefined)}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="mt-2 text-[11px] text-slate-400">
+                        {L("No positions loaded yet.", "Aún no hay posiciones cargadas.")}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="rounded-lg border border-slate-800 bg-slate-950/40 p-3">
+                    <div className="text-[11px] font-semibold text-slate-200">{L("Balances", "Balances")}</div>
+                    {snaptradeBalancesSummary ? (
+                      <div className="mt-2 grid grid-cols-3 gap-2 text-[11px]">
+                        <div className="rounded-lg border border-slate-800 bg-slate-950/50 px-2 py-1">
+                          <div className="text-slate-400">{L("Cash", "Efectivo")}</div>
+                          <div className="text-slate-100 font-semibold">{formatMoney(snaptradeBalancesSummary.cash)}</div>
+                        </div>
+                        <div className="rounded-lg border border-slate-800 bg-slate-950/50 px-2 py-1">
+                          <div className="text-slate-400">{L("Buying power", "Poder de compra")}</div>
+                          <div className="text-slate-100 font-semibold">{formatMoney(snaptradeBalancesSummary.buyingPower)}</div>
+                        </div>
+                        <div className="rounded-lg border border-slate-800 bg-slate-950/50 px-2 py-1">
+                          <div className="text-slate-400">{L("Equity", "Equidad")}</div>
+                          <div className="text-slate-100 font-semibold">{formatMoney(snaptradeBalancesSummary.equity)}</div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="mt-2 text-[11px] text-slate-400">
+                        {L("No balances loaded yet.", "Aún no hay balances cargados.")}
+                      </div>
+                    )}
+                  </div>
+
+                  <details className="rounded-lg border border-slate-800 bg-slate-950/40 p-3">
+                    <summary className="cursor-pointer text-[11px] font-semibold text-slate-200">
+                      {L("Raw data preview", "Vista previa raw")}
+                    </summary>
+                    <div className="mt-2 grid gap-3">
+                      {snaptradeBalances ? (
+                        <pre className="max-h-44 overflow-auto rounded-lg border border-slate-800 bg-slate-950/40 p-2 text-[10px] text-slate-200">
+                          {JSON.stringify(snaptradeBalances, null, 2)}
+                        </pre>
+                      ) : null}
+                      {snaptradeOrders ? (
+                        <pre className="max-h-44 overflow-auto rounded-lg border border-slate-800 bg-slate-950/40 p-2 text-[10px] text-slate-200">
+                          {JSON.stringify(snaptradeOrders, null, 2)}
+                        </pre>
+                      ) : null}
+                      {snaptradeHoldings ? (
+                        <pre className="max-h-44 overflow-auto rounded-lg border border-slate-800 bg-slate-950/40 p-2 text-[10px] text-slate-200">
+                          {JSON.stringify(snaptradeHoldings, null, 2)}
+                        </pre>
+                      ) : null}
+                      {snaptradeActivities ? (
+                        <pre className="max-h-44 overflow-auto rounded-lg border border-slate-800 bg-slate-950/40 p-2 text-[10px] text-slate-200">
+                          {JSON.stringify(snaptradeActivities, null, 2)}
+                        </pre>
+                      ) : null}
+                    </div>
+                  </details>
                 </div>
               </div>
             </div>
           </section>
+          ) : null}
         </div>
       </main>
     </>
