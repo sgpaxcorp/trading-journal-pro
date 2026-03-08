@@ -19,7 +19,9 @@ import { GlobalRankingScreen } from "./src/screens/GlobalRankingScreen";
 import { JournalDateScreen } from "./src/screens/JournalDateScreen";
 import { TrophiesScreen } from "./src/screens/TrophiesScreen";
 import { NotebookScreen } from "./src/screens/NotebookScreen";
+import { NotebookEditorScreen } from "./src/screens/NotebookEditorScreen";
 import { ChallengesScreen } from "./src/screens/ChallengesScreen";
+import { BrokerConnectScreen } from "./src/screens/BrokerConnectScreen";
 import { AuthScreen, type AuthMode } from "./src/screens/AuthScreen";
 import { ThemeProvider, useTheme } from "./src/lib/ThemeContext";
 import { LanguageProvider } from "./src/lib/LanguageContext";
@@ -55,7 +57,9 @@ type RootStackParamList = {
   GlobalRanking: undefined;
   Trophies: undefined;
   Notebook: undefined;
+  NotebookEditor: { kind: "page" | "free"; id: string; title?: string };
   Challenges: undefined;
+  BrokerConnect: undefined;
 };
 
 const Tab = createBottomTabNavigator<MainTabParamList>();
@@ -132,6 +136,15 @@ function MainTabs() {
     navigation.navigate("Challenges");
   }, [navigation]);
 
+  const openBrokerConnect = useCallback(() => {
+    const parent = navigation.getParent<NativeStackNavigationProp<RootStackParamList>>();
+    if (parent) {
+      parent.navigate("BrokerConnect");
+      return;
+    }
+    navigation.navigate("BrokerConnect");
+  }, [navigation]);
+
   const handleMoreSelect = useCallback((action: () => void) => {
     setMoreOpen(false);
     setTimeout(action, 120);
@@ -176,6 +189,12 @@ function MainTabs() {
         onPress: () => handleMoreSelect(openChallenges),
       },
       {
+        key: "broker-connect",
+        label: t(language, "Broker connect", "Conectar bróker"),
+        iconName: "link-outline" as const,
+        onPress: () => handleMoreSelect(openBrokerConnect),
+      },
+      {
         key: "about",
         label: t(language, "About us", "Sobre nosotros"),
         iconName: "information-circle-outline" as const,
@@ -203,6 +222,7 @@ function MainTabs() {
       openNotebook,
       openSettings,
       openTrophies,
+      openBrokerConnect,
     ]
   );
 
@@ -271,6 +291,7 @@ function MainTabs() {
               onOpenNotebook={openNotebook}
               onOpenChallenges={openChallenges}
               onOpenJournalDate={openJournalDate}
+              onOpenBrokerConnect={openBrokerConnect}
             />
           )}
         </Tab.Screen>
@@ -387,9 +408,19 @@ function AppShell() {
             options={{ title: "Notebook" }}
           />
           <Stack.Screen
+            name="NotebookEditor"
+            component={NotebookEditorScreen}
+            options={{ title: "Notebook" }}
+          />
+          <Stack.Screen
             name="Challenges"
             component={ChallengesScreen}
             options={{ title: "Challenges" }}
+          />
+          <Stack.Screen
+            name="BrokerConnect"
+            component={BrokerConnectScreen}
+            options={{ title: "Broker connect" }}
           />
         </Stack.Navigator>
       ) : (

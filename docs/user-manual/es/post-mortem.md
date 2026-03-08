@@ -1,9 +1,12 @@
 # Post-mortem (Option Flow)
+
+## Acceso
+- Navegación lateral → Option Flow → Post‑mortem.
+
 Documenta lo que realmente paso despues del plan.
 
 ## Donde se usa
-Ruta: `/option-flow`
-Seccion: Post-mortem o Resultado real.
+Dentro de Option Flow, en la seccion Post‑mortem o Resultado real.
 
 ## Pasos
 - Escribe que esperabas que pasara.

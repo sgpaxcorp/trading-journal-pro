@@ -10,6 +10,7 @@ const NAV_GROUPS = (lang: "en" | "es") => {
       items: [
         { href: "/help", label: isEs ? "Resumen" : "Overview" },
         { href: "/help/getting-started", label: isEs ? "Guia de inicio" : "Getting Started" },
+        { href: "/help/growth-plan", label: isEs ? "Plan de crecimiento" : "Growth Plan" },
       ],
     },
     {
@@ -19,14 +20,38 @@ const NAV_GROUPS = (lang: "en" | "es") => {
         { href: "/help/workflows", label: isEs ? "Flujos de trabajo" : "Workflows" },
         { href: "/help/dashboard-widgets", label: isEs ? "Dashboard y widgets" : "Dashboard & Widgets" },
         { href: "/help/analytics", label: isEs ? "Analitica y rendimiento" : "Analytics & Performance" },
+        { href: "/help/ai-coaching", label: isEs ? "AI Coaching" : "AI Coaching" },
+        { href: "/help/notebook", label: isEs ? "Notebook" : "Notebook" },
+        { href: "/help/back-study", label: isEs ? "Back‑Study" : "Back‑Study" },
+        { href: "/help/rules-alarms", label: isEs ? "Reglas y alarmas" : "Rules & Alarms" },
+        { href: "/help/challenges", label: isEs ? "Retos" : "Challenges" },
         { href: "/help/audit", label: isEs ? "Auditoría" : "Audit" },
         { href: "/help/kpis", label: isEs ? "KPIs y metricas" : "KPIs & Metrics" },
       ],
     },
-    // Data & reports removed from sidebar per request.
+    {
+      title: isEs ? "Datos y reportes" : "Data & reports",
+      items: [
+        { href: "/help/data-inputs", label: isEs ? "Datos e importaciones" : "Data Inputs & Imports" },
+        { href: "/help/option-flow", label: isEs ? "Option Flow" : "Option Flow" },
+        { href: "/help/reports", label: isEs ? "Reportes Option Flow" : "Option Flow Reports" },
+        { href: "/help/post-mortem", label: isEs ? "Post‑mortem" : "Post‑mortem" },
+      ],
+    },
     {
       title: isEs ? "Cuenta y ajustes" : "Account & settings",
-      items: [{ href: "/help/settings", label: isEs ? "Idioma y ajustes" : "Language & Settings" }],
+      items: [
+        { href: "/help/settings", label: isEs ? "Idioma y ajustes" : "Language & Settings" },
+        { href: "/help/billing", label: isEs ? "Billing y planes" : "Billing & Plans" },
+      ],
+    },
+    {
+      title: isEs ? "Comunidad y recursos" : "Community & resources",
+      items: [
+        { href: "/help/forum", label: isEs ? "Comunidad" : "Community Forum" },
+        { href: "/help/global-ranking", label: isEs ? "Ranking global" : "Global Ranking" },
+        { href: "/help/resources", label: isEs ? "Recursos" : "Resources Library" },
+      ],
     },
   ];
 };

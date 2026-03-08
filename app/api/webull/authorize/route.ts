@@ -14,7 +14,10 @@ export async function POST(req: Request) {
     const body = await req.json().catch(() => ({} as any));
 
     const state = crypto.randomBytes(12).toString("hex");
-    const scope = typeof body?.scope === "string" ? body.scope : undefined;
+    const scope =
+      typeof body?.scope === "string"
+        ? body.scope
+        : process.env.WEBULL_SCOPE?.trim() || undefined;
     const url = buildWebullAuthUrl({ state, scope });
 
     const res = NextResponse.json({ url });

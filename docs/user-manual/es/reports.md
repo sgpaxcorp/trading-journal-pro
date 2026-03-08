@@ -1,9 +1,12 @@
 # Reportes de Option Flow
+
+## Acceso
+- Navegación lateral → Option Flow → Reporte.
+
 Como leer el reporte de Option Flow y usarlo en tu plan.
 
 ## Donde aparece el reporte
-Ruta: `/option-flow`
-El reporte se genera despues de subir un archivo o screenshots.
+El reporte se genera dentro de Option Flow despues de subir un archivo o screenshots.
 
 ## Secciones principales (en simple)
 - Resumen ejecutivo: takeaway rapido y sesgo.

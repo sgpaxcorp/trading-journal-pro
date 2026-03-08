@@ -1,34 +1,56 @@
-# Analytics and Performance
-Use analytics to find patterns, leaks, and repeatable strengths.
+# Analytics & Performance
 
-## Where to open analytics
-Route: `/performance/analytics-statistics`
+## Access
+- Left navigation → Performance → Analytics & Statistics.
 
-## What you will see
-The analytics page is organized by tabs. Each tab answers a specific question.
+Analytics answers two questions: **Is my edge real?** and **Is my process consistent?**
 
-## Tabs overview
-- Overview: quick KPIs like sessions, win rate, net P&L, and expectancy.
-- Performance: deeper results by outcome and quality.
-- Risk: drawdowns, max loss, and risk control.
-- Distribution: how results spread across days or outcomes.
-- Time: performance by day of week or time of day.
-- Instruments: results by symbol or product.
-- Trades: trade-level breakdowns and patterns.
-- Statistics: advanced stats and summaries.
+## Before you analyze
+1. Make sure your trades are imported or recorded.
+2. Select a date range with enough sessions.
+3. Use consistent setup names so breakdowns are accurate.
+
+## Tabs overview (what each section answers)
+**Overview**  
+Top‑level KPIs: sessions, win rate, net P&L, expectancy.
+
+**Performance**  
+Win/loss distribution, outcome quality, average win/loss, and efficiency.
+
+**Risk**  
+Drawdowns, max loss, risk control compliance.
+
+**Distribution**  
+How results spread across days or outcomes — confirms stability.
+
+**Time**  
+Performance by day of week and time of day — identifies best hours.
+
+**Instruments**  
+Results by symbol/product — where your edge actually exists.
+
+**Trades**  
+Trade‑level metrics and patterns.
+
+**Statistics**  
+Advanced metrics (Sharpe, Sortino, profit factor, etc.).
 
 ## Balance chart
-Route: `/performance/balance-chart`
-- Shows your equity curve over time.
-- Useful to confirm consistency and drawdown control.
+The balance chart shows your equity curve over time. Use it to confirm consistency and identify drawdown phases.
+
+## How to read analytics like a pro
+1. Start with Overview → confirm sample size.
+2. Use Risk to validate discipline.
+3. Use Time + Instruments to isolate your edge.
+4. Use Statistics for deeper validation (only after you trust the data).
 
 ## Tips
-- Filter by date range before judging a metric.
-- Keep setup names consistent in Journal so breakdowns stay clean.
+- Always filter by a clean date range.
+- One month of data is often too small for real conclusions.
 
 ## FAQ
-Q: Why are some tabs locked?
-A: Advanced tabs require the Advanced plan. Core includes the Overview tab only.
+Q: Why are some tabs locked?  
+A: Advanced tabs require the Advanced plan. Core includes Overview only.
 
-Q: Why are my charts empty?
-A: You need saved journal sessions in the selected range.
+Q: Why are my charts empty?  
+A: You need saved sessions in the selected range.

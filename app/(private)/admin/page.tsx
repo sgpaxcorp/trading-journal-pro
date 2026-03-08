@@ -77,6 +77,10 @@ export default function AdminDashboardPage() {
   const [metrics, setMetrics] = useState<Metrics | null>(null);
   const [loadingMetrics, setLoadingMetrics] = useState(true);
   const [forbidden, setForbidden] = useState(false);
+  const [scheduleHourNy, setScheduleHourNy] = useState("13");
+  const [scheduleLoading, setScheduleLoading] = useState(false);
+  const [scheduleSaving, setScheduleSaving] = useState(false);
+  const [scheduleNotice, setScheduleNotice] = useState<string | null>(null);
 
   useEffect(() => {
     if (loading || !user) return;
@@ -107,6 +111,63 @@ export default function AdminDashboardPage() {
     };
     load();
   }, [loading, user]);
+
+  useEffect(() => {
+    if (loading || !user) return;
+    const loadSettings = async () => {
+      setScheduleLoading(true);
+      setScheduleNotice(null);
+      try {
+        const { data: sessionData } = await supabaseBrowser.auth.getSession();
+        const token = sessionData?.session?.access_token;
+        if (!token) return;
+        const res = await fetch("/api/admin/settings", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) return;
+        const body = await res.json();
+        const hour = Number(body?.dailyMotivationSchedule?.hourNy ?? 13);
+        setScheduleHourNy(String(Number.isInteger(hour) ? hour : 13));
+      } finally {
+        setScheduleLoading(false);
+      }
+    };
+    loadSettings();
+  }, [loading, user]);
+
+  async function handleSaveSchedule() {
+    setScheduleSaving(true);
+    setScheduleNotice(null);
+    try {
+      const { data: sessionData } = await supabaseBrowser.auth.getSession();
+      const token = sessionData?.session?.access_token;
+      if (!token) {
+        setScheduleNotice(L("Admin session missing.", "Falta la sesión de admin."));
+        return;
+      }
+      const res = await fetch("/api/admin/settings", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ hourNy: Number(scheduleHourNy), minuteNy: 0 }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setScheduleNotice(String(body?.error ?? L("Save failed.", "No se pudo guardar.")));
+        return;
+      }
+      setScheduleNotice(
+        L(
+          `Daily motivation set to ${body?.dailyMotivationSchedule?.label ?? "1:00 PM EST"}.`,
+          `La motivación diaria quedó en ${body?.dailyMotivationSchedule?.label ?? "1:00 PM EST"}.`
+        )
+      );
+    } finally {
+      setScheduleSaving(false);
+    }
+  }
 
   if (loading) {
     return (
@@ -160,6 +221,55 @@ export default function AdminDashboardPage() {
 
         {metrics && (
           <>
+            <section className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5 space-y-4">
+              <div className="flex flex-col gap-1">
+                <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">
+                  {L("Motivation schedule", "Horario de motivación")}
+                </p>
+                <h2 className="text-lg font-semibold">
+                  {L("Daily motivational push hour", "Hora del push motivacional diario")}
+                </h2>
+                <p className="text-sm text-slate-400">
+                  {L(
+                    "This controls the daily motivational message in New York time. Friday, Saturday, and Sunday keep their special message types.",
+                    "Esto controla el mensaje motivacional diario en hora de New York. Viernes, sábado y domingo mantienen sus mensajes especiales."
+                  )}
+                </p>
+              </div>
+              <div className="flex flex-col gap-3 md:flex-row md:items-end">
+                <label className="flex flex-col gap-2">
+                  <span className="text-xs text-slate-400">{L("Hour (ET)", "Hora (ET)")}</span>
+                  <select
+                    value={scheduleHourNy}
+                    onChange={(e) => setScheduleHourNy(e.target.value)}
+                    className="rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-slate-100 outline-none"
+                    disabled={scheduleLoading || scheduleSaving}
+                  >
+                    {Array.from({ length: 24 }, (_, hour) => (
+                      <option key={hour} value={String(hour)}>
+                        {String(hour).padStart(2, "0")}:00 ET
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <button
+                  type="button"
+                  onClick={handleSaveSchedule}
+                  disabled={scheduleLoading || scheduleSaving}
+                  className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-sm font-medium text-emerald-200 disabled:opacity-50"
+                >
+                  {scheduleSaving ? L("Saving…", "Guardando…") : L("Save schedule", "Guardar horario")}
+                </button>
+              </div>
+              <p className="text-xs text-slate-500">
+                {L(
+                  "Current cron resolution is hourly, so minutes are fixed at :00.",
+                  "La resolución actual del cron es por hora, así que los minutos quedan fijos en :00."
+                )}
+              </p>
+              {scheduleNotice && <p className="text-sm text-emerald-300">{scheduleNotice}</p>}
+            </section>
+
             <section className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
                 <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">

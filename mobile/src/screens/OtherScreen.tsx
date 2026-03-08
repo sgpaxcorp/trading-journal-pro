@@ -16,6 +16,7 @@ type OtherScreenProps = {
   onOpenNotebook: () => void;
   onOpenChallenges: () => void;
   onOpenJournalDate: () => void;
+  onOpenBrokerConnect: () => void;
 };
 
 const WEB_BASE = "https://www.neurotrader-journal.com";
@@ -28,6 +29,7 @@ export function OtherScreen({
   onOpenNotebook,
   onOpenChallenges,
   onOpenJournalDate,
+  onOpenBrokerConnect,
 }: OtherScreenProps) {
   const { language } = useLanguage();
   const { colors } = useTheme();
@@ -102,6 +104,16 @@ export function OtherScreen({
           )}
           iconName="flame-outline"
           onPress={onOpenChallenges}
+        />
+        <ModuleTile
+          title={t(language, "Broker connect", "Conectar bróker")}
+          description={t(
+            language,
+            "Link your broker account on mobile.",
+            "Conecta tu cuenta de bróker en móvil."
+          )}
+          iconName="link-outline"
+          onPress={onOpenBrokerConnect}
         />
         <ModuleTile
           title={t(language, "About us", "Sobre nosotros")}

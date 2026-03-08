@@ -1,13 +1,21 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useState, type FormEvent, type ChangeEvent } from "react";
 import Link from "next/link";
 import Script from "next/script";
+import { useAuth } from "@/context/AuthContext";
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
+import {
+  createSupportTicket,
+  uploadSupportAttachments,
+  addSupportMessage,
+  type SupportAttachment,
+} from "@/lib/supportTicketsSupabase";
 
 export default function ContactPage() {
   const { theme, locale } = useAppSettings();
+  const { user } = useAuth() as any;
   const lang = resolveLocale(locale);
   const isEs = lang === "es";
   const L = (en: string, es: string) => (isEs ? es : en);
@@ -19,9 +27,20 @@ export default function ContactPage() {
   const [subject, setSubject] = useState("");
   const [message, setMessage] = useState("");
   const [company, setCompany] = useState("");
+  const [files, setFiles] = useState<File[]>([]);
+  const [uploading, setUploading] = useState(false);
   const [sending, setSending] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const canAttach = Boolean(user?.id);
+
+  function handleFiles(e: ChangeEvent<HTMLInputElement>) {
+    const list = Array.from(e.target.files ?? []);
+    if (!list.length) return;
+    const next = list.slice(0, 3);
+    setFiles(next);
+  }
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -35,32 +54,71 @@ export default function ContactPage() {
 
     setSending(true);
     try {
-      const captchaToken = hcaptchaSiteKey
-        ? (document.querySelector('[name="h-captcha-response"]') as HTMLTextAreaElement | null)?.value || ""
-        : "";
-      if (hcaptchaSiteKey && !captchaToken) {
-        setError(L("Please complete the captcha.", "Completa el captcha."));
-        setSending(false);
-        return;
-      }
-      const res = await fetch("/api/contact", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, email, subject, message, captchaToken, company }),
-      });
-      const body = await res.json();
-      if (!res.ok) throw new Error(body?.error || "Contact failed");
+      if (user?.id) {
+        const ticketRes = await createSupportTicket({
+          userId: user.id,
+          name,
+          email,
+          subject: subject || L("Support request", "Solicitud de soporte"),
+          message: undefined,
+          source: "contact",
+        });
+        if (!ticketRes.ok) throw new Error(ticketRes.error || "Support ticket failed");
+        const ticketId = ticketRes.ticket?.id;
+        if (!ticketId) throw new Error("Missing ticket id");
 
-      setStatus(L("Message sent. We’ll reply soon.", "Mensaje enviado. Te responderemos pronto."));
+        let attachments: SupportAttachment[] = [];
+        if (files.length) {
+          setUploading(true);
+          const uploaded = await uploadSupportAttachments({
+            userId: user.id,
+            ticketId,
+            files,
+          });
+          setUploading(false);
+          if (!uploaded.ok) throw new Error(uploaded.error || "Attachment upload failed");
+          attachments = uploaded.attachments;
+        }
+
+        const msgRes = await addSupportMessage({
+          ticketId,
+          userId: user.id,
+          message,
+          attachments,
+          authorRole: "user",
+        });
+        if (!msgRes.ok) throw new Error(msgRes.error || "Message failed");
+        setStatus(L("Support ticket created. We’ll reply soon.", "Ticket creado. Te responderemos pronto."));
+      } else {
+        const captchaToken = hcaptchaSiteKey
+          ? (document.querySelector('[name="h-captcha-response"]') as HTMLTextAreaElement | null)?.value || ""
+          : "";
+        if (hcaptchaSiteKey && !captchaToken) {
+          setError(L("Please complete the captcha.", "Completa el captcha."));
+          setSending(false);
+          return;
+        }
+        const res = await fetch("/api/contact", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name, email, subject, message, captchaToken, company }),
+        });
+        const body = await res.json();
+        if (!res.ok) throw new Error(body?.error || "Contact failed");
+
+        setStatus(L("Message sent. We’ll reply soon.", "Mensaje enviado. Te responderemos pronto."));
+      }
       setName("");
       setEmail("");
       setSubject("");
       setMessage("");
       setCompany("");
+      setFiles([]);
     } catch (err: any) {
       setError(err?.message || L("We couldn't send your message.", "No pudimos enviar tu mensaje."));
     } finally {
       setSending(false);
+      setUploading(false);
     }
   }
 
@@ -164,6 +222,34 @@ export default function ContactPage() {
                 />
               </div>
 
+              {canAttach && (
+                <div>
+                  <label className="block text-[11px] text-slate-400 mb-1">
+                    {L("Screenshots (optional)", "Screenshots (opcional)")}
+                  </label>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    onChange={handleFiles}
+                    className="w-full rounded-lg bg-slate-950/70 border border-slate-700 px-3 py-2 text-xs text-slate-200"
+                  />
+                  {files.length > 0 && (
+                    <p className="mt-2 text-[11px] text-slate-400">
+                      {L("Selected:", "Seleccionados:")} {files.map((f) => f.name).join(", ")}
+                    </p>
+                  )}
+                </div>
+              )}
+              {!canAttach && (
+                <p className="text-[11px] text-slate-500">
+                  {L(
+                    "Log in to attach screenshots to your support ticket.",
+                    "Inicia sesión para adjuntar screenshots a tu ticket."
+                  )}
+                </p>
+              )}
+
               {hcaptchaSiteKey && (
                 <div className="pt-1">
                   <div className="h-captcha" data-sitekey={hcaptchaSiteKey} />
@@ -175,10 +261,10 @@ export default function ContactPage() {
 
               <button
                 type="submit"
-                disabled={sending}
+                disabled={sending || uploading}
                 className="rounded-xl bg-emerald-400 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-emerald-300 disabled:opacity-60"
               >
-                {sending ? L("Sending…", "Enviando…") : L("Send message", "Enviar mensaje")}
+                {sending ? L("Sending…", "Enviando…") : uploading ? L("Uploading…", "Subiendo…") : L("Send message", "Enviar mensaje")}
               </button>
             </form>
           </section>

@@ -1,5 +1,8 @@
 # Guía de Auditoría (Historial de Órdenes)
 
+## Acceso
+- Navegación lateral → Back‑Study → Auditoría.
+
 ## Qué hace esta auditoría
 Esta auditoría usa el **historial de órdenes del broker** (sin AI) para calcular métricas objetivas y determinísticas sobre tu proceso de ejecución.
 

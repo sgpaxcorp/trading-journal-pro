@@ -98,6 +98,48 @@ function formatMoney(value: number | null | undefined) {
   return `$${value.toFixed(2)}`;
 }
 
+function formatDateShort(input?: string | number | null) {
+  if (!input) return "—";
+  const d =
+    typeof input === "number"
+      ? new Date(input)
+      : input.length === 10
+        ? new Date(`${input}T00:00:00Z`)
+        : new Date(input);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toISOString().slice(0, 10);
+}
+
+function pickText(...vals: Array<string | number | null | undefined>) {
+  for (const v of vals) {
+    if (v === null || v === undefined) continue;
+    const s = String(v).trim();
+    if (s) return s;
+  }
+  return "—";
+}
+
+function pickBalanceObject(raw: any) {
+  if (!raw) return null;
+  if (Array.isArray(raw)) return raw[0] ?? null;
+  if (Array.isArray(raw?.data)) return raw.data[0] ?? null;
+  if (Array.isArray(raw?.balances)) return raw.balances[0] ?? null;
+  if (raw?.balances && typeof raw.balances === "object") return raw.balances;
+  if (raw?.data && typeof raw.data === "object") return raw.data;
+  if (raw?.balance && typeof raw.balance === "object") return raw.balance;
+  return raw;
+}
+
+function toNumber(value: any): number | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value === "string") {
+    const n = Number(value.replace(/,/g, ""));
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
 function extractPositions(raw: any): any[] {
   if (!raw) return [];
   if (Array.isArray(raw)) {
@@ -162,6 +204,15 @@ export default function ImportPage() {
   const [snaptradeActivities, setSnaptradeActivities] = useState<any[] | null>(null);
   const [snaptradeBalances, setSnaptradeBalances] = useState<any | null>(null);
   const [snaptradeOrders, setSnaptradeOrders] = useState<any[] | null>(null);
+  const [snaptradeTradePreview, setSnaptradeTradePreview] = useState<any[] | null>(null);
+  const [snaptradePreviewMeta, setSnaptradePreviewMeta] = useState<{
+    total: number;
+    inserted: number;
+    updated: number;
+    duplicates: number;
+  } | null>(null);
+  const [snaptradePreviewSelection, setSnaptradePreviewSelection] = useState<Record<string, boolean>>({});
+  const [snaptradePreviewLoading, setSnaptradePreviewLoading] = useState(false);
   const [snaptradeBroker, setSnaptradeBroker] = useState<string>("");
   const [snaptradeImporting, setSnaptradeImporting] = useState(false);
   const [showSnaptradeHelp, setShowSnaptradeHelp] = useState(true);
@@ -209,27 +260,105 @@ export default function ImportPage() {
     return { cash, buyingPower, equity };
   }, [snaptradeBalances]);
 
+  const snaptradeActivitiesPreview = useMemo(() => {
+    const rows = Array.isArray(snaptradeActivities) ? snaptradeActivities : [];
+    return rows.slice(0, 20).map((a) => ({
+      date: pickText(a?.trade_date, a?.settlement_date, a?.created_at, a?.timestamp),
+      type: pickText(a?.type, a?.action, a?.side),
+      symbol: pickText(a?.option_symbol, a?.symbol, a?.ticker),
+      qty: a?.units ?? a?.quantity ?? a?.qty,
+      price: a?.price ?? a?.avg_price ?? a?.average_price,
+      amount: a?.amount ?? a?.net_amount,
+    }));
+  }, [snaptradeActivities]);
+
+  const snaptradeOrdersPreview = useMemo(() => {
+    const rows = Array.isArray(snaptradeOrders) ? snaptradeOrders : [];
+    return rows.slice(0, 20).map((o) => ({
+      date: pickText(o?.created_at, o?.placed_at, o?.trade_date, o?.timestamp),
+      symbol: pickText(o?.symbol, o?.option_symbol, o?.ticker),
+      side: pickText(o?.side, o?.action, o?.order_type),
+      qty: o?.units ?? o?.quantity ?? o?.qty ?? o?.filled_quantity,
+      price: o?.price ?? o?.avg_price ?? o?.average_price,
+      status: pickText(o?.status, o?.order_status),
+    }));
+  }, [snaptradeOrders]);
+
+  const snaptradeSelectedCount = useMemo(
+    () => Object.values(snaptradePreviewSelection).filter(Boolean).length,
+    [snaptradePreviewSelection]
+  );
+
   const webullPositionsPreview = useMemo(() => {
     const positions = extractPositions(webullPositions);
     return positions.slice(0, 10);
   }, [webullPositions]);
 
   const webullBalancesSummary = useMemo(() => {
-    if (!webullBalances || typeof webullBalances !== "object") return null;
-    const cash =
-      (webullBalances as any)?.cash ?? (webullBalances as any)?.cashBalance ?? (webullBalances as any)?.available_cash;
-    const buyingPower =
-      (webullBalances as any)?.buying_power ??
-      (webullBalances as any)?.buyingPower ??
-      (webullBalances as any)?.bp ??
-      (webullBalances as any)?.total_buying_power;
-    const equity =
-      (webullBalances as any)?.equity ??
-      (webullBalances as any)?.netAccountValue ??
-      (webullBalances as any)?.netLiquidation ??
-      (webullBalances as any)?.total_equity;
+    const base = pickBalanceObject(webullBalances);
+    if (!base || typeof base !== "object") return null;
+    const nested = pickBalanceObject(
+      (base as any)?.balance ??
+        (base as any)?.balances ??
+        (base as any)?.accountBalance ??
+        (base as any)?.account_balance ??
+        (base as any)?.account ??
+        null
+    );
+    const source = nested && typeof nested === "object" ? { ...base, ...nested } : base;
+    const cash = toNumber(
+      (source as any)?.cash ??
+        (source as any)?.cashBalance ??
+        (source as any)?.available_cash ??
+        (source as any)?.availableCash ??
+        (source as any)?.available_cash_balance ??
+        (source as any)?.settledCash ??
+        (source as any)?.settled_cash
+    );
+    const buyingPower = toNumber(
+      (source as any)?.buying_power ??
+        (source as any)?.buyingPower ??
+        (source as any)?.bp ??
+        (source as any)?.total_buying_power ??
+        (source as any)?.availableBuyingPower ??
+        (source as any)?.available_buying_power
+    );
+    const equity = toNumber(
+      (source as any)?.equity ??
+        (source as any)?.netAccountValue ??
+        (source as any)?.netLiquidation ??
+        (source as any)?.total_equity ??
+        (source as any)?.accountValue ??
+        (source as any)?.account_value ??
+        (source as any)?.totalAccountValue
+    );
+    if (cash === null && buyingPower === null && equity === null) return null;
     return { cash, buyingPower, equity };
   }, [webullBalances]);
+
+  const webullActivitiesPreview = useMemo(() => {
+    const rows = Array.isArray(webullActivities) ? webullActivities : [];
+    return rows.slice(0, 20).map((a) => ({
+      date: pickText(a?.tradeDate, a?.date, a?.createdAt, a?.timestamp, a?.time),
+      type: pickText(a?.action, a?.side, a?.type),
+      symbol: pickText(a?.symbol, a?.ticker, a?.instrument?.symbol),
+      qty: a?.quantity ?? a?.qty ?? a?.filledQuantity,
+      price: a?.price ?? a?.avgPrice ?? a?.averagePrice,
+      amount: a?.amount ?? a?.netAmount ?? a?.value,
+    }));
+  }, [webullActivities]);
+
+  const webullOrdersPreview = useMemo(() => {
+    const rows = Array.isArray(webullOrders) ? webullOrders : [];
+    return rows.slice(0, 20).map((o) => ({
+      date: pickText(o?.createdAt, o?.placedTime, o?.time, o?.timestamp),
+      symbol: pickText(o?.symbol, o?.ticker, o?.instrument?.symbol),
+      side: pickText(o?.side, o?.action, o?.orderType),
+      qty: o?.totalQty ?? o?.quantity ?? o?.qty ?? o?.filledQty,
+      price: o?.price ?? o?.avgPrice ?? o?.averagePrice,
+      status: pickText(o?.status, o?.orderStatus),
+    }));
+  }, [webullOrders]);
 
   const router = useRouter();
 
@@ -505,6 +634,118 @@ export default function ImportPage() {
           endDate: end.toISOString().slice(0, 10),
           broker: "snaptrade",
           comment: "SnapTrade import (30d)",
+        }),
+      });
+      const data = await res.json().catch(() => ({} as any));
+      if (!res.ok) {
+        throw new Error(data?.error ?? "SnapTrade import failed");
+      }
+      setSnaptradeStatus(
+        L(
+          `Imported ${data?.inserted ?? 0} trades (${data?.updated ?? 0} updated, ${data?.duplicates ?? 0} duplicates).`,
+          `Importadas ${data?.inserted ?? 0} operaciones (${data?.updated ?? 0} actualizadas, ${data?.duplicates ?? 0} duplicadas).`
+        )
+      );
+      loadHistory();
+    } catch (err: any) {
+      setSnaptradeError(err?.message ?? "SnapTrade error");
+    } finally {
+      setSnaptradeImporting(false);
+    }
+  }
+
+  async function onSnaptradePreviewTrades() {
+    if (!snaptradeAccountId) return;
+    try {
+      setSnaptradeError(null);
+      setSnaptradeStatus(null);
+      setSnaptradePreviewLoading(true);
+      const end = new Date();
+      const start = new Date();
+      start.setDate(end.getDate() - 30);
+      const token = await getToken();
+      if (!token) throw new Error(L("Unauthorized. Please log out and log in again.", "No autorizado."));
+
+      const res = await fetch("/api/broker-import/snaptrade", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          accountId: snaptradeAccountId,
+          startDate: start.toISOString().slice(0, 10),
+          endDate: end.toISOString().slice(0, 10),
+          broker: "snaptrade",
+          comment: "SnapTrade preview (30d)",
+          previewOnly: true,
+          previewLimit: 200,
+        }),
+      });
+      const data = await res.json().catch(() => ({} as any));
+      if (!res.ok) {
+        throw new Error(data?.error ?? "SnapTrade preview failed");
+      }
+      const preview = Array.isArray(data?.preview) ? data.preview : [];
+      setSnaptradeTradePreview(preview);
+      setSnaptradePreviewMeta({
+        total: Number(data?.total ?? preview.length ?? 0),
+        inserted: Number(data?.inserted ?? 0),
+        updated: Number(data?.updated ?? 0),
+        duplicates: Number(data?.duplicates ?? 0),
+      });
+      const selection: Record<string, boolean> = {};
+      for (const row of preview) {
+        const hash = row?.trade_hash || row?.tradeHash;
+        if (!hash) continue;
+        selection[hash] = !row?.is_duplicate;
+      }
+      setSnaptradePreviewSelection(selection);
+      setSnaptradeStatus(
+        L(
+          `Preview loaded (${preview.length} shown). Select which trades to import.`,
+          `Vista previa cargada (${preview.length} mostradas). Selecciona cuáles importar.`
+        )
+      );
+    } catch (err: any) {
+      setSnaptradeError(err?.message ?? "SnapTrade error");
+    } finally {
+      setSnaptradePreviewLoading(false);
+    }
+  }
+
+  async function onSnaptradeImportSelected() {
+    if (!snaptradeAccountId) return;
+    const hashes = Object.entries(snaptradePreviewSelection)
+      .filter(([, checked]) => checked)
+      .map(([hash]) => hash);
+    if (!hashes.length) {
+      setSnaptradeError(L("Select at least one trade to import.", "Selecciona al menos un trade para importar."));
+      return;
+    }
+    try {
+      setSnaptradeError(null);
+      setSnaptradeStatus(null);
+      setSnaptradeImporting(true);
+      const end = new Date();
+      const start = new Date();
+      start.setDate(end.getDate() - 30);
+      const token = await getToken();
+      if (!token) throw new Error(L("Unauthorized. Please log out and log in again.", "No autorizado."));
+
+      const res = await fetch("/api/broker-import/snaptrade", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          accountId: snaptradeAccountId,
+          startDate: start.toISOString().slice(0, 10),
+          endDate: end.toISOString().slice(0, 10),
+          broker: "snaptrade",
+          comment: "SnapTrade import (selected)",
+          includeTradeHashes: hashes,
         }),
       });
       const data = await res.json().catch(() => ({} as any));
@@ -1387,25 +1628,43 @@ export default function ImportPage() {
                         </div>
                       </div>
 
-                      <div className="mt-4 flex flex-wrap items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={onSnaptradeSyncSelected}
-                          className="rounded-xl bg-emerald-400 px-4 py-2 text-[11px] font-semibold text-slate-950 hover:bg-emerald-300 disabled:opacity-60"
-                          disabled={!snaptradeAccountId || snaptradeSyncing}
-                        >
-                          {snaptradeSyncing ? L("Syncing...", "Sincronizando...") : L("Sync selected", "Sincronizar selección")}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={onSnaptradeImportTrades}
-                          className="rounded-xl border border-emerald-300/40 bg-emerald-400/10 px-3 py-2 text-[11px] font-semibold text-emerald-100 hover:bg-emerald-400/20 disabled:opacity-60"
-                          disabled={!snaptradeAccountId || snaptradeImporting}
-                        >
-                          {snaptradeImporting ? L("Importing...", "Importando...") : L("Import trades only", "Solo importar trades")}
-                        </button>
-                      </div>
-                    </div>
+                <div className="mt-4 flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={onSnaptradeSyncSelected}
+                    className="rounded-xl bg-emerald-400 px-4 py-2 text-[11px] font-semibold text-slate-950 hover:bg-emerald-300 disabled:opacity-60"
+                    disabled={!snaptradeAccountId || snaptradeSyncing}
+                  >
+                    {snaptradeSyncing ? L("Syncing...", "Sincronizando...") : L("Sync selected", "Sincronizar selección")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onSnaptradePreviewTrades}
+                    className="rounded-xl border border-slate-700 bg-slate-950/30 px-3 py-2 text-[11px] font-semibold text-slate-100 hover:bg-slate-950/50 disabled:opacity-60"
+                    disabled={!snaptradeAccountId || snaptradePreviewLoading}
+                  >
+                    {snaptradePreviewLoading ? L("Loading preview...", "Cargando vista previa...") : L("Preview trades", "Ver trades")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onSnaptradeImportTrades}
+                    className="rounded-xl border border-emerald-300/40 bg-emerald-400/10 px-3 py-2 text-[11px] font-semibold text-emerald-100 hover:bg-emerald-400/20 disabled:opacity-60"
+                    disabled={!snaptradeAccountId || snaptradeImporting}
+                  >
+                    {snaptradeImporting ? L("Importing...", "Importando...") : L("Import trades only", "Solo importar trades")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onSnaptradeImportSelected}
+                    className="rounded-xl border border-emerald-300/40 bg-emerald-400/10 px-3 py-2 text-[11px] font-semibold text-emerald-100 hover:bg-emerald-400/20 disabled:opacity-60"
+                    disabled={!snaptradeAccountId || snaptradeImporting || !snaptradeTradePreview?.length}
+                  >
+                    {snaptradeImporting
+                      ? L("Importing...", "Importando...")
+                      : L(`Import selected (${snaptradeSelectedCount})`, `Importar selección (${snaptradeSelectedCount})`)}
+                  </button>
+                </div>
+              </div>
 
                     <div className="rounded-xl border border-slate-800 bg-slate-950/30 p-4">
                       <div className="text-xs font-semibold text-slate-100">{L("Preview", "Vista previa")}</div>
@@ -1466,9 +1725,9 @@ export default function ImportPage() {
                           )}
                         </div>
 
-                        <div className="rounded-lg border border-slate-800 bg-slate-950/40 p-3">
-                          <div className="text-[11px] font-semibold text-slate-200">{L("Balances", "Balances")}</div>
-                          {snaptradeBalancesSummary ? (
+                  <div className="rounded-lg border border-slate-800 bg-slate-950/40 p-3">
+                    <div className="text-[11px] font-semibold text-slate-200">{L("Balances", "Balances")}</div>
+                    {snaptradeBalancesSummary ? (
                             <div className="mt-2 grid grid-cols-3 gap-2 text-[11px]">
                               <div className="rounded-lg border border-slate-800 bg-slate-950/50 px-2 py-1">
                                 <div className="text-slate-400">{L("Cash", "Efectivo")}</div>
@@ -1483,40 +1742,155 @@ export default function ImportPage() {
                                 <div className="text-slate-100 font-semibold">{formatMoney(snaptradeBalancesSummary.equity)}</div>
                               </div>
                             </div>
-                          ) : (
-                            <div className="mt-2 text-[11px] text-slate-400">
-                              {L("No balances loaded yet.", "Aún no hay balances cargados.")}
-                            </div>
+                    ) : (
+                      <div className="mt-2 text-[11px] text-slate-400">
+                        {L("No balances loaded yet.", "Aún no hay balances cargados.")}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="rounded-lg border border-slate-800 bg-slate-950/40 p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-[11px] font-semibold text-slate-200">
+                        {L("Trades preview (30d)", "Vista previa de trades (30d)")}
+                      </div>
+                      {snaptradePreviewMeta ? (
+                        <div className="text-[10px] text-slate-400">
+                          {L(
+                            `Total ${snaptradePreviewMeta.total} · New ${snaptradePreviewMeta.inserted} · Existing ${snaptradePreviewMeta.updated}`,
+                            `Total ${snaptradePreviewMeta.total} · Nuevos ${snaptradePreviewMeta.inserted} · Existentes ${snaptradePreviewMeta.updated}`
                           )}
                         </div>
+                      ) : null}
+                    </div>
+                    {snaptradeTradePreview && snaptradeTradePreview.length ? (
+                      <div className="mt-2 overflow-hidden rounded-lg border border-slate-800">
+                        <div className="grid grid-cols-[24px_1.1fr_0.6fr_0.6fr_0.6fr_0.8fr] gap-2 bg-slate-950/50 px-2 py-1 text-[10px] text-slate-400">
+                          <span></span>
+                          <span>{L("Symbol", "Símbolo")}</span>
+                          <span>{L("Side", "Lado")}</span>
+                          <span>{L("Qty", "Cant.")}</span>
+                          <span>{L("Price", "Precio")}</span>
+                          <span>{L("Date", "Fecha")}</span>
+                        </div>
+                        <div className="max-h-56 overflow-auto">
+                          {snaptradeTradePreview.map((row: any, idx: number) => {
+                            const hash = row?.trade_hash || row?.tradeHash || `${idx}`;
+                            const checked = !!snaptradePreviewSelection[hash];
+                            const symbol = row?.symbol ?? row?.instrument_symbol ?? row?.contract_code ?? "—";
+                            const side = row?.side ?? "—";
+                            const qty = row?.qty ?? row?.quantity ?? "—";
+                            const price = row?.price ?? row?.avg_price ?? row?.average_price ?? "—";
+                            const date = row?.executed_at ? String(row.executed_at).slice(0, 10) : "—";
+                            const isDup = row?.is_duplicate;
+                            return (
+                              <label
+                                key={hash}
+                                className="grid cursor-pointer grid-cols-[24px_1.1fr_0.6fr_0.6fr_0.6fr_0.8fr] gap-2 border-t border-slate-800 px-2 py-1 text-[11px] text-slate-200 hover:bg-slate-950/60"
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={(e) =>
+                                    setSnaptradePreviewSelection((prev) => ({
+                                      ...prev,
+                                      [hash]: e.target.checked,
+                                    }))
+                                  }
+                                />
+                                <span className="truncate">{String(symbol)}</span>
+                                <span className={isDup ? "text-amber-200" : ""}>{String(side)}</span>
+                                <span>{String(qty)}</span>
+                                <span>{formatMoney(typeof price === "number" ? price : Number(price))}</span>
+                                <span className="text-[10px] text-slate-400">{date}</span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="mt-2 text-[11px] text-slate-400">
+                        {L(
+                          "No trades preview loaded yet. Click “Preview trades” to review before importing.",
+                          "Aún no hay vista previa. Presiona “Ver trades” para revisar antes de importar."
+                        )}
+                      </div>
+                    )}
+                  </div>
 
-                        <details className="rounded-lg border border-slate-800 bg-slate-950/40 p-3">
-                          <summary className="cursor-pointer text-[11px] font-semibold text-slate-200">
-                            {L("Raw data preview", "Vista previa raw")}
-                          </summary>
-                          <div className="mt-2 grid gap-3">
-                            {snaptradeBalances ? (
-                              <pre className="max-h-44 overflow-auto rounded-lg border border-slate-800 bg-slate-950/40 p-2 text-[10px] text-slate-200">
-                                {JSON.stringify(snaptradeBalances, null, 2)}
-                              </pre>
-                            ) : null}
-                            {snaptradeOrders ? (
-                              <pre className="max-h-44 overflow-auto rounded-lg border border-slate-800 bg-slate-950/40 p-2 text-[10px] text-slate-200">
-                                {JSON.stringify(snaptradeOrders, null, 2)}
-                              </pre>
-                            ) : null}
-                            {snaptradeHoldings ? (
-                              <pre className="max-h-44 overflow-auto rounded-lg border border-slate-800 bg-slate-950/40 p-2 text-[10px] text-slate-200">
-                                {JSON.stringify(snaptradeHoldings, null, 2)}
-                              </pre>
-                            ) : null}
-                            {snaptradeActivities ? (
-                              <pre className="max-h-44 overflow-auto rounded-lg border border-slate-800 bg-slate-950/40 p-2 text-[10px] text-slate-200">
-                                {JSON.stringify(snaptradeActivities, null, 2)}
-                              </pre>
-                            ) : null}
-                          </div>
-                        </details>
+                  <div className="rounded-lg border border-slate-800 bg-slate-950/40 p-3">
+                    <div className="text-[11px] font-semibold text-slate-200">
+                      {L("Activities (digest)", "Actividades (resumen)")}
+                    </div>
+                    {snaptradeActivitiesPreview.length ? (
+                      <div className="mt-2 overflow-hidden rounded-lg border border-slate-800">
+                        <div className="grid grid-cols-[0.9fr_0.9fr_1.2fr_0.6fr_0.6fr_0.8fr] gap-2 bg-slate-950/50 px-2 py-1 text-[10px] text-slate-400">
+                          <span>{L("Date", "Fecha")}</span>
+                          <span>{L("Type", "Tipo")}</span>
+                          <span>{L("Symbol", "Símbolo")}</span>
+                          <span>{L("Qty", "Cant.")}</span>
+                          <span>{L("Price", "Precio")}</span>
+                          <span>{L("Amount", "Monto")}</span>
+                        </div>
+                        <div className="max-h-44 overflow-auto">
+                          {snaptradeActivitiesPreview.map((row, idx) => (
+                            <div
+                              key={`${row.symbol}-${idx}`}
+                              className="grid grid-cols-[0.9fr_0.9fr_1.2fr_0.6fr_0.6fr_0.8fr] gap-2 border-t border-slate-800 px-2 py-1 text-[11px] text-slate-200"
+                            >
+                              <span className="text-slate-400">{formatDateShort(row.date)}</span>
+                              <span className="truncate">{row.type}</span>
+                              <span className="truncate">{row.symbol}</span>
+                              <span>{row.qty ?? "—"}</span>
+                              <span>{formatMoney(typeof row.price === "number" ? row.price : Number(row.price))}</span>
+                              <span>{formatMoney(typeof row.amount === "number" ? row.amount : Number(row.amount))}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="mt-2 text-[11px] text-slate-400">
+                        {L("No activities loaded yet.", "Aún no hay actividades cargadas.")}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="rounded-lg border border-slate-800 bg-slate-950/40 p-3">
+                    <div className="text-[11px] font-semibold text-slate-200">
+                      {L("Orders (digest)", "Órdenes (resumen)")}
+                    </div>
+                    {snaptradeOrdersPreview.length ? (
+                      <div className="mt-2 overflow-hidden rounded-lg border border-slate-800">
+                        <div className="grid grid-cols-[0.9fr_1.2fr_0.7fr_0.6fr_0.6fr_0.8fr] gap-2 bg-slate-950/50 px-2 py-1 text-[10px] text-slate-400">
+                          <span>{L("Date", "Fecha")}</span>
+                          <span>{L("Symbol", "Símbolo")}</span>
+                          <span>{L("Side", "Lado")}</span>
+                          <span>{L("Qty", "Cant.")}</span>
+                          <span>{L("Price", "Precio")}</span>
+                          <span>{L("Status", "Estado")}</span>
+                        </div>
+                        <div className="max-h-44 overflow-auto">
+                          {snaptradeOrdersPreview.map((row, idx) => (
+                            <div
+                              key={`${row.symbol}-${idx}`}
+                              className="grid grid-cols-[0.9fr_1.2fr_0.7fr_0.6fr_0.6fr_0.8fr] gap-2 border-t border-slate-800 px-2 py-1 text-[11px] text-slate-200"
+                            >
+                              <span className="text-slate-400">{formatDateShort(row.date)}</span>
+                              <span className="truncate">{row.symbol}</span>
+                              <span>{row.side}</span>
+                              <span>{row.qty ?? "—"}</span>
+                              <span>{formatMoney(typeof row.price === "number" ? row.price : Number(row.price))}</span>
+                              <span className="text-slate-400">{row.status}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="mt-2 text-[11px] text-slate-400">
+                        {L("No orders loaded yet.", "Aún no hay órdenes cargadas.")}
+                      </div>
+                    )}
+                  </div>
                       </div>
                     </div>
                   </div>
@@ -1734,33 +2108,79 @@ export default function ImportPage() {
                           )}
                         </div>
 
-                        <details className="rounded-lg border border-slate-800 bg-slate-950/40 p-3">
-                          <summary className="cursor-pointer text-[11px] font-semibold text-slate-200">
-                            {L("Raw data preview", "Vista previa raw")}
-                          </summary>
-                          <div className="mt-2 grid gap-3">
-                            {webullBalances ? (
-                              <pre className="max-h-44 overflow-auto rounded-lg border border-slate-800 bg-slate-950/40 p-2 text-[10px] text-slate-200">
-                                {JSON.stringify(webullBalances, null, 2)}
-                              </pre>
-                            ) : null}
-                            {webullOrders ? (
-                              <pre className="max-h-44 overflow-auto rounded-lg border border-slate-800 bg-slate-950/40 p-2 text-[10px] text-slate-200">
-                                {JSON.stringify(webullOrders, null, 2)}
-                              </pre>
-                            ) : null}
-                            {webullPositions ? (
-                              <pre className="max-h-44 overflow-auto rounded-lg border border-slate-800 bg-slate-950/40 p-2 text-[10px] text-slate-200">
-                                {JSON.stringify(webullPositions, null, 2)}
-                              </pre>
-                            ) : null}
-                            {webullActivities ? (
-                              <pre className="max-h-44 overflow-auto rounded-lg border border-slate-800 bg-slate-950/40 p-2 text-[10px] text-slate-200">
-                                {JSON.stringify(webullActivities, null, 2)}
-                              </pre>
-                            ) : null}
+                        <div className="rounded-lg border border-slate-800 bg-slate-950/40 p-3">
+                          <div className="text-[11px] font-semibold text-slate-200">
+                            {L("Activities (digest)", "Actividades (resumen)")}
                           </div>
-                        </details>
+                          {webullActivitiesPreview.length ? (
+                            <div className="mt-2 overflow-hidden rounded-lg border border-slate-800">
+                              <div className="grid grid-cols-[0.9fr_0.9fr_1.2fr_0.6fr_0.6fr_0.8fr] gap-2 bg-slate-950/50 px-2 py-1 text-[10px] text-slate-400">
+                                <span>{L("Date", "Fecha")}</span>
+                                <span>{L("Type", "Tipo")}</span>
+                                <span>{L("Symbol", "Símbolo")}</span>
+                                <span>{L("Qty", "Cant.")}</span>
+                                <span>{L("Price", "Precio")}</span>
+                                <span>{L("Amount", "Monto")}</span>
+                              </div>
+                              <div className="max-h-44 overflow-auto">
+                                {webullActivitiesPreview.map((row, idx) => (
+                                  <div
+                                    key={`${row.symbol}-${idx}`}
+                                    className="grid grid-cols-[0.9fr_0.9fr_1.2fr_0.6fr_0.6fr_0.8fr] gap-2 border-t border-slate-800 px-2 py-1 text-[11px] text-slate-200"
+                                  >
+                                    <span className="text-slate-400">{formatDateShort(row.date)}</span>
+                                    <span className="truncate">{row.type}</span>
+                                    <span className="truncate">{row.symbol}</span>
+                                    <span>{row.qty ?? "—"}</span>
+                                    <span>{formatMoney(typeof row.price === "number" ? row.price : Number(row.price))}</span>
+                                    <span>{formatMoney(typeof row.amount === "number" ? row.amount : Number(row.amount))}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="mt-2 text-[11px] text-slate-400">
+                              {L("No activities loaded yet.", "Aún no hay actividades cargadas.")}
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="rounded-lg border border-slate-800 bg-slate-950/40 p-3">
+                          <div className="text-[11px] font-semibold text-slate-200">
+                            {L("Orders (digest)", "Órdenes (resumen)")}
+                          </div>
+                          {webullOrdersPreview.length ? (
+                            <div className="mt-2 overflow-hidden rounded-lg border border-slate-800">
+                              <div className="grid grid-cols-[0.9fr_1.2fr_0.7fr_0.6fr_0.6fr_0.8fr] gap-2 bg-slate-950/50 px-2 py-1 text-[10px] text-slate-400">
+                                <span>{L("Date", "Fecha")}</span>
+                                <span>{L("Symbol", "Símbolo")}</span>
+                                <span>{L("Side", "Lado")}</span>
+                                <span>{L("Qty", "Cant.")}</span>
+                                <span>{L("Price", "Precio")}</span>
+                                <span>{L("Status", "Estado")}</span>
+                              </div>
+                              <div className="max-h-44 overflow-auto">
+                                {webullOrdersPreview.map((row, idx) => (
+                                  <div
+                                    key={`${row.symbol}-${idx}`}
+                                    className="grid grid-cols-[0.9fr_1.2fr_0.7fr_0.6fr_0.6fr_0.8fr] gap-2 border-t border-slate-800 px-2 py-1 text-[11px] text-slate-200"
+                                  >
+                                    <span className="text-slate-400">{formatDateShort(row.date)}</span>
+                                    <span className="truncate">{row.symbol}</span>
+                                    <span>{row.side}</span>
+                                    <span>{row.qty ?? "—"}</span>
+                                    <span>{formatMoney(typeof row.price === "number" ? row.price : Number(row.price))}</span>
+                                    <span className="text-slate-400">{row.status}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="mt-2 text-[11px] text-slate-400">
+                              {L("No orders loaded yet.", "Aún no hay órdenes cargadas.")}
+                            </div>
+                          )}
+                        </div>
                       </div>
                     </div>
                   </div>

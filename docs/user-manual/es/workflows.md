@@ -1,32 +1,37 @@
 # Flujos de trabajo
-Rutinas simples para obtener resultados consistentes dentro de la plataforma.
 
-## Flujo diario (15 a 25 min)
-- Abre el dia en Journal y completa Premarket Prep.
-- Registra entradas y salidas durante la sesion.
-- Completa el post-trade al final del dia.
-- Revisa Dashboard y marca tu checklist.
+## Acceso
+- Centro de ayuda → Flujos de trabajo.
 
-## Revision semanal (30 a 45 min)
-- Abre Performance y revisa la semana.
-- Busca patrones por setup, horario y disciplina.
-- Escribe una mejora en el Notebook.
+Rutinas simples y repetibles para mantener el sistema efectivo.
 
-## Revision mensual (45 a 60 min)
-- Revisa equity curve y distribucion mensual.
-- Ajusta limites u objetivos en Growth Plan si es necesario.
-- Crea un enfoque mensual o desafio.
+## Flujo diario (15–25 min)
+1. Revisa el ritmo del Growth Plan y tu pérdida máxima.
+2. Completa el Premarket en el Journal.
+3. Registra entradas/salidas y notas en trade.
+4. Termina el análisis post‑trade.
+5. Revisa el Dashboard para validar ritmo y disciplina.
 
-## Flujo de Option Flow (15 a 20 min)
-- Sube un CSV o pega screenshots en Option Flow.
-- Lee el reporte y niveles clave.
-- Envia el plan al premarket del Journal.
+## Revisión semanal (30–45 min)
+1. Abre Analítica y revisa las últimas 5–7 sesiones.
+2. Identifica patrones por setup, hora y ejecución.
+3. Agrega una regla de mejora al Notebook.
 
-## Flujo de importacion de broker (5 a 10 min)
-- Sube el archivo en Importador.
-- Confirma filas y corrige formato si es necesario.
-- Recalcula analitica cuando el data este guardado.
+## Revisión mensual (45–60 min)
+1. Revisa la curva de equity y distribución mensual.
+2. Compara el progreso vs los milestones del plan.
+3. Define un enfoque mensual o challenge.
+
+## Flujo Option Flow (15–20 min)
+1. Sube CSV o screenshots en Option Flow.
+2. Lee el resumen y niveles clave.
+3. Envía el plan al Journal premarket.
+
+## Flujo de importación (5–10 min)
+1. Importa trades por SnapTrade o CSV.
+2. Confirma filas insertadas/actualizadas en el historial.
+3. Reabre Analítica al finalizar.
 
 ## FAQ
-P: Cual es el orden recomendado si soy nuevo?
-R: Growth Plan, luego Journal diario, luego Dashboard y Performance.
+P: ¿Cuál es el orden recomendado si soy nuevo?  
+R: Growth Plan → Journal diario → Dashboard → Analítica.

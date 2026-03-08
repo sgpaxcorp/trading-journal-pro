@@ -31,8 +31,7 @@ function getNewYorkTimeParts() {
 }
 
 function shouldSendNowNY() {
-  const { weekday, hour } = getNewYorkTimeParts();
-  if (weekday === "Sat" || weekday === "Sun") return false;
+  const { hour } = getNewYorkTimeParts();
   return hour === 9;
 }
 
@@ -94,7 +93,7 @@ async function fetchExpoReceipts(receiptIds: string[]) {
   return { ok: res.ok, status: res.status, body };
 }
 
-export async function POST(req: NextRequest) {
+async function handleRequest(req: NextRequest) {
   try {
     const url = new URL(req.url);
     const forceParam = url.searchParams.get("force");
@@ -186,4 +185,12 @@ export async function POST(req: NextRequest) {
   } catch (err: any) {
     return NextResponse.json({ error: err?.message || "Unknown error" }, { status: 500 });
   }
+}
+
+export async function POST(req: NextRequest) {
+  return handleRequest(req);
+}
+
+export async function GET(req: NextRequest) {
+  return handleRequest(req);
 }

@@ -1,34 +1,56 @@
-# Analitica y rendimiento
-Usa la analitica para encontrar patrones, fugas y fortalezas repetibles.
+# Analítica y rendimiento
 
-## Donde abrir la analitica
-Ruta: `/performance/analytics-statistics`
+## Acceso
+- Navegación lateral → Performance → Analítica y estadísticas.
 
-## Que veras
-La pagina esta organizada por tabs. Cada tab responde una pregunta concreta.
+La Analítica responde dos preguntas: **¿mi edge es real?** y **¿mi proceso es consistente?**
 
-## Resumen de tabs
-- Resumen: KPIs rapidos como sesiones, win rate, P&L neto y expectativa.
-- Rendimiento: resultados mas profundos por calidad.
-- Riesgo: drawdowns, perdida maxima y control de riesgo.
-- Distribucion: como se reparte el resultado en dias o escenarios.
-- Tiempo: rendimiento por dia de la semana u hora.
-- Instrumentos: resultados por simbolo o producto.
-- Operaciones: desgloses a nivel trade.
-- Estadisticas: resumen avanzado.
+## Antes de analizar
+1. Asegúrate de tener trades importados o registrados.
+2. Elige un rango con suficientes sesiones.
+3. Usa nombres consistentes para setups y estrategias.
+
+## Tabs (qué responde cada una)
+**Overview**  
+KPIs principales: sesiones, win rate, P&L neto, expectancy.
+
+**Performance**  
+Distribución de resultados, calidad, promedio win/loss.
+
+**Risk**  
+Drawdowns, pérdidas máximas y control de riesgo.
+
+**Distribution**  
+Cómo se distribuyen los resultados por día u outcome.
+
+**Time**  
+Desempeño por día de la semana y hora.
+
+**Instruments**  
+Resultados por símbolo/producto.
+
+**Trades**  
+Métricas a nivel trade y patrones.
+
+**Statistics**  
+Métricas avanzadas (Sharpe, Sortino, profit factor, etc.).
 
 ## Balance chart
-Ruta: `/performance/balance-chart`
-- Muestra tu equity curve en el tiempo.
-- Sirve para validar consistencia y drawdown.
+Muestra la curva de equity. Úsala para validar consistencia y fases de drawdown.
+
+## Cómo leer analítica como pro
+1. Empieza con Overview y confirma tamaño de muestra.
+2. Revisa Risk para validar disciplina.
+3. Usa Time + Instruments para aislar tu edge.
+4. Usa Statistics solo cuando confías en la data.
 
 ## Tips
-- Filtra por rango de fechas antes de juzgar un KPI.
-- Mantén nombres de setups consistentes en el Journal para desgloses limpios.
+- Analiza con rangos limpios de fechas.
+- Un solo mes suele ser insuficiente para conclusiones reales.
 
 ## FAQ
-P: Por que algunos tabs estan bloqueados?
-R: Los tabs avanzados requieren el plan Advanced. Core incluye solo el Resumen.
+P: ¿Por qué algunas tabs están bloqueadas?  
+R: Tabs avanzadas requieren plan Advanced. Core solo incluye Overview.
 
-P: Por que mis graficas salen vacias?
+P: ¿Por qué los charts salen vacíos?  
 R: Necesitas sesiones guardadas en el rango seleccionado.

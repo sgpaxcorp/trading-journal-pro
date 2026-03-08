@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
 import { useRoute } from "@react-navigation/native";
 
 import { ScreenScaffold } from "../components/ScreenScaffold";
+import { InkField } from "../components/InkField";
+import type { InkDrawing } from "../components/inkTypes";
 import { useLanguage } from "../lib/LanguageContext";
 import { t } from "../lib/i18n";
 import { useTheme } from "../lib/ThemeContext";
@@ -43,6 +45,20 @@ type NotesPayload = {
   premarket?: string;
   live?: string;
   post?: string;
+  premarket_mode?: "text" | "ink";
+  live_mode?: "text" | "ink";
+  post_mode?: "text" | "ink";
+  premarket_ink?: InkDrawing | null;
+  live_ink?: InkDrawing | null;
+  post_ink?: InkDrawing | null;
+  after_review_note_mode?: {
+    didWell?: "text" | "ink";
+    improve?: "text" | "ink";
+  };
+  after_review_note_ink?: {
+    didWell?: InkDrawing | null;
+    improve?: InkDrawing | null;
+  };
   entries?: any[];
   exits?: any[];
   costs?: { commissions?: number; fees?: number };
@@ -286,6 +302,16 @@ export function JournalDateScreen() {
   const [premarket, setPremarket] = useState("");
   const [live, setLive] = useState("");
   const [post, setPost] = useState("");
+  const [premarketMode, setPremarketMode] = useState<"text" | "ink">("text");
+  const [liveMode, setLiveMode] = useState<"text" | "ink">("text");
+  const [postMode, setPostMode] = useState<"text" | "ink">("text");
+  const [premarketInk, setPremarketInk] = useState<InkDrawing | null>(null);
+  const [liveInk, setLiveInk] = useState<InkDrawing | null>(null);
+  const [postInk, setPostInk] = useState<InkDrawing | null>(null);
+  const [afterDidWellMode, setAfterDidWellMode] = useState<"text" | "ink">("text");
+  const [afterImproveMode, setAfterImproveMode] = useState<"text" | "ink">("text");
+  const [afterDidWellInk, setAfterDidWellInk] = useState<InkDrawing | null>(null);
+  const [afterImproveInk, setAfterImproveInk] = useState<InkDrawing | null>(null);
   const [mindset, setMindset] = useState<MindsetRatings>(DEFAULT_MINDSET);
   const [checklists, setChecklists] = useState<ChecklistSnapshot>(EMPTY_CHECKLISTS);
   const [afterReview, setAfterReview] = useState<AfterTradeReview>(DEFAULT_AFTER_REVIEW);
@@ -304,6 +330,10 @@ export function JournalDateScreen() {
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const isoDate = toYmd(date);
+  const { width } = useWindowDimensions();
+  const pageWidth = Math.max(width - 32, 280);
+  const pagerRef = useRef<ScrollView>(null);
+  const [sectionIndex, setSectionIndex] = useState(0);
 
   useEffect(() => {
     const dateParam = route?.params?.date;
@@ -374,6 +404,16 @@ export function JournalDateScreen() {
         setPremarket(parsed.premarket ?? "");
         setLive(parsed.live ?? "");
         setPost(parsed.post ?? "");
+        setPremarketMode(parsed.premarket_mode === "ink" ? "ink" : "text");
+        setLiveMode(parsed.live_mode === "ink" ? "ink" : "text");
+        setPostMode(parsed.post_mode === "ink" ? "ink" : "text");
+        setPremarketInk(parsed.premarket_ink ?? null);
+        setLiveInk(parsed.live_ink ?? null);
+        setPostInk(parsed.post_ink ?? null);
+        setAfterDidWellMode(parsed.after_review_note_mode?.didWell === "ink" ? "ink" : "text");
+        setAfterImproveMode(parsed.after_review_note_mode?.improve === "ink" ? "ink" : "text");
+        setAfterDidWellInk(parsed.after_review_note_ink?.didWell ?? null);
+        setAfterImproveInk(parsed.after_review_note_ink?.improve ?? null);
         setMindset(normalizeMindset(mindsetRaw));
         setChecklists(normalizeChecklists(checklistsRaw));
         setAfterReview(normalizeAfterReview(afterReviewRaw));
@@ -463,6 +503,16 @@ export function JournalDateScreen() {
       setPremarket(parsed.premarket ?? "");
       setLive(parsed.live ?? "");
       setPost(parsed.post ?? "");
+      setPremarketMode(parsed.premarket_mode === "ink" ? "ink" : "text");
+      setLiveMode(parsed.live_mode === "ink" ? "ink" : "text");
+      setPostMode(parsed.post_mode === "ink" ? "ink" : "text");
+      setPremarketInk(parsed.premarket_ink ?? null);
+      setLiveInk(parsed.live_ink ?? null);
+      setPostInk(parsed.post_ink ?? null);
+      setAfterDidWellMode(parsed.after_review_note_mode?.didWell === "ink" ? "ink" : "text");
+      setAfterImproveMode(parsed.after_review_note_mode?.improve === "ink" ? "ink" : "text");
+      setAfterDidWellInk(parsed.after_review_note_ink?.didWell ?? null);
+      setAfterImproveInk(parsed.after_review_note_ink?.improve ?? null);
       setMindset(normalizeMindset(mindsetRaw));
       setChecklists(normalizeChecklists(checklistsRaw));
       setAfterReview(normalizeAfterReview(afterReviewRaw));
@@ -540,6 +590,20 @@ export function JournalDateScreen() {
         premarket,
         live,
         post,
+        premarket_mode: premarketMode,
+        live_mode: liveMode,
+        post_mode: postMode,
+        premarket_ink: premarketInk,
+        live_ink: liveInk,
+        post_ink: postInk,
+        after_review_note_mode: {
+          didWell: afterDidWellMode,
+          improve: afterImproveMode,
+        },
+        after_review_note_ink: {
+          didWell: afterDidWellInk,
+          improve: afterImproveInk,
+        },
         mindset,
         checklists,
         after_review: afterReview,
@@ -593,6 +657,445 @@ export function JournalDateScreen() {
     }
   }
 
+  const overviewSection = (
+    <>
+      <View style={styles.summaryCard}>
+        <Text style={styles.sectionTitle}>{t(language, "Day summary", "Resumen del día")}</Text>
+        <View style={styles.summaryRow}>
+          <View style={styles.summaryItem}>
+            <Text style={styles.summaryLabel}>{t(language, "Net P&L", "P&L neto")}</Text>
+            <Text style={styles.summaryValue}>{summary.net ?? "—"}</Text>
+          </View>
+          <View style={styles.summaryItem}>
+            <Text style={styles.summaryLabel}>{t(language, "Gross", "Bruto")}</Text>
+            <Text style={styles.summaryValue}>{summary.gross ?? "—"}</Text>
+          </View>
+        </View>
+        <View style={styles.summaryRow}>
+          <View style={styles.summaryItem}>
+            <Text style={styles.summaryLabel}>{t(language, "Commissions", "Comisiones")}</Text>
+            <Text style={styles.summaryValue}>{summary.commissions ?? "—"}</Text>
+          </View>
+          <View style={styles.summaryItem}>
+            <Text style={styles.summaryLabel}>{t(language, "Fees", "Fees")}</Text>
+            <Text style={styles.summaryValue}>{summary.fees ?? "—"}</Text>
+          </View>
+        </View>
+      </View>
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>{t(language, "Trades", "Trades")}</Text>
+        {trades.length === 0 ? (
+          <Text style={styles.sectionHint}>
+            {t(language, "No trades recorded for this date.", "No hay trades en esta fecha.")}
+          </Text>
+        ) : (
+          <View style={styles.tradeList}>
+            {trades.map((trade, idx) => (
+              <View key={`${trade.leg}-${trade.symbol}-${idx}`} style={styles.tradeCard}>
+                <Text style={styles.tradeTitle}>
+                  {trade.leg === "entry" ? t(language, "Entry", "Entrada") : t(language, "Exit", "Salida")} ·{" "}
+                  {trade.symbol}
+                </Text>
+                <Text style={styles.tradeMeta}>
+                  {trade.side ?? "—"} · {trade.quantity ?? "—"} @ {trade.price ?? "—"} · {trade.time ?? "—"}
+                </Text>
+              </View>
+            ))}
+          </View>
+        )}
+      </View>
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>{t(language, "Trade context", "Contexto del trade")}</Text>
+        <View style={styles.fieldRow}>
+          <View style={styles.field}>
+            <Text style={styles.fieldLabel}>{t(language, "Instrument", "Instrumento")}</Text>
+            <TextInput
+              style={styles.input}
+              value={instrument}
+              onChangeText={setInstrument}
+              placeholder={t(language, "Symbol / market", "Símbolo / mercado")}
+              placeholderTextColor={colors.textMuted}
+            />
+          </View>
+          <View style={styles.field}>
+            <Text style={styles.fieldLabel}>{t(language, "Direction", "Dirección")}</Text>
+            <TextInput
+              style={styles.input}
+              value={direction}
+              onChangeText={setDirection}
+              placeholder={t(language, "Long / Short", "Long / Short")}
+              placeholderTextColor={colors.textMuted}
+            />
+          </View>
+        </View>
+        <View style={styles.fieldRow}>
+          <View style={styles.field}>
+            <Text style={styles.fieldLabel}>{t(language, "Size", "Tamaño")}</Text>
+            <TextInput
+              style={styles.input}
+              value={size}
+              onChangeText={setSize}
+              placeholder="0"
+              placeholderTextColor={colors.textMuted}
+              keyboardType="numeric"
+            />
+          </View>
+          <View style={styles.field}>
+            <Text style={styles.fieldLabel}>{t(language, "Entry price", "Precio entrada")}</Text>
+            <TextInput
+              style={styles.input}
+              value={entryPrice}
+              onChangeText={setEntryPrice}
+              placeholder="0.00"
+              placeholderTextColor={colors.textMuted}
+              keyboardType="numeric"
+            />
+          </View>
+          <View style={styles.field}>
+            <Text style={styles.fieldLabel}>{t(language, "Exit price", "Precio salida")}</Text>
+            <TextInput
+              style={styles.input}
+              value={exitPrice}
+              onChangeText={setExitPrice}
+              placeholder="0.00"
+              placeholderTextColor={colors.textMuted}
+              keyboardType="numeric"
+            />
+          </View>
+        </View>
+        <View style={styles.fieldRow}>
+          <View style={styles.field}>
+            <Text style={styles.fieldLabel}>{t(language, "Emotion", "Emoción")}</Text>
+            <TextInput
+              style={styles.input}
+              value={emotion}
+              onChangeText={setEmotion}
+              placeholder={t(language, "Calm, anxious, etc.", "Calma, ansiedad, etc.")}
+              placeholderTextColor={colors.textMuted}
+            />
+          </View>
+          <View style={styles.field}>
+            <Text style={styles.fieldLabel}>{t(language, "Respected plan", "Respetó el plan")}</Text>
+            <View style={styles.toggleGroup}>
+              <Pressable
+                style={[styles.toggleChip, respectedPlan === true && styles.toggleChipActive]}
+                onPress={() => setRespectedPlan(true)}
+              >
+                <Text style={[styles.toggleText, respectedPlan === true && styles.toggleTextActive]}>
+                  {t(language, "Yes", "Sí")}
+                </Text>
+              </Pressable>
+              <Pressable
+                style={[styles.toggleChip, respectedPlan === false && styles.toggleChipActive]}
+                onPress={() => setRespectedPlan(false)}
+              >
+                <Text style={[styles.toggleText, respectedPlan === false && styles.toggleTextActive]}>
+                  {t(language, "No", "No")}
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </View>
+    </>
+  );
+
+  const premarketSection = (
+    <InkField
+      label={t(language, "Premarket", "Premarket")}
+      mode={premarketMode}
+      onModeChange={setPremarketMode}
+      textValue={premarket}
+      onTextChange={setPremarket}
+      inkValue={premarketInk}
+      onInkChange={setPremarketInk}
+      placeholder={t(language, "Premarket plan, bias, levels…", "Plan premarket, sesgo, niveles…")}
+      height={300}
+    />
+  );
+
+  const insideSection = (
+    <InkField
+      label={t(language, "Inside trade", "Inside trade")}
+      mode={liveMode}
+      onModeChange={setLiveMode}
+      textValue={live}
+      onTextChange={setLive}
+      inkValue={liveInk}
+      onInkChange={setLiveInk}
+      placeholder={t(language, "Notes during the trade…", "Notas durante el trade…")}
+      height={300}
+    />
+  );
+
+  const afterSection = (
+    <InkField
+      label={t(language, "After trade", "After trade")}
+      mode={postMode}
+      onModeChange={setPostMode}
+      textValue={post}
+      onTextChange={setPost}
+      inkValue={postInk}
+      onInkChange={setPostInk}
+      placeholder={t(language, "Post‑trade review…", "Revisión post‑trade…")}
+      height={300}
+    />
+  );
+
+  const mindsetSection = (
+    <View style={styles.section}>
+      <Text style={styles.sectionTitle}>{t(language, "Mindset ratings", "Mindset")}</Text>
+      <View style={styles.ratingRow}>
+        <Text style={styles.ratingLabel}>{t(language, "Emotional balance", "Balance emocional")}</Text>
+        <View style={styles.ratingChips}>
+          {[1, 2, 3, 4, 5].map((v) => (
+            <Pressable
+              key={`mind-em-${v}`}
+              style={[styles.ratingChip, mindset.emotional_balance === v && styles.ratingChipActive]}
+              onPress={() => setMindset((prev) => ({ ...prev, emotional_balance: v }))}
+            >
+              <Text style={[styles.ratingChipText, mindset.emotional_balance === v && styles.ratingChipTextActive]}>
+                {v}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+      </View>
+      <View style={styles.ratingRow}>
+        <Text style={styles.ratingLabel}>{t(language, "Impulse control", "Control de impulso")}</Text>
+        <View style={styles.ratingChips}>
+          {[1, 2, 3, 4, 5].map((v) => (
+            <Pressable
+              key={`mind-im-${v}`}
+              style={[styles.ratingChip, mindset.impulse_control === v && styles.ratingChipActive]}
+              onPress={() => setMindset((prev) => ({ ...prev, impulse_control: v }))}
+            >
+              <Text style={[styles.ratingChipText, mindset.impulse_control === v && styles.ratingChipTextActive]}>
+                {v}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+      </View>
+      <View style={styles.ratingRow}>
+        <Text style={styles.ratingLabel}>{t(language, "Setup quality", "Calidad del setup")}</Text>
+        <View style={styles.ratingChips}>
+          {[1, 2, 3, 4, 5].map((v) => (
+            <Pressable
+              key={`mind-sq-${v}`}
+              style={[styles.ratingChip, mindset.setup_quality === v && styles.ratingChipActive]}
+              onPress={() => setMindset((prev) => ({ ...prev, setup_quality: v }))}
+            >
+              <Text style={[styles.ratingChipText, mindset.setup_quality === v && styles.ratingChipTextActive]}>
+                {v}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+      </View>
+      <View style={styles.ratingRow}>
+        <Text style={styles.ratingLabel}>{t(language, "Probability", "Probabilidad")}</Text>
+        <View style={styles.ratingChips}>
+          {[1, 2, 3, 4, 5].map((v) => (
+            <Pressable
+              key={`mind-pr-${v}`}
+              style={[styles.ratingChip, mindset.probability === v && styles.ratingChipActive]}
+              onPress={() => setMindset((prev) => ({ ...prev, probability: v }))}
+            >
+              <Text style={[styles.ratingChipText, mindset.probability === v && styles.ratingChipTextActive]}>
+                {v}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+      </View>
+    </View>
+  );
+
+  const checklistSection = (
+    <View style={styles.section}>
+      <Text style={styles.sectionTitle}>{t(language, "Checklists", "Checklists")}</Text>
+      {(["premarket", "inside", "after"] as const).map((phase) => (
+        <View key={phase} style={styles.checklistBlock}>
+          <Text style={styles.checklistTitle}>
+            {phase === "premarket"
+              ? t(language, "Premarket checklist", "Checklist premarket")
+              : phase === "inside"
+              ? t(language, "In‑trade checklist", "Checklist en trade")
+              : t(language, "After‑trade checklist", "Checklist post‑trade")}
+          </Text>
+          {CHECKLIST_ITEMS[phase].map((item) => {
+            const selected = checklists[phase].includes(item);
+            return (
+              <Pressable
+                key={`${phase}-${item}`}
+                style={[styles.checkItem, selected && styles.checkItemActive]}
+                onPress={() => toggleChecklistItem(phase, item)}
+              >
+                <Text style={[styles.checkItemText, selected && styles.checkItemTextActive]}>
+                  {selected ? "✓ " : ""}{checklistLabel(item)}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      ))}
+      <View style={styles.checklistBlock}>
+        <Text style={styles.checklistTitle}>{t(language, "Strategy filters", "Filtro de estrategia")}</Text>
+        {CHECKLIST_ITEMS.strategy.map((item) => {
+          const selected = checklists.strategy.includes(item);
+          return (
+            <Pressable
+              key={`strategy-${item}`}
+              style={[styles.checkItem, selected && styles.checkItemActive]}
+              onPress={() => toggleChecklistItem("strategy", item)}
+            >
+              <Text style={[styles.checkItemText, selected && styles.checkItemTextActive]}>
+                {selected ? "✓ " : ""}{checklistLabel(item)}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+      <View style={styles.checklistBlock}>
+        <Text style={styles.checklistTitle}>{t(language, "Impulses", "Impulsos")}</Text>
+        {CHECKLIST_ITEMS.impulses.map((item) => {
+          const selected = checklists.impulses.includes(item);
+          return (
+            <Pressable
+              key={`impulse-${item}`}
+              style={[styles.checkItem, selected && styles.checkItemActive]}
+              onPress={() => toggleChecklistItem("impulses", item)}
+            >
+              <Text style={[styles.checkItemText, selected && styles.checkItemTextActive]}>
+                {selected ? "✓ " : ""}{checklistLabel(item)}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+      <View style={styles.checklistBlock}>
+        <Text style={styles.checklistTitle}>{t(language, "States", "Estados")}</Text>
+        {CHECKLIST_ITEMS.states.map((item) => {
+          const selected = checklists.states.includes(item);
+          return (
+            <Pressable
+              key={`state-${item}`}
+              style={[styles.checkItem, selected && styles.checkItemActive]}
+              onPress={() => toggleChecklistItem("states", item)}
+            >
+              <Text style={[styles.checkItemText, selected && styles.checkItemTextActive]}>
+                {selected ? "✓ " : ""}{checklistLabel(item)}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+    </View>
+  );
+
+  const afterReviewSection = (
+    <View style={styles.section}>
+      <Text style={styles.sectionTitle}>{t(language, "After‑trade review", "Revisión post‑trade")}</Text>
+      {AFTER_REVIEW_ITEMS.map((item) => {
+        const selected = afterReview.checklist[item.id];
+        return (
+          <Pressable
+            key={`after-${item.id}`}
+            style={[styles.checkItem, selected && styles.checkItemActive]}
+            onPress={() => toggleAfterReviewItem(item.id)}
+          >
+            <Text style={[styles.checkItemText, selected && styles.checkItemTextActive]}>
+              {selected ? "✓ " : ""}{t(language, item.en, item.es)}
+            </Text>
+          </Pressable>
+        );
+      })}
+      <View style={styles.ratingRow}>
+        <Text style={styles.ratingLabel}>{t(language, "Execution", "Ejecución")}</Text>
+        <View style={styles.ratingChips}>
+          {[1, 2, 3, 4, 5].map((v) => (
+            <Pressable
+              key={`after-ex-${v}`}
+              style={[styles.ratingChip, afterReview.ratings.execution === v && styles.ratingChipActive]}
+              onPress={() =>
+                setAfterReview((prev) => ({ ...prev, ratings: { ...prev.ratings, execution: v } }))
+              }
+            >
+              <Text style={[styles.ratingChipText, afterReview.ratings.execution === v && styles.ratingChipTextActive]}>
+                {v}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+      </View>
+      <View style={styles.ratingRow}>
+        <Text style={styles.ratingLabel}>{t(language, "Patience", "Paciencia")}</Text>
+        <View style={styles.ratingChips}>
+          {[1, 2, 3, 4, 5].map((v) => (
+            <Pressable
+              key={`after-pa-${v}`}
+              style={[styles.ratingChip, afterReview.ratings.patience === v && styles.ratingChipActive]}
+              onPress={() => setAfterReview((prev) => ({ ...prev, ratings: { ...prev.ratings, patience: v } }))}
+            >
+              <Text style={[styles.ratingChipText, afterReview.ratings.patience === v && styles.ratingChipTextActive]}>
+                {v}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+      </View>
+      <View style={styles.ratingRow}>
+        <Text style={styles.ratingLabel}>{t(language, "Clarity", "Claridad")}</Text>
+        <View style={styles.ratingChips}>
+          {[1, 2, 3, 4, 5].map((v) => (
+            <Pressable
+              key={`after-cl-${v}`}
+              style={[styles.ratingChip, afterReview.ratings.clarity === v && styles.ratingChipActive]}
+              onPress={() => setAfterReview((prev) => ({ ...prev, ratings: { ...prev.ratings, clarity: v } }))}
+            >
+              <Text style={[styles.ratingChipText, afterReview.ratings.clarity === v && styles.ratingChipTextActive]}>
+                {v}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+      </View>
+      <InkField
+        label={t(language, "Did well", "Lo que hice bien")}
+        mode={afterDidWellMode}
+        onModeChange={setAfterDidWellMode}
+        textValue={afterReview.notes.didWell}
+        onTextChange={(value) => setAfterReview((prev) => ({ ...prev, notes: { ...prev.notes, didWell: value } }))}
+        inkValue={afterDidWellInk}
+        onInkChange={setAfterDidWellInk}
+        placeholder={t(language, "What went well?", "¿Qué salió bien?")}
+        height={300}
+      />
+      <InkField
+        label={t(language, "Improve", "Mejorar")}
+        mode={afterImproveMode}
+        onModeChange={setAfterImproveMode}
+        textValue={afterReview.notes.improve}
+        onTextChange={(value) => setAfterReview((prev) => ({ ...prev, notes: { ...prev.notes, improve: value } }))}
+        inkValue={afterImproveInk}
+        onInkChange={setAfterImproveInk}
+        placeholder={t(language, "What will you improve?", "¿Qué mejorarás?")}
+        height={300}
+      />
+    </View>
+  );
+
+  const sections = [
+    { key: "overview", label: t(language, "Overview", "Resumen"), content: overviewSection },
+    { key: "premarket", label: t(language, "Premarket", "Premarket"), content: premarketSection },
+    { key: "inside", label: t(language, "Inside trade", "Inside trade"), content: insideSection },
+    { key: "after", label: t(language, "After trade", "After trade"), content: afterSection },
+    { key: "mindset", label: t(language, "Mindset", "Mindset"), content: mindsetSection },
+    { key: "checklists", label: t(language, "Checklists", "Checklists"), content: checklistSection },
+    { key: "review", label: t(language, "After review", "Post‑trade"), content: afterReviewSection },
+  ];
+
   return (
     <ScreenScaffold
       title={t(language, "Journal date", "Journal por fecha")}
@@ -626,408 +1129,41 @@ export function JournalDateScreen() {
         <>
           {error ? <Text style={styles.errorText}>{error}</Text> : null}
           {status ? <Text style={styles.statusText}>{status}</Text> : null}
-          <View style={styles.summaryCard}>
-            <Text style={styles.sectionTitle}>{t(language, "Day summary", "Resumen del día")}</Text>
-            <View style={styles.summaryRow}>
-              <View style={styles.summaryItem}>
-                <Text style={styles.summaryLabel}>{t(language, "Net P&L", "P&L neto")}</Text>
-                <Text style={styles.summaryValue}>{summary.net ?? "—"}</Text>
-              </View>
-              <View style={styles.summaryItem}>
-                <Text style={styles.summaryLabel}>{t(language, "Gross", "Bruto")}</Text>
-                <Text style={styles.summaryValue}>{summary.gross ?? "—"}</Text>
-              </View>
-            </View>
-            <View style={styles.summaryRow}>
-              <View style={styles.summaryItem}>
-                <Text style={styles.summaryLabel}>{t(language, "Commissions", "Comisiones")}</Text>
-                <Text style={styles.summaryValue}>{summary.commissions ?? "—"}</Text>
-              </View>
-              <View style={styles.summaryItem}>
-                <Text style={styles.summaryLabel}>{t(language, "Fees", "Fees")}</Text>
-                <Text style={styles.summaryValue}>{summary.fees ?? "—"}</Text>
-              </View>
-            </View>
-          </View>
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>{t(language, "Trades", "Trades")}</Text>
-            {trades.length === 0 ? (
-              <Text style={styles.sectionHint}>
-                {t(language, "No trades recorded for this date.", "No hay trades en esta fecha.")}
-              </Text>
-            ) : (
-              <View style={styles.tradeList}>
-                {trades.map((trade, idx) => (
-                  <View key={`${trade.leg}-${trade.symbol}-${idx}`} style={styles.tradeCard}>
-                    <Text style={styles.tradeTitle}>
-                      {trade.leg === "entry" ? t(language, "Entry", "Entrada") : t(language, "Exit", "Salida")} ·{" "}
-                      {trade.symbol}
-                    </Text>
-                    <Text style={styles.tradeMeta}>
-                      {trade.side ?? "—"} · {trade.quantity ?? "—"} @ {trade.price ?? "—"} · {trade.time ?? "—"}
-                    </Text>
-                  </View>
-                ))}
-              </View>
-            )}
-          </View>
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>{t(language, "Trade context", "Contexto del trade")}</Text>
-            <View style={styles.fieldRow}>
-              <View style={styles.field}>
-                <Text style={styles.fieldLabel}>{t(language, "Instrument", "Instrumento")}</Text>
-                <TextInput
-                  style={styles.input}
-                  value={instrument}
-                  onChangeText={setInstrument}
-                  placeholder={t(language, "Symbol / market", "Símbolo / mercado")}
-                  placeholderTextColor={colors.textMuted}
-                />
-              </View>
-              <View style={styles.field}>
-                <Text style={styles.fieldLabel}>{t(language, "Direction", "Dirección")}</Text>
-                <TextInput
-                  style={styles.input}
-                  value={direction}
-                  onChangeText={setDirection}
-                  placeholder={t(language, "Long / Short", "Long / Short")}
-                  placeholderTextColor={colors.textMuted}
-                />
-              </View>
-            </View>
-            <View style={styles.fieldRow}>
-              <View style={styles.field}>
-                <Text style={styles.fieldLabel}>{t(language, "Size", "Tamaño")}</Text>
-                <TextInput
-                  style={styles.input}
-                  value={size}
-                  onChangeText={setSize}
-                  placeholder="0"
-                  placeholderTextColor={colors.textMuted}
-                  keyboardType="numeric"
-                />
-              </View>
-              <View style={styles.field}>
-                <Text style={styles.fieldLabel}>{t(language, "Entry price", "Precio entrada")}</Text>
-                <TextInput
-                  style={styles.input}
-                  value={entryPrice}
-                  onChangeText={setEntryPrice}
-                  placeholder="0.00"
-                  placeholderTextColor={colors.textMuted}
-                  keyboardType="numeric"
-                />
-              </View>
-              <View style={styles.field}>
-                <Text style={styles.fieldLabel}>{t(language, "Exit price", "Precio salida")}</Text>
-                <TextInput
-                  style={styles.input}
-                  value={exitPrice}
-                  onChangeText={setExitPrice}
-                  placeholder="0.00"
-                  placeholderTextColor={colors.textMuted}
-                  keyboardType="numeric"
-                />
-              </View>
-            </View>
-            <View style={styles.fieldRow}>
-              <View style={styles.field}>
-                <Text style={styles.fieldLabel}>{t(language, "Emotion", "Emoción")}</Text>
-                <TextInput
-                  style={styles.input}
-                  value={emotion}
-                  onChangeText={setEmotion}
-                  placeholder={t(language, "Calm, anxious, etc.", "Calma, ansiedad, etc.")}
-                  placeholderTextColor={colors.textMuted}
-                />
-              </View>
-              <View style={styles.field}>
-                <Text style={styles.fieldLabel}>{t(language, "Respected plan", "Respetó el plan")}</Text>
-                <View style={styles.toggleGroup}>
+          <View style={styles.tabBar}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+              {sections.map((section, idx) => {
+                const active = idx === sectionIndex;
+                return (
                   <Pressable
-                    style={[styles.toggleChip, respectedPlan === true && styles.toggleChipActive]}
-                    onPress={() => setRespectedPlan(true)}
+                    key={section.key}
+                    style={[styles.tabChip, active && styles.tabChipActive]}
+                    onPress={() => {
+                      setSectionIndex(idx);
+                      pagerRef.current?.scrollTo({ x: idx * pageWidth, animated: true });
+                    }}
                   >
-                    <Text style={[styles.toggleText, respectedPlan === true && styles.toggleTextActive]}>
-                      {t(language, "Yes", "Sí")}
-                    </Text>
+                    <Text style={[styles.tabText, active && styles.tabTextActive]}>{section.label}</Text>
                   </Pressable>
-                  <Pressable
-                    style={[styles.toggleChip, respectedPlan === false && styles.toggleChipActive]}
-                    onPress={() => setRespectedPlan(false)}
-                  >
-                    <Text style={[styles.toggleText, respectedPlan === false && styles.toggleTextActive]}>
-                      {t(language, "No", "No")}
-                    </Text>
-                  </Pressable>
-                </View>
-              </View>
-            </View>
+                );
+              })}
+            </ScrollView>
           </View>
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>{t(language, "Premarket", "Premarket")}</Text>
-            <TextInput
-              style={styles.textarea}
-              placeholder={t(language, "Premarket plan, bias, levels…", "Plan premarket, sesgo, niveles…")}
-              placeholderTextColor={colors.textMuted}
-              value={premarket}
-              onChangeText={setPremarket}
-              multiline
-            />
-          </View>
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>{t(language, "Inside trade", "Inside trade")}</Text>
-            <TextInput
-              style={styles.textarea}
-              placeholder={t(language, "Notes during the trade…", "Notas durante el trade…")}
-              placeholderTextColor={colors.textMuted}
-              value={live}
-              onChangeText={setLive}
-              multiline
-            />
-          </View>
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>{t(language, "After trade", "After trade")}</Text>
-            <TextInput
-              style={styles.textarea}
-              placeholder={t(language, "Post‑trade review…", "Revisión post‑trade…")}
-              placeholderTextColor={colors.textMuted}
-              value={post}
-              onChangeText={setPost}
-              multiline
-            />
-          </View>
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>{t(language, "Mindset ratings", "Mindset")}</Text>
-            <View style={styles.ratingRow}>
-              <Text style={styles.ratingLabel}>{t(language, "Emotional balance", "Balance emocional")}</Text>
-              <View style={styles.ratingChips}>
-                {[1, 2, 3, 4, 5].map((v) => (
-                  <Pressable
-                    key={`mind-em-${v}`}
-                    style={[styles.ratingChip, mindset.emotional_balance === v && styles.ratingChipActive]}
-                    onPress={() => setMindset((prev) => ({ ...prev, emotional_balance: v }))}
-                  >
-                    <Text style={[styles.ratingChipText, mindset.emotional_balance === v && styles.ratingChipTextActive]}>
-                      {v}
-                    </Text>
-                  </Pressable>
-                ))}
-              </View>
-            </View>
-            <View style={styles.ratingRow}>
-              <Text style={styles.ratingLabel}>{t(language, "Impulse control", "Control de impulso")}</Text>
-              <View style={styles.ratingChips}>
-                {[1, 2, 3, 4, 5].map((v) => (
-                  <Pressable
-                    key={`mind-im-${v}`}
-                    style={[styles.ratingChip, mindset.impulse_control === v && styles.ratingChipActive]}
-                    onPress={() => setMindset((prev) => ({ ...prev, impulse_control: v }))}
-                  >
-                    <Text style={[styles.ratingChipText, mindset.impulse_control === v && styles.ratingChipTextActive]}>
-                      {v}
-                    </Text>
-                  </Pressable>
-                ))}
-              </View>
-            </View>
-            <View style={styles.ratingRow}>
-              <Text style={styles.ratingLabel}>{t(language, "Setup quality", "Calidad del setup")}</Text>
-              <View style={styles.ratingChips}>
-                {[1, 2, 3, 4, 5].map((v) => (
-                  <Pressable
-                    key={`mind-sq-${v}`}
-                    style={[styles.ratingChip, mindset.setup_quality === v && styles.ratingChipActive]}
-                    onPress={() => setMindset((prev) => ({ ...prev, setup_quality: v }))}
-                  >
-                    <Text style={[styles.ratingChipText, mindset.setup_quality === v && styles.ratingChipTextActive]}>
-                      {v}
-                    </Text>
-                  </Pressable>
-                ))}
-              </View>
-            </View>
-            <View style={styles.ratingRow}>
-              <Text style={styles.ratingLabel}>{t(language, "Probability", "Probabilidad")}</Text>
-              <View style={styles.ratingChips}>
-                {[1, 2, 3, 4, 5].map((v) => (
-                  <Pressable
-                    key={`mind-pr-${v}`}
-                    style={[styles.ratingChip, mindset.probability === v && styles.ratingChipActive]}
-                    onPress={() => setMindset((prev) => ({ ...prev, probability: v }))}
-                  >
-                    <Text style={[styles.ratingChipText, mindset.probability === v && styles.ratingChipTextActive]}>
-                      {v}
-                    </Text>
-                  </Pressable>
-                ))}
-              </View>
-            </View>
-          </View>
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>{t(language, "Checklists", "Checklists")}</Text>
-            {(["premarket", "inside", "after"] as const).map((phase) => (
-              <View key={phase} style={styles.checklistBlock}>
-                <Text style={styles.checklistTitle}>
-                  {phase === "premarket"
-                    ? t(language, "Premarket checklist", "Checklist premarket")
-                    : phase === "inside"
-                    ? t(language, "In‑trade checklist", "Checklist en trade")
-                    : t(language, "After‑trade checklist", "Checklist post‑trade")}
-                </Text>
-                {CHECKLIST_ITEMS[phase].map((item) => {
-                  const selected = checklists[phase].includes(item);
-                  return (
-                    <Pressable
-                      key={`${phase}-${item}`}
-                      style={[styles.checkItem, selected && styles.checkItemActive]}
-                      onPress={() => toggleChecklistItem(phase, item)}
-                    >
-                      <Text style={[styles.checkItemText, selected && styles.checkItemTextActive]}>
-                        {selected ? "✓ " : ""}{checklistLabel(item)}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
+          <ScrollView
+            horizontal
+            pagingEnabled
+            ref={pagerRef}
+            showsHorizontalScrollIndicator={false}
+            onMomentumScrollEnd={(event) => {
+              const idx = Math.round(event.nativeEvent.contentOffset.x / pageWidth);
+              if (idx !== sectionIndex) setSectionIndex(idx);
+            }}
+          >
+            {sections.map((section) => (
+              <View key={section.key} style={[styles.page, { width: pageWidth }]}>
+                {section.content}
               </View>
             ))}
-            <View style={styles.checklistBlock}>
-              <Text style={styles.checklistTitle}>{t(language, "Strategy filters", "Filtro de estrategia")}</Text>
-              {CHECKLIST_ITEMS.strategy.map((item) => {
-                const selected = checklists.strategy.includes(item);
-                return (
-                  <Pressable
-                    key={`strategy-${item}`}
-                    style={[styles.checkItem, selected && styles.checkItemActive]}
-                    onPress={() => toggleChecklistItem("strategy", item)}
-                  >
-                    <Text style={[styles.checkItemText, selected && styles.checkItemTextActive]}>
-                      {selected ? "✓ " : ""}{checklistLabel(item)}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-            <View style={styles.checklistBlock}>
-              <Text style={styles.checklistTitle}>{t(language, "Impulses", "Impulsos")}</Text>
-              {CHECKLIST_ITEMS.impulses.map((item) => {
-                const selected = checklists.impulses.includes(item);
-                return (
-                  <Pressable
-                    key={`impulse-${item}`}
-                    style={[styles.checkItem, selected && styles.checkItemActive]}
-                    onPress={() => toggleChecklistItem("impulses", item)}
-                  >
-                    <Text style={[styles.checkItemText, selected && styles.checkItemTextActive]}>
-                      {selected ? "✓ " : ""}{checklistLabel(item)}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-            <View style={styles.checklistBlock}>
-              <Text style={styles.checklistTitle}>{t(language, "States", "Estados")}</Text>
-              {CHECKLIST_ITEMS.states.map((item) => {
-                const selected = checklists.states.includes(item);
-                return (
-                  <Pressable
-                    key={`state-${item}`}
-                    style={[styles.checkItem, selected && styles.checkItemActive]}
-                    onPress={() => toggleChecklistItem("states", item)}
-                  >
-                    <Text style={[styles.checkItemText, selected && styles.checkItemTextActive]}>
-                      {selected ? "✓ " : ""}{checklistLabel(item)}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-          </View>
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>{t(language, "After‑trade review", "Revisión post‑trade")}</Text>
-            {AFTER_REVIEW_ITEMS.map((item) => {
-              const selected = afterReview.checklist[item.id];
-              return (
-                <Pressable
-                  key={`after-${item.id}`}
-                  style={[styles.checkItem, selected && styles.checkItemActive]}
-                  onPress={() => toggleAfterReviewItem(item.id)}
-                >
-                  <Text style={[styles.checkItemText, selected && styles.checkItemTextActive]}>
-                    {selected ? "✓ " : ""}{t(language, item.en, item.es)}
-                  </Text>
-                </Pressable>
-              );
-            })}
-            <View style={styles.ratingRow}>
-              <Text style={styles.ratingLabel}>{t(language, "Execution", "Ejecución")}</Text>
-              <View style={styles.ratingChips}>
-                {[1, 2, 3, 4, 5].map((v) => (
-                  <Pressable
-                    key={`after-ex-${v}`}
-                    style={[styles.ratingChip, afterReview.ratings.execution === v && styles.ratingChipActive]}
-                    onPress={() =>
-                      setAfterReview((prev) => ({ ...prev, ratings: { ...prev.ratings, execution: v } }))
-                    }
-                  >
-                    <Text style={[styles.ratingChipText, afterReview.ratings.execution === v && styles.ratingChipTextActive]}>
-                      {v}
-                    </Text>
-                  </Pressable>
-                ))}
-              </View>
-            </View>
-            <View style={styles.ratingRow}>
-              <Text style={styles.ratingLabel}>{t(language, "Patience", "Paciencia")}</Text>
-              <View style={styles.ratingChips}>
-                {[1, 2, 3, 4, 5].map((v) => (
-                  <Pressable
-                    key={`after-pa-${v}`}
-                    style={[styles.ratingChip, afterReview.ratings.patience === v && styles.ratingChipActive]}
-                    onPress={() => setAfterReview((prev) => ({ ...prev, ratings: { ...prev.ratings, patience: v } }))}
-                  >
-                    <Text style={[styles.ratingChipText, afterReview.ratings.patience === v && styles.ratingChipTextActive]}>
-                      {v}
-                    </Text>
-                  </Pressable>
-                ))}
-              </View>
-            </View>
-            <View style={styles.ratingRow}>
-              <Text style={styles.ratingLabel}>{t(language, "Clarity", "Claridad")}</Text>
-              <View style={styles.ratingChips}>
-                {[1, 2, 3, 4, 5].map((v) => (
-                  <Pressable
-                    key={`after-cl-${v}`}
-                    style={[styles.ratingChip, afterReview.ratings.clarity === v && styles.ratingChipActive]}
-                    onPress={() => setAfterReview((prev) => ({ ...prev, ratings: { ...prev.ratings, clarity: v } }))}
-                  >
-                    <Text style={[styles.ratingChipText, afterReview.ratings.clarity === v && styles.ratingChipTextActive]}>
-                      {v}
-                    </Text>
-                  </Pressable>
-                ))}
-              </View>
-            </View>
-            <Text style={styles.fieldLabel}>{t(language, "Did well", "Lo que hice bien")}</Text>
-            <TextInput
-              style={styles.textarea}
-              placeholder={t(language, "What went well?", "¿Qué salió bien?")}
-              placeholderTextColor={colors.textMuted}
-              value={afterReview.notes.didWell}
-              onChangeText={(value) => setAfterReview((prev) => ({ ...prev, notes: { ...prev.notes, didWell: value } }))}
-              multiline
-            />
-            <Text style={styles.fieldLabel}>{t(language, "Improve", "Mejorar")}</Text>
-            <TextInput
-              style={styles.textarea}
-              placeholder={t(language, "What will you improve?", "¿Qué mejorarás?")}
-              placeholderTextColor={colors.textMuted}
-              value={afterReview.notes.improve}
-              onChangeText={(value) => setAfterReview((prev) => ({ ...prev, notes: { ...prev.notes, improve: value } }))}
-              multiline
-            />
-          </View>
+          </ScrollView>
           <Pressable style={[styles.saveButton, saving && styles.saveButtonDisabled]} onPress={handleSave}>
             <Text style={styles.saveButtonText}>
               {saving ? t(language, "Saving…", "Guardando…") : t(language, "Save journal", "Guardar journal")}
@@ -1310,5 +1446,34 @@ const createStyles = (colors: ThemeColors) =>
       color: colors.success,
       fontSize: 12,
       fontWeight: "600",
+    },
+    tabBar: {
+      marginTop: 8,
+      marginBottom: 6,
+    },
+    tabChip: {
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+      borderRadius: 999,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+      marginRight: 8,
+    },
+    tabChipActive: {
+      borderColor: colors.primary,
+      backgroundColor: colors.infoSoft,
+    },
+    tabText: {
+      color: colors.textMuted,
+      fontSize: 12,
+      fontWeight: "600",
+    },
+    tabTextActive: {
+      color: colors.textPrimary,
+    },
+    page: {
+      paddingRight: 12,
+      gap: 10,
     },
   });

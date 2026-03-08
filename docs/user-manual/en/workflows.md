@@ -1,32 +1,37 @@
 # Workflows
-Simple routines to get consistent results from the platform.
 
-## Daily workflow (15 to 25 min)
-- Open today in Journal and complete Premarket Prep.
-- Log entries and exits during the session.
-- Complete Post-trade review at the end of the day.
-- Check Dashboard and mark your checklist.
+## Access
+- Help Center → Workflows.
 
-## Weekly review (30 to 45 min)
-- Open Performance analytics and review the week.
-- Look for patterns by setup, time, and discipline.
-- Write one improvement rule in Notebook.
+Simple, repeatable routines that keep the system effective.
 
-## Monthly review (45 to 60 min)
-- Review equity curve and monthly distribution.
-- Update Growth Plan limits or goals if needed.
-- Create a new monthly focus or challenge.
+## Daily workflow (15–25 min)
+1. Review your Growth Plan pacing and max loss rule.
+2. Complete Premarket Prep in Journal.
+3. Log entries/exits and in‑trade notes.
+4. Finish the After‑Trade review.
+5. Check Dashboard to confirm pace and discipline.
 
-## Option Flow workflow (15 to 20 min)
-- Upload a CSV or paste screenshots in Option Flow.
-- Read the report and key levels.
-- Send the plan to your Journal premarket section.
+## Weekly review (30–45 min)
+1. Open Analytics and review the last 5–7 sessions.
+2. Identify patterns by setup, time, and execution quality.
+3. Add one improvement rule to Notebook.
 
-## Broker import workflow (5 to 10 min)
-- Upload broker file in Imports.
-- Confirm rows and fix formatting if needed.
-- Re-run analytics once the data is saved.
+## Monthly review (45–60 min)
+1. Review equity curve and monthly distribution.
+2. Compare progress vs Growth Plan milestones.
+3. Set one monthly focus or challenge.
+
+## Option Flow workflow (15–20 min)
+1. Upload CSV or screenshots in Option Flow.
+2. Read the summary and key levels.
+3. Send the plan to Journal premarket.
+
+## Broker import workflow (5–10 min)
+1. Import trades via SnapTrade or CSV.
+2. Confirm rows inserted/updated in import history.
+3. Re‑open Analytics after the import finishes.
 
 ## FAQ
-Q: What is the recommended order if I am new?
-A: Growth Plan, then Journal daily, then Dashboard and Performance.
+Q: What is the recommended order if I am new?  
+A: Growth Plan → Journal daily → Dashboard → Analytics.

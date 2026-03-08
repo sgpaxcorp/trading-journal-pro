@@ -62,29 +62,39 @@ export async function POST(req: NextRequest) {
 
   const startDate = String(body?.startDate ?? "").trim() || toISODate(new Date(Date.now() - 30 * 86400000));
   const endDate = String(body?.endDate ?? "").trim() || toISODate(new Date());
+  const previewOnly = Boolean(body?.previewOnly);
+  const previewLimitRaw = Number(body?.previewLimit ?? 200);
+  const previewLimit = Number.isFinite(previewLimitRaw)
+    ? Math.max(1, Math.min(previewLimitRaw, 500))
+    : 200;
+  const includeTradeHashes = Array.isArray(body?.includeTradeHashes)
+    ? body.includeTradeHashes.map((h: any) => String(h))
+    : null;
 
-  // 1) Create batch
-  const { data: batch, error: batchErr } = await supabaseAdmin
-    .from("trade_import_batches")
-    .insert({
-      user_id: userId,
-      broker: brokerLabel,
-      filename: `snaptrade:${accountId}`,
-      comment: body?.comment ?? null,
-      status: "processing",
-      started_at: new Date().toISOString(),
-      imported_rows: 0,
-      updated_rows: 0,
-      duplicates: 0,
-    })
-    .select("id")
-    .single();
+  let batchId: string | null = null;
+  if (!previewOnly) {
+    // 1) Create batch
+    const { data: batch, error: batchErr } = await supabaseAdmin
+      .from("trade_import_batches")
+      .insert({
+        user_id: userId,
+        broker: brokerLabel,
+        filename: `snaptrade:${accountId}`,
+        comment: body?.comment ?? null,
+        status: "processing",
+        started_at: new Date().toISOString(),
+        imported_rows: 0,
+        updated_rows: 0,
+        duplicates: 0,
+      })
+      .select("id")
+      .single();
 
-  if (batchErr || !batch?.id) {
-    return NextResponse.json({ error: batchErr?.message ?? "Failed to create batch" }, { status: 500 });
+    if (batchErr || !batch?.id) {
+      return NextResponse.json({ error: batchErr?.message ?? "Failed to create batch" }, { status: 500 });
+    }
+    batchId = String(batch.id);
   }
-
-  const batchId = String(batch.id);
 
   try {
     const snaptradeUser = await getSnaptradeUser(userId);
@@ -109,7 +119,7 @@ export async function POST(req: NextRequest) {
           ? data.activities
           : [];
 
-    const tradeRowsAll: any[] = [];
+    let tradeRowsAll: any[] = [];
     const inFileHashes = new Set<string>();
     let tradeDuplicatesInFile = 0;
 
@@ -182,6 +192,11 @@ export async function POST(req: NextRequest) {
       });
     }
 
+    if (includeTradeHashes && includeTradeHashes.length) {
+      const allow = new Set(includeTradeHashes);
+      tradeRowsAll = tradeRowsAll.filter((row) => allow.has(row.trade_hash));
+    }
+
     const tradeHashes = tradeRowsAll.map((x) => x.trade_hash).filter(Boolean);
     const existingTradeHash = new Set<string>();
     if (tradeHashes.length) {
@@ -200,6 +215,26 @@ export async function POST(req: NextRequest) {
     const tradeInserted = tradeRowsAll.filter((x) => !existingTradeHash.has(x.trade_hash)).length;
     const tradeUpdated = tradeRowsAll.length - tradeInserted;
 
+    if (previewOnly) {
+      const preview = tradeRowsAll.slice(0, previewLimit).map((row) => ({
+        ...row,
+        is_duplicate: existingTradeHash.has(row.trade_hash),
+      }));
+      return NextResponse.json(
+        {
+          ok: true,
+          broker: brokerLabel,
+          preview,
+          total: tradeRowsAll.length,
+          inserted: tradeInserted,
+          updated: tradeUpdated,
+          duplicates: tradeDuplicatesInFile,
+          activities: activities.length,
+        },
+        { status: 200 }
+      );
+    }
+
     if (tradeRowsAll.length) {
       const { error } = await supabaseAdmin.from("trades").upsert(tradeRowsAll, {
         onConflict: "trade_hash",
@@ -211,19 +246,21 @@ export async function POST(req: NextRequest) {
     const durationMs = Date.now() - startedAt;
     const duplicates = tradeDuplicatesInFile;
 
-    const { error: updErr } = await supabaseAdmin
-      .from("trade_import_batches")
-      .update({
-        status: "success",
-        imported_rows: tradeInserted,
-        updated_rows: tradeUpdated,
-        duplicates,
-        finished_at: new Date().toISOString(),
-        duration_ms: durationMs,
-      })
-      .eq("id", batchId);
+    if (batchId) {
+      const { error: updErr } = await supabaseAdmin
+        .from("trade_import_batches")
+        .update({
+          status: "success",
+          imported_rows: tradeInserted,
+          updated_rows: tradeUpdated,
+          duplicates,
+          finished_at: new Date().toISOString(),
+          duration_ms: durationMs,
+        })
+        .eq("id", batchId);
 
-    if (updErr) throw new Error(updErr.message ?? "Failed to finalize batch");
+      if (updErr) throw new Error(updErr.message ?? "Failed to finalize batch");
+    }
 
     return NextResponse.json(
       {
@@ -238,15 +275,17 @@ export async function POST(req: NextRequest) {
     );
   } catch (err: any) {
     const durationMs = Date.now() - startedAt;
-    await supabaseAdmin
-      .from("trade_import_batches")
-      .update({
-        status: "failed",
-        finished_at: new Date().toISOString(),
-        duration_ms: durationMs,
-        error: err?.message ?? "SnapTrade import failed",
-      })
-      .eq("id", batchId);
+    if (batchId) {
+      await supabaseAdmin
+        .from("trade_import_batches")
+        .update({
+          status: "failed",
+          finished_at: new Date().toISOString(),
+          duration_ms: durationMs,
+          error: err?.message ?? "SnapTrade import failed",
+        })
+        .eq("id", batchId);
+    }
 
     return NextResponse.json(formatSnaptradeError(err), { status: 500 });
   }

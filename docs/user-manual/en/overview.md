@@ -1,35 +1,58 @@
 # Help Center
-A practical guide to using Neuro Trader Journal. This content only covers the platform features and how to use them.
+
+## Access
+- Help Center → Overview.
+
+This manual explains how the platform actually works — not just what buttons to click. Use it as your operational guide.
 
 ## What Neuro Trader Journal is
-Neuro Trader Journal helps you document trades, measure performance, and build discipline. The core loop is: plan, journal, review, improve.
+Neuro Trader Journal is a performance system. The core loop is: **plan → execute → journal → review → improve**. Every page supports that loop.
 
 ## How to use this guide
-- Use the left menu to jump to a topic.
-- If you ask Neuro a question, always open the link it gives you at the end for full details.
-- Each page is organized as short sections you can expand.
+- Start with Getting Started if you are new.
+- Use Growth Plan and Journal to build your daily operating system.
+- Use Dashboard and Analytics to verify performance and discipline.
 
-## Main areas of the platform
-- Dashboard (`/dashboard`): a quick view of your month, streaks, and key widgets.
-- Growth Plan (`/growth-plan`): your rules, limits, goals, and trading identity.
-- Journal (`/journal/YYYY-MM-DD`): your daily trade log and reflections.
-- Performance (`/performance/analytics-statistics`): analytics and breakdowns.
-- Option Flow Intelligence (`/option-flow`): flow analysis, report, and plan.
-- Notebook (`/notebook`): personal playbooks and notes.
-- Back-Study (`/back-study`): visual review of entries and exits.
-- Imports (`/import`): upload broker files.
-- Rules & Alarms (`/rules-alarms`): discipline reminders.
-- Challenges (`/challenges`): habit and consistency challenges.
+## Platform map (what each page is for)
+**Dashboard**  
+Snapshot of progress vs plan, streaks, and discipline. Use it to decide if today you are on pace.
 
-## Where to change language and theme
-Go to Account Preferences: `/account/preferences`. You can switch language and theme there.
+**Growth Plan**  
+Defines your risk limits, daily pacing, and timeline. This is the source of truth for progress.
 
-## If data is missing
-Most widgets and analytics require saved journal sessions. If a chart looks empty, confirm your journal entries are saved for the selected date range.
+**Journal (Daily Session)**  
+Captures premarket plan, execution, mindset, and post‑trade review. This is where behavior becomes data.
+
+**Performance & Analytics**  
+Turns your journal into KPIs, patterns, and breakdowns. This is where you diagnose edge and leaks.
+
+**AI Coaching**  
+Turns data into feedback and action items. It becomes useful after you have consistent sessions.
+
+**Imports (Broker Sync or CSV)**  
+Brings real trades into the system. Without clean data, analytics are inaccurate.
+
+**Option Flow Intelligence (add‑on)**  
+Generates flow reports and premarket plans. Best used when it is linked to your Journal.
+
+**Notebook**  
+Your playbook: rules, patterns, and lessons you want to repeat.
+
+**Back‑Study**  
+Visual replay to validate entries/exits and refine setups.
+
+**Rules & Alarms**  
+Discipline safeguards and reminders.
+
+**Challenges**  
+Habit and consistency programs tied to your journal behavior.
+
+## If data looks empty
+Most widgets and analytics require saved sessions in the selected date range. Confirm your Journal entries and imports are complete.
 
 ## FAQ
-Q: Where should I start if I am new?
-A: Follow the Getting Started page and complete your Growth Plan first.
+Q: Where should I start?  
+A: Getting Started → Growth Plan → Journal → Dashboard → Analytics.
 
-Q: Where do I find help inside the app?
+Q: Where do I find help inside the app?  
 A: Use the Help menu or ask Neuro and open the link provided.

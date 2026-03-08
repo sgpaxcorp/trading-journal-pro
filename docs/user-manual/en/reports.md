@@ -1,9 +1,12 @@
 # Option Flow Reports
+
+## Access
+- Left navigation → Option Flow → Report.
+
 How to read the Option Flow report and use it in your plan.
 
 ## Where the report appears
-Route: `/option-flow`
-The report is generated after you upload a file or screenshots.
+The report is generated inside Option Flow after you upload a file or screenshots.
 
 ## Main sections (plain language)
 - Executive summary: quick takeaway and bias.

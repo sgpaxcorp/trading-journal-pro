@@ -41,6 +41,7 @@ export function SettingsScreen() {
   const [notificationStatus, setNotificationStatus] = useState<"granted" | "denied" | "undetermined">("undetermined");
   const [pushToken, setPushToken] = useState<string | null>(null);
   const [testNotifLoading, setTestNotifLoading] = useState(false);
+  const [serverNotifLoading, setServerNotifLoading] = useState(false);
   const [planLoading, setPlanLoading] = useState(false);
   const [currentPlan, setCurrentPlan] = useState<"core" | "advanced" | null>(null);
   const [planStatus, setPlanStatus] = useState<string | null>(null);
@@ -440,6 +441,49 @@ export function SettingsScreen() {
     }
   }
 
+  async function handleServerDailyNotification() {
+    if (notificationLoading || serverNotifLoading) return;
+    if (notificationStatus !== "granted") {
+      Alert.alert(
+        t(language, "Enable notifications", "Habilita notificaciones"),
+        t(
+          language,
+          "Please allow notifications in Settings to receive reminders.",
+          "Activa notificaciones en Ajustes para recibir recordatorios."
+        )
+      );
+      return;
+    }
+    try {
+      setServerNotifLoading(true);
+      const res = await apiPost<{ ok?: boolean; sent?: number; detail?: string }>(
+        "/api/notifications/send-daily?force=1",
+        {}
+      );
+      const sent = typeof res?.sent === "number" ? res.sent : 0;
+      const detail = res?.detail || "";
+      Alert.alert(
+        t(language, "Server reminder sent", "Recordatorio enviado"),
+        detail
+          ? detail
+          : sent > 0
+            ? `${t(language, "Sent", "Enviadas")}: ${sent}`
+            : t(
+                language,
+                "No tokens available or reminders disabled.",
+                "No hay tokens disponibles o los recordatorios están desactivados."
+              )
+      );
+    } catch (err: any) {
+      Alert.alert(
+        t(language, "Push error", "Error de notificación"),
+        err?.message ?? "Error"
+      );
+    } finally {
+      setServerNotifLoading(false);
+    }
+  }
+
 
   const styles = useMemo(() => createStyles(colors), [colors]);
   const handleRefresh = useCallback(async () => {
@@ -619,12 +663,23 @@ export function SettingsScreen() {
         <Pressable
           style={[styles.saveButton, testNotifLoading && styles.saveButtonDisabled]}
           onPress={handleTestNotification}
-          disabled={testNotifLoading}
+          disabled={testNotifLoading || serverNotifLoading}
         >
           <Text style={styles.saveButtonText}>
             {testNotifLoading
               ? t(language, "Sending…", "Enviando…")
               : t(language, "Send test notification", "Enviar notificación de prueba")}
+          </Text>
+        </Pressable>
+        <Pressable
+          style={[styles.saveButtonSecondary, serverNotifLoading && styles.saveButtonDisabled]}
+          onPress={handleServerDailyNotification}
+          disabled={serverNotifLoading || testNotifLoading}
+        >
+          <Text style={styles.saveButtonSecondaryText}>
+            {serverNotifLoading
+              ? t(language, "Sending…", "Enviando…")
+              : t(language, "Send server reminder", "Enviar recordatorio del servidor")}
           </Text>
         </Pressable>
       </View>
@@ -746,6 +801,15 @@ const createStyles = (colors: ThemeColors) => {
       alignItems: "center",
       paddingVertical: 10,
     },
+    saveButtonSecondary: {
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+      alignItems: "center",
+      paddingVertical: 10,
+      marginTop: 8,
+    },
     dangerButton: {
       borderRadius: 10,
       backgroundColor: colors.danger,
@@ -757,6 +821,11 @@ const createStyles = (colors: ThemeColors) => {
     },
     saveButtonText: {
       color: colors.onPrimary,
+      fontSize: 12,
+      fontWeight: "700",
+    },
+    saveButtonSecondaryText: {
+      color: colors.textPrimary,
       fontSize: 12,
       fontWeight: "700",
     },

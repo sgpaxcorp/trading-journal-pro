@@ -1,5 +1,8 @@
 # Audit Guide (Order History)
 
+## Access
+- Left navigation → Back‑Study → Audit.
+
 ## What this audit does
 This audit uses **broker order history** (not AI) to compute objective, rule-based checks about how orders were placed and managed.
 

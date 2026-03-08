@@ -1,21 +1,22 @@
 # Idioma y ajustes
-Donde cambiar tus preferencias.
 
-## Cambiar idioma
-Ruta: `/account/preferences`
-- Abre la seccion de idioma.
-- Elige Auto, English o Espanol.
-- La interfaz se ajusta segun tu preferencia.
+## Acceso
+- Navegación lateral → Settings / Preferencias de cuenta.
 
-## Cambiar tema
-Ruta: `/account/preferences`
-- Elige NeuroMode (oscuro) o Modo claro.
+Estos ajustes controlan interfaz, notificaciones y billing.
 
-## Administrar plan y facturacion
-Ruta: `/billing`
-- Cambia o actualiza tu plan.
-- Historial de facturacion en `/billing/history`.
+## Idioma
+Abre Language y elige Auto, English o Español. La interfaz se actualiza al instante.
+
+## Tema
+Alterna entre NeuroMode (oscuro) y Light Mode. Mantén un tema consistente para reducir fatiga visual.
+
+## Notificaciones (mobile)
+Activa notificaciones para recordatorios y check‑ins diarios. Para probar push en iOS necesitas credenciales APNs configuradas.
+
+## Plan y billing
+En Billing puedes subir de plan, cambiar plan o gestionar add‑ons. El historial aparece en la misma sección.
 
 ## FAQ
-P: Cambie el idioma pero algunas areas no se actualizaron.
-R: Algunas secciones se actualizan progresivamente. Refresca la pagina y continua.
+P: Cambié idioma y algunas áreas no actualizaron.  
+R: Algunas secciones actualizan progresivamente. Recarga la página.

@@ -86,7 +86,6 @@ export default async function HelpKpisPage() {
                 >
                   <summary className="cursor-pointer text-sm font-semibold text-slate-100 flex flex-wrap items-center gap-2">
                     <span>{text.name}</span>
-                    <span className="text-[11px] font-mono text-slate-500">{kpi.id}</span>
                   </summary>
                   <div className="mt-3 space-y-2 text-sm text-slate-300">
                     <p>

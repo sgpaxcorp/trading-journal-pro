@@ -1,51 +1,65 @@
 # Guia de inicio
-Configura tu cuenta y completa el primer ciclo en 10 a 15 minutos.
 
-## 1) Crea tu cuenta
-Ruta: `/signup`
-- Ingresa nombre, email y password.
-- Acepta terminos y crea la cuenta.
+## Acceso
+- Centro de ayuda → Guía de inicio.
 
-## 2) Verifica tu email
-Ruta: `/signup` (verificacion)
-- Abre el correo y copia el codigo de 6 digitos.
-- Pegalo en la pantalla de verificacion.
-- Usa reenvio si es necesario.
+Neuro Trader Journal es un sistema de performance. La forma mas rapida de obtener valor es completar un ciclo completo: plan → ejecucion → journal → revision. Esta guia explica el orden correcto y el nivel esperado en cada paso.
 
-## 3) Elige un plan
-Ruta: `/billing`
-- Selecciona Core o Advanced.
-- Completa el pago.
-- Seras redirigido a la app.
+## Como se ve un setup “correcto”
+Tienes un Growth Plan guardado, al menos una sesion completa en el Journal y un Dashboard que refleja esas sesiones.
 
-## 4) Completa tu Growth Plan
-Ruta: `/growth-plan`
-- Define limites de riesgo, objetivos y reglas.
-- Guarda el plan antes de empezar a journalear.
+## 1) Crear cuenta y confirmar acceso
+Esto habilita el workspace y conecta tu perfil con almacenamiento, reportes y AI coaching. Usa el email que mantendras a largo plazo porque ese email ancla tu historial e importaciones.
 
-## 5) Crea tu primer Journal
-Ruta: `/journal/YYYY-MM-DD`
-- Abre la fecha desde el calendario.
-- Completa premarket, notas en sesion y post-trade.
+## 2) Elegir el plan que calza con tu flujo
+Core es la base disciplinada. Advanced es para traders que necesitan analitica profunda, reportes y coaching IA. Si vas a revisar rendimiento semanalmente y ajustar reglas, Advanced es la opcion practica.
 
-## 6) Revisa tu Dashboard
-Ruta: `/dashboard`
-- Mira el calendario P&L y tus rachas.
-- Usa widgets para ver progreso y acciones diarias.
+## 3) Construir el Growth Plan (la columna del sistema)
+Tu plan no es una meta de ego. Es la fuente de verdad para progreso, ritmo y control de riesgo.
 
-## 7) Revisa Performance y AI Coaching
-Rutas: `/performance/analytics-statistics`, `/performance/ai-coaching`
-- Explora la analitica cuando tengas sesiones guardadas.
-- Pregunta a Neuro por feedback de un rango de fechas.
+Define con intencion:
+1. Balance inicial. Usa el valor real de la cuenta.
+2. Balance objetivo. Que sea significativo y medible.
+3. Fecha objetivo. Realista y alcanzable.
+4. Dias de trading. Solo los dias que realmente vas a operar.
+5. Limites de riesgo. Perdida maxima diaria y riesgo por trade deben ser sostenibles.
+
+Guarda el plan. El sistema lo usa para checkpoints semanales/mensuales y los widgets de progreso.
+
+## 4) Conectar datos: SnapTrade o CSV
+Broker Sync (SnapTrade) es el camino rapido. Si tu broker no esta soportado, usa importacion CSV.
+
+Mejor practica:
+1. Conecta o importa antes de journalear. Datos limpios = analitica precisa.
+2. Confirma que la importacion finalizo sin errores.
+3. En CSV, exporta el historial oficial sin editar.
+
+## 5) Journal de la primera sesion
+Este es el habito mas importante. Una sesion esta completa cuando incluye:
+1. Premarket. Sesgo, niveles y riesgo.
+2. Ejecucion. Entradas, salidas, sizing y decisiones.
+3. Post‑trade. Lo que funciono, lo que fallo, lo que repetir.
+
+Estas entrenando calidad de decision, no solo resultados.
+
+## 6) Revisar Dashboard y Analitica
+El Dashboard muestra comportamiento y disciplina. La Analitica explica el por que.
+1. Confirma si el P&L va alineado al ritmo del plan.
+2. Revisa rachas y control de riesgo.
+3. Abre Analitica para validar edge, horas mas fuertes y breakdown por estrategia.
+
+## 7) Usar AI Coaching para retroalimentacion
+AI Coaching es mas potente con un minimo de sesiones. Pide un rango de fechas y solicita:
+1. Patrones a reforzar.
+2. Patrones a eliminar.
+3. Una regla concreta para agregar o remover.
 
 ## 8) Option Flow (opcional)
-Ruta: `/option-flow`
-- Sube un CSV o pega screenshots.
-- Genera el reporte y envia el plan al Journal.
+Si usas el add‑on, genera el reporte y envia el plan al Journal para que quede integrado al premarket.
 
 ## FAQ
-P: No veo datos en analitica.
-R: Necesitas sesiones guardadas en el rango seleccionado.
+P: No veo datos en Analitica.  
+R: Necesitas sesiones guardadas en el rango seleccionado y una importacion finalizada.
 
-P: Soy nuevo, por donde empiezo?
-R: Growth Plan, luego Journal diario, luego Dashboard y Performance.
+P: Que debo hacer primero cada dia?  
+R: Revisa tu plan, escribe el premarket y confirma tu perdida maxima antes del primer trade.

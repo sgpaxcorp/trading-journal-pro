@@ -66,7 +66,7 @@ async function sendExpoMessages(messages: Array<Record<string, unknown>>) {
   return results;
 }
 
-export async function POST(req: NextRequest) {
+async function handleRequest(req: NextRequest) {
   try {
     const secret = process.env.CRON_SECRET || "";
     const authHeader = req.headers.get("authorization") || "";
@@ -140,4 +140,12 @@ export async function POST(req: NextRequest) {
   } catch (err: any) {
     return NextResponse.json({ error: err?.message || "Unknown error" }, { status: 500 });
   }
+}
+
+export async function POST(req: NextRequest) {
+  return handleRequest(req);
+}
+
+export async function GET(req: NextRequest) {
+  return handleRequest(req);
 }
