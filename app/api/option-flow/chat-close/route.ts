@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getOptionFlowBetaApiPayload, isOptionFlowBetaTester, resolveOptionFlowLang } from "@/lib/optionFlowBeta";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 import { getAuthUser } from "@/lib/authServer";
 
@@ -9,6 +10,12 @@ export async function POST(req: NextRequest) {
   const auth = await getAuthUser(req);
   if (!auth?.userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  if (!isOptionFlowBetaTester(auth.email)) {
+    return NextResponse.json(
+      getOptionFlowBetaApiPayload(resolveOptionFlowLang(req.headers.get("accept-language"))),
+      { status: 403 }
+    );
   }
   try {
     const body = await req.json();

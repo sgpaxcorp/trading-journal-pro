@@ -4,8 +4,8 @@
     "slug": "neuro-trader",
     "scheme": "com.sgpax.neurotraderjournal",
     "version": "1.0.0",
-    "orientation": "portrait",
-    "icon": "./assets/neurotrader-logo-icon.png",
+    "orientation": "default",
+    "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": false,
     "splash": {
@@ -24,7 +24,7 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/neurotrader-logo-icon.png",
+        "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true,
@@ -37,7 +37,8 @@
     "plugins": [
       "expo-secure-store",
       "expo-notifications",
-      "./plugins/with-device-debug-bundling"
+      "./plugins/with-device-debug-bundling",
+      "expo-font"
     ],
     "extra": {
       "eas": {

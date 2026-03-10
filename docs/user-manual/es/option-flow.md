@@ -2,6 +2,8 @@
 ## Acceso
 - Navegación lateral → Option Flow.
 
+Estado: beta privada. El acceso público está deshabilitado mientras el módulo siga en development y test mode.
+
 Option Flow convierte flujo en un plan premarket. No es un servicio de señales; es un resumen estructurado que validas con tu chart y reglas.
 
 ## Flujo estándar

@@ -105,8 +105,8 @@ function buildSteps(
       id: 8,
       title: L("Option Flow Intelligence", "Option Flow Intelligence"),
       body: L(
-        "Analyze flow and generate reports from your imports.",
-        "Analiza flujo y genera reportes desde tus imports."
+        "Private beta module for testing options flow reports and premarket plans.",
+        "Módulo en beta privada para probar reportes de options flow y planes premarket."
       ),
       path: "/dashboard",
       selector: '[data-tour="nav-option-flow"]',

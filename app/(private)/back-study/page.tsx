@@ -9,6 +9,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useTradingAccounts } from "@/hooks/useTradingAccounts";
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
+import { supabaseBrowser } from "@/lib/supaBaseClient";
 
 import type { JournalEntry } from "@/lib/journalLocal";
 import { getAllJournalEntries } from "@/lib/journalSupabase";
@@ -112,6 +113,80 @@ type ChartState = {
   candles: Candle[];
 };
 
+type AuditTradeSequence = {
+  index: number;
+  entry_ts: string | null;
+  exit_ts: string | null;
+  entry_count: number;
+  exit_count: number;
+  entry_qty: number;
+  exit_qty: number;
+  stop_mod_count: number;
+  time_to_first_stop_sec: number | null;
+  oco_used: boolean;
+  manual_market_exit: boolean;
+  stop_market_filled: boolean;
+  summary: string;
+};
+
+type AuditMetrics = {
+  oco_used?: boolean;
+  stop_present?: boolean;
+  stop_mod_count?: number;
+  cancel_count?: number;
+  replace_count?: number;
+  manual_market_exit?: boolean;
+  stop_market_filled?: boolean;
+  time_to_first_stop_sec?: number | null;
+  evidence?: {
+    stop_events?: Array<{ ts_utc?: string | null; stop_price?: number | null; oco_id?: string | null }>;
+    cancel_events?: Array<{ ts_utc?: string | null; status?: string | null; replace_id?: string | null }>;
+    fills?: Array<{ ts_utc?: string | null; side?: string | null; pos_effect?: string | null; order_type?: string | null }>;
+  };
+  insights?: string[];
+  summary?: string | null;
+  trades?: AuditTradeSequence[];
+};
+
+type AuditCompliance = {
+  score: number | null;
+  checklist: {
+    total: number;
+    completed: number;
+    completion_pct: number | null;
+    missing_items: string[];
+  };
+  rules: Array<{ label: string; status: "pass" | "fail" | "unknown"; reason: string }>;
+  respected_plan: boolean | null;
+  plan_present: boolean;
+};
+
+type ExecutionDiscipline = {
+  score: number | null;
+  checks: Array<{ label: string; status: "pass" | "fail" | "unknown"; reason: string }>;
+  metrics: {
+    stop_present: boolean | null;
+    oco_used: boolean | null;
+    stop_mod_count: number;
+    cancel_count: number;
+    replace_count: number;
+    manual_market_exit: boolean | null;
+    stop_market_filled: boolean | null;
+    time_to_first_stop_sec: number | null;
+  };
+};
+
+type AuditResponse = {
+  date: string;
+  symbol: string | null;
+  instrument_key: string | null;
+  events: any[];
+  audit: AuditMetrics;
+  process_review: AuditCompliance;
+  execution_discipline: ExecutionDiscipline;
+  plan_compliance?: AuditCompliance;
+};
+
 /* =========================
    Helpers
 ========================= */
@@ -201,6 +276,22 @@ function getSessionLabel(timeStr: string): "RTH" | "ETH" | null {
   return mins >= rthStart && mins <= rthEnd ? "RTH" : "ETH";
 }
 
+function formatSecondsForReview(sec: number | null) {
+  if (sec == null) return "—";
+  if (sec < 60) return `${sec}s`;
+  const min = Math.round((sec / 60) * 10) / 10;
+  return `${min} min`;
+}
+
+function formatUtcDateLabel(value: string | null | undefined) {
+  if (!value) return "—";
+  try {
+    return new Date(value).toLocaleString();
+  } catch {
+    return value;
+  }
+}
+
 /**
  * Convert candle timestamp (Yahoo UTC) → minutes of day in local time.
  */
@@ -279,6 +370,19 @@ function parseGenericOptionUnderlying(raw: string) {
   const m = s.match(/^([A-Z]{1,6})\d{6}[CP]\d+/);
   if (!m) return null;
   return m[1];
+}
+
+function buildInstrumentKeyFromTrade(trade: TradeView): string | null {
+  if (trade.kind !== "option") return null;
+
+  const parsed = parseSPXOptionSymbol(trade.symbol);
+  if (parsed) {
+    const expiry = parsed.expiry.toISOString().slice(0, 10);
+    const strike = Number.isInteger(parsed.strike) ? String(parsed.strike) : String(parsed.strike);
+    return `${parsed.underlying.replace(/W$/, "")}|${expiry}|${parsed.right}|${strike}`;
+  }
+
+  return null;
 }
 
 /**
@@ -549,7 +653,13 @@ function InteractiveCandleChart({
         position: "belowBar",
         color: entryColor,
         shape: "arrowUp",
-        text: `${pt.label || entryLabel} ${pt.price != null ? pt.price.toFixed(2) : ""}`.trim(),
+        text: [
+          pt.label || entryLabel,
+          pt.price != null ? `@ ${pt.price.toFixed(2)}` : null,
+          pt.time || null,
+        ]
+          .filter(Boolean)
+          .join(" · "),
       });
     });
 
@@ -563,7 +673,13 @@ function InteractiveCandleChart({
         position: "aboveBar",
         color: exitColor,
         shape: "arrowDown",
-        text: `${pt.label || exitLabel} ${pt.price != null ? pt.price.toFixed(2) : ""}`.trim(),
+        text: [
+          pt.label || exitLabel,
+          pt.price != null ? `@ ${pt.price.toFixed(2)}` : null,
+          pt.time || null,
+        ]
+          .filter(Boolean)
+          .join(" · "),
       });
     });
 
@@ -666,6 +782,32 @@ function InteractiveCandleChart({
           className="w-full h-80 rounded-xl border border-slate-800 bg-slate-950"
         />
       )}
+    </div>
+  );
+}
+
+function ReviewMetricCard({
+  label,
+  value,
+  tone = "default",
+}: {
+  label: string;
+  value: string;
+  tone?: "default" | "emerald" | "sky" | "rose";
+}) {
+  const toneClass =
+    tone === "emerald"
+      ? "border-emerald-400/20 bg-emerald-500/10 text-emerald-100"
+      : tone === "sky"
+      ? "border-sky-400/20 bg-sky-500/10 text-sky-100"
+      : tone === "rose"
+      ? "border-rose-400/20 bg-rose-500/10 text-rose-100"
+      : "border-slate-800 bg-slate-950/70 text-slate-100";
+
+  return (
+    <div className={`rounded-2xl border p-4 ${toneClass}`}>
+      <p className="text-[11px] uppercase tracking-[0.18em] text-slate-400">{label}</p>
+      <p className="mt-2 text-lg font-semibold">{value}</p>
     </div>
   );
 }
@@ -963,6 +1105,9 @@ function BackStudyPageInner() {
     error: null,
     candles: [],
   });
+  const [auditLoading, setAuditLoading] = useState(false);
+  const [auditError, setAuditError] = useState<string | null>(null);
+  const [auditResult, setAuditResult] = useState<AuditResponse | null>(null);
 
   /* -------- Yahoo fetch -------- */
 
@@ -1104,9 +1249,63 @@ function BackStudyPageInner() {
     }
   };
 
+  const loadAuditForTrade = async (trade: TradeView) => {
+    if (!user?.id || !activeAccountId) return;
+
+    setAuditLoading(true);
+    setAuditError(null);
+
+    try {
+      const { data: sessionData } = await supabaseBrowser.auth.getSession();
+      const token = sessionData?.session?.access_token;
+      if (!token) {
+        setAuditError(L("Session expired. Sign in again.", "La sesión expiró. Inicia sesión de nuevo."));
+        setAuditResult(null);
+        return;
+      }
+
+      const params = new URLSearchParams();
+      params.set("date", trade.date);
+      params.set("accountId", activeAccountId);
+
+      const instrumentKey = buildInstrumentKeyFromTrade(trade);
+      if (instrumentKey) {
+        params.set("instrument_key", instrumentKey);
+      } else {
+        params.set("symbol", trade.symbol);
+      }
+
+      const res = await fetch(`/api/broker-import/order-history?${params.toString()}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setAuditError(
+          data?.error ??
+            L("Could not load execution audit.", "No se pudo cargar la auditoría de ejecución.")
+        );
+        setAuditResult(null);
+        return;
+      }
+
+      setAuditResult(data as AuditResponse);
+    } catch (err: any) {
+      setAuditError(
+        err?.message ??
+          L("Could not load execution audit.", "No se pudo cargar la auditoría de ejecución.")
+      );
+      setAuditResult(null);
+    } finally {
+      setAuditLoading(false);
+    }
+  };
+
   const handleLoad = async (e: FormEvent) => {
     e.preventDefault();
     await loadReplay();
+    if (selectedTrade) {
+      await loadAuditForTrade(selectedTrade);
+    }
   };
 
   // 🔗 Button to open AI Coach pre-configured for this trade
@@ -1127,8 +1326,24 @@ function BackStudyPageInner() {
     if (isAuditTab) return;
     if (!selectedTrade) return;
     void loadReplay();
+    void loadAuditForTrade(selectedTrade);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTrade, timeframe, chartRange]);
+
+  useEffect(() => {
+    if (selectedTrade) return;
+    setAuditResult(null);
+    setAuditError(null);
+    setAuditLoading(false);
+  }, [selectedTrade]);
+
+  const auditMetrics = auditResult?.audit ?? null;
+  const auditProcessReview = auditResult?.process_review ?? auditResult?.plan_compliance ?? null;
+  const auditExecutionDiscipline = auditResult?.execution_discipline ?? null;
+  const auditTrades = auditMetrics?.trades ?? [];
+  const auditInsights = auditMetrics?.insights ?? [];
+  const auditEvidence = auditMetrics?.evidence ?? null;
+  const selectedInstrumentKey = selectedTrade ? buildInstrumentKeyFromTrade(selectedTrade) : null;
 
   if (loading || !user || (!isAuditTab && entriesLoading)) {
     return (
@@ -1152,7 +1367,7 @@ function BackStudyPageInner() {
               <h1 className="text-3xl md:text-4xl font-semibold mt-1">
                 {isAuditTab
                   ? L("Order history audit", "Auditoría de órdenes")
-                  : L("Chart replays from your journal", "Replays de charts desde tu journal")}
+                  : L("Unified trade review", "Revisión unificada del trade")}
               </h1>
               <p className="text-sm md:text-base text-slate-400 mt-2 max-w-xl">
                 {isAuditTab
@@ -1161,8 +1376,8 @@ function BackStudyPageInner() {
                       "Analiza tu historial de órdenes importado con reglas determinísticas (sin AI)."
                     )
                   : L(
-                      "Each entry in the Entries/Exits widgets becomes a trade. The chart marks the exact entry (green arrow) and exit (blue arrow) using the times and prices you saved in the daily journal.",
-                      "Cada entrada en los widgets de Entradas/Salidas se convierte en un trade. El chart marca la entrada (flecha verde) y la salida (flecha azul) usando horas y precios guardados en tu journal."
+                      "Back-Study now works as a trade review workspace: chart replay, execution truth from audit, process compliance, and direct handoff to AI Coach.",
+                      "Back-Study ahora funciona como un workspace de revisión del trade: replay visual, verdad de ejecución desde audit, cumplimiento del proceso y handoff directo al AI Coach."
                     )}
               </p>
             </div>
@@ -1187,7 +1402,7 @@ function BackStudyPageInner() {
               }`}
               aria-pressed={!isAuditTab}
             >
-              {L("Back testing", "Back testing")}
+              {L("Trade review", "Trade review")}
             </button>
             <button
               type="button"
@@ -1199,7 +1414,7 @@ function BackStudyPageInner() {
               }`}
               aria-pressed={isAuditTab}
             >
-              {L("Audit", "Auditoría")}
+              {L("Audit workbench", "Audit workbench")}
             </button>
           </div>
 
@@ -1316,14 +1531,14 @@ function BackStudyPageInner() {
                             </span>
                           </p>
                           <p>
-                            {L("Avg entry:", "Promedio entrada:")}{" "}
+                            {L("Saved entry avg:", "Promedio de entrada guardado:")}{" "}
                             <span className="text-emerald-200">
                               {selectedTrade.entryAvgPrice != null
                                 ? selectedTrade.entryAvgPrice.toFixed(2)
                                 : "—"}
                             </span>
                             {" · "}
-                            {L("Avg exit:", "Promedio salida:")}{" "}
+                            {L("Saved exit avg:", "Promedio de salida guardado:")}{" "}
                             <span className="text-sky-200">
                               {selectedTrade.exitAvgPrice != null
                                 ? selectedTrade.exitAvgPrice.toFixed(2)
@@ -1440,62 +1655,107 @@ function BackStudyPageInner() {
                     </form>
                   </section>
 
+                  {selectedTrade && (
+                    <section className="grid gap-4 xl:grid-cols-4">
+                      <ReviewMetricCard
+                        label={L("Trade identity", "Identidad del trade")}
+                        value={`${selectedTrade.symbol} · ${selectedTrade.entryTime} → ${selectedTrade.exitTime}`}
+                        tone="default"
+                      />
+                      <ReviewMetricCard
+                        label={L("Replay scope", "Scope del replay")}
+                        value={`${timeframe} · ${rangeLabels[chartRange]} · ${timeMode === "et" ? "ET" : L("Local", "Local")}`}
+                        tone="sky"
+                      />
+                      <ReviewMetricCard
+                        label={L("Execution audit", "Auditoría de ejecución")}
+                        value={
+                          auditLoading
+                            ? L("Loading…", "Cargando…")
+                            : auditError
+                            ? L("Audit error", "Error de auditoría")
+                            : auditResult?.events?.length
+                            ? `${auditResult.events.length} ${L("events", "eventos")}`
+                            : L("No broker events", "Sin eventos del broker")
+                        }
+                        tone={auditError ? "rose" : "emerald"}
+                      />
+                      <ReviewMetricCard
+                        label={L("Process review", "Revisión del proceso")}
+                        value={
+                          auditProcessReview?.score != null
+                            ? `${auditProcessReview.score}%`
+                            : L("Pending", "Pendiente")
+                        }
+                        tone={
+                          auditProcessReview?.score != null && auditProcessReview.score < 70
+                            ? "rose"
+                            : "default"
+                        }
+                      />
+                    </section>
+                  )}
+
                   {/* Charts */}
                   {selectedTrade && (
-                    <section className="space-y-4">
-                      {/* Underlying */}
-                      <div>
-                        {underlyingState.loading ? (
-                          <p className="text-sm text-slate-400">
-                            {L("Loading underlying chart…", "Cargando chart del underlying…")}
-                          </p>
-                        ) : underlyingState.error ? (
-                          <p className="text-sm text-sky-300">
-                            {underlyingState.error}
-                          </p>
-                        ) : (
-                          <InteractiveCandleChart
-                            title={L("Underlying asset", "Activo subyacente")}
-                            symbol={normalizeSymbolForYahoo(
-                              selectedTrade.underlyingSymbol,
-                              selectedTrade.kind
-                            )}
-                            candles={underlyingState.candles}
-                            selectedDate={selectedTrade.date}
-                            entryPoints={entryPoints}
-                            exitPoints={exitPoints}
-                            timeMode={timeMode}
-                            entryColor="#22c55e"
-                            exitColor="#38bdf8"
-                            entryLabel={L("Entry", "Entrada")}
-                            exitLabel={L("Exit", "Salida")}
-                            zoomInLabel={L("Zoom in", "Acercar")}
-                            zoomOutLabel={L("Zoom out", "Alejar")}
-                            zoomResetLabel={L("Reset zoom", "Reiniciar zoom")}
-                            emptyLabel={L("No chart data for this symbol/timeframe.", "No hay datos de chart para este símbolo/timeframe.")}
-                          />
-                        )}
-                      </div>
+                    <section className="grid gap-4 xl:grid-cols-[minmax(0,1.35fr),minmax(320px,0.65fr)]">
+                      <div className="space-y-4">
+                        <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-4 md:p-5">
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div>
+                              <p className="text-[11px] uppercase tracking-[0.2em] text-emerald-400">
+                                {L("Trade review workspace", "Workspace de revisión")}
+                              </p>
+                              <h2 className="mt-2 text-xl font-semibold text-slate-100">
+                                {selectedTrade.symbol} · {selectedTrade.date}
+                              </h2>
+                              <p className="mt-2 text-sm text-slate-400">
+                                {L(
+                                  "Read the chart as context, then confirm the execution truth in the audit panel on the right.",
+                                  "Lee el chart como contexto y luego confirma la verdad de ejecución en el panel de auditoría a la derecha."
+                                )}
+                              </p>
+                            </div>
+                            <div className="rounded-2xl border border-slate-800 bg-slate-950/70 px-4 py-3 text-xs text-slate-300">
+                              <p>
+                                {L("Underlying", "Underlying")}:{" "}
+                                <span className="font-mono text-slate-100">{selectedTrade.underlyingSymbol}</span>
+                              </p>
+                              {selectedTrade.contractSymbol ? (
+                                <p className="mt-1">
+                                  {L("Contract", "Contrato")}:{" "}
+                                  <span className="font-mono text-slate-100">{selectedTrade.contractSymbol}</span>
+                                </p>
+                              ) : null}
+                              <p className="mt-1">
+                                {L("Trade rows", "Rows del trade")}:{" "}
+                                <span className="text-slate-100">{selectedTrade.entries.length + selectedTrade.exits.length}</span>
+                              </p>
+                              <p className="mt-1">
+                                {L("Audit filter", "Filtro de audit")}:{" "}
+                                <span className="font-mono text-slate-100">
+                                  {selectedInstrumentKey || selectedTrade.symbol}
+                                </span>
+                              </p>
+                            </div>
+                          </div>
+                        </div>
 
-                      {/* Contract */}
-                      {selectedTrade.contractSymbol && (
                         <div>
-                          {contractState.loading ? (
+                          {underlyingState.loading ? (
                             <p className="text-sm text-slate-400">
-                              {L("Loading contract chart…", "Cargando chart del contrato…")}
+                              {L("Loading underlying chart…", "Cargando chart del underlying…")}
                             </p>
-                          ) : contractState.error ? (
-                            <p className="text-sm text-sky-300">
-                              {contractState.error}
-                            </p>
+                          ) : underlyingState.error ? (
+                            <p className="text-sm text-sky-300">{underlyingState.error}</p>
                           ) : (
                             <InteractiveCandleChart
-                              title={L("Contract used", "Contrato usado")}
+                              title={L("Underlying asset", "Activo subyacente")}
                               symbol={normalizeSymbolForYahoo(
-                                selectedTrade.contractSymbol,
-                                "option"
+                                selectedTrade.underlyingSymbol,
+                                selectedTrade.kind
                               )}
-                              candles={contractState.candles}
+                              candles={underlyingState.candles}
                               selectedDate={selectedTrade.date}
                               entryPoints={entryPoints}
                               exitPoints={exitPoints}
@@ -1511,9 +1771,432 @@ function BackStudyPageInner() {
                             />
                           )}
                         </div>
-                      )}
+
+                        {selectedTrade.contractSymbol && (
+                          <div>
+                            {contractState.loading ? (
+                              <p className="text-sm text-slate-400">
+                                {L("Loading contract chart…", "Cargando chart del contrato…")}
+                              </p>
+                            ) : contractState.candles.length ? (
+                              <div className="space-y-2">
+                                {contractState.error ? (
+                                  <p className="text-xs text-sky-300">
+                                    {contractState.error}{" "}
+                                    {L(
+                                      "Treat this panel as a proxy and not as the exact instrument truth.",
+                                      "Trata este panel como proxy y no como la verdad exacta del instrumento."
+                                    )}
+                                  </p>
+                                ) : null}
+                                <InteractiveCandleChart
+                                  title={L("Contract used", "Contrato usado")}
+                                  symbol={normalizeSymbolForYahoo(
+                                    selectedTrade.contractSymbol,
+                                    "option"
+                                  )}
+                                  candles={contractState.candles}
+                                  selectedDate={selectedTrade.date}
+                                  entryPoints={entryPoints}
+                                  exitPoints={exitPoints}
+                                  timeMode={timeMode}
+                                  entryColor="#22c55e"
+                                  exitColor="#38bdf8"
+                                  entryLabel={L("Entry", "Entrada")}
+                                  exitLabel={L("Exit", "Salida")}
+                                  zoomInLabel={L("Zoom in", "Acercar")}
+                                  zoomOutLabel={L("Zoom out", "Alejar")}
+                                  zoomResetLabel={L("Reset zoom", "Reiniciar zoom")}
+                                  emptyLabel={L("No chart data for this symbol/timeframe.", "No hay datos de chart para este símbolo/timeframe.")}
+                                />
+                              </div>
+                            ) : contractState.error ? (
+                              <div className="space-y-2">
+                                <p className="text-sm text-sky-300">{contractState.error}</p>
+                                <p className="text-xs text-slate-500">
+                                  {L(
+                                    "If the contract chart is missing, treat this panel as a proxy and not as the exact instrument truth.",
+                                    "Si falta el chart del contrato, trata este panel como proxy y no como la verdad exacta del instrumento."
+                                  )}
+                                </p>
+                              </div>
+                            ) : (
+                              <p className="text-sm text-slate-400">
+                                {L("No contract chart data available.", "No hay datos del chart del contrato.")}
+                              </p>
+                            )}
+                          </div>
+                        )}
+                      </div>
+
+                      <aside className="space-y-4">
+                        <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-4 md:p-5">
+                          <div className="flex items-center justify-between gap-3">
+                            <div>
+                              <p className="text-[11px] uppercase tracking-[0.2em] text-sky-400">
+                                {L("Execution truth", "Verdad de ejecución")}
+                              </p>
+                              <h3 className="mt-2 text-lg font-semibold text-slate-100">
+                                {L("Selected trade audit", "Auditoría del trade seleccionado")}
+                              </h3>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => router.push("/back-study?tab=audit")}
+                              className="rounded-xl border border-slate-700 px-3 py-2 text-xs text-slate-300 hover:border-emerald-400 hover:text-emerald-200"
+                            >
+                              {L("Open full audit", "Abrir audit completo")}
+                            </button>
+                          </div>
+
+                          {auditLoading ? (
+                            <p className="mt-4 text-sm text-slate-400">
+                              {L("Loading execution audit…", "Cargando auditoría de ejecución…")}
+                            </p>
+                          ) : auditError ? (
+                            <div className="mt-4 rounded-2xl border border-rose-500/40 bg-rose-500/10 px-3 py-3 text-sm text-rose-200">
+                              {auditError}
+                            </div>
+                          ) : (
+                            <>
+                              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                                <ReviewMetricCard
+                                  label={L("OCO used", "OCO usado")}
+                                  value={auditMetrics ? (auditMetrics.oco_used ? "Yes" : "No") : "—"}
+                                  tone="default"
+                                />
+                                <ReviewMetricCard
+                                  label={L("Stop present", "Stop presente")}
+                                  value={auditMetrics ? (auditMetrics.stop_present ? "Yes" : "No") : "—"}
+                                  tone="default"
+                                />
+                                <ReviewMetricCard
+                                  label={L("Time to first stop", "Tiempo al primer stop")}
+                                  value={formatSecondsForReview(auditMetrics?.time_to_first_stop_sec ?? null)}
+                                  tone="default"
+                                />
+                                <ReviewMetricCard
+                                  label={L("Manual market exit", "Salida manual")}
+                                  value={auditMetrics ? (auditMetrics.manual_market_exit ? "Yes" : "No") : "—"}
+                                  tone={auditMetrics?.manual_market_exit ? "rose" : "default"}
+                                />
+                              </div>
+
+                              <div className="mt-4 rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
+                                <p className="text-[11px] uppercase tracking-[0.18em] text-slate-400">
+                                  {L("Execution summary", "Resumen de ejecución")}
+                                </p>
+                                <p className="mt-2 text-sm text-slate-200">
+                                  {auditMetrics?.summary ||
+                                    L("No deterministic summary available yet.", "Aún no hay resumen determinístico.")}
+                                </p>
+                              </div>
+
+                              <div className="mt-4 rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
+                                <p className="text-[11px] uppercase tracking-[0.18em] text-slate-400">
+                                  {L("Execution discipline", "Disciplina de ejecución")}
+                                </p>
+                                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                                  <ReviewMetricCard
+                                    label={L("Execution score", "Score de ejecución")}
+                                    value={
+                                      auditExecutionDiscipline?.score != null
+                                        ? `${auditExecutionDiscipline.score}%`
+                                        : "—"
+                                    }
+                                    tone={
+                                      auditExecutionDiscipline?.score != null &&
+                                      auditExecutionDiscipline.score < 70
+                                        ? "rose"
+                                        : "emerald"
+                                    }
+                                  />
+                                  <ReviewMetricCard
+                                    label={L("Stop / OCO discipline", "Disciplina de stop / OCO")}
+                                    value={
+                                      auditExecutionDiscipline
+                                        ? `${auditExecutionDiscipline.metrics.stop_present ? "STOP" : "NO STOP"} · ${
+                                            auditExecutionDiscipline.metrics.oco_used ? "OCO" : "NO OCO"
+                                          }`
+                                        : "—"
+                                    }
+                                    tone="default"
+                                  />
+                                </div>
+                              </div>
+                            </>
+                          )}
+                        </div>
+
+                        <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-4 md:p-5">
+                          <p className="text-[11px] uppercase tracking-[0.2em] text-violet-400">
+                            {L("Coach handoff", "Handoff al coach")}
+                          </p>
+                          <p className="mt-3 text-sm text-slate-300">
+                            {L(
+                              "When you ask AI Coach from here, it already receives the selected symbol, date, trade window, timeframe, and chart range as context.",
+                              "Cuando preguntas al AI Coach desde aquí, ya recibe como contexto el símbolo, la fecha, la ventana del trade, el timeframe y el rango del chart."
+                            )}
+                          </p>
+                        </div>
+                      </aside>
                     </section>
                   )}
+
+                  {selectedTrade && (
+                    <section className="grid gap-4 xl:grid-cols-[minmax(0,1.3fr),minmax(0,0.7fr)]">
+                      <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-4 md:p-5">
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <p className="text-[11px] uppercase tracking-[0.2em] text-emerald-400">
+                              {L("Order timeline", "Timeline de órdenes")}
+                            </p>
+                            <h3 className="mt-2 text-lg font-semibold text-slate-100">
+                              {L("Trade sequence from audit", "Secuencia del trade desde audit")}
+                            </h3>
+                          </div>
+                          <span className="text-xs text-slate-500">
+                            {auditResult?.events?.length
+                              ? `${auditResult.events.length} ${L("broker events", "eventos del broker")}`
+                              : L("No broker events", "Sin eventos del broker")}
+                          </span>
+                        </div>
+
+                        {auditLoading ? (
+                          <p className="mt-4 text-sm text-slate-400">
+                            {L("Building execution sequence…", "Construyendo secuencia de ejecución…")}
+                          </p>
+                        ) : auditTrades.length ? (
+                          <div className="mt-4 space-y-3">
+                            {auditTrades.map((tradeSeq) => (
+                              <div
+                                key={tradeSeq.index}
+                                className="rounded-2xl border border-slate-800/80 bg-slate-950/80 p-4"
+                              >
+                                <div className="flex flex-wrap items-center justify-between gap-3">
+                                  <p className="text-sm font-semibold text-slate-100">
+                                    {L("Trade", "Trade")} {tradeSeq.index}
+                                  </p>
+                                  <p className="text-[11px] text-slate-500">
+                                    {formatUtcDateLabel(tradeSeq.entry_ts)} → {formatUtcDateLabel(tradeSeq.exit_ts)}
+                                  </p>
+                                </div>
+                                <div className="mt-3 grid gap-2 md:grid-cols-3 text-xs text-slate-200">
+                                  <div>{L("Entries", "Entradas")}: {tradeSeq.entry_count} ({tradeSeq.entry_qty})</div>
+                                  <div>{L("Exits", "Salidas")}: {tradeSeq.exit_count} ({tradeSeq.exit_qty})</div>
+                                  <div>{L("Stop mods", "Stops mod.")}: {tradeSeq.stop_mod_count}</div>
+                                  <div>{L("Time to stop", "Tiempo al stop")}: {formatSecondsForReview(tradeSeq.time_to_first_stop_sec ?? null)}</div>
+                                  <div>{L("OCO", "OCO")}: {tradeSeq.oco_used ? "Yes" : "No"}</div>
+                                  <div>{L("Manual MKT exit", "Salida MKT manual")}: {tradeSeq.manual_market_exit ? "Yes" : "No"}</div>
+                                </div>
+                                <p className="mt-3 text-xs text-slate-400">{tradeSeq.summary}</p>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="mt-4 text-sm text-slate-400">
+                            {L(
+                              "No trade sequence was detected for the selected replay. This usually means there is no imported order history for that exact trade yet.",
+                              "No se detectó una secuencia de trade para el replay seleccionado. Normalmente significa que todavía no hay order history importado para ese trade exacto."
+                            )}
+                          </p>
+                        )}
+                      </div>
+
+                      <div className="space-y-4">
+                        <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-4 md:p-5">
+                          <p className="text-[11px] uppercase tracking-[0.2em] text-sky-400">
+                            {L("Deterministic insights", "Insights determinísticos")}
+                          </p>
+                          {auditInsights.length ? (
+                            <ul className="mt-4 space-y-2 text-sm text-slate-200">
+                              {auditInsights.map((item, idx) => (
+                                <li
+                                  key={`${item}-${idx}`}
+                                  className="rounded-xl border border-slate-800/70 bg-slate-950/60 px-3 py-2"
+                                >
+                                  {item}
+                                </li>
+                              ))}
+                            </ul>
+                          ) : (
+                            <p className="mt-4 text-sm text-slate-400">
+                              {L("No deterministic insights available yet.", "Aún no hay insights determinísticos.")}
+                            </p>
+                          )}
+                        </div>
+
+                        <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-4 md:p-5">
+                          <p className="text-[11px] uppercase tracking-[0.2em] text-amber-400">
+                            {L("Process review", "Revisión del proceso")}
+                          </p>
+                          {auditProcessReview ? (
+                            <div className="mt-4 space-y-3 text-sm">
+                              <div className="grid gap-3 sm:grid-cols-2">
+                                <ReviewMetricCard
+                                  label={L("Process score", "Score del proceso")}
+                                  value={
+                                    auditProcessReview.score != null ? `${auditProcessReview.score}%` : "—"
+                                  }
+                                  tone={
+                                    auditProcessReview.score != null && auditProcessReview.score < 70
+                                      ? "rose"
+                                      : "emerald"
+                                  }
+                                />
+                                <ReviewMetricCard
+                                  label={L("Checklist completion", "Checklist completado")}
+                                  value={`${auditProcessReview.checklist.completed}/${auditProcessReview.checklist.total}`}
+                                  tone="default"
+                                />
+                              </div>
+
+                              {auditProcessReview.checklist.missing_items?.length ? (
+                                <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+                                  <p className="font-semibold text-slate-100">
+                                    {L("Missing checklist items", "Checklist pendiente")}
+                                  </p>
+                                  <ul className="mt-2 space-y-1 text-slate-300">
+                                    {auditProcessReview.checklist.missing_items.map((item, idx) => (
+                                      <li key={`${item}-${idx}`}>• {item}</li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              ) : null}
+
+                              <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+                                <p className="font-semibold text-slate-100">
+                                  {L("Non-negotiable rules", "Reglas no negociables")}
+                                </p>
+                                {auditProcessReview.rules?.length ? (
+                                  <ul className="mt-2 space-y-2">
+                                    {auditProcessReview.rules.map((rule, idx) => (
+                                      <li key={`${rule.label}-${idx}`}>
+                                        <p
+                                          className={
+                                            rule.status === "pass"
+                                              ? "text-emerald-300"
+                                              : rule.status === "fail"
+                                              ? "text-rose-300"
+                                              : "text-slate-300"
+                                          }
+                                        >
+                                          {rule.status.toUpperCase()} · {rule.label}
+                                        </p>
+                                        <p className="text-xs text-slate-500">{rule.reason}</p>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                ) : (
+                                  <p className="mt-2 text-slate-400">
+                                    {L("No active rules found in Growth Plan.", "No hay reglas activas en el Growth Plan.")}
+                                  </p>
+                                )}
+                              </div>
+
+                              <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+                                <p className="font-semibold text-slate-100">
+                                  {L("Execution discipline checks", "Checks de disciplina de ejecución")}
+                                </p>
+                                {auditExecutionDiscipline?.checks?.length ? (
+                                  <ul className="mt-2 space-y-2">
+                                    {auditExecutionDiscipline.checks.map((check, idx) => (
+                                      <li key={`${check.label}-${idx}`}>
+                                        <p
+                                          className={
+                                            check.status === "pass"
+                                              ? "text-emerald-300"
+                                              : check.status === "fail"
+                                              ? "text-rose-300"
+                                              : "text-slate-300"
+                                          }
+                                        >
+                                          {check.status.toUpperCase()} · {check.label}
+                                        </p>
+                                        <p className="text-xs text-slate-500">{check.reason}</p>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                ) : (
+                                  <p className="mt-2 text-slate-400">
+                                    {L("No execution-discipline checks available yet.", "Aún no hay checks de disciplina de ejecución.")}
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+                          ) : (
+                            <p className="mt-4 text-sm text-slate-400">
+                              {L("Process review will appear after audit data loads.", "La revisión del proceso aparecerá cuando cargue la auditoría.")}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    </section>
+                  )}
+
+                  {selectedTrade && auditEvidence ? (
+                    <section className="rounded-2xl border border-slate-800 bg-slate-900/80 p-4 md:p-5">
+                      <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">
+                        {L("Raw execution evidence", "Evidencia cruda de ejecución")}
+                      </p>
+                      <div className="mt-4 grid gap-4 lg:grid-cols-3">
+                        <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
+                          <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                            {L("Stop events", "Eventos de stop")}
+                          </p>
+                          <div className="mt-3 space-y-2 text-xs text-slate-200 max-h-64 overflow-y-auto">
+                            {auditEvidence.stop_events?.length ? (
+                              auditEvidence.stop_events.map((s, idx) => (
+                                <div key={`stop-${idx}`} className="rounded-xl border border-slate-800 bg-slate-950/80 px-2 py-2">
+                                  <div>{formatUtcDateLabel(s.ts_utc ?? null)}</div>
+                                  <div>{L("Stop", "Stop")}: {s.stop_price ?? "—"}</div>
+                                  <div>{L("OCO", "OCO")}: {s.oco_id ?? "—"}</div>
+                                </div>
+                              ))
+                            ) : (
+                              <div className="text-slate-500">{L("None", "Ninguno")}</div>
+                            )}
+                          </div>
+                        </div>
+                        <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
+                          <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                            {L("Cancel events", "Cancelaciones")}
+                          </p>
+                          <div className="mt-3 space-y-2 text-xs text-slate-200 max-h-64 overflow-y-auto">
+                            {auditEvidence.cancel_events?.length ? (
+                              auditEvidence.cancel_events.map((c, idx) => (
+                                <div key={`cancel-${idx}`} className="rounded-xl border border-slate-800 bg-slate-950/80 px-2 py-2">
+                                  <div>{formatUtcDateLabel(c.ts_utc ?? null)}</div>
+                                  <div>{L("Status", "Estado")}: {c.status ?? "—"}</div>
+                                  <div>{L("Replace", "Reemplazo")}: {c.replace_id ?? "—"}</div>
+                                </div>
+                              ))
+                            ) : (
+                              <div className="text-slate-500">{L("None", "Ninguno")}</div>
+                            )}
+                          </div>
+                        </div>
+                        <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
+                          <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                            {L("Fill events", "Ejecuciones")}
+                          </p>
+                          <div className="mt-3 space-y-2 text-xs text-slate-200 max-h-64 overflow-y-auto">
+                            {auditEvidence.fills?.length ? (
+                              auditEvidence.fills.map((f, idx) => (
+                                <div key={`fill-${idx}`} className="rounded-xl border border-slate-800 bg-slate-950/80 px-2 py-2">
+                                  <div>{formatUtcDateLabel(f.ts_utc ?? null)}</div>
+                                  <div>{L("Side", "Lado")}: {f.side ?? "—"} / {f.pos_effect ?? "—"}</div>
+                                  <div>{L("Order", "Orden")}: {f.order_type ?? "—"}</div>
+                                </div>
+                              ))
+                            ) : (
+                              <div className="text-slate-500">{L("None", "Ninguno")}</div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </section>
+                  ) : null}
                 </div>
               )}
             </>

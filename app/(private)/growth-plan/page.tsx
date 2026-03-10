@@ -648,7 +648,7 @@ export default function GrowthPlanPage() {
   const [startingBalanceStr, setStartingBalanceStr] = useState("");
   const [targetBalanceStr, setTargetBalanceStr] = useState("");
   const [targetDateStr, setTargetDateStr] = useState("");
-  const planMode: "auto" = "auto";
+  const planMode = "auto" as const;
   const [tradingDaysTouched, setTradingDaysTouched] = useState(false);
   const [guidedMode, setGuidedMode] = useState(true);
   const [maxDailyLossPercentStr, setMaxDailyLossPercentStr] = useState("");

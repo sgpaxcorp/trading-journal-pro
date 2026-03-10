@@ -15,10 +15,6 @@ import type {
 
 import { supabaseBrowser } from "@/lib/supaBaseClient";
 import type { AppUser, PlanId } from "@/lib/types";
-import {
-  sendWelcomeEmail,
-  sendSubscriptionReceiptEmail,
-} from "@/lib/email";
 
 /* ========================
    Tipos
@@ -210,12 +206,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         );
       }
 
-      // 3) Emails mock
-      const appUser = mapSupabaseUserToAppUser(sbUser);
-      if (appUser) {
-        sendWelcomeEmail(appUser).catch(() => {});
-        sendSubscriptionReceiptEmail(appUser, plan).catch(() => {});
-      }
+      // Email delivery must stay server-side. Subscription welcome/receipt
+      // emails are handled from secure server routes/webhooks.
 
       // 👉 devolvemos los datos mínimos para el step 2 (billing)
       return {

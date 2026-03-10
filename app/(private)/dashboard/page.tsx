@@ -181,6 +181,187 @@ function buildAutoPhases(
   return rows;
 }
 
+const clampInt = (n: number, lo = 0, hi = Number.MAX_SAFE_INTEGER) =>
+  Math.max(lo, Math.min(hi, Math.floor(n)));
+
+type PlanRow = {
+  day: number;
+  type: "goal" | "loss";
+  pct: number;
+  expectedUSD: number;
+  endBalance: number;
+};
+
+type CadenceTarget = {
+  targetEquity: number;
+  targetDate: string | null;
+  monthIndex?: number;
+  weekIndex?: number;
+  weeksInMonth?: number;
+  monthGoal?: number;
+  monthLabel?: string;
+  monthStartBalance?: number;
+  monthEndBalance?: number;
+};
+
+type CadenceProgressPeriod = {
+  startBalance: number;
+  targetBalance: number;
+  goalAmount: number;
+  actualAmount: number;
+  progress: number;
+  targetDate: string | null;
+};
+
+type CadenceProgressSummary = {
+  quarterIndex: number;
+  monthIndex: number;
+  weekIndex: number;
+  weeksInMonth: number;
+  week: CadenceProgressPeriod;
+  month: CadenceProgressPeriod;
+  quarter: CadenceProgressPeriod;
+};
+
+function computeRequiredGoalPct(
+  starting: number,
+  target: number,
+  totalDays: number,
+  lossDaysPerWeek: number,
+  lossPct: number
+): { goalPctDecimal: number } {
+  const D = clampInt(totalDays, 0);
+  if (D === 0 || starting <= 0 || target <= 0) {
+    return { goalPctDecimal: 0 };
+  }
+
+  const perWeek = clampInt(lossDaysPerWeek, 0, 5);
+  let totalLossDays = 0;
+  let prodLoss = 1;
+
+  for (let d = 1; d <= D; d++) {
+    const dayInWeek = (d - 1) % 5;
+    const isLoss = perWeek > 0 && dayInWeek < perWeek;
+    if (isLoss) {
+      totalLossDays++;
+      prodLoss *= 1 - lossPct / 100;
+    }
+  }
+
+  const goalDays = D - totalLossDays;
+  const ratio = target / (starting * (prodLoss || 1));
+
+  let g = 0;
+  if (goalDays > 0 && ratio > 0) g = Math.pow(ratio, 1 / goalDays) - 1;
+  if (!Number.isFinite(g) || g < 0) g = 0;
+
+  return { goalPctDecimal: g };
+}
+
+function buildBalancedPlanSuggested(
+  starting: number,
+  target: number,
+  totalDays: number,
+  lossDaysPerWeek: number,
+  lossPct: number
+): { rows: PlanRow[]; requiredGoalPct: number } {
+  const { goalPctDecimal } = computeRequiredGoalPct(starting, target, totalDays, lossDaysPerWeek, lossPct);
+  const goalPct = goalPctDecimal * 100;
+
+  let bal = starting;
+  const rows: PlanRow[] = [];
+  const perWeek = clampInt(lossDaysPerWeek, 0, 5);
+
+  for (let d = 1; d <= totalDays; d++) {
+    const dayInWeek = (d - 1) % 5;
+    const isLoss = perWeek > 0 && dayInWeek < perWeek;
+    const pct = isLoss ? -lossPct : goalPct;
+    const expectedUSD = bal * (pct / 100);
+    const endBalance = bal + expectedUSD;
+    rows.push({ day: d, type: isLoss ? "loss" : "goal", pct, expectedUSD, endBalance });
+    bal = endBalance;
+  }
+
+  if (rows.length > 0) {
+    const last = rows[rows.length - 1];
+    const drift = target - last.endBalance;
+    if (Math.abs(drift) > 0.01) {
+      last.expectedUSD += drift;
+      const prevBalance = rows.length > 1 ? rows[rows.length - 2].endBalance : starting;
+      last.pct = prevBalance > 0 ? (last.expectedUSD / prevBalance) * 100 : last.pct;
+      last.endBalance = target;
+    }
+  }
+
+  return { rows, requiredGoalPct: goalPct };
+}
+
+function buildWeeklyMilestonesFromMonthlyGoals(
+  starting: number,
+  target: number,
+  startIso: string,
+  targetIso: string,
+  lossDaysPerWeek: number,
+  maxDailyLossPercent: number
+): CadenceTarget[] {
+  if (starting <= 0 || target <= 0) return [];
+  const tradingDays = listTradingDaysBetween(startIso, targetIso);
+  if (tradingDays.length === 0) return [];
+  const totalTradingDays = tradingDays.length;
+
+  const plan = buildBalancedPlanSuggested(
+    starting,
+    target,
+    totalTradingDays,
+    lossDaysPerWeek,
+    Math.max(0, maxDailyLossPercent)
+  );
+  const planRows = plan.rows;
+  if (planRows.length === 0) return [];
+
+  const monthMap = new Map<string, number[]>();
+  for (let i = 0; i < tradingDays.length; i++) {
+    const monthKey = tradingDays[i]?.slice(0, 7) ?? "";
+    if (!monthKey) continue;
+    const list = monthMap.get(monthKey) ?? [];
+    list.push(i);
+    monthMap.set(monthKey, list);
+  }
+
+  const milestones: CadenceTarget[] = [];
+  let monthIndex = 0;
+  for (const [monthKey, indices] of monthMap.entries()) {
+    if (!indices.length) continue;
+    monthIndex += 1;
+    const startIndex = indices[0];
+    const endIndex = indices[indices.length - 1];
+    const monthStartBalance = startIndex > 0 ? planRows[startIndex - 1]?.endBalance ?? starting : starting;
+    const monthEndBalance = planRows[endIndex]?.endBalance ?? planRows[planRows.length - 1]?.endBalance ?? target;
+    const monthGoalProfit = monthEndBalance - monthStartBalance;
+    const weeksInMonth = Math.max(1, Math.ceil(indices.length / 5));
+
+    for (let w = 1; w <= weeksInMonth; w++) {
+      const weekEndIndex = Math.min(endIndex, startIndex + w * 5 - 1);
+      const fraction = w / weeksInMonth;
+      const targetEquity = monthStartBalance + (monthEndBalance - monthStartBalance) * fraction;
+      const targetDate = tradingDays[weekEndIndex] ?? tradingDays[tradingDays.length - 1] ?? targetIso;
+      milestones.push({
+        targetEquity,
+        targetDate,
+        monthIndex,
+        weekIndex: w,
+        weeksInMonth,
+        monthGoal: monthGoalProfit,
+        monthLabel: monthKey,
+        monthStartBalance,
+        monthEndBalance,
+      });
+    }
+  }
+
+  return milestones;
+}
+
 type CalendarCell = {
   dateStr: string | null;
   dayNumber: number | null;
@@ -1403,6 +1584,92 @@ export default function DashboardPage() {
     };
   }, [plan, autoPhases, currentBalance, cashflowNet]);
 
+  const cadenceProgress = useMemo<CadenceProgressSummary | null>(() => {
+    if (!plan || (plan as any)?.planMode !== "auto") return null;
+    if (!planStartStr || !targetDateStr || starting <= 0 || target <= 0) return null;
+
+    const lossDaysPerWeek = Number(
+      (plan as any)?.lossDaysPerWeek ?? (plan as any)?.loss_days_per_week ?? 0
+    ) || 0;
+    const maxDailyLossPercent = Number(
+      (plan as any)?.maxDailyLossPercent ?? (plan as any)?.max_daily_loss_percent ?? 0
+    ) || 0;
+
+    const milestones = buildWeeklyMilestonesFromMonthlyGoals(
+      starting,
+      target,
+      planStartStr,
+      targetDateStr,
+      lossDaysPerWeek,
+      maxDailyLossPercent
+    );
+    if (!milestones.length) return null;
+
+    const todayStr = formatDateYYYYMMDD(new Date());
+    const current =
+      milestones.find((m) => (m.targetDate ?? targetDateStr) >= todayStr) ?? milestones[milestones.length - 1];
+    const monthIndex = current.monthIndex ?? 1;
+    const weekIndex = current.weekIndex ?? 1;
+    const weeksInMonth = current.weeksInMonth ?? 1;
+    const quarterIndex = Math.ceil(monthIndex / 3);
+
+    const monthMilestones = milestones.filter((m) => (m.monthIndex ?? 1) === monthIndex);
+    const quarterMilestones = milestones.filter((m) => {
+      const idx = m.monthIndex ?? 1;
+      return idx >= (quarterIndex - 1) * 3 + 1 && idx <= quarterIndex * 3;
+    });
+
+    if (!monthMilestones.length || !quarterMilestones.length) return null;
+
+    const buildPeriod = (
+      startBalance: number,
+      targetBalance: number,
+      targetDate: string | null
+    ): CadenceProgressPeriod => {
+      const goalAmount = Math.max(0, targetBalance - startBalance);
+      const actualAmount = currentBalance - startBalance;
+      const progress = goalAmount > 0 ? Math.max(0, Math.min(1.5, actualAmount / goalAmount)) : 0;
+      return {
+        startBalance,
+        targetBalance,
+        goalAmount,
+        actualAmount,
+        progress,
+        targetDate,
+      };
+    };
+
+    const previousWeek = weekIndex > 1 ? monthMilestones[weekIndex - 2] : null;
+    const weekStartBalance = previousWeek?.targetEquity ?? current.monthStartBalance ?? starting;
+    const monthStartBalance = current.monthStartBalance ?? monthMilestones[0]?.monthStartBalance ?? starting;
+    const monthTargetBalance = current.monthEndBalance ?? monthMilestones[monthMilestones.length - 1]?.targetEquity ?? target;
+    const quarterStartBalance =
+      quarterMilestones[0]?.monthStartBalance ??
+      (quarterMilestones[0]?.monthIndex === 1 ? starting : quarterMilestones[0]?.targetEquity ?? starting);
+    const quarterTargetBalance =
+      quarterMilestones[quarterMilestones.length - 1]?.monthEndBalance ??
+      quarterMilestones[quarterMilestones.length - 1]?.targetEquity ??
+      target;
+
+    return {
+      quarterIndex,
+      monthIndex,
+      weekIndex,
+      weeksInMonth,
+      week: buildPeriod(weekStartBalance, current.targetEquity, current.targetDate ?? null),
+      month: buildPeriod(
+        monthStartBalance,
+        monthTargetBalance,
+        monthMilestones[monthMilestones.length - 1]?.targetDate ?? null
+      ),
+      quarter: buildPeriod(
+        quarterStartBalance,
+        quarterTargetBalance,
+        quarterMilestones[quarterMilestones.length - 1]?.targetDate ?? null
+      ),
+    };
+  }, [plan, planStartStr, targetDateStr, starting, target, currentBalance]);
+
   const manualPhases = useMemo(() => {
     return normalizePhases((plan as any)?.planPhases ?? (plan as any)?.plan_phases);
   }, [plan]);
@@ -1427,10 +1694,24 @@ export default function DashboardPage() {
   }, [plan, manualPhases, currentBalance]);
 
   const accountStage = useMemo(() => {
-    if (manualPhaseMetrics) {
+    const planMode = String((plan as any)?.planMode ?? (plan as any)?.plan_mode ?? "").toLowerCase();
+
+    if (cadenceProgress) {
+      return {
+        mode: "cadence",
+        label: `${L("Week", "Semana")} ${cadenceProgress.weekIndex}/${cadenceProgress.weeksInMonth}`,
+        phaseLabel: `${L("Quarter", "Trimestre")} ${cadenceProgress.quarterIndex} · ${L("Month", "Mes")} ${cadenceProgress.monthIndex} · ${L("Week", "Semana")} ${cadenceProgress.weekIndex}/${cadenceProgress.weeksInMonth}`,
+        start: cadenceProgress.week.startBalance,
+        target: cadenceProgress.week.targetBalance,
+        progress: cadenceProgress.week.progress,
+        remaining: Math.max(0, cadenceProgress.week.goalAmount - Math.max(0, cadenceProgress.week.actualAmount)),
+      };
+    }
+    if (planMode === "manual" && manualPhaseMetrics) {
       return {
         mode: "manual",
         label: manualPhaseMetrics.current.title || L("Phase", "Fase"),
+        phaseLabel: manualPhaseMetrics.current.title || L("Phase", "Fase"),
         start: manualPhaseMetrics.prevTarget,
         target: manualPhaseMetrics.current.targetEquity,
         progress: manualPhaseMetrics.progress,
@@ -1441,6 +1722,7 @@ export default function DashboardPage() {
       return {
         mode: "monthly",
         label: `${L("Month", "Mes")} ${phaseMetrics.currentMonthIndex}/${phaseMetrics.totalMonths}`,
+        phaseLabel: `${L("Month", "Mes")} ${phaseMetrics.currentMonthIndex}/${phaseMetrics.totalMonths}`,
         start: phaseMetrics.monthStartTarget,
         target: phaseMetrics.monthTarget,
         progress: phaseMetrics.monthProgress,
@@ -1451,6 +1733,7 @@ export default function DashboardPage() {
       return {
         mode: "auto",
         label: `${autoCadenceUnit} ${autoPhaseMetrics.index}/${autoPhaseMetrics.total}`,
+        phaseLabel: `${autoCadenceUnit} ${autoPhaseMetrics.index}/${autoPhaseMetrics.total}`,
         start: autoPhaseMetrics.prevTarget,
         target: autoPhaseMetrics.current.targetEquity,
         progress: autoPhaseMetrics.progress,
@@ -1460,6 +1743,7 @@ export default function DashboardPage() {
     return {
       mode: "overall",
       label: L("Full plan", "Plan completo"),
+      phaseLabel: L("Full plan", "Plan completo"),
       start: starting,
       target,
       progress: progressPct / 100,
@@ -1468,6 +1752,7 @@ export default function DashboardPage() {
   }, [
     L,
     manualPhaseMetrics,
+    cadenceProgress,
     autoPhaseMetrics,
     autoCadenceUnit,
     phaseMetrics,
@@ -1655,6 +1940,13 @@ export default function DashboardPage() {
       const stageProgressPct = Math.max(0, accountStage.progress * 100);
       const stageClampedProgress = Math.max(0, Math.min(150, stageProgressPct));
       const isStageBased = accountStage.mode !== "overall";
+      const cadenceCards = cadenceProgress
+        ? [
+            { key: "week", title: L("Week", "Semana"), data: cadenceProgress.week },
+            { key: "month", title: L("Month", "Mes"), data: cadenceProgress.month },
+            { key: "quarter", title: L("Quarter", "Trimestre"), data: cadenceProgress.quarter },
+          ]
+        : [];
       return (
         <>
           <p className={widgetTitleClass}>
@@ -1666,12 +1958,53 @@ export default function DashboardPage() {
 
           {plan ? (
             <>
+              {cadenceProgress ? (
+                <div className="mt-2 rounded-xl border border-slate-800 bg-slate-900/40 p-3">
+                  <p className="text-[12px] text-slate-500">
+                    {L("Current phase", "Fase actual")}
+                  </p>
+                  <p className="text-[16px] text-slate-100 font-semibold">
+                    {accountStage.phaseLabel}
+                  </p>
+                  <div className="mt-3 grid gap-2 md:grid-cols-3">
+                    {cadenceCards.map((period) => {
+                      const reached = Math.max(0, period.data.actualAmount);
+                      const goal = period.data.goalAmount;
+                      const remaining = Math.max(0, goal - reached);
+                      return (
+                        <div key={period.key} className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
+                          <p className="text-[11px] uppercase tracking-[0.28em] text-slate-500">
+                            {period.title}
+                          </p>
+                          <p className="mt-1 text-[15px] font-semibold text-slate-100">
+                            ${reached.toFixed(2)} / ${goal.toFixed(2)}
+                          </p>
+                          <p className="mt-1 text-[11px] text-slate-500">
+                            {L("Target balance", "Balance meta")}{" "}
+                            <span className="text-emerald-300">${period.data.targetBalance.toFixed(2)}</span>
+                          </p>
+                          <p className="mt-1 text-[11px] text-slate-500">
+                            {L("Remaining", "Falta")}{" "}
+                            <span className="text-slate-200">${remaining.toFixed(2)}</span>
+                          </p>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : null}
+
               {isStageBased ? (
                 <>
                   <p className="text-[12px] text-slate-500 mt-2">
                     {L("Current stage:", "Etapa actual:")}{" "}
                     <span className="text-slate-200 font-semibold">{accountStage.label}</span>
                   </p>
+                  {cadenceProgress ? (
+                    <p className="text-[12px] text-slate-500 mt-1">
+                      {L("This card tracks your current weekly checkpoint. Monthly and quarterly progress are shown above.", "Esta tarjeta sigue tu checkpoint semanal actual. El progreso mensual y trimestral aparece arriba.")}
+                    </p>
+                  ) : null}
                   <p className="text-[16px] text-slate-300 mt-1">
                     {L("Stage start:", "Inicio etapa:")}{" "}
                     <span className="text-slate-50 font-semibold">${accountStage.start.toFixed(2)}</span> ·{" "}
@@ -1825,6 +2158,65 @@ export default function DashboardPage() {
                 {L("Edit Growth Plan", "Editar Growth Plan")}
               </Link>
             </p>
+          ) : cadenceProgress ? (
+            <div className="mt-3 space-y-3">
+              <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-3">
+                <p className="text-[12px] text-slate-500">
+                  {L("Current phase", "Fase actual")}
+                </p>
+                <p className="text-[16px] text-slate-100 font-semibold">
+                  {L("Quarter", "Trimestre")} {cadenceProgress.quarterIndex} · {L("Month", "Mes")}{" "}
+                  {cadenceProgress.monthIndex} · {L("Week", "Semana")} {cadenceProgress.weekIndex}/
+                  {cadenceProgress.weeksInMonth}
+                </p>
+                <p className="text-[12px] text-slate-500 mt-1">
+                  {L("Current balance:", "Balance actual:")}{" "}
+                  <span className="text-slate-200">${currentBalance.toFixed(2)}</span>
+                </p>
+              </div>
+
+              {[
+                { key: "week", title: L("Week target", "Meta semanal"), data: cadenceProgress.week },
+                { key: "month", title: L("Month target", "Meta mensual"), data: cadenceProgress.month },
+                { key: "quarter", title: L("Quarter target", "Meta trimestral"), data: cadenceProgress.quarter },
+              ].map((period) => {
+                const actualText = `${period.data.actualAmount >= 0 ? "+" : "-"}$${Math.abs(period.data.actualAmount).toFixed(2)}`;
+                const goalText = `$${period.data.goalAmount.toFixed(2)}`;
+                return (
+                  <div key={period.key} className="rounded-xl border border-slate-800 bg-slate-900/40 p-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-[12px] text-slate-500">{period.title}</p>
+                      {period.data.targetDate ? (
+                        <span className="text-[11px] text-slate-500">
+                          {L("By", "Para")} {period.data.targetDate}
+                        </span>
+                      ) : null}
+                    </div>
+                    <p className="mt-1 text-[16px] font-semibold text-slate-100">
+                      {actualText} / {goalText}
+                    </p>
+                    <p className="mt-1 text-[12px] text-slate-500">
+                      {L("Start", "Inicio")}{" "}
+                      <span className="text-slate-200">${period.data.startBalance.toFixed(2)}</span> ·{" "}
+                      {L("Target", "Meta")}{" "}
+                      <span className="text-emerald-300">${period.data.targetBalance.toFixed(2)}</span>
+                    </p>
+                    <div className="mt-2 h-2 w-full rounded-full bg-slate-800 overflow-hidden">
+                      <div
+                        className="h-2 bg-linear-to-r from-emerald-400 via-emerald-300 to-sky-400"
+                        style={{ width: `${Math.min(100, period.data.progress * 100)}%` }}
+                      />
+                    </div>
+                    <p className="mt-1 text-[12px] text-slate-500">
+                      {L("Remaining", "Falta")}{" "}
+                      <span className="text-slate-200">
+                        ${Math.max(0, period.data.goalAmount - Math.max(0, period.data.actualAmount)).toFixed(2)}
+                      </span>
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
           ) : autoPhaseMetrics ? (
             <div className="mt-3 space-y-3">
               <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-3">

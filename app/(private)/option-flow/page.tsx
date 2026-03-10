@@ -10,6 +10,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useTradingAccounts } from "@/hooks/useTradingAccounts";
 import { supabaseBrowser } from "@/lib/supaBaseClient";
 import { hasEntitlement } from "@/lib/entitlementsSupabase";
+import { getOptionFlowBetaCopy, isOptionFlowBetaTester } from "@/lib/optionFlowBeta";
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
 
@@ -1496,6 +1497,8 @@ export default function OptionFlowPage() {
   const lang = resolveLocale(locale) as Lang;
   const isEs = lang === "es";
   const localeTag = LOCALE_TAG[lang];
+  const betaCopy = getOptionFlowBetaCopy(lang);
+  const hasBetaAccess = isOptionFlowBetaTester(email);
 
   const [entitled, setEntitled] = useState<boolean | null>(null);
   const [checking, setChecking] = useState<boolean>(true);
@@ -1505,7 +1508,8 @@ export default function OptionFlowPage() {
     !paywallEnabled ||
     String(process.env.NEXT_PUBLIC_OPTIONFLOW_BYPASS ?? "").toLowerCase() === "true" ||
     String(process.env.NEXT_PUBLIC_OPTIONFLOW_BYPASS ?? "") === "1";
-  const showPaywall = paywallEnabled && !bypassPaywall && !entitled;
+  const showBetaGate = !hasBetaAccess;
+  const showPaywall = !showBetaGate && paywallEnabled && !bypassPaywall && !entitled;
 
   const [provider, setProvider] = useState<ProviderId>("optionstrat");
   const [tradeIntent, setTradeIntent] = useState<TradeIntent>("0dte");
@@ -1588,17 +1592,7 @@ export default function OptionFlowPage() {
     }
   }, [provider]);
 
-  const statusLabel = paywallEnabled
-    ? entitled
-      ? isEs
-        ? "Add-on activo"
-        : "Add-on active"
-      : isEs
-      ? "Add-on requerido"
-      : "Add-on required"
-    : isEs
-    ? "Acceso temprano"
-    : "Early access";
+  const statusLabel = betaCopy.betaStatus;
 
   function appendMessage(
     msg: Omit<ChatMessage, "id"> & { id?: string },
@@ -2844,6 +2838,13 @@ export default function OptionFlowPage() {
         }
         return;
       }
+      if (hasBetaAccess) {
+        if (alive) {
+          setEntitled(true);
+          setChecking(false);
+        }
+        return;
+      }
       if (bypassPaywall) {
         if (alive) {
           setEntitled(true);
@@ -2861,7 +2862,7 @@ export default function OptionFlowPage() {
     return () => {
       alive = false;
     };
-  }, [userId, checkoutStatus, bypassPaywall]);
+  }, [userId, checkoutStatus, bypassPaywall, hasBetaAccess]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -4136,6 +4137,62 @@ export default function OptionFlowPage() {
     );
   }
 
+  if (showBetaGate) {
+    return (
+      <main className="min-h-screen bg-slate-950 text-slate-50">
+        <TopNav />
+
+        <div className="mx-auto w-full max-w-5xl px-4 sm:px-6 md:px-10 py-8">
+          <section className="rounded-3xl border border-emerald-500/30 bg-slate-900/70 p-6 sm:p-8 shadow-2xl shadow-emerald-500/5">
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="rounded-full border border-emerald-400/60 bg-emerald-500/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.28em] text-emerald-200">
+                {betaCopy.badge}
+              </span>
+              <span className="rounded-full border border-slate-700 bg-slate-950/70 px-3 py-1 text-[11px] text-slate-300">
+                {betaCopy.betaStatus}
+              </span>
+            </div>
+
+            <h1 className="mt-5 text-2xl sm:text-3xl font-semibold">
+              {betaCopy.title}
+            </h1>
+
+            <p className="mt-4 max-w-3xl text-sm sm:text-[15px] leading-7 text-slate-300">
+              {betaCopy.description}
+            </p>
+
+            <p className="mt-3 max-w-3xl text-sm leading-7 text-slate-400">
+              {betaCopy.availability}
+            </p>
+
+            <div className="mt-6 rounded-2xl border border-slate-800 bg-slate-950/70 p-5">
+              <p className="text-[11px] uppercase tracking-[0.28em] text-slate-400">
+                {isEs ? "Qué hace" : "What it does"}
+              </p>
+              <ul className="mt-3 space-y-3 text-sm text-slate-300">
+                {betaCopy.bullets.map((item) => (
+                  <li key={item} className="flex gap-3">
+                    <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-emerald-300" />
+                    <span>{item}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            <div className="mt-6 flex flex-wrap items-center gap-3">
+              <Link
+                href="/help/option-flow"
+                className="rounded-xl border border-slate-700 px-4 py-2 text-xs text-slate-300 hover:border-emerald-400 hover:text-emerald-200"
+              >
+                {betaCopy.learnMore}
+              </Link>
+            </div>
+          </section>
+        </div>
+      </main>
+    );
+  }
+
   return (
     <main className="min-h-screen bg-slate-950 text-slate-50">
       <TopNav />
@@ -4199,26 +4256,20 @@ export default function OptionFlowPage() {
         {showPaywall ? (
           <section className="rounded-3xl border border-slate-800 bg-slate-900/60 p-6">
             <h2 className="text-lg font-semibold">
-              {isEs ? "Desbloquear Option Flow Intelligence" : "Unlock Option Flow Intelligence"}
+              {betaCopy.title}
             </h2>
             <p className="text-sm text-slate-400 mt-2 max-w-2xl">
-              {isEs
-                ? "Obtén análisis avanzado del flujo, resúmenes de IA y planes premarket basados en la actividad más relevante."
-                : "Get advanced flow analysis, AI summaries, and premarket plans based on the most meaningful options activity."}
+              {betaCopy.description}
+            </p>
+            <p className="mt-3 max-w-2xl text-xs text-slate-500">
+              {betaCopy.availability}
             </p>
             <div className="mt-4 flex flex-wrap items-center gap-3">
-              <button
-                type="button"
-                onClick={handleCheckout}
-                className="rounded-xl bg-emerald-400 px-4 py-2 text-xs font-semibold text-slate-950 shadow hover:bg-emerald-300"
-              >
-                {isEs ? "Desbloquear por $5/mes" : "Unlock for $5/mo"}
-              </button>
               <Link
-                href="/billing"
+                href="/help/option-flow"
                 className="rounded-xl border border-slate-700 px-4 py-2 text-xs text-slate-300 hover:border-emerald-400 hover:text-emerald-200"
               >
-                {isEs ? "Administrar facturación" : "Manage billing"}
+                {betaCopy.learnMore}
               </Link>
             </div>
             {message && <p className="mt-3 text-xs text-amber-200">{message}</p>}

@@ -9,6 +9,7 @@ import { useAuth } from "@/context/AuthContext";
 import type { PlanId } from "@/lib/types";
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
+import { getOptionFlowBetaCopy, isOptionFlowBetaTester } from "@/lib/optionFlowBeta";
 import { supabaseBrowser } from "@/lib/supaBaseClient";
 import { listMyEntitlements } from "@/lib/entitlementsSupabase";
 
@@ -37,6 +38,8 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
   const lang = resolveLocale(locale);
   const isEs = lang === "es";
   const L = (en: string, es: string) => (isEs ? es : en);
+  const optionFlowBeta = getOptionFlowBetaCopy(isEs ? "es" : "en");
+  const optionFlowBetaAccess = isOptionFlowBetaTester(user?.email ?? "");
 
   const [selectedPlan, setSelectedPlan] = useState<PlanId>(initialPlan);
   const [loading, setLoading] = useState(false);
@@ -61,7 +64,13 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
   const [subscriptionLoading, setSubscriptionLoading] = useState(false);
   const [autoRenewEnabled, setAutoRenewEnabled] = useState(true);
   const [cancelReason, setCancelReason] = useState("");
+  const [cancelUsageStatus, setCancelUsageStatus] = useState("");
+  const [cancelImprovement, setCancelImprovement] = useState("");
+  const [cancelReturnTrigger, setCancelReturnTrigger] = useState("");
   const [cancelDetail, setCancelDetail] = useState("");
+  const [cancelAcknowledge, setCancelAcknowledge] = useState(false);
+  const [cancelFlowStep, setCancelFlowStep] = useState<1 | 2>(1);
+  const [cancelModalOpen, setCancelModalOpen] = useState(false);
   const [cancelLoading, setCancelLoading] = useState(false);
   const [cancelNotice, setCancelNotice] = useState<string | null>(null);
 
@@ -344,13 +353,19 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
       setCancelNotice(L("Please select a reason.", "Selecciona un motivo."));
       return;
     }
-    const confirmed = window.confirm(
-      L(
-        "Are you sure you want to cancel auto-renew? You will keep access until the period ends.",
-        "¿Seguro que quieres cancelar la auto-renovación? Mantendrás acceso hasta que termine el período."
-      )
-    );
-    if (!confirmed) return;
+    if (!cancelUsageStatus.trim()) {
+      setCancelNotice(L("Please tell us how much you used the platform.", "Indícanos cuánto usaste la plataforma."));
+      return;
+    }
+    if (!cancelAcknowledge) {
+      setCancelNotice(
+        L(
+          "Please confirm that you understand access stays active until the end of your current billing cycle.",
+          "Confirma que entiendes que el acceso seguirá activo hasta el final de tu ciclo actual."
+        )
+      );
+      return;
+    }
 
     try {
       setCancelNotice(null);
@@ -364,6 +379,9 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
         },
         body: JSON.stringify({
           reason: cancelReason.trim(),
+          usageStatus: cancelUsageStatus.trim(),
+          improvementArea: cancelImprovement.trim(),
+          returnTrigger: cancelReturnTrigger.trim(),
           detail: cancelDetail.trim(),
         }),
       });
@@ -379,12 +397,48 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
           : prev
       );
       setAutoRenewEnabled(false);
-      setCancelNotice(L("Cancellation scheduled.", "Cancelación programada."));
+      const activeUntil = data.current_period_end ?? subscriptionInfo.current_period_end;
+      setCancelNotice(
+        activeUntil
+          ? L(
+              `Cancellation scheduled. Your membership stays active until ${formatDate(activeUntil)}. We also sent a confirmation email.`,
+              `Cancelación programada. Tu membresía seguirá activa hasta ${formatDate(activeUntil)}. También te enviamos un email de confirmación.`
+            )
+          : L("Cancellation scheduled.", "Cancelación programada.")
+      );
+      setCancelModalOpen(false);
     } catch (err: any) {
       setCancelNotice(err?.message ?? L("Failed to cancel subscription.", "No se pudo cancelar la suscripción."));
     } finally {
       setCancelLoading(false);
     }
+  }
+
+  function handleAdvanceCancelFlow() {
+    if (!cancelReason.trim()) {
+      setCancelNotice(L("Please select a reason.", "Selecciona un motivo."));
+      return;
+    }
+    if (!cancelUsageStatus.trim()) {
+      setCancelNotice(
+        L("Please tell us how much you used the platform.", "Indícanos cuánto usaste la plataforma.")
+      );
+      return;
+    }
+    setCancelNotice(null);
+    setCancelFlowStep(2);
+  }
+
+  function openCancelModal() {
+    setCancelNotice(null);
+    setCancelFlowStep(1);
+    setCancelAcknowledge(false);
+    setCancelModalOpen(true);
+  }
+
+  function closeCancelModal() {
+    if (cancelLoading) return;
+    setCancelModalOpen(false);
   }
 
   const isButtonDisabled = loading || authLoading;
@@ -409,6 +463,8 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
       return value;
     }
   };
+  const nextBillingDate = subscriptionInfo?.current_period_end ?? null;
+  const accessUntilDate = subscriptionInfo?.current_period_end ?? null;
 
   return (
     <main className="min-h-screen bg-slate-950 text-slate-50 flex justify-center px-4 py-10">
@@ -752,67 +808,46 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
                   {L("Option Flow Intelligence", "Option Flow Intelligence")}
                 </h2>
                 <p className="text-xs text-slate-400 mt-1">
-                  {L(
-                    "Premium flow analysis, premarket planning, and AI-grade summaries.",
-                    "Análisis premium de flujo, planificación premarket y resúmenes con IA."
-                  )}
+                  {optionFlowBeta.description}
                 </p>
               </div>
               <span className="rounded-full border border-slate-700 bg-slate-950/70 px-3 py-1 text-[11px] text-slate-300">
-                {addonLoading
-                  ? L("Checking…", "Verificando…")
-                  : addonActive
-                  ? L("Active", "Activo")
-                  : L("Optional", "Opcional")}
+                {optionFlowBetaAccess
+                  ? L("Internal beta", "Beta interno")
+                  : optionFlowBeta.badge}
               </span>
             </div>
 
             <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
               <div>
                 <p className="text-sm font-semibold text-slate-100">
-                  ${billingCycle === "annual" ? OPTION_FLOW_PRICES.annual.toFixed(2) : OPTION_FLOW_PRICES.monthly.toFixed(2)}
+                  {optionFlowBetaAccess
+                    ? L("Internal tester access", "Acceso interno de prueba")
+                    : L("Private beta access only", "Solo acceso beta privado")}
                 </p>
                 <p className="text-[11px] text-slate-400">
-                  {billingCycle === "annual"
-                    ? L("Annual add-on", "Add-on anual")
-                    : L("Monthly add-on", "Add-on mensual")}
+                  {optionFlowBeta.billingNotice}
                 </p>
               </div>
 
               <div className="flex flex-wrap items-center gap-3">
-                {!hasActivePlan ? (
+                {optionFlowBetaAccess ? (
                   <button
                     type="button"
-                    onClick={() => setAddonSelected((prev) => !prev)}
-                    className={`rounded-xl px-4 py-2 text-xs font-semibold transition ${
-                      addonSelected
-                        ? "bg-emerald-400 text-slate-950 hover:bg-emerald-300"
-                        : "border border-slate-700 text-slate-200 hover:border-emerald-400"
-                    }`}
+                    onClick={() => router.push("/option-flow")}
+                    className="rounded-xl bg-emerald-400 px-4 py-2 text-xs font-semibold text-slate-950 hover:bg-emerald-300"
                   >
-                    {addonSelected
-                      ? L("Remove Option Flow", "Quitar Option Flow")
-                      : L("Add Option Flow", "Agregar Option Flow")}
+                    {optionFlowBeta.openInternal}
                   </button>
                 ) : (
                   <button
                     type="button"
-                    onClick={() => handleAddonCheckout("option_flow")}
-                    disabled={isButtonDisabled || addonActive}
-                    className="rounded-xl bg-emerald-400 px-4 py-2 text-xs font-semibold text-slate-950 hover:bg-emerald-300 disabled:opacity-60 disabled:cursor-not-allowed"
+                    onClick={() => router.push("/option-flow")}
+                    className="rounded-xl border border-slate-700 px-4 py-2 text-xs text-slate-300 hover:border-emerald-400 hover:text-emerald-200"
                   >
-                    {addonActive
-                      ? L("Already active", "Ya activo")
-                      : L("Add Option Flow", "Agregar Option Flow")}
+                    {optionFlowBeta.learnMore}
                   </button>
                 )}
-                <button
-                  type="button"
-                  onClick={() => router.push("/option-flow")}
-                  className="rounded-xl border border-slate-700 px-4 py-2 text-xs text-slate-300 hover:border-emerald-400 hover:text-emerald-200"
-                >
-                  {L("Open Option Flow", "Abrir Option Flow")}
-                </button>
               </div>
             </div>
 
@@ -928,10 +963,11 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
                       <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500">
                         {L("Next renewal", "Próxima renovación")}
                       </p>
-                      <p className="mt-1 text-slate-100">
+                      <p className="mt-1 text-slate-100">{formatDate(subscriptionInfo.current_period_end)}</p>
+                      <p className="mt-1 text-[11px] text-slate-500">
                         {subscriptionInfo.cancel_at_period_end
-                          ? L("Auto‑renew off", "Auto‑renovación apagada")
-                          : formatDate(subscriptionInfo.current_period_end)}
+                          ? L("Auto‑renew is off", "La auto‑renovación está apagada")
+                          : L("Auto‑renew is on", "La auto‑renovación está activa")}
                       </p>
                     </div>
                     <div className="rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-2">
@@ -943,7 +979,46 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
                     </div>
                   </div>
 
-                  <div className="flex flex-col md:flex-row md:items-center gap-3">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                    <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-amber-100">
+                      <p className="text-[10px] uppercase tracking-[0.2em] text-amber-300/80">
+                        {L("Before you cancel", "Antes de cancelar")}
+                      </p>
+                      <p className="mt-2">
+                        {subscriptionInfo.cancel_at_period_end
+                          ? L(
+                              "Auto-renew is already off. No future charge is scheduled right now.",
+                              "La auto-renovación ya está apagada. No hay un cargo futuro programado ahora mismo."
+                            )
+                          : L(
+                              "If you cancel today, we stop the next renewal, not your current access.",
+                              "Si cancelas hoy, detenemos la próxima renovación, no tu acceso actual."
+                            )}
+                      </p>
+                      <p className="mt-2 text-amber-50">
+                        {L("Your account stays active until", "Tu cuenta seguirá activa hasta")}{" "}
+                        <strong>{formatDate(accessUntilDate)}</strong>.
+                      </p>
+                    </div>
+
+                    <div className="rounded-xl border border-slate-800 bg-slate-950/60 px-4 py-3 text-slate-300">
+                      <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500">
+                        {L("Billing timing", "Calendario de cobro")}
+                      </p>
+                      <p className="mt-2">
+                        {L("Next billing cycle date", "Próxima fecha del ciclo de pago")}:{" "}
+                        <strong className="text-slate-100">{formatDate(nextBillingDate)}</strong>
+                      </p>
+                      <p className="mt-2 text-slate-400">
+                        {L(
+                          "Example: if you paid 3 days ago and cancel now, your membership still remains active until the next cycle date shown above.",
+                          "Ejemplo: si pagaste hace 3 días y cancelas ahora, tu membresía seguirá activa hasta la próxima fecha de ciclo mostrada arriba."
+                        )}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col md:flex-row md:items-start gap-3">
                     <div className="flex-1 rounded-xl border border-slate-800 bg-slate-950/60 px-4 py-3">
                       <p className="text-[11px] text-slate-400 mb-2">
                         {L("Auto‑renew", "Auto‑renovación")}
@@ -966,43 +1041,37 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
 
                     <div className="flex-1 rounded-xl border border-slate-800 bg-slate-950/60 px-4 py-3">
                       <p className="text-[11px] text-slate-400 mb-2">
-                        {L("Cancellation reason", "Motivo de cancelación")}
+                        {L(
+                          "Open the cancellation flow to review billing rules, answer the exit survey, and confirm the end date of your access.",
+                          "Abre el flujo de cancelación para revisar las reglas de billing, responder la encuesta de salida y confirmar la fecha final de tu acceso."
+                        )}
                       </p>
-                      <select
-                        value={cancelReason}
-                        onChange={(e) => setCancelReason(e.target.value)}
-                        className="w-full rounded-md bg-slate-950/90 border border-slate-700 px-3 py-2 text-xs text-slate-100 outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400/60"
-                      >
-                        <option value="">{L("Select a reason", "Selecciona un motivo")}</option>
-                        <option value="too_expensive">{L("Too expensive", "Muy caro")}</option>
-                        <option value="not_using">{L("Not using enough", "No lo estoy usando")}</option>
-                        <option value="missing_features">{L("Missing features", "Faltan features")}</option>
-                        <option value="technical_issues">{L("Technical issues", "Problemas técnicos")}</option>
-                        <option value="other">{L("Other", "Otro")}</option>
-                      </select>
-                      <textarea
-                        value={cancelDetail}
-                        onChange={(e) => setCancelDetail(e.target.value)}
-                        placeholder={L("Optional details", "Detalles (opcional)")}
-                        className="mt-2 w-full rounded-md bg-slate-950/90 border border-slate-700 px-3 py-2 text-xs text-slate-100 outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400/60"
-                        rows={3}
-                      />
+                      <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-4 text-xs text-slate-300">
+                        <p className="font-semibold text-slate-100">
+                          {L("Cancellation flow includes", "El flujo de cancelación incluye")}
+                        </p>
+                        <ul className="mt-3 space-y-2 text-slate-400">
+                          <li>{L("Your next billing cycle date before you confirm.", "Tu próxima fecha de ciclo de pago antes de confirmar.")}</li>
+                          <li>{L("A rule reminder that access remains active until that date.", "Un recordatorio de que el acceso sigue activo hasta esa fecha.")}</li>
+                          <li>{L("An exit survey plus a confirmation email after cancellation.", "Una encuesta de salida más un email de confirmación después de cancelar.")}</li>
+                        </ul>
+                      </div>
+                      <div className="mt-4 flex justify-end">
+                        <button
+                          type="button"
+                          onClick={openCancelModal}
+                          disabled={subscriptionInfo.cancel_at_period_end}
+                          className="rounded-xl bg-rose-500/80 px-4 py-2 text-xs font-semibold text-white hover:bg-rose-500 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {subscriptionInfo.cancel_at_period_end
+                            ? L("Cancellation scheduled", "Cancelación programada")
+                            : L("Open cancellation flow", "Abrir flujo de cancelación")}
+                        </button>
+                      </div>
                     </div>
                   </div>
 
                   <div className="flex flex-wrap items-center gap-3">
-                    <button
-                      type="button"
-                      onClick={handleCancelSubscription}
-                      disabled={cancelLoading || subscriptionInfo.cancel_at_period_end}
-                      className="rounded-xl bg-rose-500/80 px-4 py-2 text-xs font-semibold text-white hover:bg-rose-500 disabled:opacity-60 disabled:cursor-not-allowed"
-                    >
-                      {subscriptionInfo.cancel_at_period_end
-                        ? L("Cancellation scheduled", "Cancelación programada")
-                        : cancelLoading
-                        ? L("Processing…", "Procesando…")
-                        : L("Cancel subscription", "Cancelar suscripción")}
-                    </button>
                     {subscriptionInfo.cancel_at_period_end && subscriptionInfo.current_period_end ? (
                       <span className="text-[11px] text-slate-400">
                         {L("Access until", "Acceso hasta")} {formatDate(subscriptionInfo.current_period_end)}
@@ -1017,6 +1086,183 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
             </div>
           </div>
         </div>
+
+        {cancelModalOpen && subscriptionInfo ? (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 px-4 py-8 backdrop-blur-sm">
+            <div className="w-full max-w-2xl rounded-3xl border border-slate-800 bg-slate-950 shadow-[0_30px_120px_rgba(15,23,42,0.85)]">
+              <div className="flex items-start justify-between gap-4 border-b border-slate-800 px-6 py-5">
+                <div>
+                  <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">
+                    {L("Cancellation flow", "Flujo de cancelación")}
+                  </p>
+                  <h3 className="mt-2 text-xl font-semibold text-slate-100">
+                    {cancelFlowStep === 1
+                      ? L("Step 1 · Tell us why you are leaving", "Paso 1 · Cuéntanos por qué te vas")
+                      : L("Step 2 · Review the cancellation rules", "Paso 2 · Revisa las reglas de cancelación")}
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={closeCancelModal}
+                  disabled={cancelLoading}
+                  className="rounded-full border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:border-slate-500 hover:text-slate-100 disabled:opacity-50"
+                >
+                  {L("Close", "Cerrar")}
+                </button>
+              </div>
+
+              <div className="px-6 py-5">
+                <div className="mb-5 flex items-center gap-2 text-[11px] text-slate-400">
+                  <span className={`h-2.5 w-2.5 rounded-full ${cancelFlowStep === 1 ? "bg-emerald-400" : "bg-emerald-400/50"}`} />
+                  <span className="mr-2">{L("Survey", "Encuesta")}</span>
+                  <span className={`h-2.5 w-2.5 rounded-full ${cancelFlowStep === 2 ? "bg-emerald-400" : "bg-slate-700"}`} />
+                  <span>{L("Final review", "Revisión final")}</span>
+                </div>
+
+                {cancelFlowStep === 1 ? (
+                  <div className="space-y-3">
+                    <p className="text-sm text-slate-400">
+                      {L(
+                        "We are sorry to see you go. These answers help us improve the product and support future winback follow-up.",
+                        "Lamentamos verte ir. Estas respuestas nos ayudan a mejorar el producto y respaldan futuros seguimientos de winback."
+                      )}
+                    </p>
+                    <select
+                      value={cancelReason}
+                      onChange={(e) => setCancelReason(e.target.value)}
+                      className="w-full rounded-md border border-slate-700 bg-slate-950/90 px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400/60"
+                    >
+                      <option value="">{L("Select a reason", "Selecciona un motivo")}</option>
+                      <option value="too_expensive">{L("Too expensive", "Muy caro")}</option>
+                      <option value="not_using">{L("Not using enough", "No lo estoy usando")}</option>
+                      <option value="missing_features">{L("Missing features", "Faltan features")}</option>
+                      <option value="technical_issues">{L("Technical issues", "Problemas técnicos")}</option>
+                      <option value="other">{L("Other", "Otro")}</option>
+                    </select>
+                    <select
+                      value={cancelUsageStatus}
+                      onChange={(e) => setCancelUsageStatus(e.target.value)}
+                      className="w-full rounded-md border border-slate-700 bg-slate-950/90 px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400/60"
+                    >
+                      <option value="">{L("How much did you use the platform?", "¿Cuánto usaste la plataforma?")}</option>
+                      <option value="daily">{L("I used it daily", "La usé a diario")}</option>
+                      <option value="weekly">{L("A few times per week", "Unas veces por semana")}</option>
+                      <option value="occasionally">{L("Only occasionally", "Solo ocasionalmente")}</option>
+                      <option value="barely_started">{L("I barely got started", "Casi no empecé")}</option>
+                    </select>
+                    <select
+                      value={cancelImprovement}
+                      onChange={(e) => setCancelImprovement(e.target.value)}
+                      className="w-full rounded-md border border-slate-700 bg-slate-950/90 px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400/60"
+                    >
+                      <option value="">{L("What was missing or hardest for you? (optional)", "¿Qué faltó o qué fue lo más difícil? (opcional)")}</option>
+                      <option value="onboarding">{L("I needed better onboarding", "Necesitaba mejor onboarding")}</option>
+                      <option value="analytics">{L("I needed clearer analytics", "Necesitaba analytics más claros")}</option>
+                      <option value="ai_coaching">{L("I needed stronger AI coaching", "Necesitaba un AI coaching más fuerte")}</option>
+                      <option value="journal_flow">{L("The journal workflow was too heavy", "El flujo del journal era muy pesado")}</option>
+                      <option value="price_value">{L("The value did not justify the price", "El valor no justificó el precio")}</option>
+                      <option value="other">{L("Other", "Otro")}</option>
+                    </select>
+                    <select
+                      value={cancelReturnTrigger}
+                      onChange={(e) => setCancelReturnTrigger(e.target.value)}
+                      className="w-full rounded-md border border-slate-700 bg-slate-950/90 px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400/60"
+                    >
+                      <option value="">{L("What would make you come back? (optional)", "¿Qué te haría volver? (opcional)")}</option>
+                      <option value="lower_price">{L("A lower price", "Un precio más bajo")}</option>
+                      <option value="better_support">{L("Better support / coaching", "Mejor soporte / coaching")}</option>
+                      <option value="more_broker_sync">{L("More broker integrations", "Más integraciones de brokers")}</option>
+                      <option value="more_ai">{L("A stronger AI workflow", "Un flujo de AI más fuerte")}</option>
+                      <option value="not_sure">{L("I’m not sure yet", "Aún no estoy seguro")}</option>
+                    </select>
+                    <textarea
+                      value={cancelDetail}
+                      onChange={(e) => setCancelDetail(e.target.value)}
+                      placeholder={L(
+                        "Anything else you want us to know before you cancel?",
+                        "¿Algo más que quieras contarnos antes de cancelar?"
+                      )}
+                      className="w-full rounded-md border border-slate-700 bg-slate-950/90 px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400/60"
+                      rows={4}
+                    />
+                    <div className="flex justify-end">
+                      <button
+                        type="button"
+                        onClick={handleAdvanceCancelFlow}
+                        className="rounded-xl border border-slate-700 px-4 py-2 text-sm font-semibold text-slate-100 hover:border-emerald-400 hover:text-emerald-200"
+                      >
+                        {L("Continue to final review", "Continuar a revisión final")}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                      <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+                        <p className="text-[11px] uppercase tracking-[0.2em] text-amber-300/80">
+                          {L("Next billing cycle", "Próximo ciclo de pago")}
+                        </p>
+                        <p className="mt-2 font-semibold">{formatDate(nextBillingDate)}</p>
+                      </div>
+                      <div className="rounded-xl border border-slate-800 bg-slate-900/70 px-4 py-3 text-sm text-slate-200">
+                        <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">
+                          {L("Access stays active until", "El acceso sigue activo hasta")}
+                        </p>
+                        <p className="mt-2 font-semibold">{formatDate(accessUntilDate)}</p>
+                      </div>
+                    </div>
+                    <div className="rounded-xl border border-slate-800 bg-slate-900/70 p-4 text-sm text-slate-300">
+                      <p className="font-semibold text-slate-100">
+                        {L("Rules before you confirm", "Reglas antes de confirmar")}
+                      </p>
+                      <ul className="mt-3 space-y-2 text-slate-400">
+                        <li>{L("Cancelling today stops the next renewal only.", "Cancelar hoy detiene solo la próxima renovación.")}</li>
+                        <li>{L("Your membership remains active through the date shown above.", "Tu membresía sigue activa hasta la fecha mostrada arriba.")}</li>
+                        <li>{L("This action does not issue an automatic refund.", "Esta acción no emite un reembolso automático.")}</li>
+                        <li>{L("You will receive a confirmation email from NeuroTrader Journal.", "Recibirás un email de confirmación de NeuroTrader Journal.")}</li>
+                      </ul>
+                    </div>
+                    <label className="flex items-start gap-2 rounded-lg border border-slate-800 bg-slate-900/70 px-3 py-2 text-[12px] text-slate-300">
+                      <input
+                        type="checkbox"
+                        checked={cancelAcknowledge}
+                        onChange={(e) => setCancelAcknowledge(e.target.checked)}
+                        className="mt-0.5 h-4 w-4 rounded border-slate-600 bg-slate-950 text-emerald-400 focus:ring-emerald-400"
+                      />
+                      <span>
+                        {L(
+                          "I understand my membership stays active until the next billing date shown above, even if I cancel today.",
+                          "Entiendo que mi membresía seguirá activa hasta la próxima fecha de cobro mostrada arriba, aunque cancele hoy."
+                        )}
+                      </span>
+                    </label>
+                    <div className="flex flex-wrap justify-between gap-3">
+                      <button
+                        type="button"
+                        onClick={() => setCancelFlowStep(1)}
+                        className="rounded-xl border border-slate-700 px-4 py-2 text-sm font-semibold text-slate-300 hover:border-slate-500 hover:text-slate-100"
+                      >
+                        {L("Back to survey", "Volver a la encuesta")}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleCancelSubscription}
+                        disabled={cancelLoading || subscriptionInfo.cancel_at_period_end}
+                        className="rounded-xl bg-rose-500/80 px-4 py-2 text-sm font-semibold text-white hover:bg-rose-500 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {cancelLoading
+                          ? L("Processing…", "Procesando…")
+                          : L("Confirm cancellation", "Confirmar cancelación")}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {cancelNotice ? <p className="mt-4 text-xs text-slate-300">{cancelNotice}</p> : null}
+              </div>
+            </div>
+          </div>
+        ) : null}
       </div>
     </main>
   );

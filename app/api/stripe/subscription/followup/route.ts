@@ -8,17 +8,20 @@ export const runtime = "nodejs";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {});
 
-function buildPromoCode(prefix = "RETURN30") {
+function buildPromoCode(prefix = "RETURN50") {
   const random = crypto.randomBytes(4).toString("hex").toUpperCase();
   return `${prefix}-${random}`;
 }
 
-export async function POST(req: NextRequest) {
+async function handleRequest(req: NextRequest) {
   try {
     const secret = process.env.CRON_SECRET || "";
     const authHeader = req.headers.get("authorization") || "";
     const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
-    if (!secret || token !== secret) {
+    const vercelCronHeader = req.headers.get("x-vercel-cron");
+    const isVercelCron = Boolean(vercelCronHeader) && vercelCronHeader !== "false";
+    const hasValidSecret = Boolean(secret) && token === secret;
+    if (!isVercelCron && !hasValidSecret) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -54,7 +57,7 @@ export async function POST(req: NextRequest) {
       const email = userData.user.email;
 
       const coupon = await stripe.coupons.create({
-        percent_off: 30,
+        percent_off: 50,
         duration: "once",
         metadata: {
           source: "winback",
@@ -101,4 +104,12 @@ export async function POST(req: NextRequest) {
   } catch (err: any) {
     return NextResponse.json({ error: err?.message ?? "Unknown error" }, { status: 500 });
   }
+}
+
+export async function GET(req: NextRequest) {
+  return handleRequest(req);
+}
+
+export async function POST(req: NextRequest) {
+  return handleRequest(req);
 }

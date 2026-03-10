@@ -57,6 +57,67 @@ function normalizeRuleLabel(label: any): string {
   return String(label ?? "").trim();
 }
 
+function buildExecutionDiscipline(audit: any) {
+  const checks = [
+    {
+      label: "Protective stop present",
+      status: audit?.stop_present === true ? "pass" : audit?.stop_present === false ? "fail" : "unknown",
+      reason:
+        audit?.stop_present === true
+          ? "A protective stop event was detected in broker order history."
+          : audit?.stop_present === false
+          ? "No protective stop event was detected in broker order history."
+          : "Not enough broker evidence to determine stop protection.",
+    },
+    {
+      label: "OCO protection used",
+      status: audit?.oco_used === true ? "pass" : audit?.oco_used === false ? "fail" : "unknown",
+      reason:
+        audit?.oco_used === true
+          ? "An OCO structure was detected."
+          : audit?.oco_used === false
+          ? "No OCO structure was detected."
+          : "Not enough broker evidence to determine OCO usage.",
+    },
+    {
+      label: "Manual market exit discipline",
+      status:
+        audit?.manual_market_exit === true
+          ? "fail"
+          : audit?.manual_market_exit === false
+          ? "pass"
+          : "unknown",
+      reason:
+        audit?.manual_market_exit === true
+          ? "A manual market exit was detected in broker events."
+          : audit?.manual_market_exit === false
+          ? "No manual market exit was detected."
+          : "Not enough broker evidence to determine whether a manual market exit occurred.",
+    },
+  ];
+
+  const evaluable = checks.filter((c) => c.status !== "unknown");
+  const score =
+    evaluable.length > 0
+      ? Math.round((evaluable.filter((c) => c.status === "pass").length / evaluable.length) * 100)
+      : null;
+
+  return {
+    score,
+    checks,
+    metrics: {
+      stop_present: audit?.stop_present ?? null,
+      oco_used: audit?.oco_used ?? null,
+      stop_mod_count: audit?.stop_mod_count ?? 0,
+      cancel_count: audit?.cancel_count ?? 0,
+      replace_count: audit?.replace_count ?? 0,
+      manual_market_exit: audit?.manual_market_exit ?? null,
+      stop_market_filled: audit?.stop_market_filled ?? null,
+      time_to_first_stop_sec: audit?.time_to_first_stop_sec ?? null,
+    },
+  };
+}
+
 export async function GET(req: NextRequest) {
   try {
     const authHeader = req.headers.get("authorization") || "";
@@ -233,7 +294,7 @@ export async function GET(req: NextRequest) {
       complianceScore = rulesScore;
     }
 
-    const planCompliance = {
+    const processReview = {
       score: complianceScore,
       weights: { checklist: 0.6, rules: 0.4 },
       checklist: {
@@ -246,6 +307,7 @@ export async function GET(req: NextRequest) {
       respected_plan: typeof journalEntry?.respected_plan === "boolean" ? journalEntry.respected_plan : null,
       plan_present: !!growthPlan,
     };
+    const executionDiscipline = buildExecutionDiscipline(audit);
 
     return NextResponse.json({
       date,
@@ -254,7 +316,9 @@ export async function GET(req: NextRequest) {
       symbol: symbol || null,
       events: deduped,
       audit,
-      plan_compliance: planCompliance,
+      process_review: processReview,
+      execution_discipline: executionDiscipline,
+      plan_compliance: processReview,
     });
   } catch (err: any) {
     return NextResponse.json({ error: err?.message ?? "Server error" }, { status: 500 });

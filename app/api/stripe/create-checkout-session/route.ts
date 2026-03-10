@@ -1,6 +1,7 @@
 // app/api/stripe/create-checkout-session/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
+import { getOptionFlowBetaApiPayload } from "@/lib/optionFlowBeta";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 
 type PlanId = "core" | "advanced";
@@ -162,9 +163,13 @@ export async function POST(req: NextRequest) {
     const planId = body.planId as PlanId | undefined;
     const billingCycle = body.billingCycle as BillingCycle | undefined;
     const couponCodeRaw = body.couponCode as string | undefined; // opcional
-    const addonOptionFlow = Boolean(body.addonOptionFlow);
+    const addonOptionFlowRequested = Boolean(body.addonOptionFlow);
     const addonBrokerSync = Boolean(body.addonBrokerSync);
     const partnerCode = normalizePartnerCode(body.partnerCode);
+
+    if (addonOptionFlowRequested) {
+      return NextResponse.json(getOptionFlowBetaApiPayload("en"), { status: 403 });
+    }
 
     if (!planId) {
       return NextResponse.json({ error: "Missing planId" }, { status: 400 });
@@ -241,7 +246,7 @@ export async function POST(req: NextRequest) {
       | undefined;
 
     let effectivePlanId: PlanId = planId;
-    let effectiveAddonOptionFlow = addonOptionFlow;
+    let effectiveAddonOptionFlow = false;
     let effectiveAddonBrokerSync = addonBrokerSync;
     let promoDiscountInfo: ResolvedDiscount | null = null;
 
@@ -262,7 +267,6 @@ export async function POST(req: NextRequest) {
             );
           }
           effectivePlanId = "advanced";
-          effectiveAddonOptionFlow = true;
           effectiveAddonBrokerSync = true;
         }
       } catch (err) {

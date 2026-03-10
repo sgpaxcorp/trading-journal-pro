@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
+import { getOptionFlowBetaApiPayload } from "@/lib/optionFlowBeta";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 
 type PlanId = "core" | "advanced";
@@ -45,6 +46,10 @@ export async function POST(req: NextRequest) {
     const planId = body.planId as PlanId | undefined;
     const billingCycle = body.billingCycle as BillingCycle | undefined;
     const addonOptionFlow = Boolean(body.addonOptionFlow);
+
+    if (addonOptionFlow) {
+      return NextResponse.json(getOptionFlowBetaApiPayload("en"), { status: 403 });
+    }
 
     if (!planId || !PRICE_IDS[planId]) {
       return NextResponse.json({ error: "Invalid plan" }, { status: 400 });

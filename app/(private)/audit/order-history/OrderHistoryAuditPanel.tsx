@@ -102,7 +102,7 @@ export default function OrderHistoryAuditPanel({
   const evidence = result?.audit?.evidence;
   const insights = result?.audit?.insights as string[] | undefined;
   const summary = result?.audit?.summary as string | undefined;
-  const compliance = result?.plan_compliance as
+  const processReview = (result?.process_review ?? result?.plan_compliance) as
     | {
         score: number | null;
         checklist: {
@@ -114,6 +114,22 @@ export default function OrderHistoryAuditPanel({
         rules: Array<{ label: string; status: "pass" | "fail" | "unknown"; reason: string }>;
         respected_plan: boolean | null;
         plan_present: boolean;
+      }
+    | undefined;
+  const executionDiscipline = result?.execution_discipline as
+    | {
+        score: number | null;
+        checks: Array<{ label: string; status: "pass" | "fail" | "unknown"; reason: string }>;
+        metrics: {
+          stop_present: boolean | null;
+          oco_used: boolean | null;
+          stop_mod_count: number;
+          cancel_count: number;
+          replace_count: number;
+          manual_market_exit: boolean | null;
+          stop_market_filled: boolean | null;
+          time_to_first_stop_sec: number | null;
+        };
       }
     | undefined;
   const trades = result?.audit?.trades as Array<{
@@ -215,14 +231,18 @@ export default function OrderHistoryAuditPanel({
 
           <div className="rounded-3xl border border-slate-800 bg-slate-950/70 p-5">
             <p className="text-[11px] uppercase tracking-[0.18em] text-emerald-300">
-              {L("Audit metrics", "Métricas de auditoría")}
+              {L("Execution discipline", "Disciplina de ejecución")}
             </p>
             {!metrics ? (
               <p className="mt-4 text-sm text-slate-400">
-                {L("Run the audit to see metrics.", "Ejecuta la auditoría para ver métricas.")}
+                {L("Run the audit to see execution discipline.", "Ejecuta la auditoría para ver la disciplina de ejecución.")}
               </p>
             ) : (
               <div className="mt-4 grid gap-3">
+                <MetricCard
+                  label={L("Execution score", "Score de ejecución")}
+                  value={executionDiscipline?.score != null ? `${executionDiscipline.score}%` : "—"}
+                />
                 <MetricCard label={L("OCO used", "OCO usado")} value={metrics.oco_used ? "Yes" : "No"} />
                 <MetricCard label={L("Stop present", "Stop presente")} value={metrics.stop_present ? "Yes" : "No"} />
                 <MetricCard label={L("Stop changes", "Cambios de stop")} value={String(metrics.stop_mod_count ?? 0)} />
@@ -287,46 +307,46 @@ export default function OrderHistoryAuditPanel({
 
         <div className="mt-6 rounded-3xl border border-slate-800 bg-slate-950/70 p-5">
           <p className="text-[11px] uppercase tracking-[0.18em] text-emerald-300">
-            {L("Process compliance", "Cumplimiento de proceso")}
+            {L("Process review", "Revisión del proceso")}
           </p>
-          {!compliance ? (
+          {!processReview ? (
             <p className="mt-3 text-sm text-slate-400">
-              {L("Run the audit to see compliance.", "Ejecuta la auditoría para ver cumplimiento.")}
+              {L("Run the audit to see process review.", "Ejecuta la auditoría para ver la revisión del proceso.")}
             </p>
           ) : (
             <div className="mt-4 space-y-4">
               <div className="grid gap-3 md:grid-cols-3">
                 <MetricCard
-                  label={L("Compliance score", "Score de cumplimiento")}
-                  value={compliance.score != null ? `${compliance.score}%` : "—"}
+                  label={L("Process score", "Score del proceso")}
+                  value={processReview.score != null ? `${processReview.score}%` : "—"}
                 />
                 <MetricCard
                   label={L("Checklist completion", "Checklist completado")}
                   value={
-                    compliance.checklist.total > 0
-                      ? `${compliance.checklist.completed}/${compliance.checklist.total} (${compliance.checklist.completion_pct ?? 0}%)`
+                    processReview.checklist.total > 0
+                      ? `${processReview.checklist.completed}/${processReview.checklist.total} (${processReview.checklist.completion_pct ?? 0}%)`
                       : "—"
                   }
                 />
                 <MetricCard
                   label={L("Plan confirmed", "Plan confirmado")}
                   value={
-                    compliance.respected_plan == null
+                    processReview.respected_plan == null
                       ? L("Unknown", "Desconocido")
-                      : compliance.respected_plan
+                      : processReview.respected_plan
                       ? L("Yes", "Sí")
                       : L("No", "No")
                   }
                 />
               </div>
 
-              {compliance.checklist.missing_items?.length ? (
+              {processReview.checklist.missing_items?.length ? (
                 <div className="rounded-2xl border border-slate-800 bg-slate-950/40 p-4">
                   <p className="text-xs uppercase tracking-[0.18em] text-slate-300">
                     {L("Missing checklist items", "Checklist pendiente")}
                   </p>
                   <ul className="mt-2 space-y-1 text-sm text-slate-200">
-                    {compliance.checklist.missing_items.map((item, idx) => (
+                    {processReview.checklist.missing_items.map((item, idx) => (
                       <li key={idx}>• {item}</li>
                     ))}
                   </ul>
@@ -337,9 +357,9 @@ export default function OrderHistoryAuditPanel({
                 <p className="text-xs uppercase tracking-[0.18em] text-slate-300">
                   {L("Non‑negotiable rules", "Reglas no negociables")}
                 </p>
-                {compliance.rules?.length ? (
+                {processReview.rules?.length ? (
                   <ul className="mt-2 space-y-2 text-sm">
-                    {compliance.rules.map((rule, idx) => {
+                    {processReview.rules.map((rule, idx) => {
                       const color =
                         rule.status === "pass"
                           ? "text-emerald-300"
@@ -364,6 +384,41 @@ export default function OrderHistoryAuditPanel({
                 ) : (
                   <p className="mt-2 text-sm text-slate-400">
                     {L("No active rules found in Growth Plan.", "No hay reglas activas en el Growth Plan.")}
+                  </p>
+                )}
+              </div>
+
+              <div className="rounded-2xl border border-slate-800 bg-slate-950/40 p-4">
+                <p className="text-xs uppercase tracking-[0.18em] text-slate-300">
+                  {L("Execution-discipline checks", "Checks de disciplina de ejecución")}
+                </p>
+                {executionDiscipline?.checks?.length ? (
+                  <ul className="mt-2 space-y-2 text-sm">
+                    {executionDiscipline.checks.map((check, idx) => {
+                      const color =
+                        check.status === "pass"
+                          ? "text-emerald-300"
+                          : check.status === "fail"
+                          ? "text-rose-300"
+                          : "text-slate-300";
+                      return (
+                        <li key={idx} className="flex flex-col gap-1">
+                          <span className={color}>
+                            {check.status === "pass"
+                              ? L("PASS", "CUMPLE")
+                              : check.status === "fail"
+                              ? L("FAIL", "FALLA")
+                              : L("UNKNOWN", "DESCONOCIDO")}{" "}
+                            · {check.label}
+                          </span>
+                          <span className="text-xs text-slate-400">{check.reason}</span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                ) : (
+                  <p className="mt-2 text-sm text-slate-400">
+                    {L("No execution-discipline checks available.", "No hay checks de disciplina de ejecución.")}
                   </p>
                 )}
               </div>

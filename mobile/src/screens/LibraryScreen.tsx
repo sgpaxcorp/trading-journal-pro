@@ -75,7 +75,10 @@ export function LibraryScreen() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!user?.id || !supabaseMobile) return;
+    const sb = supabaseMobile;
+    const userId = user?.id;
+    if (!userId || !sb) return;
+    const supabase = sb;
     let cancelled = false;
 
     async function loadResources(isRefresh = false) {
@@ -86,10 +89,10 @@ export function LibraryScreen() {
 
       const accountId = await fetchActiveAccountId();
 
-      let query = supabaseMobile
+      let query = supabase
         .from(TABLE)
         .select("*")
-        .eq("user_id", user.id);
+        .eq("user_id", userId);
 
       if (accountId) query = query.eq("account_id", accountId);
 

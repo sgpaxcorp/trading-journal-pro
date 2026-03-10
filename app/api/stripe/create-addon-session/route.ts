@@ -1,6 +1,7 @@
 // app/api/stripe/create-addon-session/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
+import { getOptionFlowBetaApiPayload } from "@/lib/optionFlowBeta";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {});
@@ -55,6 +56,10 @@ export async function POST(req: NextRequest) {
     const addonCfg = ADDON_CONFIG[addonKey];
     if (!addonCfg) {
       return NextResponse.json({ error: "Invalid add-on" }, { status: 400 });
+    }
+
+    if (addonKey === "option_flow") {
+      return NextResponse.json(getOptionFlowBetaApiPayload("en"), { status: 403 });
     }
 
     const billingCycle = (body?.billingCycle as "monthly" | "annual" | undefined) || "monthly";

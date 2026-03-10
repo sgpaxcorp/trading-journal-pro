@@ -1,4 +1,8 @@
 import { supabaseBrowser } from "@/lib/supaBaseClient";
+import {
+  normalizeNotebookInkPayload,
+  type NotebookInkPayload,
+} from "@/lib/notebookInk";
 
 export type NotebookBookRow = {
   id: string;
@@ -25,6 +29,7 @@ export type NotebookPageRow = {
   section_id: string | null;
   title: string;
   content: string;
+  ink: NotebookInkPayload | null;
   created_at: string;
   updated_at: string | null;
 };
@@ -79,7 +84,10 @@ export async function listNotebookData(
   return {
     notebooks: (books ?? []) as NotebookBookRow[],
     sections: (sections ?? []) as NotebookSectionRow[],
-    pages: (pages ?? []) as NotebookPageRow[],
+    pages: ((pages ?? []) as NotebookPageRow[]).map((page) => ({
+      ...page,
+      ink: normalizeNotebookInkPayload(page.ink),
+    })),
   };
 }
 
@@ -158,7 +166,12 @@ export async function createNotebookPage(
 export async function updateNotebookPage(
   userId: string,
   pageId: string,
-  patch: Partial<Pick<NotebookPageRow, "title" | "content" | "section_id">>
+  patch: Partial<
+    Pick<
+      NotebookPageRow,
+      "title" | "content" | "section_id" | "notebook_id" | "ink"
+    >
+  >
 ): Promise<boolean> {
   const { error } = await supabaseBrowser
     .from(PAGES_TABLE)
@@ -176,10 +189,31 @@ export async function updateNotebookPage(
   return true;
 }
 
+export async function updateNotebookBook(
+  userId: string,
+  notebookId: string,
+  patch: Partial<Pick<NotebookBookRow, "name" | "account_id">>
+): Promise<boolean> {
+  const { error } = await supabaseBrowser
+    .from(BOOKS_TABLE)
+    .update({
+      ...patch,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", notebookId)
+    .eq("user_id", userId);
+
+  if (error) {
+    console.error("[notebookSupabase] updateNotebookBook error:", error);
+    return false;
+  }
+  return true;
+}
+
 export async function updateNotebookSection(
   userId: string,
   sectionId: string,
-  patch: Partial<Pick<NotebookSectionRow, "name">>
+  patch: Partial<Pick<NotebookSectionRow, "name" | "notebook_id">>
 ): Promise<boolean> {
   const { error } = await supabaseBrowser
     .from(SECTIONS_TABLE)
@@ -192,6 +226,23 @@ export async function updateNotebookSection(
 
   if (error) {
     console.error("[notebookSupabase] updateNotebookSection error:", error);
+    return false;
+  }
+  return true;
+}
+
+export async function deleteNotebookSection(
+  userId: string,
+  sectionId: string
+): Promise<boolean> {
+  const { error } = await supabaseBrowser
+    .from(SECTIONS_TABLE)
+    .delete()
+    .eq("id", sectionId)
+    .eq("user_id", userId);
+
+  if (error) {
+    console.error("[notebookSupabase] deleteNotebookSection error:", error);
     return false;
   }
   return true;

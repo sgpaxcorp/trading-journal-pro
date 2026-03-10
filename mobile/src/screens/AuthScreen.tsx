@@ -7,34 +7,19 @@ import { supabaseMobile } from "../lib/supabase";
 import { type ThemeColors } from "../theme";
 import { useTheme } from "../lib/ThemeContext";
 
-export type AuthMode = "signin" | "signup";
-
 const logo = require("../../assets/apple-touch-icon.png");
 
-type AuthScreenProps = {
-  mode: AuthMode;
-  onToggleMode: () => void;
-};
-
-export function AuthScreen({ mode, onToggleMode }: AuthScreenProps) {
+export function AuthScreen() {
   const { language } = useLanguage();
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const isSignUp = mode === "signup";
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-
-  const submitLabel = useMemo(
-    () => (isSignUp ? t(language, "Create account", "Crear cuenta") : t(language, "Sign in", "Iniciar sesión")),
-    [isSignUp, language]
-  );
 
   async function handleSubmit() {
     setError(null);
-    setStatus(null);
 
     if (!email.trim() || !password.trim()) {
       setError(t(language, "Enter email and password.", "Escribe email y contraseña."));
@@ -54,25 +39,6 @@ export function AuthScreen({ mode, onToggleMode }: AuthScreenProps) {
 
     setBusy(true);
     try {
-      if (isSignUp) {
-        const { error } = await supabaseMobile.auth.signUp({
-          email: email.trim(),
-          password: password.trim(),
-        });
-        if (error) {
-          setError(error.message);
-          return;
-        }
-        setStatus(
-          t(
-            language,
-            "Account created. Check your inbox to verify your email.",
-            "Cuenta creada. Revisa tu correo para verificar tu email."
-          )
-        );
-        return;
-      }
-
       const { error } = await supabaseMobile.auth.signInWithPassword({
         email: email.trim(),
         password: password.trim(),
@@ -92,14 +58,12 @@ export function AuthScreen({ mode, onToggleMode }: AuthScreenProps) {
       </View>
       <View style={styles.card}>
         <Text style={styles.kicker}>Neuro Trader</Text>
-        <Text style={styles.title}>
-          {isSignUp ? t(language, "Create your account", "Crea tu cuenta") : t(language, "Sign in", "Inicia sesión")}
-        </Text>
+        <Text style={styles.title}>{t(language, "Sign in", "Inicia sesión")}</Text>
         <Text style={styles.subtitle}>
           {t(
             language,
-            "Sign in to access your dashboard, journal, and analytics.",
-            "Inicia sesión para acceder a tu dashboard, journal y analíticas."
+            "Sign in with your existing account to access your dashboard, journal, and analytics.",
+            "Inicia sesión con tu cuenta existente para acceder a tu dashboard, journal y analíticas."
           )}
         </Text>
 
@@ -123,19 +87,14 @@ export function AuthScreen({ mode, onToggleMode }: AuthScreenProps) {
         />
 
         <Pressable style={styles.primaryButton} onPress={handleSubmit} disabled={busy}>
-          {busy ? <ActivityIndicator color={colors.onPrimary} /> : <Text style={styles.primaryButtonText}>{submitLabel}</Text>}
-        </Pressable>
-
-        <Pressable onPress={onToggleMode}>
-          <Text style={styles.linkText}>
-            {isSignUp
-              ? t(language, "Already have an account? Sign in", "¿Ya tienes cuenta? Inicia sesión")
-              : t(language, "Need an account? Create one", "¿No tienes cuenta? Crea una")}
-          </Text>
+          {busy ? (
+            <ActivityIndicator color={colors.onPrimary} />
+          ) : (
+            <Text style={styles.primaryButtonText}>{t(language, "Sign in", "Iniciar sesión")}</Text>
+          )}
         </Pressable>
 
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
-        {status ? <Text style={styles.statusText}>{status}</Text> : null}
       </View>
     </View>
   );
@@ -208,19 +167,8 @@ const createStyles = (colors: ThemeColors) =>
       fontWeight: "700",
       fontSize: 14,
     },
-    linkText: {
-      color: colors.textPrimary,
-      textAlign: "center",
-      marginTop: 2,
-      fontSize: 12,
-    },
     errorText: {
       color: colors.danger,
-      fontSize: 12,
-      textAlign: "center",
-    },
-    statusText: {
-      color: colors.primary,
       fontSize: 12,
       textAlign: "center",
     },

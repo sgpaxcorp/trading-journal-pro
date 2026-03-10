@@ -86,12 +86,14 @@ export function TrophiesScreen() {
 
       if (loadError && supabaseMobile) {
         try {
+          const userId = user?.id;
+          if (!userId) throw new Error("Missing user");
           let rpcRes = await supabaseMobile.rpc("nt_public_user_trophies", {
-            target_user: user.id,
+            target_user: userId,
           });
           if (rpcRes.error) {
             rpcRes = await supabaseMobile.rpc("nt_public_user_trophies", {
-              p_user_id: user.id,
+              p_user_id: userId,
             });
           }
           if (!rpcRes.error && Array.isArray(rpcRes.data)) {

@@ -121,12 +121,13 @@ export function AICoachScreen({}: AICoachScreenProps) {
 
   useEffect(() => {
     if (!activeThread?.id) return;
+    const threadId = activeThread.id;
     let active = true;
 
     async function loadMessages() {
       try {
         setLoadingMessages(true);
-        const data = await fetchMessages(activeThread.id);
+        const data = await fetchMessages(threadId);
         if (!active) return;
         setMessages(data ?? []);
         setTimeout(() => listRef.current?.scrollToEnd({ animated: false }), 50);

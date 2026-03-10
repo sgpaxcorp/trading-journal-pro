@@ -64,7 +64,10 @@ export function ChallengesScreen() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!supabaseMobile || !user?.id) return;
+    const sb = supabaseMobile;
+    const userId = user?.id;
+    if (!sb || !userId) return;
+    const supabase = sb;
 
     let cancelled = false;
 
@@ -74,12 +77,12 @@ export function ChallengesScreen() {
       }
       setError(null);
 
-      const { data, error: runErr } = await supabaseMobile
+      const { data, error: runErr } = await supabase
         .from("challenge_runs")
         .select(
           "id,challenge_id,status,duration_days,required_green_days,days_tracked,process_green_days,max_loss_breaks,xp_earned,current_streak,best_streak,last_tracked_date,started_at,ended_at,created_at"
         )
-        .eq("user_id", user.id)
+        .eq("user_id", userId)
         .order("created_at", { ascending: false });
 
       if (!cancelled) {

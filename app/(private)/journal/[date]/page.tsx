@@ -2549,6 +2549,25 @@ export default function DailyJournalPage() {
               />
             </div>
 
+            <div className="border-t border-slate-800 pt-3 mt-4">
+              <p className="text-slate-200 text-sm font-semibold mb-2">
+                {L("Exit evidence", "Evidencia de salida")}
+              </p>
+              <div className="flex flex-wrap gap-2 text-[13px] leading-snug">
+                {EXIT_REASON_TAGS.map((t) => (
+                  <label key={t} className={tagPillClass(!!entry.tags?.includes(t))}>
+                    <input
+                      type="checkbox"
+                      onChange={() => toggleTag(t)}
+                      checked={entry.tags?.includes(t)}
+                      className={tagCheckboxClass}
+                    />
+                    <span className="wrap-break-word">{tagLabel(t, EXIT_REASON_LABELS)}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+
             <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
               <div>
                 <label className="text-[11px] uppercase tracking-wide text-slate-400">
@@ -2862,25 +2881,6 @@ export default function DailyJournalPage() {
                 left={L("Low", "Baja")}
                 right={L("High", "Alta")}
               />
-            </div>
-          </div>
-
-          <div className="border-t border-slate-800 pt-3 mt-4">
-            <p className="text-slate-200 text-sm font-semibold mb-2">
-              {L("Exit evidence", "Evidencia de salida")}
-            </p>
-            <div className="flex flex-wrap gap-2 text-[13px] leading-snug">
-              {EXIT_REASON_TAGS.map((t) => (
-                <label key={t} className={tagPillClass(!!entry.tags?.includes(t))}>
-                  <input
-                    type="checkbox"
-                    onChange={() => toggleTag(t)}
-                    checked={entry.tags?.includes(t)}
-                    className={tagCheckboxClass}
-                  />
-                  <span className="wrap-break-word">{tagLabel(t, EXIT_REASON_LABELS)}</span>
-                </label>
-              ))}
             </div>
           </div>
         </WidgetCard>

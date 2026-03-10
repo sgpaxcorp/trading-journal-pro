@@ -2,6 +2,8 @@
 ## Access
 - Left navigation → Option Flow.
 
+Status: private beta. Public access is disabled while the module is in development and test mode.
+
 Option Flow turns raw flow data into a premarket plan. It is not a signal service — it is a structured summary you validate with your own chart and rules.
 
 ## Standard workflow

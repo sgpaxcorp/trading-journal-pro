@@ -49,7 +49,10 @@ export function GlobalRankingScreen() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!supabaseMobile || !user?.id) return;
+    const sb = supabaseMobile;
+    const userId = user?.id;
+    if (!sb || !userId) return;
+    const supabase = sb;
 
     let cancelled = false;
 
@@ -62,7 +65,7 @@ export function GlobalRankingScreen() {
       let leaderboard: any[] | null = null;
       let lbError: any = null;
 
-      const primary = await supabaseMobile.rpc("nt_public_leaderboard", {
+      const primary = await supabase.rpc("nt_public_leaderboard", {
         limit_num: DEFAULT_LIMIT,
         offset_num: 0,
       });
@@ -71,7 +74,7 @@ export function GlobalRankingScreen() {
       lbError = primary.error;
 
       if (lbError) {
-        const alt = await supabaseMobile.rpc("nt_public_leaderboard", {
+        const alt = await supabase.rpc("nt_public_leaderboard", {
           p_limit: DEFAULT_LIMIT,
           p_offset: 0,
         });
@@ -82,16 +85,16 @@ export function GlobalRankingScreen() {
       let profileRow: any = null;
       let profileError: any = null;
 
-      const profileRes = await supabaseMobile.rpc("nt_public_user_profile", {
-        target_user: user.id,
+      const profileRes = await supabase.rpc("nt_public_user_profile", {
+        target_user: userId,
       });
 
       profileRow = profileRes.data;
       profileError = profileRes.error;
 
       if (profileError) {
-        const altProfile = await supabaseMobile.rpc("nt_public_user_profile", {
-          p_user_id: user.id,
+        const altProfile = await supabase.rpc("nt_public_user_profile", {
+          p_user_id: userId,
         });
         profileRow = altProfile.data;
         profileError = altProfile.error;
@@ -127,7 +130,7 @@ export function GlobalRankingScreen() {
           const row = Array.isArray(profileRow) ? profileRow[0] : profileRow;
           if (row) {
             setProfile({
-              user_id: String(row.user_id ?? user.id),
+              user_id: String(row.user_id ?? userId),
               display_name: String(row.display_name ?? "Trader"),
               avatar_url: (row.avatar_url ?? null) as string | null,
               tier: String(row.tier ?? "Bronze"),

@@ -158,6 +158,11 @@ function getUsMarketHolidays(year: number, isEs: boolean): Holiday[] {
   return holidays;
 }
 
+function formatCalendarPnl(value: number) {
+  const sign = value > 0 ? "+" : value < 0 ? "-" : "";
+  return `${sign}$${Math.abs(value).toFixed(0)}`;
+}
+
 type AccountSeriesResponse = {
   daily: { date: string; value: number }[];
 };
@@ -312,7 +317,7 @@ export function CalendarScreen({ onOpenJournalDate }: CalendarScreenProps) {
                       </Text>
                     </>
                   ) : pnl != null ? (
-                    <Text style={styles.pnlLabel}>{pnl.toFixed(0)}</Text>
+                    <Text style={styles.pnlLabel}>{formatCalendarPnl(pnl)}</Text>
                   ) : null}
                 </>
               );
@@ -448,15 +453,16 @@ const createStyles = (colors: ThemeColors) =>
     },
     dayLabel: {
       color: colors.textPrimary,
-      fontSize: 12,
-      fontWeight: "600",
+      fontSize: 15,
+      fontWeight: "800",
     },
     mutedLabel: {
       color: colors.textMuted,
     },
     pnlLabel: {
       color: colors.textMuted,
-      fontSize: 9,
+      fontSize: 10,
+      fontWeight: "600",
     },
     winCell: {
       borderColor: colors.success,

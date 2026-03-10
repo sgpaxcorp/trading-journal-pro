@@ -156,7 +156,10 @@ export function DashboardScreen({ onOpenModule, onOpenJournalDate }: DashboardSc
   }, []);
 
   useEffect(() => {
-    if (!user?.id || !supabaseMobile) return;
+    const sb = supabaseMobile;
+    const userId = user?.id;
+    if (!userId || !sb) return;
+    const supabase = sb;
     let cancelled = false;
 
     async function loadTradingSystem() {
@@ -167,10 +170,10 @@ export function DashboardScreen({ onOpenModule, onOpenJournalDate }: DashboardSc
       let plan: PlanRow | null = null;
 
       for (const table of tables) {
-        let query = supabaseMobile
+        let query = supabase
           .from(table)
           .select("steps, updated_at, created_at")
-          .eq("user_id", user.id)
+          .eq("user_id", userId)
           .order("updated_at", { ascending: false })
           .order("created_at", { ascending: false })
           .limit(1);
@@ -181,10 +184,10 @@ export function DashboardScreen({ onOpenModule, onOpenJournalDate }: DashboardSc
         const { data, error: loadError } = await query;
 
         if (loadError && accountId) {
-          const alt = await supabaseMobile
+          const alt = await supabase
             .from(table)
             .select("steps, updated_at, created_at")
-            .eq("user_id", user.id)
+            .eq("user_id", userId)
             .order("updated_at", { ascending: false })
             .order("created_at", { ascending: false })
             .limit(1);
@@ -690,6 +693,56 @@ const createStyles = (colors: ThemeColors) =>
       fontSize: 11,
       fontWeight: "700",
       marginTop: 6,
+    },
+    systemCard: {
+      marginTop: 8,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.card,
+      padding: 12,
+      gap: 10,
+    },
+    systemTitle: {
+      color: colors.textPrimary,
+      fontSize: 14,
+      fontWeight: "700",
+    },
+    systemHint: {
+      color: colors.textMuted,
+      fontSize: 12,
+      lineHeight: 18,
+    },
+    systemLink: {
+      color: colors.primary,
+      fontWeight: "700",
+    },
+    systemGrid: {
+      flexDirection: "row",
+      gap: 10,
+    },
+    systemSection: {
+      flex: 1,
+      gap: 6,
+    },
+    systemLabel: {
+      color: colors.success,
+      fontSize: 11,
+      fontWeight: "700",
+      textTransform: "uppercase",
+      letterSpacing: 1.1,
+    },
+    systemLabelDont: {
+      color: colors.danger,
+      fontSize: 11,
+      fontWeight: "700",
+      textTransform: "uppercase",
+      letterSpacing: 1.1,
+    },
+    systemItem: {
+      color: colors.textPrimary,
+      fontSize: 12,
+      lineHeight: 18,
     },
     focusList: {
       gap: 6,

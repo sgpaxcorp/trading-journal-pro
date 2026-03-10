@@ -5,13 +5,19 @@
 
 Neuro Trader Journal is a performance system. The fastest way to value is to complete one full loop: plan → execute → journal → review. This guide shows the exact sequence and the standard quality bar for each step.
 
+Important access rule:
+1. Web is where you create the account, choose the plan, and manage billing.
+2. Mobile is for existing users who already have access and want to review, journal, and receive reminders on the go.
+
 ## What “done” looks like
 You have a saved Growth Plan, at least one completed trading session in the Journal, and a dashboard that reflects those sessions.
 
-## 1) Create the account and confirm access
+## 1) Create the account on web and confirm access
 This unlocks the workspace and connects your profile to storage, reports, and AI coaching. Use the same email you plan to use long‑term, because that email anchors all imports, history, and entitlements.
 
-## 2) Choose the plan that matches your workflow
+After access is active, use that same account to sign in on mobile. The mobile app does not create accounts or process payments.
+
+## 2) Choose the plan on web that matches your workflow
 Core is the disciplined journaling foundation. Advanced is for traders who need deeper analytics, reports, and AI coaching. If you expect to review performance weekly and make systematic changes, Advanced is the practical choice.
 
 ## 3) Build your Growth Plan (this is the system’s backbone)

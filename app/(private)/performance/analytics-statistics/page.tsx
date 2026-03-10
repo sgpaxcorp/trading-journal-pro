@@ -3423,6 +3423,20 @@ function StatisticsSection({
   const T = (en: string, es: string) => LL(lang, en, es);
   const [kpiView, setKpiView] = useState<KpiViewFilter>("all");
   const [openKpiId, setOpenKpiId] = useState<KPIId | null>(null);
+  const hiddenKpiIds = useMemo<Set<KPIId>>(
+    () =>
+      new Set<KPIId>([
+        "calmar_ratio",
+        "mar_ratio",
+        "treynor_ratio",
+        "var_95",
+        "cvar_95",
+        "omega_ratio",
+        "kappa_3_ratio",
+        "ulcer_index",
+      ]),
+    []
+  );
   // if you have a trade ledger, load it here; for now we infer from sessions
   const ledgerClosedTrades = useMemo(() => [], []);
   const ledgerOpenPositions = useMemo(() => [], []);
@@ -3449,10 +3463,119 @@ function StatisticsSection({
     "exposure",
   ];
 
+  const visibleKpis = useMemo(
+    () => (kpis ?? []).filter((k) => !hiddenKpiIds.has(k.id)),
+    [kpis, hiddenKpiIds]
+  );
+
+  const beginnerStats = useMemo(() => {
+    const sessionPnls = (sessions ?? []).map((s) => toNumberMaybe(s.pnlNet));
+    const greenDays = sessionPnls.filter((pnl) => pnl > 0);
+    const redDays = sessionPnls.filter((pnl) => pnl < 0);
+    const activeDays = sessionPnls.filter((pnl) => pnl !== 0);
+    const bestDay = sessionPnls.length ? Math.max(...sessionPnls) : null;
+    const worstDay = sessionPnls.length ? Math.min(...sessionPnls) : null;
+    const greenRate = activeDays.length ? (greenDays.length / activeDays.length) * 100 : null;
+    const redRate = activeDays.length ? (redDays.length / activeDays.length) * 100 : null;
+    const avgGreenDay = greenDays.length ? mean(greenDays) : null;
+    const avgRedDay = redDays.length ? mean(redDays) : null;
+    const avgActiveDayResult = activeDays.length ? mean(activeDays) : null;
+    const tradesPerDay = tradeStats?.tradeDays ? (tradeStats.tradeCount || 0) / tradeStats.tradeDays : null;
+
+    return [
+      {
+        label: T("Green days", "Días verdes"),
+        value:
+          greenRate != null
+            ? `${greenDays.length} · ${fmtPct(greenRate)}`
+            : "—",
+        help: T(
+          "Winning days as a share of active days. Flat days are excluded.",
+          "Días ganadores como porcentaje de días con actividad. Días planos se excluyen."
+        ),
+      },
+      {
+        label: T("Red days", "Días rojos"),
+        value:
+          redRate != null
+            ? `${redDays.length} · ${fmtPct(redRate)}`
+            : "—",
+        help: T(
+          "Losing days as a share of active days. Flat days are excluded.",
+          "Días perdedores como porcentaje de días con actividad. Días planos se excluyen."
+        ),
+      },
+      {
+        label: T("Avg green day", "Promedio día verde"),
+        value: avgGreenDay != null ? fmtUsd(avgGreenDay) : "—",
+        help: T(
+          "Average profit on your winning days.",
+          "Ganancia promedio en tus días positivos."
+        ),
+      },
+      {
+        label: T("Avg red day", "Promedio día rojo"),
+        value: avgRedDay != null ? fmtUsd(avgRedDay) : "—",
+        help: T(
+          "Average loss on your losing days.",
+          "Pérdida promedio en tus días negativos."
+        ),
+      },
+      {
+        label: T("Avg winning trade time", "Tiempo prom. trade ganador"),
+        value: agg.avgHoldWinMins != null ? `${agg.avgHoldWinMins.toFixed(0)} min` : "—",
+        help: T(
+          "Average time you stay in winning trades.",
+          "Tiempo promedio que permaneces en trades ganadores."
+        ),
+      },
+      {
+        label: T("Avg losing trade time", "Tiempo prom. trade perdedor"),
+        value: agg.avgHoldLossMins != null ? `${agg.avgHoldLossMins.toFixed(0)} min` : "—",
+        help: T(
+          "Average time you stay in losing trades.",
+          "Tiempo promedio que permaneces en trades perdedores."
+        ),
+      },
+      {
+        label: T("Best day", "Mejor día"),
+        value: bestDay != null ? fmtUsd(bestDay) : "—",
+        help: T(
+          "Highest single-day result in the selected range.",
+          "Mejor resultado diario dentro del rango seleccionado."
+        ),
+      },
+      {
+        label: T("Trades per active day", "Trades por día activo"),
+        value: tradesPerDay != null ? tradesPerDay.toFixed(2) : "—",
+        help: T(
+          "Average number of closed trades on days where you traded.",
+          "Cantidad promedio de trades cerrados en los días donde operaste."
+        ),
+      },
+      {
+        label: T("Avg result per active day", "Resultado prom. por día activo"),
+        value: avgActiveDayResult != null ? fmtUsd(avgActiveDayResult) : "—",
+        help: T(
+          "Average P&L on the days where you had trading activity.",
+          "P&L promedio en los días donde tuviste actividad de trading."
+        ),
+      },
+      {
+        label: T("Worst day", "Peor día"),
+        value: worstDay != null ? fmtUsd(worstDay) : "—",
+        help: T(
+          "Lowest single-day result in the selected range.",
+          "Peor resultado diario dentro del rango seleccionado."
+        ),
+      },
+    ];
+  }, [sessions, tradeStats, agg.avgHoldWinMins, agg.avgHoldLossMins, T]);
+
   const kpiScores = useMemo(() => {
     const scoreMap = new Map<KPIId, number>();
     const byType = new Map<string, { min: number; max: number }>();
-    const candidates = (kpis ?? []).filter(
+    const candidates = visibleKpis.filter(
       (k) => k.value != null && Number.isFinite(k.value) && KPI_DIRECTION[k.id]
     );
 
@@ -3480,11 +3603,11 @@ function StatisticsSection({
     }
 
     return scoreMap;
-  }, [kpis]);
+  }, [visibleKpis]);
 
   const kpiToneMap = useMemo(() => {
     const toneMap = new Map<KPIId, StatTone>();
-    for (const k of kpis ?? []) {
+    for (const k of visibleKpis) {
       const score = kpiScores.get(k.id);
       if (score == null) {
         toneMap.set(k.id, "neutral");
@@ -3497,7 +3620,7 @@ function StatisticsSection({
       }
     }
     return toneMap;
-  }, [kpis, kpiScores]);
+  }, [visibleKpis, kpiScores]);
 
   useEffect(() => {
     setOpenKpiId(null);
@@ -3507,7 +3630,7 @@ function StatisticsSection({
     const groups = orderedCategories.map((cat) => ({
       category: cat,
       label: categoryLabels[cat],
-      items: (kpis ?? []).filter((k) => k.category === cat),
+      items: visibleKpis.filter((k) => k.category === cat),
     }));
     const withCategory = kpiCategory === "all" ? groups : groups.filter((g) => g.category === kpiCategory);
     if (kpiView === "all") return withCategory;
@@ -3520,7 +3643,7 @@ function StatisticsSection({
         return kpiView === "strong" ? score >= threshold : score <= threshold;
       }),
     }));
-  }, [kpis, kpiCategory, kpiView, categoryLabels, kpiScores]);
+  }, [visibleKpis, kpiCategory, kpiView, categoryLabels, kpiScores]);
 
   const formatKpiValue = (k: KPIResult): string => {
     if (k.value == null || !Number.isFinite(k.value)) return "—";
@@ -3533,8 +3656,27 @@ function StatisticsSection({
 
   return (
     <div className="space-y-6">
+      <Card title={T("Simple trading stats", "Métricas simples de trading")}>
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-sm">
+          {beginnerStats.map((stat) => (
+            <MiniStat
+              key={stat.label}
+              label={stat.label}
+              value={stat.value}
+              help={stat.help}
+            />
+          ))}
+        </div>
+        <p className="mt-4 text-[11px] text-slate-500">
+          {T(
+            "These metrics are meant to answer the basics fast: how often you win, how big your good/bad days are, how long you hold winners vs losers, and what each active day usually produces.",
+            "Estas métricas responden lo básico rápido: con qué frecuencia ganas, qué tamaño tienen tus días buenos/malos, cuánto tiempo mantienes ganadores vs perdedores y qué suele producir cada día activo."
+          )}
+        </p>
+      </Card>
+
       <Card
-        title={T("Institutional KPIs", "KPIs institucionales")}
+        title={T("Advanced trading KPIs", "KPIs avanzados de trading")}
         right={(
           <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
             <span>{T("Category", "Categoría")}</span>
@@ -3592,6 +3734,12 @@ function StatisticsSection({
             {T(
               "Percent KPIs are shown in percent points. Missing data returns a dash.",
               "Los KPIs en % se muestran en puntos porcentuales. Datos faltantes muestran un guion."
+            )}
+          </p>
+          <p className="text-[11px] text-slate-500">
+            {T(
+              "More technical ratios were intentionally hidden here to keep this view easier to understand.",
+              "Las razones más técnicas se ocultaron intencionalmente para que esta vista sea más fácil de entender."
             )}
           </p>
           <p className="text-[11px] text-slate-500 flex flex-wrap items-center gap-3">

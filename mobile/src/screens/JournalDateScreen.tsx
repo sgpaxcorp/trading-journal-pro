@@ -4,6 +4,7 @@ import { useRoute } from "@react-navigation/native";
 
 import { ScreenScaffold } from "../components/ScreenScaffold";
 import { InkField } from "../components/InkField";
+import type { InkFieldHandle } from "../components/InkField";
 import type { InkDrawing } from "../components/inkTypes";
 import { useLanguage } from "../lib/LanguageContext";
 import { t } from "../lib/i18n";
@@ -330,9 +331,15 @@ export function JournalDateScreen() {
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const isoDate = toYmd(date);
-  const { width } = useWindowDimensions();
+  const { width, height: screenHeight } = useWindowDimensions();
   const pageWidth = Math.max(width - 32, 280);
   const pagerRef = useRef<ScrollView>(null);
+  const premarketFieldRef = useRef<InkFieldHandle>(null);
+  const liveFieldRef = useRef<InkFieldHandle>(null);
+  const postFieldRef = useRef<InkFieldHandle>(null);
+  const afterDidWellFieldRef = useRef<InkFieldHandle>(null);
+  const afterImproveFieldRef = useRef<InkFieldHandle>(null);
+  const journalFieldHeight = Math.max(420, Math.min(560, Math.round(screenHeight * 0.48)));
   const [sectionIndex, setSectionIndex] = useState(0);
 
   useEffect(() => {
@@ -580,6 +587,16 @@ export function JournalDateScreen() {
       if (accountId) entryQuery = entryQuery.eq("account_id", accountId);
       const { data: entryData } = await entryQuery.maybeSingle();
       const existingNotes = parseNotes((entryData as any)?.notes ?? "");
+      const latestPremarketInk = await premarketFieldRef.current?.getCurrentInk();
+      const latestLiveInk = await liveFieldRef.current?.getCurrentInk();
+      const latestPostInk = await postFieldRef.current?.getCurrentInk();
+      const latestAfterDidWellInk = await afterDidWellFieldRef.current?.getCurrentInk();
+      const latestAfterImproveInk = await afterImproveFieldRef.current?.getCurrentInk();
+      if (latestPremarketInk) setPremarketInk(latestPremarketInk);
+      if (latestLiveInk) setLiveInk(latestLiveInk);
+      if (latestPostInk) setPostInk(latestPostInk);
+      if (latestAfterDidWellInk) setAfterDidWellInk(latestAfterDidWellInk);
+      if (latestAfterImproveInk) setAfterImproveInk(latestAfterImproveInk);
       const toNumOrNull = (value: string) => {
         const n = Number(value);
         if (!Number.isFinite(n)) return null;
@@ -593,16 +610,16 @@ export function JournalDateScreen() {
         premarket_mode: premarketMode,
         live_mode: liveMode,
         post_mode: postMode,
-        premarket_ink: premarketInk,
-        live_ink: liveInk,
-        post_ink: postInk,
+        premarket_ink: latestPremarketInk ?? premarketInk,
+        live_ink: latestLiveInk ?? liveInk,
+        post_ink: latestPostInk ?? postInk,
         after_review_note_mode: {
           didWell: afterDidWellMode,
           improve: afterImproveMode,
         },
         after_review_note_ink: {
-          didWell: afterDidWellInk,
-          improve: afterImproveInk,
+          didWell: latestAfterDidWellInk ?? afterDidWellInk,
+          improve: latestAfterImproveInk ?? afterImproveInk,
         },
         mindset,
         checklists,
@@ -802,6 +819,7 @@ export function JournalDateScreen() {
 
   const premarketSection = (
     <InkField
+      ref={premarketFieldRef}
       label={t(language, "Premarket", "Premarket")}
       mode={premarketMode}
       onModeChange={setPremarketMode}
@@ -810,12 +828,13 @@ export function JournalDateScreen() {
       inkValue={premarketInk}
       onInkChange={setPremarketInk}
       placeholder={t(language, "Premarket plan, bias, levels…", "Plan premarket, sesgo, niveles…")}
-      height={300}
+      height={journalFieldHeight}
     />
   );
 
   const insideSection = (
     <InkField
+      ref={liveFieldRef}
       label={t(language, "Inside trade", "Inside trade")}
       mode={liveMode}
       onModeChange={setLiveMode}
@@ -824,12 +843,13 @@ export function JournalDateScreen() {
       inkValue={liveInk}
       onInkChange={setLiveInk}
       placeholder={t(language, "Notes during the trade…", "Notas durante el trade…")}
-      height={300}
+      height={journalFieldHeight}
     />
   );
 
   const afterSection = (
     <InkField
+      ref={postFieldRef}
       label={t(language, "After trade", "After trade")}
       mode={postMode}
       onModeChange={setPostMode}
@@ -838,7 +858,7 @@ export function JournalDateScreen() {
       inkValue={postInk}
       onInkChange={setPostInk}
       placeholder={t(language, "Post‑trade review…", "Revisión post‑trade…")}
-      height={300}
+      height={journalFieldHeight}
     />
   );
 
@@ -1062,6 +1082,7 @@ export function JournalDateScreen() {
         </View>
       </View>
       <InkField
+        ref={afterDidWellFieldRef}
         label={t(language, "Did well", "Lo que hice bien")}
         mode={afterDidWellMode}
         onModeChange={setAfterDidWellMode}
@@ -1070,9 +1091,10 @@ export function JournalDateScreen() {
         inkValue={afterDidWellInk}
         onInkChange={setAfterDidWellInk}
         placeholder={t(language, "What went well?", "¿Qué salió bien?")}
-        height={300}
+        height={journalFieldHeight}
       />
       <InkField
+        ref={afterImproveFieldRef}
         label={t(language, "Improve", "Mejorar")}
         mode={afterImproveMode}
         onModeChange={setAfterImproveMode}
@@ -1081,7 +1103,7 @@ export function JournalDateScreen() {
         inkValue={afterImproveInk}
         onInkChange={setAfterImproveInk}
         placeholder={t(language, "What will you improve?", "¿Qué mejorarás?")}
-        height={300}
+        height={journalFieldHeight}
       />
     </View>
   );

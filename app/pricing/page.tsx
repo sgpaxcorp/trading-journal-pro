@@ -44,10 +44,6 @@ export default function PricingPage() {
     advanced: { monthly: 26.99, annual: 269.90 },
   } as const;
 
-  const OPTION_FLOW = {
-    monthly: 6.99,
-    annual: 69.90,
-  } as const;
   const BROKER_SYNC = {
     monthly: 5.0,
     annual: 50.0,
@@ -371,40 +367,32 @@ export default function PricingPage() {
             <div className="rounded-2xl border border-slate-800 bg-slate-950/80 p-5 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
               <div>
                 <p className="text-[10px] uppercase tracking-[0.2em] text-slate-400">
-                  {L("Add-on", "Add-on")}
+                  {L("Private beta", "Beta privada")}
                 </p>
                 <h3 className="text-sm font-semibold text-slate-50">
                   {L("Option Flow Intelligence", "Option Flow Intelligence")}
                 </h3>
                 <p className="text-[10px] text-slate-300 mt-1">
                   {L(
-                    "Add deep options flow analytics to any plan (Core or Advanced).",
-                    "Agrega analítica profunda de options flow a cualquier plan (Core o Advanced)."
+                    "Currently in development and test mode. Public access is disabled while we validate reports and workflow quality.",
+                    "Actualmente en development y test mode. El acceso público está deshabilitado mientras validamos reportes y calidad del workflow."
                   )}
                 </p>
               </div>
               <div className="flex items-center gap-3">
                 <div className="rounded-xl border border-emerald-400/40 bg-emerald-500/10 px-4 py-2 text-center">
                   <div className="text-emerald-300 text-[10px] uppercase tracking-[0.15em]">
-                    {billingCycle === "monthly" ? L("Monthly", "Mensual") : L("Annual", "Anual")}
+                    BETA
                   </div>
                   <div className="text-emerald-200 text-2xl font-semibold leading-none">
-                    ${
-                      billingCycle === "monthly"
-                        ? OPTION_FLOW.monthly.toFixed(2)
-                        : OPTION_FLOW.annual.toFixed(2)
-                    }
+                    {L("Private", "Privado")}
                   </div>
                   <div className="text-[9px] text-slate-400">
-                    {billingCycle === "monthly"
-                      ? L("per month", "por mes")
-                      : L("per year", "por año")}
+                    {L("Internal testing only", "Solo pruebas internas")}
                   </div>
                 </div>
                 <div className="text-[9px] text-slate-500">
-                  {billingCycle === "annual"
-                    ? L("Billed annually", "Facturado anual")
-                    : L("Billed monthly", "Facturado mensual")}
+                  {L("Not for public sale", "No disponible para venta pública")}
                 </div>
               </div>
             </div>

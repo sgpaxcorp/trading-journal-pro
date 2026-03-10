@@ -6,19 +6,13 @@ import * as Device from "expo-device";
 import Constants from "expo-constants";
 
 import { ScreenScaffold } from "../components/ScreenScaffold";
-import { apiGet, apiPost } from "../lib/api";
+import { apiPost } from "../lib/api";
 import { useLanguage } from "../lib/LanguageContext";
 import { t } from "../lib/i18n";
 import { useSupabaseUser } from "../lib/useSupabaseUser";
 import { supabaseMobile } from "../lib/supabase";
 import { type ThemeColors } from "../theme";
 import { useTheme } from "../lib/ThemeContext";
-
-type Entitlement = {
-  entitlement_key?: string | null;
-  status?: string | null;
-  metadata?: Record<string, any> | null;
-};
 
 export function SettingsScreen() {
   const { language, setLanguage } = useLanguage();
@@ -42,9 +36,6 @@ export function SettingsScreen() {
   const [pushToken, setPushToken] = useState<string | null>(null);
   const [testNotifLoading, setTestNotifLoading] = useState(false);
   const [serverNotifLoading, setServerNotifLoading] = useState(false);
-  const [planLoading, setPlanLoading] = useState(false);
-  const [currentPlan, setCurrentPlan] = useState<"core" | "advanced" | null>(null);
-  const [planStatus, setPlanStatus] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const mountedRef = useRef(true);
 
@@ -174,66 +165,6 @@ export function SettingsScreen() {
       active = false;
     };
   }, [user?.id, language]);
-
-  const normalizePlan = useCallback((raw: unknown): "core" | "advanced" | null => {
-    const v = String(raw ?? "").toLowerCase();
-    if (v.includes("advanced")) return "advanced";
-    if (v.includes("core")) return "core";
-    return null;
-  }, []);
-
-  const isActiveStatus = useCallback((status?: string | null) => {
-    const s = String(status ?? "").toLowerCase();
-    return ["active", "trialing", "past_due"].includes(s);
-  }, []);
-
-  const loadPlan = useCallback(async () => {
-    if (!user?.id) return;
-    try {
-      setPlanLoading(true);
-      let plan: "core" | "advanced" | null = null;
-      let status: string | null = null;
-
-      if (supabaseMobile) {
-        const { data, error } = await supabaseMobile
-          .from("profiles")
-          .select("plan, subscription_status")
-          .eq("id", user.id)
-          .maybeSingle();
-        if (!error && data) {
-          plan = normalizePlan((data as any)?.plan);
-          status = String((data as any)?.subscription_status ?? "");
-        }
-      }
-
-      if (!plan || !isActiveStatus(status)) {
-        const res = await apiGet<{ entitlements: Entitlement[] }>("/api/entitlements/list");
-        const entitlements = res?.entitlements ?? [];
-        const activeEntitlements = entitlements.filter((e) => isActiveStatus(e.status));
-        const entPlan =
-          activeEntitlements.find((e) => normalizePlan(e.entitlement_key)) ??
-          activeEntitlements.find((e) => normalizePlan(e.metadata?.planId || e.metadata?.plan));
-
-        if (entPlan) {
-          plan = normalizePlan(entPlan.entitlement_key || entPlan.metadata?.planId || entPlan.metadata?.plan);
-          status = entPlan.status ?? status;
-        }
-      }
-
-      if (!mountedRef.current) return;
-      setCurrentPlan(plan);
-      setPlanStatus(status);
-    } catch {
-      if (!mountedRef.current) return;
-    } finally {
-      if (!mountedRef.current) return;
-      setPlanLoading(false);
-    }
-  }, [isActiveStatus, normalizePlan, user?.id]);
-
-  useEffect(() => {
-    loadPlan();
-  }, [loadPlan]);
 
   async function handleSaveProfile() {
     if (!supabaseMobile || !user?.id) return;
@@ -407,8 +338,8 @@ export function SettingsScreen() {
 
       const receiptData = res?.receipts?.body?.data ?? null;
       if (receiptData && typeof receiptData === "object") {
-        const receiptEntries = Object.values(receiptData);
-        const receiptError = receiptEntries.find((entry: any) => entry?.status === "error");
+        const receiptEntries = Object.values(receiptData) as Array<{ status?: string; message?: string }>;
+        const receiptError = receiptEntries.find((entry) => entry?.status === "error");
         if (receiptError) {
           Alert.alert(
             t(language, "Push receipt error", "Error en el recibo"),
@@ -489,11 +420,11 @@ export function SettingsScreen() {
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      await Promise.all([loadProfile(), loadPlan()]);
+      await loadProfile();
     } finally {
       setRefreshing(false);
     }
-  }, [loadPlan, loadProfile]);
+  }, [loadProfile]);
 
   return (
     <ScreenScaffold
@@ -582,53 +513,6 @@ export function SettingsScreen() {
           </Text>
         </Pressable>
       </View>
-
-      <View style={styles.sectionCard}>
-        <Text style={styles.sectionTitle}>{t(language, "Subscription", "Suscripción")}</Text>
-        {planLoading ? (
-          <Text style={styles.sectionHint}>{t(language, "Loading subscription…", "Cargando suscripción…")}</Text>
-        ) : currentPlan ? (
-          <>
-            <Text style={styles.sectionHint}>
-              {t(
-                language,
-                `Current plan: ${currentPlan.toUpperCase()}`,
-                `Plan actual: ${currentPlan.toUpperCase()}`
-              )}
-            </Text>
-            {planStatus ? (
-              <Text style={styles.sectionHint}>
-                {t(language, `Status: ${planStatus}`, `Estado: ${planStatus}`)}
-              </Text>
-            ) : null}
-            <Text style={styles.sectionHint}>
-              {t(
-                language,
-                "Manage renewals or cancellation in the web app.",
-                "Administra la renovación o cancelación en la web."
-              )}
-            </Text>
-            <Pressable
-              style={styles.saveButton}
-              onPress={() => Linking.openURL("https://neurotrader-journal.com/billing")}
-            >
-              <Text style={styles.saveButtonText}>
-                {t(language, "Open billing on web", "Abrir billing en la web")}
-              </Text>
-            </Pressable>
-          </>
-        ) : (
-          <Text style={styles.sectionHint}>
-            {t(
-              language,
-              "Plan details are syncing. Please refresh in a moment.",
-              "El plan se está sincronizando. Actualiza en un momento."
-            )}
-          </Text>
-        )}
-      </View>
-
-      {false ? null : null}
 
       <View style={styles.sectionCard}>
         <Text style={styles.sectionTitle}>{t(language, "Notifications", "Notificaciones")}</Text>

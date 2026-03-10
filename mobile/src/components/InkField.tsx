@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { forwardRef, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
 
 import { InkCanvas } from "./InkCanvas";
@@ -20,7 +20,11 @@ type InkFieldProps = {
   height?: number;
 };
 
-export function InkField({
+export type InkFieldHandle = {
+  getCurrentInk: () => Promise<InkDrawing | null>;
+};
+
+export const InkField = forwardRef<InkFieldHandle, InkFieldProps>(function InkField({
   label,
   mode,
   onModeChange,
@@ -30,11 +34,22 @@ export function InkField({
   onInkChange,
   placeholder,
   height = 260,
-}: InkFieldProps) {
+}: InkFieldProps, ref) {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const inkRef = useRef<InkCanvasHandle>(null);
   const [inkColor, setInkColor] = useState("#FFFFFF");
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      getCurrentInk: async () => {
+        const next = await inkRef.current?.getCurrentDrawing?.();
+        return next ?? inkValue ?? null;
+      },
+    }),
+    [inkValue]
+  );
 
   const palette = [
     { id: "white", value: "#FFFFFF" },
@@ -112,7 +127,7 @@ export function InkField({
       )}
     </View>
   );
-}
+});
 
 const createStyles = (colors: ThemeColors) =>
   StyleSheet.create({

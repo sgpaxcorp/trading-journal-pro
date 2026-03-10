@@ -55,8 +55,8 @@ export default function PageIntro() {
         match: (p) => p.startsWith("/option-flow"),
         title: L("Option Flow Intelligence", "Option Flow Intelligence"),
         body: L(
-          "Upload flow data and generate objective reports.",
-          "Sube data de flujo y genera reportes objetivos."
+          "Private beta workspace for testing flow uploads, reports, and premarket plans.",
+          "Espacio en beta privada para probar cargas de flujo, reportes y planes premarket."
         ),
       },
       {

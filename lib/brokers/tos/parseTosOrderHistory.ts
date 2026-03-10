@@ -293,15 +293,20 @@ export function parseTosOrderHistoryFromRows(rows: string[][], opts: ParserOptio
 
   dataRows.forEach((r, idx) => {
     const rowIndex = header.headerRowIdx + 1 + idx;
+    const noteLine = r.map((c) => normalizeCell(c)).join(" ").trim();
     const timePlaced = getCell(r, header.cols.timePlaced);
     const side = getCell(r, header.cols.side);
     const qtyRaw = getCell(r, header.cols.qty);
     const symbolRaw = getCell(r, header.cols.symbol);
 
     const hasMain = !!timePlaced || !!side || !!qtyRaw || !!symbolRaw;
+    const isAttachedNote =
+      !side &&
+      !qtyRaw &&
+      !symbolRaw &&
+      /\b(OCO\s*#|RE\s*#|\d+(?:\.\d+)?\s*STP)\b/i.test(noteLine);
 
-    if (!hasMain) {
-      const noteLine = r.map((c) => normalizeCell(c)).join(" ").trim();
+    if (!hasMain || isAttachedNote) {
       if (!noteLine) return;
       if (!lastEvent) return;
 

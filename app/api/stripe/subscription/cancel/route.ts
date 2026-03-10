@@ -25,10 +25,16 @@ export async function POST(req: NextRequest) {
 
     const body = await req.json();
     const reason = String(body.reason ?? "").trim();
+    const usageStatus = String(body.usageStatus ?? "").trim();
+    const improvementArea = String(body.improvementArea ?? "").trim();
+    const returnTrigger = String(body.returnTrigger ?? "").trim();
     const detail = String(body.detail ?? "").trim();
 
     if (!reason) {
       return NextResponse.json({ error: "Missing cancellation reason" }, { status: 400 });
+    }
+    if (!usageStatus) {
+      return NextResponse.json({ error: "Missing cancellation usage status" }, { status: 400 });
     }
 
     const { data: profile } = await supabaseAdmin
@@ -85,7 +91,7 @@ export async function POST(req: NextRequest) {
     const effectiveAt = currentPeriodEnd
       ? new Date(currentPeriodEnd * 1000).toISOString()
       : null;
-    const followupAt = new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString();
+    const followupAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
 
     await supabaseAdmin.from("subscription_cancellations").insert({
       user_id: user.id,
@@ -93,6 +99,9 @@ export async function POST(req: NextRequest) {
       stripe_customer_id: customerId || profile?.stripe_customer_id || null,
       cancel_at_period_end: true,
       reason,
+      usage_status: usageStatus,
+      improvement_area: improvementArea || null,
+      return_trigger: returnTrigger || null,
       reason_detail: detail || null,
       effective_at: effectiveAt,
       followup_at: followupAt,
@@ -108,6 +117,7 @@ export async function POST(req: NextRequest) {
           (user.user_metadata as any)?.name ||
           "",
         periodEnd: effectiveAt,
+        nextBillingDate: effectiveAt,
       });
     }
 

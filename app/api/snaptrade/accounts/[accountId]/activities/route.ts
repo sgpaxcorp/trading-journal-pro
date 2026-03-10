@@ -7,7 +7,7 @@ export const runtime = "nodejs";
 
 export async function GET(
   req: NextRequest,
-  context: { params: { accountId: string } | Promise<{ accountId: string }> }
+  context: { params: Promise<{ accountId: string }> }
 ) {
   try {
     const auth = await getAuthUser(req);
@@ -24,7 +24,7 @@ export async function GET(
       return NextResponse.json({ error: "SnapTrade not connected" }, { status: 400 });
     }
 
-    const { accountId: accountIdParam } = await Promise.resolve(context.params);
+    const { accountId: accountIdParam } = await context.params;
     const accountId = String(accountIdParam || "");
     if (!accountId) {
       return NextResponse.json({ error: "Missing accountId" }, { status: 400 });

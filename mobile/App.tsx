@@ -22,7 +22,7 @@ import { NotebookScreen } from "./src/screens/NotebookScreen";
 import { NotebookEditorScreen } from "./src/screens/NotebookEditorScreen";
 import { ChallengesScreen } from "./src/screens/ChallengesScreen";
 import { BrokerConnectScreen } from "./src/screens/BrokerConnectScreen";
-import { AuthScreen, type AuthMode } from "./src/screens/AuthScreen";
+import { AuthScreen } from "./src/screens/AuthScreen";
 import { ThemeProvider, useTheme } from "./src/lib/ThemeContext";
 import { LanguageProvider } from "./src/lib/LanguageContext";
 import { useLanguage } from "./src/lib/LanguageContext";
@@ -266,13 +266,17 @@ function MainTabs() {
           name="Other"
           options={{
             title: "More",
-            tabBarButton: (props) => (
+            tabBarButton: ({ children, style, onPress, accessibilityState, accessibilityLabel, testID }) => (
               <Pressable
-                {...props}
                 onPress={() => setMoreOpen(true)}
                 accessibilityRole="button"
-                accessibilityLabel="More"
-              />
+                accessibilityLabel={accessibilityLabel ?? "More"}
+                accessibilityState={accessibilityState}
+                style={style}
+                testID={testID}
+              >
+                {children}
+              </Pressable>
             ),
           }}
           listeners={{
@@ -308,7 +312,6 @@ function MainTabs() {
 }
 
 function AppShell() {
-  const [mode, setMode] = useState<AuthMode>("signin");
   const [session, setSession] = useState<Session | null>(null);
   const [authReady, setAuthReady] = useState(false);
   const { colors, mode: themeMode } = useTheme();
@@ -424,10 +427,7 @@ function AppShell() {
           />
         </Stack.Navigator>
       ) : (
-        <AuthScreen
-          mode={mode}
-          onToggleMode={() => setMode((current) => (current === "signin" ? "signup" : "signin"))}
-        />
+        <AuthScreen />
       )}
     </NavigationContainer>
   );

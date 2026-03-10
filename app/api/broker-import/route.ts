@@ -321,7 +321,7 @@ function parseQtyFromDesc(desc: string): number | null {
   return qty;
 }
 function parsePriceFromDesc(desc: string): number | null {
-  const m = desc.match(/@\s*([0-9]+(?:\.[0-9]+)?)/i);
+  const m = desc.match(/@\s*((?:[0-9]+(?:\.[0-9]+)?)|(?:\.[0-9]+))/i);
   if (!m) return null;
   const p = Number(m[1]);
   return Number.isFinite(p) ? p : null;
@@ -982,7 +982,7 @@ export async function POST(req: NextRequest) {
         const qty = parseQtyFromDesc(description);
         const price = parsePriceFromDesc(description);
 
-        if (!side || !qty || !price) continue;
+        if (!side || !qty || price == null || !Number.isFinite(price)) continue;
 
         const opt = parseOptionFromDesc(description);
         const instrument_type = opt ? "option" : "stock";

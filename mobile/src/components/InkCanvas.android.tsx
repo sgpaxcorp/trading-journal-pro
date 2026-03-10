@@ -16,6 +16,7 @@ const DEFAULT_WIDTH = 3;
 
 export type InkCanvasHandle = {
   showColorPicker: () => void;
+  getCurrentDrawing: () => Promise<InkDrawing | null>;
 };
 
 function strokeToPath(stroke: InkStroke) {
@@ -37,8 +38,14 @@ export const InkCanvas = forwardRef<InkCanvasHandle, InkCanvasProps>(
     ref,
     () => ({
       showColorPicker: () => {},
+      getCurrentDrawing: async () => {
+        if (current && current.points.length > 0) {
+          return { engine: "skia", strokes: [...strokes, current] };
+        }
+        return { engine: "skia", strokes };
+      },
     }),
-    []
+    [current, strokes]
   );
 
   useEffect(() => {

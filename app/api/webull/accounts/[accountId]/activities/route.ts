@@ -6,12 +6,12 @@ export const runtime = "nodejs";
 
 export async function GET(
   req: Request,
-  context: { params: Promise<{ accountId: string }> | { accountId: string } }
+  context: { params: Promise<{ accountId: string }> }
 ) {
   try {
     const auth = await getAuthUser(req);
     if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    const params = await Promise.resolve((context as any).params);
+    const params = await context.params;
     const accountId = params.accountId;
     const url = new URL(req.url);
     const daysParam = url.searchParams.get("days");

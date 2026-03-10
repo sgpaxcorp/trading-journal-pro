@@ -369,7 +369,7 @@ const createStyles = (colors: ThemeColors) =>
       fontSize: 12,
     },
     errorText: {
-      color: colors.negative,
+      color: colors.danger,
       fontSize: 12,
     },
     accountList: {
@@ -385,7 +385,7 @@ const createStyles = (colors: ThemeColors) =>
     },
     accountCardActive: {
       borderColor: colors.primary,
-      backgroundColor: colors.surfaceAccent,
+      backgroundColor: colors.successSoft,
     },
     accountTitle: {
       color: colors.textPrimary,

@@ -16,6 +16,7 @@ type PencilKitModule = {
 
 export type InkCanvasHandle = {
   showColorPicker: () => void;
+  getCurrentDrawing: () => Promise<InkDrawing | null>;
 };
 
 function loadPencilKit(): PencilKitModule | null {
@@ -39,13 +40,26 @@ export const InkCanvas = forwardRef<InkCanvasHandle, InkCanvasProps>(
       showColorPicker: () => {
         viewRef.current?.showColorPicker?.();
       },
+      getCurrentDrawing: async () => {
+        const data = await viewRef.current?.getCanvasDataAsBase64?.();
+        if (!data) return value ?? null;
+        return { engine: "pencilkit", data };
+      },
     }),
-    []
+    [value]
   );
 
   useEffect(() => {
     if (!pencilkit || !value || value.engine !== "pencilkit") return;
-    viewRef.current?.setCanvasDataFromBase64(value.data);
+    let attempts = 0;
+    const apply = () => {
+      attempts += 1;
+      viewRef.current?.setCanvasDataFromBase64?.(value.data);
+      if (attempts < 4) {
+        setTimeout(apply, 120);
+      }
+    };
+    apply();
   }, [pencilkit, value?.engine, (value as any)?.data]);
 
   useEffect(() => {

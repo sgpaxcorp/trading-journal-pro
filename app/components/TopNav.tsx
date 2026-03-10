@@ -748,8 +748,11 @@ export default function TopNav() {
             {t("nav.backStudy", lang)}
           </Link>
 
-          <Link href="/option-flow" className={linkClass} data-tour="nav-option-flow">
-            {t("nav.optionFlow", lang)}
+          <Link href="/option-flow" className={`${linkClass} inline-flex items-center gap-2`} data-tour="nav-option-flow">
+            <span>{t("nav.optionFlow", lang)}</span>
+            <span className="rounded-full border border-emerald-400/50 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-200">
+              BETA
+            </span>
           </Link>
 
           <Dropdown

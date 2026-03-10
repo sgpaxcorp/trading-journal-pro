@@ -8,6 +8,10 @@ This manual explains how the platform actually works — not just what buttons t
 ## What Neuro Trader Journal is
 Neuro Trader Journal is a performance system. The core loop is: **plan → execute → journal → review → improve**. Every page supports that loop.
 
+## Web and mobile roles
+- Web is the control center: access, billing, Growth Plan, imports, full review, and account management.
+- Mobile is the companion app for existing users: sign in, review key screens, journal on the go, and receive reminders.
+
 ## How to use this guide
 - Start with Getting Started if you are new.
 - Use Growth Plan and Journal to build your daily operating system.
@@ -32,8 +36,8 @@ Turns data into feedback and action items. It becomes useful after you have cons
 **Imports (Broker Sync or CSV)**  
 Brings real trades into the system. Without clean data, analytics are inaccurate.
 
-**Option Flow Intelligence (add‑on)**  
-Generates flow reports and premarket plans. Best used when it is linked to your Journal.
+**Option Flow Intelligence (private beta)**  
+Private beta workspace for testing flow reports and premarket plans before public release.
 
 **Notebook**  
 Your playbook: rules, patterns, and lessons you want to repeat.

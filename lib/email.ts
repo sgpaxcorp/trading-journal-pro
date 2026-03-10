@@ -489,18 +489,26 @@ export async function sendSubscriptionCancellationEmail(args: {
   email: string;
   name?: string | null;
   periodEnd?: string | null;
+  nextBillingDate?: string | null;
 }) {
   const safeName = args.name || "trader";
   const subject = "Your NeuroTrader Journal cancellation is scheduled";
   const periodText = args.periodEnd
     ? new Date(args.periodEnd).toLocaleDateString("en-US")
     : "the end of your current billing period";
+  const nextBillingText = args.nextBillingDate
+    ? new Date(args.nextBillingDate).toLocaleDateString("en-US")
+    : periodText;
 
   const text = [
     `Hi ${safeName},`,
     "",
+    "We are sorry to see you go.",
+    "",
     "We have scheduled your subscription to cancel at the end of the current billing period.",
+    `Your next billing cycle date was ${nextBillingText}.`,
     `Access remains active through ${periodText}.`,
+    "If you cancelled today after a recent payment, your membership still stays active until that date.",
     "",
     "If you change your mind, you can re-enable auto‑renew anytime from Billing.",
     "",
@@ -514,7 +522,9 @@ export async function sendSubscriptionCancellationEmail(args: {
     greeting: `Hi ${safeName},`,
     highlight: `Access remains active through <strong>${periodText}</strong>.`,
     paragraphs: [
-      "We’ve scheduled your subscription to cancel at the end of the current billing period. You won’t be charged again unless you re‑enable auto‑renew.",
+      "We’re sorry to see you leave. We’ve scheduled your subscription to cancel at the end of the current billing period, and you won’t be charged again unless you re-enable auto-renew.",
+      `Your next billing cycle date was <strong>${nextBillingText}</strong>, and your membership remains active through <strong>${periodText}</strong>.`,
+      "If you paid recently and cancelled today, your access still stays active until that date.",
       "If you want to keep your plan active, you can turn auto‑renew back on from Billing at any time.",
     ],
     ctaLabel: "Open billing",
@@ -525,7 +535,7 @@ export async function sendSubscriptionCancellationEmail(args: {
 }
 
 /**
- * Win‑back: coupon 30% off.
+ * Win‑back: coupon 50% off.
  */
 export async function sendSubscriptionWinbackEmail(args: {
   email: string;
@@ -533,12 +543,12 @@ export async function sendSubscriptionWinbackEmail(args: {
   promotionCode: string;
 }) {
   const safeName = args.name || "trader";
-  const subject = "Come back to NeuroTrader Journal with 30% off";
+  const subject = "Come back to NeuroTrader Journal with 50% off";
 
   const text = [
     `Hi ${safeName},`,
     "",
-    "We’d love to have you back. Here is a 30% off code for your next subscription:",
+    "We’d love to have you back. Here is a 50% off code for your next subscription:",
     args.promotionCode,
     "",
     "Use it at checkout in the app.",
@@ -547,12 +557,12 @@ export async function sendSubscriptionWinbackEmail(args: {
   ].join("\n");
 
   const html = buildNeuroTraderHtml({
-    title: "30% off your return",
+    title: "50% off your return",
     preheader: "Your comeback code is ready.",
     greeting: `Hi ${safeName},`,
     highlight: `Promo code: <strong>${args.promotionCode}</strong>`,
     paragraphs: [
-      "We’d love to have you back. Use this 30% off code on your next subscription checkout.",
+      "We’d love to have you back. Use this 50% off code on your next subscription checkout.",
       "If you need help reactivating, reply to this email and our team will assist you.",
     ],
     ctaLabel: "Resume subscription",

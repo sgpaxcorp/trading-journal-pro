@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
+import { getOptionFlowBetaApiPayload, isOptionFlowBetaTester, resolveOptionFlowLang } from "@/lib/optionFlowBeta";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 
 export const runtime = "nodejs";
@@ -603,6 +604,11 @@ export async function POST(req: NextRequest) {
 
     const userId = authData.user.id;
     const email = authData.user.email ?? null;
+    const requestLang = resolveOptionFlowLang(req.headers.get("accept-language"));
+
+    if (!isOptionFlowBetaTester(email)) {
+      return NextResponse.json(getOptionFlowBetaApiPayload(requestLang), { status: 403 });
+    }
 
     if (!BYPASS_ENTITLEMENT) {
       const hasEnt = await requireEntitlement(userId);

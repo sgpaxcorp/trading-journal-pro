@@ -76,7 +76,7 @@ export function RichTextEditor({
           fontLarger: () => <Text style={styles.toolbarText}>A+</Text>,
         }}
         onPressAddImage={() => {}}
-        onPress={(action) => {
+        onPress={(action: string) => {
           if (action === "insertTable") {
             const editor = editorRef.current as unknown as {
               insertHTML?: (html: string) => void;
