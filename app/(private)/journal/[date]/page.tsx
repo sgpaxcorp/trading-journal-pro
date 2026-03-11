@@ -8,6 +8,7 @@ import { useParams, useRouter } from "next/navigation";
 
 import type { JournalWidgetId, JournalWidgetDef } from "@/app/components/JournalGrid";
 
+import JournalInkField from "@/app/components/JournalInkField";
 import RichTextEditor from "@/app/components/RichTextEditor";
 
 import type { JournalEntry } from "@/lib/journalTypes";
@@ -35,6 +36,13 @@ import {
   saveJournalUiSettings,
   type JournalUiSettings,
 } from "@/lib/journalUiSettingsSupabase";
+import {
+  buildNotebookInkPayload,
+  getNotebookInkMode,
+  normalizeNotebookInkDrawing,
+  type NotebookInkDrawing,
+  type NotebookInkMode,
+} from "@/lib/notebookInk";
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
 
@@ -817,6 +825,12 @@ export default function DailyJournalPage() {
   const [premarketHtml, setPremarketHtml] = useState<string>("");
   const [insideHtml, setInsideHtml] = useState<string>("");
   const [afterHtml, setAfterHtml] = useState<string>("");
+  const [premarketMode, setPremarketMode] = useState<NotebookInkMode>("text");
+  const [insideMode, setInsideMode] = useState<NotebookInkMode>("text");
+  const [afterMode, setAfterMode] = useState<NotebookInkMode>("text");
+  const [premarketInk, setPremarketInk] = useState<NotebookInkDrawing | null>(null);
+  const [insideInk, setInsideInk] = useState<NotebookInkDrawing | null>(null);
+  const [afterInk, setAfterInk] = useState<NotebookInkDrawing | null>(null);
 
   // Optional: keep a reference to the inside editor for dictation insertion
   const insideEditorRef = useRef<any>(null);
@@ -852,6 +866,10 @@ export default function DailyJournalPage() {
   const [checklistPresets, setChecklistPresets] = useState<JournalChecklistPresets>(DEFAULT_CHECKLIST_PRESETS);
   const [mindset, setMindset] = useState<MindsetRatings>(DEFAULT_MINDSET);
   const [afterReview, setAfterReview] = useState<AfterTradeReview>(DEFAULT_AFTER_REVIEW);
+  const [afterDidWellMode, setAfterDidWellMode] = useState<NotebookInkMode>("text");
+  const [afterImproveMode, setAfterImproveMode] = useState<NotebookInkMode>("text");
+  const [afterDidWellInk, setAfterDidWellInk] = useState<NotebookInkDrawing | null>(null);
+  const [afterImproveInk, setAfterImproveInk] = useState<NotebookInkDrawing | null>(null);
   const [editProcess, setEditProcess] = useState(false);
   const [editMindset, setEditMindset] = useState(false);
   const [newChecklistItem, setNewChecklistItem] = useState({
@@ -872,6 +890,15 @@ export default function DailyJournalPage() {
   const autoSaveReadyRef = useRef(false);
   const autoSaveIgnoreNextRef = useRef(false);
   const [autoSaveDirty, setAutoSaveDirty] = useState(false);
+
+  const editableValue = (
+    content: string,
+    mode: NotebookInkMode,
+    drawing: NotebookInkDrawing | null
+  ) => ({
+    content,
+    ink: buildNotebookInkPayload(mode, drawing),
+  });
 
   const [entryTrades, setEntryTrades] = useState<EntryTradeRow[]>([]);
   const [exitTrades, setExitTrades] = useState<ExitTradeRow[]>([]);
@@ -1086,6 +1113,12 @@ export default function DailyJournalPage() {
                 setPremarketHtml(String((parsed as any).premarket ?? ""));
                 setInsideHtml(String((parsed as any).live ?? ""));
                 setAfterHtml(String((parsed as any).post ?? ""));
+                setPremarketMode((parsed as any).premarket_mode === "ink" ? "ink" : "text");
+                setInsideMode((parsed as any).live_mode === "ink" ? "ink" : "text");
+                setAfterMode((parsed as any).post_mode === "ink" ? "ink" : "text");
+                setPremarketInk(normalizeNotebookInkDrawing((parsed as any).premarket_ink));
+                setInsideInk(normalizeNotebookInkDrawing((parsed as any).live_ink));
+                setAfterInk(normalizeNotebookInkDrawing((parsed as any).post_ink));
 
                 if (Array.isArray((parsed as any).entries)) fallbackEntries = (parsed as any).entries;
                 if (Array.isArray((parsed as any).exits)) fallbackExits = (parsed as any).exits;
@@ -1106,6 +1139,14 @@ export default function DailyJournalPage() {
                   } else {
                     setAfterReview(DEFAULT_AFTER_REVIEW);
                   }
+                  setAfterDidWellMode((rest as any)?.after_review_note_mode?.didWell === "ink" ? "ink" : "text");
+                  setAfterImproveMode((rest as any)?.after_review_note_mode?.improve === "ink" ? "ink" : "text");
+                  setAfterDidWellInk(
+                    normalizeNotebookInkDrawing((rest as any)?.after_review_note_ink?.didWell)
+                  );
+                  setAfterImproveInk(
+                    normalizeNotebookInkDrawing((rest as any)?.after_review_note_ink?.improve)
+                  );
 
                   const entryTags = Array.isArray((existing as any)?.tags) ? (existing as any).tags : [];
                   const checklists = (rest as any)?.checklists;
@@ -1146,32 +1187,66 @@ export default function DailyJournalPage() {
                   setNotesExtra({});
                   setMindset(DEFAULT_MINDSET);
                   setAfterReview(DEFAULT_AFTER_REVIEW);
+                  setAfterDidWellMode("text");
+                  setAfterImproveMode("text");
+                  setAfterDidWellInk(null);
+                  setAfterImproveInk(null);
                 }
               } else {
                 // Legacy plain string
                 setPremarketHtml(String(notesStr));
                 setInsideHtml("");
                 setAfterHtml("");
+                setPremarketMode("text");
+                setInsideMode("text");
+                setAfterMode("text");
+                setPremarketInk(null);
+                setInsideInk(null);
+                setAfterInk(null);
                 setNotesExtra({});
                 setMindset(DEFAULT_MINDSET);
                 setAfterReview(DEFAULT_AFTER_REVIEW);
+                setAfterDidWellMode("text");
+                setAfterImproveMode("text");
+                setAfterDidWellInk(null);
+                setAfterImproveInk(null);
               }
             } catch {
               // Legacy plain string
               setPremarketHtml(String(notesStr));
               setInsideHtml("");
               setAfterHtml("");
+              setPremarketMode("text");
+              setInsideMode("text");
+              setAfterMode("text");
+              setPremarketInk(null);
+              setInsideInk(null);
+              setAfterInk(null);
               setNotesExtra({});
               setMindset(DEFAULT_MINDSET);
               setAfterReview(DEFAULT_AFTER_REVIEW);
+              setAfterDidWellMode("text");
+              setAfterImproveMode("text");
+              setAfterDidWellInk(null);
+              setAfterImproveInk(null);
             }
           } else {
             setPremarketHtml("");
             setInsideHtml("");
             setAfterHtml("");
+            setPremarketMode("text");
+            setInsideMode("text");
+            setAfterMode("text");
+            setPremarketInk(null);
+            setInsideInk(null);
+            setAfterInk(null);
             setNotesExtra({});
             setMindset(DEFAULT_MINDSET);
             setAfterReview(DEFAULT_AFTER_REVIEW);
+            setAfterDidWellMode("text");
+            setAfterImproveMode("text");
+            setAfterDidWellInk(null);
+            setAfterImproveInk(null);
           }
 
           const entryTags = Array.isArray((existing as any)?.tags) ? (existing as any).tags : [];
@@ -1187,9 +1262,19 @@ export default function DailyJournalPage() {
           setPremarketHtml("");
           setInsideHtml("");
           setAfterHtml("");
+          setPremarketMode("text");
+          setInsideMode("text");
+          setAfterMode("text");
+          setPremarketInk(null);
+          setInsideInk(null);
+          setAfterInk(null);
           setNotesExtra({});
           setMindset(DEFAULT_MINDSET);
           setAfterReview(DEFAULT_AFTER_REVIEW);
+          setAfterDidWellMode("text");
+          setAfterImproveMode("text");
+          setAfterDidWellInk(null);
+          setAfterImproveInk(null);
         }
 
         const storedEntries = Array.isArray((storedTrades as any)?.entries)
@@ -1661,6 +1746,20 @@ export default function DailyJournalPage() {
     nextExtra.mindset = hasMindset ? { ...mindset } : null;
     nextExtra.checklists = checklistSnapshot;
     nextExtra.after_review = { ...afterReview };
+    nextExtra.premarket_mode = premarketMode;
+    nextExtra.live_mode = insideMode;
+    nextExtra.post_mode = afterMode;
+    nextExtra.premarket_ink = premarketInk;
+    nextExtra.live_ink = insideInk;
+    nextExtra.post_ink = afterInk;
+    nextExtra.after_review_note_mode = {
+      didWell: afterDidWellMode,
+      improve: afterImproveMode,
+    };
+    nextExtra.after_review_note_ink = {
+      didWell: afterDidWellInk,
+      improve: afterImproveInk,
+    };
 
     const notesPayload = JSON.stringify({
       ...nextExtra,
@@ -1744,7 +1843,27 @@ export default function DailyJournalPage() {
     }
     setAutoSaveDirty(true);
     setAutoSaveState("idle");
-  }, [premarketHtml, insideHtml, afterHtml, entryTrades, exitTrades, entry, notesExtra, mindset, afterReview]);
+  }, [
+    premarketHtml,
+    insideHtml,
+    afterHtml,
+    premarketMode,
+    insideMode,
+    afterMode,
+    premarketInk,
+    insideInk,
+    afterInk,
+    afterDidWellMode,
+    afterImproveMode,
+    afterDidWellInk,
+    afterImproveInk,
+    entryTrades,
+    exitTrades,
+    entry,
+    notesExtra,
+    mindset,
+    afterReview,
+  ]);
 
   /* =========================================================
      Import / Sync
@@ -1794,10 +1913,15 @@ export default function DailyJournalPage() {
       }
 
       const found = json?.trades_found ?? 0;
-      const groups = json?.groups ?? 0;
-      const updated = json?.updated ?? 0;
+      const entriesCount = json?.entries_count ?? 0;
+      const exitsCount = json?.exits_count ?? 0;
 
-      setMsg(`Synced ${found} trades → ${groups} groups (${updated} updated).`);
+      setMsg(
+        L(
+          `Synced ${found} fills → ${entriesCount} entries / ${exitsCount} exits.`,
+          `Se sincronizaron ${found} fills → ${entriesCount} entradas / ${exitsCount} salidas.`
+        )
+      );
       setTimeout(() => setMsg(""), 2500);
 
       // rehydrate
@@ -2039,9 +2163,14 @@ export default function DailyJournalPage() {
       defaultLayout: { i: "premarket", x: 0, y: 0, w: 7, h: 8, minW: 4, minH: 6 },
       render: () => (
         <WidgetCard title={L("Premarket Prep", "Preparación premarket")}>
-          <RichTextEditor
-            value={premarketHtml}
-            onChange={setPremarketHtml}
+          <JournalInkField
+            value={editableValue(premarketHtml, premarketMode, premarketInk)}
+            onChange={(next) => {
+              const ink = next.ink;
+              setPremarketHtml(next.content);
+              setPremarketMode(getNotebookInkMode(ink));
+              setPremarketInk(ink?.drawing ?? null);
+            }}
             placeholder={L(
               "Premarket prep: bias, levels, planned setups, rules…",
               "Preparación premarket: sesgo, niveles, setups planificados, reglas…"
@@ -2453,24 +2582,31 @@ export default function DailyJournalPage() {
         <WidgetCard
           title={L("Inside the Trade", "Dentro del trade")}
           right={
-            <button
-              type="button"
-              onClick={toggleDictation}
-              className={`px-2 py-1 rounded ${listening ? "bg-sky-500 text-white" : "bg-slate-800 text-slate-200"} text-xs hover:bg-slate-700`}
-            >
-              {listening ? L("● Stop dictation", "● Detener dictado") : L("Start dictation", "Iniciar dictado")}
-            </button>
+            insideMode === "text" ? (
+              <button
+                type="button"
+                onClick={toggleDictation}
+                className={`px-2 py-1 rounded ${listening ? "bg-sky-500 text-white" : "bg-slate-800 text-slate-200"} text-xs hover:bg-slate-700`}
+              >
+                {listening ? L("● Stop dictation", "● Detener dictado") : L("Start dictation", "Iniciar dictado")}
+              </button>
+            ) : null
           }
         >
-          <RichTextEditor
-            value={insideHtml}
-            onChange={setInsideHtml}
+          <JournalInkField
+            value={editableValue(insideHtml, insideMode, insideInk)}
+            onChange={(next) => {
+              const ink = next.ink;
+              setInsideHtml(next.content);
+              setInsideMode(getNotebookInkMode(ink));
+              setInsideInk(ink?.drawing ?? null);
+            }}
             placeholder={L(
               "During the trade: execution notes, management decisions, mistakes, emotions…",
               "Durante el trade: notas de ejecución, decisiones de manejo, errores, emociones…"
             )}
             minHeight={180}
-            onReady={(ed: any) => {
+            onReady={(ed) => {
               insideEditorRef.current = ed;
             }}
           />
@@ -2484,9 +2620,14 @@ export default function DailyJournalPage() {
       defaultLayout: { i: "after", x: 0, y: 16, w: 7, h: 8, minW: 4, minH: 6 },
       render: () => (
         <WidgetCard title={L("After-trade Analysis", "Análisis post‑trade")}>
-          <RichTextEditor
-            value={afterHtml}
-            onChange={setAfterHtml}
+          <JournalInkField
+            value={editableValue(afterHtml, afterMode, afterInk)}
+            onChange={(next) => {
+              const ink = next.ink;
+              setAfterHtml(next.content);
+              setAfterMode(getNotebookInkMode(ink));
+              setAfterInk(ink?.drawing ?? null);
+            }}
             placeholder={L(
               "Post-trade: what went right/wrong, process corrections, rule breaks, next actions…",
               "Post-trade: qué salió bien/mal, correcciones de proceso, rompimientos de reglas, próximos pasos…"
@@ -2570,31 +2711,31 @@ export default function DailyJournalPage() {
 
             <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
               <div>
-                <label className="text-[11px] uppercase tracking-wide text-slate-400">
-                  {L("What I did well", "Lo que hice bien")}
-                </label>
-                <textarea
-                  rows={2}
-                  value={afterReview.notes.didWell}
-                  onChange={(e) =>
-                    setAfterReview((prev) => ({ ...prev, notes: { ...prev.notes, didWell: e.target.value } }))
-                  }
-                  className="mt-2 w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-[14px] text-slate-100 focus:outline-none focus:border-emerald-400"
+                <JournalInkField
+                  label={L("What I did well", "Lo que hice bien")}
+                  value={editableValue(afterReview.notes.didWell, afterDidWellMode, afterDidWellInk)}
+                  onChange={(next) => {
+                    const ink = next.ink;
+                    setAfterReview((prev) => ({ ...prev, notes: { ...prev.notes, didWell: next.content } }));
+                    setAfterDidWellMode(getNotebookInkMode(ink));
+                    setAfterDidWellInk(ink?.drawing ?? null);
+                  }}
                   placeholder={L("Short and direct…", "Corto y directo…")}
+                  minHeight={180}
                 />
               </div>
               <div>
-                <label className="text-[11px] uppercase tracking-wide text-slate-400">
-                  {L("What to fix next time", "Qué corregir la próxima vez")}
-                </label>
-                <textarea
-                  rows={2}
-                  value={afterReview.notes.improve}
-                  onChange={(e) =>
-                    setAfterReview((prev) => ({ ...prev, notes: { ...prev.notes, improve: e.target.value } }))
-                  }
-                  className="mt-2 w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-[14px] text-slate-100 focus:outline-none focus:border-emerald-400"
+                <JournalInkField
+                  label={L("What to fix next time", "Qué corregir la próxima vez")}
+                  value={editableValue(afterReview.notes.improve, afterImproveMode, afterImproveInk)}
+                  onChange={(next) => {
+                    const ink = next.ink;
+                    setAfterReview((prev) => ({ ...prev, notes: { ...prev.notes, improve: next.content } }));
+                    setAfterImproveMode(getNotebookInkMode(ink));
+                    setAfterImproveInk(ink?.drawing ?? null);
+                  }}
                   placeholder={L("One clear improvement…", "Una mejora clara…")}
+                  minHeight={180}
                 />
               </div>
             </div>

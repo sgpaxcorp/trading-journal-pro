@@ -33,6 +33,7 @@ const NAV_GROUPS = (lang: "en" | "es") => {
       title: isEs ? "Datos y reportes" : "Data & reports",
       items: [
         { href: "/help/data-inputs", label: isEs ? "Datos e importaciones" : "Data Inputs & Imports" },
+        { href: "/help/profit-loss-track", label: "Profit & Loss Track" },
         { href: "/help/option-flow", label: isEs ? "Option Flow" : "Option Flow" },
         { href: "/help/reports", label: isEs ? "Reportes Option Flow" : "Option Flow Reports" },
         { href: "/help/post-mortem", label: isEs ? "Post‑mortem" : "Post‑mortem" },

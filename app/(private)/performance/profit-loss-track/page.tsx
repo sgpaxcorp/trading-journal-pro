@@ -2,12 +2,15 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
 import {
   ResponsiveContainer,
   LineChart,
   Line,
   BarChart,
   Bar,
+  Cell,
   CartesianGrid,
   XAxis,
   YAxis,
@@ -28,11 +31,13 @@ import {
   getProfitLossProfile,
   upsertProfitLossProfile,
   listProfitLossBudgets,
+  listNormalizedTradeCosts,
   upsertProfitLossBudget,
   buildDefaultProfitLossProfile,
   type ProfitLossCost,
   type ProfitLossBudget,
   type ProfitLossProfile,
+  type NormalizedTradeCostRow,
   type BillingCycle,
   type CostCategory,
   type TraderType,
@@ -48,6 +53,7 @@ import type { JournalEntry } from "@/lib/journalTypes";
 
 type RangeKey = "week" | "month" | "quarter" | "semiannual" | "annual";
 type TabKey = "summary" | "income" | "runway" | "stack" | "vendors" | "budget" | "controls";
+type TradeCostSource = "normalized_trades" | "journal_notes";
 
 type CostFormState = {
   name: string;
@@ -145,9 +151,40 @@ function startOfYear(date: Date) {
   return new Date(date.getFullYear(), 0, 1);
 }
 
+function endOfWeek(date: Date) {
+  const start = startOfWeek(date);
+  const end = new Date(start);
+  end.setDate(end.getDate() + 6);
+  return end;
+}
+
+function endOfMonth(date: Date) {
+  return new Date(date.getFullYear(), date.getMonth() + 1, 0);
+}
+
+function endOfQuarter(date: Date) {
+  const start = startOfQuarter(date);
+  return new Date(start.getFullYear(), start.getMonth() + 3, 0);
+}
+
+function endOfSemiannual(date: Date) {
+  const start = startOfSemiannual(date);
+  return new Date(start.getFullYear(), start.getMonth() + 6, 0);
+}
+
+function endOfYear(date: Date) {
+  return new Date(date.getFullYear(), 11, 31);
+}
+
 function addMonths(date: Date, months: number) {
   const d = new Date(date);
   d.setMonth(d.getMonth() + months);
+  return d;
+}
+
+function addDays(date: Date, days: number) {
+  const d = new Date(date);
+  d.setDate(d.getDate() + days);
   return d;
 }
 
@@ -211,6 +248,55 @@ function getRangeStart(today: Date, rangeKey: RangeKey) {
   return startOfYear(today);
 }
 
+function getRangeEnd(date: Date, rangeKey: RangeKey) {
+  if (rangeKey === "week") return endOfWeek(date);
+  if (rangeKey === "month") return endOfMonth(date);
+  if (rangeKey === "quarter") return endOfQuarter(date);
+  if (rangeKey === "semiannual") return endOfSemiannual(date);
+  return endOfYear(date);
+}
+
+function getElapsedMonthFactor(rangeStart: Date, rangeEnd: Date, rangeKey: RangeKey) {
+  const elapsedDays = Math.max(1, daysBetween(rangeStart, rangeEnd));
+  const totalDays = Math.max(1, daysBetween(rangeStart, getRangeEnd(rangeStart, rangeKey)));
+  return RANGE_MONTHS[rangeKey] * (elapsedDays / totalDays);
+}
+
+function getPreviousRange(rangeStart: Date, rangeEnd: Date, rangeKey: RangeKey) {
+  const elapsedDays = Math.max(1, daysBetween(rangeStart, rangeEnd));
+
+  if (rangeKey === "week") {
+    const start = addDays(rangeStart, -7);
+    return { start, end: addDays(start, elapsedDays - 1) };
+  }
+
+  if (rangeKey === "month") {
+    const start = new Date(rangeStart.getFullYear(), rangeStart.getMonth() - 1, 1);
+    const end = addDays(start, elapsedDays - 1);
+    const cap = endOfMonth(start);
+    return { start, end: end > cap ? cap : end };
+  }
+
+  if (rangeKey === "quarter") {
+    const start = new Date(rangeStart.getFullYear(), rangeStart.getMonth() - 3, 1);
+    const end = addDays(start, elapsedDays - 1);
+    const cap = endOfQuarter(start);
+    return { start, end: end > cap ? cap : end };
+  }
+
+  if (rangeKey === "semiannual") {
+    const start = new Date(rangeStart.getFullYear(), rangeStart.getMonth() - 6, 1);
+    const end = addDays(start, elapsedDays - 1);
+    const cap = endOfSemiannual(start);
+    return { start, end: end > cap ? cap : end };
+  }
+
+  const start = new Date(rangeStart.getFullYear() - 1, 0, 1);
+  const end = addDays(start, elapsedDays - 1);
+  const cap = endOfYear(start);
+  return { start, end: end > cap ? cap : end };
+}
+
 function periodLabel(rangeKey: RangeKey, L: (en: string, es: string) => string) {
   if (rangeKey === "week") return L("This week", "Esta semana");
   if (rangeKey === "month") return L("This month", "Este mes");
@@ -269,6 +355,16 @@ function formFromCost(cost: ProfitLossCost): CostFormState {
         : String(cost.amortization_months),
     presetKey: cost.preset_key ?? "",
   };
+}
+
+function getBudgetStatus(row: {
+  budgetToDate: number;
+  utilization: number;
+}) {
+  if (row.budgetToDate <= 0) return "no-budget" as const;
+  if (row.utilization > 1) return "over" as const;
+  if (row.utilization > 0.8) return "near" as const;
+  return "on-track" as const;
 }
 
 function defaultAmortizationMonths(cost: ProfitLossCost | SuggestedCostPreset) {
@@ -398,6 +494,19 @@ function downloadTextFile(filename: string, content: string) {
   URL.revokeObjectURL(url);
 }
 
+function escapeCsvCell(value: string | number | null | undefined) {
+  const text = value == null ? "" : String(value);
+  if (/[",\n]/.test(text)) {
+    return `"${text.replace(/"/g, '""')}"`;
+  }
+  return text;
+}
+
+function downloadCsvFile(filename: string, rows: Array<Array<string | number | null | undefined>>) {
+  const content = rows.map((row) => row.map(escapeCsvCell).join(",")).join("\n");
+  downloadTextFile(filename, content);
+}
+
 export default function ProfitLossTrackPage() {
   const { user } = useAuth() as any;
   const { plan, loading: planLoading } = useUserPlan();
@@ -413,12 +522,14 @@ export default function ProfitLossTrackPage() {
   const [budgets, setBudgets] = useState<ProfitLossBudget[]>([]);
   const [snapshots, setSnapshots] = useState<DailySnapshotRow[]>([]);
   const [entries, setEntries] = useState<JournalEntry[]>([]);
+  const [tradeCostRows, setTradeCostRows] = useState<NormalizedTradeCostRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [profileSaving, setProfileSaving] = useState(false);
   const [budgetSaving, setBudgetSaving] = useState(false);
   const [editingCostId, setEditingCostId] = useState<string | null>(null);
   const [selectedVendor, setSelectedVendor] = useState<string | null>(null);
+  const [selectedBudgetCategory, setSelectedBudgetCategory] = useState<CostCategory | null>(null);
   const [form, setForm] = useState<CostFormState>(blankCostForm());
   const [budgetForm, setBudgetForm] = useState<BudgetFormState>(blankBudgetForm());
   const [presetBusyKey, setPresetBusyKey] = useState<string | null>(null);
@@ -436,6 +547,8 @@ export default function ProfitLossTrackPage() {
     };
   }, [today, rangeKey]);
 
+  const previousRange = useMemo(() => getPreviousRange(range.start, range.end, rangeKey), [range, rangeKey]);
+
   useEffect(() => {
     if (!user?.id) return;
     let cancelled = false;
@@ -444,12 +557,20 @@ export default function ProfitLossTrackPage() {
       try {
         setLoading(true);
         setError(null);
-        const [costRows, profileRow, budgetRows, snapRows, entryRows] = await Promise.all([
+        const nextDay = new Date(range.end);
+        nextDay.setDate(nextDay.getDate() + 1);
+        const [costRows, profileRow, budgetRows, snapRows, entryRows, tradeRows] = await Promise.all([
           listProfitLossCosts(user.id, activeAccountId),
           getProfitLossProfile(user.id, activeAccountId),
           listProfitLossBudgets(user.id, activeAccountId),
           listDailySnapshots(user.id, toIso(range.start), toIso(range.end), activeAccountId),
           getAllJournalEntries(user.id, activeAccountId),
+          listNormalizedTradeCosts({
+            userId: user.id,
+            accountId: activeAccountId,
+            fromIso: `${toIso(range.start)}T00:00:00.000Z`,
+            toIso: `${toIso(nextDay)}T00:00:00.000Z`,
+          }),
         ]);
 
         if (cancelled) return;
@@ -458,6 +579,7 @@ export default function ProfitLossTrackPage() {
         setBudgets(budgetRows);
         setSnapshots(snapRows);
         setEntries(entryRows);
+        setTradeCostRows(tradeRows);
       } catch (err: any) {
         if (cancelled) return;
         setError(err?.message || "Failed to load data");
@@ -487,12 +609,22 @@ export default function ProfitLossTrackPage() {
     const totalTrading = snapshots.reduce((sum, row) => sum + (row.realized_usd || 0), 0);
     const rangeStartIso = toIso(range.start);
     const rangeEndIso = toIso(range.end);
-    const tradeRecordCount = entries.filter((entry) => {
+    const journalTradeRecordCount = entries.filter((entry) => {
       const date = String(entry?.date ?? "").slice(0, 10);
       return !!date && date >= rangeStartIso && date <= rangeEndIso;
     }).length;
 
-    const tradeCosts = entries.reduce(
+    const normalizedTradeCosts = tradeCostRows.reduce(
+      (acc, row) => {
+        acc.fees += row.fees || 0;
+        acc.commissions += row.commissions || 0;
+        acc.total += row.total_cost || 0;
+        return acc;
+      },
+      { fees: 0, commissions: 0, total: 0 }
+    );
+
+    const journalTradeCosts = entries.reduce(
       (acc, entry) => {
         const date = String(entry?.date ?? "").slice(0, 10);
         if (!date || date < rangeStartIso || date > rangeEndIso) return acc;
@@ -504,6 +636,10 @@ export default function ProfitLossTrackPage() {
       },
       { fees: 0, commissions: 0, total: 0 }
     );
+
+    const tradeCostSource: TradeCostSource = tradeCostRows.length > 0 ? "normalized_trades" : "journal_notes";
+    const tradeCosts = tradeCostSource === "normalized_trades" ? normalizedTradeCosts : journalTradeCosts;
+    const tradeRecordCount = tradeCostSource === "normalized_trades" ? tradeCostRows.length : journalTradeRecordCount;
 
     const activeCosts = costs.filter((item) => (item.is_active ?? true) !== false);
     const periodExpenses = activeCosts.reduce((sum, cost) => sum + expenseForRange(cost, range.start, range.end), 0);
@@ -537,6 +673,7 @@ export default function ProfitLossTrackPage() {
       totalTrading,
       tradeCosts,
       tradeRecordCount,
+      tradeCostSource,
       periodExpenses,
       netAfterExpenses,
       expensesByCategory,
@@ -554,7 +691,12 @@ export default function ProfitLossTrackPage() {
       feePerRecord: tradeRecordCount > 0 ? tradeCosts.total / tradeRecordCount : null,
       activeCount: activeCosts.length,
     };
-  }, [activeProfile, costs, entries, range, rangeKey, snapshots]);
+  }, [activeProfile, costs, entries, range, rangeKey, snapshots, tradeCostRows]);
+
+  const tradeCostSourceLabel =
+    totals.tradeCostSource === "normalized_trades"
+      ? L("Broker sync / imports", "Sync del broker / imports")
+      : L("Journal notes fallback", "Fallback de journal notes");
 
   const series = useMemo(() => {
     const days: string[] = [];
@@ -657,35 +799,80 @@ export default function ProfitLossTrackPage() {
       monthlyByCategory[budget.category] = budget.monthly_amount;
     });
 
-    const selectedByCategory = COST_CATEGORIES.reduce((acc, key) => {
+    const fullPeriodByCategory = COST_CATEGORIES.reduce((acc, key) => {
       acc[key] = monthlyByCategory[key] * RANGE_MONTHS[rangeKey];
       return acc;
     }, {} as Record<CostCategory, number>);
 
+    const elapsedFactor = getElapsedMonthFactor(range.start, range.end, rangeKey);
+    const toDateByCategory = COST_CATEGORIES.reduce((acc, key) => {
+      acc[key] = monthlyByCategory[key] * elapsedFactor;
+      return acc;
+    }, {} as Record<CostCategory, number>);
+
     const monthlyBudgetTotal = COST_CATEGORIES.reduce((sum, key) => sum + monthlyByCategory[key], 0);
-    const selectedPeriodBudgetTotal = COST_CATEGORIES.reduce((sum, key) => sum + selectedByCategory[key], 0);
-    const selectedPeriodVariance = selectedPeriodBudgetTotal - totals.periodExpenses;
+    const fullPeriodBudgetTotal = COST_CATEGORIES.reduce((sum, key) => sum + fullPeriodByCategory[key], 0);
+    const budgetToDateTotal = COST_CATEGORIES.reduce((sum, key) => sum + toDateByCategory[key], 0);
+    const selectedPeriodVariance = budgetToDateTotal - totals.periodExpenses;
 
     const categoryRows = COST_CATEGORIES.map((key) => {
       const actual = totals.expensesByCategory[key] || 0;
-      const budget = selectedByCategory[key] || 0;
+      const budgetToDate = toDateByCategory[key] || 0;
+      const fullBudget = fullPeriodByCategory[key] || 0;
+      const utilization = budgetToDate > 0 ? actual / budgetToDate : actual > 0 ? Infinity : 0;
       return {
         category: key,
         actual,
-        budget,
-        variance: budget - actual,
+        budgetToDate,
+        fullBudget,
+        variance: budgetToDate - actual,
+        utilization,
       };
-    }).filter((row) => row.actual > 0 || row.budget > 0);
+    }).filter((row) => row.actual > 0 || row.budgetToDate > 0 || row.fullBudget > 0);
 
     return {
       monthlyByCategory,
-      selectedByCategory,
+      fullPeriodByCategory,
+      toDateByCategory,
+      elapsedFactor,
       monthlyBudgetTotal,
-      selectedPeriodBudgetTotal,
+      fullPeriodBudgetTotal,
+      budgetToDateTotal,
       selectedPeriodVariance,
       categoryRows,
     };
-  }, [budgets, rangeKey, totals.expensesByCategory, totals.periodExpenses]);
+  }, [budgets, range.end, range.start, rangeKey, totals.expensesByCategory, totals.periodExpenses]);
+
+  const previousBudgetSummary = useMemo(() => {
+    const elapsedFactor = getElapsedMonthFactor(previousRange.start, previousRange.end, rangeKey);
+    const actualByCategory = COST_CATEGORIES.reduce((acc, key) => {
+      acc[key] = 0;
+      return acc;
+    }, {} as Record<CostCategory, number>);
+
+    costs
+      .filter((cost) => (cost.is_active ?? true) !== false)
+      .forEach((cost) => {
+        actualByCategory[cost.category] += expenseForRange(cost, previousRange.start, previousRange.end);
+      });
+
+    const budgetToDateByCategory = COST_CATEGORIES.reduce((acc, key) => {
+      acc[key] = (budgetSummary.monthlyByCategory[key] || 0) * elapsedFactor;
+      return acc;
+    }, {} as Record<CostCategory, number>);
+
+    const actualTotal = COST_CATEGORIES.reduce((sum, key) => sum + actualByCategory[key], 0);
+    const budgetToDateTotal = COST_CATEGORIES.reduce((sum, key) => sum + budgetToDateByCategory[key], 0);
+    const variance = budgetToDateTotal - actualTotal;
+
+    return {
+      actualByCategory,
+      budgetToDateByCategory,
+      actualTotal,
+      budgetToDateTotal,
+      variance,
+    };
+  }, [budgetSummary.monthlyByCategory, costs, previousRange.end, previousRange.start, rangeKey]);
 
   useEffect(() => {
     if (!vendorRows.length) {
@@ -696,6 +883,19 @@ export default function ProfitLossTrackPage() {
       setSelectedVendor(vendorRows[0].vendor);
     }
   }, [selectedVendor, vendorRows]);
+
+  useEffect(() => {
+    if (!budgetSummary.categoryRows.length) {
+      if (selectedBudgetCategory !== null) setSelectedBudgetCategory(null);
+      return;
+    }
+    if (
+      !selectedBudgetCategory ||
+      !budgetSummary.categoryRows.some((row) => row.category === selectedBudgetCategory)
+    ) {
+      setSelectedBudgetCategory(budgetSummary.categoryRows[0].category);
+    }
+  }, [budgetSummary.categoryRows, selectedBudgetCategory]);
 
   const selectedVendorDetail = useMemo(() => {
     if (!selectedVendor) return null;
@@ -752,6 +952,105 @@ export default function ProfitLossTrackPage() {
     }, {} as Record<CostCategory, number>);
   }, [traderTypeSuggestions]);
 
+  const budgetComparison = useMemo(() => {
+    const spendDelta = totals.periodExpenses - previousBudgetSummary.actualTotal;
+    const spendDeltaPct =
+      previousBudgetSummary.actualTotal > 0 ? spendDelta / previousBudgetSummary.actualTotal : null;
+    const recommendedMonthlyTotal = COST_CATEGORIES.reduce(
+      (sum, key) => sum + (recommendedBudgetByCategory[key] || 0),
+      0
+    );
+
+    return {
+      spendDelta,
+      spendDeltaPct,
+      recommendedMonthlyTotal,
+      recommendationGap: budgetSummary.monthlyBudgetTotal - recommendedMonthlyTotal,
+    };
+  }, [
+    budgetSummary.monthlyBudgetTotal,
+    previousBudgetSummary.actualTotal,
+    recommendedBudgetByCategory,
+    totals.periodExpenses,
+  ]);
+
+  const budgetChartRows = useMemo(() => {
+    return budgetSummary.categoryRows
+      .map((row) => ({
+        category: row.category,
+        label: L(CATEGORY_LABELS[row.category].en, CATEGORY_LABELS[row.category].es),
+        budgetToDate: row.budgetToDate,
+        actual: row.actual,
+        previousActual: previousBudgetSummary.actualByCategory[row.category] || 0,
+      }))
+      .sort((a, b) => b.actual - a.actual);
+  }, [L, budgetSummary.categoryRows, previousBudgetSummary.actualByCategory]);
+
+  const selectedBudgetCategoryDetail = useMemo(() => {
+    if (!selectedBudgetCategory) return null;
+    const summaryRow = budgetSummary.categoryRows.find((row) => row.category === selectedBudgetCategory);
+    if (!summaryRow) return null;
+
+    const items = costs
+      .filter((cost) => (cost.is_active ?? true) !== false && cost.category === selectedBudgetCategory)
+      .map((cost) => ({
+        ...cost,
+        vendorLabel: cost.vendor?.trim() || cost.name,
+        monthlyEquivalent: monthlyEquivalent(cost),
+        selectedPeriodSpend: expenseForRange(cost, range.start, range.end),
+        previousPeriodSpend: expenseForRange(cost, previousRange.start, previousRange.end),
+        renewal: nextRenewalDate(cost, today),
+      }))
+      .sort((a, b) => b.selectedPeriodSpend - a.selectedPeriodSpend || b.monthlyEquivalent - a.monthlyEquivalent);
+
+    const actualTotal = summaryRow.actual;
+    const status = getBudgetStatus(summaryRow);
+    const actionPlan =
+      status === "over"
+        ? [
+            L("Reduce or pause the largest vendor in this category first.", "Reduce o pausa primero el vendor mas grande de esta categoria."),
+            L("Review renewals and switch off non-essential tools before the next charge.", "Revisa renovaciones y apaga herramientas no esenciales antes del proximo cargo."),
+            L("Rebuild the budget if the higher spend is intentional and permanent.", "Reconstruye el presupuesto si el gasto mayor es intencional y permanente."),
+          ]
+        : status === "near"
+          ? [
+              L("Freeze new spend in this category until the period closes.", "Congela gasto nuevo en esta categoria hasta cerrar el periodo."),
+              L("Check the next renewal and confirm it is still needed.", "Verifica la proxima renovacion y confirma que sigue siendo necesaria."),
+              L("Compare this category against the trader preset before adding more tools.", "Compara esta categoria contra el preset del trader antes de agregar mas herramientas."),
+            ]
+          : status === "no-budget"
+            ? [
+                L("Set a monthly budget so this category can be measured properly.", "Define un presupuesto mensual para medir esta categoria correctamente."),
+                L("Use the trader preset as a baseline if you want a quick target.", "Usa el preset del trader como base si quieres un objetivo rapido."),
+                L("Group the vendors here before you increase stack complexity.", "Agrupa los vendors aqui antes de aumentar la complejidad del stack."),
+              ]
+            : [
+                L("Keep the stack stable and avoid adding unnecessary tools.", "Mantén el stack estable y evita agregar herramientas innecesarias."),
+                L("Review the top vendor only if performance still lags despite staying on budget.", "Revisa el vendor principal solo si el performance sigue flojo aun estando en presupuesto."),
+                L("Carry this budget into the next close unless your workflow changed.", "Mantén este presupuesto para el próximo cierre salvo que tu workflow haya cambiado."),
+              ];
+
+    return {
+      category: selectedBudgetCategory,
+      label: L(CATEGORY_LABELS[selectedBudgetCategory].en, CATEGORY_LABELS[selectedBudgetCategory].es),
+      summaryRow,
+      status,
+      items,
+      actionPlan,
+      actualTotal,
+    };
+  }, [
+    L,
+    budgetSummary.categoryRows,
+    costs,
+    previousRange.end,
+    previousRange.start,
+    range.end,
+    range.start,
+    selectedBudgetCategory,
+    today,
+  ]);
+
   const controlAlerts = useMemo(() => {
     const alerts: Array<{ level: AlertLevel; title: string; detail: string }> = [];
 
@@ -785,14 +1084,14 @@ export default function ProfitLossTrackPage() {
     });
 
     budgetSummary.categoryRows
-      .filter((row) => row.budget > 0 && row.actual > row.budget * (1 + activeProfile.overspend_alert_pct))
-      .sort((a, b) => b.actual - b.budget - (a.actual - a.budget))
+      .filter((row) => row.budgetToDate > 0 && row.actual > row.budgetToDate * (1 + activeProfile.overspend_alert_pct))
+      .sort((a, b) => b.actual - b.budgetToDate - (a.actual - a.budgetToDate))
       .slice(0, 3)
       .forEach((row) => {
         alerts.push({
           level: "medium",
           title: L("Over budget category", "Categoria sobre presupuesto"),
-          detail: `${L(CATEGORY_LABELS[row.category].en, CATEGORY_LABELS[row.category].es)} · ${currency(row.actual - row.budget)} ${L("over", "por encima")}`,
+          detail: `${L(CATEGORY_LABELS[row.category].en, CATEGORY_LABELS[row.category].es)} · ${currency(row.actual - row.budgetToDate)} ${L("over", "por encima")}`,
         });
       });
 
@@ -863,7 +1162,7 @@ export default function ProfitLossTrackPage() {
       {
         label: L("No category above overspend threshold", "Ninguna categoria supera el umbral de sobregasto"),
         done: !budgetSummary.categoryRows.some(
-          (row) => row.budget > 0 && row.actual > row.budget * (1 + activeProfile.overspend_alert_pct)
+          (row) => row.budgetToDate > 0 && row.actual > row.budgetToDate * (1 + activeProfile.overspend_alert_pct)
         ),
       },
     ];
@@ -923,7 +1222,7 @@ export default function ProfitLossTrackPage() {
       `${L("Selected period break-even", "Break-even del periodo")}: ${currency(totals.selectedPeriodBreakEven)}`,
       `${L("Actual net after expenses", "Neto real despues de gastos")}: ${currency(totals.netAfterExpenses)}`,
       `${L("Budget variance", "Varianza vs presupuesto")}: ${currency(budgetSummary.selectedPeriodVariance)}`,
-      `${L("Observed fees", "Fees observados")}: ${currency(totals.tradeCosts.total)}`,
+      `${L("Observed fees", "Fees observados")}: ${currency(totals.tradeCosts.total)} (${tradeCostSourceLabel})`,
       `${L("Top vendor", "Vendor principal")}: ${vendorRows[0]?.vendor ?? "--"}${vendorRows[0] ? ` (${currency(vendorRows[0].monthlyEquivalent)} / ${L("month", "mes")})` : ""}`,
       `${L("Critical alerts", "Alertas criticas")}: ${controlAlerts.length}`,
     ];
@@ -947,6 +1246,7 @@ export default function ProfitLossTrackPage() {
     totals.netAfterExpenses,
     totals.selectedPeriodBreakEven,
     totals.tradeCosts.total,
+    tradeCostSourceLabel,
     vendorRows,
   ]);
 
@@ -1024,6 +1324,246 @@ export default function ProfitLossTrackPage() {
       next[category] = suggested > 0 ? suggested.toFixed(2) : "";
     });
     setBudgetForm(next);
+  }
+
+  function buildClosePackageCsvRows() {
+    const rows: Array<Array<string | number | null | undefined>> = [
+      [L("Section", "Seccion"), L("Metric", "Metrica"), L("Value", "Valor"), L("Notes", "Notas")],
+      ["overview", L("Period", "Periodo"), periodTitle, rangeKey],
+      ["overview", L("Trading P&L (net)", "P&L de trading (neto)"), totals.totalTrading, ""],
+      ["overview", L("Observed commissions & fees", "Comisiones y fees observados"), totals.tradeCosts.total, tradeCostSourceLabel],
+      ["overview", L("Operating expenses", "Gastos operativos"), totals.periodExpenses, ""],
+      ["overview", L("Net after expenses", "Neto despues de gastos"), totals.netAfterExpenses, ""],
+      ["overview", L("Selected period break-even", "Break-even del periodo"), totals.selectedPeriodBreakEven, ""],
+      ["overview", L("Budget variance", "Varianza vs presupuesto"), budgetSummary.selectedPeriodVariance, ""],
+      [],
+      [L("Section", "Seccion"), L("Category", "Categoria"), L("Budget", "Presupuesto"), L("Actual", "Real"), L("Variance", "Varianza")],
+      ...budgetSummary.categoryRows.map((row) => [
+        "budget",
+        L(CATEGORY_LABELS[row.category].en, CATEGORY_LABELS[row.category].es),
+        row.budgetToDate,
+        row.actual,
+        row.variance,
+      ]),
+      [],
+      [L("Section", "Seccion"), L("Vendor", "Vendor"), L("Monthly", "Mensual"), L("Period spend", "Gasto del periodo"), L("Next renewal", "Proxima renovacion")],
+      ...vendorRows.map((row) => [
+        "vendor",
+        row.vendor,
+        row.monthlyEquivalent,
+        row.selectedPeriodSpend,
+        row.nextRenewal ? toIso(row.nextRenewal) : "--",
+      ]),
+      [],
+      [L("Section", "Seccion"), L("Alert", "Alerta"), L("Level", "Nivel"), L("Detail", "Detalle")],
+      ...controlAlerts.map((alert) => ["alert", alert.title, alert.level, alert.detail]),
+    ];
+
+    if (monthlyClose.checklist.length) {
+      rows.push([]);
+      rows.push([L("Section", "Seccion"), L("Close check", "Check de cierre"), L("Status", "Estado"), ""]);
+      monthlyClose.checklist.forEach((item) => {
+        rows.push(["close", item.label, item.done ? L("Done", "Listo") : L("Open", "Abierto"), ""]);
+      });
+    }
+
+    return rows;
+  }
+
+  function downloadClosePackageCsv() {
+    downloadCsvFile(
+      `profit-loss-close-package-${rangeKey}-${toIso(today)}.csv`,
+      buildClosePackageCsvRows()
+    );
+  }
+
+  function downloadClosePackagePdf() {
+    const doc = new jsPDF({ unit: "pt", format: "letter" });
+    const marginX = 42;
+    let cursorY = 44;
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(18);
+    doc.text(L("Profit & Loss Close Package", "Close Package de Profit & Loss"), marginX, cursorY);
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
+    cursorY += 18;
+    doc.text(`${L("Period", "Periodo")}: ${periodTitle}`, marginX, cursorY);
+    cursorY += 14;
+    doc.text(`${L("Trader type", "Tipo de trader")}: ${L(TRADER_TYPE_LABELS[activeProfile.trader_type].en, TRADER_TYPE_LABELS[activeProfile.trader_type].es)}`, marginX, cursorY);
+    cursorY += 14;
+    doc.text(`${L("Trade cost source", "Fuente de costos variables")}: ${tradeCostSourceLabel}`, marginX, cursorY);
+
+    autoTable(doc, {
+      startY: cursorY + 18,
+      head: [[L("Metric", "Metrica"), L("Value", "Valor")]],
+      body: [
+        [L("Trading P&L (net)", "P&L de trading (neto)"), currency(totals.totalTrading)],
+        [L("Observed commissions & fees", "Comisiones y fees observados"), `${currency(totals.tradeCosts.total)} (${tradeCostSourceLabel})`],
+        [L("Operating expenses", "Gastos operativos"), currency(totals.periodExpenses)],
+        [L("Net after expenses", "Neto despues de gastos"), currency(totals.netAfterExpenses)],
+        [L("Selected period break-even", "Break-even del periodo"), currency(totals.selectedPeriodBreakEven)],
+        [L("Budget variance", "Varianza vs presupuesto"), currency(budgetSummary.selectedPeriodVariance)],
+      ],
+      styles: { fontSize: 9 },
+      headStyles: { fillColor: [15, 23, 42] },
+      margin: { left: marginX, right: marginX },
+    });
+
+    const summaryEndY = (doc as any).lastAutoTable?.finalY ?? cursorY + 140;
+    autoTable(doc, {
+      startY: summaryEndY + 18,
+      head: [[L("Category", "Categoria"), L("Budget", "Presupuesto"), L("Actual", "Real"), L("Variance", "Varianza")]],
+      body:
+        budgetSummary.categoryRows.length > 0
+          ? budgetSummary.categoryRows.map((row) => [
+              L(CATEGORY_LABELS[row.category].en, CATEGORY_LABELS[row.category].es),
+              currency(row.budgetToDate),
+              currency(row.actual),
+              currency(row.variance),
+            ])
+          : [[L("No budget rows", "Sin filas de presupuesto"), "--", "--", "--"]],
+      styles: { fontSize: 9 },
+      headStyles: { fillColor: [22, 163, 74] },
+      margin: { left: marginX, right: marginX },
+    });
+
+    const budgetEndY = (doc as any).lastAutoTable?.finalY ?? summaryEndY + 120;
+    autoTable(doc, {
+      startY: budgetEndY + 18,
+      head: [[L("Vendor", "Vendor"), L("Monthly", "Mensual"), L("Period spend", "Gasto del periodo"), L("Next renewal", "Proxima renovacion")]],
+      body:
+        vendorRows.length > 0
+          ? vendorRows.slice(0, 10).map((row) => [
+              row.vendor,
+              currency(row.monthlyEquivalent),
+              currency(row.selectedPeriodSpend),
+              row.nextRenewal ? toIso(row.nextRenewal) : "--",
+            ])
+          : [[L("No vendors", "Sin vendors"), "--", "--", "--"]],
+      styles: { fontSize: 9 },
+      headStyles: { fillColor: [59, 130, 246] },
+      margin: { left: marginX, right: marginX },
+    });
+
+    const vendorEndY = (doc as any).lastAutoTable?.finalY ?? budgetEndY + 120;
+    autoTable(doc, {
+      startY: vendorEndY + 18,
+      head: [[L("Alert", "Alerta"), L("Level", "Nivel"), L("Detail", "Detalle")]],
+      body:
+        controlAlerts.length > 0
+          ? controlAlerts.slice(0, 10).map((alert) => [alert.title, alert.level, alert.detail])
+          : [[L("No active control alerts", "Sin alertas activas"), "--", "--"]],
+      styles: { fontSize: 9 },
+      headStyles: { fillColor: [234, 179, 8] },
+      margin: { left: marginX, right: marginX },
+    });
+
+    doc.save(`profit-loss-close-package-${rangeKey}-${toIso(today)}.pdf`);
+  }
+
+  function downloadCategoryCsv() {
+    if (!selectedBudgetCategoryDetail) return;
+
+    const rows: Array<Array<string | number | null | undefined>> = [
+      [L("Category", "Categoria"), selectedBudgetCategoryDetail.label],
+      [L("Period", "Periodo"), periodTitle],
+      [L("Budget to date", "Presupuesto a la fecha"), selectedBudgetCategoryDetail.summaryRow.budgetToDate],
+      [L("Actual", "Real"), selectedBudgetCategoryDetail.summaryRow.actual],
+      [L("Variance", "Varianza"), selectedBudgetCategoryDetail.summaryRow.variance],
+      [L("Full period budget", "Presupuesto completo"), selectedBudgetCategoryDetail.summaryRow.fullBudget],
+      [],
+      [L("Vendor", "Vendor"), L("Current", "Actual"), L("Previous", "Anterior"), L("Monthly eq.", "Eq. mensual"), L("Share", "Participacion"), L("Next renewal", "Proxima renovacion")],
+      ...selectedBudgetCategoryDetail.items.map((item) => [
+        item.vendorLabel,
+        item.selectedPeriodSpend,
+        item.previousPeriodSpend,
+        item.monthlyEquivalent,
+        selectedBudgetCategoryDetail.actualTotal > 0
+          ? `${((item.selectedPeriodSpend / selectedBudgetCategoryDetail.actualTotal) * 100).toFixed(1)}%`
+          : "--",
+        item.renewal ? toIso(item.renewal) : "--",
+      ]),
+      [],
+      [L("Recommended actions", "Acciones recomendadas")],
+      ...selectedBudgetCategoryDetail.actionPlan.map((item) => [item]),
+    ];
+
+    downloadCsvFile(
+      `profit-loss-category-${selectedBudgetCategoryDetail.category}-${rangeKey}-${toIso(today)}.csv`,
+      rows
+    );
+  }
+
+  function downloadCategoryPdf() {
+    if (!selectedBudgetCategoryDetail) return;
+
+    const doc = new jsPDF({ unit: "pt", format: "letter" });
+    const marginX = 42;
+    let cursorY = 44;
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(18);
+    doc.text(selectedBudgetCategoryDetail.label, marginX, cursorY);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
+    cursorY += 18;
+    doc.text(`${L("Period", "Periodo")}: ${periodTitle}`, marginX, cursorY);
+    cursorY += 14;
+    doc.text(`${L("Status", "Estado")}: ${selectedBudgetCategoryDetail.status}`, marginX, cursorY);
+
+    autoTable(doc, {
+      startY: cursorY + 18,
+      head: [[L("Metric", "Metrica"), L("Value", "Valor")]],
+      body: [
+        [L("Budget to date", "Presupuesto a la fecha"), currency(selectedBudgetCategoryDetail.summaryRow.budgetToDate)],
+        [L("Actual", "Real"), currency(selectedBudgetCategoryDetail.summaryRow.actual)],
+        [L("Variance", "Varianza"), currency(selectedBudgetCategoryDetail.summaryRow.variance)],
+        [L("Full period budget", "Presupuesto completo"), currency(selectedBudgetCategoryDetail.summaryRow.fullBudget)],
+        [
+          L("Previous period", "Periodo anterior"),
+          currency(previousBudgetSummary.actualByCategory[selectedBudgetCategoryDetail.category] || 0),
+        ],
+      ],
+      styles: { fontSize: 9 },
+      headStyles: { fillColor: [15, 23, 42] },
+      margin: { left: marginX, right: marginX },
+    });
+
+    const summaryEndY = (doc as any).lastAutoTable?.finalY ?? cursorY + 120;
+    autoTable(doc, {
+      startY: summaryEndY + 18,
+      head: [[L("Vendor", "Vendor"), L("Current", "Actual"), L("Previous", "Anterior"), L("Monthly eq.", "Eq. mensual"), L("Share", "Participacion"), L("Next renewal", "Proxima renovacion")]],
+      body:
+        selectedBudgetCategoryDetail.items.length > 0
+          ? selectedBudgetCategoryDetail.items.map((item) => [
+              item.vendorLabel,
+              currency(item.selectedPeriodSpend),
+              currency(item.previousPeriodSpend),
+              currency(item.monthlyEquivalent),
+              selectedBudgetCategoryDetail.actualTotal > 0
+                ? `${((item.selectedPeriodSpend / selectedBudgetCategoryDetail.actualTotal) * 100).toFixed(0)}%`
+                : "--",
+              item.renewal ? toIso(item.renewal) : "--",
+            ])
+          : [[L("No active vendors", "Sin vendors activos"), "--", "--", "--", "--", "--"]],
+      styles: { fontSize: 9 },
+      headStyles: { fillColor: [22, 163, 74] },
+      margin: { left: marginX, right: marginX },
+    });
+
+    const vendorEndY = (doc as any).lastAutoTable?.finalY ?? summaryEndY + 120;
+    autoTable(doc, {
+      startY: vendorEndY + 18,
+      head: [[L("Recommended actions", "Acciones recomendadas")]],
+      body: selectedBudgetCategoryDetail.actionPlan.map((item) => [item]),
+      styles: { fontSize: 9 },
+      headStyles: { fillColor: [59, 130, 246] },
+      margin: { left: marginX, right: marginX },
+    });
+
+    doc.save(`profit-loss-category-${selectedBudgetCategoryDetail.category}-${rangeKey}-${toIso(today)}.pdf`);
   }
 
   async function saveCostForm() {
@@ -1992,10 +2532,16 @@ export default function ProfitLossTrackPage() {
                 {
                   label: L("Observed fee drag / month", "Drag de fees / mes"),
                   value: currency(totals.monthlyTradeCostDrag),
-                  hint: L(
-                    "Auto-detected from journal notes. Already embedded in net trading P&L.",
-                    "Auto-detectado desde journal notes. Ya esta incluido en el P&L neto."
-                  ),
+                  hint:
+                    totals.tradeCostSource === "normalized_trades"
+                      ? L(
+                          "Auto-detected from normalized broker sync/import data. Already embedded in net trading P&L.",
+                          "Auto-detectado desde data normalizada de broker sync/import. Ya esta incluido en el P&L neto."
+                        )
+                      : L(
+                          "Fallback from journal notes. Already embedded in net trading P&L.",
+                          "Fallback desde journal notes. Ya esta incluido en el P&L neto."
+                        ),
                 },
               ].map((card) => (
                 <div key={card.label} className="rounded-2xl border border-slate-800 bg-slate-900/50 p-4">
@@ -2167,7 +2713,7 @@ export default function ProfitLossTrackPage() {
 
         {tab === "budget" && (
           <div className="mt-6 space-y-6">
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
               {[
                 {
                   label: L("Monthly budget", "Presupuesto mensual"),
@@ -2175,9 +2721,14 @@ export default function ProfitLossTrackPage() {
                   hint: L("Planned operating expense ceiling", "Techo planificado de gasto operativo"),
                 },
                 {
-                  label: L("Selected period budget", "Presupuesto del periodo"),
-                  value: currency(budgetSummary.selectedPeriodBudgetTotal),
+                  label: L("Full period budget", "Presupuesto completo del periodo"),
+                  value: currency(budgetSummary.fullPeriodBudgetTotal),
                   hint: periodTitle,
+                },
+                {
+                  label: L("Budget to date", "Presupuesto a la fecha"),
+                  value: currency(budgetSummary.budgetToDateTotal),
+                  hint: L("Prorated to the elapsed part of the period", "Prorrateado a la parte transcurrida del periodo"),
                 },
                 {
                   label: L("Actual operating spend", "Gasto operativo real"),
@@ -2185,7 +2736,7 @@ export default function ProfitLossTrackPage() {
                   hint: periodTitle,
                 },
                 {
-                  label: L("Budget variance", "Varianza vs presupuesto"),
+                  label: L("Variance to date", "Varianza a la fecha"),
                   value: currency(budgetSummary.selectedPeriodVariance),
                   hint:
                     budgetSummary.selectedPeriodVariance >= 0
@@ -2193,9 +2744,30 @@ export default function ProfitLossTrackPage() {
                       : L("Negative means overspend", "Negativo significa sobregasto"),
                 },
                 {
+                  label: L("Previous period spend", "Gasto del periodo anterior"),
+                  value: currency(previousBudgetSummary.actualTotal),
+                  hint: `${toIso(previousRange.start)} - ${toIso(previousRange.end)}`,
+                },
+                {
+                  label: L("Vs previous period", "Vs periodo anterior"),
+                  value: currency(budgetComparison.spendDelta),
+                  hint:
+                    budgetComparison.spendDeltaPct == null
+                      ? L("No prior comparison", "Sin comparacion previa")
+                      : `${budgetComparison.spendDeltaPct >= 0 ? "+" : ""}${(budgetComparison.spendDeltaPct * 100).toFixed(1)}%`,
+                },
+                {
                   label: L("Observed trading fees", "Fees de trading observados"),
                   value: currency(totals.tradeCosts.total),
-                  hint: L("From journal notes in selected period", "Desde journal notes en el periodo"),
+                  hint: tradeCostSourceLabel,
+                },
+                {
+                  label: L("Preset monthly budget", "Presupuesto mensual del preset"),
+                  value: currency(budgetComparison.recommendedMonthlyTotal),
+                  hint:
+                    budgetComparison.recommendationGap >= 0
+                      ? L("Saved budget is above the preset", "El presupuesto guardado esta por encima del preset")
+                      : L("Saved budget is below the preset", "El presupuesto guardado esta por debajo del preset"),
                 },
               ].map((card) => (
                 <div key={card.label} className="rounded-2xl border border-slate-800 bg-slate-900/50 p-4">
@@ -2204,6 +2776,279 @@ export default function ProfitLossTrackPage() {
                   <p className="text-xs text-slate-500 mt-1">{card.hint}</p>
                 </div>
               ))}
+            </div>
+
+            <div className="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
+              <section className="rounded-2xl border border-slate-800 bg-slate-900/50 p-5">
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <h2 className="text-lg font-semibold">{L("Category comparison", "Comparacion por categoria")}</h2>
+                    <p className="text-xs text-slate-500 mt-1">
+                      {L(
+                        "Compare budget to date, actual spend, and the previous period for each category.",
+                        "Compara presupuesto a la fecha, gasto real y periodo anterior por categoria."
+                      )}
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-3 text-[11px] text-slate-400">
+                    <span className="inline-flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-emerald-400" />{L("Budget to date", "Presupuesto a la fecha")}</span>
+                    <span className="inline-flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-sky-400" />{L("Actual", "Real")}</span>
+                    <span className="inline-flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-amber-400" />{L("Previous", "Anterior")}</span>
+                  </div>
+                </div>
+                <div className="mt-4 h-[360px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={budgetChartRows} layout="vertical" margin={{ left: 12, right: 12, top: 8, bottom: 8 }}>
+                      <CartesianGrid stroke="#1f2937" strokeDasharray="3 3" />
+                      <XAxis type="number" tick={{ fontSize: 10, fill: "#94a3b8" }} />
+                      <YAxis
+                        type="category"
+                        dataKey="label"
+                        width={120}
+                        tick={{ fontSize: 10, fill: "#94a3b8" }}
+                      />
+                      <Tooltip formatter={(value: any) => currency(Number(value))} labelStyle={{ color: "#0f172a" }} />
+                      <Bar
+                        dataKey="budgetToDate"
+                        fill="#34d399"
+                        radius={[0, 4, 4, 0]}
+                        onClick={(data: any) => {
+                          const category = data?.payload?.category as CostCategory | undefined;
+                          if (category) setSelectedBudgetCategory(category);
+                        }}
+                      >
+                        {budgetChartRows.map((row) => (
+                          <Cell
+                            key={`budget-${row.category}`}
+                            fill="#34d399"
+                            fillOpacity={!selectedBudgetCategory || selectedBudgetCategory === row.category ? 1 : 0.28}
+                            cursor="pointer"
+                          />
+                        ))}
+                      </Bar>
+                      <Bar
+                        dataKey="actual"
+                        fill="#38bdf8"
+                        radius={[0, 4, 4, 0]}
+                        onClick={(data: any) => {
+                          const category = data?.payload?.category as CostCategory | undefined;
+                          if (category) setSelectedBudgetCategory(category);
+                        }}
+                      >
+                        {budgetChartRows.map((row) => (
+                          <Cell
+                            key={`actual-${row.category}`}
+                            fill="#38bdf8"
+                            fillOpacity={!selectedBudgetCategory || selectedBudgetCategory === row.category ? 1 : 0.28}
+                            cursor="pointer"
+                          />
+                        ))}
+                      </Bar>
+                      <Bar
+                        dataKey="previousActual"
+                        fill="#f59e0b"
+                        radius={[0, 4, 4, 0]}
+                        onClick={(data: any) => {
+                          const category = data?.payload?.category as CostCategory | undefined;
+                          if (category) setSelectedBudgetCategory(category);
+                        }}
+                      >
+                        {budgetChartRows.map((row) => (
+                          <Cell
+                            key={`previous-${row.category}`}
+                            fill="#f59e0b"
+                            fillOpacity={!selectedBudgetCategory || selectedBudgetCategory === row.category ? 1 : 0.28}
+                            cursor="pointer"
+                          />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+                <p className="mt-3 text-[11px] text-slate-500">
+                  {L(
+                    "Click any bar to sync the drilldown on the right.",
+                    "Haz click en cualquier barra para sincronizar el drilldown de la derecha."
+                  )}
+                </p>
+                {budgetChartRows.length === 0 && (
+                  <p className="text-sm text-slate-400 mt-3">
+                    {L("No category data yet.", "Aun no hay data por categoria.")}
+                  </p>
+                )}
+              </section>
+
+              <section className="rounded-2xl border border-slate-800 bg-slate-900/50 p-5">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <h2 className="text-lg font-semibold">{L("Category drilldown", "Drilldown por categoria")}</h2>
+                    <p className="text-xs text-slate-500 mt-1">
+                      {L(
+                        "See which vendors are driving the category and what action to take next.",
+                        "Mira que vendors empujan la categoria y que accion conviene tomar."
+                      )}
+                    </p>
+                  </div>
+                  {selectedBudgetCategoryDetail && (
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={downloadCategoryPdf}
+                        className="rounded-xl border border-slate-700 px-3 py-2 text-xs text-slate-200 hover:border-emerald-400"
+                      >
+                        {L("Export PDF", "Exportar PDF")}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={downloadCategoryCsv}
+                        className="rounded-xl border border-slate-700 px-3 py-2 text-xs text-slate-200 hover:border-emerald-400"
+                      >
+                        {L("Export CSV", "Exportar CSV")}
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {budgetSummary.categoryRows.map((row) => (
+                    <button
+                      key={row.category}
+                      type="button"
+                      onClick={() => setSelectedBudgetCategory(row.category)}
+                      className={`rounded-full border px-3 py-1.5 text-xs transition ${
+                        selectedBudgetCategory === row.category
+                          ? "border-emerald-400 bg-emerald-400/10 text-emerald-200"
+                          : "border-slate-700 text-slate-300 hover:border-emerald-400/70"
+                      }`}
+                    >
+                      {L(CATEGORY_LABELS[row.category].en, CATEGORY_LABELS[row.category].es)}
+                    </button>
+                  ))}
+                </div>
+
+                {!selectedBudgetCategoryDetail ? (
+                  <p className="text-sm text-slate-400 mt-4">
+                    {L("Pick a category to inspect it.", "Selecciona una categoria para inspeccionarla.")}
+                  </p>
+                ) : (
+                  <div className="mt-4 space-y-4">
+                    <div className="rounded-xl border border-slate-800 bg-slate-950/40 px-4 py-4">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-semibold">{selectedBudgetCategoryDetail.label}</p>
+                          <p className="text-xs text-slate-500 mt-1">{periodTitle}</p>
+                        </div>
+                        <span
+                          className={`rounded-full border px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] ${
+                            selectedBudgetCategoryDetail.status === "over"
+                              ? "border-rose-500/40 bg-rose-500/10 text-rose-200"
+                              : selectedBudgetCategoryDetail.status === "near"
+                                ? "border-amber-400/40 bg-amber-400/10 text-amber-200"
+                                : selectedBudgetCategoryDetail.status === "no-budget"
+                                  ? "border-slate-700 bg-slate-900/70 text-slate-300"
+                                  : "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
+                          }`}
+                        >
+                          {selectedBudgetCategoryDetail.status === "over"
+                            ? L("Reduce", "Reducir")
+                            : selectedBudgetCategoryDetail.status === "near"
+                              ? L("Review", "Revisar")
+                              : selectedBudgetCategoryDetail.status === "no-budget"
+                                ? L("Set budget", "Definir budget")
+                                : L("Keep", "Mantener")}
+                        </span>
+                      </div>
+                      <div className="mt-3 grid gap-3 md:grid-cols-2 text-[11px] text-slate-300">
+                        <p>
+                          {L("Budget to date", "Presupuesto a la fecha")}:{" "}
+                          <span className="font-semibold">{currency(selectedBudgetCategoryDetail.summaryRow.budgetToDate)}</span>
+                        </p>
+                        <p>
+                          {L("Actual", "Real")}:{" "}
+                          <span className="font-semibold">{currency(selectedBudgetCategoryDetail.summaryRow.actual)}</span>
+                        </p>
+                        <p>
+                          {L("Previous period", "Periodo anterior")}:{" "}
+                          <span className="font-semibold">
+                            {currency(previousBudgetSummary.actualByCategory[selectedBudgetCategoryDetail.category] || 0)}
+                          </span>
+                        </p>
+                        <p>
+                          {L("Full period budget", "Presupuesto completo")}:{" "}
+                          <span className="font-semibold">{currency(selectedBudgetCategoryDetail.summaryRow.fullBudget)}</span>
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl border border-slate-800 bg-slate-950/40 px-4 py-4">
+                      <p className="text-sm font-semibold">{L("Recommended actions", "Acciones recomendadas")}</p>
+                      <div className="mt-3 space-y-2">
+                        {selectedBudgetCategoryDetail.actionPlan.map((item, index) => (
+                          <div key={`${selectedBudgetCategoryDetail.category}-action-${index}`} className="flex gap-2 text-sm text-slate-200">
+                            <span className="text-emerald-300">{index + 1}.</span>
+                            <span>{item}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl border border-slate-800 bg-slate-950/40 px-4 py-4">
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-sm font-semibold">{L("Vendor drivers", "Vendors que empujan la categoria")}</p>
+                        <p className="text-[11px] text-slate-500">
+                          {selectedBudgetCategoryDetail.items.length} {L("items", "items")}
+                        </p>
+                      </div>
+                      <div className="mt-3 space-y-3">
+                        {selectedBudgetCategoryDetail.items.length === 0 ? (
+                          <p className="text-sm text-slate-400">
+                            {L("No active vendors in this category.", "No hay vendors activos en esta categoria.")}
+                          </p>
+                        ) : (
+                          selectedBudgetCategoryDetail.items.map((item) => {
+                            const share =
+                              selectedBudgetCategoryDetail.actualTotal > 0
+                                ? item.selectedPeriodSpend / selectedBudgetCategoryDetail.actualTotal
+                                : 0;
+                            return (
+                              <div key={item.id} className="rounded-lg border border-slate-800 bg-slate-900/60 px-3 py-3">
+                                <div className="flex flex-wrap items-start justify-between gap-3">
+                                  <div>
+                                    <p className="text-sm font-medium">{item.vendorLabel}</p>
+                                    <p className="text-[11px] text-slate-500 mt-1">
+                                      {L(CYCLE_LABELS[item.billing_cycle].en, CYCLE_LABELS[item.billing_cycle].es)}
+                                      {" · "}
+                                      {L("Monthly eq.", "Eq. mensual")}: {currency(item.monthlyEquivalent)}
+                                    </p>
+                                  </div>
+                                  <div className="text-right text-[11px] text-slate-300">
+                                    <p>
+                                      {L("Current", "Actual")}: <span className="font-semibold">{currency(item.selectedPeriodSpend)}</span>
+                                    </p>
+                                    <p>
+                                      {L("Previous", "Anterior")}: <span className="font-semibold">{currency(item.previousPeriodSpend)}</span>
+                                    </p>
+                                    <p>
+                                      {L("Share", "Participacion")}:{" "}
+                                      <span className="font-semibold">{selectedBudgetCategoryDetail.actualTotal > 0 ? `${(share * 100).toFixed(0)}%` : "--"}</span>
+                                    </p>
+                                  </div>
+                                </div>
+                                <div className="mt-2 flex items-center justify-between text-[11px] text-slate-500">
+                                  <span>{L("Amount", "Monto")}: {currency(item.amount)}</span>
+                                  <span>
+                                    {L("Next renewal", "Proxima renovacion")}: {item.renewal ? toIso(item.renewal) : "--"}
+                                  </span>
+                                </div>
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </section>
             </div>
 
             <div className="grid gap-6 lg:grid-cols-[0.95fr_1.05fr]">
@@ -2268,8 +3113,8 @@ export default function ProfitLossTrackPage() {
                 <h2 className="text-lg font-semibold">{L("Budget vs actual", "Presupuesto vs real")}</h2>
                 <p className="text-xs text-slate-500 mt-1">
                   {L(
-                    "Positive variance means you are under budget. Negative variance means you spent more than planned.",
-                    "Varianza positiva significa que estas bajo presupuesto. Negativa significa que gastaste mas de lo planificado."
+                    "Budget to date is prorated to the elapsed portion of the selected period. The row bar shows how much of that budget has already been consumed.",
+                    "El presupuesto a la fecha se prorratea a la parte transcurrida del periodo seleccionado. La barra muestra cuanto de ese presupuesto ya se consumio."
                   )}
                 </p>
                 <div className="mt-4 space-y-3">
@@ -2289,7 +3134,8 @@ export default function ProfitLossTrackPage() {
                           </div>
                           <div className="grid gap-1 text-right text-[11px] text-slate-300">
                             <p>
-                              {L("Budget", "Presupuesto")}: <span className="font-semibold">{currency(row.budget)}</span>
+                              {L("Budget to date", "Presupuesto a la fecha")}:{" "}
+                              <span className="font-semibold">{currency(row.budgetToDate)}</span>
                             </p>
                             <p>
                               {L("Actual", "Real")}: <span className="font-semibold">{currency(row.actual)}</span>
@@ -2298,6 +3144,83 @@ export default function ProfitLossTrackPage() {
                               {L("Variance", "Varianza")}: <span className="font-semibold">{currency(row.variance)}</span>
                             </p>
                           </div>
+                        </div>
+                        <div className="mt-3">
+                          {(() => {
+                            const previousActual = previousBudgetSummary.actualByCategory[row.category] || 0;
+                            const deltaVsPrevious = row.actual - previousActual;
+                            const status =
+                              row.budgetToDate <= 0
+                                ? "no-budget"
+                                : row.utilization > 1
+                                  ? "over"
+                                  : row.utilization > 0.8
+                                    ? "near"
+                                    : "on-track";
+                            const badgeClass =
+                              status === "over"
+                                ? "border-rose-500/40 bg-rose-500/10 text-rose-200"
+                                : status === "near"
+                                  ? "border-amber-400/40 bg-amber-400/10 text-amber-200"
+                                  : status === "no-budget"
+                                    ? "border-slate-700 bg-slate-900/70 text-slate-300"
+                                    : "border-emerald-500/30 bg-emerald-500/10 text-emerald-200";
+                            const statusLabel =
+                              status === "over"
+                                ? L("Over budget", "Sobre presupuesto")
+                                : status === "near"
+                                  ? L("Near limit", "Cerca del limite")
+                                  : status === "no-budget"
+                                    ? L("No budget set", "Sin presupuesto")
+                                    : L("On track", "En control");
+                            const fillWidth =
+                              row.budgetToDate > 0
+                                ? `${Math.min(140, Math.max(6, row.utilization * 100))}%`
+                                : row.actual > 0
+                                  ? "100%"
+                                  : "0%";
+                            const fillClass =
+                              status === "over"
+                                ? "bg-rose-400"
+                                : status === "near"
+                                  ? "bg-amber-300"
+                                  : status === "no-budget"
+                                    ? "bg-slate-500"
+                                    : "bg-emerald-400";
+
+                            return (
+                              <>
+                                <div className="flex flex-wrap items-center justify-between gap-3">
+                                  <span className={`rounded-full border px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] ${badgeClass}`}>
+                                    {statusLabel}
+                                  </span>
+                                  <div className="text-[11px] text-slate-400">
+                                    {L("Prev. period", "Periodo ant.")}:{" "}
+                                    <span className="font-semibold text-slate-200">{currency(previousActual)}</span>
+                                    {" · "}
+                                    {L("Delta", "Delta")}:{" "}
+                                    <span className={deltaVsPrevious <= 0 ? "text-emerald-200" : "text-rose-200"}>
+                                      {currency(deltaVsPrevious)}
+                                    </span>
+                                  </div>
+                                </div>
+                                <div className="mt-3 h-2 rounded-full bg-slate-800">
+                                  <div className={`h-2 rounded-full ${fillClass}`} style={{ width: fillWidth }} />
+                                </div>
+                                <div className="mt-2 flex items-center justify-between text-[11px] text-slate-500">
+                                  <span>
+                                    {L("Consumed", "Consumido")}:{" "}
+                                    {row.budgetToDate > 0 && Number.isFinite(row.utilization)
+                                      ? `${(row.utilization * 100).toFixed(0)}%`
+                                      : "--"}
+                                  </span>
+                                  <span>
+                                    {L("Full period budget", "Presupuesto completo")}: {currency(row.fullBudget)}
+                                  </span>
+                                </div>
+                              </>
+                            );
+                          })()}
                         </div>
                       </div>
                     ))
@@ -2333,7 +3256,7 @@ export default function ProfitLossTrackPage() {
                   label: L("Over-budget categories", "Categorias sobre presupuesto"),
                   value: String(
                     budgetSummary.categoryRows.filter(
-                      (row) => row.budget > 0 && row.actual > row.budget * (1 + activeProfile.overspend_alert_pct)
+                      (row) => row.budgetToDate > 0 && row.actual > row.budgetToDate * (1 + activeProfile.overspend_alert_pct)
                     ).length
                   ),
                   hint: periodTitle,
@@ -2341,7 +3264,7 @@ export default function ProfitLossTrackPage() {
                 {
                   label: L("Fee per trade record", "Fee por registro de trade"),
                   value: totals.feePerRecord == null ? "--" : currency(totals.feePerRecord),
-                  hint: L("Observed from journal notes", "Observado desde journal notes"),
+                  hint: tradeCostSourceLabel,
                 },
                 {
                   label: L("Recommended preset budget", "Presupuesto recomendado del preset"),
@@ -2455,6 +3378,59 @@ export default function ProfitLossTrackPage() {
                       />
                     </label>
                   </div>
+                  <div className="mt-4 grid gap-3 md:grid-cols-3 text-xs">
+                    {[
+                      {
+                        label: L("In-app alerts", "Alertas in-app"),
+                        value: activeProfile.finance_alerts_inapp_enabled,
+                        onToggle: () =>
+                          setProfile((prev) => ({
+                            ...(prev ?? buildDefaultProfitLossProfile(user?.id ?? "", activeAccountId)),
+                            finance_alerts_inapp_enabled: !activeProfile.finance_alerts_inapp_enabled,
+                          })),
+                      },
+                      {
+                        label: L("Push alerts", "Alertas push"),
+                        value: activeProfile.finance_alerts_push_enabled,
+                        onToggle: () =>
+                          setProfile((prev) => ({
+                            ...(prev ?? buildDefaultProfitLossProfile(user?.id ?? "", activeAccountId)),
+                            finance_alerts_push_enabled: !activeProfile.finance_alerts_push_enabled,
+                          })),
+                      },
+                      {
+                        label: L("Email alerts", "Alertas por email"),
+                        value: activeProfile.finance_alerts_email_enabled,
+                        onToggle: () =>
+                          setProfile((prev) => ({
+                            ...(prev ?? buildDefaultProfitLossProfile(user?.id ?? "", activeAccountId)),
+                            finance_alerts_email_enabled: !activeProfile.finance_alerts_email_enabled,
+                          })),
+                      },
+                    ].map((item) => (
+                      <button
+                        key={item.label}
+                        type="button"
+                        onClick={item.onToggle}
+                        className={`rounded-xl border px-4 py-3 text-left transition ${
+                          item.value
+                            ? "border-emerald-400/40 bg-emerald-400/10 text-emerald-100"
+                            : "border-slate-700 bg-slate-950/40 text-slate-300"
+                        }`}
+                      >
+                        <p className="text-sm font-medium">{item.label}</p>
+                        <p className="mt-1 text-[11px] uppercase tracking-[0.2em] text-slate-400">
+                          {item.value ? L("Enabled", "Activo") : L("Disabled", "Inactivo")}
+                        </p>
+                      </button>
+                    ))}
+                  </div>
+                  <p className="mt-3 text-[11px] text-slate-500">
+                    {L(
+                      "The hourly cron uses these settings when it sends renewal, overspend, and variable-cost alerts.",
+                      "El cron horario usa esta configuracion para enviar alertas de renovacion, sobregasto y costos variables."
+                    )}
+                  </p>
                 </section>
 
                 <section className="rounded-2xl border border-slate-800 bg-slate-900/50 p-5">
@@ -2466,6 +3442,10 @@ export default function ProfitLossTrackPage() {
                     )}
                   </p>
                   <div className="mt-4 space-y-3 text-sm">
+                    <div className="flex items-center justify-between">
+                      <span>{L("Cost source", "Fuente de costos")}</span>
+                      <span className="font-semibold">{tradeCostSourceLabel}</span>
+                    </div>
                     <div className="flex items-center justify-between">
                       <span>{L("Observed commissions & fees", "Comisiones y fees observados")}</span>
                       <span className="font-semibold">{currency(totals.tradeCosts.total)}</span>
@@ -2510,6 +3490,20 @@ export default function ProfitLossTrackPage() {
                       </p>
                     </div>
                     <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={downloadClosePackagePdf}
+                        className="rounded-xl border border-slate-700 px-3 py-2 text-xs text-slate-200 hover:border-emerald-400"
+                      >
+                        {L("Download close PDF", "Descargar close PDF")}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={downloadClosePackageCsv}
+                        className="rounded-xl border border-slate-700 px-3 py-2 text-xs text-slate-200 hover:border-emerald-400"
+                      >
+                        {L("Download close CSV", "Descargar close CSV")}
+                      </button>
                       <button
                         type="button"
                         onClick={() => {

@@ -35,8 +35,23 @@ export type ProfitLossProfile = {
   renewal_alert_days: number;
   overspend_alert_pct: number;
   variable_cost_alert_ratio: number;
+  finance_alerts_inapp_enabled: boolean;
+  finance_alerts_push_enabled: boolean;
+  finance_alerts_email_enabled: boolean;
   created_at?: string;
   updated_at?: string;
+};
+
+export type NormalizedTradeCostRow = {
+  id: string;
+  user_id: string;
+  account_id?: string | null;
+  broker?: string | null;
+  symbol?: string | null;
+  executed_at: string;
+  commissions: number;
+  fees: number;
+  total_cost: number;
 };
 
 export type ProfitLossCost = {
@@ -125,6 +140,9 @@ function mapProfileRow(row: any, userId: string, accountId?: string | null): Pro
     renewal_alert_days: Math.max(1, Math.round(toNumber(row?.renewal_alert_days, 7))),
     overspend_alert_pct: Math.max(0, toNumber(row?.overspend_alert_pct, 0.1)),
     variable_cost_alert_ratio: Math.max(0, toNumber(row?.variable_cost_alert_ratio, 0.25)),
+    finance_alerts_inapp_enabled: row?.finance_alerts_inapp_enabled ?? true,
+    finance_alerts_push_enabled: row?.finance_alerts_push_enabled ?? true,
+    finance_alerts_email_enabled: row?.finance_alerts_email_enabled ?? true,
     created_at: row?.created_at,
     updated_at: row?.updated_at,
   };
@@ -156,6 +174,9 @@ export function buildDefaultProfitLossProfile(userId: string, accountId?: string
     renewal_alert_days: 7,
     overspend_alert_pct: 0.1,
     variable_cost_alert_ratio: 0.25,
+    finance_alerts_inapp_enabled: true,
+    finance_alerts_push_enabled: true,
+    finance_alerts_email_enabled: true,
   };
 }
 
@@ -208,6 +229,9 @@ export async function upsertProfitLossProfile(profile: ProfitLossProfile) {
     renewal_alert_days: profile.renewal_alert_days,
     overspend_alert_pct: profile.overspend_alert_pct,
     variable_cost_alert_ratio: profile.variable_cost_alert_ratio,
+    finance_alerts_inapp_enabled: profile.finance_alerts_inapp_enabled,
+    finance_alerts_push_enabled: profile.finance_alerts_push_enabled,
+    finance_alerts_email_enabled: profile.finance_alerts_email_enabled,
     updated_at: new Date().toISOString(),
   };
 
@@ -428,4 +452,43 @@ export async function updateProfitLossCost(userId: string, id: string, patch: Pa
     .single();
   if (error) throw error;
   return mapCostRow(data);
+}
+
+export async function listNormalizedTradeCosts(params: {
+  userId: string;
+  fromIso: string;
+  toIso: string;
+  accountId?: string | null;
+}) {
+  if (!params.userId) return [] as NormalizedTradeCostRow[];
+
+  let query = supabaseBrowser
+    .from("trades")
+    .select("id,user_id,account_id,broker,symbol,executed_at,commissions,fees")
+    .eq("user_id", params.userId)
+    .gte("executed_at", params.fromIso)
+    .lt("executed_at", params.toIso);
+
+  if (params.accountId) {
+    query = query.eq("account_id", params.accountId);
+  }
+
+  const { data, error } = await query.order("executed_at", { ascending: true });
+  if (error) throw error;
+
+  return (data ?? []).map((row: any) => {
+    const commissions = Math.abs(toNumber(row?.commissions));
+    const fees = Math.abs(toNumber(row?.fees));
+    return {
+      id: String(row?.id ?? ""),
+      user_id: String(row?.user_id ?? params.userId),
+      account_id: row?.account_id ?? null,
+      broker: row?.broker ?? null,
+      symbol: row?.symbol ?? null,
+      executed_at: String(row?.executed_at ?? ""),
+      commissions,
+      fees,
+      total_cost: commissions + fees,
+    };
+  });
 }

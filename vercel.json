@@ -2,7 +2,7 @@
   "crons": [
     {
       "path": "/api/notifications/send-daily",
-      "schedule": "0 * * * *"
+      "schedule": "30 8 * * 1-5"
     },
     {
       "path": "/api/notifications/send-daily-motivation",
@@ -10,6 +10,10 @@
     },
     {
       "path": "/api/notifications/send-daily-goal",
+      "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/notifications/send-profit-loss-alerts",
       "schedule": "0 * * * *"
     },
     {

@@ -166,6 +166,31 @@ const CHECKLIST_LABELS: Record<string, string> = {
   Overconfident: "Sobreconfiado",
 };
 
+const TAG_PREFIX = {
+  premarket: "PRE:",
+  inside: "IN:",
+  after: "POST:",
+  strategy: "STRAT:",
+} as const;
+
+const EXIT_REASON_TAGS = [
+  "Stop Loss Placed",
+  "Take Profit Hit",
+  "Manual Exit",
+  "Moved stop to profit",
+  "Stopped out (loss)",
+  "Move stop to breakeven",
+];
+
+const EXIT_REASON_LABELS: Record<string, string> = {
+  "Stop Loss Placed": "Stop loss colocado",
+  "Take Profit Hit": "Take profit ejecutado",
+  "Manual Exit": "Salida manual",
+  "Moved stop to profit": "Stop movido a profit",
+  "Stopped out (loss)": "Stop ejecutado (pérdida)",
+  "Move stop to breakeven": "Mover stop a BE",
+};
+
 const AFTER_REVIEW_ITEMS = [
   { id: "followed_exit_plan", en: "Followed my exit plan", es: "Seguí mi plan de salida" },
   { id: "exit_at_level", en: "Exited at my planned level", es: "Salí en el nivel planificado" },
@@ -200,6 +225,121 @@ const EMPTY_CHECKLISTS: ChecklistSnapshot = {
   impulses: [],
   states: [],
 };
+
+const DEFAULT_CHECKLIST_PRESETS: ChecklistSnapshot = {
+  premarket: [...CHECKLIST_ITEMS.premarket],
+  inside: [...CHECKLIST_ITEMS.inside],
+  after: [...CHECKLIST_ITEMS.after],
+  strategy: [...CHECKLIST_ITEMS.strategy],
+  impulses: [...CHECKLIST_ITEMS.impulses],
+  states: [...CHECKLIST_ITEMS.states],
+};
+
+const SECTION_PREFIX: Record<keyof ChecklistSnapshot, string | null> = {
+  premarket: TAG_PREFIX.premarket,
+  inside: TAG_PREFIX.inside,
+  after: TAG_PREFIX.after,
+  strategy: TAG_PREFIX.strategy,
+  impulses: null,
+  states: null,
+};
+
+const uniqueStrings = (items: string[]) => Array.from(new Set(items.map((item) => item.trim()).filter(Boolean)));
+
+const checklistTag = (prefix: string | null, item: string) => (prefix ? `${prefix} ${item}`.trim() : item.trim());
+
+const normalizeChecklistPresets = (raw?: any): ChecklistSnapshot => {
+  const asList = (value: any, fallback: string[]) =>
+    Array.isArray(value) ? uniqueStrings(value.map((item) => String(item))) : fallback;
+
+  return {
+    premarket: asList(raw?.premarket, DEFAULT_CHECKLIST_PRESETS.premarket),
+    inside: asList(raw?.inside, DEFAULT_CHECKLIST_PRESETS.inside),
+    after: asList(raw?.after, DEFAULT_CHECKLIST_PRESETS.after),
+    strategy: asList(raw?.strategy, DEFAULT_CHECKLIST_PRESETS.strategy),
+    impulses: asList(raw?.impulses, DEFAULT_CHECKLIST_PRESETS.impulses),
+    states: asList(raw?.states, DEFAULT_CHECKLIST_PRESETS.states),
+  };
+};
+
+const extractPrefixed = (tags: string[], prefix: string) =>
+  tags
+    .filter((tag) => tag.startsWith(prefix))
+    .map((tag) => tag.slice(prefix.length).trim())
+    .filter(Boolean);
+
+const mergeChecklistPresetsWithTags = (
+  tags: string[],
+  presets: ChecklistSnapshot
+): ChecklistSnapshot => {
+  const next: ChecklistSnapshot = {
+    premarket: [...presets.premarket],
+    inside: [...presets.inside],
+    after: [...presets.after],
+    strategy: [...presets.strategy],
+    impulses: [...presets.impulses],
+    states: [...presets.states],
+  };
+
+  const addUnique = (key: keyof ChecklistSnapshot, item: string) => {
+    const normalized = item.trim();
+    if (!normalized) return;
+    if (next[key].some((existing) => existing.toLowerCase() === normalized.toLowerCase())) return;
+    next[key] = [...next[key], normalized];
+  };
+
+  for (const item of extractPrefixed(tags, TAG_PREFIX.premarket)) addUnique("premarket", item);
+  for (const item of extractPrefixed(tags, TAG_PREFIX.inside)) addUnique("inside", item);
+  for (const item of extractPrefixed(tags, TAG_PREFIX.after)) addUnique("after", item);
+  for (const item of extractPrefixed(tags, TAG_PREFIX.strategy)) addUnique("strategy", item);
+
+  for (const tag of tags) {
+    if (EXIT_REASON_TAGS.includes(tag)) continue;
+    if (
+      tag.startsWith(TAG_PREFIX.premarket) ||
+      tag.startsWith(TAG_PREFIX.inside) ||
+      tag.startsWith(TAG_PREFIX.after) ||
+      tag.startsWith(TAG_PREFIX.strategy)
+    ) {
+      continue;
+    }
+    if (tag) {
+      addUnique("impulses", tag);
+      addUnique("states", tag);
+    }
+  }
+
+  return next;
+};
+
+const mergeChecklistSelections = (left: ChecklistSnapshot, right: ChecklistSnapshot): ChecklistSnapshot => ({
+  premarket: uniqueStrings([...left.premarket, ...right.premarket]),
+  inside: uniqueStrings([...left.inside, ...right.inside]),
+  after: uniqueStrings([...left.after, ...right.after]),
+  strategy: uniqueStrings([...left.strategy, ...right.strategy]),
+  impulses: uniqueStrings([...left.impulses, ...right.impulses]),
+  states: uniqueStrings([...left.states, ...right.states]),
+});
+
+const checklistSelectionsFromTags = (tags: string[], presets: ChecklistSnapshot): ChecklistSnapshot => ({
+  premarket: extractPrefixed(tags, TAG_PREFIX.premarket),
+  inside: extractPrefixed(tags, TAG_PREFIX.inside),
+  after: extractPrefixed(tags, TAG_PREFIX.after),
+  strategy: extractPrefixed(tags, TAG_PREFIX.strategy),
+  impulses: presets.impulses.filter((item) => tags.includes(item)),
+  states: presets.states.filter((item) => tags.includes(item)),
+});
+
+const controlledTagsForPresets = (presets: ChecklistSnapshot) =>
+  new Set<string>([
+    ...EXIT_REASON_TAGS,
+    ...presets.impulses,
+    ...presets.states,
+    ...presets.premarket.map((item) => checklistTag(TAG_PREFIX.premarket, item)),
+    ...presets.inside.map((item) => checklistTag(TAG_PREFIX.inside, item)),
+    ...presets.after.map((item) => checklistTag(TAG_PREFIX.after, item)),
+    ...presets.strategy.map((item) => checklistTag(TAG_PREFIX.strategy, item)),
+  ]);
 
 const clampRating = (raw: any) => {
   const n = Number(raw);
@@ -314,7 +454,10 @@ export function JournalDateScreen() {
   const [afterDidWellInk, setAfterDidWellInk] = useState<InkDrawing | null>(null);
   const [afterImproveInk, setAfterImproveInk] = useState<InkDrawing | null>(null);
   const [mindset, setMindset] = useState<MindsetRatings>(DEFAULT_MINDSET);
+  const [checklistPresets, setChecklistPresets] = useState<ChecklistSnapshot>(DEFAULT_CHECKLIST_PRESETS);
   const [checklists, setChecklists] = useState<ChecklistSnapshot>(EMPTY_CHECKLISTS);
+  const [preservedTags, setPreservedTags] = useState<string[]>([]);
+  const [exitEvidenceTags, setExitEvidenceTags] = useState<string[]>([]);
   const [afterReview, setAfterReview] = useState<AfterTradeReview>(DEFAULT_AFTER_REVIEW);
   const [instrument, setInstrument] = useState("");
   const [direction, setDirection] = useState("");
@@ -374,6 +517,105 @@ export function JournalDateScreen() {
     }));
   };
 
+  const toggleExitEvidenceTag = (tag: string) => {
+    setExitEvidenceTags((prev) =>
+      prev.includes(tag) ? prev.filter((item) => item !== tag) : [...prev, tag]
+    );
+  };
+
+  const applyLoadedJournal = (
+    entry: JournalEntryRow | null,
+    tradeRows: JournalTradeRow[] | null | undefined,
+    parsed: NotesPayload,
+    settings?: any
+  ) => {
+    const mindsetRaw = parsed.mindset ?? parsed.journal_mindset;
+    const checklistsRaw = parsed.checklists ?? parsed.journal_checklists;
+    const afterReviewRaw = parsed.after_review ?? parsed.journal_after_review;
+    const rawTags = Array.isArray(entry?.tags)
+      ? entry.tags.map((tag) => String(tag))
+      : typeof entry?.tags === "string"
+      ? entry.tags
+          .split(",")
+          .map((tag) => tag.trim())
+          .filter(Boolean)
+      : [];
+
+    const basePresets = normalizeChecklistPresets(settings?.checklists ?? settings?.checklist_presets);
+    const notesChecklist = normalizeChecklists(checklistsRaw);
+    const snapshotTags = [
+      ...notesChecklist.premarket.map((item) => checklistTag(TAG_PREFIX.premarket, item)),
+      ...notesChecklist.inside.map((item) => checklistTag(TAG_PREFIX.inside, item)),
+      ...notesChecklist.after.map((item) => checklistTag(TAG_PREFIX.after, item)),
+      ...notesChecklist.strategy.map((item) => checklistTag(TAG_PREFIX.strategy, item)),
+      ...notesChecklist.impulses,
+      ...notesChecklist.states,
+    ];
+    const mergedPresets = mergeChecklistPresetsWithTags([...rawTags, ...snapshotTags], basePresets);
+    const tagSelections = checklistSelectionsFromTags(rawTags, mergedPresets);
+    const controlledTagSet = controlledTagsForPresets(mergedPresets);
+
+    setPremarket(parsed.premarket ?? "");
+    setLive(parsed.live ?? "");
+    setPost(parsed.post ?? "");
+    setPremarketMode(parsed.premarket_mode === "ink" ? "ink" : "text");
+    setLiveMode(parsed.live_mode === "ink" ? "ink" : "text");
+    setPostMode(parsed.post_mode === "ink" ? "ink" : "text");
+    setPremarketInk(parsed.premarket_ink ?? null);
+    setLiveInk(parsed.live_ink ?? null);
+    setPostInk(parsed.post_ink ?? null);
+    setAfterDidWellMode(parsed.after_review_note_mode?.didWell === "ink" ? "ink" : "text");
+    setAfterImproveMode(parsed.after_review_note_mode?.improve === "ink" ? "ink" : "text");
+    setAfterDidWellInk(parsed.after_review_note_ink?.didWell ?? null);
+    setAfterImproveInk(parsed.after_review_note_ink?.improve ?? null);
+    setMindset(normalizeMindset(mindsetRaw));
+    setChecklistPresets(mergedPresets);
+    setChecklists(mergeChecklistSelections(notesChecklist, tagSelections));
+    setPreservedTags(rawTags.filter((tag) => !controlledTagSet.has(tag)));
+    setExitEvidenceTags(rawTags.filter((tag) => EXIT_REASON_TAGS.includes(tag)));
+    setAfterReview(normalizeAfterReview(afterReviewRaw));
+    setInstrument(entry?.instrument ?? "");
+    setDirection(entry?.direction ?? "");
+    setSize(entry?.size != null ? String(entry.size) : "");
+    setEntryPrice(entry?.entry_price != null ? String(entry.entry_price) : "");
+    setExitPrice(entry?.exit_price != null ? String(entry.exit_price) : "");
+    setEmotion(entry?.emotion ?? "");
+    setRespectedPlan(typeof entry?.respected_plan === "boolean" ? entry.respected_plan : null);
+    setSummary({
+      net: parsed.pnl?.net ?? entry?.pnl ?? undefined,
+      gross: parsed.pnl?.gross,
+      commissions: parsed.costs?.commissions,
+      fees: parsed.costs?.fees,
+    });
+    if (Array.isArray(tradeRows) && tradeRows.length > 0) {
+      setTrades(tradeRows);
+    } else {
+      const fallbackTrades = [
+        ...(parsed.entries || []).map((trade: any) => ({
+          leg: "entry",
+          symbol: String(trade.symbol ?? ""),
+          side: trade.side ?? null,
+          premium: trade.premium ?? null,
+          price: trade.price ?? null,
+          quantity: trade.quantity ?? null,
+          time: trade.time ?? null,
+          kind: trade.kind ?? null,
+        })),
+        ...(parsed.exits || []).map((trade: any) => ({
+          leg: "exit",
+          symbol: String(trade.symbol ?? ""),
+          side: trade.side ?? null,
+          premium: trade.premium ?? null,
+          price: trade.price ?? null,
+          quantity: trade.quantity ?? null,
+          time: trade.time ?? null,
+          kind: trade.kind ?? null,
+        })),
+      ].filter((trade) => trade.symbol);
+      setTrades(fallbackTrades as JournalTradeRow[]);
+    }
+  };
+
   useEffect(() => {
     let active = true;
 
@@ -394,6 +636,12 @@ export function JournalDateScreen() {
         const { data: entryData } = await entryQuery.maybeSingle();
         const entry = entryData as JournalEntryRow | null;
         const parsed = parseNotes(entry?.notes ?? "");
+        const { data: uiData } = await supabaseMobile
+          .from("journal_ui_settings")
+          .select("settings")
+          .eq("user_id", user.id)
+          .eq("page_key", "journal")
+          .maybeSingle();
 
         let tradesQuery = supabaseMobile
           .from("journal_trades")
@@ -405,66 +653,7 @@ export function JournalDateScreen() {
         const { data: tradeRows } = await tradesQuery;
 
         if (!active) return;
-        const mindsetRaw = parsed.mindset ?? parsed.journal_mindset;
-        const checklistsRaw = parsed.checklists ?? parsed.journal_checklists;
-        const afterReviewRaw = parsed.after_review ?? parsed.journal_after_review;
-
-        setPremarket(parsed.premarket ?? "");
-        setLive(parsed.live ?? "");
-        setPost(parsed.post ?? "");
-        setPremarketMode(parsed.premarket_mode === "ink" ? "ink" : "text");
-        setLiveMode(parsed.live_mode === "ink" ? "ink" : "text");
-        setPostMode(parsed.post_mode === "ink" ? "ink" : "text");
-        setPremarketInk(parsed.premarket_ink ?? null);
-        setLiveInk(parsed.live_ink ?? null);
-        setPostInk(parsed.post_ink ?? null);
-        setAfterDidWellMode(parsed.after_review_note_mode?.didWell === "ink" ? "ink" : "text");
-        setAfterImproveMode(parsed.after_review_note_mode?.improve === "ink" ? "ink" : "text");
-        setAfterDidWellInk(parsed.after_review_note_ink?.didWell ?? null);
-        setAfterImproveInk(parsed.after_review_note_ink?.improve ?? null);
-        setMindset(normalizeMindset(mindsetRaw));
-        setChecklists(normalizeChecklists(checklistsRaw));
-        setAfterReview(normalizeAfterReview(afterReviewRaw));
-        setInstrument(entry?.instrument ?? "");
-        setDirection(entry?.direction ?? "");
-        setSize(entry?.size != null ? String(entry.size) : "");
-        setEntryPrice(entry?.entry_price != null ? String(entry.entry_price) : "");
-        setExitPrice(entry?.exit_price != null ? String(entry.exit_price) : "");
-        setEmotion(entry?.emotion ?? "");
-        setRespectedPlan(typeof entry?.respected_plan === "boolean" ? entry.respected_plan : null);
-        setSummary({
-          net: parsed.pnl?.net ?? entry?.pnl ?? undefined,
-          gross: parsed.pnl?.gross,
-          commissions: parsed.costs?.commissions,
-          fees: parsed.costs?.fees,
-        });
-        if (Array.isArray(tradeRows) && tradeRows.length > 0) {
-          setTrades(tradeRows as JournalTradeRow[]);
-        } else {
-          const fallbackTrades = [
-            ...(parsed.entries || []).map((t: any) => ({
-              leg: "entry",
-              symbol: String(t.symbol ?? ""),
-              side: t.side ?? null,
-              premium: t.premium ?? null,
-              price: t.price ?? null,
-              quantity: t.quantity ?? null,
-              time: t.time ?? null,
-              kind: t.kind ?? null,
-            })),
-            ...(parsed.exits || []).map((t: any) => ({
-              leg: "exit",
-              symbol: String(t.symbol ?? ""),
-              side: t.side ?? null,
-              premium: t.premium ?? null,
-              price: t.price ?? null,
-              quantity: t.quantity ?? null,
-              time: t.time ?? null,
-              kind: t.kind ?? null,
-            })),
-          ].filter((t) => t.symbol);
-          setTrades(fallbackTrades as JournalTradeRow[]);
-        }
+        applyLoadedJournal(entry, tradeRows as JournalTradeRow[] | null | undefined, parsed, (uiData as any)?.settings);
       } catch (err: any) {
         if (!active) return;
         setError(err?.message ?? "Failed to load journal.");
@@ -494,6 +683,12 @@ export function JournalDateScreen() {
       const { data: entryData } = await entryQuery.maybeSingle();
       const entry = entryData as JournalEntryRow | null;
       const parsed = parseNotes(entry?.notes ?? "");
+      const { data: uiData } = await supabaseMobile
+        .from("journal_ui_settings")
+        .select("settings")
+        .eq("user_id", user.id)
+        .eq("page_key", "journal")
+        .maybeSingle();
 
       let tradesQuery = supabaseMobile
         .from("journal_trades")
@@ -504,66 +699,7 @@ export function JournalDateScreen() {
       if (accountId) tradesQuery = tradesQuery.eq("account_id", accountId);
       const { data: tradeRows } = await tradesQuery;
 
-      const mindsetRaw = parsed.mindset ?? parsed.journal_mindset;
-      const checklistsRaw = parsed.checklists ?? parsed.journal_checklists;
-      const afterReviewRaw = parsed.after_review ?? parsed.journal_after_review;
-
-      setPremarket(parsed.premarket ?? "");
-      setLive(parsed.live ?? "");
-      setPost(parsed.post ?? "");
-      setPremarketMode(parsed.premarket_mode === "ink" ? "ink" : "text");
-      setLiveMode(parsed.live_mode === "ink" ? "ink" : "text");
-      setPostMode(parsed.post_mode === "ink" ? "ink" : "text");
-      setPremarketInk(parsed.premarket_ink ?? null);
-      setLiveInk(parsed.live_ink ?? null);
-      setPostInk(parsed.post_ink ?? null);
-      setAfterDidWellMode(parsed.after_review_note_mode?.didWell === "ink" ? "ink" : "text");
-      setAfterImproveMode(parsed.after_review_note_mode?.improve === "ink" ? "ink" : "text");
-      setAfterDidWellInk(parsed.after_review_note_ink?.didWell ?? null);
-      setAfterImproveInk(parsed.after_review_note_ink?.improve ?? null);
-      setMindset(normalizeMindset(mindsetRaw));
-      setChecklists(normalizeChecklists(checklistsRaw));
-      setAfterReview(normalizeAfterReview(afterReviewRaw));
-      setInstrument(entry?.instrument ?? "");
-      setDirection(entry?.direction ?? "");
-      setSize(entry?.size != null ? String(entry.size) : "");
-      setEntryPrice(entry?.entry_price != null ? String(entry.entry_price) : "");
-      setExitPrice(entry?.exit_price != null ? String(entry.exit_price) : "");
-      setEmotion(entry?.emotion ?? "");
-      setRespectedPlan(typeof entry?.respected_plan === "boolean" ? entry.respected_plan : null);
-      setSummary({
-        net: parsed.pnl?.net ?? entry?.pnl ?? undefined,
-        gross: parsed.pnl?.gross,
-        commissions: parsed.costs?.commissions,
-        fees: parsed.costs?.fees,
-      });
-      if (Array.isArray(tradeRows) && tradeRows.length > 0) {
-        setTrades(tradeRows as JournalTradeRow[]);
-      } else {
-        const fallbackTrades = [
-          ...(parsed.entries || []).map((t: any) => ({
-            leg: "entry",
-            symbol: String(t.symbol ?? ""),
-            side: t.side ?? null,
-            premium: t.premium ?? null,
-            price: t.price ?? null,
-            quantity: t.quantity ?? null,
-            time: t.time ?? null,
-            kind: t.kind ?? null,
-          })),
-          ...(parsed.exits || []).map((t: any) => ({
-            leg: "exit",
-            symbol: String(t.symbol ?? ""),
-            side: t.side ?? null,
-            premium: t.premium ?? null,
-            price: t.price ?? null,
-            quantity: t.quantity ?? null,
-            time: t.time ?? null,
-            kind: t.kind ?? null,
-          })),
-        ].filter((t) => t.symbol);
-        setTrades(fallbackTrades as JournalTradeRow[]);
-      }
+      applyLoadedJournal(entry, tradeRows as JournalTradeRow[] | null | undefined, parsed, (uiData as any)?.settings);
       setStatus(null);
       setError(null);
     } catch (err: any) {
@@ -582,7 +718,7 @@ export function JournalDateScreen() {
       const accountId = await resolveActiveAccountId(user.id);
       let entryQuery = supabaseMobile
         .from("journal_entries")
-        .select("notes")
+        .select("notes, tags")
         .eq("user_id", user.id)
         .eq("date", isoDate);
       if (accountId) entryQuery = entryQuery.eq("account_id", accountId);
@@ -603,6 +739,16 @@ export function JournalDateScreen() {
         if (!Number.isFinite(n)) return null;
         return n;
       };
+      const nextTags = uniqueStrings([
+        ...preservedTags,
+        ...exitEvidenceTags,
+        ...checklists.premarket.map((item) => checklistTag(TAG_PREFIX.premarket, item)),
+        ...checklists.inside.map((item) => checklistTag(TAG_PREFIX.inside, item)),
+        ...checklists.after.map((item) => checklistTag(TAG_PREFIX.after, item)),
+        ...checklists.strategy.map((item) => checklistTag(TAG_PREFIX.strategy, item)),
+        ...checklists.impulses,
+        ...checklists.states,
+      ]);
       const nextNotes = JSON.stringify({
         ...existingNotes,
         premarket,
@@ -636,6 +782,7 @@ export function JournalDateScreen() {
         entry_price: toNumOrNull(entryPrice),
         exit_price: toNumOrNull(exitPrice),
         respected_plan: respectedPlan === null ? null : respectedPlan,
+        tags: nextTags,
       };
 
       if (!entryData) {
@@ -653,6 +800,7 @@ export function JournalDateScreen() {
             entry_price: entryPatch.entry_price,
             exit_price: entryPatch.exit_price,
             respected_plan: entryPatch.respected_plan,
+            tags: nextTags,
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
           });
@@ -945,7 +1093,7 @@ export function JournalDateScreen() {
               ? t(language, "In‑trade checklist", "Checklist en trade")
               : t(language, "After‑trade checklist", "Checklist post‑trade")}
           </Text>
-          {CHECKLIST_ITEMS[phase].map((item) => {
+          {checklistPresets[phase].map((item) => {
             const selected = checklists[phase].includes(item);
             return (
               <Pressable
@@ -963,7 +1111,7 @@ export function JournalDateScreen() {
       ))}
       <View style={styles.checklistBlock}>
         <Text style={styles.checklistTitle}>{t(language, "Strategy filters", "Filtro de estrategia")}</Text>
-        {CHECKLIST_ITEMS.strategy.map((item) => {
+        {checklistPresets.strategy.map((item) => {
           const selected = checklists.strategy.includes(item);
           return (
             <Pressable
@@ -980,7 +1128,7 @@ export function JournalDateScreen() {
       </View>
       <View style={styles.checklistBlock}>
         <Text style={styles.checklistTitle}>{t(language, "Impulses", "Impulsos")}</Text>
-        {CHECKLIST_ITEMS.impulses.map((item) => {
+        {checklistPresets.impulses.map((item) => {
           const selected = checklists.impulses.includes(item);
           return (
             <Pressable
@@ -997,7 +1145,7 @@ export function JournalDateScreen() {
       </View>
       <View style={styles.checklistBlock}>
         <Text style={styles.checklistTitle}>{t(language, "States", "Estados")}</Text>
-        {CHECKLIST_ITEMS.states.map((item) => {
+        {checklistPresets.states.map((item) => {
           const selected = checklists.states.includes(item);
           return (
             <Pressable
@@ -1032,6 +1180,24 @@ export function JournalDateScreen() {
           </Pressable>
         );
       })}
+      <View style={styles.checklistBlock}>
+        <Text style={styles.checklistTitle}>{t(language, "Exit evidence", "Evidencia de salida")}</Text>
+        {EXIT_REASON_TAGS.map((tag) => {
+          const selected = exitEvidenceTags.includes(tag);
+          return (
+            <Pressable
+              key={`exit-${tag}`}
+              style={[styles.checkItem, selected && styles.checkItemActive]}
+              onPress={() => toggleExitEvidenceTag(tag)}
+            >
+              <Text style={[styles.checkItemText, selected && styles.checkItemTextActive]}>
+                {selected ? "✓ " : ""}
+                {language === "es" ? EXIT_REASON_LABELS[tag] ?? tag : tag}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
       <View style={styles.ratingRow}>
         <Text style={styles.ratingLabel}>{t(language, "Execution", "Ejecución")}</Text>
         <View style={styles.ratingChips}>

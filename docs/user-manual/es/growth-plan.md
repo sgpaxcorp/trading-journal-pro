@@ -62,6 +62,13 @@ Cómo usarlo:
 2. Divide el mes en metas semanales.
 3. Usa el resumen trimestral para validar el ritmo general.
 
+Nota importante:
+- En el Dashboard, `Account Progress` y `Plan Progress` no significan lo mismo.
+- `Account Progress` muestra la realidad del equity de la cuenta.
+- `Plan Progress` mide Week / Month / Quarter contra el **balance base** y el **balance objetivo** de cada checkpoint del plan.
+- Por eso puedes ver una semana “adelantada” o “completada” aunque hoy estés en rojo, si tu balance actual sigue por encima del target de ese checkpoint.
+- Para ver lo que realmente hiciste esta semana, usa `Weekly Summary`.
+
 ## PDF del plan
 Usa “Download PDF” para guardar una versión de referencia del plan.
 

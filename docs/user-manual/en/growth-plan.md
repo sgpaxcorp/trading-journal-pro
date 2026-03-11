@@ -62,6 +62,13 @@ How to use it:
 2. Treat each week as a small step to the monthly goal.
 3. Review the quarterly summary to confirm your pace at a higher level.
 
+Important note:
+- In the Dashboard, `Account Progress` and `Plan Progress` do not mean the same thing.
+- `Account Progress` shows the real account equity state.
+- `Plan Progress` measures Week / Month / Quarter against the **checkpoint base balance** and the **checkpoint target balance** from the plan.
+- That is why a week can appear “ahead” or “completed” even if today is red, as long as your current balance is still above that checkpoint target.
+- To see what you actually did this week, use `Weekly Summary`.
+
 ## PDF Plan
 Use the “Download PDF” action to keep a reference version of your plan and pacing.
 

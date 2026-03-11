@@ -37,6 +37,7 @@ import { getAllJournalEntries } from "@/lib/journalSupabase";
 import { listDailySnapshots, type DailySnapshotRow } from "@/lib/snapshotSupabase";
 import { listCashflows, signedCashflowAmount, type Cashflow } from "@/lib/cashflowsSupabase";
 import { buildCashflowAdjustedDailyReturns } from "@/lib/performanceReturns";
+import { computeAdjustedTarget } from "@/lib/growthPlanSupabase";
 import {
   computeAllKPIs,
   formatKpiInputs,
@@ -1988,6 +1989,44 @@ export default function AnalyticsStatisticsPage() {
     };
   }, [scopeMode, planStartIso, planTargetDate, planStartingBalance, planTargetBalance, cashflowNetForPlan, dateRange.endIso, currentEquity]);
 
+  const accountAnalyticsSummary = useMemo(() => {
+    const referenceEquity = uiEquity[0]?.value ?? planStartingBalance ?? 0;
+    const netChange = currentEquity - referenceEquity;
+    const returnPct = referenceEquity > 0 ? (netChange / referenceEquity) * 100 : null;
+    const cashflowNetSelected = (overviewCashflowTotals.deposits ?? 0) - (overviewCashflowTotals.withdrawals ?? 0);
+
+    return {
+      referenceEquity,
+      netChange,
+      returnPct,
+      cashflowNetSelected,
+      maxDrawdown: snapshot?.maxDrawdown ?? null,
+      maxDrawdownPct: snapshot?.maxDrawdownPct ?? null,
+    };
+  }, [uiEquity, planStartingBalance, currentEquity, overviewCashflowTotals.deposits, overviewCashflowTotals.withdrawals, snapshot]);
+
+  const planAnalyticsSummary = useMemo(() => {
+    if (!plan || !planStartingBalance || !planTargetBalance) return null;
+
+    const adjustedPlanTarget = computeAdjustedTarget(plan as any, cashflowNetForPlan || 0);
+    const checkpointTarget = monthlyPlanTracker?.monthTarget ?? adjustedPlanTarget;
+    const checkpointGap = currentEquity - checkpointTarget;
+    const overallProgress =
+      adjustedPlanTarget > planStartingBalance
+        ? Math.max(0, Math.min(1.5, (currentEquity - planStartingBalance) / (adjustedPlanTarget - planStartingBalance)))
+        : 0;
+
+    return {
+      adjustedPlanTarget,
+      checkpointTarget,
+      checkpointGap,
+      overallProgress,
+      currentMonthIndex: monthlyPlanTracker?.currentMonthIndex ?? null,
+      totalMonths: monthlyPlanTracker?.totalMonths ?? null,
+      monthlyRate: monthlyPlanTracker?.monthlyRate ?? null,
+    };
+  }, [plan, planStartingBalance, planTargetBalance, cashflowNetForPlan, currentEquity, monthlyPlanTracker]);
+
   const uiDaily = useMemo(() => {
     const s = snapshot;
     if (!s) return [] as DailyPnlPoint[];
@@ -2212,61 +2251,164 @@ export default function AnalyticsStatisticsPage() {
           )}
         </section>
 
-        {monthlyPlanTracker ? (
-          <section className="mb-6 grid grid-cols-1 lg:grid-cols-3 gap-4">
-            <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
-              <p className="text-[11px] uppercase tracking-[0.3em] text-slate-500">
-                {L("Plan monthly pacing", "Ritmo mensual del plan")}
-              </p>
-              <p className="mt-2 text-sm text-slate-400">
-                {L("Month", "Mes")} {monthlyPlanTracker.currentMonthIndex}/{monthlyPlanTracker.totalMonths}
-              </p>
-              <p className="text-2xl font-semibold text-slate-100">
-                {fmtUsd(monthlyPlanTracker.monthTarget)}
-              </p>
-              <div className="mt-3 h-2 w-full rounded-full bg-slate-800 overflow-hidden">
-                <div
-                  className="h-2 bg-linear-to-r from-emerald-400 via-emerald-300 to-sky-400"
-                  style={{ width: `${Math.min(100, monthlyPlanTracker.progress * 100)}%` }}
-                />
+        <section className="mb-6 grid grid-cols-1 xl:grid-cols-2 gap-4">
+          <div className="rounded-2xl border border-cyan-400/10 bg-[radial-gradient(circle_at_top_left,_rgba(34,211,238,0.14),_transparent_40%),linear-gradient(180deg,_rgba(15,23,42,0.92),_rgba(2,6,23,0.96))] p-5">
+            <p className="text-[11px] uppercase tracking-[0.32em] text-cyan-200/70">
+              {L("Account Analytics", "Analítica de cuenta")}
+            </p>
+            <p className="mt-2 text-sm text-slate-300">
+              {L(
+                "This lens stays on real equity behavior: account balance, trading result, cashflow, and drawdown.",
+                "Esta vista se queda en la realidad del equity: balance de cuenta, resultado de trading, flujo de capital y drawdown."
+              )}
+            </p>
+
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              {[
+                { key: "equity", label: L("Current equity", "Equity actual"), value: fmtUsd(currentEquity), tone: "text-slate-100" },
+                {
+                  key: "net-change",
+                  label: L("Net account change", "Cambio neto de cuenta"),
+                  value: fmtUsd(accountAnalyticsSummary.netChange),
+                  tone: accountAnalyticsSummary.netChange >= 0 ? "text-emerald-300" : "text-sky-300",
+                },
+                {
+                  key: "trading-pnl",
+                  label: L("Trading P&L", "P&L de trading"),
+                  value: fmtUsd(uiTotals.netPnl),
+                  tone: uiTotals.netPnl >= 0 ? "text-emerald-300" : "text-sky-300",
+                },
+                {
+                  key: "cashflow-net",
+                  label: L("Net cashflow", "Flujo neto"),
+                  value: fmtUsd(accountAnalyticsSummary.cashflowNetSelected),
+                  tone:
+                    Math.abs(accountAnalyticsSummary.cashflowNetSelected) < 0.005
+                      ? "text-slate-100"
+                      : accountAnalyticsSummary.cashflowNetSelected >= 0
+                        ? "text-amber-300"
+                        : "text-sky-300",
+                },
+              ].map((card) => (
+                <div key={card.key} className="rounded-xl border border-slate-800 bg-slate-950/45 p-3">
+                  <p className="text-[11px] uppercase tracking-[0.24em] text-slate-500">{card.label}</p>
+                  <p className={`mt-2 text-[18px] font-semibold ${card.tone}`}>{card.value}</p>
+                </div>
+              ))}
+            </div>
+
+            <p className="mt-4 text-xs text-slate-500">
+              {L("Reference equity:", "Equity de referencia:")}{" "}
+              <span className="text-slate-200">{fmtUsd(accountAnalyticsSummary.referenceEquity)}</span> ·{" "}
+              {L("Return on reference:", "Retorno sobre referencia:")}{" "}
+              <span className="text-slate-200">
+                {accountAnalyticsSummary.returnPct != null ? fmtPct(accountAnalyticsSummary.returnPct) : "—"}
+              </span> ·{" "}
+              {L("Max drawdown:", "Máx. drawdown:")}{" "}
+              <span className="text-slate-200">
+                {accountAnalyticsSummary.maxDrawdown != null ? fmtUsd(accountAnalyticsSummary.maxDrawdown) : "—"}
+              </span>
+            </p>
+          </div>
+
+          <div className="rounded-2xl border border-emerald-500/10 bg-[radial-gradient(circle_at_top_left,_rgba(16,185,129,0.14),_transparent_40%),linear-gradient(180deg,_rgba(15,23,42,0.92),_rgba(2,6,23,0.96))] p-5">
+            <p className="text-[11px] uppercase tracking-[0.32em] text-emerald-200/70">
+              {L("Plan Analytics", "Analítica del plan")}
+            </p>
+
+            {!plan ? (
+              <div className="mt-3 text-sm text-slate-400">
+                {L("Create a Growth Plan to compare the account against plan pacing.", "Crea un Growth Plan para comparar la cuenta contra el ritmo del plan.")}{" "}
+                <Link href="/growth-plan" className="text-emerald-300 hover:text-emerald-200 underline">
+                  {L("Open Growth Plan", "Abrir Growth Plan")}
+                </Link>
               </div>
-              <p className="mt-2 text-xs text-slate-500">
-                {L("Remaining this month:", "Falta este mes:")}{" "}
-                <span className="text-slate-200">{fmtUsd(monthlyPlanTracker.remaining)}</span>
-              </p>
-            </div>
+            ) : scopeMode !== "plan" ? (
+              <div className="mt-3 space-y-3">
+                <p className="text-sm text-slate-300">
+                  {L(
+                    "Plan Analytics is most accurate in Plan scope because it aligns the range with the Growth Plan start.",
+                    "Plan Analytics es más precisa en alcance Plan porque alinea el rango con el inicio del Growth Plan."
+                  )}
+                </p>
+                <p className="text-xs text-slate-500">
+                  {L("Current scope:", "Alcance actual:")}{" "}
+                  <span className="text-slate-200">{L("All-time", "Histórico")}</span>
+                </p>
+              </div>
+            ) : planAnalyticsSummary ? (
+              <>
+                <p className="mt-2 text-sm text-slate-300">
+                  {L(
+                    "This lens compares balance now against the current checkpoint and the full Growth Plan target.",
+                    "Esta vista compara el balance actual contra el checkpoint actual y contra la meta total del Growth Plan."
+                  )}
+                </p>
 
-            <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
-              <p className="text-[11px] uppercase tracking-[0.3em] text-slate-500">
-                {L("Compound pace", "Ritmo compuesto")}
-              </p>
-              <p className="mt-2 text-sm text-slate-400">
-                {L("Target date:", "Fecha meta:")}{" "}
-                <span className="text-slate-200">{planTargetDate}</span>
-              </p>
-              <p className="text-2xl font-semibold text-emerald-300">
-                {(monthlyPlanTracker.monthlyRate * 100).toFixed(2)}% / {L("month", "mes")}
-              </p>
-              <p className="mt-2 text-xs text-slate-500">
-                {L("Based on long‑term target and plan start.", "Basado en tu meta y fecha de inicio.")}
-              </p>
-            </div>
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  {[
+                    { key: "start", label: L("Plan start", "Inicio plan"), value: fmtUsd(planStartingBalance), tone: "text-slate-100" },
+                    { key: "current", label: L("Balance now", "Balance actual"), value: fmtUsd(currentEquity), tone: "text-slate-100" },
+                    {
+                      key: "checkpoint",
+                      label:
+                        monthlyPlanTracker && planAnalyticsSummary.currentMonthIndex != null && planAnalyticsSummary.totalMonths != null
+                          ? `${L("Month target", "Meta mensual")} ${planAnalyticsSummary.currentMonthIndex}/${planAnalyticsSummary.totalMonths}`
+                          : L("Plan target", "Meta del plan"),
+                      value: fmtUsd(planAnalyticsSummary.checkpointTarget),
+                      tone: "text-emerald-300",
+                    },
+                    {
+                      key: "status",
+                      label:
+                        planAnalyticsSummary.checkpointGap >= 0
+                          ? L("Ahead by", "Adelantado por")
+                          : L("Remaining", "Falta"),
+                      value: fmtUsd(Math.abs(planAnalyticsSummary.checkpointGap)),
+                      tone: planAnalyticsSummary.checkpointGap >= 0 ? "text-emerald-300" : "text-amber-300",
+                    },
+                  ].map((card) => (
+                    <div key={card.key} className="rounded-xl border border-slate-800 bg-slate-950/45 p-3">
+                      <p className="text-[11px] uppercase tracking-[0.24em] text-slate-500">{card.label}</p>
+                      <p className={`mt-2 text-[18px] font-semibold ${card.tone}`}>{card.value}</p>
+                    </div>
+                  ))}
+                </div>
 
-            <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
-              <p className="text-[11px] uppercase tracking-[0.3em] text-slate-500">
-                {L("Scope", "Alcance")}
+                <div className="mt-4 h-2 w-full rounded-full bg-slate-800 overflow-hidden">
+                  <div
+                    className="h-2 bg-linear-to-r from-emerald-400 via-cyan-300 to-sky-400"
+                    style={{ width: `${Math.min(100, planAnalyticsSummary.overallProgress * 100)}%` }}
+                  />
+                </div>
+
+                <p className="mt-2 text-xs text-slate-500">
+                  {L("Adjusted plan target:", "Meta ajustada del plan:")}{" "}
+                  <span className="text-slate-200">{fmtUsd(planAnalyticsSummary.adjustedPlanTarget)}</span>
+                  {planTargetDate ? (
+                    <>
+                      {" "}· {L("Target date:", "Fecha meta:")}{" "}
+                      <span className="text-slate-200">{planTargetDate}</span>
+                    </>
+                  ) : null}
+                  {planAnalyticsSummary.monthlyRate != null ? (
+                    <>
+                      {" "}· {L("Compound pace:", "Ritmo compuesto:")}{" "}
+                      <span className="text-slate-200">{(planAnalyticsSummary.monthlyRate * 100).toFixed(2)}% / {L("month", "mes")}</span>
+                    </>
+                  ) : null}
+                </p>
+              </>
+            ) : (
+              <p className="mt-3 text-sm text-slate-400">
+                {L(
+                  "Plan pacing needs valid start balance, target balance, and target date.",
+                  "El ritmo del plan necesita balance inicial, balance meta y fecha meta válidos."
+                )}
               </p>
-              <p className="mt-2 text-sm text-slate-400">
-                {scopeMode === "plan"
-                  ? L("Tracking from plan start.", "Trackeando desde inicio del plan.")
-                  : L("All‑time scope selected.", "Alcance histórico seleccionado.")}
-              </p>
-              <p className="mt-4 text-xs text-slate-500">
-                {L("Switch to All‑time to compare against your full trading history.", "Cambia a Histórico para comparar contra todo tu historial.")}
-              </p>
-            </div>
-          </section>
-        ) : null}
+            )}
+          </div>
+        </section>
 
         {/* Tabs */}
         <section className="mb-6">

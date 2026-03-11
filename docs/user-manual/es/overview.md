@@ -30,6 +30,9 @@ Captura plan premarket, ejecución, mindset y revisión post‑trade. Aquí el c
 **Performance & Analítica**  
 Convierte el journal en KPIs, patrones y breakdowns. Aquí diagnosticas edge y errores.
 
+**Profit & Loss Track**  
+Controla el lado de negocio del trading: suscripciones, educación, vendors, presupuestos, renovaciones y break-even.
+
 **AI Coaching**  
 Convierte datos en feedback y acciones. Es más útil cuando tienes sesiones consistentes.
 

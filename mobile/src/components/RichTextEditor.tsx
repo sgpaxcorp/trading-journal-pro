@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
 import { RichEditor, RichToolbar, actions, type FONT_SIZE } from "react-native-pell-rich-editor";
 
 import { useTheme } from "../lib/ThemeContext";
@@ -44,6 +44,7 @@ export function RichTextEditor({
   const [fontSize, setFontSize] = useState(18);
   const [fontFamily, setFontFamily] = useState(FONT_FAMILY_OPTIONS[0]?.value ?? "Arial");
   const [focused, setFocused] = useState(false);
+  const [openDropdown, setOpenDropdown] = useState<"font" | "size" | null>(null);
 
   useEffect(() => {
     const editor = editorRef.current as unknown as {
@@ -120,53 +121,90 @@ export function RichTextEditor({
     editor?.focusContentEditor();
   };
 
+  const applyFontSize = (nextSize: (typeof FONT_SIZE_OPTIONS)[number]) => {
+    setFontSize(nextSize.px);
+    editorRef.current?.setFontSize(nextSize.command);
+    editorRef.current?.focusContentEditor();
+  };
+
+  const currentFontOption = FONT_FAMILY_OPTIONS.find((option) => option.value === fontFamily) ?? FONT_FAMILY_OPTIONS[0];
+  const currentSizeOption = FONT_SIZE_OPTIONS.find((option) => option.px === fontSize);
+  const dropdownTitle = openDropdown === "font" ? "Choose font" : "Choose size";
+  const dropdownOptions = openDropdown === "font" ? FONT_FAMILY_OPTIONS : FONT_SIZE_OPTIONS;
+
   return (
     <View style={[styles.wrapper, focused && styles.wrapperFocused]}>
       <View style={styles.controlRail}>
-        <View style={styles.controlGroup}>
-          <Text style={styles.controlLabel}>Font</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.controlRow}>
-            {FONT_FAMILY_OPTIONS.map((option) => {
-              const active = fontFamily === option.value;
-              return (
-                <Pressable
-                  key={option.id}
-                  style={[styles.controlChip, active && styles.controlChipActive]}
-                  onPress={() => applyFontFamily(option.value)}
-                >
-                  <Text style={[styles.controlChipText, active && styles.controlChipTextActive]}>
-                    {option.label}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </ScrollView>
-        </View>
+        <View style={styles.dropdownRow}>
+          <Pressable
+            style={[styles.dropdownField, openDropdown === "font" && styles.dropdownFieldActive]}
+            onPress={() => setOpenDropdown((current) => (current === "font" ? null : "font"))}
+          >
+            <Text style={styles.dropdownLabel}>Font</Text>
+            <View style={styles.dropdownValueRow}>
+              <Text style={styles.dropdownValue} numberOfLines={1}>
+                {currentFontOption?.label ?? "System"}
+              </Text>
+              <Text style={styles.dropdownChevron}>v</Text>
+            </View>
+          </Pressable>
 
-        <View style={styles.controlGroupCompact}>
-          <Text style={styles.controlLabel}>Size</Text>
-          <View style={styles.controlRow}>
-            {FONT_SIZE_OPTIONS.map((option) => {
-              const active = fontSize === option.px;
-              return (
-                <Pressable
-                  key={option.id}
-                  style={[styles.controlChipSmall, active && styles.controlChipActive]}
-                  onPress={() => {
-                    setFontSize(option.px);
-                    editorRef.current?.setFontSize(option.command);
-                    editorRef.current?.focusContentEditor();
-                  }}
-                >
-                  <Text style={[styles.controlChipText, active && styles.controlChipTextActive]}>
-                    {option.label}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
+          <Pressable
+            style={[styles.dropdownField, openDropdown === "size" && styles.dropdownFieldActive]}
+            onPress={() => setOpenDropdown((current) => (current === "size" ? null : "size"))}
+          >
+            <Text style={styles.dropdownLabel}>Size</Text>
+            <View style={styles.dropdownValueRow}>
+              <Text style={styles.dropdownValue} numberOfLines={1}>
+                {currentSizeOption?.label ?? String(fontSize)}
+              </Text>
+              <Text style={styles.dropdownChevron}>v</Text>
+            </View>
+          </Pressable>
         </View>
       </View>
+
+      <Modal
+        transparent
+        visible={openDropdown !== null}
+        animationType="fade"
+        onRequestClose={() => setOpenDropdown(null)}
+      >
+        <View style={styles.dropdownModal}>
+          <Pressable style={styles.dropdownBackdrop} onPress={() => setOpenDropdown(null)} />
+          <View style={styles.dropdownSheet}>
+            <Text style={styles.dropdownSheetTitle}>{dropdownTitle}</Text>
+            <View style={styles.dropdownSheetOptions}>
+              {dropdownOptions.map((option) => {
+                const active =
+                  openDropdown === "font"
+                    ? fontFamily === (option as (typeof FONT_FAMILY_OPTIONS)[number]).value
+                    : fontSize === (option as (typeof FONT_SIZE_OPTIONS)[number]).px;
+
+                return (
+                  <Pressable
+                    key={option.id}
+                    style={[styles.dropdownOption, active && styles.dropdownOptionActive]}
+                    onPress={() => {
+                      if (openDropdown === "font") {
+                        applyFontFamily((option as (typeof FONT_FAMILY_OPTIONS)[number]).value);
+                      } else {
+                        applyFontSize(option as (typeof FONT_SIZE_OPTIONS)[number]);
+                      }
+                      setOpenDropdown(null);
+                    }}
+                  >
+                    <Text style={[styles.dropdownOptionText, active && styles.dropdownOptionTextActive]}>
+                      {option.label}
+                    </Text>
+                    {active ? <Text style={styles.dropdownOptionBadge}>Current</Text> : null}
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       <RichToolbar
         editor={editorRef}
@@ -276,57 +314,109 @@ const createStyles = (colors: ThemeColors) =>
       paddingHorizontal: 10,
       paddingTop: 10,
       paddingBottom: 8,
-      gap: 10,
       borderBottomWidth: 1,
       borderBottomColor: colors.border,
       backgroundColor: colors.background,
     },
-    controlGroup: {
+    dropdownRow: {
+      flexDirection: "row",
+      gap: 10,
+    },
+    dropdownField: {
+      flex: 1,
+      minWidth: 0,
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.card,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
       gap: 6,
     },
-    controlGroupCompact: {
-      gap: 6,
+    dropdownFieldActive: {
+      borderColor: colors.primary,
+      backgroundColor: colors.infoSoft,
     },
-    controlLabel: {
+    dropdownLabel: {
       color: colors.textMuted,
       fontSize: 10,
       fontWeight: "700",
       textTransform: "uppercase",
       letterSpacing: 1,
     },
-    controlRow: {
+    dropdownValueRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
       gap: 8,
-      alignItems: "center",
     },
-    controlChip: {
-      borderRadius: 999,
-      borderWidth: 1,
-      borderColor: colors.border,
-      backgroundColor: colors.card,
-      paddingHorizontal: 12,
-      paddingVertical: 7,
+    dropdownValue: {
+      flex: 1,
+      color: colors.textPrimary,
+      fontSize: 14,
+      fontWeight: "700",
     },
-    controlChipSmall: {
-      minWidth: 46,
-      borderRadius: 999,
-      borderWidth: 1,
-      borderColor: colors.border,
-      backgroundColor: colors.card,
-      paddingHorizontal: 12,
-      paddingVertical: 7,
-      alignItems: "center",
-    },
-    controlChipActive: {
-      borderColor: colors.primary,
-      backgroundColor: colors.infoSoft,
-    },
-    controlChipText: {
+    dropdownChevron: {
       color: colors.textMuted,
       fontSize: 12,
       fontWeight: "700",
     },
-    controlChipTextActive: {
+    dropdownModal: {
+      flex: 1,
+      justifyContent: "flex-end",
+    },
+    dropdownBackdrop: {
+      ...StyleSheet.absoluteFillObject,
+      backgroundColor: "rgba(3, 7, 18, 0.45)",
+    },
+    dropdownSheet: {
+      marginHorizontal: 12,
+      marginBottom: 12,
+      borderRadius: 20,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.background,
+      padding: 14,
+      gap: 12,
+    },
+    dropdownSheetTitle: {
       color: colors.textPrimary,
+      fontSize: 16,
+      fontWeight: "800",
+    },
+    dropdownSheetOptions: {
+      gap: 8,
+    },
+    dropdownOption: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.card,
+      paddingHorizontal: 12,
+      paddingVertical: 12,
+      gap: 10,
+    },
+    dropdownOptionActive: {
+      borderColor: colors.primary,
+      backgroundColor: colors.infoSoft,
+    },
+    dropdownOptionText: {
+      flex: 1,
+      color: colors.textPrimary,
+      fontSize: 14,
+      fontWeight: "700",
+    },
+    dropdownOptionTextActive: {
+      color: colors.textPrimary,
+    },
+    dropdownOptionBadge: {
+      color: colors.primary,
+      fontSize: 11,
+      fontWeight: "800",
+      textTransform: "uppercase",
     },
     toolbar: {
       backgroundColor: colors.background,

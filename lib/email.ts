@@ -571,3 +571,66 @@ export async function sendSubscriptionWinbackEmail(args: {
 
   await sendEmailBase({ to: args.email, subject, text, html });
 }
+
+export async function sendProfitLossAlertEmail(args: {
+  email: string;
+  name?: string | null;
+  title: string;
+  message: string;
+  alertKind: "renewal" | "overspend" | "variable_cost";
+  ctaUrl?: string | null;
+  detailLines?: string[];
+}) {
+  const safeName = args.name || "trader";
+  const ctaUrl = args.ctaUrl || "https://neurotrader-journal.com/performance/profit-loss-track";
+  const subject = `Profit & Loss Track: ${args.title}`;
+  const extraText = (args.detailLines ?? []).filter(Boolean);
+
+  const text = [
+    `Hi ${safeName},`,
+    "",
+    args.message,
+    ...(extraText.length ? ["", ...extraText] : []),
+    "",
+    "Open Profit & Loss Track to review the issue and adjust your stack, budget, or controls.",
+    ctaUrl,
+    "",
+    "NeuroTrader Journal Team",
+  ].join("\n");
+
+  const paragraphs = [
+    args.message,
+    ...(extraText.length
+      ? [
+          extraText
+            .map((line) => `• ${line}`)
+            .join("<br />"),
+        ]
+      : []),
+    "Open <strong>Profit &amp; Loss Track</strong> to review the issue and adjust your stack, budget, or controls.",
+  ];
+
+  const highlight =
+    args.alertKind === "renewal"
+      ? "A recurring cost is about to renew."
+      : args.alertKind === "overspend"
+        ? "A category moved above budget."
+        : "Trading costs moved above your threshold.";
+
+  const html = buildNeuroTraderHtml({
+    title: args.title,
+    preheader: args.message,
+    greeting: `Hi ${safeName},`,
+    highlight,
+    paragraphs,
+    ctaLabel: "Open Profit & Loss Track",
+    ctaUrl,
+  });
+
+  await sendEmailBase({
+    to: args.email,
+    subject,
+    text,
+    html,
+  });
+}

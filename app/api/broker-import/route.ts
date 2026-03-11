@@ -475,6 +475,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const userId = authData.user.id;
+  const activeAccountId = await resolveActiveAccountId(userId);
 
   const form = (await req.formData()) as unknown as {
     get: (name: string) => FormDataEntryValue | null;
@@ -555,7 +556,7 @@ export async function POST(req: NextRequest) {
       if (orderHistoryHeader) {
         const sourceTzRaw = String(getFormValue("sourceTz") ?? getFormValue("source_tz") ?? "");
         const sourceTz = sourceTzRaw.trim() || "America/New_York";
-        const accountId = (await resolveActiveAccountId(userId)) ?? null;
+        const accountId = activeAccountId ?? null;
         if (!accountId) {
           throw new Error("No active account selected. Please choose an account first.");
         }
@@ -761,6 +762,7 @@ export async function POST(req: NextRequest) {
 
         tradeByHash.set(trade_hash, {
           user_id: userId,
+          account_id: activeAccountId ?? null,
           broker,
 
           asset_type: "future",
@@ -884,9 +886,9 @@ export async function POST(req: NextRequest) {
           .from("trade_import_batches")
           .update({
             status: "success",
-            imported_rows: orderHistorySummary.eventsSaved,
+            imported_rows: 0,
             updated_rows: 0,
-            duplicates: orderHistorySummary.duplicates,
+            duplicates: 0,
             order_history_events: orderHistorySummary.eventsSaved,
             order_history_duplicates: orderHistorySummary.duplicates,
             order_history_import_id: orderHistorySummary.importId,
@@ -900,9 +902,9 @@ export async function POST(req: NextRequest) {
             ok: true,
             batchId,
             broker,
-            inserted: orderHistorySummary.eventsSaved,
+            inserted: 0,
             updated: 0,
-            duplicates: orderHistorySummary.duplicates,
+            duplicates: 0,
             orderHistory: orderHistorySummary,
             message:
               orderHistorySummary.eventsSaved > 0
@@ -1018,6 +1020,7 @@ export async function POST(req: NextRequest) {
 
         tradeRowsAll.push({
           user_id: userId,
+          account_id: activeAccountId ?? null,
           broker,
 
           asset_type: instrument_type === "option" ? "option" : instrument_type,
@@ -1192,7 +1195,7 @@ export async function POST(req: NextRequest) {
     }
 
     const durationMs = Date.now() - startedAt;
-    const duplicatesForHistory = tradeDuplicatesInFile + ledgerDuplicates;
+    const statementDuplicates = tradeDuplicatesInFile;
 
     // 2) Finalize batch — SUCCESS
       const { error: updErr } = await supabaseAdmin
@@ -1201,7 +1204,7 @@ export async function POST(req: NextRequest) {
           status: "success",
           imported_rows: tradeInserted,
           updated_rows: tradeUpdated,
-          duplicates: duplicatesForHistory,
+          duplicates: statementDuplicates,
           order_history_events: orderHistorySummary?.eventsSaved ?? 0,
           order_history_duplicates: orderHistorySummary?.duplicates ?? 0,
           order_history_import_id: orderHistorySummary?.importId ?? null,
@@ -1217,7 +1220,7 @@ export async function POST(req: NextRequest) {
             batchId,
             broker,
             warning: `Import done but failed to finalize batch: ${updErr.message}`,
-            message: `Import complete — ${tradeInserted} new, ${tradeUpdated} updated, ${tradeDuplicatesInFile} duplicates skipped.`,
+            message: `Statement trades — ${tradeInserted} new, ${tradeUpdated} updated, ${statementDuplicates} duplicates skipped.`,
           },
           { status: 200 }
         );
@@ -1230,11 +1233,11 @@ export async function POST(req: NextRequest) {
           broker,
           inserted: tradeInserted,
           updated: tradeUpdated,
-          duplicates: duplicatesForHistory,
+          duplicates: statementDuplicates,
           orderHistory: orderHistorySummary ?? undefined,
           message:
-            `Import complete — ${tradeInserted} new, ${tradeUpdated} updated, ` +
-            `${tradeDuplicatesInFile} duplicates skipped. Ledger: ${ledgerInserted} new, ${ledgerUpdated} updated, ${ledgerDuplicates} duplicates skipped.`,
+            `Statement trades — ${tradeInserted} new, ${tradeUpdated} updated, ` +
+            `${statementDuplicates} duplicates skipped. Ledger: ${ledgerInserted} new, ${ledgerUpdated} updated, ${ledgerDuplicates} duplicates skipped.`,
         },
         { status: 200 }
     );
@@ -1247,7 +1250,7 @@ export async function POST(req: NextRequest) {
         status: "failed",
         imported_rows: tradeInserted || 0,
         updated_rows: tradeUpdated || 0,
-        duplicates: (tradeDuplicatesInFile || 0) + (ledgerDuplicates || 0),
+        duplicates: tradeDuplicatesInFile || 0,
         finished_at: new Date().toISOString(),
         duration_ms: durationMs,
         error: e?.message ?? "Import failed",

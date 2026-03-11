@@ -23,9 +23,9 @@ type ImportHistoryItem = {
   filename: string | null;
   comment: string | null;
   status: "success" | "failed" | "processing";
-  imported_rows: number | null; // inserted
-  updated_rows: number | null;  // ✅ NEW
-  duplicates: number | null;    // skipped (ledger)
+  imported_rows: number | null; // statement trades inserted
+  updated_rows: number | null;  // statement trades updated
+  duplicates: number | null;    // statement trade duplicates
   order_history_events?: number | null;
   order_history_duplicates?: number | null;
   order_history_import_id?: string | null;
@@ -1062,19 +1062,24 @@ export default function ImportPage() {
           : null;
 
       const parts: string[] = [];
-      if (inserted !== null) parts.push(isEs ? `Importadas ${inserted} filas` : `Imported ${inserted} rows`);
-      if (duplicates !== null) parts.push(isEs ? `${duplicates} duplicados omitidos` : `${duplicates} duplicates skipped`);
-      if (updated !== null) parts.push(isEs ? `${updated} actualizadas` : `${updated} updated`);
-      if (orderEvents !== null)
+      if (inserted !== null || updated !== null || duplicates !== null) {
         parts.push(
           isEs
-            ? `Ordenes ${orderEvents} (${orderDupes ?? 0} duplicadas)`
-            : `Order history ${orderEvents} (${orderDupes ?? 0} duplicates)`
+            ? `Trades del statement: ${inserted ?? 0} nuevas, ${updated ?? 0} actualizadas, ${duplicates ?? 0} duplicadas`
+            : `Statement trades: ${inserted ?? 0} new, ${updated ?? 0} updated, ${duplicates ?? 0} duplicates`
         );
+      }
+      if (orderEvents !== null || orderDupes !== null) {
+        parts.push(
+          isEs
+            ? `Historial de órdenes: ${orderEvents ?? 0} nuevas, ${orderDupes ?? 0} duplicadas`
+            : `Order history: ${orderEvents ?? 0} new, ${orderDupes ?? 0} duplicates`
+        );
+      }
 
       setStatusMsg(
         parts.length
-          ? `${parts.join(" (").replace(/\)\s\(/g, ", ")}).`.replace(/\(\)/g, "")
+          ? parts.join(" • ")
           : L("Import completed.", "Importación completada.")
       );
 
@@ -1364,7 +1369,7 @@ export default function ImportPage() {
                             </div>
                           </div>
                           <div className="flex flex-col items-end gap-1">
-                            {h.order_history_events && h.order_history_events > 0 ? (
+                            {(Number(h.order_history_events ?? 0) > 0 || Number(h.order_history_duplicates ?? 0) > 0) ? (
                               <span className="rounded-full border border-sky-400/30 bg-sky-400/10 px-2 py-0.5 text-[10px] font-semibold text-sky-200">
                                 {L("Audit-ready", "Listo para auditoría")}
                               </span>
@@ -1382,23 +1387,58 @@ export default function ImportPage() {
                           </div>
                         </div>
 
-                        {/* ✅ 3 tiles */}
-                        <div className="mt-2 grid grid-cols-3 gap-2 text-[11px]">
-                          <div className="rounded-lg border border-slate-800 bg-slate-950/30 px-2 py-1">
-                            <div className="text-slate-400">{L("Imported", "Importadas")}</div>
-                            <div className="font-semibold text-slate-100">{h.imported_rows ?? "—"}</div>
+                        <div className="mt-3">
+                          <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-500">
+                            {L("Statement Trades", "Trades del statement")}
                           </div>
+                          <div className="grid grid-cols-3 gap-2 text-[11px]">
+                            <div className="rounded-lg border border-slate-800 bg-slate-950/30 px-2 py-1">
+                              <div className="text-slate-400">{L("Imported", "Importadas")}</div>
+                              <div className="font-semibold text-slate-100">{h.imported_rows ?? 0}</div>
+                            </div>
 
-                          <div className="rounded-lg border border-slate-800 bg-slate-950/30 px-2 py-1">
-                            <div className="text-slate-400">{L("Updated", "Actualizadas")}</div>
-                            <div className="font-semibold text-slate-100">{h.updated_rows ?? "—"}</div>
-                          </div>
+                            <div className="rounded-lg border border-slate-800 bg-slate-950/30 px-2 py-1">
+                              <div className="text-slate-400">{L("Updated", "Actualizadas")}</div>
+                              <div className="font-semibold text-slate-100">{h.updated_rows ?? 0}</div>
+                            </div>
 
-                          <div className="rounded-lg border border-slate-800 bg-slate-950/30 px-2 py-1">
-                            <div className="text-slate-400">{L("Duplicates", "Duplicados")}</div>
-                            <div className="font-semibold text-slate-100">{h.duplicates ?? "—"}</div>
+                            <div className="rounded-lg border border-slate-800 bg-slate-950/30 px-2 py-1">
+                              <div className="text-slate-400">{L("Duplicates", "Duplicados")}</div>
+                              <div className="font-semibold text-slate-100">{h.duplicates ?? 0}</div>
+                            </div>
                           </div>
                         </div>
+
+                        {typeof h.order_history_events === "number" || typeof h.order_history_duplicates === "number" ? (
+                          <div className="mt-3">
+                            <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-500">
+                              {L("Order History", "Historial de órdenes")}
+                            </div>
+                            <div className="grid grid-cols-2 gap-2 text-[11px]">
+                              <div className="rounded-lg border border-slate-800 bg-slate-950/30 px-2 py-1">
+                                <div className="text-slate-400">{L("Imported", "Importadas")}</div>
+                                <div className="font-semibold text-slate-100">{h.order_history_events ?? 0}</div>
+                              </div>
+
+                              <div className="rounded-lg border border-slate-800 bg-slate-950/30 px-2 py-1">
+                                <div className="text-slate-400">{L("Duplicates", "Duplicados")}</div>
+                                <div className="font-semibold text-slate-100">{h.order_history_duplicates ?? 0}</div>
+                              </div>
+                            </div>
+                          </div>
+                        ) : null}
+
+                        {(Number(h.imported_rows ?? 0) === 0 &&
+                          Number(h.updated_rows ?? 0) === 0 &&
+                          Number(h.duplicates ?? 0) === 0 &&
+                          (Number(h.order_history_events ?? 0) > 0 || Number(h.order_history_duplicates ?? 0) > 0)) ? (
+                          <div className="mt-2 text-[11px] text-slate-400">
+                            {L(
+                              "This batch only affected order history. No statement trades were imported.",
+                              "Este batch solo afectó el historial de órdenes. No se importaron trades del statement."
+                            )}
+                          </div>
+                        ) : null}
 
                         {h.comment ? (
                           <div className="mt-2 text-[11px] text-slate-300">
@@ -1407,20 +1447,8 @@ export default function ImportPage() {
                           </div>
                         ) : null}
 
-                        {typeof h.order_history_events === "number" ? (
-                          <div className="mt-2 text-[11px] text-slate-300">
-                            <span className="font-semibold text-slate-200">
-                              {L("Order history events:", "Eventos de órdenes:")}
-                            </span>{" "}
-                            {h.order_history_events}
-                            {typeof h.order_history_duplicates === "number"
-                              ? ` (${L("duplicates", "duplicados")}: ${h.order_history_duplicates})`
-                              : ""}
-                          </div>
-                        ) : null}
-
                         {h.filename ? (
-                          <div className="mt-1 truncate text-[11px] text-slate-400">
+                          <div className="mt-2 truncate text-[11px] text-slate-400">
                             {L("File:", "Archivo:")} {h.filename}
                           </div>
                         ) : null}

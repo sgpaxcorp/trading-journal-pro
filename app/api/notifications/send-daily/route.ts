@@ -31,8 +31,9 @@ function getNewYorkTimeParts() {
 }
 
 function shouldSendNowNY() {
-  const { hour } = getNewYorkTimeParts();
-  return hour === 9;
+  const { weekday, hour, minute } = getNewYorkTimeParts();
+  const isWeekday = ["Mon", "Tue", "Wed", "Thu", "Fri"].includes(weekday);
+  return isWeekday && hour === 8 && minute === 30;
 }
 
 function tryDecodeUserId(token: string) {
@@ -51,12 +52,12 @@ function buildMessage(locale: string | null) {
   if (isEs) {
     return {
       title: "Neuro Trader Journal",
-      body: "El mercado abre en 30 minutos. Tiempo para prepararte.",
+      body: "El mercado abre a las 9:30 AM. Es hora de prepararte para el premarket.",
     };
   }
   return {
     title: "Neuro Trader Journal",
-    body: "Market opens in 30 minutes. Time to prepare.",
+    body: "The market opens at 9:30 AM. Time to prepare for premarket.",
   };
 }
 
@@ -130,7 +131,7 @@ async function handleRequest(req: NextRequest) {
     }
 
     if (!force && !shouldSendNowNY()) {
-      return NextResponse.json({ ok: true, sent: 0, detail: "Outside 9:00 AM ET window." });
+      return NextResponse.json({ ok: true, sent: 0, detail: "Outside 8:30 AM ET weekday window." });
     }
 
     let rows: PushRow[] = [];

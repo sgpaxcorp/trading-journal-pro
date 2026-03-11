@@ -167,6 +167,7 @@ export async function POST(req: NextRequest) {
 
       tradeRowsAll.push({
         user_id: userId,
+        account_id: accountId,
         broker: brokerLabel,
         asset_type: instrument_type,
         symbol: symbolRaw,

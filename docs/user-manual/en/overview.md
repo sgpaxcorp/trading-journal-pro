@@ -30,6 +30,9 @@ Captures premarket plan, execution, mindset, and post‑trade review. This is wh
 **Performance & Analytics**  
 Turns your journal into KPIs, patterns, and breakdowns. This is where you diagnose edge and leaks.
 
+**Profit & Loss Track**  
+Runs the business side of trading: subscriptions, education, vendors, budgets, renewals, and break-even.
+
 **AI Coaching**  
 Turns data into feedback and action items. It becomes useful after you have consistent sessions.
 

@@ -69,6 +69,26 @@ function stripHtml(raw: string): string {
     .trim();
 }
 
+const usdFormatter = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+
+function formatCurrency(value: number): string {
+  return usdFormatter.format(Number.isFinite(value) ? value : 0);
+}
+
+function formatSignedCurrency(value: number): string {
+  return `${value >= 0 ? "+" : "-"}${formatCurrency(Math.abs(value))}`;
+}
+
+function formatPercent(value: number, digits = 1): string {
+  const safeValue = Number.isFinite(value) ? value : 0;
+  return `${safeValue.toFixed(digits)}%`;
+}
+
 function getPlanStartDateStr(plan: unknown): string | null {
   const p: any = plan ?? null;
   if (!p) return null;
@@ -1503,27 +1523,34 @@ export default function DashboardPage() {
   // Derived metrics
   const name = (user as any)?.name || L("Trader", "Trader");
 
-  const { starting, target, currentBalance, progressPct, clampedProgress } = useMemo(() => {
-    const startingLocal = (plan as any)?.startingBalance ?? 0;
-    const adjustedStart = plan ? startingLocal + (cashflowNet ?? 0) : startingLocal;
-    const targetLocal = plan ? computeAdjustedTarget(plan, cashflowNet ?? 0) : 0;
-
-    const totalPnlLocal = filteredEntries.reduce((sum, e) => {
+  const totalTradingPnl = useMemo(() => {
+    return filteredEntries.reduce((sum, e) => {
       const pnlRaw = (e as any).pnl;
       const pnl = typeof pnlRaw === "number" ? pnlRaw : Number(pnlRaw) || 0;
       return sum + pnl;
     }, 0);
+  }, [filteredEntries]);
 
-    const latestSeriesValue = (() => {
-      if (!serverSeries || serverSeries.length === 0) return null;
-      const sorted = [...serverSeries].sort((a, b) => String(a.date).localeCompare(String(b.date)));
-      const last = sorted[sorted.length - 1];
-      const v = Number(last?.value);
-      return Number.isFinite(v) ? v : null;
-    })();
+  const sortedServerSeries = useMemo(() => {
+    if (!serverSeries || serverSeries.length === 0) return [];
+    return serverSeries
+      .map((point) => ({
+        date: String(point.date).slice(0, 10),
+        value: Number(point.value),
+      }))
+      .filter((point) => point.date && Number.isFinite(point.value))
+      .sort((a, b) => String(a.date).localeCompare(String(b.date)));
+  }, [serverSeries]);
+
+  const { starting, target, currentBalance, progressPct } = useMemo(() => {
+    const startingLocal = (plan as any)?.startingBalance ?? 0;
+    const adjustedStart = plan ? startingLocal + (cashflowNet ?? 0) : startingLocal;
+    const targetLocal = plan ? computeAdjustedTarget(plan, cashflowNet ?? 0) : 0;
+
+    const latestSeriesValue = sortedServerSeries.length > 0 ? sortedServerSeries[sortedServerSeries.length - 1]?.value ?? null : null;
 
     // ✅ Current account balance prefers authoritative equity series (if present)
-    const fallbackBalance = plan ? adjustedStart + totalPnlLocal : startingLocal;
+    const fallbackBalance = plan ? adjustedStart + totalTradingPnl : startingLocal;
     const currentBalanceLocal = latestSeriesValue ?? fallbackBalance;
 
     const progressPctLocal =
@@ -1531,22 +1558,66 @@ export default function DashboardPage() {
         ? ((currentBalanceLocal - adjustedStart) / (targetLocal - adjustedStart)) * 100
         : 0;
 
-    const clampedProgressLocal = Math.max(0, Math.min(Number.isFinite(progressPctLocal) ? progressPctLocal : 0, 150));
-
     return {
       starting: adjustedStart,
       target: targetLocal,
       currentBalance: currentBalanceLocal,
       progressPct: progressPctLocal,
-      clampedProgress: clampedProgressLocal,
     };
-  }, [plan, filteredEntries, cashflowNet, serverSeries]);
+  }, [plan, cashflowNet, sortedServerSeries, totalTradingPnl]);
 
   const planStartStr = useMemo(() => getPlanStartDateStr(plan) || "", [plan]);
   const targetDateStr = useMemo(
     () => String((plan as any)?.targetDate ?? (plan as any)?.target_date ?? "").slice(0, 10),
     [plan]
   );
+
+  const accountProgressMetrics = useMemo(() => {
+    const firstPoint = sortedServerSeries[0] ?? null;
+    const peakPoint =
+      sortedServerSeries.reduce<{ date: string; value: number } | null>(
+        (best, point) => {
+          if (!best || point.value > best.value) return point;
+          return best;
+        },
+        null
+      ) ?? {
+        date: sessionDateStr,
+        value: currentBalance,
+      };
+    const rawPlanStartBalance = Number((plan as any)?.startingBalance ?? 0);
+    const referenceBalance =
+      plan && Number.isFinite(rawPlanStartBalance) && rawPlanStartBalance > 0
+        ? rawPlanStartBalance
+        : firstPoint?.value ?? currentBalance;
+    const referenceDate = planStartStr || firstPoint?.date || sessionDateStr;
+    const peakBalance = Math.max(peakPoint?.value ?? currentBalance, currentBalance);
+    const peakDate =
+      currentBalance >= (peakPoint?.value ?? Number.NEGATIVE_INFINITY)
+        ? sessionDateStr
+        : peakPoint?.date || sessionDateStr;
+    const netChange = currentBalance - referenceBalance;
+    const returnPct = referenceBalance > 0 ? (netChange / referenceBalance) * 100 : 0;
+    const fromPeak = currentBalance - peakBalance;
+    const fromPeakPct = peakBalance > 0 ? (fromPeak / peakBalance) * 100 : 0;
+    const peakCoveragePct = peakBalance > 0 ? Math.max(0, Math.min(100, (currentBalance / peakBalance) * 100)) : 0;
+
+    return {
+      referenceBalance,
+      referenceDate,
+      netChange,
+      returnPct,
+      tradingPnl: totalTradingPnl,
+      netCashflow: cashflowNet ?? 0,
+      peakBalance,
+      peakDate,
+      fromPeak,
+      fromPeakPct,
+      peakCoveragePct,
+      isAtHigh: Math.abs(fromPeak) < 0.01,
+      referenceMode: planStartStr ? "plan-start" : "tracked",
+    };
+  }, [sortedServerSeries, sessionDateStr, currentBalance, totalTradingPnl, cashflowNet, plan, planStartStr]);
 
   const autoPhaseCadence = useMemo(() => {
     const raw =
@@ -1884,6 +1955,7 @@ export default function DashboardPage() {
     };
   }, [
     L,
+    plan,
     manualPhaseMetrics,
     cadenceProgress,
     autoPhaseMetrics,
@@ -2070,16 +2142,55 @@ export default function DashboardPage() {
   // ===== Render widgets =====
   const renderItem = (id: WidgetId) => {
     if (id === "progress") {
-      const stageProgressPct = Math.max(0, accountStage.progress * 100);
-      const stageClampedProgress = Math.max(0, Math.min(150, stageProgressPct));
-      const isStageBased = accountStage.mode !== "overall";
-      const cadenceCards = cadenceProgress
-        ? [
-            { key: "week", title: L("Week", "Semana"), data: cadenceProgress.week },
-            { key: "month", title: L("Month", "Mes"), data: cadenceProgress.month },
-            { key: "quarter", title: L("Quarter", "Trimestre"), data: cadenceProgress.quarter },
-          ]
-        : [];
+      const hasCashflowImpact = Math.abs(accountProgressMetrics.netCashflow) >= 0.005;
+      const accountMetricCards = [
+        {
+          key: "net-change",
+          label: L("Net account change", "Cambio neto de cuenta"),
+          value: formatSignedCurrency(accountProgressMetrics.netChange),
+          tone: accountProgressMetrics.netChange >= 0 ? "text-emerald-300" : "text-rose-300",
+          sublabel: L("Current balance vs reference balance", "Balance actual vs balance de referencia"),
+        },
+        {
+          key: "return",
+          label: L("Return on reference", "Retorno sobre referencia"),
+          value: formatPercent(accountProgressMetrics.returnPct),
+          tone: accountProgressMetrics.returnPct >= 0 ? "text-cyan-300" : "text-rose-300",
+          sublabel: L("Percent change in account equity", "Cambio porcentual del equity"),
+        },
+        {
+          key: "trading-pnl",
+          label: L("Trading P&L", "P&L de trading"),
+          value: formatSignedCurrency(accountProgressMetrics.tradingPnl),
+          tone: accountProgressMetrics.tradingPnl >= 0 ? "text-emerald-300" : "text-rose-300",
+          sublabel: L("Execution result across tracked sessions", "Resultado de ejecucion en sesiones registradas"),
+        },
+        {
+          key: "cashflow",
+          label: L("Net cashflow", "Flujo neto"),
+          value: formatSignedCurrency(accountProgressMetrics.netCashflow),
+          tone:
+            Math.abs(accountProgressMetrics.netCashflow) < 0.005
+              ? "text-slate-200"
+              : accountProgressMetrics.netCashflow >= 0
+                ? "text-amber-300"
+                : "text-rose-300",
+          sublabel: L("Deposits and withdrawals", "Depositos y retiros"),
+        },
+      ];
+      const referenceContext =
+        accountProgressMetrics.referenceMode === "plan-start"
+          ? L("Reference locked to plan start", "Referencia fijada al inicio del plan")
+          : L("Reference from first tracked equity point", "Referencia desde el primer punto de equity registrado");
+      const highWaterNote = accountProgressMetrics.isAtHigh
+        ? L(
+            "The account is printing a new equity high. Weekly Summary stays focused on realized weekly performance.",
+            "La cuenta esta marcando un nuevo maximo de equity. Weekly Summary se mantiene enfocado en el rendimiento real semanal."
+          )
+        : L(
+            `The account is ${formatCurrency(Math.abs(accountProgressMetrics.fromPeak))} below its high-water mark (${formatPercent(Math.abs(accountProgressMetrics.fromPeakPct))}). Weekly Summary stays focused on realized weekly performance.`,
+            `La cuenta esta ${formatCurrency(Math.abs(accountProgressMetrics.fromPeak))} por debajo de su maximo de equity (${formatPercent(Math.abs(accountProgressMetrics.fromPeakPct))}). Weekly Summary se mantiene enfocado en el rendimiento real semanal.`
+          );
       return (
         <>
           <p className={widgetTitleClass}>
@@ -2089,147 +2200,185 @@ export default function DashboardPage() {
             <span className={widgetDragHintClass}>⠿</span>
           </p>
 
-          {plan ? (
-            <>
-              {cadenceProgress ? (
-                <div className="mt-2 rounded-xl border border-slate-800 bg-slate-900/40 p-3">
-                  <p className="text-[12px] text-slate-500">
-                    {L("Current phase", "Fase actual")}
-                  </p>
-                  <p className="text-[16px] text-slate-100 font-semibold">
-                    {accountStage.phaseLabel}
-                  </p>
-                  <div className="mt-3 grid gap-2 md:grid-cols-3">
-                    {cadenceCards.map((period) => {
-                      const reached = Math.max(0, period.data.actualAmount);
-                      const goal = period.data.goalAmount;
-                      const remaining = Math.max(0, goal - reached);
-                      const currentText = `${reached >= 0 ? "+" : "-"}$${Math.abs(reached).toFixed(2)}`;
-                      const goalText = `$${goal.toFixed(2)}`;
-                      return (
-                        <div key={period.key} className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
-                          <p className="text-[11px] uppercase tracking-[0.28em] text-slate-500">
-                            {period.title}
-                          </p>
-                          <p className="mt-1 text-[15px] font-semibold text-slate-100">
-                            {currentText}
-                          </p>
-                          <p className="mt-1 text-[11px] text-slate-500">
-                            {L("Current P&L", "P&L actual")}{" "}
-                            <span className="text-slate-200">{currentText}</span>
-                          </p>
-                          <p className="mt-1 text-[11px] text-slate-500">
-                            {L("Goal P&L", "Meta P&L")}{" "}
-                            <span className="text-emerald-300">{goalText}</span>
-                          </p>
-                          <p className="mt-1 text-[11px] text-slate-500">
-                            {L("Target balance", "Balance meta")}{" "}
-                            <span className="text-emerald-300">${period.data.targetBalance.toFixed(2)}</span>
-                          </p>
-                          <p className="mt-1 text-[11px] text-slate-500">
-                            {L("Remaining", "Falta")}{" "}
-                            <span className="text-slate-200">${remaining.toFixed(2)}</span>
-                          </p>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              ) : null}
-
-              {isStageBased ? (
-                <>
-                  <p className="text-[12px] text-slate-500 mt-2">
-                    {L("Current stage:", "Etapa actual:")}{" "}
-                    <span className="text-slate-200 font-semibold">{accountStage.label}</span>
-                  </p>
-                  {cadenceProgress ? (
-                    <p className="text-[12px] text-slate-500 mt-1">
-                      {L("This card tracks your current weekly checkpoint. Monthly and quarterly progress are shown above.", "Esta tarjeta sigue tu checkpoint semanal actual. El progreso mensual y trimestral aparece arriba.")}
-                    </p>
-                  ) : null}
-                  <p className="text-[16px] text-slate-300 mt-1">
-                    {L("Stage start:", "Inicio etapa:")}{" "}
-                    <span className="text-slate-50 font-semibold">${accountStage.start.toFixed(2)}</span> ·{" "}
-                    {L("Stage target:", "Meta etapa:")}{" "}
-                    <span className="text-emerald-400 font-semibold">${accountStage.target.toFixed(2)}</span>
-                  </p>
-                  <p className="text-[12px] text-slate-500 mt-1">
-                    {L("Plan target:", "Meta del plan:")}{" "}
-                    <span className="text-slate-200">${target.toFixed(2)}</span>
-                  </p>
-                </>
-              ) : (
-                <p className="text-[16px] text-slate-300 mt-2">
-                  {L("Start:", "Inicio:")}{" "}
-                  <span className="text-slate-50 font-semibold">${starting.toFixed(2)}</span> ·{" "}
-                  {L("Target:", "Meta:")}{" "}
-                  <span className="text-emerald-400 font-semibold">${target.toFixed(2)}</span>
+          <div className="mt-2 rounded-2xl border border-cyan-400/10 bg-[radial-gradient(circle_at_top_left,_rgba(34,211,238,0.18),_transparent_42%),linear-gradient(180deg,_rgba(15,23,42,0.92),_rgba(2,6,23,0.96))] p-4">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+              <div>
+                <p className="text-[11px] uppercase tracking-[0.34em] text-cyan-200/70">
+                  {L("Equity snapshot", "Snapshot de equity")}
                 </p>
-              )}
-
-              <p className="text-[16px] text-slate-300 mt-1">
-                {L("Current balance:", "Balance actual:")}{" "}
-                <span className="text-slate-50 font-semibold">${currentBalance.toFixed(2)}</span>
-              </p>
-
-              <div className="mt-4 h-4 w-full rounded-full bg-slate-800 overflow-hidden">
-                <div
-                  className="h-4 bg-linear-to-r from-emerald-400 via-emerald-300 to-sky-400"
-                  style={{ width: `${isStageBased ? stageClampedProgress : clampedProgress}%` }}
-                />
+                <p className="mt-2 text-[28px] font-semibold text-slate-50">
+                  {formatCurrency(currentBalance)}
+                </p>
+                <p className="mt-2 text-[12px] text-slate-400">
+                  {referenceContext} ·{" "}
+                  <span className="text-slate-200">{accountProgressMetrics.referenceDate}</span>
+                </p>
               </div>
 
-              <p className="text-[14px] text-slate-400 mt-2 leading-snug">
-                {(isStageBased ? stageClampedProgress : clampedProgress) <= 0
-                  ? isStageBased
-                    ? L(
-                        "You are at 0% of this stage. Let the first sessions set the tone.",
-                        "Estás en 0% de esta etapa. Deja que las primeras sesiones marquen el ritmo."
-                      )
-                    : L(
-                        "You are at 0% of this plan. Let the first sessions set the tone.",
-                        "Estás en 0% de este plan. Deja que las primeras sesiones marquen el ritmo."
-                      )
-                  : (isStageBased ? stageClampedProgress : clampedProgress) < 100
-                  ? isStageBased
-                    ? L(
-                        `You have completed ${stageProgressPct.toFixed(1)}% of this stage target.`,
-                        `Has completado ${stageProgressPct.toFixed(1)}% de la meta de esta etapa.`
-                      )
-                    : L(
-                        `You have completed ${progressPct.toFixed(1)}% of your target based on data since this plan started.`,
-                        `Has completado ${progressPct.toFixed(1)}% de tu meta según los datos desde que inició este plan.`
-                      )
-                  : isStageBased
-                  ? L(
-                      "Stage completed. Keep momentum for the next target.",
-                      "Etapa completada. Mantén el impulso para la próxima meta."
-                    )
-                  : L(
-                      "You have exceeded this target. Time to define the next structured goal.",
-                      "Has superado esta meta. Es momento de definir el próximo objetivo."
-                    )}
-              </p>
-            </>
-          ) : (
-            <p className="text-[14px] text-slate-500 mt-2">
-              {L("No growth plan set yet.", "Aún no tienes un plan de crecimiento.")}{" "}
-              <Link href="/growth-plan" data-tour="dash-edit-growth-plan" className="text-emerald-400 underline">
-                {L("Create your plan now.", "Crea tu plan ahora.")}
-              </Link>
+              <div className="rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-3">
+                <p className="text-[11px] uppercase tracking-[0.28em] text-slate-500">
+                  {L("Reference balance", "Balance de referencia")}
+                </p>
+                <p className="mt-1 text-[15px] font-semibold text-slate-100">
+                  {formatCurrency(accountProgressMetrics.referenceBalance)}
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+              {accountMetricCards.map((card) => (
+                <div key={card.key} className="rounded-xl border border-slate-800 bg-slate-950/45 p-3">
+                  <p className="text-[11px] uppercase tracking-[0.24em] text-slate-500">
+                    {card.label}
+                  </p>
+                  <p className={`mt-2 text-[17px] font-semibold ${card.tone}`}>
+                    {card.value}
+                  </p>
+                  <p className="mt-1 text-[11px] text-slate-500">
+                    {card.sublabel}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="mt-3 rounded-xl border border-slate-800 bg-slate-900/40 p-3">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-[11px] uppercase tracking-[0.28em] text-slate-500">
+                  {L("High-water mark", "Maximo de equity")}
+                </p>
+                <p className="mt-1 text-[16px] font-semibold text-slate-100">
+                  {formatCurrency(accountProgressMetrics.peakBalance)}
+                </p>
+                <p className="mt-1 text-[11px] text-slate-500">
+                  {accountProgressMetrics.peakDate}
+                </p>
+              </div>
+
+              <div className="text-right">
+                <p className="text-[11px] uppercase tracking-[0.24em] text-slate-500">
+                  {accountProgressMetrics.isAtHigh ? L("Status", "Estado") : L("From peak", "Desde el maximo")}
+                </p>
+                <p
+                  className={`mt-1 text-[15px] font-semibold ${
+                    accountProgressMetrics.isAtHigh ? "text-emerald-300" : "text-amber-300"
+                  }`}
+                >
+                  {accountProgressMetrics.isAtHigh
+                    ? L("New high", "Nuevo maximo")
+                    : formatSignedCurrency(accountProgressMetrics.fromPeak)}
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-slate-800">
+              <div
+                className="h-2 bg-linear-to-r from-cyan-400 via-sky-400 to-emerald-300"
+                style={{
+                  width: `${Math.max(
+                    accountProgressMetrics.isAtHigh ? 100 : 6,
+                    accountProgressMetrics.peakCoveragePct
+                  )}%`,
+                }}
+              />
+            </div>
+
+            <p className="mt-2 text-[12px] leading-snug text-slate-400">
+              {highWaterNote}
+              {hasCashflowImpact
+                ? ` ${L(
+                    `Net account change includes ${formatSignedCurrency(accountProgressMetrics.netCashflow)} in cashflows.`,
+                    `El cambio neto de cuenta incluye ${formatSignedCurrency(accountProgressMetrics.netCashflow)} en flujos de capital.`
+                  )}`
+                : ""}
             </p>
-          )}
+          </div>
         </>
       );
     }
 
     if (id === "plan-progress") {
+      const currentTargetGap = currentBalance - accountStage.target;
+      const currentTargetProgress = Math.max(0, Math.min(100, accountStage.progress * 100));
+      const currentTargetLabel =
+        currentTargetGap >= 0
+          ? L("Ahead of current target", "Adelantado vs meta actual")
+          : L("Remaining to current target", "Falta para la meta actual");
+      const currentTargetDate =
+        (cadenceProgress?.week.targetDate ??
+          manualPhaseMetrics?.current.targetDate ??
+          autoPhaseMetrics?.current.targetDate ??
+          targetDateStr) ||
+        null;
+      const startMetricLabel =
+        accountStage.mode === "manual"
+          ? L("Phase start", "Inicio fase")
+          : accountStage.mode === "overall"
+            ? L("Plan start", "Inicio plan")
+            : L("Checkpoint start", "Inicio checkpoint");
+      const targetMetricLabel =
+        accountStage.mode === "manual"
+          ? L("Phase target", "Meta fase")
+          : accountStage.mode === "overall"
+            ? L("Plan target", "Meta plan")
+            : L("Checkpoint target", "Meta checkpoint");
+      const renderPlanSummary = (phaseLabel: string, note: string) => (
+        <div className="rounded-2xl border border-emerald-500/10 bg-[radial-gradient(circle_at_top_left,_rgba(16,185,129,0.14),_transparent_44%),linear-gradient(180deg,_rgba(15,23,42,0.92),_rgba(2,6,23,0.96))] p-4">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-[12px] text-slate-500">
+                {L("Current phase", "Fase actual")}
+              </p>
+              <p className="text-[17px] font-semibold text-slate-100">
+                {phaseLabel}
+              </p>
+            </div>
+            {currentTargetDate ? (
+              <span className="rounded-full border border-slate-800 bg-slate-950/70 px-2 py-1 text-[11px] text-slate-400">
+                {L("By", "Para")} {currentTargetDate}
+              </span>
+            ) : null}
+          </div>
+
+          <div className="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+            {[
+              { key: "start", label: startMetricLabel, value: formatCurrency(accountStage.start) },
+              { key: "current", label: L("Balance now", "Balance actual"), value: formatCurrency(currentBalance) },
+              { key: "target", label: targetMetricLabel, value: formatCurrency(accountStage.target) },
+              {
+                key: "status",
+                label: currentTargetLabel,
+                value: formatCurrency(Math.abs(currentTargetGap)),
+                tone: currentTargetGap >= 0 ? "text-emerald-300" : "text-amber-300",
+              },
+            ].map((card) => (
+              <div key={card.key} className="rounded-xl border border-slate-800 bg-slate-950/45 p-3">
+                <p className="text-[11px] uppercase tracking-[0.24em] text-slate-500">
+                  {card.label}
+                </p>
+                <p className={`mt-2 text-[16px] font-semibold ${card.tone ?? "text-slate-100"}`}>
+                  {card.value}
+                </p>
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-4 h-2 w-full overflow-hidden rounded-full bg-slate-800">
+            <div
+              className="h-2 bg-linear-to-r from-emerald-400 via-cyan-300 to-sky-400"
+              style={{ width: `${currentTargetProgress}%` }}
+            />
+          </div>
+
+          <p className="mt-2 text-[12px] leading-snug text-slate-400">{note}</p>
+        </div>
+      );
       return (
         <>
           <p className={widgetTitleClass}>
             <span className={widgetTitleTextClass}>
-              {L("Plan Progress (Phases)", "Progreso del plan (fases)")}
+              {L("Plan Progress", "Progreso del plan")}
             </span>
             <span className={widgetDragHintClass}>⠿</span>
           </p>
@@ -2243,46 +2392,28 @@ export default function DashboardPage() {
             </p>
           ) : plan?.planMode === "manual" ? (
             manualPhaseMetrics ? (
-            <div className="mt-3 space-y-3">
-              <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-3">
-                <p className="text-[12px] text-slate-500">
-                  {L("Current phase", "Fase actual")}
-                </p>
-                <p className="text-[16px] text-slate-100 font-semibold">
-                  {manualPhaseMetrics.current.title || L("Phase", "Fase")}
-                </p>
-                <p className="text-[12px] text-slate-500 mt-1">
-                  {L("Target:", "Meta:")}{" "}
-                  <span className="text-emerald-300">${manualPhaseMetrics.current.targetEquity.toFixed(2)}</span>
-                </p>
-                {manualPhaseMetrics.current.targetDate ? (
-                  <p className="text-[12px] text-slate-500 mt-1">
-                    {L("Target date:", "Fecha objetivo:")}{" "}
-                    <span className="text-slate-200">{manualPhaseMetrics.current.targetDate}</span>
-                  </p>
-                ) : null}
-                <p className="text-[12px] text-slate-500 mt-1">
-                  {L("Progress:", "Progreso:")}{" "}
-                  <span className="text-slate-200">{(manualPhaseMetrics.progress * 100).toFixed(1)}%</span>
-                </p>
-              </div>
+              <div className="mt-3 space-y-3">
+                {renderPlanSummary(
+                  manualPhaseMetrics.current.title || L("Phase", "Fase"),
+                  L(
+                    "Manual phases compare the live account balance against direct equity targets. Weekly Summary stays on realized weekly performance only.",
+                    "Las fases manuales comparan el balance real contra metas directas de equity. Weekly Summary se mantiene solo en el rendimiento real semanal."
+                  )
+                )}
 
-              <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-3">
-                <p className="text-[12px] text-slate-500">
-                  {L("Phase progress", "Progreso de fase")}
-                </p>
-                <div className="mt-2 h-2 w-full rounded-full bg-slate-800 overflow-hidden">
-                  <div
-                    className="h-2 bg-linear-to-r from-emerald-400 via-emerald-300 to-sky-400"
-                    style={{ width: `${Math.min(100, manualPhaseMetrics.progress * 100)}%` }}
-                  />
+                <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-3">
+                  <p className="text-[12px] text-slate-500">
+                    {L("Manual phase rule", "Regla de fase manual")}
+                  </p>
+                  <p className="mt-1 text-[15px] font-semibold text-slate-100">
+                    {L("Move the account to the target equity of this phase.", "Lleva la cuenta al equity objetivo de esta fase.")}
+                  </p>
+                  <p className="mt-1 text-[12px] text-slate-500">
+                    {L("Progress", "Progreso")}{" "}
+                    <span className="text-slate-200">{formatPercent(manualPhaseMetrics.progress * 100)}</span>
+                  </p>
                 </div>
-                <p className="text-[12px] text-slate-500 mt-1">
-                  {L("Remaining:", "Falta:")}{" "}
-                  <span className="text-slate-200">${manualPhaseMetrics.remaining.toFixed(2)}</span>
-                </p>
               </div>
-            </div>
             ) : (
               <p className="text-[13px] text-slate-500 mt-2">
                 {L("Add manual phases to activate this widget.", "Agrega fases manuales para activar este widget.")}{" "}
@@ -2303,28 +2434,21 @@ export default function DashboardPage() {
             </p>
           ) : cadenceProgress ? (
             <div className="mt-3 space-y-3">
-              <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-3">
-                <p className="text-[12px] text-slate-500">
-                  {L("Current phase", "Fase actual")}
-                </p>
-                <p className="text-[16px] text-slate-100 font-semibold">
-                  {L("Quarter", "Trimestre")} {cadenceProgress.quarterIndex} · {L("Month", "Mes")}{" "}
-                  {cadenceProgress.monthIndex} · {L("Week", "Semana")} {cadenceProgress.weekIndex}/
-                  {cadenceProgress.weeksInMonth}
-                </p>
-                <p className="text-[12px] text-slate-500 mt-1">
-                  {L("Current balance:", "Balance actual:")}{" "}
-                  <span className="text-slate-200">${currentBalance.toFixed(2)}</span>
-                </p>
-              </div>
+              {renderPlanSummary(
+                accountStage.phaseLabel,
+                `${L(
+                  "This widget compares balance now against checkpoint start and checkpoint target. Weekly Summary stays focused on what you actually made this week.",
+                  "Este widget compara el balance actual contra el inicio y la meta de cada checkpoint. Weekly Summary se mantiene enfocado en lo que realmente hiciste esta semana."
+                )} ${L("Overall plan target:", "Meta total del plan:")} ${formatCurrency(target)}`
+              )}
 
               {[
-                { key: "week", title: L("Week target", "Meta semanal"), data: cadenceProgress.week },
-                { key: "month", title: L("Month target", "Meta mensual"), data: cadenceProgress.month },
-                { key: "quarter", title: L("Quarter target", "Meta trimestral"), data: cadenceProgress.quarter },
+                { key: "week", title: L("Week checkpoint", "Checkpoint semanal"), data: cadenceProgress.week },
+                { key: "month", title: L("Month checkpoint", "Checkpoint mensual"), data: cadenceProgress.month },
+                { key: "quarter", title: L("Quarter checkpoint", "Checkpoint trimestral"), data: cadenceProgress.quarter },
               ].map((period) => {
-                const actualText = `${period.data.actualAmount >= 0 ? "+" : "-"}$${Math.abs(period.data.actualAmount).toFixed(2)}`;
-                const goalText = `$${period.data.goalAmount.toFixed(2)}`;
+                const checkpointGap = currentBalance - period.data.targetBalance;
+                const checkpointProgress = Math.max(0, Math.min(100, period.data.progress * 100));
                 return (
                   <div key={period.key} className="rounded-xl border border-slate-800 bg-slate-900/40 p-3">
                     <div className="flex items-center justify-between gap-3">
@@ -2335,96 +2459,99 @@ export default function DashboardPage() {
                         </span>
                       ) : null}
                     </div>
-                    <p className="mt-1 text-[16px] font-semibold text-slate-100">
-                      {actualText}
+
+                    <p className={`mt-2 text-[17px] font-semibold ${checkpointGap >= 0 ? "text-emerald-300" : "text-amber-300"}`}>
+                      {checkpointGap >= 0 ? L("Ahead by", "Adelantado por") : L("Remaining", "Falta")}{" "}
+                      {formatCurrency(Math.abs(checkpointGap))}
                     </p>
-                    <p className="mt-1 text-[12px] text-slate-500">
-                      {L("Current P&L", "P&L actual")}{" "}
-                      <span className="text-slate-200">{actualText}</span> ·{" "}
-                      {L("Goal P&L", "Meta P&L")}{" "}
-                      <span className="text-emerald-300">{goalText}</span>
-                    </p>
-                    <p className="mt-1 text-[12px] text-slate-500">
-                      {L("Start", "Inicio")}{" "}
-                      <span className="text-slate-200">${period.data.startBalance.toFixed(2)}</span> ·{" "}
-                      {L("Target", "Meta")}{" "}
-                      <span className="text-emerald-300">${period.data.targetBalance.toFixed(2)}</span>
-                    </p>
+
+                    <div className="mt-2 grid gap-1 text-[12px] text-slate-500">
+                      <p>
+                        {L("Checkpoint start", "Inicio checkpoint")}{" "}
+                        <span className="text-slate-200">{formatCurrency(period.data.startBalance)}</span>
+                      </p>
+                      <p>
+                        {L("Balance now", "Balance actual")}{" "}
+                        <span className="text-slate-200">{formatCurrency(currentBalance)}</span>
+                      </p>
+                      <p>
+                        {L("Checkpoint target", "Meta checkpoint")}{" "}
+                        <span className="text-emerald-300">{formatCurrency(period.data.targetBalance)}</span>
+                      </p>
+                      <p>
+                        {L("Required move from start", "Movimiento requerido desde el inicio")}{" "}
+                        <span className="text-slate-200">{formatCurrency(period.data.goalAmount)}</span> ·{" "}
+                        {L("Moved from start", "Movimiento desde el inicio")}{" "}
+                        <span className={period.data.actualAmount >= 0 ? "text-emerald-300" : "text-rose-300"}>
+                          {formatSignedCurrency(period.data.actualAmount)}
+                        </span>
+                      </p>
+                    </div>
+
                     <div className="mt-2 h-2 w-full rounded-full bg-slate-800 overflow-hidden">
                       <div
                         className="h-2 bg-linear-to-r from-emerald-400 via-emerald-300 to-sky-400"
-                        style={{ width: `${Math.min(100, period.data.progress * 100)}%` }}
+                        style={{ width: `${checkpointProgress}%` }}
                       />
                     </div>
-                    <p className="mt-1 text-[12px] text-slate-500">
-                      {L("Remaining", "Falta")}{" "}
-                      <span className="text-slate-200">
-                        ${Math.max(0, period.data.goalAmount - Math.max(0, period.data.actualAmount)).toFixed(2)}
-                      </span>
-                    </p>
                   </div>
                 );
               })}
             </div>
           ) : autoPhaseMetrics ? (
             <div className="mt-3 space-y-3">
-              <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-3">
-                <p className="text-[12px] text-slate-500">
-                  {L("Current milestone", "Meta actual")} · {autoCadenceUnit} {autoPhaseMetrics.index}/{autoPhaseMetrics.total}
-                </p>
-                <p className="text-[16px] text-slate-100 font-semibold">
-                  ${autoPhaseMetrics.current.targetEquity.toFixed(2)}
-                </p>
-                {autoPhaseMetrics.current.targetDate ? (
-                  <p className="text-[12px] text-slate-500 mt-1">
-                    {L("Target date:", "Fecha objetivo:")}{" "}
-                    <span className="text-slate-200">{autoPhaseMetrics.current.targetDate}</span>
-                  </p>
-                ) : null}
-                <p className="text-[12px] text-slate-500 mt-1">
-                  {L("Cadence:", "Cadencia:")}{" "}
-                  <span className="text-slate-200">{autoCadenceLabel}</span>
-                </p>
-              </div>
+              {renderPlanSummary(
+                `${L("Milestone", "Hito")} ${autoPhaseMetrics.index}/${autoPhaseMetrics.total}`,
+                `${L("Cadence:", "Cadencia:")} ${autoCadenceLabel}. ${L(
+                  "This widget keeps the account on pace against the next milestone, not against weekly realized P&L.",
+                  "Este widget mantiene la cuenta en ritmo contra el siguiente hito, no contra el P&L realizado de la semana."
+                )}`
+              )}
 
               <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-3">
                 <p className="text-[12px] text-slate-500">
-                  {L("Milestone progress", "Progreso de meta")}
+                  {L("Milestone target", "Meta del hito")}
                 </p>
-                <div className="mt-2 h-2 w-full rounded-full bg-slate-800 overflow-hidden">
-                  <div
-                    className="h-2 bg-linear-to-r from-emerald-400 via-emerald-300 to-sky-400"
-                    style={{ width: `${Math.min(100, autoPhaseMetrics.progress * 100)}%` }}
-                  />
-                </div>
-                <p className="text-[12px] text-slate-500 mt-1">
-                  {L("Remaining:", "Falta:")}{" "}
-                  <span className="text-slate-200">${autoPhaseMetrics.remaining.toFixed(2)}</span>
+                <p className="mt-1 text-[16px] font-semibold text-slate-100">
+                  {formatCurrency(autoPhaseMetrics.current.targetEquity)}
                 </p>
+                {autoPhaseMetrics.current.targetDate ? (
+                  <p className="mt-1 text-[12px] text-slate-500">
+                    {L("Target date", "Fecha objetivo")}{" "}
+                    <span className="text-slate-200">{autoPhaseMetrics.current.targetDate}</span>
+                  </p>
+                ) : null}
               </div>
             </div>
           ) : phaseMetrics ? (
             <div className="mt-3 space-y-3">
+              {renderPlanSummary(
+                accountStage.phaseLabel,
+                L(
+                  "This view is plan pacing only. Weekly Summary stays on realized weekly execution.",
+                  "Esta vista es solo de ritmo contra el plan. Weekly Summary se queda en la ejecucion real semanal."
+                )
+              )}
+
               <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-3">
                 <p className="text-[12px] text-slate-500">
                   {L("Long‑term target", "Meta largo plazo")}
                 </p>
                 <p className="text-[16px] text-emerald-300 font-semibold">
-                  ${target.toFixed(2)}
+                  {formatCurrency(target)}
                 </p>
                 <p className="text-[12px] text-slate-500 mt-1">
-                  {L("Target date:", "Fecha meta:")}{" "}
+                  {L("Target date", "Fecha meta")}{" "}
                   <span className="text-slate-200">{targetDateStr}</span>
                 </p>
               </div>
 
               <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-3">
                 <p className="text-[12px] text-slate-500">
-                  {L("Monthly milestone", "Meta mensual")} ·{" "}
-                  {L("Month", "Mes")} {phaseMetrics.currentMonthIndex}/{phaseMetrics.totalMonths}
+                  {L("Monthly milestone", "Meta mensual")} · {L("Month", "Mes")} {phaseMetrics.currentMonthIndex}/{phaseMetrics.totalMonths}
                 </p>
                 <p className="text-[16px] text-slate-100 font-semibold">
-                  ${phaseMetrics.monthTarget.toFixed(2)}
+                  {formatCurrency(phaseMetrics.monthTarget)}
                 </p>
                 <div className="mt-2 h-2 w-full rounded-full bg-slate-800 overflow-hidden">
                   <div
@@ -2433,23 +2560,22 @@ export default function DashboardPage() {
                   />
                 </div>
                 <p className="text-[12px] text-slate-500 mt-1">
-                  {L("Remaining this month:", "Falta este mes:")}{" "}
-                  <span className="text-slate-200">${phaseMetrics.remainingToMonth.toFixed(2)}</span>
+                  {L("Remaining this month", "Falta este mes")}{" "}
+                  <span className="text-slate-200">{formatCurrency(phaseMetrics.remainingToMonth)}</span>
                 </p>
               </div>
 
               <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-3">
                 <p className="text-[12px] text-slate-500">
-                  {L("Mid‑term milestone", "Meta mediano plazo")} ·{" "}
-                  {L("Month", "Mes")} {phaseMetrics.midIndex}
+                  {L("Mid‑term milestone", "Meta mediano plazo")} · {L("Month", "Mes")} {phaseMetrics.midIndex}
                 </p>
                 <p className="text-[16px] text-slate-100 font-semibold">
-                  ${phaseMetrics.midTarget.toFixed(2)}
+                  {formatCurrency(phaseMetrics.midTarget)}
                 </p>
                 <p className="text-[12px] text-slate-500 mt-1">
-                  {L("Compounded pacing:", "Ritmo compuesto:")}{" "}
+                  {L("Compounded pacing", "Ritmo compuesto")}{" "}
                   <span className="text-slate-200">
-                    {(phaseMetrics.monthlyRate * 100).toFixed(2)}%/{L("month", "mes")}
+                    {formatPercent(phaseMetrics.monthlyRate * 100, 2)}/{L("month", "mes")}
                   </span>
                 </p>
               </div>

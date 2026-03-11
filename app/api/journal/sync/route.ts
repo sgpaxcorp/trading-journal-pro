@@ -222,8 +222,14 @@ export async function POST(req: NextRequest) {
 
     const { startISO, endISO } = dayRangeUTC(date);
 
+    const applyAccountFilter = (query: any) => {
+      if (accountId) return query.eq("account_id", accountId);
+      return query.is("account_id", null);
+    };
+
     /* ---------- load trades (fills) ---------- */
-    const { data: trades, error } = await supabaseAdmin
+    const tradesQuery = applyAccountFilter(
+      supabaseAdmin
       .from("trades")
       .select(
         `
@@ -245,7 +251,10 @@ export async function POST(req: NextRequest) {
       .eq("user_id", userId)
       .gte("executed_at", startISO)
       .lt("executed_at", endISO)
-      .order("executed_at", { ascending: true });
+      .order("executed_at", { ascending: true })
+    );
+
+    const { data: trades, error } = await tradesQuery;
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
@@ -264,12 +273,14 @@ export async function POST(req: NextRequest) {
     }
 
     /* ---------- preserve textual notes ---------- */
-    const { data: existing } = await supabaseAdmin
+    const existingNotesQuery = applyAccountFilter(
+      supabaseAdmin
       .from("journal_entries")
       .select("notes")
       .eq("user_id", userId)
       .eq("date", date)
-      .maybeSingle();
+    );
+    const { data: existing } = await existingNotesQuery.maybeSingle();
 
     let premarket = "";
     let live = "";
@@ -442,7 +453,7 @@ export async function POST(req: NextRequest) {
       .delete()
       .eq("user_id", userId)
       .eq("journal_date", date);
-    if (accountId) delQuery = delQuery.eq("account_id", accountId);
+    delQuery = accountId ? delQuery.eq("account_id", accountId) : delQuery.is("account_id", null);
 
     const { error: delJT } = await delQuery;
 
@@ -533,9 +544,12 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       date,
+      account_id: accountId ?? null,
       trades_found: trades.length,
       entries_count: entries.length,
       exits_count: exits.length,
+      groups: new Set([...entries, ...exits].map((row) => `${row.symbol}:${row.kind}`)).size,
+      updated: jtRows.length,
       pnl_gross: pnlGross,
       pnl_net: pnlNet,
       commissions: totalCommissions,
