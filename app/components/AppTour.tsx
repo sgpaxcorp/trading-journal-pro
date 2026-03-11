@@ -122,16 +122,6 @@ function buildSteps(
       selector: '[data-tour="nav-challenges"]',
     },
     {
-      id: 10,
-      title: L("Resources", "Recursos"),
-      body: L(
-        "Your saved guides, videos, and learning resources.",
-        "Tus guías, videos y recursos guardados."
-      ),
-      path: "/dashboard",
-      selector: '[data-tour="nav-resources"]',
-    },
-    {
       id: 11,
       title: L("Rules & Alarms", "Reglas y alarmas"),
       body: L(

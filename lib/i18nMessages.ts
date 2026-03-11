@@ -22,7 +22,6 @@ export const I18N_MESSAGES: Record<string, MessageDict> = {
     "nav.journal": "Journal",
     "nav.challenges": "Challenges",
     "nav.performance": "Performance",
-    "nav.resources": "Resources",
     "nav.forum": "Forum",
   },
 
@@ -46,7 +45,6 @@ export const I18N_MESSAGES: Record<string, MessageDict> = {
     "nav.journal": "Journal",
     "nav.challenges": "Retos",
     "nav.performance": "Performance",
-    "nav.resources": "Recursos",
     "nav.forum": "Foro",
   },
 };

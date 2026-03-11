@@ -1,14 +1,12 @@
 import { Alert, Linking, Platform, Pressable, StyleSheet, Switch, Text, TextInput, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import * as Notifications from "expo-notifications";
-import * as Device from "expo-device";
-import Constants from "expo-constants";
 
 import { ScreenScaffold } from "../components/ScreenScaffold";
 import { apiPost } from "../lib/api";
 import { useLanguage } from "../lib/LanguageContext";
 import { t } from "../lib/i18n";
+import { registerDeviceForPush } from "../lib/pushNotifications";
 import { useSupabaseUser } from "../lib/useSupabaseUser";
 import { supabaseMobile } from "../lib/supabase";
 import { type ThemeColors } from "../theme";
@@ -106,49 +104,21 @@ export function SettingsScreen() {
     async function initNotifications() {
       try {
         setNotificationLoading(true);
-        const permissions = await Notifications.getPermissionsAsync();
-        let status = permissions.status;
-        if (status !== "granted") {
-          const request = await Notifications.requestPermissionsAsync();
-          status = request.status;
-        }
+        const result = await registerDeviceForPush({
+          locale: language,
+          promptIfNeeded: true,
+        });
         if (!active) return;
-        setNotificationStatus(status);
+        setNotificationStatus(result.status);
 
-        if (status !== "granted") {
+        if (result.status !== "granted") {
           setNotificationEnabled(false);
           setNotificationReady(true);
           return;
         }
 
-        const projectId =
-          Constants.easConfig?.projectId ||
-          Constants.expoConfig?.extra?.eas?.projectId ||
-          process.env.EXPO_PUBLIC_EXPO_PROJECT_ID;
-
-        const tokenData = projectId
-          ? await Notifications.getExpoPushTokenAsync({ projectId })
-          : await Notifications.getExpoPushTokenAsync();
-
-        if (!active) return;
-        const token = tokenData.data;
-        setPushToken(token);
-        const resolvedDeviceName = Device.deviceName || Device.modelName || null;
-
-        const res = await apiPost<{
-          ok: boolean;
-          token?: { daily_reminder_enabled?: boolean | null };
-        }>("/api/notifications/register", {
-          expoPushToken: token,
-          platform: Platform.OS,
-          deviceId: Device.osInternalBuildId ?? null,
-          deviceName: resolvedDeviceName || Device.modelName || null,
-          locale: language,
-          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-        });
-
-        if (!active) return;
-        const enabled = res?.token?.daily_reminder_enabled;
+        setPushToken(result.pushToken);
+        const enabled = result.dailyReminderEnabled;
         setNotificationEnabled(typeof enabled === "boolean" ? enabled : true);
         setNotificationReady(true);
       } catch (err) {
@@ -247,15 +217,34 @@ export function SettingsScreen() {
     }
 
     if (!pushToken) {
-      Alert.alert(
-        t(language, "Notification setup required", "Configuración necesaria"),
-        t(
-          language,
-          "We could not register this device for reminders yet.",
-          "No pudimos registrar este dispositivo para recordatorios."
-        )
-      );
-      return;
+      try {
+        const result = await registerDeviceForPush({
+          locale: language,
+          promptIfNeeded: true,
+          dailyReminderEnabled: nextValue,
+        });
+        setNotificationStatus(result.status);
+        setPushToken(result.pushToken);
+        if (!result.pushToken) {
+          Alert.alert(
+            t(language, "Notification setup required", "Configuración necesaria"),
+            t(
+              language,
+              "We could not register this device for reminders yet.",
+              "No pudimos registrar este dispositivo para recordatorios."
+            )
+          );
+          return;
+        }
+        setNotificationEnabled(typeof result.dailyReminderEnabled === "boolean" ? result.dailyReminderEnabled : nextValue);
+        return;
+      } catch (err: any) {
+        Alert.alert(
+          t(language, "Notification update failed", "Error al actualizar notificaciones"),
+          err?.message ?? "Error"
+        );
+        return;
+      }
     }
 
     try {
@@ -295,15 +284,13 @@ export function SettingsScreen() {
       setTestNotifLoading(true);
       let tokenToUse = pushToken;
       if (!tokenToUse) {
-        const projectId =
-          Constants.easConfig?.projectId ||
-          Constants.expoConfig?.extra?.eas?.projectId ||
-          process.env.EXPO_PUBLIC_EXPO_PROJECT_ID;
-        const tokenData = projectId
-          ? await Notifications.getExpoPushTokenAsync({ projectId })
-          : await Notifications.getExpoPushTokenAsync();
-        tokenToUse = tokenData.data;
-        setPushToken(tokenToUse);
+        const result = await registerDeviceForPush({
+          locale: language,
+          promptIfNeeded: true,
+        });
+        setNotificationStatus(result.status);
+        tokenToUse = result.pushToken;
+        setPushToken(result.pushToken);
       }
       if (!tokenToUse) {
         Alert.alert(

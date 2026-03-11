@@ -38,6 +38,6 @@
 
 ## Developer Manual
 - Stack y scripts -> `package.json`
-- Env vars -> `app/api/*`, `lib/*`, `middleware.ts`
+- Env vars -> `app/api/*`, `lib/*`, `proxy.ts`
 - Estructura -> `app/`, `lib/`, `context/`, `hooks/`
 - Lint/build -> salida de `npm run lint` y `npm run build`

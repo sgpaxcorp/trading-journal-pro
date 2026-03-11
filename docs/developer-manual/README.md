@@ -19,7 +19,7 @@ Supabase:
 - `NEXT_PUBLIC_SUPABASE_URL`
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
 - `SUPABASE_SERVICE_ROLE_KEY`
-Evidencia: `lib/supaBaseAdmin.ts`, `lib/supaBaseClient.ts`, `lib/supabaseServer.ts`, `middleware.ts`
+Evidencia: `lib/supaBaseAdmin.ts`, `lib/supaBaseClient.ts`, `lib/supabaseServer.ts`, `proxy.ts`
 
 OpenAI:
 - `OPENAI_API_KEY`

@@ -332,14 +332,15 @@ export function JournalDateScreen() {
   const [status, setStatus] = useState<string | null>(null);
   const isoDate = toYmd(date);
   const { width, height: screenHeight } = useWindowDimensions();
-  const pageWidth = Math.max(width - 32, 280);
+  const pageWidth = Math.max(width - 24, 300);
   const pagerRef = useRef<ScrollView>(null);
   const premarketFieldRef = useRef<InkFieldHandle>(null);
   const liveFieldRef = useRef<InkFieldHandle>(null);
   const postFieldRef = useRef<InkFieldHandle>(null);
   const afterDidWellFieldRef = useRef<InkFieldHandle>(null);
   const afterImproveFieldRef = useRef<InkFieldHandle>(null);
-  const journalFieldHeight = Math.max(420, Math.min(560, Math.round(screenHeight * 0.48)));
+  const journalFieldHeight = Math.max(620, Math.min(920, Math.round(screenHeight * 0.78)));
+  const reviewFieldHeight = Math.max(360, Math.min(520, Math.round(screenHeight * 0.46)));
   const [sectionIndex, setSectionIndex] = useState(0);
 
   useEffect(() => {
@@ -1091,7 +1092,7 @@ export function JournalDateScreen() {
         inkValue={afterDidWellInk}
         onInkChange={setAfterDidWellInk}
         placeholder={t(language, "What went well?", "¿Qué salió bien?")}
-        height={journalFieldHeight}
+        height={reviewFieldHeight}
       />
       <InkField
         ref={afterImproveFieldRef}
@@ -1103,7 +1104,7 @@ export function JournalDateScreen() {
         inkValue={afterImproveInk}
         onInkChange={setAfterImproveInk}
         placeholder={t(language, "What will you improve?", "¿Qué mejorarás?")}
-        height={journalFieldHeight}
+        height={reviewFieldHeight}
       />
     </View>
   );
@@ -1128,6 +1129,9 @@ export function JournalDateScreen() {
       )}
       refreshing={refreshing}
       onRefresh={handleRefresh}
+      showBrand={false}
+      compactHeader
+      contentPadding={12}
     >
       <View style={styles.dateRow}>
         <Pressable style={styles.dateButton} onPress={() => setDate((d) => shiftDateSkippingSaturday(d, -1))}>
@@ -1495,7 +1499,6 @@ const createStyles = (colors: ThemeColors) =>
       color: colors.textPrimary,
     },
     page: {
-      paddingRight: 12,
-      gap: 10,
+      gap: 12,
     },
   });

@@ -103,7 +103,7 @@ export const InkCanvas = forwardRef<InkCanvasHandle, InkCanvasProps>(
 
 const styles = StyleSheet.create({
   wrapper: {
-    borderRadius: 12,
+    borderRadius: 16,
     overflow: "hidden",
   },
   canvas: {

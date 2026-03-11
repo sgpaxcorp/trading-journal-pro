@@ -69,15 +69,6 @@ export default function PageIntro() {
         ),
       },
       {
-        key: "resources",
-        match: (p) => p.startsWith("/resources"),
-        title: L("Resources", "Recursos"),
-        body: L(
-          "Save books, videos, and links you want to revisit.",
-          "Guarda libros, videos y enlaces para revisar luego."
-        ),
-      },
-      {
         key: "rules-alarms",
         match: (p) => p.startsWith("/rules-alarms"),
         title: L("Rules & Alarms", "Reglas y alarmas"),

@@ -41,7 +41,7 @@ export default function Home() {
           <Link href="/pricing" className="hover:text-emerald-400">
             {L("Pricing", "Precios")}
           </Link>
-          <Link href="/resources" className="hover:text-emerald-400">
+          <Link href="/about" className="hover:text-emerald-400">
             {L("About Us", "Sobre nosotros")}
           </Link>
           <Link href="/growthaccountsimulator" className="hover:text-emerald-400">

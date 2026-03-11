@@ -1,21 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { notifyGoalAchievement } from "@/lib/goalAchievementNotifications";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 
 export const runtime = "nodejs";
 
-type PushRow = {
-  expo_push_token: string;
-  locale: string | null;
-  user_id: string;
-  last_goal_notified_date?: string | null;
-};
-
 const NY_TZ = "America/New_York";
-
-function isExpoPushToken(token: string) {
-  return token.startsWith("ExponentPushToken") || token.startsWith("ExpoPushToken");
-}
 
 function getNyDateString() {
   const parts = new Intl.DateTimeFormat("en-US", {
@@ -30,113 +20,78 @@ function getNyDateString() {
   return `${year}-${month}-${day}`;
 }
 
-function buildMessage(locale: string | null) {
-  const isEs = String(locale || "").toLowerCase().startsWith("es");
-  if (isEs) {
-    return {
-      title: "Neuro Trader Journal",
-      body: "Meta diaria alcanzada. Bloquea la ganancia y protege tu disciplina.",
-    };
-  }
-  return {
-    title: "Neuro Trader Journal",
-    body: "Daily goal achieved. Lock the win and protect discipline.",
-  };
-}
-
-async function sendExpoMessages(messages: Array<Record<string, unknown>>) {
-  const chunks: Array<Array<Record<string, unknown>>> = [];
-  const size = 100;
-  for (let i = 0; i < messages.length; i += size) {
-    chunks.push(messages.slice(i, i + size));
-  }
-
-  const results: Array<{ ok: boolean; status: number; body: unknown }> = [];
-  for (const chunk of chunks) {
-    const res = await fetch("https://exp.host/--/api/v2/push/send", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(chunk),
-    });
-    const body = await res.json().catch(() => ({}));
-    results.push({ ok: res.ok, status: res.status, body });
-  }
-  return results;
-}
-
 async function handleRequest(req: NextRequest) {
   try {
+    const url = new URL(req.url);
+    const forceParam = url.searchParams.get("force");
+    const force = forceParam === "1" || forceParam === "true";
+
     const secret = process.env.CRON_SECRET || "";
     const authHeader = req.headers.get("authorization") || "";
     const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
     const vercelCronHeader = req.headers.get("x-vercel-cron");
     const isVercelCron = Boolean(vercelCronHeader) && vercelCronHeader !== "false";
-    const hasValidSecret = secret && token === secret;
-    if (!isVercelCron && !hasValidSecret) {
+    const hasValidSecret = Boolean(secret) && token === secret;
+    let forceUserId: string | null = null;
+
+    if (force && token && !hasValidSecret) {
+      const { data: authData, error: authErr } = await supabaseAdmin.auth.getUser(token);
+      if (!authErr && authData?.user?.id) {
+        forceUserId = authData.user.id;
+      }
+    }
+
+    if (!isVercelCron && !hasValidSecret && !forceUserId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     const nyDate = getNyDateString();
 
-    const { data: snapshots, error: snapError } = await supabaseAdmin
+    let snapshotsQuery = supabaseAdmin
       .from("daily_snapshots")
-      .select("user_id, goal_met")
+      .select("user_id")
       .eq("date", nyDate)
       .eq("goal_met", true);
 
+    if (forceUserId) {
+      snapshotsQuery = snapshotsQuery.eq("user_id", forceUserId);
+    }
+
+    const { data: snapshots, error: snapError } = await snapshotsQuery;
     if (snapError) {
       return NextResponse.json({ error: snapError.message }, { status: 500 });
     }
 
-    const goalUsers = new Set((snapshots ?? []).map((row: any) => String(row.user_id)));
-    if (goalUsers.size === 0) {
-      return NextResponse.json({ ok: true, sent: 0, detail: "No goal-met users today." });
+    const userIds = Array.from(new Set((snapshots ?? []).map((row: any) => String(row?.user_id ?? "")).filter(Boolean)));
+    if (userIds.length === 0) {
+      return NextResponse.json({ ok: true, sent: 0, inAppInserted: 0, detail: "No goal-met users today." });
     }
 
-    const { data: tokens, error } = await supabaseAdmin
-      .from("push_tokens")
-      .select("expo_push_token, locale, user_id, last_goal_notified_date")
-      .eq("daily_reminder_enabled", true);
+    let sent = 0;
+    let inAppInserted = 0;
+    const results: Array<Record<string, unknown>> = [];
 
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+    for (const userId of userIds) {
+      const result = await notifyGoalAchievement({
+        userId,
+        goalScope: "day",
+        periodKey: nyDate,
+        metadata: {
+          source: "daily_goal_cron",
+          snapshot_date: nyDate,
+        },
+      });
+
+      sent += Number(result.pushSent ?? 0);
+      inAppInserted += result.inAppInserted ? 1 : 0;
+      results.push({
+        userId,
+        pushSent: result.pushSent,
+        inAppInserted: result.inAppInserted,
+      });
     }
 
-    const rows = (tokens ?? []) as PushRow[];
-    const targetRows = rows.filter((row) => {
-      if (!goalUsers.has(String(row.user_id))) return false;
-      if (row.last_goal_notified_date === nyDate) return false;
-      return isExpoPushToken(row.expo_push_token);
-    });
-
-    if (targetRows.length === 0) {
-      return NextResponse.json({ ok: true, sent: 0, detail: "No new tokens to notify." });
-    }
-
-    const messages = targetRows.map((row) => {
-      const message = buildMessage(row.locale);
-      return {
-        to: row.expo_push_token,
-        title: message.title,
-        body: message.body,
-        sound: "default",
-        data: { screen: "Dashboard", type: "daily_goal" },
-      };
-    });
-
-    const results = await sendExpoMessages(messages);
-
-    const notifiedTokens = targetRows.map((row) => row.expo_push_token);
-    if (notifiedTokens.length > 0) {
-      await supabaseAdmin
-        .from("push_tokens")
-        .update({ last_goal_notified_date: nyDate, updated_at: new Date().toISOString() })
-        .in("expo_push_token", notifiedTokens);
-    }
-
-    return NextResponse.json({ ok: true, sent: messages.length, results });
+    return NextResponse.json({ ok: true, sent, inAppInserted, results });
   } catch (err: any) {
     return NextResponse.json({ error: err?.message || "Unknown error" }, { status: 500 });
   }

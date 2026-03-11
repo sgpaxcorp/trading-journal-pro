@@ -40,8 +40,8 @@ export function OtherScreen({
       title={t(language, "Other", "Otros")}
       subtitle={t(
         language,
-        "Quick access to settings, resources, and ranking tools.",
-        "Acceso rápido a ajustes, recursos y ranking."
+        "Quick access to settings and ranking tools.",
+        "Acceso rápido a ajustes y ranking."
       )}
     >
       <View style={styles.section}>

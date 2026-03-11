@@ -7,6 +7,7 @@ import {
   Text,
   TextInput,
   TouchableWithoutFeedback,
+  useWindowDimensions,
   View,
 } from "react-native";
 import { useNavigation, useRoute } from "@react-navigation/native";
@@ -116,6 +117,8 @@ export function NotebookEditorScreen() {
   const navigation = useNavigation<any>();
   const params = (route?.params ?? {}) as RouteParams;
   const { kind, id, title } = params;
+  const { height: screenHeight } = useWindowDimensions();
+  const editorFieldHeight = Math.max(620, Math.min(920, Math.round(screenHeight * 0.78)));
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -131,7 +134,7 @@ export function NotebookEditorScreen() {
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
   const [workspaceChips, setWorkspaceChips] = useState<WorkspaceChip[]>([]);
   const [workspaceGroups, setWorkspaceGroups] = useState<WorkspaceSectionGroup[]>([]);
-  const [explorerOpen, setExplorerOpen] = useState(true);
+  const [explorerOpen, setExplorerOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState<CreateMode>(null);
   const [createValue, setCreateValue] = useState("");
   const [creating, setCreating] = useState(false);
@@ -149,20 +152,12 @@ export function NotebookEditorScreen() {
       const accountId = await fetchActiveAccountId();
 
       if (kind === "page") {
-        const pageResult = accountId
-          ? await supabaseMobile
-              .from(PAGES_TABLE)
-              .select("id, notebook_id, section_id, title, content, ink, updated_at, created_at")
-              .eq("id", id)
-              .eq("user_id", user.id)
-              .eq("account_id", accountId)
-              .maybeSingle()
-          : await supabaseMobile
-              .from(PAGES_TABLE)
-              .select("id, notebook_id, section_id, title, content, ink, updated_at, created_at")
-              .eq("id", id)
-              .eq("user_id", user.id)
-              .maybeSingle();
+        const pageResult = await supabaseMobile
+          .from(PAGES_TABLE)
+          .select("id, notebook_id, section_id, title, content, ink, updated_at, created_at")
+          .eq("id", id)
+          .eq("user_id", user.id)
+          .maybeSingle();
 
         if (pageResult.error) throw pageResult.error;
         const page = pageResult.data as PageRow | null;
@@ -349,26 +344,15 @@ export function NotebookEditorScreen() {
       };
 
       if (kind === "page") {
-        const updateResult = accountId
-          ? await supabaseMobile
-              .from(PAGES_TABLE)
-              .update({
-                content,
-                ink: inkPayload,
-                updated_at: new Date().toISOString(),
-              })
-              .eq("id", id)
-              .eq("user_id", user.id)
-              .eq("account_id", accountId)
-          : await supabaseMobile
-              .from(PAGES_TABLE)
-              .update({
-                content,
-                ink: inkPayload,
-                updated_at: new Date().toISOString(),
-              })
-              .eq("id", id)
-              .eq("user_id", user.id);
+        const updateResult = await supabaseMobile
+          .from(PAGES_TABLE)
+          .update({
+            content,
+            ink: inkPayload,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", id)
+          .eq("user_id", user.id);
         if (updateResult.error) throw updateResult.error;
       } else {
         const updateResult = accountId
@@ -413,25 +397,14 @@ export function NotebookEditorScreen() {
     setRenaming(true);
     setError(null);
     try {
-      const accountId = await fetchActiveAccountId();
-      const updateResult = accountId
-        ? await supabaseMobile
-            .from(PAGES_TABLE)
-            .update({
-              title: nextTitle,
-              updated_at: new Date().toISOString(),
-            })
-            .eq("id", id)
-            .eq("user_id", user.id)
-            .eq("account_id", accountId)
-        : await supabaseMobile
-            .from(PAGES_TABLE)
-            .update({
-              title: nextTitle,
-              updated_at: new Date().toISOString(),
-            })
-            .eq("id", id)
-            .eq("user_id", user.id);
+      const updateResult = await supabaseMobile
+        .from(PAGES_TABLE)
+        .update({
+          title: nextTitle,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", id)
+        .eq("user_id", user.id);
       if (updateResult.error) throw updateResult.error;
       setCurrentTitle(nextTitle);
       setRenameOpen(false);
@@ -465,8 +438,6 @@ export function NotebookEditorScreen() {
     setCreating(true);
     setCreateError(null);
     try {
-      const accountId = await fetchActiveAccountId();
-
       if (createOpen === "section") {
         const sectionInsert = await supabaseMobile
           .from(SECTIONS_TABLE)
@@ -496,7 +467,6 @@ export function NotebookEditorScreen() {
           section_id: currentSectionId ?? null,
           title: nextName,
           content: "",
-          account_id: accountId ?? null,
         })
         .select("id, title")
         .single();
@@ -545,7 +515,14 @@ export function NotebookEditorScreen() {
         );
 
   return (
-    <ScreenScaffold title={screenTitle} subtitle={screenSubtitle} scrollable>
+    <ScreenScaffold
+      title={screenTitle}
+      subtitle={screenSubtitle}
+      scrollable
+      showBrand={false}
+      compactHeader
+      contentPadding={12}
+    >
       {loading ? (
         <View style={styles.loadingRow}>
           <ActivityIndicator color={colors.primary} />
@@ -696,7 +673,7 @@ export function NotebookEditorScreen() {
             inkValue={ink}
             onInkChange={setInk}
             placeholder={t(language, "Write your note…", "Escribe tu nota…")}
-            height={360}
+            height={editorFieldHeight}
           />
         </>
       )}

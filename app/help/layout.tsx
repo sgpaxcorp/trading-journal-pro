@@ -46,11 +46,10 @@ const NAV_GROUPS = (lang: "en" | "es") => {
       ],
     },
     {
-      title: isEs ? "Comunidad y recursos" : "Community & resources",
+      title: isEs ? "Comunidad" : "Community",
       items: [
         { href: "/help/forum", label: isEs ? "Comunidad" : "Community Forum" },
         { href: "/help/global-ranking", label: isEs ? "Ranking global" : "Global Ranking" },
-        { href: "/help/resources", label: isEs ? "Recursos" : "Resources Library" },
       ],
     },
   ];

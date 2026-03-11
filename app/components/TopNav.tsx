@@ -661,15 +661,6 @@ const challenges: NavItem[] = [
   },
 ];
 
-const resources: NavItem[] = [
-  {
-    id: "library",
-    titleKey: "nav.resources.library.title",
-    descriptionKey: "nav.resources.library.desc",
-    href: "/resources/library",
-  },
-];
-
 const rules: NavItem[] = [
   {
     id: "reminders",
@@ -761,13 +752,6 @@ export default function TopNav() {
             theme={theme}
             lang={lang}
             dataTour="nav-challenges"
-          />
-          <Dropdown
-            titleKey="nav.resources"
-            items={resources}
-            theme={theme}
-            lang={lang}
-            dataTour="nav-resources"
           />
           <Dropdown
             titleKey="nav.rules"

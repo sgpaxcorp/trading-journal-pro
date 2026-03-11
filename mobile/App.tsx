@@ -19,6 +19,7 @@ import { GlobalRankingScreen } from "./src/screens/GlobalRankingScreen";
 import { JournalDateScreen } from "./src/screens/JournalDateScreen";
 import { TrophiesScreen } from "./src/screens/TrophiesScreen";
 import { NotebookScreen } from "./src/screens/NotebookScreen";
+import { NotebookWorkspaceScreen } from "./src/screens/NotebookWorkspaceScreen";
 import { NotebookEditorScreen } from "./src/screens/NotebookEditorScreen";
 import { ChallengesScreen } from "./src/screens/ChallengesScreen";
 import { BrokerConnectScreen } from "./src/screens/BrokerConnectScreen";
@@ -27,6 +28,7 @@ import { ThemeProvider, useTheme } from "./src/lib/ThemeContext";
 import { LanguageProvider } from "./src/lib/LanguageContext";
 import { useLanguage } from "./src/lib/LanguageContext";
 import { hasSupabaseConfig, supabaseMobile } from "./src/lib/supabase";
+import { registerDeviceForPush } from "./src/lib/pushNotifications";
 import { ModulePlaceholderScreen } from "./src/screens/ModulePlaceholderScreen";
 import { MoreSheet } from "./src/components/MoreSheet";
 import { t } from "./src/lib/i18n";
@@ -57,6 +59,7 @@ type RootStackParamList = {
   GlobalRanking: undefined;
   Trophies: undefined;
   Notebook: undefined;
+  NotebookWorkspace: { notebookId: string; title?: string };
   NotebookEditor: { kind: "page" | "free"; id: string; title?: string };
   Challenges: undefined;
   BrokerConnect: undefined;
@@ -315,6 +318,7 @@ function AppShell() {
   const [session, setSession] = useState<Session | null>(null);
   const [authReady, setAuthReady] = useState(false);
   const { colors, mode: themeMode } = useTheme();
+  const { language } = useLanguage();
   const loadingStyles = useMemo(
     () =>
       StyleSheet.create({
@@ -358,6 +362,29 @@ function AppShell() {
       subscription.unsubscribe();
     };
   }, []);
+
+  useEffect(() => {
+    if (!session?.user?.id) return;
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        await registerDeviceForPush({
+          locale: language,
+          promptIfNeeded: false,
+        });
+      } catch (err) {
+        if (!cancelled) {
+          console.warn("[mobile] push auto-registration failed:", err);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [session?.user?.id, language]);
 
   const shouldShowMainTabs = Boolean(session) || !hasSupabaseConfig;
 
@@ -409,6 +436,11 @@ function AppShell() {
             name="Notebook"
             component={NotebookScreen}
             options={{ title: "Notebook" }}
+          />
+          <Stack.Screen
+            name="NotebookWorkspace"
+            component={NotebookWorkspaceScreen}
+            options={({ route }) => ({ title: (route.params as { title?: string } | undefined)?.title ?? "Notebook" })}
           />
           <Stack.Screen
             name="NotebookEditor"

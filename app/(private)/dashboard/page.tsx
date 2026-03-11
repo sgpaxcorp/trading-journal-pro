@@ -1,7 +1,7 @@
 // app/(private)/dashboard/page.tsx
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
@@ -876,6 +876,7 @@ export default function DashboardPage() {
   const [widgetsLoaded, setWidgetsLoaded] = useState(false);
   const phaseAlertBusyRef = useRef(false);
   const phaseRuleIdRef = useRef<string | null>(null);
+  const goalNotificationAttemptedRef = useRef<Set<string>>(new Set());
 
   const widgetTitleClass =
     "widget-title drag-handle select-none cursor-move text-[14px] font-semibold tracking-wide flex items-center gap-2 group";
@@ -1356,6 +1357,82 @@ export default function DashboardPage() {
     };
   }, [user, plan, sessionDateStr, dailyCalcs, activeAccountId]);
 
+  const notifyGoalAchievementClient = useCallback(async (payload: {
+    goalScope: "day" | "week" | "month" | "quarter";
+    periodKey: string;
+    accountId?: string | null;
+    goalAmount?: number;
+    actualAmount?: number;
+    targetBalance?: number;
+    progress?: number;
+    metadata?: Record<string, unknown>;
+  }) => {
+    const dedupeKey = `${payload.goalScope}:${payload.periodKey}:${payload.accountId ?? "user"}`;
+    if (goalNotificationAttemptedRef.current.has(dedupeKey)) return;
+    goalNotificationAttemptedRef.current.add(dedupeKey);
+
+    try {
+      const { data: sessionData } = await supabaseBrowser.auth.getSession();
+      const token = sessionData?.session?.access_token;
+      if (!token) throw new Error("Unauthorized");
+
+      const res = await fetch("/api/notifications/goal-achievement", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          goalScope: payload.goalScope,
+          periodKey: payload.periodKey,
+          accountId: payload.goalScope === "day" ? null : payload.accountId ?? null,
+          locale: lang,
+          goalAmount: payload.goalAmount ?? null,
+          actualAmount: payload.actualAmount ?? null,
+          targetBalance: payload.targetBalance ?? null,
+          progress: payload.progress ?? null,
+          metadata: payload.metadata ?? {},
+        }),
+      });
+
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(text || `HTTP ${res.status}`);
+      }
+
+      const body = await res.json().catch(() => ({}));
+      if (body?.inAppInserted) {
+        try {
+          window.dispatchEvent(new Event("ntj_alert_force_pull"));
+        } catch {
+          // ignore
+        }
+      }
+    } catch (err) {
+      goalNotificationAttemptedRef.current.delete(dedupeKey);
+      console.warn("[dashboard] goal achievement notify failed:", err);
+    }
+  }, [lang]);
+
+  useEffect(() => {
+    const userId = (user as any)?.uid || (user as any)?.id || "";
+    if (!userId) return;
+    if (!dailyCalcs.goalMet || dailyCalcs.expectedSessionUSD <= 0) return;
+
+    void notifyGoalAchievementClient({
+      goalScope: "day",
+      periodKey: sessionDateStr,
+      goalAmount: dailyCalcs.expectedSessionUSD,
+      actualAmount: dailyCalcs.actualSessionUSD,
+      targetBalance: dailyCalcs.startOfSessionBalance + dailyCalcs.expectedSessionUSD,
+      progress: dailyCalcs.progressToGoal / 100,
+      metadata: {
+        source: "dashboard",
+        goal_date: sessionDateStr,
+      },
+    });
+  }, [user, sessionDateStr, dailyCalcs.goalMet, dailyCalcs.expectedSessionUSD, dailyCalcs.actualSessionUSD, dailyCalcs.startOfSessionBalance, dailyCalcs.progressToGoal, notifyGoalAchievementClient]);
+
   // ========== Checklist autosave ==========
   async function saveChecklistToServer(payload: { date: string; items: UiChecklistItem[]; notes?: string | null }) {
     const userId = (user as any)?.uid || (user as any)?.id || "";
@@ -1670,6 +1747,62 @@ export default function DashboardPage() {
     };
   }, [plan, planStartStr, targetDateStr, starting, target, currentBalance]);
 
+  useEffect(() => {
+    const userId = (user as any)?.uid || (user as any)?.id || "";
+    if (!userId || !activeAccountId || !cadenceProgress) return;
+
+    const candidates = [
+      {
+        goalScope: "week" as const,
+        periodKey: `q${cadenceProgress.quarterIndex}:m${cadenceProgress.monthIndex}:w${cadenceProgress.weekIndex}:${cadenceProgress.week.targetDate ?? "na"}`,
+        data: cadenceProgress.week,
+        metadata: {
+          source: "dashboard",
+          quarter_index: cadenceProgress.quarterIndex,
+          month_index: cadenceProgress.monthIndex,
+          week_index: cadenceProgress.weekIndex,
+          target_date: cadenceProgress.week.targetDate ?? null,
+        },
+      },
+      {
+        goalScope: "month" as const,
+        periodKey: `q${cadenceProgress.quarterIndex}:m${cadenceProgress.monthIndex}:${cadenceProgress.month.targetDate ?? "na"}`,
+        data: cadenceProgress.month,
+        metadata: {
+          source: "dashboard",
+          quarter_index: cadenceProgress.quarterIndex,
+          month_index: cadenceProgress.monthIndex,
+          target_date: cadenceProgress.month.targetDate ?? null,
+        },
+      },
+      {
+        goalScope: "quarter" as const,
+        periodKey: `q${cadenceProgress.quarterIndex}:${cadenceProgress.quarter.targetDate ?? "na"}`,
+        data: cadenceProgress.quarter,
+        metadata: {
+          source: "dashboard",
+          quarter_index: cadenceProgress.quarterIndex,
+          target_date: cadenceProgress.quarter.targetDate ?? null,
+        },
+      },
+    ];
+
+    for (const candidate of candidates) {
+      if (candidate.data.goalAmount <= 0) continue;
+      if (candidate.data.actualAmount < candidate.data.goalAmount) continue;
+      void notifyGoalAchievementClient({
+        goalScope: candidate.goalScope,
+        periodKey: candidate.periodKey,
+        accountId: activeAccountId,
+        goalAmount: candidate.data.goalAmount,
+        actualAmount: candidate.data.actualAmount,
+        targetBalance: candidate.data.targetBalance,
+        progress: candidate.data.progress,
+        metadata: candidate.metadata,
+      });
+    }
+  }, [user, activeAccountId, cadenceProgress, notifyGoalAchievementClient]);
+
   const manualPhases = useMemo(() => {
     return normalizePhases((plan as any)?.planPhases ?? (plan as any)?.plan_phases);
   }, [plan]);
@@ -1971,13 +2104,23 @@ export default function DashboardPage() {
                       const reached = Math.max(0, period.data.actualAmount);
                       const goal = period.data.goalAmount;
                       const remaining = Math.max(0, goal - reached);
+                      const currentText = `${reached >= 0 ? "+" : "-"}$${Math.abs(reached).toFixed(2)}`;
+                      const goalText = `$${goal.toFixed(2)}`;
                       return (
                         <div key={period.key} className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
                           <p className="text-[11px] uppercase tracking-[0.28em] text-slate-500">
                             {period.title}
                           </p>
                           <p className="mt-1 text-[15px] font-semibold text-slate-100">
-                            ${reached.toFixed(2)} / ${goal.toFixed(2)}
+                            {currentText}
+                          </p>
+                          <p className="mt-1 text-[11px] text-slate-500">
+                            {L("Current P&L", "P&L actual")}{" "}
+                            <span className="text-slate-200">{currentText}</span>
+                          </p>
+                          <p className="mt-1 text-[11px] text-slate-500">
+                            {L("Goal P&L", "Meta P&L")}{" "}
+                            <span className="text-emerald-300">{goalText}</span>
                           </p>
                           <p className="mt-1 text-[11px] text-slate-500">
                             {L("Target balance", "Balance meta")}{" "}
@@ -2193,7 +2336,13 @@ export default function DashboardPage() {
                       ) : null}
                     </div>
                     <p className="mt-1 text-[16px] font-semibold text-slate-100">
-                      {actualText} / {goalText}
+                      {actualText}
+                    </p>
+                    <p className="mt-1 text-[12px] text-slate-500">
+                      {L("Current P&L", "P&L actual")}{" "}
+                      <span className="text-slate-200">{actualText}</span> ·{" "}
+                      {L("Goal P&L", "Meta P&L")}{" "}
+                      <span className="text-emerald-300">{goalText}</span>
                     </p>
                     <p className="mt-1 text-[12px] text-slate-500">
                       {L("Start", "Inicio")}{" "}

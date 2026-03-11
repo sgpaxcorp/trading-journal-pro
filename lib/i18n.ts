@@ -62,7 +62,6 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     "nav.notebook": "Notebook",
     "nav.backStudy": "Back-Studying",
     "nav.challenges": "Challenges",
-    "nav.resources": "Resources",
     "nav.rules": "Rules & Alarms",
     "nav.forum": "Forum",
     "nav.optionFlow": "Option Flow Intelligence",
@@ -73,7 +72,6 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     "nav.notebook.title": "Notebook",
     "nav.backStudy.title": "Back-Studying",
     "nav.challenges.title": "Challenges",
-    "nav.resources.title": "Resources",
     "nav.rules.title": "Rules & Alarms",
     "nav.forum.title": "Forum",
     "nav.optionFlow.title": "Option Flow Intelligence",
@@ -118,14 +116,6 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     // Older alias
     "nav.challenges.main.title": "Challenges",
     "nav.challenges.main.desc": "Consistency challenge with rules.",
-
-    /* -----------------
-       Resources dropdown
-    ------------------ */
-    "nav.resources.library.title": "Library",
-    "nav.resources.library.desc": "Save and organize your learning resources.",
-    "nav.resources.audit.title": "Audit",
-    "nav.resources.audit.desc": "Order history checks and evidence.",
 
     /* -----------------
        Rules dropdown
@@ -328,7 +318,6 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     "nav.notebook": "Cuaderno",
     "nav.backStudy": "Back-Studying",
     "nav.challenges": "Retos",
-    "nav.resources": "Recursos",
     "nav.rules": "Reglas y alarmas",
     "nav.forum": "Foro",
     "nav.optionFlow": "Inteligencia de flujo de opciones",
@@ -339,7 +328,6 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     "nav.notebook.title": "Cuaderno",
     "nav.backStudy.title": "Back-Studying",
     "nav.challenges.title": "Retos",
-    "nav.resources.title": "Recursos",
     "nav.rules.title": "Reglas y alarmas",
     "nav.forum.title": "Foro",
     "nav.optionFlow.title": "Inteligencia de flujo de opciones",
@@ -382,14 +370,6 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     "nav.challenges.item.desc": "Reto de consistencia con reglas.",
     "nav.challenges.main.title": "Retos",
     "nav.challenges.main.desc": "Reto de consistencia con reglas.",
-
-    /* -----------------
-       Resources dropdown
-    ------------------ */
-    "nav.resources.library.title": "Biblioteca",
-    "nav.resources.library.desc": "Guarda y organiza tus recursos de aprendizaje.",
-    "nav.resources.audit.title": "Auditoría",
-    "nav.resources.audit.desc": "Checks de órdenes y evidencia.",
 
     /* -----------------
        Rules dropdown

@@ -33,7 +33,7 @@ export const InkField = forwardRef<InkFieldHandle, InkFieldProps>(function InkFi
   inkValue,
   onInkChange,
   placeholder,
-  height = 260,
+  height = 520,
 }: InkFieldProps, ref) {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
@@ -132,7 +132,7 @@ export const InkField = forwardRef<InkFieldHandle, InkFieldProps>(function InkFi
 const createStyles = (colors: ThemeColors) =>
   StyleSheet.create({
     block: {
-      gap: 8,
+      gap: 10,
     },
     header: {
       flexDirection: "row",
@@ -170,7 +170,7 @@ const createStyles = (colors: ThemeColors) =>
       color: colors.textPrimary,
     },
     inkWrapper: {
-      borderRadius: 12,
+      borderRadius: 16,
       borderWidth: 1,
       borderColor: colors.border,
       backgroundColor: colors.surface,

@@ -5,6 +5,7 @@ import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
 
 import { EditorContent, useEditor } from "@tiptap/react";
+import { Mark, mergeAttributes } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import Underline from "@tiptap/extension-underline";
 import Link from "@tiptap/extension-link";
@@ -14,6 +15,34 @@ import { Table } from "@tiptap/extension-table";
 import { TableRow } from "@tiptap/extension-table-row";
 import { TableHeader } from "@tiptap/extension-table-header";
 import { TableCell } from "@tiptap/extension-table-cell";
+import {
+  Bold,
+  ChevronDown,
+  Italic,
+  Underline as UnderlineIcon,
+  List,
+  ListOrdered,
+  Quote,
+  Link2,
+  Table2,
+  Rows3,
+  Columns3,
+  Trash2,
+  Undo2,
+  Redo2,
+  Heading1,
+} from "lucide-react";
+
+declare module "@tiptap/core" {
+  interface Commands<ReturnType> {
+    textStyle: {
+      setFontFamily: (font: string | null) => ReturnType;
+      setFontSize: (size: string | null) => ReturnType;
+      setHighlight: (color: string | null) => ReturnType;
+      unsetTextStyle: () => ReturnType;
+    };
+  }
+}
 
 /* =========================================================
    Types
@@ -21,7 +50,7 @@ import { TableCell } from "@tiptap/extension-table-cell";
 
 type TableSize = { rows: number; cols: number };
 
-type ToolbarTheme = "light";
+type ToolbarTheme = "dark";
 
 export type RichTextEditorProps = {
   value: string;
@@ -33,9 +62,7 @@ export type RichTextEditorProps = {
   /** Optional hook for parent components (e.g., dictation insertion) */
   onReady?: (editor: any) => void;
 
-  /** Toolbar is intentionally "light" (white) for a professional look.
-   *  Editor surface remains dark to match the app.
-   */
+  /** Toolbar theme stays aligned with the platform surface. */
   toolbarTheme?: ToolbarTheme;
 };
 
@@ -51,6 +78,104 @@ function Icon({ children }: { children: React.ReactNode }) {
   return <span className="inline-flex h-8 w-8 items-center justify-center">{children}</span>;
 }
 
+function ToolbarSelect({
+  label,
+  value,
+  onChange,
+  options,
+}: {
+  label: string;
+  value: string;
+  onChange: (next: string) => void;
+  options: Array<{ value: string; label: string }>;
+}) {
+  return (
+    <label className="relative flex h-11 min-w-[122px] flex-col justify-center rounded-2xl border border-slate-800 bg-slate-950/85 pl-3 pr-9 transition hover:border-slate-700 focus-within:border-emerald-400/60 focus-within:bg-slate-900/95">
+      <span className="pointer-events-none text-[9px] font-semibold uppercase tracking-[0.22em] text-slate-500">
+        {label}
+      </span>
+      <select
+        className="h-5 appearance-none bg-transparent text-[12px] font-semibold text-slate-100 outline-none"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        aria-label={label}
+      >
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+      <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+    </label>
+  );
+}
+
+const FONT_FAMILY_OPTIONS = [
+  { value: "Inter", label: "Inter" },
+  { value: "system-ui", label: "System" },
+  { value: "Georgia", label: "Georgia" },
+  { value: "Times New Roman", label: "Times" },
+  { value: "Menlo", label: "Menlo" },
+];
+
+const FONT_SIZE_OPTIONS = ["13px", "15px", "17px", "19px", "22px", "26px"];
+
+const TextStyle = Mark.create({
+  name: "textStyle",
+  addAttributes() {
+    return {
+      fontFamily: {
+        default: null,
+        parseHTML: (el) => (el as HTMLElement).style.fontFamily || null,
+      },
+      fontSize: {
+        default: null,
+        parseHTML: (el) => (el as HTMLElement).style.fontSize || null,
+      },
+      backgroundColor: {
+        default: null,
+        parseHTML: (el) => (el as HTMLElement).style.backgroundColor || null,
+      },
+    };
+  },
+  parseHTML() {
+    return [{ tag: "span[style]" }];
+  },
+  renderHTML({ HTMLAttributes }) {
+    const { fontFamily, fontSize, backgroundColor, ...rest } = HTMLAttributes as any;
+    const styles = [
+      fontFamily ? `font-family: ${fontFamily}` : null,
+      fontSize ? `font-size: ${fontSize}` : null,
+      backgroundColor ? `background-color: ${backgroundColor}` : null,
+    ]
+      .filter(Boolean)
+      .join("; ");
+
+    return ["span", mergeAttributes(rest, styles ? { style: styles } : {}), 0];
+  },
+  addCommands() {
+    return {
+      setFontFamily:
+        (font) =>
+        ({ chain }) =>
+          chain().setMark(this.name, { fontFamily: font }).run(),
+      setFontSize:
+        (size) =>
+        ({ chain }) =>
+          chain().setMark(this.name, { fontSize: size }).run(),
+      setHighlight:
+        (color) =>
+        ({ chain }) =>
+          chain().setMark(this.name, { backgroundColor: color }).run(),
+      unsetTextStyle:
+        () =>
+        ({ chain }) =>
+          chain().unsetMark(this.name).run(),
+    };
+  },
+});
+
 function TablePicker({
   onPick,
   label,
@@ -65,8 +190,8 @@ function TablePicker({
   const [hover, setHover] = useState<TableSize | null>(null);
 
   return (
-    <div className="absolute left-0 top-full mt-2 w-[220px] rounded-xl border border-slate-200 bg-white p-3 shadow-xl z-50">
-      <div className="mb-2 text-[11px] text-slate-500">
+    <div className="absolute left-0 top-full z-50 mt-2 w-[220px] rounded-2xl border border-slate-800 bg-slate-950/95 p-3 shadow-2xl shadow-black/40 backdrop-blur">
+      <div className="mb-2 text-[11px] text-slate-400">
         {hover ? `${hover.rows} × ${hover.cols}` : label(6, 6)}
       </div>
       <div className="grid grid-cols-6 gap-1">
@@ -85,8 +210,8 @@ function TablePicker({
               className={
                 "h-6 w-6 rounded border transition " +
                 (active
-                  ? "border-emerald-500 bg-emerald-100"
-                  : "border-slate-200 bg-slate-50 hover:bg-slate-100")
+                  ? "border-emerald-400 bg-emerald-400/20"
+                  : "border-slate-700 bg-slate-900/80 hover:border-slate-600 hover:bg-slate-800/80")
               }
               aria-label={ariaLabel(r, c)}
               title={titleLabel(r, c)}
@@ -114,16 +239,15 @@ function ToolbarButton({
   theme: ToolbarTheme;
 }) {
   const base =
-    "inline-flex items-center justify-center rounded-lg border text-sm font-semibold transition select-none";
+    "inline-flex h-9 w-9 items-center justify-center rounded-xl border text-sm font-semibold transition select-none";
 
-  // For now we only support light toolbar to match the design request.
   const cls =
-    theme === "light"
+    theme === "dark"
       ? disabled
-        ? `${base} border-slate-200 bg-white text-slate-300 cursor-not-allowed`
+        ? `${base} border-slate-800 bg-slate-950/60 text-slate-600 cursor-not-allowed`
         : active
-        ? `${base} border-slate-900 bg-slate-900 text-white`
-        : `${base} border-slate-200 bg-white text-slate-700 hover:bg-slate-100`
+        ? `${base} border-emerald-400/50 bg-emerald-400/15 text-emerald-200 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]`
+        : `${base} border-slate-800 bg-slate-950/80 text-slate-300 hover:border-slate-700 hover:bg-slate-900`
       : base;
 
   return (
@@ -144,7 +268,7 @@ export default function RichTextEditor({
   className = "",
   minHeight = 260,
   onReady,
-  toolbarTheme = "light",
+  toolbarTheme = "dark",
 }: RichTextEditorProps) {
   const { locale } = useAppSettings();
   const lang = resolveLocale(locale);
@@ -152,6 +276,7 @@ export default function RichTextEditor({
   const L = (en: string, es: string) => (isEs ? es : en);
   const effectivePlaceholder = placeholder ?? L("Write…", "Escribe…");
   const [tableOpen, setTableOpen] = useState(false);
+  const [editorFocused, setEditorFocused] = useState(false);
   const editorRef = useRef<any>(null);
 
   const extensions = useMemo(
@@ -159,8 +284,11 @@ export default function RichTextEditor({
       StarterKit.configure({
         heading: { levels: [1, 2, 3] },
         codeBlock: false,
+        bulletList: { keepMarks: true },
+        orderedList: { keepMarks: true },
       }),
       Underline,
+      TextStyle,
       Link.configure({
         openOnClick: false,
         autolink: true,
@@ -189,6 +317,12 @@ export default function RichTextEditor({
     content: value || "<p></p>",
     onUpdate: ({ editor }) => {
       onChange(editor.getHTML());
+    },
+    onFocus: () => {
+      setEditorFocused(true);
+    },
+    onBlur: () => {
+      setEditorFocused(false);
     },
     editorProps: {
       attributes: {
@@ -305,13 +439,38 @@ export default function RichTextEditor({
       .run();
   };
 
+  const activeTextStyle = (editor?.getAttributes("textStyle") as { fontFamily?: string; fontSize?: string }) ?? {};
+  const currentFont = activeTextStyle.fontFamily || "Inter";
+  const currentSize = activeTextStyle.fontSize || "15px";
+
   return (
     <div className={`w-full ${className}`.trim()}>
       {/*
-        Professional "light" toolbar like the reference screenshot
-        while keeping the editor surface dark (matching the app).
+        Keep the toolbar and the writing surface in the same dark language
+        as the rest of the platform.
       */}
-      <div className="mb-2 flex flex-wrap items-center gap-1 rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
+      <div
+        className={`mb-2 flex flex-wrap items-center gap-1.5 rounded-2xl border p-2 shadow-[0_18px_40px_rgba(0,0,0,0.24)] transition ${
+          editorFocused
+            ? "border-emerald-400/40 bg-slate-950 shadow-[0_0_0_1px_rgba(52,211,153,0.12),0_18px_40px_rgba(0,0,0,0.26)]"
+            : "border-slate-800/90 bg-slate-950/90"
+        }`}
+      >
+        <div className="flex items-center gap-2 pr-1">
+          <ToolbarSelect
+            label={L("Font", "Fuente")}
+            value={currentFont}
+            onChange={(next) => editor?.chain().focus().setFontFamily(next).run()}
+            options={FONT_FAMILY_OPTIONS}
+          />
+          <ToolbarSelect
+            label={L("Size", "Tamaño")}
+            value={currentSize}
+            onChange={(next) => editor?.chain().focus().setFontSize(next).run()}
+            options={FONT_SIZE_OPTIONS.map((size) => ({ value: size, label: size.replace("px", "") }))}
+          />
+        </div>
+
         <ToolbarButton
           theme={toolbarTheme}
           title={L("Bold", "Negrita")}
@@ -319,9 +478,7 @@ export default function RichTextEditor({
           disabled={!editor}
           onClick={() => editor?.chain().focus().toggleBold().run()}
         >
-          <Icon>
-            <span className="font-black">B</span>
-          </Icon>
+          <Icon><Bold size={15} strokeWidth={2.2} /></Icon>
         </ToolbarButton>
 
         <ToolbarButton
@@ -331,9 +488,7 @@ export default function RichTextEditor({
           disabled={!editor}
           onClick={() => editor?.chain().focus().toggleItalic().run()}
         >
-          <Icon>
-            <span className="italic">I</span>
-          </Icon>
+          <Icon><Italic size={15} strokeWidth={2.2} /></Icon>
         </ToolbarButton>
 
         <ToolbarButton
@@ -343,9 +498,7 @@ export default function RichTextEditor({
           disabled={!editor}
           onClick={() => editor?.chain().focus().toggleUnderline().run()}
         >
-          <Icon>
-            <span className="underline">U</span>
-          </Icon>
+          <Icon><UnderlineIcon size={15} strokeWidth={2.2} /></Icon>
         </ToolbarButton>
 
         <ToolbarButton
@@ -355,7 +508,7 @@ export default function RichTextEditor({
           disabled={!editor}
           onClick={() => editor?.chain().focus().toggleBulletList().run()}
         >
-          <Icon>•</Icon>
+          <Icon><List size={15} strokeWidth={2.2} /></Icon>
         </ToolbarButton>
 
         <ToolbarButton
@@ -365,7 +518,7 @@ export default function RichTextEditor({
           disabled={!editor}
           onClick={() => editor?.chain().focus().toggleOrderedList().run()}
         >
-          <Icon>1.</Icon>
+          <Icon><ListOrdered size={15} strokeWidth={2.2} /></Icon>
         </ToolbarButton>
 
         <ToolbarButton
@@ -375,7 +528,7 @@ export default function RichTextEditor({
           disabled={!editor}
           onClick={() => editor?.chain().focus().toggleBlockquote().run()}
         >
-          <Icon>“”</Icon>
+          <Icon><Quote size={15} strokeWidth={2.2} /></Icon>
         </ToolbarButton>
 
         <ToolbarButton
@@ -385,7 +538,7 @@ export default function RichTextEditor({
           disabled={!editor}
           onClick={insertLink}
         >
-          <Icon>🔗</Icon>
+          <Icon><Link2 size={15} strokeWidth={2.2} /></Icon>
         </ToolbarButton>
 
         <div className="relative">
@@ -395,7 +548,7 @@ export default function RichTextEditor({
             disabled={!editor}
             onClick={() => setTableOpen((v) => !v)}
           >
-            <Icon>▦</Icon>
+            <Icon><Table2 size={15} strokeWidth={2.2} /></Icon>
           </ToolbarButton>
           {tableOpen && editor && (
             <TablePicker
@@ -416,7 +569,7 @@ export default function RichTextEditor({
           disabled={!editor || !can(() => editor!.can().addRowAfter())}
           onClick={() => editor?.chain().focus().addRowAfter().run()}
         >
-          <Icon>+row</Icon>
+          <Icon><Rows3 size={15} strokeWidth={2.2} /></Icon>
         </ToolbarButton>
 
         <ToolbarButton
@@ -425,7 +578,7 @@ export default function RichTextEditor({
           disabled={!editor || !can(() => editor!.can().addColumnAfter())}
           onClick={() => editor?.chain().focus().addColumnAfter().run()}
         >
-          <Icon>+col</Icon>
+          <Icon><Columns3 size={15} strokeWidth={2.2} /></Icon>
         </ToolbarButton>
 
         <ToolbarButton
@@ -434,10 +587,20 @@ export default function RichTextEditor({
           disabled={!editor || !can(() => editor!.can().deleteTable())}
           onClick={() => editor?.chain().focus().deleteTable().run()}
         >
-          <Icon>del</Icon>
+          <Icon><Trash2 size={15} strokeWidth={2.2} /></Icon>
         </ToolbarButton>
 
         <div className="ml-auto" />
+
+        <ToolbarButton
+          theme={toolbarTheme}
+          title={L("Heading", "Título")}
+          active={!!editor?.isActive("heading", { level: 1 })}
+          disabled={!editor}
+          onClick={() => editor?.chain().focus().toggleHeading({ level: 1 }).run()}
+        >
+          <Icon><Heading1 size={15} strokeWidth={2.2} /></Icon>
+        </ToolbarButton>
 
         <ToolbarButton
           theme={toolbarTheme}
@@ -445,7 +608,7 @@ export default function RichTextEditor({
           disabled={!editor || !can(() => editor!.can().undo())}
           onClick={() => editor?.chain().focus().undo().run()}
         >
-          <Icon>↶</Icon>
+          <Icon><Undo2 size={15} strokeWidth={2.2} /></Icon>
         </ToolbarButton>
 
         <ToolbarButton
@@ -454,12 +617,17 @@ export default function RichTextEditor({
           disabled={!editor || !can(() => editor!.can().redo())}
           onClick={() => editor?.chain().focus().redo().run()}
         >
-          <Icon>↷</Icon>
+          <Icon><Redo2 size={15} strokeWidth={2.2} /></Icon>
         </ToolbarButton>
       </div>
 
-      {/* Dark editor surface (keeps the app look) */}
-      <div className="nt-rte rounded-xl border border-slate-800 bg-slate-950">
+      <div
+        className={`nt-rte overflow-hidden rounded-2xl border bg-slate-950/95 shadow-[inset_0_1px_0_rgba(148,163,184,0.05)] transition ${
+          editorFocused
+            ? "border-emerald-400/45 shadow-[0_0_0_1px_rgba(52,211,153,0.12),inset_0_1px_0_rgba(148,163,184,0.05),0_16px_36px_rgba(0,0,0,0.22)]"
+            : "border-slate-800/90"
+        }`}
+      >
         <EditorContent editor={editor} />
       </div>
 
@@ -476,6 +644,10 @@ export default function RichTextEditor({
 
         .nt-rte .ProseMirror p {
           margin: 0.4rem 0;
+        }
+
+        .nt-rte .ProseMirror {
+          caret-color: rgba(30, 230, 168, 0.95);
         }
 
         .nt-rte .ProseMirror ul,

@@ -15,6 +15,9 @@ type ScreenScaffoldProps = PropsWithChildren<{
   scrollable?: boolean;
   refreshing?: boolean;
   onRefresh?: () => void;
+  showBrand?: boolean;
+  compactHeader?: boolean;
+  contentPadding?: number;
 }>;
 
 export function ScreenScaffold({
@@ -24,6 +27,9 @@ export function ScreenScaffold({
   scrollable = true,
   refreshing = false,
   onRefresh,
+  showBrand = true,
+  compactHeader = false,
+  contentPadding = 16,
 }: ScreenScaffoldProps) {
   const { language } = useLanguage();
   const { colors } = useTheme();
@@ -40,11 +46,13 @@ export function ScreenScaffold({
       };
   const content = (
     <>
-      <View style={styles.brandRow}>
-        <Image source={brandLogo} style={styles.brandLogo} resizeMode="contain" />
-      </View>
-      <Text style={styles.title}>{title}</Text>
-      <Text style={styles.subtitle}>{subtitle}</Text>
+      {showBrand ? (
+        <View style={styles.brandRow}>
+          <Image source={brandLogo} style={styles.brandLogo} resizeMode="contain" />
+        </View>
+      ) : null}
+      <Text style={[styles.title, compactHeader && styles.titleCompact]}>{title}</Text>
+      <Text style={[styles.subtitle, compactHeader && styles.subtitleCompact]}>{subtitle}</Text>
       {activeRefreshing ? (
         <View style={styles.refreshBanner}>
           <Image source={brandLogo} style={styles.refreshLogo} resizeMode="contain" />
@@ -52,14 +60,20 @@ export function ScreenScaffold({
           <ActivityIndicator size="small" color={colors.primary} />
         </View>
       ) : null}
-      <View style={[styles.block, !scrollable && styles.blockFill]}>{children}</View>
+      <View style={[styles.block, compactHeader && styles.blockCompact, !scrollable && styles.blockFill]}>
+        {children}
+      </View>
     </>
   );
 
   return (
     <ScrollView
       style={styles.root}
-      contentContainerStyle={styles.content}
+      contentContainerStyle={[
+        styles.content,
+        compactHeader && styles.contentCompact,
+        { paddingHorizontal: contentPadding },
+      ]}
       alwaysBounceVertical
       refreshControl={
         <RefreshControl
@@ -88,6 +102,10 @@ const createStyles = (colors: ThemeColors) =>
       paddingBottom: 24,
       flexGrow: 1,
     },
+    contentCompact: {
+      paddingTop: 12,
+      gap: 10,
+    },
     brandRow: {
       alignItems: "center",
       marginBottom: 4,
@@ -101,14 +119,25 @@ const createStyles = (colors: ThemeColors) =>
       fontWeight: "700",
       fontSize: 26,
     },
+    titleCompact: {
+      fontSize: 22,
+    },
     subtitle: {
       color: colors.textMuted,
       fontSize: 14,
       lineHeight: 20,
     },
+    subtitleCompact: {
+      fontSize: 13,
+      lineHeight: 18,
+    },
     block: {
       marginTop: 6,
       gap: 10,
+    },
+    blockCompact: {
+      marginTop: 4,
+      gap: 8,
     },
     blockFill: {
       flex: 1,

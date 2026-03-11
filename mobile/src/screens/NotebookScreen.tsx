@@ -11,6 +11,7 @@ import {
   View,
 } from "react-native";
 import { useNavigation } from "@react-navigation/native";
+import { Ionicons } from "@expo/vector-icons";
 
 import { ScreenScaffold } from "../components/ScreenScaffold";
 import { useLanguage } from "../lib/LanguageContext";
@@ -22,8 +23,6 @@ import { useSupabaseUser } from "../lib/useSupabaseUser";
 import { apiGet } from "../lib/api";
 
 const BOOKS_TABLE = "ntj_notebook_books";
-const SECTIONS_TABLE = "ntj_notebook_sections";
-const PAGES_TABLE = "ntj_notebook_pages";
 const FREE_NOTES_TABLE = "ntj_notebook_free_notes";
 
 type NotebookBook = {
@@ -31,51 +30,42 @@ type NotebookBook = {
   name: string;
 };
 
-type NotebookSection = {
-  id: string;
-  name: string;
-  notebook_id: string;
-};
-
-type NotebookPage = {
-  id: string;
-  notebook_id: string;
-  section_id: string | null;
-  title: string;
-  content: string;
-  updated_at: string | null;
-  created_at: string;
-};
-
 type FreeNote = {
   entry_date: string;
-  content: string;
+  content: string | null;
   updated_at: string | null;
+};
+
+type JournalEntryDateRow = {
+  date: string;
 };
 
 type AccountsResponse = {
   activeAccountId: string | null;
 };
 
-type ManageTarget =
-  | { kind: "book"; book: NotebookBook }
-  | { kind: "section"; section: NotebookSection }
-  | { kind: "page"; page: NotebookPage };
+type ShelfMode = "journal" | "custom";
 
 function stripHtml(input?: string | null) {
   if (!input) return "";
   return input.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
 }
 
-function formatDate(value?: string | null) {
-  if (!value) return "—";
-  const date = new Date(value);
+function formatEntryDateBadge(value: string) {
+  const date = new Date(`${value}T00:00:00`);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleDateString();
+  return date.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+  });
 }
 
-function toYmd(date = new Date()) {
-  return date.toISOString().slice(0, 10);
+function formatEntryDateWeekday(value: string) {
+  const date = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString(undefined, {
+    weekday: "short",
+  });
 }
 
 async function fetchActiveAccountId(): Promise<string | null> {
@@ -94,25 +84,21 @@ export function NotebookScreen() {
   const styles = useMemo(() => createStyles(colors), [colors]);
   const navigation = useNavigation<any>();
 
-  const [pages, setPages] = useState<NotebookPage[]>([]);
   const [books, setBooks] = useState<NotebookBook[]>([]);
-  const [sections, setSections] = useState<NotebookSection[]>([]);
   const [freeNotes, setFreeNotes] = useState<FreeNote[]>([]);
+  const [journalDates, setJournalDates] = useState<string[]>([]);
+  const [activeShelf, setActiveShelf] = useState<ShelfMode>("journal");
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [createMode, setCreateMode] = useState<"book" | "section" | "page" | null>(null);
-  const [createName, setCreateName] = useState("");
-  const [selectedBookId, setSelectedBookId] = useState<string | null>(null);
-  const [selectedSectionId, setSelectedSectionId] = useState<string | null>(null);
-  const [creating, setCreating] = useState(false);
-  const [createError, setCreateError] = useState<string | null>(null);
-  const [manageTarget, setManageTarget] = useState<ManageTarget | null>(null);
-  const [manageName, setManageName] = useState("");
-  const [manageBookId, setManageBookId] = useState<string | null>(null);
-  const [manageSectionId, setManageSectionId] = useState<string | null>(null);
-  const [managing, setManaging] = useState(false);
-  const [manageError, setManageError] = useState<string | null>(null);
+  const [inlineBookOpen, setInlineBookOpen] = useState(false);
+  const [inlineBookName, setInlineBookName] = useState("");
+  const [inlineBookBusy, setInlineBookBusy] = useState(false);
+  const [inlineBookError, setInlineBookError] = useState<string | null>(null);
+  const [manageBook, setManageBook] = useState<NotebookBook | null>(null);
+  const [manageBookName, setManageBookName] = useState("");
+  const [manageBookBusy, setManageBookBusy] = useState(false);
+  const [manageBookError, setManageBookError] = useState<string | null>(null);
 
   async function reloadNotebookData(options?: { showLoading?: boolean }) {
     if (!supabaseMobile || !user?.id) return;
@@ -130,33 +116,7 @@ export function NotebookScreen() {
         .eq("user_id", user.id);
 
       if (accountId) bookQuery = bookQuery.eq("account_id", accountId);
-
-      const { data: bookRows, error: bookErr } = await bookQuery.order("created_at", {
-        ascending: true,
-      });
-
-      const safeBooks = Array.isArray(bookRows) ? (bookRows as any[]) : [];
-      const bookIds = safeBooks.map((b) => b.id);
-
-      let sectionRows: NotebookSection[] = [];
-      let pageRows: NotebookPage[] = [];
-
-      if (bookIds.length > 0) {
-        const { data: secData } = await supabaseMobile
-          .from(SECTIONS_TABLE)
-          .select("id, name, notebook_id")
-          .in("notebook_id", bookIds)
-          .order("created_at", { ascending: true });
-
-        const { data: pageData } = await supabaseMobile
-          .from(PAGES_TABLE)
-          .select("id, notebook_id, section_id, title, content, created_at, updated_at")
-          .in("notebook_id", bookIds)
-          .order("updated_at", { ascending: false });
-
-        sectionRows = Array.isArray(secData) ? (secData as NotebookSection[]) : [];
-        pageRows = Array.isArray(pageData) ? (pageData as NotebookPage[]) : [];
-      }
+      else bookQuery = bookQuery.is("account_id", null);
 
       let freeQuery = supabaseMobile
         .from(FREE_NOTES_TABLE)
@@ -166,25 +126,43 @@ export function NotebookScreen() {
       if (accountId) freeQuery = freeQuery.eq("account_id", accountId);
       else freeQuery = freeQuery.is("account_id", null);
 
-      const { data: freeRows } = await freeQuery.order("entry_date", {
-        ascending: false,
-      });
+      let journalQuery = supabaseMobile
+        .from("journal_entries")
+        .select("date, account_id")
+        .eq("user_id", user.id);
 
-      if (bookErr) {
-        console.error("[NotebookScreen] book error:", bookErr);
-        setError(
-          t(
-            language,
-            "We couldn't load notebook data.",
-            "No pudimos cargar el notebook."
-          )
-        );
-      }
+      if (accountId) journalQuery = journalQuery.eq("account_id", accountId);
 
-      setBooks(safeBooks.map((b) => ({ id: b.id, name: b.name })));
-      setSections(sectionRows);
-      setPages(pageRows);
-      setFreeNotes(Array.isArray(freeRows) ? (freeRows as FreeNote[]) : []);
+      const [{ data: bookRows, error: bookErr }, { data: freeRows, error: freeErr }, { data: journalRows, error: journalErr }] =
+        await Promise.all([
+          bookQuery.order("created_at", { ascending: true }),
+          freeQuery.order("entry_date", { ascending: false }),
+          journalQuery.order("date", { ascending: false }),
+        ]);
+
+      if (bookErr) throw bookErr;
+      if (freeErr) throw freeErr;
+      if (journalErr) throw journalErr;
+
+      const safeBooks = Array.isArray(bookRows) ? (bookRows as any[]) : [];
+      const safeNotes = Array.isArray(freeRows) ? (freeRows as FreeNote[]) : [];
+      const safeJournalRows = Array.isArray(journalRows) ? (journalRows as JournalEntryDateRow[]) : [];
+
+      const mergedDates = Array.from(
+        new Set([
+          ...safeNotes.map((note) => note.entry_date),
+          ...safeJournalRows.map((row) => row.date),
+        ])
+      ).sort((a, b) => (a < b ? 1 : a > b ? -1 : 0));
+
+      setBooks(safeBooks.map((book) => ({ id: book.id, name: book.name })));
+      setFreeNotes(safeNotes);
+      setJournalDates(mergedDates);
+    } catch (err: any) {
+      setError(
+        err?.message ??
+          t(language, "We couldn't load the notebook library.", "No pudimos cargar la biblioteca del notebook.")
+      );
     } finally {
       if (showLoading) setLoading(false);
     }
@@ -192,20 +170,17 @@ export function NotebookScreen() {
 
   useEffect(() => {
     if (!supabaseMobile || !user?.id) return;
-
-    let cancelled = false;
-
-    async function loadNotebook(isRefresh = false) {
-      await reloadNotebookData({ showLoading: !isRefresh });
-      if (cancelled) return;
-    }
-
-    void loadNotebook();
-
-    return () => {
-      cancelled = true;
-    };
+    void reloadNotebookData({ showLoading: true });
   }, [language, user?.id]);
+
+  useEffect(() => {
+    if (activeShelf === "journal" && journalDates.length === 0 && books.length > 0) {
+      setActiveShelf("custom");
+    }
+    if (activeShelf === "custom" && books.length === 0 && journalDates.length > 0) {
+      setActiveShelf("journal");
+    }
+  }, [activeShelf, books.length, journalDates.length]);
 
   async function handleRefresh() {
     if (!supabaseMobile || !user?.id) return;
@@ -217,113 +192,64 @@ export function NotebookScreen() {
     }
   }
 
-  const availableSections = useMemo(() => {
-    if (!selectedBookId) return [];
-    return sections.filter((section) => section.notebook_id === selectedBookId);
-  }, [sections, selectedBookId]);
+  function openManageBook(book: NotebookBook) {
+    setManageBook(book);
+    setManageBookName(book.name);
+    setManageBookBusy(false);
+    setManageBookError(null);
+  }
 
-  const pagesBySectionId = useMemo(() => {
-    const map = new Map<string, NotebookPage[]>();
-    pages.forEach((page) => {
-      const key = page.section_id ?? "__unsectioned__";
-      const next = map.get(key) ?? [];
-      next.push(page);
-      map.set(key, next);
+  function closeManageBook() {
+    if (manageBookBusy) return;
+    setManageBook(null);
+    setManageBookError(null);
+  }
+
+  const journalNoteMap = useMemo(() => {
+    const map = new Map<string, FreeNote>();
+    freeNotes.forEach((note) => {
+      map.set(note.entry_date, note);
     });
     return map;
-  }, [pages]);
+  }, [freeNotes]);
 
-  const notebookWorkspace = useMemo(
+  const journalTiles = useMemo(
     () =>
-      books.map((book) => {
-        const notebookSections = sections.filter((section) => section.notebook_id === book.id);
-        const notebookPages = pages.filter((page) => page.notebook_id === book.id);
-        const standalonePages = notebookPages.filter((page) => !page.section_id);
+      journalDates.map((entryDate) => {
+        const note = journalNoteMap.get(entryDate) ?? null;
         return {
-          book,
-          sections: notebookSections.map((section) => ({
-            section,
-            pages: (pagesBySectionId.get(section.id) ?? []).filter(
-              (page) => page.notebook_id === book.id
+          id: entryDate,
+          title: formatEntryDateBadge(entryDate),
+          subtitle: formatEntryDateWeekday(entryDate),
+          preview:
+            stripHtml(note?.content) ||
+            t(
+              language,
+              "Open this journal notebook page.",
+              "Abre esta página del journal notebook."
             ),
-          })),
-          standalonePages,
-          totalPages: notebookPages.length,
         };
       }),
-    [books, sections, pages, pagesBySectionId]
+    [journalDates, journalNoteMap, language]
   );
 
-  function openCreate(mode: "book" | "section" | "page") {
-    setCreateMode(mode);
-    setCreateName("");
-    setCreateError(null);
-    setCreating(false);
-    if (mode === "book") {
-      setSelectedBookId(null);
-      setSelectedSectionId(null);
-      return;
-    }
-    if (!selectedBookId && books.length > 0) {
-      setSelectedBookId(books[0].id);
-    }
-    if (mode === "section") {
-      setSelectedSectionId(null);
-    }
-  }
-
-  function closeCreate() {
-    if (creating) return;
-    setCreateMode(null);
-    setCreateName("");
-    setCreateError(null);
-  }
-
-  function openManage(target: ManageTarget) {
-    setManageTarget(target);
-    setManageError(null);
-    setManaging(false);
-    if (target.kind === "book") {
-      setManageName(target.book.name);
-      setManageBookId(target.book.id);
-      setManageSectionId(null);
-      return;
-    }
-    if (target.kind === "section") {
-      setManageName(target.section.name);
-      setManageBookId(target.section.notebook_id);
-      setManageSectionId(target.section.id);
-      return;
-    }
-    setManageName(target.page.title);
-    setManageBookId(target.page.notebook_id);
-    setManageSectionId(target.page.section_id);
-  }
-
-  function closeManage() {
-    if (managing) return;
-    setManageTarget(null);
-    setManageError(null);
-  }
-
-  async function openDailyNote(entryDate = toYmd()) {
+  async function openDailyNote(entryDate: string) {
     if (!supabaseMobile || !user?.id) return;
     try {
       const accountId = await fetchActiveAccountId();
-      const { error: upsertErr } = await supabaseMobile
-        .from(FREE_NOTES_TABLE)
-        .upsert(
-          {
-            user_id: user.id,
-            account_id: accountId ?? null,
-            entry_date: entryDate,
-            content: "",
-            updated_at: new Date().toISOString(),
-          },
-          { onConflict: "user_id,account_id,entry_date" }
-        );
+      const { error: upsertErr } = await supabaseMobile.from(FREE_NOTES_TABLE).upsert(
+        {
+          user_id: user.id,
+          account_id: accountId ?? null,
+          entry_date: entryDate,
+          content: "",
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "user_id,account_id,entry_date" }
+      );
       if (upsertErr) throw upsertErr;
-      await handleRefresh();
+
+      await reloadNotebookData();
       navigation.navigate("NotebookEditor", {
         kind: "free",
         id: entryDate,
@@ -332,260 +258,128 @@ export function NotebookScreen() {
     } catch (err: any) {
       setError(
         err?.message ??
-          t(language, "We couldn't open the daily note.", "No pudimos abrir la nota diaria.")
+          t(language, "We couldn't open this journal page.", "No pudimos abrir esta página del journal.")
       );
     }
   }
 
-  async function handleCreate() {
-    if (!supabaseMobile || !user?.id || !createMode) return;
-    const trimmed = createName.trim();
-    const fallbackTitle = t(language, "Untitled page", "Página sin título");
-
-    if (createMode === "book" && !trimmed) {
-      setCreateError(t(language, "Name is required.", "El nombre es requerido."));
-      return;
-    }
-    if (createMode === "section" && (!trimmed || !selectedBookId)) {
-      setCreateError(
-        selectedBookId
-          ? t(language, "Name is required.", "El nombre es requerido.")
-          : t(language, "Select a notebook first.", "Selecciona un notebook primero.")
-      );
-      return;
-    }
-    if (createMode === "page" && !selectedBookId) {
-      setCreateError(t(language, "Select a notebook first.", "Selecciona un notebook primero."));
+  async function handleInlineBookCreate() {
+    if (!supabaseMobile || !user?.id) return;
+    const trimmed = inlineBookName.trim();
+    if (!trimmed) {
+      setInlineBookError(t(language, "Name is required.", "El nombre es requerido."));
       return;
     }
 
-    setCreating(true);
-    setCreateError(null);
+    setInlineBookBusy(true);
+    setInlineBookError(null);
     try {
       const accountId = await fetchActiveAccountId();
-      if (createMode === "book") {
-        const { error: insertErr } = await supabaseMobile
-          .from(BOOKS_TABLE)
-          .insert({
-            user_id: user.id,
-            account_id: accountId ?? null,
-            name: trimmed,
-          });
-        if (insertErr) throw insertErr;
-      } else if (createMode === "section") {
-        const { error: insertErr } = await supabaseMobile
-          .from(SECTIONS_TABLE)
-          .insert({
-            user_id: user.id,
-            notebook_id: selectedBookId,
-            name: trimmed,
-          });
-        if (insertErr) throw insertErr;
-      } else if (createMode === "page") {
-        const title = trimmed || fallbackTitle;
-        const { data, error: insertErr } = await supabaseMobile
-          .from(PAGES_TABLE)
-          .insert({
-            user_id: user.id,
-            notebook_id: selectedBookId,
-            section_id: selectedSectionId ?? null,
-            title,
-            content: "",
-            account_id: accountId ?? null,
-          })
-          .select("id, title")
-          .single();
-        if (insertErr) throw insertErr;
-        if (data?.id) {
-          closeCreate();
-          await reloadNotebookData();
-          navigation.navigate("NotebookEditor", {
-            kind: "page",
-            id: data.id,
-            title: data.title ?? title,
-          });
-          return;
-        }
-      }
+      const { error: insertErr } = await supabaseMobile.from(BOOKS_TABLE).insert({
+        user_id: user.id,
+        account_id: accountId ?? null,
+        name: trimmed,
+      });
+      if (insertErr) throw insertErr;
 
-      closeCreate();
+      setInlineBookOpen(false);
+      setInlineBookName("");
+      setActiveShelf("custom");
       await reloadNotebookData();
     } catch (err: any) {
-      setCreateError(
+      setInlineBookError(
         err?.message ??
-          t(language, "We couldn't create the notebook item.", "No pudimos crear el notebook.")
+          t(language, "We couldn't create this notebook.", "No pudimos crear este notebook.")
       );
     } finally {
-      setCreating(false);
+      setInlineBookBusy(false);
     }
   }
 
-  async function handleRenameOrMove() {
-    if (!supabaseMobile || !user?.id || !manageTarget) return;
-    const trimmed = manageName.trim();
+  async function handleManageBookSave() {
+    if (!supabaseMobile || !user?.id || !manageBook) return;
+    const trimmed = manageBookName.trim();
     if (!trimmed) {
-      setManageError(t(language, "Name is required.", "El nombre es requerido."));
+      setManageBookError(t(language, "Name is required.", "El nombre es requerido."));
       return;
     }
 
-    setManaging(true);
-    setManageError(null);
+    setManageBookBusy(true);
+    setManageBookError(null);
     try {
-      if (manageTarget.kind === "book") {
-        const { error } = await supabaseMobile
-          .from(BOOKS_TABLE)
-          .update({ name: trimmed })
-          .eq("id", manageTarget.book.id)
-          .eq("user_id", user.id);
-        if (error) throw error;
-      } else if (manageTarget.kind === "section") {
-        if (!manageBookId) {
-          throw new Error(t(language, "Select a notebook first.", "Selecciona un notebook primero."));
-        }
-        const fromBookId = manageTarget.section.notebook_id;
-        const sectionId = manageTarget.section.id;
-        const { error: sectionError } = await supabaseMobile
-          .from(SECTIONS_TABLE)
-          .update({ name: trimmed, notebook_id: manageBookId })
-          .eq("id", sectionId)
-          .eq("user_id", user.id);
-        if (sectionError) throw sectionError;
-
-        if (fromBookId !== manageBookId) {
-          const { error: pageMoveError } = await supabaseMobile
-            .from(PAGES_TABLE)
-            .update({ notebook_id: manageBookId })
-            .eq("section_id", sectionId)
-            .eq("user_id", user.id);
-          if (pageMoveError) throw pageMoveError;
-        }
-      } else {
-        if (!manageBookId) {
-          throw new Error(t(language, "Select a notebook first.", "Selecciona un notebook primero."));
-        }
-        const targetSection =
-          manageSectionId && sections.some((section) => section.id === manageSectionId && section.notebook_id === manageBookId)
-            ? manageSectionId
-            : null;
-        const { error } = await supabaseMobile
-          .from(PAGES_TABLE)
-          .update({
-            title: trimmed,
-            notebook_id: manageBookId,
-            section_id: targetSection,
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", manageTarget.page.id)
-          .eq("user_id", user.id);
-        if (error) throw error;
-      }
+      const { error: updateErr } = await supabaseMobile
+        .from(BOOKS_TABLE)
+        .update({ name: trimmed, updated_at: new Date().toISOString() })
+        .eq("id", manageBook.id)
+        .eq("user_id", user.id);
+      if (updateErr) throw updateErr;
 
       await reloadNotebookData();
-      closeManage();
+      closeManageBook();
     } catch (err: any) {
-      setManageError(
+      setManageBookError(
         err?.message ??
-          t(language, "We couldn't update this item.", "No pudimos actualizar este elemento.")
+          t(language, "We couldn't update this notebook.", "No pudimos actualizar este notebook.")
       );
     } finally {
-      setManaging(false);
+      setManageBookBusy(false);
     }
   }
 
-  async function executeDeleteTarget() {
-    if (!supabaseMobile || !user?.id || !manageTarget) return;
-    setManaging(true);
-    setManageError(null);
+  async function executeDeleteBook() {
+    if (!supabaseMobile || !user?.id || !manageBook) return;
+    setManageBookBusy(true);
+    setManageBookError(null);
     try {
-      if (manageTarget.kind === "book") {
-        const { error: deletePagesError } = await supabaseMobile
-          .from(PAGES_TABLE)
-          .delete()
-          .eq("notebook_id", manageTarget.book.id)
-          .eq("user_id", user.id);
-        if (deletePagesError) throw deletePagesError;
+      const { error: deletePagesError } = await supabaseMobile
+        .from("ntj_notebook_pages")
+        .delete()
+        .eq("notebook_id", manageBook.id)
+        .eq("user_id", user.id);
+      if (deletePagesError) throw deletePagesError;
 
-        const { error: deleteSectionsError } = await supabaseMobile
-          .from(SECTIONS_TABLE)
-          .delete()
-          .eq("notebook_id", manageTarget.book.id)
-          .eq("user_id", user.id);
-        if (deleteSectionsError) throw deleteSectionsError;
+      const { error: deleteSectionsError } = await supabaseMobile
+        .from("ntj_notebook_sections")
+        .delete()
+        .eq("notebook_id", manageBook.id)
+        .eq("user_id", user.id);
+      if (deleteSectionsError) throw deleteSectionsError;
 
-        const { error: deleteBookError } = await supabaseMobile
-          .from(BOOKS_TABLE)
-          .delete()
-          .eq("id", manageTarget.book.id)
-          .eq("user_id", user.id);
-        if (deleteBookError) throw deleteBookError;
-      } else if (manageTarget.kind === "section") {
-        const { error: releasePagesError } = await supabaseMobile
-          .from(PAGES_TABLE)
-          .update({ section_id: null, updated_at: new Date().toISOString() })
-          .eq("section_id", manageTarget.section.id)
-          .eq("user_id", user.id);
-        if (releasePagesError) throw releasePagesError;
-
-        const { error: deleteSectionError } = await supabaseMobile
-          .from(SECTIONS_TABLE)
-          .delete()
-          .eq("id", manageTarget.section.id)
-          .eq("user_id", user.id);
-        if (deleteSectionError) throw deleteSectionError;
-      } else {
-        const { error: deletePageError } = await supabaseMobile
-          .from(PAGES_TABLE)
-          .delete()
-          .eq("id", manageTarget.page.id)
-          .eq("user_id", user.id);
-        if (deletePageError) throw deletePageError;
-      }
+      const { error: deleteBookError } = await supabaseMobile
+        .from(BOOKS_TABLE)
+        .delete()
+        .eq("id", manageBook.id)
+        .eq("user_id", user.id);
+      if (deleteBookError) throw deleteBookError;
 
       await reloadNotebookData();
-      closeManage();
+      closeManageBook();
     } catch (err: any) {
-      setManageError(
+      setManageBookError(
         err?.message ??
-          t(language, "We couldn't delete this item.", "No pudimos borrar este elemento.")
+          t(language, "We couldn't delete this notebook.", "No pudimos borrar este notebook.")
       );
     } finally {
-      setManaging(false);
+      setManageBookBusy(false);
     }
   }
 
-  function confirmDeleteTarget() {
-    if (!manageTarget) return;
-    const title =
-      manageTarget.kind === "book"
-        ? manageTarget.book.name
-        : manageTarget.kind === "section"
-        ? manageTarget.section.name
-        : manageTarget.page.title;
-    const message =
-      manageTarget.kind === "book"
-        ? t(
-            language,
-            "This deletes the notebook, its sections, and all pages.",
-            "Esto borra el notebook, sus secciones y todas las páginas."
-          )
-        : manageTarget.kind === "section"
-        ? t(
-            language,
-            "This deletes the section and keeps its pages as unsectioned.",
-            "Esto borra la sección y deja sus páginas sin sección."
-          )
-        : t(language, "This deletes the page permanently.", "Esto borra la página permanentemente.");
-
+  function confirmDeleteBook() {
+    if (!manageBook) return;
     Alert.alert(
-      t(language, "Delete item", "Borrar elemento"),
-      `${title}\n\n${message}`,
+      t(language, "Delete notebook", "Borrar notebook"),
+      `${manageBook.name}\n\n${t(
+        language,
+        "This deletes the notebook, its sections, and all pages inside it.",
+        "Esto borra el notebook, sus secciones y todas las páginas dentro."
+      )}`,
       [
         { text: t(language, "Cancel", "Cancelar"), style: "cancel" },
         {
           text: t(language, "Delete", "Borrar"),
           style: "destructive",
           onPress: () => {
-            void executeDeleteTarget();
+            void executeDeleteBook();
           },
         },
       ]
@@ -597,517 +391,271 @@ export function NotebookScreen() {
       title={t(language, "Notebook", "Notebook")}
       subtitle={t(
         language,
-        "Review and edit your notebook entries.",
-        "Revisa y edita tus notas del notebook."
+        "Open journal pages by date or manage your custom notebook library.",
+        "Abre páginas del journal por fecha o gestiona tu biblioteca de notebooks custom."
       )}
       refreshing={refreshing}
       onRefresh={handleRefresh}
+      showBrand={false}
+      compactHeader
+      contentPadding={12}
     >
       {loading ? (
         <View style={styles.loadingRow}>
           <ActivityIndicator color={colors.primary} />
-          <Text style={styles.loadingText}>
-            {t(language, "Loading notebook…", "Cargando notebook…")}
-          </Text>
+          <Text style={styles.loadingText}>{t(language, "Loading notebook…", "Cargando notebook…")}</Text>
         </View>
       ) : error ? (
         <Text style={styles.errorText}>{error}</Text>
       ) : (
         <View style={styles.sectionList}>
-          <View style={styles.actionCard}>
-            <Text style={styles.actionTitle}>
-              {t(language, "Create new", "Crear nuevo")}
-            </Text>
-            <View style={styles.actionRow}>
-              <Pressable
-                style={({ pressed }) => [styles.actionButton, pressed && styles.cardPressed]}
-                onPress={() => openCreate("book")}
-              >
-                <Text style={styles.actionButtonText}>
-                  {t(language, "Notebook", "Notebook")}
-                </Text>
-              </Pressable>
-              <Pressable
-                style={({ pressed }) => [styles.actionButton, pressed && styles.cardPressed]}
-                onPress={() => openCreate("section")}
-              >
-                <Text style={styles.actionButtonText}>
-                  {t(language, "Section", "Sección")}
-                </Text>
-              </Pressable>
-              <Pressable
-                style={({ pressed }) => [styles.actionButton, pressed && styles.cardPressed]}
-                onPress={() => openCreate("page")}
-              >
-                <Text style={styles.actionButtonText}>
-                  {t(language, "Page", "Página")}
-                </Text>
-              </Pressable>
-            </View>
-            <Text style={styles.actionHint}>
-              {t(
-                language,
-                "Create notebooks, sections, and pages directly here.",
-                "Crea notebooks, secciones y páginas directamente aquí."
-              )}
-            </Text>
-          </View>
-          <View style={styles.sectionCard}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>
-                {t(language, "Daily notebook", "Notebook diario")}
-              </Text>
-              <Pressable style={styles.headerPill} onPress={() => void openDailyNote()}>
-                <Text style={styles.headerPillText}>
-                  {t(language, "Open today", "Abrir hoy")}
-                </Text>
-              </Pressable>
-            </View>
-            <Text style={styles.sectionHint}>
-              {t(
-                language,
-                "Open today's note or edit a previous day below.",
-                "Abre la nota de hoy o edita un día anterior abajo."
-              )}
-            </Text>
-            {freeNotes.length === 0 ? (
-              <Text style={styles.emptyText}>
-                {t(language, "No daily notes yet.", "Aún no hay notas diarias.")}
-              </Text>
-            ) : (
-              freeNotes.slice(0, 6).map((note) => (
-                <Pressable
-                  key={note.entry_date}
-                  style={({ pressed }) => [styles.noteCard, pressed && styles.cardPressed]}
-                  onPress={() =>
-                    navigation.navigate("NotebookEditor", {
-                      kind: "free",
-                      id: note.entry_date,
-                      title: `${t(language, "Daily note", "Nota diaria")} · ${note.entry_date}`,
-                    })
-                  }
-                >
-                  <Text style={styles.noteDate}>{note.entry_date}</Text>
-                  <Text style={styles.noteContent} numberOfLines={3}>
-                    {stripHtml(note.content)}
-                  </Text>
-                </Pressable>
-              ))
-            )}
-          </View>
-
-          <View style={styles.sectionCard}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>
-                {t(language, "Notebook workspace", "Workspace del notebook")}
-              </Text>
-              <Text style={styles.sectionMeta}>
-                {books.length} {t(language, "notebooks", "notebooks")}
-              </Text>
-            </View>
-            <Text style={styles.sectionHint}>
-              {t(
-                language,
-                "Browse notebooks, sections, and pages natively.",
-                "Navega notebooks, secciones y páginas de forma nativa."
-              )}
-            </Text>
-            {notebookWorkspace.length === 0 ? (
-              <Text style={styles.emptyText}>
-                {t(language, "No notebooks yet.", "Aún no hay notebooks.")}
-              </Text>
-            ) : (
-              notebookWorkspace.map(({ book, sections: notebookSections, standalonePages, totalPages }) => (
-                <View key={book.id} style={styles.workspaceCard}>
-                  <View style={styles.workspaceHeader}>
-                    <View>
-                      <Text style={styles.workspaceTitle}>{book.name}</Text>
-                      <Text style={styles.workspaceMeta}>
-                        {totalPages} {t(language, "pages", "páginas")}
-                        {" · "}
-                        {notebookSections.length} {t(language, "sections", "secciones")}
-                      </Text>
-                    </View>
-                    <View style={styles.workspaceHeaderActions}>
-                      <Pressable
-                        style={styles.headerPill}
-                        onPress={() => {
-                          setSelectedBookId(book.id);
-                          openCreate("page");
-                        }}
-                      >
-                        <Text style={styles.headerPillText}>
-                          {t(language, "New page", "Nueva página")}
-                        </Text>
-                      </Pressable>
-                      <Pressable style={styles.itemMenuButton} onPress={() => openManage({ kind: "book", book })}>
-                        <Text style={styles.itemMenuText}>•••</Text>
-                      </Pressable>
-                    </View>
-                  </View>
-
-                  {standalonePages.length > 0 ? (
-                    <View style={styles.workspaceBlock}>
-                      <Text style={styles.workspaceBlockTitle}>
-                        {t(language, "Pages without section", "Páginas sin sección")}
-                      </Text>
-                      {standalonePages.map((page) => (
-                        <Pressable
-                          key={page.id}
-                          style={({ pressed }) => [styles.pageCard, pressed && styles.cardPressed]}
-                          onPress={() =>
-                            navigation.navigate("NotebookEditor", {
-                              kind: "page",
-                              id: page.id,
-                              title: page.title,
-                            })
-                          }
-                        >
-                          <Text style={styles.pageTitle}>{page.title}</Text>
-                          <Text style={styles.pageMeta}>
-                            {formatDate(page.updated_at ?? page.created_at)}
-                          </Text>
-                          <Text style={styles.pageContent} numberOfLines={3}>
-                            {stripHtml(page.content)}
-                          </Text>
-                        </Pressable>
-                      ))}
-                    </View>
-                  ) : null}
-
-                  {notebookSections.map(({ section, pages: sectionPages }) => (
-                    <View key={section.id} style={styles.workspaceBlock}>
-                      <View style={styles.workspaceBlockHeader}>
-                        <Text style={styles.workspaceBlockTitle}>{section.name}</Text>
-                        <View style={styles.workspaceHeaderActions}>
-                          <Text style={styles.workspaceBlockMeta}>
-                            {sectionPages.length} {t(language, "pages", "páginas")}
-                          </Text>
-                          <Pressable
-                            style={styles.itemMenuButton}
-                            onPress={() => openManage({ kind: "section", section })}
-                          >
-                            <Text style={styles.itemMenuText}>•••</Text>
-                          </Pressable>
-                        </View>
-                      </View>
-                      {sectionPages.length === 0 ? (
-                        <Text style={styles.emptyText}>
-                          {t(language, "No pages in this section yet.", "Aún no hay páginas en esta sección.")}
-                        </Text>
-                      ) : (
-                        sectionPages.map((page) => (
-                          <Pressable
-                            key={page.id}
-                            style={({ pressed }) => [styles.pageCard, pressed && styles.cardPressed]}
-                            onPress={() =>
-                              navigation.navigate("NotebookEditor", {
-                                kind: "page",
-                                id: page.id,
-                                title: page.title,
-                              })
-                            }
-                          >
-                            <View style={styles.pageHeaderRow}>
-                              <Text style={styles.pageTitle}>{page.title}</Text>
-                              <Pressable
-                                style={styles.itemMenuButton}
-                                onPress={() => openManage({ kind: "page", page })}
-                              >
-                                <Text style={styles.itemMenuText}>•••</Text>
-                              </Pressable>
-                            </View>
-                            <Text style={styles.pageMeta}>
-                              {formatDate(page.updated_at ?? page.created_at)}
-                            </Text>
-                            <Text style={styles.pageContent} numberOfLines={3}>
-                              {stripHtml(page.content)}
-                            </Text>
-                          </Pressable>
-                        ))
-                      )}
-                    </View>
-                  ))}
-                </View>
-              ))
-            )}
-          </View>
-        </View>
-      )}
-      <Modal visible={!!createMode} transparent animationType="slide" onRequestClose={closeCreate}>
-        <TouchableWithoutFeedback onPress={closeCreate}>
-          <View style={styles.modalBackdrop}>
-            <TouchableWithoutFeedback>
-              <View style={styles.modalCard}>
-                <View style={styles.modalHandle} />
-                <Text style={styles.modalTitle}>
-                  {createMode === "book"
-                    ? t(language, "New notebook", "Nuevo notebook")
-                    : createMode === "section"
-                    ? t(language, "New section", "Nueva sección")
-                    : t(language, "New page", "Nueva página")}
-                </Text>
-                {createError ? <Text style={styles.modalError}>{createError}</Text> : null}
-
-                {createMode !== "book" && (
-                  <View style={styles.selectorBlock}>
-                    <Text style={styles.selectorLabel}>
-                      {t(language, "Notebook", "Notebook")}
-                    </Text>
-                    <View style={styles.selectorRow}>
-                      {books.length === 0 ? (
-                        <Text style={styles.selectorEmpty}>
-                          {t(
-                            language,
-                            "Create a notebook first.",
-                            "Crea un notebook primero."
-                          )}
-                        </Text>
-                      ) : (
-                        books.map((book) => {
-                          const active = book.id === selectedBookId;
-                          return (
-                            <Pressable
-                              key={book.id}
-                              style={[
-                                styles.selectorChip,
-                                active && styles.selectorChipActive,
-                              ]}
-                              onPress={() => {
-                                setSelectedBookId(book.id);
-                                setSelectedSectionId(null);
-                              }}
-                            >
-                              <Text
-                                style={[
-                                  styles.selectorChipText,
-                                  active && styles.selectorChipTextActive,
-                                ]}
-                              >
-                                {book.name}
-                              </Text>
-                            </Pressable>
-                          );
-                        })
-                      )}
-                    </View>
-                  </View>
-                )}
-
-                {createMode === "page" && (
-                  <View style={styles.selectorBlock}>
-                    <Text style={styles.selectorLabel}>
-                      {t(language, "Section (optional)", "Sección (opcional)")}
-                    </Text>
-                    <View style={styles.selectorRow}>
-                      <Pressable
-                        style={[
-                          styles.selectorChip,
-                          !selectedSectionId && styles.selectorChipActive,
-                        ]}
-                        onPress={() => setSelectedSectionId(null)}
-                      >
-                        <Text
-                          style={[
-                            styles.selectorChipText,
-                            !selectedSectionId && styles.selectorChipTextActive,
-                          ]}
-                        >
-                          {t(language, "No section", "Sin sección")}
-                        </Text>
-                      </Pressable>
-                      {availableSections.map((section) => {
-                        const active = section.id === selectedSectionId;
-                        return (
-                          <Pressable
-                            key={section.id}
-                            style={[
-                              styles.selectorChip,
-                              active && styles.selectorChipActive,
-                            ]}
-                            onPress={() => setSelectedSectionId(section.id)}
-                          >
-                            <Text
-                              style={[
-                                styles.selectorChipText,
-                                active && styles.selectorChipTextActive,
-                              ]}
-                            >
-                              {section.name}
-                            </Text>
-                          </Pressable>
-                        );
-                      })}
-                    </View>
-                  </View>
-                )}
-
-                <TextInput
-                  placeholder={
-                    createMode === "page"
-                      ? t(language, "Page title", "Título de página")
-                      : t(language, "Name", "Nombre")
-                  }
-                  placeholderTextColor={colors.textMuted}
-                  value={createName}
-                  onChangeText={setCreateName}
-                  style={styles.input}
-                />
-                <Pressable
-                  style={[styles.primaryButton, creating && styles.primaryButtonDisabled]}
-                  onPress={handleCreate}
-                  disabled={creating}
-                >
-                  <Text style={styles.primaryButtonText}>
-                    {creating
-                      ? t(language, "Creating…", "Creando…")
-                      : t(language, "Create", "Crear")}
-                  </Text>
-                </Pressable>
+          <View style={styles.shelfRow}>
+            <Pressable
+              style={({ pressed }) => [
+                styles.shelfCard,
+                activeShelf === "journal" && styles.shelfCardActive,
+                pressed && styles.cardPressed,
+              ]}
+              onPress={() => setActiveShelf("journal")}
+            >
+              <View style={[styles.shelfIconBubble, activeShelf === "journal" && styles.shelfIconBubbleActive]}>
+                <Ionicons name="calendar-clear-outline" size={22} color={colors.primary} />
               </View>
-            </TouchableWithoutFeedback>
+              <Text style={styles.shelfTitle}>{t(language, "Journal Notebook", "Journal Notebook")}</Text>
+              <Text style={styles.shelfCaption}>
+                {t(
+                  language,
+                  "Each day from Journal Date lives here as its own notebook page.",
+                  "Cada día de Journal Date vive aquí como su propia página."
+                )}
+              </Text>
+            </Pressable>
+
+            <Pressable
+              style={({ pressed }) => [
+                styles.shelfCard,
+                activeShelf === "custom" && styles.shelfCardActive,
+                pressed && styles.cardPressed,
+              ]}
+              onPress={() => setActiveShelf("custom")}
+            >
+              <View style={[styles.shelfIconBubble, activeShelf === "custom" && styles.shelfIconBubbleActive]}>
+                <Ionicons name="library-outline" size={22} color={colors.primary} />
+              </View>
+              <Text style={styles.shelfTitle}>{t(language, "Custom Notebooks", "Custom Notebooks")}</Text>
+              <Text style={styles.shelfCaption}>
+                {t(
+                  language,
+                  "Keep separate libraries for study, process, ideas, and playbooks.",
+                  "Mantén bibliotecas separadas para estudio, proceso, ideas y playbooks."
+                )}
+              </Text>
+            </Pressable>
           </View>
-        </TouchableWithoutFeedback>
-      </Modal>
-      <Modal visible={!!manageTarget} transparent animationType="slide" onRequestClose={closeManage}>
-        <TouchableWithoutFeedback onPress={closeManage}>
-          <View style={styles.modalBackdrop}>
-            <TouchableWithoutFeedback>
-              <View style={styles.modalCard}>
-                <View style={styles.modalHandle} />
-                <Text style={styles.modalTitle}>
-                  {manageTarget?.kind === "book"
-                    ? t(language, "Manage notebook", "Gestionar notebook")
-                    : manageTarget?.kind === "section"
-                    ? t(language, "Manage section", "Gestionar sección")
-                    : t(language, "Manage page", "Gestionar página")}
-                </Text>
-                {manageError ? <Text style={styles.modalError}>{manageError}</Text> : null}
 
-                <View style={styles.selectorBlock}>
-                  <Text style={styles.selectorLabel}>
-                    {manageTarget?.kind === "page"
-                      ? t(language, "Page title", "Título de página")
-                      : t(language, "Name", "Nombre")}
-                  </Text>
-                  <TextInput
-                    placeholder={
-                      manageTarget?.kind === "page"
-                        ? t(language, "Page title", "Título de página")
-                        : t(language, "Name", "Nombre")
-                    }
-                    placeholderTextColor={colors.textMuted}
-                    value={manageName}
-                    onChangeText={setManageName}
-                    style={styles.input}
-                  />
-                </View>
+          {activeShelf === "journal" ? (
+            <View style={styles.sectionCard}>
+              <Text style={styles.sectionTitle}>
+                {t(language, "Journal Notebook", "Journal Notebook")}
+              </Text>
+              <Text style={styles.sectionHint}>
+                {t(
+                  language,
+                  "These pages come from days you created or traded in Journal Date.",
+                  "Estas páginas salen de los días que creaste o tradeaste en Journal Date."
+                )}
+              </Text>
 
-                {manageTarget?.kind !== "book" ? (
-                  <View style={styles.selectorBlock}>
-                    <Text style={styles.selectorLabel}>
-                      {t(language, "Notebook", "Notebook")}
-                    </Text>
-                    <View style={styles.selectorRow}>
-                      {books.map((book) => {
-                        const active = book.id === manageBookId;
-                        return (
-                          <Pressable
-                            key={book.id}
-                            style={[styles.selectorChip, active && styles.selectorChipActive]}
-                            onPress={() => {
-                              setManageBookId(book.id);
-                              if (manageTarget?.kind === "page") {
-                                const matches = sections.some(
-                                  (section) => section.id === manageSectionId && section.notebook_id === book.id
-                                );
-                                if (!matches) setManageSectionId(null);
-                              }
-                            }}
-                          >
-                            <Text
-                              style={[styles.selectorChipText, active && styles.selectorChipTextActive]}
-                            >
-                              {book.name}
-                            </Text>
-                          </Pressable>
-                        );
-                      })}
-                    </View>
-                  </View>
-                ) : null}
-
-                {manageTarget?.kind === "page" ? (
-                  <View style={styles.selectorBlock}>
-                    <Text style={styles.selectorLabel}>
-                      {t(language, "Section", "Sección")}
-                    </Text>
-                    <View style={styles.selectorRow}>
-                      <Pressable
-                        style={[styles.selectorChip, !manageSectionId && styles.selectorChipActive]}
-                        onPress={() => setManageSectionId(null)}
-                      >
-                        <Text
-                          style={[
-                            styles.selectorChipText,
-                            !manageSectionId && styles.selectorChipTextActive,
-                          ]}
-                        >
-                          {t(language, "No section", "Sin sección")}
-                        </Text>
-                      </Pressable>
-                      {sections
-                        .filter((section) => section.notebook_id === manageBookId)
-                        .map((section) => {
-                          const active = section.id === manageSectionId;
-                          return (
-                            <Pressable
-                              key={section.id}
-                              style={[styles.selectorChip, active && styles.selectorChipActive]}
-                              onPress={() => setManageSectionId(section.id)}
-                            >
-                              <Text
-                                style={[styles.selectorChipText, active && styles.selectorChipTextActive]}
-                              >
-                                {section.name}
-                              </Text>
-                            </Pressable>
-                          );
-                        })}
-                    </View>
-                  </View>
-                ) : null}
-
-                {manageTarget?.kind === "section" ? (
-                  <Text style={styles.actionHint}>
+              {journalTiles.length === 0 ? (
+                <View style={styles.emptyCard}>
+                  <Ionicons name="calendar-outline" size={20} color={colors.textMuted} />
+                  <Text style={styles.emptyText}>
                     {t(
                       language,
-                      "Moving the section to another notebook also moves its pages there.",
-                      "Mover la sección a otro notebook también mueve sus páginas."
+                      "No journal notebook pages yet. Once you trade or write in Journal Date, the day appears here.",
+                      "Aún no hay páginas del journal notebook. Cuando tradees o escribas en Journal Date, el día aparecerá aquí."
                     )}
                   </Text>
-                ) : null}
+                </View>
+              ) : (
+                <View style={styles.iconGrid}>
+                  {journalTiles.map((tile) => (
+                    <Pressable
+                      key={tile.id}
+                      style={({ pressed }) => [styles.libraryTile, pressed && styles.cardPressed]}
+                      onPress={() => void openDailyNote(tile.id)}
+                    >
+                      <View style={styles.libraryTileTop}>
+                        <View style={styles.libraryIconBubble}>
+                          <Ionicons name="book-outline" size={20} color={colors.primary} />
+                        </View>
+                      </View>
+                      <Text style={styles.libraryTileTitle}>{tile.title}</Text>
+                      <Text style={styles.libraryTileMeta}>{tile.subtitle}</Text>
+                      <Text style={styles.libraryTilePreview} numberOfLines={2}>
+                        {tile.preview}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+              )}
+            </View>
+          ) : (
+            <View style={styles.sectionCard}>
+              <Text style={styles.sectionTitle}>
+                {t(language, "Custom Notebooks", "Custom Notebooks")}
+              </Text>
+              <Text style={styles.sectionHint}>
+                {t(
+                  language,
+                  "Create notebooks right here, then open one library at a time.",
+                  "Crea notebooks aquí mismo y luego abre una biblioteca a la vez."
+                )}
+              </Text>
 
-                <View style={styles.manageActionRow}>
+              <View style={styles.iconGrid}>
+                {inlineBookOpen ? (
+                  <View style={styles.draftTile}>
+                    <View style={styles.libraryTileTop}>
+                      <View style={styles.libraryIconBubble}>
+                        <Ionicons name="create-outline" size={18} color={colors.primary} />
+                      </View>
+                    </View>
+                    <TextInput
+                      value={inlineBookName}
+                      onChangeText={setInlineBookName}
+                      placeholder={t(language, "Notebook name", "Nombre del notebook")}
+                      placeholderTextColor={colors.textMuted}
+                      style={styles.draftInput}
+                      autoFocus
+                      onSubmitEditing={() => {
+                        void handleInlineBookCreate();
+                      }}
+                    />
+                    {inlineBookError ? <Text style={styles.inlineError}>{inlineBookError}</Text> : null}
+                    <View style={styles.draftActions}>
+                      <Pressable
+                        style={[styles.smallPrimaryButton, inlineBookBusy && styles.primaryButtonDisabled]}
+                        onPress={() => {
+                          void handleInlineBookCreate();
+                        }}
+                        disabled={inlineBookBusy}
+                      >
+                        <Text style={styles.smallPrimaryButtonText}>
+                          {inlineBookBusy ? t(language, "Saving…", "Guardando…") : t(language, "Save", "Guardar")}
+                        </Text>
+                      </Pressable>
+                      <Pressable
+                        style={styles.smallSecondaryButton}
+                        onPress={() => {
+                          if (inlineBookBusy) return;
+                          setInlineBookOpen(false);
+                          setInlineBookName("");
+                          setInlineBookError(null);
+                        }}
+                      >
+                        <Text style={styles.smallSecondaryButtonText}>{t(language, "Cancel", "Cancelar")}</Text>
+                      </Pressable>
+                    </View>
+                  </View>
+                ) : (
                   <Pressable
-                    style={[styles.primaryButton, styles.managePrimaryButton, managing && styles.primaryButtonDisabled]}
-                    onPress={handleRenameOrMove}
-                    disabled={managing}
+                    style={({ pressed }) => [styles.createTile, pressed && styles.cardPressed]}
+                    onPress={() => {
+                      setInlineBookOpen(true);
+                      setInlineBookName("");
+                      setInlineBookError(null);
+                    }}
                   >
-                    <Text style={styles.primaryButtonText}>
-                      {managing
-                        ? t(language, "Saving…", "Guardando…")
-                        : t(language, "Save changes", "Guardar cambios")}
+                    <View style={styles.createTileBubble}>
+                      <Ionicons name="add-outline" size={24} color={colors.primary} />
+                    </View>
+                    <Text style={styles.createTileTitle}>
+                      {t(language, "New notebook", "Nuevo notebook")}
+                    </Text>
+                    <Text style={styles.createTileCaption}>
+                      {t(language, "Create it here", "Créalo aquí")}
                     </Text>
                   </Pressable>
+                )}
+
+                {books.map((book) => (
                   <Pressable
-                    style={styles.secondaryButton}
-                    onPress={confirmDeleteTarget}
-                    disabled={managing}
+                    key={book.id}
+                    style={({ pressed }) => [styles.libraryTile, pressed && styles.cardPressed]}
+                    onPress={() =>
+                      navigation.navigate("NotebookWorkspace", {
+                        notebookId: book.id,
+                        title: book.name,
+                      })
+                    }
+                    onLongPress={() => openManageBook(book)}
                   >
-                    <Text style={styles.secondaryButtonText}>
-                      {t(language, "Delete", "Borrar")}
+                    <View style={styles.libraryTileTop}>
+                      <View style={styles.libraryIconBubble}>
+                        <Ionicons name="library-outline" size={20} color={colors.primary} />
+                      </View>
+                    </View>
+                    <Text style={styles.libraryTileTitle} numberOfLines={2}>
+                      {book.name}
                     </Text>
+                    <Text style={styles.libraryTileMeta}>
+                      {t(language, "Open notebook", "Abrir notebook")}
+                    </Text>
+                    <Text style={styles.libraryTilePreview} numberOfLines={2}>
+                      {t(
+                        language,
+                        "Tap to open. Long press to rename or delete.",
+                        "Toca para abrir. Mantén presionado para renombrar o borrar."
+                      )}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+
+              {!inlineBookOpen && books.length === 0 ? (
+                <View style={styles.emptyCard}>
+                  <Ionicons name="library-outline" size={20} color={colors.textMuted} />
+                  <Text style={styles.emptyText}>
+                    {t(language, "No custom notebooks yet.", "Aún no hay notebooks custom.")}
+                  </Text>
+                </View>
+              ) : null}
+            </View>
+          )}
+        </View>
+      )}
+
+      <Modal visible={!!manageBook} transparent animationType="slide" onRequestClose={closeManageBook}>
+        <TouchableWithoutFeedback onPress={closeManageBook}>
+          <View style={styles.modalBackdrop}>
+            <TouchableWithoutFeedback>
+              <View style={styles.modalCard}>
+                <View style={styles.modalHandle} />
+                <Text style={styles.modalTitle}>{t(language, "Manage notebook", "Gestionar notebook")}</Text>
+                {manageBookError ? <Text style={styles.modalError}>{manageBookError}</Text> : null}
+                <TextInput
+                  value={manageBookName}
+                  onChangeText={setManageBookName}
+                  placeholder={t(language, "Notebook name", "Nombre del notebook")}
+                  placeholderTextColor={colors.textMuted}
+                  style={styles.input}
+                  autoFocus
+                />
+                <View style={styles.manageActionRow}>
+                  <Pressable
+                    style={[styles.primaryButton, styles.managePrimaryButton, manageBookBusy && styles.primaryButtonDisabled]}
+                    onPress={() => {
+                      void handleManageBookSave();
+                    }}
+                    disabled={manageBookBusy}
+                  >
+                    <Text style={styles.primaryButtonText}>
+                      {manageBookBusy ? t(language, "Saving…", "Guardando…") : t(language, "Save changes", "Guardar cambios")}
+                    </Text>
+                  </Pressable>
+                  <Pressable style={styles.secondaryButton} onPress={confirmDeleteBook} disabled={manageBookBusy}>
+                    <Text style={styles.secondaryButtonText}>{t(language, "Delete", "Borrar")}</Text>
                   </Pressable>
                 </View>
               </View>
@@ -1136,200 +684,201 @@ const createStyles = (colors: ThemeColors) =>
       fontSize: 12,
     },
     sectionList: {
-      gap: 12,
+      gap: 14,
     },
-    actionCard: {
-      borderRadius: 16,
+    shelfRow: {
+      flexDirection: "row",
+      gap: 10,
+    },
+    shelfCard: {
+      flex: 1,
+      minHeight: 150,
+      borderRadius: 20,
       borderWidth: 1,
       borderColor: colors.border,
       backgroundColor: colors.card,
       padding: 14,
       gap: 10,
     },
-    actionTitle: {
-      color: colors.textPrimary,
-      fontWeight: "700",
-      fontSize: 14,
+    shelfCardActive: {
+      borderColor: colors.primary,
+      backgroundColor: colors.surface,
+      shadowColor: colors.primary,
+      shadowOpacity: 0.14,
+      shadowRadius: 18,
+      shadowOffset: { width: 0, height: 8 },
+      elevation: 3,
     },
-    actionRow: {
-      flexDirection: "row",
-      gap: 8,
-    },
-    actionButton: {
-      flex: 1,
-      borderRadius: 12,
+    shelfIconBubble: {
+      width: 46,
+      height: 46,
+      borderRadius: 16,
       borderWidth: 1,
       borderColor: colors.border,
       backgroundColor: colors.surface,
-      paddingVertical: 10,
       alignItems: "center",
+      justifyContent: "center",
     },
-    actionButtonText: {
+    shelfIconBubbleActive: {
+      borderColor: colors.primary,
+      backgroundColor: colors.successSoft,
+    },
+    shelfTitle: {
       color: colors.textPrimary,
-      fontSize: 12,
-      fontWeight: "700",
+      fontSize: 15,
+      fontWeight: "800",
     },
-    actionHint: {
+    shelfCaption: {
       color: colors.textMuted,
-      fontSize: 11,
+      fontSize: 12,
+      lineHeight: 18,
     },
     sectionCard: {
-      borderRadius: 16,
+      borderRadius: 20,
       borderWidth: 1,
       borderColor: colors.border,
       backgroundColor: colors.card,
       padding: 14,
-      gap: 10,
-    },
-    sectionHeader: {
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "space-between",
-      gap: 8,
-    },
-    sectionHint: {
-      color: colors.textMuted,
-      fontSize: 11,
+      gap: 12,
     },
     sectionTitle: {
       color: colors.textPrimary,
-      fontWeight: "700",
-      fontSize: 14,
+      fontWeight: "800",
+      fontSize: 16,
     },
-    sectionMeta: {
+    sectionHint: {
       color: colors.textMuted,
       fontSize: 12,
+      lineHeight: 18,
     },
-    headerPill: {
-      borderRadius: 999,
-      borderWidth: 1,
-      borderColor: colors.primary,
-      backgroundColor: colors.successSoft,
-      paddingHorizontal: 10,
-      paddingVertical: 6,
-    },
-    headerPillText: {
-      color: colors.textPrimary,
-      fontSize: 11,
-      fontWeight: "700",
-    },
-    noteCard: {
-      borderRadius: 12,
-      borderWidth: 1,
-      borderColor: colors.border,
-      backgroundColor: colors.surface,
-      padding: 10,
-      gap: 6,
-    },
-    cardPressed: {
-      opacity: 0.8,
-      transform: [{ scale: 0.99 }],
-    },
-    noteDate: {
-      color: colors.textMuted,
-      fontSize: 11,
-    },
-    noteContent: {
-      color: colors.textPrimary,
-      fontSize: 12,
-      lineHeight: 17,
-    },
-    pageCard: {
-      borderRadius: 12,
-      borderWidth: 1,
-      borderColor: colors.border,
-      backgroundColor: colors.surface,
-      padding: 10,
-      gap: 6,
-    },
-    pageHeaderRow: {
+    iconGrid: {
       flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "space-between",
-      gap: 8,
+      flexWrap: "wrap",
+      gap: 10,
     },
-    pageTitle: {
-      color: colors.textPrimary,
-      fontWeight: "700",
-      fontSize: 13,
-      flex: 1,
-    },
-    pageMeta: {
-      color: colors.textMuted,
-      fontSize: 11,
-    },
-    pageContent: {
-      color: colors.textPrimary,
-      fontSize: 12,
-      lineHeight: 17,
-    },
-    workspaceCard: {
-      borderRadius: 14,
+    libraryTile: {
+      width: "48%",
+      minHeight: 146,
+      borderRadius: 18,
       borderWidth: 1,
       borderColor: colors.border,
       backgroundColor: colors.surface,
       padding: 12,
-      gap: 12,
+      gap: 8,
     },
-    workspaceHeader: {
+    libraryTileTop: {
       flexDirection: "row",
       alignItems: "center",
       justifyContent: "space-between",
-      gap: 10,
     },
-    workspaceHeaderActions: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 8,
-    },
-    workspaceTitle: {
-      color: colors.textPrimary,
-      fontWeight: "700",
-      fontSize: 14,
-    },
-    workspaceMeta: {
-      color: colors.textMuted,
-      fontSize: 11,
-      marginTop: 2,
-    },
-    workspaceBlock: {
-      gap: 8,
-    },
-    workspaceBlockHeader: {
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "space-between",
-      gap: 8,
-    },
-    workspaceBlockTitle: {
-      color: colors.textPrimary,
-      fontSize: 12,
-      fontWeight: "700",
-    },
-    workspaceBlockMeta: {
-      color: colors.textMuted,
-      fontSize: 11,
-    },
-    itemMenuButton: {
-      minWidth: 34,
-      height: 34,
-      borderRadius: 10,
+    libraryIconBubble: {
+      width: 42,
+      height: 42,
+      borderRadius: 14,
       borderWidth: 1,
       borderColor: colors.border,
       backgroundColor: colors.card,
       alignItems: "center",
       justifyContent: "center",
-      paddingHorizontal: 6,
     },
-    itemMenuText: {
+    libraryTileTitle: {
       color: colors.textPrimary,
       fontSize: 14,
+      fontWeight: "800",
+    },
+    libraryTileMeta: {
+      color: colors.textMuted,
+      fontSize: 11,
       fontWeight: "700",
-      letterSpacing: 1,
+    },
+    libraryTilePreview: {
+      color: colors.textPrimary,
+      fontSize: 11,
+      lineHeight: 16,
+    },
+    createTile: {
+      width: "48%",
+      minHeight: 146,
+      borderRadius: 18,
+      borderWidth: 1,
+      borderColor: colors.primary,
+      borderStyle: "dashed",
+      backgroundColor: colors.successSoft,
+      padding: 12,
+      gap: 8,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    createTileBubble: {
+      width: 46,
+      height: 46,
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: colors.primary,
+      backgroundColor: colors.surface,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    createTileTitle: {
+      color: colors.textPrimary,
+      fontSize: 14,
+      fontWeight: "800",
+      textAlign: "center",
+    },
+    createTileCaption: {
+      color: colors.textMuted,
+      fontSize: 11,
+      fontWeight: "700",
+      textAlign: "center",
+    },
+    draftTile: {
+      width: "48%",
+      minHeight: 146,
+      borderRadius: 18,
+      borderWidth: 1,
+      borderColor: colors.primary,
+      backgroundColor: colors.surface,
+      padding: 12,
+      gap: 10,
+    },
+    draftInput: {
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.card,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      color: colors.textPrimary,
+      fontSize: 13,
+      fontWeight: "700",
+    },
+    draftActions: {
+      flexDirection: "row",
+      gap: 8,
+    },
+    inlineError: {
+      color: colors.danger,
+      fontSize: 11,
+    },
+    emptyCard: {
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+      padding: 14,
+      gap: 8,
+      alignItems: "center",
+      justifyContent: "center",
     },
     emptyText: {
       color: colors.textMuted,
       fontSize: 12,
+      lineHeight: 18,
+      textAlign: "center",
+    },
+    cardPressed: {
+      opacity: 0.82,
+      transform: [{ scale: 0.99 }],
     },
     modalBackdrop: {
       flex: 1,
@@ -1365,43 +914,6 @@ const createStyles = (colors: ThemeColors) =>
       fontSize: 12,
       textAlign: "center",
     },
-    selectorBlock: {
-      gap: 8,
-    },
-    selectorLabel: {
-      color: colors.textMuted,
-      fontSize: 12,
-      fontWeight: "600",
-    },
-    selectorRow: {
-      flexDirection: "row",
-      flexWrap: "wrap",
-      gap: 8,
-    },
-    selectorChip: {
-      borderRadius: 999,
-      borderWidth: 1,
-      borderColor: colors.border,
-      backgroundColor: colors.card,
-      paddingHorizontal: 12,
-      paddingVertical: 6,
-    },
-    selectorChipActive: {
-      borderColor: colors.primary,
-      backgroundColor: colors.successSoft,
-    },
-    selectorChipText: {
-      color: colors.textPrimary,
-      fontSize: 12,
-      fontWeight: "600",
-    },
-    selectorChipTextActive: {
-      color: colors.textPrimary,
-    },
-    selectorEmpty: {
-      color: colors.textMuted,
-      fontSize: 12,
-    },
     input: {
       borderRadius: 12,
       borderWidth: 1,
@@ -1425,6 +937,34 @@ const createStyles = (colors: ThemeColors) =>
       color: colors.textPrimary,
       fontWeight: "700",
       fontSize: 13,
+    },
+    smallPrimaryButton: {
+      flex: 1,
+      borderRadius: 10,
+      backgroundColor: colors.primary,
+      paddingVertical: 9,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    smallPrimaryButtonText: {
+      color: colors.textPrimary,
+      fontSize: 11,
+      fontWeight: "800",
+    },
+    smallSecondaryButton: {
+      flex: 1,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.card,
+      paddingVertical: 9,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    smallSecondaryButtonText: {
+      color: colors.textPrimary,
+      fontSize: 11,
+      fontWeight: "700",
     },
     manageActionRow: {
       flexDirection: "row",

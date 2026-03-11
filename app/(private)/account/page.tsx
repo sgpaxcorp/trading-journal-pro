@@ -842,8 +842,8 @@ export default function AccountPage() {
               <p className="text-sm font-semibold text-rose-200">{L("Delete account", "Eliminar cuenta")}</p>
               <p className="text-xs text-rose-200/80 mt-1 max-w-xl">
                 {L(
-                  "This permanently deletes your user and ALL related data (journal, analytics, trades, resources, trophies, etc.). This cannot be undone.",
-                  "Esto elimina permanentemente tu usuario y TODA tu data (journal, analíticas, trades, recursos, trofeos, etc.). No se puede deshacer."
+                  "This permanently deletes your user and ALL related data (journal, analytics, trades, trophies, etc.). This cannot be undone.",
+                  "Esto elimina permanentemente tu usuario y TODA tu data (journal, analíticas, trades, trofeos, etc.). No se puede deshacer."
                 )}
               </p>
               <p className="text-[11px] text-rose-200/70 mt-2">
