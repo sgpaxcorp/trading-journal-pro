@@ -1,10 +1,12 @@
 "use client";
 
-import React, { useEffect, useState, useRef } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { supabaseBrowser } from "@/lib/supaBaseClient";
 import { syncMyTrophies } from "@/lib/trophiesSupabase";
+import { isActiveProfileStatus, shouldAllowLocalProfileAccessFallback } from "@/lib/accessControl";
+import { fetchAccessStatus } from "@/lib/accessStatusClient";
 import CandleAssistant from "@/app/components/NeuroAssistant";
 import AppTour from "@/app/components/AppTour";
 import PageIntro from "@/app/components/PageIntro";
@@ -31,13 +33,10 @@ export default function PrivateLayout({ children }: PrivateLayoutProps) {
   const { user, loading } = useAuth() as any;
   const sessionIdRef = useRef<string | null>(null);
 
-  const [subscriptionStatus, setSubscriptionStatus] = useState<string>("pending");
+  const [hasAppAccess, setHasAppAccess] = useState<boolean>(false);
   const [onboardingCompleted, setOnboardingCompleted] = useState<boolean>(false);
   const [profileChecked, setProfileChecked] = useState(false);
-  const isStatusActive = (status?: string | null) => {
-    const v = String(status ?? "").toLowerCase().trim();
-    return v === "active" || v === "trialing" || v === "paid";
-  };
+  const allowLocalProfileFallback = shouldAllowLocalProfileAccessFallback();
 
   // Intentos de re-check para darle tiempo al webhook
   const [refreshAttempts, setRefreshAttempts] = useState(0);
@@ -49,6 +48,13 @@ export default function PrivateLayout({ children }: PrivateLayoutProps) {
       router.replace("/signin");
     }
   }, [loading, user, router]);
+
+  useEffect(() => {
+    setRefreshAttempts(0);
+    setProfileChecked(false);
+    setHasAppAccess(false);
+    setOnboardingCompleted(false);
+  }, [user?.id]);
 
   useEffect(() => {
     if (!user || typeof window === "undefined") return;
@@ -84,73 +90,65 @@ export default function PrivateLayout({ children }: PrivateLayoutProps) {
     track();
   }, [user, pathname]);
 
-  /* 2) Leer perfil más reciente desde Supabase (tabla profiles) */
+  const refreshAccessState = useCallback(async () => {
+    if (!user) return null;
+    try {
+      const access = await fetchAccessStatus();
+      if (access) {
+        const status = String(access.profile?.subscriptionStatus ?? "").toLowerCase() || "pending";
+        const onboarding = Boolean(access.profile?.onboardingCompleted ?? false);
+        const canAccess = Boolean(access.hasAppAccess);
+
+        setHasAppAccess(canAccess);
+        setOnboardingCompleted(onboarding);
+        setProfileChecked(true);
+        return { status, onboarding, hasAccess: canAccess };
+      }
+
+      const metaStatus = String((user as any)?.user_metadata?.subscriptionStatus ?? "").toLowerCase();
+      const canAccess = allowLocalProfileFallback && isActiveProfileStatus(metaStatus);
+      setHasAppAccess(canAccess);
+      setOnboardingCompleted(false);
+      setProfileChecked(true);
+      return {
+        status: metaStatus || "pending",
+        onboarding: false,
+        hasAccess: canAccess,
+      };
+    } catch {
+      const metaStatus = String((user as any)?.user_metadata?.subscriptionStatus ?? "").toLowerCase();
+      const canAccess = allowLocalProfileFallback && isActiveProfileStatus(metaStatus);
+      setHasAppAccess(canAccess);
+      setOnboardingCompleted(false);
+      setProfileChecked(true);
+      return {
+        status: metaStatus || "pending",
+        onboarding: false,
+        hasAccess: canAccess,
+      };
+    }
+  }, [allowLocalProfileFallback, user]);
+
+  /* 2) Leer acceso + perfil más reciente */
   useEffect(() => {
     if (loading || !user) return;
+    refreshAccessState();
+  }, [loading, refreshAccessState, user]);
 
-    const fetchProfile = async () => {
-      const metaStatus = String((user as any)?.user_metadata?.subscriptionStatus ?? "").toLowerCase();
-      const { data, error } = await supabaseBrowser
-        .from("profiles")
-        .select("subscription_status, onboarding_completed")
-        .eq("id", user.id)
-        .maybeSingle();
-
-      const missingProfile = !data;
-      const hasError = !!error && (error as any)?.code !== "PGRST116";
-
-      if ((missingProfile || hasError) && typeof window !== "undefined") {
-        try {
-          const session = await supabaseBrowser.auth.getSession();
-          const token = session?.data?.session?.access_token;
-          if (token) {
-            await fetch("/api/profile/ensure", {
-              method: "POST",
-              headers: { Authorization: `Bearer ${token}` },
-            });
-          }
-        } catch {
-          // silent
-        }
-      }
-
-      if (missingProfile || hasError) {
-        setSubscriptionStatus(metaStatus || "pending");
-        setOnboardingCompleted(false);
-        setProfileChecked(true);
-        return;
-      }
-
-      const status =
-        ((data.subscription_status as string | undefined) ?? metaStatus) || "pending";
-      const onboarding =
-        (data.onboarding_completed as boolean | undefined) ?? false;
-
-      setSubscriptionStatus(status);
-      setOnboardingCompleted(onboarding);
-      setProfileChecked(true);
-    };
-
-    fetchProfile();
-  }, [loading, user]);
-
-  /* 3) Profile checker + gating: suscripción */
+  /* 3) Access checker + gating */
   useEffect(() => {
     if (loading || !user || !profileChecked) return;
 
-    const metaStatus = String((user as any)?.user_metadata?.subscriptionStatus ?? "").toLowerCase();
-    const effectiveStatus = subscriptionStatus || metaStatus;
-    const isActive = isStatusActive(effectiveStatus);
     const isOnAllowedRoute = ALLOW_WITHOUT_ACTIVE_SUB.some((p) =>
       pathname.startsWith(p)
     );
 
     // Si la suscripción está activa → continuar
-    if (isActive) return;
+    if (hasAppAccess) return;
 
     // Si NO está activa pero estamos en una ruta que se permite sin sub activa,
     // no hacemos nada (ej. /billing, /billing/success, etc.)
-    if (!isActive && isOnAllowedRoute) {
+    if (!hasAppAccess && isOnAllowedRoute) {
       return;
     }
 
@@ -158,22 +156,7 @@ export default function PrivateLayout({ children }: PrivateLayoutProps) {
     // Damos chance al webhook: re-check del perfil con pequeños delays.
     if (refreshAttempts < MAX_REFRESH_ATTEMPTS) {
       const timer = setTimeout(async () => {
-        const { data, error } = await supabaseBrowser
-          .from("profiles")
-          .select("subscription_status, onboarding_completed")
-          .eq("id", user.id)
-          .maybeSingle();
-
-        if (!error && data) {
-          const status =
-            (data.subscription_status as string | undefined) ?? "pending";
-          const onboarding =
-            (data.onboarding_completed as boolean | undefined) ?? false;
-
-          setSubscriptionStatus(status);
-          setOnboardingCompleted(onboarding);
-        }
-
+        await refreshAccessState();
         setRefreshAttempts((prev) => prev + 1);
       }, 2000); // 2s entre intentos
 
@@ -181,24 +164,22 @@ export default function PrivateLayout({ children }: PrivateLayoutProps) {
     }
 
     // Si ya intentamos varias veces y sigue sin estar activa → mandar a /billing/complete
-    if (!isActive && refreshAttempts >= MAX_REFRESH_ATTEMPTS) {
+    if (!hasAppAccess && refreshAttempts >= MAX_REFRESH_ATTEMPTS) {
       router.replace("/billing/complete");
     }
   }, [
+    hasAppAccess,
     loading,
-    user,
     profileChecked,
-    subscriptionStatus,
-    onboardingCompleted,
     pathname,
+    refreshAccessState,
     router,
     refreshAttempts,
+    user,
   ]);
 
   const userId: string | null = user?.id ?? null;
-  const metaStatus = String((user as any)?.user_metadata?.subscriptionStatus ?? "").toLowerCase();
-  const effectiveStatus = subscriptionStatus || metaStatus;
-  const isActive = isStatusActive(effectiveStatus);
+  const isActive = hasAppAccess;
   const isOnAllowedRoute = ALLOW_WITHOUT_ACTIVE_SUB.some((p) =>
     pathname.startsWith(p)
   );
@@ -238,11 +219,10 @@ export default function PrivateLayout({ children }: PrivateLayoutProps) {
         <div className="min-h-screen bg-slate-950 text-slate-50 flex flex-col items-center justify-center">
           <div className="px-6 py-4 rounded-xl border border-emerald-400/60 bg-slate-900/80 shadow-lg max-w-sm text-center">
             <p className="text-sm font-semibold text-emerald-300 mb-1">
-              Verifying your subscription…
+              Verifying your access…
             </p>
             <p className="text-[11px] text-slate-300">
-              We’re confirming your payment with Stripe. This usually takes just
-              a few seconds.
+              We’re syncing your access status. This usually takes just a few seconds.
             </p>
           </div>
         </div>

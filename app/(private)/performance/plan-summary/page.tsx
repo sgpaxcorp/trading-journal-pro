@@ -22,11 +22,15 @@ import {
 } from "@/lib/cashflowsSupabase";
 
 import {
-  computeAdjustedTarget,
   getGrowthPlanSupabaseByAccount,
   upsertGrowthPlanSupabase,
   type GrowthPlan,
 } from "@/lib/growthPlanSupabase";
+import {
+  getTakenPlannedWithdrawalAmount,
+  getTotalPlannedWithdrawalAmount,
+  normalizePlannedWithdrawals,
+} from "@/lib/growthPlanProjection";
 
 type PlannedWithdrawal = NonNullable<GrowthPlan["plannedWithdrawals"]>[number];
 
@@ -67,18 +71,6 @@ function daysBetween(a: string, b: string): number {
   const db = new Date(`${b}T00:00:00Z`);
   if (Number.isNaN(da.getTime()) || Number.isNaN(db.getTime())) return 0;
   return Math.max(0, Math.ceil((db.getTime() - da.getTime()) / (1000 * 60 * 60 * 24)));
-}
-
-function normalizeWithdrawals(rows: PlannedWithdrawal[] | null | undefined): PlannedWithdrawal[] {
-  const list = Array.isArray(rows) ? rows : [];
-  return list.map((item) => ({
-    id: item.id || crypto.randomUUID(),
-    targetEquity: Math.max(0, toNum(item.targetEquity, 0)),
-    amount: Math.max(0, toNum(item.amount, 0)),
-    status: item.status ?? "pending",
-    achievedAt: item.achievedAt ?? null,
-    decidedAt: item.decidedAt ?? null,
-  }));
 }
 
 function normalizePhases(rows: Array<any> | null | undefined) {
@@ -169,21 +161,24 @@ export default function PlanSummaryPage() {
   }, [plan, totalTradingPnl]);
 
   const accountEquity = useMemo(() => tradingEquity + cashflowNet, [tradingEquity, cashflowNet]);
-
-  const adjustedTarget = useMemo(
-    () => computeAdjustedTarget(plan, cashflowNet),
-    [plan, cashflowNet]
+  const targetEquity = useMemo(() => Math.max(0, toNum(plan?.targetBalance, 0)), [plan]);
+  const withdrawals = useMemo(() => normalizePlannedWithdrawals(plan?.plannedWithdrawals), [plan]);
+  const totalPlannedWithdrawal = useMemo(() => getTotalPlannedWithdrawalAmount(withdrawals), [withdrawals]);
+  const takenPlannedWithdrawal = useMemo(() => getTakenPlannedWithdrawalAmount(withdrawals), [withdrawals]);
+  const totalWealthProduced = useMemo(
+    () => accountEquity + takenPlannedWithdrawal,
+    [accountEquity, takenPlannedWithdrawal]
   );
 
   const progressPct = useMemo(() => {
-    if (!adjustedTarget || adjustedTarget <= 0) return 0;
-    return Math.max(0, Math.min(1.25, accountEquity / adjustedTarget));
-  }, [accountEquity, adjustedTarget]);
+    if (!targetEquity || targetEquity <= 0) return 0;
+    return Math.max(0, Math.min(1.25, accountEquity / targetEquity));
+  }, [accountEquity, targetEquity]);
 
   const remainingToTarget = useMemo(() => {
-    if (!adjustedTarget) return 0;
-    return Math.max(0, adjustedTarget - accountEquity);
-  }, [adjustedTarget, accountEquity]);
+    if (!targetEquity) return 0;
+    return Math.max(0, targetEquity - accountEquity);
+  }, [accountEquity, targetEquity]);
 
   const planStyleLabel = useMemo(() => {
     if (!plan?.planStyle) return L("Balanced", "Balanceado");
@@ -240,11 +235,11 @@ export default function PlanSummaryPage() {
   const monthlyTarget = monthsRemaining > 0 ? remainingToTarget / monthsRemaining : 0;
   const weeklyTarget = daysRemaining > 0 ? remainingToTarget / (daysRemaining / 7) : 0;
 
-  const withdrawals = useMemo(() => normalizeWithdrawals(plan?.plannedWithdrawals), [plan]);
   const reachedPending = useMemo(() => {
     return withdrawals.find(
       (w) =>
-        (w.status ?? "pending") === "pending" && accountEquity >= (w.targetEquity || 0)
+        (w.status ?? "pending") === "pending" &&
+        accountEquity >= (w.projectedEquityBeforeWithdrawal ?? w.targetEquity ?? 0)
     );
   }, [withdrawals, accountEquity]);
 
@@ -282,7 +277,12 @@ export default function PlanSummaryPage() {
           date: isoToday(),
           type: "withdrawal",
           amount: Math.abs(item.amount),
-          note: "Planned withdrawal",
+          note: item.periodLabel
+            ? `Planned withdrawal · ${item.periodLabel}`
+            : "Planned withdrawal",
+          reasonCode: "profit_distribution",
+          sourceModule: "growth_plan",
+          linkedPlanWithdrawalId: item.id,
         });
       }
       await updateWithdrawalStatus(item.id, "taken");
@@ -383,7 +383,25 @@ export default function PlanSummaryPage() {
                       <span className="font-semibold text-amber-200">
                         {currency(reachedPending.amount, localeTag)}
                       </span>{" "}
-                      @ {currency(reachedPending.targetEquity, localeTag)} {L("equity", "equity")}.
+                      {L("at", "en")}{" "}
+                      {currency(
+                        reachedPending.projectedEquityBeforeWithdrawal ?? reachedPending.targetEquity,
+                        localeTag
+                      )}{" "}
+                      {L("equity", "equity")}
+                      {reachedPending.periodLabel ? (
+                        <>
+                          {" "}
+                          · <span className="text-slate-300">{reachedPending.periodLabel}</span>
+                        </>
+                      ) : null}
+                      {reachedPending.plannedDate ? (
+                        <>
+                          {" "}
+                          · <span className="text-slate-400">{formatDate(reachedPending.plannedDate)}</span>
+                        </>
+                      ) : null}
+                      .
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
@@ -428,12 +446,18 @@ export default function PlanSummaryPage() {
                   {L("Target", "Meta")}
                 </div>
                 <div className="mt-1 text-2xl font-semibold">
-                  {currency(adjustedTarget || plan.targetBalance || 0, localeTag)}
+                  {currency(targetEquity || 0, localeTag)}
                 </div>
                 <div className="mt-1 text-xs text-slate-400">
                   {L("Target date:", "Fecha meta:")}{" "}
                   <span className="text-slate-200">{formatDate(targetDate)}</span>
                 </div>
+                {totalPlannedWithdrawal > 0 ? (
+                  <div className="mt-1 text-xs text-slate-500">
+                    {L("Planned withdrawals:", "Retiros planificados:")}{" "}
+                    <span className="text-sky-300">{currency(totalPlannedWithdrawal, localeTag)}</span>
+                  </div>
+                ) : null}
                 {plan.targetMultiple ? (
                   <div className="mt-1 text-xs text-slate-500">
                     {L("Target multiple:", "Multiplicador:")}{" "}
@@ -473,6 +497,12 @@ export default function PlanSummaryPage() {
                   {L("Remaining:", "Restante:")}{" "}
                   <span className="text-slate-200">{currency(remainingToTarget, localeTag)}</span>
                 </div>
+                {takenPlannedWithdrawal > 0 ? (
+                  <div className="mt-1 text-xs text-slate-500">
+                    {L("Wealth produced incl. taken withdrawals:", "Capital producido incl. retiros tomados:")}{" "}
+                    <span className="text-slate-200">{currency(totalWealthProduced, localeTag)}</span>
+                  </div>
+                ) : null}
               </div>
             </section>
 
@@ -508,6 +538,18 @@ export default function PlanSummaryPage() {
                   <div className="flex justify-between gap-3">
                     <span className="text-slate-400">{L("Loss days/week", "Días pérdida/sem")}</span>
                     <span className="font-semibold">{plan.lossDaysPerWeek ?? 0}</span>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <span className="text-slate-400">{L("Planned withdrawals", "Retiros planificados")}</span>
+                    <span className="font-semibold">
+                      {withdrawals.length > 0 ? currency(totalPlannedWithdrawal, localeTag) : "—"}
+                    </span>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <span className="text-slate-400">{L("Taken so far", "Tomados hasta ahora")}</span>
+                    <span className="font-semibold">
+                      {takenPlannedWithdrawal > 0 ? currency(takenPlannedWithdrawal, localeTag) : "—"}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -601,7 +643,9 @@ export default function PlanSummaryPage() {
                       <div>
                         <div className="text-sm text-slate-200">
                           {currency(w.amount, localeTag)} {L("at", "a")}{" "}
-                          <span className="text-emerald-300">{currency(w.targetEquity, localeTag)}</span>
+                          <span className="text-emerald-300">
+                            {currency(w.projectedEquityBeforeWithdrawal ?? w.targetEquity, localeTag)}
+                          </span>
                         </div>
                         <div className="text-xs text-slate-500">
                           {L("Status", "Estado")}:{" "}
@@ -613,8 +657,25 @@ export default function PlanSummaryPage() {
                                 : L("Pending", "Pendiente")}
                           </span>
                         </div>
+                        <div className="mt-1 text-xs text-slate-500">
+                          {w.periodLabel ? (
+                            <span className="text-slate-300">{w.periodLabel}</span>
+                          ) : null}
+                          {w.plannedDate ? (
+                            <span className="ml-2">{L("Planned date", "Fecha planificada")}: <span className="text-slate-300">{formatDate(w.plannedDate)}</span></span>
+                          ) : null}
+                        </div>
+                        {w.projectedEquityAfterWithdrawal != null ? (
+                          <div className="text-xs text-slate-500">
+                            {L("Projected equity after withdrawal", "Equity proyectado después del retiro")}:{" "}
+                            <span className="text-slate-300">
+                              {currency(w.projectedEquityAfterWithdrawal, localeTag)}
+                            </span>
+                          </div>
+                        ) : null}
                       </div>
-                      {(w.status ?? "pending") === "pending" && accountEquity >= w.targetEquity ? (
+                      {(w.status ?? "pending") === "pending" &&
+                      accountEquity >= (w.projectedEquityBeforeWithdrawal ?? w.targetEquity) ? (
                         <div className="flex items-center gap-2">
                           <button
                             type="button"

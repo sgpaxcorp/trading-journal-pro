@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
+import { PLATFORM_ACCESS_ENTITLEMENT } from "@/lib/accessControl";
 
 function parseAdminEmails(envValue?: string | null) {
   return (envValue || "")
@@ -74,9 +75,10 @@ export async function GET(req: NextRequest) {
       await Promise.all([
       supabaseAdmin.from("profiles").select("id", { count: "exact", head: true }),
       supabaseAdmin
-        .from("profiles")
+        .from("user_entitlements")
         .select("id", { count: "exact", head: true })
-        .eq("subscription_status", "active"),
+        .eq("entitlement_key", PLATFORM_ACCESS_ENTITLEMENT)
+        .in("status", ["active", "trialing"]),
       supabaseAdmin
         .from("profiles")
         .select("id, created_at")

@@ -4,21 +4,18 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { supabaseBrowser } from "@/lib/supaBaseClient";
+import { shouldAllowLocalProfileAccessFallback } from "@/lib/accessControl";
+import { listMyEntitlements } from "@/lib/entitlementsSupabase";
+import { normalizePlanTier, planFromEntitlements, type AppPlan } from "@/lib/planAccess";
 
-export type UserPlan = "core" | "advanced" | "none";
-
-function normalizePlan(raw: unknown): UserPlan {
-  const v = String(raw ?? "").toLowerCase();
-  if (v === "advanced" || v === "pro") return "advanced";
-  if (v === "core") return "core";
-  return "none";
-}
+export type UserPlan = AppPlan;
 
 export function useUserPlan() {
   const { user, loading: authLoading } = useAuth() as any;
   const [plan, setPlan] = useState<UserPlan>("none");
   const [status, setStatus] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const allowLocalProfileFallback = shouldAllowLocalProfileAccessFallback();
 
   useEffect(() => {
     if (authLoading) return;
@@ -34,19 +31,28 @@ export function useUserPlan() {
     async function loadPlan() {
       setLoading(true);
       try {
-        const { data } = await supabaseBrowser
+        const [{ data }, entitlements] = await Promise.all([
+          supabaseBrowser
           .from("profiles")
           .select("plan, subscription_status")
           .eq("id", user.id)
-          .maybeSingle();
+          .maybeSingle(),
+          listMyEntitlements(user.id),
+        ]);
 
-        const dbPlan = normalizePlan((data as any)?.plan);
-        const metaPlan = normalizePlan(
+        const entitlementPlan = planFromEntitlements(entitlements);
+        const dbPlan = normalizePlanTier((data as any)?.plan);
+        const metaPlan = normalizePlanTier(
           (user as any)?.plan ||
             (user as any)?.subscriptionPlan ||
             (user as any)?.user_metadata?.plan
         );
-        const finalPlan = dbPlan !== "none" ? dbPlan : metaPlan;
+        const finalPlan =
+          entitlementPlan !== "none"
+            ? entitlementPlan
+            : allowLocalProfileFallback && dbPlan !== "none"
+            ? dbPlan
+            : metaPlan;
 
         if (!cancelled) {
           setPlan(finalPlan);
@@ -67,7 +73,7 @@ export function useUserPlan() {
     return () => {
       cancelled = true;
     };
-  }, [authLoading, user?.id]);
+  }, [allowLocalProfileFallback, authLoading, user?.id]);
 
   return { plan, status, loading };
 }

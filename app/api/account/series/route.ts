@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
+import {
+  buildPlanProjection,
+  normalizePlannedWithdrawals,
+  normalizeWithdrawalSettings,
+} from "@/lib/growthPlanProjection";
 
 export const runtime = "nodejs";
 
@@ -13,6 +18,32 @@ type CashflowRow = {
 };
 
 type SeriesPoint = { date: string; value: number };
+
+type GrowthPlanRow = {
+  starting_balance?: number;
+  target_balance?: number;
+  daily_target_pct?: number;
+  daily_goal_percent?: number;
+  loss_days_per_week?: number;
+  loss_day?: number;
+  loss_days?: number;
+  loss_day_per_week?: number;
+  lossDaysPerWeek?: number;
+  trading_days?: number;
+  max_daily_loss_percent?: number;
+  created_at?: string;
+  updated_at?: string;
+  target_date?: string;
+  targetDate?: string;
+  plan_mode?: string;
+  planMode?: string;
+  plan_phases?: unknown;
+  planPhases?: unknown;
+  plan_start_date?: string | null;
+  planned_withdrawal_settings?: unknown;
+  planned_withdrawals?: unknown;
+  steps?: unknown;
+};
 
 function isoDate(d: Date): string {
   const y = d.getFullYear();
@@ -124,6 +155,62 @@ async function queryCashflows(table: string, userId: string, accountId?: string 
   return { data: (data ?? []) as any[], error };
 }
 
+async function queryGrowthPlanTable(table: string, userId: string, accountId?: string | null) {
+  let q = supabaseAdmin
+    .from(table)
+    .select(
+      "starting_balance,target_balance,daily_target_pct,daily_goal_percent,loss_days_per_week,trading_days,max_daily_loss_percent,created_at,updated_at,target_date,plan_mode,plan_phases,plan_start_date,planned_withdrawal_settings,planned_withdrawals,steps"
+    )
+    .eq("user_id", userId)
+    .order("updated_at", { ascending: false })
+    .order("created_at", { ascending: false })
+    .limit(1);
+  if (accountId) {
+    q = q.eq("account_id", accountId);
+  }
+  let { data, error } = await q;
+
+  if (error && accountId && isMissingColumnError(error, "account_id")) {
+    const retry = await supabaseAdmin
+      .from(table)
+      .select(
+        "starting_balance,target_balance,daily_target_pct,daily_goal_percent,loss_days_per_week,trading_days,max_daily_loss_percent,created_at,updated_at,target_date,plan_mode,plan_phases,plan_start_date,planned_withdrawal_settings,planned_withdrawals,steps"
+      )
+      .eq("user_id", userId)
+      .order("updated_at", { ascending: false })
+      .order("created_at", { ascending: false })
+      .limit(1);
+    data = (retry.data ?? null) as any;
+    error = retry.error;
+  }
+
+  return { data: (data ?? []) as GrowthPlanRow[], error };
+}
+
+async function getGrowthPlanRow(
+  userId: string,
+  email?: string | null,
+  accountId?: string | null
+): Promise<GrowthPlanRow | null> {
+  const tables = ["growth_plans", "ntj_growth_plans"];
+
+  for (const table of tables) {
+    const primary = await queryGrowthPlanTable(table, userId, accountId);
+    if (primary.error && primary.error.code !== "42P01") throw primary.error;
+    if (primary.data.length > 0) return primary.data[0] ?? null;
+  }
+
+  if (!email) return null;
+
+  for (const table of tables) {
+    const fallback = await queryGrowthPlanTable(table, email, accountId);
+    if (fallback.error && fallback.error.code !== "42P01") throw fallback.error;
+    if (fallback.data.length > 0) return fallback.data[0] ?? null;
+  }
+
+  return null;
+}
+
 async function listCashflowsForUser(
   userId: string,
   email?: string | null,
@@ -225,35 +312,7 @@ export async function GET(req: NextRequest) {
       .eq("user_id", userId)
       .maybeSingle();
     const accountId = requestedAccountId || (pref as any)?.active_account_id || null;
-    let planQuery = supabaseAdmin
-      .from("growth_plans")
-      .select(
-        "starting_balance,target_balance,daily_target_pct,daily_goal_percent,loss_days_per_week,trading_days,created_at,updated_at,target_date,plan_mode,plan_phases"
-      )
-      .eq("user_id", userId)
-      .order("updated_at", { ascending: false })
-      .order("created_at", { ascending: false })
-      .limit(1);
-    if (accountId) planQuery = planQuery.eq("account_id", accountId);
-    let { data: planRows, error: planErr } = await planQuery;
-
-    if (planErr && accountId && isMissingColumnError(planErr, "account_id")) {
-      const retry = await supabaseAdmin
-        .from("growth_plans")
-        .select(
-          "starting_balance,target_balance,daily_target_pct,daily_goal_percent,loss_days_per_week,trading_days,created_at,updated_at,target_date,plan_mode,plan_phases"
-        )
-        .eq("user_id", userId)
-        .order("updated_at", { ascending: false })
-        .order("created_at", { ascending: false })
-        .limit(1);
-      planRows = retry.data as any[] | null;
-      planErr = retry.error;
-    }
-
-    if (planErr) throw planErr;
-
-    const plan = (planRows ?? [])[0] as any | undefined;
+    const plan = await getGrowthPlanRow(userId, email, accountId);
     const startingBalance = toNum(plan?.starting_balance ?? 0, 0);
     const targetBalance = toNum(plan?.target_balance ?? 0, 0);
     const dailyTargetPct = toNum(plan?.daily_target_pct ?? plan?.daily_goal_percent ?? 0, 0);
@@ -267,10 +326,24 @@ export async function GET(req: NextRequest) {
     const lossDaysPerWeek = Math.max(0, Math.min(5, Math.floor(toNum(lossDaysRaw, 0))));
 
     const planStartIso = (() => {
+      const explicit = String(plan?.plan_start_date ?? "");
+      if (explicit && explicit.length >= 10) return explicit.slice(0, 10);
       const raw = String(plan?.created_at ?? plan?.updated_at ?? "");
       if (raw && raw.length >= 10) return raw.slice(0, 10);
       return "";
     })();
+    const targetDateIso = String(plan?.target_date ?? plan?.targetDate ?? "").slice(0, 10);
+    const plannedWithdrawals = normalizePlannedWithdrawals(plan?.planned_withdrawals ?? []);
+    const plannedWithdrawalSettings =
+      normalizeWithdrawalSettings(plan?.planned_withdrawal_settings) ??
+      (plannedWithdrawals.length
+        ? {
+            enabled: true,
+            frequency: plannedWithdrawals[0]?.frequency ?? "monthly",
+            amount: plannedWithdrawals[0]?.amount ?? 0,
+            startPeriodIndex: plannedWithdrawals[0]?.periodIndex ?? 1,
+          }
+        : null);
 
     const journalRows = await listJournalEntries(userId, email, accountId);
     const cashflows = await listCashflowsForUser(userId, email, accountId);
@@ -324,22 +397,48 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // Build projected series (trading days only + cashflow neutralization)
-    let projBalance = startingBalance;
-    let tradingIdx = 0;
     const projected: SeriesPoint[] = [];
 
-    for (const d of dateList) {
-      const dayCash = cashByDate[d] ?? 0;
-      if (dayCash !== 0) projBalance += dayCash;
+    const canProjectWithPlan =
+      startingBalance > 0 &&
+      targetBalance > 0 &&
+      !!planStartIso &&
+      !!targetDateIso;
 
-      if (isWeekday(d) && dailyTargetPct > 0) {
-        const isLossDay = lossDaysPerWeek > 0 && (tradingIdx % 5) < lossDaysPerWeek;
-        const r = dailyTargetPct / 100;
-        projBalance = projBalance * (1 + (isLossDay ? -r : r));
-        tradingIdx += 1;
+    if (canProjectWithPlan) {
+      const projection = buildPlanProjection({
+        starting: startingBalance,
+        target: targetBalance,
+        startIso: planStartIso,
+        targetIso: targetDateIso,
+        lossDaysPerWeek,
+        maxDailyLossPercent: toNum(plan?.max_daily_loss_percent ?? 0, 0),
+        withdrawalSettings: plannedWithdrawalSettings,
+        existingWithdrawals: plannedWithdrawals,
+      });
+      const projectedByDate = new Map(projection.rows.map((row) => [row.isoDate, row.endBalance]));
+      let lastValue = startingBalance;
+      for (const d of dateList) {
+        if (projectedByDate.has(d)) {
+          lastValue = Number((projectedByDate.get(d) ?? lastValue).toFixed(2));
+        }
+        projected.push({ date: d, value: Number(lastValue.toFixed(2)) });
       }
-      projected.push({ date: d, value: Number(projBalance.toFixed(2)) });
+    } else {
+      let projBalance = startingBalance;
+      let tradingIdx = 0;
+      for (const d of dateList) {
+        const dayCash = cashByDate[d] ?? 0;
+        if (dayCash !== 0) projBalance += dayCash;
+
+        if (isWeekday(d) && dailyTargetPct > 0) {
+          const isLossDay = lossDaysPerWeek > 0 && (tradingIdx % 5) < lossDaysPerWeek;
+          const r = dailyTargetPct / 100;
+          projBalance = projBalance * (1 + (isLossDay ? -r : r));
+          tradingIdx += 1;
+        }
+        projected.push({ date: d, value: Number(projBalance.toFixed(2)) });
+      }
     }
 
     const totalTradingPnl = cumPnl;
@@ -350,11 +449,16 @@ export async function GET(req: NextRequest) {
       plan: {
         startingBalance,
         targetBalance,
+        adjustedTargetBalance: Number(targetBalance.toFixed(2)),
         dailyTargetPct,
         planStartIso: startIso,
         targetDate: String(plan?.target_date ?? plan?.targetDate ?? ""),
         planMode: String(plan?.plan_mode ?? plan?.planMode ?? ""),
         planPhases: plan?.plan_phases ?? plan?.planPhases ?? null,
+        lossDaysPerWeek,
+        tradingDays: toNum(plan?.trading_days ?? 0, 0),
+        maxDailyLossPercent: toNum(plan?.max_daily_loss_percent ?? 0, 0),
+        steps: plan?.steps ?? null,
       },
       totals: {
         tradingPnl: Number(totalTradingPnl.toFixed(2)),

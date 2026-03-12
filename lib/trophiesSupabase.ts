@@ -1,9 +1,16 @@
 import { supabaseBrowser } from "@/lib/supaBaseClient";
+import {
+  applyCounterAliases,
+  computeBestStreak,
+  describeTrophyUnlock,
+  normalizeRuleKey,
+  normalizeRuleOp,
+  type TrophyRuleOp,
+} from "@/lib/trophyCatalog";
 
 const LOG = "[trophiesSupabase]";
 
 export type TrophyTier = "Bronze" | "Silver" | "Gold" | "Elite";
-export type TrophyRuleOp = "gte" | "eq" | "lte";
 
 export type TrophyDefinition = {
   id: string;
@@ -40,9 +47,6 @@ export type PublicUserTrophy = {
   earned_at: string | null;
 };
 
-// Back-compat alias (older code referred to earned trophies as "EarnedTrophy")
-type EarnedTrophy = PublicUserTrophy;
-
 export type PublicLeaderboardRow = {
   rank?: number;
   user_id: string;
@@ -75,85 +79,6 @@ const TIER_ICON_MAP: Record<string, string> = {
   bronze: "/Bronze_Trophy.svg",
 };
 
-function normalizeRuleKey(raw: unknown): string {
-  return String(raw ?? "")
-    .trim()
-    .toLowerCase()
-    .replace(/[\s-]+/g, "_")
-    .replace(/[^a-z0-9_]/g, "");
-}
-
-function normalizeRuleOp(raw: unknown): TrophyRuleOp {
-  const op = String(raw ?? "").trim().toLowerCase();
-  if (op === "eq" || op === "=") return "eq";
-  if (op === "lte" || op === "<=") return "lte";
-  return "gte";
-}
-
-const COUNTER_ALIASES: Record<string, string[]> = {
-  plan_created: [
-    "growth_plan_created",
-    "growth_plan_saved",
-    "growth_plan_complete",
-    "growth_plan_completed",
-    "growth_plan_uploaded",
-    "growth_plan_upload",
-    "growth_plan_done",
-    "plan_created",
-    "plan_saved",
-    "plan_complete",
-    "plan_completed",
-    "plan_uploaded",
-    "plan_upload",
-    "plan_done",
-  ],
-  days_logged: [
-    "journal_days",
-    "journaling_days",
-    "days_in_journal",
-    "days_traded",
-    "trading_days",
-    "trading_days_logged",
-    "journal_entries",
-    "journal_days_logged",
-    "days_journaled",
-  ],
-  best_streak: [
-    "journal_streak",
-    "streak",
-    "streak_best",
-    "best_streak_days",
-    "longest_streak",
-    "streak_days",
-  ],
-  challenges_completed: [
-    "challenge_completed",
-    "completed_challenges",
-    "challenges_done",
-    "challenges_finished",
-  ],
-};
-
-function applyCounterAliases(input: Record<string, number>): Record<string, number> {
-  const out: Record<string, number> = { ...input };
-
-  for (const [base, aliases] of Object.entries(COUNTER_ALIASES)) {
-    const baseKey = normalizeRuleKey(base);
-    const baseValue = Number(out[baseKey] ?? out[base] ?? 0);
-
-    out[baseKey] = baseValue;
-    out[base] = baseValue;
-
-    for (const alias of aliases) {
-      const key = normalizeRuleKey(alias);
-      if (out[key] == null) out[key] = baseValue;
-      if (out[alias] == null) out[alias] = baseValue;
-    }
-  }
-
-  return out;
-}
-
 export function tierIconPath(tier?: TrophyTier | string | null): string {
   const t = String(tier ?? "bronze").toLowerCase();
   return TIER_ICON_MAP[t] ?? "/Bronze_Trophy.svg";
@@ -174,20 +99,7 @@ export function getLevelFromXp(xp: number): number {
 }
 
 export function describeUnlock(def: TrophyDefinition): string {
-  const v = Number(def.rule_value || 0);
-
-  switch (def.rule_key) {
-    case "days_logged":
-      return `Log ${v} trading day${v === 1 ? "" : "s"} in your journal.`;
-    case "best_streak":
-      return `Reach a journaling streak of ${v} day${v === 1 ? "" : "s"}.`;
-    case "plan_created":
-      return "Create your Growth Plan.";
-    case "challenges_completed":
-      return `Complete ${v} challenge${v === 1 ? "" : "s"}.`;
-    default:
-      return def.description;
-  }
+  return describeTrophyUnlock(def.rule_key, def.rule_value, def.description);
 }
 
 /**
@@ -615,22 +527,86 @@ async function getUserTrophyCounters(userId: string): Promise<Record<string, num
 
   // Challenges completed
   const { data: completedChallenges, error: chErr } = await supabaseBrowser
-    .from("challenge_progress")
-    .select("challenge_id")
+    .from("challenge_runs")
+    .select("id")
     .eq("user_id", userId)
     .eq("status", "completed");
 
   if (chErr) {
-    console.warn("[Trophies] challenge_progress query failed:", chErr);
+    console.warn("[Trophies] challenge_runs query failed:", chErr);
   }
 
   const challenges_completed = (completedChallenges ?? []).length;
+
+  let daily_goal_reached = 0;
+  let weekly_goal_reached = 0;
+  let monthly_goal_reached = 0;
+  let quarterly_goal_reached = 0;
+
+  try {
+    const { data: goalDeliveries, error: goalErr } = await supabaseBrowser
+      .from("goal_achievement_deliveries")
+      .select("goal_scope, period_key")
+      .eq("user_id", userId)
+      .eq("channel", "inapp");
+
+    if (goalErr) {
+      console.warn("[Trophies] goal_achievement_deliveries query failed:", goalErr);
+    } else {
+      const scopes = {
+        day: new Set<string>(),
+        week: new Set<string>(),
+        month: new Set<string>(),
+        quarter: new Set<string>(),
+      };
+
+      for (const row of goalDeliveries ?? []) {
+        const scope = String((row as any)?.goal_scope ?? "").trim();
+        const periodKey = String((row as any)?.period_key ?? "").trim();
+        if (!periodKey) continue;
+        if (scope === "day" || scope === "week" || scope === "month" || scope === "quarter") {
+          scopes[scope].add(periodKey);
+        }
+      }
+
+      daily_goal_reached = scopes.day.size;
+      weekly_goal_reached = scopes.week.size;
+      monthly_goal_reached = scopes.month.size;
+      quarterly_goal_reached = scopes.quarter.size;
+    }
+  } catch {
+    // ignore
+  }
+
+  if (daily_goal_reached === 0) {
+    try {
+      const { data: snapshotDays, error: snapshotErr } = await supabaseBrowser
+        .from("daily_snapshots")
+        .select("date")
+        .eq("user_id", userId)
+        .eq("goal_met", true);
+
+      if (snapshotErr) {
+        console.warn("[Trophies] daily_snapshots query failed:", snapshotErr);
+      } else {
+        daily_goal_reached = new Set(
+          (snapshotDays ?? []).map((row: any) => String(row?.date ?? "")).filter(Boolean)
+        ).size;
+      }
+    } catch {
+      // ignore
+    }
+  }
 
   const counters = {
     days_logged,
     best_streak,
     plan_created,
     challenges_completed,
+    daily_goal_reached,
+    weekly_goal_reached,
+    monthly_goal_reached,
+    quarterly_goal_reached,
     // aliases for different rule keys used across deployments
     growth_plan_created: plan_created,
     growth_plan: plan_created,
@@ -641,34 +617,4 @@ async function getUserTrophyCounters(userId: string): Promise<Record<string, num
   };
 
   return applyCounterAliases(counters);
-}
-
-function computeBestStreak(sortedDates: string[]): number {
-  if (!sortedDates.length) return 0;
-
-  const toDay = (s: string) => {
-    // s is YYYY-MM-DD
-    const [y, m, d] = s.split("-").map((x) => parseInt(x, 10));
-    // Use UTC to avoid timezone drift
-    return Date.UTC(y, (m || 1) - 1, d || 1) / 86400000;
-  };
-
-  const days = sortedDates.map(toDay);
-
-  let best = 1;
-  let cur = 1;
-
-  for (let i = 1; i < days.length; i++) {
-    if (days[i] === days[i - 1] + 1) {
-      cur += 1;
-      best = Math.max(best, cur);
-    } else if (days[i] === days[i - 1]) {
-      // same day (duplicate) — ignore
-      continue;
-    } else {
-      cur = 1;
-    }
-  }
-
-  return best;
 }

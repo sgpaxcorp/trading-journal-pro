@@ -119,9 +119,60 @@ async function readCachedGamificationFromDb(userId: string): Promise<ProfileGami
   }
 }
 
+async function computeChallengeXpTotal(userId: string): Promise<number> {
+  try {
+    const { data, error } = await supabaseBrowser
+      .from("challenge_runs")
+      .select("xp_earned")
+      .eq("user_id", userId);
+
+    if (error) {
+      console.error(LOG, "computeChallengeXpTotal error:", error);
+      return 0;
+    }
+
+    return (data ?? []).reduce((sum, row: any) => {
+      const xp = toNum(row?.xp_earned, 0);
+      return sum + xp;
+    }, 0);
+  } catch (e) {
+    console.error(LOG, "computeChallengeXpTotal exception:", e);
+    return 0;
+  }
+}
+
+async function computeTrophyXpTotal(userId: string): Promise<number> {
+  try {
+    const { data, error } = await supabaseBrowser
+      .from("user_trophies")
+      .select("trophy_id, trophy_definitions(xp)")
+      .eq("user_id", userId);
+
+    if (error) {
+      console.error(LOG, "computeTrophyXpTotal error:", error);
+      return 0;
+    }
+
+    const seen = new Set<string>();
+    let total = 0;
+
+    for (const row of data ?? []) {
+      const trophyId = String((row as any)?.trophy_id ?? "").trim();
+      if (!trophyId || seen.has(trophyId)) continue;
+      seen.add(trophyId);
+      total += toNum((row as any)?.trophy_definitions?.xp, 0);
+    }
+
+    return total;
+  } catch (e) {
+    console.error(LOG, "computeTrophyXpTotal exception:", e);
+    return 0;
+  }
+}
+
 /**
  * Read-only gamification snapshot for the profile.
- * ✅ Derived from challenge_progress (Supabase).
+ * ✅ Derived from challenge_runs + user_trophies (Supabase).
  * ✅ Optional: sync cached snapshot into profile_gamification.
  * ✅ Optional: fallback to cached snapshot if challenge_progress is empty.
  */
@@ -142,7 +193,12 @@ export async function getProfileGamification(
     if (cached) return cached;
   }
 
-  const xp = (progress || []).reduce((sum, p) => sum + toNum((p as any)?.xpEarned, 0), 0);
+  const [challengeXp, trophyXp] = await Promise.all([
+    computeChallengeXpTotal(userId),
+    computeTrophyXpTotal(userId),
+  ]);
+
+  const xp = challengeXp + trophyXp;
   const level = computeLevelFromXp(xp);
   const tier = computeTierFromLevel(level);
   const badges = computeBadges(progress || []);

@@ -22,6 +22,16 @@ import {
   getGrowthPlanSupabaseByAccount,
   upsertGrowthPlanSupabase,
 } from "@/lib/growthPlanSupabase";
+import {
+  buildPlanProjection,
+  computeTradingDaysBetween as computeProjectedTradingDaysBetween,
+  inferWithdrawalSettingsFromEvents,
+  normalizePlannedWithdrawals,
+  normalizeWithdrawalSettings,
+  type PlannedWithdrawalEvent,
+  type PlannedWithdrawalSettings,
+  type WithdrawalFrequency,
+} from "@/lib/growthPlanProjection";
 
 import { listCashflows, signedCashflowAmount } from "@/lib/cashflowsSupabase";
 import { syncMyTrophies } from "@/lib/trophiesSupabase";
@@ -107,10 +117,14 @@ function toDateOnlyStr(value: unknown): string | null {
 
 type PlanRow = {
   day: number;
+  isoDate?: string;
   type: "goal" | "loss";
   pct: number;
+  startBalance?: number;
   expectedUSD: number;
+  withdrawalUSD?: number;
   endBalance: number;
+  cumulativeWithdrawals?: number;
 };
 
 function computeRequiredGoalPct(
@@ -300,7 +314,13 @@ async function generateAndDownloadPDF(
     maxDailyLossPercent: number;
     lossDaysPerWeek: number;
     requiredGoalPct: number;
-    explainRequired?: { goalDays: number; totalLossDays: number; prodLoss: number };
+    explainRequired?: {
+      goalDays: number;
+      totalLossDays: number;
+      prodLoss: number;
+      totalPlannedWithdrawal?: number;
+      plannedWithdrawalCount?: number;
+    };
   },
   lang: "en" | "es"
 ) {
@@ -366,6 +386,14 @@ async function generateAndDownloadPDF(
         `El patrón semanal asume ${meta.lossDaysPerWeek} día(s) de pérdida por cada 5 días de trading -> ${totalLossDays} día(s) de pérdida y ${goalDays} día(s) de meta.`
       )
     );
+    if ((meta.explainRequired.totalPlannedWithdrawal ?? 0) > 0) {
+      chunks.push(
+        L(
+          `This projection also includes ${meta.explainRequired.plannedWithdrawalCount ?? 0} scheduled withdrawal(s) totaling ${currency(meta.explainRequired.totalPlannedWithdrawal ?? 0)}.`,
+          `Esta proyección también incluye ${meta.explainRequired.plannedWithdrawalCount ?? 0} retiro(s) programado(s) por un total de ${currency(meta.explainRequired.totalPlannedWithdrawal ?? 0)}.`
+        )
+      );
+    }
   }
 
   const paragraph = chunks.join(" ");
@@ -400,6 +428,12 @@ async function generateAndDownloadPDF(
     [L("Max daily loss (%)", "Pérdida diaria máxima (%)"), `${meta.maxDailyLossPercent}%`],
     [L("Loss days per week", "Días de pérdida por semana"), String(meta.lossDaysPerWeek)],
   ];
+  if ((meta.explainRequired?.totalPlannedWithdrawal ?? 0) > 0) {
+    summaryBody.push([
+      L("Planned withdrawals", "Retiros planificados"),
+      `${currency(meta.explainRequired?.totalPlannedWithdrawal ?? 0)} (${meta.explainRequired?.plannedWithdrawalCount ?? 0})`,
+    ]);
+  }
 
   autoTable(doc, {
     startY: y + 6,
@@ -419,8 +453,8 @@ async function generateAndDownloadPDF(
   doc.setFont("helvetica", "normal");
   doc.setFontSize(11);
   const guide = L(
-    "Each row is one trading day. Type shows Goal-day or Loss-day. % applied is the estimated daily goal for goal-days. Expected (USD) is the projected result for that day. Ending balance is the projected balance after the day.",
-    "Cada fila es un día de trading. Tipo indica Día de Meta o Día de Pérdida. % aplicado es la meta diaria estimada solo en días de meta. Esperado (USD) es el resultado proyectado para ese día. Balance final es el balance estimado al cierre."
+    "Each row is one trading day. Type shows Goal-day or Loss-day. % applied is the estimated daily goal for goal-days. Expected (USD) is the projected result for that day. Withdrawal (USD) shows any scheduled capital taken out that day. Ending balance is the projected balance after both trading and any scheduled withdrawal.",
+    "Cada fila es un día de trading. Tipo indica Día de Meta o Día de Pérdida. % aplicado es la meta diaria estimada solo en días de meta. Esperado (USD) es el resultado proyectado para ese día. Retiro (USD) muestra cualquier capital programado que sale ese día. Balance final es el balance estimado después del trading y de cualquier retiro programado."
   );
   const guideWrapped = doc.splitTextToSize(guide, 612 - M * 2);
   doc.text(guideWrapped, M, y);
@@ -431,6 +465,7 @@ async function generateAndDownloadPDF(
     r.type === "loss" ? L("Loss", "Pérdida") : L("Goal", "Meta"),
     `${r.pct.toFixed(3)}%`,
     currency(r.expectedUSD),
+    currency(r.withdrawalUSD ?? 0),
     currency(r.endBalance),
   ]);
 
@@ -438,7 +473,7 @@ async function generateAndDownloadPDF(
     margin: { left: M, right: M, top: 56 },
     styles: { fontSize: 12, cellPadding: 6 },
     headStyles: { fillColor: [241, 245, 249], textColor: [15, 23, 42] },
-    head: [[L("Day", "Día"), L("Type", "Tipo de día"), L("% applied", "Meta diaria (%)"), L("Expected (USD)", "Esperado (USD)"), L("Ending balance (USD)", "Balance final (USD)")]],
+    head: [[L("Day", "Día"), L("Type", "Tipo de día"), L("% applied", "Meta diaria (%)"), L("Expected (USD)", "Esperado (USD)"), L("Withdrawal (USD)", "Retiro (USD)"), L("Ending balance (USD)", "Balance final (USD)")]],
     body: tableData,
     theme: "grid",
     didDrawPage: () => {
@@ -603,14 +638,9 @@ const STEP_TITLES_ES: Record<WizardStep, string> = {
 
 type AssistantLang = "en" | "es"; // stored in Supabase (inside growth plan record)
 
-type PlannedWithdrawal = {
-  id: string;
-  targetEquity: number;
-  amount: number;
-  status?: "pending" | "taken" | "skipped";
-  achievedAt?: string | null;
-  decidedAt?: string | null;
-};
+type PlannedWithdrawal = PlannedWithdrawalEvent;
+
+type PlannedWithdrawalMode = "undecided" | "none" | "scheduled";
 
 type PlanPhase = {
   id: string;
@@ -619,6 +649,15 @@ type PlanPhase = {
   targetDate?: string | null;
   status?: "pending" | "completed";
   completedAt?: string | null;
+  monthIndex?: number;
+  weekIndex?: number;
+  weeksInMonth?: number;
+  monthGoal?: number;
+  monthLabel?: string | null;
+  monthStartBalance?: number;
+  monthEndBalance?: number;
+  monthWithdrawal?: number;
+  cumulativeWithdrawals?: number;
 };
 
 export default function GrowthPlanPage() {
@@ -654,6 +693,10 @@ export default function GrowthPlanPage() {
   const [maxDailyLossPercentStr, setMaxDailyLossPercentStr] = useState("");
   const [tradingDaysStr, setTradingDaysStr] = useState("");
   const [lossDaysPerWeekStr, setLossDaysPerWeekStr] = useState("");
+  const [plannedWithdrawalMode, setPlannedWithdrawalMode] = useState<PlannedWithdrawalMode>("undecided");
+  const [plannedWithdrawalFrequency, setPlannedWithdrawalFrequency] = useState<WithdrawalFrequency>("monthly");
+  const [plannedWithdrawalAmountStr, setPlannedWithdrawalAmountStr] = useState("");
+  const [plannedWithdrawalStartPeriodStr, setPlannedWithdrawalStartPeriodStr] = useState("1");
   const [plannedWithdrawals, setPlannedWithdrawals] = useState<PlannedWithdrawal[]>([]);
   const [planPhases, setPlanPhases] = useState<PlanPhase[]>([]);
   const [planStartDate, setPlanStartDate] = useState<string | null>(null);
@@ -677,9 +720,40 @@ export default function GrowthPlanPage() {
   const maxDailyLossPercent = toNum(maxDailyLossPercentStr, 0);
   const tradingDays = clampInt(toNum(tradingDaysStr, 0), 0);
   const lossDaysPerWeek = clampInt(toNum(lossDaysPerWeekStr, 0), 0, 5);
+  const plannedWithdrawalAmount = Math.max(0, toNum(plannedWithdrawalAmountStr, 0));
+  const plannedWithdrawalStartPeriod = Math.max(1, clampInt(toNum(plannedWithdrawalStartPeriodStr, 1), 1));
   const riskPerTradePct = Math.max(0, toNum(riskPerTradePctStr, 0));
   const targetMultiple =
     startingBalance > 0 && targetBalance > 0 ? targetBalance / startingBalance : 0;
+
+  const plannedWithdrawalSettings = useMemo<PlannedWithdrawalSettings | null>(() => {
+    if (plannedWithdrawalMode === "scheduled" && plannedWithdrawalAmount > 0) {
+      return {
+        enabled: true,
+        frequency: plannedWithdrawalFrequency,
+        amount: plannedWithdrawalAmount,
+        startPeriodIndex: plannedWithdrawalStartPeriod,
+      };
+    }
+    if (plannedWithdrawalMode === "none") {
+      return {
+        enabled: false,
+        frequency: plannedWithdrawalFrequency,
+        amount: 0,
+        startPeriodIndex: plannedWithdrawalStartPeriod,
+      };
+    }
+    return null;
+  }, [
+    plannedWithdrawalAmount,
+    plannedWithdrawalFrequency,
+    plannedWithdrawalMode,
+    plannedWithdrawalStartPeriod,
+  ]);
+
+  const plannedWithdrawalConfigured =
+    plannedWithdrawalMode === "none" ||
+    (plannedWithdrawalMode === "scheduled" && plannedWithdrawalAmount > 0);
 
   const baseBalanceForDollars = useMemo(() => {
     // If editing an existing plan AND the user hasn't changed the starting balance from what we loaded,
@@ -698,7 +772,7 @@ export default function GrowthPlanPage() {
     if (!targetDateStr) return;
     if (tradingDaysTouched) return;
     const startIso = isoToday();
-    const count = computeTradingDaysBetween(startIso, targetDateStr);
+    const count = computeProjectedTradingDaysBetween(startIso, targetDateStr);
     if (!Number.isFinite(count) || count <= 0) return;
     setTradingDaysStr(String(count));
   }, [targetDateStr, tradingDaysTouched]);
@@ -740,16 +814,72 @@ export default function GrowthPlanPage() {
     [rules]
   );
 
+  const projection = useMemo(() => {
+    if (!targetDateStr || startingBalance <= 0 || targetBalance <= 0) {
+      return buildPlanProjection({
+        starting: 0,
+        target: 0,
+        startIso: planStartDate || isoToday(),
+        targetIso: targetDateStr || planStartDate || isoToday(),
+        lossDaysPerWeek,
+        maxDailyLossPercent: Math.max(0, maxDailyLossPercent),
+        withdrawalSettings: plannedWithdrawalSettings,
+        existingWithdrawals: plannedWithdrawals,
+      });
+    }
+
+    return buildPlanProjection({
+      starting: Math.max(0, startingBalance),
+      target: Math.max(0, targetBalance),
+      startIso: planStartDate || isoToday(),
+      targetIso: targetDateStr,
+      lossDaysPerWeek,
+      maxDailyLossPercent: Math.max(0, maxDailyLossPercent),
+      withdrawalSettings: plannedWithdrawalSettings,
+      existingWithdrawals: plannedWithdrawals,
+    });
+  }, [
+    lossDaysPerWeek,
+    maxDailyLossPercent,
+    planStartDate,
+    plannedWithdrawalSettings,
+    plannedWithdrawals,
+    startingBalance,
+    targetBalance,
+    targetDateStr,
+  ]);
+
+  const suggestedRows = projection.rows;
+  const requiredGoalPct = projection.requiredGoalPct;
+  const generatedPlannedWithdrawals = useMemo(
+    () => (plannedWithdrawalMode === "scheduled" ? projection.withdrawals : []),
+    [plannedWithdrawalMode, projection.withdrawals]
+  );
+  const autoPhases = useMemo(
+    () => (autoPhasesGenerated ? projection.milestones : []),
+    [autoPhasesGenerated, projection.milestones]
+  );
+  const explainRequired = useMemo(() => {
+    const goalDays = suggestedRows.filter((row) => row.type === "goal").length;
+    const totalLossDays = suggestedRows.length - goalDays;
+    const prodLoss =
+      totalLossDays > 0
+        ? Math.pow(1 - Math.max(0, maxDailyLossPercent) / 100, totalLossDays)
+        : 1;
+
+    return {
+      goalDays,
+      totalLossDays,
+      prodLoss,
+      goalPct: requiredGoalPct,
+      totalPlannedWithdrawal: generatedPlannedWithdrawals.reduce((sum, item) => sum + item.amount, 0),
+      plannedWithdrawalCount: generatedPlannedWithdrawals.length,
+    };
+  }, [generatedPlannedWithdrawals, maxDailyLossPercent, requiredGoalPct, suggestedRows]);
+
   const guidedTasksByStep = useMemo<Record<WizardStep, GuidedTask[]>>(() => {
     const lossDaysSet = lossDaysPerWeekStr.trim().length > 0;
-    const requiredGoalReady =
-      computeRequiredGoalPct(
-        Math.max(0, startingBalance),
-        Math.max(0, targetBalance),
-        tradingDays,
-        lossDaysPerWeek,
-        Math.max(0, maxDailyLossPercent)
-      ).goalPctDecimal > 0;
+    const requiredGoalReady = suggestedRows.length > 0;
     return {
       0: [
         {
@@ -775,6 +905,12 @@ export default function GrowthPlanPage() {
           label: L("Pick a target date", "Elige fecha meta"),
           done: !!targetDateStr,
           anchor: "gp-target-date",
+        },
+        {
+          id: "planned_withdrawals",
+          label: L("Choose planned withdrawals", "Configura retiros planificados"),
+          done: plannedWithdrawalConfigured,
+          anchor: "gp-planned-withdrawals",
         },
         {
           id: "trading_days",
@@ -889,6 +1025,8 @@ export default function GrowthPlanPage() {
     riskPerTradePct,
     lossDaysPerWeekStr,
     autoPhasesGenerated,
+    plannedWithdrawalConfigured,
+    suggestedRows.length,
     tradingSystemCount,
     analysisStylesCount,
     stepsData.analysis,
@@ -978,13 +1116,29 @@ export default function GrowthPlanPage() {
             String((existing as any).planStartDate ?? (existing as any).plan_start_date ?? (existing as any).createdAt ?? (existing as any).created_at ?? "")
               .slice(0, 10) || null
           );
-          setPlannedWithdrawals(
+          const existingPlannedWithdrawals = normalizePlannedWithdrawals(
             Array.isArray((existing as any).plannedWithdrawals)
               ? (existing as any).plannedWithdrawals
               : Array.isArray((existing as any).planned_withdrawals)
                 ? (existing as any).planned_withdrawals
                 : []
           );
+          const existingWithdrawalSettings =
+            normalizeWithdrawalSettings((existing as any).plannedWithdrawalSettings) ??
+            normalizeWithdrawalSettings((existing as any).planned_withdrawal_settings) ??
+            inferWithdrawalSettingsFromEvents(existingPlannedWithdrawals);
+          setPlannedWithdrawals(existingPlannedWithdrawals);
+          if (existingWithdrawalSettings?.enabled) {
+            setPlannedWithdrawalMode("scheduled");
+            setPlannedWithdrawalFrequency(existingWithdrawalSettings.frequency);
+            setPlannedWithdrawalAmountStr(String(existingWithdrawalSettings.amount ?? 0));
+            setPlannedWithdrawalStartPeriodStr(String(existingWithdrawalSettings.startPeriodIndex ?? 1));
+          } else {
+            setPlannedWithdrawalMode("none");
+            setPlannedWithdrawalFrequency(existingWithdrawalSettings?.frequency ?? "monthly");
+            setPlannedWithdrawalAmountStr("");
+            setPlannedWithdrawalStartPeriodStr(String(existingWithdrawalSettings?.startPeriodIndex ?? 1));
+          }
           setPlanPhases(
             Array.isArray((existing as any).planPhases)
               ? (existing as any).planPhases
@@ -998,6 +1152,8 @@ export default function GrowthPlanPage() {
           if (cashflowUserId) {
             try {
               const planStart =
+                toDateOnlyStr((existing as any).planStartDate) ||
+                toDateOnlyStr((existing as any).plan_start_date) ||
                 toDateOnlyStr((existing as any).createdAt) ||
                 toDateOnlyStr((existing as any).created_at) ||
                 toDateOnlyStr((existing as any).createdAtIso) ||
@@ -1054,6 +1210,10 @@ export default function GrowthPlanPage() {
           setCashflowNet(0);
           setPlanStartDate(isoToday());
           setPlannedWithdrawals([]);
+          setPlannedWithdrawalMode("undecided");
+          setPlannedWithdrawalFrequency("monthly");
+          setPlannedWithdrawalAmountStr("");
+          setPlannedWithdrawalStartPeriodStr("1");
           setPlanPhases([]);
           setAutoPhasesGenerated(false);
 
@@ -1147,61 +1307,10 @@ export default function GrowthPlanPage() {
           }
   }
 
-  const explainRequired = useMemo(() => {
-    const calc = computeRequiredGoalPct(
-      Math.max(0, startingBalance),
-      Math.max(0, targetBalance),
-      tradingDays,
-      lossDaysPerWeek,
-      Math.max(0, maxDailyLossPercent)
-    );
-    return {
-      goalDays: calc.goalDays,
-      totalLossDays: calc.totalLossDays,
-      prodLoss: calc.lossMultipliersProduct,
-      goalPct: calc.goalPctDecimal * 100,
-    };
-  }, [startingBalance, targetBalance, tradingDays, lossDaysPerWeek, maxDailyLossPercent]);
-
-  const { rows: suggestedRows, requiredGoalPct } = useMemo(
-    () =>
-      buildBalancedPlanSuggested(
-        Math.max(0, startingBalance),
-        Math.max(0, targetBalance),
-        tradingDays,
-        lossDaysPerWeek,
-        Math.max(0, maxDailyLossPercent)
-      ),
-    [startingBalance, targetBalance, tradingDays, lossDaysPerWeek, maxDailyLossPercent]
-  );
-
   const maxLossDollar =
     baseBalanceForDollars > 0 ? (baseBalanceForDollars * (maxDailyLossPercent || 0)) / 100 : 0;
   const requiredGoalDollar =
     baseBalanceForDollars > 0 ? (baseBalanceForDollars * (requiredGoalPct || 0)) / 100 : 0;
-
-  const autoPhases = useMemo(() => {
-    if (!autoPhasesGenerated) return [];
-    if (!targetDateStr) return [];
-    if (startingBalance <= 0 || targetBalance <= 0) return [];
-    const startIso = planStartDate || isoToday();
-    return buildWeeklyMilestonesFromMonthlyGoals(
-      startingBalance,
-      targetBalance,
-      startIso,
-      targetDateStr,
-      lossDaysPerWeek,
-      Math.max(0, maxDailyLossPercent)
-    );
-  }, [
-    autoPhasesGenerated,
-    targetDateStr,
-    startingBalance,
-    targetBalance,
-    planStartDate,
-    lossDaysPerWeek,
-    maxDailyLossPercent,
-  ]);
 
   const firstMonthMeta = useMemo(() => {
     if (!autoPhases.length) return null;
@@ -1226,7 +1335,9 @@ export default function GrowthPlanPage() {
     monthLabel: string;
     startBalance: number;
     endBalance: number;
-    profit: number;
+    tradingProfit: number;
+    netChange: number;
+    withdrawal: number;
     endDate: string | null;
   };
 
@@ -1239,6 +1350,8 @@ export default function GrowthPlanPage() {
         phase.monthStartBalance ??
         (phase.monthGoal != null ? phase.targetEquity - phase.monthGoal : phase.targetEquity);
       const endBalance = phase.monthEndBalance ?? phase.targetEquity;
+      const tradingProfit = phase.monthGoal ?? endBalance - startBalance;
+      const withdrawal = phase.monthWithdrawal ?? 0;
       const monthLabel = phase.monthLabel ?? "";
       const weekIndex = phase.weekIndex ?? 0;
       const existing = map.get(idx);
@@ -1248,7 +1361,9 @@ export default function GrowthPlanPage() {
           monthLabel,
           startBalance,
           endBalance,
-          profit: endBalance - startBalance,
+          tradingProfit,
+          netChange: endBalance - startBalance,
+          withdrawal,
           endDate: phase.targetDate ?? null,
           maxWeek: weekIndex,
         });
@@ -1256,7 +1371,9 @@ export default function GrowthPlanPage() {
       }
       if (weekIndex >= existing.maxWeek) {
         existing.endBalance = endBalance;
-        existing.profit = endBalance - existing.startBalance;
+        existing.tradingProfit = tradingProfit;
+        existing.netChange = endBalance - existing.startBalance;
+        existing.withdrawal = withdrawal;
         existing.endDate = phase.targetDate ?? existing.endDate;
         existing.maxWeek = weekIndex;
       }
@@ -1271,7 +1388,9 @@ export default function GrowthPlanPage() {
     rangeLabel: string;
     startBalance: number;
     endBalance: number;
-    profit: number;
+    tradingProfit: number;
+    netChange: number;
+    withdrawal: number;
     endDate: string | null;
   };
 
@@ -1292,7 +1411,9 @@ export default function GrowthPlanPage() {
         rangeLabel,
         startBalance,
         endBalance,
-        profit: endBalance - startBalance,
+        tradingProfit: slice.reduce((sum, month) => sum + month.tradingProfit, 0),
+        netChange: endBalance - startBalance,
+        withdrawal: slice.reduce((sum, month) => sum + month.withdrawal, 0),
         endDate: end.endDate,
       });
     }
@@ -1302,7 +1423,7 @@ export default function GrowthPlanPage() {
   const tradingDaysFromToday = useMemo(() => {
     if (!targetDateStr) return null;
     const today = isoToday();
-    const count = computeTradingDaysBetween(today, targetDateStr);
+    const count = computeProjectedTradingDaysBetween(today, targetDateStr);
     if (!Number.isFinite(count) || count <= 0) return null;
     return { today, count };
   }, [targetDateStr]);
@@ -1325,6 +1446,8 @@ export default function GrowthPlanPage() {
           goalDays: explainRequired.goalDays,
           totalLossDays: explainRequired.totalLossDays,
           prodLoss: explainRequired.prodLoss,
+          totalPlannedWithdrawal: explainRequired.totalPlannedWithdrawal,
+          plannedWithdrawalCount: explainRequired.plannedWithdrawalCount,
         },
       },
       lang
@@ -1345,7 +1468,8 @@ export default function GrowthPlanPage() {
     targetBalance > 0 &&
     !!targetDateStr &&
     maxDailyLossPercent > 0 &&
-    lossDaysSet;
+    lossDaysSet &&
+    plannedWithdrawalConfigured;
 
   useEffect(() => {
     if (canGeneratePhases) {
@@ -1467,6 +1591,126 @@ export default function GrowthPlanPage() {
             }}
             className={inputBase}
           />
+        </div>
+      ),
+    },
+    {
+      id: "planned_withdrawals",
+      anchor: "gp-planned-withdrawals",
+      title: L("Planned withdrawals", "Retiros planificados"),
+      description: L(
+        "Tell the plan if you want to take money out during the plan. Withdrawals change the pacing and milestone math.",
+        "Indica si quieres retirar dinero durante el plan. Los retiros cambian el ritmo y el cálculo de metas."
+      ),
+      isComplete: plannedWithdrawalConfigured,
+      content: (
+        <div id="gp-planned-withdrawals" className="space-y-3">
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setPlannedWithdrawalMode("none")}
+              className={`rounded-full border px-3 py-1.5 text-sm transition ${
+                plannedWithdrawalMode === "none"
+                  ? "border-emerald-400 bg-emerald-400/10 text-emerald-300"
+                  : "border-slate-700 text-slate-300 hover:border-slate-500"
+              }`}
+            >
+              {L("No withdrawals", "Sin retiros")}
+            </button>
+            <button
+              type="button"
+              onClick={() => setPlannedWithdrawalMode("scheduled")}
+              className={`rounded-full border px-3 py-1.5 text-sm transition ${
+                plannedWithdrawalMode === "scheduled"
+                  ? "border-emerald-400 bg-emerald-400/10 text-emerald-300"
+                  : "border-slate-700 text-slate-300 hover:border-slate-500"
+              }`}
+            >
+              {L("Yes, schedule withdrawals", "Sí, programar retiros")}
+            </button>
+          </div>
+
+          {plannedWithdrawalMode === "scheduled" ? (
+            <div className="grid gap-3 md:grid-cols-3">
+              <div>
+                <label className="mb-1 block text-slate-300">{L("Frequency", "Frecuencia")}</label>
+                <select
+                  value={plannedWithdrawalFrequency}
+                  onChange={(e) => setPlannedWithdrawalFrequency(e.target.value as WithdrawalFrequency)}
+                  className={inputBase}
+                >
+                  <option value="monthly">{L("Monthly", "Mensual")}</option>
+                  <option value="quarterly">{L("Quarterly", "Trimestral")}</option>
+                  <option value="semiannual">{L("Semiannual", "Semestral")}</option>
+                </select>
+              </div>
+              <div>
+                <label className="mb-1 block text-slate-300">{L("Amount per withdrawal (USD)", "Monto por retiro (USD)")}</label>
+                <input
+                  inputMode="decimal"
+                  value={plannedWithdrawalAmountStr}
+                  onChange={(e) => setPlannedWithdrawalAmountStr(onlyNum(e.target.value))}
+                  onBlur={() => {
+                    if (!plannedWithdrawalAmountStr.trim()) return;
+                    setPlannedWithdrawalAmountStr(String(plannedWithdrawalAmount));
+                  }}
+                  className={inputBase}
+                  placeholder="0"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-slate-300">{L("First withdrawal period", "Primer período de retiro")}</label>
+                <input
+                  inputMode="numeric"
+                  value={plannedWithdrawalStartPeriodStr}
+                  onChange={(e) => setPlannedWithdrawalStartPeriodStr(onlyNum(e.target.value))}
+                  onBlur={() => {
+                    if (!plannedWithdrawalStartPeriodStr.trim()) return;
+                    setPlannedWithdrawalStartPeriodStr(String(plannedWithdrawalStartPeriod));
+                  }}
+                  className={inputBase}
+                  placeholder="1"
+                />
+              </div>
+            </div>
+          ) : null}
+
+          <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-3 text-xs text-slate-400">
+            {plannedWithdrawalMode === "scheduled" && generatedPlannedWithdrawals.length > 0 ? (
+              <>
+                <p>
+                  {L("Planned withdrawals generated:", "Retiros generados:")}{" "}
+                  <span className="font-semibold text-slate-100">{generatedPlannedWithdrawals.length}</span>
+                </p>
+                <p className="mt-1">
+                  {L("Total scheduled outflow:", "Salida total programada:")}{" "}
+                  <span className="font-semibold text-slate-100">
+                    {currency(generatedPlannedWithdrawals.reduce((sum, item) => sum + item.amount, 0))}
+                  </span>
+                </p>
+                <p className="mt-1">
+                  {L(
+                    "The plan now solves the goal-day % after these withdrawals are removed from equity.",
+                    "El plan ahora resuelve el % requerido después de restar estos retiros del equity."
+                  )}
+                </p>
+              </>
+            ) : plannedWithdrawalMode === "none" ? (
+              <p>
+                {L(
+                  "This plan compounds without taking money out during the target period.",
+                  "Este plan compone sin sacar dinero durante el período objetivo."
+                )}
+              </p>
+            ) : (
+              <p>
+                {L(
+                  "Choose whether you want withdrawals. This choice is required before we finalize the pace.",
+                  "Elige si quieres retiros. Esta decisión es requerida antes de cerrar el ritmo."
+                )}
+              </p>
+            )}
+          </div>
         </div>
       ),
     },
@@ -1627,6 +1871,12 @@ export default function GrowthPlanPage() {
             {L("Approx goal-day $:", "Aprox $ por día meta:")}{" "}
             <span className="text-slate-200">{currency(requiredGoalDollar)}</span>
           </p>
+          {explainRequired.totalPlannedWithdrawal > 0 ? (
+            <p className="text-xs text-slate-500 mt-1">
+              {L("Scheduled withdrawals in plan:", "Retiros programados en el plan:")}{" "}
+              <span className="text-sky-300">{currency(explainRequired.totalPlannedWithdrawal)}</span>
+            </p>
+          ) : null}
           <div className="mt-3">
             <button
               onClick={onDownloadPdfSuggested}
@@ -1677,8 +1927,8 @@ export default function GrowthPlanPage() {
                     "Tus metas se generan automáticamente cuando completas los datos requeridos."
                   )
                 : L(
-                    "Complete target date + max daily loss + loss days per week first.",
-                    "Completa fecha meta + pérdida diaria máx + días de pérdida por semana primero."
+                    "Complete target date, withdrawal choice, max daily loss, and loss days per week first.",
+                    "Completa fecha meta, elección de retiros, pérdida diaria máx y días de pérdida por semana primero."
                   )}
             </p>
           ) : autoPhases.length === 0 ? (
@@ -1707,6 +1957,12 @@ export default function GrowthPlanPage() {
                 <p className="text-[12px] text-slate-500 mt-1">
                   {L("Month goal (profit):", "Meta del mes (ganancia):")}{" "}
                   <span className="text-slate-200">{currency(firstMonthMeta.monthGoal)}</span>
+                </p>
+              ) : null}
+              {(autoPhases[0].monthWithdrawal ?? 0) > 0 ? (
+                <p className="text-[11px] text-slate-500">
+                  {L("Month withdrawal:", "Retiro del mes:")}{" "}
+                  <span className="text-sky-300">{currency(autoPhases[0].monthWithdrawal ?? 0)}</span>
                 </p>
               ) : null}
               {firstMonthMeta?.weeklyPct ? (
@@ -1749,8 +2005,16 @@ export default function GrowthPlanPage() {
                           {L("Target", "Meta")}: <span className="text-slate-200">{currency(q.endBalance)}</span>
                         </p>
                         <p className="text-[11px] text-emerald-300">
-                          {L("Profit", "Ganancia")}: <span>{currency(q.profit)}</span>
+                          {L("Trading profit", "Ganancia de trading")}: <span>{currency(q.tradingProfit)}</span>
                         </p>
+                        <p className="text-[11px] text-slate-300">
+                          {L("Net change", "Cambio neto")}: <span className="text-slate-200">{currency(q.netChange)}</span>
+                        </p>
+                        {q.withdrawal > 0 ? (
+                          <p className="text-[11px] text-sky-300">
+                            {L("Withdrawals", "Retiros")}: <span>{currency(q.withdrawal)}</span>
+                          </p>
+                        ) : null}
                         {q.endDate ? (
                           <p className="text-[10px] text-slate-500">
                             {L("End date", "Fecha fin")}: <span className="text-slate-300">{q.endDate}</span>
@@ -1763,14 +2027,14 @@ export default function GrowthPlanPage() {
               ) : null}
               <p className="text-[11px] text-slate-500 mt-2">
                 {L(
-                  "Milestones follow the minimum % required by your loss rules.",
-                  "Las metas siguen el % mínimo requerido según tus reglas de pérdida."
+                  "Milestones follow the minimum % required by your loss rules and any scheduled withdrawals.",
+                  "Las metas siguen el % mínimo requerido según tus reglas de pérdida y cualquier retiro programado."
                 )}
               </p>
               <p className="text-[11px] text-slate-500">
                 {L(
-                  "Weekly checkpoints split the monthly goal evenly.",
-                  "Los checkpoints semanales dividen la meta mensual en partes iguales."
+                  "Weekly checkpoints roll up into month-end balances after planned withdrawals are deducted.",
+                  "Los checkpoints semanales escalan al balance de fin de mes después de descontar los retiros programados."
                 )}
               </p>
             </div>
@@ -1930,6 +2194,7 @@ export default function GrowthPlanPage() {
     maxDailyLossPercent > 0 &&
     riskPerTradePct > 0 &&
     lossDaysSet &&
+    plannedWithdrawalConfigured &&
     autoPhasesGenerated;
 
   const handleApproveAndSave = async () => {
@@ -1943,6 +2208,7 @@ export default function GrowthPlanPage() {
       maxDailyLossPercent <= 0 ||
       riskPerTradePct <= 0 ||
       !lossDaysSet ||
+      !plannedWithdrawalConfigured ||
       !autoPhasesGenerated
     ) {
       setError(L("Please complete all required fields first.", "Completa todos los campos requeridos primero."));
@@ -1964,6 +2230,7 @@ export default function GrowthPlanPage() {
     }
 
     const dailyPctForSave = Math.max(0, requiredGoalPct);
+    const nextPlannedWithdrawals = plannedWithdrawalMode === "scheduled" ? generatedPlannedWithdrawals : [];
     const autoPhasePayload =
       autoPhasesGenerated && autoPhases.length > 0
         ? autoPhases.map((phase, idx) => {
@@ -1977,6 +2244,15 @@ export default function GrowthPlanPage() {
               targetEquity: phase.targetEquity,
               targetDate: phase.targetDate ?? null,
               status: "pending" as const,
+              monthIndex: phase.monthIndex,
+              weekIndex: phase.weekIndex,
+              weeksInMonth: phase.weeksInMonth,
+              monthGoal: phase.monthGoal,
+              monthLabel: phase.monthLabel,
+              monthStartBalance: phase.monthStartBalance,
+              monthEndBalance: phase.monthEndBalance,
+              monthWithdrawal: phase.monthWithdrawal,
+              cumulativeWithdrawals: phase.cumulativeWithdrawals,
             };
           })
         : planPhases;
@@ -1993,7 +2269,8 @@ export default function GrowthPlanPage() {
       planMode: "auto",
       targetMultiple: targetMultiple > 0 ? targetMultiple : null,
       planStartDate: effectivePlanStart,
-      plannedWithdrawals,
+      plannedWithdrawalSettings,
+      plannedWithdrawals: nextPlannedWithdrawals,
       planPhases: autoPhasePayload,
       dailyGoalPercent: dailyPctForSave,
       dailyTargetPct: dailyPctForSave,
@@ -2009,6 +2286,8 @@ export default function GrowthPlanPage() {
     };
 
     try {
+      setPlannedWithdrawals(nextPlannedWithdrawals);
+      setPlanPhases(autoPhasePayload);
       await upsertGrowthPlanSupabase(payload, activeAccountId);
       if (user?.id) {
         void syncMyTrophies(String(user.id)).catch((err) => {

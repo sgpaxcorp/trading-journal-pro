@@ -636,30 +636,6 @@ function getContractMultiplier(kind: InstrumentType, symbol: string) {
 }
 
 /* =========================================================
-   Averages (UI only)
-========================================================= */
-
-function computeAverages(trades: { symbol: string; kind: InstrumentType; price: string; quantity: string }[]) {
-  const map: Record<string, { sumPxQty: number; sumQty: number }> = {};
-  for (const t of trades) {
-    const symbol = (t.symbol || "").trim().toUpperCase();
-    if (!symbol) continue;
-    const kind = t.kind || "other";
-    const key = `${symbol}|${kind}`;
-    const px = parseFloat(t.price);
-    const qty = parseFloat(t.quantity);
-    if (!Number.isFinite(px) || !Number.isFinite(qty) || qty <= 0) continue;
-    if (!map[key]) map[key] = { sumPxQty: 0, sumQty: 0 };
-    map[key].sumPxQty += px * qty;
-    map[key].sumQty += qty;
-  }
-  return Object.entries(map).map(([key, v]) => {
-    const [symbol, kind] = key.split("|") as [string, InstrumentType];
-    return { symbol, kind, avg: v.sumPxQty / v.sumQty, qty: v.sumQty };
-  });
-}
-
-/* =========================================================
    PnL helpers (FIFO + multipliers + premium)
 ========================================================= */
 
@@ -1547,9 +1523,6 @@ export default function DailyJournalPage() {
     setExitTrades((prev) => prev.filter((t) => t.id !== id));
   };
 
-  const entryAverages = useMemo(() => computeAverages(entryTrades), [entryTrades]);
-  const exitAverages = useMemo(() => computeAverages(exitTrades), [exitTrades]);
-
   /* =========================================================
      ✅ Auto PnL (FIFO)
   ========================================================= */
@@ -2411,16 +2384,12 @@ export default function DailyJournalPage() {
               </table>
 
               <div className="pt-1 border-t border-slate-800 mt-1">
-                <p className="text-[11px] text-slate-400 mb-1">
-                  {L("Average entry price per symbol/type", "Precio promedio de entrada por símbolo/tipo")}
+                <p className="text-[11px] text-slate-400">
+                  {L(
+                    "Each imported fill stays separate. Same contract, same day does not get merged into one average trade.",
+                    "Cada fill importado se mantiene separado. El mismo contrato, en el mismo día, no se fusiona como un solo trade promedio."
+                  )}
                 </p>
-                <div className="flex flex-wrap gap-2">
-                  {entryAverages.map((a) => (
-                    <span key={`${a.symbol}|${a.kind}`} className="px-2 py-1 rounded-full bg-slate-950 border border-slate-700 text-[11px]">
-                      {a.symbol} ({a.kind}): {a.avg.toFixed(2)} · {L("qty", "cant.")} {a.qty}
-                    </span>
-                  ))}
-                </div>
               </div>
             </div>
           )}
@@ -2557,16 +2526,12 @@ export default function DailyJournalPage() {
               </table>
 
               <div className="pt-1 border-t border-slate-800 mt-1">
-                <p className="text-[11px] text-slate-400 mb-1">
-                  {L("Average exit price per symbol/type", "Precio promedio de salida por símbolo/tipo")}
+                <p className="text-[11px] text-slate-400">
+                  {L(
+                    "Exit fills also stay separate so multiple round trips on the same contract remain distinct.",
+                    "Los fills de salida también se mantienen separados para que varios round trips del mismo contrato sigan siendo distintos."
+                  )}
                 </p>
-                <div className="flex flex-wrap gap-2">
-                  {exitAverages.map((a) => (
-                    <span key={`${a.symbol}|${a.kind}`} className="px-2 py-1 rounded-full bg-slate-950 border border-slate-700 text-[11px]">
-                      {a.symbol} ({a.kind}): {a.avg.toFixed(2)}
-                    </span>
-                  ))}
-                </div>
               </div>
             </div>
           )}

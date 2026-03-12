@@ -16,6 +16,14 @@
 import { supabaseBrowser } from "@/lib/supaBaseClient";
 
 export type CashflowType = "deposit" | "withdrawal";
+export type CashflowReason =
+  | "owner_contribution"
+  | "owner_draw"
+  | "profit_distribution"
+  | "reserve_transfer"
+  | "tax_reserve"
+  | "broker_correction"
+  | "other";
 
 export type Cashflow = {
   id: string;
@@ -24,6 +32,9 @@ export type Cashflow = {
   date: string; // YYYY-MM-DD
   type: CashflowType;
   amount: number; // positive number (we apply sign by type)
+  reason_code?: CashflowReason | null;
+  source_module?: string | null;
+  linked_plan_withdrawal_id?: string | null;
   note: string | null;
   created_at: string;
 };
@@ -62,6 +73,9 @@ function mapCashflowRow(row: any): Cashflow {
     date: resolveCashflowDate(row),
     type,
     amount,
+    reason_code: row?.reason_code ?? null,
+    source_module: row?.source_module ?? null,
+    linked_plan_withdrawal_id: row?.linked_plan_withdrawal_id ?? null,
     note: row?.note ?? row?.memo ?? null,
     created_at: String(row?.created_at ?? row?.createdAt ?? ""),
   };
@@ -217,10 +231,16 @@ export async function createCashflow(params: {
   date: string; // YYYY-MM-DD
   type: CashflowType;
   amount: number; // positive
+  reasonCode?: CashflowReason | null;
+  sourceModule?: string | null;
+  linkedPlanWithdrawalId?: string | null;
   note?: string | null;
 }) {
   const { userId, date, type, amount, accountId } = params;
   const note = params.note ?? null;
+  const reasonCode = params.reasonCode ?? null;
+  const sourceModule = params.sourceModule ?? null;
+  const linkedPlanWithdrawalId = params.linkedPlanWithdrawalId ?? null;
 
   if (!userId) throw new Error("Missing userId");
   if (!date) throw new Error("Missing date");
@@ -233,6 +253,9 @@ export async function createCashflow(params: {
     date,
     type,
     amount,
+    reason_code: reasonCode,
+    source_module: sourceModule,
+    linked_plan_withdrawal_id: linkedPlanWithdrawalId,
     note,
   };
 

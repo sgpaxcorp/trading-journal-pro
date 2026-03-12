@@ -1,6 +1,5 @@
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
-
-const ACTIVE_STATUSES = new Set(["active", "trialing"]);
+import { isActiveEntitlementStatus } from "@/lib/accessControl";
 
 export async function hasActiveEntitlement(
   userId: string,
@@ -15,5 +14,5 @@ export async function hasActiveEntitlement(
     .maybeSingle();
 
   if (error || !data) return false;
-  return ACTIVE_STATUSES.has(String((data as any).status ?? "").toLowerCase());
+  return isActiveEntitlementStatus((data as any).status);
 }

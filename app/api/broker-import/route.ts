@@ -292,6 +292,7 @@ function parseTosExpiryToISO(raw: string): string | null {
   const yyyy = `20${m[3]}`;
   return `${yyyy}-${mm}-${day}`;
 }
+
 function normalizeOptionRoot(root: string, description: string): string {
   if (root.toUpperCase() === "SPX" && /(WEEKLY|WEEKLYS)/i.test(description))
     return "SPXW";

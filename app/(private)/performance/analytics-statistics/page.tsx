@@ -37,7 +37,13 @@ import { getAllJournalEntries } from "@/lib/journalSupabase";
 import { listDailySnapshots, type DailySnapshotRow } from "@/lib/snapshotSupabase";
 import { listCashflows, signedCashflowAmount, type Cashflow } from "@/lib/cashflowsSupabase";
 import { buildCashflowAdjustedDailyReturns } from "@/lib/performanceReturns";
-import { computeAdjustedTarget } from "@/lib/growthPlanSupabase";
+import {
+  buildPlanProjection,
+  normalizePlannedWithdrawals,
+  normalizeWithdrawalSettings,
+  type PlannedWithdrawalEvent,
+  type PlannedWithdrawalSettings,
+} from "@/lib/growthPlanProjection";
 import {
   computeAllKPIs,
   formatKpiInputs,
@@ -1465,6 +1471,9 @@ export default function AnalyticsStatisticsPage() {
   const [planMode, setPlanMode] = useState<"auto" | "manual" | "">("");
   const [planRules, setPlanRules] = useState<any[]>([]);
   const [planMaxDailyLossPct, setPlanMaxDailyLossPct] = useState<number>(0);
+  const [planLossDaysPerWeek, setPlanLossDaysPerWeek] = useState<number>(0);
+  const [planPlannedWithdrawals, setPlanPlannedWithdrawals] = useState<PlannedWithdrawalEvent[]>([]);
+  const [planPlannedWithdrawalSettings, setPlanPlannedWithdrawalSettings] = useState<PlannedWithdrawalSettings | null>(null);
 
   const effectivePlanStart = useMemo(
     () => (scopeMode === "plan" ? planStartIso : ""),
@@ -1498,7 +1507,7 @@ export default function AnalyticsStatisticsPage() {
 
       try {
         const SELECT_GROWTH_PLAN =
-          "starting_balance,target_balance,target_date,plan_start_date,plan_mode,created_at,updated_at,max_daily_loss_percent,rules" as const;
+          "starting_balance,target_balance,target_date,plan_start_date,plan_mode,created_at,updated_at,max_daily_loss_percent,loss_days_per_week,rules,planned_withdrawals,planned_withdrawal_settings" as const;
         const { data, error } = await supabaseBrowser
           .from("growth_plans")
           .select(SELECT_GROWTH_PLAN)
@@ -1514,6 +1523,13 @@ export default function AnalyticsStatisticsPage() {
           console.error("[AnalyticsStatistics] growth_plans fetch error:", error);
           setPlanStartingBalance(0);
           setPlanStartIso("");
+          setPlanTargetBalance(0);
+          setPlanTargetDate("");
+          setPlanRules([]);
+          setPlanMaxDailyLossPct(0);
+          setPlanLossDaysPerWeek(0);
+          setPlanPlannedWithdrawals([]);
+          setPlanPlannedWithdrawalSettings(null);
           return;
         }
 
@@ -1531,12 +1547,18 @@ export default function AnalyticsStatisticsPage() {
         setPlanMode(mode === "manual" ? "manual" : mode === "auto" ? "auto" : "");
         setPlanRules(Array.isArray(row?.rules) ? row.rules : []);
         setPlanMaxDailyLossPct(toNumberMaybe(row?.max_daily_loss_percent ?? 0));
+        setPlanLossDaysPerWeek(Math.max(0, Math.min(5, Math.floor(toNumberMaybe(row?.loss_days_per_week ?? 0)))));
+        setPlanPlannedWithdrawals(normalizePlannedWithdrawals(row?.planned_withdrawals ?? []));
+        setPlanPlannedWithdrawalSettings(normalizeWithdrawalSettings(row?.planned_withdrawal_settings));
       } catch (err) {
         console.error("[AnalyticsStatistics] growth_plans fetch exception:", err);
         setPlanStartingBalance(0);
         setPlanStartIso("");
         setPlanRules([]);
         setPlanMaxDailyLossPct(0);
+        setPlanLossDaysPerWeek(0);
+        setPlanPlannedWithdrawals([]);
+        setPlanPlannedWithdrawalSettings(null);
       }
     }
 
@@ -1953,31 +1975,81 @@ export default function AnalyticsStatisticsPage() {
     return uiEquity[uiEquity.length - 1]?.value ?? 0;
   }, [uiEquity]);
 
+  const planProjection = useMemo(() => {
+    if (!planStartIso || !planTargetDate || !planStartingBalance || !planTargetBalance) return null;
+    return buildPlanProjection({
+      starting: planStartingBalance,
+      target: planTargetBalance,
+      startIso: planStartIso,
+      targetIso: planTargetDate,
+      lossDaysPerWeek: planLossDaysPerWeek,
+      maxDailyLossPercent: planMaxDailyLossPct,
+      withdrawalSettings: planPlannedWithdrawalSettings,
+      existingWithdrawals: planPlannedWithdrawals,
+    });
+  }, [
+    planLossDaysPerWeek,
+    planMaxDailyLossPct,
+    planPlannedWithdrawalSettings,
+    planPlannedWithdrawals,
+    planStartIso,
+    planStartingBalance,
+    planTargetBalance,
+    planTargetDate,
+  ]);
+
   const monthlyPlanTracker = useMemo(() => {
     if (scopeMode !== "plan") return null;
     if (planMode === "manual") return null;
     if (!planStartIso || !planTargetDate) return null;
     if (!planStartingBalance || !planTargetBalance) return null;
+    if (!planProjection?.milestones?.length) return null;
 
-    const totalMonthsRaw = monthsBetween(planStartIso, planTargetDate);
-    const totalMonths = Math.max(1, totalMonthsRaw + 1);
-    const targetMultiple = planTargetBalance / planStartingBalance;
-    if (!Number.isFinite(targetMultiple) || targetMultiple <= 0) return null;
+    const monthTargets = new Map<
+      number,
+      {
+        monthIndex: number;
+        startBalance: number;
+        targetBalance: number;
+        tradingProfit: number;
+        withdrawal: number;
+        weekIndex: number;
+      }
+    >();
+    for (const phase of planProjection.milestones) {
+      const monthIndex = phase.monthIndex ?? 1;
+      const existing = monthTargets.get(monthIndex);
+      const candidate = {
+        monthIndex,
+        startBalance: phase.monthStartBalance ?? planStartingBalance,
+        targetBalance: phase.monthEndBalance ?? phase.targetEquity,
+        tradingProfit: phase.monthGoal ?? 0,
+        withdrawal: phase.monthWithdrawal ?? 0,
+        weekIndex: phase.weekIndex ?? 0,
+      };
+      if (!existing || candidate.weekIndex >= existing.weekIndex) {
+        monthTargets.set(monthIndex, candidate);
+      }
+    }
 
-    const base = planStartingBalance + (cashflowNetForPlan || 0);
-    const monthlyRate = Math.pow(targetMultiple, 1 / totalMonths) - 1;
-
+    const months = Array.from(monthTargets.values()).sort((a, b) => a.monthIndex - b.monthIndex);
+    if (!months.length) return null;
+    const totalMonths = months.length;
     const anchorEnd = looksLikeYYYYMMDD(dateRange.endIso) ? dateRange.endIso : isoDate(new Date());
-    const currentMonthIndex = Math.min(
-      totalMonths,
-      Math.max(1, monthsBetween(planStartIso, anchorEnd) + 1)
-    );
-
-    const prevTarget = base * Math.pow(1 + monthlyRate, currentMonthIndex - 1);
-    const monthTarget = base * Math.pow(1 + monthlyRate, currentMonthIndex);
+    const currentMonthIndex = Math.min(totalMonths, Math.max(1, monthsBetween(planStartIso, anchorEnd) + 1));
+    const currentMonth = months.find((item) => item.monthIndex === currentMonthIndex) ?? months[months.length - 1];
+    const prevTarget =
+      currentMonthIndex <= 1
+        ? planStartingBalance
+        : months.find((item) => item.monthIndex === currentMonthIndex - 1)?.targetBalance ?? planStartingBalance;
+    const monthTarget = currentMonth.targetBalance;
     const span = Math.max(1, monthTarget - prevTarget);
     const progress = Math.max(0, Math.min(1.25, (currentEquity - prevTarget) / span));
     const remaining = Math.max(0, monthTarget - currentEquity);
+    const monthlyRate =
+      currentMonth.startBalance > 0
+        ? (currentMonth.targetBalance + currentMonth.withdrawal - currentMonth.startBalance) / currentMonth.startBalance
+        : null;
 
     return {
       totalMonths,
@@ -1986,8 +2058,10 @@ export default function AnalyticsStatisticsPage() {
       remaining,
       progress,
       monthlyRate,
+      monthWithdrawal: currentMonth.withdrawal,
+      monthTradingProfit: currentMonth.tradingProfit,
     };
-  }, [scopeMode, planStartIso, planTargetDate, planStartingBalance, planTargetBalance, cashflowNetForPlan, dateRange.endIso, currentEquity]);
+  }, [scopeMode, planMode, planProjection, planStartIso, planTargetDate, planStartingBalance, planTargetBalance, dateRange.endIso, currentEquity]);
 
   const accountAnalyticsSummary = useMemo(() => {
     const referenceEquity = uiEquity[0]?.value ?? planStartingBalance ?? 0;
@@ -2008,24 +2082,25 @@ export default function AnalyticsStatisticsPage() {
   const planAnalyticsSummary = useMemo(() => {
     if (!plan || !planStartingBalance || !planTargetBalance) return null;
 
-    const adjustedPlanTarget = computeAdjustedTarget(plan as any, cashflowNetForPlan || 0);
-    const checkpointTarget = monthlyPlanTracker?.monthTarget ?? adjustedPlanTarget;
+    const checkpointTarget = monthlyPlanTracker?.monthTarget ?? planTargetBalance;
     const checkpointGap = currentEquity - checkpointTarget;
     const overallProgress =
-      adjustedPlanTarget > planStartingBalance
-        ? Math.max(0, Math.min(1.5, (currentEquity - planStartingBalance) / (adjustedPlanTarget - planStartingBalance)))
+      planTargetBalance > planStartingBalance
+        ? Math.max(0, Math.min(1.5, (currentEquity - planStartingBalance) / (planTargetBalance - planStartingBalance)))
         : 0;
 
     return {
-      adjustedPlanTarget,
+      adjustedPlanTarget: planTargetBalance,
       checkpointTarget,
       checkpointGap,
       overallProgress,
       currentMonthIndex: monthlyPlanTracker?.currentMonthIndex ?? null,
       totalMonths: monthlyPlanTracker?.totalMonths ?? null,
       monthlyRate: monthlyPlanTracker?.monthlyRate ?? null,
+      monthWithdrawal: monthlyPlanTracker?.monthWithdrawal ?? null,
+      monthTradingProfit: monthlyPlanTracker?.monthTradingProfit ?? null,
     };
-  }, [plan, planStartingBalance, planTargetBalance, cashflowNetForPlan, currentEquity, monthlyPlanTracker]);
+  }, [plan, planStartingBalance, planTargetBalance, currentEquity, monthlyPlanTracker]);
 
   const uiDaily = useMemo(() => {
     const s = snapshot;
@@ -2383,7 +2458,7 @@ export default function AnalyticsStatisticsPage() {
                 </div>
 
                 <p className="mt-2 text-xs text-slate-500">
-                  {L("Adjusted plan target:", "Meta ajustada del plan:")}{" "}
+                  {L("Plan target:", "Meta del plan:")}{" "}
                   <span className="text-slate-200">{fmtUsd(planAnalyticsSummary.adjustedPlanTarget)}</span>
                   {planTargetDate ? (
                     <>
@@ -2395,6 +2470,18 @@ export default function AnalyticsStatisticsPage() {
                     <>
                       {" "}· {L("Compound pace:", "Ritmo compuesto:")}{" "}
                       <span className="text-slate-200">{(planAnalyticsSummary.monthlyRate * 100).toFixed(2)}% / {L("month", "mes")}</span>
+                    </>
+                  ) : null}
+                  {planAnalyticsSummary.monthTradingProfit != null ? (
+                    <>
+                      {" "}· {L("Trading profit this month target:", "Ganancia de trading meta del mes:")}{" "}
+                      <span className="text-slate-200">{fmtUsd(planAnalyticsSummary.monthTradingProfit)}</span>
+                    </>
+                  ) : null}
+                  {planAnalyticsSummary.monthWithdrawal != null && planAnalyticsSummary.monthWithdrawal > 0 ? (
+                    <>
+                      {" "}· {L("Planned withdrawals this month:", "Retiros planificados este mes:")}{" "}
+                      <span className="text-slate-200">{fmtUsd(planAnalyticsSummary.monthWithdrawal)}</span>
                     </>
                   ) : null}
                 </p>

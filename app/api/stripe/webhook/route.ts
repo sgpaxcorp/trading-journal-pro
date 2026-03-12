@@ -3,6 +3,10 @@ import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 import {
+  normalizeSubscriptionStatusToEntitlement,
+  PLATFORM_ACCESS_ENTITLEMENT,
+} from "@/lib/accessControl";
+import {
   sendWelcomeEmailByEmail,
   sendSubscriptionReceiptEmailByEmail,
 } from "@/lib/email";
@@ -23,6 +27,7 @@ const ADDON_CONFIG = {
   },
 } as const;
 type AddonKey = keyof typeof ADDON_CONFIG;
+type EntitlementKey = AddonKey | typeof PLATFORM_ACCESS_ENTITLEMENT;
 
 const ADDON_PRICE_ID_TO_KEY = new Map<string, AddonKey>();
 Object.entries(ADDON_CONFIG).forEach(([key, cfg]) => {
@@ -32,13 +37,24 @@ Object.entries(ADDON_CONFIG).forEach(([key, cfg]) => {
 
 async function upsertEntitlement(params: {
   userId: string;
-  entitlementKey: AddonKey;
+  entitlementKey: EntitlementKey;
   status: string;
   stripeCustomerId?: string | null;
   stripeSubscriptionId?: string | null;
   stripePriceId?: string | null;
+  source?: string;
+  metadata?: Record<string, unknown> | null;
 }) {
-  const { userId, entitlementKey, status, stripeCustomerId, stripeSubscriptionId, stripePriceId } = params;
+  const {
+    userId,
+    entitlementKey,
+    status,
+    stripeCustomerId,
+    stripeSubscriptionId,
+    stripePriceId,
+    source,
+    metadata,
+  } = params;
   if (!userId) return;
 
   try {
@@ -46,11 +62,12 @@ async function upsertEntitlement(params: {
       {
         user_id: userId,
         entitlement_key: entitlementKey,
-        status,
-        source: "stripe",
+        status: normalizeSubscriptionStatusToEntitlement(status),
+        source: source ?? "stripe",
         stripe_customer_id: stripeCustomerId ?? null,
         stripe_subscription_id: stripeSubscriptionId ?? null,
         stripe_price_id: stripePriceId ?? null,
+        metadata: metadata ?? {},
         updated_at: new Date().toISOString(),
       },
       { onConflict: "user_id,entitlement_key" }
@@ -139,6 +156,13 @@ function normalizeBillingCycle(raw?: string | null): "monthly" | "annual" | null
   if (v === "monthly" || v === "month") return "monthly";
   if (v === "annual" || v === "year" || v === "yearly") return "annual";
   return null;
+}
+
+function buildPlatformAccessMetadata(planId?: string | null, billingCycle?: string | null) {
+  return {
+    plan: String(planId ?? "").trim().toLowerCase() || null,
+    billingCycle: normalizeBillingCycle(billingCycle) ?? null,
+  };
 }
 
 async function maybeCreatePartnerCommissionFromInvoice(invoice: Stripe.Invoice) {
@@ -390,9 +414,24 @@ export async function POST(req: NextRequest) {
                 email
               );
 
+              const resolvedUserId =
+                (await resolveUserIdByEmail(email)) || (await resolveUserIdByCustomer(customerId));
+              if (resolvedUserId) {
+                await upsertEntitlement({
+                  userId: resolvedUserId,
+                  entitlementKey: PLATFORM_ACCESS_ENTITLEMENT,
+                  status: "active",
+                  stripeCustomerId: customerId,
+                  stripeSubscriptionId: subscriptionId ?? null,
+                  stripePriceId: subPriceId,
+                  metadata: buildPlatformAccessMetadata(
+                    planId,
+                    subscription?.items?.data?.[0]?.price?.recurring?.interval ?? session.metadata?.billingCycle
+                  ),
+                });
+              }
+
               if (includesOptionFlowAddon || includesBrokerSyncAddon) {
-                const resolvedUserId =
-                  (await resolveUserIdByEmail(email)) || (await resolveUserIdByCustomer(customerId));
                 if (resolvedUserId && subscription) {
                   if (includesOptionFlowAddon) {
                     await upsertEntitlement({
@@ -518,6 +557,19 @@ export async function POST(req: NextRequest) {
             userId
           );
         }
+
+        await upsertEntitlement({
+          userId,
+          entitlementKey: PLATFORM_ACCESS_ENTITLEMENT,
+          status: "active",
+          stripeCustomerId: customerId,
+          stripeSubscriptionId: subscriptionId ?? null,
+          stripePriceId: subPriceId,
+          metadata: buildPlatformAccessMetadata(
+            planId,
+            subscription?.items?.data?.[0]?.price?.recurring?.interval ?? session.metadata?.billingCycle
+          ),
+        });
 
         // Entitlements for add-ons handled below (includes option flow + broker sync)
 
@@ -659,6 +711,15 @@ export async function POST(req: NextRequest) {
               metaError
             );
           }
+
+          await upsertEntitlement({
+            userId,
+            entitlementKey: PLATFORM_ACCESS_ENTITLEMENT,
+            status,
+            stripeCustomerId: customerId,
+            stripeSubscriptionId: subscription.id,
+            stripePriceId: subPriceId,
+          });
         }
 
         if (includesOptionFlowAddon || includesBrokerSyncAddon) {
@@ -740,48 +801,56 @@ export async function POST(req: NextRequest) {
           break;
         }
 
-        if (
-          status === "canceled" ||
-          status === "unpaid" ||
-          status === "past_due"
-        ) {
-          const { data: rows, error } = await supabaseAdmin
+        const { data: rows, error } = await supabaseAdmin
+          .from("profiles")
+          .select("id, plan")
+          .eq("stripe_customer_id", customerId)
+          .limit(1);
+
+        if (!error && rows && rows.length > 0) {
+          const userId = rows[0].id as string;
+          const profilePlan = String((rows[0] as any).plan ?? "").trim().toLowerCase() || null;
+
+          const { error: profileError } = await supabaseAdmin
             .from("profiles")
-            .select("id")
-            .eq("stripe_customer_id", customerId)
-            .limit(1);
+            .update({
+              subscription_status: status,
+            })
+            .eq("id", userId);
 
-          if (!error && rows && rows.length > 0) {
-            const userId = rows[0].id as string;
-
-            const { error: profileError } = await supabaseAdmin
-              .from("profiles")
-              .update({
-                subscription_status: status,
-              })
-              .eq("id", userId);
-
-            if (profileError) {
-              console.error(
-                "[WEBHOOK] Error updating profiles on subscription.updated:",
-                profileError
-              );
-            }
-
-            const { error: metaError } =
-              await supabaseAdmin.auth.admin.updateUserById(userId, {
-                user_metadata: {
-                  subscriptionStatus: status,
-                },
-              });
-
-            if (metaError) {
-              console.error(
-                "[WEBHOOK] Error updating user_metadata on subscription.updated:",
-                metaError
-              );
-            }
+          if (profileError) {
+            console.error(
+              "[WEBHOOK] Error updating profiles on subscription.updated:",
+              profileError
+            );
           }
+
+          const { error: metaError } =
+            await supabaseAdmin.auth.admin.updateUserById(userId, {
+              user_metadata: {
+                subscriptionStatus: status,
+              },
+            });
+
+          if (metaError) {
+            console.error(
+              "[WEBHOOK] Error updating user_metadata on subscription.updated:",
+              metaError
+            );
+          }
+
+          await upsertEntitlement({
+            userId,
+            entitlementKey: PLATFORM_ACCESS_ENTITLEMENT,
+            status,
+            stripeCustomerId: customerId,
+            stripeSubscriptionId: subscription.id,
+            stripePriceId: subPriceId,
+            metadata: buildPlatformAccessMetadata(
+              profilePlan,
+              subscription.items?.data?.[0]?.price?.recurring?.interval ?? null
+            ),
+          });
         }
 
         if (includesOptionFlowAddon || includesBrokerSyncAddon) {

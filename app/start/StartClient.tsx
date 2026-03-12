@@ -6,6 +6,8 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supaBaseClient";
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
+import { isActiveProfileStatus, shouldAllowLocalProfileAccessFallback } from "@/lib/accessControl";
+import { fetchAccessStatus } from "@/lib/accessStatusClient";
 
 type PlanId = "core" | "advanced";
 type Step = 1 | 2 | 3 | 4 | 5;
@@ -90,10 +92,7 @@ export default function StartClient({ initialPlan }: StartClientProps) {
   const [verifying, setVerifying] = useState(false);
   const [resending, setResending] = useState(false);
   const [canResend, setCanResend] = useState(true);
-  const isStatusActive = (status?: string | null) => {
-    const v = String(status ?? "").toLowerCase().trim();
-    return v === "active" || v === "trialing" || v === "paid";
-  };
+  const allowLocalProfileFallback = shouldAllowLocalProfileAccessFallback();
 
   // Detectar si ya hay usuario logueado
   useEffect(() => {
@@ -116,21 +115,17 @@ export default function StartClient({ initialPlan }: StartClientProps) {
         const isConfirmed = Boolean((data.user as any)?.email_confirmed_at);
         if (isConfirmed) {
           try {
-            const { data: profile } = await supabase
-              .from("profiles")
-              .select("subscription_status, plan")
-              .eq("id", data.user.id)
-              .maybeSingle();
-
+            const access = await fetchAccessStatus();
             const metaStatus = String((data.user as any)?.user_metadata?.subscriptionStatus ?? "").toLowerCase();
-            const status = String(profile?.subscription_status ?? metaStatus ?? "");
+            const status = String(access?.profile?.subscriptionStatus ?? metaStatus ?? "");
+            const hasAccess = Boolean(access?.hasAppAccess) || (allowLocalProfileFallback && isActiveProfileStatus(status));
 
-            if (isStatusActive(status)) {
+            if (hasAccess) {
               router.replace("/dashboard");
               return;
             }
 
-            const planFromProfile = String(profile?.plan ?? "").toLowerCase();
+            const planFromProfile = String(access?.profile?.plan ?? "").toLowerCase();
             const planParam = planFromProfile === "advanced" || planFromProfile === "core"
               ? planFromProfile
               : initialPlan;
@@ -154,7 +149,7 @@ export default function StartClient({ initialPlan }: StartClientProps) {
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [allowLocalProfileFallback, initialPlan, router]);
 
   // Paso 1: crear cuenta en Supabase
   async function handleInformationSubmit(e: FormEvent) {

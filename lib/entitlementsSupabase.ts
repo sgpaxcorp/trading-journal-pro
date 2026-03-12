@@ -1,4 +1,8 @@
 import { supabaseBrowser } from "@/lib/supaBaseClient";
+import {
+  isActiveEntitlementStatus,
+  PLATFORM_ACCESS_ENTITLEMENT,
+} from "@/lib/accessControl";
 
 export type EntitlementStatus =
   | "active"
@@ -80,6 +84,20 @@ export async function hasEntitlement(
   return entitlements.some(
     (e) =>
       e.entitlement_key === entitlementKey &&
-      (e.status === "active" || e.status === "trialing")
+      isActiveEntitlementStatus(e.status)
   );
+}
+
+export function hasPlatformAccessEntitlement(entitlements: UserEntitlement[]): boolean {
+  return entitlements.some(
+    (e) =>
+      e.entitlement_key === PLATFORM_ACCESS_ENTITLEMENT &&
+      isActiveEntitlementStatus(e.status)
+  );
+}
+
+export async function hasPlatformAccess(userId: string): Promise<boolean> {
+  if (!userId) return false;
+  const entitlements = await listMyEntitlements(userId);
+  return hasPlatformAccessEntitlement(entitlements);
 }

@@ -35,6 +35,7 @@ import {
   deleteCashflow,
   listCashflows,
   signedCashflowAmount,
+  type CashflowReason,
   type Cashflow,
   type CashflowType,
 } from "@/lib/cashflowsSupabase";
@@ -59,6 +60,7 @@ type DbGrowthPlanRow = {
 
   selected_plan: string | null;
 
+  plan_start_date: string | null;
   created_at: string | null;
   updated_at: string | null;
 };
@@ -79,6 +81,7 @@ type GrowthPlan = {
 
   selectedPlan: string | null;
 
+  planStartDate: string | null;
   createdAtIso: string;
   updatedAtIso: string;
 };
@@ -121,6 +124,27 @@ function dailyTargetPct(plan: GrowthPlan | null): number {
   return plan.dailyTargetPct > 0 ? plan.dailyTargetPct : plan.dailyGoalPercent;
 }
 
+function reasonLabel(reason: CashflowReason | string | null | undefined, lang: "en" | "es"): string {
+  const value = String(reason ?? "");
+  const t = (en: string, es: string) => (lang === "es" ? es : en);
+  switch (value) {
+    case "owner_contribution":
+      return t("Owner contribution", "Aporte del dueño");
+    case "owner_draw":
+      return t("Owner draw", "Retiro del dueño");
+    case "profit_distribution":
+      return t("Profit distribution", "Distribución de ganancias");
+    case "reserve_transfer":
+      return t("Reserve transfer", "Transferencia a reserva");
+    case "tax_reserve":
+      return t("Tax reserve", "Reserva de impuestos");
+    case "broker_correction":
+      return t("Broker correction", "Corrección del broker");
+    default:
+      return t("Other", "Otro");
+  }
+}
+
 async function fetchLatestGrowthPlan(userId: string, accountId?: string | null): Promise<GrowthPlan | null> {
   if (!userId) return null;
 
@@ -129,7 +153,7 @@ async function fetchLatestGrowthPlan(userId: string, accountId?: string | null):
   // Avoid building the select string dynamically (e.g., array.join), otherwise strict TS may infer
   // the result as `GenericStringError` (TS2352).
   const SELECT_GROWTH_PLAN =
-    "id,user_id,starting_balance,target_balance,daily_target_pct,daily_goal_percent,max_daily_loss_percent,loss_days_per_week,trading_days,selected_plan,created_at,updated_at" as const;
+    "id,user_id,starting_balance,target_balance,daily_target_pct,daily_goal_percent,max_daily_loss_percent,loss_days_per_week,trading_days,selected_plan,plan_start_date,created_at,updated_at" as const;
 
   try {
     let q = supabaseBrowser
@@ -169,6 +193,7 @@ async function fetchLatestGrowthPlan(userId: string, accountId?: string | null):
 
       selectedPlan: row.selected_plan ?? null,
 
+      planStartDate: row.plan_start_date ? String(row.plan_start_date).slice(0, 10) : null,
       createdAtIso,
       updatedAtIso,
     };
@@ -204,6 +229,7 @@ export default function PlanPage() {
   const [cfType, setCfType] = useState<CashflowType>("deposit");
   const [cfDate, setCfDate] = useState<string>(isoToday());
   const [cfAmount, setCfAmount] = useState<string>("");
+  const [cfReason, setCfReason] = useState<CashflowReason>("owner_contribution");
   const [cfNote, setCfNote] = useState<string>("");
 
   const [saving, setSaving] = useState(false);
@@ -236,7 +262,7 @@ export default function PlanPage() {
 
       // cashflows ledger (deposits/withdrawals)
       try {
-        const fromDate = gp ? String(gp.createdAtIso).slice(0, 10) : undefined;
+        const fromDate = gp?.planStartDate || (gp ? String(gp.createdAtIso).slice(0, 10) : undefined);
         const opts = fromDate
           ? { fromDate, throwOnError: true, forceServer: true, accountId: activeAccountId }
           : { throwOnError: true, forceServer: true, accountId: activeAccountId };
@@ -271,7 +297,7 @@ export default function PlanPage() {
 
   const planStartDate = useMemo(() => {
     if (!plan) return "";
-    return String(plan.createdAtIso || plan.updatedAtIso || "").slice(0, 10);
+    return String(plan.planStartDate || plan.createdAtIso || plan.updatedAtIso || "").slice(0, 10);
   }, [plan]);
 
   const totalTradingPnl = useMemo(() => {
@@ -347,10 +373,13 @@ export default function PlanPage() {
         date: cfDate,
         type: cfType,
         amount,
+        reasonCode: cfReason,
+        sourceModule: "cashflow_tracker",
         note: cfNote?.trim() ? cfNote.trim() : null,
       });
 
       setCfAmount("");
+      setCfReason(cfType === "deposit" ? "owner_contribution" : "owner_draw");
       setCfNote("");
 
       // reload ledger only (cheaper), but keep it simple: reload everything
@@ -667,6 +696,19 @@ export default function PlanPage() {
                               {fmtCurrency(Math.abs(signed))}
                             </div>
 
+                            <div className="mt-1 text-xs text-slate-500">
+                              {L("Reason", "Motivo")}:{" "}
+                              <span className="text-slate-300">
+                                {reasonLabel(cf.reason_code, isEs ? "es" : "en")}
+                              </span>
+                              {cf.source_module ? (
+                                <>
+                                  {" "}· {L("Source", "Origen")}:{" "}
+                                  <span className="text-slate-300">{String(cf.source_module)}</span>
+                                </>
+                              ) : null}
+                            </div>
+
                             {cf.note ? (
                               <div className="mt-1 text-xs text-slate-400 wrap-break-word">
                                 {cf.note}
@@ -709,7 +751,10 @@ export default function PlanPage() {
                     <div className="inline-flex rounded-xl border border-slate-800 bg-slate-950/60 p-1">
                       <button
                         type="button"
-                        onClick={() => setCfType("deposit")}
+                        onClick={() => {
+                          setCfType("deposit");
+                          setCfReason("owner_contribution");
+                        }}
                         className={[
                           "px-3 py-1.5 text-xs rounded-lg transition",
                           cfType === "deposit"
@@ -721,7 +766,10 @@ export default function PlanPage() {
                       </button>
                       <button
                         type="button"
-                        onClick={() => setCfType("withdrawal")}
+                        onClick={() => {
+                          setCfType("withdrawal");
+                          setCfReason("owner_draw");
+                        }}
                         className={[
                           "px-3 py-1.5 text-xs rounded-lg transition",
                           cfType === "withdrawal"
@@ -753,6 +801,32 @@ export default function PlanPage() {
                       placeholder="1000"
                       className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-400"
                     />
+                  </div>
+
+                  <div className="md:col-span-2">
+                    <label className="block text-xs text-slate-400 mb-1">{L("Reason", "Motivo")}</label>
+                    <select
+                      value={cfReason}
+                      onChange={(e) => setCfReason(e.target.value as CashflowReason)}
+                      className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-400"
+                    >
+                      {cfType === "deposit" ? (
+                        <>
+                          <option value="owner_contribution">{L("Owner contribution", "Aporte del dueño")}</option>
+                          <option value="broker_correction">{L("Broker correction", "Corrección del broker")}</option>
+                          <option value="other">{L("Other", "Otro")}</option>
+                        </>
+                      ) : (
+                        <>
+                          <option value="owner_draw">{L("Owner draw", "Retiro del dueño")}</option>
+                          <option value="profit_distribution">{L("Profit distribution", "Distribución de ganancias")}</option>
+                          <option value="reserve_transfer">{L("Reserve transfer", "Transferencia a reserva")}</option>
+                          <option value="tax_reserve">{L("Tax reserve", "Reserva de impuestos")}</option>
+                          <option value="broker_correction">{L("Broker correction", "Corrección del broker")}</option>
+                          <option value="other">{L("Other", "Otro")}</option>
+                        </>
+                      )}
+                    </select>
                   </div>
 
                   <div className="md:col-span-2">

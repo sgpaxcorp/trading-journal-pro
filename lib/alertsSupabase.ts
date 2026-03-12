@@ -15,6 +15,9 @@
 
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import { supabaseBrowser } from "@/lib/supaBaseClient";
+import { shouldAllowLocalProfileAccessFallback } from "@/lib/accessControl";
+import { listMyEntitlements } from "@/lib/entitlementsSupabase";
+import { normalizePlanTier, planFromEntitlements, type AppPlan } from "@/lib/planAccess";
 
 // -----------------------------
 // Types
@@ -149,7 +152,7 @@ export function normalizeChannels(v: unknown): AlertChannel[] {
   return Array.from(set);
 }
 
-type UserPlan = "core" | "advanced" | "none";
+type UserPlan = AppPlan;
 
 const ALERT_RULE_LIMITS: Record<UserPlan, Record<AlertKind, number>> = {
   core: { alarm: 2, reminder: 2 },
@@ -160,23 +163,20 @@ const ALERT_RULE_LIMITS: Record<UserPlan, Record<AlertKind, number>> = {
 const CORE_RULE_KEYS = new Set(["open_positions", "options_expiring"]);
 const CORE_RULE_TRIGGERS = new Set(["open_positions", "options_expiring"]);
 
-function normalizePlan(raw: unknown): UserPlan {
-  const v = String(raw ?? "").toLowerCase();
-  if (v === "advanced" || v === "pro") return "advanced";
-  if (v === "core") return "core";
-  return "none";
-}
-
 async function fetchUserPlan(userId: string): Promise<UserPlan> {
   try {
-    const { data, error } = await supabaseBrowser
-      .from("profiles")
-      .select("plan")
-      .eq("id", userId)
-      .maybeSingle();
+    const [{ data, error }, entitlements] = await Promise.all([
+      supabaseBrowser.from("profiles").select("plan").eq("id", userId).maybeSingle(),
+      listMyEntitlements(userId),
+    ]);
 
+    const entitlementPlan = planFromEntitlements(entitlements);
+    if (entitlementPlan !== "none") return entitlementPlan;
     if (error) return "none";
-    return normalizePlan((data as any)?.plan);
+    if (shouldAllowLocalProfileAccessFallback()) {
+      return normalizePlanTier((data as any)?.plan);
+    }
+    return "none";
   } catch {
     return "none";
   }

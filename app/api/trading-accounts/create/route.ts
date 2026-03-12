@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
+import { isActiveEntitlementStatus, PLATFORM_ACCESS_ENTITLEMENT } from "@/lib/accessControl";
+import { normalizePlanTier } from "@/lib/planAccess";
 
 export const runtime = "nodejs";
 
 function maxAccountsForPlan(planRaw: string | null | undefined): number {
-  const plan = String(planRaw || "").toLowerCase();
-  if (plan === "advanced" || plan === "pro") return 999;
+  const plan = normalizePlanTier(planRaw);
+  if (plan === "advanced") return 999;
   return 5;
 }
 
@@ -29,13 +31,23 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Missing account name" }, { status: 400 });
     }
 
-    const { data: profile } = await supabaseAdmin
-      .from("profiles")
-      .select("plan")
-      .eq("id", userId)
-      .maybeSingle();
+    const [{ data: profile }, { data: entitlement }] = await Promise.all([
+      supabaseAdmin.from("profiles").select("plan").eq("id", userId).maybeSingle(),
+      supabaseAdmin
+        .from("user_entitlements")
+        .select("status, metadata")
+        .eq("user_id", userId)
+        .eq("entitlement_key", PLATFORM_ACCESS_ENTITLEMENT)
+        .maybeSingle(),
+    ]);
 
-    const maxAccounts = maxAccountsForPlan((profile as any)?.plan);
+    const planFromEntitlement =
+      entitlement && isActiveEntitlementStatus((entitlement as any).status)
+        ? normalizePlanTier((entitlement as any)?.metadata?.plan)
+        : "none";
+    const maxAccounts = maxAccountsForPlan(
+      planFromEntitlement !== "none" ? planFromEntitlement : (profile as any)?.plan
+    );
 
     const { data: existing, error: countErr } = await supabaseAdmin
       .from("trading_accounts")

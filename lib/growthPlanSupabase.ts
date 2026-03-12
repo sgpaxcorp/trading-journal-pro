@@ -1,4 +1,11 @@
 import { supabaseBrowser } from "@/lib/supaBaseClient";
+import {
+  getTotalPlannedWithdrawalAmount,
+  normalizePlannedWithdrawals,
+  normalizeWithdrawalSettings,
+  type PlannedWithdrawalEvent,
+  type PlannedWithdrawalSettings,
+} from "@/lib/growthPlanProjection";
 
 export type GrowthPlanStepKey =
   | "prepare"
@@ -101,14 +108,8 @@ export type GrowthPlan = {
   steps?: GrowthPlanSteps;
   rules?: GrowthPlanRule[];
 
-  plannedWithdrawals?: Array<{
-    id: string;
-    targetEquity: number;
-    amount: number;
-    status?: "pending" | "taken" | "skipped";
-    achievedAt?: string | null;
-    decidedAt?: string | null;
-  }>;
+  plannedWithdrawalSettings?: PlannedWithdrawalSettings | null;
+  plannedWithdrawals?: PlannedWithdrawalEvent[];
   planPhases?: Array<{
     id: string;
     title?: string | null;
@@ -116,6 +117,15 @@ export type GrowthPlan = {
     targetDate?: string | null; // YYYY-MM-DD
     status?: "pending" | "completed";
     completedAt?: string | null;
+    monthIndex?: number;
+    weekIndex?: number;
+    weeksInMonth?: number;
+    monthGoal?: number;
+    monthLabel?: string | null;
+    monthStartBalance?: number;
+    monthEndBalance?: number;
+    monthWithdrawal?: number;
+    cumulativeWithdrawals?: number;
   }>;
 
   resetCount?: number;
@@ -284,10 +294,12 @@ function normalizePlan(raw: any, userId: string): GrowthPlan {
     rules,
 
     plannedWithdrawals: Array.isArray(raw?.planned_withdrawals)
-      ? raw.planned_withdrawals
+      ? normalizePlannedWithdrawals(raw.planned_withdrawals)
       : Array.isArray(raw?.plannedWithdrawals)
-        ? raw.plannedWithdrawals
+        ? normalizePlannedWithdrawals(raw.plannedWithdrawals)
         : [],
+    plannedWithdrawalSettings:
+      normalizeWithdrawalSettings(raw?.planned_withdrawal_settings ?? raw?.plannedWithdrawalSettings) ?? null,
     planPhases: Array.isArray(raw?.plan_phases)
       ? raw.plan_phases
       : Array.isArray(raw?.planPhases)
@@ -329,6 +341,7 @@ function toDb(plan: GrowthPlan) {
         : null,
     target_multiple: targetMultiple,
     plan_start_date: plan.planStartDate ?? null,
+    planned_withdrawal_settings: plan.plannedWithdrawalSettings ?? null,
     planned_withdrawals: plan.plannedWithdrawals ?? [],
     plan_phases: plan.planPhases ?? [],
 
@@ -360,15 +373,9 @@ function toDb(plan: GrowthPlan) {
 
 export function computeAdjustedTarget(plan: GrowthPlan | null, cashflowNet: number) {
   if (!plan) return 0;
-  const base = num(plan.startingBalance, 0) + num(cashflowNet, 0);
-  const mult =
-    plan.targetMultiple != null && Number.isFinite(plan.targetMultiple)
-      ? plan.targetMultiple
-      : plan.startingBalance > 0 && plan.targetBalance > 0
-        ? plan.targetBalance / plan.startingBalance
-        : null;
-  if (!mult || !Number.isFinite(mult)) return plan.targetBalance ?? 0;
-  return Math.max(0, Number((base * mult).toFixed(2)));
+  const baseTarget = num(plan.targetBalance, 0);
+  const plannedWithdrawals = getTotalPlannedWithdrawalAmount(plan.plannedWithdrawals ?? []);
+  return Math.max(0, Number((baseTarget + plannedWithdrawals).toFixed(2)));
 }
 
 /** Obtiene user id actual (requiere sesión activa) */

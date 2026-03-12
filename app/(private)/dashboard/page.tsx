@@ -7,7 +7,7 @@ import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 
 import { useAuth } from "@/context/AuthContext";
-import { computeAdjustedTarget, getGrowthPlanSupabaseByAccount, upsertGrowthPlanSupabase, type GrowthPlan } from "@/lib/growthPlanSupabase";
+import { getGrowthPlanSupabaseByAccount, upsertGrowthPlanSupabase, type GrowthPlan } from "@/lib/growthPlanSupabase";
 import type { JournalEntry } from "@/lib/journalTypes";
 import { getAllJournalEntries } from "@/lib/journalSupabase";
 import { upsertDailySnapshot } from "@/lib/snapshotSupabase";
@@ -37,6 +37,160 @@ const DynamicDashboardGrid = dynamic(() => Promise.resolve(DashboardGrid), {
    Types (UI only)
 ========================= */
 type UiChecklistItem = { text: string; done: boolean };
+type MotivationMessageRow = {
+  id: string;
+  locale: string;
+  title: string | null;
+  body: string;
+  weekday: string | null;
+  day_of_year: number | null;
+};
+
+const NEW_YORK_TZ = "America/New_York";
+
+function getNewYorkDayParts(now = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: NEW_YORK_TZ,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    weekday: "short",
+  }).formatToParts(now);
+  const year = Number(parts.find((p) => p.type === "year")?.value ?? "1970");
+  const month = Number(parts.find((p) => p.type === "month")?.value ?? "1");
+  const day = Number(parts.find((p) => p.type === "day")?.value ?? "1");
+  const weekdayRaw = (parts.find((p) => p.type === "weekday")?.value ?? "Mon").toLowerCase();
+  const weekdayMap: Record<string, string> = {
+    mon: "mon",
+    tue: "tue",
+    wed: "wed",
+    thu: "thu",
+    fri: "fri",
+    sat: "sat",
+    sun: "sun",
+  };
+  return {
+    year,
+    month,
+    day,
+    weekday: weekdayMap[weekdayRaw.slice(0, 3)] ?? "mon",
+  };
+}
+
+function getNewYorkDayOfYear(now = new Date()) {
+  const { year, month, day } = getNewYorkDayParts(now);
+  const startUtc = Date.UTC(year, 0, 1);
+  const currentUtc = Date.UTC(year, month - 1, day);
+  return Math.floor((currentUtc - startUtc) / 86400000) + 1;
+}
+
+function fallbackCoachMessage(weekday: string, lang: "en" | "es") {
+  const t = (en: string, es: string) => (lang === "es" ? es : en);
+  if (weekday === "fri") {
+    return {
+      title: t("Neuro Trader Friday", "Neuro Trader viernes"),
+      body: t(
+        "Close the week with emotional neutrality. Your edge grows when review is honest and ego stays quiet.",
+        "Cierra la semana con neutralidad emocional. Tu edge crece cuando la revisión es honesta y el ego se queda en silencio."
+      ),
+    };
+  }
+  if (weekday === "sat") {
+    return {
+      title: t("Neuro Trader reset", "Reset Neuro Trader"),
+      body: t(
+        "Rest is part of execution. Reset your nervous system today so you do not trade next week from fatigue.",
+        "Descansar también es parte de la ejecución. Resetea tu sistema nervioso hoy para no operar la próxima semana desde el cansancio."
+      ),
+    };
+  }
+  if (weekday === "sun") {
+    return {
+      title: t("Neuro Trader preparation", "Preparación Neuro Trader"),
+      body: t(
+        "Prepare your levels, calendar, and scenarios. Confidence tomorrow comes from clarity tonight.",
+        "Prepara niveles, calendario y escenarios. La confianza de mañana nace de la claridad de esta noche."
+      ),
+    };
+  }
+  return {
+    title: t("Neuro Trader focus", "Enfoque Neuro Trader"),
+    body: t(
+      "Trade from process, not from impulse. The mind you bring to the screen determines the quality of every decision.",
+      "Opera desde el proceso, no desde el impulso. La mente con la que llegas a la pantalla determina la calidad de cada decisión."
+    ),
+  };
+}
+
+function pickMotivationMessage(rows: MotivationMessageRow[], lang: "en" | "es", now = new Date()) {
+  const localeCode = lang === "es" ? "es" : "en";
+  const dayOfYear = getNewYorkDayOfYear(now);
+  const weekday = getNewYorkDayParts(now).weekday;
+  const localeRows = rows.filter((row) => row.locale === localeCode);
+  const fallbackRows = rows.filter((row) => row.locale === "en");
+  const pool = localeRows.length ? localeRows : fallbackRows;
+
+  const exactDay = pool.find((row) => row.day_of_year === dayOfYear);
+  if (exactDay) return exactDay;
+
+  const weekdaySpecific = pool.find((row) => row.weekday === weekday);
+  if (weekdaySpecific) return weekdaySpecific;
+
+  const generic = pool.find((row) => !row.weekday && row.day_of_year == null);
+  if (generic) return generic;
+
+  const fallback = fallbackCoachMessage(weekday, lang);
+  return {
+    id: `fallback-${localeCode}-${weekday}-${dayOfYear}`,
+    locale: localeCode,
+    title: fallback.title,
+    body: fallback.body,
+    weekday,
+    day_of_year: dayOfYear,
+  } satisfies MotivationMessageRow;
+}
+
+function buildSparklinePath(values: number[], width: number, height: number) {
+  if (!values.length) return "";
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = max - min;
+  return values
+    .map((value, index) => {
+      const x = values.length === 1 ? width / 2 : (index / (values.length - 1)) * width;
+      const y =
+        range === 0
+          ? height / 2
+          : height - ((value - min) / range) * height;
+      return `${index === 0 ? "M" : "L"}${x.toFixed(2)} ${y.toFixed(2)}`;
+    })
+    .join(" ");
+}
+
+function buildSparklineDots(values: number[], width: number, height: number) {
+  if (!values.length) return [] as Array<{ x: number; y: number; value: number; index: number }>;
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = max - min;
+  return values.map((value, index) => {
+    const x = values.length === 1 ? width / 2 : (index / (values.length - 1)) * width;
+    const y =
+      range === 0
+        ? height / 2
+        : height - ((value - min) / range) * height;
+    return { x, y, value, index };
+  });
+}
+
+function formatCompactDateLabel(isoDate: string, locale?: string) {
+  if (!isoDate) return "—";
+  const date = new Date(`${isoDate}T00:00:00`);
+  if (!Number.isFinite(date.getTime())) return isoDate;
+  return new Intl.DateTimeFormat(locale || undefined, {
+    month: "short",
+    day: "numeric",
+  }).format(date);
+}
 
 /* =========================
    Utils
@@ -894,6 +1048,7 @@ export default function DashboardPage() {
   const [creatingAccount, setCreatingAccount] = useState(false);
   const [accountMessage, setAccountMessage] = useState<string | null>(null);
   const [widgetsLoaded, setWidgetsLoaded] = useState(false);
+  const [dailyCoachMessage, setDailyCoachMessage] = useState<MotivationMessageRow | null>(null);
   const phaseAlertBusyRef = useRef(false);
   const phaseRuleIdRef = useRef<string | null>(null);
   const goalNotificationAttemptedRef = useRef<Set<string>>(new Set());
@@ -1005,6 +1160,60 @@ export default function DashboardPage() {
     if (loading) return;
     if (!user) router.replace("/signin");
   }, [loading, user, router]);
+
+  useEffect(() => {
+    if (loading || !user) return;
+    let cancelled = false;
+
+    const loadDailyCoachMessage = async () => {
+      try {
+        const localeCode = isEs ? "es" : "en";
+        const { data, error } = await supabaseBrowser
+          .from("motivational_messages")
+          .select("id, locale, title, body, weekday, day_of_year")
+          .eq("active", true)
+          .in("locale", [localeCode, "en"]);
+
+        if (cancelled) return;
+        if (error) {
+          console.warn("[dashboard] motivational_messages fetch error:", error);
+          const fallback = fallbackCoachMessage(getNewYorkDayParts().weekday, isEs ? "es" : "en");
+          setDailyCoachMessage({
+            id: `fallback-${localeCode}-${getNewYorkDayOfYear()}`,
+            locale: localeCode,
+            title: fallback.title,
+            body: fallback.body,
+            weekday: getNewYorkDayParts().weekday,
+            day_of_year: getNewYorkDayOfYear(),
+          });
+          return;
+        }
+
+        const picked = pickMotivationMessage(
+          ((data ?? []) as MotivationMessageRow[]).filter((row) => !!row.body),
+          isEs ? "es" : "en"
+        );
+        setDailyCoachMessage(picked);
+      } catch (err) {
+        if (cancelled) return;
+        console.warn("[dashboard] daily coach message load exception:", err);
+        const fallback = fallbackCoachMessage(getNewYorkDayParts().weekday, isEs ? "es" : "en");
+        setDailyCoachMessage({
+          id: `fallback-${isEs ? "es" : "en"}-${getNewYorkDayOfYear()}`,
+          locale: isEs ? "es" : "en",
+          title: fallback.title,
+          body: fallback.body,
+          weekday: getNewYorkDayParts().weekday,
+          day_of_year: getNewYorkDayOfYear(),
+        });
+      }
+    };
+
+    loadDailyCoachMessage();
+    return () => {
+      cancelled = true;
+    };
+  }, [loading, user, isEs]);
 
   // Load plan + journal + checklist + cashflows (rolling day for checklist)
   useEffect(() => {
@@ -1545,7 +1754,7 @@ export default function DashboardPage() {
   const { starting, target, currentBalance, progressPct } = useMemo(() => {
     const startingLocal = (plan as any)?.startingBalance ?? 0;
     const adjustedStart = plan ? startingLocal + (cashflowNet ?? 0) : startingLocal;
-    const targetLocal = plan ? computeAdjustedTarget(plan, cashflowNet ?? 0) : 0;
+    const targetLocal = plan ? Number((plan as any)?.targetBalance ?? 0) : 0;
 
     const latestSeriesValue = sortedServerSeries.length > 0 ? sortedServerSeries[sortedServerSeries.length - 1]?.value ?? null : null;
 
@@ -1618,6 +1827,82 @@ export default function DashboardPage() {
       referenceMode: planStartStr ? "plan-start" : "tracked",
     };
   }, [sortedServerSeries, sessionDateStr, currentBalance, totalTradingPnl, cashflowNet, plan, planStartStr]);
+
+  const accountProgressSparkline = useMemo(() => {
+    const endDate = new Date(`${sessionDateStr}T00:00:00`);
+    const endDateValid = Number.isFinite(endDate.getTime());
+    const dailyPnl = new Map<string, number>();
+    const dailyCashflow = new Map<string, number>();
+
+    for (const entry of filteredEntries) {
+      const ds = String((entry as any)?.date ?? "").slice(0, 10);
+      if (!ds) continue;
+      const pnlRaw = (entry as any)?.pnl;
+      const pnl = typeof pnlRaw === "number" ? pnlRaw : Number(pnlRaw) || 0;
+      dailyPnl.set(ds, (dailyPnl.get(ds) ?? 0) + pnl);
+    }
+
+    for (const cf of filteredCashflows) {
+      const ds = String((cf as any)?.date ?? "").slice(0, 10);
+      if (!ds) continue;
+      dailyCashflow.set(ds, (dailyCashflow.get(ds) ?? 0) + signedCashflowAmount(cf));
+    }
+
+    const recent: Array<{ date: string; value: number }> = [];
+
+    if (endDateValid) {
+      let carry = Number(currentBalance);
+      const cursor = new Date(endDate);
+
+      for (let i = 0; i < 14; i += 1) {
+        const iso = formatDateYYYYMMDD(cursor);
+        recent.push({ date: iso, value: carry });
+        const impact = (dailyPnl.get(iso) ?? 0) + (dailyCashflow.get(iso) ?? 0);
+        carry -= impact;
+        cursor.setDate(cursor.getDate() - 1);
+      }
+
+      recent.reverse();
+    } else {
+      recent.push(
+        { date: accountProgressMetrics.referenceDate, value: Number(accountProgressMetrics.referenceBalance) },
+        { date: sessionDateStr, value: Number(currentBalance) }
+      );
+    }
+
+    const values = recent.map((point) => Number(point.value ?? 0));
+    const path = buildSparklinePath(values, 220, 52);
+    const dots = buildSparklineDots(values, 220, 52);
+    const first = values[0] ?? currentBalance;
+    const last = values[values.length - 1] ?? currentBalance;
+    const min = values.length ? Math.min(...values) : currentBalance;
+    const max = values.length ? Math.max(...values) : currentBalance;
+    const mid = min + (max - min) / 2;
+    const middlePoint = recent[Math.floor((recent.length - 1) / 2)] ?? recent[recent.length - 1];
+    return {
+      path,
+      dots,
+      points: recent,
+      start: first,
+      end: last,
+      min,
+      max,
+      mid,
+      delta: last - first,
+      isPositive: last >= first,
+      startDateLabel: formatCompactDateLabel(recent[0]?.date ?? sessionDateStr, localeTag),
+      midDateLabel: formatCompactDateLabel(middlePoint?.date ?? sessionDateStr, localeTag),
+      endDateLabel: formatCompactDateLabel(recent[recent.length - 1]?.date ?? sessionDateStr, localeTag),
+    };
+  }, [
+    accountProgressMetrics.referenceBalance,
+    accountProgressMetrics.referenceDate,
+    currentBalance,
+    filteredCashflows,
+    filteredEntries,
+    localeTag,
+    sessionDateStr,
+  ]);
 
   const autoPhaseCadence = useMemo(() => {
     const raw =
@@ -2142,7 +2427,6 @@ export default function DashboardPage() {
   // ===== Render widgets =====
   const renderItem = (id: WidgetId) => {
     if (id === "progress") {
-      const hasCashflowImpact = Math.abs(accountProgressMetrics.netCashflow) >= 0.005;
       const accountMetricCards = [
         {
           key: "net-change",
@@ -2182,15 +2466,6 @@ export default function DashboardPage() {
         accountProgressMetrics.referenceMode === "plan-start"
           ? L("Reference locked to plan start", "Referencia fijada al inicio del plan")
           : L("Reference from first tracked equity point", "Referencia desde el primer punto de equity registrado");
-      const highWaterNote = accountProgressMetrics.isAtHigh
-        ? L(
-            "The account is printing a new equity high. Weekly Summary stays focused on realized weekly performance.",
-            "La cuenta esta marcando un nuevo maximo de equity. Weekly Summary se mantiene enfocado en el rendimiento real semanal."
-          )
-        : L(
-            `The account is ${formatCurrency(Math.abs(accountProgressMetrics.fromPeak))} below its high-water mark (${formatPercent(Math.abs(accountProgressMetrics.fromPeakPct))}). Weekly Summary stays focused on realized weekly performance.`,
-            `La cuenta esta ${formatCurrency(Math.abs(accountProgressMetrics.fromPeak))} por debajo de su maximo de equity (${formatPercent(Math.abs(accountProgressMetrics.fromPeakPct))}). Weekly Summary se mantiene enfocado en el rendimiento real semanal.`
-          );
       return (
         <>
           <p className={widgetTitleClass}>
@@ -2215,7 +2490,7 @@ export default function DashboardPage() {
                 </p>
               </div>
 
-              <div className="rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-3">
+              <div className="rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-3 lg:min-w-[220px]">
                 <p className="text-[11px] uppercase tracking-[0.28em] text-slate-500">
                   {L("Reference balance", "Balance de referencia")}
                 </p>
@@ -2240,59 +2515,67 @@ export default function DashboardPage() {
                 </div>
               ))}
             </div>
-          </div>
 
-          <div className="mt-3 rounded-xl border border-slate-800 bg-slate-900/40 p-3">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-[11px] uppercase tracking-[0.28em] text-slate-500">
-                  {L("High-water mark", "Maximo de equity")}
-                </p>
-                <p className="mt-1 text-[16px] font-semibold text-slate-100">
-                  {formatCurrency(accountProgressMetrics.peakBalance)}
-                </p>
-                <p className="mt-1 text-[11px] text-slate-500">
-                  {accountProgressMetrics.peakDate}
-                </p>
+            <div className="mt-4 rounded-xl border border-slate-800 bg-slate-950/45 p-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-[11px] uppercase tracking-[0.28em] text-slate-500">
+                    {L("Progress curve", "Curva de progreso")}
+                  </p>
+                  <p className="mt-1 text-[12px] text-slate-400">
+                    {L(
+                      "X-axis shows date. Y-axis shows account balance. The line uses your latest 14 calendar days and carries forward the last known balance.",
+                      "El eje X muestra la fecha. El eje Y muestra el balance de la cuenta. La línea usa tus últimos 14 días calendario y arrastra el último balance conocido."
+                    )}
+                  </p>
+                </div>
+                <span className={`text-[12px] font-semibold ${accountProgressSparkline.isPositive ? "text-emerald-300" : "text-amber-300"}`}>
+                  {formatSignedCurrency(accountProgressSparkline.delta)}
+                </span>
               </div>
 
-              <div className="text-right">
-                <p className="text-[11px] uppercase tracking-[0.24em] text-slate-500">
-                  {accountProgressMetrics.isAtHigh ? L("Status", "Estado") : L("From peak", "Desde el maximo")}
-                </p>
-                <p
-                  className={`mt-1 text-[15px] font-semibold ${
-                    accountProgressMetrics.isAtHigh ? "text-emerald-300" : "text-amber-300"
-                  }`}
-                >
-                  {accountProgressMetrics.isAtHigh
-                    ? L("New high", "Nuevo maximo")
-                    : formatSignedCurrency(accountProgressMetrics.fromPeak)}
-                </p>
+              <div className="mt-3 grid grid-cols-[72px_minmax(0,1fr)] gap-3">
+                <div className="flex h-[72px] flex-col justify-between text-[10px] text-slate-500">
+                  <span>{formatCurrency(accountProgressSparkline.max)}</span>
+                  <span>{formatCurrency(accountProgressSparkline.mid)}</span>
+                  <span>{formatCurrency(accountProgressSparkline.min)}</span>
+                </div>
+
+                <div>
+                  <div className="rounded-lg border border-slate-800/80 bg-slate-950/70 px-3 py-3">
+                    <svg viewBox="0 0 220 60" preserveAspectRatio="none" className="h-[60px] w-full">
+                      <g transform="translate(0 4)">
+                        <path
+                          d={accountProgressSparkline.path}
+                          fill="none"
+                          stroke={accountProgressSparkline.isPositive ? "#34d399" : "#f59e0b"}
+                          strokeWidth="2.5"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                        {accountProgressSparkline.dots.map((dot) => (
+                          <circle
+                            key={`${dot.index}-${dot.x}-${dot.y}`}
+                            cx={dot.x}
+                            cy={dot.y}
+                            r="2.2"
+                            fill={accountProgressSparkline.isPositive ? "#34d399" : "#f59e0b"}
+                            stroke="rgba(2,6,23,0.95)"
+                            strokeWidth="1"
+                          />
+                        ))}
+                      </g>
+                    </svg>
+                  </div>
+
+                  <div className="mt-2 grid grid-cols-3 text-[10px] text-slate-500">
+                    <span>{accountProgressSparkline.startDateLabel}</span>
+                    <span className="text-center">{accountProgressSparkline.midDateLabel}</span>
+                    <span className="text-right">{accountProgressSparkline.endDateLabel}</span>
+                  </div>
+                </div>
               </div>
             </div>
-
-            <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-slate-800">
-              <div
-                className="h-2 bg-linear-to-r from-cyan-400 via-sky-400 to-emerald-300"
-                style={{
-                  width: `${Math.max(
-                    accountProgressMetrics.isAtHigh ? 100 : 6,
-                    accountProgressMetrics.peakCoveragePct
-                  )}%`,
-                }}
-              />
-            </div>
-
-            <p className="mt-2 text-[12px] leading-snug text-slate-400">
-              {highWaterNote}
-              {hasCashflowImpact
-                ? ` ${L(
-                    `Net account change includes ${formatSignedCurrency(accountProgressMetrics.netCashflow)} in cashflows.`,
-                    `El cambio neto de cuenta incluye ${formatSignedCurrency(accountProgressMetrics.netCashflow)} en flujos de capital.`
-                  )}`
-                : ""}
-            </p>
           </div>
         </>
       );
@@ -3423,34 +3706,59 @@ export default function DashboardPage() {
         )}
 
         <section className="mb-6 rounded-xl border border-slate-800 bg-slate-900/60 p-4">
-          <p className="text-[13px] text-slate-400 mb-2">
-            {L(
-              "Customize your dashboard: toggle widgets on/off.",
-              "Personaliza tu dashboard: activa o desactiva los widgets."
-            )}
-          </p>
+          <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+            <div className="min-w-0 flex-1">
+              <p className="text-[13px] text-slate-400 mb-2">
+                {L(
+                  "Customize your dashboard: toggle widgets on/off.",
+                  "Personaliza tu dashboard: activa o desactiva los widgets."
+                )}
+              </p>
 
-          <div className="flex flex-wrap gap-2">
-            {ALL_WIDGETS.map((w) => {
-              const isActive = activeWidgets.includes(w.id);
-              return (
-                <button
-                  key={w.id}
-                  type="button"
-                  onClick={() => {
-                    setActiveWidgets((prev) => (prev.includes(w.id) ? prev.filter((x) => x !== w.id) : [...prev, w.id]));
-                  }}
-                  className={`px-3 py-1.5 rounded-full text-[12px] border transition ${
-                    isActive
-                      ? "bg-emerald-400 text-slate-950 border-emerald-300"
-                      : "bg-slate-950 text-slate-300 border-slate-700 hover:border-emerald-400 hover:text-emerald-300"
-                  }`}
-                >
-                  {isActive ? "✓ " : "+ "}
-                  {w.label}
-                </button>
-              );
-            })}
+              <div className="flex flex-wrap gap-2">
+                {ALL_WIDGETS.map((w) => {
+                  const isActive = activeWidgets.includes(w.id);
+                  return (
+                    <button
+                      key={w.id}
+                      type="button"
+                      onClick={() => {
+                        setActiveWidgets((prev) => (prev.includes(w.id) ? prev.filter((x) => x !== w.id) : [...prev, w.id]));
+                      }}
+                      className={`px-3 py-1.5 rounded-full text-[12px] border transition ${
+                        isActive
+                          ? "bg-emerald-400 text-slate-950 border-emerald-300"
+                          : "bg-slate-950 text-slate-300 border-slate-700 hover:border-emerald-400 hover:text-emerald-300"
+                      }`}
+                    >
+                      {isActive ? "✓ " : "+ "}
+                      {w.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {dailyCoachMessage ? (
+              <div className="w-full shrink-0 rounded-xl border border-emerald-400/20 bg-[linear-gradient(135deg,rgba(16,185,129,0.12),rgba(6,182,212,0.08),rgba(15,23,42,0.88))] px-4 py-3 xl:max-w-[380px]">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-[10px] uppercase tracking-[0.28em] text-emerald-200/80">
+                      {L("Daily coach message", "Mensaje diario del coach")}
+                    </p>
+                    <p className="mt-1 text-[13px] font-semibold text-slate-100 truncate">
+                      {dailyCoachMessage.title || L("Coach note for today", "Nota del coach para hoy")}
+                    </p>
+                    <p className="mt-1 text-[12px] leading-relaxed text-slate-300">
+                      {dailyCoachMessage.body}
+                    </p>
+                  </div>
+                  <div className="mt-0.5 rounded-full border border-emerald-400/30 bg-emerald-400/10 px-2 py-1 text-[10px] font-semibold text-emerald-200">
+                    {L("Today", "Hoy")}
+                  </div>
+                </div>
+              </div>
+            ) : null}
           </div>
         </section>
 
