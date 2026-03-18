@@ -2,11 +2,13 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState, useRef, Suspense } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import TopNav from "@/app/components/TopNav";
 import { useAuth } from "@/context/AuthContext";
 import { useTradingAccounts } from "@/hooks/useTradingAccounts";
+import { useUserPlan } from "@/hooks/useUserPlan";
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
 import { supabaseBrowser } from "@/lib/supaBaseClient";
@@ -819,12 +821,14 @@ function ReviewMetricCard({
 function BackStudyPageInner() {
   const { user, loading } = useAuth();
   const { activeAccountId, loading: accountsLoading } = useTradingAccounts();
+  const { plan, loading: planLoading } = useUserPlan();
   const router = useRouter();
   const searchParams = useSearchParams();
   const { locale } = useAppSettings();
   const lang = resolveLocale(locale);
   const isEs = lang === "es";
   const L = (en: string, es: string) => (isEs ? es : en);
+  const canAccessAudit = plan === "advanced";
 
   const activeTab =
     searchParams.get("tab") === "audit" ? "audit" : "backtest";
@@ -1250,6 +1254,7 @@ function BackStudyPageInner() {
   };
 
   const loadAuditForTrade = async (trade: TradeView) => {
+    if (!canAccessAudit) return;
     if (!user?.id || !activeAccountId) return;
 
     setAuditLoading(true);
@@ -1303,7 +1308,7 @@ function BackStudyPageInner() {
   const handleLoad = async (e: FormEvent) => {
     e.preventDefault();
     await loadReplay();
-    if (selectedTrade) {
+    if (canAccessAudit && selectedTrade) {
       await loadAuditForTrade(selectedTrade);
     }
   };
@@ -1326,16 +1331,18 @@ function BackStudyPageInner() {
     if (isAuditTab) return;
     if (!selectedTrade) return;
     void loadReplay();
-    void loadAuditForTrade(selectedTrade);
+    if (canAccessAudit) {
+      void loadAuditForTrade(selectedTrade);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedTrade, timeframe, chartRange]);
+  }, [selectedTrade, timeframe, chartRange, canAccessAudit, isAuditTab]);
 
   useEffect(() => {
-    if (selectedTrade) return;
+    if (selectedTrade && canAccessAudit) return;
     setAuditResult(null);
     setAuditError(null);
     setAuditLoading(false);
-  }, [selectedTrade]);
+  }, [selectedTrade, canAccessAudit]);
 
   const auditMetrics = auditResult?.audit ?? null;
   const auditProcessReview = auditResult?.process_review ?? auditResult?.plan_compliance ?? null;
@@ -1345,7 +1352,7 @@ function BackStudyPageInner() {
   const auditEvidence = auditMetrics?.evidence ?? null;
   const selectedInstrumentKey = selectedTrade ? buildInstrumentKeyFromTrade(selectedTrade) : null;
 
-  if (loading || !user || (!isAuditTab && entriesLoading)) {
+  if (loading || planLoading || !user || (!isAuditTab && entriesLoading)) {
     return (
       <main className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center">
         <p className="text-slate-400 text-sm">{L("Loading back-study…", "Cargando back-study…")}</p>
@@ -1375,9 +1382,14 @@ function BackStudyPageInner() {
                       "Analyze your imported order history with deterministic checks (no AI).",
                       "Analiza tu historial de órdenes importado con reglas determinísticas (sin AI)."
                     )
-                  : L(
+                  : canAccessAudit
+                  ? L(
                       "Back-Study now works as a trade review workspace: chart replay, execution truth from audit, process compliance, and direct handoff to AI Coach.",
                       "Back-Study ahora funciona como un workspace de revisión del trade: replay visual, verdad de ejecución desde audit, cumplimiento del proceso y handoff directo al AI Coach."
+                    )
+                  : L(
+                      "Use Trade review to replay the chart, review entries and exits, and document what happened in the trade.",
+                      "Usa Trade review para repetir el chart, revisar entradas y salidas, y documentar qué pasó en el trade."
                     )}
               </p>
             </div>
@@ -1404,25 +1416,65 @@ function BackStudyPageInner() {
             >
               {L("Trade review", "Trade review")}
             </button>
-            <button
-              type="button"
-              onClick={() => router.push("/back-study?tab=audit")}
-              className={`rounded-full px-4 py-2 text-sm font-semibold transition border ${
-                isAuditTab
-                  ? "bg-emerald-500 text-slate-950 border-emerald-400"
-                  : "border-slate-700 text-slate-200 hover:border-emerald-400 hover:text-emerald-300"
-              }`}
-              aria-pressed={isAuditTab}
-            >
-              {L("Audit workbench", "Audit workbench")}
-            </button>
+            {canAccessAudit ? (
+              <button
+                type="button"
+                onClick={() => router.push("/back-study?tab=audit")}
+                className={`rounded-full px-4 py-2 text-sm font-semibold transition border ${
+                  isAuditTab
+                    ? "bg-emerald-500 text-slate-950 border-emerald-400"
+                    : "border-slate-700 text-slate-200 hover:border-emerald-400 hover:text-emerald-300"
+                }`}
+                aria-pressed={isAuditTab}
+              >
+                {L("Audit workbench", "Audit workbench")}
+              </button>
+            ) : (
+              <Link
+                href="/plans-comparison"
+                className="rounded-full px-4 py-2 text-sm font-semibold transition border border-slate-700 text-slate-400 hover:border-emerald-400 hover:text-emerald-300"
+              >
+                {L("Audit workbench · Advanced", "Audit workbench · Advanced")}
+              </Link>
+            )}
           </div>
 
           {isAuditTab ? (
-            <OrderHistoryAuditPanel
-              wrapperClassName="w-full"
-              innerClassName="max-w-6xl mx-auto space-y-6"
-            />
+            canAccessAudit ? (
+              <OrderHistoryAuditPanel
+                wrapperClassName="w-full"
+                innerClassName="max-w-6xl mx-auto space-y-6"
+              />
+            ) : (
+              <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
+                <p className="text-emerald-300 text-[11px] uppercase tracking-[0.3em]">
+                  {L("Advanced feature", "Función Advanced")}
+                </p>
+                <h2 className="text-2xl font-semibold mt-2">
+                  {L("Audit workbench is included in Advanced", "Audit workbench está incluido en Advanced")}
+                </h2>
+                <p className="text-sm text-slate-400 mt-2 max-w-2xl">
+                  {L(
+                    "Core keeps Trade review. Advanced unlocks deterministic order-history audit, execution sequencing, and deeper process validation.",
+                    "Core mantiene Trade review. Advanced desbloquea la auditoría determinística de órdenes, la secuencia de ejecución y una validación más profunda del proceso."
+                  )}
+                </p>
+                <div className="mt-4 flex flex-wrap gap-3">
+                  <Link
+                    href="/billing"
+                    className="px-4 py-2 rounded-xl bg-emerald-400 text-slate-950 text-xs font-semibold hover:bg-emerald-300 transition"
+                  >
+                    {L("Upgrade to Advanced", "Actualizar a Advanced")}
+                  </Link>
+                  <Link
+                    href="/plans-comparison"
+                    className="px-4 py-2 rounded-xl border border-slate-700 text-slate-200 text-xs hover:border-emerald-400 transition"
+                  >
+                    {L("Compare plans", "Comparar planes")}
+                  </Link>
+                </div>
+              </section>
+            )
           ) : (
             <>
               {entriesError && (
@@ -1667,38 +1719,46 @@ function BackStudyPageInner() {
                         value={`${timeframe} · ${rangeLabels[chartRange]} · ${timeMode === "et" ? "ET" : L("Local", "Local")}`}
                         tone="sky"
                       />
-                      <ReviewMetricCard
-                        label={L("Execution audit", "Auditoría de ejecución")}
-                        value={
-                          auditLoading
-                            ? L("Loading…", "Cargando…")
-                            : auditError
-                            ? L("Audit error", "Error de auditoría")
-                            : auditResult?.events?.length
-                            ? `${auditResult.events.length} ${L("events", "eventos")}`
-                            : L("No broker events", "Sin eventos del broker")
-                        }
-                        tone={auditError ? "rose" : "emerald"}
-                      />
-                      <ReviewMetricCard
-                        label={L("Process review", "Revisión del proceso")}
-                        value={
-                          auditProcessReview?.score != null
-                            ? `${auditProcessReview.score}%`
-                            : L("Pending", "Pendiente")
-                        }
-                        tone={
-                          auditProcessReview?.score != null && auditProcessReview.score < 70
-                            ? "rose"
-                            : "default"
-                        }
-                      />
+                      {canAccessAudit ? (
+                        <>
+                          <ReviewMetricCard
+                            label={L("Execution audit", "Auditoría de ejecución")}
+                            value={
+                              auditLoading
+                                ? L("Loading…", "Cargando…")
+                                : auditError
+                                ? L("Audit error", "Error de auditoría")
+                                : auditResult?.events?.length
+                                ? `${auditResult.events.length} ${L("events", "eventos")}`
+                                : L("No broker events", "Sin eventos del broker")
+                            }
+                            tone={auditError ? "rose" : "emerald"}
+                          />
+                          <ReviewMetricCard
+                            label={L("Process review", "Revisión del proceso")}
+                            value={
+                              auditProcessReview?.score != null
+                                ? `${auditProcessReview.score}%`
+                                : L("Pending", "Pendiente")
+                            }
+                            tone={
+                              auditProcessReview?.score != null && auditProcessReview.score < 70
+                                ? "rose"
+                                : "default"
+                            }
+                          />
+                        </>
+                      ) : null}
                     </section>
                   )}
 
                   {/* Charts */}
                   {selectedTrade && (
-                    <section className="grid gap-4 xl:grid-cols-[minmax(0,1.35fr),minmax(320px,0.65fr)]">
+                    <section
+                      className={`grid gap-4 ${
+                        canAccessAudit ? "xl:grid-cols-[minmax(0,1.35fr),minmax(320px,0.65fr)]" : "grid-cols-1"
+                      }`}
+                    >
                       <div className="space-y-4">
                         <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-4 md:p-5">
                           <div className="flex flex-wrap items-start justify-between gap-3">
@@ -1731,12 +1791,14 @@ function BackStudyPageInner() {
                                 {L("Trade rows", "Rows del trade")}:{" "}
                                 <span className="text-slate-100">{selectedTrade.entries.length + selectedTrade.exits.length}</span>
                               </p>
-                              <p className="mt-1">
-                                {L("Audit filter", "Filtro de audit")}:{" "}
-                                <span className="font-mono text-slate-100">
-                                  {selectedInstrumentKey || selectedTrade.symbol}
-                                </span>
-                              </p>
+                              {canAccessAudit ? (
+                                <p className="mt-1">
+                                  {L("Audit filter", "Filtro de audit")}:{" "}
+                                  <span className="font-mono text-slate-100">
+                                    {selectedInstrumentKey || selectedTrade.symbol}
+                                  </span>
+                                </p>
+                              ) : null}
                             </div>
                           </div>
                         </div>
@@ -1829,121 +1891,123 @@ function BackStudyPageInner() {
                         )}
                       </div>
 
-                      <aside className="space-y-4">
-                        <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-4 md:p-5">
-                          <div className="flex items-center justify-between gap-3">
-                            <div>
-                              <p className="text-[11px] uppercase tracking-[0.2em] text-sky-400">
-                                {L("Execution truth", "Verdad de ejecución")}
+                      {canAccessAudit ? (
+                        <aside className="space-y-4">
+                          <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-4 md:p-5">
+                            <div className="flex items-center justify-between gap-3">
+                              <div>
+                                <p className="text-[11px] uppercase tracking-[0.2em] text-sky-400">
+                                  {L("Execution truth", "Verdad de ejecución")}
+                                </p>
+                                <h3 className="mt-2 text-lg font-semibold text-slate-100">
+                                  {L("Selected trade audit", "Auditoría del trade seleccionado")}
+                                </h3>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => router.push("/back-study?tab=audit")}
+                                className="rounded-xl border border-slate-700 px-3 py-2 text-xs text-slate-300 hover:border-emerald-400 hover:text-emerald-200"
+                              >
+                                {L("Open full audit", "Abrir audit completo")}
+                              </button>
+                            </div>
+
+                            {auditLoading ? (
+                              <p className="mt-4 text-sm text-slate-400">
+                                {L("Loading execution audit…", "Cargando auditoría de ejecución…")}
                               </p>
-                              <h3 className="mt-2 text-lg font-semibold text-slate-100">
-                                {L("Selected trade audit", "Auditoría del trade seleccionado")}
-                              </h3>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => router.push("/back-study?tab=audit")}
-                              className="rounded-xl border border-slate-700 px-3 py-2 text-xs text-slate-300 hover:border-emerald-400 hover:text-emerald-200"
-                            >
-                              {L("Open full audit", "Abrir audit completo")}
-                            </button>
-                          </div>
-
-                          {auditLoading ? (
-                            <p className="mt-4 text-sm text-slate-400">
-                              {L("Loading execution audit…", "Cargando auditoría de ejecución…")}
-                            </p>
-                          ) : auditError ? (
-                            <div className="mt-4 rounded-2xl border border-rose-500/40 bg-rose-500/10 px-3 py-3 text-sm text-rose-200">
-                              {auditError}
-                            </div>
-                          ) : (
-                            <>
-                              <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                                <ReviewMetricCard
-                                  label={L("OCO used", "OCO usado")}
-                                  value={auditMetrics ? (auditMetrics.oco_used ? "Yes" : "No") : "—"}
-                                  tone="default"
-                                />
-                                <ReviewMetricCard
-                                  label={L("Stop present", "Stop presente")}
-                                  value={auditMetrics ? (auditMetrics.stop_present ? "Yes" : "No") : "—"}
-                                  tone="default"
-                                />
-                                <ReviewMetricCard
-                                  label={L("Time to first stop", "Tiempo al primer stop")}
-                                  value={formatSecondsForReview(auditMetrics?.time_to_first_stop_sec ?? null)}
-                                  tone="default"
-                                />
-                                <ReviewMetricCard
-                                  label={L("Manual market exit", "Salida manual")}
-                                  value={auditMetrics ? (auditMetrics.manual_market_exit ? "Yes" : "No") : "—"}
-                                  tone={auditMetrics?.manual_market_exit ? "rose" : "default"}
-                                />
+                            ) : auditError ? (
+                              <div className="mt-4 rounded-2xl border border-rose-500/40 bg-rose-500/10 px-3 py-3 text-sm text-rose-200">
+                                {auditError}
                               </div>
-
-                              <div className="mt-4 rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
-                                <p className="text-[11px] uppercase tracking-[0.18em] text-slate-400">
-                                  {L("Execution summary", "Resumen de ejecución")}
-                                </p>
-                                <p className="mt-2 text-sm text-slate-200">
-                                  {auditMetrics?.summary ||
-                                    L("No deterministic summary available yet.", "Aún no hay resumen determinístico.")}
-                                </p>
-                              </div>
-
-                              <div className="mt-4 rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
-                                <p className="text-[11px] uppercase tracking-[0.18em] text-slate-400">
-                                  {L("Execution discipline", "Disciplina de ejecución")}
-                                </p>
-                                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                            ) : (
+                              <>
+                                <div className="mt-4 grid gap-3 sm:grid-cols-2">
                                   <ReviewMetricCard
-                                    label={L("Execution score", "Score de ejecución")}
-                                    value={
-                                      auditExecutionDiscipline?.score != null
-                                        ? `${auditExecutionDiscipline.score}%`
-                                        : "—"
-                                    }
-                                    tone={
-                                      auditExecutionDiscipline?.score != null &&
-                                      auditExecutionDiscipline.score < 70
-                                        ? "rose"
-                                        : "emerald"
-                                    }
-                                  />
-                                  <ReviewMetricCard
-                                    label={L("Stop / OCO discipline", "Disciplina de stop / OCO")}
-                                    value={
-                                      auditExecutionDiscipline
-                                        ? `${auditExecutionDiscipline.metrics.stop_present ? "STOP" : "NO STOP"} · ${
-                                            auditExecutionDiscipline.metrics.oco_used ? "OCO" : "NO OCO"
-                                          }`
-                                        : "—"
-                                    }
+                                    label={L("OCO used", "OCO usado")}
+                                    value={auditMetrics ? (auditMetrics.oco_used ? "Yes" : "No") : "—"}
                                     tone="default"
                                   />
+                                  <ReviewMetricCard
+                                    label={L("Stop present", "Stop presente")}
+                                    value={auditMetrics ? (auditMetrics.stop_present ? "Yes" : "No") : "—"}
+                                    tone="default"
+                                  />
+                                  <ReviewMetricCard
+                                    label={L("Time to first stop", "Tiempo al primer stop")}
+                                    value={formatSecondsForReview(auditMetrics?.time_to_first_stop_sec ?? null)}
+                                    tone="default"
+                                  />
+                                  <ReviewMetricCard
+                                    label={L("Manual market exit", "Salida manual")}
+                                    value={auditMetrics ? (auditMetrics.manual_market_exit ? "Yes" : "No") : "—"}
+                                    tone={auditMetrics?.manual_market_exit ? "rose" : "default"}
+                                  />
                                 </div>
-                              </div>
-                            </>
-                          )}
-                        </div>
 
-                        <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-4 md:p-5">
-                          <p className="text-[11px] uppercase tracking-[0.2em] text-violet-400">
-                            {L("Coach handoff", "Handoff al coach")}
-                          </p>
-                          <p className="mt-3 text-sm text-slate-300">
-                            {L(
-                              "When you ask AI Coach from here, it already receives the selected symbol, date, trade window, timeframe, and chart range as context.",
-                              "Cuando preguntas al AI Coach desde aquí, ya recibe como contexto el símbolo, la fecha, la ventana del trade, el timeframe y el rango del chart."
+                                <div className="mt-4 rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
+                                  <p className="text-[11px] uppercase tracking-[0.18em] text-slate-400">
+                                    {L("Execution summary", "Resumen de ejecución")}
+                                  </p>
+                                  <p className="mt-2 text-sm text-slate-200">
+                                    {auditMetrics?.summary ||
+                                      L("No deterministic summary available yet.", "Aún no hay resumen determinístico.")}
+                                  </p>
+                                </div>
+
+                                <div className="mt-4 rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
+                                  <p className="text-[11px] uppercase tracking-[0.18em] text-slate-400">
+                                    {L("Execution discipline", "Disciplina de ejecución")}
+                                  </p>
+                                  <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                                    <ReviewMetricCard
+                                      label={L("Execution score", "Score de ejecución")}
+                                      value={
+                                        auditExecutionDiscipline?.score != null
+                                          ? `${auditExecutionDiscipline.score}%`
+                                          : "—"
+                                      }
+                                      tone={
+                                        auditExecutionDiscipline?.score != null &&
+                                        auditExecutionDiscipline.score < 70
+                                          ? "rose"
+                                          : "emerald"
+                                      }
+                                    />
+                                    <ReviewMetricCard
+                                      label={L("Stop / OCO discipline", "Disciplina de stop / OCO")}
+                                      value={
+                                        auditExecutionDiscipline
+                                          ? `${auditExecutionDiscipline.metrics.stop_present ? "STOP" : "NO STOP"} · ${
+                                              auditExecutionDiscipline.metrics.oco_used ? "OCO" : "NO OCO"
+                                            }`
+                                          : "—"
+                                      }
+                                      tone="default"
+                                    />
+                                  </div>
+                                </div>
+                              </>
                             )}
-                          </p>
-                        </div>
-                      </aside>
+                          </div>
+
+                          <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-4 md:p-5">
+                            <p className="text-[11px] uppercase tracking-[0.2em] text-violet-400">
+                              {L("Coach handoff", "Handoff al coach")}
+                            </p>
+                            <p className="mt-3 text-sm text-slate-300">
+                              {L(
+                                "When you ask AI Coach from here, it already receives the selected symbol, date, trade window, timeframe, and chart range as context.",
+                                "Cuando preguntas al AI Coach desde aquí, ya recibe como contexto el símbolo, la fecha, la ventana del trade, el timeframe y el rango del chart."
+                              )}
+                            </p>
+                          </div>
+                        </aside>
+                      ) : null}
                     </section>
                   )}
 
-                  {selectedTrade && (
+                  {selectedTrade && canAccessAudit && (
                     <section className="grid gap-4 xl:grid-cols-[minmax(0,1.3fr),minmax(0,0.7fr)]">
                       <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-4 md:p-5">
                         <div className="flex items-center justify-between gap-3">

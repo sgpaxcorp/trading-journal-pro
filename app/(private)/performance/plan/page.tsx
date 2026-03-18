@@ -22,6 +22,7 @@ import { useRouter } from "next/navigation";
 import TopNav from "@/app/components/TopNav";
 import { useAuth } from "@/context/AuthContext";
 import { useTradingAccounts } from "@/hooks/useTradingAccounts";
+import { useUserPlan } from "@/hooks/useUserPlan";
 
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
@@ -210,6 +211,7 @@ async function fetchLatestGrowthPlan(userId: string, accountId?: string | null):
 export default function PlanPage() {
   const { user, loading } = useAuth() as any;
   const { activeAccountId, loading: accountsLoading } = useTradingAccounts();
+  const { plan: userPlan, loading: planLoading } = useUserPlan();
   const router = useRouter();
   const { locale } = useAppSettings();
   const lang = resolveLocale(locale);
@@ -242,6 +244,7 @@ export default function PlanPage() {
   }, [loading, user, router]);
 
   async function reloadAll() {
+    if (planLoading || userPlan !== "advanced") return;
     if (loading || !user || accountsLoading || !activeAccountId) return;
     if (!planUserId) return;
 
@@ -290,10 +293,11 @@ export default function PlanPage() {
   }
 
   useEffect(() => {
+    if (planLoading || userPlan !== "advanced") return;
     if (loading || !user || accountsLoading || !activeAccountId) return;
     reloadAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, planUserId, journalUserId, accountsLoading, activeAccountId]);
+  }, [planLoading, userPlan, loading, planUserId, journalUserId, accountsLoading, activeAccountId]);
 
   const planStartDate = useMemo(() => {
     if (!plan) return "";
@@ -413,12 +417,53 @@ export default function PlanPage() {
     }
   }
 
-  if (loading || !user || loadingData) {
+  if (loading || planLoading || !user || (userPlan === "advanced" && loadingData)) {
     return (
       <main className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center">
         <p className="text-base text-slate-400">
           {L("Loading your plan...", "Cargando tu plan...")}
         </p>
+      </main>
+    );
+  }
+
+  if (userPlan !== "advanced") {
+    return (
+      <main className="min-h-screen bg-slate-950 text-slate-50">
+        <TopNav />
+        <div className="max-w-4xl mx-auto px-6 py-16">
+          <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
+            <p className="text-emerald-300 text-[11px] uppercase tracking-[0.3em]">
+              {L("Advanced feature", "Función Advanced")}
+            </p>
+            <h1 className="text-xl font-semibold mt-2">
+              {L(
+                "Cashflow tracking is included in Advanced",
+                "El seguimiento de cashflow está incluido en Advanced"
+              )}
+            </h1>
+            <p className="text-sm text-slate-400 mt-2">
+              {L(
+                "Track deposits, withdrawals, and account-equity adjustments without mixing them into trading P&L.",
+                "Controla depósitos, retiros y ajustes de equity sin mezclarlos con tu P&L de trading."
+              )}
+            </p>
+            <div className="mt-4 flex flex-wrap gap-3">
+              <Link
+                href="/billing"
+                className="px-4 py-2 rounded-xl bg-emerald-400 text-slate-950 text-xs font-semibold hover:bg-emerald-300 transition"
+              >
+                {L("Upgrade to Advanced", "Actualizar a Advanced")}
+              </Link>
+              <Link
+                href="/plans-comparison"
+                className="px-4 py-2 rounded-xl border border-slate-700 text-slate-200 text-xs hover:border-emerald-400 transition"
+              >
+                {L("Compare plans", "Comparar planes")}
+              </Link>
+            </div>
+          </div>
+        </div>
       </main>
     );
   }

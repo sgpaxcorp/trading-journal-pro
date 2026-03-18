@@ -741,6 +741,44 @@ function buildRecentSessionsSnippet(recentSessions: any[], n = 8): string {
         mindBits.push(`prob ${Number(mindset.probability)}/5`);
       if (mindBits.length) detailLines.push(`  mindset: ${mindBits.join(" | ")}`);
 
+      const neuro = s?.neuro || {};
+      const neuroBits: string[] = [];
+      if (Array.isArray(neuro?.premarket?.thesis) && neuro.premarket.thesis.length)
+        neuroBits.push(`thesis: ${neuro.premarket.thesis.slice(0, 3).join(", ")}`);
+      if (Array.isArray(neuro?.premarket?.confirmation) && neuro.premarket.confirmation.length)
+        neuroBits.push(`confirm: ${neuro.premarket.confirmation.slice(0, 3).join(", ")}`);
+      if (Array.isArray(neuro?.premarket?.invalidation) && neuro.premarket.invalidation.length)
+        neuroBits.push(`invalid: ${neuro.premarket.invalidation.slice(0, 3).join(", ")}`);
+      if (Array.isArray(neuro?.inside?.changed) && neuro.inside.changed.length)
+        neuroBits.push(`changed: ${neuro.inside.changed.slice(0, 3).join(", ")}`);
+      if (Array.isArray(neuro?.inside?.state) && neuro.inside.state.length)
+        neuroBits.push(`state: ${neuro.inside.state.slice(0, 3).join(", ")}`);
+      if (typeof neuro?.inside?.plan_followed === "string" && neuro.inside.plan_followed)
+        neuroBits.push(`plan_followed: ${neuro.inside.plan_followed}`);
+      if (Array.isArray(neuro?.after?.exit_reason) && neuro.after.exit_reason.length)
+        neuroBits.push(`exit: ${neuro.after.exit_reason.slice(0, 3).join(", ")}`);
+      if (Array.isArray(neuro?.after?.truth) && neuro.after.truth.length)
+        neuroBits.push(`truth: ${neuro.after.truth.slice(0, 3).join(", ")}`);
+      if (typeof neuro?.after?.take_again === "string" && neuro.after.take_again)
+        neuroBits.push(`take_again: ${neuro.after.take_again}`);
+      if (typeof neuro?.after?.one_line_truth === "string" && neuro.after.one_line_truth)
+        neuroBits.push(`one_line_truth: ${clampText(neuro.after.one_line_truth, 120)}`);
+      if (Array.isArray(neuro?.after?.custom_tags) && neuro.after.custom_tags.length)
+        neuroBits.push(`custom: ${neuro.after.custom_tags.slice(0, 4).join(", ")}`);
+      if (neuroBits.length) detailLines.push(`  neuro: ${neuroBits.join(" | ")}`);
+
+      const neuroSummary = neuro?.summary || {};
+      const neuroSummaryBits: string[] = [];
+      if (Number.isFinite(Number(neuroSummary?.score)))
+        neuroSummaryBits.push(`score ${Number(neuroSummary.score)}`);
+      if (typeof neuroSummary?.level === "string" && neuroSummary.level)
+        neuroSummaryBits.push(`level ${neuroSummary.level}`);
+      if (Array.isArray(neuroSummary?.flags) && neuroSummary.flags.length)
+        neuroSummaryBits.push(`flags: ${neuroSummary.flags.slice(0, 4).join(", ")}`);
+      if (typeof neuroSummary?.insight === "string" && neuroSummary.insight)
+        neuroSummaryBits.push(`insight: ${clampText(neuroSummary.insight, 160)}`);
+      if (neuroSummaryBits.length) detailLines.push(`  neuro_summary: ${neuroSummaryBits.join(" | ")}`);
+
       const tradesSummary = buildTradesSummary(s?.trades);
       if (tradesSummary) detailLines.push(`  trades: ${tradesSummary}`);
 
@@ -917,6 +955,7 @@ function buildSystemPrompt(params: {
       "- Si incluyes métricas/estadísticas, usa 1–3 números relevantes y explica qué significan (sin volcar datos).",
       "- Si hay KPIs en el contexto, interprétalos usando su definición y notas; si un KPI no tiene valor, di que falta data.",
       "- Si el contexto incluye entradas/salidas o una secuencia cronológica, NARRA lo que pasó (orden de entradas/salidas, re-entrada, stop-out, recuperación) usando los tiempos/precios del contexto.",
+      "- Si el contexto incluye Neuro Layer / Neuro Score / Neuro Insight, úsalo para comparar plan inicial, ejecución real y verdad post-trade. Señala drift cognitivo solo cuando el soporte sea claro.",
       "- Pre‑prompt obligatorio: si NO hay resultados de Audit (Order History) en el contexto, pide al usuario que vaya a Back‑Studying → Audit y comparta el resumen o screenshots.",
       "- Si el usuario pregunta por “qué hubiera pasado” pero solo hay subyacente (sin precio real del contrato), explica la limitación y pide el precio del contrato a esa hora para continuar.",
       "- Nunca digas que “no puedes ver imágenes”. Si hay screenshot adjunto o contexto de back-study, úsalo.",
@@ -944,6 +983,7 @@ function buildSystemPrompt(params: {
     "- If you cite analytics, use only 1–3 relevant numbers and explain the implication (no data dump).",
     "- If KPI results are provided, interpret them using their definition/notes; if a KPI has no value, say data is insufficient.",
     "- If context includes entries/exits or a chronological sequence, NARRATE what happened (entry/exit order, re-entry, stop-out, recovery) using the times/prices from context.",
+    "- If Neuro Layer / Neuro Score / Neuro Insight are present, use them to compare the original plan, live execution, and post-trade truth. Only call cognitive drift when the support is clear.",
     "- Required pre‑prompt: if Audit (Order History) results are NOT in context, ask the user to open Back‑Studying → Audit and share the summary or screenshots.",
     "- If the user asks “what would have happened” but only underlying prices exist (no option contract price), state the limitation and ask for the contract price at that time to continue.",
     "- Never say you “can’t see images”. If a screenshot or back-study context is provided, use it.",

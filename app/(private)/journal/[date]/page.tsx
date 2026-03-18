@@ -12,7 +12,7 @@ import JournalInkField from "@/app/components/JournalInkField";
 import RichTextEditor from "@/app/components/RichTextEditor";
 
 import type { JournalEntry } from "@/lib/journalTypes";
-import { getJournalEntryByDate, saveJournalEntry } from "@/lib/journalSupabase";
+import { getAllJournalEntries, getJournalEntryByDate, saveJournalEntry } from "@/lib/journalSupabase";
 
 import { getJournalTradesForDay, saveJournalTradesForDay } from "@/lib/journalTradesSupabase";
 import { syncMyTrophies } from "@/lib/trophiesSupabase";
@@ -45,6 +45,27 @@ import {
 } from "@/lib/notebookInk";
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
+import {
+  DEFAULT_NEURO_LAYER,
+  NEURO_AFTER_EXIT_REASON_OPTIONS,
+  NEURO_AFTER_TAKE_AGAIN_OPTIONS,
+  NEURO_AFTER_TRUTH_OPTIONS,
+  NEURO_INSIDE_CHANGED_OPTIONS,
+  NEURO_INSIDE_STATE_OPTIONS,
+  NEURO_PLAN_FOLLOWED_OPTIONS,
+  NEURO_PREMARKET_CONFIRMATION_OPTIONS,
+  NEURO_PREMARKET_INVALIDATION_OPTIONS,
+  NEURO_PREMARKET_THESIS_OPTIONS,
+  buildNeuroMemory,
+  computeNeuroSummary,
+  getNeuroInsightText,
+  getNeuroLevelLabel,
+  getNeuroOptionLabel,
+  type NeuroMemory,
+  type NeuroLayer,
+  type NeuroOption,
+  normalizeNeuroLayer,
+} from "@/lib/neuroLayer";
 
 /* =========================================================
    Trades / DTE parsing
@@ -112,12 +133,6 @@ const STRATEGY_LABELS: Record<OptionStrategy, { en: string; es: string }> = {
 };
 
 type ProcessPhase = "premarket" | "inside" | "after";
-const PROCESS_PHASES: ProcessPhase[] = ["premarket", "inside", "after"];
-const PROCESS_LABELS: Record<ProcessPhase, { en: string; es: string }> = {
-  premarket: { en: "Premarket", es: "Premarket" },
-  inside: { en: "In‑Trade", es: "En trade" },
-  after: { en: "After‑Trade", es: "Post‑trade" },
-};
 
 type JournalChecklistPresets = {
   premarket: string[];
@@ -355,9 +370,9 @@ const AFTER_REVIEW_ITEMS = [
 const DEFAULT_AFTER_REVIEW: AfterTradeReview = {
   checklist: Object.fromEntries(AFTER_REVIEW_ITEMS.map((item) => [item.id, false])),
   ratings: {
-    execution: 3,
-    patience: 3,
-    clarity: 3,
+    execution: 0,
+    patience: 0,
+    clarity: 0,
   },
   notes: {
     didWell: "",
@@ -368,7 +383,7 @@ const DEFAULT_AFTER_REVIEW: AfterTradeReview = {
 const clampRating = (v: any) => {
   const n = Number(v);
   if (!Number.isFinite(n)) return null;
-  return Math.max(1, Math.min(5, Math.round(n)));
+  return Math.max(0, Math.min(5, Math.round(n)));
 };
 
 const normalizeMindset = (raw?: any): MindsetRatings => ({
@@ -837,8 +852,9 @@ export default function DailyJournalPage() {
   // Preserve extra keys that already exist in journal_entries.notes (e.g., broker sync metadata: costs/pnl/synced_at).
   // This prevents the UI 'Save' action from accidentally wiping sync metadata.
   const [notesExtra, setNotesExtra] = useState<Record<string, any>>({});
+  const [neuroLayer, setNeuroLayer] = useState<NeuroLayer>(DEFAULT_NEURO_LAYER);
+  const [newNeuroCustomTag, setNewNeuroCustomTag] = useState("");
 
-  const [processPhase, setProcessPhase] = useState<ProcessPhase>("premarket");
   const [checklistPresets, setChecklistPresets] = useState<JournalChecklistPresets>(DEFAULT_CHECKLIST_PRESETS);
   const [mindset, setMindset] = useState<MindsetRatings>(DEFAULT_MINDSET);
   const [afterReview, setAfterReview] = useState<AfterTradeReview>(DEFAULT_AFTER_REVIEW);
@@ -847,7 +863,6 @@ export default function DailyJournalPage() {
   const [afterDidWellInk, setAfterDidWellInk] = useState<NotebookInkDrawing | null>(null);
   const [afterImproveInk, setAfterImproveInk] = useState<NotebookInkDrawing | null>(null);
   const [editProcess, setEditProcess] = useState(false);
-  const [editMindset, setEditMindset] = useState(false);
   const [newChecklistItem, setNewChecklistItem] = useState({
     premarket: "",
     inside: "",
@@ -862,6 +877,7 @@ export default function DailyJournalPage() {
 
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState("");
+  const [journalNeuroMemory, setJournalNeuroMemory] = useState<NeuroMemory | null>(null);
   const [autoSaveState, setAutoSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const autoSaveReadyRef = useRef(false);
   const autoSaveIgnoreNextRef = useRef(false);
@@ -998,6 +1014,27 @@ export default function DailyJournalPage() {
         const tpls = await listJournalTemplates(userId);
         if (!alive) return;
         setTemplates(tpls);
+
+        const recentEntries = await getAllJournalEntries(userId, activeAccountId);
+        if (!alive) return;
+        const memory = buildNeuroMemory(
+          (recentEntries || []).map((entry: any) => {
+            const notesStr = typeof entry?.notes === "string" ? entry.notes : "";
+            let parsed: any = {};
+            try {
+              parsed = notesStr ? JSON.parse(notesStr) : {};
+            } catch {
+              parsed = {};
+            }
+            return {
+              date: String(entry?.date || "").slice(0, 10),
+              pnl: typeof entry?.pnl === "number" ? entry.pnl : Number(entry?.pnl ?? 0),
+              neuro: normalizeNeuroLayer((parsed as any)?.neuro_layer ?? (parsed as any)?.neuroLayer ?? {}),
+            };
+          }),
+          isEs ? "es" : "en"
+        );
+        setJournalNeuroMemory(memory);
       } catch (err) {
         console.error("[journal] failed to load UI/templates:", err);
       }
@@ -1006,7 +1043,7 @@ export default function DailyJournalPage() {
     return () => {
       alive = false;
     };
-  }, [userId, authLoading]);
+  }, [userId, authLoading, activeAccountId, isEs]);
 
   // Persist checklist presets to Supabase (debounced)
   useEffect(() => {
@@ -1108,6 +1145,12 @@ export default function DailyJournalPage() {
                     setMindset(normalizeMindset(storedMindset));
                   } else {
                     setMindset(DEFAULT_MINDSET);
+                  }
+                  const storedNeuroLayer = (rest as any)?.neuro_layer ?? (rest as any)?.neuroLayer ?? null;
+                  if (storedNeuroLayer && typeof storedNeuroLayer === "object") {
+                    setNeuroLayer(normalizeNeuroLayer(storedNeuroLayer));
+                  } else {
+                    setNeuroLayer(DEFAULT_NEURO_LAYER);
                   }
                   const storedAfterReview = (rest as any)?.after_review ?? null;
                   if (storedAfterReview && typeof storedAfterReview === "object") {
@@ -1597,6 +1640,78 @@ export default function DailyJournalPage() {
       return { ...prev, tags };
     });
   const tagLabel = (tag: string, map: Record<string, string>) => (isEs ? map[tag] ?? tag : tag);
+  const neuroLabel = (optionId: string, options: NeuroOption[]) =>
+    getNeuroOptionLabel(optionId, options, isEs ? "es" : "en");
+  const neuroSummary = useMemo(() => computeNeuroSummary(neuroLayer), [neuroLayer]);
+  const neuroLevelLabel = useMemo(
+    () => getNeuroLevelLabel(neuroSummary.level, isEs ? "es" : "en"),
+    [isEs, neuroSummary.level]
+  );
+  const neuroInsight = useMemo(
+    () => getNeuroInsightText(neuroSummary.insight_key, isEs ? "es" : "en"),
+    [isEs, neuroSummary.insight_key]
+  );
+
+  const toggleNeuroMulti = (
+    section: keyof NeuroLayer,
+    field: string,
+    optionId: string
+  ) => {
+    setNeuroLayer((prev) => {
+      const sectionValue = prev[section] as Record<string, any>;
+      const current = Array.isArray(sectionValue?.[field]) ? sectionValue[field] : [];
+      const exists = current.includes(optionId);
+      return {
+        ...prev,
+        [section]: {
+          ...sectionValue,
+          [field]: exists ? current.filter((item: string) => item !== optionId) : [...current, optionId],
+        },
+      };
+    });
+  };
+
+  const setNeuroSingle = (
+    section: keyof NeuroLayer,
+    field: string,
+    optionId: string | null
+  ) => {
+    setNeuroLayer((prev) => ({
+      ...prev,
+      [section]: {
+        ...(prev[section] as Record<string, any>),
+        [field]: optionId,
+      },
+    }));
+  };
+
+  const addNeuroCustomTag = () => {
+    const next = normalizeItemText(newNeuroCustomTag);
+    if (!next) return;
+    setNeuroLayer((prev) => {
+      if (prev.after.custom_tags.some((item) => item.toLowerCase() === next.toLowerCase())) {
+        return prev;
+      }
+      return {
+        ...prev,
+        after: {
+          ...prev.after,
+          custom_tags: [...prev.after.custom_tags, next],
+        },
+      };
+    });
+    setNewNeuroCustomTag("");
+  };
+
+  const removeNeuroCustomTag = (tag: string) => {
+    setNeuroLayer((prev) => ({
+      ...prev,
+      after: {
+        ...prev.after,
+        custom_tags: prev.after.custom_tags.filter((item) => item !== tag),
+      },
+    }));
+  };
 
   const SECTION_PREFIX: Record<keyof JournalChecklistPresets, string | null> = {
     premarket: TAG_PREFIX.premarket,
@@ -1718,6 +1833,11 @@ export default function DailyJournalPage() {
     const hasMindset = Object.values(mindset || {}).some((v) => v !== null && v !== undefined);
     nextExtra.mindset = hasMindset ? { ...mindset } : null;
     nextExtra.checklists = checklistSnapshot;
+    nextExtra.neuro_layer = neuroLayer;
+    nextExtra.neuro_summary = {
+      ...neuroSummary,
+      insight_text: getNeuroInsightText(neuroSummary.insight_key, "en"),
+    };
     nextExtra.after_review = { ...afterReview };
     nextExtra.premarket_mode = premarketMode;
     nextExtra.live_mode = insideMode;
@@ -1772,7 +1892,10 @@ export default function DailyJournalPage() {
       setTimeout(() => setAutoSaveState("idle"), 1500);
 
       if (!opts?.silent) {
-        setMsg(L("Saved ✅", "Guardado ✅"));
+        setMsg(
+          L("Saved ✅ · Neuro Insight: ", "Guardado ✅ · Neuro Insight: ") +
+            neuroInsight
+        );
         setTimeout(() => setMsg(""), 2000);
       }
       if (userId) {
@@ -1834,6 +1957,8 @@ export default function DailyJournalPage() {
     exitTrades,
     entry,
     notesExtra,
+    neuroLayer,
+    neuroSummary,
     mindset,
     afterReview,
   ]);
@@ -1958,6 +2083,10 @@ export default function DailyJournalPage() {
             const storedMindset = (rest as any)?.mindset ?? (rest as any)?.journal_mindset ?? null;
             if (storedMindset && typeof storedMindset === "object") {
               setMindset(normalizeMindset(storedMindset));
+            }
+            const storedNeuroLayer = (rest as any)?.neuro_layer ?? (rest as any)?.neuroLayer ?? null;
+            if (storedNeuroLayer && typeof storedNeuroLayer === "object") {
+              setNeuroLayer(normalizeNeuroLayer(storedNeuroLayer));
             }
           }
         }
@@ -2095,7 +2224,7 @@ export default function DailyJournalPage() {
     left: string;
     right: string;
   }) => {
-    const val = Number.isFinite(Number(value)) ? Number(value) : 3;
+    const val = Number.isFinite(Number(value)) ? Number(value) : 0;
     return (
       <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
         <div className="flex items-center justify-between mb-2">
@@ -2106,7 +2235,7 @@ export default function DailyJournalPage() {
         </div>
         <input
           type="range"
-          min={1}
+          min={0}
           max={5}
           step={1}
           value={val}
@@ -2120,6 +2249,132 @@ export default function DailyJournalPage() {
       </div>
     );
   };
+
+  const NeuroChipGroup = ({
+    title,
+    options,
+    selected,
+    onToggle,
+    single = false,
+  }: {
+    title: string;
+    options: NeuroOption[];
+    selected: string[];
+    onToggle: (optionId: string) => void;
+    single?: boolean;
+  }) => (
+    <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+      <p className="text-sm font-semibold text-slate-200 mb-2">{title}</p>
+      <div className="flex flex-wrap gap-2">
+        {options.map((option) => {
+          const active = selected.includes(option.id);
+          return (
+            <button
+              key={option.id}
+              type="button"
+              onClick={() => onToggle(option.id)}
+              className={`rounded-full border px-3 py-1.5 text-xs transition ${
+                active
+                  ? "border-emerald-400 bg-emerald-500/15 text-emerald-200 shadow-[0_0_0_1px_rgba(16,185,129,0.2)]"
+                  : "border-slate-700 bg-slate-950 text-slate-300 hover:border-slate-500"
+              }`}
+              aria-pressed={active}
+            >
+              {neuroLabel(option.id, options)}
+              {single && active ? (
+                <span className="ml-1 text-[10px] text-emerald-300">{L("selected", "seleccionado")}</span>
+              ) : null}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+
+  const ChecklistChipGroup = ({
+    title,
+    section,
+    items,
+    selected,
+    helper,
+  }: {
+    title: string;
+    section: keyof JournalChecklistPresets;
+    items: string[];
+    selected: string[];
+    helper?: string;
+  }) => (
+    <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+      <div className="flex items-center justify-between gap-2 mb-2">
+        <div>
+          <p className="text-sm font-semibold text-slate-200">{title}</p>
+          {helper ? <p className="text-[11px] text-slate-500 mt-1">{helper}</p> : null}
+        </div>
+        {editProcess ? (
+          <span className="text-[11px] text-slate-500">{L("Customize mode", "Modo personalizar")}</span>
+        ) : null}
+      </div>
+      <div className="flex flex-wrap gap-2 text-[13px] leading-snug">
+        {items.map((item) => (
+          <label
+            key={`${section}-${item}`}
+            className={tagPillClass(
+              section === "strategy" ? isChecklistSelected("strategy", item) : isChecklistSelected(section as ProcessPhase, item)
+            )}
+          >
+            <input
+              type="checkbox"
+              onChange={() =>
+                section === "strategy"
+                  ? toggleChecklistItem("strategy", item)
+                  : toggleChecklistItem(section as ProcessPhase, item)
+              }
+              checked={
+                section === "strategy"
+                  ? isChecklistSelected("strategy", item)
+                  : isChecklistSelected(section as ProcessPhase, item)
+              }
+              className={tagCheckboxClass}
+            />
+            <span className="wrap-break-word">
+              {section === "strategy" ? tagLabel(item, STRATEGY_ITEM_LABELS) : tagLabel(item, PROCESS_ITEM_LABELS)}
+            </span>
+            {editProcess ? (
+              <button
+                type="button"
+                onClick={() => removeChecklistItem(section, item)}
+                className="ml-1 text-slate-500 hover:text-rose-400"
+                title={L("Remove", "Eliminar")}
+              >
+                ✕
+              </button>
+            ) : null}
+          </label>
+        ))}
+      </div>
+      {editProcess ? (
+        <div className="mt-3 flex gap-2">
+          <input
+            value={newChecklistItem[section]}
+            onChange={(e) => setNewChecklistItem((prev) => ({ ...prev, [section]: e.target.value }))}
+            placeholder={
+              section === "strategy"
+                ? L("Add strategy item", "Añadir estrategia")
+                : L("Add checklist item", "Añadir item")
+            }
+            className="flex-1 rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 focus:border-emerald-400 focus:outline-none"
+          />
+          <button
+            type="button"
+            onClick={() => addChecklistItem(section)}
+            className="rounded-xl bg-emerald-500 px-3 py-2 text-sm font-semibold text-slate-950 hover:bg-emerald-400"
+          >
+            {L("Add", "Añadir")}
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
 
   /* =========================================================
      Averages + PnL
@@ -2135,7 +2390,18 @@ export default function DailyJournalPage() {
       title: L("Premarket Prep", "Preparación premarket"),
       defaultLayout: { i: "premarket", x: 0, y: 0, w: 7, h: 8, minW: 4, minH: 6 },
       render: () => (
-        <WidgetCard title={L("Premarket Prep", "Preparación premarket")}>
+        <WidgetCard
+          title={L("Premarket Prep", "Preparación premarket")}
+          right={
+            <button
+              type="button"
+              onClick={() => setEditProcess((v) => !v)}
+              className="px-2 py-1 rounded-md border border-slate-700 text-[11px] text-slate-300 hover:text-white hover:border-slate-500"
+            >
+              {editProcess ? L("Done", "Listo") : L("Customize", "Personalizar")}
+            </button>
+          }
+        >
           <JournalInkField
             value={editableValue(premarketHtml, premarketMode, premarketInk)}
             onChange={(next) => {
@@ -2150,6 +2416,64 @@ export default function DailyJournalPage() {
             )}
             minHeight={180}
           />
+          <div className="mt-4 grid grid-cols-1 gap-3">
+            <NeuroChipGroup
+              title={L("Thesis", "Tesis")}
+              options={NEURO_PREMARKET_THESIS_OPTIONS}
+              selected={neuroLayer.premarket.thesis}
+              onToggle={(optionId) => toggleNeuroMulti("premarket", "thesis", optionId)}
+            />
+            <NeuroChipGroup
+              title={L("Confirmation I need", "Confirmación que necesito")}
+              options={NEURO_PREMARKET_CONFIRMATION_OPTIONS}
+              selected={neuroLayer.premarket.confirmation}
+              onToggle={(optionId) => toggleNeuroMulti("premarket", "confirmation", optionId)}
+            />
+            <NeuroChipGroup
+              title={L("Invalidation", "Invalidación")}
+              options={NEURO_PREMARKET_INVALIDATION_OPTIONS}
+              selected={neuroLayer.premarket.invalidation}
+              onToggle={(optionId) => toggleNeuroMulti("premarket", "invalidation", optionId)}
+            />
+          </div>
+          <div className="mt-4 grid grid-cols-1 gap-3">
+            <ChecklistChipGroup
+              title={L("Premarket checklist", "Checklist premarket")}
+              section="premarket"
+              items={checklistPresets.premarket}
+              selected={extractPrefixed(Array.isArray(entry.tags) ? entry.tags : [], TAG_PREFIX.premarket)}
+              helper={L(
+                "These are the concrete checks that must be done before the first trade.",
+                "Estos son los checks concretos que deben estar hechos antes del primer trade."
+              )}
+            />
+            <ChecklistChipGroup
+              title={L("Strategy checklist", "Checklist de estrategia")}
+              section="strategy"
+              items={checklistPresets.strategy}
+              selected={extractPrefixed(Array.isArray(entry.tags) ? entry.tags : [], TAG_PREFIX.strategy)}
+              helper={L(
+                "Use this to qualify the setup before entry.",
+                "Úsalo para calificar el setup antes de la entrada."
+              )}
+            />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <RatingSlider
+                label={L("Setup quality", "Calidad del setup")}
+                value={mindset.setup_quality}
+                onChange={(v) => setMindset((prev) => ({ ...prev, setup_quality: v }))}
+                left={L("Weak", "Débil")}
+                right={L("Strong", "Fuerte")}
+              />
+              <RatingSlider
+                label={L("Probability rating", "Probabilidad")}
+                value={mindset.probability}
+                onChange={(v) => setMindset((prev) => ({ ...prev, probability: v }))}
+                left={L("Low", "Baja")}
+                right={L("High", "Alta")}
+              />
+            </div>
+          </div>
         </WidgetCard>
       ),
     },
@@ -2215,8 +2539,14 @@ export default function DailyJournalPage() {
       title: L("Entries", "Entradas"),
       defaultLayout: { i: "entries", x: 7, y: 3, w: 5, h: 7, minW: 4, minH: 6 },
       render: () => (
-        <WidgetCard title={L("Entries", "Entradas")}>
-          <div className="grid grid-cols-1 md:grid-cols-8 gap-2 text-sm">
+        <WidgetCard
+          title={L("Entries", "Entradas")}
+          subtitle={L(
+            "Add each fill separately. Keep every round trip distinct.",
+            "Agrega cada fill por separado. Mantén cada round trip distinto."
+          )}
+        >
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
             <div>
               <label className="text-xs text-slate-400 block mb-1">
                 {L("Symbol / Contract", "Símbolo / Contrato")}
@@ -2313,21 +2643,23 @@ export default function DailyJournalPage() {
               />
             </div>
 
-            <div>
+            <div className="sm:col-span-2">
               <label className="text-xs text-slate-400 block mb-1">{L("Time", "Hora")}</label>
-              <input
-                type="text"
-                value={newEntryTrade.time}
-                onChange={(e) => setNewEntryTrade((p) => ({ ...p, time: e.target.value }))}
-                className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-[14px] text-slate-300"
-              />
-              <button
-                type="button"
-                className="text-[11px] text-emerald-300 mt-1"
-                onClick={() => setNewEntryTrade((p) => ({ ...p, time: nowTimeLabel() }))}
-              >
-                {L("use current time", "usar hora actual")}
-              </button>
+              <div className="flex flex-col gap-1 sm:flex-row sm:items-center">
+                <input
+                  type="text"
+                  value={newEntryTrade.time}
+                  onChange={(e) => setNewEntryTrade((p) => ({ ...p, time: e.target.value }))}
+                  className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-[14px] text-slate-300"
+                />
+                <button
+                  type="button"
+                  className="text-[11px] text-emerald-300 sm:whitespace-nowrap"
+                  onClick={() => setNewEntryTrade((p) => ({ ...p, time: nowTimeLabel() }))}
+                >
+                  {L("use current time", "usar hora actual")}
+                </button>
+              </div>
             </div>
           </div>
 
@@ -2341,47 +2673,48 @@ export default function DailyJournalPage() {
 
           {entryTrades.length > 0 && (
             <div className="space-y-2 text-xs mt-3">
-              <table className="w-full text-left text-[12px] border border-slate-800 rounded-lg overflow-hidden">
-                <thead className="bg-slate-900/80">
-                  <tr>
-                    <th className="px-2 py-1 border-b border-slate-800">{L("Symbol", "Símbolo")}</th>
-                    <th className="px-2 py-1 border-b border-slate-800">{L("Type", "Tipo")}</th>
-                    <th className="px-2 py-1 border-b border-slate-800">{L("Side", "Lado")}</th>
-                    <th className="px-2 py-1 border-b border-slate-800">{L("Premium", "Prima")}</th>
-                    <th className="px-2 py-1 border-b border-slate-800">{L("Strategy", "Estrategia")}</th>
-                    <th className="px-2 py-1 border-b border-slate-800">{L("Price", "Precio")}</th>
-                    <th className="px-2 py-1 border-b border-slate-800">{L("Qty", "Cant.")}</th>
-                    <th className="px-2 py-1 border-b border-slate-800">{L("Time", "Hora")}</th>
-                    <th className="px-2 py-1 border-b border-slate-800">DTE</th>
-                    <th className="px-2 py-1 border-b border-slate-800 text-right">–</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {entryTrades.map((t) => (
-                    <tr key={t.id} className="border-t border-slate-800">
-                      <td className="px-2 py-1">{t.symbol}</td>
-                      <td className="px-2 py-1">{t.kind}</td>
-                      <td className="px-2 py-1">{t.side}</td>
-                      <td className="px-2 py-1">{premiumLabel(t.kind, t.premiumSide, lang)}</td>
-                      <td className="px-2 py-1">{strategyLabel(t.kind, t.optionStrategy, lang)}</td>
-                      <td className="px-2 py-1">{t.price}</td>
-                      <td className="px-2 py-1">{t.quantity}</td>
-                      <td className="px-2 py-1">{t.time}</td>
-                      <td className="px-2 py-1">{t.kind === "option" ? (t.dte ?? "—") : "—"}</td>
-                      <td className="px-2 py-1 text-right">
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteEntryTrade(t.id)}
-                          className="text-slate-500 hover:text-sky-300"
-                          title={L("Delete entry", "Eliminar entrada")}
-                        >
-                          ✕
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <div className="space-y-2">
+                {entryTrades.map((t, index) => (
+                  <div key={t.id} className="rounded-xl border border-slate-800 bg-slate-950/70 px-3 py-2">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500">
+                          {L("Entry", "Entrada")} {index + 1}
+                        </p>
+                        <p className="mt-1 text-sm font-semibold text-slate-100 break-all">{t.symbol}</p>
+                        <p className="mt-1 text-[12px] text-slate-400">
+                          {t.kind} · {t.side} · {premiumLabel(t.kind, t.premiumSide, lang)}
+                        </p>
+                        <p className="text-[12px] text-slate-500">
+                          {strategyLabel(t.kind, t.optionStrategy, lang)}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteEntryTrade(t.id)}
+                        className="text-slate-500 hover:text-sky-300 shrink-0"
+                        title={L("Delete entry", "Eliminar entrada")}
+                      >
+                        ✕
+                      </button>
+                    </div>
+                    <div className="mt-3 grid grid-cols-3 gap-2">
+                      <div className="rounded-lg border border-slate-800 bg-slate-900/70 px-2 py-1.5">
+                        <p className="text-[10px] uppercase tracking-wide text-slate-500">{L("Price", "Precio")}</p>
+                        <p className="mt-1 text-sm text-slate-100">{t.price || "—"}</p>
+                      </div>
+                      <div className="rounded-lg border border-slate-800 bg-slate-900/70 px-2 py-1.5">
+                        <p className="text-[10px] uppercase tracking-wide text-slate-500">{L("Qty", "Cant.")}</p>
+                        <p className="mt-1 text-sm text-slate-100">{t.quantity || "—"}</p>
+                      </div>
+                      <div className="rounded-lg border border-slate-800 bg-slate-900/70 px-2 py-1.5">
+                        <p className="text-[10px] uppercase tracking-wide text-slate-500">{L("Time", "Hora")}</p>
+                        <p className="mt-1 text-sm text-slate-100">{t.time || "—"}</p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
 
               <div className="pt-1 border-t border-slate-800 mt-1">
                 <p className="text-[11px] text-slate-400">
@@ -2402,8 +2735,14 @@ export default function DailyJournalPage() {
       title: L("Exits", "Salidas"),
       defaultLayout: { i: "exits", x: 7, y: 10, w: 5, h: 6, minW: 4, minH: 5 },
       render: () => (
-        <WidgetCard title={L("Exits", "Salidas")}>
-          <div className="grid grid-cols-1 md:grid-cols-8 gap-2 text-sm">
+        <WidgetCard
+          title={L("Exits", "Salidas")}
+          subtitle={L(
+            "Close the exact open position. Keep partials and round trips separate.",
+            "Cierra la posición abierta exacta. Mantén parciales y round trips separados."
+          )}
+        >
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
             <div>
               <label className="text-xs text-slate-400 block mb-1">
                 {L("Close position", "Cerrar posición")}
@@ -2451,7 +2790,7 @@ export default function DailyJournalPage() {
               <input readOnly value={premiumLabel(newExitTrade.kind, newExitTrade.premiumSide, lang)} className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-[14px] text-slate-300" />
             </div>
 
-            <div>
+            <div className="sm:col-span-2">
               <label className="text-xs text-slate-400 block mb-1">
                 {L("Option strategy", "Estrategia de opciones")}
               </label>
@@ -2468,12 +2807,14 @@ export default function DailyJournalPage() {
               <input type="number" value={newExitTrade.quantity} onChange={(e) => setNewExitTrade((p) => ({ ...p, quantity: e.target.value }))} className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-[14px] text-slate-100 focus:outline-none focus:border-emerald-400" />
             </div>
 
-            <div>
+            <div className="sm:col-span-2">
               <label className="text-xs text-slate-400 block mb-1">{L("Time", "Hora")}</label>
-              <input type="text" value={newExitTrade.time} onChange={(e) => setNewExitTrade((p) => ({ ...p, time: e.target.value }))} className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-[14px] text-slate-300" />
-              <button type="button" className="text-[11px] text-emerald-300 mt-1" onClick={() => setNewExitTrade((p) => ({ ...p, time: nowTimeLabel() }))}>
-                {L("use current time", "usar hora actual")}
-              </button>
+              <div className="flex flex-col gap-1 sm:flex-row sm:items-center">
+                <input type="text" value={newExitTrade.time} onChange={(e) => setNewExitTrade((p) => ({ ...p, time: e.target.value }))} className="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-[14px] text-slate-300" />
+                <button type="button" className="text-[11px] text-emerald-300 sm:whitespace-nowrap" onClick={() => setNewExitTrade((p) => ({ ...p, time: nowTimeLabel() }))}>
+                  {L("use current time", "usar hora actual")}
+                </button>
+              </div>
             </div>
           </div>
 
@@ -2483,47 +2824,48 @@ export default function DailyJournalPage() {
 
           {exitTrades.length > 0 && (
             <div className="space-y-2 text-xs mt-3">
-              <table className="w-full text-left text-[12px] border border-slate-800 rounded-lg overflow-hidden">
-                <thead className="bg-slate-900/80">
-                  <tr>
-                    <th className="px-2 py-1 border-b border-slate-800">{L("Symbol", "Símbolo")}</th>
-                    <th className="px-2 py-1 border-b border-slate-800">{L("Type", "Tipo")}</th>
-                    <th className="px-2 py-1 border-b border-slate-800">{L("Side", "Lado")}</th>
-                    <th className="px-2 py-1 border-b border-slate-800">{L("Premium", "Prima")}</th>
-                    <th className="px-2 py-1 border-b border-slate-800">{L("Strategy", "Estrategia")}</th>
-                    <th className="px-2 py-1 border-b border-slate-800">{L("Price", "Precio")}</th>
-                    <th className="px-2 py-1 border-b border-slate-800">{L("Qty", "Cant.")}</th>
-                    <th className="px-2 py-1 border-b border-slate-800">{L("Time", "Hora")}</th>
-                    <th className="px-2 py-1 border-b border-slate-800">DTE</th>
-                    <th className="px-2 py-1 border-b border-slate-800 text-right">–</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {exitTrades.map((t) => (
-                    <tr key={t.id} className="border-t border-slate-800">
-                      <td className="px-2 py-1">{t.symbol}</td>
-                      <td className="px-2 py-1">{t.kind}</td>
-                      <td className="px-2 py-1">{t.side}</td>
-                      <td className="px-2 py-1">{premiumLabel(t.kind, t.premiumSide, lang)}</td>
-                      <td className="px-2 py-1">{strategyLabel(t.kind, t.optionStrategy, lang)}</td>
-                      <td className="px-2 py-1">{t.price}</td>
-                      <td className="px-2 py-1">{t.quantity}</td>
-                      <td className="px-2 py-1">{t.time}</td>
-                      <td className="px-2 py-1">{t.kind === "option" ? (t.dte ?? "—") : "—"}</td>
-                      <td className="px-2 py-1 text-right">
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteExitTrade(t.id)}
-                          className="text-slate-500 hover:text-sky-300"
-                          title={L("Delete exit", "Eliminar salida")}
-                        >
-                          ✕
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <div className="space-y-2">
+                {exitTrades.map((t, index) => (
+                  <div key={t.id} className="rounded-xl border border-slate-800 bg-slate-950/70 px-3 py-2">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500">
+                          {L("Exit", "Salida")} {index + 1}
+                        </p>
+                        <p className="mt-1 text-sm font-semibold text-slate-100 break-all">{t.symbol}</p>
+                        <p className="mt-1 text-[12px] text-slate-400">
+                          {t.kind} · {t.side} · {premiumLabel(t.kind, t.premiumSide, lang)}
+                        </p>
+                        <p className="text-[12px] text-slate-500">
+                          {strategyLabel(t.kind, t.optionStrategy, lang)}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteExitTrade(t.id)}
+                        className="text-slate-500 hover:text-sky-300 shrink-0"
+                        title={L("Delete exit", "Eliminar salida")}
+                      >
+                        ✕
+                      </button>
+                    </div>
+                    <div className="mt-3 grid grid-cols-3 gap-2">
+                      <div className="rounded-lg border border-slate-800 bg-slate-900/70 px-2 py-1.5">
+                        <p className="text-[10px] uppercase tracking-wide text-slate-500">{L("Price", "Precio")}</p>
+                        <p className="mt-1 text-sm text-slate-100">{t.price || "—"}</p>
+                      </div>
+                      <div className="rounded-lg border border-slate-800 bg-slate-900/70 px-2 py-1.5">
+                        <p className="text-[10px] uppercase tracking-wide text-slate-500">{L("Qty", "Cant.")}</p>
+                        <p className="mt-1 text-sm text-slate-100">{t.quantity || "—"}</p>
+                      </div>
+                      <div className="rounded-lg border border-slate-800 bg-slate-900/70 px-2 py-1.5">
+                        <p className="text-[10px] uppercase tracking-wide text-slate-500">{L("Time", "Hora")}</p>
+                        <p className="mt-1 text-sm text-slate-100">{t.time || "—"}</p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
 
               <div className="pt-1 border-t border-slate-800 mt-1">
                 <p className="text-[11px] text-slate-400">
@@ -2575,6 +2917,69 @@ export default function DailyJournalPage() {
               insideEditorRef.current = ed;
             }}
           />
+          <div className="mt-4 grid grid-cols-1 gap-3">
+            <NeuroChipGroup
+              title={L("What changed?", "¿Qué cambió?")}
+              options={NEURO_INSIDE_CHANGED_OPTIONS}
+              selected={neuroLayer.inside.changed}
+              onToggle={(optionId) => toggleNeuroMulti("inside", "changed", optionId)}
+            />
+            <NeuroChipGroup
+              title={L("Current state", "Estado actual")}
+              options={NEURO_INSIDE_STATE_OPTIONS}
+              selected={neuroLayer.inside.state}
+              onToggle={(optionId) => toggleNeuroMulti("inside", "state", optionId)}
+            />
+            <NeuroChipGroup
+              title={L("Did I follow the plan?", "¿Seguí el plan?")}
+              options={NEURO_PLAN_FOLLOWED_OPTIONS}
+              selected={neuroLayer.inside.plan_followed ? [neuroLayer.inside.plan_followed] : []}
+              onToggle={(optionId) =>
+                setNeuroSingle(
+                  "inside",
+                  "plan_followed",
+                  neuroLayer.inside.plan_followed === optionId ? null : optionId
+                )
+              }
+              single
+            />
+          </div>
+          <div className="mt-4">
+            <div className="mb-3">
+              <p className="text-sm font-semibold text-slate-200">
+                {L("Trade management", "Manejo del trade")}
+              </p>
+              <p className="mt-1 text-[11px] text-slate-500">
+                {L(
+                  "Mark the live management actions that actually happened while the trade was open.",
+                  "Marca las acciones reales de manejo que ocurrieron mientras el trade estuvo abierto."
+                )}
+              </p>
+              <div className="mt-2 flex flex-wrap gap-2 text-[13px] leading-snug">
+                {EXIT_REASON_TAGS.map((t) => (
+                  <label key={t} className={tagPillClass(!!entry.tags?.includes(t))}>
+                    <input
+                      type="checkbox"
+                      onChange={() => toggleTag(t)}
+                      checked={entry.tags?.includes(t)}
+                      className={tagCheckboxClass}
+                    />
+                    <span className="wrap-break-word">{tagLabel(t, EXIT_REASON_LABELS)}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+            <ChecklistChipGroup
+              title={L("In-trade checklist", "Checklist en trade")}
+              section="inside"
+              items={checklistPresets.inside}
+              selected={extractPrefixed(Array.isArray(entry.tags) ? entry.tags : [], TAG_PREFIX.inside)}
+              helper={L(
+                "Use this to mark whether your live execution stayed inside the process.",
+                "Úsalo para marcar si tu ejecución en vivo se mantuvo dentro del proceso."
+              )}
+            />
+          </div>
         </WidgetCard>
       ),
     },
@@ -2599,6 +3004,69 @@ export default function DailyJournalPage() {
             )}
             minHeight={180}
           />
+          <div className="mt-4 grid grid-cols-1 gap-3">
+            <NeuroChipGroup
+              title={L("Why did I exit?", "¿Por qué salí?")}
+              options={NEURO_AFTER_EXIT_REASON_OPTIONS}
+              selected={neuroLayer.after.exit_reason}
+              onToggle={(optionId) => toggleNeuroMulti("after", "exit_reason", optionId)}
+            />
+            <NeuroChipGroup
+              title={L("Would I take this trade again?", "¿Tomaría este trade otra vez?")}
+              options={NEURO_AFTER_TAKE_AGAIN_OPTIONS}
+              selected={neuroLayer.after.take_again ? [neuroLayer.after.take_again] : []}
+              onToggle={(optionId) =>
+                setNeuroSingle(
+                  "after",
+                  "take_again",
+                  neuroLayer.after.take_again === optionId ? null : optionId
+                )
+              }
+              single
+            />
+            <NeuroChipGroup
+              title={L("Truth about the trade", "Verdad sobre el trade")}
+              options={NEURO_AFTER_TRUTH_OPTIONS}
+              selected={neuroLayer.after.truth}
+              onToggle={(optionId) => toggleNeuroMulti("after", "truth", optionId)}
+            />
+            <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+              <label className="text-sm font-semibold text-slate-200">
+                {L("One-line truth", "Verdad en una línea")}
+              </label>
+              <p className="mt-1 text-[11px] text-slate-500">
+                {L(
+                  "One brutal sentence about what was really true in this trade.",
+                  "Una frase brutalmente honesta sobre lo que realmente fue cierto en este trade."
+                )}
+              </p>
+              <textarea
+                value={neuroLayer.after.one_line_truth}
+                onChange={(e) =>
+                  setNeuroLayer((prev) => ({
+                    ...prev,
+                    after: {
+                      ...prev.after,
+                      one_line_truth: e.target.value,
+                    },
+                  }))
+                }
+                rows={3}
+                placeholder={L("I traded before confirmation.", "Operé antes de la confirmación.")}
+                className="mt-3 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 focus:border-emerald-400 focus:outline-none"
+              />
+            </div>
+            <ChecklistChipGroup
+              title={L("After-trade checklist", "Checklist post-trade")}
+              section="after"
+              items={checklistPresets.after}
+              selected={extractPrefixed(Array.isArray(entry.tags) ? entry.tags : [], TAG_PREFIX.after)}
+              helper={L(
+                "Use this for the concrete review actions that should happen after the trade closes.",
+                "Úsalo para las acciones concretas de revisión que deben ocurrir después de cerrar el trade."
+              )}
+            />
+          </div>
           <details className="mt-4 rounded-xl border border-slate-800 bg-slate-950/60 p-3">
             <summary className="cursor-pointer text-sm font-semibold text-slate-200">
               {L("After‑Trade Checklist (optional)", "Checklist post‑trade (opcional)")}
@@ -2655,25 +3123,6 @@ export default function DailyJournalPage() {
               />
             </div>
 
-            <div className="border-t border-slate-800 pt-3 mt-4">
-              <p className="text-slate-200 text-sm font-semibold mb-2">
-                {L("Exit evidence", "Evidencia de salida")}
-              </p>
-              <div className="flex flex-wrap gap-2 text-[13px] leading-snug">
-                {EXIT_REASON_TAGS.map((t) => (
-                  <label key={t} className={tagPillClass(!!entry.tags?.includes(t))}>
-                    <input
-                      type="checkbox"
-                      onChange={() => toggleTag(t)}
-                      checked={entry.tags?.includes(t)}
-                      className={tagCheckboxClass}
-                    />
-                    <span className="wrap-break-word">{tagLabel(t, EXIT_REASON_LABELS)}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
-
             <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
               <div>
                 <JournalInkField
@@ -2711,282 +3160,144 @@ export default function DailyJournalPage() {
 
     {
       id: "emotional",
-      title: L("Mindset & Impulse", "Mentalidad e impulsos"),
+      title: L("Neuro Layer", "Neuro Layer"),
       defaultLayout: { i: "emotional", x: 7, y: 16, w: 5, h: 6, minW: 3, minH: 4 },
       render: () => (
         <WidgetCard
-          title={L("Mindset & Impulse", "Mentalidad e impulsos")}
-          right={
-            <button
-              type="button"
-              onClick={() => setEditMindset((v) => !v)}
-              className="px-2 py-1 rounded-md border border-slate-700 text-[11px] text-slate-300 hover:text-white hover:border-slate-500"
-            >
-              {editMindset ? L("Done", "Listo") : L("Customize", "Personalizar")}
-            </button>
-          }
+          title={L("Neuro Layer", "Neuro Layer")}
+          subtitle={L(
+            "Decision replay, drift, and truth from the same journal.",
+            "Decision replay, drift y verdad desde el mismo journal."
+          )}
         >
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <RatingSlider
-              label={L("Emotional balance", "Balance emocional")}
-              value={mindset.emotional_balance}
-              onChange={(v) => setMindset((prev) => ({ ...prev, emotional_balance: v }))}
-              left={L("Unstable", "Inestable")}
-              right={L("Calm", "Calmado")}
-            />
-            <RatingSlider
-              label={L("Impulse control", "Control de impulsos")}
-              value={mindset.impulse_control}
-              onChange={(v) => setMindset((prev) => ({ ...prev, impulse_control: v }))}
-              left={L("Reactive", "Reactivo")}
-              right={L("Disciplined", "Disciplinado")}
-            />
-          </div>
-
-          <div className="mt-4">
-            <div className="flex items-center justify-between mb-2">
-              <p className="text-slate-200 text-sm font-semibold">
-                {L("State tags", "Estado")}
+          <div className="grid grid-cols-1 md:grid-cols-[auto,1fr] gap-3">
+            <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3">
+              <p className="text-[11px] uppercase tracking-[0.24em] text-emerald-200/80">
+                {L("Neuro Score", "Neuro Score")}
               </p>
-              {editMindset && (
-                <span className="text-[11px] text-slate-500">
-                  {L("Add or remove tags", "Añadir o quitar etiquetas")}
-                </span>
-              )}
-            </div>
-            <div className="flex flex-wrap gap-2 text-[13px] leading-snug">
-              {checklistPresets.states.map((t) => (
-                <label key={t} className={tagPillClass(!!entry.tags?.includes(t))}>
-                  <input
-                    type="checkbox"
-                    onChange={() => toggleTag(t)}
-                    checked={entry.tags?.includes(t)}
-                    className={tagCheckboxClass}
-                  />
-                  <span className="wrap-break-word">{tagLabel(t, STATE_ITEM_LABELS)}</span>
-                  {editMindset && (
-                    <button
-                      type="button"
-                      onClick={() => removeChecklistItem("states", t)}
-                      className="ml-1 text-slate-500 hover:text-rose-400"
-                      title={L("Remove", "Eliminar")}
-                    >
-                      ✕
-                    </button>
-                  )}
-                </label>
-              ))}
-            </div>
-            {editMindset && (
-              <div className="mt-2 flex gap-2">
-                <input
-                  value={newChecklistItem.states}
-                  onChange={(e) => setNewChecklistItem((prev) => ({ ...prev, states: e.target.value }))}
-                  placeholder={L("Add state tag", "Añadir etiqueta")}
-                  className="flex-1 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-xs text-slate-100 focus:outline-none focus:border-emerald-400"
-                />
-                <button
-                  type="button"
-                  onClick={() => addChecklistItem("states")}
-                  className="px-3 py-1.5 rounded-lg bg-emerald-500 text-slate-950 text-xs font-semibold hover:bg-emerald-400"
-                >
-                  {L("Add", "Añadir")}
-                </button>
-              </div>
-            )}
-          </div>
-
-          <div className="border-t border-slate-800 pt-3 mt-4">
-            <div className="flex items-center justify-between mb-2">
-              <p className="text-slate-200 text-sm font-semibold">
-                {L("Impulse triggers", "Impulsos")}
+              <p className="mt-2 text-3xl font-semibold text-white">
+                {neuroSummary.score == null ? "—" : neuroSummary.score}
               </p>
-              {editMindset && (
-                <span className="text-[11px] text-slate-500">
-                  {L("Track only what matters", "Solo lo importante")}
-                </span>
-              )}
+              <p className="mt-1 text-xs text-emerald-100/80">{neuroLevelLabel}</p>
             </div>
-            <div className="flex flex-wrap gap-2 text-[13px] leading-snug">
-              {checklistPresets.impulses.map((t) => (
-                <label key={t} className={tagPillClass(!!entry.tags?.includes(t))}>
-                  <input
-                    type="checkbox"
-                    onChange={() => toggleTag(t)}
-                    checked={entry.tags?.includes(t)}
-                    className={tagCheckboxClass}
-                  />
-                  <span className="wrap-break-word">{tagLabel(t, IMPULSE_ITEM_LABELS)}</span>
-                  {editMindset && (
-                    <button
-                      type="button"
-                      onClick={() => removeChecklistItem("impulses", t)}
-                      className="ml-1 text-slate-500 hover:text-rose-400"
-                      title={L("Remove", "Eliminar")}
-                    >
-                      ✕
-                    </button>
-                  )}
-                </label>
-              ))}
-            </div>
-            {editMindset && (
-              <div className="mt-2 flex gap-2">
-                <input
-                  value={newChecklistItem.impulses}
-                  onChange={(e) => setNewChecklistItem((prev) => ({ ...prev, impulses: e.target.value }))}
-                  placeholder={L("Add impulse tag", "Añadir impulso")}
-                  className="flex-1 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-xs text-slate-100 focus:outline-none focus:border-emerald-400"
-                />
-                <button
-                  type="button"
-                  onClick={() => addChecklistItem("impulses")}
-                  className="px-3 py-1.5 rounded-lg bg-emerald-500 text-slate-950 text-xs font-semibold hover:bg-emerald-400"
-                >
-                  {L("Add", "Añadir")}
-                </button>
+            <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-3">
+              <p className="text-[11px] uppercase tracking-[0.24em] text-slate-400">
+                {L("Neuro Insight", "Neuro Insight")}
+              </p>
+              <p className="mt-2 text-sm leading-6 text-slate-100">{neuroInsight}</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {neuroSummary.strengths.slice(0, 2).map((item) => (
+                  <span
+                    key={item}
+                    className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-[11px] text-emerald-200"
+                  >
+                    {item.replaceAll("_", " ")}
+                  </span>
+                ))}
+                {neuroSummary.risks.slice(0, 2).map((item) => (
+                  <span
+                    key={item}
+                    className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-[11px] text-amber-200"
+                  >
+                    {item.replaceAll("_", " ")}
+                  </span>
+                ))}
               </div>
-            )}
+            </div>
           </div>
-        </WidgetCard>
-      ),
-    },
 
-    {
-      id: "strategy",
-      title: L("Process & Strategy", "Proceso y estrategia"),
-      defaultLayout: { i: "strategy", x: 7, y: 22, w: 5, h: 8, minW: 3, minH: 4 },
-      render: () => (
-        <WidgetCard
-          title={L("Process & Strategy", "Proceso y estrategia")}
-          right={
-            <button
-              type="button"
-              onClick={() => setEditProcess((v) => !v)}
-              className="px-2 py-1 rounded-md border border-slate-700 text-[11px] text-slate-300 hover:text-white hover:border-slate-500"
-            >
-              {editProcess ? L("Done", "Listo") : L("Customize", "Personalizar")}
-            </button>
-          }
-        >
-          <div className="flex items-center gap-2 mb-3">
-            {PROCESS_PHASES.map((phase) => {
-              const on = processPhase === phase;
-              return (
-                <button
-                  key={phase}
-                  type="button"
-                  onClick={() => setProcessPhase(phase)}
-                  className={`px-3 py-1 rounded-full text-xs border ${on ? "bg-emerald-500 text-slate-950 border-emerald-400" : "bg-slate-950 text-slate-300 border-slate-700 hover:border-slate-500"}`}
+          <div className="mt-4 rounded-2xl border border-slate-800 bg-slate-950/60 p-3">
+            <p className="text-[11px] uppercase tracking-[0.24em] text-slate-400">
+              {L("Decision Replay", "Decision Replay")}
+            </p>
+            <div className="mt-3 space-y-2 text-sm text-slate-200">
+              <p>
+                <span className="text-slate-400">{L("Premarket", "Premarket")}:</span>{" "}
+                {[
+                  ...neuroLayer.premarket.thesis.map((item) => neuroLabel(item, NEURO_PREMARKET_THESIS_OPTIONS)),
+                  ...neuroLayer.premarket.confirmation.map((item) =>
+                    neuroLabel(item, NEURO_PREMARKET_CONFIRMATION_OPTIONS)
+                  ),
+                  ...neuroLayer.premarket.invalidation.map((item) =>
+                    neuroLabel(item, NEURO_PREMARKET_INVALIDATION_OPTIONS)
+                  ),
+                ].join(" · ") || L("No Neuro checks yet", "Todavía sin Neuro checks")}
+              </p>
+              <p>
+                <span className="text-slate-400">{L("Inside", "Dentro")}:</span>{" "}
+                {[
+                  ...neuroLayer.inside.changed.map((item) => neuroLabel(item, NEURO_INSIDE_CHANGED_OPTIONS)),
+                  ...neuroLayer.inside.state.map((item) => neuroLabel(item, NEURO_INSIDE_STATE_OPTIONS)),
+                  neuroLayer.inside.plan_followed
+                    ? neuroLabel(neuroLayer.inside.plan_followed, NEURO_PLAN_FOLLOWED_OPTIONS)
+                    : "",
+                ]
+                  .filter(Boolean)
+                  .join(" · ") || L("No Neuro checks yet", "Todavía sin Neuro checks")}
+              </p>
+              <p>
+                <span className="text-slate-400">{L("After", "Después")}:</span>{" "}
+                {[
+                  ...neuroLayer.after.exit_reason.map((item) => neuroLabel(item, NEURO_AFTER_EXIT_REASON_OPTIONS)),
+                  neuroLayer.after.take_again ? neuroLabel(neuroLayer.after.take_again, NEURO_AFTER_TAKE_AGAIN_OPTIONS) : "",
+                  ...neuroLayer.after.truth.map((item) => neuroLabel(item, NEURO_AFTER_TRUTH_OPTIONS)),
+                ]
+                  .filter(Boolean)
+                  .join(" · ") || L("No Neuro checks yet", "Todavía sin Neuro checks")}
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-4 rounded-2xl border border-slate-800 bg-slate-950/60 p-3">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-sm font-semibold text-slate-200">{L("Custom Neuro tags", "Tags Neuro personalizados")}</p>
+              <span className="text-[11px] text-slate-500">
+                {L("Use these for your own repeatable patterns.", "Úsalos para tus propios patrones repetibles.")}
+              </span>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {neuroLayer.after.custom_tags.map((tag) => (
+                <span
+                  key={tag}
+                  className="inline-flex items-center gap-2 rounded-full border border-slate-700 bg-slate-950 px-3 py-1 text-xs text-slate-200"
                 >
-                  {PROCESS_LABELS[phase][lang]}
-                </button>
-              );
-            })}
-          </div>
-
-          <div className="flex flex-wrap gap-2 text-[13px] leading-snug">
-            {checklistPresets[processPhase].map((t) => (
-              <label key={`${processPhase}-${t}`} className={tagPillClass(isChecklistSelected(processPhase, t))}>
-                <input
-                  type="checkbox"
-                  onChange={() => toggleChecklistItem(processPhase, t)}
-                  checked={isChecklistSelected(processPhase, t)}
-                  className={tagCheckboxClass}
-                />
-                <span className="wrap-break-word">{tagLabel(t, PROCESS_ITEM_LABELS)}</span>
-                {editProcess && (
+                  {tag}
                   <button
                     type="button"
-                    onClick={() => removeChecklistItem(processPhase, t)}
-                    className="ml-1 text-slate-500 hover:text-rose-400"
+                    onClick={() => removeNeuroCustomTag(tag)}
+                    className="text-slate-500 hover:text-rose-400"
                     title={L("Remove", "Eliminar")}
                   >
                     ✕
                   </button>
-                )}
-              </label>
-            ))}
-          </div>
-
-          {editProcess && (
-            <div className="mt-2 flex gap-2">
+                </span>
+              ))}
+              {!neuroLayer.after.custom_tags.length ? (
+                <span className="text-xs text-slate-500">
+                  {L("No custom Neuro tags yet.", "Todavía no hay tags Neuro personalizados.")}
+                </span>
+              ) : null}
+            </div>
+            <div className="mt-3 flex gap-2">
               <input
-                value={newChecklistItem[processPhase]}
-                onChange={(e) => setNewChecklistItem((prev) => ({ ...prev, [processPhase]: e.target.value }))}
-                placeholder={L("Add checklist item", "Añadir item")}
-                className="flex-1 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-xs text-slate-100 focus:outline-none focus:border-emerald-400"
+                value={newNeuroCustomTag}
+                onChange={(e) => setNewNeuroCustomTag(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    addNeuroCustomTag();
+                  }
+                }}
+                placeholder={L("Add a custom pattern or trigger", "Añade un patrón o trigger personalizado")}
+                className="flex-1 rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 focus:border-emerald-400 focus:outline-none"
               />
               <button
                 type="button"
-                onClick={() => addChecklistItem(processPhase)}
-                className="px-3 py-1.5 rounded-lg bg-emerald-500 text-slate-950 text-xs font-semibold hover:bg-emerald-400"
+                onClick={addNeuroCustomTag}
+                className="rounded-xl bg-emerald-500 px-3 py-2 text-sm font-semibold text-slate-950 hover:bg-emerald-400"
               >
                 {L("Add", "Añadir")}
               </button>
-            </div>
-          )}
-
-          <div className="border-t border-slate-800 pt-3 mt-4">
-            <p className="text-slate-200 text-sm font-semibold mb-2">
-              {L("Strategy checklist", "Checklist de estrategia")}
-            </p>
-            <div className="flex flex-wrap gap-2 text-[13px] leading-snug">
-              {checklistPresets.strategy.map((t) => (
-                <label key={t} className={tagPillClass(isChecklistSelected("strategy", t))}>
-                  <input
-                    type="checkbox"
-                    onChange={() => toggleChecklistItem("strategy", t)}
-                    checked={isChecklistSelected("strategy", t)}
-                    className={tagCheckboxClass}
-                  />
-                  <span className="wrap-break-word">{tagLabel(t, STRATEGY_ITEM_LABELS)}</span>
-                  {editProcess && (
-                    <button
-                      type="button"
-                      onClick={() => removeChecklistItem("strategy", t)}
-                      className="ml-1 text-slate-500 hover:text-rose-400"
-                      title={L("Remove", "Eliminar")}
-                    >
-                      ✕
-                    </button>
-                  )}
-                </label>
-              ))}
-            </div>
-            {editProcess && (
-              <div className="mt-2 flex gap-2">
-                <input
-                  value={newChecklistItem.strategy}
-                  onChange={(e) => setNewChecklistItem((prev) => ({ ...prev, strategy: e.target.value }))}
-                  placeholder={L("Add strategy item", "Añadir estrategia")}
-                  className="flex-1 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-xs text-slate-100 focus:outline-none focus:border-emerald-400"
-                />
-                <button
-                  type="button"
-                  onClick={() => addChecklistItem("strategy")}
-                  className="px-3 py-1.5 rounded-lg bg-emerald-500 text-slate-950 text-xs font-semibold hover:bg-emerald-400"
-                >
-                  {L("Add", "Añadir")}
-                </button>
-              </div>
-            )}
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
-              <RatingSlider
-                label={L("Setup quality", "Calidad del setup")}
-                value={mindset.setup_quality}
-                onChange={(v) => setMindset((prev) => ({ ...prev, setup_quality: v }))}
-                left={L("Weak", "Débil")}
-                right={L("Strong", "Fuerte")}
-              />
-              <RatingSlider
-                label={L("Probability rating", "Probabilidad")}
-                value={mindset.probability}
-                onChange={(v) => setMindset((prev) => ({ ...prev, probability: v }))}
-                left={L("Low", "Baja")}
-                right={L("High", "Alta")}
-              />
             </div>
           </div>
         </WidgetCard>
@@ -3060,10 +3371,10 @@ export default function DailyJournalPage() {
         key: "session",
         label: L("Premarket + In‑Trade", "Premarket + En‑trade"),
         description: L(
-          "Premarket + in‑trade notes with mindset and trade evidence in one flow.",
-          "Premarket + en‑trade con mindset y evidencia del trade en un solo flujo."
+          "Premarket, live execution, Neuro Layer, and trade evidence in one flow.",
+          "Premarket, ejecución en vivo, Neuro Layer y evidencia del trade en un solo flujo."
         ),
-        sections: ["premarket", "inside", "emotional", "strategy", "entries", "exits", "templates"] as JournalWidgetId[],
+        sections: ["premarket", "inside", "emotional", "entries", "exits", "templates"] as JournalWidgetId[],
       },
       {
         key: "after",
@@ -3289,18 +3600,79 @@ export default function DailyJournalPage() {
             )}
           </div>
 
-          <div className="mt-1 text-[9px] text-slate-500">
-            {activeStep?.description}
-          </div>
+        <div className="mt-1 text-[9px] text-slate-500">
+          {activeStep?.description}
         </div>
 
-        <div className={gridMode ? "grid grid-cols-1 lg:grid-cols-2 gap-4" : "space-y-4"}>
-          {activeStep?.sections.map((id) => (
-            <div key={id} className={gridMode && fullWidthSections.has(id) ? "lg:col-span-2" : ""}>
-              {sectionMap[id]?.render()}
+        {journalNeuroMemory ? (
+          <div
+            className={`mt-3 rounded-2xl border px-4 py-3 ${
+              journalNeuroMemory.kind === "risk"
+                ? "border-amber-300/30 bg-[linear-gradient(135deg,rgba(251,191,36,0.12),rgba(15,23,42,0.92))]"
+                : journalNeuroMemory.kind === "strength"
+                  ? "border-cyan-300/30 bg-[linear-gradient(135deg,rgba(34,211,238,0.12),rgba(15,23,42,0.92))]"
+                  : "border-slate-700 bg-slate-950/80"
+            }`}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-[10px] uppercase tracking-[0.26em] text-slate-300/85">
+                  {L("Neuro Memory", "Neuro Memory")}
+                </p>
+                <p className="mt-1 text-sm font-semibold text-slate-100">{journalNeuroMemory.title}</p>
+                <p className="mt-1.5 text-xs leading-relaxed text-slate-200/90">{journalNeuroMemory.body}</p>
+              </div>
+              <div
+                className={`rounded-full px-2.5 py-1 text-[10px] font-semibold ${
+                  journalNeuroMemory.kind === "risk"
+                    ? "border border-amber-300/40 bg-amber-400/10 text-amber-100"
+                    : journalNeuroMemory.kind === "strength"
+                      ? "border border-cyan-300/40 bg-cyan-400/10 text-cyan-100"
+                      : "border border-slate-600 bg-slate-800 text-slate-200"
+                }`}
+              >
+                {journalNeuroMemory.kind === "risk"
+                  ? L("Pattern", "Patrón")
+                  : journalNeuroMemory.kind === "strength"
+                    ? L("Strength", "Fortaleza")
+                    : L("Memory", "Memoria")}
+              </div>
             </div>
-          ))}
+          </div>
+        ) : null}
         </div>
+
+        {gridMode ? (
+          <>
+            <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.18fr)_minmax(420px,0.82fr)] gap-4">
+              <div className="space-y-4">
+                {["premarket", "inside"].map((id) => (
+                  <div key={id}>{sectionMap[id as JournalWidgetId]?.render()}</div>
+                ))}
+              </div>
+              <div className="space-y-4">
+                {["emotional", "entries", "exits"].map((id) => (
+                  <div key={id}>{sectionMap[id as JournalWidgetId]?.render()}</div>
+                ))}
+              </div>
+            </div>
+            <div className="mt-4 space-y-4">
+              {activeStep?.sections
+                .filter((id) => !["premarket", "inside", "emotional", "entries", "exits"].includes(id))
+                .map((id) => (
+                  <div key={id} className={fullWidthSections.has(id) ? "w-full" : ""}>
+                    {sectionMap[id]?.render()}
+                  </div>
+                ))}
+            </div>
+          </>
+        ) : (
+          <div className="space-y-4">
+            {activeStep?.sections.map((id) => (
+              <div key={id}>{sectionMap[id]?.render()}</div>
+            ))}
+          </div>
+        )}
 
         <div className="flex items-center justify-between mt-6">
           <button

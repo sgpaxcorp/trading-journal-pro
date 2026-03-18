@@ -9,7 +9,7 @@ import { isActiveProfileStatus, shouldAllowLocalProfileAccessFallback } from "@/
 import { fetchAccessStatus } from "@/lib/accessStatusClient";
 import CandleAssistant from "@/app/components/NeuroAssistant";
 import AppTour from "@/app/components/AppTour";
-import PageIntro from "@/app/components/PageIntro";
+import RouteQuickTour from "@/app/components/RouteQuickTour";
 import GlobalAlertPopups from "@/app/components/GlobalAlertPopups";
 import GlobalAlertRuleEngine from "@/app/components/GlobalAlertRuleEngine";
 import GlobalRealtimeNotifications from "@/app/components/GlobalRealtimeNotifications";
@@ -239,7 +239,11 @@ export default function PrivateLayout({ children }: PrivateLayoutProps) {
       {userId && isActive && profileChecked ? (
         <>
           <AppTour onboardingCompleted={onboardingCompleted} />
-          <PageIntro />
+          {onboardingCompleted ? (
+            <>
+              <RouteQuickTour enabled />
+            </>
+          ) : null}
         </>
       ) : null}
 

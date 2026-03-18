@@ -609,7 +609,7 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
               )}
               <ul className="space-y-1 text-[11px] text-slate-300">
                 <li>• {L("Full daily journal & calendar", "Diario diario completo y calendario")}</li>
-                <li>• {L("Back-study module", "Módulo de back-study")}</li>
+                <li>• {L("Trade review workspace", "Workspace de revisión de trades")}</li>
                 <li>• {L("Basic analytics", "Analítica básica")}</li>
                 <li>• {L("Bi‑weekly performance report (email + in‑app) — Saturdays 9 AM EST", "Reporte quincenal (email + app) — Sábados 9 AM EST")}</li>
                 <li>• {L("Monthly performance report (email + in‑app) — 1st of each month, 9 AM EST", "Reporte mensual (email + app) — día 1 de cada mes, 9 AM EST")}</li>
@@ -697,6 +697,9 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
 
               <ul className="relative space-y-1 text-[11px] text-slate-50">
                 <li>• {L("Everything in Core", "Todo lo de Core")}</li>
+                <li>• {L("Notebook workspace", "Workspace de notebook")}</li>
+                <li>• {L("Cashflow tracking", "Seguimiento de cashflow")}</li>
+                <li>• {L("Audit workbench", "Audit workbench")}</li>
                 <li>• {L("Advanced analytics & breakdowns", "Analítica avanzada y breakdowns")}</li>
                 <li>• {L("Profit & Loss Track (business accounting)", "Profit & Loss Track (contabilidad)")}</li>
                 <li>• {L("AI coaching & mindset tools", "AI coaching y herramientas de mindset")}</li>

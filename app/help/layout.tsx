@@ -17,6 +17,7 @@ const NAV_GROUPS = (lang: "en" | "es") => {
       title: isEs ? "Uso diario" : "Daily use",
       items: [
         { href: "/help/journal", label: isEs ? "Entradas de Journal" : "Journal Entries" },
+        { href: "/help/neuro-layer", label: isEs ? "Neuro Layer" : "Neuro Layer" },
         { href: "/help/workflows", label: isEs ? "Flujos de trabajo" : "Workflows" },
         { href: "/help/dashboard-widgets", label: isEs ? "Dashboard y widgets" : "Dashboard & Widgets" },
         { href: "/help/analytics", label: isEs ? "Analitica y rendimiento" : "Analytics & Performance" },

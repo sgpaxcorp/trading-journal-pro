@@ -27,6 +27,9 @@ Define límites de riesgo, ritmo diario y horizonte. Es la fuente de verdad del 
 **Journal (sesión diaria)**  
 Captura plan premarket, ejecución, mindset y revisión post‑trade. Aquí el comportamiento se convierte en datos.
 
+**Neuro Layer**  
+Vive dentro del Journal y convierte tu plan, decisiones en vivo y verdad post‑trade en datos estructurados de psicología y proceso.
+
 **Performance & Analítica**  
 Convierte el journal en KPIs, patrones y breakdowns. Aquí diagnosticas edge y errores.
 
@@ -34,7 +37,7 @@ Convierte el journal en KPIs, patrones y breakdowns. Aquí diagnosticas edge y e
 Controla el lado de negocio del trading: suscripciones, educación, vendors, presupuestos, renovaciones y break-even.
 
 **AI Coaching**  
-Convierte datos en feedback y acciones. Es más útil cuando tienes sesiones consistentes.
+Convierte Journal, Neuro Layer, Growth Plan, analítica y contexto de ejecución en feedback y acciones.
 
 **Imports (Broker Sync o CSV)**  
 Trae trades reales al sistema. Sin datos limpios, la analítica se distorsiona.

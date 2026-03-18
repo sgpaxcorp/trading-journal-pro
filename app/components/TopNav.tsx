@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { MessageSquare } from "lucide-react";
 
 import { useAuth } from "@/context/AuthContext";
@@ -11,6 +11,7 @@ import { supabaseBrowser } from "@/lib/supaBaseClient";
 import { useAppSettings, type Theme } from "@/lib/appSettings";
 import { resolveLocale, t, type Locale } from "@/lib/i18n";
 import { listAlertEvents, subscribeToAlertEvents } from "@/lib/alertsSupabase";
+import { QUICK_TOUR_OPEN_EVENT, getQuickTourContext } from "@/lib/quickTour";
 
 type NavItem = {
   id: string;
@@ -144,10 +145,10 @@ function Dropdown({ title, titleKey, items, theme, lang, dataTour }: DropdownPro
 function HelpMenu({ theme, lang }: { theme: Theme; lang: Locale }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
+  const pathname = usePathname();
   const L = (en: string, es: string) => (lang === "es" ? es : en);
   const { user } = useAuth() as any;
-  const router = useRouter();
-  const [resettingTour, setResettingTour] = useState(false);
+  const current = getQuickTourContext(pathname || "/dashboard", L);
 
   const isLight = theme === "light";
 
@@ -174,33 +175,10 @@ function HelpMenu({ theme, lang }: { theme: Theme; lang: Locale }) {
     ? "border-slate-300 text-slate-700 hover:border-emerald-400 hover:text-emerald-700"
     : "border-slate-700 text-slate-200 hover:border-emerald-400 hover:text-emerald-300";
 
-  const handleActivateTour = async () => {
-    if (!user?.id || typeof window === "undefined") return;
-    setResettingTour(true);
-    try {
-      const key = `ntj_app_tour_${user.id}`;
-      localStorage.removeItem(key);
-      Object.keys(localStorage)
-        .filter((k) => k.startsWith(`ntj_intro_${user.id}`))
-        .forEach((k) => localStorage.removeItem(k));
-
-      await supabaseBrowser.auth.updateUser({
-        data: { onboardingCompleted: false },
-      });
-
-      await supabaseBrowser
-        .from("profiles")
-        .update({ onboarding_completed: false })
-        .eq("id", user.id);
-    } catch (err) {
-      console.warn("[HelpMenu] Failed to reset tour", err);
-    } finally {
-      setResettingTour(false);
-      router.replace("/dashboard");
-      setTimeout(() => {
-        window.location.reload();
-      }, 60);
-    }
+  const handleActivateTour = () => {
+    if (typeof window === "undefined") return;
+    setOpen(false);
+    window.dispatchEvent(new CustomEvent(QUICK_TOUR_OPEN_EVENT));
   };
 
   return (
@@ -223,10 +201,10 @@ function HelpMenu({ theme, lang }: { theme: Theme; lang: Locale }) {
               isLight ? "text-slate-900" : "text-slate-100"
             } mb-1`}
           >
-            {t("help.title", lang)}
+            {current.title}
           </p>
           <p className={`text-[11px] ${isLight ? "text-slate-600" : "text-slate-400"} mb-3`}>
-            {t("help.desc", lang)}
+            {current.summary}
           </p>
 
           <ul
@@ -234,27 +212,26 @@ function HelpMenu({ theme, lang }: { theme: Theme; lang: Locale }) {
               isLight ? "text-slate-700" : "text-slate-300"
             }`}
           >
-            <li>• {t("help.bullet.calendar", lang)}</li>
-            <li>• {t("help.bullet.widgets", lang)}</li>
-            <li>• {t("help.bullet.plan", lang)}</li>
+            {current.bullets.slice(0, 3).map((bullet) => (
+              <li key={bullet}>• {bullet}</li>
+            ))}
           </ul>
 
           <div className="mt-3 flex flex-wrap gap-2 text-[11px]">
             <Link
-              href="/help/getting-started"
+              href={current.guideHref}
               className={`px-2 py-1 rounded-lg border transition ${linkClass}`}
+              onClick={() => setOpen(false)}
             >
-              {t("help.link.gettingStarted", lang)}
+              {L("Open guide", "Abrir guía")}
             </Link>
             <button
               type="button"
-              onClick={() => void handleActivateTour()}
-              disabled={resettingTour || !user?.id}
-              className={`px-2 py-1 rounded-lg border transition ${linkClass} ${
-                resettingTour ? "opacity-60 cursor-not-allowed" : ""
-              }`}
+              onClick={handleActivateTour}
+              disabled={!user?.id}
+              className={`px-2 py-1 rounded-lg border transition ${linkClass}`}
             >
-              {t("help.link.activateTour", lang)}
+              {L("Start quick tour", "Iniciar quick tour")}
             </button>
           </div>
         </div>

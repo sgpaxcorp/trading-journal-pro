@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Image,
   Linking,
   Pressable,
   StyleSheet,
@@ -14,13 +15,16 @@ import { apiGet, apiPost } from "../lib/api";
 import { useLanguage } from "../lib/LanguageContext";
 import { t } from "../lib/i18n";
 import { parseNotes, type StoredTradeRow, type TradesPayload } from "../lib/journalNotes";
+import { supabaseMobile } from "../lib/supabase";
 import { useTheme } from "../lib/ThemeContext";
-import { type ThemeColors } from "../theme";
+import { DARK_COLORS, type ThemeColors } from "../theme";
 
 type DashboardScreenProps = {
   onOpenModule: (title: string, description: string) => void;
   onOpenJournalDate: (date: string) => void;
 };
+
+const coachBrain = require("../../assets/neurotrader-logo-icon.png");
 
 type SeriesPoint = { date: string; value: number };
 
@@ -67,6 +71,15 @@ type JournalEntry = {
 
 type JournalListResponse = {
   entries: JournalEntry[];
+};
+
+type MotivationMessageRow = {
+  id: string;
+  locale: string;
+  title: string | null;
+  body: string;
+  weekday: string | null;
+  day_of_year: number | null;
 };
 
 type UiChecklistItem = {
@@ -154,38 +167,161 @@ type PlanProgressCard = {
   }>;
 };
 
+const DASHBOARD_TITLE_STOPS = ["#7CF7CF", "#63D6FF", "#9A7CFF", "#2BE3A7"] as const;
+
+function hexToRgb(hex: string) {
+  const normalized = hex.replace("#", "");
+  const value = normalized.length === 3
+    ? normalized.split("").map((char) => char + char).join("")
+    : normalized;
+  return {
+    r: parseInt(value.slice(0, 2), 16),
+    g: parseInt(value.slice(2, 4), 16),
+    b: parseInt(value.slice(4, 6), 16),
+  };
+}
+
+function mixHex(a: string, b: string, t: number) {
+  const start = hexToRgb(a);
+  const end = hexToRgb(b);
+  const mix = (from: number, to: number) => Math.round(from + (to - from) * t);
+  const toHex = (value: number) => value.toString(16).padStart(2, "0");
+  return `#${toHex(mix(start.r, end.r))}${toHex(mix(start.g, end.g))}${toHex(mix(start.b, end.b))}`;
+}
+
+function gradientColorAt(index: number, total: number) {
+  if (total <= 1) return DASHBOARD_TITLE_STOPS[0];
+  const progress = index / (total - 1);
+  const segments = DASHBOARD_TITLE_STOPS.length - 1;
+  const scaled = progress * segments;
+  const segmentIndex = Math.min(segments - 1, Math.floor(scaled));
+  const localT = scaled - segmentIndex;
+  return mixHex(DASHBOARD_TITLE_STOPS[segmentIndex], DASHBOARD_TITLE_STOPS[segmentIndex + 1], localT);
+}
+
+function GradientTitleText({ text, style }: { text: string; style: any }) {
+  const chars = Array.from(text);
+  return (
+    <Text style={style}>
+      {chars.map((char, index) => (
+        <Text key={`${char}-${index}`} style={{ color: gradientColorAt(index, chars.length) }}>
+          {char}
+        </Text>
+      ))}
+    </Text>
+  );
+}
+
 const WEB_GROWTH_PLAN_URL = "https://www.neurotrader-journal.com/growth-plan";
 
-const HERO_MESSAGES = [
-  {
-    title: { en: "Train like a pro today", es: "Entrena como profesional hoy" },
-    subtitle: {
-      en: "Process before outcome. Trade the plan, not the noise.",
-      es: "Proceso antes que resultado. Opera el plan, no el ruido.",
-    },
-  },
-  {
-    title: { en: "One clean trade is enough", es: "Un trade limpio es suficiente" },
-    subtitle: {
-      en: "Patience is the edge. Wait for your A+ setup.",
-      es: "La paciencia es el edge. Espera tu setup A+.",
-    },
-  },
-  {
-    title: { en: "Protect capital first", es: "Protege el capital primero" },
-    subtitle: {
-      en: "Risk small, execute sharp, review honestly.",
-      es: "Riesgo pequeño, ejecución clara, revisión honesta.",
-    },
-  },
-  {
-    title: { en: "Consistency compounds", es: "La consistencia compone" },
-    subtitle: {
-      en: "Win your routine today; results will follow.",
-      es: "Gana tu rutina hoy; el resultado llegará.",
-    },
-  },
-];
+const NEW_YORK_TZ = "America/New_York";
+
+function getNewYorkDayParts(now = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: NEW_YORK_TZ,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    weekday: "short",
+  }).formatToParts(now);
+  const year = Number(parts.find((p) => p.type === "year")?.value ?? "1970");
+  const month = Number(parts.find((p) => p.type === "month")?.value ?? "1");
+  const day = Number(parts.find((p) => p.type === "day")?.value ?? "1");
+  const weekdayRaw = (parts.find((p) => p.type === "weekday")?.value ?? "Mon").toLowerCase();
+  const weekdayMap: Record<string, string> = {
+    mon: "mon",
+    tue: "tue",
+    wed: "wed",
+    thu: "thu",
+    fri: "fri",
+    sat: "sat",
+    sun: "sun",
+  };
+  return {
+    year,
+    month,
+    day,
+    weekday: weekdayMap[weekdayRaw.slice(0, 3)] ?? "mon",
+  };
+}
+
+function getNewYorkDayOfYear(now = new Date()) {
+  const { year, month, day } = getNewYorkDayParts(now);
+  const startUtc = Date.UTC(year, 0, 1);
+  const currentUtc = Date.UTC(year, month - 1, day);
+  return Math.floor((currentUtc - startUtc) / 86400000) + 1;
+}
+
+function fallbackCoachMessage(weekday: string, lang: "en" | "es") {
+  const tx = (en: string, es: string) => (lang === "es" ? es : en);
+  if (weekday === "fri") {
+    return {
+      title: tx("Neuro Trader Friday", "Neuro Trader viernes"),
+      body: tx(
+        "Close the week with emotional neutrality. Your edge grows when review is honest and ego stays quiet.",
+        "Cierra la semana con neutralidad emocional. Tu edge crece cuando la revisión es honesta y el ego se queda en silencio."
+      ),
+    };
+  }
+  if (weekday === "sat") {
+    return {
+      title: tx("Neuro Trader reset", "Reset Neuro Trader"),
+      body: tx(
+        "Rest is part of execution. Reset your nervous system today so you do not trade next week from fatigue.",
+        "Descansar también es parte de la ejecución. Resetea tu sistema nervioso hoy para no operar la próxima semana desde el cansancio."
+      ),
+    };
+  }
+  if (weekday === "sun") {
+    return {
+      title: tx("Neuro Trader preparation", "Preparación Neuro Trader"),
+      body: tx(
+        "Prepare your levels, calendar, and scenarios. Confidence tomorrow comes from clarity tonight.",
+        "Prepara niveles, calendario y escenarios. La confianza de mañana nace de la claridad de esta noche."
+      ),
+    };
+  }
+  return {
+    title: tx("Neuro Trader focus", "Enfoque Neuro Trader"),
+    body: tx(
+      "Trade from process, not from impulse. The mind you bring to the screen determines the quality of every decision.",
+      "Opera desde el proceso, no desde el impulso. La mente con la que llegas a la pantalla determina la calidad de cada decisión."
+    ),
+  };
+}
+
+function buildFallbackCoachRow(lang: "en" | "es"): MotivationMessageRow {
+  const dayParts = getNewYorkDayParts();
+  const fallback = fallbackCoachMessage(dayParts.weekday, lang);
+  return {
+    id: `fallback-${lang}-${getNewYorkDayOfYear()}`,
+    locale: lang,
+    title: fallback.title,
+    body: fallback.body,
+    weekday: dayParts.weekday,
+    day_of_year: getNewYorkDayOfYear(),
+  };
+}
+
+function pickMotivationMessage(rows: MotivationMessageRow[], lang: "en" | "es", now = new Date()) {
+  const localeCode = lang === "es" ? "es" : "en";
+  const dayOfYear = getNewYorkDayOfYear(now);
+  const weekday = getNewYorkDayParts(now).weekday;
+  const localeRows = rows.filter((row) => row.locale === localeCode);
+  const fallbackRows = rows.filter((row) => row.locale === "en");
+  const pool = localeRows.length ? localeRows : fallbackRows;
+
+  const exactDay = pool.find((row) => row.day_of_year === dayOfYear);
+  if (exactDay) return exactDay;
+
+  const weekdaySpecific = pool.find((row) => row.weekday === weekday);
+  if (weekdaySpecific) return weekdaySpecific;
+
+  const generic = pool.find((row) => !row.weekday && row.day_of_year == null);
+  if (generic) return generic;
+
+  return buildFallbackCoachRow(lang);
+}
 
 function formatDateYYYYMMDD(d: Date): string {
   const y = d.getFullYear();
@@ -520,6 +656,7 @@ export function DashboardScreen({ onOpenModule: _onOpenModule, onOpenJournalDate
   const [journalEntries, setJournalEntries] = useState<JournalEntry[]>([]);
   const [journalLoading, setJournalLoading] = useState(false);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  const [dailyCoachMessage, setDailyCoachMessage] = useState<MotivationMessageRow | null>(null);
   const [todayChecklist, setTodayChecklist] = useState<UiChecklistItem[]>([]);
   const [checklistSaving, setChecklistSaving] = useState(false);
   const [checklistSaveError, setChecklistSaveError] = useState<string | null>(null);
@@ -528,7 +665,12 @@ export function DashboardScreen({ onOpenModule: _onOpenModule, onOpenJournalDate
 
   const isWideProgressLayout = width >= 980;
   const isWideTopRow = width >= 920;
+  const isCompactTopCards = width < 700;
   const todayStr = useMemo(() => formatDateYYYYMMDD(new Date()), []);
+  const coachFallback = useMemo(
+    () => buildFallbackCoachRow(language === "es" ? "es" : "en"),
+    [language]
+  );
 
   useEffect(() => {
     let active = true;
@@ -556,6 +698,48 @@ export function DashboardScreen({ onOpenModule: _onOpenModule, onOpenJournalDate
       active = false;
     };
   }, []);
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadDailyCoachMessage() {
+      const localeCode = language === "es" ? "es" : "en";
+      if (!supabaseMobile) {
+        if (active) setDailyCoachMessage(buildFallbackCoachRow(localeCode));
+        return;
+      }
+
+      try {
+        const { data, error } = await supabaseMobile
+          .from("motivational_messages")
+          .select("id, locale, title, body, weekday, day_of_year")
+          .eq("active", true)
+          .in("locale", [localeCode, "en"]);
+
+        if (!active) return;
+        if (error) {
+          console.warn("[mobile dashboard] motivational_messages fetch error:", error);
+          setDailyCoachMessage(buildFallbackCoachRow(localeCode));
+          return;
+        }
+
+        const picked = pickMotivationMessage(
+          ((data ?? []) as MotivationMessageRow[]).filter((row) => !!row.body),
+          localeCode
+        );
+        setDailyCoachMessage(picked);
+      } catch (err) {
+        if (!active) return;
+        console.warn("[mobile dashboard] daily coach message load exception:", err);
+        setDailyCoachMessage(buildFallbackCoachRow(localeCode));
+      }
+    }
+
+    void loadDailyCoachMessage();
+    return () => {
+      active = false;
+    };
+  }, [language]);
 
   useEffect(() => {
     const fallbackChecklist = [
@@ -910,13 +1094,6 @@ export function DashboardScreen({ onOpenModule: _onOpenModule, onOpenJournalDate
 
   const formatPercent = (value: number, digits = 1) => `${(Number.isFinite(value) ? value : 0).toFixed(digits)}%`;
 
-  const heroMessage = useMemo(() => {
-    const today = new Date();
-    const start = new Date(today.getFullYear(), 0, 0);
-    const dayOfYear = Math.floor((today.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
-    return HERO_MESSAGES[dayOfYear % HERO_MESSAGES.length];
-  }, []);
-
   async function handleRefresh() {
     setError(null);
     setRefreshing(true);
@@ -1032,6 +1209,100 @@ export function DashboardScreen({ onOpenModule: _onOpenModule, onOpenJournalDate
       ]
     : [];
 
+  const renderDaySummary = () => (
+    <View style={styles.daySummaryCard}>
+      <View style={styles.daySummaryHeader}>
+        <View>
+          <Text style={styles.daySummaryEyebrow}>{t(language, "Day summary", "Resumen del día")}</Text>
+          <Text style={styles.daySummaryTitle}>
+            {selectedDate ?? t(language, "Select a day", "Selecciona un día")}
+          </Text>
+        </View>
+        <View style={styles.daySummaryNav}>
+          <Pressable
+            style={[styles.dayNavButton, !prevSummaryDate && styles.dayNavDisabled]}
+            onPress={() => prevSummaryDate && setSelectedDate(prevSummaryDate)}
+            disabled={!prevSummaryDate}
+          >
+            <Text style={styles.dayNavText}>‹</Text>
+          </Pressable>
+          <Pressable
+            style={[styles.dayNavButton, !nextSummaryDate && styles.dayNavDisabled]}
+            onPress={() => nextSummaryDate && setSelectedDate(nextSummaryDate)}
+            disabled={!nextSummaryDate}
+          >
+            <Text style={styles.dayNavText}>›</Text>
+          </Pressable>
+        </View>
+      </View>
+
+      {!selectedDate ? (
+        <Text style={styles.daySummaryHint}>
+          {t(
+            language,
+            "No journal days found in the last 45 days.",
+            "No hay días de journal en los últimos 45 días."
+          )}
+        </Text>
+      ) : (
+        <>
+          <View style={styles.daySummaryRow}>
+            <View style={styles.daySummaryNote}>
+              <Text style={styles.daySummaryLabel}>{t(language, "Premarket", "Premarket")}</Text>
+              <Text style={styles.daySummaryBody}>
+                {premarketText ? premarketText.slice(0, 160) : t(language, "No notes.", "Sin notas.")}
+              </Text>
+            </View>
+            <View style={styles.daySummaryNote}>
+              <Text style={styles.daySummaryLabel}>{t(language, "Inside trade", "Inside trade")}</Text>
+              <Text style={styles.daySummaryBody}>
+                {insideText ? insideText.slice(0, 160) : t(language, "No notes.", "Sin notas.")}
+              </Text>
+            </View>
+          </View>
+          <View style={styles.daySummaryRow}>
+            <View style={styles.daySummaryNote}>
+              <Text style={styles.daySummaryLabel}>{t(language, "After trade", "After trade")}</Text>
+              <Text style={styles.daySummaryBody}>
+                {afterText ? afterText.slice(0, 160) : t(language, "No notes.", "Sin notas.")}
+              </Text>
+            </View>
+          </View>
+          <View style={styles.daySummaryTrades}>
+            <View style={styles.daySummaryTradeCard}>
+              <Text style={styles.daySummaryLabel}>{t(language, "Entries", "Entradas")}</Text>
+              {entryRows.length ? (
+                entryRows.slice(0, 5).map((row, idx) => (
+                  <Text key={`entry-${idx}`} style={styles.daySummaryBody}>
+                    {row.symbol} · {row.side ?? "—"} · {row.quantity ?? "—"} @ {row.price ?? "—"}
+                  </Text>
+                ))
+              ) : (
+                <Text style={styles.daySummaryBody}>{t(language, "No entries logged.", "Sin entradas.")}</Text>
+              )}
+            </View>
+            <View style={styles.daySummaryTradeCard}>
+              <Text style={styles.daySummaryLabel}>{t(language, "Exits", "Salidas")}</Text>
+              {exitRows.length ? (
+                exitRows.slice(0, 5).map((row, idx) => (
+                  <Text key={`exit-${idx}`} style={styles.daySummaryBody}>
+                    {row.symbol} · {row.side ?? "—"} · {row.quantity ?? "—"} @ {row.price ?? "—"}
+                  </Text>
+                ))
+              ) : (
+                <Text style={styles.daySummaryBody}>{t(language, "No exits logged.", "Sin salidas.")}</Text>
+              )}
+            </View>
+          </View>
+        </>
+      )}
+
+      {journalLoading ? (
+        <Text style={styles.loadingText}>{t(language, "Syncing journal…", "Sincronizando journal…")}</Text>
+      ) : null}
+    </View>
+  );
+
   return (
     <ScreenScaffold
       title={t(language, "Dashboard", "Dashboard")}
@@ -1050,108 +1321,124 @@ export function DashboardScreen({ onOpenModule: _onOpenModule, onOpenJournalDate
         </View>
       ) : (
         <>
-          <View style={[styles.topInsightRow, !isWideTopRow && styles.topInsightRowStack]}>
-            <View style={[styles.panelCard, styles.focusPanel]}>
-              <Text style={styles.heroEyebrow}>{t(language, "Daily focus", "Enfoque del día")}</Text>
-              <Text style={styles.heroTitle}>{heroMessage.title[language]}</Text>
-              <Text style={styles.heroSubtitle}>{heroMessage.subtitle[language]}</Text>
+          <View style={[styles.panelCard, styles.coachBannerCard, isCompactTopCards && styles.coachBannerCardCompact]}>
+            <Image source={coachBrain} resizeMode="contain" style={styles.coachBrainA} />
+            <Image source={coachBrain} resizeMode="contain" style={styles.coachBrainB} />
+            <View style={styles.coachAccentRail} />
+            <View style={styles.coachBannerHeader}>
+              <View style={styles.coachHeaderMeta}>
+                <Text style={styles.heroEyebrow}>{t(language, "Daily coach message", "Mensaje diario del coach")}</Text>
+                <GradientTitleText
+                  text={dailyCoachMessage?.title || coachFallback.title || t(language, "Coach note for today", "Nota del coach para hoy")}
+                  style={styles.coachTitle}
+                />
+              </View>
+              <View style={styles.coachPill}>
+                <Text style={styles.coachPillText}>{t(language, "Today", "Hoy")}</Text>
+              </View>
+            </View>
+            <View style={styles.coachMessageRow}>
+              <Text style={styles.coachQuoteMark}>“</Text>
+              <Text style={styles.coachBody}>
+                {dailyCoachMessage?.body || coachFallback.body}
+              </Text>
+            </View>
+          </View>
+
+          <View style={[styles.panelCard, styles.systemPanel, styles.systemPanelStandalone, isCompactTopCards && styles.systemPanelCompact]}>
+            <View style={[styles.systemHeaderRow, isCompactTopCards && styles.systemHeaderRowCompact]}>
+              <View style={styles.systemHeaderMeta}>
+                <GradientTitleText text={t(language, "Trading System", "Sistema de trading")} style={styles.systemTitle} />
+                <Text style={styles.systemDate}>
+                  {todayStr}
+                  {checklistSaving
+                    ? `  ${t(language, "Saving…", "Guardando…")}`
+                    : checklistSaveError
+                      ? `  ${t(language, "Error", "Error")}`
+                      : `  ${t(language, "Saved", "Guardado")}`}
+                </Text>
+              </View>
             </View>
 
-            <View style={[styles.panelCard, styles.systemPanel]}>
-              <View style={styles.systemHeaderRow}>
-                <View style={styles.systemHeaderMeta}>
-                  <Text style={styles.systemTitle}>{t(language, "Trading System", "Sistema de trading")}</Text>
-                  <Text style={styles.systemDate}>
-                    {todayStr}
-                    {checklistSaving
-                      ? `  ${t(language, "Saving…", "Guardando…")}`
-                      : checklistSaveError
-                        ? `  ${t(language, "Error", "Error")}`
-                        : `  ${t(language, "Saved", "Guardado")}`}
+            <View style={[styles.systemWorkspace, !isWideTopRow && styles.systemWorkspaceStack, isCompactTopCards && styles.systemWorkspaceCompact]}>
+              <View style={[styles.systemStepsColumn, isCompactTopCards && styles.systemStepsColumnCompact]}>
+                <Text style={styles.systemHeaderHint}>{t(language, "Steps (daily)", "Pasos (diarios)")}</Text>
+
+                {todayChecklist.length ? (
+                  <View style={styles.systemChecklistList}>
+                    {todayChecklist.slice(0, isCompactTopCards ? 4 : 12).map((item, index) => (
+                      <Pressable
+                        key={`${item.text}-${index}`}
+                        onPress={() => toggleChecklistItem(index)}
+                        style={[styles.systemChecklistItem, isCompactTopCards && styles.systemChecklistItemCompact]}
+                      >
+                        <View style={[styles.systemCheckbox, item.done && styles.systemCheckboxDone]}>
+                          {item.done ? <Text style={styles.systemCheckboxMark}>✓</Text> : null}
+                        </View>
+                        <Text style={[styles.systemItem, item.done && styles.systemItemDone]}>{item.text}</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                ) : (
+                  <Text style={styles.systemHint}>
+                    {t(
+                      language,
+                      "Add your Trading System steps in Growth Plan.",
+                      "Agrega tus pasos del Sistema de Trading en el Growth Plan."
+                    )}{" "}
+                    <Text style={styles.systemLink} onPress={() => Linking.openURL(WEB_GROWTH_PLAN_URL)}>
+                      {t(language, "Edit Growth Plan", "Editar Growth Plan")}
+                    </Text>
                   </Text>
-                </View>
+                )}
+
+                <Pressable style={[styles.systemJournalButton, isCompactTopCards && styles.systemJournalButtonCompact]} onPress={() => onOpenJournalDate(todayStr)}>
+                  <Text style={styles.systemJournalButtonText}>
+                    {t(language, "Open today's journal", "Abrir el journal de hoy")}
+                  </Text>
+                </Pressable>
               </View>
 
-              <View style={[styles.systemWorkspace, !isWideTopRow && styles.systemWorkspaceStack]}>
-                <View style={styles.systemStepsColumn}>
-                  <Text style={styles.systemHeaderHint}>{t(language, "Steps (daily)", "Pasos (diarios)")}</Text>
-
-                  {todayChecklist.length ? (
-                    <View style={styles.systemChecklistList}>
-                      {todayChecklist.slice(0, 12).map((item, index) => (
-                        <Pressable
-                          key={`${item.text}-${index}`}
-                          onPress={() => toggleChecklistItem(index)}
-                          style={styles.systemChecklistItem}
-                        >
-                          <View style={[styles.systemCheckbox, item.done && styles.systemCheckboxDone]}>
-                            {item.done ? <Text style={styles.systemCheckboxMark}>✓</Text> : null}
-                          </View>
-                          <Text style={[styles.systemItem, item.done && styles.systemItemDone]}>{item.text}</Text>
-                        </Pressable>
-                      ))}
+              <View style={[styles.systemRulesColumn, isCompactTopCards && styles.systemRulesColumnCompact]}>
+                <View style={[styles.systemSectionCard, isCompactTopCards && styles.systemSectionCardCompact]}>
+                  <Text style={styles.systemLabel}>{t(language, "Do", "Hacer")}</Text>
+                  {(tradingSystem.doList.length ? tradingSystem.doList : [{ text: "—" }]).slice(0, isCompactTopCards ? 2 : 4).map((item, idx) => (
+                    <View key={`do-${idx}`} style={styles.systemBulletRow}>
+                      <View style={[styles.systemBullet, styles.systemBulletDo]} />
+                      <Text style={styles.systemItem}>{item.text}</Text>
                     </View>
-                  ) : (
-                    <Text style={styles.systemHint}>
-                      {t(
-                        language,
-                        "Add your Trading System steps in Growth Plan.",
-                        "Agrega tus pasos del Sistema de Trading en el Growth Plan."
-                      )}{" "}
-                      <Text style={styles.systemLink} onPress={() => Linking.openURL(WEB_GROWTH_PLAN_URL)}>
-                        {t(language, "Edit Growth Plan", "Editar Growth Plan")}
-                      </Text>
-                    </Text>
-                  )}
-
-                  <Pressable style={styles.systemJournalButton} onPress={() => onOpenJournalDate(todayStr)}>
-                    <Text style={styles.systemJournalButtonText}>
-                      {t(language, "Open today's journal", "Abrir el journal de hoy")}
-                    </Text>
-                  </Pressable>
+                  ))}
                 </View>
 
-                <View style={styles.systemRulesColumn}>
-                  <View style={styles.systemSectionCard}>
-                    <Text style={styles.systemLabel}>{t(language, "Do", "Hacer")}</Text>
-                    {(tradingSystem.doList.length ? tradingSystem.doList : [{ text: "—" }]).slice(0, 4).map((item, idx) => (
-                      <View key={`do-${idx}`} style={styles.systemBulletRow}>
-                        <View style={[styles.systemBullet, styles.systemBulletDo]} />
-                        <Text style={styles.systemItem}>{item.text}</Text>
-                      </View>
-                    ))}
-                  </View>
-
-                  <View style={styles.systemSectionCard}>
-                    <Text style={styles.systemLabelDont}>{t(language, "Don't", "No hacer")}</Text>
-                    {(tradingSystem.dontList.length ? tradingSystem.dontList : [{ text: "—" }]).slice(0, 4).map((item, idx) => (
-                      <View key={`dont-${idx}`} style={styles.systemBulletRow}>
-                        <View style={[styles.systemBullet, styles.systemBulletDont]} />
-                        <Text style={styles.systemItem}>{item.text}</Text>
-                      </View>
-                    ))}
-                  </View>
-
-                  {tradingSystem.doList.length + tradingSystem.dontList.length === 0 ? (
-                    <Text style={styles.systemHint}>
-                      {t(
-                        language,
-                        "Add your Do/Don't rules in Growth Plan.",
-                        "Agrega tus reglas Hacer/No hacer en Growth Plan."
-                      )}{" "}
-                      <Text style={styles.systemLink} onPress={() => Linking.openURL(WEB_GROWTH_PLAN_URL)}>
-                        {t(language, "Edit Growth Plan", "Editar Growth Plan")}
-                      </Text>
-                    </Text>
-                  ) : null}
+                <View style={[styles.systemSectionCard, isCompactTopCards && styles.systemSectionCardCompact]}>
+                  <Text style={styles.systemLabelDont}>{t(language, "Don't", "No hacer")}</Text>
+                  {(tradingSystem.dontList.length ? tradingSystem.dontList : [{ text: "—" }]).slice(0, isCompactTopCards ? 2 : 4).map((item, idx) => (
+                    <View key={`dont-${idx}`} style={styles.systemBulletRow}>
+                      <View style={[styles.systemBullet, styles.systemBulletDont]} />
+                      <Text style={styles.systemItem}>{item.text}</Text>
+                    </View>
+                  ))}
                 </View>
+
+                {tradingSystem.doList.length + tradingSystem.dontList.length === 0 ? (
+                  <Text style={styles.systemHint}>
+                    {t(
+                      language,
+                      "Add your Do/Don't rules in Growth Plan.",
+                      "Agrega tus reglas Hacer/No hacer en Growth Plan."
+                    )}{" "}
+                    <Text style={styles.systemLink} onPress={() => Linking.openURL(WEB_GROWTH_PLAN_URL)}>
+                      {t(language, "Edit Growth Plan", "Editar Growth Plan")}
+                    </Text>
+                  </Text>
+                ) : null}
               </View>
             </View>
           </View>
 
           <View style={styles.summaryRow}>
             <View style={[styles.panelCard, styles.weeklyCard]}>
-              <Text style={styles.summaryLabel}>{t(language, "Weekly P&L", "P&L semanal")}</Text>
+              <GradientTitleText text={t(language, "Weekly P&L", "P&L semanal")} style={styles.summaryLabel} />
               <Text style={styles.summaryValue}>{formatSigned(weeklySummary.total)}</Text>
               <Text style={styles.summaryHint}>
                 {t(language, "Current week (Sun–Fri).", "Semana actual (Dom–Vie).")}
@@ -1188,92 +1475,96 @@ export function DashboardScreen({ onOpenModule: _onOpenModule, onOpenJournalDate
           </View>
 
           <View style={[styles.progressRow, !isWideProgressLayout && styles.progressRowStack]}>
-            <View style={[styles.progressCard, !isWideProgressLayout && styles.progressCardFull]}>
-              <Text style={styles.progressTitle}>{t(language, "Account Progress", "Progreso de cuenta")}</Text>
+            <View style={[styles.progressColumn, !isWideProgressLayout && styles.progressColumnFull]}>
+              <View style={styles.progressCard}>
+                <GradientTitleText text={t(language, "Account Progress", "Progreso de cuenta")} style={styles.progressTitle} />
 
-              {accountProgress ? (
-                <>
-                  <View style={styles.snapshotCard}>
-                    <View style={styles.snapshotMain}>
-                      <Text style={styles.snapshotEyebrow}>{t(language, "Equity snapshot", "Snapshot de equity")}</Text>
-                      <Text style={styles.snapshotValue}>{formatCurrency(currentBalance)}</Text>
-                      <Text style={styles.snapshotHint}>
-                        {accountProgress.referenceMode === "plan-start"
-                          ? t(language, "Reference locked to plan start", "Referencia fijada al inicio del plan")
-                          : t(language, "Reference from first tracked point", "Referencia desde el primer punto registrado")}{" "}
-                        · <Text style={styles.snapshotHintStrong}>{accountProgress.referenceDate}</Text>
+                {accountProgress ? (
+                  <>
+                    <View style={styles.snapshotCard}>
+                      <View style={styles.snapshotMain}>
+                        <Text style={styles.snapshotEyebrow}>{t(language, "Equity snapshot", "Snapshot de equity")}</Text>
+                        <Text style={styles.snapshotValue}>{formatCurrency(currentBalance)}</Text>
+                        <Text style={styles.snapshotHint}>
+                          {accountProgress.referenceMode === "plan-start"
+                            ? t(language, "Reference locked to plan start", "Referencia fijada al inicio del plan")
+                            : t(language, "Reference from first tracked point", "Referencia desde el primer punto registrado")}{" "}
+                          · <Text style={styles.snapshotHintStrong}>{accountProgress.referenceDate}</Text>
+                        </Text>
+                      </View>
+
+                      <View style={styles.snapshotBadge}>
+                        <Text style={styles.snapshotBadgeLabel}>{t(language, "Reference balance", "Balance de referencia")}</Text>
+                        <Text style={styles.snapshotBadgeValue}>{formatCurrency(accountProgress.referenceBalance)}</Text>
+                      </View>
+                    </View>
+
+                    <View style={styles.metricGrid}>
+                      {accountMetricCards.map((card) => (
+                        <View key={card.key} style={styles.metricCard}>
+                          <Text style={styles.metricLabel}>{card.label}</Text>
+                          <Text style={[styles.metricValue, card.tone]}>{card.value}</Text>
+                          <Text style={styles.metricSublabel}>{card.sublabel}</Text>
+                        </View>
+                      ))}
+                    </View>
+
+                    <View style={styles.highWaterCard}>
+                      <View style={styles.highWaterHeader}>
+                        <View style={styles.highWaterMeta}>
+                          <Text style={styles.metricLabel}>{t(language, "High-water mark", "Máximo de equity")}</Text>
+                          <Text style={styles.highWaterValue}>{formatCurrency(accountProgress.peakBalance)}</Text>
+                          <Text style={styles.metricSublabel}>{accountProgress.peakDate}</Text>
+                        </View>
+
+                        <View style={styles.highWaterStatus}>
+                          <Text style={styles.metricLabel}>
+                            {accountProgress.isAtHigh
+                              ? t(language, "Status", "Estado")
+                              : t(language, "From peak", "Desde el máximo")}
+                          </Text>
+                          <Text style={[styles.highWaterStatusValue, accountProgress.isAtHigh ? styles.metricTonePositive : styles.metricToneWarning]}>
+                            {accountProgress.isAtHigh
+                              ? t(language, "New high", "Nuevo máximo")
+                              : formatSigned(accountProgress.fromPeak)}
+                          </Text>
+                        </View>
+                      </View>
+
+                      <View style={styles.progressTrack}>
+                        <View
+                          style={[
+                            styles.progressFill,
+                            { width: `${Math.max(accountProgress.isAtHigh ? 100 : 6, accountProgress.peakCoveragePct)}%` },
+                          ]}
+                        />
+                      </View>
+
+                      <Text style={styles.progressNote}>
+                        {accountProgress.isAtHigh
+                          ? t(
+                              language,
+                              "The account is printing a new equity high.",
+                              "La cuenta está marcando un nuevo máximo de equity."
+                            )
+                          : t(
+                              language,
+                              `The account is ${formatCurrency(Math.abs(accountProgress.fromPeak))} below its high-water mark.`,
+                              `La cuenta está ${formatCurrency(Math.abs(accountProgress.fromPeak))} por debajo de su máximo de equity.`
+                            )}
                       </Text>
                     </View>
+                  </>
+                ) : (
+                  <Text style={styles.progressNote}>{t(language, "No account progress yet.", "Aún no hay progreso de cuenta.")}</Text>
+                )}
+              </View>
 
-                    <View style={styles.snapshotBadge}>
-                      <Text style={styles.snapshotBadgeLabel}>{t(language, "Reference balance", "Balance de referencia")}</Text>
-                      <Text style={styles.snapshotBadgeValue}>{formatCurrency(accountProgress.referenceBalance)}</Text>
-                    </View>
-                  </View>
-
-                  <View style={styles.metricGrid}>
-                    {accountMetricCards.map((card) => (
-                      <View key={card.key} style={styles.metricCard}>
-                        <Text style={styles.metricLabel}>{card.label}</Text>
-                        <Text style={[styles.metricValue, card.tone]}>{card.value}</Text>
-                        <Text style={styles.metricSublabel}>{card.sublabel}</Text>
-                      </View>
-                    ))}
-                  </View>
-
-                  <View style={styles.highWaterCard}>
-                    <View style={styles.highWaterHeader}>
-                      <View style={styles.highWaterMeta}>
-                        <Text style={styles.metricLabel}>{t(language, "High-water mark", "Máximo de equity")}</Text>
-                        <Text style={styles.highWaterValue}>{formatCurrency(accountProgress.peakBalance)}</Text>
-                        <Text style={styles.metricSublabel}>{accountProgress.peakDate}</Text>
-                      </View>
-
-                      <View style={styles.highWaterStatus}>
-                        <Text style={styles.metricLabel}>
-                          {accountProgress.isAtHigh
-                            ? t(language, "Status", "Estado")
-                            : t(language, "From peak", "Desde el máximo")}
-                        </Text>
-                        <Text style={[styles.highWaterStatusValue, accountProgress.isAtHigh ? styles.metricTonePositive : styles.metricToneWarning]}>
-                          {accountProgress.isAtHigh
-                            ? t(language, "New high", "Nuevo máximo")
-                            : formatSigned(accountProgress.fromPeak)}
-                        </Text>
-                      </View>
-                    </View>
-
-                    <View style={styles.progressTrack}>
-                      <View
-                        style={[
-                          styles.progressFill,
-                          { width: `${Math.max(accountProgress.isAtHigh ? 100 : 6, accountProgress.peakCoveragePct)}%` },
-                        ]}
-                      />
-                    </View>
-
-                    <Text style={styles.progressNote}>
-                      {accountProgress.isAtHigh
-                        ? t(
-                            language,
-                            "The account is printing a new equity high.",
-                            "La cuenta está marcando un nuevo máximo de equity."
-                          )
-                        : t(
-                            language,
-                            `The account is ${formatCurrency(Math.abs(accountProgress.fromPeak))} below its high-water mark.`,
-                            `La cuenta está ${formatCurrency(Math.abs(accountProgress.fromPeak))} por debajo de su máximo de equity.`
-                          )}
-                    </Text>
-                  </View>
-                </>
-              ) : (
-                <Text style={styles.progressNote}>{t(language, "No account progress yet.", "Aún no hay progreso de cuenta.")}</Text>
-              )}
+              {renderDaySummary()}
             </View>
 
             <View style={[styles.progressCard, !isWideProgressLayout && styles.progressCardFull]}>
-              <Text style={styles.progressTitle}>{t(language, "Plan Progress", "Progreso del plan")}</Text>
+              <GradientTitleText text={t(language, "Plan Progress", "Progreso del plan")} style={styles.progressTitle} />
 
               {!planProgress ? (
                 <Text style={styles.progressNote}>
@@ -1395,104 +1686,23 @@ export function DashboardScreen({ onOpenModule: _onOpenModule, onOpenJournalDate
           {error ? <Text style={styles.errorText}>{error}</Text> : null}
         </>
       )}
-
-      <View style={styles.daySummaryCard}>
-        <View style={styles.daySummaryHeader}>
-          <View>
-            <Text style={styles.daySummaryEyebrow}>{t(language, "Day summary", "Resumen del día")}</Text>
-            <Text style={styles.daySummaryTitle}>
-              {selectedDate ?? t(language, "Select a day", "Selecciona un día")}
-            </Text>
-          </View>
-          <View style={styles.daySummaryNav}>
-            <Pressable
-              style={[styles.dayNavButton, !prevSummaryDate && styles.dayNavDisabled]}
-              onPress={() => prevSummaryDate && setSelectedDate(prevSummaryDate)}
-              disabled={!prevSummaryDate}
-            >
-              <Text style={styles.dayNavText}>‹</Text>
-            </Pressable>
-            <Pressable
-              style={[styles.dayNavButton, !nextSummaryDate && styles.dayNavDisabled]}
-              onPress={() => nextSummaryDate && setSelectedDate(nextSummaryDate)}
-              disabled={!nextSummaryDate}
-            >
-              <Text style={styles.dayNavText}>›</Text>
-            </Pressable>
-          </View>
-        </View>
-
-        {!selectedDate ? (
-          <Text style={styles.daySummaryHint}>
-            {t(
-              language,
-              "No journal days found in the last 45 days.",
-              "No hay días de journal en los últimos 45 días."
-            )}
-          </Text>
-        ) : (
-          <>
-            <View style={styles.daySummaryRow}>
-              <View style={styles.daySummaryNote}>
-                <Text style={styles.daySummaryLabel}>{t(language, "Premarket", "Premarket")}</Text>
-                <Text style={styles.daySummaryBody}>
-                  {premarketText ? premarketText.slice(0, 160) : t(language, "No notes.", "Sin notas.")}
-                </Text>
-              </View>
-              <View style={styles.daySummaryNote}>
-                <Text style={styles.daySummaryLabel}>{t(language, "Inside trade", "Inside trade")}</Text>
-                <Text style={styles.daySummaryBody}>
-                  {insideText ? insideText.slice(0, 160) : t(language, "No notes.", "Sin notas.")}
-                </Text>
-              </View>
-            </View>
-            <View style={styles.daySummaryRow}>
-              <View style={styles.daySummaryNote}>
-                <Text style={styles.daySummaryLabel}>{t(language, "After trade", "After trade")}</Text>
-                <Text style={styles.daySummaryBody}>
-                  {afterText ? afterText.slice(0, 160) : t(language, "No notes.", "Sin notas.")}
-                </Text>
-              </View>
-            </View>
-            <View style={styles.daySummaryTrades}>
-              <View style={styles.daySummaryTradeCard}>
-                <Text style={styles.daySummaryLabel}>{t(language, "Entries", "Entradas")}</Text>
-                {entryRows.length ? (
-                  entryRows.slice(0, 5).map((row, idx) => (
-                    <Text key={`entry-${idx}`} style={styles.daySummaryBody}>
-                      {row.symbol} · {row.side ?? "—"} · {row.quantity ?? "—"} @ {row.price ?? "—"}
-                    </Text>
-                  ))
-                ) : (
-                  <Text style={styles.daySummaryBody}>{t(language, "No entries logged.", "Sin entradas.")}</Text>
-                )}
-              </View>
-              <View style={styles.daySummaryTradeCard}>
-                <Text style={styles.daySummaryLabel}>{t(language, "Exits", "Salidas")}</Text>
-                {exitRows.length ? (
-                  exitRows.slice(0, 5).map((row, idx) => (
-                    <Text key={`exit-${idx}`} style={styles.daySummaryBody}>
-                      {row.symbol} · {row.side ?? "—"} · {row.quantity ?? "—"} @ {row.price ?? "—"}
-                    </Text>
-                  ))
-                ) : (
-                  <Text style={styles.daySummaryBody}>{t(language, "No exits logged.", "Sin salidas.")}</Text>
-                )}
-              </View>
-            </View>
-          </>
-        )}
-
-        {journalLoading ? (
-          <Text style={styles.loadingText}>{t(language, "Syncing journal…", "Sincronizando journal…")}</Text>
-        ) : null}
-      </View>
     </ScreenScaffold>
   );
 }
 
-const createStyles = (colors: ThemeColors) =>
-  StyleSheet.create({
+const createStyles = (colors: ThemeColors) => {
+  const isDark = colors.background === DARK_COLORS.background;
+  const widgetTitleBase = {
+    color: isDark ? "#94F1E4" : colors.primary,
+    fontSize: 14,
+    fontWeight: "800" as const,
+    letterSpacing: 0.35,
+    textShadowColor: isDark ? "rgba(46, 144, 255, 0.18)" : "rgba(15, 157, 122, 0.12)",
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: isDark ? 12 : 6,
+  };
+
+  return StyleSheet.create({
     topInsightRow: {
       flexDirection: "row",
       gap: 10,
@@ -1508,14 +1718,70 @@ const createStyles = (colors: ThemeColors) =>
       backgroundColor: colors.surface,
       padding: 14,
     },
+    coachBannerCard: {
+      position: "relative",
+      overflow: "hidden",
+      borderColor: isDark ? "#24517E" : "#D5E8F5",
+      backgroundColor: isDark ? "#091732" : "#F8FBFF",
+      marginBottom: 10,
+      paddingTop: 12,
+      paddingBottom: 12,
+    },
+    coachBannerCardCompact: {
+      paddingTop: 11,
+      paddingBottom: 11,
+    },
+    coachBrainA: {
+      position: "absolute",
+      top: -28,
+      right: -8,
+      width: 148,
+      height: 148,
+      opacity: isDark ? 0.12 : 0.08,
+      transform: [{ rotate: "8deg" }],
+    },
+    coachBrainB: {
+      position: "absolute",
+      bottom: -36,
+      left: 56,
+      width: 132,
+      height: 132,
+      opacity: isDark ? 0.08 : 0.05,
+      transform: [{ scaleX: -1 }, { rotate: "-10deg" }],
+    },
+    coachAccentRail: {
+      position: "absolute",
+      left: 0,
+      top: 16,
+      bottom: 16,
+      width: 3,
+      borderRadius: 999,
+      backgroundColor: isDark ? "#63D6FF" : "#2E6BFF",
+    },
     focusPanel: {
       flex: 1,
       justifyContent: "space-between",
       gap: 8,
     },
+    coachPanel: {
+      borderColor: isDark ? "#21456B" : "#D8E8F2",
+      backgroundColor: isDark ? "#0C1737" : "#F7FBFF",
+      gap: 10,
+    },
+    coachPanelCompact: {
+      padding: 12,
+      gap: 8,
+    },
     systemPanel: {
       flex: 1.08,
       gap: 10,
+    },
+    systemPanelCompact: {
+      padding: 12,
+      gap: 8,
+    },
+    systemPanelStandalone: {
+      marginBottom: 0,
     },
     heroEyebrow: {
       color: colors.textMuted,
@@ -1524,19 +1790,69 @@ const createStyles = (colors: ThemeColors) =>
       letterSpacing: 1.2,
       fontWeight: "700",
     },
-    heroTitle: {
+    coachHeaderRow: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+      justifyContent: "space-between",
+      gap: 10,
+    },
+    coachHeaderMeta: {
+      flex: 1,
+      gap: 4,
+    },
+    coachBannerHeader: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+      justifyContent: "space-between",
+      gap: 10,
+    },
+    coachTitle: {
       color: colors.textPrimary,
       fontSize: 18,
-      fontWeight: "800",
-      lineHeight: 24,
+      fontWeight: "900",
+      lineHeight: 23,
     },
-    heroSubtitle: {
-      color: colors.textMuted,
-      fontSize: 12,
-      lineHeight: 17,
+    coachMessageRow: {
+      marginTop: 7,
+      flexDirection: "row",
+      alignItems: "flex-start",
+      gap: 9,
+      paddingRight: 2,
+    },
+    coachQuoteMark: {
+      color: isDark ? "#7CF7CF" : colors.primary,
+      fontSize: 32,
+      lineHeight: 32,
+      fontWeight: "900",
+      marginTop: -2,
+    },
+    coachBody: {
+      flex: 1,
+      color: isDark ? "#DCEAFF" : colors.textPrimary,
+      fontSize: 13,
+      lineHeight: 20,
+      fontWeight: "600",
+    },
+    coachPill: {
+      borderRadius: 999,
+      borderWidth: 1,
+      borderColor: isDark ? "#2B6C65" : "#B8DCD0",
+      backgroundColor: isDark ? "#0F2D2A" : "#E7F8F1",
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+    },
+    coachPillText: {
+      color: isDark ? "#B8F4E2" : colors.primary,
+      fontSize: 10,
+      fontWeight: "800",
+      textTransform: "uppercase",
+      letterSpacing: 0.7,
     },
     systemHeaderRow: {
       gap: 4,
+    },
+    systemHeaderRowCompact: {
+      gap: 2,
     },
     systemHeaderMeta: {
       gap: 4,
@@ -1549,9 +1865,7 @@ const createStyles = (colors: ThemeColors) =>
       fontWeight: "700",
     },
     systemTitle: {
-      color: colors.primary,
-      fontSize: 15,
-      fontWeight: "800",
+      ...widgetTitleBase,
     },
     systemDate: {
       color: colors.textMuted,
@@ -1565,13 +1879,24 @@ const createStyles = (colors: ThemeColors) =>
     systemWorkspaceStack: {
       flexDirection: "column",
     },
+    systemWorkspaceCompact: {
+      gap: 8,
+    },
     systemStepsColumn: {
       flex: 1.45,
       gap: 10,
     },
+    systemStepsColumnCompact: {
+      gap: 8,
+    },
     systemRulesColumn: {
       flex: 0.78,
       gap: 10,
+    },
+    systemRulesColumnCompact: {
+      flexDirection: "row",
+      alignItems: "stretch",
+      gap: 8,
     },
     systemChecklistList: {
       gap: 8,
@@ -1586,6 +1911,11 @@ const createStyles = (colors: ThemeColors) =>
       backgroundColor: colors.card,
       paddingHorizontal: 12,
       paddingVertical: 11,
+    },
+    systemChecklistItemCompact: {
+      paddingHorizontal: 10,
+      paddingVertical: 9,
+      gap: 8,
     },
     systemCheckbox: {
       width: 22,
@@ -1614,6 +1944,11 @@ const createStyles = (colors: ThemeColors) =>
       backgroundColor: colors.card,
       padding: 10,
       gap: 6,
+    },
+    systemSectionCardCompact: {
+      flex: 1,
+      padding: 9,
+      gap: 5,
     },
     systemLabel: {
       color: colors.success,
@@ -1674,6 +2009,10 @@ const createStyles = (colors: ThemeColors) =>
       paddingVertical: 11,
       marginTop: 2,
     },
+    systemJournalButtonCompact: {
+      paddingHorizontal: 14,
+      paddingVertical: 9,
+    },
     systemJournalButtonText: {
       color: colors.onPrimary,
       fontSize: 13,
@@ -1690,11 +2029,7 @@ const createStyles = (colors: ThemeColors) =>
       gap: 4,
     },
     summaryLabel: {
-      color: colors.textMuted,
-      fontSize: 11,
-      textTransform: "uppercase",
-      letterSpacing: 1.2,
-      fontWeight: "700",
+      ...widgetTitleBase,
     },
     summaryValue: {
       color: colors.textPrimary,
@@ -1760,6 +2095,13 @@ const createStyles = (colors: ThemeColors) =>
     progressRowStack: {
       flexDirection: "column",
     },
+    progressColumn: {
+      flex: 1,
+      gap: 12,
+    },
+    progressColumnFull: {
+      width: "100%",
+    },
     progressCard: {
       flex: 1,
       borderRadius: 18,
@@ -1773,9 +2115,7 @@ const createStyles = (colors: ThemeColors) =>
       width: "100%",
     },
     progressTitle: {
-      color: colors.primary,
-      fontSize: 13,
-      fontWeight: "800",
+      ...widgetTitleBase,
     },
     snapshotCard: {
       borderRadius: 16,
@@ -2097,3 +2437,4 @@ const createStyles = (colors: ThemeColors) =>
       fontSize: 12,
     },
   });
+};

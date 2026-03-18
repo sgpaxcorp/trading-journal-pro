@@ -23,7 +23,7 @@ What it includes:
 - `Return on reference`
 - `Trading P&L`
 - `Net cashflow`
-- `High-water mark`
+- `Progress curve`
 
 What it answers:
 - `How is my real equity doing?`
@@ -36,6 +36,28 @@ Important:
 - This widget does not evaluate weekly, monthly, or quarterly plan checkpoints.
 - `Trading P&L` is trading performance.
 - `Net account change` can include deposits or withdrawals when cashflows exist.
+- The progress curve uses the last 14 calendar days and shows ending account balance by date.
+
+**Daily Coach Message**  
+This is the short daily message near the top of the Dashboard.
+
+What it does:
+- gives one psychological focus for the day
+- uses the daily message system
+- stays separate from performance data
+
+**Neuro Memory**  
+This is the short reminder that comes from your recent Journal Neuro Layer inputs.
+
+What it does:
+- surfaces one repeated pattern from recent sessions
+- warns you about recurring drift
+- or reminds you of a stable strength worth protecting
+
+What it is not:
+- it is not a full report
+- it is not a replacement for AI Coaching
+- it is not based on one trade only
 
 **Plan Progress**  
 Compares your current balance against the Growth Plan path.

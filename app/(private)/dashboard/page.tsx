@@ -14,6 +14,7 @@ import { upsertDailySnapshot } from "@/lib/snapshotSupabase";
 import { getJournalTradesForDates } from "@/lib/journalTradesSupabase";
 import { parseNotes, type TradesPayload } from "@/lib/journalNotes";
 import { createAlertRule } from "@/lib/alertsSupabase";
+import { buildNeuroMemory, computeNeuroSummary, normalizeNeuroLayer, type NeuroMemory } from "@/lib/neuroLayer";
 
 // ✅ Cashflows (deposits/withdrawals)
 import { listCashflows, signedCashflowAmount, type Cashflow } from "@/lib/cashflowsSupabase";
@@ -1067,6 +1068,25 @@ export default function DashboardPage() {
   // Autosave UX
   const [checklistSaving, setChecklistSaving] = useState(false);
   const [checklistSaveError, setChecklistSaveError] = useState<string | null>(null);
+
+  const neuroMemory = useMemo<NeuroMemory | null>(() => {
+    const sessions = entries
+      .map((entry) => {
+        const parsed = parseNotes((entry as any)?.notes ?? "");
+        const neuroLayer = normalizeNeuroLayer((parsed as any)?.neuro_layer ?? (parsed as any)?.neuroLayer ?? {});
+        const neuroSummary = computeNeuroSummary(neuroLayer);
+        if (neuroSummary.score == null && !neuroLayer.after.one_line_truth && !neuroLayer.after.custom_tags.length) {
+          return null;
+        }
+        return {
+          date: String((entry as any)?.date || "").slice(0, 10),
+          pnl: typeof (entry as any)?.pnl === "number" ? (entry as any).pnl : Number((entry as any)?.pnl ?? 0),
+          neuro: neuroLayer,
+        };
+      })
+      .filter(Boolean) as Array<{ date: string; pnl: number; neuro: any }>;
+    return buildNeuroMemory(sessions, isEs ? "es" : "en");
+  }, [entries, isEs]);
 
   // Keep original frozen todayStr (other widgets untouched)
   const [todayStr] = useState(() => formatDateYYYYMMDD(new Date()));
@@ -3705,17 +3725,17 @@ export default function DashboardPage() {
           </section>
         )}
 
-        <section className="mb-6 rounded-xl border border-slate-800 bg-slate-900/60 p-4">
-          <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+        <section className="mb-5 rounded-xl border border-slate-800 bg-slate-900/60 p-3">
+          <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
             <div className="min-w-0 flex-1">
-              <p className="text-[13px] text-slate-400 mb-2">
+              <p className="mb-1.5 text-[12px] text-slate-400">
                 {L(
                   "Customize your dashboard: toggle widgets on/off.",
                   "Personaliza tu dashboard: activa o desactiva los widgets."
                 )}
               </p>
 
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap gap-1.5">
                 {ALL_WIDGETS.map((w) => {
                   const isActive = activeWidgets.includes(w.id);
                   return (
@@ -3725,7 +3745,7 @@ export default function DashboardPage() {
                       onClick={() => {
                         setActiveWidgets((prev) => (prev.includes(w.id) ? prev.filter((x) => x !== w.id) : [...prev, w.id]));
                       }}
-                      className={`px-3 py-1.5 rounded-full text-[12px] border transition ${
+                      className={`rounded-full border px-2.5 py-1 text-[11px] transition ${
                         isActive
                           ? "bg-emerald-400 text-slate-950 border-emerald-300"
                           : "bg-slate-950 text-slate-300 border-slate-700 hover:border-emerald-400 hover:text-emerald-300"
@@ -3739,24 +3759,69 @@ export default function DashboardPage() {
               </div>
             </div>
 
-            {dailyCoachMessage ? (
-              <div className="w-full shrink-0 rounded-xl border border-emerald-400/20 bg-[linear-gradient(135deg,rgba(16,185,129,0.12),rgba(6,182,212,0.08),rgba(15,23,42,0.88))] px-4 py-3 xl:max-w-[380px]">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-[10px] uppercase tracking-[0.28em] text-emerald-200/80">
-                      {L("Daily coach message", "Mensaje diario del coach")}
-                    </p>
-                    <p className="mt-1 text-[13px] font-semibold text-slate-100 truncate">
-                      {dailyCoachMessage.title || L("Coach note for today", "Nota del coach para hoy")}
-                    </p>
-                    <p className="mt-1 text-[12px] leading-relaxed text-slate-300">
-                      {dailyCoachMessage.body}
-                    </p>
+            {(dailyCoachMessage || neuroMemory) ? (
+              <div className="w-full shrink-0 space-y-3 xl:max-w-[460px]">
+                {dailyCoachMessage ? (
+                  <div className="rounded-xl border border-emerald-300/30 bg-[linear-gradient(135deg,rgba(16,185,129,0.18),rgba(6,182,212,0.12),rgba(15,23,42,0.9))] px-4 py-3 shadow-[0_0_28px_rgba(16,185,129,0.14)]">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="text-[10px] uppercase tracking-[0.26em] text-emerald-200/90">
+                          {L("Daily coach message", "Mensaje diario del coach")}
+                        </p>
+                        <p className="mt-1 text-[15px] font-semibold leading-tight text-slate-50">
+                          {dailyCoachMessage.title || L("Coach note for today", "Nota del coach para hoy")}
+                        </p>
+                        <p className="mt-2 text-[13px] leading-relaxed text-slate-100/90">
+                          {dailyCoachMessage.body}
+                        </p>
+                      </div>
+                      <div className="mt-0.5 rounded-full border border-emerald-300/40 bg-emerald-400/12 px-2.5 py-1 text-[10px] font-semibold text-emerald-100 shadow-[0_0_12px_rgba(16,185,129,0.18)]">
+                        {L("Today", "Hoy")}
+                      </div>
+                    </div>
                   </div>
-                  <div className="mt-0.5 rounded-full border border-emerald-400/30 bg-emerald-400/10 px-2 py-1 text-[10px] font-semibold text-emerald-200">
-                    {L("Today", "Hoy")}
+                ) : null}
+
+                {neuroMemory ? (
+                  <div
+                    className={`rounded-xl border px-4 py-3 ${
+                      neuroMemory.kind === "risk"
+                        ? "border-amber-300/30 bg-[linear-gradient(135deg,rgba(251,191,36,0.14),rgba(15,23,42,0.92))]"
+                        : neuroMemory.kind === "strength"
+                          ? "border-cyan-300/30 bg-[linear-gradient(135deg,rgba(34,211,238,0.14),rgba(15,23,42,0.92))]"
+                          : "border-slate-700 bg-slate-950/80"
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-[10px] uppercase tracking-[0.26em] text-slate-300/90">
+                          {L("Neuro Memory", "Neuro Memory")}
+                        </p>
+                        <p className="mt-1 text-[14px] font-semibold leading-tight text-slate-50">
+                          {neuroMemory.title}
+                        </p>
+                        <p className="mt-2 text-[12px] leading-relaxed text-slate-200/90">
+                          {neuroMemory.body}
+                        </p>
+                      </div>
+                      <div
+                        className={`rounded-full px-2.5 py-1 text-[10px] font-semibold ${
+                          neuroMemory.kind === "risk"
+                            ? "border border-amber-300/40 bg-amber-400/10 text-amber-100"
+                            : neuroMemory.kind === "strength"
+                              ? "border border-cyan-300/40 bg-cyan-400/10 text-cyan-100"
+                              : "border border-slate-600 bg-slate-800 text-slate-200"
+                        }`}
+                      >
+                        {neuroMemory.kind === "risk"
+                          ? L("Pattern", "Patrón")
+                          : neuroMemory.kind === "strength"
+                            ? L("Strength", "Fortaleza")
+                            : L("Memory", "Memoria")}
+                      </div>
+                    </div>
                   </div>
-                </div>
+                ) : null}
               </div>
             ) : null}
           </div>

@@ -27,6 +27,9 @@ Defines your risk limits, daily pacing, and timeline. This is the source of trut
 **Journal (Daily Session)**  
 Captures premarket plan, execution, mindset, and post‑trade review. This is where behavior becomes data.
 
+**Neuro Layer**  
+Lives inside the Journal and converts your plan, live decisions, and post‑trade truth into structured psychology and process data.
+
 **Performance & Analytics**  
 Turns your journal into KPIs, patterns, and breakdowns. This is where you diagnose edge and leaks.
 
@@ -34,7 +37,7 @@ Turns your journal into KPIs, patterns, and breakdowns. This is where you diagno
 Runs the business side of trading: subscriptions, education, vendors, budgets, renewals, and break-even.
 
 **AI Coaching**  
-Turns data into feedback and action items. It becomes useful after you have consistent sessions.
+Turns Journal data, Neuro Layer, Growth Plan, analytics, and execution context into feedback and action items.
 
 **Imports (Broker Sync or CSV)**  
 Brings real trades into the system. Without clean data, analytics are inaccurate.

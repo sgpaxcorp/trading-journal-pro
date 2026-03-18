@@ -12,6 +12,7 @@ Una sesión completa incluye:
 2. Entradas y salidas.
 3. Notas en trade.
 4. Revisión post‑trade.
+5. Selecciones del Neuro Layer.
 
 ## Premarket Prep (plan antes de ejecutar)
 Define la intención del día.
@@ -58,6 +59,12 @@ Captura lo que pasó mientras el trade estaba activo:
 - Cómo manejaste el trade.
 - Errores o rompimientos de regla.
 - Estado emocional en tiempo real.
+- Acciones de manejo del trade como:
+  - stop loss colocado
+  - take profit ejecutado
+  - salida manual
+  - stop movido a profit
+  - mover stop a breakeven
 
 Puedes usar dictado si prefieres hablar.
 
@@ -73,22 +80,53 @@ Checklist + ratings opcionales:
 - Paciencia
 - Claridad mental
 
-## Mentalidad e impulsos (psicología)
-Mide tu estado mental y detonantes.
-- Balance emocional
-- Control de impulsos
-- Etiquetas de estado (calmado, ansioso, etc.)
-- Impulsos (revenge, FOMO, aburrimiento)
+Esos sliders opcionales comienzan en `0/5` hasta que tú los califiques.
 
-Personaliza etiquetas según tu realidad.
+## Neuro Layer (decisión + psicología)
+Neuro Layer reemplaza la vista vieja de mindset por una estructura más útil.
 
-## Proceso y estrategia (tu playbook)
-La capa de disciplina.
-1. Checklist por fase: premarket, en‑trade o post‑trade.
-2. Checklist de estrategia.
-3. Rating de calidad del setup.
-4. Rating de probabilidad.
-5. Evidencia de salida (por qué saliste).
+Se construye desde el mismo Journal, no desde otro formulario.
+
+Lo que haces:
+1. En `Premarket`, eliges:
+   - Thesis
+   - Confirmation I need
+   - Invalidation
+2. En `Inside the Trade`, eliges:
+   - What changed
+   - Current state
+   - Did I follow the plan?
+   - Acciones de manejo del trade
+3. En `After-trade Analysis`, eliges:
+   - Why did I exit?
+   - Would I take this trade again?
+   - Truth about the trade
+   - One-line Truth
+
+Lo que produce la plataforma:
+- Neuro Score
+- Neuro Insight
+- Decision Replay
+- Neuro Memory en el Dashboard
+- mejor contexto para AI Coaching
+
+Usa chips primero. Escribe solo cuando haga falta una frase corta de verdad.
+
+## Checklists de proceso (integrados en el Journal)
+El checklist de proceso ya no vive como widget aparte.
+
+Ahora está integrado donde corresponde:
+1. `Premarket Prep`
+   - checklist premarket
+   - checklist de estrategia
+   - calidad del setup
+   - rating de probabilidad
+2. `Inside the Trade`
+   - checklist en trade
+3. `After-trade Analysis`
+   - checklist post-trade
+
+Esto reduce entrada duplicada y deja la capa de disciplina más cerca del momento donde ocurrió la decisión.
 
 ## Plantillas (consistencia)
 Guarda tu estructura ideal como plantilla y aplícala en futuras sesiones.
@@ -97,6 +135,8 @@ Guarda tu estructura ideal como plantilla y aplícala en futuras sesiones.
 - Registra el día el mismo día.
 - Mantén nombres consistentes (setups, tags, estrategias).
 - Notas cortas y honestas superan notas largas y vagas.
+- Usa One-line Truth incluso en días verdes.
+- No uses Neuro Layer para justificar el trade. Úsalo para describirlo honestamente.
 
 ## FAQ
 P: ¿Puedo editar el Journal después?  
@@ -104,3 +144,6 @@ R: Sí. Abre la misma fecha y actualiza los campos.
 
 P: ¿Necesito Growth Plan antes?  
 R: Recomendado. Alinea tu journal con metas y límites claros.
+
+P: ¿AI Coaching lee el Neuro Layer automáticamente?  
+R: Sí. Lee Neuro Layer junto con el resto del Journal, Growth Plan y analytics.

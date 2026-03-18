@@ -4,6 +4,8 @@
 - La página tiene dos modos:
   - `Trade review`
   - `Audit workbench`
+- `Trade review` está disponible en `Core` y `Advanced`.
+- `Audit workbench` está disponible solo en `Advanced`.
 
 ## Qué es ahora Back-Study
 Back-Study ya no es solo una página de replay visual. Ahora es un workspace de revisión del trade que combina:
@@ -18,10 +20,10 @@ Back-Study ya no es solo una página de replay visual. Ahora es un workspace de 
 2. Selector de trade para el día seleccionado.
 3. Controles de timeframe, rango histórico y modo horario.
 4. Charts del subyacente y, cuando exista, del contrato usado.
-5. Resumen de auditoría de ejecución del trade seleccionado.
-6. Secuencia del trade basada en eventos del broker.
-7. Revisión de proceso e insights determinísticos.
-8. Evidencia cruda de ejecución.
+5. Para `Advanced`, resumen de auditoría de ejecución del trade seleccionado.
+6. Para `Advanced`, secuencia del trade basada en eventos del broker.
+7. Para `Advanced`, revisión de proceso e insights determinísticos.
+8. Para `Advanced`, evidencia cruda de ejecución.
 
 ### Cómo funciona
 1. Selecciona la fecha de la sesión.

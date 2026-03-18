@@ -53,6 +53,11 @@ import {
   type AiCoachMessageRow,
   type AiCoachThreadRow,
 } from "@/lib/aiCoachChatSupabase";
+import {
+  computeNeuroSummary,
+  getNeuroInsightText,
+  normalizeNeuroLayer,
+} from "@/lib/neuroLayer";
 
 /* =========================
    Types
@@ -444,11 +449,23 @@ const QUICK_PROMPTS_EN: string[] = [
   "What should I improve in my risk management during losing days?",
 ];
 
+const NEURO_QUICK_PROMPTS_EN: string[] = [
+  "Show me my Neuro review from recent sessions.",
+  "What drift pattern am I repeating between plan and execution?",
+  "What does my journal say about my decision process lately?",
+];
+
 const QUICK_PROMPTS_ES: string[] = [
   "Basado en mis últimas sesiones, ¿qué es lo principal que debo cambiar?",
   "Viendo solo datos recientes, ¿cuál es mi mayor fuga psicológica?",
   "¿Cómo voy vs mi plan y mis retos esta semana?",
   "¿Qué debo mejorar en mi gestión de riesgo durante días rojos?",
+];
+
+const NEURO_QUICK_PROMPTS_ES: string[] = [
+  "Muéstrame mi revisión Neuro de las sesiones recientes.",
+  "¿Qué patrón de drift estoy repitiendo entre plan y ejecución?",
+  "¿Qué dice mi journal últimamente sobre mi proceso de decisión?",
 ];
 
 function makeId() {
@@ -759,6 +776,10 @@ function compactSessionForAi(entry: any, tradesForDate?: TradesPayload | null) {
     parsedNotes?.journal_mindset ||
     parsedNotes?.journalMindset ||
     {};
+  const rawNeuroLayer =
+    parsedNotes?.neuro_layer ||
+    parsedNotes?.neuroLayer ||
+    {};
 
   const checklist = {
     premarket: toShortList(rawChecklists?.premarket, 6),
@@ -775,6 +796,8 @@ function compactSessionForAi(entry: any, tradesForDate?: TradesPayload | null) {
     setup_quality: clampRating(rawMindset?.setup_quality),
     probability: clampRating(rawMindset?.probability),
   };
+  const neuro = normalizeNeuroLayer(rawNeuroLayer);
+  const neuroSummary = computeNeuroSummary(neuro);
 
   // Common note fields across variations (you can extend later)
   const premarket =
@@ -846,6 +869,19 @@ function compactSessionForAi(entry: any, tradesForDate?: TradesPayload | null) {
     notes: clampText(notes, 520),
     checklists: checklist,
     mindset,
+    neuro: {
+      premarket: neuro.premarket,
+      inside: neuro.inside,
+      after: neuro.after,
+      summary: {
+        score: neuroSummary.score,
+        level: neuroSummary.level,
+        insight: getNeuroInsightText(neuroSummary.insight_key, "en"),
+        flags: neuroSummary.flags,
+        strengths: neuroSummary.strengths,
+        risks: neuroSummary.risks,
+      },
+    },
     trades: {
       entries: normalizedEntries,
       exits: normalizedExits,
@@ -1468,6 +1504,7 @@ function AiCoachingPageInner() {
   const isEs = lang === "es";
   const L = (en: string, es: string) => (isEs ? es : en);
   const quickPrompts = isEs ? QUICK_PROMPTS_ES : QUICK_PROMPTS_EN;
+  const neuroQuickPrompts = isEs ? NEURO_QUICK_PROMPTS_ES : NEURO_QUICK_PROMPTS_EN;
 
   // Platform data
   const [entries, setEntries] = useState<JournalEntry[]>([]);
@@ -2933,17 +2970,41 @@ function AiCoachingPageInner() {
             {/* Input area */}
             <div className="border-t border-slate-800 px-4 py-3 space-y-3">
               {/* Quick prompts */}
-              <div className="flex flex-wrap gap-2">
-                {quickPrompts.map((p) => (
-                  <button
-                    key={p}
-                    type="button"
-                    className="text-[11px] px-3 py-1 rounded-full border border-slate-700 hover:border-emerald-400 hover:text-emerald-200 bg-slate-900/80"
-                    onClick={() => setQuestion(p)}
-                  >
-                    {p}
-                  </button>
-                ))}
+              <div className="space-y-3">
+                <div>
+                  <p className="mb-2 text-[11px] uppercase tracking-[0.16em] text-slate-400">
+                    {L("Quick prompts", "Prompts rápidos")}
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {quickPrompts.map((p) => (
+                      <button
+                        key={p}
+                        type="button"
+                        className="text-[11px] px-3 py-1 rounded-full border border-slate-700 hover:border-emerald-400 hover:text-emerald-200 bg-slate-900/80"
+                        onClick={() => setQuestion(p)}
+                      >
+                        {p}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <p className="mb-2 text-[11px] uppercase tracking-[0.16em] text-slate-400">
+                    {L("Neuro shortcuts", "Atajos Neuro")}
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {neuroQuickPrompts.map((p) => (
+                      <button
+                        key={p}
+                        type="button"
+                        className="text-[11px] px-3 py-1 rounded-full border border-cyan-500/30 bg-cyan-500/10 text-cyan-100 hover:border-cyan-300 hover:text-white"
+                        onClick={() => setQuestion(p)}
+                      >
+                        {p}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>
 
               {/* Text + screenshot */}
