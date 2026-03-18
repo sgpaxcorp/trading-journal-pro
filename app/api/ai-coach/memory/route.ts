@@ -7,6 +7,19 @@ function safeString(x: any): string {
   return typeof x === "string" ? x : x == null ? "" : String(x);
 }
 
+function isAiCoachMemoryUnavailableError(error: any): boolean {
+  const code = typeof error?.code === "string" ? error.code : "";
+  const message = typeof error?.message === "string" ? error.message.toLowerCase() : "";
+  return (
+    code === "PGRST205" ||
+    code === "42P01" ||
+    (message.includes("ai_coach_memory") &&
+      (message.includes("schema cache") ||
+        message.includes("does not exist") ||
+        message.includes("could not find the table")))
+  );
+}
+
 export async function GET(req: Request) {
   try {
     const auth = req.headers.get("authorization") || "";
@@ -29,6 +42,17 @@ export async function GET(req: Request) {
       .order("updated_at", { ascending: false });
 
     if (error) {
+      if (isAiCoachMemoryUnavailableError(error)) {
+        return Response.json({
+          global: "",
+          weekly: "",
+          daily: "",
+          weeklyKey: "",
+          dailyKey: "",
+          updatedAt: "",
+          disabled: true,
+        });
+      }
       return Response.json({ error: error.message }, { status: 500 });
     }
 
@@ -48,6 +72,17 @@ export async function GET(req: Request) {
       ),
     });
   } catch (err: any) {
+    if (isAiCoachMemoryUnavailableError(err)) {
+      return Response.json({
+        global: "",
+        weekly: "",
+        daily: "",
+        weeklyKey: "",
+        dailyKey: "",
+        updatedAt: "",
+        disabled: true,
+      });
+    }
     return Response.json({ error: safeString(err?.message) }, { status: 500 });
   }
 }

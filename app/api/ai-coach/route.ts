@@ -2,7 +2,7 @@
 //
 // Goals:
 // 1) Make the coach feel 1:1 and conversational (not robotic).
-// 2) Always end with ONE follow-up question.
+// 2) Keep the output decision-oriented for traders, not report-like.
 // 3) Avoid Markdown tables unless the user explicitly asks for stats/breakdowns.
 // 4) Use the provided analytics only when it clearly supports the user's question.
 // 5) Keep the response compact, actionable, and grounded in the data supplied.
@@ -10,6 +10,8 @@
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 import { getAuthUser } from "@/lib/authServer";
 import { rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
+import { auditOrderEvents } from "@/lib/audit/auditEngine";
+import type { NormalizedOrderEvent } from "@/lib/brokers/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -59,6 +61,24 @@ type CoachMemoryBundle = {
   daily: string;
 };
 
+type CoachActionPlan = {
+  summary: string;
+  nextAction: string;
+  ruleToAdd: string;
+  ruleToRemove: string;
+  checkpointFocus: string;
+};
+
+type AutoAuditContext = {
+  attached: boolean;
+  date?: string | null;
+  instrument?: string | null;
+  summary?: string;
+  processScore?: number | null;
+  disciplineScore?: number | null;
+  eventCount?: number;
+};
+
 function toDateKey(value?: string | null): string | null {
   if (!value) return null;
   const d = new Date(value);
@@ -82,6 +102,181 @@ function resolveScopeKeys(body: AiCoachRequestBody) {
   const dailyKey = fromSnapshot || fromSessions || fallback;
   const weeklyKey = isoWeekKey(dailyKey);
   return { dailyKey, weeklyKey };
+}
+
+async function resolveActiveAccountId(userId: string): Promise<string | null> {
+  if (!userId) return null;
+  const { data } = await supabaseAdmin
+    .from("user_preferences")
+    .select("active_account_id")
+    .eq("user_id", userId)
+    .maybeSingle();
+  return safeString((data as any)?.active_account_id || "").trim() || null;
+}
+
+function normalizeAuditSymbol(raw: any): string {
+  return safeString(raw).trim().toUpperCase();
+}
+
+function wantsExecutionTruth(body: AiCoachRequestBody): boolean {
+  const mode = safeString(body?.coachingFocus?.mode || "").toLowerCase();
+  if (mode === "execution-truth") return true;
+
+  const question = safeString(body?.question || "").toLowerCase();
+  return /(audit|execution|entry|entries|exit|exits|stop|manage|management|fill|fills|oco|broker|orden|órden|entrada|salida|ejecuci)/i.test(question);
+}
+
+function buildExecutionDisciplineFromAudit(audit: any) {
+  const checks = [
+    {
+      label: "Protective stop present",
+      status: audit?.stop_present === true ? "pass" : audit?.stop_present === false ? "fail" : "unknown",
+    },
+    {
+      label: "OCO protection used",
+      status: audit?.oco_used === true ? "pass" : audit?.oco_used === false ? "fail" : "unknown",
+    },
+    {
+      label:
+        audit?.manual_market_exit === true
+          ? "Manual market exit detected"
+          : "Manual market exit avoided",
+      status:
+        audit?.manual_market_exit === true
+          ? "fail"
+          : audit?.manual_market_exit === false
+            ? "pass"
+            : "unknown",
+    },
+  ];
+  const evaluable = checks.filter((check) => check.status !== "unknown");
+  const score =
+    evaluable.length > 0
+      ? Math.round((evaluable.filter((check) => check.status === "pass").length / evaluable.length) * 100)
+      : null;
+  return { score, checks };
+}
+
+function pickAutoAuditCandidate(body: AiCoachRequestBody): { date: string; instrument: string } | null {
+  const candidates = [...safeArray<any>(body?.relevantSessions), ...safeArray<any>(body?.recentSessions)];
+  for (const candidate of candidates) {
+    const date = safeString(candidate?.date).slice(0, 10);
+    const instrument = normalizeAuditSymbol(candidate?.instrument || candidate?.symbol || "");
+    if (date && instrument) return { date, instrument };
+  }
+  return null;
+}
+
+async function buildAutomaticAuditContext(userId: string, body: AiCoachRequestBody): Promise<{ block: string; meta: AutoAuditContext }> {
+  if (!userId || !wantsExecutionTruth(body)) {
+    return { block: "", meta: { attached: false } };
+  }
+
+  const candidate = pickAutoAuditCandidate(body);
+  if (!candidate) {
+    return { block: "", meta: { attached: false } };
+  }
+
+  const accountId = await resolveActiveAccountId(userId);
+  if (!accountId) {
+    return { block: "", meta: { attached: false, date: candidate.date, instrument: candidate.instrument } };
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from("broker_order_events")
+    .select("*")
+    .eq("user_id", userId)
+    .eq("account_id", accountId)
+    .eq("date", candidate.date)
+    .order("ts_utc", { ascending: true });
+
+  if (error || !Array.isArray(data) || !data.length) {
+    return {
+      block: "",
+      meta: { attached: false, date: candidate.date, instrument: candidate.instrument, eventCount: 0 },
+    };
+  }
+
+  const filtered = data.filter((row: any) => {
+    const symbol = normalizeAuditSymbol(row?.symbol);
+    const instrumentKey = normalizeAuditSymbol(row?.instrument_key);
+    return symbol === candidate.instrument || instrumentKey.startsWith(`${candidate.instrument}|`);
+  });
+
+  if (!filtered.length) {
+    return {
+      block: "",
+      meta: { attached: false, date: candidate.date, instrument: candidate.instrument, eventCount: 0 },
+    };
+  }
+
+  const audit = auditOrderEvents(filtered as NormalizedOrderEvent[]);
+  const executionDiscipline = buildExecutionDisciplineFromAudit(audit);
+
+  const [{ data: journalEntry }, { data: checklistRow }, { data: growthPlanRows }] = await Promise.all([
+    supabaseAdmin
+      .from("journal_entries")
+      .select("pnl, respected_plan")
+      .eq("user_id", userId)
+      .eq("account_id", accountId)
+      .eq("date", candidate.date)
+      .maybeSingle(),
+    supabaseAdmin
+      .from("daily_checklists")
+      .select("items")
+      .eq("user_id", userId)
+      .eq("date", candidate.date)
+      .maybeSingle(),
+    supabaseAdmin
+      .from("growth_plans")
+      .select("rules")
+      .eq("user_id", userId)
+      .order("updated_at", { ascending: false })
+      .limit(1),
+  ]);
+
+  const checklistItems = safeArray<any>((checklistRow as any)?.items);
+  const completedChecklist = checklistItems.filter((item) => Boolean(item?.done)).length;
+  const checklistScore = checklistItems.length > 0 ? Math.round((completedChecklist / checklistItems.length) * 100) : null;
+
+  const respectedPlan = typeof (journalEntry as any)?.respected_plan === "boolean" ? (journalEntry as any).respected_plan : null;
+  const pnl = Number((journalEntry as any)?.pnl);
+
+  const planRules = safeArray<any>((growthPlanRows ?? [])[0]?.rules).filter((rule) => rule?.isActive !== false);
+  const processScoreParts = [checklistScore, respectedPlan === null ? null : respectedPlan ? 100 : 0].filter((value) => typeof value === "number") as number[];
+  const processScore = processScoreParts.length
+    ? Math.round(processScoreParts.reduce((sum, value) => sum + value, 0) / processScoreParts.length)
+    : null;
+
+  const lines: string[] = [];
+  lines.push(
+    `Automatic audit attached: ${candidate.date} · ${candidate.instrument} · broker events=${filtered.length}`
+  );
+  lines.push(
+    `Audit summary: ${clampText(audit.summary, 220)} · disciplineScore=${executionDiscipline.score ?? "—"}${processScore != null ? ` · processScore=${processScore}` : ""}`
+  );
+  lines.push(
+    `Audit highlights: stopPresent=${audit.stop_present ? "yes" : "no"} · oco=${audit.oco_used ? "yes" : "no"} · manualMarketExit=${audit.manual_market_exit ? "yes" : "no"} · firstStopSec=${audit.time_to_first_stop_sec ?? "—"}`
+  );
+  if (Number.isFinite(pnl)) {
+    lines.push(`Journal session on audit date: pnl=${usd(pnl)} · respectedPlan=${respectedPlan == null ? "—" : respectedPlan ? "yes" : "no"}`);
+  }
+  if (planRules.length) {
+    lines.push(`Active rules on audit date: ${planRules.slice(0, 4).map((rule) => safeString(rule?.label)).filter(Boolean).join(", ")}`);
+  }
+
+  return {
+    block: lines.join("\n"),
+    meta: {
+      attached: true,
+      date: candidate.date,
+      instrument: candidate.instrument,
+      summary: clampText(audit.summary, 220),
+      processScore,
+      disciplineScore: executionDiscipline.score,
+      eventCount: filtered.length,
+    },
+  };
 }
 
 async function getCoachMemory(userId: string, keys: { dailyKey: string; weeklyKey: string }): Promise<CoachMemoryBundle> {
@@ -238,13 +433,6 @@ function stripMarkdownTables(md: string): string {
   return normalized;
 }
 
-function endsWithQuestion(text: string): boolean {
-  const t = (text || "").trim();
-  if (!t) return false;
-  const lastChar = t.slice(-1);
-  return lastChar === "?" || lastChar === "¿" || lastChar === "؟" || lastChar === "？";
-}
-
 function buildFallbackFollowUp(lang: "es" | "en", question: string): string {
   const q = (question || "").toLowerCase();
 
@@ -268,8 +456,7 @@ function buildFallbackFollowUp(lang: "es" | "en", question: string): string {
 function maybeAppendFollowUp(text: string, lang: "es" | "en", question: string): string {
   const t = (text || "").trim();
   if (!t) return buildFallbackFollowUp(lang, question);
-  if (endsWithQuestion(t)) return t;
-  return `${t}\n\n${buildFallbackFollowUp(lang, question)}`;
+  return t;
 }
 
 function usd(n: any): string {
@@ -789,6 +976,446 @@ function buildRecentSessionsSnippet(recentSessions: any[], n = 8): string {
   return rows.join("\n");
 }
 
+function safeArray<T = any>(value: any): T[] {
+  return Array.isArray(value) ? (value as T[]) : [];
+}
+
+function safeJsonParse(raw: any): any | null {
+  if (!raw || typeof raw !== "string") return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function flattenTextValue(value: any, maxItems = 12): string[] {
+  if (value == null) return [];
+  if (typeof value === "string") {
+    const clean = value.replace(/\s+/g, " ").trim();
+    return clean ? [clean] : [];
+  }
+  if (typeof value === "number" || typeof value === "boolean") return [String(value)];
+  if (Array.isArray(value)) {
+    return value.flatMap((item) => flattenTextValue(item, maxItems)).slice(0, maxItems);
+  }
+  if (typeof value === "object") {
+    return Object.values(value)
+      .flatMap((item) => flattenTextValue(item, maxItems))
+      .slice(0, maxItems);
+  }
+  return [];
+}
+
+function pct(n: any): string {
+  const value = Number(n);
+  return Number.isFinite(value) ? `${value.toFixed(2)}%` : "—";
+}
+
+function resolveCoachModeLabel(mode: string, lang: "es" | "en"): string {
+  const labels: Record<string, { en: string; es: string }> = {
+    "plan-rescue": { en: "Plan rescue", es: "Rescate del plan" },
+    "weekly-review": { en: "Weekly review", es: "Revisión semanal" },
+    "risk-discipline": { en: "Risk discipline", es: "Disciplina de riesgo" },
+    "execution-truth": { en: "Execution truth", es: "Verdad de ejecución" },
+    "psychology-patterns": { en: "Psychology patterns", es: "Patrones psicológicos" },
+  };
+  const hit = labels[mode];
+  return hit ? (lang === "es" ? hit.es : hit.en) : mode || "General";
+}
+
+function resolveCoachDirectiveBlock(body: AiCoachRequestBody, lang: "es" | "en"): string {
+  const focus = body?.coachingFocus || {};
+  const mode = safeString(focus?.mode || "").trim();
+  const rangePreset = safeString(focus?.rangePreset || "").trim() || "all";
+  const rangeStartIso = toDateKey(focus?.rangeStartIso);
+  const rangeEndIso = toDateKey(focus?.rangeEndIso);
+  const label = resolveCoachModeLabel(mode, lang);
+  const lines = [
+    `Coaching lens: ${label}`,
+    `Context range preset: ${rangePreset}${rangeStartIso ? ` (${rangeStartIso}${rangeEndIso ? ` → ${rangeEndIso}` : ""})` : ""}`,
+  ];
+  return lines.join("\n");
+}
+
+function buildLensStructureGuide(mode: string, lang: "es" | "en", strictEvidenceMode: boolean): string {
+  const lens = safeString(mode).trim().toLowerCase();
+  const introEs = strictEvidenceMode
+    ? "Estructura obligatoria. No uses un bloque separado de Conclusión."
+    : "Estructura preferida. Evita un bloque separado de Conclusión salvo que sea indispensable.";
+  const introEn = strictEvidenceMode
+    ? "Required structure. Do not use a separate Conclusion block."
+    : "Preferred structure. Avoid a separate Conclusion block unless it is indispensable.";
+
+  if (lang === "es") {
+    if (lens === "weekly-review") {
+      return [
+        introEs,
+        "Usa headings cortos y solo en español:",
+        "1) Qué mejoró (1-2 líneas).",
+        "2) Qué se deterioró (2-4 bullets con hechos).",
+        "3) Qué importa la próxima semana (1-3 bullets de lectura del coach).",
+        "4) Plan para la próxima sesión (next action, rule to add, rule to remove, checkpoint focus).",
+        "5) Pregunta de seguimiento solo si falta información crítica o si mejora materialmente el plan de la próxima sesión.",
+      ].join("\n");
+    }
+    if (lens === "risk-discipline") {
+      return [
+        introEs,
+        "Usa headings cortos y solo en español:",
+        "1) Estado de risk rails (1-2 líneas: on track / at risk / violation).",
+        "2) Evidencia (2-4 bullets; solo hechos y 1-3 números relevantes).",
+        "3) Lectura del coach (1-3 bullets; cuál rail se rompió y por qué).",
+        "4) Fix para la próxima sesión (next action, rule to add, rule to remove, checkpoint focus).",
+        "5) Pregunta de seguimiento solo si hace falta para afinar el fix.",
+      ].join("\n");
+    }
+    if (lens === "execution-truth") {
+      return [
+        introEs,
+        "Usa headings cortos y solo en español:",
+        "1) Verdad de ejecución (1-2 líneas sobre si el comportamiento coincidió o no con el plan).",
+        "2) Evidencia (2-4 bullets; hechos cronológicos, entradas/salidas/manejo).",
+        "3) Lectura del coach (1-3 bullets; qué patrón operativo domina).",
+        "4) Fix para la próxima sesión (next action, rule to add, rule to remove, checkpoint focus).",
+        "5) Pregunta de seguimiento solo si falta una pieza crítica del trade.",
+      ].join("\n");
+    }
+    if (lens === "psychology-patterns") {
+      return [
+        introEs,
+        "Usa headings cortos y solo en español:",
+        "1) Patrón dominante (1-2 líneas).",
+        "2) Evidencia (2-4 bullets; emociones, drift, decisiones).",
+        "3) Lectura del coach (1-3 bullets; disparador y costo del patrón).",
+        "4) Intervención para la próxima sesión (next action, rule to add, rule to remove, checkpoint focus).",
+        "5) Pregunta de seguimiento solo si ayuda a validar el disparador principal.",
+      ].join("\n");
+    }
+    return [
+      introEs,
+      "Usa headings cortos y solo en español:",
+      "1) Estado vs plan (1-2 líneas: on track / at risk / off pace frente al checkpoint).",
+      "2) Evidencia (2-4 bullets; solo hechos y 1-3 números relevantes).",
+      "3) Lectura del coach (1-3 bullets; patrón principal y por qué reduce la probabilidad de cumplir el plan).",
+      "4) Plan para la próxima sesión (next action, rule to add, rule to remove, checkpoint focus).",
+      "5) Pregunta de seguimiento solo si falta info crítica o si una sola pregunta mejora materialmente el plan de mañana.",
+    ].join("\n");
+  }
+
+  if (lens === "weekly-review") {
+    return [
+      introEn,
+      "Use short headings and keep them fully in English:",
+      "1) What improved (1-2 lines).",
+      "2) What slipped (2-4 bullets with facts).",
+      "3) What matters next week (1-3 bullets of coach read).",
+      "4) Next session plan (next action, rule to add, rule to remove, checkpoint focus).",
+      "5) Follow-up only if critical information is missing or one question would materially improve the next-session plan.",
+    ].join("\n");
+  }
+  if (lens === "risk-discipline") {
+    return [
+      introEn,
+      "Use short headings and keep them fully in English:",
+      "1) Risk rails status (1-2 lines: on track / at risk / violation).",
+      "2) Evidence (2-4 bullets; facts only and 1-3 relevant numbers).",
+      "3) Coach read (1-3 bullets; which rail broke and why).",
+      "4) Fix for next session (next action, rule to add, rule to remove, checkpoint focus).",
+      "5) Follow-up only if needed to sharpen the fix.",
+    ].join("\n");
+  }
+  if (lens === "execution-truth") {
+    return [
+      introEn,
+      "Use short headings and keep them fully in English:",
+      "1) Execution truth (1-2 lines on whether behavior matched the plan).",
+      "2) Evidence (2-4 bullets; chronological facts, entries/exits/management).",
+      "3) Coach read (1-3 bullets; what operational pattern dominated).",
+      "4) Fix for next session (next action, rule to add, rule to remove, checkpoint focus).",
+      "5) Follow-up only if one critical trade detail is missing.",
+    ].join("\n");
+  }
+  if (lens === "psychology-patterns") {
+    return [
+      introEn,
+      "Use short headings and keep them fully in English:",
+      "1) Dominant pattern (1-2 lines).",
+      "2) Evidence (2-4 bullets; emotions, drift, decisions).",
+      "3) Coach read (1-3 bullets; trigger and cost of the pattern).",
+      "4) Intervention for next session (next action, rule to add, rule to remove, checkpoint focus).",
+      "5) Follow-up only if it helps validate the main trigger.",
+    ].join("\n");
+  }
+  return [
+    introEn,
+    "Use short headings and keep them fully in English:",
+    "1) Status vs plan (1-2 lines: on track / at risk / off pace versus the checkpoint).",
+    "2) Evidence (2-4 bullets; facts only and 1-3 relevant numbers).",
+    "3) Coach read (1-3 bullets; main pattern and why it reduces the odds of reaching the plan).",
+    "4) Next session plan (next action, rule to add, rule to remove, checkpoint focus).",
+    "5) Follow-up only if critical information is missing or one question would materially improve tomorrow's plan.",
+  ].join("\n");
+}
+
+function buildGrowthPlanOperatingBlock(body: AiCoachRequestBody): string {
+  const growthPlan = body.growthPlan || null;
+  const planSnapshot = body.planSnapshot || null;
+  if (!growthPlan && !planSnapshot) return "";
+
+  const lines: string[] = [];
+
+  if (growthPlan) {
+    const start = Number(growthPlan?.startingBalance);
+    const target = Number(growthPlan?.targetBalance);
+    const targetDate = safeString(growthPlan?.targetDate || "");
+    const planMode = safeString(growthPlan?.planMode || "");
+    const dailyTargetPct = Number(growthPlan?.dailyTargetPct);
+    const maxDailyLossPercent = Number(growthPlan?.maxDailyLossPercent);
+    const maxRiskPerTradePercent = Number(growthPlan?.maxRiskPerTradePercent);
+    const maxRiskPerTradeUsd = Number(growthPlan?.maxRiskPerTradeUsd);
+    const tradingDays = Number(growthPlan?.tradingDays);
+    const lossDaysPerWeek = Number(growthPlan?.lossDaysPerWeek);
+    const planStartDate = safeString(growthPlan?.planStartDate || "");
+
+    lines.push(
+      `Growth Plan objective: start=${usd(start)}, target=${usd(target)}${targetDate ? `, targetDate=${targetDate}` : ""}${planStartDate ? `, planStart=${planStartDate}` : ""}${planMode ? `, mode=${planMode}` : ""}`
+    );
+    lines.push(
+      `Risk rails: dailyTarget=${pct(dailyTargetPct)}, maxDailyLoss=${pct(maxDailyLossPercent)}, maxRiskPerTrade=${Number.isFinite(maxRiskPerTradeUsd) && maxRiskPerTradeUsd > 0 ? usd(maxRiskPerTradeUsd) : pct(maxRiskPerTradePercent)}, tradingDays=${Number.isFinite(tradingDays) ? tradingDays : "—"}, lossDaysPerWeek=${Number.isFinite(lossDaysPerWeek) ? lossDaysPerWeek : "—"}`
+    );
+
+    const activeRules = safeArray<any>(growthPlan?.rules)
+      .map((rule) => ({
+        label: safeString(rule?.label).trim(),
+        description: safeString(rule?.description).trim(),
+      }))
+      .filter((rule) => rule.label)
+      .slice(0, 6);
+    if (activeRules.length) {
+      lines.push(`Active plan rules:\n${activeRules.map((rule) => `- ${rule.label}${rule.description ? ` · ${clampText(rule.description, 120)}` : ""}`).join("\n")}`);
+    }
+
+    const executionSystem = growthPlan?.executionSystem || null;
+    if (executionSystem) {
+      const doList = safeArray<any>(executionSystem?.doList)
+        .map((item) => safeString(item?.text ?? item).trim())
+        .filter(Boolean)
+        .slice(0, 4);
+      const dontList = safeArray<any>(executionSystem?.dontList)
+        .map((item) => safeString(item?.text ?? item).trim())
+        .filter(Boolean)
+        .slice(0, 4);
+      if (doList.length || dontList.length) {
+        lines.push(`Execution system:${doList.length ? ` do=${doList.join(", ")}` : ""}${dontList.length ? ` | don't=${dontList.join(", ")}` : ""}`);
+      }
+    }
+  }
+
+  if (planSnapshot) {
+    const start = Number(planSnapshot?.effectiveStartingBalance ?? planSnapshot?.startingBalance);
+    const target = Number(planSnapshot?.effectiveTargetBalance ?? planSnapshot?.targetBalance);
+    const current = Number(planSnapshot?.currentBalance);
+    const progress = Number(planSnapshot?.progressPct);
+    const sessionsSincePlan = Number(planSnapshot?.sessionsSincePlan);
+    lines.push(
+      `Plan position now: start=${usd(start)}, target=${usd(target)}, current=${usd(current)}, progress=${Number.isFinite(progress) ? progress.toFixed(1) + "%" : "—"}, sessionsSincePlan=${Number.isFinite(sessionsSincePlan) ? sessionsSincePlan : "—"}`
+    );
+  }
+
+  const phases = safeArray<any>(growthPlan?.planPhases)
+    .map((phase) => ({
+      id: safeString(phase?.id),
+      title: safeString(phase?.title),
+      targetEquity: Number(phase?.targetEquity),
+      targetDate: safeString(phase?.targetDate),
+      status: safeString(phase?.status),
+      monthIndex: Number(phase?.monthIndex),
+      weekIndex: Number(phase?.weekIndex),
+    }))
+    .filter((phase) => Number.isFinite(phase.targetEquity) && phase.targetEquity > 0)
+    .sort((a, b) => a.targetEquity - b.targetEquity);
+
+  if (phases.length) {
+    const currentBalance = Number(planSnapshot?.currentBalance);
+    const nextPhase =
+      phases.find((phase) => phase.status !== "completed" && (!Number.isFinite(currentBalance) || phase.targetEquity > currentBalance)) ||
+      phases.find((phase) => phase.status !== "completed") ||
+      null;
+    if (nextPhase) {
+      const gap = Number.isFinite(currentBalance) ? nextPhase.targetEquity - currentBalance : null;
+      const gapText =
+        gap == null
+          ? ""
+          : gap >= 0
+            ? ` · gap=${usd(gap)}`
+            : ` · gap=ahead ${usd(Math.abs(gap))}`;
+      lines.push(
+        `Next checkpoint: ${nextPhase.title || nextPhase.id || "Phase"} · target=${usd(nextPhase.targetEquity)}${nextPhase.targetDate ? ` · by=${nextPhase.targetDate}` : ""}${gapText}`
+      );
+    }
+  }
+
+  return lines.join("\n");
+}
+
+function extractJournalEntryForRetrieval(entry: any) {
+  const date = safeString(entry?.date).slice(0, 10);
+  const pnl = Number(entry?.pnl);
+  const respectedPlan = typeof entry?.respectedPlan === "boolean" ? entry.respectedPlan : null;
+  const emotion = safeString(entry?.emotion || "");
+  const instrument = safeString(entry?.instrument || entry?.mainInstrument || entry?.symbol || "").toUpperCase();
+  const tags = safeArray<any>(entry?.tags).map((tag) => safeString(tag).trim()).filter(Boolean);
+  const notesJson = safeJsonParse(entry?.notes);
+  const premarket = flattenTextValue(notesJson?.premarket ?? notesJson?.pre ?? "").slice(0, 6).join(" | ");
+  const live = flattenTextValue(notesJson?.live ?? notesJson?.inside ?? "").slice(0, 6).join(" | ");
+  const post = flattenTextValue(notesJson?.post ?? notesJson?.after ?? "").slice(0, 6).join(" | ");
+  const neuro = flattenTextValue(notesJson?.neuro_layer ?? notesJson?.neuroLayer ?? "").slice(0, 6).join(" | ");
+  const noteText = flattenTextValue(notesJson ?? entry?.notes ?? "").slice(0, 18).join(" | ");
+  const emotionFlags = [emotion, live, post, neuro]
+    .join(" ")
+    .toLowerCase()
+    .match(/fomo|fear|miedo|greed|codicia|revenge|revancha|ansiedad|anxiety|frustr|impuls|urgency|urgencia/g) ?? [];
+  const violationFlags = [tags.join(" "), live, post, neuro, noteText]
+    .join(" ")
+    .toLowerCase()
+    .match(/stop|no stop|sin stop|oversize|size|late|chase|plan no|plan=no|impuls|revenge|re-entry|reentry|overtrade|break rule|romp/i) ?? [];
+  const summaryText = [
+    date,
+    instrument,
+    emotion,
+    tags.join(" "),
+    premarket,
+    live,
+    post,
+    neuro,
+    noteText,
+    emotionFlags.join(" "),
+    violationFlags.join(" "),
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  return {
+    date,
+    pnl,
+    respectedPlan,
+    emotion,
+    instrument,
+    tags,
+    premarket,
+    live,
+    post,
+    neuro,
+    noteText,
+    emotionFlags,
+    violationFlags,
+    summaryText,
+  };
+}
+
+function scoreRetrievedJournalEntry(entry: ReturnType<typeof extractJournalEntryForRetrieval>, body: AiCoachRequestBody): number {
+  let score = 0;
+
+  const question = safeString(body?.question || "").toLowerCase();
+  const mode = safeString(body?.coachingFocus?.mode || "").toLowerCase();
+  const tokens = question
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .split(/\s+/)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 3)
+    .slice(0, 12);
+
+  for (const token of tokens) {
+    if (entry.summaryText.includes(token)) score += 5;
+  }
+
+  const absPnl = Math.abs(Number(entry.pnl) || 0);
+  if (absPnl >= 200) score += 2;
+  if (entry.respectedPlan === false) score += 3;
+  score += Math.min(4, entry.violationFlags.length);
+  score += Math.min(3, entry.emotionFlags.length);
+
+  const nextCheckpointTarget = Number(body?.growthPlan?.planPhases?.[0]?.targetEquity ?? NaN);
+  const currentBalance = Number(body?.planSnapshot?.currentBalance ?? NaN);
+  const checkpointGap =
+    Number.isFinite(nextCheckpointTarget) && Number.isFinite(currentBalance)
+      ? nextCheckpointTarget - currentBalance
+      : null;
+  if (checkpointGap != null && checkpointGap > 0 && Number(entry.pnl) < 0) {
+    score += 2;
+  }
+
+  if (mode === "plan-rescue" && (entry.respectedPlan === false || Number(entry.pnl) < 0)) score += 4;
+  if (mode === "risk-discipline" && /(risk|size|stop|loss|revenge|impuls)/i.test(entry.summaryText)) score += 4;
+  if (mode === "execution-truth" && /(entry|exit|manage|execution|plan_followed|stop|target)/i.test(entry.summaryText)) score += 4;
+  if (mode === "psychology-patterns" && /(emotion|fear|greed|fomo|anxiety|ansiedad|revenge|frustr)/i.test(entry.summaryText)) score += 4;
+  if (mode === "weekly-review" && absPnl > 0) score += 2;
+
+  return score;
+}
+
+function buildFullJournalRetrievalBlock(body: AiCoachRequestBody): string {
+  const rows = safeArray<any>(body?.fullSnapshot?.journalEntries);
+  if (!rows.length) return "";
+
+  const startIso = toDateKey(body?.coachingFocus?.rangeStartIso);
+  const endIso = toDateKey(body?.coachingFocus?.rangeEndIso);
+  const filtered = rows.filter((row) => {
+    const date = safeString(row?.date).slice(0, 10);
+    if (!date) return false;
+    if (startIso && date < startIso) return false;
+    if (endIso && date > endIso) return false;
+    return true;
+  });
+  if (!filtered.length) return "";
+
+  const docs = filtered.map(extractJournalEntryForRetrieval);
+  const scored = docs
+    .map((entry) => ({ entry, score: scoreRetrievedJournalEntry(entry, body) }))
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      return safeString(b.entry.date).localeCompare(safeString(a.entry.date));
+    });
+
+  const selected = scored
+    .filter((row, index) => row.score > 0 || index < 6)
+    .slice(0, 8)
+    .map((row) => row.entry);
+
+  const planViolations = docs.filter((entry) => entry.respectedPlan === false).length;
+  const redSessions = docs.filter((entry) => Number(entry.pnl) < 0).length;
+  const greenSessions = docs.filter((entry) => Number(entry.pnl) > 0).length;
+
+  const lines: string[] = [];
+  lines.push(
+    `Full journal scan: sessions=${filtered.length}, green=${greenSessions}, red=${redSessions}, planViolations=${planViolations}${startIso ? `, window=${startIso}${endIso ? ` → ${endIso}` : ""}` : ""}`
+  );
+  lines.push(
+    "Retrieved from full journal corpus:\n" +
+      selected
+        .map((entry) => {
+          const bits = [
+            `- ${entry.date || "—"} · pnl ${Number.isFinite(entry.pnl) ? usd(entry.pnl) : "—"}`,
+            entry.instrument ? `instrument ${entry.instrument}` : "",
+            entry.respectedPlan === false ? "plan=no" : entry.respectedPlan === true ? "plan=yes" : "",
+            entry.tags.length ? `tags: ${entry.tags.slice(0, 5).join(", ")}` : "",
+            entry.emotion ? `emotion: ${entry.emotion}` : "",
+          ].filter(Boolean);
+          const detail = [entry.premarket, entry.live, entry.post, entry.neuro, entry.noteText]
+            .filter(Boolean)
+            .map((section) => clampText(section, 160))
+            .slice(0, 3)
+            .join(" | ");
+          return detail ? `${bits.join(" · ")}\n  ${detail}` : bits.join(" · ");
+        })
+        .join("\n")
+  );
+
+  return lines.join("\n");
+}
+
 function buildContextText(body: AiCoachRequestBody, lang: "es" | "en"): string {
   const profile = body.userProfile || {};
   const firstName = safeString(profile.firstName || profile.displayName || profile.name || "Trader").trim() || "Trader";
@@ -796,11 +1423,16 @@ function buildContextText(body: AiCoachRequestBody, lang: "es" | "en"): string {
   const snapshot = body.snapshot || null;
   const analytics = body.analyticsSummary || null;
   const analyticsSnapshot = body.analyticsSnapshot || null;
-  const planSnapshot = body.planSnapshot || null;
 
   const lines: string[] = [];
 
   lines.push(`User name: ${firstName}`);
+  lines.push(resolveCoachDirectiveBlock(body, lang));
+
+  const growthPlanBlock = buildGrowthPlanOperatingBlock(body);
+  if (growthPlanBlock) {
+    lines.push(growthPlanBlock);
+  }
 
   if (snapshot) {
     const total = Number(snapshot?.totalSessions) || 0;
@@ -861,17 +1493,6 @@ function buildContextText(body: AiCoachRequestBody, lang: "es" | "en"): string {
     lines.push(comparisonsBlock);
   }
 
-  if (planSnapshot) {
-    const start = planSnapshot?.effectiveStartingBalance ?? planSnapshot?.startingBalance;
-    const target = planSnapshot?.effectiveTargetBalance ?? planSnapshot?.targetBalance;
-    const cur = planSnapshot?.currentBalance;
-    const prog = Number(planSnapshot?.progressPct);
-    const since = Number(planSnapshot?.sessionsSincePlan);
-    lines.push(
-      `Plan snapshot: start=${usd(start)}, target=${usd(target)}, current=${usd(cur)}, progress=${Number.isFinite(prog) ? prog.toFixed(1) + "%" : "—"}, sessionsSincePlan=${Number.isFinite(since) ? since : "—"}`
-    );
-  }
-
   const gamification = body.gamification || body.fullSnapshot?.profileGamification;
   if (gamification) {
     const level = Number(gamification?.level);
@@ -904,6 +1525,11 @@ function buildContextText(body: AiCoachRequestBody, lang: "es" | "en"): string {
 
   const relevantSnippet = buildRecentSessionsSnippet(relevant, 6);
   if (relevantSnippet) lines.push("Relevant sessions for the question:\n" + relevantSnippet);
+
+  const fullJournalBlock = buildFullJournalRetrievalBlock(body);
+  if (fullJournalBlock) {
+    lines.push(fullJournalBlock);
+  }
 
   // Keep the context block bounded.
   const joined = lines.join("\n");
@@ -938,62 +1564,70 @@ function buildSystemPrompt(params: {
   firstName: string;
   allowTables: boolean;
   strictEvidenceMode: boolean;
+  mode: string;
 }): string {
-  const { lang, firstName, allowTables, strictEvidenceMode } = params;
+  const { lang, firstName, allowTables, strictEvidenceMode, mode } = params;
+  const lensGuide = buildLensStructureGuide(mode, lang, strictEvidenceMode);
 
   if (lang === "es") {
     return [
-      "Eres un coach de trading 1:1. Tu objetivo es ayudar al usuario a mejorar su proceso, riesgo y psicología usando SOLO el contexto provisto.",
+      "Eres un coach de trading 1:1. Tu objetivo principal es aumentar la probabilidad de que el usuario cumpla su Growth Plan y el próximo checkpoint usando SOLO el contexto provisto.",
       "Estilo obligatorio:",
       `- Habla como un coach humano (cercano, directo, sin sonar robótico). Puedes usar el nombre del usuario: ${firstName}.`,
       "- Responde a la pregunta específica primero; no des un reporte genérico.",
+      "- Si hay contexto de Growth Plan, piensa como un operador del plan: primero ubica al usuario contra la meta, luego identifica el bloqueo principal, luego da la acción de mayor leverage.",
       "- Mantén la respuesta en segmentos cortos (párrafos breves + bullets cuando ayude).",
       `- ${allowTables ? "Puedes usar tablas si el usuario las pidió." : "NO uses tablas Markdown salvo que el usuario explícitamente pida una tabla/desglose."}`,
       "- NO asumas ni inventes datos. Si algo no está en el contexto, dilo explícitamente.",
       "- Separa hechos (observaciones) de inferencias. Si infieres, dilo y explica el soporte.",
       "- Sé objetivo: no digas lo que el usuario quiere oír, di lo que los datos muestran.",
+      "- Cuando existan datos del plan, menciona explícitamente: 1) cómo va respecto al plan/checkpoint, 2) qué patrón lo aleja del plan, 3) qué debe cambiar mañana.",
       "- Si incluyes métricas/estadísticas, usa 1–3 números relevantes y explica qué significan (sin volcar datos).",
       "- Si hay KPIs en el contexto, interprétalos usando su definición y notas; si un KPI no tiene valor, di que falta data.",
       "- Si el contexto incluye entradas/salidas o una secuencia cronológica, NARRA lo que pasó (orden de entradas/salidas, re-entrada, stop-out, recuperación) usando los tiempos/precios del contexto.",
       "- Si el contexto incluye Neuro Layer / Neuro Score / Neuro Insight, úsalo para comparar plan inicial, ejecución real y verdad post-trade. Señala drift cognitivo solo cuando el soporte sea claro.",
+      "- Usa el journal completo de forma inteligente: prioriza las sesiones recuperadas del corpus completo cuando expliquen mejor el patrón que las sesiones recientes.",
       "- Pre‑prompt obligatorio: si NO hay resultados de Audit (Order History) en el contexto, pide al usuario que vaya a Back‑Studying → Audit y comparta el resumen o screenshots.",
       "- Si el usuario pregunta por “qué hubiera pasado” pero solo hay subyacente (sin precio real del contrato), explica la limitación y pide el precio del contrato a esa hora para continuar.",
       "- Nunca digas que “no puedes ver imágenes”. Si hay screenshot adjunto o contexto de back-study, úsalo.",
       "- Si falta información crítica, haz UNA pregunta aclaratoria (pero igualmente da una recomendación útil).",
       "- Evita relleno, definiciones básicas y advertencias genéricas.",
       "- Si hay comparaciones por periodo, usa como máximo 1–2 para responder (no resumas todo).",
-      strictEvidenceMode
-        ? "Formato estricto (breve): 1) Respuesta directa (1–2 frases). 2) Observaciones (2–4 bullets). 3) Inferencias (1–3 bullets, indicando soporte). 4) Conclusión (1–2 bullets)."
-        : "Formato libre, pero breve.",
-      "Regla final (no la rompas): termina SIEMPRE con UNA sola pregunta de seguimiento (una línea), específica y accionable.",
+      "- Responde 100% en español. No mezcles headings, bullets, labels o cierres en inglés.",
+      "- Si usas headings, usa headings cortos y consistentes con el lente actual.",
+      lensGuide,
+      "No cierres con una pregunta de seguimiento por defecto. Hazla solo si falta información crítica o si una sola pregunta mejorará materialmente la próxima sesión.",
       "Entrega en Markdown simple (títulos cortos opcionales, bullets ok).",
     ].join("\n");
   }
 
   return [
-    "You are a 1:1 trading coach. Your job is to help the user improve process, risk, and psychology using ONLY the provided context.",
+    "You are a 1:1 trading coach. Your primary job is to increase the user's probability of reaching the Growth Plan and the next checkpoint using ONLY the provided context.",
     "Required style:",
     `- Sound human (warm, direct, not robotic). You may use the user's name: ${firstName}.`,
     "- Answer the user's specific question first; do not produce a generic report.",
+    "- If Growth Plan context exists, think like a plan operator: first locate the user versus the target, then identify the main blocker, then give the highest-leverage next action.",
     "- Keep it concise with short paragraphs and bullets when helpful.",
     `- ${allowTables ? "You may use tables if the user asked for them." : "Do NOT use Markdown tables unless the user explicitly asked for a table/breakdown."}`,
     "- Do NOT assume or invent data. If something is not in the context, say so explicitly.",
     "- Separate facts (observations) from inferences. If you infer, say it and cite the support.",
     "- Be objective: do not tell the user what they want to hear, say what the data shows.",
+    "- When plan data exists, explicitly state: 1) where the user stands versus the plan/checkpoint, 2) which pattern is reducing the odds of hitting it, 3) what to change next session.",
     "- If you cite analytics, use only 1–3 relevant numbers and explain the implication (no data dump).",
     "- If KPI results are provided, interpret them using their definition/notes; if a KPI has no value, say data is insufficient.",
     "- If context includes entries/exits or a chronological sequence, NARRATE what happened (entry/exit order, re-entry, stop-out, recovery) using the times/prices from context.",
     "- If Neuro Layer / Neuro Score / Neuro Insight are present, use them to compare the original plan, live execution, and post-trade truth. Only call cognitive drift when the support is clear.",
+    "- Use the full journal intelligently: prioritize sessions retrieved from the full journal corpus when they explain the pattern better than the recent sample.",
     "- Required pre‑prompt: if Audit (Order History) results are NOT in context, ask the user to open Back‑Studying → Audit and share the summary or screenshots.",
     "- If the user asks “what would have happened” but only underlying prices exist (no option contract price), state the limitation and ask for the contract price at that time to continue.",
     "- Never say you “can’t see images”. If a screenshot or back-study context is provided, use it.",
     "- If critical info is missing, ask ONE clarifying question (but still give a useful recommendation).",
     "- Avoid filler, basic definitions, and generic disclaimers.",
     "- If period comparisons are provided, use at most 1–2 to answer (do not summarize everything).",
-    strictEvidenceMode
-      ? "Strict brief format: 1) Direct answer (1–2 sentences). 2) Observations (2–4 bullets). 3) Inferences (1–3 bullets with support). 4) Conclusion (1–2 bullets)."
-      : "Free format, but brief.",
-    "Final rule (must follow): ALWAYS end with ONE follow-up question (single line), specific and actionable.",
+    "- Respond 100% in English. Do not mix headings, bullets, labels, or closing lines in Spanish.",
+    "- If you use headings, keep them short and consistent with the active lens.",
+    lensGuide,
+    "Do not end with a follow-up question by default. Ask one only if critical information is missing or one question would materially improve the next session plan.",
     "Output in clean Markdown (short headings optional, bullets ok).",
   ].join("\n");
 }
@@ -1128,6 +1762,82 @@ async function callOpenAI(params: {
   };
 }
 
+function extractFirstJsonObject(raw: string): any | null {
+  const text = safeString(raw).trim();
+  if (!text) return null;
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start === -1 || end === -1 || end <= start) return null;
+  try {
+    return JSON.parse(text.slice(start, end + 1));
+  } catch {
+    return null;
+  }
+}
+
+async function buildCoachActionPlan(params: {
+  apiKey: string;
+  baseUrl: string;
+  model: string;
+  lang: "es" | "en";
+  question: string;
+  coachText: string;
+}): Promise<CoachActionPlan | null> {
+  const { apiKey, baseUrl, model, lang, question, coachText } = params;
+  const system =
+    lang === "es"
+      ? [
+          "Extrae un plan de acción operativo desde una respuesta de coaching de trading.",
+          "Devuelve SOLO JSON válido con este shape exacto:",
+          '{"summary":"", "nextAction":"", "ruleToAdd":"", "ruleToRemove":"", "checkpointFocus":""}',
+          "Reglas:",
+          "- summary: 1 frase corta de la tesis del coach.",
+          "- nextAction: una sola acción clara para la próxima sesión.",
+          "- ruleToAdd: una sola regla concreta para agregar.",
+          "- ruleToRemove: una sola regla concreta para eliminar o dejar de hacer.",
+          "- checkpointFocus: el checkpoint o foco del plan que debe protegerse.",
+          "- Si falta algo, usa string vacío.",
+        ].join("\n")
+      : [
+          "Extract an operational action plan from a trading coaching response.",
+          "Return ONLY valid JSON with this exact shape:",
+          '{"summary":"", "nextAction":"", "ruleToAdd":"", "ruleToRemove":"", "checkpointFocus":""}',
+          "Rules:",
+          "- summary: 1 short sentence with the coach's thesis.",
+          "- nextAction: one clear action for the next session.",
+          "- ruleToAdd: one concrete rule to add.",
+          "- ruleToRemove: one concrete rule to remove or stop doing.",
+          "- checkpointFocus: the checkpoint or plan focus that must be protected.",
+          "- If missing, use an empty string.",
+        ].join("\n");
+
+  const extraction = await callOpenAI({
+    apiKey,
+    baseUrl,
+    model,
+    messages: [
+      { role: "system", content: system },
+      {
+        role: "user",
+        content: `Question:\n${clampText(question, 500)}\n\nCoach response:\n${clampText(coachText, 2200)}`,
+      },
+    ],
+    maxTokens: 260,
+    temperature: 0.1,
+  });
+
+  const parsed = extractFirstJsonObject(extraction.text);
+  if (!parsed || typeof parsed !== "object") return null;
+
+  return {
+    summary: clampText(parsed.summary, 180),
+    nextAction: clampText(parsed.nextAction, 180),
+    ruleToAdd: clampText(parsed.ruleToAdd, 180),
+    ruleToRemove: clampText(parsed.ruleToRemove, 180),
+    checkpointFocus: clampText(parsed.checkpointFocus, 140),
+  };
+}
+
 export async function POST(req: Request) {
   try {
     const authUser = await getAuthUser(req);
@@ -1193,13 +1903,19 @@ export async function POST(req: Request) {
       firstName,
       allowTables,
       strictEvidenceMode,
+      mode: safeString(body?.coachingFocus?.mode || ""),
     });
 
     const userId = authUser.userId;
     const scopeKeys = resolveScopeKeys(body);
     const existingMemory = userId ? await getCoachMemory(userId, scopeKeys) : { global: "", weekly: "", daily: "" };
 
+    const autoAudit = userId ? await buildAutomaticAuditContext(userId, body) : { block: "", meta: { attached: false } as AutoAuditContext };
+
     let contextText = buildContextText(body, language);
+    if (autoAudit.block) {
+      contextText += `\nAutomatic execution audit:\n${autoAudit.block}`;
+    }
     if (userId) {
       const feedbackSnippet = await getRecentCoachFeedback(userId);
       if (feedbackSnippet) {
@@ -1287,8 +2003,50 @@ export async function POST(req: Request) {
       coachText = stripMarkdownTables(coachText);
     }
 
-    // Ensure it ends with exactly one follow-up question.
+    // Keep the model output intact; only backfill if the model returned nothing.
     coachText = maybeAppendFollowUp(coachText, language, question);
+
+    let actionPlan: CoachActionPlan | null = null;
+    try {
+      actionPlan = await buildCoachActionPlan({
+        apiKey,
+        baseUrl,
+        model: process.env.AI_COACH_MODEL || "gpt-4o-mini",
+        lang: language,
+        question,
+        coachText,
+      });
+    } catch {
+      actionPlan = null;
+    }
+
+    if (userId && body.threadId && actionPlan) {
+      try {
+        const { data: existingThread } = await supabaseAdmin
+          .from("ai_coach_threads")
+          .select("metadata")
+          .eq("id", body.threadId)
+          .eq("user_id", userId)
+          .maybeSingle();
+
+        await supabaseAdmin
+          .from("ai_coach_threads")
+          .update({
+            summary: actionPlan.summary || null,
+            metadata: {
+              ...((existingThread as any)?.metadata ?? {}),
+              latestActionPlan: actionPlan,
+              latestAudit: autoAudit.meta,
+              updatedFrom: "ai-coach",
+            },
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", body.threadId)
+          .eq("user_id", userId);
+      } catch {
+        // keep response flowing even if thread summary fails
+      }
+    }
 
     if (userId) {
       try {
@@ -1368,6 +2126,8 @@ export async function POST(req: Request) {
       text: coachText,
       model: result.model,
       usage: result.usage,
+      actionPlan,
+      autoAudit: autoAudit.meta,
     });
   } catch (err: any) {
     const msg = safeString(err?.message) || "Unknown error";

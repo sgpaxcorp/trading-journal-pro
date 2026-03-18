@@ -27,6 +27,16 @@ export type JournalUiSettings = {
     impulses?: string[];
     states?: string[];
   };
+
+  neuroOptions?: {
+    premarket_thesis?: string[];
+    premarket_confirmation?: string[];
+    premarket_invalidation?: string[];
+    inside_changed?: string[];
+    inside_state?: string[];
+    after_exit_reason?: string[];
+    after_truth?: string[];
+  };
 };
 
 export async function getJournalUiSettings(

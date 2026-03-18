@@ -766,6 +766,139 @@ function WidgetCard({
   );
 }
 
+function plainTextPreview(raw: string | null | undefined, maxChars = 280) {
+  const text = String(raw ?? "")
+    .replace(/<br\s*\/?>/gi, " ")
+    .replace(/<\/p>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!text) return "";
+  return text.length > maxChars ? `${text.slice(0, maxChars).trim()}…` : text;
+}
+
+type NeuroOptionGroupKey =
+  | "premarket_thesis"
+  | "premarket_confirmation"
+  | "premarket_invalidation"
+  | "inside_changed"
+  | "inside_state"
+  | "after_exit_reason"
+  | "after_truth";
+
+type NeuroOptionPresets = Record<NeuroOptionGroupKey, NeuroOption[]>;
+type NeuroOptionDrafts = Record<NeuroOptionGroupKey, string>;
+
+const NEURO_OPTIONS_STORAGE_KEY = "journal_neuro_options_v1";
+
+const DEFAULT_NEURO_OPTION_PRESETS: NeuroOptionPresets = {
+  premarket_thesis: NEURO_PREMARKET_THESIS_OPTIONS,
+  premarket_confirmation: NEURO_PREMARKET_CONFIRMATION_OPTIONS,
+  premarket_invalidation: NEURO_PREMARKET_INVALIDATION_OPTIONS,
+  inside_changed: NEURO_INSIDE_CHANGED_OPTIONS,
+  inside_state: NEURO_INSIDE_STATE_OPTIONS,
+  after_exit_reason: NEURO_AFTER_EXIT_REASON_OPTIONS,
+  after_truth: NEURO_AFTER_TRUTH_OPTIONS,
+};
+
+const EMPTY_NEURO_OPTION_DRAFTS: NeuroOptionDrafts = {
+  premarket_thesis: "",
+  premarket_confirmation: "",
+  premarket_invalidation: "",
+  inside_changed: "",
+  inside_state: "",
+  after_exit_reason: "",
+  after_truth: "",
+};
+
+const customNeuroOptionId = (label: string) =>
+  `custom:${label
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 48)}`;
+
+const makeCustomNeuroOption = (label: string): NeuroOption => ({
+  id: customNeuroOptionId(label),
+  en: label,
+  es: label,
+});
+
+const dedupeNeuroOptions = (options: NeuroOption[]) => {
+  const seen = new Set<string>();
+  return options.filter((option) => {
+    if (!option?.id || seen.has(option.id)) return false;
+    seen.add(option.id);
+    return true;
+  });
+};
+
+const normalizeNeuroOptionLabels = (
+  raw?: Partial<Record<NeuroOptionGroupKey, string[]>>
+): Record<NeuroOptionGroupKey, string[]> => ({
+  premarket_thesis: Array.isArray(raw?.premarket_thesis) ? raw!.premarket_thesis.map((x) => String(x).trim()).filter(Boolean) : [],
+  premarket_confirmation: Array.isArray(raw?.premarket_confirmation)
+    ? raw!.premarket_confirmation.map((x) => String(x).trim()).filter(Boolean)
+    : [],
+  premarket_invalidation: Array.isArray(raw?.premarket_invalidation)
+    ? raw!.premarket_invalidation.map((x) => String(x).trim()).filter(Boolean)
+    : [],
+  inside_changed: Array.isArray(raw?.inside_changed) ? raw!.inside_changed.map((x) => String(x).trim()).filter(Boolean) : [],
+  inside_state: Array.isArray(raw?.inside_state) ? raw!.inside_state.map((x) => String(x).trim()).filter(Boolean) : [],
+  after_exit_reason: Array.isArray(raw?.after_exit_reason)
+    ? raw!.after_exit_reason.map((x) => String(x).trim()).filter(Boolean)
+    : [],
+  after_truth: Array.isArray(raw?.after_truth) ? raw!.after_truth.map((x) => String(x).trim()).filter(Boolean) : [],
+});
+
+const buildNeuroOptionPresets = (labels?: Partial<Record<NeuroOptionGroupKey, string[]>>): NeuroOptionPresets => {
+  const normalized = normalizeNeuroOptionLabels(labels);
+  return {
+    premarket_thesis: dedupeNeuroOptions([
+      ...DEFAULT_NEURO_OPTION_PRESETS.premarket_thesis,
+      ...normalized.premarket_thesis.map(makeCustomNeuroOption),
+    ]),
+    premarket_confirmation: dedupeNeuroOptions([
+      ...DEFAULT_NEURO_OPTION_PRESETS.premarket_confirmation,
+      ...normalized.premarket_confirmation.map(makeCustomNeuroOption),
+    ]),
+    premarket_invalidation: dedupeNeuroOptions([
+      ...DEFAULT_NEURO_OPTION_PRESETS.premarket_invalidation,
+      ...normalized.premarket_invalidation.map(makeCustomNeuroOption),
+    ]),
+    inside_changed: dedupeNeuroOptions([
+      ...DEFAULT_NEURO_OPTION_PRESETS.inside_changed,
+      ...normalized.inside_changed.map(makeCustomNeuroOption),
+    ]),
+    inside_state: dedupeNeuroOptions([
+      ...DEFAULT_NEURO_OPTION_PRESETS.inside_state,
+      ...normalized.inside_state.map(makeCustomNeuroOption),
+    ]),
+    after_exit_reason: dedupeNeuroOptions([
+      ...DEFAULT_NEURO_OPTION_PRESETS.after_exit_reason,
+      ...normalized.after_exit_reason.map(makeCustomNeuroOption),
+    ]),
+    after_truth: dedupeNeuroOptions([
+      ...DEFAULT_NEURO_OPTION_PRESETS.after_truth,
+      ...normalized.after_truth.map(makeCustomNeuroOption),
+    ]),
+  };
+};
+
+const extractCustomNeuroOptionLabels = (
+  options: NeuroOptionPresets
+): Record<NeuroOptionGroupKey, string[]> => ({
+  premarket_thesis: options.premarket_thesis.filter((o) => o.id.startsWith("custom:")).map((o) => o.en),
+  premarket_confirmation: options.premarket_confirmation.filter((o) => o.id.startsWith("custom:")).map((o) => o.en),
+  premarket_invalidation: options.premarket_invalidation.filter((o) => o.id.startsWith("custom:")).map((o) => o.en),
+  inside_changed: options.inside_changed.filter((o) => o.id.startsWith("custom:")).map((o) => o.en),
+  inside_state: options.inside_state.filter((o) => o.id.startsWith("custom:")).map((o) => o.en),
+  after_exit_reason: options.after_exit_reason.filter((o) => o.id.startsWith("custom:")).map((o) => o.en),
+  after_truth: options.after_truth.filter((o) => o.id.startsWith("custom:")).map((o) => o.en),
+});
+
 /* =========================================================
    Page
 ========================================================= */
@@ -854,6 +987,10 @@ export default function DailyJournalPage() {
   const [notesExtra, setNotesExtra] = useState<Record<string, any>>({});
   const [neuroLayer, setNeuroLayer] = useState<NeuroLayer>(DEFAULT_NEURO_LAYER);
   const [newNeuroCustomTag, setNewNeuroCustomTag] = useState("");
+  const [neuroOptionPresets, setNeuroOptionPresets] = useState<NeuroOptionPresets>(
+    DEFAULT_NEURO_OPTION_PRESETS
+  );
+  const [newNeuroOption, setNewNeuroOption] = useState<NeuroOptionDrafts>(EMPTY_NEURO_OPTION_DRAFTS);
 
   const [checklistPresets, setChecklistPresets] = useState<JournalChecklistPresets>(DEFAULT_CHECKLIST_PRESETS);
   const [mindset, setMindset] = useState<MindsetRatings>(DEFAULT_MINDSET);
@@ -945,6 +1082,7 @@ export default function DailyJournalPage() {
       ...uiSettingsRef.current,
       ...patch,
       checklists: patch.checklists ?? uiSettingsRef.current.checklists,
+      neuroOptions: patch.neuroOptions ?? uiSettingsRef.current.neuroOptions,
     };
     uiSettingsRef.current = next;
     saveJournalUiSettings(userId, UI_PAGE_KEY, next).catch((e) =>
@@ -974,6 +1112,28 @@ export default function DailyJournalPage() {
     uiSettingsRef.current = { ...uiSettingsRef.current, checklists: checklistPresets };
   }, [checklistPresets]);
 
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(NEURO_OPTIONS_STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      const next = buildNeuroOptionPresets(parsed);
+      setNeuroOptionPresets(next);
+      uiSettingsRef.current = { ...uiSettingsRef.current, neuroOptions: extractCustomNeuroOptionLabels(next) };
+    } catch {
+      // ignore
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    const labels = extractCustomNeuroOptionLabels(neuroOptionPresets);
+    try {
+      localStorage.setItem(NEURO_OPTIONS_STORAGE_KEY, JSON.stringify(labels));
+    } catch {}
+    uiSettingsRef.current = { ...uiSettingsRef.current, neuroOptions: labels };
+  }, [neuroOptionPresets]);
+
   // Load UI settings + templates from Supabase
   useEffect(() => {
     if (!userId || authLoading) return;
@@ -983,6 +1143,7 @@ export default function DailyJournalPage() {
     (async () => {
       try {
         let hasLocalChecklists = false;
+        let hasLocalNeuroOptions = false;
 
         try {
           const raw = localStorage.getItem(checklistStorageKey);
@@ -995,11 +1156,23 @@ export default function DailyJournalPage() {
           }
         } catch {}
 
+        try {
+          const raw = localStorage.getItem(NEURO_OPTIONS_STORAGE_KEY);
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            const next = buildNeuroOptionPresets(parsed);
+            hasLocalNeuroOptions = true;
+            setNeuroOptionPresets(next);
+            uiSettingsRef.current = { ...uiSettingsRef.current, neuroOptions: extractCustomNeuroOptionLabels(next) };
+          }
+        } catch {}
+
         const ui = await getJournalUiSettings(userId, UI_PAGE_KEY);
         if (!alive) return;
 
         if (ui) {
           const rawChecklists: any = (ui as any).checklists ?? (ui as any).checklist_presets;
+          const rawNeuroOptions: any = (ui as any).neuroOptions ?? (ui as any).neuro_options;
           if (!hasLocalChecklists && rawChecklists && typeof rawChecklists === "object") {
             const normalized = normalizeChecklistPresets(rawChecklists);
             setChecklistPresets(normalized);
@@ -1007,6 +1180,20 @@ export default function DailyJournalPage() {
               localStorage.setItem(checklistStorageKey, JSON.stringify(normalized));
             } catch {}
             uiSettingsRef.current = { ...uiSettingsRef.current, checklists: normalized };
+          }
+          if (!hasLocalNeuroOptions && rawNeuroOptions && typeof rawNeuroOptions === "object") {
+            const next = buildNeuroOptionPresets(rawNeuroOptions);
+            setNeuroOptionPresets(next);
+            try {
+              localStorage.setItem(
+                NEURO_OPTIONS_STORAGE_KEY,
+                JSON.stringify(extractCustomNeuroOptionLabels(next))
+              );
+            } catch {}
+            uiSettingsRef.current = {
+              ...uiSettingsRef.current,
+              neuroOptions: extractCustomNeuroOptionLabels(next),
+            };
           }
         }
 
@@ -1053,6 +1240,14 @@ export default function DailyJournalPage() {
     }, 300);
     return () => clearTimeout(t);
   }, [userId, checklistPresets]);
+
+  useEffect(() => {
+    if (!userId) return;
+    const t = setTimeout(() => {
+      commitUiSettings({ neuroOptions: extractCustomNeuroOptionLabels(neuroOptionPresets) });
+    }, 300);
+    return () => clearTimeout(t);
+  }, [userId, neuroOptionPresets]);
 
   const [currentStep, setCurrentStep] = useState(0);
 
@@ -1651,6 +1846,20 @@ export default function DailyJournalPage() {
     () => getNeuroInsightText(neuroSummary.insight_key, isEs ? "es" : "en"),
     [isEs, neuroSummary.insight_key]
   );
+  const premarketPreview = useMemo(() => plainTextPreview(premarketHtml, 320), [premarketHtml]);
+  const premarketReplay = useMemo(
+    () =>
+      [
+        ...neuroLayer.premarket.thesis.map((item) => neuroLabel(item, neuroOptionPresets.premarket_thesis)),
+        ...neuroLayer.premarket.confirmation.map((item) =>
+          neuroLabel(item, neuroOptionPresets.premarket_confirmation)
+        ),
+        ...neuroLayer.premarket.invalidation.map((item) =>
+          neuroLabel(item, neuroOptionPresets.premarket_invalidation)
+        ),
+      ].filter(Boolean),
+    [neuroLayer.premarket, neuroOptionPresets, isEs]
+  );
 
   const toggleNeuroMulti = (
     section: keyof NeuroLayer,
@@ -1711,6 +1920,69 @@ export default function DailyJournalPage() {
         custom_tags: prev.after.custom_tags.filter((item) => item !== tag),
       },
     }));
+  };
+
+  const addNeuroOption = (group: NeuroOptionGroupKey) => {
+    const text = normalizeItemText(newNeuroOption[group]);
+    if (!text) return;
+    const nextOption = makeCustomNeuroOption(text);
+    setNeuroOptionPresets((prev) => {
+      if (prev[group].some((option) => option.id === nextOption.id || option.en.toLowerCase() === text.toLowerCase())) {
+        return prev;
+      }
+      return {
+        ...prev,
+        [group]: [...prev[group], nextOption],
+      };
+    });
+    setNewNeuroOption((prev) => ({ ...prev, [group]: "" }));
+  };
+
+  const removeNeuroOption = (group: NeuroOptionGroupKey, optionId: string) => {
+    if (!optionId.startsWith("custom:")) return;
+    setNeuroOptionPresets((prev) => ({
+      ...prev,
+      [group]: prev[group].filter((option) => option.id !== optionId),
+    }));
+    setNeuroLayer((prev) => {
+      if (group === "premarket_thesis") {
+        return { ...prev, premarket: { ...prev.premarket, thesis: prev.premarket.thesis.filter((item) => item !== optionId) } };
+      }
+      if (group === "premarket_confirmation") {
+        return {
+          ...prev,
+          premarket: {
+            ...prev.premarket,
+            confirmation: prev.premarket.confirmation.filter((item) => item !== optionId),
+          },
+        };
+      }
+      if (group === "premarket_invalidation") {
+        return {
+          ...prev,
+          premarket: {
+            ...prev.premarket,
+            invalidation: prev.premarket.invalidation.filter((item) => item !== optionId),
+          },
+        };
+      }
+      if (group === "inside_changed") {
+        return { ...prev, inside: { ...prev.inside, changed: prev.inside.changed.filter((item) => item !== optionId) } };
+      }
+      if (group === "inside_state") {
+        return { ...prev, inside: { ...prev.inside, state: prev.inside.state.filter((item) => item !== optionId) } };
+      }
+      if (group === "after_exit_reason") {
+        return {
+          ...prev,
+          after: { ...prev.after, exit_reason: prev.after.exit_reason.filter((item) => item !== optionId) },
+        };
+      }
+      return {
+        ...prev,
+        after: { ...prev.after, truth: prev.after.truth.filter((item) => item !== optionId) },
+      };
+    });
   };
 
   const SECTION_PREFIX: Record<keyof JournalChecklistPresets, string | null> = {
@@ -2256,38 +2528,74 @@ export default function DailyJournalPage() {
     selected,
     onToggle,
     single = false,
+    groupKey,
   }: {
     title: string;
     options: NeuroOption[];
     selected: string[];
     onToggle: (optionId: string) => void;
     single?: boolean;
+    groupKey?: NeuroOptionGroupKey;
   }) => (
     <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
-      <p className="text-sm font-semibold text-slate-200 mb-2">{title}</p>
+      <div className="flex items-center justify-between gap-2 mb-2">
+        <p className="text-sm font-semibold text-slate-200">{title}</p>
+        {editProcess ? <span className="text-[11px] text-slate-500">{L("Customize mode", "Modo personalizar")}</span> : null}
+      </div>
       <div className="flex flex-wrap gap-2">
         {options.map((option) => {
           const active = selected.includes(option.id);
           return (
-            <button
+            <div
               key={option.id}
-              type="button"
-              onClick={() => onToggle(option.id)}
-              className={`rounded-full border px-3 py-1.5 text-xs transition ${
+              className={`inline-flex items-center gap-1 rounded-full border px-3 py-1.5 text-xs transition ${
                 active
                   ? "border-emerald-400 bg-emerald-500/15 text-emerald-200 shadow-[0_0_0_1px_rgba(16,185,129,0.2)]"
                   : "border-slate-700 bg-slate-950 text-slate-300 hover:border-slate-500"
               }`}
-              aria-pressed={active}
             >
-              {neuroLabel(option.id, options)}
-              {single && active ? (
-                <span className="ml-1 text-[10px] text-emerald-300">{L("selected", "seleccionado")}</span>
+              <button
+                type="button"
+                onClick={() => onToggle(option.id)}
+                className="min-w-0"
+                aria-pressed={active}
+              >
+                {neuroLabel(option.id, options)}
+                {single && active ? (
+                  <span className="ml-1 text-[10px] text-emerald-300">{L("selected", "seleccionado")}</span>
+                ) : null}
+              </button>
+              {editProcess && option.id.startsWith("custom:") && groupKey ? (
+                <button
+                  type="button"
+                  onClick={() => removeNeuroOption(groupKey, option.id)}
+                  className="text-slate-500 hover:text-rose-400"
+                  title={L("Remove", "Eliminar")}
+                >
+                  ✕
+                </button>
               ) : null}
-            </button>
+            </div>
           );
         })}
       </div>
+      {editProcess && groupKey ? (
+        <div className="mt-3 flex gap-2">
+          <input
+            value={newNeuroOption[groupKey]}
+            onChange={(e) => setNewNeuroOption((prev) => ({ ...prev, [groupKey]: e.target.value }))}
+            placeholder={L("Add chip", "Añadir chip")}
+            className="flex-1 rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 focus:border-emerald-400 focus:outline-none"
+          />
+          <button
+            type="button"
+            onClick={() => addNeuroOption(groupKey)}
+            className="rounded-xl bg-emerald-500 px-3 py-2 text-sm font-semibold text-slate-950 hover:bg-emerald-400"
+          >
+            {L("Add", "Añadir")}
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 
@@ -2419,21 +2727,24 @@ export default function DailyJournalPage() {
           <div className="mt-4 grid grid-cols-1 gap-3">
             <NeuroChipGroup
               title={L("Thesis", "Tesis")}
-              options={NEURO_PREMARKET_THESIS_OPTIONS}
+              options={neuroOptionPresets.premarket_thesis}
               selected={neuroLayer.premarket.thesis}
               onToggle={(optionId) => toggleNeuroMulti("premarket", "thesis", optionId)}
+              groupKey="premarket_thesis"
             />
             <NeuroChipGroup
               title={L("Confirmation I need", "Confirmación que necesito")}
-              options={NEURO_PREMARKET_CONFIRMATION_OPTIONS}
+              options={neuroOptionPresets.premarket_confirmation}
               selected={neuroLayer.premarket.confirmation}
               onToggle={(optionId) => toggleNeuroMulti("premarket", "confirmation", optionId)}
+              groupKey="premarket_confirmation"
             />
             <NeuroChipGroup
               title={L("Invalidation", "Invalidación")}
-              options={NEURO_PREMARKET_INVALIDATION_OPTIONS}
+              options={neuroOptionPresets.premarket_invalidation}
               selected={neuroLayer.premarket.invalidation}
               onToggle={(optionId) => toggleNeuroMulti("premarket", "invalidation", optionId)}
+              groupKey="premarket_invalidation"
             />
           </div>
           <div className="mt-4 grid grid-cols-1 gap-3">
@@ -2889,15 +3200,24 @@ export default function DailyJournalPage() {
         <WidgetCard
           title={L("Inside the Trade", "Dentro del trade")}
           right={
-            insideMode === "text" ? (
+            <div className="flex items-center gap-2">
               <button
                 type="button"
-                onClick={toggleDictation}
-                className={`px-2 py-1 rounded ${listening ? "bg-sky-500 text-white" : "bg-slate-800 text-slate-200"} text-xs hover:bg-slate-700`}
+                onClick={() => setEditProcess((v) => !v)}
+                className="px-2 py-1 rounded-md border border-slate-700 text-[11px] text-slate-300 hover:text-white hover:border-slate-500"
               >
-                {listening ? L("● Stop dictation", "● Detener dictado") : L("Start dictation", "Iniciar dictado")}
+                {editProcess ? L("Done", "Listo") : L("Customize", "Personalizar")}
               </button>
-            ) : null
+              {insideMode === "text" ? (
+                <button
+                  type="button"
+                  onClick={toggleDictation}
+                  className={`px-2 py-1 rounded ${listening ? "bg-sky-500 text-white" : "bg-slate-800 text-slate-200"} text-xs hover:bg-slate-700`}
+                >
+                  {listening ? L("● Stop dictation", "● Detener dictado") : L("Start dictation", "Iniciar dictado")}
+                </button>
+              ) : null}
+            </div>
           }
         >
           <JournalInkField
@@ -2920,15 +3240,17 @@ export default function DailyJournalPage() {
           <div className="mt-4 grid grid-cols-1 gap-3">
             <NeuroChipGroup
               title={L("What changed?", "¿Qué cambió?")}
-              options={NEURO_INSIDE_CHANGED_OPTIONS}
+              options={neuroOptionPresets.inside_changed}
               selected={neuroLayer.inside.changed}
               onToggle={(optionId) => toggleNeuroMulti("inside", "changed", optionId)}
+              groupKey="inside_changed"
             />
             <NeuroChipGroup
               title={L("Current state", "Estado actual")}
-              options={NEURO_INSIDE_STATE_OPTIONS}
+              options={neuroOptionPresets.inside_state}
               selected={neuroLayer.inside.state}
               onToggle={(optionId) => toggleNeuroMulti("inside", "state", optionId)}
+              groupKey="inside_state"
             />
             <NeuroChipGroup
               title={L("Did I follow the plan?", "¿Seguí el plan?")}
@@ -2989,7 +3311,18 @@ export default function DailyJournalPage() {
       title: L("After-trade Analysis", "Análisis post‑trade"),
       defaultLayout: { i: "after", x: 0, y: 16, w: 7, h: 8, minW: 4, minH: 6 },
       render: () => (
-        <WidgetCard title={L("After-trade Analysis", "Análisis post‑trade")}>
+        <WidgetCard
+          title={L("After-trade Analysis", "Análisis post‑trade")}
+          right={
+            <button
+              type="button"
+              onClick={() => setEditProcess((v) => !v)}
+              className="px-2 py-1 rounded-md border border-slate-700 text-[11px] text-slate-300 hover:text-white hover:border-slate-500"
+            >
+              {editProcess ? L("Done", "Listo") : L("Customize", "Personalizar")}
+            </button>
+          }
+        >
           <JournalInkField
             value={editableValue(afterHtml, afterMode, afterInk)}
             onChange={(next) => {
@@ -3007,9 +3340,10 @@ export default function DailyJournalPage() {
           <div className="mt-4 grid grid-cols-1 gap-3">
             <NeuroChipGroup
               title={L("Why did I exit?", "¿Por qué salí?")}
-              options={NEURO_AFTER_EXIT_REASON_OPTIONS}
+              options={neuroOptionPresets.after_exit_reason}
               selected={neuroLayer.after.exit_reason}
               onToggle={(optionId) => toggleNeuroMulti("after", "exit_reason", optionId)}
+              groupKey="after_exit_reason"
             />
             <NeuroChipGroup
               title={L("Would I take this trade again?", "¿Tomaría este trade otra vez?")}
@@ -3026,9 +3360,10 @@ export default function DailyJournalPage() {
             />
             <NeuroChipGroup
               title={L("Truth about the trade", "Verdad sobre el trade")}
-              options={NEURO_AFTER_TRUTH_OPTIONS}
+              options={neuroOptionPresets.after_truth}
               selected={neuroLayer.after.truth}
               onToggle={(optionId) => toggleNeuroMulti("after", "truth", optionId)}
+              groupKey="after_truth"
             />
             <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
               <label className="text-sm font-semibold text-slate-200">
@@ -3179,12 +3514,26 @@ export default function DailyJournalPage() {
                 {neuroSummary.score == null ? "—" : neuroSummary.score}
               </p>
               <p className="mt-1 text-xs text-emerald-100/80">{neuroLevelLabel}</p>
+              <p className="mt-2 text-[11px] leading-relaxed text-emerald-100/70">
+                {neuroSummary.score == null
+                  ? L(
+                      "Needs at least 3 Neuro inputs before scoring starts.",
+                      "Necesita al menos 3 inputs Neuro para empezar a puntuar."
+                    )
+                  : L(
+                      "Starts at 100 and adjusts from your plan, execution, and truth inputs.",
+                      "Empieza en 100 y se ajusta según tu plan, tu ejecución y tu verdad post-trade."
+                    )}
+              </p>
             </div>
             <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-3">
               <p className="text-[11px] uppercase tracking-[0.24em] text-slate-400">
                 {L("Neuro Insight", "Neuro Insight")}
               </p>
               <p className="mt-2 text-sm leading-6 text-slate-100">{neuroInsight}</p>
+              <p className="mt-2 text-[11px] text-slate-500">
+                {L("Signals counted", "Señales contadas")}: {neuroSummary.signals}
+              </p>
               <div className="mt-3 flex flex-wrap gap-2">
                 {neuroSummary.strengths.slice(0, 2).map((item) => (
                   <span
@@ -3208,26 +3557,54 @@ export default function DailyJournalPage() {
 
           <div className="mt-4 rounded-2xl border border-slate-800 bg-slate-950/60 p-3">
             <p className="text-[11px] uppercase tracking-[0.24em] text-slate-400">
+              {L("How Neuro Score works", "Cómo funciona el Neuro Score")}
+            </p>
+            <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+              <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-3">
+                <p className="font-semibold text-slate-200">{L("Adds points for", "Suma puntos por")}</p>
+                <ul className="mt-2 space-y-1 text-slate-400">
+                  <li>{L("Clear invalidation", "Invalidación clara")}</li>
+                  <li>{L("Calm / patient / clear state", "Estado calmado / paciente / claro")}</li>
+                  <li>{L("Stayed with the plan", "Mantenerse dentro del plan")}</li>
+                  <li>{L("Clean review and honest truth", "Revisión limpia y verdad honesta")}</li>
+                </ul>
+              </div>
+              <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-3">
+                <p className="font-semibold text-slate-200">{L("Reduces points for", "Resta puntos por")}</p>
+                <ul className="mt-2 space-y-1 text-slate-400">
+                  <li>{L("Entering early after requiring confirmation", "Entrar temprano después de exigir confirmación")}</li>
+                  <li>{L("Breaking or partially breaking the plan", "Romper el plan o seguirlo solo a medias")}</li>
+                  <li>{L("Emotional exit or forced trade", "Salida emocional o trade forzado")}</li>
+                  <li>{L("Reactive state, no edge, or truth mismatch", "Estado reactivo, sin edge o verdad inconsistente")}</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-4 rounded-2xl border border-slate-800 bg-slate-950/60 p-3">
+            <p className="text-[11px] uppercase tracking-[0.24em] text-slate-400">
               {L("Decision Replay", "Decision Replay")}
             </p>
             <div className="mt-3 space-y-2 text-sm text-slate-200">
               <p>
                 <span className="text-slate-400">{L("Premarket", "Premarket")}:</span>{" "}
                 {[
-                  ...neuroLayer.premarket.thesis.map((item) => neuroLabel(item, NEURO_PREMARKET_THESIS_OPTIONS)),
+                  ...neuroLayer.premarket.thesis.map((item) =>
+                    neuroLabel(item, neuroOptionPresets.premarket_thesis)
+                  ),
                   ...neuroLayer.premarket.confirmation.map((item) =>
-                    neuroLabel(item, NEURO_PREMARKET_CONFIRMATION_OPTIONS)
+                    neuroLabel(item, neuroOptionPresets.premarket_confirmation)
                   ),
                   ...neuroLayer.premarket.invalidation.map((item) =>
-                    neuroLabel(item, NEURO_PREMARKET_INVALIDATION_OPTIONS)
+                    neuroLabel(item, neuroOptionPresets.premarket_invalidation)
                   ),
                 ].join(" · ") || L("No Neuro checks yet", "Todavía sin Neuro checks")}
               </p>
               <p>
                 <span className="text-slate-400">{L("Inside", "Dentro")}:</span>{" "}
                 {[
-                  ...neuroLayer.inside.changed.map((item) => neuroLabel(item, NEURO_INSIDE_CHANGED_OPTIONS)),
-                  ...neuroLayer.inside.state.map((item) => neuroLabel(item, NEURO_INSIDE_STATE_OPTIONS)),
+                  ...neuroLayer.inside.changed.map((item) => neuroLabel(item, neuroOptionPresets.inside_changed)),
+                  ...neuroLayer.inside.state.map((item) => neuroLabel(item, neuroOptionPresets.inside_state)),
                   neuroLayer.inside.plan_followed
                     ? neuroLabel(neuroLayer.inside.plan_followed, NEURO_PLAN_FOLLOWED_OPTIONS)
                     : "",
@@ -3238,9 +3615,11 @@ export default function DailyJournalPage() {
               <p>
                 <span className="text-slate-400">{L("After", "Después")}:</span>{" "}
                 {[
-                  ...neuroLayer.after.exit_reason.map((item) => neuroLabel(item, NEURO_AFTER_EXIT_REASON_OPTIONS)),
+                  ...neuroLayer.after.exit_reason.map((item) =>
+                    neuroLabel(item, neuroOptionPresets.after_exit_reason)
+                  ),
                   neuroLayer.after.take_again ? neuroLabel(neuroLayer.after.take_again, NEURO_AFTER_TAKE_AGAIN_OPTIONS) : "",
-                  ...neuroLayer.after.truth.map((item) => neuroLabel(item, NEURO_AFTER_TRUTH_OPTIONS)),
+                  ...neuroLayer.after.truth.map((item) => neuroLabel(item, neuroOptionPresets.after_truth)),
                 ]
                   .filter(Boolean)
                   .join(" · ") || L("No Neuro checks yet", "Todavía sin Neuro checks")}
@@ -3368,13 +3747,22 @@ export default function DailyJournalPage() {
   const WIZARD_STEPS = useMemo(
     () => [
       {
-        key: "session",
-        label: L("Premarket + In‑Trade", "Premarket + En‑trade"),
+        key: "premarket",
+        label: L("Premarket Prep", "Preparación Premarket"),
         description: L(
-          "Premarket, live execution, Neuro Layer, and trade evidence in one flow.",
-          "Premarket, ejecución en vivo, Neuro Layer y evidencia del trade en un solo flujo."
+          "Define the setup, confirmation, invalidation, and session plan before the first trade.",
+          "Define el setup, la confirmación, la invalidación y el plan de la sesión antes del primer trade."
         ),
-        sections: ["premarket", "inside", "emotional", "entries", "exits", "templates"] as JournalWidgetId[],
+        sections: ["premarket", "templates"] as JournalWidgetId[],
+      },
+      {
+        key: "intrade",
+        label: L("In-Trade", "En Trade"),
+        description: L(
+          "Manage the live trade, record what changed, and log entries and exits without losing the premarket context.",
+          "Maneja el trade en vivo, registra qué cambió y documenta entradas y salidas sin perder el contexto del premarket."
+        ),
+        sections: ["inside", "emotional", "entries", "exits"] as JournalWidgetId[],
       },
       {
         key: "after",
@@ -3388,11 +3776,7 @@ export default function DailyJournalPage() {
 
   const stepCount = WIZARD_STEPS.length;
   const activeStep = WIZARD_STEPS[Math.min(currentStep, stepCount - 1)] || WIZARD_STEPS[0];
-  const gridMode = activeStep?.key === "session";
-  const fullWidthSections = useMemo(
-    () => new Set<JournalWidgetId>(gridMode ? ["entries", "exits"] : []),
-    [gridMode]
-  );
+  const gridMode = activeStep?.key === "intrade";
 
   const goPrevStep = () => setCurrentStep((s) => Math.max(0, s - 1));
   const goNextStep = () => setCurrentStep((s) => Math.min(stepCount - 1, s + 1));
@@ -3551,7 +3935,7 @@ export default function DailyJournalPage() {
               </button>
             </div>
 
-            {activeStep?.key === "session" && (
+            {activeStep?.key === "intrade" && (
               <div className="relative rounded-2xl border border-emerald-400/25 bg-slate-950/80 px-3.5 py-3 max-w-[420px] shadow-[0_0_32px_rgba(16,185,129,0.18)]">
                 <div className="absolute inset-0 rounded-2xl bg-gradient-to-r from-emerald-500/10 via-transparent to-sky-500/10 pointer-events-none" />
                 <div className="relative grid grid-cols-3 gap-2">
@@ -3604,6 +3988,43 @@ export default function DailyJournalPage() {
           {activeStep?.description}
         </div>
 
+        {activeStep?.key === "intrade" ? (
+          <div className="mt-3 rounded-2xl border border-cyan-300/20 bg-[linear-gradient(135deg,rgba(34,211,238,0.10),rgba(15,23,42,0.92))] px-4 py-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-[10px] uppercase tracking-[0.26em] text-cyan-100/80">
+                  {L("Premarket carry-forward", "Premarket arrastrado")}
+                </p>
+                <p className="mt-1 text-sm font-semibold text-slate-100">
+                  {L(
+                    "This is what you wrote before the market opened. Use it as the anchor while the trade is live.",
+                    "Esto es lo que escribiste antes de que abriera el mercado. Úsalo como ancla mientras el trade está vivo."
+                  )}
+                </p>
+                <p className="mt-2 text-sm leading-6 text-slate-200/90">
+                  {premarketPreview ||
+                    L(
+                      "No premarket note yet. Go back to Step 1 and define the session plan first.",
+                      "Todavía no hay nota de premarket. Vuelve al Paso 1 y define primero el plan de la sesión."
+                    )}
+                </p>
+              </div>
+            </div>
+            {premarketReplay.length ? (
+              <div className="mt-3 flex flex-wrap gap-2">
+                {premarketReplay.map((label) => (
+                  <span
+                    key={label}
+                    className="rounded-full border border-cyan-300/25 bg-cyan-400/10 px-2.5 py-1 text-[11px] text-cyan-100"
+                  >
+                    {label}
+                  </span>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
         {journalNeuroMemory ? (
           <div
             className={`mt-3 rounded-2xl border px-4 py-3 ${
@@ -3646,7 +4067,7 @@ export default function DailyJournalPage() {
           <>
             <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.18fr)_minmax(420px,0.82fr)] gap-4">
               <div className="space-y-4">
-                {["premarket", "inside"].map((id) => (
+                {["inside"].map((id) => (
                   <div key={id}>{sectionMap[id as JournalWidgetId]?.render()}</div>
                 ))}
               </div>
@@ -3658,9 +4079,9 @@ export default function DailyJournalPage() {
             </div>
             <div className="mt-4 space-y-4">
               {activeStep?.sections
-                .filter((id) => !["premarket", "inside", "emotional", "entries", "exits"].includes(id))
+                .filter((id) => !["inside", "emotional", "entries", "exits"].includes(id))
                 .map((id) => (
-                  <div key={id} className={fullWidthSections.has(id) ? "w-full" : ""}>
+                  <div key={id}>
                     {sectionMap[id]?.render()}
                   </div>
                 ))}

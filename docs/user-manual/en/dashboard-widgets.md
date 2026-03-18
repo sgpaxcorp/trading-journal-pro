@@ -105,9 +105,6 @@ Use it to:
 **P&L Calendar**  
 Monthly view of daily P&L. Green = positive day, blue = controlled loss day.
 
-**Daily Target**  
-Shows today’s goal vs actual P&L when a target exists in Growth Plan.
-
 **Trading Days**  
 Shows year progress and remaining trading days based on your plan.
 
@@ -127,11 +124,10 @@ Macro events by country. Use this to avoid trading into high-volatility events.
 1. Start with `Account Progress` to see the equity reality.
 2. Check `Plan Progress` to know if you are ahead or behind the Growth Plan.
 3. Use `Weekly Summary` to review the real result of the week.
-4. Scan `P&L Calendar` and `Daily Target` to validate short-term pace.
+4. Use `P&L Calendar` to audit recent sessions day by day without turning the dashboard into a daily money-pressure screen.
 
 ## Tips
 - Empty widgets usually mean missing journal sessions or missing imports.
-- If `Daily Target` is off, review your Growth Plan fields.
 - If `Account Progress` and `Plan Progress` tell different stories, that is not a bug: they answer different questions.
 
 ## FAQ
@@ -143,6 +139,9 @@ A: In `Weekly Summary`.
 
 Q: Where do I see the real account state?  
 A: In `Account Progress`.
+
+Q: Why is `Daily Target` no longer on the main Dashboard?  
+A: To reduce pressure and avoid encouraging traders to force P&L intraday. The dashboard now prioritizes account reality, plan pacing, and realized execution.
 
 Q: Why does the P&L Calendar look empty?  
 A: You need saved sessions in the selected month.

@@ -34,6 +34,11 @@ import {
   type AiCoachSnapshot,
 } from "@/lib/aiCoachSnapshotSupabase";
 import {
+  getDefaultExecutionSystem,
+  upsertGrowthPlanSupabase,
+  type GrowthPlanChecklistItem,
+} from "@/lib/growthPlanSupabase";
+import {
   getProfileGamification,
   type ProfileGamification,
 } from "@/lib/profileGamificationSupabase";
@@ -48,9 +53,9 @@ import {
   createAiCoachThread,
   getOrCreateMostRecentAiCoachThread,
   insertAiCoachMessage,
+  listAiCoachFeedbackForThread,
   listAiCoachMessages,
   listAiCoachThreads,
-  type AiCoachMessageRow,
   type AiCoachThreadRow,
 } from "@/lib/aiCoachChatSupabase";
 import {
@@ -73,7 +78,34 @@ type ChatMessage = {
   role: "user" | "coach";
   text: string;
   createdAt: string;
+  meta?: {
+    actionPlan?: CoachActionPlanMeta | null;
+    autoAudit?: CoachAutoAuditMeta | null;
+  } | null;
 };
+
+type CoachActionPlanMeta = {
+  summary?: string;
+  nextAction?: string;
+  ruleToAdd?: string;
+  ruleToRemove?: string;
+  checkpointFocus?: string;
+};
+
+type CoachAutoAuditMeta = {
+  attached?: boolean;
+  date?: string | null;
+  instrument?: string | null;
+  summary?: string;
+  processScore?: number | null;
+  disciplineScore?: number | null;
+  eventCount?: number;
+};
+
+type PlanRuleActionState = {
+  kind: "success" | "info" | "error";
+  message: string;
+} | null;
 
 type CoachMemoryView = {
   global?: string;
@@ -82,6 +114,7 @@ type CoachMemoryView = {
   dailyKey?: string;
   weeklyKey?: string;
   updatedAt?: string;
+  disabled?: boolean;
 };
 
 type GrowthPlanRow = {
@@ -89,12 +122,46 @@ type GrowthPlanRow = {
   user_id: string;
   starting_balance: number | string | null;
   target_balance: number | string | null;
+  target_date?: string | null;
+  plan_start_date?: string | null;
+  plan_mode?: "auto" | "manual" | string | null;
   daily_target_pct: number | string | null;
   daily_goal_percent: number | string | null;
   max_daily_loss_percent: number | string | null;
+  max_risk_per_trade_percent?: number | string | null;
   max_risk_per_trade_usd: number | string | null;
+  trading_days?: number | string | null;
+  loss_days_per_week?: number | string | null;
+  rules?: Array<{
+    id?: string;
+    label?: string;
+    description?: string;
+    isActive?: boolean;
+  }> | null;
+  steps?: Record<string, any> | null;
+  plan_phases?: Array<Record<string, any>> | null;
+  planned_withdrawal_settings?: Record<string, any> | null;
+  planned_withdrawals?: Array<Record<string, any>> | null;
   created_at: string | null;
   updated_at: string | null;
+};
+
+type CoachMode =
+  | "plan-rescue"
+  | "weekly-review"
+  | "risk-discipline"
+  | "execution-truth"
+  | "psychology-patterns";
+
+type CoachRangePreset = "plan" | "last30" | "last90" | "all";
+type CoachConversationLanguage = "auto" | "es" | "en";
+
+type CoachPromptTemplate = {
+  id: string;
+  label: string;
+  prompt: string;
+  mode: CoachMode;
+  range: CoachRangePreset;
 };
 
 type Snapshot = {
@@ -184,7 +251,7 @@ type CoachAnalyticsSnapshot = {
   range: {
     startIso: string;
     endIso: string;
-    source: "ALL" | "PLAN";
+    source: "ALL" | "PLAN" | "CUSTOM";
   };
   totals: {
     sessions: number;
@@ -442,37 +509,182 @@ function findClosestCandle(
    Helpers
 ========================= */
 
-const QUICK_PROMPTS_EN: string[] = [
-  "Based on my last sessions, what is the main thing I should change?",
-  "Looking only at recent data, what is my biggest psychological leak?",
-  "How am I doing vs my plan and challenges this week?",
-  "What should I improve in my risk management during losing days?",
-];
+function getSmartPromptGroups(isEs: boolean): {
+  primary: CoachPromptTemplate[];
+  neuro: CoachPromptTemplate[];
+} {
+  if (isEs) {
+    return {
+      primary: [
+        {
+          id: "checkpoint-rescue",
+          label: "Rescatar el checkpoint",
+          prompt:
+            "Analiza mi journal y mi Growth Plan para decirme qué amenaza más mi próximo checkpoint. Quiero el patrón principal, la evidencia del journal y la acción concreta para la próxima sesión.",
+          mode: "plan-rescue",
+          range: "plan",
+        },
+        {
+          id: "costly-behavior",
+          label: "Conducta más costosa",
+          prompt:
+            "Tomando los últimos 30 días, ¿cuál es la conducta que más me está costando probabilidad de cumplir el Growth Plan? Dímelo con evidencia y con una regla operativa concreta.",
+          mode: "plan-rescue",
+          range: "last30",
+        },
+        {
+          id: "risk-vs-plan",
+          label: "Riesgo vs plan",
+          prompt:
+            "Compara mi ejecución reciente con los risk rails de mi Growth Plan. Quiero saber dónde estoy filtrando edge en size, pérdida diaria, frecuencia o disciplina.",
+          mode: "risk-discipline",
+          range: "last30",
+        },
+        {
+          id: "tomorrow-protection",
+          label: "Plan para mañana",
+          prompt:
+            "Usando mis sesiones recientes, dime qué debe proteger mi plan de trading de mañana para evitar repetir mis errores más costosos.",
+          mode: "weekly-review",
+          range: "last30",
+        },
+        {
+          id: "rule-swap",
+          label: "Regla para añadir y quitar",
+          prompt:
+            "Si fueras mi performance coach, ¿qué regla exacta agregarías hoy a mi sistema y qué regla quitarías o endurecerías para mejorar mi cumplimiento del plan?",
+          mode: "plan-rescue",
+          range: "last90",
+        },
+      ],
+      neuro: [
+        {
+          id: "execution-truth-gap",
+          label: "Verdad de ejecución",
+          prompt:
+            "Usa execution truth sobre mis sesiones recientes y dime dónde más se separó mi plan de mi comportamiento real.",
+          mode: "execution-truth",
+          range: "last30",
+        },
+        {
+          id: "emotion-drift",
+          label: "Patrón emocional",
+          prompt:
+            "Lee el drift emocional en mi journal y dime qué patrón psicológico aparece antes de mis peores decisiones.",
+          mode: "psychology-patterns",
+          range: "last90",
+        },
+        {
+          id: "red-day-diagnosis",
+          label: "Diagnóstico de días rojos",
+          prompt:
+            "Audita mis sesiones perdedoras y dime si el problema dominante es entradas, salidas, size, manejo o estado mental.",
+          mode: "execution-truth",
+          range: "last90",
+        },
+        {
+          id: "premarket-focus",
+          label: "Foco pre-market",
+          prompt:
+            "Sintetiza mi journal, mi capa Neuro y mis resultados en un foco concreto de pre-market para mañana.",
+          mode: "psychology-patterns",
+          range: "last30",
+        },
+      ],
+    };
+  }
 
-const NEURO_QUICK_PROMPTS_EN: string[] = [
-  "Show me my Neuro review from recent sessions.",
-  "What drift pattern am I repeating between plan and execution?",
-  "What does my journal say about my decision process lately?",
-];
-
-const QUICK_PROMPTS_ES: string[] = [
-  "Basado en mis últimas sesiones, ¿qué es lo principal que debo cambiar?",
-  "Viendo solo datos recientes, ¿cuál es mi mayor fuga psicológica?",
-  "¿Cómo voy vs mi plan y mis retos esta semana?",
-  "¿Qué debo mejorar en mi gestión de riesgo durante días rojos?",
-];
-
-const NEURO_QUICK_PROMPTS_ES: string[] = [
-  "Muéstrame mi revisión Neuro de las sesiones recientes.",
-  "¿Qué patrón de drift estoy repitiendo entre plan y ejecución?",
-  "¿Qué dice mi journal últimamente sobre mi proceso de decisión?",
-];
+  return {
+    primary: [
+      {
+        id: "checkpoint-rescue",
+        label: "Rescue the checkpoint",
+        prompt:
+          "Analyze my journal and Growth Plan to tell me what is threatening my next checkpoint most. I want the main pattern, the journal evidence, and the one action I should take next session.",
+        mode: "plan-rescue",
+        range: "plan",
+      },
+      {
+        id: "costly-behavior",
+        label: "Most expensive behavior",
+        prompt:
+          "Using the last 30 days, what behavior is costing me the most probability of hitting my Growth Plan? Show me the evidence and turn it into one concrete operating rule.",
+        mode: "plan-rescue",
+        range: "last30",
+      },
+      {
+        id: "risk-vs-plan",
+        label: "Risk vs plan",
+        prompt:
+          "Compare my recent execution with the risk rails in my Growth Plan. I want to know where I am leaking edge in size, daily loss discipline, frequency, or rule adherence.",
+        mode: "risk-discipline",
+        range: "last30",
+      },
+      {
+        id: "tomorrow-protection",
+        label: "Tomorrow protection plan",
+        prompt:
+          "Use my recent sessions to tell me what tomorrow's trading plan needs to protect me from so I stop repeating my most expensive mistakes.",
+        mode: "weekly-review",
+        range: "last30",
+      },
+      {
+        id: "rule-swap",
+        label: "Rule to add and remove",
+        prompt:
+          "If you were my performance coach, what exact rule would you add to my system today and what rule would you remove or tighten to improve plan adherence?",
+        mode: "plan-rescue",
+        range: "last90",
+      },
+    ],
+    neuro: [
+      {
+        id: "execution-truth-gap",
+        label: "Execution truth",
+        prompt:
+          "Use execution truth across my recent sessions and tell me where my plan and my real behavior diverged the most.",
+        mode: "execution-truth",
+        range: "last30",
+      },
+      {
+        id: "emotion-drift",
+        label: "Emotional drift pattern",
+        prompt:
+          "Read the emotional drift in my journal and tell me which psychological pattern appears before my worst decisions.",
+        mode: "psychology-patterns",
+        range: "last90",
+      },
+      {
+        id: "red-day-diagnosis",
+        label: "Red-day diagnosis",
+        prompt:
+          "Audit my losing sessions and tell me whether the dominant problem is entries, exits, sizing, management, or state of mind.",
+        mode: "execution-truth",
+        range: "last90",
+      },
+      {
+        id: "premarket-focus",
+        label: "Pre-market focus",
+        prompt:
+          "Synthesize my journal, Neuro layer, and results into one concrete pre-market focus for tomorrow.",
+        mode: "psychology-patterns",
+        range: "last30",
+      },
+    ],
+  };
+}
 
 function makeId() {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
     return crypto.randomUUID();
   }
   return Math.random().toString(36).slice(2);
+}
+
+function normalizePlanRuleText(raw: string | null | undefined): string {
+  return String(raw || "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 
@@ -1208,7 +1420,7 @@ function computeWindowStats(
 function buildCoachAnalyticsSnapshot(
   entries: JournalEntry[],
   cashflows: Cashflow[],
-  planStartIso: string | null,
+  range: { startIso?: string | null; endIso?: string | null; preset?: CoachRangePreset },
   startingBalance: number
 ): CoachAnalyticsSnapshot {
   const sessions = (entries as any[])
@@ -1233,10 +1445,15 @@ function buildCoachAnalyticsSnapshot(
     createdAt: string;
   }>;
 
-  const rangeSource = planStartIso ? "PLAN" : "ALL";
-  const filtered = planStartIso
-    ? sessions.filter((s) => !planStartIso || s.date >= planStartIso)
-    : sessions;
+  const startIso = range?.startIso && looksLikeYYYYMMDD(range.startIso) ? range.startIso : "";
+  const endIso = range?.endIso && looksLikeYYYYMMDD(range.endIso) ? range.endIso : "";
+  const rangeSource =
+    range?.preset === "plan" ? "PLAN" : startIso || endIso ? "CUSTOM" : "ALL";
+  const filtered = sessions.filter((s) => {
+    if (startIso && s.date < startIso) return false;
+    if (endIso && s.date > endIso) return false;
+    return true;
+  });
 
   const winsArr = filtered.map((s) => s.pnlNet).filter((p) => p > 0);
   const lossArr = filtered.map((s) => s.pnlNet).filter((p) => p < 0).map((p) => Math.abs(p));
@@ -1269,7 +1486,7 @@ function buildCoachAnalyticsSnapshot(
   const maxWin = winsArr.length ? Math.max(...winsArr) : 0;
   const maxLoss = lossArr.length ? Math.max(...lossArr) : 0;
 
-  const equityCurve = computeEquityCurveFromSessions(filtered, cashflows, startingBalance, planStartIso);
+  const equityCurve = computeEquityCurveFromSessions(filtered, cashflows, startingBalance, startIso || null);
   const dd = computeMaxDrawdown(equityCurve);
 
   const byInstrumentMap: Record<string, { sessions: number; netPnl: number }> = {};
@@ -1332,8 +1549,8 @@ function buildCoachAnalyticsSnapshot(
   return {
     updatedAtIso: new Date().toISOString(),
     range: {
-      startIso: planStartIso || "",
-      endIso: new Date().toISOString().slice(0, 10),
+      startIso,
+      endIso: endIso || new Date().toISOString().slice(0, 10),
       source: rangeSource,
     },
     totals: {
@@ -1503,8 +1720,63 @@ function AiCoachingPageInner() {
   const lang = resolveLocale(locale);
   const isEs = lang === "es";
   const L = (en: string, es: string) => (isEs ? es : en);
-  const quickPrompts = isEs ? QUICK_PROMPTS_ES : QUICK_PROMPTS_EN;
-  const neuroQuickPrompts = isEs ? NEURO_QUICK_PROMPTS_ES : NEURO_QUICK_PROMPTS_EN;
+  const coachModeOptions = useMemo<Array<{ value: CoachMode; label: string }>>(
+    () =>
+      isEs
+        ? [
+            { value: "plan-rescue", label: "Rescate del plan" },
+            { value: "weekly-review", label: "Revisión semanal" },
+            { value: "risk-discipline", label: "Disciplina de riesgo" },
+            { value: "execution-truth", label: "Verdad de ejecución" },
+            { value: "psychology-patterns", label: "Patrones psicológicos" },
+          ]
+        : [
+            { value: "plan-rescue", label: "Plan rescue" },
+            { value: "weekly-review", label: "Weekly review" },
+            { value: "risk-discipline", label: "Risk discipline" },
+            { value: "execution-truth", label: "Execution truth" },
+            { value: "psychology-patterns", label: "Psychology patterns" },
+          ],
+    [isEs]
+  );
+  const coachRangeOptions = useMemo<Array<{ value: CoachRangePreset; label: string }>>(
+    () =>
+      isEs
+        ? [
+            { value: "plan", label: "Desde el plan" },
+            { value: "last30", label: "Últimos 30 días" },
+            { value: "last90", label: "Últimos 90 días" },
+            { value: "all", label: "Todo el journal" },
+          ]
+        : [
+            { value: "plan", label: "Since plan start" },
+            { value: "last30", label: "Last 30 days" },
+            { value: "last90", label: "Last 90 days" },
+            { value: "all", label: "All journal history" },
+          ],
+    [isEs]
+  );
+  const coachModeLabels = useMemo(
+    () =>
+      Object.fromEntries(coachModeOptions.map((option) => [option.value, option.label])) as Record<
+        CoachMode,
+        string
+      >,
+    [coachModeOptions]
+  );
+  const coachRangeLabels = useMemo(
+    () =>
+      Object.fromEntries(coachRangeOptions.map((option) => [option.value, option.label])) as Record<
+        CoachRangePreset,
+        string
+      >,
+    [coachRangeOptions]
+  );
+  const coachConversationLanguageOptions: Array<{ value: CoachConversationLanguage; label: string }> = [
+    { value: "auto", label: L("Auto", "Auto") },
+    { value: "en", label: "English" },
+    { value: "es", label: "Español" },
+  ];
 
   // Platform data
   const [entries, setEntries] = useState<JournalEntry[]>([]);
@@ -1522,12 +1794,19 @@ function AiCoachingPageInner() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [coachMemory, setCoachMemory] = useState<CoachMemoryView | null>(null);
   const [memoryOpen, setMemoryOpen] = useState(false);
+  const [feedbackEnabled, setFeedbackEnabled] = useState(true);
   const [feedbackByMessage, setFeedbackByMessage] = useState<Record<string, number>>({});
   const [feedbackSending, setFeedbackSending] = useState<Record<string, boolean>>({});
 
   // UI state
   const [question, setQuestion] = useState("");
   const [coachState, setCoachState] = useState<AiCoachState>({ loading: false, error: null });
+  const [coachMode, setCoachMode] = useState<CoachMode>("plan-rescue");
+  const [coachRangePreset, setCoachRangePreset] = useState<CoachRangePreset>("plan");
+  const [coachConversationLanguage, setCoachConversationLanguage] = useState<CoachConversationLanguage>("auto");
+  const [selectedPromptId, setSelectedPromptId] = useState("");
+  const [planRuleSaving, setPlanRuleSaving] = useState<"doList" | "dontList" | null>(null);
+  const [planRuleAction, setPlanRuleAction] = useState<PlanRuleActionState>(null);
 
   // URL params (avoid hook-order issues from useSearchParams)
   const [searchParams, setSearchParams] = useState<URLSearchParams | null>(null);
@@ -1535,6 +1814,19 @@ function AiCoachingPageInner() {
     if (typeof window === "undefined") return;
     setSearchParams(new URLSearchParams(window.location.search));
   }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const saved = window.localStorage.getItem("tjpro_ai_coach_language");
+    if (saved === "auto" || saved === "es" || saved === "en") {
+      setCoachConversationLanguage(saved);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem("tjpro_ai_coach_language", coachConversationLanguage);
+  }, [coachConversationLanguage]);
 
   // Screenshot
   const [screenshotFile, setScreenshotFile] = useState<File | null>(null);
@@ -1549,6 +1841,147 @@ function AiCoachingPageInner() {
 
   // Scroll to bottom
   const endRef = useRef<HTMLDivElement | null>(null);
+  const coachUiLang = coachConversationLanguage === "auto" ? (isEs ? "es" : "en") : coachConversationLanguage;
+  const coachUiIsEs = coachUiLang === "es";
+  const promptGroups = useMemo(() => getSmartPromptGroups(coachUiIsEs), [coachUiIsEs]);
+  const growthPlanSystemRules = useMemo(() => {
+    const system = growthPlan?.steps?.execution_and_journal?.system;
+    const normalizeRule = (value: unknown): string => {
+      if (typeof value === "string") return value.trim();
+      if (value && typeof value === "object" && "text" in value && typeof value.text === "string") {
+        return value.text.trim();
+      }
+      return "";
+    };
+    const doList: string[] = (Array.isArray(system?.doList) ? (system.doList as unknown[]) : [])
+      .map((rule: unknown) => normalizeRule(rule))
+      .filter(Boolean)
+      .slice(0, 4);
+    const dontList: string[] = (Array.isArray(system?.dontList) ? (system.dontList as unknown[]) : [])
+      .map((rule: unknown) => normalizeRule(rule))
+      .filter(Boolean)
+      .slice(0, 4);
+    return { doList, dontList };
+  }, [growthPlan]);
+  const allPromptTemplates = useMemo(
+    () => [...promptGroups.primary, ...promptGroups.neuro],
+    [promptGroups]
+  );
+  const selectedPromptTemplate = useMemo(
+    () => allPromptTemplates.find((template) => template.id === selectedPromptId) ?? null,
+    [allPromptTemplates, selectedPromptId]
+  );
+
+  const applyPromptTemplate = (template: CoachPromptTemplate) => {
+    setCoachMode(template.mode);
+    setCoachRangePreset(template.range);
+    setQuestion(template.prompt);
+  };
+
+  const handlePromptSelection = (promptId: string) => {
+    setSelectedPromptId(promptId);
+    const template = allPromptTemplates.find((item) => item.id === promptId);
+    if (template) applyPromptTemplate(template);
+  };
+
+  const applyRuleToGrowthPlan = async (listKey: "doList" | "dontList", rawRule: string | undefined) => {
+    const text = normalizePlanRuleText(rawRule);
+    if (!text) return;
+    if (!growthPlan || !activeAccountId) {
+      setPlanRuleAction({
+        kind: "error",
+        message: L(
+          "Load an active Growth Plan before applying coach rules.",
+          "Carga un Growth Plan activo antes de aplicar reglas del coach."
+        ),
+      });
+      return;
+    }
+
+    const system = growthPlan.steps?.execution_and_journal?.system ?? getDefaultExecutionSystem();
+    const targetList = Array.isArray(system[listKey]) ? [...system[listKey]] : [];
+    const oppositeKey = listKey === "doList" ? "dontList" : "doList";
+    const oppositeList = Array.isArray(system[oppositeKey]) ? system[oppositeKey] : [];
+    const normalizedTarget = targetList.map((item) => normalizePlanRuleText(item?.text).toLowerCase());
+    const normalizedOpposite = oppositeList.map((item) => normalizePlanRuleText(item?.text).toLowerCase());
+    const normalizedText = text.toLowerCase();
+
+    if (normalizedTarget.includes(normalizedText)) {
+      setPlanRuleAction({
+        kind: "info",
+        message:
+          listKey === "doList"
+            ? L("That rule is already in your Do list.", "Esa regla ya está en tu lista Do.")
+            : L("That rule is already in your Don't list.", "Esa regla ya está en tu lista Don't."),
+      });
+      return;
+    }
+
+    if (normalizedOpposite.includes(normalizedText)) {
+      setPlanRuleAction({
+        kind: "info",
+        message:
+          listKey === "doList"
+            ? L("That rule already exists in your Don't list. Review it before adding it to Do.", "Esa regla ya existe en tu lista Don't. Revísala antes de agregarla a Do.")
+            : L("That rule already exists in your Do list. Review it before adding it to Don't.", "Esa regla ya existe en tu lista Do. Revísala antes de agregarla a Don't."),
+      });
+      return;
+    }
+
+    const nextItem: GrowthPlanChecklistItem = {
+      id: `coach-${listKey}-${makeId()}`,
+      text,
+      isActive: true,
+      isSuggested: false,
+    };
+
+    try {
+      setPlanRuleSaving(listKey);
+      setPlanRuleAction(null);
+
+      const saved = await upsertGrowthPlanSupabase(
+        {
+          steps: {
+            ...(growthPlan.steps ?? {}),
+            execution_and_journal: {
+              ...(growthPlan.steps?.execution_and_journal ?? {}),
+              system: {
+                ...system,
+                [listKey]: [...targetList, nextItem],
+              },
+            },
+          } as any,
+        },
+        activeAccountId
+      );
+
+      setGrowthPlan((prev) =>
+        prev
+          ? {
+              ...prev,
+              steps: saved.steps as Record<string, any>,
+              updated_at: saved.updatedAt ?? prev.updated_at,
+            }
+          : prev
+      );
+      setPlanRuleAction({
+        kind: "success",
+        message:
+          listKey === "doList"
+            ? L("Rule added to your Do list.", "Regla agregada a tu lista Do.")
+            : L("Rule added to your Don't list.", "Regla agregada a tu lista Don't."),
+      });
+    } catch (err: any) {
+      setPlanRuleAction({
+        kind: "error",
+        message:
+          err?.message ||
+          L("Could not update the Growth Plan rules.", "No se pudo actualizar las reglas del Growth Plan."),
+      });
+    } finally {
+      setPlanRuleSaving(null);
+    }
+  };
 
   const renderMemoryList = (text?: string) => {
     const clean = String(text || "").trim();
@@ -1568,6 +2001,202 @@ function AiCoachingPageInner() {
     );
   };
 
+  const renderActionPlan = (plan?: CoachActionPlanMeta | null) => {
+    if (!plan) return null;
+    const rows = [
+      { label: L("Next action", "Próxima acción"), value: plan.nextAction },
+      { label: L("Rule to add", "Regla para agregar"), value: plan.ruleToAdd },
+      { label: L("Rule to remove", "Regla para remover"), value: plan.ruleToRemove },
+      { label: L("Checkpoint focus", "Foco del checkpoint"), value: plan.checkpointFocus },
+    ].filter((row) => String(row.value || "").trim());
+
+    if (!rows.length && !String(plan.summary || "").trim()) return null;
+
+    return (
+      <div className="mt-3 rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-3 text-[12px] text-slate-100">
+        <p className="text-[10px] uppercase tracking-[0.18em] text-emerald-300">
+          {L("Action plan", "Plan de acción")}
+        </p>
+        {plan.summary ? <p className="mt-2 text-slate-200">{plan.summary}</p> : null}
+        <div className="mt-2 space-y-1.5">
+          {rows.map((row) => (
+            <div key={row.label}>
+              <span className="text-slate-400">{row.label}: </span>
+              <span className="text-slate-100">{row.value}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  const renderAutoAudit = (audit?: CoachAutoAuditMeta | null) => {
+    if (!audit?.attached) return null;
+    return (
+      <div className="mt-3 rounded-xl border border-cyan-500/20 bg-cyan-500/10 p-3 text-[12px] text-slate-100">
+        <p className="text-[10px] uppercase tracking-[0.18em] text-cyan-300">
+          {L("Auto audit attached", "Auto audit adjuntado")}
+        </p>
+        <p className="mt-2 text-slate-200">
+          {[audit.date, audit.instrument].filter(Boolean).join(" · ")}
+          {typeof audit.eventCount === "number" ? ` · ${audit.eventCount} ${L("events", "eventos")}` : ""}
+        </p>
+        {audit.summary ? <p className="mt-2 text-slate-300">{audit.summary}</p> : null}
+        <div className="mt-2 flex flex-wrap gap-2 text-[11px]">
+          {typeof audit.disciplineScore === "number" ? (
+            <span className="rounded-full border border-cyan-500/30 px-2 py-1">
+              {L("Discipline", "Disciplina")}: {audit.disciplineScore}%
+            </span>
+          ) : null}
+          {typeof audit.processScore === "number" ? (
+            <span className="rounded-full border border-cyan-500/30 px-2 py-1">
+              {L("Process", "Proceso")}: {audit.processScore}%
+            </span>
+          ) : null}
+        </div>
+      </div>
+    );
+  };
+
+  const renderGrowthPlanSuggestions = (plan?: CoachActionPlanMeta | null) => {
+    const ruleToAdd = String(plan?.ruleToAdd || "").trim();
+    const ruleToRemove = String(plan?.ruleToRemove || "").trim();
+    if (!ruleToAdd && !ruleToRemove) return null;
+
+    return (
+      <div className="rounded-xl border border-violet-400/20 bg-violet-500/10 p-3 text-[12px] text-slate-100">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-[10px] uppercase tracking-[0.18em] text-violet-200">
+              {L("Growth Plan suggestions", "Sugerencias para el Growth Plan")}
+            </p>
+            <p className="mt-1 text-slate-300">
+              {L(
+                "Turn the coach output into cleaner operating rules for your Do / Don't system.",
+                "Convierte el output del coach en reglas operativas más limpias para tu sistema de Do / Don't."
+              )}
+            </p>
+          </div>
+          <Link
+            href="/growth-plan"
+            className="shrink-0 rounded-full border border-violet-300/30 px-3 py-1 text-[11px] text-violet-100 transition hover:border-violet-200 hover:text-white"
+          >
+            {L("Open plan", "Abrir plan")}
+          </Link>
+        </div>
+
+        <div className="mt-3 grid gap-2">
+          {ruleToAdd ? (
+            <div className="rounded-lg border border-emerald-400/20 bg-slate-950/40 p-2.5">
+              <p className="text-[10px] uppercase tracking-[0.14em] text-emerald-300">
+                {L("Suggested Do", "Do sugerido")}
+              </p>
+              <p className="mt-1 text-slate-100">{ruleToAdd}</p>
+              <button
+                type="button"
+                onClick={() => applyRuleToGrowthPlan("doList", ruleToAdd)}
+                disabled={planRuleSaving === "doList" || !growthPlan || !activeAccountId}
+                className="mt-2 rounded-full border border-emerald-300/30 px-3 py-1 text-[11px] text-emerald-100 transition hover:border-emerald-200 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {planRuleSaving === "doList"
+                  ? L("Adding to Do...", "Agregando a Do...")
+                  : L("Add to Do", "Agregar a Do")}
+              </button>
+            </div>
+          ) : null}
+          {ruleToRemove ? (
+            <div className="rounded-lg border border-rose-400/20 bg-slate-950/40 p-2.5">
+              <p className="text-[10px] uppercase tracking-[0.14em] text-rose-300">
+                {L("Suggested Don't", "Don't sugerido")}
+              </p>
+              <p className="mt-1 text-slate-100">{ruleToRemove}</p>
+              <button
+                type="button"
+                onClick={() => applyRuleToGrowthPlan("dontList", ruleToRemove)}
+                disabled={planRuleSaving === "dontList" || !growthPlan || !activeAccountId}
+                className="mt-2 rounded-full border border-rose-300/30 px-3 py-1 text-[11px] text-rose-100 transition hover:border-rose-200 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {planRuleSaving === "dontList"
+                  ? L("Adding to Don't...", "Agregando a Don't...")
+                  : L("Add to Don't", "Agregar a Don't")}
+              </button>
+            </div>
+          ) : null}
+        </div>
+
+        {planRuleAction ? (
+          <div
+            className={`mt-3 rounded-lg border px-3 py-2 text-[11px] ${
+              planRuleAction.kind === "success"
+                ? "border-emerald-400/20 bg-emerald-500/10 text-emerald-100"
+                : planRuleAction.kind === "info"
+                  ? "border-slate-600 bg-slate-900/60 text-slate-200"
+                  : "border-rose-400/20 bg-rose-500/10 text-rose-100"
+            }`}
+          >
+            {planRuleAction.message}
+          </div>
+        ) : null}
+
+        {(growthPlanSystemRules.doList.length || growthPlanSystemRules.dontList.length) && (
+          <div className="mt-3 grid gap-2 md:grid-cols-2">
+            <div className="rounded-lg border border-slate-700 bg-slate-950/40 p-2.5">
+              <p className="text-[10px] uppercase tracking-[0.14em] text-slate-400">
+                {L("Current Do list", "Do actual")}
+              </p>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {growthPlanSystemRules.doList.length ? (
+                  growthPlanSystemRules.doList.map((rule) => (
+                    <span key={rule} className="rounded-full border border-emerald-500/20 px-2 py-1 text-[10px] text-emerald-100">
+                      {rule}
+                    </span>
+                  ))
+                ) : (
+                  <span className="text-[11px] text-slate-500">{L("No Do rules yet.", "Aún no hay reglas Do.")}</span>
+                )}
+              </div>
+            </div>
+            <div className="rounded-lg border border-slate-700 bg-slate-950/40 p-2.5">
+              <p className="text-[10px] uppercase tracking-[0.14em] text-slate-400">
+                {L("Current Don't list", "Don't actual")}
+              </p>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {growthPlanSystemRules.dontList.length ? (
+                  growthPlanSystemRules.dontList.map((rule) => (
+                    <span key={rule} className="rounded-full border border-rose-500/20 px-2 py-1 text-[10px] text-rose-100">
+                      {rule}
+                    </span>
+                  ))
+                ) : (
+                  <span className="text-[11px] text-slate-500">{L("No Don't rules yet.", "Aún no hay reglas Don't.")}</span>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        <button
+          type="button"
+          onClick={() =>
+            applyPromptTemplate({
+              id: "refine-growth-plan-rules",
+              label: "",
+              mode: "plan-rescue",
+              range: "last30",
+              prompt: L(
+                "Rewrite the suggested rule changes as clean Do and Don't rules for my Growth Plan. Keep them short, operational, and realistic for my next sessions.",
+                "Reescribe los cambios de reglas sugeridos como reglas Do y Don't limpias para mi Growth Plan. Mantenlas cortas, operativas y realistas para mis próximas sesiones."
+              ),
+            })
+          }
+          className="mt-3 rounded-full border border-violet-300/30 px-3 py-1.5 text-[11px] text-violet-100 transition hover:border-violet-200 hover:text-white"
+        >
+          {L("Refine into plan rules", "Refinar como reglas del plan")}
+        </button>
+      </div>
+    );
+  };
+
   const fetchCoachMemory = async () => {
     const session = await supabaseBrowser.auth.getSession();
     const token = session?.data?.session?.access_token;
@@ -1577,7 +2206,24 @@ function AiCoachingPageInner() {
     });
     if (!res.ok) return;
     const data = await res.json().catch(() => null);
-    if (data) setCoachMemory(data);
+    if (!data || data?.disabled) {
+      setCoachMemory(null);
+      return;
+    }
+    setCoachMemory(data);
+  };
+
+  const loadFeedbackState = async (threadId: string) => {
+    if (!threadId) {
+      setFeedbackByMessage({});
+      return;
+    }
+    const rows = await listAiCoachFeedbackForThread(threadId);
+    const next = rows.reduce<Record<string, number>>((acc, row) => {
+      if (row.message_id && (row.rating === 1 || row.rating === -1)) acc[row.message_id] = row.rating;
+      return acc;
+    }, {});
+    setFeedbackByMessage(next);
   };
 
   const sendFeedback = async (messageId: string, rating: number) => {
@@ -1599,9 +2245,16 @@ function AiCoachingPageInner() {
           rating,
         }),
       });
-      if (res.ok) {
+      const data = await res.json().catch(() => null);
+      if (data?.disabled) {
+        setFeedbackEnabled(false);
+        return;
+      }
+      if (res.ok && data?.ok !== false) {
         setFeedbackByMessage((prev) => ({ ...prev, [messageId]: rating }));
         await fetchCoachMemory();
+      } else {
+        console.warn("[AI Coaching] feedback save error:", data?.error || res.status);
       }
     } finally {
       setFeedbackSending((prev) => ({ ...prev, [messageId]: false }));
@@ -1930,10 +2583,13 @@ function AiCoachingPageInner() {
             role: m.role === "coach" ? "coach" : "user",
             text: m.content,
             createdAt: m.created_at,
+            meta: (m.meta as ChatMessage["meta"]) ?? null,
           }));
           setMessages(mapped);
+          await loadFeedbackState(threadToUse.id);
         } else {
           setMessages([]);
+          setFeedbackByMessage({});
         }
 
         // 3) Journal
@@ -1945,7 +2601,7 @@ function AiCoachingPageInner() {
         const { data: gp, error: gpErr } = await supabaseBrowser
           .from("growth_plans")
           .select(
-            "id,user_id,starting_balance,target_balance,daily_target_pct,daily_goal_percent,max_daily_loss_percent,max_risk_per_trade_usd,created_at,updated_at"
+            "id,user_id,starting_balance,target_balance,target_date,plan_start_date,plan_mode,daily_target_pct,daily_goal_percent,max_daily_loss_percent,max_risk_per_trade_percent,max_risk_per_trade_usd,trading_days,loss_days_per_week,rules,steps,plan_phases,planned_withdrawal_settings,planned_withdrawals,created_at,updated_at"
           )
           .eq("user_id", userId)
           .eq("account_id", activeAccountId)
@@ -2040,22 +2696,83 @@ function AiCoachingPageInner() {
 
   /* ---------- Derived stats ---------- */
 
-  const snapshot = useMemo(() => (entries.length ? buildSnapshot(entries) : null), [entries]);
+  const planStartIso = useMemo(() => planStartIsoFromPlan(growthPlan), [growthPlan]);
+  const coachRangeBounds = useMemo(() => {
+    const dated = entries
+      .map((entry) => String(entry?.date || "").slice(0, 10))
+      .filter(looksLikeYYYYMMDD)
+      .sort();
+
+    const earliestIso = dated[0] || "";
+    const latestIso = dated[dated.length - 1] || isoDate(new Date());
+    const endIso = latestIso || isoDate(new Date());
+
+    if (coachRangePreset === "plan") {
+      return {
+        preset: coachRangePreset,
+        startIso: planStartIso && looksLikeYYYYMMDD(planStartIso) ? planStartIso : earliestIso,
+        endIso,
+        label: planStartIso
+          ? isEs
+            ? "Desde el inicio del plan hasta hoy"
+            : "From plan start to today"
+          : isEs
+            ? "Todo el journal"
+            : "All journal history",
+      };
+    }
+
+    if (coachRangePreset === "last30") {
+      return {
+        preset: coachRangePreset,
+        startIso: addDaysIso(isoDate(new Date()), -29),
+        endIso: isoDate(new Date()),
+        label: isEs ? "Últimos 30 días calendario" : "Last 30 calendar days",
+      };
+    }
+
+    if (coachRangePreset === "last90") {
+      return {
+        preset: coachRangePreset,
+        startIso: addDaysIso(isoDate(new Date()), -89),
+        endIso: isoDate(new Date()),
+        label: isEs ? "Últimos 90 días calendario" : "Last 90 calendar days",
+      };
+    }
+
+    return {
+      preset: coachRangePreset,
+      startIso: earliestIso,
+      endIso,
+      label: isEs ? "Todo el journal" : "All journal history",
+    };
+  }, [coachRangePreset, entries, planStartIso, isEs]);
+
+  const entriesForCoach = useMemo(() => {
+    const { startIso, endIso } = coachRangeBounds;
+    return entries.filter((entry) => {
+      const date = String(entry?.date || "").slice(0, 10);
+      if (!looksLikeYYYYMMDD(date)) return false;
+      if (startIso && looksLikeYYYYMMDD(startIso) && date < startIso) return false;
+      if (endIso && looksLikeYYYYMMDD(endIso) && date > endIso) return false;
+      return true;
+    });
+  }, [coachRangeBounds, entries]);
+
+  const snapshot = useMemo(() => (entriesForCoach.length ? buildSnapshot(entriesForCoach) : null), [entriesForCoach]);
 
   const analyticsSummary = useMemo(
-    () => buildAnalyticsSummaryFromEntries(entries),
-    [entries]
+    () => buildAnalyticsSummaryFromEntries(entriesForCoach),
+    [entriesForCoach]
   );
 
-  const planStartIso = useMemo(() => planStartIsoFromPlan(growthPlan), [growthPlan]);
-
   const recentSessions = useMemo(() => {
-    if (!entries.length) return [];
-    const sorted = [...entries].sort((a: any, b: any) =>
+    if (!entriesForCoach.length) return [];
+    const sorted = [...entriesForCoach].sort((a: any, b: any) =>
       String(a.date || "").localeCompare(String(b.date || ""))
     );
     return sorted.slice(-25).reverse();
-  }, [entries]);
+  }, [entriesForCoach]);
 
   useEffect(() => {
     if (!coachUserProfile?.id || !activeAccountId) {
@@ -2073,7 +2790,12 @@ function AiCoachingPageInner() {
           .order("journal_date", { ascending: true });
 
         if (activeAccountId) q = q.eq("account_id", activeAccountId);
-        if (planStartIso && looksLikeYYYYMMDD(planStartIso)) q = q.gte("journal_date", planStartIso);
+        if (coachRangeBounds.startIso && looksLikeYYYYMMDD(coachRangeBounds.startIso)) {
+          q = q.gte("journal_date", coachRangeBounds.startIso);
+        }
+        if (coachRangeBounds.endIso && looksLikeYYYYMMDD(coachRangeBounds.endIso)) {
+          q = q.lte("journal_date", coachRangeBounds.endIso);
+        }
 
         const { data, error } = await q;
         if (error) throw error;
@@ -2089,7 +2811,7 @@ function AiCoachingPageInner() {
     return () => {
       alive = false;
     };
-  }, [coachUserProfile?.id, activeAccountId, planStartIso]);
+  }, [coachUserProfile?.id, activeAccountId, coachRangeBounds.endIso, coachRangeBounds.startIso]);
 
   useEffect(() => {
     if (!recentSessions.length || !tradeRows.length) {
@@ -2182,21 +2904,46 @@ function AiCoachingPageInner() {
     };
   }, [growthPlan, entries, cashflows, planStartIso, accountSeriesTotals]);
 
+  const rangeCashflows = useMemo(() => {
+    const { startIso, endIso } = coachRangeBounds;
+    return (cashflows ?? []).filter((cf) => {
+      const date = String(cf?.date ?? "").slice(0, 10);
+      if (!looksLikeYYYYMMDD(date)) return false;
+      if (startIso && looksLikeYYYYMMDD(startIso) && date < startIso) return false;
+      if (endIso && looksLikeYYYYMMDD(endIso) && date > endIso) return false;
+      return true;
+    });
+  }, [cashflows, coachRangeBounds]);
+
   const analyticsSnapshot = useMemo(() => {
-    const startingBalance = planSnapshot?.effectiveStartingBalance ?? toNum(growthPlan?.starting_balance, 0);
-    return buildCoachAnalyticsSnapshot(entries, cashflows, planStartIso, startingBalance);
-  }, [entries, cashflows, growthPlan, planSnapshot?.effectiveStartingBalance, planStartIso]);
+    const currentBalance = planSnapshot?.currentBalance ?? accountSeriesTotals?.currentBalance ?? 0;
+    const contextPnl = entriesForCoach.reduce((sum, entry) => sum + sessionNetPnl(entry), 0);
+    const contextCashflows = rangeCashflows.reduce((sum, cf) => sum + signedCashflowAmount(cf), 0);
+    const startingBalance =
+      currentBalance && (contextPnl !== 0 || contextCashflows !== 0)
+        ? currentBalance - contextPnl - contextCashflows
+        : planSnapshot?.effectiveStartingBalance ?? toNum(growthPlan?.starting_balance, 0);
+
+    return buildCoachAnalyticsSnapshot(entriesForCoach, rangeCashflows, coachRangeBounds, startingBalance);
+  }, [
+    accountSeriesTotals?.currentBalance,
+    coachRangeBounds,
+    entriesForCoach,
+    growthPlan,
+    planSnapshot?.currentBalance,
+    planSnapshot?.effectiveStartingBalance,
+    rangeCashflows,
+  ]);
 
   const sessionsForTradeAnalytics = useMemo(() => {
-    return (entries as any[])
+    return (entriesForCoach as any[])
       .map((e) => {
         const date = String(e?.date ?? e?.trade_date ?? e?.created_at ?? "").slice(0, 10);
         if (!looksLikeYYYYMMDD(date)) return null;
-        if (planStartIso && date < planStartIso) return null;
         return { date, pnlNet: sessionNetPnl(e) };
       })
       .filter(Boolean) as Array<{ date: string; pnlNet: number }>;
-  }, [entries, planStartIso]);
+  }, [entriesForCoach]);
 
   const tradeStats = useMemo<TradeAnalytics | null>(() => {
     if (!tradeRows.length) return null;
@@ -2207,30 +2954,50 @@ function AiCoachingPageInner() {
     () => planSnapshot?.effectiveStartingBalance ?? toNum(growthPlan?.starting_balance, 0),
     [planSnapshot?.effectiveStartingBalance, growthPlan]
   );
+  const coachContextStartingBalance = useMemo(() => {
+    const currentBalance = planSnapshot?.currentBalance ?? accountSeriesTotals?.currentBalance ?? 0;
+    const contextPnl = sessionsForTradeAnalytics.reduce((sum, session) => sum + session.pnlNet, 0);
+    const contextCashflows = rangeCashflows.reduce((sum, cf) => sum + signedCashflowAmount(cf), 0);
+    if (currentBalance && (contextPnl !== 0 || contextCashflows !== 0)) {
+      return currentBalance - contextPnl - contextCashflows;
+    }
+    return effectiveStartingBalance;
+  }, [
+    accountSeriesTotals?.currentBalance,
+    effectiveStartingBalance,
+    planSnapshot?.currentBalance,
+    rangeCashflows,
+    sessionsForTradeAnalytics,
+  ]);
 
   const equityCurve = useMemo(() => {
-    return computeEquityCurveFromSessions(sessionsForTradeAnalytics, cashflows, effectiveStartingBalance, planStartIso);
-  }, [sessionsForTradeAnalytics, cashflows, effectiveStartingBalance, planStartIso]);
+    return computeEquityCurveFromSessions(
+      sessionsForTradeAnalytics,
+      rangeCashflows,
+      coachContextStartingBalance,
+      coachRangeBounds.startIso || null
+    );
+  }, [sessionsForTradeAnalytics, rangeCashflows, coachContextStartingBalance, coachRangeBounds.startIso]);
 
   const performanceReturns = useMemo(() => {
     if (!equityCurve.length) return [];
-    const planStartCandidate = planStartIso ?? "";
-    const planStart = looksLikeYYYYMMDD(planStartCandidate) ? planStartCandidate : "";
-    const startIso = planStart || equityCurve[0].date;
+    const rangeStartCandidate = coachRangeBounds.startIso ?? "";
+    const rangeStart = looksLikeYYYYMMDD(rangeStartCandidate) ? rangeStartCandidate : "";
+    const startIso = rangeStart || equityCurve[0].date;
     const endIso = equityCurve[equityCurve.length - 1]?.date ?? startIso;
     const dailyPnl = sessionsForTradeAnalytics.map((s) => ({ date: s.date, pnl: s.pnlNet }));
-    const cashflowPoints = (cashflows ?? []).map((cf) => ({
+    const cashflowPoints = (rangeCashflows ?? []).map((cf) => ({
       date: String(cf?.date ?? "").slice(0, 10),
       net: signedCashflowAmount(cf),
     }));
     return buildCashflowAdjustedDailyReturns({
       startIso,
       endIso,
-      startingBalance: effectiveStartingBalance,
+      startingBalance: coachContextStartingBalance,
       dailyPnl,
       cashflows: cashflowPoints,
     });
-  }, [equityCurve, sessionsForTradeAnalytics, cashflows, planStartIso, effectiveStartingBalance]);
+  }, [equityCurve, sessionsForTradeAnalytics, rangeCashflows, coachRangeBounds.startIso, coachContextStartingBalance]);
 
   const kpiResults = useMemo<KPIResult[]>(() => {
     if (!tradeStats) return [];
@@ -2449,6 +3216,7 @@ function AiCoachingPageInner() {
     setThreads(refreshed);
     setActiveThread(t);
     setMessages([]);
+    setFeedbackByMessage({});
 
     const url = new URL(window.location.href);
     url.searchParams.set("thread", t.id);
@@ -2470,8 +3238,10 @@ function AiCoachingPageInner() {
       role: m.role === "coach" ? "coach" : "user",
       text: m.content,
       createdAt: m.created_at,
+      meta: (m.meta as ChatMessage["meta"]) ?? null,
     }));
     setMessages(mapped);
+    await loadFeedbackState(threadId);
   }
 
   /* ---------- Call the API ---------- */
@@ -2487,7 +3257,8 @@ function AiCoachingPageInner() {
 
     try {
       const finalQuestion = question.trim();
-      const languageHint = isEs ? "es" : detectLanguage(finalQuestion);
+      const languageHint =
+        coachConversationLanguage === "auto" ? detectLanguage(finalQuestion) : coachConversationLanguage;
 
       const userText =
         finalQuestion ||
@@ -2528,7 +3299,7 @@ function AiCoachingPageInner() {
       const compactRecent = recentSessions.map((s: any) =>
         compactSessionForAi(s, tradesByDate[String(s?.date || "").slice(0, 10)] || null)
       );
-      const relevant = findRelevantSessions(entries, finalQuestion, 8).map((s: any) =>
+      const relevant = findRelevantSessions(entriesForCoach, finalQuestion, 8).map((s: any) =>
         compactSessionForAi(s, tradesByDate[String(s?.date || "").slice(0, 10)] || null)
       );
 
@@ -2576,14 +3347,56 @@ function AiCoachingPageInner() {
             ? {
                 startingBalance: toNum(growthPlan.starting_balance, 0),
                 targetBalance: toNum(growthPlan.target_balance, 0),
+                targetDate: growthPlan.target_date ?? null,
+                planMode: growthPlan.plan_mode ?? null,
                 dailyTargetPct: toNum(growthPlan.daily_target_pct ?? growthPlan.daily_goal_percent, 0),
                 maxDailyLossPercent: toNum(growthPlan.max_daily_loss_percent, 0),
+                maxRiskPerTradePercent: toNum(growthPlan.max_risk_per_trade_percent, 0),
+                maxRiskPerTradeUsd: toNum(growthPlan.max_risk_per_trade_usd, 0),
+                tradingDays: toNum(growthPlan.trading_days, 0),
+                lossDaysPerWeek: toNum(growthPlan.loss_days_per_week, 0),
                 planStartDate: planStartIsoFromPlan(growthPlan),
+                rules: Array.isArray(growthPlan.rules)
+                  ? growthPlan.rules
+                      .filter((rule) => rule && rule.isActive !== false)
+                      .slice(0, 8)
+                      .map((rule) => ({
+                        id: rule.id ?? "",
+                        label: String(rule.label ?? "").trim(),
+                        description: String(rule.description ?? "").trim(),
+                      }))
+                  : [],
+                executionSystem: growthPlan.steps?.execution_and_journal?.system
+                  ? {
+                      doList: Array.isArray(growthPlan.steps.execution_and_journal.system?.doList)
+                        ? growthPlan.steps.execution_and_journal.system.doList.slice(0, 6)
+                        : [],
+                      dontList: Array.isArray(growthPlan.steps.execution_and_journal.system?.dontList)
+                        ? growthPlan.steps.execution_and_journal.system.dontList.slice(0, 6)
+                        : [],
+                      orderList: Array.isArray(growthPlan.steps.execution_and_journal.system?.orderList)
+                        ? growthPlan.steps.execution_and_journal.system.orderList.slice(0, 6)
+                        : [],
+                    }
+                  : null,
+                planPhases: Array.isArray(growthPlan.plan_phases)
+                  ? growthPlan.plan_phases.slice(0, 24).map((phase) => ({
+                      id: String(phase?.id ?? ""),
+                      title: String(phase?.title ?? ""),
+                      targetEquity: toNum(phase?.targetEquity ?? phase?.target_equity, 0),
+                      targetDate: phase?.targetDate ?? phase?.target_date ?? null,
+                      status: phase?.status ?? null,
+                      monthIndex: phase?.monthIndex ?? phase?.month_index ?? null,
+                      weekIndex: phase?.weekIndex ?? phase?.week_index ?? null,
+                    }))
+                  : [],
               }
             : null,
           cashflowsSummary: {
-            netCashflows: (cashflows || []).reduce((sum, cf) => sum + signedCashflowAmount(cf), 0),
-            count: cashflows?.length || 0,
+            netCashflows: rangeCashflows.reduce((sum, cf) => sum + signedCashflowAmount(cf), 0),
+            count: rangeCashflows.length || 0,
+            rangeStartIso: coachRangeBounds.startIso || null,
+            rangeEndIso: coachRangeBounds.endIso || null,
           },
           fullSnapshot,
           gamification,
@@ -2597,6 +3410,10 @@ function AiCoachingPageInner() {
             strictEvidenceMode: true,
           },
           coachingFocus: {
+            mode: coachMode,
+            rangePreset: coachRangePreset,
+            rangeStartIso: coachRangeBounds.startIso || null,
+            rangeEndIso: coachRangeBounds.endIso || null,
             useChallengesAndGamification: true,
             useAnalyticsSummary: true,
             useRelevantSessions: true,
@@ -2618,6 +3435,10 @@ function AiCoachingPageInner() {
       const coachText =
         String(data.text || "").trim() ||
         L("No response text received.", "No se recibió texto de respuesta.");
+      const coachMeta: ChatMessage["meta"] = {
+        actionPlan: data?.actionPlan ?? null,
+        autoAudit: data?.autoAudit ?? null,
+      };
 
       // 5) Persist coach message (Supabase)
       const coachRow = await insertAiCoachMessage({
@@ -2628,6 +3449,8 @@ function AiCoachingPageInner() {
         meta: {
           model: data?.model || null,
           usage: data?.usage || null,
+          actionPlan: coachMeta?.actionPlan ?? null,
+          autoAudit: coachMeta?.autoAudit ?? null,
         },
       });
 
@@ -2636,6 +3459,7 @@ function AiCoachingPageInner() {
         role: "coach",
         text: coachText,
         createdAt: coachRow?.created_at || new Date().toISOString(),
+        meta: coachMeta,
       };
 
       setMessages((prev) => [...prev, coachMsg]);
@@ -2655,6 +3479,51 @@ function AiCoachingPageInner() {
   /* =========================
      Render
   ========================== */
+
+  const latestCoachArtifacts = [...messages]
+    .reverse()
+    .find((msg) => msg.role === "coach" && (msg.meta?.actionPlan || msg.meta?.autoAudit));
+
+  const selectedCoachModeMeta =
+    coachMode === "weekly-review"
+      ? {
+          label: L("Weekly review", "Revisión semanal"),
+          description: L(
+            "Use the selected range to identify what is improving, what is slipping, and the one adjustment that most affects next week.",
+            "Usa el rango seleccionado para identificar qué mejora, qué se está desviando y el ajuste único que más impacta la próxima semana."
+          ),
+        }
+      : coachMode === "risk-discipline"
+        ? {
+            label: L("Risk discipline", "Disciplina de riesgo"),
+            description: L(
+              "Prioritize loss containment, position sizing, daily loss breaches, and rule enforcement against the plan.",
+              "Prioriza contención de pérdidas, size, violaciones de pérdida diaria y cumplimiento de reglas contra el plan."
+            ),
+          }
+        : coachMode === "execution-truth"
+          ? {
+              label: L("Execution truth", "Verdad de ejecución"),
+              description: L(
+                "Focus on entries, exits, management, and whether the execution matched the original plan and the audit trail.",
+                "Enfócate en entradas, salidas, manejo y si la ejecución realmente coincidió con el plan original y el audit trail."
+              ),
+            }
+          : coachMode === "psychology-patterns"
+            ? {
+                label: L("Psychology patterns", "Patrones psicológicos"),
+                description: L(
+                  "Look for emotional drift, repeated cognitive flags, and the pattern most likely to sabotage the next checkpoint.",
+                  "Busca drift emocional, flags cognitivos repetidos y el patrón más probable de sabotear el próximo checkpoint."
+                ),
+              }
+            : {
+                label: L("Plan rescue", "Rescate del plan"),
+                description: L(
+                  "Anchor the conversation to the Growth Plan, the next checkpoint, and the highest-leverage behavior to improve plan attainment.",
+                  "Ancla la conversación al Growth Plan, al próximo checkpoint y a la conducta de mayor leverage para mejorar el cumplimiento del plan."
+                ),
+              };
 
   const isDisabled =
     dataLoading ||
@@ -2803,6 +3672,107 @@ function AiCoachingPageInner() {
           </div>
         )}
 
+        <section className="rounded-2xl border border-emerald-500/20 bg-[radial-gradient(circle_at_top_left,rgba(16,185,129,0.14),transparent_48%),rgba(15,23,42,0.92)] p-4 md:p-5">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+            <div className="max-w-2xl">
+              <p className="text-[11px] uppercase tracking-[0.18em] text-emerald-300">
+                {L("Coaching objective", "Objetivo del coaching")}
+              </p>
+              <h2 className="mt-1 text-lg font-semibold text-slate-100">
+                {selectedCoachModeMeta.label}
+              </h2>
+              <p className="mt-1 text-sm text-slate-300">
+                {selectedCoachModeMeta.description}
+              </p>
+              <p className="mt-2 text-xs text-slate-400">
+                {L(
+                  "The coach searches all sessions inside this range, then retrieves the journal evidence most relevant to your question and your Growth Plan.",
+                  "El coach busca todas las sesiones dentro de este rango y luego recupera la evidencia del journal más relevante para tu pregunta y tu Growth Plan."
+                )}
+              </p>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-3 lg:min-w-[620px]">
+              <label className="space-y-1">
+                <span className="text-[11px] uppercase tracking-[0.16em] text-slate-400">
+                  {L("Coaching lens", "Lente del coach")}
+                </span>
+                <select
+                  value={coachMode}
+                  onChange={(e) => setCoachMode(e.target.value as CoachMode)}
+                  className="w-full rounded-xl border border-slate-700 bg-slate-950/70 px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400/40"
+                >
+                  {coachModeOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="space-y-1">
+                <span className="text-[11px] uppercase tracking-[0.16em] text-slate-400">
+                  {L("Context range", "Rango de contexto")}
+                </span>
+                <select
+                  value={coachRangePreset}
+                  onChange={(e) => setCoachRangePreset(e.target.value as CoachRangePreset)}
+                  className="w-full rounded-xl border border-slate-700 bg-slate-950/70 px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400/40"
+                >
+                  {coachRangeOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="space-y-1">
+                <span className="text-[11px] uppercase tracking-[0.16em] text-slate-400">
+                  {L("Coach language", "Idioma del coach")}
+                </span>
+                <select
+                  value={coachConversationLanguage}
+                  onChange={(e) => setCoachConversationLanguage(e.target.value as CoachConversationLanguage)}
+                  className="w-full rounded-xl border border-slate-700 bg-slate-950/70 px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400/40"
+                >
+                  {coachConversationLanguageOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          </div>
+
+          <div className="mt-4 flex flex-wrap gap-2 text-[11px] text-slate-300">
+            <span className="rounded-full border border-slate-700 bg-slate-950/60 px-3 py-1">
+              {L("Range", "Rango")}: <span className="font-semibold text-slate-100">{coachRangeBounds.label}</span>
+            </span>
+            <span className="rounded-full border border-slate-700 bg-slate-950/60 px-3 py-1">
+              {L("Sessions in context", "Sesiones en contexto")}: <span className="font-semibold text-slate-100">{entriesForCoach.length}</span>
+            </span>
+            <span className="rounded-full border border-slate-700 bg-slate-950/60 px-3 py-1">
+              {L("Coach language", "Idioma del coach")}:{" "}
+              <span className="font-semibold text-slate-100">
+                {coachConversationLanguage === "auto"
+                  ? L("Auto-detect", "Auto-detect")
+                  : coachConversationLanguage === "es"
+                    ? "Español"
+                    : "English"}
+              </span>
+            </span>
+            {coachRangeBounds.startIso && (
+              <span className="rounded-full border border-slate-700 bg-slate-950/60 px-3 py-1">
+                {L("Window", "Ventana")}: <span className="font-semibold text-slate-100">{coachRangeBounds.startIso}</span>
+                {" "}→{" "}
+                <span className="font-semibold text-slate-100">{coachRangeBounds.endIso || isoDate(new Date())}</span>
+              </span>
+            )}
+          </div>
+        </section>
+
         <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)] gap-4 flex-1 min-h-0">
           {/* Chat panel */}
           <section className="rounded-2xl border border-slate-800 bg-slate-900/70 flex flex-col min-h-0">
@@ -2814,8 +3784,8 @@ function AiCoachingPageInner() {
                 </p>
                 <p className="text-xs text-slate-400">
                   {L(
-                    "Ask questions, attach a chart screenshot, and get short, focused feedback.",
-                    "Haz preguntas, adjunta un screenshot y recibe feedback corto y directo."
+                    "Ask questions, attach a chart screenshot, and get focused feedback anchored to the selected journal range and Growth Plan.",
+                    "Haz preguntas, adjunta un screenshot y recibe feedback enfocado, anclado al rango del journal seleccionado y al Growth Plan."
                   )}{" "}
                   {L("You can write in English or Spanish.", "Puedes escribir en español o inglés.")}
                 </p>
@@ -2893,14 +3863,13 @@ function AiCoachingPageInner() {
 
               {!messages.length && !coachState.error && (
                 <p className="text-xs text-slate-500">
-                  {L("Start by typing a question (example:", "Empieza escribiendo una pregunta (ejemplo:")}{" "}
+                  {coachUiIsEs ? "Empieza escribiendo una pregunta (ejemplo:" : "Start by typing a question (example:"}{" "}
                   <span className="italic">
-                    {L("“What do I need to improve in my last 5 sessions?”", "“¿Qué debo mejorar en mis últimas 5 sesiones?”")}
+                    {coachUiIsEs ? "“¿Qué debo mejorar en mis últimas 5 sesiones?”" : "“What do I need to improve in my last 5 sessions?”"}
                   </span>
-                  {L(
-                    "). You can also attach a screenshot of a trade chart with entry/exit arrows.",
-                    "). También puedes adjuntar un screenshot de un chart con flechas de entrada/salida."
-                  )}
+                  {coachUiIsEs
+                    ? "). También puedes adjuntar un screenshot de un chart con flechas de entrada/salida."
+                    : "). You can also attach a screenshot of a trade chart with entry/exit arrows."}
                 </p>
               )}
 
@@ -2917,7 +3886,9 @@ function AiCoachingPageInner() {
                     }`}
                   >
                     {msg.role === "coach" ? <CoachMarkdown text={msg.text} /> : msg.text}
-                    {msg.role === "coach" && (
+                    {msg.role === "coach" && renderActionPlan(msg.meta?.actionPlan)}
+                    {msg.role === "coach" && renderAutoAudit(msg.meta?.autoAudit)}
+                    {msg.role === "coach" && feedbackEnabled && (
                       <div className="mt-3 flex items-center gap-2 text-[11px] text-slate-400">
                         <span>{L("Helpful?", "¿Útil?")}</span>
                         <button
@@ -2971,39 +3942,61 @@ function AiCoachingPageInner() {
             <div className="border-t border-slate-800 px-4 py-3 space-y-3">
               {/* Quick prompts */}
               <div className="space-y-3">
-                <div>
-                  <p className="mb-2 text-[11px] uppercase tracking-[0.16em] text-slate-400">
-                    {L("Quick prompts", "Prompts rápidos")}
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    {quickPrompts.map((p) => (
-                      <button
-                        key={p}
-                        type="button"
-                        className="text-[11px] px-3 py-1 rounded-full border border-slate-700 hover:border-emerald-400 hover:text-emerald-200 bg-slate-900/80"
-                        onClick={() => setQuestion(p)}
-                      >
-                        {p}
-                      </button>
-                    ))}
+                <div className="rounded-2xl border border-slate-800 bg-slate-950/50 p-3">
+                  <div className="mb-2 flex items-center justify-between gap-3">
+                    <p className="text-[11px] uppercase tracking-[0.16em] text-slate-400">
+                      {L("Prompt library", "Biblioteca de prompts")}
+                    </p>
+                    <p className="text-[10px] text-slate-500">
+                      {L("Selecting one loads lens + range + question.", "Al seleccionar uno carga lente + rango + pregunta.")}
+                    </p>
                   </div>
-                </div>
-                <div>
-                  <p className="mb-2 text-[11px] uppercase tracking-[0.16em] text-slate-400">
-                    {L("Neuro shortcuts", "Atajos Neuro")}
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    {neuroQuickPrompts.map((p) => (
-                      <button
-                        key={p}
-                        type="button"
-                        className="text-[11px] px-3 py-1 rounded-full border border-cyan-500/30 bg-cyan-500/10 text-cyan-100 hover:border-cyan-300 hover:text-white"
-                        onClick={() => setQuestion(p)}
-                      >
-                        {p}
-                      </button>
-                    ))}
-                  </div>
+
+                  <select
+                    value={selectedPromptId}
+                    onChange={(e) => handlePromptSelection(e.target.value)}
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400/40"
+                  >
+                    <option value="">
+                      {L("Choose a smart prompt...", "Elige un prompt inteligente...")}
+                    </option>
+                    <optgroup label={L("Growth Plan plays", "Prompts de Growth Plan")}>
+                      {promptGroups.primary.map((template) => (
+                        <option key={template.id} value={template.id}>
+                          {template.label}
+                        </option>
+                      ))}
+                    </optgroup>
+                    <optgroup label={L("Neuro + execution plays", "Prompts Neuro + ejecución")}>
+                      {promptGroups.neuro.map((template) => (
+                        <option key={template.id} value={template.id}>
+                          {template.label}
+                        </option>
+                      ))}
+                    </optgroup>
+                  </select>
+
+                  {selectedPromptTemplate ? (
+                    <div className="mt-3 rounded-xl border border-slate-700 bg-slate-900/60 p-3">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="rounded-full border border-emerald-400/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-emerald-200">
+                          {coachModeLabels[selectedPromptTemplate.mode]}
+                        </span>
+                        <span className="rounded-full border border-slate-700 px-2 py-0.5 text-[10px] text-slate-300">
+                          {coachRangeLabels[selectedPromptTemplate.range]}
+                        </span>
+                        <span className="rounded-full border border-cyan-400/20 px-2 py-0.5 text-[10px] text-cyan-100">
+                          {L("Loaded into composer", "Cargado al composer")}
+                        </span>
+                      </div>
+                      <p className="mt-2 text-[12px] font-semibold text-slate-100">
+                        {selectedPromptTemplate.label}
+                      </p>
+                      <p className="mt-1 text-[11px] leading-relaxed text-slate-300">
+                        {selectedPromptTemplate.prompt}
+                      </p>
+                    </div>
+                  ) : null}
                 </div>
               </div>
 
@@ -3012,10 +4005,11 @@ function AiCoachingPageInner() {
                 <div className="flex gap-2">
                   <textarea
                     className="flex-1 min-h-[60px] max-h-[140px] rounded-xl border border-slate-700 bg-slate-950/60 px-3 py-2 text-sm outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400/40"
-                    placeholder={L(
-                      "Ask your coach about your last trades, emotions, challenges, or plan adherence...",
-                      "Pregunta al coach sobre tus últimas operaciones, emociones, retos o disciplina del plan..."
-                    )}
+                    placeholder={
+                      coachUiIsEs
+                        ? "Pregunta al coach sobre tus últimas operaciones, emociones, retos o disciplina del plan..."
+                        : "Ask your coach about your last trades, emotions, challenges, or plan adherence..."
+                    }
                     value={question}
                     onChange={(e) => setQuestion(e.target.value)}
                   />
@@ -3072,9 +4066,22 @@ function AiCoachingPageInner() {
             <h2 className="text-sm font-medium text-slate-200 flex items-center justify-between">
               {L("Snapshot", "Resumen")}
               <span className="text-[10px] text-slate-400">
-                {L("Last", "Últimas")} {recentSessions.length} {L("sessions", "sesiones")}
+                {coachRangeBounds.label} · {recentSessions.length} {L("sessions", "sesiones")}
               </span>
             </h2>
+
+            {latestCoachArtifacts && (
+              <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+                <p className="text-[11px] uppercase tracking-[0.16em] text-slate-400">
+                  {L("Latest coach output", "Último output del coach")}
+                </p>
+                {renderActionPlan(latestCoachArtifacts.meta?.actionPlan)}
+                {renderAutoAudit(latestCoachArtifacts.meta?.autoAudit)}
+              </div>
+            )}
+
+            {latestCoachArtifacts?.meta?.actionPlan &&
+              renderGrowthPlanSuggestions(latestCoachArtifacts.meta.actionPlan)}
 
             <div className="grid grid-cols-2 gap-3 text-sm">
               <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">

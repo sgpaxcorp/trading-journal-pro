@@ -47,6 +47,31 @@ type MotivationMessageRow = {
   day_of_year: number | null;
 };
 
+type DashboardCoachActionPlan = {
+  summary?: string;
+  nextAction?: string;
+  ruleToAdd?: string;
+  ruleToRemove?: string;
+  checkpointFocus?: string;
+};
+
+type DashboardCoachAudit = {
+  attached?: boolean;
+  date?: string | null;
+  instrument?: string | null;
+  summary?: string;
+  processScore?: number | null;
+  disciplineScore?: number | null;
+  eventCount?: number;
+};
+
+type DashboardCoachReminder = {
+  summary: string | null;
+  updatedAt: string | null;
+  actionPlan: DashboardCoachActionPlan | null;
+  audit: DashboardCoachAudit | null;
+};
+
 const NEW_YORK_TZ = "America/New_York";
 
 function getNewYorkDayParts(now = new Date()) {
@@ -1000,7 +1025,6 @@ export default function DashboardPage() {
   const ALL_WIDGETS: { id: WidgetId; label: string }[] = [
     { id: "progress", label: L("Account Progress", "Progreso de cuenta") },
     { id: "plan-progress", label: L("Plan Progress", "Progreso del plan") },
-    { id: "daily-target", label: L("Daily Target", "Meta diaria") },
     { id: "calendar", label: L("P&L Calendar", "Calendario P&L") },
     { id: "weekly", label: L("Weekly Summary", "Resumen semanal") },
     { id: "streak", label: L("Green Streak", "Racha verde") },
@@ -1033,7 +1057,6 @@ export default function DashboardPage() {
   const [activeWidgets, setActiveWidgets] = useState<WidgetId[]>([
     "progress",
     "plan-progress",
-    "daily-target",
     "calendar",
     "weekly",
     "streak",
@@ -1050,6 +1073,7 @@ export default function DashboardPage() {
   const [accountMessage, setAccountMessage] = useState<string | null>(null);
   const [widgetsLoaded, setWidgetsLoaded] = useState(false);
   const [dailyCoachMessage, setDailyCoachMessage] = useState<MotivationMessageRow | null>(null);
+  const [coachReminder, setCoachReminder] = useState<DashboardCoachReminder | null>(null);
   const phaseAlertBusyRef = useRef(false);
   const phaseRuleIdRef = useRef<string | null>(null);
   const goalNotificationAttemptedRef = useRef<Set<string>>(new Set());
@@ -1088,10 +1112,7 @@ export default function DashboardPage() {
     return buildNeuroMemory(sessions, isEs ? "es" : "en");
   }, [entries, isEs]);
 
-  // Keep original frozen todayStr (other widgets untouched)
-  const [todayStr] = useState(() => formatDateYYYYMMDD(new Date()));
-
-  // Rolling day ONLY for daily-target + actions
+  // Rolling day for actions and internal daily-goal calculations
   const [rollingTodayStr, setRollingTodayStr] = useState(() => formatDateYYYYMMDD(new Date()));
 
   const systemRules = useMemo(() => {
@@ -1234,6 +1255,67 @@ export default function DashboardPage() {
       cancelled = true;
     };
   }, [loading, user, isEs]);
+
+  useEffect(() => {
+    if (loading || !user) return;
+    let cancelled = false;
+
+    const loadLatestCoachReminder = async () => {
+      try {
+        const userId = (user as any)?.uid || (user as any)?.id || "";
+        if (!userId) {
+          setCoachReminder(null);
+          return;
+        }
+
+        const { data, error } = await supabaseBrowser
+          .from("ai_coach_threads")
+          .select("summary, metadata, updated_at")
+          .eq("user_id", userId)
+          .order("updated_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (cancelled) return;
+        if (error) {
+          console.warn("[dashboard] latest ai coach thread fetch error:", error);
+          setCoachReminder(null);
+          return;
+        }
+
+        const metadata = data?.metadata && typeof data.metadata === "object" ? (data.metadata as any) : {};
+        const actionPlan = metadata?.latestActionPlan ?? null;
+        const audit = metadata?.latestAudit ?? null;
+        const hasReminder =
+          String(data?.summary || "").trim() ||
+          String(actionPlan?.nextAction || "").trim() ||
+          String(actionPlan?.ruleToAdd || "").trim() ||
+          String(actionPlan?.ruleToRemove || "").trim() ||
+          String(actionPlan?.checkpointFocus || "").trim();
+
+        if (!hasReminder) {
+          setCoachReminder(null);
+          return;
+        }
+
+        setCoachReminder({
+          summary: typeof data?.summary === "string" ? data.summary.trim() : null,
+          updatedAt: typeof data?.updated_at === "string" ? data.updated_at : null,
+          actionPlan,
+          audit,
+        });
+      } catch (err) {
+        if (cancelled) return;
+        console.warn("[dashboard] latest ai coach thread exception:", err);
+        setCoachReminder(null);
+      }
+    };
+
+    loadLatestCoachReminder();
+    return () => {
+      cancelled = true;
+    };
+  }, [loading, user, activeAccountId]);
 
   // Load plan + journal + checklist + cashflows (rolling day for checklist)
   useEffect(() => {
@@ -3721,6 +3803,106 @@ export default function DashboardPage() {
               </div>
               {accountMessage && <p className="text-[11px] text-emerald-300">{accountMessage}</p>}
               {accountsError && <p className="text-[11px] text-red-400">{accountsError}</p>}
+            </div>
+          </section>
+        )}
+
+        {coachReminder && (
+          <section className="mb-5 rounded-2xl border border-violet-400/20 bg-[radial-gradient(circle_at_top_left,rgba(167,139,250,0.14),transparent_38%),linear-gradient(135deg,rgba(30,41,59,0.96),rgba(15,23,42,0.96))] p-4 shadow-[0_0_36px_rgba(139,92,246,0.10)]">
+            <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-[10px] uppercase tracking-[0.24em] text-violet-200/90">
+                    {L("Latest AI coaching action plan", "Último plan de acción del AI Coaching")}
+                  </p>
+                  {coachReminder.updatedAt ? (
+                    <span className="rounded-full border border-violet-300/20 bg-violet-400/10 px-2.5 py-1 text-[10px] text-violet-100">
+                      {L("Updated", "Actualizado")}{" "}
+                      {new Date(coachReminder.updatedAt).toLocaleDateString(localeTag, {
+                        month: "short",
+                        day: "numeric",
+                      })}
+                    </span>
+                  ) : null}
+                  {coachReminder.audit?.attached ? (
+                    <span className="rounded-full border border-cyan-300/20 bg-cyan-400/10 px-2.5 py-1 text-[10px] text-cyan-100">
+                      {L("Auto audit attached", "Auto audit adjuntado")}
+                    </span>
+                  ) : null}
+                </div>
+
+                <h2 className="mt-2 text-lg font-semibold text-slate-50">
+                  {coachReminder.actionPlan?.nextAction ||
+                    coachReminder.actionPlan?.checkpointFocus ||
+                    coachReminder.summary ||
+                    L("Latest coaching guidance", "Última guía del coach")}
+                </h2>
+
+                {coachReminder.summary ? (
+                  <p className="mt-2 max-w-3xl text-sm leading-relaxed text-slate-300">
+                    {coachReminder.summary}
+                  </p>
+                ) : null}
+
+                <div className="mt-4 grid gap-3 lg:grid-cols-2">
+                  {coachReminder.actionPlan?.nextAction ? (
+                    <div className="rounded-xl border border-emerald-400/20 bg-slate-950/45 p-3">
+                      <p className="text-[10px] uppercase tracking-[0.16em] text-emerald-300">
+                        {L("Next action", "Próxima acción")}
+                      </p>
+                      <p className="mt-1 text-sm text-slate-100">{coachReminder.actionPlan.nextAction}</p>
+                    </div>
+                  ) : null}
+                  {coachReminder.actionPlan?.checkpointFocus ? (
+                    <div className="rounded-xl border border-violet-300/20 bg-slate-950/45 p-3">
+                      <p className="text-[10px] uppercase tracking-[0.16em] text-violet-200">
+                        {L("Checkpoint focus", "Foco del checkpoint")}
+                      </p>
+                      <p className="mt-1 text-sm text-slate-100">{coachReminder.actionPlan.checkpointFocus}</p>
+                    </div>
+                  ) : null}
+                  {coachReminder.actionPlan?.ruleToAdd ? (
+                    <div className="rounded-xl border border-emerald-400/20 bg-slate-950/45 p-3">
+                      <p className="text-[10px] uppercase tracking-[0.16em] text-emerald-300">
+                        {L("Rule to add", "Regla para agregar")}
+                      </p>
+                      <p className="mt-1 text-sm text-slate-100">{coachReminder.actionPlan.ruleToAdd}</p>
+                    </div>
+                  ) : null}
+                  {coachReminder.actionPlan?.ruleToRemove ? (
+                    <div className="rounded-xl border border-rose-400/20 bg-slate-950/45 p-3">
+                      <p className="text-[10px] uppercase tracking-[0.16em] text-rose-200">
+                        {L("Rule to remove", "Regla para remover")}
+                      </p>
+                      <p className="mt-1 text-sm text-slate-100">{coachReminder.actionPlan.ruleToRemove}</p>
+                    </div>
+                  ) : null}
+                </div>
+
+                {coachReminder.audit?.attached ? (
+                  <p className="mt-3 text-[12px] text-slate-400">
+                    {[coachReminder.audit.date, coachReminder.audit.instrument].filter(Boolean).join(" · ")}
+                    {typeof coachReminder.audit.eventCount === "number"
+                      ? ` · ${coachReminder.audit.eventCount} ${L("events", "eventos")}`
+                      : ""}
+                  </p>
+                ) : null}
+              </div>
+
+              <div className="flex shrink-0 flex-wrap gap-2">
+                <Link
+                  href="/performance/ai-coaching"
+                  className="rounded-full bg-violet-300 px-4 py-2 text-[12px] font-semibold text-slate-950 transition hover:bg-violet-200"
+                >
+                  {L("Open AI Coaching", "Abrir AI Coaching")}
+                </Link>
+                <Link
+                  href="/growth-plan"
+                  className="rounded-full border border-violet-300/30 px-4 py-2 text-[12px] font-semibold text-violet-100 transition hover:border-violet-200 hover:text-white"
+                >
+                  {L("Open Growth Plan", "Abrir Growth Plan")}
+                </Link>
+              </div>
             </div>
           </section>
         )}

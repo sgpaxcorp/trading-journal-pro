@@ -55,6 +55,8 @@ Neuro Layer is built from three places in the same Journal:
 
 The platform reads those selections together as one decision story.
 
+Each Neuro chip group can also be customized. Use `Customize` inside the Journal and add the chips that match your own language, setups, and repeatable patterns.
+
 ## Recommended fill order
 Use this order every day:
 
@@ -313,6 +315,10 @@ How to fill them:
 Neuro Score is the main visible score of the session.
 
 Higher is better.
+
+It starts at `100` and moves up or down based on the Neuro inputs you selected.
+
+The platform only starts scoring when there are at least `3` Neuro signals. If there is not enough input yet, the score stays empty on purpose.
 
 It is based on process signals such as:
 - whether you named confirmation and invalidation

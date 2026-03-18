@@ -4,6 +4,19 @@
 
 import { supabaseBrowser } from "@/lib/supaBaseClient";
 
+function isAiCoachFeedbackUnavailableError(error: any): boolean {
+  const code = typeof error?.code === "string" ? error.code : "";
+  const message = typeof error?.message === "string" ? error.message.toLowerCase() : "";
+  return (
+    code === "PGRST205" ||
+    code === "42P01" ||
+    (message.includes("ai_coach_feedback") &&
+      (message.includes("schema cache") ||
+        message.includes("does not exist") ||
+        message.includes("could not find the table")))
+  );
+}
+
 export type AiCoachRole = "user" | "coach" | "system";
 
 export type AiCoachThreadRow = {
@@ -24,6 +37,17 @@ export type AiCoachMessageRow = {
   content: string;
   meta: any | null;
   created_at: string;
+};
+
+export type AiCoachFeedbackRow = {
+  id: string;
+  user_id: string;
+  thread_id: string | null;
+  message_id: string;
+  rating: number;
+  note: string | null;
+  created_at: string;
+  updated_at: string;
 };
 
 export async function listAiCoachThreads(
@@ -129,6 +153,24 @@ export async function insertAiCoachMessage(params: {
     return null;
   }
   return data as AiCoachMessageRow;
+}
+
+export async function listAiCoachFeedbackForThread(threadId: string): Promise<AiCoachFeedbackRow[]> {
+  if (!threadId) return [];
+
+  const { data, error } = await supabaseBrowser
+    .from("ai_coach_feedback")
+    .select("*")
+    .eq("thread_id", threadId);
+
+  if (error) {
+    if (isAiCoachFeedbackUnavailableError(error)) {
+      return [];
+    }
+    console.error("[ai_coach_feedback] list error:", error);
+    return [];
+  }
+  return (data || []) as AiCoachFeedbackRow[];
 }
 
 export async function updateAiCoachThread(params: {

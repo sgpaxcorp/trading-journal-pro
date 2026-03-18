@@ -6,13 +6,16 @@
 
 El Journal convierte tu ejecución en datos. Cada día captura tu plan, tus decisiones y tu revisión. Un mismo día puede incluir varias sesiones.
 
-## Estructura de una sesión completa
-Una sesión completa incluye:
-1. Plan premarket.
-2. Entradas y salidas.
-3. Notas en trade.
-4. Revisión post‑trade.
-5. Selecciones del Neuro Layer.
+## Estructura de la sesión (3 pasos)
+El Journal ahora corre en 3 pasos:
+1. `Premarket Prep`
+2. `In-Trade`
+3. `After-Trade`
+
+La lógica es simple:
+- El Paso 1 define el plan.
+- El Paso 2 ejecuta el plan y mantiene visible la nota de premarket.
+- El Paso 3 revisa la sesión con honestidad.
 
 ## Premarket Prep (plan antes de ejecutar)
 Define la intención del día.
@@ -20,6 +23,8 @@ Incluye:
 1. Sesgo y niveles clave.
 2. Setup esperado.
 3. Límite de riesgo y una regla “no negociable”.
+
+Usa `Customize` si quieres añadir tus propios items de checklist o chips Neuro.
 
 ## P&L del día
 Este bloque conecta ejecución con resultado.
@@ -41,7 +46,7 @@ Campos:
 7. Cantidad: tamaño de la entrada.
 8. Hora: hora del fill (usa hora actual si quieres).
 
-El sistema calcula el precio promedio de entrada y el DTE en opciones.
+Cada fill se mantiene separado. El sistema no fusiona distintos round trips en un solo trade promedio.
 
 ## Salidas (cierra la posición)
 Cierra posiciones seleccionando un trade abierto.

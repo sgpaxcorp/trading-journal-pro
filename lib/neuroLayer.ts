@@ -180,7 +180,7 @@ const sanitizeStringArray = (value: any, allowed?: Set<string>) =>
           value
             .map((item) => String(item ?? "").trim())
             .filter(Boolean)
-            .filter((item) => (allowed ? allowed.has(item) : true))
+            .filter((item) => (allowed ? allowed.has(item) || item.startsWith("custom:") : true))
         )
       )
     : [];

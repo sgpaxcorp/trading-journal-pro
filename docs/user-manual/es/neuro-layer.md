@@ -55,6 +55,8 @@ Neuro Layer se construye desde tres lugares del mismo Journal:
 
 La plataforma lee esas selecciones juntas como una sola historia de decisión.
 
+Cada grupo de chips Neuro también se puede personalizar. Usa `Customize` dentro del Journal y añade los chips que mejor encajen con tu lenguaje, tus setups y tus patrones repetibles.
+
 ## Orden recomendado para llenarlo
 Usa este orden cada día:
 
@@ -313,6 +315,10 @@ Cómo llenarlos:
 Neuro Score es el score principal visible de la sesión.
 
 Más alto es mejor.
+
+Empieza en `100` y sube o baja según los inputs Neuro que seleccionaste.
+
+La plataforma solo empieza a puntuar cuando hay al menos `3` señales Neuro. Si todavía no hay suficiente input, el score se queda vacío a propósito.
 
 Se basa en señales de proceso como:
 - si nombraste confirmación e invalidación

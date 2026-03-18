@@ -6,13 +6,16 @@
 
 The Journal is where execution becomes data. Each day captures your plan, actions, and review. A single date can include multiple sessions.
 
-## Session structure (what “complete” looks like)
-A complete session includes:
-1. Premarket plan.
-2. Entries and exits.
-3. In‑trade notes.
-4. Post‑trade review.
-5. Neuro Layer selections.
+## Session structure (3 steps)
+The Journal now runs in 3 steps:
+1. `Premarket Prep`
+2. `In-Trade`
+3. `After-Trade`
+
+The goal is simple:
+- Step 1 defines the plan.
+- Step 2 executes the plan and keeps the premarket note visible.
+- Step 3 reviews the session honestly.
 
 ## Premarket Prep (plan before execution)
 Use this section to define your intent.
@@ -20,6 +23,8 @@ Write:
 1. Market bias and key levels.
 2. The setup you are looking for.
 3. Risk limits and a “do not break” rule.
+
+Use `Customize` if you want to add your own checklist items or Neuro chips.
 
 ## Day P&L
 This block connects execution to outcomes.
@@ -41,7 +46,7 @@ Fields:
 7. Quantity: size of the entry.
 8. Time: time of fill (use current time if needed).
 
-The system calculates average entry price per symbol and shows DTE for options.
+Each fill stays separate. The system does not merge different round trips into one average trade.
 
 ## Exits (close the position)
 Close positions by selecting an open entry and defining the exit.
