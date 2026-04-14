@@ -65,6 +65,8 @@ export type PublicUserProfile = {
   xp_total: number;
   trophies_count: number;
   level: number;
+  rank?: number | null;
+  show_in_ranking?: boolean;
 };
 
 export type TrophySyncResult = {
@@ -379,6 +381,13 @@ export async function getPublicUserProfile(
     xp_total: xp,
     trophies_count: Number((row as any).trophies_count ?? (row as any).trophies_total ?? 0),
     level: Number((row as any).level ?? getLevelFromXp(xp)),
+    rank:
+      typeof (row as any).rank === "number"
+        ? (row as any).rank
+        : Number.isFinite(Number((row as any).rank))
+          ? Number((row as any).rank)
+          : null,
+    show_in_ranking: Boolean((row as any).show_in_ranking ?? false),
   };
 }
 

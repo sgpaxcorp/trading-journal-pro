@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import TopNav from "@/app/components/TopNav";
 import TrophyToasts, { type TrophyToastItem } from "@/app/components/TrophyToasts";
@@ -12,6 +12,7 @@ import {
   listPublicLeaderboard,
   syncMyTrophies,
   type PublicLeaderboardRow,
+  type PublicUserProfile,
 } from "@/lib/trophiesSupabase";
 
 function tierPill(tier?: string | null) {
@@ -41,7 +42,7 @@ export default function GlobalRankingPage() {
   const L = (en: string, es: string) => (isEs ? es : en);
 
   const [rows, setRows] = useState<PublicLeaderboardRow[]>([]);
-  const [me, setMe] = useState<PublicLeaderboardRow | null>(null);
+  const [me, setMe] = useState<PublicUserProfile | null>(null);
   const [loadingRows, setLoadingRows] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -51,14 +52,6 @@ export default function GlobalRankingPage() {
   // Keep as a plain string so TS doesn't spread `string | undefined` everywhere.
   // When `user` isn't ready yet, this becomes "" and we guard accordingly.
   const userId: string = (user?.id as string) ?? "";
-
-  const myRankInTop25 = useMemo(() => {
-    if (!userId) return null;
-    const idx = rows.findIndex((r) => r.user_id === userId);
-    if (idx < 0) return null;
-    // Rank is derived from the ordering (we don't store it in DB).
-    return idx + 1;
-  }, [rows, userId]);
 
   // Auto-sync trophies on load (no button)
   useEffect(() => {
@@ -161,8 +154,8 @@ export default function GlobalRankingPage() {
             <h1 className="text-3xl font-semibold mt-1">{L("Global Ranking", "Ranking global")}</h1>
             <p className="text-sm text-slate-400 mt-2 max-w-2xl">
               {L(
-                "Leaderboard by total XP. XP includes challenge XP plus all trophies you earn across the platform.",
-                "Ranking por XP total. El XP incluye el XP de retos más todos los trofeos que ganas en la plataforma."
+                "Consistency leaderboard based on trophy XP earned across the platform. This is not a profit leaderboard.",
+                "Ranking de consistencia basado en el XP de trofeos que ganas en la plataforma. No es un ranking de ganancias."
               )}
             </p>
           </div>
@@ -186,10 +179,10 @@ export default function GlobalRankingPage() {
               <div>
                 <p className="text-xs text-slate-400">{L("Your snapshot", "Tu resumen")}</p>
                 <p className="mt-1 text-sm text-slate-200">
-                  {typeof myRankInTop25 === "number" ? (
+                  {typeof me?.rank === "number" ? (
                     <>
                       {L("Your rank:", "Tu rango:")}{" "}
-                      <span className="font-semibold text-emerald-200">#{myRankInTop25}</span>
+                      <span className="font-semibold text-emerald-200">#{me.rank}</span>
                       {me ? (
                         <>
                           {" "}({me.xp_total?.toLocaleString?.() ?? me.xp_total} XP · {me.trophies_count}{" "}
@@ -197,11 +190,19 @@ export default function GlobalRankingPage() {
                         </>
                       ) : null}
                     </>
-                  ) : me ? (
+                  ) : me?.show_in_ranking ? (
                     <>
                       {me.xp_total?.toLocaleString?.() ?? me.xp_total} XP · {me.trophies_count}{" "}
                       {L("trophies", "trofeos")}
                       <span className="text-slate-500"> · {L("Not in the top 25 yet", "Aún no estás en el top 25")}</span>
+                    </>
+                  ) : me ? (
+                    <>
+                      {me.xp_total?.toLocaleString?.() ?? me.xp_total} XP · {me.trophies_count}{" "}
+                      {L("trophies", "trofeos")}
+                      <span className="text-slate-500">
+                        {" "}· {L("Ranking hidden in your privacy settings", "Ranking oculto en tu configuración de privacidad")}
+                      </span>
                     </>
                   ) : (
                     <span className="text-slate-500">{L("Loading…", "Cargando…")}</span>
@@ -227,9 +228,9 @@ export default function GlobalRankingPage() {
         {/* Leaderboard */}
         <section className="rounded-3xl border border-slate-800 bg-slate-900/50 overflow-hidden">
           <div className="flex items-center justify-between px-5 py-4 border-b border-slate-800">
-            <h2 className="text-sm font-semibold text-slate-100">{L("Top traders", "Top traders")}</h2>
+            <h2 className="text-sm font-semibold text-slate-100">{L("Top consistency ranking", "Top ranking de consistencia")}</h2>
             <p className="text-[11px] text-slate-400">
-              {L("Updated live as users earn trophies.", "Se actualiza en vivo cuando los usuarios ganan trofeos.")}
+              {L("Updated as users earn trophies and accumulate XP.", "Se actualiza a medida que los usuarios ganan trofeos y acumulan XP.")}
             </p>
           </div>
 
@@ -302,8 +303,8 @@ export default function GlobalRankingPage() {
 
               <p className="px-5 py-4 text-[11px] text-slate-500">
                 {L(
-                  "Privacy note: profiles show only trophies earned and public ranking stats. No email, phone or address is exposed.",
-                  "Nota de privacidad: los perfiles muestran solo trofeos ganados y estadísticas públicas. No se expone email, teléfono ni dirección."
+                  "Privacy note: profiles show only trophies earned and public ranking stats. Ranking is opt-in. No email, phone or address is exposed.",
+                  "Nota de privacidad: los perfiles muestran solo trofeos ganados y estadísticas públicas. El ranking es opcional. No se expone email, teléfono ni dirección."
                 )}
               </p>
             </div>

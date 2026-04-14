@@ -70,6 +70,26 @@ Cuando la cancelación se acepta:
 ## Historial de pagos
 Abre `Billing History` para revisar facturas anteriores y períodos de pago.
 
+## Emails de billing
+NeuroTrader Journal ahora envía los principales emails del ciclo de suscripción desde el sistema visual de la plataforma en lugar de depender solo de los emails de cliente de Stripe.
+
+### Qué puede recibir el usuario
+1. `Subscription confirmation` justo después de que el checkout se completa.
+2. `Subscription receipt` después de un pago exitoso o una renovación.
+3. `Renewal reminder` antes del próximo cobro recurrente.
+4. `Payment issue` si una renovación falla y el método de pago necesita revisión.
+5. `Cancellation scheduled` después de apagar la auto-renovación.
+6. `Winback offer` más adelante si el usuario sigue cancelado y entra en la campaña de follow-up.
+
+### Para qué sirven estos emails
+- Mantener la experiencia de billing alineada visualmente con NeuroTrader Journal.
+- Llevar al usuario de vuelta a `Billing` dentro de la app en vez de mandarlo primero a un flujo externo genérico.
+- Hacer que recibos, recordatorios y emails de recuperación sean más claros dentro del mismo estilo visual de onboarding y account recovery.
+
+### Nota importante para admin
+- Stripe todavía puede enviar sus propios emails de cliente si siguen activados en Stripe Dashboard.
+- Para evitar recibos o recordatorios duplicados, el admin debe desactivar en Stripe las opciones de emails que se solapan una vez los emails de NeuroTrader Journal estén live.
+
 ## Mejores prácticas
 - Revisa la próxima fecha de renovación antes de cambiar la auto-renovación.
 - Usa facturación anual solo si coincide con tu horizonte real de trading.

@@ -8,7 +8,10 @@ import {
 } from "@/lib/accessControl";
 import {
   sendWelcomeEmailByEmail,
+  sendSubscriptionConfirmationEmailByEmail,
   sendSubscriptionReceiptEmailByEmail,
+  sendSubscriptionRenewalReminderEmail,
+  sendSubscriptionPaymentIssueEmail,
 } from "@/lib/email";
 import { createPartnerCommission, getPartnerProfile } from "@/lib/partnerProgram";
 
@@ -33,6 +36,16 @@ const ADDON_PRICE_ID_TO_KEY = new Map<string, AddonKey>();
 Object.entries(ADDON_CONFIG).forEach(([key, cfg]) => {
   if (cfg.monthly) ADDON_PRICE_ID_TO_KEY.set(cfg.monthly, key as AddonKey);
   if (cfg.annual) ADDON_PRICE_ID_TO_KEY.set(cfg.annual, key as AddonKey);
+});
+
+const PLAN_PRICE_ID_TO_KEY = new Map<string, PlanId>();
+[
+  [process.env.STRIPE_PRICE_CORE_MONTHLY ?? "", "core"],
+  [process.env.STRIPE_PRICE_CORE_ANNUAL ?? "", "core"],
+  [process.env.STRIPE_PRICE_ADVANCED_MONTHLY ?? "", "advanced"],
+  [process.env.STRIPE_PRICE_ADVANCED_ANNUAL ?? "", "advanced"],
+].forEach(([priceId, planId]) => {
+  if (priceId) PLAN_PRICE_ID_TO_KEY.set(priceId, planId as PlanId);
 });
 
 async function upsertEntitlement(params: {
@@ -158,11 +171,236 @@ function normalizeBillingCycle(raw?: string | null): "monthly" | "annual" | null
   return null;
 }
 
+function normalizePlanId(raw?: string | null): PlanId | null {
+  const value = String(raw ?? "").trim().toLowerCase();
+  if (value === "core" || value === "advanced") return value as PlanId;
+  return null;
+}
+
+function resolvePlanIdFromPriceId(priceId?: string | null): PlanId | null {
+  if (!priceId) return null;
+  return PLAN_PRICE_ID_TO_KEY.get(String(priceId)) ?? null;
+}
+
 function buildPlatformAccessMetadata(planId?: string | null, billingCycle?: string | null) {
   return {
     plan: String(planId ?? "").trim().toLowerCase() || null,
     billingCycle: normalizeBillingCycle(billingCycle) ?? null,
   };
+}
+
+type ResolvedProfile = {
+  id: string;
+  email: string | null;
+  firstName: string | null;
+  plan: PlanId | null;
+};
+
+async function resolveProfileByCustomer(customerId?: string | null): Promise<ResolvedProfile | null> {
+  if (!customerId) return null;
+  const { data, error } = await supabaseAdmin
+    .from("profiles")
+    .select("id,email,first_name,plan")
+    .eq("stripe_customer_id", customerId)
+    .limit(1)
+    .maybeSingle();
+  if (error || !data) return null;
+  return {
+    id: String((data as any).id),
+    email: ((data as any).email as string | null) ?? null,
+    firstName: ((data as any).first_name as string | null) ?? null,
+    plan: normalizePlanId((data as any).plan),
+  };
+}
+
+function resolveInvoiceLinePriceIds(invoice: Stripe.Invoice) {
+  return (invoice.lines?.data ?? [])
+    .map((line) => ((line as any)?.price?.id as string | null) ?? null)
+    .filter((value): value is string => Boolean(value));
+}
+
+function resolveInvoicePrimaryPriceId(invoice: Stripe.Invoice) {
+  return resolveInvoiceLinePriceIds(invoice)[0] ?? null;
+}
+
+function isAddonOnlyInvoice(invoice: Stripe.Invoice, subscription?: Stripe.Subscription | null) {
+  const subscriptionAddonKey = subscription?.metadata?.addonKey as string | undefined;
+  const primaryPriceId = resolveInvoicePrimaryPriceId(invoice);
+  if (subscriptionAddonKey && isAddonPurchase({ addonKey: subscriptionAddonKey, priceId: primaryPriceId })) {
+    return true;
+  }
+  const linePriceIds = resolveInvoiceLinePriceIds(invoice);
+  return linePriceIds.length > 0 && linePriceIds.every((priceId) => Boolean(resolveAddonKeyFromPriceId(priceId)));
+}
+
+function resolveInvoicePlanId(
+  invoice: Stripe.Invoice,
+  subscription?: Stripe.Subscription | null,
+  fallbackPlan?: string | null
+): PlanId {
+  const metaPlan =
+    normalizePlanId(subscription?.metadata?.planId) ||
+    normalizePlanId(subscription?.metadata?.plan) ||
+    normalizePlanId((invoice.parent as any)?.subscription_details?.metadata?.planId) ||
+    normalizePlanId((invoice.parent as any)?.subscription_details?.metadata?.plan) ||
+    normalizePlanId(fallbackPlan);
+  if (metaPlan) return metaPlan;
+
+  const linePlan = resolveInvoiceLinePriceIds(invoice)
+    .map((priceId) => resolvePlanIdFromPriceId(priceId))
+    .find(Boolean);
+  return linePlan ?? "core";
+}
+
+function resolveInvoiceBillingCycle(invoice: Stripe.Invoice, subscription?: Stripe.Subscription | null) {
+  return (
+    normalizeBillingCycle(subscription?.items?.data?.[0]?.price?.recurring?.interval) ||
+    normalizeBillingCycle((invoice.parent as any)?.subscription_details?.metadata?.billingCycle) ||
+    normalizeBillingCycle(
+      (((invoice.lines?.data ?? []).find((line) => Boolean((line as any)?.price?.recurring?.interval)) as any)?.price
+        ?.recurring?.interval as string | null) ?? null
+    ) ||
+    null
+  );
+}
+
+function resolveInvoiceRenewalDate(invoice: Stripe.Invoice) {
+  const periodEnd = invoice.lines?.data?.find((line) => line.period?.end)?.period?.end;
+  if (typeof periodEnd === "number" && periodEnd > 0) {
+    return new Date(periodEnd * 1000).toISOString();
+  }
+  const nextAttempt = (invoice as any)?.next_payment_attempt;
+  if (typeof nextAttempt === "number" && nextAttempt > 0) {
+    return new Date(nextAttempt * 1000).toISOString();
+  }
+  return null;
+}
+
+type StripeLifecycleEmailKey =
+  | "welcome"
+  | "subscription_confirmation"
+  | "subscription_receipt"
+  | "subscription_renewal_reminder"
+  | "subscription_payment_issue";
+
+async function beginStripeEmailDelivery(args: {
+  eventId: string;
+  emailKey: StripeLifecycleEmailKey;
+  email: string;
+  stripeObjectId?: string | null;
+}) {
+  const now = new Date().toISOString();
+  const { data, error } = await supabaseAdmin
+    .from("stripe_email_deliveries")
+    .select("id,status")
+    .eq("event_id", args.eventId)
+    .eq("email_key", args.emailKey)
+    .maybeSingle();
+
+  if (error) {
+    console.error("[WEBHOOK] Could not inspect stripe email delivery:", error);
+    return true;
+  }
+
+  const existing = data as any;
+  if (!existing) {
+    const { error: insertError } = await supabaseAdmin.from("stripe_email_deliveries").insert({
+      event_id: args.eventId,
+      email_key: args.emailKey,
+      email: args.email,
+      stripe_object_id: args.stripeObjectId ?? null,
+      status: "processing",
+      updated_at: now,
+    });
+    if (insertError) {
+      console.error("[WEBHOOK] Could not create stripe email delivery:", insertError);
+      return true;
+    }
+    return true;
+  }
+
+  if (String(existing.status ?? "") === "sent" || String(existing.status ?? "") === "processing") {
+    return false;
+  }
+
+  const { error: updateError } = await supabaseAdmin
+    .from("stripe_email_deliveries")
+    .update({
+      status: "processing",
+      last_error: null,
+      updated_at: now,
+    })
+    .eq("id", existing.id);
+  if (updateError) {
+    console.error("[WEBHOOK] Could not reset failed stripe email delivery:", updateError);
+    return false;
+  }
+  return true;
+}
+
+async function markStripeEmailDelivery(args: {
+  eventId: string;
+  emailKey: StripeLifecycleEmailKey;
+  status: "sent" | "failed";
+  errorMessage?: string | null;
+}) {
+  const payload =
+    args.status === "sent"
+      ? {
+          status: "sent",
+          last_error: null,
+          sent_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        }
+      : {
+          status: "failed",
+          last_error: args.errorMessage ?? null,
+          updated_at: new Date().toISOString(),
+        };
+
+  const { error } = await supabaseAdmin
+    .from("stripe_email_deliveries")
+    .update(payload)
+    .eq("event_id", args.eventId)
+    .eq("email_key", args.emailKey);
+  if (error) {
+    console.error("[WEBHOOK] Could not update stripe email delivery state:", error);
+  }
+}
+
+async function sendStripeLifecycleEmailOnce(args: {
+  eventId: string;
+  emailKey: StripeLifecycleEmailKey;
+  email: string | null;
+  stripeObjectId?: string | null;
+  send: () => Promise<void>;
+}) {
+  if (!args.email) return false;
+  const shouldSend = await beginStripeEmailDelivery({
+    eventId: args.eventId,
+    emailKey: args.emailKey,
+    email: args.email,
+    stripeObjectId: args.stripeObjectId ?? null,
+  });
+  if (!shouldSend) return false;
+
+  try {
+    await args.send();
+    await markStripeEmailDelivery({
+      eventId: args.eventId,
+      emailKey: args.emailKey,
+      status: "sent",
+    });
+    return true;
+  } catch (err: any) {
+    await markStripeEmailDelivery({
+      eventId: args.eventId,
+      emailKey: args.emailKey,
+      status: "failed",
+      errorMessage: err?.message ?? "Unknown email error",
+    });
+    throw err;
+  }
 }
 
 async function maybeCreatePartnerCommissionFromInvoice(invoice: Stripe.Invoice) {
@@ -287,10 +525,6 @@ export async function POST(req: NextRequest) {
           null;
 
         const customerName = session.customer_details?.name ?? null;
-        const amountTotal = session.amount_total
-          ? session.amount_total / 100
-          : undefined;
-
         console.log("[WEBHOOK] checkout.session.completed raw metadata:", {
           sessionMetadata: session.metadata,
           subscriptionId,
@@ -458,17 +692,32 @@ export async function POST(req: NextRequest) {
 
               // 🔔 Enviar emails DESPUÉS de marcar la suscripción como activa
               try {
-                await sendWelcomeEmailByEmail(email, customerName);
-                await sendSubscriptionReceiptEmailByEmail({
+                const billingCycle =
+                  subscription?.items?.data?.[0]?.price?.recurring?.interval ??
+                  session.metadata?.billingCycle ??
+                  null;
+                await sendStripeLifecycleEmailOnce({
+                  eventId: event.id,
+                  emailKey: "welcome",
                   email,
-                  plan: planId,
-                  amount: amountTotal,
-                  subscriptionId: subscriptionId ?? undefined,
+                  stripeObjectId: session.id,
+                  send: () => sendWelcomeEmailByEmail(email, customerName),
                 });
-                console.log(
-                  "[WEBHOOK] Welcome + receipt emails sent (by email branch) to",
-                  email
-                );
+                await sendStripeLifecycleEmailOnce({
+                  eventId: event.id,
+                  emailKey: "subscription_confirmation",
+                  email,
+                  stripeObjectId: subscriptionId ?? session.id,
+                  send: () =>
+                    sendSubscriptionConfirmationEmailByEmail({
+                      email,
+                      name: customerName,
+                      plan: planId,
+                      billingCycle,
+                      subscriptionId: subscriptionId ?? undefined,
+                    }),
+                });
+                console.log("[WEBHOOK] Welcome + confirmation emails sent (by email branch) to", email);
               } catch (mailErr) {
                 console.error(
                   "[WEBHOOK] Error sending emails (by email branch):",
@@ -576,17 +825,32 @@ export async function POST(req: NextRequest) {
         // 3) Enviar emails si tenemos email
         if (email) {
           try {
-            await sendWelcomeEmailByEmail(email, customerName);
-            await sendSubscriptionReceiptEmailByEmail({
+            const billingCycle =
+              subscription?.items?.data?.[0]?.price?.recurring?.interval ??
+              session.metadata?.billingCycle ??
+              null;
+            await sendStripeLifecycleEmailOnce({
+              eventId: event.id,
+              emailKey: "welcome",
               email,
-              plan: planId,
-              amount: amountTotal,
-              subscriptionId: subscriptionId ?? undefined,
+              stripeObjectId: session.id,
+              send: () => sendWelcomeEmailByEmail(email, customerName),
             });
-            console.log(
-              "[WEBHOOK] Welcome + receipt emails sent (userId branch) to",
-              email
-            );
+            await sendStripeLifecycleEmailOnce({
+              eventId: event.id,
+              emailKey: "subscription_confirmation",
+              email,
+              stripeObjectId: subscriptionId ?? session.id,
+              send: () =>
+                sendSubscriptionConfirmationEmailByEmail({
+                  email,
+                  name: customerName,
+                  plan: planId,
+                  billingCycle,
+                  subscriptionId: subscriptionId ?? undefined,
+                }),
+            });
+            console.log("[WEBHOOK] Welcome + confirmation emails sent (userId branch) to", email);
           } catch (mailErr) {
             console.error(
               "[WEBHOOK] Error sending emails (userId branch):",
@@ -887,10 +1151,171 @@ export async function POST(req: NextRequest) {
 
       case "invoice.paid": {
         const invoice = event.data.object as Stripe.Invoice;
+        const customerId = typeof invoice.customer === "string" ? invoice.customer : null;
+        const rawSubscription = (invoice as any)?.subscription;
+        const subscriptionId =
+          typeof rawSubscription === "string"
+            ? rawSubscription
+            : typeof rawSubscription?.id === "string"
+            ? rawSubscription.id
+            : null;
+        const subscription = subscriptionId
+          ? await stripe.subscriptions.retrieve(subscriptionId).catch(() => null)
+          : null;
+
         try {
           await maybeCreatePartnerCommissionFromInvoice(invoice);
         } catch (err) {
           console.error("[WEBHOOK] Could not create partner commission from invoice.paid:", err);
+        }
+
+        if (!isAddonOnlyInvoice(invoice, subscription)) {
+          const profile = await resolveProfileByCustomer(customerId);
+          const email =
+            invoice.customer_email ??
+            (profile?.email ? profile.email.toLowerCase() : null);
+          const name =
+            ((invoice as any)?.customer_name as string | null) ??
+            profile?.firstName ??
+            null;
+          const planId = resolveInvoicePlanId(invoice, subscription, profile?.plan ?? null);
+          const billingCycle = resolveInvoiceBillingCycle(invoice, subscription);
+
+          if (email) {
+            try {
+              await sendStripeLifecycleEmailOnce({
+                eventId: event.id,
+                emailKey: "subscription_receipt",
+                email,
+                stripeObjectId: invoice.id,
+                send: () =>
+                  sendSubscriptionReceiptEmailByEmail({
+                    email,
+                    name,
+                    plan: planId,
+                    amount: Number(invoice.amount_paid || invoice.total || 0) / 100,
+                    billingCycle,
+                    subscriptionId: subscriptionId ?? undefined,
+                    invoiceNumber: invoice.number ?? null,
+                    invoiceUrl: invoice.hosted_invoice_url ?? null,
+                    chargeDate:
+                      typeof invoice.status_transitions?.paid_at === "number" && invoice.status_transitions.paid_at > 0
+                        ? new Date(invoice.status_transitions.paid_at * 1000).toISOString()
+                        : new Date().toISOString(),
+                  }),
+              });
+            } catch (mailErr) {
+              console.error("[WEBHOOK] Could not send invoice.paid receipt email:", mailErr);
+            }
+          }
+        }
+        break;
+      }
+
+      case "invoice.upcoming": {
+        const invoice = event.data.object as Stripe.Invoice;
+        const customerId = typeof invoice.customer === "string" ? invoice.customer : null;
+        const rawSubscription = (invoice as any)?.subscription;
+        const subscriptionId =
+          typeof rawSubscription === "string"
+            ? rawSubscription
+            : typeof rawSubscription?.id === "string"
+            ? rawSubscription.id
+            : null;
+        const subscription = subscriptionId
+          ? await stripe.subscriptions.retrieve(subscriptionId).catch(() => null)
+          : null;
+
+        if (!isAddonOnlyInvoice(invoice, subscription)) {
+          const profile = await resolveProfileByCustomer(customerId);
+          const email =
+            invoice.customer_email ??
+            (profile?.email ? profile.email.toLowerCase() : null);
+          const name =
+            ((invoice as any)?.customer_name as string | null) ??
+            profile?.firstName ??
+            null;
+          const planId = resolveInvoicePlanId(invoice, subscription, profile?.plan ?? null);
+          const billingCycle = resolveInvoiceBillingCycle(invoice, subscription);
+
+          if (email) {
+            try {
+              await sendStripeLifecycleEmailOnce({
+                eventId: event.id,
+                emailKey: "subscription_renewal_reminder",
+                email,
+                stripeObjectId: invoice.id,
+                send: () =>
+                  sendSubscriptionRenewalReminderEmail({
+                    email,
+                    name,
+                    plan: planId,
+                    amount: Number(invoice.amount_due || invoice.total || 0) / 100,
+                    billingCycle,
+                    renewalDate: resolveInvoiceRenewalDate(invoice),
+                  }),
+              });
+            } catch (mailErr) {
+              console.error("[WEBHOOK] Could not send invoice.upcoming reminder email:", mailErr);
+            }
+          }
+        }
+        break;
+      }
+
+      case "invoice.payment_failed": {
+        const invoice = event.data.object as Stripe.Invoice;
+        const customerId = typeof invoice.customer === "string" ? invoice.customer : null;
+        const rawSubscription = (invoice as any)?.subscription;
+        const subscriptionId =
+          typeof rawSubscription === "string"
+            ? rawSubscription
+            : typeof rawSubscription?.id === "string"
+            ? rawSubscription.id
+            : null;
+        const subscription = subscriptionId
+          ? await stripe.subscriptions.retrieve(subscriptionId).catch(() => null)
+          : null;
+
+        if (!isAddonOnlyInvoice(invoice, subscription)) {
+          const profile = await resolveProfileByCustomer(customerId);
+          const email =
+            invoice.customer_email ??
+            (profile?.email ? profile.email.toLowerCase() : null);
+          const name =
+            ((invoice as any)?.customer_name as string | null) ??
+            profile?.firstName ??
+            null;
+          const planId = resolveInvoicePlanId(invoice, subscription, profile?.plan ?? null);
+          const billingCycle = resolveInvoiceBillingCycle(invoice, subscription);
+
+          if (email) {
+            try {
+              await sendStripeLifecycleEmailOnce({
+                eventId: event.id,
+                emailKey: "subscription_payment_issue",
+                email,
+                stripeObjectId: invoice.id,
+                send: () =>
+                  sendSubscriptionPaymentIssueEmail({
+                    email,
+                    name,
+                    plan: planId,
+                    amount: Number(invoice.amount_due || invoice.total || 0) / 100,
+                    billingCycle,
+                    invoiceNumber: invoice.number ?? null,
+                    invoiceUrl: invoice.hosted_invoice_url ?? null,
+                    nextAttemptAt:
+                      typeof (invoice as any)?.next_payment_attempt === "number" &&
+                      (invoice as any).next_payment_attempt > 0
+                        ? new Date((invoice as any).next_payment_attempt * 1000).toISOString()
+                        : null,
+                  }),
+              });
+            } catch (mailErr) {
+              console.error("[WEBHOOK] Could not send invoice.payment_failed email:", mailErr);
+            }
+          }
         }
         break;
       }

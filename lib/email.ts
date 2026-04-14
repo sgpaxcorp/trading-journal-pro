@@ -1,18 +1,15 @@
-// lib/email.ts
 import { AppUser, PlanId } from "./types";
 import { Resend } from "resend";
 
-/**
- * Remitente verificado en Resend.
- */
+const APP_URL =
+  process.env.NEXT_PUBLIC_APP_URL ||
+  process.env.NEXT_PUBLIC_SITE_URL ||
+  "https://neurotrader-journal.com";
+
 const FROM_EMAIL =
   process.env.RESEND_FROM_EMAIL ||
   "NeuroTrader Journal <support@neurotrader-journal.com>";
 
-/**
- * Cliente de Resend.
- * Si no hay RESEND_API_KEY, se queda en null y usamos modo "mock".
- */
 const resend = process.env.RESEND_API_KEY
   ? new Resend(process.env.RESEND_API_KEY)
   : null;
@@ -24,67 +21,172 @@ type SendEmailArgs = {
   html?: string;
 };
 
-/* =========================================================================
-   TEMPLATE FUTURISTA NEURO-TRADER (HTML)
-   ========================================================================= */
+type EmailContent = {
+  subject: string;
+  text: string;
+  html: string;
+};
+
+export type AutomatedEmailKey =
+  | "email_confirmation"
+  | "password_reset"
+  | "account_recovery"
+  | "welcome"
+  | "subscription_confirmation"
+  | "subscription_receipt"
+  | "subscription_renewal_reminder"
+  | "subscription_payment_issue"
+  | "subscription_cancellation"
+  | "subscription_winback"
+  | "profit_loss_alert";
+
+export type AutomatedEmailPreview = {
+  key: AutomatedEmailKey;
+  category: "Authentication" | "Billing" | "Lifecycle" | "Operations";
+  name: string;
+  description: string;
+  trigger: string;
+  delivery: string;
+  from: string;
+  preview: EmailContent;
+};
 
 type NeuroTemplateArgs = {
   title: string;
   preheader?: string;
+  eyebrow?: string;
   greeting: string;
-  paragraphs: string[]; // párrafos principales
-  highlight?: string; // frase grande tipo tagline
+  paragraphs: string[];
+  highlight?: string;
+  code?: string;
+  facts?: { label: string; value: string }[];
   ctaLabel?: string;
   ctaUrl?: string;
+  secondaryLabel?: string;
+  secondaryUrl?: string;
   footerNote?: string;
 };
+
+function escapeHtml(value: string) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function resolveAppUrl(path = "") {
+  const base = APP_URL.replace(/\/$/, "");
+  if (!path) return base;
+  return path.startsWith("http") ? path : `${base}${path.startsWith("/") ? path : `/${path}`}`;
+}
+
+function buildParagraphs(paragraphs: string[]) {
+  return paragraphs
+    .map(
+      (p) =>
+        `<p style="margin:0 0 12px 0;color:#cbd5e1;font-size:15px;line-height:1.7;">${p}</p>`
+    )
+    .join("");
+}
+
+function formatMoney(amount?: number | null) {
+  if (typeof amount !== "number" || Number.isNaN(amount)) return "Processed successfully";
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+  }).format(amount);
+}
+
+function formatEmailDate(value?: string | number | Date | null) {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toLocaleDateString("en-US", {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function formatPlanLabel(plan?: string | null) {
+  const clean = String(plan ?? "").trim().toLowerCase();
+  if (!clean) return "NeuroTrader Journal";
+  if (clean === "advanced") return "Advanced";
+  if (clean === "core") return "Core";
+  return clean
+    .split(/[\s_-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function formatBillingCycleLabel(cycle?: string | null) {
+  const clean = String(cycle ?? "").trim().toLowerCase();
+  if (!clean) return null;
+  if (clean === "monthly" || clean === "month") return "Monthly";
+  if (clean === "annual" || clean === "yearly" || clean === "year") return "Annual";
+  return clean.charAt(0).toUpperCase() + clean.slice(1);
+}
 
 function buildNeuroTraderHtml({
   title,
   preheader,
+  eyebrow,
   greeting,
   paragraphs,
   highlight,
+  code,
+  facts,
   ctaLabel,
   ctaUrl,
+  secondaryLabel,
+  secondaryUrl,
   footerNote,
 }: NeuroTemplateArgs): string {
   const preheaderText =
     preheader ||
-    "Upgrade your trading with structured journaling, analytics & neuro-performance.";
+    "Structured journaling, AI coaching, and trading clarity inside NeuroTrader Journal.";
 
-  const bodyHtml = paragraphs
-    .map(
-      (p) =>
-        `<p style="margin:0 0 10px 0;color:#cbd5f5;font-size:14px;line-height:1.6;">${p}</p>`
-    )
-    .join("");
-
-  const highlightHtml = highlight
-    ? `<p style="margin:16px 0 18px 0;font-size:14px;line-height:1.6;color:#a5b4fc;">
-         <span style="display:inline-block;padding:6px 10px;border-radius:999px;border:1px solid rgba(94,234,212,0.4);background:rgba(15,23,42,0.9);color:#e5e7eb;">
-           ${highlight}
-         </span>
-       </p>`
+  const factsHtml = Array.isArray(facts) && facts.length
+    ? `<table role="presentation" width="100%" cellPadding="0" cellSpacing="0" style="margin:18px 0 8px 0;border-collapse:separate;border-spacing:0 10px;">${facts
+        .map(
+          (fact) =>
+            `<tr>
+               <td style="padding:0 12px 0 0;color:#94a3b8;font-size:12px;line-height:1.4;text-transform:uppercase;letter-spacing:0.16em;width:40%;">${escapeHtml(fact.label)}</td>
+               <td style="padding:0;color:#f8fafc;font-size:13px;line-height:1.6;font-weight:600;">${fact.value}</td>
+             </tr>`
+        )
+        .join("")}</table>`
     : "";
 
-  const ctaHtml =
-    ctaLabel && ctaUrl
-      ? `<div style="margin:22px 0 4px 0;">
-           <a href="${ctaUrl}"
-              style="display:inline-block;padding:10px 20px;border-radius:999px;
-                     background:linear-gradient(135deg,#22c55e,#06b6d4);
-                     color:#020617;font-weight:600;font-size:14px;
-                     text-decoration:none;">
-             ${ctaLabel}
-           </a>
-         </div>`
-      : "";
+  const codeHtml = code
+    ? `<div style="margin:18px 0 6px 0;border:1px solid rgba(45,212,191,0.35);border-radius:18px;background:linear-gradient(180deg,rgba(15,23,42,0.95),rgba(15,23,42,0.82));padding:18px 18px 16px 18px;">
+         <div style="font-size:11px;letter-spacing:0.24em;text-transform:uppercase;color:#67e8f9;margin:0 0 8px 0;">Verification code</div>
+         <div style="font-size:34px;line-height:1;font-weight:800;letter-spacing:0.3em;color:#f8fafc;">${escapeHtml(code)}</div>
+         <div style="margin-top:10px;color:#94a3b8;font-size:12px;line-height:1.6;">Enter this code inside NeuroTrader Journal to continue.</div>
+       </div>`
+    : "";
+
+  const highlightHtml = highlight
+    ? `<div style="margin:16px 0 18px 0;padding:14px 16px;border-radius:16px;border:1px solid rgba(16,185,129,0.32);background:rgba(16,185,129,0.08);color:#ecfeff;font-size:14px;line-height:1.7;">${highlight}</div>`
+    : "";
+
+  const ctaHtml = ctaLabel && ctaUrl
+    ? `<div style="margin:24px 0 10px 0;">
+         <a href="${ctaUrl}" style="display:inline-block;padding:12px 20px;border-radius:999px;background:linear-gradient(135deg,#22c55e,#06b6d4);color:#04111d;font-size:14px;font-weight:700;text-decoration:none;">${escapeHtml(ctaLabel)}</a>
+       </div>`
+    : "";
+
+  const secondaryHtml = secondaryLabel && secondaryUrl
+    ? `<div style="margin:0 0 4px 0;">
+         <a href="${secondaryUrl}" style="display:inline-block;padding:10px 18px;border-radius:999px;border:1px solid rgba(100,116,139,0.45);color:#e2e8f0;font-size:13px;font-weight:600;text-decoration:none;">${escapeHtml(secondaryLabel)}</a>
+       </div>`
+    : "";
 
   const footerHtml = footerNote
-    ? `<p style="margin:18px 0 0 0;color:#64748b;font-size:11px;line-height:1.5;">
-         ${footerNote}
-       </p>`
+    ? `<p style="margin:20px 0 0 0;color:#64748b;font-size:11px;line-height:1.6;">${footerNote}</p>`
     : "";
 
   return `
@@ -92,94 +194,52 @@ function buildNeuroTraderHtml({
 <html lang="en">
 <head>
   <meta charSet="UTF-8" />
-  <title>${title}</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <style>
-    @media (prefers-color-scheme: dark) {
-      body { background-color:#020617 !important; }
-    }
-  </style>
+  <title>${escapeHtml(title)}</title>
 </head>
-<body style="margin:0;padding:0;background-color:#020617;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
-  <!-- Preheader invisible -->
-  <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">
-    ${preheaderText}
-  </div>
-
-  <table role="presentation" width="100%" cellPadding="0" cellSpacing="0" style="background-color:#020617;padding:24px 0;">
+<body style="margin:0;padding:0;background:#020617;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">${escapeHtml(preheaderText)}</div>
+  <table role="presentation" width="100%" cellPadding="0" cellSpacing="0" style="background:#020617;padding:28px 0;">
     <tr>
       <td align="center">
-        <table role="presentation" width="100%" cellPadding="0" cellSpacing="0" style="max-width:600px;background:radial-gradient(circle at 0% 0%,rgba(56,189,248,0.35),transparent 55%),radial-gradient(circle at 100% 0%,rgba(16,185,129,0.35),transparent 55%),linear-gradient(180deg,#020617,#020617);border-radius:18px;border:1px solid rgba(148,163,184,0.28);box-shadow:0 18px 45px rgba(15,23,42,0.9);overflow:hidden;">
-          <!-- HEADER -->
+        <table role="presentation" width="100%" cellPadding="0" cellSpacing="0" style="max-width:660px;border-radius:26px;overflow:hidden;background:radial-gradient(circle at top left,rgba(34,197,94,0.18),transparent 30%),radial-gradient(circle at top right,rgba(6,182,212,0.18),transparent 30%),linear-gradient(180deg,#06111f 0%,#020617 100%);border:1px solid rgba(51,65,85,0.9);box-shadow:0 24px 70px rgba(2,6,23,0.72);">
           <tr>
-            <td style="padding:18px 26px 10px 26px;border-bottom:1px solid rgba(51,65,85,0.9);">
+            <td style="padding:20px 28px 14px 28px;border-bottom:1px solid rgba(30,41,59,0.9);">
               <table width="100%" role="presentation" cellPadding="0" cellSpacing="0">
                 <tr>
                   <td align="left">
-                    <div style="display:flex;align-items:center;gap:8px;">
-                      <div style="width:30px;height:30px;border-radius:10px;background:radial-gradient(circle at 30% 0%,#22c55e,transparent 55%),radial-gradient(circle at 70% 100%,#38bdf8,transparent 55%),#020617;border:1px solid rgba(148,163,184,0.5);display:flex;align-items:center;justify-content:center;">
-                        <span style="font-size:16px;color:#e5e7eb;font-weight:700;">NT</span>
+                    <div style="display:flex;align-items:center;gap:12px;">
+                      <div style="width:34px;height:34px;border-radius:12px;border:1px solid rgba(148,163,184,0.35);background:radial-gradient(circle at 25% 25%,#22c55e 0%,transparent 55%),radial-gradient(circle at 70% 70%,#38bdf8 0%,transparent 60%),#020617;display:flex;align-items:center;justify-content:center;">
+                        <span style="font-size:15px;font-weight:800;color:#f8fafc;">NT</span>
                       </div>
-                      <div style="font-size:14px;font-weight:600;color:#e5e7eb;">
-                        NeuroTrader Journal
-                        <div style="font-size:11px;color:#9ca3af;font-weight:400;">
-                          Neurophysiological Trading Performance
-                        </div>
+                      <div>
+                        <div style="font-size:14px;font-weight:700;color:#f8fafc;">NeuroTrader Journal</div>
+                        <div style="font-size:11px;color:#94a3b8;">Trading structure. Neuro awareness. Repeatable execution.</div>
                       </div>
                     </div>
                   </td>
-                  <td align="right" style="font-size:11px;color:#6b7280;">
-                    ${title}
-                  </td>
+                  <td align="right" style="font-size:11px;letter-spacing:0.22em;text-transform:uppercase;color:#67e8f9;">${escapeHtml(eyebrow || title)}</td>
                 </tr>
               </table>
             </td>
           </tr>
-
-          <!-- BODY -->
           <tr>
-            <td style="padding:22px 26px 24px 26px;position:relative;">
-              <!-- waves “neuronales” de fondo -->
-              <div style="position:absolute;inset:0;pointer-events:none;opacity:0.22;">
-                <svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%">
-                  <defs>
-                    <linearGradient id="wave" x1="0%" y1="0%" x2="100%" y2="0%">
-                      <stop offset="0%" stop-color="#22c55e" />
-                      <stop offset="50%" stop-color="#38bdf8" />
-                      <stop offset="100%" stop-color="#a855f7" />
-                    </linearGradient>
-                  </defs>
-                  <path d="M0 40 Q 80 10 160 40 T 320 40 T 480 40 T 640 40" fill="none" stroke="url(#wave)" stroke-width="1" stroke-linecap="round" stroke-dasharray="4 6" />
-                  <path d="M0 90 Q 80 60 160 90 T 320 90 T 480 90 T 640 90" fill="none" stroke="url(#wave)" stroke-width="1" stroke-linecap="round" stroke-dasharray="3 7" />
-                </svg>
-              </div>
-
-              <div style="position:relative;z-index:1;">
-                <p style="margin:0 0 10px 0;color:#e5e7eb;font-size:15px;font-weight:500;">
-                  ${greeting}
-                </p>
-
-                ${highlightHtml}
-
-                ${bodyHtml}
-
-                ${ctaHtml}
-
-                ${footerHtml}
-              </div>
+            <td style="padding:30px 28px 28px 28px;">
+              <div style="font-size:28px;line-height:1.2;font-weight:800;color:#f8fafc;margin:0 0 10px 0;">${escapeHtml(title)}</div>
+              <p style="margin:0 0 16px 0;color:#e2e8f0;font-size:15px;font-weight:600;line-height:1.6;">${greeting}</p>
+              ${highlightHtml}
+              ${codeHtml}
+              ${factsHtml}
+              ${buildParagraphs(paragraphs)}
+              ${ctaHtml}
+              ${secondaryHtml}
+              ${footerHtml}
             </td>
           </tr>
-
-          <!-- FOOTER -->
           <tr>
-            <td style="padding:12px 26px 18px 26px;border-top:1px solid rgba(31,41,55,0.9);">
-              <p style="margin:0;color:#6b7280;font-size:11px;line-height:1.5;">
-                You’re receiving this email because you created an account or subscription on
-                <span style="color:#e5e7eb;">NeuroTrader Journal</span>.
-              </p>
-              <p style="margin:6px 0 0 0;color:#4b5563;font-size:10px;">
-                &copy; ${new Date().getFullYear()} NeuroTrader Journal. All rights reserved.
-              </p>
+            <td style="padding:16px 28px 22px 28px;border-top:1px solid rgba(30,41,59,0.9);">
+              <p style="margin:0;color:#64748b;font-size:11px;line-height:1.6;">You’re receiving this email because you have an account, subscription, or admin-triggered email flow inside <span style="color:#f8fafc;">NeuroTrader Journal</span>.</p>
+              <p style="margin:6px 0 0 0;color:#475569;font-size:10px;line-height:1.6;">© ${new Date().getFullYear()} NeuroTrader Journal. All rights reserved.</p>
             </td>
           </tr>
         </table>
@@ -187,27 +247,20 @@ function buildNeuroTraderHtml({
     </tr>
   </table>
 </body>
-</html>
-`;
+</html>`;
 }
 
-/* =========================================================================
-   0) Helper genérico para enviar emails
-   ========================================================================= */
-
 async function sendEmailBase({ to, subject, text, html }: SendEmailArgs) {
-  // MODO MOCK (sin Resend configurado)
   if (!resend) {
     console.log("======================================");
-    console.log("[EMAIL MOCK] To:      ", to);
-    console.log("[EMAIL MOCK] Subject: ", subject);
+    console.log("[EMAIL MOCK] To:", to);
+    console.log("[EMAIL MOCK] Subject:", subject);
     if (text) console.log("[EMAIL MOCK] Text:\n", text);
     if (html) console.log("[EMAIL MOCK] HTML length:", html.length);
     console.log("======================================");
     return;
   }
 
-  // MODO REAL (Resend)
   try {
     await (resend as any).emails.send({
       from: FROM_EMAIL,
@@ -216,125 +269,871 @@ async function sendEmailBase({ to, subject, text, html }: SendEmailArgs) {
       text,
       html,
     });
-    console.log("[EMAIL] Sent successfully via Resend to", to);
   } catch (err) {
     console.error("[EMAIL] Error sending via Resend:", err);
+    throw err;
   }
 }
 
-/* =========================================================================
-   1) FUNCIONES QUE YA USA TU AUTHCONTEXT (NO CAMBIAR FIRMAS)
-   ========================================================================= */
-
-/**
- * Email de bienvenida al usuario cuando se registra.
- * Firma: sendWelcomeEmail(user: AppUser)
- */
-export async function sendWelcomeEmail(user: AppUser) {
-  const name = user.name || "trader";
-  const subject = "Welcome to NeuroTrader Journal";
-
+function buildEmailConfirmationContent(args: {
+  email: string;
+  name?: string | null;
+  confirmationCode: string;
+  continueUrl?: string | null;
+}) : EmailContent {
+  const safeName = args.name || "trader";
+  const continueUrl = args.continueUrl || resolveAppUrl("/signup");
+  const subject = "Confirm your NeuroTrader Journal account";
   const text = [
-    `Hi ${name},`,
+    `Hi ${safeName},`,
     "",
-    "Welcome to NeuroTrader Journal!",
+    "Welcome to NeuroTrader Journal.",
     "",
-    "You’ve just taken a big step toward trading with more structure, clarity, and psychological edge.",
+    `Your verification code is: ${args.confirmationCode}`,
     "",
-    "During the beta, access is limited. Our team may contact you with next steps or onboarding tips.",
+    "Enter that code in the verification step to continue.",
+    `If you prefer, open this link: ${continueUrl}`,
     "",
-    "Log in to start journaling your trades and exploring your analytics:",
-    "https://neurotrader-journal.com",
+    "If you didn’t request this account, you can safely ignore this email.",
     "",
-    "Happy trading,",
     "NeuroTrader Journal Team",
   ].join("\n");
 
   const html = buildNeuroTraderHtml({
-    title: `Welcome, ${name}`,
-    preheader:
-      "Your NeuroTrader Journal account is ready. Start tracking your trades and your mind.",
-    greeting: `Hi ${name},`,
-    highlight: "You just unlocked a neuro-aware trading workspace.",
+    title: "Confirm your account",
+    eyebrow: "Authentication",
+    preheader: "Use your secure code to verify your NeuroTrader Journal account.",
+    greeting: `Hi ${escapeHtml(safeName)},`,
+    highlight: "Verify your email to unlock your journal, billing step, and onboarding flow.",
+    code: args.confirmationCode,
     paragraphs: [
-      "Welcome to <strong>NeuroTrader Journal</strong> – your command center for structured journaling, performance analytics and psychological edge.",
-      "From now on, every trade has a memory: context, emotion, execution and outcome. That’s how you train your brain to think in probabilities, not impulses.",
-      "During the beta, access is limited. We may reach out with tailored onboarding tips based on how you trade.",
+      "Use the verification code above inside NeuroTrader Journal to confirm your email and continue setup.",
+      "Once verified, you can choose your plan, complete checkout, and enter your trading workspace.",
     ],
-    ctaLabel: "Enter your NeuroTrading Space",
-    ctaUrl: "https://neurotrader-journal.com",
-    footerNote:
-      "If you didn’t create this account, you can safely ignore this email.",
+    facts: [
+      { label: "Email", value: escapeHtml(args.email) },
+      { label: "Flow", value: "Account confirmation" },
+    ],
+    ctaLabel: "Open verification step",
+    ctaUrl: continueUrl,
+    footerNote: "If this wasn’t you, you can ignore this email and no access will be granted.",
   });
 
-  await sendEmailBase({
-    to: user.email,
-    subject,
-    text,
-    html,
-  });
+  return { subject, text, html };
 }
 
-/**
- * Email de recibo de suscripción.
- * Firma: sendSubscriptionReceiptEmail(user: AppUser, plan: PlanId)
- */
-export async function sendSubscriptionReceiptEmail(
-  user: AppUser,
-  plan: PlanId
-) {
-  const name = user.name || "trader";
-  const subject = "Your NeuroTrader Journal subscription";
-
+function buildPasswordResetContent(args: {
+  email: string;
+  name?: string | null;
+  resetUrl: string;
+}) : EmailContent {
+  const safeName = args.name || "trader";
+  const subject = "Reset your NeuroTrader Journal password";
   const text = [
-    `Hi ${name},`,
+    `Hi ${safeName},`,
     "",
-    `Thank you for subscribing to NeuroTrader Journal (${plan} plan).`,
+    "We received a request to reset your NeuroTrader Journal password.",
+    `Use this secure link to continue: ${args.resetUrl}`,
     "",
-    "This is a mock-style receipt email. In production, you can enrich this with full billing details.",
-    "",
-    "You can manage your subscription inside the app.",
+    "If you did not request a reset, you can ignore this email.",
     "",
     "NeuroTrader Journal Team",
   ].join("\n");
 
   const html = buildNeuroTraderHtml({
-    title: `Subscription active – ${name}`,
-    preheader: "Your NeuroTrader Journal subscription is live.",
-    greeting: `Hi ${name},`,
-    highlight: `Your <strong>${plan.toUpperCase()}</strong> plan is now active.`,
+    title: "Reset your password",
+    eyebrow: "Authentication",
+    preheader: "Open your secure reset link to choose a new password.",
+    greeting: `Hi ${escapeHtml(safeName)},`,
+    highlight: "Your password reset link is ready.",
     paragraphs: [
-      `Thank you for subscribing to <strong>NeuroTrader Journal</strong> on the <strong>${plan}</strong> plan.`,
-      "You now have access to structured journaling, performance analytics and tools designed to align your nervous system with your trading plan.",
-      "You can review or update your subscription details at any time from inside the app.",
+      "Open the secure link below to set a new password and recover access to your NeuroTrader Journal account.",
+      "For your safety, use the link from the device where you normally sign in.",
+    ],
+    facts: [
+      { label: "Email", value: escapeHtml(args.email) },
+      { label: "Request", value: "Password reset" },
+    ],
+    ctaLabel: "Reset password",
+    ctaUrl: args.resetUrl,
+    secondaryLabel: "Open sign in",
+    secondaryUrl: resolveAppUrl("/signin"),
+    footerNote: "If you didn’t request a password reset, no action is required.",
+  });
+
+  return { subject, text, html };
+}
+
+function buildAccountRecoveryContent(args: {
+  email: string;
+  name?: string | null;
+  resetUrl: string;
+}) : EmailContent {
+  const safeName = args.name || "trader";
+  const signInUrl = resolveAppUrl("/signin");
+  const subject = "Your NeuroTrader Journal account details";
+  const text = [
+    `Hi ${safeName},`,
+    "",
+    "Here is the account we found for NeuroTrader Journal:",
+    `Sign-in email: ${args.email}`,
+    "",
+    `If you also want to reset your password, use this secure link: ${args.resetUrl}`,
+    `Sign in here: ${signInUrl}`,
+    "",
+    "NeuroTrader Journal Team",
+  ].join("\n");
+
+  const html = buildNeuroTraderHtml({
+    title: "Account recovery",
+    eyebrow: "Authentication",
+    preheader: "We found your NeuroTrader Journal sign-in details.",
+    greeting: `Hi ${escapeHtml(safeName)},`,
+    highlight: `Your sign-in email is <strong>${escapeHtml(args.email)}</strong>.`,
+    paragraphs: [
+      "Use the sign-in email above to access NeuroTrader Journal.",
+      "If you also need a new password, use the reset link below and choose a new one right away.",
+    ],
+    facts: [
+      { label: "Sign-in email", value: escapeHtml(args.email) },
+      { label: "Support", value: "support@neurotrader-journal.com" },
+    ],
+    ctaLabel: "Reset password",
+    ctaUrl: args.resetUrl,
+    secondaryLabel: "Open sign in",
+    secondaryUrl: signInUrl,
+    footerNote: "If you did not request account recovery, you can ignore this email.",
+  });
+
+  return { subject, text, html };
+}
+
+function buildWelcomeEmailContent(args: {
+  email: string;
+  name?: string | null;
+}) : EmailContent {
+  const safeName = args.name || "trader";
+  const subject = "Welcome to NeuroTrader Journal";
+  const text = [
+    `Hi ${safeName},`,
+    "",
+    "Welcome to NeuroTrader Journal.",
+    "",
+    "Your trading workspace is ready. Log in to start journaling your trades, reviewing analytics, and building real process memory.",
+    resolveAppUrl("/signin"),
+    "",
+    "NeuroTrader Journal Team",
+  ].join("\n");
+
+  const html = buildNeuroTraderHtml({
+    title: "Welcome to NeuroTrader Journal",
+    eyebrow: "Lifecycle",
+    preheader: "Your workspace is ready.",
+    greeting: `Hi ${escapeHtml(safeName)},`,
+    highlight: "Your neuro-aware trading workspace is active.",
+    paragraphs: [
+      "Your account is ready for structured journaling, analytics, and AI coaching tied to how you actually trade.",
+      "Start logging your sessions, marking emotional patterns, and reviewing your execution with context.",
+    ],
+    facts: [{ label: "Email", value: escapeHtml(args.email) }],
+    ctaLabel: "Open dashboard",
+    ctaUrl: resolveAppUrl("/dashboard"),
+    secondaryLabel: "Open sign in",
+    secondaryUrl: resolveAppUrl("/signin"),
+    footerNote: "If you didn’t create this account, you can ignore this email.",
+  });
+
+  return { subject, text, html };
+}
+
+function buildSubscriptionReceiptContent(args: {
+  email: string;
+  name?: string | null;
+  plan: PlanId | string;
+  amount?: number;
+  subscriptionId?: string;
+  billingCycle?: string | null;
+  invoiceNumber?: string | null;
+  invoiceUrl?: string | null;
+  chargeDate?: string | null;
+}) : EmailContent {
+  const safeName = args.name || "trader";
+  const subject = "Your NeuroTrader Journal subscription receipt";
+  const amountText = formatMoney(args.amount);
+  const planLabel = formatPlanLabel(args.plan);
+  const billingLabel = formatBillingCycleLabel(args.billingCycle);
+  const chargeDateText = formatEmailDate(args.chargeDate);
+  const text = [
+    `Hi ${safeName},`,
+    "",
+    `Your ${planLabel} subscription payment was confirmed.`,
+    `Amount: ${amountText}`,
+    billingLabel ? `Billing cycle: ${billingLabel}` : "",
+    chargeDateText ? `Paid on: ${chargeDateText}` : "",
+    args.invoiceNumber ? `Invoice: ${args.invoiceNumber}` : "",
+    args.subscriptionId ? `Subscription ID: ${args.subscriptionId}` : "",
+    "",
+    args.invoiceUrl ? `Invoice: ${args.invoiceUrl}` : "",
+    `Billing: ${resolveAppUrl("/billing")}`,
+    "",
+    "NeuroTrader Journal Team",
+  ].filter(Boolean).join("\n");
+
+  const html = buildNeuroTraderHtml({
+    title: "Subscription receipt",
+    eyebrow: "Billing",
+    preheader: "Your subscription payment has been confirmed.",
+    greeting: `Hi ${escapeHtml(safeName)},`,
+    highlight: `Your <strong>${escapeHtml(planLabel)}</strong>${billingLabel ? ` <strong>${escapeHtml(billingLabel.toLowerCase())}</strong>` : ""} payment was processed successfully.`,
+    paragraphs: [
+      "Your subscription payment has been processed and your workspace remains active inside NeuroTrader Journal.",
+      "You can review billing details, invoices, plan changes, and renewal settings from the Billing section at any time.",
+    ],
+    facts: [
+      { label: "Plan", value: escapeHtml(planLabel) },
+      { label: "Amount", value: escapeHtml(amountText) },
+      ...(billingLabel ? [{ label: "Billing", value: escapeHtml(billingLabel) }] : []),
+      ...(chargeDateText ? [{ label: "Paid on", value: escapeHtml(chargeDateText) }] : []),
+      ...(args.invoiceNumber ? [{ label: "Invoice", value: escapeHtml(args.invoiceNumber) }] : []),
+      ...(args.subscriptionId ? [{ label: "Subscription", value: escapeHtml(args.subscriptionId) }] : []),
+    ],
+    ctaLabel: "Open billing",
+    ctaUrl: resolveAppUrl("/billing"),
+    ...(args.invoiceUrl
+      ? {
+          secondaryLabel: "Open invoice",
+          secondaryUrl: args.invoiceUrl,
+        }
+      : {}),
+  });
+
+  return { subject, text, html };
+}
+
+function buildSubscriptionConfirmationContent(args: {
+  email: string;
+  name?: string | null;
+  plan: PlanId | string;
+  billingCycle?: string | null;
+  subscriptionId?: string | null;
+}) : EmailContent {
+  const safeName = args.name || "trader";
+  const planLabel = formatPlanLabel(args.plan);
+  const billingLabel = formatBillingCycleLabel(args.billingCycle);
+  const subject = `Your ${planLabel} plan is active`;
+  const text = [
+    `Hi ${safeName},`,
+    "",
+    `Your NeuroTrader Journal ${planLabel} plan is active.`,
+    billingLabel ? `Billing cycle: ${billingLabel}` : "",
+    args.subscriptionId ? `Subscription ID: ${args.subscriptionId}` : "",
+    "",
+    `Open billing: ${resolveAppUrl("/billing")}`,
+    `Open dashboard: ${resolveAppUrl("/dashboard")}`,
+    "",
+    "NeuroTrader Journal Team",
+  ].filter(Boolean).join("\n");
+
+  const html = buildNeuroTraderHtml({
+    title: `${planLabel} plan confirmed`,
+    eyebrow: "Billing",
+    preheader: "Your subscription is active and ready to use.",
+    greeting: `Hi ${escapeHtml(safeName)},`,
+    highlight: `Your <strong>${escapeHtml(planLabel)}</strong> plan is now active${billingLabel ? ` on a <strong>${escapeHtml(billingLabel.toLowerCase())}</strong> cycle` : ""}.`,
+    paragraphs: [
+      "Your checkout finished successfully and your subscription is now active inside NeuroTrader Journal.",
+      "From here, you can open your dashboard, review Billing, and start journaling without waiting on Stripe-hosted emails.",
+    ],
+    facts: [
+      { label: "Plan", value: escapeHtml(planLabel) },
+      ...(billingLabel ? [{ label: "Billing", value: escapeHtml(billingLabel) }] : []),
+      ...(args.subscriptionId ? [{ label: "Subscription", value: escapeHtml(args.subscriptionId) }] : []),
+      { label: "Email", value: escapeHtml(args.email) },
     ],
     ctaLabel: "Open dashboard",
-    ctaUrl: "https://neurotrader-journal.com",
+    ctaUrl: resolveAppUrl("/dashboard"),
+    secondaryLabel: "Open billing",
+    secondaryUrl: resolveAppUrl("/billing"),
   });
 
-  await sendEmailBase({
-    to: user.email,
-    subject,
-    text,
-    html,
-  });
+  return { subject, text, html };
 }
 
-/**
- * Email interno a soporte cuando alguien pide acceso al beta.
- * Se usa desde /api/email/beta-request
- */
-export async function sendBetaRequestEmail(args: {
-  name: string;
+function buildSubscriptionRenewalReminderContent(args: {
   email: string;
-}) {
-  const { name, email } = args;
+  name?: string | null;
+  plan: PlanId | string;
+  amount?: number | null;
+  billingCycle?: string | null;
+  renewalDate?: string | null;
+}) : EmailContent {
+  const safeName = args.name || "trader";
+  const planLabel = formatPlanLabel(args.plan);
+  const billingLabel = formatBillingCycleLabel(args.billingCycle);
+  const renewalDateText = formatEmailDate(args.renewalDate);
+  const amountText = formatMoney(args.amount);
+  const subject = `Upcoming renewal for your ${planLabel} plan`;
+  const text = [
+    `Hi ${safeName},`,
+    "",
+    `Your ${planLabel} plan is scheduled to renew${renewalDateText ? ` on ${renewalDateText}` : " soon"}.`,
+    `Amount: ${amountText}`,
+    billingLabel ? `Billing cycle: ${billingLabel}` : "",
+    "",
+    `Review billing: ${resolveAppUrl("/billing")}`,
+    "",
+    "NeuroTrader Journal Team",
+  ].filter(Boolean).join("\n");
 
+  const html = buildNeuroTraderHtml({
+    title: "Renewal reminder",
+    eyebrow: "Billing",
+    preheader: "Your next subscription charge is coming up.",
+    greeting: `Hi ${escapeHtml(safeName)},`,
+    highlight: renewalDateText
+      ? `Your <strong>${escapeHtml(planLabel)}</strong> plan is scheduled to renew on <strong>${escapeHtml(renewalDateText)}</strong>.`
+      : `Your <strong>${escapeHtml(planLabel)}</strong> plan is scheduled to renew soon.`,
+    paragraphs: [
+      "This is a heads-up from NeuroTrader Journal so you can review your billing details before the next charge goes through.",
+      "If you want to update your payment method, switch plans, or cancel before renewal, open Billing from the button below.",
+    ],
+    facts: [
+      { label: "Plan", value: escapeHtml(planLabel) },
+      { label: "Amount", value: escapeHtml(amountText) },
+      ...(billingLabel ? [{ label: "Billing", value: escapeHtml(billingLabel) }] : []),
+      ...(renewalDateText ? [{ label: "Renewal date", value: escapeHtml(renewalDateText) }] : []),
+    ],
+    ctaLabel: "Review billing",
+    ctaUrl: resolveAppUrl("/billing"),
+  });
+
+  return { subject, text, html };
+}
+
+function buildSubscriptionPaymentIssueContent(args: {
+  email: string;
+  name?: string | null;
+  plan: PlanId | string;
+  amount?: number | null;
+  billingCycle?: string | null;
+  invoiceNumber?: string | null;
+  invoiceUrl?: string | null;
+  nextAttemptAt?: string | null;
+}) : EmailContent {
+  const safeName = args.name || "trader";
+  const planLabel = formatPlanLabel(args.plan);
+  const amountText = formatMoney(args.amount);
+  const billingLabel = formatBillingCycleLabel(args.billingCycle);
+  const nextAttemptText = formatEmailDate(args.nextAttemptAt);
+  const subject = `Payment issue on your ${planLabel} plan`;
+  const text = [
+    `Hi ${safeName},`,
+    "",
+    `We couldn't process the latest payment for your ${planLabel} plan.`,
+    `Amount: ${amountText}`,
+    billingLabel ? `Billing cycle: ${billingLabel}` : "",
+    args.invoiceNumber ? `Invoice: ${args.invoiceNumber}` : "",
+    nextAttemptText ? `Next attempt: ${nextAttemptText}` : "",
+    "",
+    `Update billing: ${resolveAppUrl("/billing")}`,
+    args.invoiceUrl ? `Invoice: ${args.invoiceUrl}` : "",
+    "",
+    "NeuroTrader Journal Team",
+  ].filter(Boolean).join("\n");
+
+  const html = buildNeuroTraderHtml({
+    title: "Payment update needed",
+    eyebrow: "Billing",
+    preheader: "Your latest subscription payment needs attention.",
+    greeting: `Hi ${escapeHtml(safeName)},`,
+    highlight: `We couldn't process the latest payment for your <strong>${escapeHtml(planLabel)}</strong> plan.`,
+    paragraphs: [
+      "Please review your payment method so your subscription stays active without interruption.",
+      nextAttemptText
+        ? `Stripe will try again on <strong>${escapeHtml(nextAttemptText)}</strong> unless you update billing first.`
+        : "Open Billing to update your payment method or review the invoice before the next retry.",
+    ],
+    facts: [
+      { label: "Plan", value: escapeHtml(planLabel) },
+      { label: "Amount", value: escapeHtml(amountText) },
+      ...(billingLabel ? [{ label: "Billing", value: escapeHtml(billingLabel) }] : []),
+      ...(args.invoiceNumber ? [{ label: "Invoice", value: escapeHtml(args.invoiceNumber) }] : []),
+      ...(nextAttemptText ? [{ label: "Next attempt", value: escapeHtml(nextAttemptText) }] : []),
+    ],
+    ctaLabel: "Update billing",
+    ctaUrl: resolveAppUrl("/billing"),
+    ...(args.invoiceUrl
+      ? {
+          secondaryLabel: "Open invoice",
+          secondaryUrl: args.invoiceUrl,
+        }
+      : {}),
+  });
+
+  return { subject, text, html };
+}
+
+function buildSubscriptionCancellationContent(args: {
+  email: string;
+  name?: string | null;
+  periodEnd?: string | null;
+  nextBillingDate?: string | null;
+}) : EmailContent {
+  const safeName = args.name || "trader";
+  const periodText = args.periodEnd ? new Date(args.periodEnd).toLocaleDateString("en-US") : "the end of your current billing period";
+  const nextBillingText = args.nextBillingDate ? new Date(args.nextBillingDate).toLocaleDateString("en-US") : periodText;
+  const subject = "Your NeuroTrader Journal cancellation is scheduled";
+  const text = [
+    `Hi ${safeName},`,
+    "",
+    "We are sorry to see you go.",
+    `Next billing cycle date: ${nextBillingText}`,
+    `Access remains active through: ${periodText}`,
+    "",
+    `Billing: ${resolveAppUrl("/billing")}`,
+    "",
+    "NeuroTrader Journal Team",
+  ].join("\n");
+
+  const html = buildNeuroTraderHtml({
+    title: "Cancellation scheduled",
+    eyebrow: "Billing",
+    preheader: "Your membership remains active until the end of the current cycle.",
+    greeting: `Hi ${escapeHtml(safeName)},`,
+    highlight: `Access remains active through <strong>${escapeHtml(periodText)}</strong>.`,
+    paragraphs: [
+      `Your next billing cycle date was <strong>${escapeHtml(nextBillingText)}</strong>.`,
+      "If you canceled today after a recent payment, your membership still remains active until the end of the current billing period.",
+      "You can turn auto-renew back on at any time from Billing.",
+    ],
+    facts: [
+      { label: "Next billing", value: escapeHtml(nextBillingText) },
+      { label: "Active until", value: escapeHtml(periodText) },
+    ],
+    ctaLabel: "Open billing",
+    ctaUrl: resolveAppUrl("/billing"),
+  });
+
+  return { subject, text, html };
+}
+
+function buildSubscriptionWinbackContent(args: {
+  email: string;
+  name?: string | null;
+  promotionCode: string;
+}) : EmailContent {
+  const safeName = args.name || "trader";
+  const subject = "Come back to NeuroTrader Journal with 50% off";
+  const text = [
+    `Hi ${safeName},`,
+    "",
+    "We’d love to have you back.",
+    `Promo code: ${args.promotionCode}`,
+    `Billing: ${resolveAppUrl("/billing")}`,
+    "",
+    "NeuroTrader Journal Team",
+  ].join("\n");
+
+  const html = buildNeuroTraderHtml({
+    title: "50% off your return",
+    eyebrow: "Lifecycle",
+    preheader: "Your comeback code is ready.",
+    greeting: `Hi ${escapeHtml(safeName)},`,
+    highlight: `Promo code: <strong>${escapeHtml(args.promotionCode)}</strong>`,
+    paragraphs: [
+      "Use this code to return to NeuroTrader Journal with 50% off your next subscription.",
+      "If you want help reactivating or choosing the right plan again, reply to this email and we’ll help.",
+    ],
+    facts: [
+      { label: "Code", value: escapeHtml(args.promotionCode) },
+      { label: "Offer", value: "50% off" },
+    ],
+    ctaLabel: "Resume subscription",
+    ctaUrl: resolveAppUrl("/billing"),
+  });
+
+  return { subject, text, html };
+}
+
+function buildProfitLossAlertContent(args: {
+  email: string;
+  name?: string | null;
+  title: string;
+  message: string;
+  alertKind: "renewal" | "overspend" | "variable_cost";
+  ctaUrl?: string | null;
+  detailLines?: string[];
+}) : EmailContent {
+  const safeName = args.name || "trader";
+  const ctaUrl = args.ctaUrl || resolveAppUrl("/performance/profit-loss-track");
+  const subject = `Profit & Loss Track: ${args.title}`;
+  const details = (args.detailLines ?? []).filter(Boolean);
+  const highlight =
+    args.alertKind === "renewal"
+      ? "A recurring cost is about to renew."
+      : args.alertKind === "overspend"
+        ? "A category moved above budget."
+        : "Trading costs moved above your threshold.";
+
+  const text = [
+    `Hi ${safeName},`,
+    "",
+    args.message,
+    ...(details.length ? ["", ...details] : []),
+    "",
+    ctaUrl,
+    "",
+    "NeuroTrader Journal Team",
+  ].join("\n");
+
+  const html = buildNeuroTraderHtml({
+    title: args.title,
+    eyebrow: "Operations",
+    preheader: args.message,
+    greeting: `Hi ${escapeHtml(safeName)},`,
+    highlight,
+    paragraphs: [
+      args.message,
+      ...(details.length ? [details.map((line) => `• ${escapeHtml(line)}`).join("<br />")] : []),
+      "Open Profit &amp; Loss Track to review the issue and adjust your stack, budget, or controls.",
+    ],
+    ctaLabel: "Open Profit & Loss Track",
+    ctaUrl,
+  });
+
+  return { subject, text, html };
+}
+
+
+export function getEmailSenderStatus() {
+  return {
+    from: FROM_EMAIL,
+    provider: "Resend",
+    configured: Boolean(process.env.RESEND_API_KEY),
+  };
+}
+
+export function getAutomatedEmailCatalog(): AutomatedEmailPreview[] {
+  return [
+    {
+      key: "email_confirmation",
+      category: "Authentication",
+      name: "Email confirmation",
+      description: "Sent when a new user creates an account and needs to verify the email before continuing.",
+      trigger: "New account created",
+      delivery: "Resend via app signup API",
+      from: FROM_EMAIL,
+      preview: buildEmailConfirmationContent({
+        email: "trader@example.com",
+        name: "Steven",
+        confirmationCode: "682941",
+        continueUrl: resolveAppUrl("/signup"),
+      }),
+    },
+    {
+      key: "password_reset",
+      category: "Authentication",
+      name: "Password reset",
+      description: "Sent when a user requests a secure link to choose a new password.",
+      trigger: "Forgot password request",
+      delivery: "Resend via auth recovery route",
+      from: FROM_EMAIL,
+      preview: buildPasswordResetContent({
+        email: "trader@example.com",
+        name: "Steven",
+        resetUrl: resolveAppUrl("/reset-password?preview=1"),
+      }),
+    },
+    {
+      key: "account_recovery",
+      category: "Authentication",
+      name: "Account recovery",
+      description: "Sent when a user requests a reminder of the sign-in email plus a reset shortcut.",
+      trigger: "Account recovery request",
+      delivery: "Resend via recovery route",
+      from: FROM_EMAIL,
+      preview: buildAccountRecoveryContent({
+        email: "steven.otero.velez@icloud.com",
+        name: "Steven",
+        resetUrl: resolveAppUrl("/reset-password?preview=1"),
+      }),
+    },
+    {
+      key: "welcome",
+      category: "Lifecycle",
+      name: "Welcome",
+      description: "Sent when a subscription or manual access becomes active.",
+      trigger: "Account activated",
+      delivery: "Resend",
+      from: FROM_EMAIL,
+      preview: buildWelcomeEmailContent({ email: "trader@example.com", name: "Steven" }),
+    },
+    {
+      key: "subscription_confirmation",
+      category: "Billing",
+      name: "Subscription confirmation",
+      description: "Sent right after checkout so the user sees a branded confirmation from the platform instead of a plain Stripe-only message.",
+      trigger: "Stripe checkout completed",
+      delivery: "Resend via Stripe webhook",
+      from: FROM_EMAIL,
+      preview: buildSubscriptionConfirmationContent({
+        email: "trader@example.com",
+        name: "Steven",
+        plan: "advanced",
+        billingCycle: "monthly",
+        subscriptionId: "sub_123456789",
+      }),
+    },
+    {
+      key: "subscription_receipt",
+      category: "Billing",
+      name: "Subscription receipt",
+      description: "Sent after a successful subscription purchase or renewal.",
+      trigger: "Stripe invoice.paid",
+      delivery: "Resend via Stripe webhook",
+      from: FROM_EMAIL,
+      preview: buildSubscriptionReceiptContent({
+        email: "trader@example.com",
+        name: "Steven",
+        plan: "advanced",
+        amount: 26.99,
+        billingCycle: "monthly",
+        subscriptionId: "sub_123456789",
+        invoiceNumber: "7D8E2A9-0005",
+        chargeDate: new Date().toISOString(),
+        invoiceUrl: resolveAppUrl("/billing"),
+      }),
+    },
+    {
+      key: "subscription_renewal_reminder",
+      category: "Billing",
+      name: "Renewal reminder",
+      description: "Sent before the next subscription charge so the user can review billing inside the app instead of relying on Stripe reminders.",
+      trigger: "Stripe invoice.upcoming",
+      delivery: "Resend via Stripe webhook",
+      from: FROM_EMAIL,
+      preview: buildSubscriptionRenewalReminderContent({
+        email: "trader@example.com",
+        name: "Steven",
+        plan: "advanced",
+        amount: 26.99,
+        billingCycle: "monthly",
+        renewalDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+      }),
+    },
+    {
+      key: "subscription_payment_issue",
+      category: "Billing",
+      name: "Payment issue",
+      description: "Sent when Stripe cannot collect a subscription payment and the user needs to update billing.",
+      trigger: "Stripe invoice.payment_failed",
+      delivery: "Resend via Stripe webhook",
+      from: FROM_EMAIL,
+      preview: buildSubscriptionPaymentIssueContent({
+        email: "trader@example.com",
+        name: "Steven",
+        plan: "advanced",
+        amount: 26.99,
+        billingCycle: "monthly",
+        invoiceNumber: "7D8E2A9-0006",
+        nextAttemptAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(),
+        invoiceUrl: resolveAppUrl("/billing"),
+      }),
+    },
+    {
+      key: "subscription_cancellation",
+      category: "Billing",
+      name: "Cancellation scheduled",
+      description: "Sent after the user confirms cancellation and keeps access until period end.",
+      trigger: "Billing cancellation confirmed",
+      delivery: "Resend",
+      from: FROM_EMAIL,
+      preview: buildSubscriptionCancellationContent({
+        email: "trader@example.com",
+        name: "Steven",
+        periodEnd: new Date(Date.now() + 12 * 24 * 60 * 60 * 1000).toISOString(),
+        nextBillingDate: new Date(Date.now() + 12 * 24 * 60 * 60 * 1000).toISOString(),
+      }),
+    },
+    {
+      key: "subscription_winback",
+      category: "Lifecycle",
+      name: "Winback 50%",
+      description: "Sent to returning users after cancellation as a comeback campaign.",
+      trigger: "Winback cron / lifecycle campaign",
+      delivery: "Resend",
+      from: FROM_EMAIL,
+      preview: buildSubscriptionWinbackContent({
+        email: "trader@example.com",
+        name: "Steven",
+        promotionCode: "COME-BACK-50",
+      }),
+    },
+    {
+      key: "profit_loss_alert",
+      category: "Operations",
+      name: "Profit & Loss alert",
+      description: "Sent when a renewal, overspend, or variable cost threshold is triggered.",
+      trigger: "Profit & Loss controls",
+      delivery: "Resend",
+      from: FROM_EMAIL,
+      preview: buildProfitLossAlertContent({
+        email: "trader@example.com",
+        name: "Steven",
+        title: "Budget drift detected",
+        message: "Your education category moved above budget this month.",
+        alertKind: "overspend",
+        detailLines: ["Budget to date: $120", "Actual spend: $178", "Main driver: mentoring"],
+      }),
+    },
+  ];
+}
+
+export async function sendAutomatedEmailTest(args: {
+  key: AutomatedEmailKey;
+  to: string;
+}) {
+  const email = args.to.trim().toLowerCase();
+  switch (args.key) {
+    case "email_confirmation":
+      return sendEmailConfirmationEmail({
+        email,
+        name: "Admin preview",
+        confirmationCode: "682941",
+        continueUrl: resolveAppUrl("/signup"),
+      });
+    case "password_reset":
+      return sendPasswordResetEmail({
+        email,
+        name: "Admin preview",
+        resetUrl: resolveAppUrl("/reset-password?preview=1"),
+      });
+    case "account_recovery":
+      return sendAccountRecoveryEmail({
+        email,
+        name: "Admin preview",
+        accountEmail: email,
+        resetUrl: resolveAppUrl("/reset-password?preview=1"),
+      });
+    case "welcome":
+      return sendWelcomeEmailByEmail(email, "Admin preview");
+    case "subscription_confirmation":
+      return sendSubscriptionConfirmationEmailByEmail({
+        email,
+        name: "Admin preview",
+        plan: "advanced",
+        billingCycle: "monthly",
+        subscriptionId: "sub_preview_001",
+      });
+    case "subscription_receipt":
+      return sendSubscriptionReceiptEmailByEmail({
+        email,
+        name: "Admin preview",
+        plan: "advanced",
+        amount: 26.99,
+        billingCycle: "monthly",
+        subscriptionId: "sub_preview_001",
+        invoiceNumber: "7D8E2A9-0005",
+        invoiceUrl: resolveAppUrl("/billing"),
+        chargeDate: new Date().toISOString(),
+      });
+    case "subscription_renewal_reminder":
+      return sendSubscriptionRenewalReminderEmail({
+        email,
+        name: "Admin preview",
+        plan: "advanced",
+        amount: 26.99,
+        billingCycle: "monthly",
+        renewalDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+      });
+    case "subscription_payment_issue":
+      return sendSubscriptionPaymentIssueEmail({
+        email,
+        name: "Admin preview",
+        plan: "advanced",
+        amount: 26.99,
+        billingCycle: "monthly",
+        invoiceNumber: "7D8E2A9-0006",
+        nextAttemptAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(),
+        invoiceUrl: resolveAppUrl("/billing"),
+      });
+    case "subscription_cancellation":
+      return sendSubscriptionCancellationEmail({
+        email,
+        name: "Admin preview",
+        periodEnd: new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toISOString(),
+        nextBillingDate: new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toISOString(),
+      });
+    case "subscription_winback":
+      return sendSubscriptionWinbackEmail({
+        email,
+        name: "Admin preview",
+        promotionCode: "COME-BACK-50",
+      });
+    case "profit_loss_alert":
+      return sendProfitLossAlertEmail({
+        email,
+        name: "Admin preview",
+        title: "Preview alert",
+        message: "This is a test of the Profit & Loss alert template.",
+        alertKind: "overspend",
+        detailLines: ["Budget to date: $120", "Actual spend: $178"],
+      });
+    default:
+      throw new Error(`Unsupported email key: ${args.key}`);
+  }
+}
+
+export async function sendEmailConfirmationEmail(args: {
+  email: string;
+  name?: string | null;
+  confirmationCode: string;
+  continueUrl?: string | null;
+}) {
+  const content = buildEmailConfirmationContent(args);
+  await sendEmailBase({ to: args.email, ...content });
+}
+
+export async function sendPasswordResetEmail(args: {
+  email: string;
+  name?: string | null;
+  resetUrl: string;
+}) {
+  const content = buildPasswordResetContent(args);
+  await sendEmailBase({ to: args.email, ...content });
+}
+
+export async function sendAccountRecoveryEmail(args: {
+  email: string;
+  name?: string | null;
+  accountEmail: string;
+  resetUrl: string;
+}) {
+  const content = buildAccountRecoveryContent({
+    email: args.accountEmail,
+    name: args.name,
+    resetUrl: args.resetUrl,
+  });
+  await sendEmailBase({ to: args.email, ...content });
+}
+
+export async function sendWelcomeEmail(user: AppUser) {
+  const content = buildWelcomeEmailContent({ email: user.email, name: user.name || "trader" });
+  await sendEmailBase({ to: user.email, ...content });
+}
+
+export async function sendSubscriptionReceiptEmail(user: AppUser, plan: PlanId) {
+  const content = buildSubscriptionReceiptContent({ email: user.email, name: user.name || "trader", plan });
+  await sendEmailBase({ to: user.email, ...content });
+}
+
+export async function sendBetaRequestEmail(args: { name: string; email: string }) {
+  const { name, email } = args;
   const subject = `New beta access request – ${email}`;
   const text = [
     "New NeuroTrader Journal beta access request:",
     "",
-    `Name:  ${name}`,
+    `Name: ${name}`,
     `Email: ${email}`,
     "",
     "Next steps (manual):",
@@ -350,226 +1149,80 @@ export async function sendBetaRequestEmail(args: {
   });
 }
 
-/* =========================================================================
-   2) HELPERS EXTRA PARA USAR EN EL WEBHOOK (POR EMAIL, SIN AppUser)
-   ========================================================================= */
-
-/**
- * Bienvenida usando solo email + nombre opcional.
- * Ideal para llamar desde el webhook de Stripe.
- */
-export async function sendWelcomeEmailByEmail(
-  email: string,
-  name?: string | null
-) {
-  const safeName = name || "trader";
-  const subject = "Welcome to NeuroTrader Journal";
-
-  const text = [
-    `Hi ${safeName},`,
-    "",
-    "Welcome to NeuroTrader Journal!",
-    "",
-    "Your subscription is now active. You can log in and start journaling your trades, reviewing analytics, and working on your trading psychology.",
-    "",
-    "Log in here:",
-    "https://neurotrader-journal.com",
-    "",
-    "If you didn't create this account, please ignore this email.",
-    "",
-    "Happy trading,",
-    "NeuroTrader Journal Team",
-  ].join("\n");
-
-  const html = buildNeuroTraderHtml({
-    title: `Welcome, ${safeName}`,
-    preheader:
-      "Your NeuroTrader Journal subscription is active. Start mapping your trades and your mind.",
-    greeting: `Hi ${safeName},`,
-    highlight: "Your neuro-aligned trading journal is ready.",
-    paragraphs: [
-      "Welcome to <strong>NeuroTrader Journal</strong>. From this point forward, every trade becomes data for your brain to learn from – not just P&L.",
-      "Log in to start journaling, tagging emotions, and exploring analytics that show how your nervous system reacts to risk.",
-    ],
-    ctaLabel: "Log in to NeuroTrader",
-    ctaUrl: "https://neurotrader-journal.com",
-    footerNote:
-      "If you didn’t create this account, you can safely ignore this email.",
-  });
-
-  await sendEmailBase({
-    to: email,
-    subject,
-    text,
-    html,
-  });
+export async function sendWelcomeEmailByEmail(email: string, name?: string | null) {
+  const content = buildWelcomeEmailContent({ email, name });
+  await sendEmailBase({ to: email, ...content });
 }
 
-/**
- * Recibo de suscripción desde el webhook (por email directo).
- */
+export async function sendSubscriptionConfirmationEmailByEmail(args: {
+  email: string;
+  name?: string | null;
+  plan: PlanId | string;
+  billingCycle?: string | null;
+  subscriptionId?: string | null;
+}) {
+  const content = buildSubscriptionConfirmationContent(args);
+  await sendEmailBase({ to: args.email, ...content });
+}
+
 export async function sendSubscriptionReceiptEmailByEmail(args: {
   email: string;
-  plan: PlanId;
-  amount?: number; // en dólares
+  plan: PlanId | string;
+  amount?: number;
   subscriptionId?: string;
   name?: string | null;
+  billingCycle?: string | null;
+  invoiceNumber?: string | null;
+  invoiceUrl?: string | null;
+  chargeDate?: string | null;
 }) {
-  const { email, plan, amount, subscriptionId, name } = args;
-
-  const safeName = name || "trader";
-  const subject = "Your NeuroTrader Journal subscription receipt";
-
-  const lines: string[] = [
-    `Hi ${safeName},`,
-    "",
-    `Thank you for subscribing to NeuroTrader Journal (${plan} plan).`,
-  ];
-
-  if (amount != null) {
-    lines.push("", `Amount: $${amount.toFixed(2)} (USD)`);
-  }
-
-  if (subscriptionId) {
-    lines.push("", `Subscription ID: ${subscriptionId}`);
-  }
-
-  lines.push(
-    "",
-    "You can manage your subscription and account settings inside the app.",
-    "",
-    "Happy trading,",
-    "NeuroTrader Journal Team"
-  );
-
-  const text = lines.join("\n");
-
-  const detailParts: string[] = [];
-  if (amount != null) {
-    detailParts.push(
-      `<p style="margin:0 0 8px 0;color:#cbd5f5;font-size:14px;">
-         <strong>Amount:</strong> $${amount.toFixed(2)} USD
-       </p>`
-    );
-  }
-  if (subscriptionId) {
-    detailParts.push(
-      `<p style="margin:0;color:#9ca3af;font-size:12px;">
-         <strong>Subscription ID:</strong> ${subscriptionId}
-       </p>`
-    );
-  }
-
-  const html = buildNeuroTraderHtml({
-    title: `Receipt – ${safeName}`,
-    preheader: "Your NeuroTrader Journal subscription receipt.",
-    greeting: `Hi ${safeName},`,
-    highlight: `Subscription: <strong>${plan.toUpperCase()} plan</strong>`,
-    paragraphs: [
-      "Thank you for subscribing to <strong>NeuroTrader Journal</strong>. Your plan is now active and linked to your trading workspace.",
-      detailParts.join(""),
-      "You can review your billing details and manage your plan directly from the app.",
-    ],
-    ctaLabel: "Go to billing",
-    ctaUrl: "https://neurotrader-journal.com/settings/billing",
-  });
-
-  await sendEmailBase({
-    to: email,
-    subject,
-    text,
-    html,
-  });
+  const content = buildSubscriptionReceiptContent(args);
+  await sendEmailBase({ to: args.email, ...content });
 }
 
-/**
- * Confirmación de cancelación (auto-renew OFF).
- */
+export async function sendSubscriptionRenewalReminderEmail(args: {
+  email: string;
+  name?: string | null;
+  plan: PlanId | string;
+  amount?: number | null;
+  billingCycle?: string | null;
+  renewalDate?: string | null;
+}) {
+  const content = buildSubscriptionRenewalReminderContent(args);
+  await sendEmailBase({ to: args.email, ...content });
+}
+
+export async function sendSubscriptionPaymentIssueEmail(args: {
+  email: string;
+  name?: string | null;
+  plan: PlanId | string;
+  amount?: number | null;
+  billingCycle?: string | null;
+  invoiceNumber?: string | null;
+  invoiceUrl?: string | null;
+  nextAttemptAt?: string | null;
+}) {
+  const content = buildSubscriptionPaymentIssueContent(args);
+  await sendEmailBase({ to: args.email, ...content });
+}
+
 export async function sendSubscriptionCancellationEmail(args: {
   email: string;
   name?: string | null;
   periodEnd?: string | null;
   nextBillingDate?: string | null;
 }) {
-  const safeName = args.name || "trader";
-  const subject = "Your NeuroTrader Journal cancellation is scheduled";
-  const periodText = args.periodEnd
-    ? new Date(args.periodEnd).toLocaleDateString("en-US")
-    : "the end of your current billing period";
-  const nextBillingText = args.nextBillingDate
-    ? new Date(args.nextBillingDate).toLocaleDateString("en-US")
-    : periodText;
-
-  const text = [
-    `Hi ${safeName},`,
-    "",
-    "We are sorry to see you go.",
-    "",
-    "We have scheduled your subscription to cancel at the end of the current billing period.",
-    `Your next billing cycle date was ${nextBillingText}.`,
-    `Access remains active through ${periodText}.`,
-    "If you cancelled today after a recent payment, your membership still stays active until that date.",
-    "",
-    "If you change your mind, you can re-enable auto‑renew anytime from Billing.",
-    "",
-    "Thank you for trading with us,",
-    "NeuroTrader Journal Team",
-  ].join("\n");
-
-  const html = buildNeuroTraderHtml({
-    title: "Cancellation scheduled",
-    preheader: "Your subscription will remain active until the period ends.",
-    greeting: `Hi ${safeName},`,
-    highlight: `Access remains active through <strong>${periodText}</strong>.`,
-    paragraphs: [
-      "We’re sorry to see you leave. We’ve scheduled your subscription to cancel at the end of the current billing period, and you won’t be charged again unless you re-enable auto-renew.",
-      `Your next billing cycle date was <strong>${nextBillingText}</strong>, and your membership remains active through <strong>${periodText}</strong>.`,
-      "If you paid recently and cancelled today, your access still stays active until that date.",
-      "If you want to keep your plan active, you can turn auto‑renew back on from Billing at any time.",
-    ],
-    ctaLabel: "Open billing",
-    ctaUrl: "https://neurotrader-journal.com/billing",
-  });
-
-  await sendEmailBase({ to: args.email, subject, text, html });
+  const content = buildSubscriptionCancellationContent(args);
+  await sendEmailBase({ to: args.email, ...content });
 }
 
-/**
- * Win‑back: coupon 50% off.
- */
 export async function sendSubscriptionWinbackEmail(args: {
   email: string;
   name?: string | null;
   promotionCode: string;
 }) {
-  const safeName = args.name || "trader";
-  const subject = "Come back to NeuroTrader Journal with 50% off";
-
-  const text = [
-    `Hi ${safeName},`,
-    "",
-    "We’d love to have you back. Here is a 50% off code for your next subscription:",
-    args.promotionCode,
-    "",
-    "Use it at checkout in the app.",
-    "",
-    "NeuroTrader Journal Team",
-  ].join("\n");
-
-  const html = buildNeuroTraderHtml({
-    title: "50% off your return",
-    preheader: "Your comeback code is ready.",
-    greeting: `Hi ${safeName},`,
-    highlight: `Promo code: <strong>${args.promotionCode}</strong>`,
-    paragraphs: [
-      "We’d love to have you back. Use this 50% off code on your next subscription checkout.",
-      "If you need help reactivating, reply to this email and our team will assist you.",
-    ],
-    ctaLabel: "Resume subscription",
-    ctaUrl: "https://neurotrader-journal.com/billing",
-  });
-
-  await sendEmailBase({ to: args.email, subject, text, html });
+  const content = buildSubscriptionWinbackContent(args);
+  await sendEmailBase({ to: args.email, ...content });
 }
 
 export async function sendProfitLossAlertEmail(args: {
@@ -581,56 +1234,6 @@ export async function sendProfitLossAlertEmail(args: {
   ctaUrl?: string | null;
   detailLines?: string[];
 }) {
-  const safeName = args.name || "trader";
-  const ctaUrl = args.ctaUrl || "https://neurotrader-journal.com/performance/profit-loss-track";
-  const subject = `Profit & Loss Track: ${args.title}`;
-  const extraText = (args.detailLines ?? []).filter(Boolean);
-
-  const text = [
-    `Hi ${safeName},`,
-    "",
-    args.message,
-    ...(extraText.length ? ["", ...extraText] : []),
-    "",
-    "Open Profit & Loss Track to review the issue and adjust your stack, budget, or controls.",
-    ctaUrl,
-    "",
-    "NeuroTrader Journal Team",
-  ].join("\n");
-
-  const paragraphs = [
-    args.message,
-    ...(extraText.length
-      ? [
-          extraText
-            .map((line) => `• ${line}`)
-            .join("<br />"),
-        ]
-      : []),
-    "Open <strong>Profit &amp; Loss Track</strong> to review the issue and adjust your stack, budget, or controls.",
-  ];
-
-  const highlight =
-    args.alertKind === "renewal"
-      ? "A recurring cost is about to renew."
-      : args.alertKind === "overspend"
-        ? "A category moved above budget."
-        : "Trading costs moved above your threshold.";
-
-  const html = buildNeuroTraderHtml({
-    title: args.title,
-    preheader: args.message,
-    greeting: `Hi ${safeName},`,
-    highlight,
-    paragraphs,
-    ctaLabel: "Open Profit & Loss Track",
-    ctaUrl,
-  });
-
-  await sendEmailBase({
-    to: args.email,
-    subject,
-    text,
-    html,
-  });
+  const content = buildProfitLossAlertContent(args);
+  await sendEmailBase({ to: args.email, ...content });
 }

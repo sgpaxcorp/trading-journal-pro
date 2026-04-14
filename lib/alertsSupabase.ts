@@ -696,32 +696,51 @@ export async function fireTestEventFromRule(
   try {
     const now = new Date();
     const date = isoDate(now);
+    const testRunId = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
     const nextPayload: Record<string, unknown> = {
       ...safeObj(payload),
       test: true,
+      test_run_id: testRunId,
       date,
       triggered_at: now.toISOString(),
     };
 
-    // Option A has a uniqueness constraint (user_id, rule_id, date).
-    const { data, error } = await supabaseBrowser
-      .from("ntj_alert_events")
-      .upsert(
-        {
-          user_id: userId,
-          rule_id: ruleId,
-          date,
-          status: "active",
-          triggered_at: now.toISOString(),
-          dismissed_until: null,
-          acknowledged_at: null,
-          payload: nextPayload,
-        },
-        { onConflict: "user_id,rule_id,date" }
-      )
-      .select("id")
-      .single();
+    // Keep test events isolated from live events. We intentionally avoid the
+    // (user_id, rule_id, date) upsert path so a manual test never overwrites a
+    // real production event for the same rule/day.
+    const baseRow = {
+      user_id: userId,
+      rule_id: ruleId,
+      status: "active",
+      triggered_at: now.toISOString(),
+      dismissed_until: null,
+      acknowledged_at: null,
+      payload: nextPayload,
+    };
+
+    let data: any = null;
+    let error: any = null;
+
+    {
+      const res = await supabaseBrowser
+        .from("ntj_alert_events")
+        .insert(baseRow)
+        .select("id")
+        .single();
+      data = res.data;
+      error = res.error;
+    }
+
+    if (error) {
+      const fallback = await supabaseBrowser
+        .from("ntj_alert_events")
+        .insert({ ...baseRow, date: null })
+        .select("id")
+        .single();
+      data = fallback.data;
+      error = fallback.error;
+    }
 
     if (error) {
       console.error(LOG, "fireTestEventFromRule error", error);

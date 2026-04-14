@@ -134,12 +134,20 @@ export default function SignInClient({ nextPath }: SignInClientProps) {
             .
           </p>
 
-          <Link
-            href="/forgot-password"
-            className="text-[11px] text-slate-500 hover:text-slate-300"
-          >
-            {L("Forgot?", "¿Olvidaste?")}
-          </Link>
+          <div className="flex items-center gap-3 text-[11px]">
+            <Link
+              href="/forgot-password"
+              className="text-slate-500 hover:text-slate-300"
+            >
+              {L("Forgot password?", "¿Olvidaste tu contraseña?")}
+            </Link>
+            <Link
+              href="/forgot-account"
+              className="text-emerald-300 hover:text-emerald-200"
+            >
+              {L("Recover account", "Recuperar cuenta")}
+            </Link>
+          </div>
         </div>
       </div>
     </main>

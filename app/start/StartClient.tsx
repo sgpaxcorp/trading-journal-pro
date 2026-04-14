@@ -164,33 +164,32 @@ export default function StartClient({ initialPlan }: StartClientProps) {
     try {
       setLoadingInfo(true);
 
-      const { data, error } = await supabase.auth.signUp({
-        email: infoForm.email,
-        password: infoForm.password,
-        options: {
-          data: {
-            full_name: infoForm.fullName,
-            selected_plan_initial: selectedPlan,
-            subscription_status: "pending",
-          },
-        },
+      const res = await fetch("/api/auth/signup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: infoForm.email,
+          password: infoForm.password,
+          fullName: infoForm.fullName,
+          plan: selectedPlan,
+          source: "start",
+        }),
       });
-
-      if (error || !data.user) {
-        setError(error?.message ?? L("Unable to create your account.", "No se pudo crear tu cuenta."));
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(String(body?.error ?? L("Unable to create your account.", "No se pudo crear tu cuenta.")));
         setLoadingInfo(false);
         return;
       }
 
       const newUser: SimpleUser = {
-        id: data.user.id,
-        email: data.user.email ?? infoForm.email,
+        id: String(body?.userId ?? ""),
+        email: String(body?.email ?? infoForm.email),
       };
 
       setUser(newUser);
       setVerificationCode("");
-      const isConfirmed = Boolean((data.user as any)?.email_confirmed_at);
-      setCurrentStep(isConfirmed ? 3 : 2);
+      setCurrentStep(2);
     } catch (err: any) {
       console.error("Error on sign up:", err);
       setError(err?.message ?? L("Unexpected error while creating account.", "Error inesperado al crear la cuenta."));

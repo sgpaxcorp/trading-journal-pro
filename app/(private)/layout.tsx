@@ -7,6 +7,7 @@ import { supabaseBrowser } from "@/lib/supaBaseClient";
 import { syncMyTrophies } from "@/lib/trophiesSupabase";
 import { isActiveProfileStatus, shouldAllowLocalProfileAccessFallback } from "@/lib/accessControl";
 import { fetchAccessStatus } from "@/lib/accessStatusClient";
+import { canAccessPrivatePath, firstAccessiblePrivatePath } from "@/lib/accessGrants";
 import CandleAssistant from "@/app/components/NeuroAssistant";
 import AppTour from "@/app/components/AppTour";
 import RouteQuickTour from "@/app/components/RouteQuickTour";
@@ -36,6 +37,9 @@ export default function PrivateLayout({ children }: PrivateLayoutProps) {
   const [hasAppAccess, setHasAppAccess] = useState<boolean>(false);
   const [onboardingCompleted, setOnboardingCompleted] = useState<boolean>(false);
   const [profileChecked, setProfileChecked] = useState(false);
+  const [entitlements, setEntitlements] = useState<
+    Array<{ entitlement_key: string; status: string; metadata?: Record<string, unknown> | null }>
+  >([]);
   const allowLocalProfileFallback = shouldAllowLocalProfileAccessFallback();
 
   // Intentos de re-check para darle tiempo al webhook
@@ -54,6 +58,7 @@ export default function PrivateLayout({ children }: PrivateLayoutProps) {
     setProfileChecked(false);
     setHasAppAccess(false);
     setOnboardingCompleted(false);
+    setEntitlements([]);
   }, [user?.id]);
 
   useEffect(() => {
@@ -98,11 +103,13 @@ export default function PrivateLayout({ children }: PrivateLayoutProps) {
         const status = String(access.profile?.subscriptionStatus ?? "").toLowerCase() || "pending";
         const onboarding = Boolean(access.profile?.onboardingCompleted ?? false);
         const canAccess = Boolean(access.hasAppAccess);
+        const nextEntitlements = Array.isArray(access.entitlements) ? access.entitlements : [];
 
         setHasAppAccess(canAccess);
         setOnboardingCompleted(onboarding);
         setProfileChecked(true);
-        return { status, onboarding, hasAccess: canAccess };
+        setEntitlements(nextEntitlements);
+        return { status, onboarding, hasAccess: canAccess, entitlements: nextEntitlements };
       }
 
       const metaStatus = String((user as any)?.user_metadata?.subscriptionStatus ?? "").toLowerCase();
@@ -110,10 +117,12 @@ export default function PrivateLayout({ children }: PrivateLayoutProps) {
       setHasAppAccess(canAccess);
       setOnboardingCompleted(false);
       setProfileChecked(true);
+      setEntitlements([]);
       return {
         status: metaStatus || "pending",
         onboarding: false,
         hasAccess: canAccess,
+        entitlements: [],
       };
     } catch {
       const metaStatus = String((user as any)?.user_metadata?.subscriptionStatus ?? "").toLowerCase();
@@ -121,10 +130,12 @@ export default function PrivateLayout({ children }: PrivateLayoutProps) {
       setHasAppAccess(canAccess);
       setOnboardingCompleted(false);
       setProfileChecked(true);
+      setEntitlements([]);
       return {
         status: metaStatus || "pending",
         onboarding: false,
         hasAccess: canAccess,
+        entitlements: [],
       };
     }
   }, [allowLocalProfileFallback, user]);
@@ -175,6 +186,30 @@ export default function PrivateLayout({ children }: PrivateLayoutProps) {
     refreshAccessState,
     router,
     refreshAttempts,
+    user,
+  ]);
+
+  useEffect(() => {
+    if (loading || !user || !profileChecked || !hasAppAccess) return;
+
+    const isOnAllowedRoute = ALLOW_WITHOUT_ACTIVE_SUB.some((p) => pathname.startsWith(p));
+    if (isOnAllowedRoute) return;
+
+    const fallbackAllowAll =
+      allowLocalProfileFallback &&
+      entitlements.length === 0;
+
+    if (canAccessPrivatePath(pathname, entitlements, { fallbackAllowAll })) return;
+
+    router.replace(firstAccessiblePrivatePath(entitlements));
+  }, [
+    allowLocalProfileFallback,
+    entitlements,
+    hasAppAccess,
+    loading,
+    pathname,
+    profileChecked,
+    router,
     user,
   ]);
 

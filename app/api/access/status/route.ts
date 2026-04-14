@@ -6,6 +6,7 @@ import {
   PLATFORM_ACCESS_ENTITLEMENT,
   shouldAllowLocalProfileAccessFallback,
 } from "@/lib/accessControl";
+import { hasAnyRecognizedAccessGrant } from "@/lib/accessGrants";
 
 export const runtime = "nodejs";
 
@@ -58,10 +59,12 @@ export async function GET(req: NextRequest) {
         String((row as any)?.entitlement_key ?? "") === PLATFORM_ACCESS_ENTITLEMENT &&
         isActiveEntitlementStatus((row as any)?.status)
     );
+    const hasScopedAccess = hasAnyRecognizedAccessGrant(entitlementRows as any[]);
 
     const profileStatus = String((effectiveProfile as any)?.subscription_status ?? "");
     const hasAppAccess =
       hasPlatformAccess ||
+      hasScopedAccess ||
       (allowLocalFallback && isActiveProfileStatus(profileStatus));
 
     return NextResponse.json({
@@ -76,6 +79,7 @@ export async function GET(req: NextRequest) {
       },
       entitlements: entitlementRows,
       hasPlatformAccess,
+      hasScopedAccess,
       hasAppAccess,
       diagnostics: {
         profileFoundById: Boolean(profile),

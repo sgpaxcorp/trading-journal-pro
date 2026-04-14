@@ -343,8 +343,11 @@ export default function GlobalRankingUserProfilePage() {
                   <span className="text-emerald-200 font-semibold">
                     {profile.xp_total}
                   </span>{" "}
-                  XP • {L("Level", "Nivel")} {profile.level} • {profile.trophies_count}{" "}
-                  {L("trophies", "trofeos")}
+                  XP • {L("Level", "Nivel")} {profile.level}
+                  {typeof profile.rank === "number" ? ` • ${L("Rank", "Rango")} #${profile.rank}` : ""}
+                  {" • "}
+                  {profile.trophies_count} {L("trophies", "trofeos")}
+                  {!profile.show_in_ranking ? ` • ${L("Hidden from public ranking", "Oculto del ranking público")}` : ""}
                 </>
               ) : (
                 "—"

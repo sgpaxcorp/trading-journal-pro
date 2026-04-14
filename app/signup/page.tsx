@@ -5,7 +5,6 @@ import type { FormEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 
-import { useAuth } from "@/context/AuthContext";
 import type { PlanId } from "@/lib/types";
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
@@ -81,7 +80,6 @@ function Stepper({
 }
 
 function SignUpPageInner() {
-  const { signUp } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
   const { locale } = useAppSettings();
@@ -137,15 +135,24 @@ function SignUpPageInner() {
       // Este plan se guarda como intención inicial en metadata.
       const planForMetadata: PlanId = planFromQuery;
 
-      await signUp({
-        firstName,
-        lastName,
-        email: normalizedEmail,
-        password,
-        phone,
-        address: "",
-        plan: planForMetadata,
+      const res = await fetch("/api/auth/signup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          firstName,
+          lastName,
+          email: normalizedEmail,
+          password,
+          phone,
+          address: "",
+          plan: planForMetadata,
+          source: "signup",
+        }),
       });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(body?.error || L("Something went wrong.", "Algo salió mal."));
+      }
 
       // Opcional: notificar a soporte
       fetch("/api/email/beta-request", {

@@ -16,6 +16,7 @@ export type AccessStatusResponse = {
     metadata?: Record<string, unknown> | null;
   }>;
   hasPlatformAccess: boolean;
+  hasScopedAccess?: boolean;
   hasAppAccess: boolean;
   diagnostics?: {
     profileFoundById: boolean;

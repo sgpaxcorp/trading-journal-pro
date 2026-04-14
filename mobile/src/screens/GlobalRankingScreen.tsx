@@ -29,6 +29,8 @@ type PublicProfile = {
   xp_total: number;
   trophies_count: number;
   level: number;
+  rank?: number | null;
+  show_in_ranking?: boolean;
 };
 
 function formatNumber(value?: number | null) {
@@ -137,6 +139,13 @@ export function GlobalRankingScreen() {
               xp_total: Number(row.xp_total ?? 0),
               trophies_count: Number(row.trophies_count ?? row.trophies_total ?? 0),
               level: Number(row.level ?? 1),
+              rank:
+                typeof row.rank === "number"
+                  ? row.rank
+                  : Number.isFinite(Number(row.rank))
+                    ? Number(row.rank)
+                    : null,
+              show_in_ranking: Boolean(row.show_in_ranking ?? false),
             });
           }
         }
@@ -229,6 +238,13 @@ export function GlobalRankingScreen() {
             xp_total: Number(row.xp_total ?? 0),
             trophies_count: Number(row.trophies_count ?? row.trophies_total ?? 0),
             level: Number(row.level ?? 1),
+            rank:
+              typeof row.rank === "number"
+                ? row.rank
+                : Number.isFinite(Number(row.rank))
+                  ? Number(row.rank)
+                  : null,
+            show_in_ranking: Boolean(row.show_in_ranking ?? false),
           });
         }
       }
@@ -237,20 +253,13 @@ export function GlobalRankingScreen() {
     }
   }
 
-  const myRank = useMemo(() => {
-    if (!user?.id) return null;
-    const index = rows.findIndex((row) => row.user_id === user.id);
-    if (index < 0) return null;
-    return index + 1;
-  }, [rows, user?.id]);
-
   return (
     <ScreenScaffold
       title={t(language, "Global ranking", "Ranking global")}
       subtitle={t(
         language,
-        "Top traders by XP and trophies earned.",
-        "Top traders por XP y trofeos ganados."
+        "Consistency ranking based on trophy XP earned across the platform.",
+        "Ranking de consistencia basado en el XP de trofeos ganado en la plataforma."
       )}
       refreshing={refreshing}
       onRefresh={handleRefresh}
@@ -271,7 +280,11 @@ export function GlobalRankingScreen() {
               {t(language, "Your snapshot", "Tu resumen")}
             </Text>
             <Text style={styles.snapshotValue}>
-              {myRank ? `#${myRank}` : t(language, "Not in top 25", "Fuera del top 25")}
+              {typeof profile?.rank === "number"
+                ? `#${profile.rank}`
+                : profile?.show_in_ranking
+                  ? t(language, "Outside top 25", "Fuera del top 25")
+                  : t(language, "Ranking hidden", "Ranking oculto")}
               {profile
                 ? ` · ${formatNumber(profile.xp_total)} XP · ${formatNumber(profile.trophies_count)} ${t(
                     language,
@@ -283,6 +296,9 @@ export function GlobalRankingScreen() {
             {profile ? (
               <Text style={styles.snapshotSub}>
                 {t(language, "Tier", "Tier")}: {profile.tier} · {t(language, "Level", "Nivel")} {profile.level}
+                {profile.show_in_ranking
+                  ? ""
+                  : ` · ${t(language, "Hidden from public ranking", "Oculto del ranking público")}`}
               </Text>
             ) : null}
           </View>

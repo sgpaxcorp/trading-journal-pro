@@ -778,6 +778,63 @@ function plainTextPreview(raw: string | null | undefined, maxChars = 280) {
   return text.length > maxChars ? `${text.slice(0, maxChars).trim()}…` : text;
 }
 
+function ProcessNarrativeShell({
+  eyebrow,
+  title,
+  description,
+  tone = "emerald",
+  children,
+}: {
+  eyebrow: string;
+  title: string;
+  description: string;
+  tone?: "emerald" | "sky" | "violet";
+  children: React.ReactNode;
+}) {
+  const toneMap: Record<"emerald" | "sky" | "violet", string> = {
+    emerald:
+      "border-emerald-400/20 bg-[linear-gradient(135deg,rgba(16,185,129,0.14),rgba(15,23,42,0.96))] shadow-[0_0_24px_rgba(16,185,129,0.10)]",
+    sky:
+      "border-sky-400/20 bg-[linear-gradient(135deg,rgba(56,189,248,0.14),rgba(15,23,42,0.96))] shadow-[0_0_24px_rgba(56,189,248,0.10)]",
+    violet:
+      "border-violet-400/20 bg-[linear-gradient(135deg,rgba(167,139,250,0.12),rgba(15,23,42,0.96))] shadow-[0_0_24px_rgba(167,139,250,0.10)]",
+  };
+
+  return (
+    <section className={`rounded-2xl border p-3 md:p-4 ${toneMap[tone]}`}>
+      <div className="mb-3">
+        <p className="text-[10px] uppercase tracking-[0.22em] text-slate-400">{eyebrow}</p>
+        <h3 className="mt-1 text-sm font-semibold text-slate-100">{title}</h3>
+        <p className="mt-1 text-[12px] leading-relaxed text-slate-400">{description}</p>
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function ProcessFrameworkShell({
+  eyebrow,
+  title,
+  description,
+  children,
+}: {
+  eyebrow: string;
+  title: string;
+  description: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="rounded-2xl border border-slate-800 bg-slate-950/75 p-3 md:p-4">
+      <div className="mb-3">
+        <p className="text-[10px] uppercase tracking-[0.22em] text-slate-500">{eyebrow}</p>
+        <h3 className="mt-1 text-sm font-semibold text-slate-100">{title}</h3>
+        <p className="mt-1 text-[12px] leading-relaxed text-slate-400">{description}</p>
+      </div>
+      <div className="space-y-3">{children}</div>
+    </section>
+  );
+}
+
 type NeuroOptionGroupKey =
   | "premarket_thesis"
   | "premarket_confirmation"
@@ -2710,79 +2767,108 @@ export default function DailyJournalPage() {
             </button>
           }
         >
-          <JournalInkField
-            value={editableValue(premarketHtml, premarketMode, premarketInk)}
-            onChange={(next) => {
-              const ink = next.ink;
-              setPremarketHtml(next.content);
-              setPremarketMode(getNotebookInkMode(ink));
-              setPremarketInk(ink?.drawing ?? null);
-            }}
-            placeholder={L(
-              "Premarket prep: bias, levels, planned setups, rules…",
-              "Preparación premarket: sesgo, niveles, setups planificados, reglas…"
-            )}
-            minHeight={180}
-          />
-          <div className="mt-4 grid grid-cols-1 gap-3">
-            <NeuroChipGroup
-              title={L("Thesis", "Tesis")}
-              options={neuroOptionPresets.premarket_thesis}
-              selected={neuroLayer.premarket.thesis}
-              onToggle={(optionId) => toggleNeuroMulti("premarket", "thesis", optionId)}
-              groupKey="premarket_thesis"
-            />
-            <NeuroChipGroup
-              title={L("Confirmation I need", "Confirmación que necesito")}
-              options={neuroOptionPresets.premarket_confirmation}
-              selected={neuroLayer.premarket.confirmation}
-              onToggle={(optionId) => toggleNeuroMulti("premarket", "confirmation", optionId)}
-              groupKey="premarket_confirmation"
-            />
-            <NeuroChipGroup
-              title={L("Invalidation", "Invalidación")}
-              options={neuroOptionPresets.premarket_invalidation}
-              selected={neuroLayer.premarket.invalidation}
-              onToggle={(optionId) => toggleNeuroMulti("premarket", "invalidation", optionId)}
-              groupKey="premarket_invalidation"
-            />
-          </div>
-          <div className="mt-4 grid grid-cols-1 gap-3">
-            <ChecklistChipGroup
-              title={L("Premarket checklist", "Checklist premarket")}
-              section="premarket"
-              items={checklistPresets.premarket}
-              selected={extractPrefixed(Array.isArray(entry.tags) ? entry.tags : [], TAG_PREFIX.premarket)}
-              helper={L(
-                "These are the concrete checks that must be done before the first trade.",
-                "Estos son los checks concretos que deben estar hechos antes del primer trade."
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.9fr)]">
+            <ProcessNarrativeShell
+              eyebrow={L("Plan narrative", "Narrativa del plan")}
+              title={L("Session plan", "Plan de la sesión")}
+              description={L(
+                "This is where the trader thinks in their own words before risk goes live.",
+                "Aquí es donde el trader piensa con sus propias palabras antes de poner riesgo en juego."
               )}
-            />
-            <ChecklistChipGroup
-              title={L("Strategy checklist", "Checklist de estrategia")}
-              section="strategy"
-              items={checklistPresets.strategy}
-              selected={extractPrefixed(Array.isArray(entry.tags) ? entry.tags : [], TAG_PREFIX.strategy)}
-              helper={L(
-                "Use this to qualify the setup before entry.",
-                "Úsalo para calificar el setup antes de la entrada."
-              )}
-            />
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <RatingSlider
-                label={L("Setup quality", "Calidad del setup")}
-                value={mindset.setup_quality}
-                onChange={(v) => setMindset((prev) => ({ ...prev, setup_quality: v }))}
-                left={L("Weak", "Débil")}
-                right={L("Strong", "Fuerte")}
+            >
+              <JournalInkField
+                value={editableValue(premarketHtml, premarketMode, premarketInk)}
+                onChange={(next) => {
+                  const ink = next.ink;
+                  setPremarketHtml(next.content);
+                  setPremarketMode(getNotebookInkMode(ink));
+                  setPremarketInk(ink?.drawing ?? null);
+                }}
+                placeholder={L(
+                  "Write your premarket plan for this session.",
+                  "Escribe tu plan premarket para esta sesión."
+                )}
+                minHeight={260}
               />
-              <RatingSlider
-                label={L("Probability rating", "Probabilidad")}
-                value={mindset.probability}
-                onChange={(v) => setMindset((prev) => ({ ...prev, probability: v }))}
-                left={L("Low", "Baja")}
-                right={L("High", "Alta")}
-              />
+            </ProcessNarrativeShell>
+
+            <div className="space-y-4">
+              <ProcessFrameworkShell
+                eyebrow={L("Execution framework", "Marco de ejecución")}
+                title={L("Setup conditions", "Condiciones del setup")}
+                description={L(
+                  "Lock the conditions that must exist before the first trade.",
+                  "Fija las condiciones que deben existir antes del primer trade."
+                )}
+              >
+                <NeuroChipGroup
+                  title={L("Thesis", "Tesis")}
+                  options={neuroOptionPresets.premarket_thesis}
+                  selected={neuroLayer.premarket.thesis}
+                  onToggle={(optionId) => toggleNeuroMulti("premarket", "thesis", optionId)}
+                  groupKey="premarket_thesis"
+                />
+                <NeuroChipGroup
+                  title={L("Confirmation I need", "Confirmación que necesito")}
+                  options={neuroOptionPresets.premarket_confirmation}
+                  selected={neuroLayer.premarket.confirmation}
+                  onToggle={(optionId) => toggleNeuroMulti("premarket", "confirmation", optionId)}
+                  groupKey="premarket_confirmation"
+                />
+                <NeuroChipGroup
+                  title={L("Invalidation", "Invalidación")}
+                  options={neuroOptionPresets.premarket_invalidation}
+                  selected={neuroLayer.premarket.invalidation}
+                  onToggle={(optionId) => toggleNeuroMulti("premarket", "invalidation", optionId)}
+                  groupKey="premarket_invalidation"
+                />
+              </ProcessFrameworkShell>
+
+              <ProcessFrameworkShell
+                eyebrow={L("Risk and quality gates", "Puertas de riesgo y calidad")}
+                title={L("Premarket checks", "Checks premarket")}
+                description={L(
+                  "Use structured checks to qualify the day without overriding your own market read.",
+                  "Usa checks estructurados para calificar el día sin reemplazar tu propia lectura del mercado."
+                )}
+              >
+                <ChecklistChipGroup
+                  title={L("Premarket checklist", "Checklist premarket")}
+                  section="premarket"
+                  items={checklistPresets.premarket}
+                  selected={extractPrefixed(Array.isArray(entry.tags) ? entry.tags : [], TAG_PREFIX.premarket)}
+                  helper={L(
+                    "These are the concrete checks that must be done before the first trade.",
+                    "Estos son los checks concretos que deben estar hechos antes del primer trade."
+                  )}
+                />
+                <ChecklistChipGroup
+                  title={L("Strategy checklist", "Checklist de estrategia")}
+                  section="strategy"
+                  items={checklistPresets.strategy}
+                  selected={extractPrefixed(Array.isArray(entry.tags) ? entry.tags : [], TAG_PREFIX.strategy)}
+                  helper={L(
+                    "Use this to qualify the setup before entry.",
+                    "Úsalo para calificar el setup antes de la entrada."
+                  )}
+                />
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <RatingSlider
+                    label={L("Setup quality", "Calidad del setup")}
+                    value={mindset.setup_quality}
+                    onChange={(v) => setMindset((prev) => ({ ...prev, setup_quality: v }))}
+                    left={L("Weak", "Débil")}
+                    right={L("Strong", "Fuerte")}
+                  />
+                  <RatingSlider
+                    label={L("Probability rating", "Probabilidad")}
+                    value={mindset.probability}
+                    onChange={(v) => setMindset((prev) => ({ ...prev, probability: v }))}
+                    left={L("Low", "Baja")}
+                    right={L("High", "Alta")}
+                  />
+                </div>
+              </ProcessFrameworkShell>
             </div>
           </div>
         </WidgetCard>
@@ -3220,87 +3306,117 @@ export default function DailyJournalPage() {
             </div>
           }
         >
-          <JournalInkField
-            value={editableValue(insideHtml, insideMode, insideInk)}
-            onChange={(next) => {
-              const ink = next.ink;
-              setInsideHtml(next.content);
-              setInsideMode(getNotebookInkMode(ink));
-              setInsideInk(ink?.drawing ?? null);
-            }}
-            placeholder={L(
-              "During the trade: execution notes, management decisions, mistakes, emotions…",
-              "Durante el trade: notas de ejecución, decisiones de manejo, errores, emociones…"
-            )}
-            minHeight={180}
-            onReady={(ed) => {
-              insideEditorRef.current = ed;
-            }}
-          />
-          <div className="mt-4 grid grid-cols-1 gap-3">
-            <NeuroChipGroup
-              title={L("What changed?", "¿Qué cambió?")}
-              options={neuroOptionPresets.inside_changed}
-              selected={neuroLayer.inside.changed}
-              onToggle={(optionId) => toggleNeuroMulti("inside", "changed", optionId)}
-              groupKey="inside_changed"
-            />
-            <NeuroChipGroup
-              title={L("Current state", "Estado actual")}
-              options={neuroOptionPresets.inside_state}
-              selected={neuroLayer.inside.state}
-              onToggle={(optionId) => toggleNeuroMulti("inside", "state", optionId)}
-              groupKey="inside_state"
-            />
-            <NeuroChipGroup
-              title={L("Did I follow the plan?", "¿Seguí el plan?")}
-              options={NEURO_PLAN_FOLLOWED_OPTIONS}
-              selected={neuroLayer.inside.plan_followed ? [neuroLayer.inside.plan_followed] : []}
-              onToggle={(optionId) =>
-                setNeuroSingle(
-                  "inside",
-                  "plan_followed",
-                  neuroLayer.inside.plan_followed === optionId ? null : optionId
-                )
-              }
-              single
-            />
-          </div>
-          <div className="mt-4">
-            <div className="mb-3">
-              <p className="text-sm font-semibold text-slate-200">
-                {L("Trade management", "Manejo del trade")}
-              </p>
-              <p className="mt-1 text-[11px] text-slate-500">
-                {L(
-                  "Mark the live management actions that actually happened while the trade was open.",
-                  "Marca las acciones reales de manejo que ocurrieron mientras el trade estuvo abierto."
-                )}
-              </p>
-              <div className="mt-2 flex flex-wrap gap-2 text-[13px] leading-snug">
-                {EXIT_REASON_TAGS.map((t) => (
-                  <label key={t} className={tagPillClass(!!entry.tags?.includes(t))}>
-                    <input
-                      type="checkbox"
-                      onChange={() => toggleTag(t)}
-                      checked={entry.tags?.includes(t)}
-                      className={tagCheckboxClass}
-                    />
-                    <span className="wrap-break-word">{tagLabel(t, EXIT_REASON_LABELS)}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
-            <ChecklistChipGroup
-              title={L("In-trade checklist", "Checklist en trade")}
-              section="inside"
-              items={checklistPresets.inside}
-              selected={extractPrefixed(Array.isArray(entry.tags) ? entry.tags : [], TAG_PREFIX.inside)}
-              helper={L(
-                "Use this to mark whether your live execution stayed inside the process.",
-                "Úsalo para marcar si tu ejecución en vivo se mantuvo dentro del proceso."
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.9fr)]">
+            <ProcessNarrativeShell
+              eyebrow={L("Live narrative", "Narrativa en vivo")}
+              title={L("Execution tape", "Cinta de ejecución")}
+              description={L(
+                "Capture what actually happened while the trade was live, without rewriting it after the fact.",
+                "Captura lo que realmente pasó mientras el trade estuvo vivo, sin reescribirlo después."
               )}
-            />
+              tone="sky"
+            >
+              <JournalInkField
+                value={editableValue(insideHtml, insideMode, insideInk)}
+                onChange={(next) => {
+                  const ink = next.ink;
+                  setInsideHtml(next.content);
+                  setInsideMode(getNotebookInkMode(ink));
+                  setInsideInk(ink?.drawing ?? null);
+                }}
+                placeholder={L(
+                  "Record the live management and execution of this trade.",
+                  "Registra el manejo y la ejecución en vivo de este trade."
+                )}
+                minHeight={260}
+                onReady={(ed) => {
+                  insideEditorRef.current = ed;
+                }}
+              />
+            </ProcessNarrativeShell>
+
+            <div className="space-y-4">
+              <ProcessFrameworkShell
+                eyebrow={L("Execution frame", "Marco de ejecución")}
+                title={L("What changed while risk was live", "Qué cambió mientras el riesgo estaba vivo")}
+                description={L(
+                  "Mark the state shifts and the distance between plan and live behavior.",
+                  "Marca los cambios de estado y la distancia entre el plan y el comportamiento real."
+                )}
+              >
+                <NeuroChipGroup
+                  title={L("What changed?", "¿Qué cambió?")}
+                  options={neuroOptionPresets.inside_changed}
+                  selected={neuroLayer.inside.changed}
+                  onToggle={(optionId) => toggleNeuroMulti("inside", "changed", optionId)}
+                  groupKey="inside_changed"
+                />
+                <NeuroChipGroup
+                  title={L("Current state", "Estado actual")}
+                  options={neuroOptionPresets.inside_state}
+                  selected={neuroLayer.inside.state}
+                  onToggle={(optionId) => toggleNeuroMulti("inside", "state", optionId)}
+                  groupKey="inside_state"
+                />
+                <NeuroChipGroup
+                  title={L("Did I follow the plan?", "¿Seguí el plan?")}
+                  options={NEURO_PLAN_FOLLOWED_OPTIONS}
+                  selected={neuroLayer.inside.plan_followed ? [neuroLayer.inside.plan_followed] : []}
+                  onToggle={(optionId) =>
+                    setNeuroSingle(
+                      "inside",
+                      "plan_followed",
+                      neuroLayer.inside.plan_followed === optionId ? null : optionId
+                    )
+                  }
+                  single
+                />
+              </ProcessFrameworkShell>
+
+              <ProcessFrameworkShell
+                eyebrow={L("Management record", "Registro de manejo")}
+                title={L("Live controls", "Controles en vivo")}
+                description={L(
+                  "Document the actions that actually happened while the position was open.",
+                  "Documenta las acciones que realmente ocurrieron mientras la posición estuvo abierta."
+                )}
+              >
+                <div>
+                  <p className="text-sm font-semibold text-slate-200">
+                    {L("Trade management", "Manejo del trade")}
+                  </p>
+                  <p className="mt-1 text-[11px] text-slate-500">
+                    {L(
+                      "Mark the live management actions that actually happened while the trade was open.",
+                      "Marca las acciones reales de manejo que ocurrieron mientras el trade estuvo abierto."
+                    )}
+                  </p>
+                  <div className="mt-2 flex flex-wrap gap-2 text-[13px] leading-snug">
+                    {EXIT_REASON_TAGS.map((t) => (
+                      <label key={t} className={tagPillClass(!!entry.tags?.includes(t))}>
+                        <input
+                          type="checkbox"
+                          onChange={() => toggleTag(t)}
+                          checked={entry.tags?.includes(t)}
+                          className={tagCheckboxClass}
+                        />
+                        <span className="wrap-break-word">{tagLabel(t, EXIT_REASON_LABELS)}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+                <ChecklistChipGroup
+                  title={L("In-trade checklist", "Checklist en trade")}
+                  section="inside"
+                  items={checklistPresets.inside}
+                  selected={extractPrefixed(Array.isArray(entry.tags) ? entry.tags : [], TAG_PREFIX.inside)}
+                  helper={L(
+                    "Use this to mark whether your live execution stayed inside the process.",
+                    "Úsalo para marcar si tu ejecución en vivo se mantuvo dentro del proceso."
+                  )}
+                />
+              </ProcessFrameworkShell>
+            </div>
           </div>
         </WidgetCard>
       ),
@@ -3323,84 +3439,116 @@ export default function DailyJournalPage() {
             </button>
           }
         >
-          <JournalInkField
-            value={editableValue(afterHtml, afterMode, afterInk)}
-            onChange={(next) => {
-              const ink = next.ink;
-              setAfterHtml(next.content);
-              setAfterMode(getNotebookInkMode(ink));
-              setAfterInk(ink?.drawing ?? null);
-            }}
-            placeholder={L(
-              "Post-trade: what went right/wrong, process corrections, rule breaks, next actions…",
-              "Post-trade: qué salió bien/mal, correcciones de proceso, rompimientos de reglas, próximos pasos…"
-            )}
-            minHeight={180}
-          />
-          <div className="mt-4 grid grid-cols-1 gap-3">
-            <NeuroChipGroup
-              title={L("Why did I exit?", "¿Por qué salí?")}
-              options={neuroOptionPresets.after_exit_reason}
-              selected={neuroLayer.after.exit_reason}
-              onToggle={(optionId) => toggleNeuroMulti("after", "exit_reason", optionId)}
-              groupKey="after_exit_reason"
-            />
-            <NeuroChipGroup
-              title={L("Would I take this trade again?", "¿Tomaría este trade otra vez?")}
-              options={NEURO_AFTER_TAKE_AGAIN_OPTIONS}
-              selected={neuroLayer.after.take_again ? [neuroLayer.after.take_again] : []}
-              onToggle={(optionId) =>
-                setNeuroSingle(
-                  "after",
-                  "take_again",
-                  neuroLayer.after.take_again === optionId ? null : optionId
-                )
-              }
-              single
-            />
-            <NeuroChipGroup
-              title={L("Truth about the trade", "Verdad sobre el trade")}
-              options={neuroOptionPresets.after_truth}
-              selected={neuroLayer.after.truth}
-              onToggle={(optionId) => toggleNeuroMulti("after", "truth", optionId)}
-              groupKey="after_truth"
-            />
-            <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
-              <label className="text-sm font-semibold text-slate-200">
-                {L("One-line truth", "Verdad en una línea")}
-              </label>
-              <p className="mt-1 text-[11px] text-slate-500">
-                {L(
-                  "One brutal sentence about what was really true in this trade.",
-                  "Una frase brutalmente honesta sobre lo que realmente fue cierto en este trade."
-                )}
-              </p>
-              <textarea
-                value={neuroLayer.after.one_line_truth}
-                onChange={(e) =>
-                  setNeuroLayer((prev) => ({
-                    ...prev,
-                    after: {
-                      ...prev.after,
-                      one_line_truth: e.target.value,
-                    },
-                  }))
-                }
-                rows={3}
-                placeholder={L("I traded before confirmation.", "Operé antes de la confirmación.")}
-                className="mt-3 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 focus:border-emerald-400 focus:outline-none"
-              />
-            </div>
-            <ChecklistChipGroup
-              title={L("After-trade checklist", "Checklist post-trade")}
-              section="after"
-              items={checklistPresets.after}
-              selected={extractPrefixed(Array.isArray(entry.tags) ? entry.tags : [], TAG_PREFIX.after)}
-              helper={L(
-                "Use this for the concrete review actions that should happen after the trade closes.",
-                "Úsalo para las acciones concretas de revisión que deben ocurrir después de cerrar el trade."
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.9fr)]">
+            <ProcessNarrativeShell
+              eyebrow={L("Review narrative", "Narrativa de revisión")}
+              title={L("Post-trade truth", "Verdad post-trade")}
+              description={L(
+                "Write the truth of the session once risk is fully off.",
+                "Escribe la verdad de la sesión una vez que el riesgo ya salió por completo."
               )}
-            />
+              tone="violet"
+            >
+              <JournalInkField
+                value={editableValue(afterHtml, afterMode, afterInk)}
+                onChange={(next) => {
+                  const ink = next.ink;
+                  setAfterHtml(next.content);
+                  setAfterMode(getNotebookInkMode(ink));
+                  setAfterInk(ink?.drawing ?? null);
+                }}
+                placeholder={L(
+                  "Write the post-trade review for this session.",
+                  "Escribe la revisión post-trade de esta sesión."
+                )}
+                minHeight={260}
+              />
+            </ProcessNarrativeShell>
+
+            <div className="space-y-4">
+              <ProcessFrameworkShell
+                eyebrow={L("Review frame", "Marco de revisión")}
+                title={L("Exit and truth", "Salida y verdad")}
+                description={L(
+                  "Capture why the trade ended, whether it deserved to be taken again, and what truth remains after the fact.",
+                  "Captura por qué terminó el trade, si merecía volver a tomarse y qué verdad queda después de los hechos."
+                )}
+              >
+                <NeuroChipGroup
+                  title={L("Why did I exit?", "¿Por qué salí?")}
+                  options={neuroOptionPresets.after_exit_reason}
+                  selected={neuroLayer.after.exit_reason}
+                  onToggle={(optionId) => toggleNeuroMulti("after", "exit_reason", optionId)}
+                  groupKey="after_exit_reason"
+                />
+                <NeuroChipGroup
+                  title={L("Would I take this trade again?", "¿Tomaría este trade otra vez?")}
+                  options={NEURO_AFTER_TAKE_AGAIN_OPTIONS}
+                  selected={neuroLayer.after.take_again ? [neuroLayer.after.take_again] : []}
+                  onToggle={(optionId) =>
+                    setNeuroSingle(
+                      "after",
+                      "take_again",
+                      neuroLayer.after.take_again === optionId ? null : optionId
+                    )
+                  }
+                  single
+                />
+                <NeuroChipGroup
+                  title={L("Truth about the trade", "Verdad sobre el trade")}
+                  options={neuroOptionPresets.after_truth}
+                  selected={neuroLayer.after.truth}
+                  onToggle={(optionId) => toggleNeuroMulti("after", "truth", optionId)}
+                  groupKey="after_truth"
+                />
+                <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+                  <label className="text-sm font-semibold text-slate-200">
+                    {L("One-line truth", "Verdad en una línea")}
+                  </label>
+                  <p className="mt-1 text-[11px] text-slate-500">
+                    {L(
+                      "One brutal sentence about what was really true in this trade.",
+                      "Una frase brutalmente honesta sobre lo que realmente fue cierto en este trade."
+                    )}
+                  </p>
+                  <textarea
+                    value={neuroLayer.after.one_line_truth}
+                    onChange={(e) =>
+                      setNeuroLayer((prev) => ({
+                        ...prev,
+                        after: {
+                          ...prev.after,
+                          one_line_truth: e.target.value,
+                        },
+                      }))
+                    }
+                    rows={3}
+                    placeholder={L("Write one clear line.", "Escribe una línea clara.")}
+                    className="mt-3 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 focus:border-emerald-400 focus:outline-none"
+                  />
+                </div>
+              </ProcessFrameworkShell>
+
+              <ProcessFrameworkShell
+                eyebrow={L("Review completion", "Cierre de revisión")}
+                title={L("Checklist and closeout", "Checklist y cierre")}
+                description={L(
+                  "Use the structured review to close the day with clarity.",
+                  "Usa la revisión estructurada para cerrar el día con claridad."
+                )}
+              >
+                <ChecklistChipGroup
+                  title={L("After-trade checklist", "Checklist post-trade")}
+                  section="after"
+                  items={checklistPresets.after}
+                  selected={extractPrefixed(Array.isArray(entry.tags) ? entry.tags : [], TAG_PREFIX.after)}
+                  helper={L(
+                    "Use this for the concrete review actions that should happen after the trade closes.",
+                    "Úsalo para las acciones concretas de revisión que deben ocurrir después de cerrar el trade."
+                  )}
+                />
+              </ProcessFrameworkShell>
+            </div>
           </div>
           <details className="mt-4 rounded-xl border border-slate-800 bg-slate-950/60 p-3">
             <summary className="cursor-pointer text-sm font-semibold text-slate-200">
@@ -3876,32 +4024,52 @@ export default function DailyJournalPage() {
         </div>
 
         {/* Wizard */}
-        <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-2 mb-3">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex items-center gap-2 overflow-x-auto">
-              {WIZARD_STEPS.map((step, idx) => {
-                const on = idx === currentStep;
-                return (
-                  <button
-                    key={step.key}
-                    type="button"
-                    onClick={() => setCurrentStep(idx)}
-                    className={`px-3 py-1 rounded-full text-[11px] border whitespace-nowrap transition ${
-                      on
-                        ? "bg-emerald-400 text-slate-950 border-emerald-400"
-                        : "bg-slate-950 text-slate-300 border-slate-700 hover:border-emerald-400"
-                    }`}
-                  >
-                    {idx + 1}. {step.label}
-                  </button>
-                );
-              })}
-              <span className="text-[10px] text-slate-400 ml-1">
-                {L("Step", "Paso")} {currentStep + 1} {L("of", "de")} {stepCount}
-              </span>
-            </div>
+        <div className="sticky top-3 z-30 mb-3">
+          <div className="bg-slate-900/95 border border-slate-800 rounded-2xl p-3 backdrop-blur supports-[backdrop-filter]:bg-slate-900/80 shadow-[0_18px_40px_rgba(2,6,23,0.35)]">
+            <div className="flex flex-col xl:flex-row xl:items-start xl:justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-col lg:flex-row lg:items-center gap-3">
+                  <div className="shrink-0 rounded-2xl border border-emerald-400/35 bg-emerald-500/10 px-3.5 py-2.5">
+                    <p className="text-[10px] uppercase tracking-[0.24em] text-emerald-200/80">
+                      {L("Current step", "Paso actual")}
+                    </p>
+                    <p className="mt-1 text-sm font-semibold text-slate-50">
+                      {currentStep + 1}. {activeStep?.label}
+                    </p>
+                    <p className="mt-1 text-[11px] text-emerald-100/75">
+                      {L("Step", "Paso")} {currentStep + 1} {L("of", "de")} {stepCount}
+                    </p>
+                  </div>
 
-            <div className="flex items-center flex-wrap justify-center gap-1.5" data-tour="journal-save">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 overflow-x-auto pb-1">
+                      {WIZARD_STEPS.map((step, idx) => {
+                        const on = idx === currentStep;
+                        return (
+                          <button
+                            key={step.key}
+                            type="button"
+                            onClick={() => setCurrentStep(idx)}
+                            className={`px-3 py-1 rounded-full text-[11px] border whitespace-nowrap transition ${
+                              on
+                                ? "bg-emerald-400 text-slate-950 border-emerald-400"
+                                : "bg-slate-950 text-slate-300 border-slate-700 hover:border-emerald-400"
+                            }`}
+                          >
+                            {idx + 1}. {step.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    <div className="mt-2 text-[11px] text-slate-400">
+                      {activeStep?.description}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center flex-wrap justify-start xl:justify-end gap-1.5" data-tour="journal-save">
               <button
                 type="button"
                 onClick={handleGoToImport}
@@ -3934,58 +4102,55 @@ export default function DailyJournalPage() {
                 {L("Save & return to dashboard", "Guardar y volver al dashboard")}
               </button>
             </div>
-
-            {activeStep?.key === "intrade" && (
-              <div className="relative rounded-2xl border border-emerald-400/25 bg-slate-950/80 px-3.5 py-3 max-w-[420px] shadow-[0_0_32px_rgba(16,185,129,0.18)]">
-                <div className="absolute inset-0 rounded-2xl bg-gradient-to-r from-emerald-500/10 via-transparent to-sky-500/10 pointer-events-none" />
-                <div className="relative grid grid-cols-3 gap-2">
-                  <div className="rounded-lg border border-emerald-400/40 bg-slate-900/70 px-3 py-2 shadow-[0_0_16px_rgba(16,185,129,0.25)]">
-                    <p className="text-[10px] uppercase tracking-wide text-emerald-200/80">
-                      {L("Auto P&L", "P&L Auto")}
-                    </p>
-                    <div className="mt-1 text-[16px] font-semibold text-emerald-100 leading-none">
-                      {pnlInput?.trim() ? pnlInput : "—"}
-                    </div>
-                  </div>
-                  <div className="rounded-lg border border-slate-800 bg-slate-900/70 px-3 py-2">
-                    <label className="text-[10px] uppercase tracking-wide text-slate-300">
-                      {L("Commissions", "Comisiones")}
-                    </label>
-                    <input
-                      type="number"
-                      value={commissionsInput}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setCommissionsInput(val);
-                        updateCostField("commissions", val);
-                      }}
-                      className="mt-1 w-full px-2 py-1 rounded-md bg-slate-950 border border-slate-700 text-[11px] text-slate-100 focus:outline-none focus:border-emerald-400"
-                      placeholder="0.00"
-                    />
-                  </div>
-                  <div className="rounded-lg border border-slate-800 bg-slate-900/70 px-3 py-2">
-                    <label className="text-[10px] uppercase tracking-wide text-slate-300">
-                      {L("Fees", "Fees")}
-                    </label>
-                    <input
-                      type="number"
-                      value={feesInput}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setFeesInput(val);
-                        updateCostField("fees", val);
-                      }}
-                      className="mt-1 w-full px-2 py-1 rounded-md bg-slate-950 border border-slate-700 text-[11px] text-slate-100 focus:outline-none focus:border-emerald-400"
-                      placeholder="0.00"
-                    />
-                  </div>
-                </div>
-              </div>
-            )}
           </div>
 
-        <div className="mt-1 text-[9px] text-slate-500">
-          {activeStep?.description}
+          <div className="mt-3 flex justify-end">
+            <div className="relative w-full xl:w-auto rounded-2xl border border-emerald-400/25 bg-slate-950/80 px-3.5 py-3 shadow-[0_0_32px_rgba(16,185,129,0.18)]">
+              <div className="absolute inset-0 rounded-2xl bg-gradient-to-r from-emerald-500/10 via-transparent to-sky-500/10 pointer-events-none" />
+              <div className="relative grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <div className="rounded-lg border border-emerald-400/40 bg-slate-900/70 px-3 py-2 shadow-[0_0_16px_rgba(16,185,129,0.25)]">
+                  <p className="text-[10px] uppercase tracking-wide text-emerald-200/80">
+                    {L("Auto P&L", "P&L Auto")}
+                  </p>
+                  <div className="mt-1 text-[16px] font-semibold text-emerald-100 leading-none">
+                    {pnlInput?.trim() ? pnlInput : "—"}
+                  </div>
+                </div>
+                <div className="rounded-lg border border-slate-800 bg-slate-900/70 px-3 py-2">
+                  <label className="text-[10px] uppercase tracking-wide text-slate-300">
+                    {L("Commissions", "Comisiones")}
+                  </label>
+                  <input
+                    type="number"
+                    value={commissionsInput}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setCommissionsInput(val);
+                      updateCostField("commissions", val);
+                    }}
+                    className="mt-1 w-full px-2 py-1 rounded-md bg-slate-950 border border-slate-700 text-[11px] text-slate-100 focus:outline-none focus:border-emerald-400"
+                    placeholder="0.00"
+                  />
+                </div>
+                <div className="rounded-lg border border-slate-800 bg-slate-900/70 px-3 py-2">
+                  <label className="text-[10px] uppercase tracking-wide text-slate-300">
+                    {L("Fees", "Fees")}
+                  </label>
+                  <input
+                    type="number"
+                    value={feesInput}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setFeesInput(val);
+                      updateCostField("fees", val);
+                    }}
+                    className="mt-1 w-full px-2 py-1 rounded-md bg-slate-950 border border-slate-700 text-[11px] text-slate-100 focus:outline-none focus:border-emerald-400"
+                    placeholder="0.00"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
 
         {activeStep?.key === "intrade" ? (
@@ -4072,10 +4237,15 @@ export default function DailyJournalPage() {
                 ))}
               </div>
               <div className="space-y-4">
-                {["emotional", "entries", "exits"].map((id) => (
+                {["emotional"].map((id) => (
                   <div key={id}>{sectionMap[id as JournalWidgetId]?.render()}</div>
                 ))}
               </div>
+            </div>
+            <div className="mt-4 grid grid-cols-1 xl:grid-cols-2 gap-4">
+              {["entries", "exits"].map((id) => (
+                <div key={id}>{sectionMap[id as JournalWidgetId]?.render()}</div>
+              ))}
             </div>
             <div className="mt-4 space-y-4">
               {activeStep?.sections
