@@ -1,5 +1,9 @@
 import { AppUser, PlanId } from "./types";
 import { Resend } from "resend";
+import { supabaseAdmin } from "@/lib/supaBaseAdmin";
+import { existsSync, readFileSync } from "fs";
+import { join } from "path";
+import { jsPDF } from "jspdf";
 
 const APP_URL =
   process.env.NEXT_PUBLIC_APP_URL ||
@@ -19,12 +23,21 @@ type SendEmailArgs = {
   subject: string;
   text?: string;
   html?: string;
+  attachments?: EmailAttachment[];
 };
 
 type EmailContent = {
   subject: string;
   text: string;
   html: string;
+};
+
+type EmailLocale = "en" | "es";
+
+type EmailAttachment = {
+  filename: string;
+  content: Buffer | string;
+  contentType?: string;
 };
 
 export type AutomatedEmailKey =
@@ -86,6 +99,55 @@ function resolveEmailLogoUrl() {
   return resolveAppUrl("/neurotrader-logo-web.png");
 }
 
+function normalizeEmailLocale(locale?: string | null): EmailLocale {
+  return String(locale || "").trim().toLowerCase().startsWith("es") ? "es" : "en";
+}
+
+async function resolveEmailLocale(args: {
+  userId?: string | null;
+  email?: string | null;
+  fallback?: string | null;
+}): Promise<EmailLocale> {
+  const fallback = normalizeEmailLocale(args.fallback);
+
+  try {
+    let userId = args.userId || null;
+    const email = String(args.email || "").trim().toLowerCase();
+
+    if (!userId && email) {
+      const { data: profile, error: profileError } = await supabaseAdmin
+        .from("profiles")
+        .select("id")
+        .eq("email", email)
+        .maybeSingle();
+
+      if (profileError) {
+        console.warn("[email] profile locale lookup error:", profileError);
+      }
+
+      userId = (profile as { id?: string | null } | null)?.id || null;
+    }
+
+    if (!userId) return fallback;
+
+    const { data, error } = await supabaseAdmin
+      .from("user_preferences")
+      .select("locale")
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    if (error) {
+      console.warn("[email] preference locale lookup error:", error);
+      return fallback;
+    }
+
+    return normalizeEmailLocale((data as { locale?: string | null } | null)?.locale || fallback);
+  } catch (error) {
+    console.warn("[email] locale lookup exception:", error);
+    return fallback;
+  }
+}
+
 function buildParagraphs(paragraphs: string[]) {
   return paragraphs
     .map(
@@ -132,6 +194,235 @@ function formatBillingCycleLabel(cycle?: string | null) {
   if (clean === "monthly" || clean === "month") return "Monthly";
   if (clean === "annual" || clean === "yearly" || clean === "year") return "Annual";
   return clean.charAt(0).toUpperCase() + clean.slice(1);
+}
+
+function sanitizeFilenamePart(value: string) {
+  return String(value || "")
+    .replace(/[^a-z0-9_-]+/gi, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 64);
+}
+
+function buildFallbackReceiptNumber(args: {
+  email: string;
+  chargeDate?: string | null;
+}) {
+  const date = args.chargeDate ? new Date(args.chargeDate) : new Date();
+  const datePart = Number.isNaN(date.getTime())
+    ? new Date().toISOString().slice(0, 10).replace(/-/g, "")
+    : date.toISOString().slice(0, 10).replace(/-/g, "");
+  let hash = 0;
+  const seed = `${args.email}:${datePart}`;
+  for (let i = 0; i < seed.length; i += 1) {
+    hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
+  }
+  return `NTJ-${datePart}-${hash.toString(16).slice(0, 6).toUpperCase()}`;
+}
+
+function addReceiptLogo(doc: jsPDF, x: number, y: number, width: number) {
+  try {
+    const logoPath = join(process.cwd(), "public", "neurotrader-logo-web.png");
+    if (!existsSync(logoPath)) return false;
+
+    const logo = readFileSync(logoPath).toString("base64");
+    doc.addImage(`data:image/png;base64,${logo}`, "PNG", x, y, width, width * 0.1585);
+    return true;
+  } catch (error) {
+    console.warn("[email] Could not embed receipt logo:", error);
+    return false;
+  }
+}
+
+function drawReceiptLabelValue(
+  doc: jsPDF,
+  label: string,
+  value: string,
+  x: number,
+  y: number,
+  valueAlign: "left" | "right" = "left"
+) {
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(8);
+  doc.setTextColor(100, 116, 139);
+  doc.text(label.toUpperCase(), x, y);
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(10);
+  doc.setTextColor(15, 23, 42);
+  doc.text(value, valueAlign === "right" ? x + 142 : x, y + 15, {
+    align: valueAlign,
+    maxWidth: 142,
+  });
+}
+
+function buildSubscriptionReceiptPdfAttachment(args: {
+  email: string;
+  name?: string | null;
+  plan: PlanId | string;
+  amount?: number;
+  subscriptionId?: string;
+  billingCycle?: string | null;
+  invoiceNumber?: string | null;
+  chargeDate?: string | null;
+}): EmailAttachment {
+  const planLabel = formatPlanLabel(args.plan);
+  const billingLabel = formatBillingCycleLabel(args.billingCycle) ?? "Subscription";
+  const amountText = formatMoney(args.amount);
+  const paidOn = formatEmailDate(args.chargeDate) ?? formatEmailDate(new Date()) ?? "";
+  const receiptNumber =
+    args.invoiceNumber || buildFallbackReceiptNumber({ email: args.email, chargeDate: args.chargeDate });
+  const customerName = args.name || "NeuroTrader Journal customer";
+
+  const doc = new jsPDF({ unit: "pt", format: "letter" });
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const margin = 48;
+
+  doc.setProperties({
+    title: `Receipt ${receiptNumber}`,
+    subject: "NeuroTrader Journal subscription receipt",
+    author: "SG PAX Corp.",
+    creator: "NeuroTrader Journal",
+  });
+
+  doc.setFillColor(248, 251, 255);
+  doc.rect(0, 0, pageWidth, pageHeight, "F");
+
+  doc.setFillColor(2, 6, 23);
+  doc.roundedRect(margin, 38, pageWidth - margin * 2, 116, 22, 22, "F");
+  doc.setFillColor(16, 185, 129);
+  doc.circle(pageWidth - 92, 82, 26, "F");
+  doc.setFillColor(6, 182, 212);
+  doc.circle(pageWidth - 65, 104, 18, "F");
+
+  const logoAdded = addReceiptLogo(doc, margin + 24, 65, 170);
+  if (!logoAdded) {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(17);
+    doc.setTextColor(248, 250, 252);
+    doc.text("NeuroTrader Journal", margin + 24, 88);
+  }
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  doc.setTextColor(203, 213, 225);
+  doc.text("Trading structure. Neuro awareness. Repeatable execution.", margin + 24, 116);
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(10);
+  doc.setTextColor(103, 232, 249);
+  doc.text("RECEIPT", pageWidth - margin - 24, 72, { align: "right" });
+  doc.setFontSize(19);
+  doc.setTextColor(248, 250, 252);
+  doc.text(receiptNumber, pageWidth - margin - 24, 100, { align: "right" });
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  doc.setTextColor(203, 213, 225);
+  doc.text("Paid subscription payment", pageWidth - margin - 24, 121, { align: "right" });
+
+  doc.setFillColor(255, 255, 255);
+  doc.roundedRect(margin, 178, pageWidth - margin * 2, 170, 18, 18, "F");
+  doc.setDrawColor(226, 232, 240);
+  doc.roundedRect(margin, 178, pageWidth - margin * 2, 170, 18, 18, "S");
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(11);
+  doc.setTextColor(15, 23, 42);
+  doc.text("Billed by", margin + 24, 208);
+  doc.text("Billed to", pageWidth / 2 + 8, 208);
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(14);
+  doc.text("SG PAX Corp.", margin + 24, 233);
+  doc.text(customerName, pageWidth / 2 + 8, 233, { maxWidth: 210 });
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(10);
+  doc.setTextColor(71, 85, 105);
+  doc.text("Merchant of record for NeuroTrader Journal", margin + 24, 252, { maxWidth: 220 });
+  doc.text("support@neurotrader-journal.com", margin + 24, 269);
+  doc.text("https://www.neurotrader-journal.com", margin + 24, 286);
+  doc.text(args.email, pageWidth / 2 + 8, 252, { maxWidth: 210 });
+
+  drawReceiptLabelValue(doc, "Paid on", paidOn, margin + 24, 319);
+  drawReceiptLabelValue(doc, "Billing cycle", billingLabel, pageWidth / 2 + 8, 319);
+
+  doc.setFillColor(236, 253, 245);
+  doc.roundedRect(margin, 376, pageWidth - margin * 2, 54, 16, 16, "F");
+  doc.setDrawColor(153, 246, 228);
+  doc.roundedRect(margin, 376, pageWidth - margin * 2, 54, 16, 16, "S");
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(10);
+  doc.setTextColor(6, 78, 59);
+  doc.text("Status", margin + 22, 398);
+  doc.setFontSize(16);
+  doc.text("PAID", margin + 22, 419);
+  doc.setFontSize(10);
+  doc.text("Total paid", pageWidth - margin - 22, 398, { align: "right" });
+  doc.setFontSize(18);
+  doc.text(amountText, pageWidth - margin - 22, 420, { align: "right" });
+
+  const tableTop = 462;
+  doc.setFillColor(15, 23, 42);
+  doc.roundedRect(margin, tableTop, pageWidth - margin * 2, 42, 14, 14, "F");
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(9);
+  doc.setTextColor(203, 213, 225);
+  doc.text("DESCRIPTION", margin + 20, tableTop + 26);
+  doc.text("QTY", pageWidth - 172, tableTop + 26, { align: "right" });
+  doc.text("AMOUNT", pageWidth - margin - 20, tableTop + 26, { align: "right" });
+
+  doc.setFillColor(255, 255, 255);
+  doc.roundedRect(margin, tableTop + 52, pageWidth - margin * 2, 76, 14, 14, "F");
+  doc.setDrawColor(226, 232, 240);
+  doc.roundedRect(margin, tableTop + 52, pageWidth - margin * 2, 76, 14, 14, "S");
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(12);
+  doc.setTextColor(15, 23, 42);
+  doc.text(`NeuroTrader Journal - ${planLabel} plan`, margin + 20, tableTop + 82);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  doc.setTextColor(100, 116, 139);
+  doc.text(`${billingLabel} subscription access`, margin + 20, tableTop + 101);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(11);
+  doc.setTextColor(15, 23, 42);
+  doc.text("1", pageWidth - 172, tableTop + 91, { align: "right" });
+  doc.text(amountText, pageWidth - margin - 20, tableTop + 91, { align: "right" });
+
+  const totalsTop = tableTop + 154;
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(10);
+  doc.setTextColor(71, 85, 105);
+  doc.text("Subtotal", pageWidth - 210, totalsTop);
+  doc.text(amountText, pageWidth - margin - 20, totalsTop, { align: "right" });
+  doc.text("Tax", pageWidth - 210, totalsTop + 24);
+  doc.text("Included if applicable", pageWidth - margin - 20, totalsTop + 24, { align: "right" });
+  doc.setDrawColor(226, 232, 240);
+  doc.line(pageWidth - 230, totalsTop + 42, pageWidth - margin - 20, totalsTop + 42);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(14);
+  doc.setTextColor(15, 23, 42);
+  doc.text("Total paid", pageWidth - 210, totalsTop + 66);
+  doc.text(amountText, pageWidth - margin - 20, totalsTop + 66, { align: "right" });
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(8);
+  doc.setTextColor(100, 116, 139);
+  const legalLines = [
+    "This receipt confirms payment for a NeuroTrader Journal subscription billed by SG PAX Corp.",
+    args.subscriptionId ? `Stripe subscription reference: ${args.subscriptionId}` : "",
+    "For billing questions, contact support@neurotrader-journal.com.",
+  ].filter(Boolean);
+  doc.text(legalLines, margin, pageHeight - 72, { maxWidth: pageWidth - margin * 2, lineHeightFactor: 1.45 });
+
+  const buffer = Buffer.from(doc.output("arraybuffer"));
+  const safeReceipt = sanitizeFilenamePart(receiptNumber) || "receipt";
+  return {
+    filename: `SG-PAX-NeuroTrader-receipt-${safeReceipt}.pdf`,
+    content: buffer,
+    contentType: "application/pdf",
+  };
 }
 
 function buildNeuroTraderHtml({
@@ -268,13 +559,16 @@ function buildNeuroTraderHtml({
 </html>`;
 }
 
-async function sendEmailBase({ to, subject, text, html }: SendEmailArgs) {
+async function sendEmailBase({ to, subject, text, html, attachments }: SendEmailArgs) {
   if (!resend) {
     console.log("======================================");
     console.log("[EMAIL MOCK] To:", to);
     console.log("[EMAIL MOCK] Subject:", subject);
     if (text) console.log("[EMAIL MOCK] Text:\n", text);
     if (html) console.log("[EMAIL MOCK] HTML length:", html.length);
+    if (attachments?.length) {
+      console.log("[EMAIL MOCK] Attachments:", attachments.map((attachment) => attachment.filename).join(", "));
+    }
     console.log("======================================");
     return;
   }
@@ -286,6 +580,7 @@ async function sendEmailBase({ to, subject, text, html }: SendEmailArgs) {
       subject,
       text: text ?? "",
       html: html ?? "",
+      attachments,
     });
   } catch (err) {
     console.error("[EMAIL] Error sending via Resend:", err);
@@ -429,36 +724,75 @@ function buildAccountRecoveryContent(args: {
 function buildWelcomeEmailContent(args: {
   email: string;
   name?: string | null;
+  locale?: string | null;
 }) : EmailContent {
   const safeName = args.name || "trader";
-  const subject = "Welcome to NeuroTrader Journal";
+  const locale = normalizeEmailLocale(args.locale);
+  const copy =
+    locale === "es"
+      ? {
+          subject: "Bienvenido a NeuroTrader Journal",
+          title: "Bienvenido a NeuroTrader Journal",
+          eyebrow: "Inicio",
+          preheader: "Tu nueva etapa como trader comienza ahora.",
+          greeting: `Hola ${safeName},`,
+          highlight: "Bienvenido a tu nueva etapa como trader.",
+          paragraphs: [
+            "Tu espacio de trabajo está listo para journaling estructurado, analytics y coaching de IA conectado a cómo realmente operas.",
+            "Si sigues tus reglas, respetas tu plan y no permites que las emociones tomen el volante, puedes llegar muy lejos. La meta no es operar más; es operar con disciplina, contexto y ejecución repetible.",
+            "Empieza registrando tus sesiones, marcando patrones emocionales y revisando tu ejecución con contexto.",
+          ],
+          factEmail: "Correo",
+          ctaLabel: "Abrir dashboard",
+          secondaryLabel: "Iniciar sesión",
+          footerNote: "Si no creaste esta cuenta, puedes ignorar este email.",
+          team: "Equipo de NeuroTrader Journal",
+        }
+      : {
+          subject: "Welcome to NeuroTrader Journal",
+          title: "Welcome to NeuroTrader Journal",
+          eyebrow: "Lifecycle",
+          preheader: "Your new trading journey starts now.",
+          greeting: `Hi ${safeName},`,
+          highlight: "Welcome to your new journey in trading.",
+          paragraphs: [
+            "Your workspace is ready for structured journaling, analytics, and AI coaching tied to how you actually trade.",
+            "If you follow your rules, respect your plan, and do not let emotions take the wheel, you can go very far. The goal is not to trade more; it is to trade with discipline, context, and repeatable execution.",
+            "Start logging your sessions, marking emotional patterns, and reviewing your execution with context.",
+          ],
+          factEmail: "Email",
+          ctaLabel: "Open dashboard",
+          secondaryLabel: "Open sign in",
+          footerNote: "If you didn’t create this account, you can ignore this email.",
+          team: "NeuroTrader Journal Team",
+        };
+
+  const subject = copy.subject;
   const text = [
-    `Hi ${safeName},`,
+    copy.greeting,
     "",
-    "Welcome to NeuroTrader Journal.",
+    copy.highlight,
     "",
-    "Your trading workspace is ready. Log in to start journaling your trades, reviewing analytics, and building real process memory.",
+    ...copy.paragraphs,
+    "",
     resolveAppUrl("/signin"),
     "",
-    "NeuroTrader Journal Team",
+    copy.team,
   ].join("\n");
 
   const html = buildNeuroTraderHtml({
-    title: "Welcome to NeuroTrader Journal",
-    eyebrow: "Lifecycle",
-    preheader: "Your workspace is ready.",
-    greeting: `Hi ${escapeHtml(safeName)},`,
-    highlight: "Your neuro-aware trading workspace is active.",
-    paragraphs: [
-      "Your account is ready for structured journaling, analytics, and AI coaching tied to how you actually trade.",
-      "Start logging your sessions, marking emotional patterns, and reviewing your execution with context.",
-    ],
-    facts: [{ label: "Email", value: escapeHtml(args.email) }],
-    ctaLabel: "Open dashboard",
+    title: copy.title,
+    eyebrow: copy.eyebrow,
+    preheader: copy.preheader,
+    greeting: escapeHtml(copy.greeting),
+    highlight: copy.highlight,
+    paragraphs: copy.paragraphs,
+    facts: [{ label: copy.factEmail, value: escapeHtml(args.email) }],
+    ctaLabel: copy.ctaLabel,
     ctaUrl: resolveAppUrl("/dashboard"),
-    secondaryLabel: "Open sign in",
+    secondaryLabel: copy.secondaryLabel,
     secondaryUrl: resolveAppUrl("/signin"),
-    footerNote: "If you didn’t create this account, you can ignore this email.",
+    footerNote: copy.footerNote,
   });
 
   return { subject, text, html };
@@ -486,6 +820,7 @@ function buildSubscriptionReceiptContent(args: {
     "",
     `Your ${planLabel} subscription payment was confirmed.`,
     `Amount: ${amountText}`,
+    "A SG PAX Corp. PDF receipt is attached for your records.",
     billingLabel ? `Billing cycle: ${billingLabel}` : "",
     chargeDateText ? `Paid on: ${chargeDateText}` : "",
     args.invoiceNumber ? `Invoice: ${args.invoiceNumber}` : "",
@@ -500,14 +835,16 @@ function buildSubscriptionReceiptContent(args: {
   const html = buildNeuroTraderHtml({
     title: "Subscription receipt",
     eyebrow: "Billing",
-    preheader: "Your subscription payment has been confirmed.",
+    preheader: "Your subscription payment has been confirmed. PDF receipt attached.",
     greeting: `Hi ${escapeHtml(safeName)},`,
-    highlight: `Your <strong>${escapeHtml(planLabel)}</strong>${billingLabel ? ` <strong>${escapeHtml(billingLabel.toLowerCase())}</strong>` : ""} payment was processed successfully.`,
+    highlight: `Your <strong>${escapeHtml(planLabel)}</strong>${billingLabel ? ` <strong>${escapeHtml(billingLabel.toLowerCase())}</strong>` : ""} payment was processed successfully. Your SG PAX Corp. PDF receipt is attached.`,
     paragraphs: [
       "Your subscription payment has been processed and your workspace remains active inside NeuroTrader Journal.",
-      "You can review billing details, invoices, plan changes, and renewal settings from the Billing section at any time.",
+      "The attached receipt is issued by SG PAX Corp. for NeuroTrader Journal subscription access.",
+      "You can review billing details, plan changes, and renewal settings from the Billing section at any time.",
     ],
     facts: [
+      { label: "Billed by", value: "SG PAX Corp." },
       { label: "Plan", value: escapeHtml(planLabel) },
       { label: "Amount", value: escapeHtml(amountText) },
       ...(billingLabel ? [{ label: "Billing", value: escapeHtml(billingLabel) }] : []),
@@ -1136,13 +1473,19 @@ export async function sendAccountRecoveryEmail(args: {
 }
 
 export async function sendWelcomeEmail(user: AppUser) {
-  const content = buildWelcomeEmailContent({ email: user.email, name: user.name || "trader" });
+  const locale = await resolveEmailLocale({ userId: user.id, email: user.email });
+  const content = buildWelcomeEmailContent({ email: user.email, name: user.name || "trader", locale });
   await sendEmailBase({ to: user.email, ...content });
 }
 
 export async function sendSubscriptionReceiptEmail(user: AppUser, plan: PlanId) {
   const content = buildSubscriptionReceiptContent({ email: user.email, name: user.name || "trader", plan });
-  await sendEmailBase({ to: user.email, ...content });
+  const receiptPdf = buildSubscriptionReceiptPdfAttachment({
+    email: user.email,
+    name: user.name || "trader",
+    plan,
+  });
+  await sendEmailBase({ to: user.email, ...content, attachments: [receiptPdf] });
 }
 
 export async function sendBetaRequestEmail(args: { name: string; email: string }) {
@@ -1167,8 +1510,9 @@ export async function sendBetaRequestEmail(args: { name: string; email: string }
   });
 }
 
-export async function sendWelcomeEmailByEmail(email: string, name?: string | null) {
-  const content = buildWelcomeEmailContent({ email, name });
+export async function sendWelcomeEmailByEmail(email: string, name?: string | null, locale?: string | null) {
+  const resolvedLocale = await resolveEmailLocale({ email, fallback: locale });
+  const content = buildWelcomeEmailContent({ email, name, locale: resolvedLocale });
   await sendEmailBase({ to: email, ...content });
 }
 
@@ -1195,7 +1539,8 @@ export async function sendSubscriptionReceiptEmailByEmail(args: {
   chargeDate?: string | null;
 }) {
   const content = buildSubscriptionReceiptContent(args);
-  await sendEmailBase({ to: args.email, ...content });
+  const receiptPdf = buildSubscriptionReceiptPdfAttachment(args);
+  await sendEmailBase({ to: args.email, ...content, attachments: [receiptPdf] });
 }
 
 export async function sendSubscriptionRenewalReminderEmail(args: {

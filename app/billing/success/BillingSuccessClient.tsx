@@ -76,8 +76,8 @@ export default function BillingSuccessClient() {
           </ul>
           <p className="mt-6 text-[10px] text-slate-500 border-t border-slate-800 pt-3">
             {L(
-              "Secure payments powered by Stripe. A payment receipt and onboarding emails are being sent to your inbox.",
-              "Pagos seguros con Stripe. Se enviará un recibo y emails de onboarding a tu correo."
+              "Secure payments powered by Stripe. NeuroTrader is sending your receipt and onboarding emails to your inbox.",
+              "Pagos seguros con Stripe. NeuroTrader enviará tu recibo y emails de onboarding a tu correo."
             )}
           </p>
         </aside>
@@ -93,7 +93,7 @@ export default function BillingSuccessClient() {
             </p>
             <ul className="mt-2 text-[11px] text-emerald-50 list-disc list-inside space-y-1">
               <li>{L("A welcome email.", "Un email de bienvenida.")}</li>
-              <li>{L("A thank-you note with details about your Stripe receipt.", "Un agradecimiento con detalles de tu recibo de Stripe.")}</li>
+              <li>{L("A SG PAX Corp. PDF receipt for your NeuroTrader subscription.", "Un recibo PDF de SG PAX Corp. por tu suscripción de NeuroTrader.")}</li>
               <li>{L("An email about your Trading Psychology Learn Book (PDF).", "Un email sobre tu Trading Psychology Learn Book (PDF).")}</li>
             </ul>
           </div>

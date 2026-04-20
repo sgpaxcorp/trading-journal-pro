@@ -602,8 +602,8 @@ export default function StartClient({ initialPlan }: StartClientProps) {
             </p>
             <p className="mt-2 text-[11px] text-slate-400">
               {L(
-                "Payment processing is handled securely by Stripe. You'll receive a payment receipt via email.",
-                "El procesamiento del pago lo maneja Stripe de forma segura. Recibirás un recibo por email."
+                "Payment processing is handled securely by Stripe. Your branded NeuroTrader receipt will arrive by email.",
+                "El procesamiento del pago lo maneja Stripe de forma segura. Tu recibo branded de NeuroTrader llegará por email."
               )}
             </p>
           </div>
@@ -679,8 +679,8 @@ export default function StartClient({ initialPlan }: StartClientProps) {
           </ul>
           <p className="mt-6 text-[10px] text-slate-500 border-t border-slate-800 pt-3">
             {L(
-              "Secure payments powered by Stripe. You'll receive a payment receipt and onboarding emails after your subscription is confirmed.",
-              "Pagos seguros con Stripe. Recibirás un recibo y emails de onboarding cuando se confirme tu suscripción."
+              "Secure payments powered by Stripe. NeuroTrader sends your receipt and onboarding emails after your subscription is confirmed.",
+              "Pagos seguros con Stripe. NeuroTrader envía tu recibo y emails de onboarding cuando se confirma tu suscripción."
             )}
           </p>
         </aside>

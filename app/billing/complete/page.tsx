@@ -50,8 +50,8 @@ export default function BillingCompletePage() {
 
         <p className="text-[9px] text-slate-500 text-center">
           {L(
-            "If you already paid and still see this message, please contact support@neurotrader-journal.com with your Stripe receipt.",
-            "Si ya pagaste y aún ves este mensaje, contacta a support@neurotrader-journal.com con tu recibo de Stripe."
+            "If you already paid and still see this message, please contact support@neurotrader-journal.com with your NeuroTrader receipt.",
+            "Si ya pagaste y aún ves este mensaje, contacta a support@neurotrader-journal.com con tu recibo de NeuroTrader."
           )}
         </p>
       </div>
