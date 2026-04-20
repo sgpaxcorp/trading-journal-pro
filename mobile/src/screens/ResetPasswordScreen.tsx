@@ -1,11 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Image, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 
 import { useLanguage } from "../lib/LanguageContext";
 import { t } from "../lib/i18n";
 import { supabaseMobile } from "../lib/supabase";
 import { useTheme } from "../lib/ThemeContext";
 import { type ThemeColors } from "../theme";
+
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const logo = require("../../assets/apple-touch-icon.png");
 
 type ResetPasswordScreenProps = {
   initialError?: string | null;
@@ -80,6 +83,10 @@ export function ResetPasswordScreen({
   return (
     <View style={styles.root}>
       <View style={styles.card}>
+        <View style={styles.logoWrap}>
+          {/* eslint-disable-next-line jsx-a11y/alt-text */}
+          <Image source={logo} style={styles.logo} resizeMode="contain" />
+        </View>
         <Text style={styles.kicker}>Neuro Trader</Text>
         <Text style={styles.title}>{t(language, "Choose a new password", "Elige una nueva contraseña")}</Text>
         <Text style={styles.subtitle}>
@@ -156,6 +163,16 @@ const createStyles = (colors: ThemeColors) =>
       backgroundColor: colors.card,
       padding: 18,
       gap: 12,
+    },
+    logoWrap: {
+      alignItems: "center",
+      justifyContent: "center",
+      marginBottom: 2,
+    },
+    logo: {
+      width: 96,
+      height: 96,
+      borderRadius: 24,
     },
     kicker: {
       color: colors.primary,

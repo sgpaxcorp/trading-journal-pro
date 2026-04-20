@@ -82,11 +82,15 @@ function resolveAppUrl(path = "") {
   return path.startsWith("http") ? path : `${base}${path.startsWith("/") ? path : `/${path}`}`;
 }
 
+function resolveEmailLogoUrl() {
+  return resolveAppUrl("/neurotrader-logo-web.png");
+}
+
 function buildParagraphs(paragraphs: string[]) {
   return paragraphs
     .map(
       (p) =>
-        `<p style="margin:0 0 12px 0;color:#cbd5e1;font-size:15px;line-height:1.7;">${p}</p>`
+        `<p style="margin:0 0 12px 0;color:#334155;font-size:15px;line-height:1.65;">${p}</p>`
     )
     .join("");
 }
@@ -148,40 +152,41 @@ function buildNeuroTraderHtml({
   const preheaderText =
     preheader ||
     "Structured journaling, AI coaching, and trading clarity inside NeuroTrader Journal.";
+  const logoUrl = resolveEmailLogoUrl();
 
   const factsHtml = Array.isArray(facts) && facts.length
     ? `<table role="presentation" width="100%" cellPadding="0" cellSpacing="0" style="margin:18px 0 8px 0;border-collapse:separate;border-spacing:0 10px;">${facts
         .map(
           (fact) =>
             `<tr>
-               <td style="padding:0 12px 0 0;color:#94a3b8;font-size:12px;line-height:1.4;text-transform:uppercase;letter-spacing:0.16em;width:40%;">${escapeHtml(fact.label)}</td>
-               <td style="padding:0;color:#f8fafc;font-size:13px;line-height:1.6;font-weight:600;">${fact.value}</td>
+               <td style="padding:0 12px 0 0;color:#64748b;font-size:11px;line-height:1.4;text-transform:uppercase;letter-spacing:0.16em;width:38%;">${escapeHtml(fact.label)}</td>
+               <td style="padding:0;color:#0f172a;font-size:13px;line-height:1.6;font-weight:700;">${fact.value}</td>
              </tr>`
         )
         .join("")}</table>`
     : "";
 
   const codeHtml = code
-    ? `<div style="margin:18px 0 6px 0;border:1px solid rgba(45,212,191,0.35);border-radius:18px;background:linear-gradient(180deg,rgba(15,23,42,0.95),rgba(15,23,42,0.82));padding:18px 18px 16px 18px;">
-         <div style="font-size:11px;letter-spacing:0.24em;text-transform:uppercase;color:#67e8f9;margin:0 0 8px 0;">Verification code</div>
-         <div style="font-size:34px;line-height:1;font-weight:800;letter-spacing:0.3em;color:#f8fafc;">${escapeHtml(code)}</div>
-         <div style="margin-top:10px;color:#94a3b8;font-size:12px;line-height:1.6;">Enter this code inside NeuroTrader Journal to continue.</div>
+    ? `<div style="margin:18px 0 6px 0;border:1px solid #99f6e4;border-radius:22px;background:linear-gradient(180deg,#ecfdf5 0%,#f0fdfa 100%);padding:18px 18px 16px 18px;">
+         <div style="font-size:10px;letter-spacing:0.24em;text-transform:uppercase;color:#0f766e;margin:0 0 8px 0;font-weight:800;">Verification code</div>
+         <div style="font-size:34px;line-height:1;font-weight:900;letter-spacing:0.28em;color:#062f2b;">${escapeHtml(code)}</div>
+         <div style="margin-top:10px;color:#475569;font-size:12px;line-height:1.6;">Enter this code inside NeuroTrader Journal to continue.</div>
        </div>`
     : "";
 
   const highlightHtml = highlight
-    ? `<div style="margin:16px 0 18px 0;padding:14px 16px;border-radius:16px;border:1px solid rgba(16,185,129,0.32);background:rgba(16,185,129,0.08);color:#ecfeff;font-size:14px;line-height:1.7;">${highlight}</div>`
+    ? `<div style="margin:16px 0 18px 0;padding:14px 16px;border-radius:20px;border:1px solid #99f6e4;background:#ecfdf5;color:#064e3b;font-size:14px;line-height:1.7;font-weight:700;">${highlight}</div>`
     : "";
 
   const ctaHtml = ctaLabel && ctaUrl
     ? `<div style="margin:24px 0 10px 0;">
-         <a href="${ctaUrl}" style="display:inline-block;padding:12px 20px;border-radius:999px;background:linear-gradient(135deg,#22c55e,#06b6d4);color:#04111d;font-size:14px;font-weight:700;text-decoration:none;">${escapeHtml(ctaLabel)}</a>
+         <a href="${ctaUrl}" style="display:inline-block;padding:13px 20px;border-radius:999px;background:linear-gradient(135deg,#10b981,#06b6d4);color:#04111d;font-size:14px;font-weight:800;text-decoration:none;box-shadow:0 12px 26px rgba(20,184,166,0.28);">${escapeHtml(ctaLabel)}</a>
        </div>`
     : "";
 
   const secondaryHtml = secondaryLabel && secondaryUrl
     ? `<div style="margin:0 0 4px 0;">
-         <a href="${secondaryUrl}" style="display:inline-block;padding:10px 18px;border-radius:999px;border:1px solid rgba(100,116,139,0.45);color:#e2e8f0;font-size:13px;font-weight:600;text-decoration:none;">${escapeHtml(secondaryLabel)}</a>
+         <a href="${secondaryUrl}" style="display:inline-block;padding:10px 18px;border-radius:999px;border:1px solid #cbd5e1;color:#0f172a;font-size:13px;font-weight:700;text-decoration:none;background:#ffffff;">${escapeHtml(secondaryLabel)}</a>
        </div>`
     : "";
 
@@ -197,49 +202,62 @@ function buildNeuroTraderHtml({
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>${escapeHtml(title)}</title>
 </head>
-<body style="margin:0;padding:0;background:#020617;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+<body style="margin:0;padding:0;background:#eef4f8;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
   <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">${escapeHtml(preheaderText)}</div>
-  <table role="presentation" width="100%" cellPadding="0" cellSpacing="0" style="background:#020617;padding:28px 0;">
+  <table role="presentation" width="100%" cellPadding="0" cellSpacing="0" style="background:#eef4f8;padding:28px 12px;">
     <tr>
       <td align="center">
-        <table role="presentation" width="100%" cellPadding="0" cellSpacing="0" style="max-width:660px;border-radius:26px;overflow:hidden;background:radial-gradient(circle at top left,rgba(34,197,94,0.18),transparent 30%),radial-gradient(circle at top right,rgba(6,182,212,0.18),transparent 30%),linear-gradient(180deg,#06111f 0%,#020617 100%);border:1px solid rgba(51,65,85,0.9);box-shadow:0 24px 70px rgba(2,6,23,0.72);">
+        <table role="presentation" width="100%" cellPadding="0" cellSpacing="0" style="max-width:430px;border-radius:46px;background:#dbe7f2;padding:10px;box-shadow:0 28px 80px rgba(15,23,42,0.18),0 8px 24px rgba(15,23,42,0.12);">
           <tr>
-            <td style="padding:20px 28px 14px 28px;border-bottom:1px solid rgba(30,41,59,0.9);">
-              <table width="100%" role="presentation" cellPadding="0" cellSpacing="0">
+            <td>
+              <table role="presentation" width="100%" cellPadding="0" cellSpacing="0" style="border-radius:38px;overflow:hidden;background:linear-gradient(180deg,#fbfdff 0%,#f5f8fb 100%);border:1px solid #d6e2ed;">
                 <tr>
-                  <td align="left">
-                    <div style="display:flex;align-items:center;gap:12px;">
-                      <div style="width:34px;height:34px;border-radius:12px;border:1px solid rgba(148,163,184,0.35);background:radial-gradient(circle at 25% 25%,#22c55e 0%,transparent 55%),radial-gradient(circle at 70% 70%,#38bdf8 0%,transparent 60%),#020617;display:flex;align-items:center;justify-content:center;">
-                        <span style="font-size:15px;font-weight:800;color:#f8fafc;">NT</span>
-                      </div>
-                      <div>
-                        <div style="font-size:14px;font-weight:700;color:#f8fafc;">NeuroTrader Journal</div>
-                        <div style="font-size:11px;color:#94a3b8;">Trading structure. Neuro awareness. Repeatable execution.</div>
-                      </div>
-                    </div>
+                  <td align="center" style="padding:13px 0 4px 0;">
+                    <div style="width:86px;height:5px;border-radius:999px;background:#cbd5e1;font-size:1px;line-height:1px;">&nbsp;</div>
                   </td>
-                  <td align="right" style="font-size:11px;letter-spacing:0.22em;text-transform:uppercase;color:#67e8f9;">${escapeHtml(eyebrow || title)}</td>
+                </tr>
+                <tr>
+                  <td style="padding:15px 24px 14px 24px;border-bottom:1px solid #e2e8f0;">
+                    <table width="100%" role="presentation" cellPadding="0" cellSpacing="0">
+                      <tr>
+                        <td align="left">
+                          <img src="${logoUrl}" width="196" alt="NeuroTrader Journal" style="display:block;width:196px;max-width:196px;height:auto;border:0;outline:none;text-decoration:none;" />
+                          <div style="padding:7px 0 0 0;color:#64748b;font-size:11px;line-height:1.5;">Trading structure. Neuro awareness. Repeatable execution.</div>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="padding-top:13px;">
+                          <span style="display:inline-block;border-radius:999px;background:#e0f2fe;color:#0369a1;font-size:10px;font-weight:900;letter-spacing:0.18em;text-transform:uppercase;padding:7px 10px;">${escapeHtml(eyebrow || title)}</span>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding:26px 24px 28px 24px;">
+                    <div style="font-size:27px;line-height:1.18;font-weight:900;color:#0f172a;margin:0 0 10px 0;letter-spacing:-0.03em;">${escapeHtml(title)}</div>
+                    <p style="margin:0 0 16px 0;color:#1e293b;font-size:15px;font-weight:800;line-height:1.6;">${greeting}</p>
+                    ${highlightHtml}
+                    ${codeHtml}
+                    ${factsHtml}
+                    ${buildParagraphs(paragraphs)}
+                    ${ctaHtml}
+                    ${secondaryHtml}
+                    ${footerHtml}
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding:16px 24px 18px 24px;border-top:1px solid #e2e8f0;background:#ffffff;">
+                    <p style="margin:0;color:#64748b;font-size:11px;line-height:1.6;">You’re receiving this email because you have an account, subscription, or admin-triggered email flow inside <span style="color:#0f172a;font-weight:800;">NeuroTrader Journal</span>.</p>
+                    <p style="margin:6px 0 0 0;color:#94a3b8;font-size:10px;line-height:1.6;">© ${new Date().getFullYear()} NeuroTrader Journal. All rights reserved.</p>
+                  </td>
+                </tr>
+                <tr>
+                  <td align="center" style="padding:8px 0 16px 0;background:#ffffff;">
+                    <div style="width:118px;height:4px;border-radius:999px;background:#cbd5e1;font-size:1px;line-height:1px;">&nbsp;</div>
+                  </td>
                 </tr>
               </table>
-            </td>
-          </tr>
-          <tr>
-            <td style="padding:30px 28px 28px 28px;">
-              <div style="font-size:28px;line-height:1.2;font-weight:800;color:#f8fafc;margin:0 0 10px 0;">${escapeHtml(title)}</div>
-              <p style="margin:0 0 16px 0;color:#e2e8f0;font-size:15px;font-weight:600;line-height:1.6;">${greeting}</p>
-              ${highlightHtml}
-              ${codeHtml}
-              ${factsHtml}
-              ${buildParagraphs(paragraphs)}
-              ${ctaHtml}
-              ${secondaryHtml}
-              ${footerHtml}
-            </td>
-          </tr>
-          <tr>
-            <td style="padding:16px 28px 22px 28px;border-top:1px solid rgba(30,41,59,0.9);">
-              <p style="margin:0;color:#64748b;font-size:11px;line-height:1.6;">You’re receiving this email because you have an account, subscription, or admin-triggered email flow inside <span style="color:#f8fafc;">NeuroTrader Journal</span>.</p>
-              <p style="margin:6px 0 0 0;color:#475569;font-size:10px;line-height:1.6;">© ${new Date().getFullYear()} NeuroTrader Journal. All rights reserved.</p>
             </td>
           </tr>
         </table>
@@ -262,12 +280,12 @@ async function sendEmailBase({ to, subject, text, html }: SendEmailArgs) {
   }
 
   try {
-    await (resend as any).emails.send({
+    await resend.emails.send({
       from: FROM_EMAIL,
       to,
       subject,
-      text,
-      html,
+      text: text ?? "",
+      html: html ?? "",
     });
   } catch (err) {
     console.error("[EMAIL] Error sending via Resend:", err);
