@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { StatusBar } from "expo-status-bar";
-import { NavigationContainer, useNavigation } from "@react-navigation/native";
+import {
+  NavigationContainer,
+  createNavigationContainerRef,
+  useNavigation,
+} from "@react-navigation/native";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { createNativeStackNavigator, type NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { Ionicons } from "@expo/vector-icons";
@@ -24,10 +28,12 @@ import { NotebookEditorScreen } from "./src/screens/NotebookEditorScreen";
 import { ChallengesScreen } from "./src/screens/ChallengesScreen";
 import { BrokerConnectScreen } from "./src/screens/BrokerConnectScreen";
 import { AuthScreen } from "./src/screens/AuthScreen";
+import { ResetPasswordScreen } from "./src/screens/ResetPasswordScreen";
 import { ThemeProvider, useTheme } from "./src/lib/ThemeContext";
 import { LanguageProvider } from "./src/lib/LanguageContext";
 import { useLanguage } from "./src/lib/LanguageContext";
 import { hasSupabaseConfig, supabaseMobile } from "./src/lib/supabase";
+import { createRecoverySessionFromUrl, isPasswordRecoveryUrl } from "./src/lib/authRecovery";
 import { registerDeviceForPush } from "./src/lib/pushNotifications";
 import { ModulePlaceholderScreen } from "./src/screens/ModulePlaceholderScreen";
 import { MoreSheet } from "./src/components/MoreSheet";
@@ -52,7 +58,9 @@ type MainTabParamList = {
 };
 
 type RootStackParamList = {
+  Auth: undefined;
   Tabs: undefined;
+  ResetPassword: undefined;
   Module: { title: string; description: string };
   Settings: undefined;
   JournalDate: { date?: string } | undefined;
@@ -67,6 +75,7 @@ type RootStackParamList = {
 
 const Tab = createBottomTabNavigator<MainTabParamList>();
 const Stack = createNativeStackNavigator<RootStackParamList>();
+const navigationRef = createNavigationContainerRef<RootStackParamList>();
 const WEB_BASE = "https://www.neurotrader-journal.com";
 
 function MainTabs() {
@@ -269,7 +278,7 @@ function MainTabs() {
           name="Other"
           options={{
             title: "More",
-            tabBarButton: ({ children, style, onPress, accessibilityState, accessibilityLabel, testID }) => (
+            tabBarButton: ({ children, style, accessibilityState, accessibilityLabel, testID }) => (
               <Pressable
                 onPress={() => setMoreOpen(true)}
                 accessibilityRole="button"
@@ -317,6 +326,10 @@ function MainTabs() {
 function AppShell() {
   const [session, setSession] = useState<Session | null>(null);
   const [authReady, setAuthReady] = useState(false);
+  const [navReady, setNavReady] = useState(false);
+  const [recoverySessionReady, setRecoverySessionReady] = useState(false);
+  const [recoveryError, setRecoveryError] = useState<string | null>(null);
+  const [shouldOpenResetScreen, setShouldOpenResetScreen] = useState(false);
   const { colors, mode: themeMode } = useTheme();
   const { language } = useLanguage();
   const loadingStyles = useMemo(
@@ -353,13 +366,55 @@ function AppShell() {
 
     const {
       data: { subscription },
-    } = supabaseMobile.auth.onAuthStateChange((_event, nextSession) => {
+    } = supabaseMobile.auth.onAuthStateChange((event, nextSession) => {
       setSession(nextSession);
+      if (event === "PASSWORD_RECOVERY") {
+        setRecoverySessionReady(Boolean(nextSession));
+        setRecoveryError(null);
+        setShouldOpenResetScreen(true);
+      }
     });
 
     return () => {
       active = false;
       subscription.unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!supabaseMobile) return;
+
+    let active = true;
+
+    async function handleRecoveryUrl(url: string | null | undefined) {
+      if (!url || !isPasswordRecoveryUrl(url)) return;
+      try {
+        const nextSession = await createRecoverySessionFromUrl(url);
+        if (!active) return;
+        setRecoverySessionReady(Boolean(nextSession));
+        setRecoveryError(null);
+      } catch (err) {
+        if (!active) return;
+        setRecoverySessionReady(false);
+        setRecoveryError(err instanceof Error ? err.message : "Recovery link error");
+      } finally {
+        if (active) {
+          setShouldOpenResetScreen(true);
+        }
+      }
+    }
+
+    Linking.getInitialURL()
+      .then((url) => handleRecoveryUrl(url))
+      .catch(() => null);
+
+    const subscription = Linking.addEventListener("url", ({ url }) => {
+      void handleRecoveryUrl(url);
+    });
+
+    return () => {
+      active = false;
+      subscription.remove();
     };
   }, []);
 
@@ -386,17 +441,44 @@ function AppShell() {
     };
   }, [session?.user?.id, language]);
 
+  useEffect(() => {
+    if (!navReady || !shouldOpenResetScreen || !navigationRef.isReady()) return;
+    navigationRef.navigate("ResetPassword");
+    setShouldOpenResetScreen(false);
+  }, [navReady, shouldOpenResetScreen]);
+
   const shouldShowMainTabs = Boolean(session) || !hasSupabaseConfig;
 
+  const handleResetPasswordDone = useCallback(() => {
+    setRecoveryError(null);
+    setRecoverySessionReady(false);
+    if (navigationRef.isReady()) {
+      navigationRef.reset({
+        index: 0,
+        routes: [{ name: "Tabs" }],
+      });
+    }
+  }, []);
+
+  const handleResetPasswordCancel = useCallback(() => {
+    setRecoveryError(null);
+    setRecoverySessionReady(false);
+    if (!navigationRef.isReady()) return;
+    navigationRef.reset({
+      index: 0,
+      routes: [{ name: shouldShowMainTabs ? "Tabs" : "Auth" }],
+    });
+  }, [shouldShowMainTabs]);
+
   return (
-    <NavigationContainer>
+    <NavigationContainer ref={navigationRef} onReady={() => setNavReady(true)}>
       <StatusBar style={themeMode === "light" ? "dark" : "light"} />
       {!authReady ? (
         <View style={loadingStyles.loading}>
           <ActivityIndicator color={colors.primary} />
           <Text style={loadingStyles.loadingText}>Loading...</Text>
         </View>
-      ) : shouldShowMainTabs ? (
+      ) : (
         <Stack.Navigator
           screenOptions={{
             headerStyle: { backgroundColor: colors.surface },
@@ -404,8 +486,25 @@ function AppShell() {
             contentStyle: { backgroundColor: colors.background },
           }}
         >
-          <Stack.Screen name="Tabs" options={{ headerShown: false }}>
-            {() => <MainTabs />}
+          {shouldShowMainTabs ? (
+            <Stack.Screen name="Tabs" options={{ headerShown: false }}>
+              {() => <MainTabs />}
+            </Stack.Screen>
+          ) : (
+            <Stack.Screen name="Auth" options={{ headerShown: false }} component={AuthScreen} />
+          )}
+          <Stack.Screen
+            name="ResetPassword"
+            options={{ title: t(language, "Reset password", "Resetear contraseña") }}
+          >
+            {() => (
+              <ResetPasswordScreen
+                initialError={recoveryError}
+                hasRecoverySession={recoverySessionReady}
+                onComplete={handleResetPasswordDone}
+                onCancel={handleResetPasswordCancel}
+              />
+            )}
           </Stack.Screen>
           <Stack.Screen
             name="Module"
@@ -458,8 +557,6 @@ function AppShell() {
             options={{ title: "Broker connect" }}
           />
         </Stack.Navigator>
-      ) : (
-        <AuthScreen />
       )}
     </NavigationContainer>
   );

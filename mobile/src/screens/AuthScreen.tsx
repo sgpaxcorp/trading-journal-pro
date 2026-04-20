@@ -12,6 +12,7 @@ import {
 } from "react-native";
 
 import { apiPost } from "../lib/api";
+import { MOBILE_PASSWORD_RESET_REDIRECT_URL } from "../lib/authRecovery";
 import { useLanguage } from "../lib/LanguageContext";
 import { t } from "../lib/i18n";
 import { supabaseMobile } from "../lib/supabase";
@@ -105,7 +106,10 @@ export function AuthScreen() {
     setBusy(true);
     try {
       const path = kind === "password" ? "/api/auth/password-reset/request" : "/api/auth/account-recovery/request";
-      const response = await apiPost<{ message?: string }>(path, { email: cleanEmail });
+      const response = await apiPost<{ message?: string }>(path, {
+        email: cleanEmail,
+        redirectTo: MOBILE_PASSWORD_RESET_REDIRECT_URL,
+      });
       setMessage(
         response?.message ??
           (kind === "password"
@@ -256,8 +260,8 @@ export function AuthScreen() {
               <Text style={styles.infoText}>
                 {t(
                   language,
-                  "We’ll send the secure email to the address you enter. Open the link from your email to continue the official reset flow.",
-                  "Enviaremos el email seguro a la dirección que indiques. Abre el enlace desde tu correo para continuar el flujo oficial de reset."
+                  "We’ll send the secure email to the address you enter. Open the link from this phone to finish the reset flow natively in the app.",
+                  "Enviaremos el email seguro a la dirección que indiques. Abre el enlace desde este teléfono para terminar el reset de forma nativa dentro del app."
                 )}
               </Text>
             </View>

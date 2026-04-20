@@ -1,9 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
+import { resolvePasswordRecoveryRedirect } from "@/lib/authRedirects";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 import { sendPasswordResetEmail } from "@/lib/email";
 import { getClientIp, rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
 
 export const runtime = "nodejs";
+
+type RecoveryProfileRow = {
+  first_name?: string | null;
+  last_name?: string | null;
+};
 
 export async function POST(req: NextRequest) {
   const rate = rateLimit(`auth-password-reset:${getClientIp(req)}`, {
@@ -32,12 +38,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "A valid email is required." }, { status: 400 });
     }
 
-    const origin = new URL(req.url).origin;
+    const redirectTo = resolvePasswordRecoveryRedirect(req.url, body?.redirectTo);
     const { data, error } = await supabaseAdmin.auth.admin.generateLink({
       type: "recovery",
       email,
       options: {
-        redirectTo: `${origin}/reset-password`,
+        redirectTo,
       },
     });
 
@@ -48,9 +54,9 @@ export async function POST(req: NextRequest) {
         .ilike("email", email)
         .order("created_at", { ascending: false })
         .limit(1)
-        .maybeSingle();
+        .maybeSingle<RecoveryProfileRow>();
 
-      const name = [String((profile as any)?.first_name ?? "").trim(), String((profile as any)?.last_name ?? "").trim()]
+      const name = [String(profile?.first_name ?? "").trim(), String(profile?.last_name ?? "").trim()]
         .filter(Boolean)
         .join(" ");
 
@@ -67,10 +73,10 @@ export async function POST(req: NextRequest) {
       ok: true,
       message: "If that account exists, a password reset email is on the way.",
     });
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error("[auth/password-reset] error:", err);
     return NextResponse.json(
-      { error: err?.message ?? "Unexpected error" },
+      { error: err instanceof Error ? err.message : "Unexpected error" },
       { status: 500 }
     );
   }
