@@ -12,6 +12,7 @@ const APP_URL =
 
 const FROM_EMAIL =
   process.env.RESEND_FROM_EMAIL ||
+  process.env.EMAIL_FROM ||
   "NeuroTrader Journal <support@neurotrader-journal.com>";
 
 const resend = process.env.RESEND_API_KEY
@@ -48,6 +49,7 @@ export type AutomatedEmailKey =
   | "subscription_confirmation"
   | "subscription_receipt"
   | "subscription_renewal_reminder"
+  | "subscription_payment_method_expiring"
   | "subscription_payment_issue"
   | "subscription_cancellation"
   | "subscription_winback"
@@ -1028,6 +1030,59 @@ function buildSubscriptionPaymentIssueContent(args: {
   return { subject, text, html };
 }
 
+function buildSubscriptionPaymentMethodExpiringContent(args: {
+  email: string;
+  name?: string | null;
+  plan?: PlanId | string | null;
+  brand?: string | null;
+  last4?: string | null;
+  expMonth?: number | null;
+  expYear?: number | null;
+}) : EmailContent {
+  const safeName = args.name || "trader";
+  const planLabel = formatPlanLabel(args.plan || "advanced");
+  const brand = args.brand ? args.brand.charAt(0).toUpperCase() + args.brand.slice(1) : "Card";
+  const last4 = args.last4 ? `ending in ${args.last4}` : "on file";
+  const expiry =
+    args.expMonth && args.expYear
+      ? `${String(args.expMonth).padStart(2, "0")}/${args.expYear}`
+      : "soon";
+  const subject = "Your NeuroTrader payment method expires soon";
+  const text = [
+    `Hi ${safeName},`,
+    "",
+    `Your ${brand} payment method ${last4} expires ${expiry}.`,
+    `Plan: ${planLabel}`,
+    "",
+    "Please update your billing details before the next renewal so your NeuroTrader Journal access stays uninterrupted.",
+    "",
+    `Update billing: ${resolveAppUrl("/billing")}`,
+    "",
+    "NeuroTrader Journal Team",
+  ].join("\n");
+
+  const html = buildNeuroTraderHtml({
+    title: "Payment method expiring",
+    eyebrow: "Billing",
+    preheader: "Update your card before it expires to avoid subscription interruption.",
+    greeting: `Hi ${escapeHtml(safeName)},`,
+    highlight: `Your <strong>${escapeHtml(brand)}</strong> payment method <strong>${escapeHtml(last4)}</strong> expires <strong>${escapeHtml(expiry)}</strong>.`,
+    paragraphs: [
+      "This is a proactive billing reminder from NeuroTrader Journal.",
+      "Please update your payment method before the next renewal so your workspace, journal, analytics, and coaching access stay uninterrupted.",
+    ],
+    facts: [
+      { label: "Plan", value: escapeHtml(planLabel) },
+      { label: "Payment method", value: `${escapeHtml(brand)} ${escapeHtml(last4)}` },
+      { label: "Expires", value: escapeHtml(expiry) },
+    ],
+    ctaLabel: "Update billing",
+    ctaUrl: resolveAppUrl("/billing"),
+  });
+
+  return { subject, text, html };
+}
+
 function buildSubscriptionCancellationContent(args: {
   email: string;
   name?: string | null;
@@ -1296,6 +1351,24 @@ export function getAutomatedEmailCatalog(): AutomatedEmailPreview[] {
       }),
     },
     {
+      key: "subscription_payment_method_expiring",
+      category: "Billing",
+      name: "Payment method expiring",
+      description: "Sent when the user’s default card is close to expiration so Stripe’s expiring-card email can stay disabled.",
+      trigger: "Daily Stripe payment-method scan",
+      delivery: "Resend via Vercel cron",
+      from: FROM_EMAIL,
+      preview: buildSubscriptionPaymentMethodExpiringContent({
+        email: "trader@example.com",
+        name: "Steven",
+        plan: "advanced",
+        brand: "visa",
+        last4: "4242",
+        expMonth: 5,
+        expYear: new Date().getFullYear(),
+      }),
+    },
+    {
       key: "subscription_cancellation",
       category: "Billing",
       name: "Cancellation scheduled",
@@ -1411,6 +1484,16 @@ export async function sendAutomatedEmailTest(args: {
         invoiceNumber: "7D8E2A9-0006",
         nextAttemptAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(),
         invoiceUrl: resolveAppUrl("/billing"),
+      });
+    case "subscription_payment_method_expiring":
+      return sendSubscriptionPaymentMethodExpiringEmail({
+        email,
+        name: "Admin preview",
+        plan: "advanced",
+        brand: "visa",
+        last4: "4242",
+        expMonth: 5,
+        expYear: new Date().getFullYear(),
       });
     case "subscription_cancellation":
       return sendSubscriptionCancellationEmail({
@@ -1566,6 +1649,19 @@ export async function sendSubscriptionPaymentIssueEmail(args: {
   nextAttemptAt?: string | null;
 }) {
   const content = buildSubscriptionPaymentIssueContent(args);
+  await sendEmailBase({ to: args.email, ...content });
+}
+
+export async function sendSubscriptionPaymentMethodExpiringEmail(args: {
+  email: string;
+  name?: string | null;
+  plan?: PlanId | string | null;
+  brand?: string | null;
+  last4?: string | null;
+  expMonth?: number | null;
+  expYear?: number | null;
+}) {
+  const content = buildSubscriptionPaymentMethodExpiringContent(args);
   await sendEmailBase({ to: args.email, ...content });
 }
 
