@@ -14,6 +14,7 @@
     "audit:prod": "npm audit --omit=dev --audit-level=high",
     "audit:mobile": "cd mobile && npm audit --omit=dev --audit-level=high",
     "verify:release": "npm run test:unit && npm run lint:web && npm run typecheck:web && npm run build && npm run typecheck:mobile && npm run audit:prod && npm run audit:mobile",
+    "verify:auth-live": "node supabase/manual/check_auth_signup_health.mjs",
     "test:e2e": "playwright test",
     "test:unit": "vitest run",
     "mobile:start": "npm --prefix mobile run start",
