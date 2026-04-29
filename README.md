@@ -1,38 +1,81 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Neuro Trader Journal
 
-## Getting Started
+Trading journal, analytics, billing, AI coaching, broker import, and mobile companion app.
 
-First, run the development server:
+## Stack
+
+- Next.js 16 + React 19
+- TypeScript
+- Supabase Auth/Postgres/Storage
+- Stripe subscriptions and add-ons
+- OpenAI-powered coaching and option-flow analysis
+- Expo/React Native mobile app in `mobile/`
+
+## Local Setup
+
+1. Install dependencies:
+
+```bash
+npm ci
+```
+
+2. Create local env files:
+
+```bash
+cp .env.example .env.local
+cp mobile/.env.example mobile/.env
+```
+
+3. Fill the Supabase, Stripe, OpenAI, Resend, hCaptcha, broker, and cron values.
+
+4. Start the web app:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+5. Start mobile when needed:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+npm run mobile:start
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Release Gates
 
-## Learn More
+Run the full local gate before release:
 
-To learn more about Next.js, take a look at the following references:
+```bash
+npm run verify:release
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Individual checks:
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```bash
+npm run test:unit
+npm run lint:web
+npm run typecheck:web
+npm run build
+npm run typecheck:mobile
+npm run audit:prod
+npm run audit:mobile
+```
 
-## Deploy on Vercel
+Smoke e2e requires a running production server:
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+```bash
+npm run build
+npm run start
+npm run test:e2e
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
-# trading-journal-pro
-# trading-journal-pro
+## Deployment Notes
+
+- Vercel project config exists in `.vercel/project.json`.
+- Production env vars must match `.env.example`.
+- Supabase migrations live in `supabase/migrations/`.
+- Vercel crons are configured in `vercel.json`.
+- Stripe webhooks must point to `/api/stripe/webhook`.
+
+## Release Planning
+
+See `docs/release-readiness-may-2026.md` for the May 2026 public launch readiness plan and go/no-go checklist.

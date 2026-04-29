@@ -7,6 +7,7 @@ import { useAuth } from "@/context/AuthContext";
 import type { PlanId } from "@/lib/types";
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
+import { supabaseBrowser } from "@/lib/supaBaseClient";
 
 const PLAN_COPY: Record<
   PlanId,
@@ -28,8 +29,8 @@ const PLAN_COPY: Record<
       { en: "Daily P&L tracking", es: "Seguimiento diario de P&L" },
       { en: "Basic analytics & calendar", es: "Analítica básica y calendario" },
       { en: "Growth plan basics", es: "Fundamentos del Growth Plan" },
-      { en: "Bi‑weekly performance report (email + in‑app) — Saturdays 9 AM EST", es: "Reporte quincenal (email + app) — Sábados 9 AM EST" },
-      { en: "Monthly performance report (email + in‑app) — 1st of each month, 9 AM EST", es: "Reporte mensual (email + app) — día 1 de cada mes, 9 AM EST" },
+      { en: "Trade review workspace", es: "Workspace de revisión de trades" },
+      { en: "Manual broker imports", es: "Imports manuales de bróker" },
       { en: "Mobile app (iOS)", es: "Aplicación móvil (iOS)" },
     ],
   },
@@ -45,9 +46,8 @@ const PLAN_COPY: Record<
       { en: "Advanced analytics & breakdowns", es: "Analítica avanzada y breakdowns" },
       { en: "Profit & Loss Track (business accounting)", es: "Profit & Loss Track (contabilidad)" },
       { en: "AI coaching & mindset tools", es: "AI coaching y herramientas de mindset" },
-      { en: "Weekly performance report (email + in‑app) — Saturdays 9 AM EST", es: "Reporte semanal (email + app) — Sábados 9 AM EST" },
-      { en: "Monthly performance report (email + in‑app) — 1st of each month, 9 AM EST", es: "Reporte mensual (email + app) — día 1 de cada mes, 9 AM EST" },
-      { en: "Annual performance report (email + in‑app) — Jan 1, 9 AM EST", es: "Reporte anual (email + app) — 1 de enero, 9 AM EST" },
+      { en: "Notebook, Cashflow, Back-Studying & Audit", es: "Notebook, Cashflow, Back-Studying y Audit" },
+      { en: "Advanced PDF exports", es: "Exportaciones PDF avanzadas" },
       { en: "Priority improvements & features", es: "Mejoras y features prioritarios" },
       { en: "Mobile app (iOS)", es: "Aplicación móvil (iOS)" },
     ],
@@ -78,13 +78,28 @@ export default function PlansPage() {
     setLoading(true);
 
     try {
-      const res = await fetch("/api/checkout", {
+      if (!user) {
+        router.replace("/signin?redirect=/plans");
+        return;
+      }
+
+      const { data: sessionData } = await supabaseBrowser.auth.getSession();
+      const token = sessionData?.session?.access_token;
+      if (!token) {
+        throw new Error(
+          L("Session not available. Please sign in again.", "Sesion no disponible. Inicia sesion nuevamente.")
+        );
+      }
+
+      const res = await fetch("/api/stripe/create-checkout-session", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
           planId: selectedPlan,
+          billingCycle: "monthly",
         }),
       });
 

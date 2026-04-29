@@ -41,11 +41,16 @@ type EmailAttachment = {
   contentType?: string;
 };
 
+export type InactivityReminderStage = 3 | 15 | 30;
+
 export type AutomatedEmailKey =
   | "email_confirmation"
   | "password_reset"
   | "account_recovery"
   | "welcome"
+  | "inactivity_3_day"
+  | "inactivity_15_day"
+  | "inactivity_30_day"
   | "subscription_confirmation"
   | "subscription_receipt"
   | "subscription_renewal_reminder"
@@ -176,6 +181,15 @@ function formatEmailDate(value?: string | number | Date | null) {
     day: "numeric",
     year: "numeric",
   });
+}
+
+function formatTodayJournalDate() {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
 }
 
 function formatPlanLabel(plan?: string | null) {
@@ -800,6 +814,153 @@ function buildWelcomeEmailContent(args: {
   return { subject, text, html };
 }
 
+function buildInactivityReminderContent(args: {
+  email: string;
+  name?: string | null;
+  daysInactive: InactivityReminderStage;
+  locale?: string | null;
+}) : EmailContent {
+  const locale = normalizeEmailLocale(args.locale);
+  const safeName = args.name || "trader";
+  const daysLabel = `${args.daysInactive}+ ${locale === "es" ? "días" : "days"}`;
+  const journalUrl = resolveAppUrl(`/journal/${formatTodayJournalDate()}`);
+  const dashboardUrl = resolveAppUrl("/dashboard");
+
+  const stageCopy = {
+    en: {
+      3: {
+        subject: "Your trading journal is waiting for today's context",
+        title: "Your process is waiting",
+        preheader: "Three days away can blur the context. Log one clean update today.",
+        highlight: "Three quiet days is enough for execution context to fade.",
+        paragraphs: [
+          "You have not opened NeuroTrader Journal for about 3 days. Before the week gets noisy, log one quick note: what changed, what you felt, and what rule matters next.",
+          "The goal is not to catch up perfectly. It is to keep your Growth Plan connected to the trader you are becoming.",
+        ],
+        ctaLabel: "Open my journal",
+        secondaryLabel: "Open dashboard",
+        factLabel: "Inactive for",
+      },
+      15: {
+        subject: "Reset your trading rhythm without guilt",
+        title: "Reset without guilt",
+        preheader: "A clean reset beats a silent gap. Start with one honest entry.",
+        highlight: "You do not need to rebuild everything today. You only need one honest entry.",
+        paragraphs: [
+          "You have been away from NeuroTrader Journal for about 15 days. That gap matters because your Growth Plan needs fresh data: execution, emotions, mistakes, and wins.",
+          "Open the journal, write what happened, and pick the next rule you will protect. Small honest resets are how disciplined traders get back in rhythm.",
+        ],
+        ctaLabel: "Restart my journal",
+        secondaryLabel: "Review dashboard",
+        factLabel: "Inactive for",
+      },
+      30: {
+        subject: "Come back with one small trading entry",
+        title: "One entry is enough",
+        preheader: "After 30 days away, the next move is simple: log one session and rebuild from there.",
+        highlight: "After a month away, the comeback starts with one small, structured entry.",
+        paragraphs: [
+          "You have been away from NeuroTrader Journal for about 30 days. No judgment. The danger is not the gap; it is letting the gap erase what your trading is teaching you.",
+          "Open your journal and create one entry today. One session, one emotion, one rule, one next action. That is enough to reconnect with your plan.",
+        ],
+        ctaLabel: "Create one entry",
+        secondaryLabel: "Open dashboard",
+        factLabel: "Inactive for",
+      },
+    },
+    es: {
+      3: {
+        subject: "Tu journal de trading está esperando el contexto de hoy",
+        title: "Tu proceso te espera",
+        preheader: "Tres días fuera pueden borrar contexto. Registra una nota limpia hoy.",
+        highlight: "Tres días sin registrar es suficiente para que se pierda contexto de ejecución.",
+        paragraphs: [
+          "No has abierto NeuroTrader Journal en aproximadamente 3 días. Antes de que la semana se ponga ruidosa, registra una nota rápida: qué cambió, qué sentiste y qué regla importa ahora.",
+          "La meta no es ponerte al día perfecto. La meta es mantener tu Growth Plan conectado con el trader en el que te estás convirtiendo.",
+        ],
+        ctaLabel: "Abrir mi journal",
+        secondaryLabel: "Abrir dashboard",
+        factLabel: "Inactivo por",
+      },
+      15: {
+        subject: "Reinicia tu ritmo de trading sin culpa",
+        title: "Reinicio sin culpa",
+        preheader: "Un reinicio limpio vale más que un silencio largo. Empieza con una entrada honesta.",
+        highlight: "No tienes que reconstruirlo todo hoy. Solo necesitas una entrada honesta.",
+        paragraphs: [
+          "Has estado fuera de NeuroTrader Journal por aproximadamente 15 días. Ese espacio importa porque tu Growth Plan necesita data fresca: ejecución, emociones, errores y victorias.",
+          "Abre el journal, escribe qué pasó y elige la próxima regla que vas a proteger. Los reinicios pequeños y honestos son parte de volver al ritmo.",
+        ],
+        ctaLabel: "Reiniciar mi journal",
+        secondaryLabel: "Revisar dashboard",
+        factLabel: "Inactivo por",
+      },
+      30: {
+        subject: "Vuelve con una entrada pequeña de trading",
+        title: "Una entrada es suficiente",
+        preheader: "Luego de 30 días fuera, el próximo paso es simple: registra una sesión y reconstruye desde ahí.",
+        highlight: "Después de un mes fuera, el regreso empieza con una entrada pequeña y estructurada.",
+        paragraphs: [
+          "Has estado fuera de NeuroTrader Journal por aproximadamente 30 días. Sin juicio. El peligro no es el gap; es permitir que el gap borre lo que tu trading te está enseñando.",
+          "Abre tu journal y crea una entrada hoy. Una sesión, una emoción, una regla, una próxima acción. Eso basta para reconectar con tu plan.",
+        ],
+        ctaLabel: "Crear una entrada",
+        secondaryLabel: "Abrir dashboard",
+        factLabel: "Inactivo por",
+      },
+    },
+  } satisfies Record<EmailLocale, Record<InactivityReminderStage, {
+    subject: string;
+    title: string;
+    preheader: string;
+    highlight: string;
+    paragraphs: string[];
+    ctaLabel: string;
+    secondaryLabel: string;
+    factLabel: string;
+  }>>;
+
+  const copy = stageCopy[locale][args.daysInactive];
+  const greeting = locale === "es" ? `Hola ${safeName},` : `Hi ${safeName},`;
+  const team = locale === "es" ? "Equipo de NeuroTrader Journal" : "NeuroTrader Journal Team";
+  const emailLabel = locale === "es" ? "Correo" : "Email";
+
+  const text = [
+    greeting,
+    "",
+    copy.highlight,
+    "",
+    ...copy.paragraphs,
+    "",
+    journalUrl,
+    "",
+    team,
+  ].join("\n");
+
+  const html = buildNeuroTraderHtml({
+    title: copy.title,
+    eyebrow: "Lifecycle",
+    preheader: copy.preheader,
+    greeting: escapeHtml(greeting),
+    highlight: copy.highlight,
+    paragraphs: copy.paragraphs,
+    facts: [
+      { label: copy.factLabel, value: escapeHtml(daysLabel) },
+      { label: emailLabel, value: escapeHtml(args.email) },
+    ],
+    ctaLabel: copy.ctaLabel,
+    ctaUrl: journalUrl,
+    secondaryLabel: copy.secondaryLabel,
+    secondaryUrl: dashboardUrl,
+    footerNote:
+      locale === "es"
+        ? "Este recordatorio se detiene automáticamente cuando vuelves a entrar y registrar actividad."
+        : "This reminder automatically resets once you return and create new activity.",
+  });
+
+  return { subject: copy.subject, text, html };
+}
+
 function buildSubscriptionReceiptContent(args: {
   email: string;
   name?: string | null;
@@ -855,7 +1016,7 @@ function buildSubscriptionReceiptContent(args: {
       ...(args.subscriptionId ? [{ label: "Subscription", value: escapeHtml(args.subscriptionId) }] : []),
     ],
     ctaLabel: "Open billing",
-    ctaUrl: resolveAppUrl("/billing"),
+    ctaUrl: resolveAppUrl("/billing/manage"),
     ...(args.invoiceUrl
       ? {
           secondaryLabel: "Open invoice",
@@ -1018,7 +1179,7 @@ function buildSubscriptionPaymentIssueContent(args: {
       ...(nextAttemptText ? [{ label: "Next attempt", value: escapeHtml(nextAttemptText) }] : []),
     ],
     ctaLabel: "Update billing",
-    ctaUrl: resolveAppUrl("/billing"),
+    ctaUrl: resolveAppUrl("/billing/update-payment"),
     ...(args.invoiceUrl
       ? {
           secondaryLabel: "Open invoice",
@@ -1077,7 +1238,7 @@ function buildSubscriptionPaymentMethodExpiringContent(args: {
       { label: "Expires", value: escapeHtml(expiry) },
     ],
     ctaLabel: "Update billing",
-    ctaUrl: resolveAppUrl("/billing"),
+    ctaUrl: resolveAppUrl("/billing/update-payment"),
   });
 
   return { subject, text, html };
@@ -1279,6 +1440,48 @@ export function getAutomatedEmailCatalog(): AutomatedEmailPreview[] {
       preview: buildWelcomeEmailContent({ email: "trader@example.com", name: "Steven" }),
     },
     {
+      key: "inactivity_3_day",
+      category: "Lifecycle",
+      name: "3-day inactivity",
+      description: "Sent when a trader has not opened the platform for 3+ days.",
+      trigger: "Daily inactivity cron",
+      delivery: "Resend via Vercel cron",
+      from: FROM_EMAIL,
+      preview: buildInactivityReminderContent({
+        email: "trader@example.com",
+        name: "Steven",
+        daysInactive: 3,
+      }),
+    },
+    {
+      key: "inactivity_15_day",
+      category: "Lifecycle",
+      name: "15-day inactivity",
+      description: "Sent when a trader has not opened the platform for 15+ days and needs a clean reset.",
+      trigger: "Daily inactivity cron",
+      delivery: "Resend via Vercel cron",
+      from: FROM_EMAIL,
+      preview: buildInactivityReminderContent({
+        email: "trader@example.com",
+        name: "Steven",
+        daysInactive: 15,
+      }),
+    },
+    {
+      key: "inactivity_30_day",
+      category: "Lifecycle",
+      name: "30-day inactivity",
+      description: "Sent when a trader has been away for 30+ days and should restart with one entry.",
+      trigger: "Daily inactivity cron",
+      delivery: "Resend via Vercel cron",
+      from: FROM_EMAIL,
+      preview: buildInactivityReminderContent({
+        email: "trader@example.com",
+        name: "Steven",
+        daysInactive: 30,
+      }),
+    },
+    {
       key: "subscription_confirmation",
       category: "Billing",
       name: "Subscription confirmation",
@@ -1445,6 +1648,24 @@ export async function sendAutomatedEmailTest(args: {
       });
     case "welcome":
       return sendWelcomeEmailByEmail(email, "Admin preview");
+    case "inactivity_3_day":
+      return sendInactivityReminderEmail({
+        email,
+        name: "Admin preview",
+        daysInactive: 3,
+      });
+    case "inactivity_15_day":
+      return sendInactivityReminderEmail({
+        email,
+        name: "Admin preview",
+        daysInactive: 15,
+      });
+    case "inactivity_30_day":
+      return sendInactivityReminderEmail({
+        email,
+        name: "Admin preview",
+        daysInactive: 30,
+      });
     case "subscription_confirmation":
       return sendSubscriptionConfirmationEmailByEmail({
         email,
@@ -1597,6 +1818,22 @@ export async function sendWelcomeEmailByEmail(email: string, name?: string | nul
   const resolvedLocale = await resolveEmailLocale({ email, fallback: locale });
   const content = buildWelcomeEmailContent({ email, name, locale: resolvedLocale });
   await sendEmailBase({ to: email, ...content });
+}
+
+export async function sendInactivityReminderEmail(args: {
+  email: string;
+  name?: string | null;
+  userId?: string | null;
+  daysInactive: InactivityReminderStage;
+  locale?: string | null;
+}) {
+  const resolvedLocale = await resolveEmailLocale({
+    userId: args.userId,
+    email: args.email,
+    fallback: args.locale,
+  });
+  const content = buildInactivityReminderContent({ ...args, locale: resolvedLocale });
+  await sendEmailBase({ to: args.email, ...content });
 }
 
 export async function sendSubscriptionConfirmationEmailByEmail(args: {

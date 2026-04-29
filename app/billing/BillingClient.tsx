@@ -441,6 +441,14 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
     setCancelModalOpen(false);
   }
 
+  function handleUpdatePaymentMethod() {
+    if (!user) {
+      router.push(`/signin?next=${encodeURIComponent("/billing/update-payment")}`);
+      return;
+    }
+    router.push("/billing/update-payment");
+  }
+
   const isButtonDisabled = loading || authLoading;
   const hasActivePlan = currentPlan !== "none" && currentStatus === "active";
   const isCurrentSelection = hasActivePlan && selectedPlan === currentPlan;
@@ -611,8 +619,8 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
                 <li>• {L("Full daily journal & calendar", "Diario diario completo y calendario")}</li>
                 <li>• {L("Trade review workspace", "Workspace de revisión de trades")}</li>
                 <li>• {L("Basic analytics", "Analítica básica")}</li>
-                <li>• {L("Bi‑weekly performance report (email + in‑app) — Saturdays 9 AM EST", "Reporte quincenal (email + app) — Sábados 9 AM EST")}</li>
-                <li>• {L("Monthly performance report (email + in‑app) — 1st of each month, 9 AM EST", "Reporte mensual (email + app) — día 1 de cada mes, 9 AM EST")}</li>
+                <li>• {L("Manual broker imports", "Imports manuales de bróker")}</li>
+                <li>• {L("Basic alerts & reminders", "Alertas y recordatorios básicos")}</li>
                 <li>• {L("Mobile app (iOS)", "Aplicación móvil (iOS)")}</li>
               </ul>
             </motion.button>
@@ -703,9 +711,8 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
                 <li>• {L("Advanced analytics & breakdowns", "Analítica avanzada y breakdowns")}</li>
                 <li>• {L("Profit & Loss Track (business accounting)", "Profit & Loss Track (contabilidad)")}</li>
                 <li>• {L("AI coaching & mindset tools", "AI coaching y herramientas de mindset")}</li>
-                <li>• {L("Weekly performance report (email + in‑app) — Saturdays 9 AM EST", "Reporte semanal (email + app) — Sábados 9 AM EST")}</li>
-                <li>• {L("Monthly performance report (email + in‑app) — 1st of each month, 9 AM EST", "Reporte mensual (email + app) — día 1 de cada mes, 9 AM EST")}</li>
-                <li>• {L("Annual performance report (email + in‑app) — Jan 1, 9 AM EST", "Reporte anual (email + app) — 1 de enero, 9 AM EST")}</li>
+                <li>• {L("Back-Studying & Audit workbench", "Back-Studying y Audit workbench")}</li>
+                <li>• {L("Advanced PDF exports", "Exportaciones PDF avanzadas")}</li>
                 <li>• {L("Priority improvements & new features", "Mejoras prioritarias y nuevas features")}</li>
                 <li>• {L("Mobile app (iOS)", "Aplicación móvil (iOS)")}</li>
               </ul>
@@ -983,6 +990,32 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                    <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-emerald-100 md:col-span-2">
+                      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                        <div>
+                          <p className="text-[10px] uppercase tracking-[0.2em] text-emerald-300/80">
+                            {L("Payment method", "Método de pago")}
+                          </p>
+                          <p className="mt-2 text-sm font-semibold text-emerald-50">
+                            {L("Need to replace your card?", "¿Necesitas cambiar tu tarjeta?")}
+                          </p>
+                          <p className="mt-1 text-[11px] text-emerald-100/80">
+                            {L(
+                              "Open the secure Stripe portal directly to update the card used for future NeuroTrader renewals.",
+                              "Abre el portal seguro de Stripe directamente para actualizar la tarjeta usada en futuras renovaciones de NeuroTrader."
+                            )}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={handleUpdatePaymentMethod}
+                          className="rounded-xl bg-emerald-400 px-4 py-2 text-xs font-semibold text-slate-950 hover:bg-emerald-300"
+                        >
+                          {L("Update payment method", "Actualizar método de pago")}
+                        </button>
+                      </div>
+                    </div>
+
                     <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-amber-100">
                       <p className="text-[10px] uppercase tracking-[0.2em] text-amber-300/80">
                         {L("Before you cancel", "Antes de cancelar")}

@@ -3,6 +3,7 @@ import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 import { getSnaptradeUser } from "@/lib/snaptradeStorage";
 import { formatSnaptradeError, snaptradeGetActivities } from "@/lib/snaptradeClient";
 import { createHash } from "crypto";
+import { requireBrokerSyncAddon } from "@/lib/serverFeatureAccess";
 
 export const runtime = "nodejs";
 
@@ -54,6 +55,13 @@ export async function POST(req: NextRequest) {
   if (authErr || !authData?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const userId = authData.user.id;
+  const brokerSyncFree =
+    process.env.BROKER_SYNC_FREE === "true" || process.env.NEXT_PUBLIC_BROKER_SYNC_FREE === "true";
+  if (!brokerSyncFree) {
+    const brokerGate = await requireBrokerSyncAddon(userId);
+    if (brokerGate) return brokerGate;
+  }
+
   const body = await req.json().catch(() => ({} as any));
   const accountId = String(body?.accountId ?? "").trim();
   const brokerLabel = String(body?.broker ?? "snaptrade").trim() || "snaptrade";

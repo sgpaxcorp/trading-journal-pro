@@ -1375,12 +1375,17 @@ async function parseExcelFile(
   file: File,
   maxRows = 2000
 ): Promise<{ rows: any[]; scanned: number; matched: number }> {
-  const XLSX = await import("xlsx");
+  const ExcelJSImport = await import("exceljs");
+  const ExcelJS = (ExcelJSImport.default ?? ExcelJSImport) as typeof import("exceljs");
   const buf = await file.arrayBuffer();
-  const wb = XLSX.read(buf, { type: "array" });
-  const sheetName = wb.SheetNames[0];
-  const ws = wb.Sheets[sheetName];
-  const grid = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" }) as any[][];
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(buf as any);
+  const ws = wb.worksheets[0];
+  const grid: any[][] = [];
+  ws?.eachRow({ includeEmpty: false }, (row) => {
+    const values = Array.isArray(row.values) ? row.values.slice(1) : [];
+    grid.push(values.map(normalizeSpreadsheetCell));
+  });
   const trimmed = grid.filter((row) =>
     Array.isArray(row) && row.some((cell) => String(cell ?? "").trim() !== "")
   );
@@ -1456,6 +1461,19 @@ async function parseExcelFile(
   };
 }
 
+function normalizeSpreadsheetCell(value: any): string | number | boolean {
+  if (value == null) return "";
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value !== "object") return value;
+  if (Array.isArray(value.richText)) {
+    return value.richText.map((part: any) => String(part?.text ?? "")).join("");
+  }
+  if ("result" in value) return normalizeSpreadsheetCell(value.result);
+  if ("text" in value) return String(value.text ?? "");
+  if ("hyperlink" in value && "tooltip" in value) return String(value.hyperlink ?? "");
+  return String(value);
+}
+
 async function parseFlowFile(
   file: File,
   providerId: ProviderId,
@@ -1465,7 +1483,7 @@ async function parseFlowFile(
 ): Promise<{ rows: any[]; scanned: number; matched: number }> {
   const name = file.name.toLowerCase();
   const isCsv = name.endsWith(".csv");
-  const isExcel = name.endsWith(".xlsx") || name.endsWith(".xls");
+  const isExcel = name.endsWith(".xlsx");
   if (isCsv) {
     const parsed = await parseCsvWithWorker(file, underlying, onProgress, maxRows);
     const cleaned = parsed.rows.filter((row) => !isHeaderLikeRow(row));
@@ -2877,8 +2895,8 @@ export default function OptionFlowPage() {
         role: "assistant",
         title: isEs ? "Inteligencia de Flujo de Opciones" : "Option Flow Intelligence",
         body: isEs
-          ? "¿Cómo quieres analizar el flujo de órdenes? Puedes pegar screenshots o subir un CSV/XLS/XLSX (máx 12MB)."
-          : "How do you want to analyze the order flow? Paste screenshots or upload a CSV/XLS/XLSX (max 12MB).",
+          ? "¿Cómo quieres analizar el flujo de órdenes? Puedes pegar screenshots o subir un CSV/XLSX (máx 12MB)."
+          : "How do you want to analyze the order flow? Paste screenshots or upload a CSV/XLSX (max 12MB).",
       },
       { persist: false }
     );
@@ -3026,17 +3044,17 @@ export default function OptionFlowPage() {
     let normalizedUnderlying = underlying.trim();
     const fileName = csvFile?.name.toLowerCase() ?? "";
     const isCsv = fileName.endsWith(".csv");
-    const isExcel = fileName.endsWith(".xlsx") || fileName.endsWith(".xls");
+    const isExcel = fileName.endsWith(".xlsx");
     const note = (noteOverride ?? analysisNotes).trim();
     if (noteOverride !== undefined) {
       setAnalysisNotes(noteOverride);
     }
     if (hasCsv && !isCsv && !isExcel) {
       appendMessage({
-        role: "system",
-        body: isEs
-          ? "Solo se admiten archivos CSV/XLS/XLSX por ahora."
-          : "Only CSV/XLS/XLSX files are supported for now.",
+          role: "system",
+          body: isEs
+          ? "Solo se admiten archivos CSV/XLSX por ahora."
+          : "Only CSV/XLSX files are supported for now.",
       });
       if (!hasShots) return;
     }
@@ -3055,8 +3073,8 @@ export default function OptionFlowPage() {
       appendMessage({
         role: "system",
         body: isEs
-          ? "Pega screenshots o sube un CSV/XLS/XLSX (máx 12MB) para iniciar el análisis."
-          : "Paste screenshots or upload a CSV/XLS/XLSX (max 12MB) to start the analysis.",
+          ? "Pega screenshots o sube un CSV/XLSX (máx 12MB) para iniciar el análisis."
+          : "Paste screenshots or upload a CSV/XLSX (max 12MB) to start the analysis.",
       });
       return;
     }
@@ -3576,8 +3594,8 @@ export default function OptionFlowPage() {
       appendMessage({
         role: "system",
         body: isEs
-          ? "Escribe qué quieres analizar o adjunta un CSV/XLS/XLSX o screenshots."
-          : "Type what you want to analyze or attach a CSV/XLS/XLSX or screenshots.",
+          ? "Escribe qué quieres analizar o adjunta un CSV/XLSX o screenshots."
+          : "Type what you want to analyze or attach a CSV/XLSX or screenshots.",
       });
       return;
     }
@@ -3830,10 +3848,10 @@ export default function OptionFlowPage() {
             <span className="text-[10.5px] text-slate-500">{providerMeta.hint}</span>
           )}
           <label className="text-[11px] text-slate-400">
-            {isEs ? "CSV/XLS/XLSX (opcional, 12MB máx)" : "CSV/XLS/XLSX (optional, 12MB max)"}
+            {isEs ? "CSV/XLSX (opcional, 12MB máx)" : "CSV/XLSX (optional, 12MB max)"}
             <input
               type="file"
-              accept=".csv,.xls,.xlsx"
+              accept=".csv,.xlsx"
               onChange={(e) => setCsvFile(e.target.files?.[0] ?? null)}
               className="ml-2 text-[11px]"
             />
@@ -4232,8 +4250,8 @@ export default function OptionFlowPage() {
             </h1>
             <p className="text-[12px] sm:text-[13px] text-slate-400 mt-2 max-w-3xl">
               {isEs
-                ? "Pega screenshots o sube un CSV/XLS/XLSX (máx 12MB) para extraer prints relevantes y armar un plan de premarket."
-                : "Paste screenshots or upload a CSV/XLS/XLSX (max 12MB) to extract key prints and build a premarket plan."}
+                ? "Pega screenshots o sube un CSV/XLSX (máx 12MB) para extraer prints relevantes y armar un plan de premarket."
+                : "Paste screenshots or upload a CSV/XLSX (max 12MB) to extract key prints and build a premarket plan."}
             </p>
           </div>
 

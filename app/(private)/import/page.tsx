@@ -1008,9 +1008,9 @@ export default function ImportPage() {
     }
 
     const name = file.name.toLowerCase();
-    const okExt = name.endsWith(".csv") || name.endsWith(".xlsx") || name.endsWith(".xls");
+    const okExt = name.endsWith(".csv") || name.endsWith(".xlsx");
     if (!okExt) {
-      setErrorMsg(L("Unsupported file type. Please upload CSV / XLS / XLSX.", "Tipo de archivo no compatible. Usa CSV / XLS / XLSX."));
+      setErrorMsg(L("Unsupported file type. Please upload CSV / XLSX.", "Tipo de archivo no compatible. Usa CSV / XLSX."));
       return;
     }
 
@@ -1256,7 +1256,7 @@ export default function ImportPage() {
                       {L("Drag & drop your file here", "Arrastra y suelta tu archivo aquí")}
                     </div>
                     <div className="text-[11px] text-slate-400">
-                      {L("Supported: CSV, XLS, XLSX", "Soporta: CSV, XLS, XLSX")}
+                      {L("Supported: CSV, XLSX", "Soporta: CSV, XLSX")}
                     </div>
 
                     <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
@@ -1284,7 +1284,7 @@ export default function ImportPage() {
                     <input
                       ref={fileInputRef}
                       type="file"
-                      accept=".csv,.xls,.xlsx"
+                      accept=".csv,.xlsx"
                       className="hidden"
                       onChange={(e) => acceptFile(e.target.files?.[0] ?? null)}
                     />

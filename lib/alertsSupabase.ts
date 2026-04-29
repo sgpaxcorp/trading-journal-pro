@@ -17,7 +17,7 @@ import type { RealtimeChannel } from "@supabase/supabase-js";
 import { supabaseBrowser } from "@/lib/supaBaseClient";
 import { shouldAllowLocalProfileAccessFallback } from "@/lib/accessControl";
 import { listMyEntitlements } from "@/lib/entitlementsSupabase";
-import { normalizePlanTier, planFromEntitlements, type AppPlan } from "@/lib/planAccess";
+import { normalizePlanTier, planFromEntitlements, planFromProfile, type AppPlan } from "@/lib/planAccess";
 
 // -----------------------------
 // Types
@@ -166,13 +166,15 @@ const CORE_RULE_TRIGGERS = new Set(["open_positions", "options_expiring"]);
 async function fetchUserPlan(userId: string): Promise<UserPlan> {
   try {
     const [{ data, error }, entitlements] = await Promise.all([
-      supabaseBrowser.from("profiles").select("plan").eq("id", userId).maybeSingle(),
+      supabaseBrowser.from("profiles").select("plan, subscription_status").eq("id", userId).maybeSingle(),
       listMyEntitlements(userId),
     ]);
 
     const entitlementPlan = planFromEntitlements(entitlements);
     if (entitlementPlan !== "none") return entitlementPlan;
     if (error) return "none";
+    const activeProfilePlan = planFromProfile(data as any);
+    if (activeProfilePlan !== "none") return activeProfilePlan;
     if (shouldAllowLocalProfileAccessFallback()) {
       return normalizePlanTier((data as any)?.plan);
     }

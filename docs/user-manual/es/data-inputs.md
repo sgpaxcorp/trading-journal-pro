@@ -14,7 +14,7 @@ Mejor opción si tu broker está soportado.
 
 Tip: revisa la tabla de “Brokers soportados” antes de comprar Broker Sync.
 
-## 2) Importación CSV / XLS / XLSX
+## 2) Importación CSV / XLSX
 Ideal cuando tu broker no está soportado por SnapTrade.
 1. Elige el **Broker** y (opcional) agrega un **Comentario**.
 2. Sube el archivo sin editar.

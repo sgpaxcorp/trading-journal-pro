@@ -28,7 +28,7 @@ export function getOptionFlowBetaCopy(lang: OptionFlowLang) {
       apiError:
         "Option Flow Intelligence está en beta privada y solo está disponible para pruebas internas.",
       bullets: [
-        "Lee screenshots y archivos CSV/XLS/XLSX de flujo.",
+        "Lee screenshots y archivos CSV/XLSX de flujo.",
         "Resume actividad relevante y sesgo premarket.",
         "Resalta niveles clave, flujo agresivo y notas de riesgo.",
       ],
@@ -50,7 +50,7 @@ export function getOptionFlowBetaCopy(lang: OptionFlowLang) {
     apiError:
       "Option Flow Intelligence is in private beta and only available for internal testing.",
     bullets: [
-      "Reads screenshots and CSV/XLS/XLSX flow files.",
+      "Reads screenshots and CSV/XLSX flow files.",
       "Builds a premarket summary from the most relevant activity.",
       "Highlights key levels, aggressive flow, and risk notes.",
     ],

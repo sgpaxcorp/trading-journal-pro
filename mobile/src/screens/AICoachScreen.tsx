@@ -69,6 +69,31 @@ type AccountSeriesResponse = {
     planStartIso?: string;
     targetDate?: string;
     maxDailyLossPercent?: number;
+    steps?: {
+      prepare?: {
+        checklist?: Array<{ id?: string; text?: string; isActive?: boolean }>;
+      };
+      strategy?: {
+        strategies?: Array<{
+          name?: string;
+          setup?: string;
+          entryRules?: string;
+          exitRules?: string;
+          managementRules?: string;
+          invalidation?: string;
+          timeframe?: string;
+          instruments?: string[];
+        }>;
+        notes?: string;
+      };
+      execution_and_journal?: {
+        system?: {
+          doList?: Array<{ id?: string; text?: string }>;
+          dontList?: Array<{ id?: string; text?: string }>;
+          orderList?: Array<{ id?: string; text?: string }>;
+        };
+      };
+    };
   } | null;
   totals?: {
     tradingPnl?: number;
@@ -750,6 +775,46 @@ export function AICoachScreen({}: AICoachScreenProps) {
               dailyTargetPct: toNum(accountSeries.plan.dailyTargetPct, 0),
               maxDailyLossPercent: toNum(accountSeries.plan.maxDailyLossPercent, 0),
               planStartDate: accountSeries.plan.planStartIso ?? null,
+              executionSystem: accountSeries.plan.steps?.execution_and_journal?.system
+                ? {
+                    doList: Array.isArray(accountSeries.plan.steps.execution_and_journal.system?.doList)
+                      ? accountSeries.plan.steps.execution_and_journal.system.doList.slice(0, 6)
+                      : [],
+                    dontList: Array.isArray(accountSeries.plan.steps.execution_and_journal.system?.dontList)
+                      ? accountSeries.plan.steps.execution_and_journal.system.dontList.slice(0, 6)
+                      : [],
+                    orderList: Array.isArray(accountSeries.plan.steps.execution_and_journal.system?.orderList)
+                      ? accountSeries.plan.steps.execution_and_journal.system.orderList.slice(0, 6)
+                      : [],
+                  }
+                : null,
+              prepareChecklist: Array.isArray(accountSeries.plan.steps?.prepare?.checklist)
+                ? accountSeries.plan.steps.prepare.checklist
+                    .filter((item) => item && item.isActive !== false && String(item.text ?? "").trim().length > 0)
+                    .slice(0, 8)
+                    .map((item) => ({
+                      id: item.id ?? "",
+                      text: String(item.text ?? "").trim(),
+                    }))
+                : [],
+              strategies: Array.isArray(accountSeries.plan.steps?.strategy?.strategies)
+                ? accountSeries.plan.steps.strategy.strategies
+                    .slice(0, 4)
+                    .map((strategy) => ({
+                      name: String(strategy?.name ?? "").trim(),
+                      setup: String(strategy?.setup ?? "").trim(),
+                      entryRules: String(strategy?.entryRules ?? "").trim(),
+                      exitRules: String(strategy?.exitRules ?? "").trim(),
+                      managementRules: String(strategy?.managementRules ?? "").trim(),
+                      invalidation: String(strategy?.invalidation ?? "").trim(),
+                      timeframe: String(strategy?.timeframe ?? "").trim(),
+                      instruments: Array.isArray(strategy?.instruments)
+                        ? strategy.instruments.map((item) => String(item).trim()).filter(Boolean)
+                        : [],
+                    }))
+                    .filter((strategy) => strategy.name || strategy.setup || strategy.entryRules || strategy.managementRules || strategy.invalidation)
+                : [],
+              strategyNotes: String(accountSeries.plan.steps?.strategy?.notes ?? "").trim(),
             }
           : null,
         cashflowsSummary: {

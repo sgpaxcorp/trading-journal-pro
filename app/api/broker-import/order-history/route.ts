@@ -4,6 +4,7 @@ import { auditOrderEvents } from "@/lib/audit/auditEngine";
 import { parseTosOrderHistory } from "@/lib/brokers/tos/parseTosOrderHistory";
 import type { NormalizedOrderEvent } from "@/lib/brokers/types";
 import { createHash } from "crypto";
+import { requireAdvancedPlan } from "@/lib/serverFeatureAccess";
 
 export const runtime = "nodejs";
 
@@ -128,6 +129,9 @@ export async function GET(req: NextRequest) {
     if (authErr || !authData?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const userId = authData.user.id;
+    const advancedGate = await requireAdvancedPlan(userId);
+    if (advancedGate) return advancedGate;
+
     const { searchParams } = new URL(req.url);
 
     const date = String(searchParams.get("date") ?? "").trim();
@@ -335,6 +339,9 @@ export async function POST(req: NextRequest) {
     if (authErr || !authData?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const userId = authData.user.id;
+    const advancedGate = await requireAdvancedPlan(userId);
+    if (advancedGate) return advancedGate;
+
     const body = await req.json();
     const rawText = String(body?.rawText ?? "");
     const sourceTz = String(body?.sourceTz ?? "America/New_York");

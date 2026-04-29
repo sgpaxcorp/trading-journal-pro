@@ -17,6 +17,8 @@ type OtherScreenProps = {
   onOpenChallenges: () => void;
   onOpenJournalDate: () => void;
   onOpenBrokerConnect: () => void;
+  isAdvanced?: boolean;
+  hasBrokerSync?: boolean;
 };
 
 const WEB_BASE = "https://www.neurotrader-journal.com";
@@ -30,6 +32,8 @@ export function OtherScreen({
   onOpenChallenges,
   onOpenJournalDate,
   onOpenBrokerConnect,
+  isAdvanced = false,
+  hasBrokerSync = false,
 }: OtherScreenProps) {
   const { language } = useLanguage();
   const { colors } = useTheme();
@@ -86,11 +90,15 @@ export function OtherScreen({
           onPress={onOpenTrophies}
         />
         <ModuleTile
-          title={t(language, "Notebook", "Notebook")}
+          title={
+            isAdvanced
+              ? t(language, "Notebook", "Notebook")
+              : t(language, "Notebook · Advanced", "Notebook · Advanced")
+          }
           description={t(
             language,
-            "Review your saved notebook entries.",
-            "Revisa tus notas guardadas."
+            "Custom notebooks, sections, pages, and research notes.",
+            "Libretas custom, secciones, páginas y notas de research."
           )}
           iconName="document-text-outline"
           onPress={onOpenNotebook}
@@ -106,11 +114,15 @@ export function OtherScreen({
           onPress={onOpenChallenges}
         />
         <ModuleTile
-          title={t(language, "Broker connect", "Conectar bróker")}
+          title={
+            hasBrokerSync
+              ? t(language, "Broker connect", "Conectar bróker")
+              : t(language, "Broker Sync · Add-on", "Broker Sync · Add-on")
+          }
           description={t(
             language,
-            "Link your broker account on mobile.",
-            "Conecta tu cuenta de bróker en móvil."
+            "Connect and sync your broker account on mobile.",
+            "Conecta y sincroniza tu cuenta de bróker en móvil."
           )}
           iconName="link-outline"
           onPress={onOpenBrokerConnect}

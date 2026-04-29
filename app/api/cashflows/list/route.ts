@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
+import { requireAdvancedPlan } from "@/lib/serverFeatureAccess";
 
 export const runtime = "nodejs";
 
@@ -102,6 +103,9 @@ export async function GET(req: NextRequest) {
     }
 
     const userId = authData.user.id;
+    const advancedGate = await requireAdvancedPlan(userId);
+    if (advancedGate) return advancedGate;
+
     const { searchParams } = new URL(req.url);
     const fromDate = searchParams.get("fromDate") || "";
     const toDate = searchParams.get("toDate") || "";

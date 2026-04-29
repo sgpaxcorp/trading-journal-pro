@@ -28,6 +28,18 @@ export async function apiGet<T>(path: string): Promise<T> {
     if (contentType.includes("text/html")) {
       throw new Error(`API error: received HTML from ${url}`);
     }
+    if (contentType.includes("application/json")) {
+      const body = await res.json().catch(() => null);
+      const message =
+        body?.error ||
+        body?.message ||
+        (body?.code === "advanced_required"
+          ? "Advanced plan required."
+          : body?.code === "broker_sync_required"
+          ? "Broker Sync add-on required."
+          : "");
+      throw new Error(message || `Request failed (${res.status})`);
+    }
     const text = await res.text();
     throw new Error(text || `Request failed (${res.status})`);
   }
@@ -52,6 +64,18 @@ export async function apiPost<T>(path: string, body: Record<string, unknown>): P
   if (!res.ok) {
     if (contentType.includes("text/html")) {
       throw new Error(`API error: received HTML from ${url}`);
+    }
+    if (contentType.includes("application/json")) {
+      const bodyJson = await res.json().catch(() => null);
+      const message =
+        bodyJson?.error ||
+        bodyJson?.message ||
+        (bodyJson?.code === "advanced_required"
+          ? "Advanced plan required."
+          : bodyJson?.code === "broker_sync_required"
+          ? "Broker Sync add-on required."
+          : "");
+      throw new Error(message || `Request failed (${res.status})`);
     }
     const text = await res.text();
     throw new Error(text || `Request failed (${res.status})`);

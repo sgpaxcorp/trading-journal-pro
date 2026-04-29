@@ -2,11 +2,76 @@ const fs = require("fs");
 const path = require("path");
 const { withDangerousMod, withXcodeProject } = require("@expo/config-plugins");
 
+const IOS_DEPLOYMENT_TARGET = "16.0";
 const USER_SCRIPT_SANDBOXING_YES = "ENABLE_USER_SCRIPT_SANDBOXING = YES;";
 const USER_SCRIPT_SANDBOXING_NO = "ENABLE_USER_SCRIPT_SANDBOXING = NO;";
 const PODFILE_PLATFORM_LINE =
   "platform :ios, podfile_properties['ios.deploymentTarget'] || '15.1'\n";
+const PODFILE_PLATFORM_BLOCK =
+  "ios_deployment_target = podfile_properties['ios.deploymentTarget'] || '16.0'\n" +
+  "platform :ios, ios_deployment_target\n";
 const PODFILE_INHIBIT_WARNINGS_LINE = "inhibit_all_warnings!\n";
+const PODFILE_RN_POST_INSTALL_BLOCK = `    react_native_post_install(
+      installer,
+      config[:reactNativePath],
+      :mac_catalyst_enabled => false,
+      :ccache_enabled => ccache_enabled?(podfile_properties),
+    )
+
+`;
+const PODFILE_NATIVE_BUILD_FIX_BLOCK = `    installer.pods_project.targets.each do |target|
+      target.build_configurations.each do |build_config|
+        build_config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = ios_deployment_target
+        build_config.build_settings['GCC_WARN_INHIBIT_ALL_WARNINGS'] = 'YES'
+        build_config.build_settings['SWIFT_SUPPRESS_WARNINGS'] = 'YES'
+        build_config.build_settings['CLANG_WARN_NULLABILITY_COMPLETENESS'] = 'NO'
+        build_config.build_settings['CLANG_WARN_DOCUMENTATION_COMMENTS'] = 'NO'
+        build_config.build_settings['CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER'] = 'NO'
+        build_config.build_settings['WARNING_CFLAGS'] = '$(inherited) -w'
+
+        ['OTHER_CFLAGS', 'OTHER_CPLUSPLUSFLAGS'].each do |flag_key|
+          flags = build_config.build_settings[flag_key]
+          flags = flags.is_a?(Array) ? flags : flags.to_s.split(/\\s+/)
+          flags.unshift('$(inherited)') unless flags.include?('$(inherited)')
+          ['-w', '-Wno-nullability-completeness', '-Wno-nullability'].each do |flag|
+            flags << flag unless flags.include?(flag)
+          end
+          build_config.build_settings[flag_key] = flags
+        end
+
+        swift_flags = build_config.build_settings['OTHER_SWIFT_FLAGS']
+        swift_flags = swift_flags.is_a?(Array) ? swift_flags : swift_flags.to_s.split(/\\s+/)
+        swift_flags.unshift('$(inherited)') unless swift_flags.include?('$(inherited)')
+        swift_flags << '-suppress-warnings' unless swift_flags.include?('-suppress-warnings')
+        [['-Xcc', '-w'], ['-Xcc', '-Wno-nullability-completeness'], ['-Xcc', '-Wno-nullability']].each do |prefix, flag|
+          has_pair = swift_flags.each_cons(2).any? { |left, right| left == prefix && right == flag }
+          swift_flags.concat([prefix, flag]) unless has_pair
+        end
+        build_config.build_settings['OTHER_SWIFT_FLAGS'] = swift_flags
+
+        libtool_flags = build_config.build_settings['LIBTOOLFLAGS']
+        libtool_flags = libtool_flags.is_a?(Array) ? libtool_flags : libtool_flags.to_s.split(/\\s+/)
+        libtool_flags.unshift('$(inherited)') unless libtool_flags.include?('$(inherited)')
+        libtool_flags << '-no_warning_for_no_symbols' unless libtool_flags.include?('-no_warning_for_no_symbols')
+        build_config.build_settings['LIBTOOLFLAGS'] = libtool_flags
+        build_config.build_settings['OTHER_LIBTOOLFLAGS'] = libtool_flags
+
+        definitions = build_config.build_settings['GCC_PREPROCESSOR_DEFINITIONS']
+        definitions = definitions.is_a?(Array) ? definitions : definitions.to_s.split(/\\s+/)
+        definitions.unshift('$(inherited)') unless definitions.include?('$(inherited)')
+        # fmt 11 + Apple Clang C++20 can fail on RN/Folly dynamic format strings.
+        definitions << 'FMT_USE_CONSTEVAL=0' unless definitions.include?('FMT_USE_CONSTEVAL=0')
+        build_config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] = definitions
+
+        # Keep fmt away from Apple Clang C++20 consteval regressions.
+        build_config.build_settings['CLANG_CXX_LANGUAGE_STANDARD'] = 'c++17' if target.name == 'fmt'
+      end
+
+      target.shell_script_build_phases.each do |phase|
+        phase.always_out_of_date = '1' if phase.name.to_s.include?('[Hermes] Replace Hermes')
+      end
+    end
+`;
 const SCHEME_LAUNCH_DEBUG =
   '<LaunchAction\n      buildConfiguration = "Debug"';
 const SCHEME_LAUNCH_RELEASE =
@@ -95,6 +160,159 @@ const toPbxQuotedScript = (script) =>
     .replace(/\n/g, "\\n")
     .replace(/"/g, '\\"')}"`;
 
+const removeDuplicateLibcxxFlag = (buildSettings) => {
+  const flags = buildSettings.OTHER_LDFLAGS;
+  if (Array.isArray(flags)) {
+    buildSettings.OTHER_LDFLAGS = flags.filter((flag) => unquote(flag) !== "-lc++");
+    return;
+  }
+  if (typeof flags === "string") {
+    buildSettings.OTHER_LDFLAGS = flags
+      .split(/\s+/)
+      .filter((flag) => unquote(flag) !== "-lc++")
+      .join(" ");
+  }
+};
+
+const appendBuildSettingFlags = (buildSettings, key, flagsToAdd) => {
+  const existing = buildSettings[key];
+  const flags = Array.isArray(existing)
+    ? [...existing]
+    : String(existing || "$(inherited)").split(/\s+/).filter(Boolean);
+  if (!flags.some((flag) => unquote(flag) === "$(inherited)")) {
+    flags.unshift("$(inherited)");
+  }
+  for (const flag of flagsToAdd) {
+    if (!flags.some((existingFlag) => unquote(existingFlag) === flag)) {
+      flags.push(flag);
+    }
+  }
+  buildSettings[key] = flags;
+};
+
+const appendSwiftCompilerFlags = (buildSettings, xccFlagsToAdd) => {
+  const existing = buildSettings.OTHER_SWIFT_FLAGS;
+  const flags = Array.isArray(existing)
+    ? [...existing]
+    : String(existing || "$(inherited)").split(/\s+/).filter(Boolean);
+  if (!flags.some((flag) => unquote(flag) === "$(inherited)")) {
+    flags.unshift("$(inherited)");
+  }
+  if (!flags.some((flag) => unquote(flag) === "-suppress-warnings")) {
+    flags.push("-suppress-warnings");
+  }
+  for (const ccFlag of xccFlagsToAdd) {
+    const hasPair = flags.some(
+      (flag, index) =>
+        unquote(flag) === "-Xcc" && unquote(flags[index + 1]) === ccFlag
+    );
+    if (!hasPair) {
+      flags.push("-Xcc", ccFlag);
+    }
+  }
+  buildSettings.OTHER_SWIFT_FLAGS = flags;
+};
+
+const ensurePodfileIosBuildFixes = (podfile) => {
+  let next = podfile;
+
+  if (!next.includes("ios_deployment_target = podfile_properties['ios.deploymentTarget']")) {
+    next = next.replace(PODFILE_PLATFORM_LINE, PODFILE_PLATFORM_BLOCK);
+  }
+
+  if (!next.includes(PODFILE_INHIBIT_WARNINGS_LINE)) {
+    const platformAnchor = next.includes(PODFILE_PLATFORM_BLOCK)
+      ? PODFILE_PLATFORM_BLOCK
+      : PODFILE_PLATFORM_LINE;
+    next = next.replace(platformAnchor, `${platformAnchor}${PODFILE_INHIBIT_WARNINGS_LINE}`);
+  }
+
+  if (!next.includes("FMT_USE_CONSTEVAL=0")) {
+    next = next.replace(
+      PODFILE_RN_POST_INSTALL_BLOCK,
+      `${PODFILE_RN_POST_INSTALL_BLOCK}${PODFILE_NATIVE_BUILD_FIX_BLOCK}`
+    );
+  } else if (!next.includes("GCC_WARN_INHIBIT_ALL_WARNINGS")) {
+    next = next.replace(
+      "        build_config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = ios_deployment_target\n",
+      "        build_config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = ios_deployment_target\n" +
+        "        build_config.build_settings['GCC_WARN_INHIBIT_ALL_WARNINGS'] = 'YES'\n" +
+        "        build_config.build_settings['SWIFT_SUPPRESS_WARNINGS'] = 'YES'\n" +
+        "        build_config.build_settings['CLANG_WARN_NULLABILITY_COMPLETENESS'] = 'NO'\n" +
+        "        build_config.build_settings['CLANG_WARN_DOCUMENTATION_COMMENTS'] = 'NO'\n" +
+        "        build_config.build_settings['CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER'] = 'NO'\n" +
+        "        build_config.build_settings['WARNING_CFLAGS'] = '$(inherited) -w'\n"
+    );
+  }
+
+  if (!next.includes("LIBTOOLFLAGS")) {
+    next = next.replace(
+      "        definitions = build_config.build_settings['GCC_PREPROCESSOR_DEFINITIONS']\n",
+      "        ['OTHER_CFLAGS', 'OTHER_CPLUSPLUSFLAGS'].each do |flag_key|\n" +
+        "          flags = build_config.build_settings[flag_key]\n" +
+        "          flags = flags.is_a?(Array) ? flags : flags.to_s.split(/\\s+/)\n" +
+        "          flags.unshift('$(inherited)') unless flags.include?('$(inherited)')\n" +
+        "          ['-w', '-Wno-nullability-completeness', '-Wno-nullability'].each do |flag|\n" +
+        "            flags << flag unless flags.include?(flag)\n" +
+        "          end\n" +
+        "          build_config.build_settings[flag_key] = flags\n" +
+        "        end\n\n" +
+        "        swift_flags = build_config.build_settings['OTHER_SWIFT_FLAGS']\n" +
+        "        swift_flags = swift_flags.is_a?(Array) ? swift_flags : swift_flags.to_s.split(/\\s+/)\n" +
+        "        swift_flags.unshift('$(inherited)') unless swift_flags.include?('$(inherited)')\n" +
+        "        swift_flags << '-suppress-warnings' unless swift_flags.include?('-suppress-warnings')\n" +
+        "        [['-Xcc', '-w'], ['-Xcc', '-Wno-nullability-completeness'], ['-Xcc', '-Wno-nullability']].each do |prefix, flag|\n" +
+        "          has_pair = swift_flags.each_cons(2).any? { |left, right| left == prefix && right == flag }\n" +
+        "          swift_flags.concat([prefix, flag]) unless has_pair\n" +
+        "        end\n" +
+        "        build_config.build_settings['OTHER_SWIFT_FLAGS'] = swift_flags\n\n" +
+        "        libtool_flags = build_config.build_settings['LIBTOOLFLAGS']\n" +
+        "        libtool_flags = libtool_flags.is_a?(Array) ? libtool_flags : libtool_flags.to_s.split(/\\s+/)\n" +
+        "        libtool_flags.unshift('$(inherited)') unless libtool_flags.include?('$(inherited)')\n" +
+        "        libtool_flags << '-no_warning_for_no_symbols' unless libtool_flags.include?('-no_warning_for_no_symbols')\n" +
+        "        build_config.build_settings['LIBTOOLFLAGS'] = libtool_flags\n" +
+        "        build_config.build_settings['OTHER_LIBTOOLFLAGS'] = libtool_flags\n\n" +
+        "        definitions = build_config.build_settings['GCC_PREPROCESSOR_DEFINITIONS']\n"
+    );
+  }
+
+  if (!next.includes("'-Wno-nullability'")) {
+    next = next.replaceAll(
+      "['-w', '-Wno-nullability-completeness']",
+      "['-w', '-Wno-nullability-completeness', '-Wno-nullability']"
+    );
+  }
+
+  if (!next.includes("build_config.build_settings['OTHER_SWIFT_FLAGS']")) {
+    next = next.replace(
+      "        libtool_flags = build_config.build_settings['LIBTOOLFLAGS']\n",
+      "        swift_flags = build_config.build_settings['OTHER_SWIFT_FLAGS']\n" +
+        "        swift_flags = swift_flags.is_a?(Array) ? swift_flags : swift_flags.to_s.split(/\\s+/)\n" +
+        "        swift_flags.unshift('$(inherited)') unless swift_flags.include?('$(inherited)')\n" +
+        "        swift_flags << '-suppress-warnings' unless swift_flags.include?('-suppress-warnings')\n" +
+        "        [['-Xcc', '-w'], ['-Xcc', '-Wno-nullability-completeness'], ['-Xcc', '-Wno-nullability']].each do |prefix, flag|\n" +
+        "          has_pair = swift_flags.each_cons(2).any? { |left, right| left == prefix && right == flag }\n" +
+        "          swift_flags.concat([prefix, flag]) unless has_pair\n" +
+        "        end\n" +
+        "        build_config.build_settings['OTHER_SWIFT_FLAGS'] = swift_flags\n\n" +
+        "        libtool_flags = build_config.build_settings['LIBTOOLFLAGS']\n"
+    );
+  }
+
+  if (next.includes("GCC_WARN_INHIBIT_ALL_WARNINGS") && !next.includes("always_out_of_date")) {
+    next = next.replace(
+      "      end\n    end\n",
+      "      end\n\n" +
+        "      target.shell_script_build_phases.each do |phase|\n" +
+        "        phase.always_out_of_date = '1' if phase.name.to_s.include?('[Hermes] Replace Hermes')\n" +
+        "      end\n" +
+        "    end\n"
+    );
+  }
+
+  return next;
+};
+
 module.exports = function withDeviceDebugBundling(config) {
   config = withXcodeProject(config, (config) => {
     const xcodeProject = config.modResults;
@@ -104,6 +322,24 @@ module.exports = function withDeviceDebugBundling(config) {
       const buildConfig = buildConfigs[key];
       if (typeof buildConfig !== "object" || !buildConfig.buildSettings) continue;
       buildConfig.buildSettings.ENABLE_USER_SCRIPT_SANDBOXING = "NO";
+      buildConfig.buildSettings.IPHONEOS_DEPLOYMENT_TARGET = IOS_DEPLOYMENT_TARGET;
+      removeDuplicateLibcxxFlag(buildConfig.buildSettings);
+      buildConfig.buildSettings.CLANG_WARN_NULLABILITY_COMPLETENESS = "NO";
+      buildConfig.buildSettings.LIBTOOLFLAGS = "$(inherited) -no_warning_for_no_symbols";
+      buildConfig.buildSettings.OTHER_LIBTOOLFLAGS = "$(inherited) -no_warning_for_no_symbols";
+      appendBuildSettingFlags(buildConfig.buildSettings, "OTHER_CFLAGS", [
+        "-Wno-nullability-completeness",
+        "-Wno-nullability",
+      ]);
+      appendBuildSettingFlags(buildConfig.buildSettings, "OTHER_CPLUSPLUSFLAGS", [
+        "-Wno-nullability-completeness",
+        "-Wno-nullability",
+      ]);
+      appendSwiftCompilerFlags(buildConfig.buildSettings, [
+        "-w",
+        "-Wno-nullability-completeness",
+        "-Wno-nullability",
+      ]);
     }
 
     const shellPhases =
@@ -141,11 +377,9 @@ module.exports = function withDeviceDebugBundling(config) {
       const podfilePath = path.join(iosRoot, "Podfile");
       if (fs.existsSync(podfilePath)) {
         let podfile = fs.readFileSync(podfilePath, "utf8");
-        if (!podfile.includes(PODFILE_INHIBIT_WARNINGS_LINE)) {
-          podfile = podfile.replace(
-            PODFILE_PLATFORM_LINE,
-            `${PODFILE_PLATFORM_LINE}${PODFILE_INHIBIT_WARNINGS_LINE}`
-          );
+        const nextPodfile = ensurePodfileIosBuildFixes(podfile);
+        if (nextPodfile !== podfile) {
+          podfile = nextPodfile;
           fs.writeFileSync(podfilePath, podfile);
         }
       }

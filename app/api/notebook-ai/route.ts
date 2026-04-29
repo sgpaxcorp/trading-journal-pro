@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import OpenAI from "openai";
 import { getAuthUser } from "@/lib/authServer";
 import { rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
+import { requireAdvancedPlan } from "@/lib/serverFeatureAccess";
 
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -14,6 +15,9 @@ export async function POST(req: Request) {
     if (!authUser) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+
+    const advancedGate = await requireAdvancedPlan(authUser.userId);
+    if (advancedGate) return advancedGate;
 
     const rate = rateLimit(`notebook-ai:user:${authUser.userId}`, {
       limit: 6,

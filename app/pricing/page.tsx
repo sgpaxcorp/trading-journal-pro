@@ -254,14 +254,12 @@ export default function PricingPage() {
                 <li>✓ {L("Emotions, tags, and lessons learned", "Emociones, etiquetas y lecciones")}</li>
                 <li>✓ {L("Calendar results", "Calendario de resultados")}</li>
                 <li>✓ {L("Equity curve + balance chart", "Curva de equity + balance")}</li>
-                <li>✓ {L("Cashflow tracking", "Seguimiento de cashflows")}</li>
                 <li>✓ {L("Core KPIs", "KPIs clave")}</li>
                 <li>✓ {L("Basic alerts & reminders", "Alertas y recordatorios básicos")}</li>
-                <li>✓ {L("Automated journaling imports", "Importación automática de journaling")}</li>
-                <li>✓ {L("Back-study module & challenges", "Módulo back-study y retos")}</li>
+                <li>✓ {L("Manual broker imports", "Imports manuales de bróker")}</li>
+                <li>✓ {L("Trade review workspace & challenges", "Trade review y retos")}</li>
                 <li>✓ {L("Global ranking (opt-in)", "Ranking global (opcional)")}</li>
                 <li>✓ {L("Mobile app (iOS)", "Aplicación móvil (iOS)")}</li>
-                <li>✓ {L("1GB data storage", "1GB de almacenamiento")}</li>
               </ul>
               <button
                 onClick={() => handleStart("core")}
@@ -324,13 +322,15 @@ export default function PricingPage() {
                 <ul className="mt-3 space-y-1.5 text-[16px] text-slate-200">
                   <li>✓ {L("Unlimited trading accounts", "Cuentas de trading ilimitadas")}</li>
                   <li>✓ {L("Everything in Core", "Todo lo de Core")}</li>
+                  <li>✓ {L("Notebook workspace", "Workspace de Notebook")}</li>
+                  <li>✓ {L("Cashflow tracking", "Seguimiento de cashflows")}</li>
                   <li>✓ {L("Time-of-day & instrument breakdowns", "Desglose por hora e instrumento")}</li>
                   <li>✓ {L("Risk metrics + streaks", "Métricas de riesgo + rachas")}</li>
                   <li>✓ {L("Profit & Loss Track (business accounting)", "Profit & Loss Track (contabilidad)")}</li>
+                  <li>✓ {L("Back-Studying & Audit workbench", "Back-Studying y Audit workbench")}</li>
                   <li>✓ {L("Advanced alerts & reminders", "Alertas y recordatorios avanzados")}</li>
-                  <li>✓ {L("Automated journaling imports", "Importación automática de journaling")}</li>
                   <li>✓ {L("AI coaching & action plans", "AI coaching y planes de acción")}</li>
-                  <li>✓ {L("PDF reports + AI summary", "Reportes PDF + resumen IA")}</li>
+                  <li>✓ {L("Advanced PDF exports", "Exportaciones PDF avanzadas")}</li>
                   <li>✓ {L("Priority email & chat support", "Soporte prioritario por email y chat")}</li>
                   <li>✓ {L("Mobile app (iOS)", "Aplicación móvil (iOS)")}</li>
                 </ul>

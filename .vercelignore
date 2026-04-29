@@ -5,3 +5,7 @@ mobile/**
 # Optional large dirs
 node_modules
 .next
+
+# Local secrets; production uses Vercel Environment Variables
+.env
+.env.*

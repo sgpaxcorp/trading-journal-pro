@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 import { isActiveEntitlementStatus, PLATFORM_ACCESS_ENTITLEMENT } from "@/lib/accessControl";
 import { hasAnyRecognizedAccessGrant } from "@/lib/accessGrants";
-import { normalizePlanTier } from "@/lib/planAccess";
+import { normalizePlanTier, planFromProfile } from "@/lib/planAccess";
 
 export const runtime = "nodejs";
 
@@ -33,7 +33,7 @@ export async function POST(req: NextRequest) {
     }
 
     const [{ data: profile }, { data: entitlements }] = await Promise.all([
-      supabaseAdmin.from("profiles").select("plan").eq("id", userId).maybeSingle(),
+      supabaseAdmin.from("profiles").select("plan, subscription_status").eq("id", userId).maybeSingle(),
       supabaseAdmin
         .from("user_entitlements")
         .select("entitlement_key, status, metadata")
@@ -54,7 +54,7 @@ export async function POST(req: NextRequest) {
         ? normalizePlanTier((platformEntitlement as any)?.metadata?.plan)
         : "none";
     const maxAccounts = maxAccountsForPlan(
-      planFromEntitlement !== "none" ? planFromEntitlement : (profile as any)?.plan
+      planFromEntitlement !== "none" ? planFromEntitlement : planFromProfile(profile as any)
     );
 
     const { data: existing, error: countErr } = await supabaseAdmin

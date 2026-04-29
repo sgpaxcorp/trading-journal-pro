@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { useTradingAccounts } from "@/hooks/useTradingAccounts";
+import { useUserPlan } from "@/hooks/useUserPlan";
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
 import { supabaseBrowser } from "@/lib/supaBaseClient";
@@ -44,6 +45,7 @@ export default function OrderHistoryAuditPanel({
 }: PanelProps) {
   const { user, loading } = useAuth();
   const { activeAccountId } = useTradingAccounts();
+  const { plan, loading: planLoading } = useUserPlan();
   const { locale } = useAppSettings();
   const lang = resolveLocale(locale);
   const isEs = lang === "es";
@@ -60,6 +62,39 @@ export default function OrderHistoryAuditPanel({
   useEffect(() => {
     setError(null);
   }, [date, symbol, instrumentKey]);
+
+  if (planLoading) {
+    return (
+      <section className={wrapperClassName}>
+        <div className={innerClassName}>
+          <p className="text-sm text-slate-400">{L("Loading...", "Cargando...")}</p>
+        </div>
+      </section>
+    );
+  }
+
+  if (plan !== "advanced") {
+    return (
+      <section className={wrapperClassName}>
+        <div className={innerClassName}>
+          <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
+            <p className="text-emerald-300 text-[11px] uppercase tracking-[0.3em]">
+              {L("Advanced feature", "Función Advanced")}
+            </p>
+            <h1 className="text-xl font-semibold mt-2">
+              {L("Order History Audit is included in Advanced", "Order History Audit está incluido en Advanced")}
+            </h1>
+            <p className="text-sm text-slate-400 mt-2">
+              {L(
+                "Core keeps Trade Review. Advanced unlocks deterministic order-history audit and process validation.",
+                "Core mantiene Trade Review. Advanced desbloquea la auditoría determinística de órdenes y validación del proceso."
+              )}
+            </p>
+          </div>
+        </div>
+      </section>
+    );
+  }
 
   async function runAudit() {
     if (!user || !activeAccountId) return;

@@ -1,4 +1,5 @@
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
+import { requireAdvancedPlan } from "@/lib/serverFeatureAccess";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -34,6 +35,9 @@ export async function POST(req: Request) {
     }
 
     const userId = authData.user.id;
+    const advancedGate = await requireAdvancedPlan(userId);
+    if (advancedGate) return advancedGate;
+
     const body = (await req.json().catch(() => null)) || {};
     const messageId = safeString(body?.messageId).trim();
     const threadId = safeString(body?.threadId).trim() || null;

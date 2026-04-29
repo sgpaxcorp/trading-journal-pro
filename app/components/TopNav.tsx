@@ -381,7 +381,7 @@ function AccountMenu({ theme, lang }: { theme: Theme; lang: Locale }) {
       try {
         const { data, error } = await supabaseBrowser
           .from("profiles")
-          .select("plan")
+          .select("plan, subscription_status")
           .eq("id", user.id)
           .single();
 
@@ -390,8 +390,11 @@ function AccountMenu({ theme, lang }: { theme: Theme; lang: Locale }) {
           return;
         }
 
-        if (!cancelled && data?.plan) {
-          setProfilePlan(data.plan as string);
+        const activeStatus = ["active", "trialing", "paid"].includes(
+          String((data as any)?.subscription_status ?? "").toLowerCase()
+        );
+        if (!cancelled) {
+          setProfilePlan(data?.plan && activeStatus ? (data.plan as string) : null);
         }
       } catch (err) {
         console.error("[TopNav] Unexpected error fetching profile plan:", err);

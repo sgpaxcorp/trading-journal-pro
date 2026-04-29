@@ -86,6 +86,10 @@ type ChatMessage = {
 
 type CoachActionPlanMeta = {
   summary?: string;
+  whatISee?: string;
+  whatIsDrifting?: string;
+  whatToProtect?: string;
+  whatChangesNextSession?: string;
   nextAction?: string;
   ruleToAdd?: string;
   ruleToRemove?: string;
@@ -2003,29 +2007,41 @@ function AiCoachingPageInner() {
 
   const renderActionPlan = (plan?: CoachActionPlanMeta | null) => {
     if (!plan) return null;
-    const rows = [
-      { label: L("Next action", "Próxima acción"), value: plan.nextAction },
-      { label: L("Rule to add", "Regla para agregar"), value: plan.ruleToAdd },
-      { label: L("Rule to remove", "Regla para remover"), value: plan.ruleToRemove },
-      { label: L("Checkpoint focus", "Foco del checkpoint"), value: plan.checkpointFocus },
-    ].filter((row) => String(row.value || "").trim());
+    const normalize = (value?: string | null) => String(value || "").trim();
+    const summary = normalize(plan.summary);
+    const sections = [
+      { label: L("What I see", "Lo que veo"), value: normalize(plan.whatISee) || summary },
+      { label: L("What is drifting", "Lo que se está desviando"), value: normalize(plan.whatIsDrifting) || normalize(plan.ruleToRemove) },
+      { label: L("What to protect", "Lo que debes proteger"), value: normalize(plan.whatToProtect) || normalize(plan.checkpointFocus) },
+      {
+        label: L("What changes next session", "Qué cambia la próxima sesión"),
+        value: normalize(plan.whatChangesNextSession) || normalize(plan.nextAction),
+      },
+    ].filter((row) => row.value);
 
-    if (!rows.length && !String(plan.summary || "").trim()) return null;
+    const filteredSections = sections.filter((row, index, rows) => {
+      if (summary && row.value.toLowerCase() === summary.toLowerCase()) return false;
+      return rows.findIndex((candidate) => candidate.value.toLowerCase() === row.value.toLowerCase()) === index;
+    });
+
+    if (!filteredSections.length && !summary) return null;
 
     return (
       <div className="mt-3 rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-3 text-[12px] text-slate-100">
         <p className="text-[10px] uppercase tracking-[0.18em] text-emerald-300">
           {L("Action plan", "Plan de acción")}
         </p>
-        {plan.summary ? <p className="mt-2 text-slate-200">{plan.summary}</p> : null}
-        <div className="mt-2 space-y-1.5">
-          {rows.map((row) => (
-            <div key={row.label}>
-              <span className="text-slate-400">{row.label}: </span>
-              <span className="text-slate-100">{row.value}</span>
-            </div>
-          ))}
-        </div>
+        {summary ? <p className="mt-2 text-slate-200">{summary}</p> : null}
+        {filteredSections.length ? (
+          <div className="mt-3 grid gap-2 sm:grid-cols-2">
+            {filteredSections.map((row) => (
+              <div key={row.label} className="rounded-xl border border-emerald-500/10 bg-slate-950/35 p-3">
+                <p className="text-[10px] uppercase tracking-[0.16em] text-emerald-200/80">{row.label}</p>
+                <p className="mt-1 text-[12px] leading-relaxed text-slate-100">{row.value}</p>
+              </div>
+            ))}
+          </div>
+        ) : null}
       </div>
     );
   };
@@ -3379,6 +3395,33 @@ function AiCoachingPageInner() {
                         : [],
                     }
                   : null,
+                prepareChecklist: Array.isArray(growthPlan.steps?.prepare?.checklist)
+                  ? growthPlan.steps.prepare.checklist
+                      .filter((item: any) => item && item.isActive !== false && String(item.text ?? "").trim().length > 0)
+                      .slice(0, 8)
+                      .map((item: any) => ({
+                        id: item.id ?? "",
+                        text: String(item.text ?? "").trim(),
+                      }))
+                  : [],
+                strategies: Array.isArray(growthPlan.steps?.strategy?.strategies)
+                  ? growthPlan.steps.strategy.strategies
+                      .slice(0, 4)
+                      .map((strategy: any) => ({
+                        name: String(strategy?.name ?? "").trim(),
+                        setup: String(strategy?.setup ?? "").trim(),
+                        entryRules: String(strategy?.entryRules ?? "").trim(),
+                        exitRules: String(strategy?.exitRules ?? "").trim(),
+                        managementRules: String(strategy?.managementRules ?? "").trim(),
+                        invalidation: String(strategy?.invalidation ?? "").trim(),
+                        timeframe: String(strategy?.timeframe ?? "").trim(),
+                        instruments: Array.isArray(strategy?.instruments)
+                          ? strategy.instruments.map((item: any) => String(item).trim()).filter(Boolean)
+                          : [],
+                      }))
+                      .filter((strategy: any) => strategy.name || strategy.setup || strategy.entryRules || strategy.managementRules || strategy.invalidation)
+                  : [],
+                strategyNotes: String(growthPlan.steps?.strategy?.notes ?? "").trim(),
                 planPhases: Array.isArray(growthPlan.plan_phases)
                   ? growthPlan.plan_phases.slice(0, 24).map((phase) => ({
                       id: String(phase?.id ?? ""),

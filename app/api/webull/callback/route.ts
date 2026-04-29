@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { exchangeWebullCode, saveWebullTokens, formatWebullError } from "@/lib/webullClient";
 import { getBrokerOAuthConnection } from "@/lib/brokerOAuthStorage";
+import { requireBrokerSyncAddon } from "@/lib/serverFeatureAccess";
 
 export const runtime = "nodejs";
 
@@ -32,6 +33,16 @@ export async function GET(req: Request) {
   }
 
   try {
+    const brokerSyncFree =
+      process.env.BROKER_SYNC_FREE === "true" || process.env.NEXT_PUBLIC_BROKER_SYNC_FREE === "true";
+    if (!brokerSyncFree) {
+      const brokerGate = await requireBrokerSyncAddon(userId);
+      if (brokerGate) {
+        res.headers.set("Location", `${url.origin}/import?webull=error&reason=broker_sync_required`);
+        return res;
+      }
+    }
+
     const existing = await getBrokerOAuthConnection(userId, "webull");
     const tokenData = await exchangeWebullCode(code);
     await saveWebullTokens(userId, tokenData, existing ?? undefined);

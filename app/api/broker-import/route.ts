@@ -1,7 +1,7 @@
 // app/api/broker-import/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
-import * as XLSX from "xlsx";
+import ExcelJS from "exceljs";
 import { createHash } from "crypto";
 import {
   detectTosOrderHistoryFromRows,
@@ -114,10 +114,34 @@ function rowsFromCsvText(csv: string): AnyRow[] {
   }
   return out;
 }
-function rowsFromExcelBuffer(buf: Buffer): AnyRow[] {
-  const wb = XLSX.read(buf, { type: "buffer" });
-  const ws = wb.Sheets[wb.SheetNames[0]];
-  return XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" }) as AnyRow[];
+function normalizeSpreadsheetCell(value: any): string | number | boolean {
+  if (value == null) return "";
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value !== "object") return value;
+  if (Array.isArray(value.richText)) {
+    return value.richText.map((part: any) => String(part?.text ?? "")).join("");
+  }
+  if ("result" in value) return normalizeSpreadsheetCell(value.result);
+  if ("text" in value) return String(value.text ?? "");
+  if ("hyperlink" in value && "tooltip" in value) return String(value.hyperlink ?? "");
+  return String(value);
+}
+
+async function rowsFromExcelBuffer(buf: Buffer): Promise<AnyRow[]> {
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(buf as any);
+  const ws = wb.worksheets[0];
+  if (!ws) return [];
+
+  const rows: AnyRow[] = [];
+  ws.eachRow({ includeEmpty: false }, (row) => {
+    const values = Array.isArray(row.values) ? row.values.slice(1) : [];
+    const normalized = values.map(normalizeSpreadsheetCell);
+    if (normalized.some((cell) => String(cell ?? "").trim() !== "")) {
+      rows.push(normalized);
+    }
+  });
+  return rows;
 }
 
 /* -------------------- datetime (Thinkorswim statement) -------------------- */
@@ -529,15 +553,15 @@ export async function POST(req: NextRequest) {
   try {
     const name = (file.name ?? "").toLowerCase();
     const isCsv = name.endsWith(".csv");
-    const isExcel = name.endsWith(".xlsx") || name.endsWith(".xls");
+    const isExcel = name.endsWith(".xlsx");
     if (!isCsv && !isExcel)
-      throw new Error("Unsupported file type. Please upload CSV / XLS / XLSX.");
+      throw new Error("Unsupported file type. Please upload CSV / XLSX.");
 
     const fileBuffer = Buffer.from(await file.arrayBuffer());
     const fileText = isCsv ? fileBuffer.toString("utf8") : null;
     const rows = isCsv
       ? rowsFromCsvText(fileText ?? "")
-      : rowsFromExcelBuffer(fileBuffer);
+      : await rowsFromExcelBuffer(fileBuffer);
 
     const rowsAsStrings = rows.map((r) => (r ?? []).map((c: any) => String(c ?? "")));
 

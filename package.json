@@ -9,8 +9,11 @@
     "start": "next start",
     "lint": "npm run lint:web",
     "lint:web": "eslint app context lib hooks proxy.ts tests --quiet",
+    "typecheck:web": "next typegen && rm -f .next/lock && tsc --noEmit",
     "typecheck:mobile": "cd mobile && npx tsc --noEmit",
-    "verify:release": "npm run test:unit && npm run lint:web && npm run build && npm run typecheck:mobile",
+    "audit:prod": "npm audit --omit=dev --audit-level=high",
+    "audit:mobile": "cd mobile && npm audit --omit=dev --audit-level=high",
+    "verify:release": "npm run test:unit && npm run lint:web && npm run typecheck:web && npm run build && npm run typecheck:mobile && npm run audit:prod && npm run audit:mobile",
     "test:e2e": "playwright test",
     "test:unit": "vitest run",
     "mobile:start": "npm --prefix mobile run start",
@@ -42,16 +45,17 @@
     "apexcharts": "^5.3.6",
     "echarts": "^6.0.0",
     "echarts-for-react": "^3.0.5",
+    "exceljs": "^4.4.0",
     "ffmpeg": "^0.0.4",
     "framer-motion": "^12.23.24",
     "hcaptcha": "^0.2.0",
     "heic2any": "^0.0.4",
-    "jspdf": "^3.0.3",
+    "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.2",
     "lexical": "^0.38.2",
     "lightweight-charts": "^5.1.0",
     "lucide-react": "^0.553.0",
-    "next": "16.0.7",
+    "next": "^16.2.4",
     "openai": "^6.9.1",
     "papaparse": "^5.5.3",
     "react": "19.2.0",
@@ -64,11 +68,10 @@
     "recharts": "^3.6.0",
     "remark-gfm": "^4.0.1",
     "resend": "^6.6.0",
-    "slate": "^0.123.0",
-    "slate-react": "^0.123.0",
-    "snaptrade-typescript-sdk": "^9.0.119",
-    "stripe": "^20.0.0",
-    "xlsx": "^0.18.5"
+    "slate": "^0.124.1",
+    "slate-react": "^0.124.0",
+    "snaptrade-typescript-sdk": "^9.0.181",
+    "stripe": "^20.0.0"
   },
   "devDependencies": {
     "@playwright/test": "^1.58.2",
@@ -79,9 +82,12 @@
     "@types/react-grid-layout": "^1.3.5",
     "baseline-browser-mapping": "^2.10.19",
     "eslint": "^9",
-    "eslint-config-next": "16.0.1",
+    "eslint-config-next": "^16.2.4",
     "tailwindcss": "^4",
     "typescript": "^5",
     "vitest": "^2.1.4"
+  },
+  "overrides": {
+    "axios": "1.15.1"
   }
 }

@@ -1,4 +1,8 @@
-import { isActiveEntitlementStatus, PLATFORM_ACCESS_ENTITLEMENT } from "@/lib/accessControl";
+import {
+  isActiveEntitlementStatus,
+  isActiveProfileStatus,
+  PLATFORM_ACCESS_ENTITLEMENT,
+} from "@/lib/accessControl";
 
 export type AppPlan = "core" | "advanced" | "none";
 
@@ -23,4 +27,12 @@ export function planFromEntitlements(
   );
 
   return normalizePlanTier(hit?.metadata?.plan);
+}
+
+export function planFromProfile(profile: {
+  plan?: unknown;
+  subscription_status?: unknown;
+} | null | undefined): AppPlan {
+  if (!profile || !isActiveProfileStatus(profile.subscription_status)) return "none";
+  return normalizePlanTier(profile.plan);
 }

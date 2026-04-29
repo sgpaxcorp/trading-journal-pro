@@ -10,6 +10,7 @@ import { useTheme } from "../lib/ThemeContext";
 
 type AnalyticsScreenProps = {
   onOpenModule: (title: string, description: string) => void;
+  isAdvanced?: boolean;
 };
 
 type SeriesPoint = { date: string; value: number };
@@ -98,7 +99,7 @@ const hexToRgba = (hex: string, alpha: number) => {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 };
 
-export function AnalyticsScreen({}: AnalyticsScreenProps) {
+export function AnalyticsScreen({ isAdvanced = false }: AnalyticsScreenProps) {
   const { language } = useLanguage();
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
@@ -109,6 +110,12 @@ export function AnalyticsScreen({}: AnalyticsScreenProps) {
   const [series, setSeries] = useState<AccountSeriesResponse | null>(null);
   const [section, setSection] = useState<"overview" | "performance" | "risk" | "time">("overview");
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isAdvanced && section !== "overview") {
+      setSection("overview");
+    }
+  }, [isAdvanced, section]);
 
   useEffect(() => {
     let active = true;
@@ -264,15 +271,17 @@ export function AnalyticsScreen({}: AnalyticsScreenProps) {
       </View>
 
       <View style={styles.segmentRow}>
-        {([
+        {(isAdvanced
+          ? [
           { id: "overview", label: t(language, "Overview", "Resumen") },
           { id: "performance", label: t(language, "Performance", "Performance") },
           { id: "risk", label: t(language, "Risk", "Riesgo") },
           { id: "time", label: t(language, "Time", "Tiempo") },
-        ] as const).map((item) => (
+        ]
+          : [{ id: "overview", label: t(language, "Overview", "Resumen") }] as const).map((item) => (
           <Pressable
             key={item.id}
-            onPress={() => setSection(item.id)}
+            onPress={() => setSection(item.id as "overview" | "performance" | "risk" | "time")}
             style={[styles.segmentButton, section === item.id && styles.segmentButtonActive]}
           >
             <Text style={styles.segmentLabel}>{item.label}</Text>
@@ -292,7 +301,7 @@ export function AnalyticsScreen({}: AnalyticsScreenProps) {
             <StatCard styles={styles} label={t(language, "Profit factor", "Profit factor")} value={snapshot?.profitFactor != null ? snapshot.profitFactor.toFixed(2) : "—"} tone={toneFor(snapshot?.profitFactor)} />
           </View>
 
-          {edgesTop.length ? (
+          {isAdvanced && edgesTop.length ? (
             <View style={styles.subSection}>
               <Text style={styles.subTitle}>{t(language, "Top edges", "Mejores edges")}</Text>
               {edgesTop.map((edge, idx) => (
@@ -335,6 +344,22 @@ export function AnalyticsScreen({}: AnalyticsScreenProps) {
               <Text style={styles.bannerText}>{t(language, "No daily data yet.", "Aún no hay datos diarios.")}</Text>
             )}
           </View>
+
+          {!isAdvanced ? (
+            <View style={styles.lockedCard}>
+              <Text style={styles.lockedBadge}>Advanced</Text>
+              <Text style={styles.lockedTitle}>
+                {t(language, "Advanced analytics locked", "Analítica avanzada bloqueada")}
+              </Text>
+              <Text style={styles.lockedText}>
+                {t(
+                  language,
+                  "Advanced unlocks performance, risk, timing, symbols, and edge breakdowns.",
+                  "Advanced desbloquea performance, riesgo, timing, símbolos y breakdowns de edge."
+                )}
+              </Text>
+            </View>
+          ) : null}
         </View>
       )}
 
@@ -659,6 +684,37 @@ const createStyles = (colors: ThemeColors) =>
       textTransform: "uppercase",
       letterSpacing: 1.2,
       fontWeight: "700",
+    },
+    lockedCard: {
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: colors.primary,
+      backgroundColor: colors.successSoft,
+      padding: 12,
+      gap: 6,
+    },
+    lockedBadge: {
+      alignSelf: "flex-start",
+      color: colors.primary,
+      borderColor: colors.primary,
+      borderWidth: 1,
+      borderRadius: 999,
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+      fontSize: 10,
+      fontWeight: "800",
+      textTransform: "uppercase",
+      letterSpacing: 1.2,
+    },
+    lockedTitle: {
+      color: colors.textPrimary,
+      fontSize: 14,
+      fontWeight: "800",
+    },
+    lockedText: {
+      color: colors.textMuted,
+      fontSize: 12,
+      lineHeight: 18,
     },
     edgeRow: {
       flexDirection: "row",

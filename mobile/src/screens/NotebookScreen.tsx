@@ -14,12 +14,14 @@ import { useNavigation } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
 
 import { ScreenScaffold } from "../components/ScreenScaffold";
+import { PlanGate } from "../components/PlanGate";
 import { useLanguage } from "../lib/LanguageContext";
 import { t } from "../lib/i18n";
 import { useTheme } from "../lib/ThemeContext";
 import type { ThemeColors } from "../theme";
 import { supabaseMobile } from "../lib/supabase";
 import { useSupabaseUser } from "../lib/useSupabaseUser";
+import { usePlanAccess } from "../lib/usePlanAccess";
 import { apiGet } from "../lib/api";
 
 const BOOKS_TABLE = "ntj_notebook_books";
@@ -83,6 +85,7 @@ export function NotebookScreen() {
   const user = useSupabaseUser();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const navigation = useNavigation<any>();
+  const planAccess = usePlanAccess();
 
   const [books, setBooks] = useState<NotebookBook[]>([]);
   const [freeNotes, setFreeNotes] = useState<FreeNote[]>([]);
@@ -101,6 +104,7 @@ export function NotebookScreen() {
   const [manageBookError, setManageBookError] = useState<string | null>(null);
 
   async function reloadNotebookData(options?: { showLoading?: boolean }) {
+    if (!planAccess.isAdvanced) return;
     if (!supabaseMobile || !user?.id) return;
 
     const showLoading = options?.showLoading ?? false;
@@ -169,9 +173,10 @@ export function NotebookScreen() {
   }
 
   useEffect(() => {
+    if (!planAccess.isAdvanced) return;
     if (!supabaseMobile || !user?.id) return;
     void reloadNotebookData({ showLoading: true });
-  }, [language, user?.id]);
+  }, [language, planAccess.isAdvanced, user?.id]);
 
   useEffect(() => {
     if (activeShelf === "journal" && journalDates.length === 0 && books.length > 0) {
@@ -183,6 +188,7 @@ export function NotebookScreen() {
   }, [activeShelf, books.length, journalDates.length]);
 
   async function handleRefresh() {
+    if (!planAccess.isAdvanced) return;
     if (!supabaseMobile || !user?.id) return;
     setRefreshing(true);
     try {
@@ -232,6 +238,21 @@ export function NotebookScreen() {
       }),
     [journalDates, journalNoteMap, language]
   );
+
+  if (!planAccess.isAdvanced) {
+    return (
+      <PlanGate
+        title={t(language, "Notebook", "Notebook")}
+        badge="Advanced"
+        loading={planAccess.loading}
+        subtitle={t(
+          language,
+          "Custom notebooks, Journal Notebook pages, sections, ink, and research notes are included in Advanced.",
+          "Libretas custom, Journal Notebook pages, secciones, ink y notas de research están incluidas en Advanced."
+        )}
+      />
+    );
+  }
 
   async function openDailyNote(entryDate: string) {
     if (!supabaseMobile || !user?.id) return;

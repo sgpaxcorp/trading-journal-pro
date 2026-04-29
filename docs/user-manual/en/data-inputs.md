@@ -14,10 +14,10 @@ Best when your broker is supported by SnapTrade.
 
 Tip: Check the “Supported brokers” table before purchasing Broker Sync.
 
-## 2) CSV / XLS / XLSX Import
+## 2) CSV / XLSX Import
 Best when your broker is not supported by SnapTrade.
 1. Choose the **Broker** and (optional) add a **Comment** for the batch.
-2. Upload the export file (CSV/XLS/XLSX) without editing.
+2. Upload the export file (CSV/XLSX) without editing.
 3. Click **Import** and review the results in Import History.
 
 ### CSV import fields (what each input means)

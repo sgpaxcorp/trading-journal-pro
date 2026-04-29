@@ -14,12 +14,14 @@ import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useNavigation, useRoute } from "@react-navigation/native";
 
 import { ScreenScaffold } from "../components/ScreenScaffold";
+import { PlanGate } from "../components/PlanGate";
 import { useLanguage } from "../lib/LanguageContext";
 import { t } from "../lib/i18n";
 import { useTheme } from "../lib/ThemeContext";
 import type { ThemeColors } from "../theme";
 import { supabaseMobile } from "../lib/supabase";
 import { useSupabaseUser } from "../lib/useSupabaseUser";
+import { usePlanAccess } from "../lib/usePlanAccess";
 import { apiGet } from "../lib/api";
 
 const BOOKS_TABLE = "ntj_notebook_books";
@@ -88,6 +90,7 @@ export function NotebookWorkspaceScreen() {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const user = useSupabaseUser();
+  const planAccess = usePlanAccess();
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
   const { notebookId, title } = (route.params ?? {}) as RouteParams;
@@ -115,6 +118,7 @@ export function NotebookWorkspaceScreen() {
 
   const loadWorkspace = useCallback(
     async (options?: { showLoading?: boolean; isRefresh?: boolean }) => {
+      if (!planAccess.isAdvanced) return;
       if (!supabaseMobile || !user?.id || !notebookId) return;
 
       const showLoading = options?.showLoading ?? false;
@@ -176,13 +180,14 @@ export function NotebookWorkspaceScreen() {
         if (isRefresh) setRefreshing(false);
       }
     },
-    [language, notebookId, user?.id]
+    [language, notebookId, planAccess.isAdvanced, user?.id]
   );
 
   useFocusEffect(
     useCallback(() => {
+      if (!planAccess.isAdvanced) return;
       void loadWorkspace({ showLoading: true });
-    }, [loadWorkspace])
+    }, [loadWorkspace, planAccess.isAdvanced])
   );
 
   useEffect(() => {
@@ -203,6 +208,21 @@ export function NotebookWorkspaceScreen() {
     () => pages.filter((page) => page.section_id === selectedSectionId),
     [pages, selectedSectionId]
   );
+
+  if (!planAccess.isAdvanced) {
+    return (
+      <PlanGate
+        title={t(language, "Notebook", "Notebook")}
+        badge="Advanced"
+        loading={planAccess.loading}
+        subtitle={t(
+          language,
+          "Notebook workspaces, sections, pages, and ink editing are included in Advanced.",
+          "Los workspaces, secciones, páginas e ink editing de Notebook están incluidos en Advanced."
+        )}
+      />
+    );
+  }
 
   function openManage(target: ManageTarget) {
     setManageTarget(target);

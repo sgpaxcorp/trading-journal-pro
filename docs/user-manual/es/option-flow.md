@@ -7,7 +7,7 @@ Estado: beta privada. El acceso público está deshabilitado mientras el módulo
 Option Flow convierte flujo en un plan premarket. No es un servicio de señales; es un resumen estructurado que validas con tu chart y reglas.
 
 ## Flujo estándar
-1. Sube data de flujo (CSV/XLS/XLSX) o screenshots.
+1. Sube data de flujo (CSV/XLSX) o screenshots.
 2. Genera el reporte.
 3. Revisa resumen, niveles clave y mapa de flujo.
 4. Envía el plan al Journal premarket.

@@ -51,7 +51,6 @@ export default function AccessGrantManager({ lang }: Props) {
       page_growth_plan: true,
       page_journal: true,
       page_import: true,
-      page_order_audit: true,
     }));
   }
 

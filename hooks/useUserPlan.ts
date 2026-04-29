@@ -6,7 +6,7 @@ import { useAuth } from "@/context/AuthContext";
 import { supabaseBrowser } from "@/lib/supaBaseClient";
 import { shouldAllowLocalProfileAccessFallback } from "@/lib/accessControl";
 import { listMyEntitlements } from "@/lib/entitlementsSupabase";
-import { normalizePlanTier, planFromEntitlements, type AppPlan } from "@/lib/planAccess";
+import { normalizePlanTier, planFromEntitlements, planFromProfile, type AppPlan } from "@/lib/planAccess";
 
 export type UserPlan = AppPlan;
 
@@ -41,6 +41,7 @@ export function useUserPlan() {
         ]);
 
         const entitlementPlan = planFromEntitlements(entitlements);
+        const activeProfilePlan = planFromProfile(data as any);
         const dbPlan = normalizePlanTier((data as any)?.plan);
         const metaPlan = normalizePlanTier(
           (user as any)?.plan ||
@@ -50,9 +51,13 @@ export function useUserPlan() {
         const finalPlan =
           entitlementPlan !== "none"
             ? entitlementPlan
+            : activeProfilePlan !== "none"
+            ? activeProfilePlan
             : allowLocalProfileFallback && dbPlan !== "none"
             ? dbPlan
-            : metaPlan;
+            : allowLocalProfileFallback
+            ? metaPlan
+            : "none";
 
         if (!cancelled) {
           setPlan(finalPlan);

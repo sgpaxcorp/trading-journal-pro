@@ -4,10 +4,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import dynamic from "next/dynamic";
 
 import { useAuth } from "@/context/AuthContext";
-import { getGrowthPlanSupabaseByAccount, upsertGrowthPlanSupabase, type GrowthPlan } from "@/lib/growthPlanSupabase";
+import {
+  getGrowthPlanSupabaseByAccount,
+  upsertGrowthPlanSupabase,
+  type GrowthPlan,
+  type GrowthPlanStrategy,
+} from "@/lib/growthPlanSupabase";
 import type { JournalEntry } from "@/lib/journalTypes";
 import { getAllJournalEntries } from "@/lib/journalSupabase";
 import { upsertDailySnapshot } from "@/lib/snapshotSupabase";
@@ -28,11 +32,6 @@ import { resolveLocale } from "@/lib/i18n";
 import { useTradingAccounts } from "@/hooks/useTradingAccounts";
 
 import TopNav from "@/app/components/TopNav";
-import DashboardGrid, { type GridItemId } from "@/app/components/DashboardGrid";
-
-const DynamicDashboardGrid = dynamic(() => Promise.resolve(DashboardGrid), {
-  ssr: false,
-});
 
 /* =========================
    Types (UI only)
@@ -49,6 +48,10 @@ type MotivationMessageRow = {
 
 type DashboardCoachActionPlan = {
   summary?: string;
+  whatISee?: string;
+  whatIsDrifting?: string;
+  whatToProtect?: string;
+  whatChangesNextSession?: string;
   nextAction?: string;
   ruleToAdd?: string;
   ruleToRemove?: string;
@@ -72,6 +75,8 @@ type DashboardCoachReminder = {
   audit: DashboardCoachAudit | null;
 };
 
+type CoachMoment = "morning" | "afternoon" | "evening";
+
 const NEW_YORK_TZ = "America/New_York";
 
 function getNewYorkDayParts(now = new Date()) {
@@ -81,10 +86,13 @@ function getNewYorkDayParts(now = new Date()) {
     month: "2-digit",
     day: "2-digit",
     weekday: "short",
+    hour: "2-digit",
+    hour12: false,
   }).formatToParts(now);
   const year = Number(parts.find((p) => p.type === "year")?.value ?? "1970");
   const month = Number(parts.find((p) => p.type === "month")?.value ?? "1");
   const day = Number(parts.find((p) => p.type === "day")?.value ?? "1");
+  const hour = Number(parts.find((p) => p.type === "hour")?.value ?? "9");
   const weekdayRaw = (parts.find((p) => p.type === "weekday")?.value ?? "Mon").toLowerCase();
   const weekdayMap: Record<string, string> = {
     mon: "mon",
@@ -99,6 +107,7 @@ function getNewYorkDayParts(now = new Date()) {
     year,
     month,
     day,
+    hour,
     weekday: weekdayMap[weekdayRaw.slice(0, 3)] ?? "mon",
   };
 }
@@ -148,6 +157,19 @@ function fallbackCoachMessage(weekday: string, lang: "en" | "es") {
   };
 }
 
+function buildFallbackCoachRow(lang: "en" | "es", now = new Date()): MotivationMessageRow {
+  const dayParts = getNewYorkDayParts(now);
+  const fallback = fallbackCoachMessage(dayParts.weekday, lang);
+  return {
+    id: `fallback-${lang}-${getNewYorkDayOfYear(now)}`,
+    locale: lang,
+    title: fallback.title,
+    body: fallback.body,
+    weekday: dayParts.weekday,
+    day_of_year: getNewYorkDayOfYear(now),
+  };
+}
+
 function pickMotivationMessage(rows: MotivationMessageRow[], lang: "en" | "es", now = new Date()) {
   const localeCode = lang === "es" ? "es" : "en";
   const dayOfYear = getNewYorkDayOfYear(now);
@@ -165,15 +187,98 @@ function pickMotivationMessage(rows: MotivationMessageRow[], lang: "en" | "es", 
   const generic = pool.find((row) => !row.weekday && row.day_of_year == null);
   if (generic) return generic;
 
-  const fallback = fallbackCoachMessage(weekday, lang);
+  return buildFallbackCoachRow(lang, now);
+}
+
+function resolveCoachFirstName(raw: unknown): string {
+  const value = String(raw ?? "").trim();
+  if (!value) return "";
+  const source = value.includes("@") ? value.split("@")[0] : value;
+  const normalized = source.replace(/[._-]+/g, " ").trim();
+  const first = normalized.split(/\s+/).find(Boolean) ?? "";
+  const clean = first.replace(/[^A-Za-zÀ-ÿ'’-]/g, "").trim();
+  if (!clean || /^trader$/i.test(clean)) return "";
+  return clean.charAt(0).toUpperCase() + clean.slice(1);
+}
+
+function resolveCoachMoment(hour: number): CoachMoment {
+  if (hour < 12) return "morning";
+  if (hour < 18) return "afternoon";
+  return "evening";
+}
+
+function personalizeCoachMessage(
+  row: MotivationMessageRow,
+  options: { lang: "en" | "es"; firstName?: string; now?: Date }
+) {
+  const { lang, firstName = "", now = new Date() } = options;
+  const tx = (en: string, es: string) => (lang === "es" ? es : en);
+  const dayParts = getNewYorkDayParts(now);
+  const dayOfYear = getNewYorkDayOfYear(now);
+  const moment = resolveCoachMoment(dayParts.hour);
+  const greetingBase =
+    moment === "morning"
+      ? tx("Good morning", "Buenos días")
+      : moment === "afternoon"
+        ? tx("Good afternoon", "Buenas tardes")
+        : tx("Good evening", "Buenas noches");
+  const pillLabel =
+    moment === "morning"
+      ? tx("Morning", "Mañana")
+      : moment === "afternoon"
+        ? tx("Afternoon", "Tarde")
+        : tx("Evening", "Noche");
+  const title = firstName ? `${greetingBase}, ${firstName}.` : `${greetingBase}.`;
+  const intros =
+    lang === "es"
+      ? {
+          morning: [
+            "Hoy quiero que empieces con calma, enfoque y una sola intención clara.",
+            "Antes de abrir el mercado, vuelve a tu proceso y baja el ruido.",
+            "Arranca liviano: claridad primero, velocidad después.",
+            "Que tu primera decisión hoy nazca del plan, no de la urgencia.",
+          ],
+          afternoon: [
+            "Haz una pausa corta y revisa si sigues operando desde el plan.",
+            "A esta hora la disciplina vale más que la energía.",
+            "Vuelve al centro antes de la próxima ejecución.",
+            "Si el ritmo sube, responde con más proceso, no con más prisa.",
+          ],
+          evening: [
+            "Cierra con honestidad: lo que aprendes hoy protege tu mañana.",
+            "Esta noche vale más la claridad que el juicio duro.",
+            "Baja revoluciones y quédate con la lección más útil del día.",
+            "Termina el día cuidando tu mente igual que cuidas tu riesgo.",
+          ],
+        }
+      : {
+          morning: [
+            "Start today with calm, focus, and one clear intention.",
+            "Before the market opens, come back to your process and lower the noise.",
+            "Begin light: clarity first, speed second.",
+            "Let your first decision today come from the plan, not urgency.",
+          ],
+          afternoon: [
+            "Take a short pause and check whether you are still trading from plan.",
+            "At this hour, discipline matters more than energy.",
+            "Come back to center before the next execution.",
+            "If the tempo rises, answer with more process, not more rush.",
+          ],
+          evening: [
+            "Close with honesty: what you learn today protects tomorrow.",
+            "Tonight, clarity is worth more than harsh self-judgment.",
+            "Lower the noise and keep the most useful lesson from the day.",
+            "End the day protecting your mind the same way you protect risk.",
+          ],
+        };
+  const introPool = intros[moment];
+  const intro = introPool[dayOfYear % introPool.length] || "";
+  const baseBody = String(row.body ?? "").trim();
   return {
-    id: `fallback-${localeCode}-${weekday}-${dayOfYear}`,
-    locale: localeCode,
-    title: fallback.title,
-    body: fallback.body,
-    weekday,
-    day_of_year: dayOfYear,
-  } satisfies MotivationMessageRow;
+    title,
+    body: [intro, baseBody].filter(Boolean).join(" "),
+    pillLabel,
+  };
 }
 
 function buildSparklinePath(values: number[], width: number, height: number) {
@@ -577,7 +682,19 @@ type WeekSummary = {
   daysWithTrades: number;
 };
 
-type WidgetId = GridItemId;
+type WidgetId =
+  | "progress"
+  | "plan-progress"
+  | "streak"
+  | "actions"
+  | "calendar"
+  | "weekly"
+  | "daily-target"
+  | "mindset-ratio"
+  | "trading-days"
+  | "economic-news";
+
+type SystemPanelTab = "focus" | "rules" | "ai";
 
 
 // ===== Trading calendar / holidays =====
@@ -1022,16 +1139,6 @@ export default function DashboardPage() {
   const localeTag = isEs ? "es-ES" : "en-US";
   const L = (en: string, es: string) => (isEs ? es : en);
 
-  const ALL_WIDGETS: { id: WidgetId; label: string }[] = [
-    { id: "progress", label: L("Account Progress", "Progreso de cuenta") },
-    { id: "plan-progress", label: L("Plan Progress", "Progreso del plan") },
-    { id: "calendar", label: L("P&L Calendar", "Calendario P&L") },
-    { id: "weekly", label: L("Weekly Summary", "Resumen semanal") },
-    { id: "streak", label: L("Green Streak", "Racha verde") },
-    { id: "actions", label: L("Trading System", "Sistema de trading") },
-    { id: "trading-days", label: L("Trading Days (Year)", "Días de trading (año)") },
-  ];
-
   const [plan, setPlan] = useState<GrowthPlan | null>(null);
   const [entries, setEntries] = useState<JournalEntry[]>([]);
   const [cashflows, setCashflows] = useState<Cashflow[]>([]);
@@ -1054,16 +1161,6 @@ export default function DashboardPage() {
   const holidayMap = useMemo(() => new Map(holidayList.map((h) => [h.date, h])), [holidayList]);
   const holidaySet = useMemo(() => new Set(holidayList.map((h) => h.date)), [holidayList]);
 
-  const [activeWidgets, setActiveWidgets] = useState<WidgetId[]>([
-    "progress",
-    "plan-progress",
-    "calendar",
-    "weekly",
-    "streak",
-    "actions",
-    "trading-days",
-  ]);
-
   const [ecoNewsCountry, setEcoNewsCountry] = useState("US");
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [showAccountCreate, setShowAccountCreate] = useState(false);
@@ -1071,19 +1168,33 @@ export default function DashboardPage() {
   const [newAccountBroker, setNewAccountBroker] = useState("");
   const [creatingAccount, setCreatingAccount] = useState(false);
   const [accountMessage, setAccountMessage] = useState<string | null>(null);
-  const [widgetsLoaded, setWidgetsLoaded] = useState(false);
   const [dailyCoachMessage, setDailyCoachMessage] = useState<MotivationMessageRow | null>(null);
   const [coachReminder, setCoachReminder] = useState<DashboardCoachReminder | null>(null);
+  const [systemPanelTab, setSystemPanelTab] = useState<SystemPanelTab>("focus");
+  const [coachNow, setCoachNow] = useState(() => new Date());
+  const coachDayKey = useMemo(() => {
+    const parts = getNewYorkDayParts(coachNow);
+    return `${parts.year}-${String(parts.month).padStart(2, "0")}-${String(parts.day).padStart(2, "0")}`;
+  }, [coachNow]);
+  const coachFirstName = useMemo(() => resolveCoachFirstName((user as any)?.name), [user]);
+  const personalizedCoachMessage = useMemo(
+    () =>
+      personalizeCoachMessage(
+        dailyCoachMessage ?? buildFallbackCoachRow(isEs ? "es" : "en", coachNow),
+        { lang: isEs ? "es" : "en", firstName: coachFirstName, now: coachNow }
+      ),
+    [coachFirstName, coachNow, dailyCoachMessage, isEs]
+  );
   const phaseAlertBusyRef = useRef(false);
   const phaseRuleIdRef = useRef<string | null>(null);
   const goalNotificationAttemptedRef = useRef<Set<string>>(new Set());
 
   const widgetTitleClass =
-    "widget-title drag-handle select-none cursor-move text-[14px] font-semibold tracking-wide flex items-center gap-2 group";
+    "widget-title select-none text-[14px] font-semibold tracking-wide flex items-center gap-2 group";
   const widgetTitleTextClass =
     "text-transparent bg-clip-text bg-gradient-to-r from-emerald-300 via-cyan-300 to-emerald-400";
   const widgetDragHintClass =
-    "text-slate-500 text-[11px] opacity-0 group-hover:opacity-100 transition";
+    "hidden";
 
   // ✅ Checklist (today) — UI type ONLY
   const [todayChecklist, setTodayChecklist] = useState<UiChecklistItem[]>([]);
@@ -1111,6 +1222,14 @@ export default function DashboardPage() {
       .filter(Boolean) as Array<{ date: string; pnl: number; neuro: any }>;
     return buildNeuroMemory(sessions, isEs ? "es" : "en");
   }, [entries, isEs]);
+  const dashboardNeuroMemory: NeuroMemory = neuroMemory ?? {
+    title: L("Latest Neuro read", "Última lectura Neuro"),
+    body: L(
+      "Your latest AI behavior read will appear here after a Neuro-tagged journal entry.",
+      "Tu lectura de comportamiento con IA aparecerá aquí después de una entrada con Neuro Layer."
+    ),
+    kind: "strength",
+  };
 
   // Rolling day for actions and internal daily-goal calculations
   const [rollingTodayStr, setRollingTodayStr] = useState(() => formatDateYYYYMMDD(new Date()));
@@ -1120,10 +1239,46 @@ export default function DashboardPage() {
     const clean = (arr: any[] | undefined) =>
       (arr ?? []).filter((i) => (i?.text ?? "").toString().trim().length > 0);
     return {
+      title: String(system?.title ?? "").trim(),
       doList: clean(system?.doList as any[]),
       dontList: clean(system?.dontList as any[]),
+      orderList: clean(system?.orderList as any[]),
+      notes: String(system?.notes ?? "").trim(),
     };
   }, [plan]);
+
+  const strategyCards = useMemo(() => {
+    const rawStrategies = plan?.steps?.strategy?.strategies;
+    if (!Array.isArray(rawStrategies)) return [];
+
+    return rawStrategies
+      .map((strategy: GrowthPlanStrategy) => ({
+        name: String(strategy?.name ?? "").trim(),
+        setup: String(strategy?.setup ?? "").trim(),
+        entryRules: String(strategy?.entryRules ?? "").trim(),
+        exitRules: String(strategy?.exitRules ?? "").trim(),
+        managementRules: String(strategy?.managementRules ?? "").trim(),
+        invalidation: String(strategy?.invalidation ?? "").trim(),
+        timeframe: String(strategy?.timeframe ?? "").trim(),
+        instruments: Array.isArray(strategy?.instruments)
+          ? strategy.instruments.map((item) => String(item).trim()).filter(Boolean)
+          : [],
+      }))
+      .filter(
+        (strategy) =>
+          strategy.name ||
+          strategy.setup ||
+          strategy.entryRules ||
+          strategy.exitRules ||
+          strategy.managementRules ||
+          strategy.invalidation ||
+          strategy.timeframe ||
+          strategy.instruments.length
+      )
+      .slice(0, 3);
+  }, [plan]);
+
+  const strategyNotes = useMemo(() => String(plan?.steps?.strategy?.notes ?? "").trim(), [plan]);
 
   // Debounce autosave
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1149,52 +1304,10 @@ export default function DashboardPage() {
     };
   }, []);
 
-  // Persist widget toggles
   useEffect(() => {
-    if (!user) return;
-    if (typeof window === "undefined") return;
-
-    const storageKey =
-      (user as any).uid
-        ? `tjpro_dashboard_widgets_${(user as any).uid}`
-        : "tjpro_dashboard_widgets_default";
-
-    try {
-      const raw = window.localStorage.getItem(storageKey);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) {
-          const valid = parsed.filter((id: any) => ALL_WIDGETS.some((w) => w.id === id)) as WidgetId[];
-          if (valid.length > 0) {
-            const withPlan = valid.includes("plan-progress")
-              ? valid
-              : [...valid, "plan-progress" as WidgetId];
-            setActiveWidgets(withPlan);
-          }
-        }
-      }
-    } catch (err) {
-      console.warn("[dashboard] error loading widget toggles", err);
-    } finally {
-      setWidgetsLoaded(true);
-    }
-  }, [user]);
-
-  useEffect(() => {
-    if (!user || !widgetsLoaded) return;
-    if (typeof window === "undefined") return;
-
-    const storageKey =
-      (user as any).uid
-        ? `tjpro_dashboard_widgets_${(user as any).uid}`
-        : "tjpro_dashboard_widgets_default";
-
-    try {
-      window.localStorage.setItem(storageKey, JSON.stringify(activeWidgets));
-    } catch (err) {
-      console.warn("[dashboard] error saving widget toggles", err);
-    }
-  }, [user, activeWidgets, widgetsLoaded]);
+    const interval = setInterval(() => setCoachNow(new Date()), 60_000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Protect route
   useEffect(() => {
@@ -1218,15 +1331,7 @@ export default function DashboardPage() {
         if (cancelled) return;
         if (error) {
           console.warn("[dashboard] motivational_messages fetch error:", error);
-          const fallback = fallbackCoachMessage(getNewYorkDayParts().weekday, isEs ? "es" : "en");
-          setDailyCoachMessage({
-            id: `fallback-${localeCode}-${getNewYorkDayOfYear()}`,
-            locale: localeCode,
-            title: fallback.title,
-            body: fallback.body,
-            weekday: getNewYorkDayParts().weekday,
-            day_of_year: getNewYorkDayOfYear(),
-          });
+          setDailyCoachMessage(buildFallbackCoachRow(isEs ? "es" : "en"));
           return;
         }
 
@@ -1238,15 +1343,7 @@ export default function DashboardPage() {
       } catch (err) {
         if (cancelled) return;
         console.warn("[dashboard] daily coach message load exception:", err);
-        const fallback = fallbackCoachMessage(getNewYorkDayParts().weekday, isEs ? "es" : "en");
-        setDailyCoachMessage({
-          id: `fallback-${isEs ? "es" : "en"}-${getNewYorkDayOfYear()}`,
-          locale: isEs ? "es" : "en",
-          title: fallback.title,
-          body: fallback.body,
-          weekday: getNewYorkDayParts().weekday,
-          day_of_year: getNewYorkDayOfYear(),
-        });
+        setDailyCoachMessage(buildFallbackCoachRow(isEs ? "es" : "en"));
       }
     };
 
@@ -1254,7 +1351,7 @@ export default function DashboardPage() {
     return () => {
       cancelled = true;
     };
-  }, [loading, user, isEs]);
+  }, [coachDayKey, loading, user, isEs]);
 
   useEffect(() => {
     if (loading || !user) return;
@@ -1288,6 +1385,10 @@ export default function DashboardPage() {
         const audit = metadata?.latestAudit ?? null;
         const hasReminder =
           String(data?.summary || "").trim() ||
+          String(actionPlan?.whatISee || "").trim() ||
+          String(actionPlan?.whatIsDrifting || "").trim() ||
+          String(actionPlan?.whatToProtect || "").trim() ||
+          String(actionPlan?.whatChangesNextSession || "").trim() ||
           String(actionPlan?.nextAction || "").trim() ||
           String(actionPlan?.ruleToAdd || "").trim() ||
           String(actionPlan?.ruleToRemove || "").trim() ||
@@ -1299,7 +1400,12 @@ export default function DashboardPage() {
         }
 
         setCoachReminder({
-          summary: typeof data?.summary === "string" ? data.summary.trim() : null,
+          summary:
+            typeof data?.summary === "string" && data.summary.trim()
+              ? data.summary.trim()
+              : typeof actionPlan?.summary === "string" && actionPlan.summary.trim()
+                ? actionPlan.summary.trim()
+                : null,
           updatedAt: typeof data?.updated_at === "string" ? data.updated_at : null,
           actionPlan,
           audit,
@@ -2523,9 +2629,6 @@ export default function DashboardPage() {
     router.push(`/journal/${dateStr}`);
   };
 
-  const layoutStorageKey =
-    user && (user as any).uid ? `tjpro_dashboard_layout_${(user as any).uid}` : "tjpro_dashboard_layout_default";
-
   // ===== Render widgets =====
   const renderItem = (id: WidgetId) => {
     if (id === "progress") {
@@ -3010,12 +3113,138 @@ export default function DashboardPage() {
 
     // ✅ Checklist widget (autosave)
     if (id === "actions") {
-      const { doList, dontList } = systemRules;
-      const hasRules = doList.length + dontList.length > 0;
+      const { doList, dontList, orderList } = systemRules;
+      const hasRules = doList.length + dontList.length + orderList.length > 0;
+      const systemTabs: Array<{ id: SystemPanelTab; label: string }> = [
+        { id: "focus", label: L("Focus", "Focus") },
+        { id: "rules", label: L("Rules", "Reglas") },
+        { id: "ai", label: L("AI plan", "Plan AI") },
+      ];
+      const normalizeText = (value: unknown) => String(value ?? "").trim();
+      const equalsText = (a: unknown, b: unknown) => normalizeText(a).toLowerCase() === normalizeText(b).toLowerCase();
+      const dedupeRows = (rows: Array<{ label: string; value: string }>) => {
+        const seen = new Set<string>();
+        return rows.filter((row) => {
+          const value = normalizeText(row.value);
+          if (!value) return false;
+          const key = value.toLowerCase();
+          if (seen.has(key)) return false;
+          seen.add(key);
+          row.value = value;
+          return true;
+        });
+      };
+      const primaryStrategy = strategyCards[0] ?? null;
+      const primaryStrategyMeta = [primaryStrategy?.timeframe, primaryStrategy?.instruments.join(", ")].filter(Boolean).join(" · ");
+      const primaryStrategyBody = normalizeText(
+        primaryStrategy?.setup ||
+          primaryStrategy?.entryRules ||
+          primaryStrategy?.managementRules ||
+          primaryStrategy?.exitRules ||
+          strategyNotes
+      );
+      const strategyGuardrail = normalizeText(primaryStrategy?.invalidation || systemRules.notes);
+      const strategySupportNote =
+        strategyNotes && !equalsText(strategyNotes, primaryStrategyBody) ? strategyNotes : "";
+      const hasRuleMatch = (value: unknown, items: any[]) => {
+        const target = normalizeText(value);
+        if (!target) return false;
+        return items.some((item) => equalsText(item?.text, target));
+      };
+      const aiCoachRead = normalizeText(
+        coachReminder?.actionPlan?.whatISee || coachReminder?.summary || primaryStrategyBody || strategyNotes
+      );
+      const aiCoachDrift = normalizeText(
+        coachReminder?.actionPlan?.whatIsDrifting || coachReminder?.actionPlan?.ruleToRemove
+      );
+      const aiCoachProtect = normalizeText(
+        coachReminder?.actionPlan?.whatToProtect ||
+          coachReminder?.actionPlan?.checkpointFocus ||
+          strategyGuardrail ||
+          orderList[0]?.text ||
+          doList[0]?.text
+      );
+      const aiCoachNextSession = normalizeText(
+        coachReminder?.actionPlan?.whatChangesNextSession ||
+          coachReminder?.actionPlan?.nextAction ||
+          todayChecklist[0]?.text ||
+          doList[0]?.text ||
+          primaryStrategyBody
+      );
+      const aiPlanTitle =
+        normalizeText(coachReminder?.summary) ||
+        aiCoachRead ||
+        aiCoachProtect ||
+        aiCoachNextSession ||
+        normalizeText(primaryStrategy?.name) ||
+        L("Latest coaching guidance", "Última guía del coach");
+      const aiPlanAlignedTo = normalizeText(primaryStrategy?.name || primaryStrategyBody || strategyNotes);
+      const aiPlanLead =
+        aiCoachRead && !equalsText(aiCoachRead, aiPlanTitle)
+          ? aiCoachRead
+          : coachReminder
+            ? ""
+            : L(
+                "No AI session yet. This tab stays anchored to your Growth Plan so the next coaching pass lands on something real.",
+                "Todavía no hay sesión AI. Esta pestaña se ancla a tu Growth Plan para que el próximo coaching aterrice sobre algo real."
+              );
+      const aiCoachReadoutRows = dedupeRows([
+        { label: L("What I see", "Lo que veo"), value: equalsText(aiCoachRead, aiPlanTitle) ? "" : aiCoachRead },
+        { label: L("What is drifting", "Lo que se está desviando"), value: aiCoachDrift },
+        { label: L("What to protect", "Lo que debes proteger"), value: aiCoachProtect },
+        { label: L("What changes next session", "Qué cambia la próxima sesión"), value: aiCoachNextSession },
+      ]).filter((row) => !equalsText(row.value, aiPlanAlignedTo));
+      const aiCoachSystemRows = dedupeRows([
+        {
+          label: L("Add to system", "Agregar al sistema"),
+          value: hasRuleMatch(coachReminder?.actionPlan?.ruleToAdd, [...doList, ...orderList])
+            ? ""
+            : normalizeText(coachReminder?.actionPlan?.ruleToAdd),
+        },
+        {
+          label: L("Stop doing", "Dejar de hacer"),
+          value:
+            hasRuleMatch(coachReminder?.actionPlan?.ruleToRemove, dontList) ||
+            equalsText(coachReminder?.actionPlan?.ruleToRemove, primaryStrategy?.invalidation)
+              ? ""
+              : normalizeText(coachReminder?.actionPlan?.ruleToRemove),
+        },
+      ]).filter(
+        (row) =>
+          !equalsText(row.value, aiPlanTitle) &&
+          !equalsText(row.value, aiPlanAlignedTo) &&
+          !aiCoachReadoutRows.some((item) => equalsText(item.value, row.value))
+      );
+
+      const renderRuleCard = (label: string, items: any[], accentClass: string, bulletClass: string) => (
+        <div className="rounded-xl border border-slate-800 bg-slate-950/35 p-3">
+          <p className={`text-[11px] uppercase tracking-[0.2em] ${accentClass}`}>{label}</p>
+          <div className="mt-2 space-y-1.5 text-[13px] text-slate-200">
+            {items.length ? (
+              <>
+                {items.slice(0, 5).map((item, idx) => (
+                  <div key={item.id ?? `${item.text}-${idx}`} className="flex items-start gap-2">
+                    <span className={bulletClass}>•</span>
+                    <span>{item.text}</span>
+                  </div>
+                ))}
+                {items.length > 5 ? (
+                  <p className="pt-1 text-[12px] text-slate-500">
+                    +{items.length - 5} {L("more in Growth Plan", "más en Growth Plan")}
+                  </p>
+                ) : null}
+              </>
+            ) : (
+              <div className="text-slate-500">{L("No items yet.", "Sin elementos todavía.")}</div>
+            )}
+          </div>
+        </div>
+      );
+
       return (
         <>
-          <div className="flex items-start justify-between gap-3">
-            <div>
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div className="min-w-0">
               <p className={widgetTitleClass}>
                 <span className={widgetTitleTextClass}>
                   {L("Trading System", "Sistema de trading")}
@@ -3032,88 +3261,145 @@ export default function DashboardPage() {
                 ) : null}
               </p>
             </div>
+
+            <div className="inline-flex w-full rounded-full border border-slate-800 bg-slate-950/70 p-1 sm:w-auto">
+              {systemTabs.map((tab) => {
+                const active = systemPanelTab === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setSystemPanelTab(tab.id)}
+                    className={`flex-1 rounded-full px-3 py-1.5 text-[11px] font-semibold transition sm:flex-none ${
+                      active
+                        ? "bg-emerald-300 text-slate-950 shadow-[0_0_18px_rgba(52,211,153,0.16)]"
+                        : "text-slate-400 hover:text-slate-100"
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           {checklistSaveError ? (
             <p className="text-[12px] text-rose-300 mt-2">{checklistSaveError}</p>
           ) : null}
 
-          <div className="mt-3 grid grid-cols-1 lg:grid-cols-3 gap-3">
-            <div className="lg:col-span-2">
-              <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">
-                {L("Steps (daily)", "Pasos (diarios)")}
-              </p>
-              {todayChecklist.length ? (
-                <ul className="mt-2 space-y-2 text-[14px] text-slate-200">
-                  {todayChecklist.slice(0, 12).map((it, idx) => (
-                    <li key={idx}>
-                      <button
-                        type="button"
-                        onClick={() => toggleChecklistItem(idx)}
-                        className="w-full flex items-start gap-3 text-left rounded-xl border border-slate-800 bg-slate-900/40 hover:bg-slate-900/70 transition px-3 py-2"
-                      >
-                        <span
-                          className={`mt-0.5 inline-flex h-5 w-5 items-center justify-center rounded-md border ${
-                            it.done ? "bg-emerald-400 text-slate-950 border-emerald-300" : "border-slate-700 text-slate-400"
-                          }`}
+          {systemPanelTab === "focus" ? (
+            <div className="mt-3 grid gap-3 xl:grid-cols-[minmax(0,1.1fr)_minmax(280px,0.9fr)]">
+              <div className="rounded-xl border border-slate-800 bg-slate-950/35 p-3">
+                <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">
+                  {L("Steps (daily)", "Pasos (diarios)")}
+                </p>
+                {todayChecklist.length ? (
+                  <ul className="mt-2 space-y-2 text-[14px] text-slate-200">
+                    {todayChecklist.slice(0, 5).map((it, idx) => (
+                      <li key={idx}>
+                        <button
+                          type="button"
+                          onClick={() => toggleChecklistItem(idx)}
+                          className="w-full flex items-start gap-3 text-left rounded-xl border border-slate-800 bg-slate-900/45 px-3 py-2 transition hover:bg-slate-900/75"
                         >
-                          {it.done ? "✓" : ""}
-                        </span>
+                          <span
+                            className={`mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md border ${
+                              it.done
+                                ? "border-emerald-300 bg-emerald-400 text-slate-950"
+                                : "border-slate-700 text-slate-400"
+                            }`}
+                          >
+                            {it.done ? "✓" : ""}
+                          </span>
+                          <span className={it.done ? "line-through opacity-80" : ""}>{it.text}</span>
+                        </button>
+                      </li>
+                    ))}
+                    {todayChecklist.length > 5 ? (
+                      <li className="px-1 text-[12px] text-slate-500">
+                        +{todayChecklist.length - 5} {L("more in today's journal", "más en el journal de hoy")}
+                      </li>
+                    ) : null}
+                  </ul>
+                ) : (
+                  <p className="mt-2 text-[13px] text-slate-500">
+                    {L("Add your Trading System steps in Growth Plan.", "Agrega tus pasos del Sistema de Trading en el Growth Plan.")}{" "}
+                    <Link href="/growth-plan" data-tour="dash-edit-growth-plan" className="text-emerald-400 underline">
+                      {L("Edit Growth Plan", "Editar Growth Plan")}
+                    </Link>
+                  </p>
+                )}
 
-                        <span className={it.done ? "line-through opacity-80" : ""}>{it.text}</span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="mt-2 text-[13px] text-slate-500">
-                  {L("Add your Trading System steps in Growth Plan.", "Agrega tus pasos del Sistema de Trading en el Growth Plan.")}{" "}
-                  <Link href="/growth-plan" data-tour="dash-edit-growth-plan" className="text-emerald-400 underline">
-                    {L("Edit Growth Plan", "Editar Growth Plan")}
-                  </Link>
+                <Link
+                  href={`/journal/${rollingTodayStr}`}
+                  className="mt-3 inline-flex rounded-xl bg-emerald-400 px-4 py-2 text-[13px] font-semibold text-slate-950 transition hover:bg-emerald-300"
+                >
+                  {L("Open today's journal", "Abrir el journal de hoy")}
+                </Link>
+              </div>
+
+              <div className="rounded-xl border border-cyan-300/20 bg-[linear-gradient(135deg,rgba(34,211,238,0.10),rgba(15,23,42,0.78))] p-3">
+                <p className="text-[11px] uppercase tracking-[0.2em] text-cyan-200">
+                  {L("Strategy snapshot", "Snapshot de estrategia")}
                 </p>
-              )}
+                {primaryStrategy || primaryStrategyBody || strategyGuardrail || strategySupportNote ? (
+                  <>
+                    {primaryStrategy ? (
+                      <div className="mt-2 rounded-xl border border-slate-800/80 bg-slate-950/35 p-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <p className="text-[13px] font-semibold text-slate-50">
+                            {primaryStrategy.name || L("Primary strategy", "Estrategia principal")}
+                          </p>
+                          {primaryStrategyMeta ? <span className="text-[11px] text-slate-500">{primaryStrategyMeta}</span> : null}
+                        </div>
+                        {primaryStrategyBody ? (
+                          <p className="mt-1 text-[12px] leading-relaxed text-slate-300">{primaryStrategyBody}</p>
+                        ) : null}
+                        {primaryStrategy.invalidation ? (
+                          <p className="mt-2 text-[12px] leading-relaxed text-amber-200/90">
+                            {L("Invalidation:", "Invalidación:")} {primaryStrategy.invalidation}
+                          </p>
+                        ) : null}
+                      </div>
+                    ) : null}
+
+                    {strategyGuardrail ? (
+                      <div className="mt-2 rounded-xl border border-slate-800/80 bg-slate-950/35 p-3">
+                        <p className="text-[10px] uppercase tracking-[0.16em] text-cyan-200/90">
+                          {L("Risk guardrail", "Guardrail de riesgo")}
+                        </p>
+                        <p className="mt-1 text-[12px] leading-relaxed text-slate-100">{strategyGuardrail}</p>
+                      </div>
+                    ) : null}
+
+                    {strategySupportNote ? (
+                      <div className="mt-2 rounded-xl border border-slate-800/80 bg-slate-950/35 p-3">
+                        <p className="text-[10px] uppercase tracking-[0.16em] text-cyan-200/90">
+                          {L("Plan note", "Nota del plan")}
+                        </p>
+                        <p className="mt-1 text-[12px] leading-relaxed text-slate-100">{strategySupportNote}</p>
+                      </div>
+                    ) : null}
+                  </>
+                ) : (
+                  <p className="mt-2 text-[13px] text-slate-500">
+                    {L("Add your strategy and rules in Growth Plan.", "Agrega tu estrategia y reglas en Growth Plan.")}{" "}
+                    <Link href="/growth-plan" data-tour="dash-edit-growth-plan" className="text-emerald-400 underline">
+                      {L("Edit Growth Plan", "Editar Growth Plan")}
+                    </Link>
+                  </p>
+                )}
+              </div>
             </div>
+          ) : null}
 
-            <div className="space-y-3">
-              <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-3">
-                <p className="text-[11px] uppercase tracking-[0.2em] text-emerald-300">
-                  {L("Do", "Hacer")}
-                </p>
-                <div className="mt-2 space-y-1 text-[13px] text-slate-200">
-                  {doList.length ? (
-                    doList.map((i) => (
-                      <div key={i.id} className="flex items-start gap-2">
-                        <span className="text-emerald-400">•</span>
-                        <span>{i.text}</span>
-                      </div>
-                    ))
-                  ) : (
-                    <div className="text-slate-500">{L("—", "—")}</div>
-                  )}
-                </div>
-              </div>
-
-              <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-3">
-                <p className="text-[11px] uppercase tracking-[0.2em] text-rose-300">
-                  {L("Don't", "No hacer")}
-                </p>
-                <div className="mt-2 space-y-1 text-[13px] text-slate-200">
-                  {dontList.length ? (
-                    dontList.map((i) => (
-                      <div key={i.id} className="flex items-start gap-2">
-                        <span className="text-rose-400">•</span>
-                        <span>{i.text}</span>
-                      </div>
-                    ))
-                  ) : (
-                    <div className="text-slate-500">{L("—", "—")}</div>
-                  )}
-                </div>
-              </div>
-
+          {systemPanelTab === "rules" ? (
+            <div className={`mt-3 grid gap-3 ${orderList.length ? "lg:grid-cols-3" : "lg:grid-cols-2"}`}>
+              {renderRuleCard(L("Do", "Hacer"), doList, "text-emerald-300", "text-emerald-400")}
+              {renderRuleCard(L("Don't", "No hacer"), dontList, "text-rose-300", "text-rose-400")}
+              {orderList.length ? renderRuleCard(L("Order", "Orden"), orderList, "text-cyan-200", "text-cyan-300") : null}
               {!hasRules && plan ? (
-                <p className="text-[12px] text-slate-500">
+                <p className="text-[12px] text-slate-500 lg:col-span-full">
                   {L("Add your Do/Don't rules in Growth Plan.", "Agrega tus reglas de Hacer/No hacer en el Growth Plan.")}{" "}
                   <Link href="/growth-plan" data-tour="dash-edit-growth-plan" className="text-emerald-400 underline">
                     {L("Edit Growth Plan", "Editar Growth Plan")}
@@ -3121,14 +3407,70 @@ export default function DashboardPage() {
                 </p>
               ) : null}
             </div>
-          </div>
+          ) : null}
 
-          <Link
-            href={`/journal/${rollingTodayStr}`}
-            className="inline-flex mt-4 px-4 py-2 rounded-xl bg-emerald-400 text-slate-950 text-[14px] font-semibold hover:bg-emerald-300 transition"
-          >
-            {L("Open today's journal", "Abrir el journal de hoy")}
-          </Link>
+          {systemPanelTab === "ai" ? (
+            <div className="mt-3 rounded-xl border border-violet-300/20 bg-[linear-gradient(135deg,rgba(139,92,246,0.14),rgba(15,23,42,0.88))] p-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="text-[11px] uppercase tracking-[0.2em] text-violet-200">
+                  {L("Latest AI coaching plan", "Último plan AI Coaching")}
+                </p>
+                {coachReminder?.updatedAt ? (
+                  <span className="rounded-full border border-violet-300/20 bg-violet-400/10 px-2.5 py-1 text-[10px] text-violet-100">
+                    {new Date(coachReminder.updatedAt).toLocaleDateString(localeTag, {
+                      month: "short",
+                      day: "numeric",
+                    })}
+                  </span>
+                ) : null}
+              </div>
+
+              <p className="mt-2 text-[15px] font-semibold leading-snug text-slate-50">{aiPlanTitle}</p>
+              {aiPlanLead ? <p className="mt-2 text-[13px] leading-relaxed text-slate-300">{aiPlanLead}</p> : null}
+              {aiPlanAlignedTo ? (
+                <p className="mt-2 text-[12px] text-violet-100/70">
+                  {L("Aligned to:", "Alineado a:")} {aiPlanAlignedTo}
+                </p>
+              ) : null}
+
+              {aiCoachReadoutRows.length ? (
+                <div className="mt-3 grid gap-2 md:grid-cols-2">
+                  {aiCoachReadoutRows.map((row) => (
+                    <div key={row.label} className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
+                      <p className="text-[10px] uppercase tracking-[0.16em] text-slate-500">{row.label}</p>
+                      <p className="mt-1 text-[13px] leading-relaxed text-slate-100">{row.value}</p>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+
+              {aiCoachSystemRows.length ? (
+                <div className="mt-2 grid gap-2 md:grid-cols-2">
+                  {aiCoachSystemRows.map((row) => (
+                    <div key={row.label} className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
+                      <p className="text-[10px] uppercase tracking-[0.16em] text-slate-500">{row.label}</p>
+                      <p className="mt-1 text-[13px] leading-relaxed text-slate-100">{row.value}</p>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Link
+                  href="/performance/ai-coaching"
+                  className="rounded-full bg-violet-300 px-4 py-2 text-[12px] font-semibold text-slate-950 transition hover:bg-violet-200"
+                >
+                  {L("Open AI Coaching", "Abrir AI Coaching")}
+                </Link>
+                <Link
+                  href="/growth-plan"
+                  className="rounded-full border border-violet-300/30 px-4 py-2 text-[12px] font-semibold text-violet-100 transition hover:border-violet-200 hover:text-white"
+                >
+                  {L("Open Growth Plan", "Abrir Growth Plan")}
+                </Link>
+              </div>
+            </div>
+          ) : null}
         </>
       );
     }
@@ -3638,6 +3980,18 @@ export default function DashboardPage() {
     );
   };
 
+  const renderDashboardCard = (id: WidgetId, className = "") => (
+    <section
+      key={id}
+      data-tour={`dash-widget-${id}`}
+      className={`rounded-2xl border border-slate-800 bg-slate-900/95 p-4 shadow-[0_18px_70px_rgba(2,6,23,0.22)] ${className}`}
+    >
+      <div className="h-full min-h-0 text-[14px]">
+        {renderItem(id)}
+      </div>
+    </section>
+  );
+
   /* ========== Render Page ========== */
   if (loading || !viewDate) {
     return (
@@ -3807,209 +4161,86 @@ export default function DashboardPage() {
           </section>
         )}
 
-        {coachReminder && (
-          <section className="mb-5 rounded-2xl border border-violet-400/20 bg-[radial-gradient(circle_at_top_left,rgba(167,139,250,0.14),transparent_38%),linear-gradient(135deg,rgba(30,41,59,0.96),rgba(15,23,42,0.96))] p-4 shadow-[0_0_36px_rgba(139,92,246,0.10)]">
-            <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <p className="text-[10px] uppercase tracking-[0.24em] text-violet-200/90">
-                    {L("Latest AI coaching action plan", "Último plan de acción del AI Coaching")}
+        {(dailyCoachMessage || dashboardNeuroMemory) ? (
+          <section className="mb-5 grid gap-3 lg:grid-cols-2">
+            <div className="h-full rounded-xl border border-emerald-300/30 bg-[linear-gradient(135deg,rgba(16,185,129,0.18),rgba(6,182,212,0.12),rgba(15,23,42,0.9))] px-4 py-3 shadow-[0_0_28px_rgba(16,185,129,0.14)]">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="text-[10px] uppercase tracking-[0.26em] text-emerald-200/90">
+                    {L("Daily coach message", "Mensaje diario del coach")}
                   </p>
-                  {coachReminder.updatedAt ? (
-                    <span className="rounded-full border border-violet-300/20 bg-violet-400/10 px-2.5 py-1 text-[10px] text-violet-100">
-                      {L("Updated", "Actualizado")}{" "}
-                      {new Date(coachReminder.updatedAt).toLocaleDateString(localeTag, {
-                        month: "short",
-                        day: "numeric",
-                      })}
-                    </span>
-                  ) : null}
-                  {coachReminder.audit?.attached ? (
-                    <span className="rounded-full border border-cyan-300/20 bg-cyan-400/10 px-2.5 py-1 text-[10px] text-cyan-100">
-                      {L("Auto audit attached", "Auto audit adjuntado")}
-                    </span>
-                  ) : null}
+                  <p className="mt-1 text-[15px] font-semibold leading-tight text-slate-50">
+                    {personalizedCoachMessage.title || L("Coach note for today", "Nota del coach para hoy")}
+                  </p>
+                  <p className="mt-2 text-[13px] leading-relaxed text-slate-100/90">
+                    {personalizedCoachMessage.body}
+                  </p>
                 </div>
-
-                <h2 className="mt-2 text-lg font-semibold text-slate-50">
-                  {coachReminder.actionPlan?.nextAction ||
-                    coachReminder.actionPlan?.checkpointFocus ||
-                    coachReminder.summary ||
-                    L("Latest coaching guidance", "Última guía del coach")}
-                </h2>
-
-                {coachReminder.summary ? (
-                  <p className="mt-2 max-w-3xl text-sm leading-relaxed text-slate-300">
-                    {coachReminder.summary}
-                  </p>
-                ) : null}
-
-                <div className="mt-4 grid gap-3 lg:grid-cols-2">
-                  {coachReminder.actionPlan?.nextAction ? (
-                    <div className="rounded-xl border border-emerald-400/20 bg-slate-950/45 p-3">
-                      <p className="text-[10px] uppercase tracking-[0.16em] text-emerald-300">
-                        {L("Next action", "Próxima acción")}
-                      </p>
-                      <p className="mt-1 text-sm text-slate-100">{coachReminder.actionPlan.nextAction}</p>
-                    </div>
-                  ) : null}
-                  {coachReminder.actionPlan?.checkpointFocus ? (
-                    <div className="rounded-xl border border-violet-300/20 bg-slate-950/45 p-3">
-                      <p className="text-[10px] uppercase tracking-[0.16em] text-violet-200">
-                        {L("Checkpoint focus", "Foco del checkpoint")}
-                      </p>
-                      <p className="mt-1 text-sm text-slate-100">{coachReminder.actionPlan.checkpointFocus}</p>
-                    </div>
-                  ) : null}
-                  {coachReminder.actionPlan?.ruleToAdd ? (
-                    <div className="rounded-xl border border-emerald-400/20 bg-slate-950/45 p-3">
-                      <p className="text-[10px] uppercase tracking-[0.16em] text-emerald-300">
-                        {L("Rule to add", "Regla para agregar")}
-                      </p>
-                      <p className="mt-1 text-sm text-slate-100">{coachReminder.actionPlan.ruleToAdd}</p>
-                    </div>
-                  ) : null}
-                  {coachReminder.actionPlan?.ruleToRemove ? (
-                    <div className="rounded-xl border border-rose-400/20 bg-slate-950/45 p-3">
-                      <p className="text-[10px] uppercase tracking-[0.16em] text-rose-200">
-                        {L("Rule to remove", "Regla para remover")}
-                      </p>
-                      <p className="mt-1 text-sm text-slate-100">{coachReminder.actionPlan.ruleToRemove}</p>
-                    </div>
-                  ) : null}
+                <div className="mt-0.5 rounded-full border border-emerald-300/40 bg-emerald-400/12 px-2.5 py-1 text-[10px] font-semibold text-emerald-100 shadow-[0_0_12px_rgba(16,185,129,0.18)]">
+                  {personalizedCoachMessage.pillLabel}
                 </div>
-
-                {coachReminder.audit?.attached ? (
-                  <p className="mt-3 text-[12px] text-slate-400">
-                    {[coachReminder.audit.date, coachReminder.audit.instrument].filter(Boolean).join(" · ")}
-                    {typeof coachReminder.audit.eventCount === "number"
-                      ? ` · ${coachReminder.audit.eventCount} ${L("events", "eventos")}`
-                      : ""}
-                  </p>
-                ) : null}
-              </div>
-
-              <div className="flex shrink-0 flex-wrap gap-2">
-                <Link
-                  href="/performance/ai-coaching"
-                  className="rounded-full bg-violet-300 px-4 py-2 text-[12px] font-semibold text-slate-950 transition hover:bg-violet-200"
-                >
-                  {L("Open AI Coaching", "Abrir AI Coaching")}
-                </Link>
-                <Link
-                  href="/growth-plan"
-                  className="rounded-full border border-violet-300/30 px-4 py-2 text-[12px] font-semibold text-violet-100 transition hover:border-violet-200 hover:text-white"
-                >
-                  {L("Open Growth Plan", "Abrir Growth Plan")}
-                </Link>
-              </div>
-            </div>
-          </section>
-        )}
-
-        <section className="mb-5 rounded-xl border border-slate-800 bg-slate-900/60 p-3">
-          <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
-            <div className="min-w-0 flex-1">
-              <p className="mb-1.5 text-[12px] text-slate-400">
-                {L(
-                  "Customize your dashboard: toggle widgets on/off.",
-                  "Personaliza tu dashboard: activa o desactiva los widgets."
-                )}
-              </p>
-
-              <div className="flex flex-wrap gap-1.5">
-                {ALL_WIDGETS.map((w) => {
-                  const isActive = activeWidgets.includes(w.id);
-                  return (
-                    <button
-                      key={w.id}
-                      type="button"
-                      onClick={() => {
-                        setActiveWidgets((prev) => (prev.includes(w.id) ? prev.filter((x) => x !== w.id) : [...prev, w.id]));
-                      }}
-                      className={`rounded-full border px-2.5 py-1 text-[11px] transition ${
-                        isActive
-                          ? "bg-emerald-400 text-slate-950 border-emerald-300"
-                          : "bg-slate-950 text-slate-300 border-slate-700 hover:border-emerald-400 hover:text-emerald-300"
-                      }`}
-                    >
-                      {isActive ? "✓ " : "+ "}
-                      {w.label}
-                    </button>
-                  );
-                })}
               </div>
             </div>
 
-            {(dailyCoachMessage || neuroMemory) ? (
-              <div className="w-full shrink-0 space-y-3 xl:max-w-[460px]">
-                {dailyCoachMessage ? (
-                  <div className="rounded-xl border border-emerald-300/30 bg-[linear-gradient(135deg,rgba(16,185,129,0.18),rgba(6,182,212,0.12),rgba(15,23,42,0.9))] px-4 py-3 shadow-[0_0_28px_rgba(16,185,129,0.14)]">
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <p className="text-[10px] uppercase tracking-[0.26em] text-emerald-200/90">
-                          {L("Daily coach message", "Mensaje diario del coach")}
-                        </p>
-                        <p className="mt-1 text-[15px] font-semibold leading-tight text-slate-50">
-                          {dailyCoachMessage.title || L("Coach note for today", "Nota del coach para hoy")}
-                        </p>
-                        <p className="mt-2 text-[13px] leading-relaxed text-slate-100/90">
-                          {dailyCoachMessage.body}
-                        </p>
-                      </div>
-                      <div className="mt-0.5 rounded-full border border-emerald-300/40 bg-emerald-400/12 px-2.5 py-1 text-[10px] font-semibold text-emerald-100 shadow-[0_0_12px_rgba(16,185,129,0.18)]">
-                        {L("Today", "Hoy")}
-                      </div>
-                    </div>
+            {dashboardNeuroMemory ? (
+              <div
+                className={`h-full rounded-xl border px-4 py-3 ${
+                  dashboardNeuroMemory.kind === "risk"
+                    ? "border-amber-300/30 bg-[linear-gradient(135deg,rgba(251,191,36,0.14),rgba(15,23,42,0.92))]"
+                    : dashboardNeuroMemory.kind === "strength"
+                      ? "border-cyan-300/30 bg-[linear-gradient(135deg,rgba(34,211,238,0.14),rgba(15,23,42,0.92))]"
+                      : "border-slate-700 bg-slate-950/80"
+                }`}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-[10px] uppercase tracking-[0.26em] text-slate-300/90">
+                      {L("Neuro Memory", "Neuro Memory")}
+                    </p>
+                    <p className="mt-1 text-[14px] font-semibold leading-tight text-slate-50">
+                      {dashboardNeuroMemory.title}
+                    </p>
+                    <p className="mt-2 text-[12px] leading-relaxed text-slate-200/90">
+                      {dashboardNeuroMemory.body}
+                    </p>
                   </div>
-                ) : null}
-
-                {neuroMemory ? (
                   <div
-                    className={`rounded-xl border px-4 py-3 ${
-                      neuroMemory.kind === "risk"
-                        ? "border-amber-300/30 bg-[linear-gradient(135deg,rgba(251,191,36,0.14),rgba(15,23,42,0.92))]"
-                        : neuroMemory.kind === "strength"
-                          ? "border-cyan-300/30 bg-[linear-gradient(135deg,rgba(34,211,238,0.14),rgba(15,23,42,0.92))]"
-                          : "border-slate-700 bg-slate-950/80"
+                    className={`rounded-full px-2.5 py-1 text-[10px] font-semibold ${
+                      dashboardNeuroMemory.kind === "risk"
+                        ? "border border-amber-300/40 bg-amber-400/10 text-amber-100"
+                        : dashboardNeuroMemory.kind === "strength"
+                          ? "border border-cyan-300/40 bg-cyan-400/10 text-cyan-100"
+                          : "border border-slate-600 bg-slate-800 text-slate-200"
                     }`}
                   >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="text-[10px] uppercase tracking-[0.26em] text-slate-300/90">
-                          {L("Neuro Memory", "Neuro Memory")}
-                        </p>
-                        <p className="mt-1 text-[14px] font-semibold leading-tight text-slate-50">
-                          {neuroMemory.title}
-                        </p>
-                        <p className="mt-2 text-[12px] leading-relaxed text-slate-200/90">
-                          {neuroMemory.body}
-                        </p>
-                      </div>
-                      <div
-                        className={`rounded-full px-2.5 py-1 text-[10px] font-semibold ${
-                          neuroMemory.kind === "risk"
-                            ? "border border-amber-300/40 bg-amber-400/10 text-amber-100"
-                            : neuroMemory.kind === "strength"
-                              ? "border border-cyan-300/40 bg-cyan-400/10 text-cyan-100"
-                              : "border border-slate-600 bg-slate-800 text-slate-200"
-                        }`}
-                      >
-                        {neuroMemory.kind === "risk"
-                          ? L("Pattern", "Patrón")
-                          : neuroMemory.kind === "strength"
-                            ? L("Strength", "Fortaleza")
-                            : L("Memory", "Memoria")}
-                      </div>
-                    </div>
+                    {dashboardNeuroMemory.kind === "risk"
+                      ? L("Pattern", "Patrón")
+                      : dashboardNeuroMemory.kind === "strength"
+                        ? L("Strength", "Fortaleza")
+                        : L("Memory", "Memoria")}
                   </div>
-                ) : null}
+                </div>
               </div>
             ) : null}
+          </section>
+        ) : null}
+
+        <section>
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,1.9fr)_minmax(340px,0.9fr)] xl:items-start">
+            <div className="grid gap-4">
+              {renderDashboardCard("progress")}
+              {renderDashboardCard("calendar")}
+              {renderDashboardCard("actions")}
+            </div>
+
+            <aside className="grid gap-4">
+              {renderDashboardCard("plan-progress")}
+              {renderDashboardCard("weekly")}
+              {renderDashboardCard("streak")}
+              {renderDashboardCard("trading-days")}
+            </aside>
           </div>
         </section>
-
-        <DynamicDashboardGrid items={activeWidgets} renderItem={renderItem} storageKey={layoutStorageKey} />
       </div>
     </main>
   );

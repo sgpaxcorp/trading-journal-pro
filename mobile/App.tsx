@@ -37,7 +37,9 @@ import { createRecoverySessionFromUrl, isPasswordRecoveryUrl } from "./src/lib/a
 import { registerDeviceForPush } from "./src/lib/pushNotifications";
 import { ModulePlaceholderScreen } from "./src/screens/ModulePlaceholderScreen";
 import { MoreSheet } from "./src/components/MoreSheet";
+import { PlanGate } from "./src/components/PlanGate";
 import { t } from "./src/lib/i18n";
+import { usePlanAccess } from "./src/lib/usePlanAccess";
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -82,6 +84,7 @@ function MainTabs() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { colors } = useTheme();
   const { language } = useLanguage();
+  const planAccess = usePlanAccess();
   const [moreOpen, setMoreOpen] = useState(false);
 
   const openModule = useCallback((title: string, description: string) => {
@@ -131,13 +134,24 @@ function MainTabs() {
   }, [navigation]);
 
   const openNotebook = useCallback(() => {
+    if (!planAccess.loading && !planAccess.isAdvanced) {
+      openModule(
+        t(language, "Notebook · Advanced", "Notebook · Advanced"),
+        t(
+          language,
+          "Custom notebooks, sections, pages, ink, and research notes are included in Advanced.",
+          "Libretas custom, secciones, páginas, ink y notas de research están incluidas en Advanced."
+        )
+      );
+      return;
+    }
     const parent = navigation.getParent<NativeStackNavigationProp<RootStackParamList>>();
     if (parent) {
       parent.navigate("Notebook");
       return;
     }
     navigation.navigate("Notebook");
-  }, [navigation]);
+  }, [language, navigation, openModule, planAccess.isAdvanced, planAccess.loading]);
 
   const openChallenges = useCallback(() => {
     const parent = navigation.getParent<NativeStackNavigationProp<RootStackParamList>>();
@@ -149,13 +163,24 @@ function MainTabs() {
   }, [navigation]);
 
   const openBrokerConnect = useCallback(() => {
+    if (!planAccess.loading && !planAccess.hasBrokerSync) {
+      openModule(
+        t(language, "Broker Sync · Add-on", "Broker Sync · Add-on"),
+        t(
+          language,
+          "Broker connection and automatic sync require the Broker Sync add-on.",
+          "La conexión de bróker y sincronización automática requieren el add-on Broker Sync."
+        )
+      );
+      return;
+    }
     const parent = navigation.getParent<NativeStackNavigationProp<RootStackParamList>>();
     if (parent) {
       parent.navigate("BrokerConnect");
       return;
     }
     navigation.navigate("BrokerConnect");
-  }, [navigation]);
+  }, [language, navigation, openModule, planAccess.hasBrokerSync, planAccess.loading]);
 
   const handleMoreSelect = useCallback((action: () => void) => {
     setMoreOpen(false);
@@ -190,7 +215,9 @@ function MainTabs() {
       },
       {
         key: "notebook",
-        label: t(language, "Notebook", "Notebook"),
+        label: planAccess.isAdvanced
+          ? t(language, "Notebook", "Notebook")
+          : t(language, "Notebook · Advanced", "Notebook · Advanced"),
         iconName: "document-text-outline" as const,
         onPress: () => handleMoreSelect(openNotebook),
       },
@@ -202,7 +229,9 @@ function MainTabs() {
       },
       {
         key: "broker-connect",
-        label: t(language, "Broker connect", "Conectar bróker"),
+        label: planAccess.hasBrokerSync
+          ? t(language, "Broker connect", "Conectar bróker")
+          : t(language, "Broker Sync · Add-on", "Broker Sync · Add-on"),
         iconName: "link-outline" as const,
         onPress: () => handleMoreSelect(openBrokerConnect),
       },
@@ -235,6 +264,8 @@ function MainTabs() {
       openSettings,
       openTrophies,
       openBrokerConnect,
+      planAccess.hasBrokerSync,
+      planAccess.isAdvanced,
     ]
   );
 
@@ -269,10 +300,25 @@ function MainTabs() {
           {() => <CalendarScreen onOpenModule={openModule} onOpenJournalDate={openJournalDate} />}
         </Tab.Screen>
         <Tab.Screen name="Analytics" options={{ title: "Analytics" }}>
-          {() => <AnalyticsScreen onOpenModule={openModule} />}
+          {() => <AnalyticsScreen onOpenModule={openModule} isAdvanced={planAccess.isAdvanced} />}
         </Tab.Screen>
         <Tab.Screen name="AICoach" options={{ title: "AI Coach" }}>
-          {() => <AICoachScreen onOpenModule={openModule} />}
+          {() =>
+            planAccess.isAdvanced ? (
+              <AICoachScreen onOpenModule={openModule} />
+            ) : (
+              <PlanGate
+                title={t(language, "AI Coach", "AI Coach")}
+                badge="Advanced"
+                loading={planAccess.loading}
+                subtitle={t(
+                  language,
+                  "AI Coaching, action plans, and mindset feedback are included in Advanced.",
+                  "AI Coaching, planes de acción y feedback de mindset están incluidos en Advanced."
+                )}
+              />
+            )
+          }
         </Tab.Screen>
         <Tab.Screen
           name="Other"
@@ -308,6 +354,8 @@ function MainTabs() {
               onOpenChallenges={openChallenges}
               onOpenJournalDate={openJournalDate}
               onOpenBrokerConnect={openBrokerConnect}
+              isAdvanced={planAccess.isAdvanced}
+              hasBrokerSync={planAccess.hasBrokerSync}
             />
           )}
         </Tab.Screen>

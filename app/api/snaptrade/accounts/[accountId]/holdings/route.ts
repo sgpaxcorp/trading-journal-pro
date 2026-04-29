@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAuthUser } from "@/lib/authServer";
 import { getSnaptradeUser } from "@/lib/snaptradeStorage";
 import { formatSnaptradeError, snaptradeGetHoldings } from "@/lib/snaptradeClient";
+import { requireBrokerSyncAddon } from "@/lib/serverFeatureAccess";
 
 export const runtime = "nodejs";
 
@@ -17,6 +18,8 @@ export async function GET(
     const brokerSyncFree =
       process.env.BROKER_SYNC_FREE === "true" || process.env.NEXT_PUBLIC_BROKER_SYNC_FREE === "true";
     if (!brokerSyncFree) {
+      const brokerGate = await requireBrokerSyncAddon(auth.userId);
+      if (brokerGate) return brokerGate;
     }
 
     const row = await getSnaptradeUser(auth.userId);

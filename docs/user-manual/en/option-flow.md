@@ -7,7 +7,7 @@ Status: private beta. Public access is disabled while the module is in developme
 Option Flow turns raw flow data into a premarket plan. It is not a signal service — it is a structured summary you validate with your own chart and rules.
 
 ## Standard workflow
-1. Upload flow data (CSV/XLS/XLSX) or screenshots.
+1. Upload flow data (CSV/XLSX) or screenshots.
 2. Generate the report.
 3. Review the executive summary, key levels, and flow map.
 4. Send the plan to your Journal premarket section.

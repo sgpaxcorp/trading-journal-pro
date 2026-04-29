@@ -2,12 +2,14 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Linking, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 
 import { ScreenScaffold } from "../components/ScreenScaffold";
+import { PlanGate } from "../components/PlanGate";
 import { apiGet, apiPost } from "../lib/api";
 import { useLanguage } from "../lib/LanguageContext";
 import { t } from "../lib/i18n";
 import { useTheme } from "../lib/ThemeContext";
 import type { ThemeColors } from "../theme";
 import { supabaseMobile } from "../lib/supabase";
+import { usePlanAccess } from "../lib/usePlanAccess";
 import { useSupabaseUser } from "../lib/useSupabaseUser";
 
 type SnaptradeAccount = {
@@ -40,6 +42,7 @@ export function BrokerConnectScreen() {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const user = useSupabaseUser();
+  const planAccess = usePlanAccess();
 
   const [broker, setBroker] = useState("");
   const [accounts, setAccounts] = useState<SnaptradeAccount[]>([]);
@@ -52,12 +55,18 @@ export function BrokerConnectScreen() {
   const [refreshing, setRefreshing] = useState(false);
 
   const loadActiveAccount = useCallback(async () => {
+    if (!planAccess.hasBrokerSync) return;
     if (!user?.id) return;
     const id = await resolveActiveAccountId(user.id);
     setActiveAccountId(id);
-  }, [user?.id]);
+  }, [planAccess.hasBrokerSync, user?.id]);
 
   const loadAccounts = useCallback(async (isRefresh = false) => {
+    if (!planAccess.hasBrokerSync) {
+      setLoading(false);
+      setRefreshing(false);
+      return;
+    }
     try {
       if (isRefresh) setRefreshing(true);
       else setLoading(true);
@@ -94,14 +103,16 @@ export function BrokerConnectScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [language, selectedAccountId]);
+  }, [language, planAccess.hasBrokerSync, selectedAccountId]);
 
   useEffect(() => {
+    if (!planAccess.hasBrokerSync) return;
     loadActiveAccount();
     loadAccounts();
-  }, [loadActiveAccount, loadAccounts]);
+  }, [loadActiveAccount, loadAccounts, planAccess.hasBrokerSync]);
 
   const handleConnect = useCallback(async () => {
+    if (!planAccess.hasBrokerSync) return;
     try {
       setConnecting(true);
       setError(null);
@@ -140,9 +151,10 @@ export function BrokerConnectScreen() {
     } finally {
       setConnecting(false);
     }
-  }, [broker, language]);
+  }, [broker, language, planAccess.hasBrokerSync]);
 
   const handleReset = useCallback(async () => {
+    if (!planAccess.hasBrokerSync) return;
     try {
       setError(null);
       setStatus(null);
@@ -159,7 +171,7 @@ export function BrokerConnectScreen() {
     } catch (err: any) {
       setError(err?.message ?? "SnapTrade error");
     }
-  }, [language]);
+  }, [language, planAccess.hasBrokerSync]);
 
   const handleSetActive = useCallback(async () => {
     if (!supabaseMobile || !user?.id || !selectedAccountId) return;
@@ -181,6 +193,21 @@ export function BrokerConnectScreen() {
       setError(err?.message ?? "Failed to update active account.");
     }
   }, [selectedAccountId, user?.id, language]);
+
+  if (!planAccess.hasBrokerSync) {
+    return (
+      <PlanGate
+        title={t(language, "Broker Sync", "Broker Sync")}
+        badge="Add-on"
+        loading={planAccess.loading}
+        subtitle={t(
+          language,
+          "Broker connection, accounts, balances, activity, and auto-sync require the Broker Sync add-on.",
+          "La conexión de bróker, cuentas, balances, actividad y auto-sync requieren el add-on Broker Sync."
+        )}
+      />
+    );
+  }
 
   const accountLabel = (acc: SnaptradeAccount) =>
     acc?.name ||

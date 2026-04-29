@@ -54,7 +54,7 @@ export const ACCESS_GRANTS: AccessGrantDefinition[] = [
       es: "Desbloquea el workspace privado principal y las páginas core estándar.",
     },
     primaryPath: "/dashboard",
-    paths: ["/dashboard", "/growth-plan", "/journal", "/import", "/audit/order-history"],
+    paths: ["/dashboard", "/growth-plan", "/journal", "/import"],
   },
   {
     key: "page_dashboard",

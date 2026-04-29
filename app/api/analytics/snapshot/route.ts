@@ -2,6 +2,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 import { buildSnapshotAndEdges, type SessionRow, type TradeRow } from "@/lib/analyticsEngine";
+import { getServerPlanForUser } from "@/lib/serverFeatureAccess";
 
 export const runtime = "nodejs";
 
@@ -764,9 +765,29 @@ export async function GET(req: NextRequest) {
       bySymbol,
     };
 
+    const plan = await getServerPlanForUser(userId);
+    const coreSnapshot =
+      plan === "advanced"
+        ? normalized
+        : {
+            updatedAtIso: normalized.updatedAtIso,
+            totalSessions: normalized.totalSessions,
+            totalTrades: normalized.totalTrades,
+            wins: normalized.wins,
+            losses: normalized.losses,
+            breakevens: normalized.breakevens,
+            winRate: normalized.winRate,
+            netPnl: normalized.netPnl,
+            avgNetPerSession: normalized.avgNetPerSession,
+            profitFactor: normalized.profitFactor,
+            maxDrawdown: normalized.maxDrawdown,
+            longestWinStreak: normalized.longestWinStreak,
+            longestLossStreak: normalized.longestLossStreak,
+          };
+
     return NextResponse.json({
-      snapshot: normalized,
-      topEdges: edges ?? [],
+      snapshot: coreSnapshot,
+      topEdges: plan === "advanced" ? edges ?? [] : [],
     });
   } catch (err: any) {
     console.error("[analytics/snapshot] error:", err);

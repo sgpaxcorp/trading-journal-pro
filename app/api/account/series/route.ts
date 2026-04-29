@@ -5,6 +5,7 @@ import {
   normalizePlannedWithdrawals,
   normalizeWithdrawalSettings,
 } from "@/lib/growthPlanProjection";
+import { getServerPlanForUser } from "@/lib/serverFeatureAccess";
 
 export const runtime = "nodejs";
 
@@ -381,6 +382,7 @@ export async function GET(req: NextRequest) {
     let cumPnl = 0;
     let cumCash = 0;
     const series: SeriesPoint[] = [];
+    const tradingSeries: SeriesPoint[] = [];
     const daily: SeriesPoint[] = [];
     const cashflow: SeriesPoint[] = [];
 
@@ -390,7 +392,9 @@ export async function GET(req: NextRequest) {
       cumPnl += dayPnl;
       cumCash += dayCash;
       const value = startingBalance + cumPnl + cumCash;
+      const tradingValue = startingBalance + cumPnl;
       series.push({ date: d, value: Number(value.toFixed(2)) });
+      tradingSeries.push({ date: d, value: Number(tradingValue.toFixed(2)) });
       cashflow.push({ date: d, value: Number(dayCash.toFixed(2)) });
       if (pnlByDate[d] != null) {
         daily.push({ date: d, value: Number(dayPnl.toFixed(2)) });
@@ -443,7 +447,10 @@ export async function GET(req: NextRequest) {
 
     const totalTradingPnl = cumPnl;
     const totalCashflowNet = cumCash;
-    const currentBalance = startingBalance + totalTradingPnl + totalCashflowNet;
+    const userPlan = await getServerPlanForUser(userId);
+    const canSeeCashflow = userPlan === "advanced";
+    const visibleCashflowNet = canSeeCashflow ? totalCashflowNet : 0;
+    const visibleCurrentBalance = startingBalance + totalTradingPnl + visibleCashflowNet;
 
     return NextResponse.json({
       plan: {
@@ -462,12 +469,12 @@ export async function GET(req: NextRequest) {
       },
       totals: {
         tradingPnl: Number(totalTradingPnl.toFixed(2)),
-        cashflowNet: Number(totalCashflowNet.toFixed(2)),
-        currentBalance: Number(currentBalance.toFixed(2)),
+        cashflowNet: Number(visibleCashflowNet.toFixed(2)),
+        currentBalance: Number(visibleCurrentBalance.toFixed(2)),
       },
-      series,
+      series: canSeeCashflow ? series : tradingSeries,
       projected,
-      cashflow,
+      cashflow: canSeeCashflow ? cashflow : [],
       daily,
     });
   } catch (err: any) {

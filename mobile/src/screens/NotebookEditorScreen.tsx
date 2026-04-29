@@ -13,6 +13,7 @@ import {
 import { useRoute } from "@react-navigation/native";
 
 import { ScreenScaffold } from "../components/ScreenScaffold";
+import { PlanGate } from "../components/PlanGate";
 import { InkField } from "../components/InkField";
 import type { InkDrawing } from "../components/inkTypes";
 import { useLanguage } from "../lib/LanguageContext";
@@ -22,6 +23,7 @@ import { useTheme } from "../lib/ThemeContext";
 import type { ThemeColors } from "../theme";
 import { supabaseMobile } from "../lib/supabase";
 import { useSupabaseUser } from "../lib/useSupabaseUser";
+import { usePlanAccess } from "../lib/usePlanAccess";
 import { apiGet } from "../lib/api";
 
 const PAGES_TABLE = "ntj_notebook_pages";
@@ -83,6 +85,7 @@ export function NotebookEditorScreen() {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const user = useSupabaseUser();
+  const planAccess = usePlanAccess();
   const route = useRoute<any>();
   const params = (route?.params ?? {}) as RouteParams;
   const { kind, id, title } = params;
@@ -102,6 +105,7 @@ export function NotebookEditorScreen() {
   const [renaming, setRenaming] = useState(false);
 
   const loadData = useCallback(async () => {
+    if (!planAccess.isAdvanced) return;
     if (!supabaseMobile || !user?.id || !kind || !id) return;
     setLoading(true);
     setError(null);
@@ -159,13 +163,15 @@ export function NotebookEditorScreen() {
     } finally {
       setLoading(false);
     }
-  }, [id, kind, language, user?.id]);
+  }, [id, kind, language, planAccess.isAdvanced, user?.id]);
 
   useEffect(() => {
+    if (!planAccess.isAdvanced) return;
     void loadData();
-  }, [loadData]);
+  }, [loadData, planAccess.isAdvanced]);
 
   async function handleSave() {
+    if (!planAccess.isAdvanced) return;
     if (!supabaseMobile || !user?.id || !kind || !id) return;
     setSaving(true);
     setError(null);
@@ -220,6 +226,7 @@ export function NotebookEditorScreen() {
   }
 
   async function handleRename() {
+    if (!planAccess.isAdvanced) return;
     if (!supabaseMobile || !user?.id || kind !== "page") {
       setRenameOpen(false);
       return;
@@ -262,6 +269,21 @@ export function NotebookEditorScreen() {
           "Your journal day page stays focused here: write or draw without distractions.",
           "La página del journal del día se mantiene enfocada aquí: escribe o dibuja sin distracciones."
         );
+
+  if (!planAccess.isAdvanced) {
+    return (
+      <PlanGate
+        title={t(language, "Notebook", "Notebook")}
+        badge="Advanced"
+        loading={planAccess.loading}
+        subtitle={t(
+          language,
+          "Notebook page editing, ink, rich text, and daily pages are included in Advanced.",
+          "La edición de páginas, ink, rich text y páginas diarias de Notebook están incluidas en Advanced."
+        )}
+      />
+    );
+  }
 
   return (
     <ScreenScaffold

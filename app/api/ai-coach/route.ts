@@ -12,6 +12,7 @@ import { getAuthUser } from "@/lib/authServer";
 import { rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
 import { auditOrderEvents } from "@/lib/audit/auditEngine";
 import type { NormalizedOrderEvent } from "@/lib/brokers/types";
+import { requireAdvancedPlan } from "@/lib/serverFeatureAccess";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -63,6 +64,10 @@ type CoachMemoryBundle = {
 
 type CoachActionPlan = {
   summary: string;
+  whatISee: string;
+  whatIsDrifting: string;
+  whatToProtect: string;
+  whatChangesNextSession: string;
   nextAction: string;
   ruleToAdd: string;
   ruleToRemove: string;
@@ -1206,9 +1211,58 @@ function buildGrowthPlanOperatingBlock(body: AiCoachRequestBody): string {
         .map((item) => safeString(item?.text ?? item).trim())
         .filter(Boolean)
         .slice(0, 4);
-      if (doList.length || dontList.length) {
-        lines.push(`Execution system:${doList.length ? ` do=${doList.join(", ")}` : ""}${dontList.length ? ` | don't=${dontList.join(", ")}` : ""}`);
+      const orderList = safeArray<any>(executionSystem?.orderList)
+        .map((item) => safeString(item?.text ?? item).trim())
+        .filter(Boolean)
+        .slice(0, 4);
+      if (doList.length || dontList.length || orderList.length) {
+        lines.push(
+          `Execution system:${doList.length ? ` do=${doList.join(", ")}` : ""}${dontList.length ? ` | don't=${dontList.join(", ")}` : ""}${
+            orderList.length ? ` | order=${orderList.join(", ")}` : ""
+          }`
+        );
       }
+    }
+
+    const prepareChecklist = safeArray<any>(growthPlan?.prepareChecklist)
+      .map((item) => safeString(item?.text ?? item).trim())
+      .filter(Boolean)
+      .slice(0, 6);
+    if (prepareChecklist.length) {
+      lines.push(`Prepare checklist anchors: ${prepareChecklist.join(" | ")}`);
+    }
+
+    const strategies = safeArray<any>(growthPlan?.strategies)
+      .map((strategy) => ({
+        name: safeString(strategy?.name).trim(),
+        setup: safeString(strategy?.setup).trim(),
+        entryRules: safeString(strategy?.entryRules).trim(),
+        exitRules: safeString(strategy?.exitRules).trim(),
+        managementRules: safeString(strategy?.managementRules).trim(),
+        invalidation: safeString(strategy?.invalidation).trim(),
+        timeframe: safeString(strategy?.timeframe).trim(),
+        instruments: safeArray<any>(strategy?.instruments).map((item) => safeString(item).trim()).filter(Boolean),
+      }))
+      .filter((strategy) => strategy.name || strategy.setup || strategy.entryRules || strategy.managementRules || strategy.invalidation)
+      .slice(0, 3);
+    if (strategies.length) {
+      lines.push(
+        `Strategy anchors:\n${strategies
+          .map((strategy) => {
+            const meta = [strategy.timeframe, strategy.instruments.join(", ")].filter(Boolean).join(" · ");
+            const core =
+              strategy.setup || strategy.entryRules || strategy.managementRules || strategy.exitRules || strategy.invalidation;
+            return `- ${strategy.name || "Strategy"}${meta ? ` (${meta})` : ""}${core ? ` · ${clampText(core, 180)}` : ""}${
+              strategy.invalidation ? ` · invalidation=${clampText(strategy.invalidation, 120)}` : ""
+            }`;
+          })
+          .join("\n")}`
+      );
+    }
+
+    const strategyNotes = safeString(growthPlan?.strategyNotes).trim();
+    if (strategyNotes) {
+      lines.push(`Strategy notes: ${clampText(strategyNotes, 220)}`);
     }
   }
 
@@ -1576,11 +1630,13 @@ function buildSystemPrompt(params: {
       `- Habla como un coach humano (cercano, directo, sin sonar robótico). Puedes usar el nombre del usuario: ${firstName}.`,
       "- Responde a la pregunta específica primero; no des un reporte genérico.",
       "- Si hay contexto de Growth Plan, piensa como un operador del plan: primero ubica al usuario contra la meta, luego identifica el bloqueo principal, luego da la acción de mayor leverage.",
+      "- Si el Growth Plan incluye estrategia, reglas o límites exactos, úsalos como ancla factual. Puedes sintetizarlos en lenguaje más claro y humano, pero sin distorsionar el significado.",
       "- Mantén la respuesta en segmentos cortos (párrafos breves + bullets cuando ayude).",
       `- ${allowTables ? "Puedes usar tablas si el usuario las pidió." : "NO uses tablas Markdown salvo que el usuario explícitamente pida una tabla/desglose."}`,
       "- NO asumas ni inventes datos. Si algo no está en el contexto, dilo explícitamente.",
       "- Separa hechos (observaciones) de inferencias. Si infieres, dilo y explica el soporte.",
       "- Sé objetivo: no digas lo que el usuario quiere oír, di lo que los datos muestran.",
+      "- Acompaña al usuario como un coach real: cercano, honesto y útil. No vendas certeza, no prometas resultados y no 'infles' el contexto.",
       "- Cuando existan datos del plan, menciona explícitamente: 1) cómo va respecto al plan/checkpoint, 2) qué patrón lo aleja del plan, 3) qué debe cambiar mañana.",
       "- Si incluyes métricas/estadísticas, usa 1–3 números relevantes y explica qué significan (sin volcar datos).",
       "- Si hay KPIs en el contexto, interprétalos usando su definición y notas; si un KPI no tiene valor, di que falta data.",
@@ -1607,11 +1663,13 @@ function buildSystemPrompt(params: {
     `- Sound human (warm, direct, not robotic). You may use the user's name: ${firstName}.`,
     "- Answer the user's specific question first; do not produce a generic report.",
     "- If Growth Plan context exists, think like a plan operator: first locate the user versus the target, then identify the main blocker, then give the highest-leverage next action.",
+    "- If the Growth Plan contains exact strategy, rule, or risk language, use it as factual anchor. You may synthesize it into clearer, more human wording, but do not distort the meaning.",
     "- Keep it concise with short paragraphs and bullets when helpful.",
     `- ${allowTables ? "You may use tables if the user asked for them." : "Do NOT use Markdown tables unless the user explicitly asked for a table/breakdown."}`,
     "- Do NOT assume or invent data. If something is not in the context, say so explicitly.",
     "- Separate facts (observations) from inferences. If you infer, say it and cite the support.",
     "- Be objective: do not tell the user what they want to hear, say what the data shows.",
+    "- Support the user like a real coach: warm, honest, and useful. Do not sell certainty, promise outcomes, or overstate the evidence.",
     "- When plan data exists, explicitly state: 1) where the user stands versus the plan/checkpoint, 2) which pattern is reducing the odds of hitting it, 3) what to change next session.",
     "- If you cite analytics, use only 1–3 relevant numbers and explain the implication (no data dump).",
     "- If KPI results are provided, interpret them using their definition/notes; if a KPI has no value, say data is insufficient.",
@@ -1782,33 +1840,50 @@ async function buildCoachActionPlan(params: {
   lang: "es" | "en";
   question: string;
   coachText: string;
+  planContext: string;
 }): Promise<CoachActionPlan | null> {
-  const { apiKey, baseUrl, model, lang, question, coachText } = params;
+  const { apiKey, baseUrl, model, lang, question, coachText, planContext } = params;
   const system =
     lang === "es"
       ? [
-          "Extrae un plan de acción operativo desde una respuesta de coaching de trading.",
+          "Extrae un plan de acción operativo desde una respuesta de coaching de trading, anclado al Growth Plan del usuario.",
           "Devuelve SOLO JSON válido con este shape exacto:",
-          '{"summary":"", "nextAction":"", "ruleToAdd":"", "ruleToRemove":"", "checkpointFocus":""}',
+          '{"summary":"", "whatISee":"", "whatIsDrifting":"", "whatToProtect":"", "whatChangesNextSession":"", "nextAction":"", "ruleToAdd":"", "ruleToRemove":"", "checkpointFocus":""}',
           "Reglas:",
-          "- summary: 1 frase corta de la tesis del coach.",
-          "- nextAction: una sola acción clara para la próxima sesión.",
-          "- ruleToAdd: una sola regla concreta para agregar.",
-          "- ruleToRemove: una sola regla concreta para eliminar o dejar de hacer.",
-          "- checkpointFocus: el checkpoint o foco del plan que debe protegerse.",
-          "- Si falta algo, usa string vacío.",
+          "- Usa SOLO dos fuentes: 1) el bloque Growth Plan context, 2) la respuesta del coach.",
+          "- NO inventes reglas, porcentajes, tamaños, instrumentos, setups, checkpoints ni límites.",
+          "- Usa el plan del usuario como base factual, pero puedes reformular en lenguaje más claro, más útil y más humano si sigues siendo fiel al significado.",
+          "- Debe sentirse como un coach real: observador, honesto, concreto y sin vender certezas.",
+          "- summary: 1 frase corta de la tesis del coach conectada al plan del usuario, sin exagerar certeza.",
+          "- whatISee: lo que ves en la ejecución o patrón del usuario según su plan y el contexto; breve, específico y humano.",
+          "- whatIsDrifting: dónde se está desviando del plan o qué está perdiendo calidad; si no está claro, string vacío.",
+          "- whatToProtect: lo que sí debe proteger en riesgo, proceso o conducta para no romper su edge.",
+          "- whatChangesNextSession: el ajuste concreto para la próxima sesión; una sola dirección clara.",
+          "- nextAction: una sola acción clara para la próxima sesión, específica al plan del usuario y escrita como un coach real, no como plantilla.",
+          "- ruleToAdd: solo si la respuesta propone una regla NUEVA no presente ya en el sistema actual.",
+          "- ruleToRemove: solo si la respuesta propone dejar de hacer algo concreto.",
+          "- checkpointFocus: el foco del plan/riesgo/ejecución que debe protegerse según el contexto. Puede ser una versión más corta de whatToProtect.",
+          "- Si una clave no está soportada por el contexto, usa string vacío.",
         ].join("\n")
       : [
-          "Extract an operational action plan from a trading coaching response.",
+          "Extract an operational action plan from a trading coaching response, anchored to the user's Growth Plan.",
           "Return ONLY valid JSON with this exact shape:",
-          '{"summary":"", "nextAction":"", "ruleToAdd":"", "ruleToRemove":"", "checkpointFocus":""}',
+          '{"summary":"", "whatISee":"", "whatIsDrifting":"", "whatToProtect":"", "whatChangesNextSession":"", "nextAction":"", "ruleToAdd":"", "ruleToRemove":"", "checkpointFocus":""}',
           "Rules:",
-          "- summary: 1 short sentence with the coach's thesis.",
-          "- nextAction: one clear action for the next session.",
-          "- ruleToAdd: one concrete rule to add.",
-          "- ruleToRemove: one concrete rule to remove or stop doing.",
-          "- checkpointFocus: the checkpoint or plan focus that must be protected.",
-          "- If missing, use an empty string.",
+          "- Use ONLY two sources: 1) the Growth Plan context block, 2) the coach response.",
+          "- Do NOT invent rules, percentages, sizes, instruments, setups, checkpoints, or limits.",
+          "- Use the user's plan as factual base, but you may rephrase it into clearer, more useful, more human language if you stay faithful to the meaning.",
+          "- It should feel like a real coach: observant, honest, concrete, and free of false certainty.",
+          "- summary: 1 short sentence with the coach's thesis tied to the user's plan, without overstating certainty.",
+          "- whatISee: what you see in the user's execution or pattern based on their plan and the context; brief, specific, and human.",
+          "- whatIsDrifting: where the user is slipping away from plan quality; if unclear, return an empty string.",
+          "- whatToProtect: what must stay intact in risk, process, or behavior so the edge is not damaged.",
+          "- whatChangesNextSession: the concrete adjustment for the next session; give one clear direction.",
+          "- nextAction: one clear action for the next session, specific to the user's plan and written like a real coach, not a template.",
+          "- ruleToAdd: only if the response proposes a NEW rule not already present in the current system.",
+          "- ruleToRemove: only if the response proposes stopping something concrete.",
+          "- checkpointFocus: the plan/risk/execution focus that must be protected according to context. It can be a shorter mirror of whatToProtect.",
+          "- If a key is not supported by context, use an empty string.",
         ].join("\n");
 
   const extraction = await callOpenAI({
@@ -1819,22 +1894,36 @@ async function buildCoachActionPlan(params: {
       { role: "system", content: system },
       {
         role: "user",
-        content: `Question:\n${clampText(question, 500)}\n\nCoach response:\n${clampText(coachText, 2200)}`,
+        content: `Growth Plan context:\n${clampText(planContext, 2400) || "(none)"}\n\nQuestion:\n${clampText(
+          question,
+          500
+        )}\n\nCoach response:\n${clampText(coachText, 2200)}`,
       },
     ],
-    maxTokens: 260,
+    maxTokens: 380,
     temperature: 0.1,
   });
 
   const parsed = extractFirstJsonObject(extraction.text);
   if (!parsed || typeof parsed !== "object") return null;
 
+  const whatISee = clampText(parsed.whatISee || parsed.summary, 220);
+  const whatIsDrifting = clampText(parsed.whatIsDrifting || parsed.ruleToRemove, 220);
+  const whatToProtect = clampText(parsed.whatToProtect || parsed.checkpointFocus, 180);
+  const whatChangesNextSession = clampText(parsed.whatChangesNextSession || parsed.nextAction, 180);
+  const nextAction = clampText(parsed.nextAction || whatChangesNextSession, 180);
+  const checkpointFocus = clampText(parsed.checkpointFocus || whatToProtect, 140);
+
   return {
     summary: clampText(parsed.summary, 180),
-    nextAction: clampText(parsed.nextAction, 180),
+    whatISee,
+    whatIsDrifting,
+    whatToProtect,
+    whatChangesNextSession,
+    nextAction,
     ruleToAdd: clampText(parsed.ruleToAdd, 180),
     ruleToRemove: clampText(parsed.ruleToRemove, 180),
-    checkpointFocus: clampText(parsed.checkpointFocus, 140),
+    checkpointFocus,
   };
 }
 
@@ -1844,6 +1933,9 @@ export async function POST(req: Request) {
     if (!authUser) {
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
+
+    const advancedGate = await requireAdvancedPlan(authUser.userId);
+    if (advancedGate) return advancedGate;
 
     const rate = rateLimit(`ai-coach:user:${authUser.userId}`, {
       limit: 10,
@@ -2015,6 +2107,7 @@ export async function POST(req: Request) {
         lang: language,
         question,
         coachText,
+        planContext: buildGrowthPlanOperatingBlock(body),
       });
     } catch {
       actionPlan = null;

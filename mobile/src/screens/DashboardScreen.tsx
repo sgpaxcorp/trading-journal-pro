@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Image,
@@ -6,7 +6,9 @@ import {
   Pressable,
   StyleSheet,
   Text,
+  type TextStyle,
   View,
+  type ViewStyle,
   useWindowDimensions,
 } from "react-native";
 
@@ -16,6 +18,7 @@ import { useLanguage } from "../lib/LanguageContext";
 import { t } from "../lib/i18n";
 import { parseNotes, type StoredTradeRow, type TradesPayload } from "../lib/journalNotes";
 import { supabaseMobile } from "../lib/supabase";
+import { useSupabaseUser } from "../lib/useSupabaseUser";
 import { useTheme } from "../lib/ThemeContext";
 import { DARK_COLORS, type ThemeColors } from "../theme";
 
@@ -33,11 +36,29 @@ type TradingSystemItem = {
   text?: string;
 };
 
+type GrowthPlanStrategy = {
+  name?: string;
+  setup?: string;
+  entryRules?: string;
+  exitRules?: string;
+  managementRules?: string;
+  invalidation?: string;
+  instruments?: string[];
+  timeframe?: string;
+};
+
 type GrowthPlanSteps = {
+  strategy?: {
+    title?: string;
+    strategies?: GrowthPlanStrategy[];
+    notes?: string;
+  };
   execution_and_journal?: {
     system?: {
       doList?: TradingSystemItem[];
       dontList?: TradingSystemItem[];
+      orderList?: TradingSystemItem[];
+      notes?: string;
     };
   };
 };
@@ -81,6 +102,34 @@ type MotivationMessageRow = {
   weekday: string | null;
   day_of_year: number | null;
 };
+
+type DashboardNeuroMemory = {
+  title: string;
+  body: string;
+  kind: "strength" | "risk" | "neutral";
+};
+
+type DashboardCoachActionPlan = {
+  summary?: string;
+  whatISee?: string;
+  whatIsDrifting?: string;
+  whatToProtect?: string;
+  whatChangesNextSession?: string;
+  nextAction?: string;
+  ruleToAdd?: string;
+  ruleToRemove?: string;
+  checkpointFocus?: string;
+};
+
+type DashboardCoachReminder = {
+  summary: string | null;
+  updatedAt: string | null;
+  actionPlan: DashboardCoachActionPlan | null;
+};
+
+type CoachMoment = "morning" | "afternoon" | "evening";
+
+type SystemPanelTab = "focus" | "rules" | "ai";
 
 type UiChecklistItem = {
   text: string;
@@ -213,6 +262,7 @@ function GradientTitleText({ text, style }: { text: string; style: any }) {
 }
 
 const WEB_GROWTH_PLAN_URL = "https://www.neurotrader-journal.com/growth-plan";
+const WEB_AI_COACH_URL = "https://www.neurotrader-journal.com/performance/ai-coaching";
 
 const NEW_YORK_TZ = "America/New_York";
 
@@ -223,10 +273,13 @@ function getNewYorkDayParts(now = new Date()) {
     month: "2-digit",
     day: "2-digit",
     weekday: "short",
+    hour: "2-digit",
+    hour12: false,
   }).formatToParts(now);
   const year = Number(parts.find((p) => p.type === "year")?.value ?? "1970");
   const month = Number(parts.find((p) => p.type === "month")?.value ?? "1");
   const day = Number(parts.find((p) => p.type === "day")?.value ?? "1");
+  const hour = Number(parts.find((p) => p.type === "hour")?.value ?? "9");
   const weekdayRaw = (parts.find((p) => p.type === "weekday")?.value ?? "Mon").toLowerCase();
   const weekdayMap: Record<string, string> = {
     mon: "mon",
@@ -241,6 +294,7 @@ function getNewYorkDayParts(now = new Date()) {
     year,
     month,
     day,
+    hour,
     weekday: weekdayMap[weekdayRaw.slice(0, 3)] ?? "mon",
   };
 }
@@ -290,16 +344,16 @@ function fallbackCoachMessage(weekday: string, lang: "en" | "es") {
   };
 }
 
-function buildFallbackCoachRow(lang: "en" | "es"): MotivationMessageRow {
-  const dayParts = getNewYorkDayParts();
+function buildFallbackCoachRow(lang: "en" | "es", now = new Date()): MotivationMessageRow {
+  const dayParts = getNewYorkDayParts(now);
   const fallback = fallbackCoachMessage(dayParts.weekday, lang);
   return {
-    id: `fallback-${lang}-${getNewYorkDayOfYear()}`,
+    id: `fallback-${lang}-${getNewYorkDayOfYear(now)}`,
     locale: lang,
     title: fallback.title,
     body: fallback.body,
     weekday: dayParts.weekday,
-    day_of_year: getNewYorkDayOfYear(),
+    day_of_year: getNewYorkDayOfYear(now),
   };
 }
 
@@ -320,7 +374,196 @@ function pickMotivationMessage(rows: MotivationMessageRow[], lang: "en" | "es", 
   const generic = pool.find((row) => !row.weekday && row.day_of_year == null);
   if (generic) return generic;
 
-  return buildFallbackCoachRow(lang);
+  return buildFallbackCoachRow(lang, now);
+}
+
+function resolveCoachFirstName(raw: unknown): string {
+  const value = String(raw ?? "").trim();
+  if (!value) return "";
+  const source = value.includes("@") ? value.split("@")[0] : value;
+  const normalized = source.replace(/[._-]+/g, " ").trim();
+  const first = normalized.split(/\s+/).find(Boolean) ?? "";
+  const clean = first.replace(/[^A-Za-zÀ-ÿ'’-]/g, "").trim();
+  if (!clean || /^trader$/i.test(clean)) return "";
+  return clean.charAt(0).toUpperCase() + clean.slice(1);
+}
+
+function resolveCoachMoment(hour: number): CoachMoment {
+  if (hour < 12) return "morning";
+  if (hour < 18) return "afternoon";
+  return "evening";
+}
+
+function personalizeCoachMessage(
+  row: MotivationMessageRow,
+  options: { lang: "en" | "es"; firstName?: string; now?: Date }
+) {
+  const { lang, firstName = "", now = new Date() } = options;
+  const tx = (en: string, es: string) => (lang === "es" ? es : en);
+  const dayParts = getNewYorkDayParts(now);
+  const dayOfYear = getNewYorkDayOfYear(now);
+  const moment = resolveCoachMoment(dayParts.hour);
+  const greetingBase =
+    moment === "morning"
+      ? tx("Good morning", "Buenos días")
+      : moment === "afternoon"
+        ? tx("Good afternoon", "Buenas tardes")
+        : tx("Good evening", "Buenas noches");
+  const pillLabel =
+    moment === "morning"
+      ? tx("Morning", "Mañana")
+      : moment === "afternoon"
+        ? tx("Afternoon", "Tarde")
+        : tx("Evening", "Noche");
+  const title = firstName ? `${greetingBase}, ${firstName}.` : `${greetingBase}.`;
+  const intros =
+    lang === "es"
+      ? {
+          morning: [
+            "Hoy quiero que empieces con calma, enfoque y una sola intención clara.",
+            "Antes de abrir el mercado, vuelve a tu proceso y baja el ruido.",
+            "Arranca liviano: claridad primero, velocidad después.",
+            "Que tu primera decisión hoy nazca del plan, no de la urgencia.",
+          ],
+          afternoon: [
+            "Haz una pausa corta y revisa si sigues operando desde el plan.",
+            "A esta hora la disciplina vale más que la energía.",
+            "Vuelve al centro antes de la próxima ejecución.",
+            "Si el ritmo sube, responde con más proceso, no con más prisa.",
+          ],
+          evening: [
+            "Cierra con honestidad: lo que aprendes hoy protege tu mañana.",
+            "Esta noche vale más la claridad que el juicio duro.",
+            "Baja revoluciones y quédate con la lección más útil del día.",
+            "Termina el día cuidando tu mente igual que cuidas tu riesgo.",
+          ],
+        }
+      : {
+          morning: [
+            "Start today with calm, focus, and one clear intention.",
+            "Before the market opens, come back to your process and lower the noise.",
+            "Begin light: clarity first, speed second.",
+            "Let your first decision today come from the plan, not urgency.",
+          ],
+          afternoon: [
+            "Take a short pause and check whether you are still trading from plan.",
+            "At this hour, discipline matters more than energy.",
+            "Come back to center before the next execution.",
+            "If the tempo rises, answer with more process, not more rush.",
+          ],
+          evening: [
+            "Close with honesty: what you learn today protects tomorrow.",
+            "Tonight, clarity is worth more than harsh self-judgment.",
+            "Lower the noise and keep the most useful lesson from the day.",
+            "End the day protecting your mind the same way you protect risk.",
+          ],
+        };
+  const introPool = intros[moment];
+  const intro = introPool[dayOfYear % introPool.length] || "";
+  const baseBody = String(row.body ?? "").trim();
+  return {
+    title,
+    body: [intro, baseBody].filter(Boolean).join(" "),
+    pillLabel,
+  };
+}
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.map((item) => String(item).trim()).filter(Boolean) : [];
+}
+
+function buildDashboardNeuroMemory(entries: JournalEntry[], lang: "en" | "es"): DashboardNeuroMemory {
+  const tx = (en: string, es: string) => (lang === "es" ? es : en);
+  const fallback: DashboardNeuroMemory = {
+    title: tx("Latest Neuro read", "Última lectura Neuro"),
+    body: tx(
+      "Your latest AI behavior read will appear here after a Neuro-tagged journal entry.",
+      "Tu lectura de comportamiento con IA aparecerá aquí después de una entrada con Neuro Layer."
+    ),
+    kind: "strength",
+  };
+
+  const sessions = entries
+    .map((entry) => {
+      const parsed = parseNotes(entry?.notes ?? null) as any;
+      const neuro = parsed?.neuro_layer ?? parsed?.neuroLayer ?? null;
+      const date = String(entry?.date ?? "").slice(0, 10);
+      if (!date || !neuro) return null;
+      return { date, neuro };
+    })
+    .filter(Boolean)
+    .sort((a: any, b: any) => String(b.date).localeCompare(String(a.date)))
+    .slice(0, 8) as Array<{ date: string; neuro: any }>;
+
+  if (!sessions.length) return fallback;
+
+  const count = (predicate: (session: (typeof sessions)[number]) => boolean) =>
+    sessions.reduce((acc, session) => acc + (predicate(session) ? 1 : 0), 0);
+
+  const forcedTrades = count((session) => {
+    const truth = stringArray(session.neuro?.after?.truth);
+    return truth.includes("forced_trade") || truth.includes("broke_plan");
+  });
+  if (forcedTrades >= 2) {
+    return {
+      title: tx("Pattern to interrupt", "Patrón a interrumpir"),
+      body: tx(
+        `Forced-trade or broke-plan signals appeared in ${forcedTrades} of your last ${sessions.length} Neuro-tagged sessions.`,
+        `Señales de trade forzado o romper el plan aparecieron en ${forcedTrades} de tus últimas ${sessions.length} sesiones con Neuro.`
+      ),
+      kind: "risk",
+    };
+  }
+
+  const earlyUrgent = count((session) => {
+    const changed = stringArray(session.neuro?.inside?.changed);
+    const state = stringArray(session.neuro?.inside?.state);
+    return changed.includes("entered_early") || state.includes("urgent") || state.includes("revenge_mode");
+  });
+  if (earlyUrgent >= 2) {
+    return {
+      title: tx("Recurring drift", "Drift recurrente"),
+      body: tx(
+        `Urgency or early entry appeared in ${earlyUrgent} of your last ${sessions.length} Neuro-tagged sessions. Wait for confirmation.`,
+        `La urgencia o entrada temprana apareció en ${earlyUrgent} de tus últimas ${sessions.length} sesiones con Neuro. Espera confirmación.`
+      ),
+      kind: "risk",
+    };
+  }
+
+  const calmAligned = count((session) => {
+    const state = stringArray(session.neuro?.inside?.state);
+    return session.neuro?.inside?.plan_followed === "yes" && state.some((item) => item === "calm" || item === "patient" || item === "clear");
+  });
+  if (calmAligned >= 2) {
+    return {
+      title: tx("Stable edge", "Edge estable"),
+      body: tx(
+        `Calm, patient execution aligned with plan-following in ${calmAligned} of your last ${sessions.length} Neuro-tagged sessions.`,
+        `La ejecución calmada y paciente se alineó con seguir el plan en ${calmAligned} de tus últimas ${sessions.length} sesiones con Neuro.`
+      ),
+      kind: "strength",
+    };
+  }
+
+  const latest = sessions[0]?.neuro;
+  const latestTruth = String(latest?.after?.one_line_truth ?? "").trim();
+  if (latestTruth) {
+    return {
+      title: tx("Latest Neuro read", "Última lectura Neuro"),
+      body: latestTruth,
+      kind: latest?.inside?.plan_followed === "no" ? "risk" : "strength",
+    };
+  }
+
+  return {
+    title: tx("Latest Neuro read", "Última lectura Neuro"),
+    body: tx(
+      "Neuro Layer data is present. Keep logging behavior tags so the AI read gets sharper.",
+      "Ya hay datos de Neuro Layer. Sigue registrando tags de comportamiento para que la lectura de IA sea más precisa."
+    ),
+    kind: "strength",
+  };
 }
 
 function formatDateYYYYMMDD(d: Date): string {
@@ -647,6 +890,7 @@ function mergeChecklistBaseWithSaved(baseTexts: string[], saved: UiChecklistItem
 export function DashboardScreen({ onOpenModule: _onOpenModule, onOpenJournalDate }: DashboardScreenProps) {
   const { language } = useLanguage();
   const { colors } = useTheme();
+  const user = useSupabaseUser();
   const { width } = useWindowDimensions();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const [loading, setLoading] = useState(true);
@@ -657,9 +901,12 @@ export function DashboardScreen({ onOpenModule: _onOpenModule, onOpenJournalDate
   const [journalLoading, setJournalLoading] = useState(false);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [dailyCoachMessage, setDailyCoachMessage] = useState<MotivationMessageRow | null>(null);
+  const [coachReminder, setCoachReminder] = useState<DashboardCoachReminder | null>(null);
   const [todayChecklist, setTodayChecklist] = useState<UiChecklistItem[]>([]);
   const [checklistSaving, setChecklistSaving] = useState(false);
   const [checklistSaveError, setChecklistSaveError] = useState<string | null>(null);
+  const [systemPanelTab, setSystemPanelTab] = useState<SystemPanelTab>("focus");
+  const [coachNow, setCoachNow] = useState(() => new Date());
   const lastChecklistPayloadRef = useRef("");
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -667,10 +914,39 @@ export function DashboardScreen({ onOpenModule: _onOpenModule, onOpenJournalDate
   const isWideTopRow = width >= 920;
   const isCompactTopCards = width < 700;
   const todayStr = useMemo(() => formatDateYYYYMMDD(new Date()), []);
+  const coachDayKey = useMemo(() => {
+    const parts = getNewYorkDayParts(coachNow);
+    return `${parts.year}-${String(parts.month).padStart(2, "0")}-${String(parts.day).padStart(2, "0")}`;
+  }, [coachNow]);
   const coachFallback = useMemo(
-    () => buildFallbackCoachRow(language === "es" ? "es" : "en"),
-    [language]
+    () => buildFallbackCoachRow(language === "es" ? "es" : "en", coachNow),
+    [coachNow, language]
   );
+  const coachFirstName = useMemo(
+    () =>
+      resolveCoachFirstName(
+        user?.user_metadata?.first_name ??
+          user?.user_metadata?.full_name ??
+          user?.user_metadata?.name ??
+          user?.email ??
+          ""
+      ),
+    [user]
+  );
+  const personalizedCoachMessage = useMemo(
+    () =>
+      personalizeCoachMessage(dailyCoachMessage ?? coachFallback, {
+        lang: language === "es" ? "es" : "en",
+        firstName: coachFirstName,
+        now: coachNow,
+      }),
+    [coachFallback, coachFirstName, coachNow, dailyCoachMessage, language]
+  );
+
+  useEffect(() => {
+    const interval = setInterval(() => setCoachNow(new Date()), 60_000);
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -703,11 +979,11 @@ export function DashboardScreen({ onOpenModule: _onOpenModule, onOpenJournalDate
     let active = true;
 
     async function loadDailyCoachMessage() {
-      const localeCode = language === "es" ? "es" : "en";
-      if (!supabaseMobile) {
-        if (active) setDailyCoachMessage(buildFallbackCoachRow(localeCode));
-        return;
-      }
+        const localeCode = language === "es" ? "es" : "en";
+        if (!supabaseMobile) {
+          if (active) setDailyCoachMessage(buildFallbackCoachRow(localeCode));
+          return;
+        }
 
       try {
         const { data, error } = await supabaseMobile
@@ -739,7 +1015,73 @@ export function DashboardScreen({ onOpenModule: _onOpenModule, onOpenJournalDate
     return () => {
       active = false;
     };
-  }, [language]);
+  }, [coachDayKey, language]);
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadLatestCoachReminder() {
+      if (!supabaseMobile || !user?.id) {
+        if (active) setCoachReminder(null);
+        return;
+      }
+
+      try {
+        const { data, error } = await supabaseMobile
+          .from("ai_coach_threads")
+          .select("summary, metadata, updated_at")
+          .eq("user_id", user.id)
+          .order("updated_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (!active) return;
+        if (error) {
+          console.warn("[mobile dashboard] latest ai coach thread fetch error:", error);
+          setCoachReminder(null);
+          return;
+        }
+
+        const metadata = data?.metadata && typeof data.metadata === "object" ? (data.metadata as any) : {};
+        const actionPlan = metadata?.latestActionPlan ?? null;
+        const hasReminder =
+          String(data?.summary || "").trim() ||
+          String(actionPlan?.whatISee || "").trim() ||
+          String(actionPlan?.whatIsDrifting || "").trim() ||
+          String(actionPlan?.whatToProtect || "").trim() ||
+          String(actionPlan?.whatChangesNextSession || "").trim() ||
+          String(actionPlan?.nextAction || "").trim() ||
+          String(actionPlan?.ruleToAdd || "").trim() ||
+          String(actionPlan?.ruleToRemove || "").trim() ||
+          String(actionPlan?.checkpointFocus || "").trim();
+
+        if (!hasReminder) {
+          setCoachReminder(null);
+          return;
+        }
+
+        setCoachReminder({
+          summary:
+            typeof data?.summary === "string" && data.summary.trim()
+              ? data.summary.trim()
+              : typeof actionPlan?.summary === "string" && actionPlan.summary.trim()
+                ? actionPlan.summary.trim()
+                : null,
+          updatedAt: data?.updated_at ?? null,
+          actionPlan,
+        });
+      } catch (err) {
+        if (!active) return;
+        console.warn("[mobile dashboard] latest ai coach thread load exception:", err);
+        setCoachReminder(null);
+      }
+    }
+
+    void loadLatestCoachReminder();
+    return () => {
+      active = false;
+    };
+  }, [user?.id]);
 
   useEffect(() => {
     const fallbackChecklist = [
@@ -845,14 +1187,140 @@ export function DashboardScreen({ onOpenModule: _onOpenModule, onOpenJournalDate
 
   const tradingSystem = useMemo(() => {
     const system = plan?.steps?.execution_and_journal?.system ?? {};
-    const doList = Array.isArray(system.doList)
-      ? system.doList.filter((item) => String(item?.text ?? "").trim().length > 0)
-      : [];
-    const dontList = Array.isArray(system.dontList)
-      ? system.dontList.filter((item) => String(item?.text ?? "").trim().length > 0)
-      : [];
-    return { doList, dontList };
+    const clean = (items?: TradingSystemItem[]) =>
+      Array.isArray(items) ? items.filter((item) => String(item?.text ?? "").trim().length > 0) : [];
+    return {
+      doList: clean(system.doList),
+      dontList: clean(system.dontList),
+      orderList: clean(system.orderList),
+      notes: String(system.notes ?? "").trim(),
+    };
   }, [plan]);
+
+  const strategyCards = useMemo(() => {
+    const rawStrategies = plan?.steps?.strategy?.strategies;
+    if (!Array.isArray(rawStrategies)) return [];
+
+    return rawStrategies
+      .map((strategy) => ({
+        name: String(strategy?.name ?? "").trim(),
+        setup: String(strategy?.setup ?? "").trim(),
+        entryRules: String(strategy?.entryRules ?? "").trim(),
+        exitRules: String(strategy?.exitRules ?? "").trim(),
+        managementRules: String(strategy?.managementRules ?? "").trim(),
+        invalidation: String(strategy?.invalidation ?? "").trim(),
+        timeframe: String(strategy?.timeframe ?? "").trim(),
+        instruments: Array.isArray(strategy?.instruments)
+          ? strategy.instruments.map((item) => String(item).trim()).filter(Boolean)
+          : [],
+      }))
+      .filter(
+        (strategy) =>
+          strategy.name ||
+          strategy.setup ||
+          strategy.entryRules ||
+          strategy.exitRules ||
+          strategy.managementRules ||
+          strategy.invalidation ||
+          strategy.timeframe ||
+          strategy.instruments.length
+      )
+      .slice(0, 3);
+  }, [plan]);
+
+  const strategyNotes = useMemo(() => String(plan?.steps?.strategy?.notes ?? "").trim(), [plan]);
+
+  const primaryStrategy = strategyCards[0] ?? null;
+  const primaryStrategyMeta = useMemo(
+    () => [primaryStrategy?.timeframe, primaryStrategy?.instruments.join(", ")].filter(Boolean).join(" · "),
+    [primaryStrategy]
+  );
+  const primaryStrategyBody = useMemo(
+    () =>
+      String(
+        primaryStrategy?.setup ||
+          primaryStrategy?.entryRules ||
+          primaryStrategy?.managementRules ||
+          primaryStrategy?.exitRules ||
+          strategyNotes
+      ).trim(),
+    [primaryStrategy, strategyNotes]
+  );
+  const strategyGuardrail = useMemo(
+    () =>
+      String(
+        primaryStrategy?.invalidation ||
+          tradingSystem.notes
+      ).trim(),
+    [primaryStrategy, tradingSystem]
+  );
+  const strategySupportNote = useMemo(
+    () =>
+      strategyNotes &&
+      strategyNotes.toLowerCase() !== primaryStrategyBody.toLowerCase()
+        ? strategyNotes
+        : "",
+    [primaryStrategyBody, strategyNotes]
+  );
+  const equalsText = useCallback(
+    (a: unknown, b: unknown) => String(a ?? "").trim().toLowerCase() === String(b ?? "").trim().toLowerCase(),
+    []
+  );
+
+  const dedupeRows = useCallback((rows: Array<{ label: string; value: string }>) => {
+    const seen = new Set<string>();
+    return rows.filter((row) => {
+      const value = String(row.value ?? "").trim();
+      if (!value) return false;
+      const key = value.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      row.value = value;
+      return true;
+    });
+  }, []);
+  const hasRuleMatch = useCallback(
+    (value: unknown, items: TradingSystemItem[]) => {
+      const target = String(value ?? "").trim();
+      if (!target) return false;
+      return items.some((item) => equalsText(item?.text, target));
+    },
+    [equalsText]
+  );
+  const aiCoachRead = useMemo(
+    () => String(coachReminder?.actionPlan?.whatISee || coachReminder?.summary || primaryStrategyBody || strategyNotes).trim(),
+    [coachReminder, primaryStrategyBody, strategyNotes]
+  );
+  const aiCoachDrift = useMemo(
+    () => String(coachReminder?.actionPlan?.whatIsDrifting || coachReminder?.actionPlan?.ruleToRemove || "").trim(),
+    [coachReminder]
+  );
+  const aiCoachProtect = useMemo(
+    () =>
+      String(
+        coachReminder?.actionPlan?.whatToProtect ||
+          coachReminder?.actionPlan?.checkpointFocus ||
+          strategyGuardrail ||
+          tradingSystem.orderList[0]?.text ||
+          tradingSystem.doList[0]?.text
+      ).trim(),
+    [coachReminder, strategyGuardrail, tradingSystem]
+  );
+  const aiCoachNextSession = useMemo(
+    () =>
+      String(
+        coachReminder?.actionPlan?.whatChangesNextSession ||
+          coachReminder?.actionPlan?.nextAction ||
+          todayChecklist[0]?.text ||
+          tradingSystem.doList[0]?.text ||
+          primaryStrategyBody
+      ).trim(),
+    [coachReminder, primaryStrategyBody, todayChecklist, tradingSystem]
+  );
+  const aiPlanAlignedTo = useMemo(
+    () => String(primaryStrategy?.name || primaryStrategyBody || strategyNotes).trim(),
+    [primaryStrategy, primaryStrategyBody, strategyNotes]
+  );
 
   const accountProgress = useMemo<AccountProgressMetrics | null>(() => {
     if (!series) return null;
@@ -1062,6 +1530,10 @@ export function DashboardScreen({ onOpenModule: _onOpenModule, onOpenJournalDate
   const afterText = String(selectedNotes?.post ?? "").trim();
   const entryRows: StoredTradeRow[] = Array.isArray(selectedNotes?.entries) ? selectedNotes.entries : [];
   const exitRows: StoredTradeRow[] = Array.isArray(selectedNotes?.exits) ? selectedNotes.exits : [];
+  const dashboardNeuroMemory = useMemo(
+    () => buildDashboardNeuroMemory(journalEntries, language === "es" ? "es" : "en"),
+    [journalEntries, language]
+  );
 
   const daySummaryIndex = selectedDate ? daySummaryDates.indexOf(selectedDate) : -1;
   const prevSummaryDate = daySummaryIndex > 0 ? daySummaryDates[daySummaryIndex - 1] : null;
@@ -1303,6 +1775,82 @@ export function DashboardScreen({ onOpenModule: _onOpenModule, onOpenJournalDate
     </View>
   );
 
+  const systemTabs: Array<{ id: SystemPanelTab; label: string }> = [
+    { id: "focus", label: t(language, "Focus", "Focus") },
+    { id: "rules", label: t(language, "Rules", "Reglas") },
+    { id: "ai", label: t(language, "AI plan", "Plan AI") },
+  ];
+  const hasSystemRules = tradingSystem.doList.length + tradingSystem.dontList.length + tradingSystem.orderList.length > 0;
+  const aiPlanTitle =
+    coachReminder?.summary ||
+    aiCoachRead ||
+    aiCoachProtect ||
+    aiCoachNextSession ||
+    primaryStrategy?.name ||
+    t(language, "Latest coaching guidance", "Última guía del coach");
+  const aiPlanLead =
+    aiCoachRead && !equalsText(aiCoachRead, aiPlanTitle)
+      ? aiCoachRead
+      : !coachReminder
+        ? t(
+            language,
+            "No AI session yet. This tab stays anchored to your Growth Plan so the next coaching pass lands on something real.",
+            "Todavía no hay sesión AI. Esta pestaña se ancla a tu Growth Plan para que el próximo coaching aterrice sobre algo real."
+          )
+        : "";
+  const aiCoachReadoutRows = dedupeRows([
+    { label: t(language, "What I see", "Lo que veo"), value: equalsText(aiCoachRead, aiPlanTitle) ? "" : aiCoachRead },
+    { label: t(language, "What is drifting", "Lo que se está desviando"), value: aiCoachDrift },
+    { label: t(language, "What to protect", "Lo que debes proteger"), value: aiCoachProtect },
+    { label: t(language, "What changes next session", "Qué cambia la próxima sesión"), value: aiCoachNextSession },
+  ]).filter((row) => !equalsText(row.value, aiPlanAlignedTo));
+  const aiCoachSystemRows = dedupeRows([
+    {
+      label: t(language, "Add to system", "Agregar al sistema"),
+      value: hasRuleMatch(coachReminder?.actionPlan?.ruleToAdd, [...tradingSystem.doList, ...tradingSystem.orderList])
+        ? ""
+        : String(coachReminder?.actionPlan?.ruleToAdd || "").trim(),
+    },
+    {
+      label: t(language, "Stop doing", "Dejar de hacer"),
+      value:
+        hasRuleMatch(coachReminder?.actionPlan?.ruleToRemove, tradingSystem.dontList) ||
+        equalsText(coachReminder?.actionPlan?.ruleToRemove, primaryStrategy?.invalidation)
+          ? ""
+          : String(coachReminder?.actionPlan?.ruleToRemove || "").trim(),
+    },
+  ]).filter(
+    (row) =>
+      !equalsText(row.value, aiPlanTitle) &&
+      !equalsText(row.value, aiPlanAlignedTo) &&
+      !aiCoachReadoutRows.some((item) => equalsText(item.value, row.value))
+  );
+  const latestCoachDate = coachReminder?.updatedAt ? String(coachReminder.updatedAt).slice(0, 10) : null;
+
+  const renderSystemRuleSection = (
+    label: string,
+    items: TradingSystemItem[],
+    labelStyle: TextStyle,
+    bulletStyle: ViewStyle
+  ) => (
+    <View style={[styles.systemSectionCard, isCompactTopCards && styles.systemSectionCardCompact]}>
+      <Text style={labelStyle}>{label}</Text>
+      {(items.length ? items : [{ text: t(language, "No items yet.", "Sin elementos todavía.") }])
+        .slice(0, isCompactTopCards ? 3 : 5)
+        .map((item, idx) => (
+          <View key={`${item.text}-${idx}`} style={styles.systemBulletRow}>
+            <View style={[styles.systemBullet, bulletStyle]} />
+            <Text style={styles.systemItem}>{item.text}</Text>
+          </View>
+        ))}
+      {items.length > (isCompactTopCards ? 3 : 5) ? (
+        <Text style={styles.systemHint}>
+          +{items.length - (isCompactTopCards ? 3 : 5)} {t(language, "more in Growth Plan", "más en Growth Plan")}
+        </Text>
+      ) : null}
+    </View>
+  );
+
   return (
     <ScreenScaffold
       title={t(language, "Dashboard", "Dashboard")}
@@ -1321,156 +1869,58 @@ export function DashboardScreen({ onOpenModule: _onOpenModule, onOpenJournalDate
         </View>
       ) : (
         <>
-          <View style={[styles.panelCard, styles.coachBannerCard, isCompactTopCards && styles.coachBannerCardCompact]}>
-            <Image source={coachBrain} resizeMode="contain" style={styles.coachBrainA} />
-            <Image source={coachBrain} resizeMode="contain" style={styles.coachBrainB} />
-            <View style={styles.coachAccentRail} />
-            <View style={styles.coachBannerHeader}>
-              <View style={styles.coachHeaderMeta}>
-                <Text style={styles.heroEyebrow}>{t(language, "Daily coach message", "Mensaje diario del coach")}</Text>
-                <GradientTitleText
-                  text={dailyCoachMessage?.title || coachFallback.title || t(language, "Coach note for today", "Nota del coach para hoy")}
-                  style={styles.coachTitle}
-                />
+          <View style={[styles.topInsightRow, !isWideTopRow && styles.topInsightRowStack]}>
+            <View style={[styles.panelCard, styles.coachBannerCard, isCompactTopCards && styles.coachBannerCardCompact]}>
+              <Image source={coachBrain} resizeMode="contain" style={styles.coachBrainA} />
+              <Image source={coachBrain} resizeMode="contain" style={styles.coachBrainB} />
+              <View style={styles.coachAccentRail} />
+              <View style={styles.coachBannerHeader}>
+                <View style={styles.coachHeaderMeta}>
+                  <Text style={styles.heroEyebrow}>{t(language, "Daily coach message", "Mensaje diario del coach")}</Text>
+                  <GradientTitleText
+                    text={personalizedCoachMessage.title || t(language, "Coach note for today", "Nota del coach para hoy")}
+                    style={styles.coachTitle}
+                  />
+                </View>
+                <View style={styles.coachPill}>
+                  <Text style={styles.coachPillText}>{personalizedCoachMessage.pillLabel}</Text>
+                </View>
               </View>
-              <View style={styles.coachPill}>
-                <Text style={styles.coachPillText}>{t(language, "Today", "Hoy")}</Text>
-              </View>
-            </View>
-            <View style={styles.coachMessageRow}>
-              <Text style={styles.coachQuoteMark}>“</Text>
-              <Text style={styles.coachBody}>
-                {dailyCoachMessage?.body || coachFallback.body}
-              </Text>
-            </View>
-          </View>
-
-          <View style={[styles.panelCard, styles.systemPanel, styles.systemPanelStandalone, isCompactTopCards && styles.systemPanelCompact]}>
-            <View style={[styles.systemHeaderRow, isCompactTopCards && styles.systemHeaderRowCompact]}>
-              <View style={styles.systemHeaderMeta}>
-                <GradientTitleText text={t(language, "Trading System", "Sistema de trading")} style={styles.systemTitle} />
-                <Text style={styles.systemDate}>
-                  {todayStr}
-                  {checklistSaving
-                    ? `  ${t(language, "Saving…", "Guardando…")}`
-                    : checklistSaveError
-                      ? `  ${t(language, "Error", "Error")}`
-                      : `  ${t(language, "Saved", "Guardado")}`}
+              <View style={styles.coachMessageRow}>
+                <Text style={styles.coachQuoteMark}>“</Text>
+                <Text style={styles.coachBody}>
+                  {personalizedCoachMessage.body}
                 </Text>
               </View>
             </View>
 
-            <View style={[styles.systemWorkspace, !isWideTopRow && styles.systemWorkspaceStack, isCompactTopCards && styles.systemWorkspaceCompact]}>
-              <View style={[styles.systemStepsColumn, isCompactTopCards && styles.systemStepsColumnCompact]}>
-                <Text style={styles.systemHeaderHint}>{t(language, "Steps (daily)", "Pasos (diarios)")}</Text>
-
-                {todayChecklist.length ? (
-                  <View style={styles.systemChecklistList}>
-                    {todayChecklist.slice(0, isCompactTopCards ? 4 : 12).map((item, index) => (
-                      <Pressable
-                        key={`${item.text}-${index}`}
-                        onPress={() => toggleChecklistItem(index)}
-                        style={[styles.systemChecklistItem, isCompactTopCards && styles.systemChecklistItemCompact]}
-                      >
-                        <View style={[styles.systemCheckbox, item.done && styles.systemCheckboxDone]}>
-                          {item.done ? <Text style={styles.systemCheckboxMark}>✓</Text> : null}
-                        </View>
-                        <Text style={[styles.systemItem, item.done && styles.systemItemDone]}>{item.text}</Text>
-                      </Pressable>
-                    ))}
-                  </View>
-                ) : (
-                  <Text style={styles.systemHint}>
-                    {t(
-                      language,
-                      "Add your Trading System steps in Growth Plan.",
-                      "Agrega tus pasos del Sistema de Trading en el Growth Plan."
-                    )}{" "}
-                    <Text style={styles.systemLink} onPress={() => Linking.openURL(WEB_GROWTH_PLAN_URL)}>
-                      {t(language, "Edit Growth Plan", "Editar Growth Plan")}
-                    </Text>
-                  </Text>
-                )}
-
-                <Pressable style={[styles.systemJournalButton, isCompactTopCards && styles.systemJournalButtonCompact]} onPress={() => onOpenJournalDate(todayStr)}>
-                  <Text style={styles.systemJournalButtonText}>
-                    {t(language, "Open today's journal", "Abrir el journal de hoy")}
-                  </Text>
-                </Pressable>
-              </View>
-
-              <View style={[styles.systemRulesColumn, isCompactTopCards && styles.systemRulesColumnCompact]}>
-                <View style={[styles.systemSectionCard, isCompactTopCards && styles.systemSectionCardCompact]}>
-                  <Text style={styles.systemLabel}>{t(language, "Do", "Hacer")}</Text>
-                  {(tradingSystem.doList.length ? tradingSystem.doList : [{ text: "—" }]).slice(0, isCompactTopCards ? 2 : 4).map((item, idx) => (
-                    <View key={`do-${idx}`} style={styles.systemBulletRow}>
-                      <View style={[styles.systemBullet, styles.systemBulletDo]} />
-                      <Text style={styles.systemItem}>{item.text}</Text>
-                    </View>
-                  ))}
+            <View
+              style={[
+                styles.panelCard,
+                styles.neuroMemoryCard,
+                dashboardNeuroMemory.kind === "risk"
+                  ? styles.neuroMemoryRisk
+                  : dashboardNeuroMemory.kind === "strength"
+                    ? styles.neuroMemoryStrength
+                    : styles.neuroMemoryNeutral,
+              ]}
+            >
+              <View style={styles.coachBannerHeader}>
+                <View style={styles.coachHeaderMeta}>
+                  <Text style={styles.heroEyebrow}>{t(language, "Neuro Memory", "Neuro Memory")}</Text>
+                  <Text style={styles.neuroMemoryTitle}>{dashboardNeuroMemory.title}</Text>
                 </View>
-
-                <View style={[styles.systemSectionCard, isCompactTopCards && styles.systemSectionCardCompact]}>
-                  <Text style={styles.systemLabelDont}>{t(language, "Don't", "No hacer")}</Text>
-                  {(tradingSystem.dontList.length ? tradingSystem.dontList : [{ text: "—" }]).slice(0, isCompactTopCards ? 2 : 4).map((item, idx) => (
-                    <View key={`dont-${idx}`} style={styles.systemBulletRow}>
-                      <View style={[styles.systemBullet, styles.systemBulletDont]} />
-                      <Text style={styles.systemItem}>{item.text}</Text>
-                    </View>
-                  ))}
-                </View>
-
-                {tradingSystem.doList.length + tradingSystem.dontList.length === 0 ? (
-                  <Text style={styles.systemHint}>
-                    {t(
-                      language,
-                      "Add your Do/Don't rules in Growth Plan.",
-                      "Agrega tus reglas Hacer/No hacer en Growth Plan."
-                    )}{" "}
-                    <Text style={styles.systemLink} onPress={() => Linking.openURL(WEB_GROWTH_PLAN_URL)}>
-                      {t(language, "Edit Growth Plan", "Editar Growth Plan")}
-                    </Text>
+                <View style={styles.neuroMemoryPill}>
+                  <Text style={styles.neuroMemoryPillText}>
+                    {dashboardNeuroMemory.kind === "risk"
+                      ? t(language, "Pattern", "Patrón")
+                      : dashboardNeuroMemory.kind === "strength"
+                        ? t(language, "Strength", "Fortaleza")
+                        : t(language, "Memory", "Memoria")}
                   </Text>
-                ) : null}
+                </View>
               </View>
-            </View>
-          </View>
-
-          <View style={styles.summaryRow}>
-            <View style={[styles.panelCard, styles.weeklyCard]}>
-              <GradientTitleText text={t(language, "Weekly P&L", "P&L semanal")} style={styles.summaryLabel} />
-              <Text style={styles.summaryValue}>{formatSigned(weeklySummary.total)}</Text>
-              <Text style={styles.summaryHint}>
-                {t(language, "Current week (Sun–Fri).", "Semana actual (Dom–Vie).")}
-              </Text>
-              <View style={styles.weeklyRow}>
-                {weeklySummary.days.map((day, idx) => {
-                  const isPositive = day.pnl != null && day.pnl > 0;
-                  const isNegative = day.pnl != null && day.pnl < 0;
-                  return (
-                    <Pressable
-                      key={`weekly-${day.iso}-${idx}`}
-                      accessibilityRole="button"
-                      onPress={() => onOpenJournalDate(day.iso)}
-                      style={[
-                        styles.weekCell,
-                        isPositive && styles.weekCellWin,
-                        isNegative && styles.weekCellLoss,
-                        day.pnl === 0 && styles.weekCellFlat,
-                      ]}
-                    >
-                      <Text style={styles.weekCellLabel}>
-                        {language === "es"
-                          ? ["D", "L", "M", "X", "J", "V"][idx]
-                          : ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri"][idx]}
-                      </Text>
-                      <Text style={styles.weekCellValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
-                        {day.pnl == null ? "—" : day.pnl === 0 ? "$0" : formatSignedShort(day.pnl)}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
+              <Text style={styles.neuroMemoryBody}>{dashboardNeuroMemory.body}</Text>
             </View>
           </View>
 
@@ -1560,7 +2010,6 @@ export function DashboardScreen({ onOpenModule: _onOpenModule, onOpenJournalDate
                 )}
               </View>
 
-              {renderDaySummary()}
             </View>
 
             <View style={[styles.progressCard, !isWideProgressLayout && styles.progressCardFull]}>
@@ -1683,6 +2132,261 @@ export function DashboardScreen({ onOpenModule: _onOpenModule, onOpenJournalDate
             </View>
           </View>
 
+          <View style={styles.summaryRow}>
+            <View style={[styles.panelCard, styles.weeklyCard]}>
+              <GradientTitleText text={t(language, "Weekly P&L", "P&L semanal")} style={styles.summaryLabel} />
+              <Text style={styles.summaryValue}>{formatSigned(weeklySummary.total)}</Text>
+              <Text style={styles.summaryHint}>
+                {t(language, "Current week (Sun–Fri).", "Semana actual (Dom–Vie).")}
+              </Text>
+              <View style={styles.weeklyRow}>
+                {weeklySummary.days.map((day, idx) => {
+                  const isPositive = day.pnl != null && day.pnl > 0;
+                  const isNegative = day.pnl != null && day.pnl < 0;
+                  return (
+                    <Pressable
+                      key={`weekly-${day.iso}-${idx}`}
+                      accessibilityRole="button"
+                      onPress={() => onOpenJournalDate(day.iso)}
+                      style={[
+                        styles.weekCell,
+                        isPositive && styles.weekCellWin,
+                        isNegative && styles.weekCellLoss,
+                        day.pnl === 0 && styles.weekCellFlat,
+                      ]}
+                    >
+                      <Text style={styles.weekCellLabel}>
+                        {language === "es"
+                          ? ["D", "L", "M", "X", "J", "V"][idx]
+                          : ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri"][idx]}
+                      </Text>
+                      <Text style={styles.weekCellValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+                        {day.pnl == null ? "—" : day.pnl === 0 ? "$0" : formatSignedShort(day.pnl)}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+          </View>
+
+          {renderDaySummary()}
+
+          <View style={[styles.panelCard, styles.systemPanel, styles.systemPanelStandalone, isCompactTopCards && styles.systemPanelCompact]}>
+            <View style={[styles.systemHeaderRow, isCompactTopCards && styles.systemHeaderRowCompact]}>
+              <View style={styles.systemHeaderMeta}>
+                <GradientTitleText text={t(language, "Trading System", "Sistema de trading")} style={styles.systemTitle} />
+                <Text style={styles.systemDate}>
+                  {todayStr}
+                  {checklistSaving
+                    ? `  ${t(language, "Saving…", "Guardando…")}`
+                    : checklistSaveError
+                      ? `  ${t(language, "Error", "Error")}`
+                      : `  ${t(language, "Saved", "Guardado")}`}
+                </Text>
+              </View>
+            </View>
+
+            <View style={styles.systemTabs}>
+              {systemTabs.map((tab) => {
+                const active = systemPanelTab === tab.id;
+                return (
+                  <Pressable
+                    key={tab.id}
+                    onPress={() => setSystemPanelTab(tab.id)}
+                    style={[styles.systemTab, active && styles.systemTabActive]}
+                  >
+                    <Text style={[styles.systemTabText, active && styles.systemTabTextActive]}>{tab.label}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+
+            {checklistSaveError ? <Text style={styles.systemErrorText}>{checklistSaveError}</Text> : null}
+
+            {systemPanelTab === "focus" ? (
+              <View style={[styles.systemTabPanel, styles.systemWorkspace, !isWideTopRow && styles.systemWorkspaceStack, isCompactTopCards && styles.systemWorkspaceCompact]}>
+                <View style={[styles.systemStepsColumn, isCompactTopCards && styles.systemStepsColumnCompact]}>
+                  <Text style={styles.systemHeaderHint}>{t(language, "Steps (daily)", "Pasos (diarios)")}</Text>
+
+                  {todayChecklist.length ? (
+                    <View style={styles.systemChecklistList}>
+                      {todayChecklist.slice(0, isCompactTopCards ? 4 : 5).map((item, index) => (
+                        <Pressable
+                          key={`${item.text}-${index}`}
+                          onPress={() => toggleChecklistItem(index)}
+                          style={[styles.systemChecklistItem, isCompactTopCards && styles.systemChecklistItemCompact]}
+                        >
+                          <View style={[styles.systemCheckbox, item.done && styles.systemCheckboxDone]}>
+                            {item.done ? <Text style={styles.systemCheckboxMark}>✓</Text> : null}
+                          </View>
+                          <Text style={[styles.systemItem, item.done && styles.systemItemDone]}>{item.text}</Text>
+                        </Pressable>
+                      ))}
+                      {todayChecklist.length > (isCompactTopCards ? 4 : 5) ? (
+                        <Text style={styles.systemHint}>
+                          +{todayChecklist.length - (isCompactTopCards ? 4 : 5)}{" "}
+                          {t(language, "more in today's journal", "más en el journal de hoy")}
+                        </Text>
+                      ) : null}
+                    </View>
+                  ) : (
+                    <Text style={styles.systemHint}>
+                      {t(
+                        language,
+                        "Add your Trading System steps in Growth Plan.",
+                        "Agrega tus pasos del Sistema de Trading en el Growth Plan."
+                      )}{" "}
+                      <Text style={styles.systemLink} onPress={() => Linking.openURL(WEB_GROWTH_PLAN_URL)}>
+                        {t(language, "Edit Growth Plan", "Editar Growth Plan")}
+                      </Text>
+                    </Text>
+                  )}
+
+                  <Pressable style={[styles.systemJournalButton, isCompactTopCards && styles.systemJournalButtonCompact]} onPress={() => onOpenJournalDate(todayStr)}>
+                    <Text style={styles.systemJournalButtonText}>
+                      {t(language, "Open today's journal", "Abrir el journal de hoy")}
+                    </Text>
+                  </Pressable>
+                </View>
+
+                <View style={[styles.systemStrategyColumn, isCompactTopCards && styles.systemStepsColumnCompact]}>
+                  <Text style={styles.systemHeaderHint}>{t(language, "Strategy snapshot", "Snapshot de estrategia")}</Text>
+                  {primaryStrategy || primaryStrategyBody || strategyGuardrail || strategySupportNote ? (
+                    <View style={styles.systemChecklistList}>
+                      {primaryStrategy ? (
+                        <View style={styles.strategyCard}>
+                          <View style={styles.strategyHeaderRow}>
+                            <Text style={styles.strategyTitle}>
+                              {primaryStrategy.name || t(language, "Primary strategy", "Estrategia principal")}
+                            </Text>
+                            {primaryStrategyMeta ? <Text style={styles.strategyMeta}>{primaryStrategyMeta}</Text> : null}
+                          </View>
+                          {primaryStrategyBody ? <Text style={styles.strategyBody}>{primaryStrategyBody}</Text> : null}
+                          {primaryStrategy.invalidation ? (
+                            <Text style={styles.strategyWarning}>
+                              {t(language, "Invalidation:", "Invalidación:")} {primaryStrategy.invalidation}
+                            </Text>
+                          ) : null}
+                        </View>
+                      ) : null}
+
+                      {!primaryStrategy && primaryStrategyBody ? (
+                        <View style={styles.focusAnchorCard}>
+                          <Text style={styles.focusAnchorLabel}>{t(language, "Strategy note", "Nota de estrategia")}</Text>
+                          <Text style={styles.focusAnchorBody}>{primaryStrategyBody}</Text>
+                        </View>
+                      ) : null}
+
+                      {strategyGuardrail ? (
+                        <View style={styles.focusAnchorCard}>
+                          <Text style={styles.focusAnchorLabel}>{t(language, "Risk guardrail", "Guardrail de riesgo")}</Text>
+                          <Text style={styles.focusAnchorBody}>{strategyGuardrail}</Text>
+                        </View>
+                      ) : null}
+
+                      {strategySupportNote ? (
+                        <View style={styles.focusAnchorCard}>
+                          <Text style={styles.focusAnchorLabel}>{t(language, "Plan note", "Nota del plan")}</Text>
+                          <Text style={styles.focusAnchorBody}>{strategySupportNote}</Text>
+                        </View>
+                      ) : null}
+
+                      {strategyCards.length > 1 ? (
+                        <Text style={styles.systemHint}>
+                          +{strategyCards.length - 1} {t(language, "more strategies in Growth Plan", "más estrategias en Growth Plan")}
+                        </Text>
+                      ) : null}
+                    </View>
+                  ) : strategyNotes ? (
+                    <Text style={styles.strategyBody}>{strategyNotes}</Text>
+                  ) : (
+                    <Text style={styles.systemHint}>
+                      {t(language, "Add your strategy and rules in Growth Plan.", "Agrega tu estrategia y reglas en Growth Plan.")}{" "}
+                      <Text style={styles.systemLink} onPress={() => Linking.openURL(WEB_GROWTH_PLAN_URL)}>
+                        {t(language, "Edit Growth Plan", "Editar Growth Plan")}
+                      </Text>
+                    </Text>
+                  )}
+                </View>
+              </View>
+            ) : null}
+
+            {systemPanelTab === "rules" ? (
+              <View style={styles.systemTabPanel}>
+                <View style={[styles.systemRulesGrid, !isWideTopRow && styles.systemRulesGridStack]}>
+                  {renderSystemRuleSection(t(language, "Do", "Hacer"), tradingSystem.doList, styles.systemLabel, styles.systemBulletDo)}
+                  {renderSystemRuleSection(t(language, "Don't", "No hacer"), tradingSystem.dontList, styles.systemLabelDont, styles.systemBulletDont)}
+                  {tradingSystem.orderList.length
+                    ? renderSystemRuleSection(t(language, "Order", "Orden"), tradingSystem.orderList, styles.systemLabelOrder, styles.systemBulletOrder)
+                    : null}
+                </View>
+                {!hasSystemRules ? (
+                  <Text style={[styles.systemHint, styles.systemTabHint]}>
+                    {t(
+                      language,
+                      "Add your Do/Don't rules in Growth Plan.",
+                      "Agrega tus reglas Hacer/No hacer en Growth Plan."
+                    )}{" "}
+                    <Text style={styles.systemLink} onPress={() => Linking.openURL(WEB_GROWTH_PLAN_URL)}>
+                      {t(language, "Edit Growth Plan", "Editar Growth Plan")}
+                    </Text>
+                  </Text>
+                ) : null}
+              </View>
+            ) : null}
+
+            {systemPanelTab === "ai" ? (
+              <View style={[styles.systemTabPanel, styles.aiPlanPanel]}>
+                <View style={styles.aiPlanHeaderRow}>
+                  <Text style={styles.aiPlanEyebrow}>
+                    {t(language, "Latest AI coaching plan", "Último plan AI Coaching")}
+                  </Text>
+                  {latestCoachDate ? <Text style={styles.aiPlanDate}>{latestCoachDate}</Text> : null}
+                </View>
+
+                <Text style={styles.aiPlanTitle}>{aiPlanTitle}</Text>
+                {aiPlanLead ? <Text style={styles.aiPlanBody}>{aiPlanLead}</Text> : null}
+                {aiPlanAlignedTo ? (
+                  <Text style={styles.aiPlanAnchorText}>
+                    {t(language, "Aligned to:", "Alineado a:")} {aiPlanAlignedTo}
+                  </Text>
+                ) : null}
+
+                {aiCoachReadoutRows.length ? (
+                  <View style={styles.aiPlanGrid}>
+                    {aiCoachReadoutRows.map((row) => (
+                      <View key={row.label} style={styles.aiPlanPoint}>
+                        <Text style={styles.aiPlanPointLabel}>{row.label}</Text>
+                        <Text style={styles.aiPlanPointBody}>{row.value}</Text>
+                      </View>
+                    ))}
+                  </View>
+                ) : null}
+
+                {aiCoachSystemRows.length ? (
+                  <View style={styles.aiPlanGrid}>
+                    {aiCoachSystemRows.map((row) => (
+                      <View key={row.label} style={styles.aiPlanPoint}>
+                        <Text style={styles.aiPlanPointLabel}>{row.label}</Text>
+                        <Text style={styles.aiPlanPointBody}>{row.value}</Text>
+                      </View>
+                    ))}
+                  </View>
+                ) : null}
+
+                <View style={styles.systemActionRow}>
+                  <Pressable style={styles.aiCoachButton} onPress={() => Linking.openURL(WEB_AI_COACH_URL)}>
+                    <Text style={styles.aiCoachButtonText}>{t(language, "Open AI Coach", "Abrir AI Coach")}</Text>
+                  </Pressable>
+                  <Pressable style={styles.systemSecondaryButton} onPress={() => Linking.openURL(WEB_GROWTH_PLAN_URL)}>
+                    <Text style={styles.systemSecondaryButtonText}>{t(language, "Growth Plan", "Growth Plan")}</Text>
+                  </Pressable>
+                </View>
+              </View>
+            ) : null}
+          </View>
+
           {error ? <Text style={styles.errorText}>{error}</Text> : null}
         </>
       )}
@@ -1707,6 +2411,7 @@ const createStyles = (colors: ThemeColors) => {
       flexDirection: "row",
       gap: 10,
       alignItems: "stretch",
+      marginBottom: 10,
     },
     topInsightRowStack: {
       flexDirection: "column",
@@ -1719,11 +2424,11 @@ const createStyles = (colors: ThemeColors) => {
       padding: 14,
     },
     coachBannerCard: {
+      flex: 1,
       position: "relative",
       overflow: "hidden",
       borderColor: isDark ? "#24517E" : "#D5E8F5",
       backgroundColor: isDark ? "#091732" : "#F8FBFF",
-      marginBottom: 10,
       paddingTop: 12,
       paddingBottom: 12,
     },
@@ -1781,6 +2486,7 @@ const createStyles = (colors: ThemeColors) => {
       gap: 8,
     },
     systemPanelStandalone: {
+      marginTop: 10,
       marginBottom: 0,
     },
     heroEyebrow: {
@@ -1848,6 +2554,49 @@ const createStyles = (colors: ThemeColors) => {
       textTransform: "uppercase",
       letterSpacing: 0.7,
     },
+    neuroMemoryCard: {
+      flex: 1,
+      gap: 8,
+      borderColor: isDark ? "#1F6D82" : "#B8E4EE",
+      backgroundColor: isDark ? "#0A1B2B" : "#F4FBFD",
+    },
+    neuroMemoryStrength: {
+      borderColor: isDark ? "#1F6D82" : "#B8E4EE",
+      backgroundColor: isDark ? "#0B1D30" : "#F4FBFD",
+    },
+    neuroMemoryRisk: {
+      borderColor: isDark ? "#80662B" : "#E9D69C",
+      backgroundColor: isDark ? "#211B0F" : "#FFFAEC",
+    },
+    neuroMemoryNeutral: {
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+    },
+    neuroMemoryTitle: {
+      color: colors.textPrimary,
+      fontSize: 16,
+      lineHeight: 21,
+      fontWeight: "900",
+    },
+    neuroMemoryBody: {
+      color: isDark ? "#DCEAFF" : colors.textPrimary,
+      fontSize: 12,
+      lineHeight: 18,
+      fontWeight: "600",
+    },
+    neuroMemoryPill: {
+      borderRadius: 999,
+      borderWidth: 1,
+      borderColor: isDark ? "#2A7D91" : "#B8E4EE",
+      backgroundColor: isDark ? "#0D3541" : "#EAF9FC",
+      paddingHorizontal: 9,
+      paddingVertical: 5,
+    },
+    neuroMemoryPillText: {
+      color: isDark ? "#BDF7FF" : "#0D7284",
+      fontSize: 10,
+      fontWeight: "900",
+    },
     systemHeaderRow: {
       gap: 4,
     },
@@ -1871,6 +2620,50 @@ const createStyles = (colors: ThemeColors) => {
       color: colors.textMuted,
       fontSize: 11,
     },
+    systemTabs: {
+      flexDirection: "row",
+      borderRadius: 999,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: isDark ? "#071023" : "#EDF5FA",
+      padding: 3,
+      gap: 3,
+    },
+    systemTab: {
+      flex: 1,
+      minHeight: 32,
+      borderRadius: 999,
+      alignItems: "center",
+      justifyContent: "center",
+      paddingHorizontal: 10,
+    },
+    systemTabActive: {
+      backgroundColor: colors.primary,
+      shadowColor: colors.primary,
+      shadowOpacity: isDark ? 0.22 : 0.12,
+      shadowRadius: 10,
+      shadowOffset: { width: 0, height: 0 },
+    },
+    systemTabText: {
+      color: colors.textMuted,
+      fontSize: 11,
+      fontWeight: "800",
+    },
+    systemTabTextActive: {
+      color: colors.onPrimary,
+    },
+    systemTabPanel: {
+      marginTop: 2,
+    },
+    systemTabHint: {
+      marginTop: 8,
+    },
+    systemErrorText: {
+      color: colors.danger,
+      fontSize: 12,
+      lineHeight: 17,
+      fontWeight: "700",
+    },
     systemWorkspace: {
       flexDirection: "row",
       gap: 10,
@@ -1884,6 +2677,10 @@ const createStyles = (colors: ThemeColors) => {
     },
     systemStepsColumn: {
       flex: 1.45,
+      gap: 10,
+    },
+    systemStrategyColumn: {
+      flex: 1,
       gap: 10,
     },
     systemStepsColumnCompact: {
@@ -1938,6 +2735,7 @@ const createStyles = (colors: ThemeColors) => {
       fontWeight: "900",
     },
     systemSectionCard: {
+      flex: 1,
       borderRadius: 12,
       borderWidth: 1,
       borderColor: colors.border,
@@ -1964,6 +2762,21 @@ const createStyles = (colors: ThemeColors) => {
       textTransform: "uppercase",
       letterSpacing: 1.1,
     },
+    systemLabelOrder: {
+      color: isDark ? "#8DEBFF" : "#08798E",
+      fontSize: 10,
+      fontWeight: "800",
+      textTransform: "uppercase",
+      letterSpacing: 1.1,
+    },
+    systemRulesGrid: {
+      flexDirection: "row",
+      alignItems: "stretch",
+      gap: 10,
+    },
+    systemRulesGridStack: {
+      flexDirection: "column",
+    },
     systemBulletRow: {
       flexDirection: "row",
       alignItems: "flex-start",
@@ -1980,6 +2793,9 @@ const createStyles = (colors: ThemeColors) => {
     },
     systemBulletDont: {
       backgroundColor: colors.danger,
+    },
+    systemBulletOrder: {
+      backgroundColor: isDark ? "#63D6FF" : "#08798E",
     },
     systemItem: {
       flex: 1,
@@ -2017,6 +2833,164 @@ const createStyles = (colors: ThemeColors) => {
       color: colors.onPrimary,
       fontSize: 13,
       fontWeight: "800",
+    },
+    strategyCard: {
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: isDark ? "#164A5B" : "#BCE5ED",
+      backgroundColor: isDark ? "#071B2D" : "#F4FBFD",
+      padding: 10,
+      gap: 5,
+    },
+    strategyHeaderRow: {
+      gap: 3,
+    },
+    strategyTitle: {
+      color: colors.textPrimary,
+      fontSize: 12,
+      lineHeight: 17,
+      fontWeight: "900",
+    },
+    strategyMeta: {
+      color: colors.textMuted,
+      fontSize: 10,
+      lineHeight: 14,
+      fontWeight: "700",
+    },
+    strategyBody: {
+      color: colors.textPrimary,
+      fontSize: 12,
+      lineHeight: 18,
+      fontWeight: "600",
+    },
+    strategyWarning: {
+      color: isDark ? "#FDE68A" : "#8A5C00",
+      fontSize: 11,
+      lineHeight: 16,
+      fontWeight: "700",
+    },
+    focusAnchorGrid: {
+      gap: 8,
+    },
+    focusAnchorCard: {
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: isDark ? "#164A5B" : "#BCE5ED",
+      backgroundColor: isDark ? "#0A1726" : "#F6FBFD",
+      padding: 10,
+      gap: 4,
+    },
+    focusAnchorLabel: {
+      color: isDark ? "#8DEBFF" : "#08798E",
+      fontSize: 10,
+      textTransform: "uppercase",
+      letterSpacing: 0.9,
+      fontWeight: "900",
+    },
+    focusAnchorBody: {
+      color: colors.textPrimary,
+      fontSize: 12,
+      lineHeight: 17,
+      fontWeight: "600",
+    },
+    aiPlanPanel: {
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: isDark ? "#513C87" : "#D7C8FF",
+      backgroundColor: isDark ? "#130F2A" : "#F7F2FF",
+      padding: 12,
+      gap: 8,
+    },
+    aiPlanHeaderRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: 8,
+    },
+    aiPlanEyebrow: {
+      flex: 1,
+      color: isDark ? "#C7B6FF" : "#6B42B5",
+      fontSize: 10,
+      lineHeight: 14,
+      fontWeight: "900",
+      textTransform: "uppercase",
+      letterSpacing: 1,
+    },
+    aiPlanDate: {
+      color: isDark ? "#DED5FF" : "#5E3DA1",
+      fontSize: 10,
+      fontWeight: "800",
+    },
+    aiPlanTitle: {
+      color: colors.textPrimary,
+      fontSize: 15,
+      lineHeight: 20,
+      fontWeight: "900",
+    },
+    aiPlanBody: {
+      color: colors.textMuted,
+      fontSize: 12,
+      lineHeight: 18,
+      fontWeight: "600",
+    },
+    aiPlanAnchorText: {
+      color: isDark ? "#DED5FF" : "#5E3DA1",
+      fontSize: 11,
+      lineHeight: 16,
+      fontWeight: "600",
+    },
+    aiPlanGrid: {
+      gap: 8,
+    },
+    aiPlanPoint: {
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: isDark ? "#2A2553" : "#E0D5FF",
+      backgroundColor: isDark ? "#090A1B" : "#FFFFFF",
+      padding: 10,
+      gap: 4,
+    },
+    aiPlanPointLabel: {
+      color: isDark ? "#B6A7F5" : "#6B42B5",
+      fontSize: 10,
+      textTransform: "uppercase",
+      letterSpacing: 0.9,
+      fontWeight: "900",
+    },
+    aiPlanPointBody: {
+      color: colors.textPrimary,
+      fontSize: 12,
+      lineHeight: 17,
+      fontWeight: "600",
+    },
+    systemActionRow: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: 8,
+      marginTop: 2,
+    },
+    aiCoachButton: {
+      borderRadius: 999,
+      backgroundColor: isDark ? "#BCA7FF" : "#6D45D9",
+      paddingHorizontal: 14,
+      paddingVertical: 9,
+    },
+    aiCoachButtonText: {
+      color: isDark ? "#130F2A" : "#FFFFFF",
+      fontSize: 12,
+      fontWeight: "900",
+    },
+    systemSecondaryButton: {
+      borderRadius: 999,
+      borderWidth: 1,
+      borderColor: isDark ? "#61518F" : "#D7C8FF",
+      paddingHorizontal: 14,
+      paddingVertical: 9,
+    },
+    systemSecondaryButtonText: {
+      color: isDark ? "#DED5FF" : "#5E3DA1",
+      fontSize: 12,
+      fontWeight: "900",
     },
     summaryRow: {
       flexDirection: "row",
