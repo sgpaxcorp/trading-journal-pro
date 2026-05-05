@@ -26,6 +26,7 @@ type Automation = {
 type Payload = {
   sender: {
     from: string;
+    authFrom?: string;
     provider: string;
     configured: boolean;
   };
@@ -152,7 +153,16 @@ export default function AdminEmailAutomations({ lang }: Props) {
           <div>
             <p className="text-[11px] uppercase tracking-[0.24em] text-slate-500">{L("Sender", "Remitente")}</p>
             <h3 className="mt-2 text-lg font-semibold text-slate-100">{data?.sender?.provider ?? "Resend"}</h3>
-            <p className="mt-1 text-sm text-slate-400 break-all">{data?.sender?.from ?? "—"}</p>
+            <div className="mt-2 space-y-2 text-sm text-slate-400 break-all">
+              <p>
+                <span className="text-slate-500">{L("Default", "General")}:</span>{" "}
+                {data?.sender?.from ?? "—"}
+              </p>
+              <p>
+                <span className="text-slate-500">{L("Auth no-reply", "Auth no-reply")}:</span>{" "}
+                {data?.sender?.authFrom ?? data?.sender?.from ?? "—"}
+              </p>
+            </div>
           </div>
 
           <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
@@ -161,8 +171,8 @@ export default function AdminEmailAutomations({ lang }: Props) {
                 <p className="text-sm font-semibold text-slate-100">{L("Delivery status", "Estado de entrega")}</p>
                 <p className="text-xs text-slate-400">
                   {L(
-                    "Auth, billing, lifecycle, and operational emails use this configuration.",
-                    "Los emails de auth, billing, lifecycle y operaciones usan esta configuración."
+                    "Billing, lifecycle, and operational emails use the default sender. Authentication emails can use a dedicated no-reply sender.",
+                    "Los emails de billing, lifecycle y operaciones usan el remitente general. Los emails de autenticación pueden usar un remitente no-reply dedicado."
                   )}
                 </p>
               </div>

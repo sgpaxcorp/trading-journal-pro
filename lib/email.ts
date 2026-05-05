@@ -15,12 +15,20 @@ const FROM_EMAIL =
   process.env.EMAIL_FROM ||
   "NeuroTrader Journal <support@neurotrader-journal.com>";
 
+const AUTH_FROM_EMAIL =
+  process.env.RESEND_AUTH_FROM_EMAIL ||
+  process.env.AUTH_FROM_EMAIL ||
+  process.env.RESEND_NO_REPLY_EMAIL ||
+  process.env.NO_REPLY_FROM_EMAIL ||
+  "NeuroTrader Journal <no-reply@neurotrader-journal.com>";
+
 const resend = process.env.RESEND_API_KEY
   ? new Resend(process.env.RESEND_API_KEY)
   : null;
 
 type SendEmailArgs = {
   to: string;
+  from?: string;
   subject: string;
   text?: string;
   html?: string;
@@ -575,7 +583,7 @@ function buildNeuroTraderHtml({
 </html>`;
 }
 
-async function sendEmailBase({ to, subject, text, html, attachments }: SendEmailArgs) {
+async function sendEmailBase({ to, from, subject, text, html, attachments }: SendEmailArgs) {
   if (!resend) {
     console.log("======================================");
     console.log("[EMAIL MOCK] To:", to);
@@ -591,7 +599,7 @@ async function sendEmailBase({ to, subject, text, html, attachments }: SendEmail
 
   try {
     await resend.emails.send({
-      from: FROM_EMAIL,
+      from: from || FROM_EMAIL,
       to,
       subject,
       text: text ?? "",
@@ -1379,6 +1387,7 @@ function buildProfitLossAlertContent(args: {
 export function getEmailSenderStatus() {
   return {
     from: FROM_EMAIL,
+    authFrom: AUTH_FROM_EMAIL,
     provider: "Resend",
     configured: Boolean(process.env.RESEND_API_KEY),
   };
@@ -1393,7 +1402,7 @@ export function getAutomatedEmailCatalog(): AutomatedEmailPreview[] {
       description: "Sent when a new user creates an account and needs to verify the email before continuing.",
       trigger: "New account created",
       delivery: "Resend via app signup API",
-      from: FROM_EMAIL,
+      from: AUTH_FROM_EMAIL,
       preview: buildEmailConfirmationContent({
         email: "trader@example.com",
         name: "Steven",
@@ -1408,7 +1417,7 @@ export function getAutomatedEmailCatalog(): AutomatedEmailPreview[] {
       description: "Sent when a user requests a secure link to choose a new password.",
       trigger: "Forgot password request",
       delivery: "Resend via auth recovery route",
-      from: FROM_EMAIL,
+      from: AUTH_FROM_EMAIL,
       preview: buildPasswordResetContent({
         email: "trader@example.com",
         name: "Steven",
@@ -1422,7 +1431,7 @@ export function getAutomatedEmailCatalog(): AutomatedEmailPreview[] {
       description: "Sent when a user requests a reminder of the sign-in email plus a reset shortcut.",
       trigger: "Account recovery request",
       delivery: "Resend via recovery route",
-      from: FROM_EMAIL,
+      from: AUTH_FROM_EMAIL,
       preview: buildAccountRecoveryContent({
         email: "steven.otero.velez@icloud.com",
         name: "Steven",
@@ -1750,7 +1759,7 @@ export async function sendEmailConfirmationEmail(args: {
   continueUrl?: string | null;
 }) {
   const content = buildEmailConfirmationContent(args);
-  await sendEmailBase({ to: args.email, ...content });
+  await sendEmailBase({ to: args.email, from: AUTH_FROM_EMAIL, ...content });
 }
 
 export async function sendPasswordResetEmail(args: {
@@ -1759,7 +1768,7 @@ export async function sendPasswordResetEmail(args: {
   resetUrl: string;
 }) {
   const content = buildPasswordResetContent(args);
-  await sendEmailBase({ to: args.email, ...content });
+  await sendEmailBase({ to: args.email, from: AUTH_FROM_EMAIL, ...content });
 }
 
 export async function sendAccountRecoveryEmail(args: {
@@ -1773,7 +1782,7 @@ export async function sendAccountRecoveryEmail(args: {
     name: args.name,
     resetUrl: args.resetUrl,
   });
-  await sendEmailBase({ to: args.email, ...content });
+  await sendEmailBase({ to: args.email, from: AUTH_FROM_EMAIL, ...content });
 }
 
 export async function sendWelcomeEmail(user: AppUser) {
