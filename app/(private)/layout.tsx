@@ -9,7 +9,6 @@ import { isActiveProfileStatus, shouldAllowLocalProfileAccessFallback } from "@/
 import { fetchAccessStatus } from "@/lib/accessStatusClient";
 import { canAccessPrivatePath, firstAccessiblePrivatePath } from "@/lib/accessGrants";
 import CandleAssistant from "@/app/components/NeuroAssistant";
-import AppTour from "@/app/components/AppTour";
 import RouteQuickTour from "@/app/components/RouteQuickTour";
 import GlobalAlertPopups from "@/app/components/GlobalAlertPopups";
 import GlobalAlertRuleEngine from "@/app/components/GlobalAlertRuleEngine";
@@ -35,7 +34,6 @@ export default function PrivateLayout({ children }: PrivateLayoutProps) {
   const sessionIdRef = useRef<string | null>(null);
 
   const [hasAppAccess, setHasAppAccess] = useState<boolean>(false);
-  const [onboardingCompleted, setOnboardingCompleted] = useState<boolean>(false);
   const [profileChecked, setProfileChecked] = useState(false);
   const [entitlements, setEntitlements] = useState<
     Array<{ entitlement_key: string; status: string; metadata?: Record<string, unknown> | null }>
@@ -57,7 +55,6 @@ export default function PrivateLayout({ children }: PrivateLayoutProps) {
     setRefreshAttempts(0);
     setProfileChecked(false);
     setHasAppAccess(false);
-    setOnboardingCompleted(false);
     setEntitlements([]);
   }, [user?.id]);
 
@@ -101,26 +98,22 @@ export default function PrivateLayout({ children }: PrivateLayoutProps) {
       const access = await fetchAccessStatus();
       if (access) {
         const status = String(access.profile?.subscriptionStatus ?? "").toLowerCase() || "pending";
-        const onboarding = Boolean(access.profile?.onboardingCompleted ?? false);
         const canAccess = Boolean(access.hasAppAccess);
         const nextEntitlements = Array.isArray(access.entitlements) ? access.entitlements : [];
 
         setHasAppAccess(canAccess);
-        setOnboardingCompleted(onboarding);
         setProfileChecked(true);
         setEntitlements(nextEntitlements);
-        return { status, onboarding, hasAccess: canAccess, entitlements: nextEntitlements };
+        return { status, hasAccess: canAccess, entitlements: nextEntitlements };
       }
 
       const metaStatus = String((user as any)?.user_metadata?.subscriptionStatus ?? "").toLowerCase();
       const canAccess = allowLocalProfileFallback && isActiveProfileStatus(metaStatus);
       setHasAppAccess(canAccess);
-      setOnboardingCompleted(false);
       setProfileChecked(true);
       setEntitlements([]);
       return {
         status: metaStatus || "pending",
-        onboarding: false,
         hasAccess: canAccess,
         entitlements: [],
       };
@@ -128,12 +121,10 @@ export default function PrivateLayout({ children }: PrivateLayoutProps) {
       const metaStatus = String((user as any)?.user_metadata?.subscriptionStatus ?? "").toLowerCase();
       const canAccess = allowLocalProfileFallback && isActiveProfileStatus(metaStatus);
       setHasAppAccess(canAccess);
-      setOnboardingCompleted(false);
       setProfileChecked(true);
       setEntitlements([]);
       return {
         status: metaStatus || "pending",
-        onboarding: false,
         hasAccess: canAccess,
         entitlements: [],
       };
@@ -273,12 +264,7 @@ export default function PrivateLayout({ children }: PrivateLayoutProps) {
       <div className="ntj-fullwidth">{children}</div>
       {userId && isActive && profileChecked ? (
         <>
-          <AppTour onboardingCompleted={onboardingCompleted} />
-          {onboardingCompleted ? (
-            <>
-              <RouteQuickTour enabled />
-            </>
-          ) : null}
+          <RouteQuickTour enabled />
         </>
       ) : null}
 

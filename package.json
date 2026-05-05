@@ -11,6 +11,7 @@
     "lint:web": "eslint app context lib hooks proxy.ts tests --quiet",
     "typecheck:web": "next typegen && rm -f .next/lock && tsc --noEmit",
     "typecheck:mobile": "cd mobile && npx tsc --noEmit",
+    "admin:bootstrap": "node supabase/manual/bootstrap_admin_user.mjs",
     "audit:prod": "npm audit --omit=dev --audit-level=high",
     "audit:mobile": "cd mobile && npm audit --omit=dev --audit-level=high",
     "verify:release": "npm run test:unit && npm run lint:web && npm run typecheck:web && npm run build && npm run typecheck:mobile && npm run audit:prod && npm run audit:mobile",

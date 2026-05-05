@@ -1,11 +1,12 @@
 // app/signin/SignInClient.tsx
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "@/lib/supaBaseClient";
 import { useAppSettings } from "@/lib/appSettings";
+import { getAdminStatus } from "@/lib/adminStatus";
 import { resolveLocale } from "@/lib/i18n";
 
 type SignInClientProps = {
@@ -30,12 +31,53 @@ export default function SignInClient({ nextPath }: SignInClientProps) {
   const L = (en: string, es: string) => (isEs ? es : en);
 
   const safeNext = useMemo(() => safeInternalPath(nextPath), [nextPath]);
+  const wantsAdminDestination =
+    safeNext === "/admin" || safeNext.startsWith("/admin/");
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [checkingExistingAdmin, setCheckingExistingAdmin] = useState(
+    wantsAdminDestination
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function checkExistingAdmin() {
+      if (!wantsAdminDestination) {
+        setCheckingExistingAdmin(false);
+        return;
+      }
+
+      setCheckingExistingAdmin(true);
+
+      try {
+        const adminStatus = await getAdminStatus();
+        if (cancelled) return;
+
+        if (adminStatus.isAdmin) {
+          router.refresh();
+          router.replace(safeNext);
+          return;
+        }
+      } catch (err) {
+        console.error("Error checking current admin session:", err);
+      }
+
+      if (!cancelled) {
+        setCheckingExistingAdmin(false);
+      }
+    }
+
+    void checkExistingAdmin();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [router, safeNext, wantsAdminDestination]);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -69,6 +111,24 @@ export default function SignInClient({ nextPath }: SignInClientProps) {
     } finally {
       setLoading(false);
     }
+  }
+
+  if (checkingExistingAdmin) {
+    return (
+      <main className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center px-4">
+        <div className="w-full max-w-md bg-slate-900/90 border border-slate-800 rounded-2xl p-6 shadow-2xl">
+          <h1 className="text-xl font-semibold mb-2">
+            {L("Checking staff access...", "Verificando acceso del staff...")}
+          </h1>
+          <p className="text-xs text-slate-400">
+            {L(
+              "Just a second while we verify your current session.",
+              "Dame un segundo mientras verificamos tu sesión actual."
+            )}
+          </p>
+        </div>
+      </main>
+    );
   }
 
   return (

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
-import { getOptionFlowBetaApiPayload, isOptionFlowBetaTester, resolveOptionFlowLang } from "@/lib/optionFlowBeta";
+import { getOptionFlowBetaApiPayload, hasOptionFlowBetaAccess, resolveOptionFlowLang } from "@/lib/optionFlowBeta";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 
 export const runtime = "nodejs";
@@ -11,11 +11,7 @@ const openai = new OpenAI({
 
 const DEFAULT_MODEL = process.env.OPENAI_OPTIONFLOW_MODEL || "gpt-4.1";
 const VISION_MODEL = process.env.OPENAI_OPTIONFLOW_VISION_MODEL || "gpt-4o";
-const ENTITLEMENT_KEY = "option_flow";
-const PAYWALL_ENABLED =
-  String(process.env.OPTIONFLOW_PAYWALL_ENABLED ?? "").toLowerCase() === "true";
 const BYPASS_ENTITLEMENT =
-  !PAYWALL_ENABLED ||
   String(process.env.OPTIONFLOW_BYPASS_ENTITLEMENT ?? "").toLowerCase() === "true" ||
   String(process.env.OPTIONFLOW_BYPASS_ENTITLEMENT ?? "") === "1";
 
@@ -573,19 +569,6 @@ function computeSqueezeCandidates(rows: ReturnType<typeof normalizeFlowRow>[], l
   return candidates.sort((a, b) => b.score - a.score).slice(0, limit);
 }
 
-async function requireEntitlement(userId: string): Promise<boolean> {
-  if (!userId) return false;
-  const { data, error } = await supabaseAdmin
-    .from("user_entitlements")
-    .select("status")
-    .eq("user_id", userId)
-    .eq("entitlement_key", ENTITLEMENT_KEY)
-    .in("status", ["active", "trialing"])
-    .limit(1);
-  if (error) return false;
-  return (data ?? []).length > 0;
-}
-
 function safeRows(rows: any[], limit = 200) {
   if (!Array.isArray(rows)) return [];
   return rows.slice(0, Math.max(1, limit));
@@ -603,18 +586,10 @@ export async function POST(req: NextRequest) {
     }
 
     const userId = authData.user.id;
-    const email = authData.user.email ?? null;
     const requestLang = resolveOptionFlowLang(req.headers.get("accept-language"));
 
-    if (!isOptionFlowBetaTester(email)) {
+    if (!BYPASS_ENTITLEMENT && !(await hasOptionFlowBetaAccess(userId))) {
       return NextResponse.json(getOptionFlowBetaApiPayload(requestLang), { status: 403 });
-    }
-
-    if (!BYPASS_ENTITLEMENT) {
-      const hasEnt = await requireEntitlement(userId);
-      if (!hasEnt) {
-        return NextResponse.json({ error: "Entitlement required" }, { status: 403 });
-      }
     }
 
     const body = await req.json();

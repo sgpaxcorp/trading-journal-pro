@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
-import { getOptionFlowBetaApiPayload, isOptionFlowBetaTester, resolveOptionFlowLang } from "@/lib/optionFlowBeta";
+import { getOptionFlowBetaApiPayload, resolveOptionFlowLang } from "@/lib/optionFlowBeta";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 
 export const runtime = "nodejs";
@@ -11,10 +11,7 @@ const openai = new OpenAI({
 
 const DEFAULT_MODEL = process.env.OPENAI_OPTIONFLOW_MODEL || "gpt-4.1";
 const ENTITLEMENT_KEY = "option_flow";
-const PAYWALL_ENABLED =
-  String(process.env.OPTIONFLOW_PAYWALL_ENABLED ?? "").toLowerCase() === "true";
 const BYPASS_ENTITLEMENT =
-  !PAYWALL_ENABLED ||
   String(process.env.OPTIONFLOW_BYPASS_ENTITLEMENT ?? "").toLowerCase() === "true" ||
   String(process.env.OPTIONFLOW_BYPASS_ENTITLEMENT ?? "") === "1";
 
@@ -43,17 +40,12 @@ export async function POST(req: NextRequest) {
     }
 
     const userId = authData.user.id;
-    const email = authData.user.email ?? null;
     const requestLang = resolveOptionFlowLang(req.headers.get("accept-language"));
-
-    if (!isOptionFlowBetaTester(email)) {
-      return NextResponse.json(getOptionFlowBetaApiPayload(requestLang), { status: 403 });
-    }
 
     if (!BYPASS_ENTITLEMENT) {
       const hasEnt = await requireEntitlement(userId);
       if (!hasEnt) {
-        return NextResponse.json({ error: "Entitlement required" }, { status: 403 });
+        return NextResponse.json(getOptionFlowBetaApiPayload(requestLang), { status: 403 });
       }
     }
 

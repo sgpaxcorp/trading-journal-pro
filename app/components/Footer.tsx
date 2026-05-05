@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
   FaInstagram,
@@ -9,14 +10,18 @@ import {
 import { FaXTwitter } from "react-icons/fa6";
 
 import { useAppSettings } from "@/lib/appSettings";
+import { useAuth } from "@/context/AuthContext";
+import { getAdminStatus } from "@/lib/adminStatus";
 import { resolveLocale, t } from "@/lib/i18n";
 
 export default function Footer() {
   const year = new Date().getFullYear();
 
   const { theme, locale } = useAppSettings();
+  const { user, loading: authLoading } = useAuth();
   const lang = resolveLocale(locale);
   const isLight = theme === "light";
+  const [staffHref, setStaffHref] = useState("/signin?next=/admin");
 
   const footerClass = isLight
     ? "w-full bg-slate-50/90 text-slate-600 px-6 md:px-10 lg:px-16 py-8 border-t border-slate-200 mt-auto"
@@ -27,6 +32,36 @@ export default function Footer() {
     : "p-2 rounded-md bg-slate-900 hover:bg-slate-800 transition";
 
   const brandLogoSrc = "/neurotrader%20logo%20for%20Web.png";
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function syncStaffHref() {
+      if (authLoading) return;
+
+      if (!user) {
+        setStaffHref("/signin?next=/admin");
+        return;
+      }
+
+      try {
+        const adminStatus = await getAdminStatus();
+        if (cancelled) return;
+
+        setStaffHref(adminStatus.isAdmin ? "/admin" : "/signin?next=/admin");
+      } catch (error) {
+        if (!cancelled) {
+          setStaffHref("/signin?next=/admin");
+        }
+      }
+    }
+
+    void syncStaffHref();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authLoading, user?.id]);
 
   return (
     <footer className={footerClass}>
@@ -53,7 +88,7 @@ export default function Footer() {
               {t("footer.links.login", lang)}
             </Link>
             <Link
-              href="/signin?next=/admin"
+              href={staffHref}
               className={isLight ? "hover:text-emerald-600 transition" : "hover:text-emerald-400 transition"}
             >
               {t("footer.links.staff", lang)}

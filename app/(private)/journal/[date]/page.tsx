@@ -3925,9 +3925,39 @@ export default function DailyJournalPage() {
   const stepCount = WIZARD_STEPS.length;
   const activeStep = WIZARD_STEPS[Math.min(currentStep, stepCount - 1)] || WIZARD_STEPS[0];
   const gridMode = activeStep?.key === "intrade";
+  const tourStepIndexByHash = useMemo(
+    () => ({
+      "journal-step-premarket": 0,
+      "journal-step-intrade": 1,
+      "journal-step-after": 2,
+    }),
+    []
+  );
 
   const goPrevStep = () => setCurrentStep((s) => Math.max(0, s - 1));
   const goNextStep = () => setCurrentStep((s) => Math.min(stepCount - 1, s + 1));
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const applyHashStep = () => {
+      const hash = window.location.hash.replace(/^#/, "").trim();
+      const nextIndex = tourStepIndexByHash[hash as keyof typeof tourStepIndexByHash];
+      if (typeof nextIndex === "number") {
+        setCurrentStep(nextIndex);
+      }
+    };
+
+    const raf = window.requestAnimationFrame(applyHashStep);
+    const timeout = window.setTimeout(applyHashStep, 120);
+    window.addEventListener("hashchange", applyHashStep);
+
+    return () => {
+      window.cancelAnimationFrame(raf);
+      window.clearTimeout(timeout);
+      window.removeEventListener("hashchange", applyHashStep);
+    };
+  }, [tourStepIndexByHash]);
 
   return (
     <main className="min-h-screen bg-slate-950 text-slate-50 px-4 md:px-8 py-6">
@@ -4050,6 +4080,7 @@ export default function DailyJournalPage() {
                             key={step.key}
                             type="button"
                             onClick={() => setCurrentStep(idx)}
+                            data-tour={`journal-step-${step.key}`}
                             className={`px-3 py-1 rounded-full text-[11px] border whitespace-nowrap transition ${
                               on
                                 ? "bg-emerald-400 text-slate-950 border-emerald-400"

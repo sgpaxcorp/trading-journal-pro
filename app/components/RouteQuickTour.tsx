@@ -61,6 +61,17 @@ export default function RouteQuickTour({ enabled = true }: { enabled?: boolean }
   }, [context.key, enabled, user?.id]);
 
   useEffect(() => {
+    if (!active || !currentStep || typeof window === "undefined") return;
+    const anchor = currentStep.anchor?.trim() || "";
+    const nextHash = anchor ? `#${anchor}` : "";
+    const currentHash = window.location.hash || "";
+    if (currentHash !== nextHash) {
+      window.history.replaceState(window.history.state, "", `${pathname || "/dashboard"}${nextHash}`);
+      window.dispatchEvent(new Event("hashchange"));
+    }
+  }, [active, currentStep, pathname]);
+
+  useEffect(() => {
     if (!active || !currentStep) return;
 
     const selector = currentStep.selector?.trim();

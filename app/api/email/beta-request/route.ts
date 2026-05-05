@@ -1,18 +1,57 @@
-// app/api/email/beta-request/route.ts
 import { NextRequest, NextResponse } from "next/server";
 
-// Stub temporal: no usa Resend ni ninguna API externa
+import { sendBetaRequestEmail } from "@/lib/email";
+import { getClientIp, rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
+
 export async function POST(req: NextRequest) {
-  if (process.env.NODE_ENV === "production") {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
-  }
   const body = await req.json().catch(() => ({}));
+  const email = String(body?.email ?? "")
+    .trim()
+    .toLowerCase();
+  const name = String(body?.name ?? "")
+    .trim()
+    .slice(0, 120);
+  const feature = String(body?.feature ?? "option_flow").trim().toLowerCase();
 
-  console.log("[EMAIL BETA-REQUEST STUB] Payload received:", body);
+  if (feature !== "option_flow") {
+    return NextResponse.json({ error: "Unsupported beta request." }, { status: 400 });
+  }
 
-  // Puedes guardar esto en Supabase si quieres, pero por ahora solo devolvemos ok
-  return NextResponse.json({
-    ok: true,
-    message: "Beta request received (stub, no email sent).",
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return NextResponse.json({ error: "Valid email is required." }, { status: 400 });
+  }
+
+  const ip = getClientIp(req);
+  const limiter = rateLimit(`beta-request:${email}:${ip}`, {
+    limit: 3,
+    windowMs: 60 * 60 * 1000,
   });
+
+  if (!limiter.allowed) {
+    return NextResponse.json(
+      { error: "Too many beta requests. Please try again later." },
+      { status: 429, headers: rateLimitHeaders(limiter) }
+    );
+  }
+
+  try {
+    await sendBetaRequestEmail({
+      email,
+      name: name || email,
+    });
+
+    return NextResponse.json(
+      {
+        ok: true,
+        message: "Beta access request sent.",
+      },
+      { headers: rateLimitHeaders(limiter) }
+    );
+  } catch (error) {
+    console.error("[beta-request] failed", error);
+    return NextResponse.json(
+      { error: "Could not send beta request right now." },
+      { status: 500, headers: rateLimitHeaders(limiter) }
+    );
+  }
 }

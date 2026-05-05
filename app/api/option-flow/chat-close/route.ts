@@ -1,17 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getOptionFlowBetaApiPayload, isOptionFlowBetaTester, resolveOptionFlowLang } from "@/lib/optionFlowBeta";
+import { getOptionFlowBetaApiPayload, hasOptionFlowBetaAccess, resolveOptionFlowLang } from "@/lib/optionFlowBeta";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 import { getAuthUser } from "@/lib/authServer";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+const BYPASS_BETA_GATE =
+  String(process.env.OPTIONFLOW_BYPASS_ENTITLEMENT ?? "").toLowerCase() === "true" ||
+  String(process.env.OPTIONFLOW_BYPASS_ENTITLEMENT ?? "") === "1";
 
 export async function POST(req: NextRequest) {
   const auth = await getAuthUser(req);
   if (!auth?.userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  if (!isOptionFlowBetaTester(auth.email)) {
+  if (!BYPASS_BETA_GATE && !(await hasOptionFlowBetaAccess(auth.userId))) {
     return NextResponse.json(
       getOptionFlowBetaApiPayload(resolveOptionFlowLang(req.headers.get("accept-language"))),
       { status: 403 }

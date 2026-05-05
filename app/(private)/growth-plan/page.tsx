@@ -1,7 +1,7 @@
 // app/(private)/growth-plan/page.tsx
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { jsPDF } from "jspdf";
@@ -528,6 +528,28 @@ function isoToday(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
+function addCalendarDays(startIso: string, days: number): string {
+  const start = new Date(`${startIso}T00:00:00`);
+  if (!Number.isFinite(start.getTime())) return startIso;
+  start.setDate(start.getDate() + Math.max(0, Math.floor(days)));
+  return start.toISOString().slice(0, 10);
+}
+
+function calendarDaysBetween(startIso: string, endIso: string): number {
+  const start = new Date(`${startIso}T00:00:00`);
+  const end = new Date(`${endIso}T00:00:00`);
+  if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime())) return 0;
+  const diff = end.getTime() - start.getTime();
+  return Math.max(0, Math.round(diff / 86_400_000));
+}
+
+function scaleFollowOnRisk(riskPct: number, mode: "same" | "lower" | "higher"): number {
+  if (!Number.isFinite(riskPct) || riskPct <= 0) return 0;
+  if (mode === "lower") return Math.max(0.25, Number((riskPct * 0.8).toFixed(2)));
+  if (mode === "higher") return Math.min(10, Number((riskPct * 1.2).toFixed(2)));
+  return Number(riskPct.toFixed(2));
+}
+
 function toYMD(date: Date): string {
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, "0");
@@ -679,6 +701,8 @@ export default function GrowthPlanPage() {
   // Cashflows net since plan start (for correct $ conversions when editing an existing plan)
   const [cashflowNet, setCashflowNet] = useState(0);
   const [loadedStartingBalance, setLoadedStartingBalance] = useState<number | null>(null);
+  const [liveCurrentBalance, setLiveCurrentBalance] = useState<number | null>(null);
+  const [isFollowOnDraft, setIsFollowOnDraft] = useState(false);
 
   // Neuro language toggle is stored in Supabase (kept in steps._ui.lang)
   const [assistantLang, setAssistantLang] = useState<AssistantLang>(lang);
@@ -699,7 +723,7 @@ export default function GrowthPlanPage() {
   const [plannedWithdrawalStartPeriodStr, setPlannedWithdrawalStartPeriodStr] = useState("1");
   const [plannedWithdrawals, setPlannedWithdrawals] = useState<PlannedWithdrawal[]>([]);
   const [planPhases, setPlanPhases] = useState<PlanPhase[]>([]);
-  const [planStartDate, setPlanStartDate] = useState<string | null>(null);
+  const [planStartDate, setPlanStartDate] = useState<string | null>(isoToday());
   const [autoPhasesGenerated, setAutoPhasesGenerated] = useState(false);
   const [step0Stage, setStep0Stage] = useState(0);
 
@@ -754,6 +778,9 @@ export default function GrowthPlanPage() {
   const plannedWithdrawalConfigured =
     plannedWithdrawalMode === "none" ||
     (plannedWithdrawalMode === "scheduled" && plannedWithdrawalAmount > 0);
+  const effectivePlanStartDate = planStartDate || isoToday();
+  const planDatesOrdered =
+    !effectivePlanStartDate || !targetDateStr || effectivePlanStartDate <= targetDateStr;
 
   const baseBalanceForDollars = useMemo(() => {
     // If editing an existing plan AND the user hasn't changed the starting balance from what we loaded,
@@ -764,6 +791,54 @@ export default function GrowthPlanPage() {
     return Math.max(0, startingBalance);
   }, [startingBalance, loadedStartingBalance, cashflowNet]);
 
+  useEffect(() => {
+    let alive = true;
+
+    const loadLiveBalance = async () => {
+      if (loading || !user || accountsLoading || !activeAccountId) {
+        if (alive) setLiveCurrentBalance(null);
+        return;
+      }
+
+      try {
+        const { data: sessionData } = await supabaseBrowser.auth.getSession();
+        const token = sessionData?.session?.access_token;
+        if (!token) {
+          if (alive) setLiveCurrentBalance(null);
+          return;
+        }
+
+        const res = await fetch(`/api/account/series?accountId=${encodeURIComponent(activeAccountId)}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) {
+          if (alive) setLiveCurrentBalance(null);
+          return;
+        }
+
+        const body = (await res.json().catch(() => ({}))) as {
+          series?: Array<{ value?: number | string | null }>;
+        };
+        const series = Array.isArray(body?.series) ? body.series : [];
+        const latest = series
+          .map((point) => Number(point?.value))
+          .filter((value: number) => Number.isFinite(value))
+          .slice(-1)[0];
+
+        if (alive) {
+          setLiveCurrentBalance(Number.isFinite(latest) ? latest : null);
+        }
+      } catch {
+        if (alive) setLiveCurrentBalance(null);
+      }
+    };
+
+    loadLiveBalance();
+    return () => {
+      alive = false;
+    };
+  }, [accountsLoading, activeAccountId, loading, user]);
+
   const riskUsd = useMemo(() => calcRiskUsd(baseBalanceForDollars, riskPerTradePct), [baseBalanceForDollars, riskPerTradePct]);
 
   const onlyNum = (s: string) => s.replace(/[^\d.]/g, "");
@@ -771,11 +846,12 @@ export default function GrowthPlanPage() {
   useEffect(() => {
     if (!targetDateStr) return;
     if (tradingDaysTouched) return;
-    const startIso = isoToday();
+    if (!planDatesOrdered) return;
+    const startIso = effectivePlanStartDate;
     const count = computeProjectedTradingDaysBetween(startIso, targetDateStr);
     if (!Number.isFinite(count) || count <= 0) return;
     setTradingDaysStr(String(count));
-  }, [targetDateStr, tradingDaysTouched]);
+  }, [effectivePlanStartDate, planDatesOrdered, targetDateStr, tradingDaysTouched]);
 
   type GuidedTask = {
     id: string;
@@ -819,8 +895,8 @@ export default function GrowthPlanPage() {
       return buildPlanProjection({
         starting: 0,
         target: 0,
-        startIso: planStartDate || isoToday(),
-        targetIso: targetDateStr || planStartDate || isoToday(),
+        startIso: effectivePlanStartDate,
+        targetIso: targetDateStr || effectivePlanStartDate,
         lossDaysPerWeek,
         maxDailyLossPercent: Math.max(0, maxDailyLossPercent),
         withdrawalSettings: plannedWithdrawalSettings,
@@ -831,7 +907,7 @@ export default function GrowthPlanPage() {
     return buildPlanProjection({
       starting: Math.max(0, startingBalance),
       target: Math.max(0, targetBalance),
-      startIso: planStartDate || isoToday(),
+      startIso: effectivePlanStartDate,
       targetIso: targetDateStr,
       lossDaysPerWeek,
       maxDailyLossPercent: Math.max(0, maxDailyLossPercent),
@@ -841,7 +917,7 @@ export default function GrowthPlanPage() {
   }, [
     lossDaysPerWeek,
     maxDailyLossPercent,
-    planStartDate,
+    effectivePlanStartDate,
     plannedWithdrawalSettings,
     plannedWithdrawals,
     startingBalance,
@@ -901,9 +977,15 @@ export default function GrowthPlanPage() {
           anchor: "gp-target-balance",
         },
         {
+          id: "start_date",
+          label: L("Pick a start date", "Elige fecha de inicio"),
+          done: !!planStartDate,
+          anchor: "gp-start-date",
+        },
+        {
           id: "target_date",
           label: L("Pick a target date", "Elige fecha meta"),
-          done: !!targetDateStr,
+          done: !!targetDateStr && planDatesOrdered,
           anchor: "gp-target-date",
         },
         {
@@ -1019,6 +1101,8 @@ export default function GrowthPlanPage() {
     L,
     startingBalance,
     targetBalance,
+    planStartDate,
+    planDatesOrdered,
     targetDateStr,
     tradingDays,
     maxDailyLossPercent,
@@ -1060,8 +1144,21 @@ export default function GrowthPlanPage() {
       setError(L("Enter starting and target balances first.", "Primero ingresa balance inicial y objetivo."));
       return;
     }
+    if (!planStartDate) {
+      setError(L("Pick a start date first.", "Elige primero una fecha de inicio."));
+      return;
+    }
     if (!targetDateStr) {
       setError(L("Pick a target date to build auto phases.", "Elige una fecha meta para crear fases automáticas."));
+      return;
+    }
+    if (!planDatesOrdered) {
+      setError(
+        L(
+          "Target date must be on or after the start date.",
+          "La fecha objetivo debe ser igual o posterior a la fecha de inicio."
+        )
+      );
       return;
     }
     if (maxDailyLossPercent <= 0) {
@@ -1094,6 +1191,7 @@ export default function GrowthPlanPage() {
 
         if (existing) {
           setHasExistingPlan(true);
+          setIsFollowOnDraft(false);
 
           setStartingBalanceStr(String(existing.startingBalance ?? 5000));
           setTargetBalanceStr(String(existing.targetBalance ?? 60000));
@@ -1198,6 +1296,7 @@ export default function GrowthPlanPage() {
         } else {
           // new plan
           setHasExistingPlan(false);
+          setIsFollowOnDraft(false);
           setStartingBalanceStr("");
           setTargetBalanceStr("");
           setTargetDateStr("");
@@ -1420,13 +1519,89 @@ export default function GrowthPlanPage() {
     return out;
   }, [monthSummaries, lang]);
 
-  const tradingDaysFromToday = useMemo(() => {
+  const projectedCompletionDate = projection.completionDate;
+  const projectedCompletionBalance = projection.completionBalance ?? null;
+  const projectedTargetReached = projection.targetReached;
+  const projectedCompletedEarly = projection.completedEarly;
+  const liveTargetReached =
+    liveCurrentBalance !== null &&
+    targetBalance > 0 &&
+    Number.isFinite(liveCurrentBalance) &&
+    liveCurrentBalance >= targetBalance;
+
+  const handleStartFollowOnPlan = useCallback(
+    (riskMode: "same" | "lower" | "higher") => {
+      const sourceBalance =
+        liveCurrentBalance !== null && Number.isFinite(liveCurrentBalance) && liveCurrentBalance > 0
+          ? liveCurrentBalance
+          : targetBalance;
+
+      if (!sourceBalance || sourceBalance <= 0) {
+        setError(L("We could not determine the balance for the next cycle yet.", "Todavía no pudimos determinar el balance para el próximo ciclo."));
+        return;
+      }
+
+      const today = isoToday();
+      const originalSpanDays =
+        planStartDate && targetDateStr ? Math.max(1, calendarDaysBetween(planStartDate, targetDateStr)) : 90;
+      const nextDate = addCalendarDays(today, originalSpanDays);
+      const sourceMultiple = targetMultiple > 1 ? targetMultiple : 1.25;
+      const nextTarget = Number((sourceBalance * sourceMultiple).toFixed(2));
+      const nextRiskPct = scaleFollowOnRisk(riskPerTradePct || 2, riskMode);
+
+      setStartingBalanceStr(sourceBalance.toFixed(2));
+      setTargetBalanceStr(nextTarget.toFixed(2));
+      setTargetDateStr(nextDate);
+      setTradingDaysTouched(false);
+      setLoadedStartingBalance(sourceBalance);
+      setCashflowNet(0);
+      setPlanStartDate(today);
+      setPlannedWithdrawals([]);
+      setPlanPhases([]);
+      setAutoPhasesGenerated(false);
+      setRiskPerTradePctStr(nextRiskPct.toFixed(2));
+      setCommitted(false);
+      setIsFollowOnDraft(true);
+      setError("");
+      setStep(0);
+      setStep0Stage(0);
+
+      pushNeuroMessage(
+        riskMode === "same"
+          ? L(
+              "Next-cycle draft ready. We kept the same risk profile and rolled the plan forward from your live balance.",
+              "El borrador del próximo ciclo está listo. Mantuvimos el mismo perfil de riesgo y reiniciamos el plan desde tu balance real."
+            )
+          : riskMode === "lower"
+            ? L(
+                "Next-cycle draft ready with lower risk. Review the new numbers, then save when the pacing feels sustainable.",
+                "El borrador del próximo ciclo está listo con menos riesgo. Revisa los nuevos números y guarda cuando el ritmo se sienta sostenible."
+              )
+            : L(
+                "Next-cycle draft ready with higher risk. Review the pacing carefully before saving.",
+                "El borrador del próximo ciclo está listo con más riesgo. Revisa el ritmo con cuidado antes de guardar."
+              )
+      );
+    },
+    [
+      L,
+      liveCurrentBalance,
+      planStartDate,
+      riskPerTradePct,
+      targetBalance,
+      targetDateStr,
+      targetMultiple,
+    ]
+  );
+
+  const tradingDaysFromRange = useMemo(() => {
     if (!targetDateStr) return null;
-    const today = isoToday();
-    const count = computeProjectedTradingDaysBetween(today, targetDateStr);
+    if (!planDatesOrdered) return null;
+    const start = effectivePlanStartDate;
+    const count = computeProjectedTradingDaysBetween(start, targetDateStr);
     if (!Number.isFinite(count) || count <= 0) return null;
-    return { today, count };
-  }, [targetDateStr]);
+    return { start, count };
+  }, [effectivePlanStartDate, planDatesOrdered, targetDateStr]);
 
   const autoCadenceUnit = L("Week", "Semana");
 
@@ -1466,7 +1641,9 @@ export default function GrowthPlanPage() {
   const canGeneratePhases =
     startingBalance > 0 &&
     targetBalance > 0 &&
+    !!planStartDate &&
     !!targetDateStr &&
+    planDatesOrdered &&
     maxDailyLossPercent > 0 &&
     lossDaysSet &&
     plannedWithdrawalConfigured;
@@ -1498,8 +1675,8 @@ export default function GrowthPlanPage() {
           </p>
           <p className="text-xs text-slate-400 mt-1">
             {L(
-              "We use your target date to calculate trading days and pacing.",
-              "Usamos tu fecha meta para calcular días de trading y el ritmo."
+              "We use your start date and target date to calculate trading days and pacing.",
+              "Usamos tu fecha de inicio y tu fecha meta para calcular días de trading y el ritmo."
             )}
           </p>
         </div>
@@ -1568,14 +1745,46 @@ export default function GrowthPlanPage() {
       ),
     },
     {
+      id: "start_date",
+      anchor: "gp-start-date",
+      title: L("Start date", "Fecha de inicio"),
+      description: L(
+        "This is when the plan begins counting pace and milestones.",
+        "Desde aquí el plan empieza a contar el ritmo y las metas."
+      ),
+      isComplete: !!planStartDate,
+      content: (
+        <div>
+          <label className="block mb-1 text-slate-300">{L("Start date", "Fecha de inicio")}</label>
+          <input
+            id="gp-start-date"
+            type="date"
+            value={planStartDate ?? ""}
+            onChange={(e) => {
+              setPlanStartDate(e.target.value || isoToday());
+              setTradingDaysTouched(false);
+              setAutoPhasesGenerated(false);
+            }}
+            className={inputBase}
+          />
+          <p className="text-slate-500 mt-1 text-xs">
+            {L(
+              "Trading days, monthly goals, and phase pacing are counted from this date.",
+              "Los días de trading, las metas mensuales y el ritmo de fases se cuentan desde esta fecha."
+            )}
+          </p>
+        </div>
+      ),
+    },
+    {
       id: "target_date",
       anchor: "gp-target-date",
       title: L("Target date", "Fecha objetivo"),
       description: L(
-        "Pick a realistic date you want to reach your target.",
-        "Elige una fecha realista en la que quieres llegar a tu meta."
+        "Pick the date by which you want to reach the target from the chosen start date.",
+        "Elige la fecha para alcanzar la meta desde la fecha de inicio seleccionada."
       ),
-      isComplete: !!targetDateStr,
+      isComplete: !!targetDateStr && planDatesOrdered,
       content: (
         <div>
           <label className="block mb-1 text-slate-300">{L("Target date", "Fecha objetivo")}</label>
@@ -1587,10 +1796,24 @@ export default function GrowthPlanPage() {
               setTargetDateStr(e.target.value);
               setTradingDaysTouched(false);
               setAutoPhasesGenerated(false);
-              setPlanStartDate(isoToday());
             }}
             className={inputBase}
           />
+          {!planDatesOrdered && targetDateStr ? (
+            <p className="text-rose-300 mt-1 text-xs">
+              {L(
+                "Target date must be on or after the start date.",
+                "La fecha objetivo debe ser igual o posterior a la fecha de inicio."
+              )}
+            </p>
+          ) : (
+            <p className="text-slate-500 mt-1 text-xs">
+              {L(
+                "The plan will calculate milestones from the start date to this target date.",
+                "El plan calculará las metas desde la fecha de inicio hasta esta fecha objetivo."
+              )}
+            </p>
+          )}
         </div>
       ),
     },
@@ -1719,8 +1942,8 @@ export default function GrowthPlanPage() {
       anchor: "gp-trading-days",
       title: L("Trading days", "Días de trading"),
       description: L(
-        "We calculate this from your target date. You can edit it if needed.",
-        "Lo calculamos desde tu fecha meta. Puedes editarlo si hace falta."
+        "We calculate this from start date to target date. You can edit it if needed.",
+        "Lo calculamos desde la fecha de inicio hasta la fecha meta. Puedes editarlo si hace falta."
       ),
       isComplete: tradingDays > 0,
       content: (
@@ -1744,11 +1967,11 @@ export default function GrowthPlanPage() {
             className={inputBase}
             placeholder="0"
           />
-          {tradingDaysFromToday ? (
+          {tradingDaysFromRange ? (
             <p className="text-slate-500 mt-1 text-xs">
               {L(
-                `From today (${tradingDaysFromToday.today}) to target: ${tradingDaysFromToday.count} trading days (NYSE holidays excluded).`,
-                `Desde hoy (${tradingDaysFromToday.today}) hasta la meta: ${tradingDaysFromToday.count} días de trading (feriados NYSE excluidos).`
+                `From start date (${tradingDaysFromRange.start}) to target: ${tradingDaysFromRange.count} trading days (NYSE holidays excluded).`,
+                `Desde la fecha de inicio (${tradingDaysFromRange.start}) hasta la meta: ${tradingDaysFromRange.count} días de trading (feriados NYSE excluidos).`
               )}
             </p>
           ) : null}
@@ -1927,15 +2150,15 @@ export default function GrowthPlanPage() {
                     "Tus metas se generan automáticamente cuando completas los datos requeridos."
                   )
                 : L(
-                    "Complete target date, withdrawal choice, max daily loss, and loss days per week first.",
-                    "Completa fecha meta, elección de retiros, pérdida diaria máx y días de pérdida por semana primero."
+                    "Complete start date, target date, withdrawal choice, max daily loss, and loss days per week first.",
+                    "Completa fecha de inicio, fecha meta, elección de retiros, pérdida diaria máx y días de pérdida por semana primero."
                   )}
             </p>
           ) : autoPhases.length === 0 ? (
             <p className="mt-3 text-xs text-slate-500">
               {L(
-                "Enter starting balance, target balance, and target date first.",
-                "Primero ingresa balance inicial, meta y fecha objetivo."
+                "Enter starting balance, target balance, start date, and target date first.",
+                "Primero ingresa balance inicial, meta, fecha de inicio y fecha objetivo."
               )}
             </p>
           ) : (
@@ -1986,6 +2209,90 @@ export default function GrowthPlanPage() {
                   {L("Target date:", "Fecha objetivo:")}{" "}
                   <span className="text-slate-200">{autoPhases[0].targetDate}</span>
                 </p>
+              ) : null}
+              {projectedTargetReached && projectedCompletionDate ? (
+                <div className="mt-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3">
+                  <p className="text-[11px] text-emerald-200 tracking-widest uppercase">
+                    {L("Projected completion", "Cierre proyectado")}
+                  </p>
+                  <p className="mt-1 text-sm text-slate-100">
+                    {projectedCompletedEarly
+                      ? L(
+                          `This plan reaches the target on ${projectedCompletionDate} and stops there instead of forcing a fake drawdown back to the goal.`,
+                          `Este plan alcanza la meta el ${projectedCompletionDate} y se detiene ahí en vez de forzar un drawdown artificial de regreso a la meta.`
+                        )
+                      : L(
+                          `This plan reaches the target on ${projectedCompletionDate}.`,
+                          `Este plan alcanza la meta el ${projectedCompletionDate}.`
+                        )}
+                  </p>
+                  {projectedCompletionBalance !== null ? (
+                    <p className="mt-1 text-[12px] text-slate-300">
+                      {L("Projected balance at completion:", "Balance proyectado al cierre:")}{" "}
+                      <span className="text-emerald-300">{currency(projectedCompletionBalance)}</span>
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
+              {isFollowOnDraft ? (
+                <div className="mt-3 rounded-xl border border-cyan-500/30 bg-cyan-500/10 p-3">
+                  <p className="text-[11px] text-cyan-200 tracking-widest uppercase">
+                    {L("Next-cycle draft", "Borrador del próximo ciclo")}
+                  </p>
+                  <p className="mt-1 text-sm text-slate-100">
+                    {L(
+                      "These numbers were prefilled from your live balance. Review target, date, and risk before saving the next plan.",
+                      "Estos números fueron prellenados desde tu balance real. Revisa meta, fecha y riesgo antes de guardar el próximo plan."
+                    )}
+                  </p>
+                </div>
+              ) : null}
+              {liveTargetReached && !isFollowOnDraft ? (
+                <div className="mt-3 rounded-xl border border-emerald-400/40 bg-emerald-400/10 p-3">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="text-[11px] text-emerald-200 tracking-widest uppercase">
+                        {L("Plan target reached", "Meta del plan alcanzada")}
+                      </p>
+                      <p className="mt-1 text-sm text-slate-100">
+                        {L(
+                          "Your live balance is already at or above the target. Close this cycle cleanly and draft the next one from current equity.",
+                          "Tu balance real ya está en o por encima de la meta. Cierra este ciclo limpio y prepara el próximo desde el equity actual."
+                        )}
+                      </p>
+                      <p className="mt-1 text-[12px] text-slate-300">
+                        {L("Live balance:", "Balance real:")}{" "}
+                        <span className="text-emerald-300">{currency(liveCurrentBalance ?? targetBalance)}</span>
+                        {" · "}
+                        {L("Original target:", "Meta original:")}{" "}
+                        <span className="text-slate-100">{currency(targetBalance)}</span>
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleStartFollowOnPlan("same")}
+                        className="rounded-xl bg-emerald-400 px-3 py-1.5 text-sm font-semibold text-slate-950 transition hover:bg-emerald-300"
+                      >
+                        {L("New plan · same risk", "Nuevo plan · mismo riesgo")}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleStartFollowOnPlan("lower")}
+                        className="rounded-xl border border-slate-700 px-3 py-1.5 text-sm text-slate-100 transition hover:border-cyan-400 hover:text-cyan-200"
+                      >
+                        {L("Lower risk", "Menos riesgo")}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleStartFollowOnPlan("higher")}
+                        className="rounded-xl border border-slate-700 px-3 py-1.5 text-sm text-slate-100 transition hover:border-amber-400 hover:text-amber-200"
+                      >
+                        {L("Higher risk", "Más riesgo")}
+                      </button>
+                    </div>
+                  </div>
+                </div>
               ) : null}
               {quarterSummaries.length ? (
                 <div className="mt-3">
@@ -2063,7 +2370,7 @@ export default function GrowthPlanPage() {
     return acc;
   }, {});
 
-  const scrollToAnchor = (anchor?: string) => {
+  const scrollToAnchor = useCallback((anchor?: string) => {
     if (!anchor) return;
     const stageIndex = step0AnchorIndex[anchor];
     if (typeof stageIndex === "number") {
@@ -2076,7 +2383,27 @@ export default function GrowthPlanPage() {
       el.scrollIntoView({ behavior: "smooth", block: "center" });
       (el as any)?.focus?.();
     }, 80);
-  };
+  }, [step0AnchorIndex]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const applyHashAnchor = () => {
+      const anchor = window.location.hash.replace(/^#/, "").trim();
+      if (!anchor) return;
+      scrollToAnchor(anchor);
+    };
+
+    const raf = window.requestAnimationFrame(applyHashAnchor);
+    const timeout = window.setTimeout(applyHashAnchor, 120);
+    window.addEventListener("hashchange", applyHashAnchor);
+
+    return () => {
+      window.cancelAnimationFrame(raf);
+      window.clearTimeout(timeout);
+      window.removeEventListener("hashchange", applyHashAnchor);
+    };
+  }, [scrollToAnchor]);
 
   function toggleRule(id: string) {
     setRules((prev) => prev.map((r) => (r.id === id ? { ...r, isActive: !r.isActive } : r)));
@@ -2189,7 +2516,9 @@ export default function GrowthPlanPage() {
     committed &&
     startingBalance > 0 &&
     targetBalance > 0 &&
+    !!planStartDate &&
     !!targetDateStr &&
+    planDatesOrdered &&
     tradingDays > 0 &&
     maxDailyLossPercent > 0 &&
     riskPerTradePct > 0 &&
@@ -2203,7 +2532,9 @@ export default function GrowthPlanPage() {
     if (
       startingBalance <= 0 ||
       targetBalance <= 0 ||
+      !planStartDate ||
       !targetDateStr ||
+      !planDatesOrdered ||
       tradingDays <= 0 ||
       maxDailyLossPercent <= 0 ||
       riskPerTradePct <= 0 ||
@@ -2214,16 +2545,34 @@ export default function GrowthPlanPage() {
       setError(L("Please complete all required fields first.", "Completa todos los campos requeridos primero."));
       return;
     }
+    if (!planDatesOrdered) {
+      setError(
+        L(
+          "Target date must be on or after the start date.",
+          "La fecha objetivo debe ser igual o posterior a la fecha de inicio."
+        )
+      );
+      return;
+    }
     if (!committed) {
       setError(L("Please confirm your commitment before saving.", "Confirma tu compromiso antes de guardar."));
       return;
     }
 
-    if (hasExistingPlan) {
+    if (hasExistingPlan && !isFollowOnDraft) {
       const confirmed = window.confirm(
         L(
           "Editing your growth plan may reset statistics, balance chart and related analytics. Journal entries will NOT be reset. Continue?",
           "Editar tu plan puede reiniciar estadísticas, balance chart y analíticas relacionadas. El journal NO se reinicia. ¿Continuar?"
+        )
+      );
+      if (!confirmed) return;
+    }
+    if (hasExistingPlan && isFollowOnDraft) {
+      const confirmed = window.confirm(
+        L(
+          "Saving this next-cycle draft will replace the current plan record for this account. Continue?",
+          "Guardar este borrador del próximo ciclo reemplazará el plan actual de esta cuenta. ¿Continuar?"
         )
       );
       if (!confirmed) return;
@@ -2335,6 +2684,7 @@ export default function GrowthPlanPage() {
           category: "ai_coach",
         });
       }
+      setIsFollowOnDraft(false);
             router.push("/dashboard");
     } catch (e) {
       console.error("[GrowthPlan] save error", e);

@@ -5,6 +5,7 @@ export type QuickTourStep = {
   title: string;
   body: string;
   selector?: string | null;
+  anchor?: string | null;
 };
 
 export type QuickTourContext = {
@@ -98,7 +99,7 @@ const BUILDERS: QuickTourBuilder[] = [
       ),
       bullets: [
         L("Starting balance anchors every projection and reference return.", "El balance inicial ancla cada proyección y retorno de referencia."),
-        L("Target balance and target date define the business objective, not a vanity number.", "El balance objetivo y la fecha objetivo definen el objetivo del negocio, no un número de ego."),
+        L("Start date and target date define the pacing window for the whole plan.", "La fecha de inicio y la fecha objetivo definen la ventana de ritmo de todo el plan."),
         L("Trading days, plan mode, and phases determine how checkpoints are built.", "Los días de trading, el modo del plan y las fases determinan cómo se construyen los checkpoints."),
       ],
       steps: [
@@ -109,6 +110,7 @@ const BUILDERS: QuickTourBuilder[] = [
             "Use the real balance you are trading from. It becomes the anchor for progress, return calculations, and checkpoint math.",
             "Usa el balance real desde el que operas. Se convierte en el ancla del progreso, del retorno y de la matemática de checkpoints."
           ),
+          anchor: "gp-starting-balance",
           selector: "#gp-starting-balance",
         },
         {
@@ -118,7 +120,18 @@ const BUILDERS: QuickTourBuilder[] = [
             "This is the final destination. Weekly and monthly targets are derived from the path toward this number.",
             "Este es el destino final. Las metas semanales y mensuales se derivan de la ruta hacia este número."
           ),
+          anchor: "gp-target-balance",
           selector: "#gp-target-balance",
+        },
+        {
+          id: "gp-start-date",
+          title: L("Start date", "Fecha de inicio"),
+          body: L(
+            "The plan starts counting from here. Trading-day math, monthly pacing, and milestone timing all begin on this date.",
+            "El plan empieza a contar desde aquí. La matemática de días de trading, el ritmo mensual y el timing de metas arrancan en esta fecha."
+          ),
+          anchor: "gp-start-date",
+          selector: "#gp-start-date",
         },
         {
           id: "gp-mode",
@@ -127,6 +140,7 @@ const BUILDERS: QuickTourBuilder[] = [
             "Choose whether the system builds checkpoints automatically or from manual phases you control directly.",
             "Elige si el sistema construye checkpoints automáticamente o desde fases manuales que controlas directamente."
           ),
+          anchor: "gp-plan-mode",
           selector: "#gp-plan-mode",
         },
         {
@@ -136,6 +150,7 @@ const BUILDERS: QuickTourBuilder[] = [
             "Set only the days you are truly willing to trade. The calendar and pacing logic depend on this cadence.",
             "Define solo los días que de verdad estás dispuesto a operar. El calendario y la lógica de pacing dependen de esa cadencia."
           ),
+          anchor: "gp-trading-days",
           selector: "#gp-trading-days",
         },
       ],
@@ -173,7 +188,8 @@ const BUILDERS: QuickTourBuilder[] = [
             "Write the plan before execution: market bias, key levels, setup, and one rule you cannot break.",
             "Escribe el plan antes de ejecutar: sesgo, niveles clave, setup y una regla que no puedes romper."
           ),
-          selector: '[data-tour="journal-premarket"]',
+          anchor: "journal-step-premarket",
+          selector: '[data-tour="journal-step-premarket"]',
         },
         {
           id: "journal-inside",
@@ -182,7 +198,8 @@ const BUILDERS: QuickTourBuilder[] = [
             "Capture what changed while the trade was alive: management decisions, mistakes, and emotional drift.",
             "Captura qué cambió mientras el trade estaba vivo: decisiones de manejo, errores y drift emocional."
           ),
-          selector: '[data-tour="journal-inside"]',
+          anchor: "journal-step-intrade",
+          selector: '[data-tour="journal-step-intrade"]',
         },
         {
           id: "journal-after",
@@ -191,7 +208,8 @@ const BUILDERS: QuickTourBuilder[] = [
             "This is where truth matters. Record what worked, what failed, and the exact correction for next time.",
             "Aquí importa la verdad. Registra qué funcionó, qué falló y la corrección exacta para la próxima vez."
           ),
-          selector: '[data-tour="journal-after"]',
+          anchor: "journal-step-after",
+          selector: '[data-tour="journal-step-after"]',
         },
         {
           id: "journal-save",

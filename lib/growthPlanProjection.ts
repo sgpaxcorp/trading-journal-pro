@@ -56,6 +56,10 @@ export type ProjectionResult = {
   tradingDays: string[];
   withdrawals: PlannedWithdrawalEvent[];
   milestones: CadenceTarget[];
+  completionDate: string | null;
+  completionBalance: number | null;
+  targetReached: boolean;
+  completedEarly: boolean;
 };
 
 function toNum(value: unknown, fallback = 0): number {
@@ -437,7 +441,6 @@ function buildMilestonesFromRows(
     monthIndex += 1;
     const startIndex = indices[0];
     const endIndex = indices[indices.length - 1];
-    const startRow = rows[startIndex - 1];
     const endRow = rows[endIndex - 1];
     const monthStartBalance = startIndex > 1 ? rows[startIndex - 2]?.endBalance ?? rows[0].startBalance : rows[0].startBalance;
     const monthEndBalance = endRow?.endBalance ?? monthStartBalance;
@@ -478,12 +481,32 @@ export function buildPlanProjection(params: {
   existingWithdrawals?: PlannedWithdrawalEvent[] | null;
 }) : ProjectionResult {
   if (params.starting <= 0 || params.target <= 0) {
-    return { rows: [], requiredGoalPct: 0, tradingDays: [], withdrawals: [], milestones: [] };
+    return {
+      rows: [],
+      requiredGoalPct: 0,
+      tradingDays: [],
+      withdrawals: [],
+      milestones: [],
+      completionDate: null,
+      completionBalance: null,
+      targetReached: false,
+      completedEarly: false,
+    };
   }
 
   const tradingDays = listTradingDaysBetween(params.startIso, params.targetIso);
   if (!tradingDays.length) {
-    return { rows: [], requiredGoalPct: 0, tradingDays: [], withdrawals: [], milestones: [] };
+    return {
+      rows: [],
+      requiredGoalPct: 0,
+      tradingDays: [],
+      withdrawals: [],
+      milestones: [],
+      completionDate: null,
+      completionBalance: null,
+      targetReached: false,
+      completedEarly: false,
+    };
   }
 
   const schedule = buildWithdrawalSchedule(
@@ -510,34 +533,47 @@ export function buildPlanProjection(params: {
     withdrawalByDay: schedule.byDay,
   });
 
-  const withdrawals = schedule.events.map((event) => {
-    const row = rows[event.endDayIndex - 1];
-    const before = row ? row.endBalance + row.withdrawalUSD : 0;
-    const after = row?.endBalance ?? 0;
-    return {
-      id: event.id,
-      amount: event.amount,
-      targetEquity: Number(before.toFixed(2)),
-      status: event.existing?.status ?? "pending",
-      achievedAt: event.existing?.achievedAt ?? null,
-      decidedAt: event.existing?.decidedAt ?? null,
-      plannedDate: event.plannedDate,
-      periodIndex: event.periodIndex,
-      periodLabel: event.periodLabel,
-      frequency: event.frequency,
-      projectedEquityBeforeWithdrawal: Number(before.toFixed(2)),
-      projectedEquityAfterWithdrawal: Number(after.toFixed(2)),
-    } satisfies PlannedWithdrawalEvent;
-  });
+  const firstTargetHitIndex = rows.findIndex((row) => row.endBalance >= params.target);
+  const targetReached = firstTargetHitIndex >= 0;
+  const completionIndex = targetReached ? firstTargetHitIndex : rows.length - 1;
+  const effectiveRows = rows.slice(0, completionIndex + 1);
+  const effectiveTradingDays = tradingDays.slice(0, completionIndex + 1);
+  const completionRow = effectiveRows[effectiveRows.length - 1] ?? null;
 
-  const milestones = buildMilestonesFromRows(rows, tradingDays);
+  const withdrawals = schedule.events
+    .filter((event) => event.endDayIndex <= effectiveRows.length)
+    .map((event) => {
+      const row = effectiveRows[event.endDayIndex - 1];
+      const before = row ? row.endBalance + row.withdrawalUSD : 0;
+      const after = row?.endBalance ?? 0;
+      return {
+        id: event.id,
+        amount: event.amount,
+        targetEquity: Number(before.toFixed(2)),
+        status: event.existing?.status ?? "pending",
+        achievedAt: event.existing?.achievedAt ?? null,
+        decidedAt: event.existing?.decidedAt ?? null,
+        plannedDate: event.plannedDate,
+        periodIndex: event.periodIndex,
+        periodLabel: event.periodLabel,
+        frequency: event.frequency,
+        projectedEquityBeforeWithdrawal: Number(before.toFixed(2)),
+        projectedEquityAfterWithdrawal: Number(after.toFixed(2)),
+      } satisfies PlannedWithdrawalEvent;
+    });
+
+  const milestones = buildMilestonesFromRows(effectiveRows, effectiveTradingDays);
 
   return {
-    rows,
+    rows: effectiveRows,
     requiredGoalPct: goalPctDecimal * 100,
-    tradingDays,
+    tradingDays: effectiveTradingDays,
     withdrawals,
     milestones,
+    completionDate: completionRow?.isoDate ?? null,
+    completionBalance: completionRow ? Number(completionRow.endBalance.toFixed(2)) : null,
+    targetReached,
+    completedEarly: targetReached && completionIndex < rows.length - 1,
   };
 }
 

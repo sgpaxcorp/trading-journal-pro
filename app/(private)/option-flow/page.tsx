@@ -10,7 +10,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useTradingAccounts } from "@/hooks/useTradingAccounts";
 import { supabaseBrowser } from "@/lib/supaBaseClient";
 import { hasEntitlement } from "@/lib/entitlementsSupabase";
-import { getOptionFlowBetaCopy, isOptionFlowBetaTester } from "@/lib/optionFlowBeta";
+import { getOptionFlowBetaCopy } from "@/lib/optionFlowBeta";
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
 
@@ -1516,18 +1516,14 @@ export default function OptionFlowPage() {
   const isEs = lang === "es";
   const localeTag = LOCALE_TAG[lang];
   const betaCopy = getOptionFlowBetaCopy(lang);
-  const hasBetaAccess = isOptionFlowBetaTester(email);
 
   const [entitled, setEntitled] = useState<boolean | null>(null);
   const [checking, setChecking] = useState<boolean>(true);
-  const paywallEnabled =
-    String(process.env.NEXT_PUBLIC_OPTIONFLOW_PAYWALL_ENABLED ?? "").toLowerCase() === "true";
   const bypassPaywall =
-    !paywallEnabled ||
     String(process.env.NEXT_PUBLIC_OPTIONFLOW_BYPASS ?? "").toLowerCase() === "true" ||
     String(process.env.NEXT_PUBLIC_OPTIONFLOW_BYPASS ?? "") === "1";
-  const showBetaGate = !hasBetaAccess;
-  const showPaywall = !showBetaGate && paywallEnabled && !bypassPaywall && !entitled;
+  const showBetaGate = !checking && !bypassPaywall && entitled === false;
+  const showPaywall = false;
 
   const [provider, setProvider] = useState<ProviderId>("optionstrat");
   const [tradeIntent, setTradeIntent] = useState<TradeIntent>("0dte");
@@ -2856,13 +2852,6 @@ export default function OptionFlowPage() {
         }
         return;
       }
-      if (hasBetaAccess) {
-        if (alive) {
-          setEntitled(true);
-          setChecking(false);
-        }
-        return;
-      }
       if (bypassPaywall) {
         if (alive) {
           setEntitled(true);
@@ -2880,7 +2869,7 @@ export default function OptionFlowPage() {
     return () => {
       alive = false;
     };
-  }, [userId, checkoutStatus, bypassPaywall, hasBetaAccess]);
+  }, [userId, checkoutStatus, bypassPaywall]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -2987,32 +2976,40 @@ export default function OptionFlowPage() {
   }
 
   async function handleCheckout() {
-    if (!userId) return;
+    if (!email) return;
     setMessage("");
     try {
-      const { data: sessionData } = await supabaseBrowser.auth.getSession();
-      const token = sessionData?.session?.access_token;
-      if (!token) {
-        throw new Error(isEs ? "Sesión no disponible" : "Session not available");
-      }
-
-      const res = await fetch("/api/stripe/create-addon-session", {
+      const res = await fetch("/api/email/beta-request", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          addonKey: "option_flow",
+          email,
+          name:
+            [user?.user_metadata?.first_name, user?.user_metadata?.last_name]
+              .filter(Boolean)
+              .join(" ")
+              .trim() || email,
+          feature: "option_flow",
         }),
       });
       const body = await res.json();
       if (!res.ok) {
-        throw new Error(body?.error || (isEs ? "Checkout falló" : "Checkout failed"));
+        throw new Error(
+          body?.error ||
+            (isEs ? "No se pudo enviar la solicitud beta." : "Could not send beta access request.")
+        );
       }
-      if (body?.url) window.location.href = body.url;
+      setMessage(
+        isEs
+          ? "Solicitud enviada. Activaremos el acceso desde Admin Center."
+          : "Request sent. We will activate access from Admin Center."
+      );
     } catch (e: any) {
-      setMessage(e?.message || (isEs ? "No se pudo iniciar el checkout." : "Unable to start checkout."));
+      setMessage(
+        e?.message || (isEs ? "No se pudo enviar la solicitud beta." : "Could not send beta access request.")
+      );
     }
   }
 
@@ -4198,6 +4195,15 @@ export default function OptionFlowPage() {
             </div>
 
             <div className="mt-6 flex flex-wrap items-center gap-3">
+              {email ? (
+                <button
+                  type="button"
+                  onClick={handleCheckout}
+                  className="rounded-xl bg-emerald-400 px-4 py-2 text-xs font-semibold text-slate-950 hover:bg-emerald-300"
+                >
+                  {betaCopy.requestAccess}
+                </button>
+              ) : null}
               <Link
                 href="/help/option-flow"
                 className="rounded-xl border border-slate-700 px-4 py-2 text-xs text-slate-300 hover:border-emerald-400 hover:text-emerald-200"
@@ -4205,6 +4211,7 @@ export default function OptionFlowPage() {
                 {betaCopy.learnMore}
               </Link>
             </div>
+            {message ? <p className="mt-4 text-xs text-emerald-200">{message}</p> : null}
           </section>
         </div>
       </main>

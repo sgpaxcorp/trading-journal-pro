@@ -75,6 +75,7 @@ function mapSupabaseUserToAppUser(
     email: sbUser.email ?? "",
     plan,
     createdAt: sbUser.created_at ?? new Date().toISOString(),
+    user_metadata: (sbUser.user_metadata ?? {}) as AppUser["user_metadata"],
   };
 }
 

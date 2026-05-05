@@ -1803,17 +1803,17 @@ export async function sendSubscriptionReceiptEmail(user: AppUser, plan: PlanId) 
 
 export async function sendBetaRequestEmail(args: { name: string; email: string }) {
   const { name, email } = args;
-  const subject = `New beta access request – ${email}`;
+  const subject = `Option Flow beta access request - ${email}`;
   const text = [
-    "New NeuroTrader Journal beta access request:",
+    "New NeuroTrader Journal Option Flow beta access request:",
     "",
     `Name: ${name}`,
     `Email: ${email}`,
     "",
-    "Next steps (manual):",
-    "1) In Supabase, open auth.users and find this user.",
-    "2) Insert or update a row in public.profiles with is_approved = true when you decide to grant access.",
-    "3) Optionally send a personal welcome email from support@neurotrader-journal.com.",
+    "Next steps (Admin Center):",
+    "1) Open Admin Center.",
+    "2) Create / update the user access grants for this email.",
+    "3) Enable the `option_flow` grant when you want to approve access.",
   ].join("\n");
 
   await sendEmailBase({
