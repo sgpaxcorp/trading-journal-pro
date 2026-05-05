@@ -217,13 +217,35 @@ function SignUpPageInner() {
       setError(L("Missing email for resend.", "Falta el email para reenviar."));
       return;
     }
+    if (!password) {
+      setError(
+        L(
+          "For security, please restart signup if you need a new verification code.",
+          "Por seguridad, vuelve a iniciar el registro si necesitas un nuevo código."
+        )
+      );
+      return;
+    }
     try {
       setResending(true);
-      const { error } = await supabaseBrowser.auth.resend({
-        type: "signup",
-        email: emailToVerify,
+      const res = await fetch("/api/auth/signup/resend", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          firstName,
+          lastName,
+          email: emailToVerify,
+          password,
+          phone,
+          address: "",
+          plan: planFromQuery,
+          source: "signup",
+        }),
       });
-      if (error) throw new Error(error.message);
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(body?.error || L("Could not resend the code.", "No se pudo reenviar el código."));
+      }
       setCanResend(false);
       setTimeout(() => setCanResend(true), 30000);
     } catch (err: any) {

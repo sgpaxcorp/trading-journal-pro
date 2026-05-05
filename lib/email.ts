@@ -482,10 +482,10 @@ function buildNeuroTraderHtml({
     : "";
 
   const codeHtml = code
-    ? `<div style="margin:18px 0 6px 0;border:1px solid #99f6e4;border-radius:22px;background:linear-gradient(180deg,#ecfdf5 0%,#f0fdfa 100%);padding:18px 18px 16px 18px;">
-         <div style="font-size:10px;letter-spacing:0.24em;text-transform:uppercase;color:#0f766e;margin:0 0 8px 0;font-weight:800;">Verification code</div>
-         <div style="font-size:34px;line-height:1;font-weight:900;letter-spacing:0.28em;color:#062f2b;">${escapeHtml(code)}</div>
-         <div style="margin-top:10px;color:#475569;font-size:12px;line-height:1.6;">Enter this code inside NeuroTrader Journal to continue.</div>
+    ? `<div style="margin:22px auto 10px auto;max-width:336px;border:1px solid #99f6e4;border-radius:24px;background:linear-gradient(180deg,#ecfdf5 0%,#f0fdfa 100%);padding:20px 18px 18px 18px;text-align:center;box-shadow:0 16px 34px rgba(16,185,129,0.14);">
+         <div style="font-size:10px;letter-spacing:0.24em;text-transform:uppercase;color:#0f766e;margin:0 0 10px 0;font-weight:800;text-align:center;">Verification code</div>
+         <div style="font-size:36px;line-height:1;font-weight:900;letter-spacing:0.26em;color:#062f2b;text-align:center;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">${escapeHtml(code)}</div>
+         <div style="margin-top:12px;color:#475569;font-size:12px;line-height:1.6;text-align:center;">Enter this code inside NeuroTrader Journal to continue.</div>
        </div>`
     : "";
 
