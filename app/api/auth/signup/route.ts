@@ -28,7 +28,7 @@ function splitFullName(fullName: string) {
 }
 
 export async function POST(req: NextRequest) {
-  const rate = rateLimit(`auth-signup:${getClientIp(req)}`, {
+  const rate = await rateLimit(`auth-signup:${getClientIp(req)}`, {
     limit: 8,
     windowMs: 10 * 60_000,
   });

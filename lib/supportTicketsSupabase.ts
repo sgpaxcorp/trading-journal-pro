@@ -4,6 +4,7 @@ import { supabaseBrowser } from "@/lib/supaBaseClient";
 
 export type SupportTicketStatus = "open" | "waiting_support" | "waiting_user" | "closed";
 export type SupportTicketPriority = "low" | "normal" | "high" | "urgent";
+export type SupportMessageAuthorRole = "user" | "admin" | "assistant" | "system";
 
 export type SupportAttachment = {
   path: string;
@@ -33,7 +34,7 @@ export type SupportMessage = {
   id: string;
   ticket_id: string;
   user_id: string | null;
-  author_role?: string | null;
+  author_role?: SupportMessageAuthorRole | string | null;
   message: string;
   attachments?: SupportAttachment[] | null;
   created_at?: string | null;
@@ -142,7 +143,7 @@ export async function addSupportMessage(input: {
   userId: string;
   message: string;
   attachments?: SupportAttachment[];
-  authorRole: "user" | "admin";
+  authorRole: SupportMessageAuthorRole;
 }) {
   const { error } = await supabaseBrowser.from("support_messages").insert({
     ticket_id: input.ticketId,
@@ -166,6 +167,45 @@ export async function addSupportMessage(input: {
     .eq("id", input.ticketId);
 
   return { ok: true as const };
+}
+
+export async function requestSupportAgentReply(input: {
+  ticketId: string;
+  dryRun?: boolean;
+}) {
+  const { data } = await supabaseBrowser.auth.getSession();
+  const token = data?.session?.access_token;
+  if (!token) {
+    return { ok: false as const, error: "Missing session" };
+  }
+
+  const res = await fetch("/api/support/agent", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      ticketId: input.ticketId,
+      dryRun: input.dryRun === true,
+    }),
+  });
+
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    return {
+      ok: false as const,
+      error: String(body?.error ?? "Support agent request failed"),
+    };
+  }
+
+  return {
+    ok: true as const,
+    canAnswer: Boolean(body?.canAnswer),
+    reply: String(body?.reply ?? ""),
+    skipped: Boolean(body?.skipped),
+    status: String(body?.status ?? ""),
+  };
 }
 
 export async function updateSupportTicketStatus(ticketId: string, status: SupportTicketStatus) {

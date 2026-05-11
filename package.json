@@ -57,7 +57,7 @@
     "lexical": "^0.38.2",
     "lightweight-charts": "^5.1.0",
     "lucide-react": "^0.553.0",
-    "next": "^16.2.4",
+    "next": "^16.2.6",
     "openai": "^6.9.1",
     "papaparse": "^5.5.3",
     "react": "19.2.0",

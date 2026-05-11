@@ -7,7 +7,7 @@ import { t } from "../lib/i18n";
 import { useTheme } from "../lib/ThemeContext";
 import type { ThemeColors } from "../theme";
 import { useSupabaseUser } from "../lib/useSupabaseUser";
-import { apiGet } from "../lib/api";
+import { apiGet, apiPost } from "../lib/api";
 import { supabaseMobile } from "../lib/supabase";
 
 type TrophiesApiResponse = {
@@ -45,6 +45,14 @@ function formatDate(value?: string | null) {
   return date.toLocaleDateString();
 }
 
+async function syncTrophiesQuietly() {
+  try {
+    await apiPost("/api/trophies/sync", {});
+  } catch (err) {
+    console.warn("[TrophiesScreen] sync error:", err);
+  }
+}
+
 export function TrophiesScreen() {
   const { language } = useLanguage();
   const { colors } = useTheme();
@@ -74,6 +82,8 @@ export function TrophiesScreen() {
       let defs: TrophyDefinition[] = [];
       let earnedRows: TrophyItem[] = [];
       let loadError: any = null;
+
+      await syncTrophiesQuietly();
 
       try {
         const res = await apiGet<TrophiesApiResponse>("/api/trophies/mobile");
@@ -195,6 +205,8 @@ export function TrophiesScreen() {
       let defs: TrophyDefinition[] = [];
       let earnedRows: TrophyItem[] = [];
       let loadError: any = null;
+
+      await syncTrophiesQuietly();
 
       try {
         const res = await apiGet<TrophiesApiResponse>("/api/trophies/mobile");

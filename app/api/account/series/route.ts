@@ -157,35 +157,77 @@ async function queryCashflows(table: string, userId: string, accountId?: string 
 }
 
 async function queryGrowthPlanTable(table: string, userId: string, accountId?: string | null) {
-  let q = supabaseAdmin
-    .from(table)
-    .select(
-      "starting_balance,target_balance,daily_target_pct,daily_goal_percent,loss_days_per_week,trading_days,max_daily_loss_percent,created_at,updated_at,target_date,plan_mode,plan_phases,plan_start_date,planned_withdrawal_settings,planned_withdrawals,steps"
-    )
-    .eq("user_id", userId)
-    .order("updated_at", { ascending: false })
-    .order("created_at", { ascending: false })
-    .limit(1);
-  if (accountId) {
-    q = q.eq("account_id", accountId);
-  }
-  let { data, error } = await q;
+  const attempts: Array<{
+    includeAccountId: boolean;
+    includeUpdatedAtOrder: boolean;
+    includeCreatedAtOrder: boolean;
+  }> = [];
 
-  if (error && accountId && isMissingColumnError(error, "account_id")) {
-    const retry = await supabaseAdmin
-      .from(table)
-      .select(
-        "starting_balance,target_balance,daily_target_pct,daily_goal_percent,loss_days_per_week,trading_days,max_daily_loss_percent,created_at,updated_at,target_date,plan_mode,plan_phases,plan_start_date,planned_withdrawal_settings,planned_withdrawals,steps"
-      )
-      .eq("user_id", userId)
-      .order("updated_at", { ascending: false })
-      .order("created_at", { ascending: false })
-      .limit(1);
-    data = (retry.data ?? null) as any;
-    error = retry.error;
+  const pushAttempt = (
+    includeAccountId: boolean,
+    includeUpdatedAtOrder: boolean,
+    includeCreatedAtOrder: boolean
+  ) => {
+    const exists = attempts.some(
+      (attempt) =>
+        attempt.includeAccountId === includeAccountId &&
+        attempt.includeUpdatedAtOrder === includeUpdatedAtOrder &&
+        attempt.includeCreatedAtOrder === includeCreatedAtOrder
+    );
+    if (!exists) {
+      attempts.push({
+        includeAccountId,
+        includeUpdatedAtOrder,
+        includeCreatedAtOrder,
+      });
+    }
+  };
+
+  pushAttempt(Boolean(accountId), true, true);
+  pushAttempt(false, true, true);
+  pushAttempt(Boolean(accountId), false, true);
+  pushAttempt(false, false, true);
+  pushAttempt(Boolean(accountId), false, false);
+  pushAttempt(false, false, false);
+
+  let lastError: any = null;
+
+  for (const attempt of attempts) {
+    let q = supabaseAdmin.from(table).select("*").eq("user_id", userId);
+
+    if (attempt.includeAccountId && accountId) {
+      q = q.eq("account_id", accountId);
+    }
+    if (attempt.includeUpdatedAtOrder) {
+      q = q.order("updated_at", { ascending: false });
+    }
+    if (attempt.includeCreatedAtOrder) {
+      q = q.order("created_at", { ascending: false });
+    }
+
+    const { data, error } = await q.limit(1);
+
+    if (!error) {
+      return { data: (data ?? []) as GrowthPlanRow[], error: null };
+    }
+
+    lastError = error;
+
+    const missingAccountId =
+      attempt.includeAccountId && isMissingColumnError(error, "account_id");
+    const missingUpdatedAt =
+      attempt.includeUpdatedAtOrder && isMissingColumnError(error, "updated_at");
+    const missingCreatedAt =
+      attempt.includeCreatedAtOrder && isMissingColumnError(error, "created_at");
+
+    if (missingAccountId || missingUpdatedAt || missingCreatedAt) {
+      continue;
+    }
+
+    return { data: [] as GrowthPlanRow[], error };
   }
 
-  return { data: (data ?? []) as GrowthPlanRow[], error };
+  return { data: [] as GrowthPlanRow[], error: lastError };
 }
 
 async function getGrowthPlanRow(

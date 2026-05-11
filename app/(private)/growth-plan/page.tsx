@@ -2,10 +2,12 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
+import TopNav from "@/app/components/TopNav";
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
 import { supabaseBrowser } from "@/lib/supaBaseClient";
@@ -526,6 +528,193 @@ function uuid() {
 
 function isoToday(): string {
   return new Date().toISOString().slice(0, 10);
+}
+
+function daysInMonth(year: number, monthIndexZeroBased: number): number {
+  return new Date(year, monthIndexZeroBased + 1, 0).getDate();
+}
+
+function buildIsoDate(year: number, monthIndexZeroBased: number, day: number): string {
+  const safeMonth = Math.max(0, Math.min(11, monthIndexZeroBased));
+  const safeDay = Math.max(1, Math.min(daysInMonth(year, safeMonth), day));
+  return `${year}-${String(safeMonth + 1).padStart(2, "0")}-${String(safeDay).padStart(2, "0")}`;
+}
+
+function parseFlexibleDateInput(value: string): string | null {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+
+  const ymd = raw.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/);
+  if (ymd) {
+    const year = Number(ymd[1]);
+    const month = Number(ymd[2]);
+    const day = Number(ymd[3]);
+    if (month >= 1 && month <= 12 && day >= 1 && day <= daysInMonth(year, month - 1)) {
+      return buildIsoDate(year, month - 1, day);
+    }
+  }
+
+  const mdy = raw.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/);
+  if (mdy) {
+    const month = Number(mdy[1]);
+    const day = Number(mdy[2]);
+    const year = Number(mdy[3]);
+    if (month >= 1 && month <= 12 && day >= 1 && day <= daysInMonth(year, month - 1)) {
+      return buildIsoDate(year, month - 1, day);
+    }
+  }
+
+  return null;
+}
+
+function prettyDateInput(value?: string | null) {
+  if (!value) return "";
+  const match = String(value).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return String(value);
+  return `${match[2]}/${match[3]}/${match[1]}`;
+}
+
+function FlexibleDateField({
+  id,
+  label,
+  value,
+  onChange,
+  lang,
+  className,
+  helperText,
+  errorText,
+  min,
+  fallbackValue,
+  onFocus,
+}: {
+  id: string;
+  label: string;
+  value: string;
+  onChange: (nextValue: string) => void;
+  lang: "en" | "es";
+  className: string;
+  helperText: string;
+  errorText?: string | null;
+  min?: string;
+  fallbackValue?: string;
+  onFocus?: () => void;
+}) {
+  const [textValue, setTextValue] = useState(prettyDateInput(value));
+  const locale = lang === "es" ? "es-PR" : "en-US";
+
+  useEffect(() => {
+    setTextValue(prettyDateInput(value));
+  }, [value]);
+
+  const selectedDate = value ? new Date(`${value}T00:00:00`) : null;
+  const selectedYear = selectedDate?.getFullYear() ?? new Date().getFullYear();
+  const selectedMonth = selectedDate?.getMonth() ?? new Date().getMonth();
+  const selectedDay = selectedDate?.getDate() ?? new Date().getDate();
+  const currentYear = new Date().getFullYear();
+
+  const yearOptions = useMemo(() => {
+    const start = Math.min(currentYear - 5, selectedYear - 8);
+    const end = Math.max(currentYear + 10, selectedYear + 8);
+    return Array.from({ length: end - start + 1 }, (_, index) => start + index);
+  }, [currentYear, selectedYear]);
+
+  const monthOptions = useMemo(() => {
+    const formatter = new Intl.DateTimeFormat(locale, { month: "long" });
+    return Array.from({ length: 12 }, (_, monthIndex) => ({
+      value: monthIndex,
+      label: formatter.format(new Date(2026, monthIndex, 1)),
+    }));
+  }, [locale]);
+
+  function commitText(nextRaw: string) {
+    const parsed = parseFlexibleDateInput(nextRaw);
+    if (parsed) {
+      onChange(parsed);
+      setTextValue(prettyDateInput(parsed));
+      return;
+    }
+    if (!nextRaw.trim()) {
+      if (fallbackValue) {
+        onChange(fallbackValue);
+        setTextValue(prettyDateInput(fallbackValue));
+      } else {
+        onChange("");
+        setTextValue("");
+      }
+      return;
+    }
+    setTextValue(prettyDateInput(value));
+  }
+
+  function updateMonth(monthIndex: number) {
+    const nextIso = buildIsoDate(selectedYear, monthIndex, selectedDay);
+    onChange(nextIso);
+  }
+
+  function updateYear(year: number) {
+    const nextIso = buildIsoDate(year, selectedMonth, selectedDay);
+    onChange(nextIso);
+  }
+
+  return (
+    <div>
+      <label className="mb-1 block text-slate-300" htmlFor={id}>
+        {label}
+      </label>
+      <div className="grid gap-3 md:grid-cols-[1.15fr_0.9fr_0.75fr]">
+        <input
+          id={id}
+          type="text"
+          inputMode="numeric"
+          value={textValue}
+          onFocus={onFocus}
+          onChange={(e) => setTextValue(e.target.value)}
+          onBlur={(e) => commitText(e.target.value)}
+          placeholder={lang === "es" ? "MM/DD/AAAA o AAAA-MM-DD" : "MM/DD/YYYY or YYYY-MM-DD"}
+          className={className}
+        />
+        <select
+          value={String(selectedMonth)}
+          onFocus={onFocus}
+          onChange={(e) => updateMonth(Number(e.target.value))}
+          className={className}
+        >
+          {monthOptions.map((month) => (
+            <option key={month.value} value={String(month.value)}>
+              {month.label}
+            </option>
+          ))}
+        </select>
+        <select
+          value={String(selectedYear)}
+          onFocus={onFocus}
+          onChange={(e) => updateYear(Number(e.target.value))}
+          className={className}
+        >
+          {yearOptions.map((year) => (
+            <option key={year} value={String(year)}>
+              {year}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="mt-3">
+        <input
+          type="date"
+          value={value}
+          min={min}
+          onFocus={onFocus}
+          onChange={(e) => onChange(e.target.value)}
+          className={className}
+        />
+      </div>
+      {errorText ? (
+        <p className="mt-1 text-xs text-rose-300">{errorText}</p>
+      ) : (
+        <p className="mt-1 text-xs text-slate-500">{helperText}</p>
+      )}
+    </div>
+  );
 }
 
 function addCalendarDays(startIso: string, days: number): string {
@@ -1754,26 +1943,24 @@ export default function GrowthPlanPage() {
       ),
       isComplete: !!planStartDate,
       content: (
-        <div>
-          <label className="block mb-1 text-slate-300">{L("Start date", "Fecha de inicio")}</label>
-          <input
-            id="gp-start-date"
-            type="date"
-            value={planStartDate ?? ""}
-            onChange={(e) => {
-              setPlanStartDate(e.target.value || isoToday());
-              setTradingDaysTouched(false);
-              setAutoPhasesGenerated(false);
-            }}
-            className={inputBase}
-          />
-          <p className="text-slate-500 mt-1 text-xs">
-            {L(
-              "Trading days, monthly goals, and phase pacing are counted from this date.",
-              "Los días de trading, las metas mensuales y el ritmo de fases se cuentan desde esta fecha."
-            )}
-          </p>
-        </div>
+        <FlexibleDateField
+          id="gp-start-date"
+          label={L("Start date", "Fecha de inicio")}
+          value={planStartDate ?? ""}
+          onFocus={() => fieldHelp("start_date")}
+          onChange={(nextValue) => {
+            setPlanStartDate(nextValue || isoToday());
+            setTradingDaysTouched(false);
+            setAutoPhasesGenerated(false);
+          }}
+          lang={lang}
+          className={inputBase}
+          fallbackValue={isoToday()}
+          helperText={L(
+            "Trading days, monthly goals, and phase pacing are counted from this date.",
+            "Los días de trading, las metas mensuales y el ritmo de fases se cuentan desde esta fecha."
+          )}
+        />
       ),
     },
     {
@@ -1786,35 +1973,32 @@ export default function GrowthPlanPage() {
       ),
       isComplete: !!targetDateStr && planDatesOrdered,
       content: (
-        <div>
-          <label className="block mb-1 text-slate-300">{L("Target date", "Fecha objetivo")}</label>
-          <input
-            id="gp-target-date"
-            type="date"
-            value={targetDateStr}
-            onChange={(e) => {
-              setTargetDateStr(e.target.value);
-              setTradingDaysTouched(false);
-              setAutoPhasesGenerated(false);
-            }}
-            className={inputBase}
-          />
-          {!planDatesOrdered && targetDateStr ? (
-            <p className="text-rose-300 mt-1 text-xs">
-              {L(
-                "Target date must be on or after the start date.",
-                "La fecha objetivo debe ser igual o posterior a la fecha de inicio."
-              )}
-            </p>
-          ) : (
-            <p className="text-slate-500 mt-1 text-xs">
-              {L(
-                "The plan will calculate milestones from the start date to this target date.",
-                "El plan calculará las metas desde la fecha de inicio hasta esta fecha objetivo."
-              )}
-            </p>
+        <FlexibleDateField
+          id="gp-target-date"
+          label={L("Target date", "Fecha objetivo")}
+          value={targetDateStr}
+          onFocus={() => fieldHelp("target_date")}
+          onChange={(nextValue) => {
+            setTargetDateStr(nextValue);
+            setTradingDaysTouched(false);
+            setAutoPhasesGenerated(false);
+          }}
+          lang={lang}
+          className={inputBase}
+          min={planStartDate ?? isoToday()}
+          errorText={
+            !planDatesOrdered && targetDateStr
+              ? L(
+                  "Target date must be on or after the start date.",
+                  "La fecha objetivo debe ser igual o posterior a la fecha de inicio."
+                )
+              : null
+          }
+          helperText={L(
+            "The plan will calculate milestones from the start date to this target date.",
+            "El plan calculará las metas desde la fecha de inicio hasta esta fecha objetivo."
           )}
-        </div>
+        />
       ),
     },
     {
@@ -2717,8 +2901,10 @@ export default function GrowthPlanPage() {
   }
 
   return (
-    <main className="min-h-screen bg-slate-950 text-slate-50 flex justify-center px-6 py-10">
-      <div className="w-full max-w-4xl bg-slate-900/95 border border-slate-800 rounded-2xl p-6 md:p-8 shadow-2xl space-y-6 text-[14px]">
+    <>
+      <TopNav />
+      <main className="min-h-screen bg-slate-950 text-slate-50 flex justify-center px-6 py-10">
+        <div className="w-full max-w-4xl bg-slate-900/95 border border-slate-800 rounded-2xl p-6 md:p-8 shadow-2xl space-y-6 text-[14px]">
         {/* Header */}
         <div className="space-y-2">
           <div className="flex items-center justify-between gap-3">
@@ -2730,39 +2916,47 @@ export default function GrowthPlanPage() {
             </div>
 
             {/* ✅ Neuro language toggle (saved to Supabase inside plan) */}
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-slate-400">Neuro:</span>
-              <div className="inline-flex items-center rounded-full border border-slate-700 bg-slate-950/70 p-0.5 text-[11px]">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setAssistantLang("en");
-                    persistAssistantLang("en");
-                    pushNeuroMessage(L("Neuro language set to EN.", "Idioma de Neuro: EN."));
-                                      }}
-                  className={`px-3 py-1 rounded-full transition ${
-                    assistantLang === "en"
-                      ? "bg-emerald-400 text-slate-950 font-semibold"
-                      : "text-slate-300 hover:text-slate-50"
-                  }`}
-                >
-                  EN
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setAssistantLang("es");
-                    persistAssistantLang("es");
-                    pushNeuroMessage(L("Neuro language set to ES.", "Idioma de Neuro: ES."));
-                                      }}
-                  className={`px-3 py-1 rounded-full transition ${
-                    assistantLang === "es"
-                      ? "bg-emerald-400 text-slate-950 font-semibold"
-                      : "text-slate-300 hover:text-slate-50"
-                  }`}
-                >
-                  ES
-                </button>
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <Link
+                href="/dashboard"
+                className="rounded-full border border-slate-700 bg-slate-950/70 px-3 py-1.5 text-xs font-semibold text-slate-200 transition hover:border-emerald-400 hover:text-emerald-200"
+              >
+                {L("Dashboard", "Dashboard")}
+              </Link>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-400">Neuro:</span>
+                <div className="inline-flex items-center rounded-full border border-slate-700 bg-slate-950/70 p-0.5 text-[11px]">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAssistantLang("en");
+                      persistAssistantLang("en");
+                      pushNeuroMessage(L("Neuro language set to EN.", "Idioma de Neuro: EN."));
+                                        }}
+                    className={`px-3 py-1 rounded-full transition ${
+                      assistantLang === "en"
+                        ? "bg-emerald-400 text-slate-950 font-semibold"
+                        : "text-slate-300 hover:text-slate-50"
+                    }`}
+                  >
+                    EN
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAssistantLang("es");
+                      persistAssistantLang("es");
+                      pushNeuroMessage(L("Neuro language set to ES.", "Idioma de Neuro: ES."));
+                                        }}
+                    className={`px-3 py-1 rounded-full transition ${
+                      assistantLang === "es"
+                        ? "bg-emerald-400 text-slate-950 font-semibold"
+                        : "text-slate-300 hover:text-slate-50"
+                    }`}
+                  >
+                    ES
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -3541,7 +3735,8 @@ export default function GrowthPlanPage() {
             animation: gpStepIn 220ms ease;
           }
         `}</style>
-      </div>
-    </main>
+        </div>
+      </main>
+    </>
   );
 }

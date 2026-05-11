@@ -130,13 +130,6 @@ export default function GlobalRankingPage() {
 
   return (
     <main className="relative min-h-screen bg-slate-950 text-slate-50">
-      {/* Soft brand diffusions (works in both themes) */}
-      <div className="pointer-events-none absolute inset-0 -z-10 overflow-hidden">
-        <div className="absolute -top-32 -left-32 h-[520px] w-[520px] rounded-full bg-emerald-500/15 blur-3xl" />
-        <div className="absolute top-24 -right-40 h-[560px] w-[560px] rounded-full bg-sky-500/14 blur-3xl" />
-        <div className="absolute -bottom-40 left-1/3 h-[560px] w-[560px] rounded-full bg-violet-500/14 blur-3xl" />
-      </div>
-
       <TopNav />
 
       <TrophyToasts
@@ -144,24 +137,30 @@ export default function GlobalRankingPage() {
         onDismiss={(id) => setToasts((prev) => prev.filter((t) => t.id !== id))}
       />
 
-      <div className="max-w-6xl mx-auto px-6 md:px-8 py-8 space-y-6">
+      <div className="max-w-6xl mx-auto px-6 md:px-8 py-6 space-y-5">
         {/* Header */}
         <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <p className="text-[11px] uppercase tracking-[0.25em] text-emerald-300">
               {L("Community", "Comunidad")}
             </p>
-            <h1 className="text-3xl font-semibold mt-1">{L("Global Ranking", "Ranking global")}</h1>
+            <h1 className="text-2xl font-semibold mt-1">{L("Global Ranking", "Ranking global")}</h1>
             <p className="text-sm text-slate-400 mt-2 max-w-2xl">
               {L(
-                "Consistency leaderboard based on trophy XP earned across the platform. This is not a profit leaderboard.",
-                "Ranking de consistencia basado en el XP de trofeos que ganas en la plataforma. No es un ranking de ganancias."
+                "Consistency leaderboard based on challenge XP and trophy XP earned across the platform. This is not a profit leaderboard.",
+                "Ranking de consistencia basado en XP de retos y XP de trofeos ganados en la plataforma. No es un ranking de ganancias."
               )}
             </p>
           </div>
 
           {userId && (
             <div className="flex items-center gap-2">
+              <Link
+                href="/dashboard"
+                className="rounded-xl border border-slate-700 bg-slate-900/70 px-4 py-2 text-xs font-semibold text-slate-100 hover:border-emerald-400 hover:text-emerald-200 transition"
+              >
+                {L("Dashboard", "Dashboard")}
+              </Link>
               <Link
                 href={`/globalranking/${userId}`}
                 className="rounded-xl border border-slate-700 bg-slate-900/70 px-4 py-2 text-xs font-semibold text-slate-100 hover:border-emerald-400 hover:text-emerald-200 transition"
@@ -174,7 +173,7 @@ export default function GlobalRankingPage() {
 
         {/* My snapshot */}
         {userId && (
-          <section className="rounded-3xl border border-slate-800 bg-slate-900/50 p-5">
+          <section className="rounded-xl border border-slate-800 bg-slate-900/50 p-5">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <p className="text-xs text-slate-400">{L("Your snapshot", "Tu resumen")}</p>
@@ -226,7 +225,7 @@ export default function GlobalRankingPage() {
         )}
 
         {/* Leaderboard */}
-        <section className="rounded-3xl border border-slate-800 bg-slate-900/50 overflow-hidden">
+        <section className="rounded-xl border border-slate-800 bg-slate-900/50 overflow-hidden">
           <div className="flex items-center justify-between px-5 py-4 border-b border-slate-800">
             <h2 className="text-sm font-semibold text-slate-100">{L("Top consistency ranking", "Top ranking de consistencia")}</h2>
             <p className="text-[11px] text-slate-400">

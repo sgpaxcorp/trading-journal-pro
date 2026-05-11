@@ -13,7 +13,7 @@ export async function POST(req: Request) {
     const limiterKey = authUser
       ? `ask:user:${authUser.userId}`
       : `ask:ip:${getClientIp(req)}`;
-    const rate = rateLimit(limiterKey, {
+    const rate = await rateLimit(limiterKey, {
       limit: authUser ? 60 : 20,
       windowMs: 60_000,
     });

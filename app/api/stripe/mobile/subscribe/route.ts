@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
-import { getOptionFlowBetaApiPayload } from "@/lib/optionFlowBeta";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 
 type PlanId = "core" | "advanced";
@@ -23,11 +22,6 @@ const PRICE_IDS: Record<PlanId, Record<BillingCycle, string>> = {
   },
 };
 
-const OPTION_FLOW_PRICES = {
-  monthly: process.env.STRIPE_PRICE_OPTIONFLOW_MONTHLY ?? "",
-  annual: process.env.STRIPE_PRICE_OPTIONFLOW_ANNUAL ?? "",
-};
-
 export async function POST(req: NextRequest) {
   try {
     const authHeader = req.headers.get("authorization") || "";
@@ -45,20 +39,12 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const planId = body.planId as PlanId | undefined;
     const billingCycle = body.billingCycle as BillingCycle | undefined;
-    const addonOptionFlow = Boolean(body.addonOptionFlow);
-
-    if (addonOptionFlow) {
-      return NextResponse.json(getOptionFlowBetaApiPayload("en"), { status: 403 });
-    }
 
     if (!planId || !PRICE_IDS[planId]) {
       return NextResponse.json({ error: "Invalid plan" }, { status: 400 });
     }
     if (!billingCycle || !PRICE_IDS[planId][billingCycle]) {
       return NextResponse.json({ error: "Invalid billing cycle" }, { status: 400 });
-    }
-    if (addonOptionFlow && !OPTION_FLOW_PRICES[billingCycle]) {
-      return NextResponse.json({ error: "Option Flow price not configured" }, { status: 500 });
     }
 
     let customerId: string | undefined;
@@ -90,9 +76,6 @@ export async function POST(req: NextRequest) {
     const lineItems: Stripe.SubscriptionCreateParams.Item[] = [
       { price: PRICE_IDS[planId][billingCycle], quantity: 1 },
     ];
-    if (addonOptionFlow) {
-      lineItems.push({ price: OPTION_FLOW_PRICES[billingCycle], quantity: 1 });
-    }
 
     const subscription = await stripe.subscriptions.create({
       customer: customerId,
@@ -104,7 +87,7 @@ export async function POST(req: NextRequest) {
         supabaseUserId: userId,
         planId,
         billingCycle,
-        addonOptionFlow: addonOptionFlow ? "true" : "false",
+        addonOptionFlow: "false",
       },
     });
 

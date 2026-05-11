@@ -23,6 +23,7 @@ import {
   isAdminUser,
   listSupportMessages,
   listSupportTickets,
+  requestSupportAgentReply,
   updateSupportTicketStatus,
   updateSupportTicket,
   uploadSupportAttachments,
@@ -668,13 +669,26 @@ export default function MessageCenterPage() {
                               authorRole: "user",
                             });
                             if (!msgRes.ok) throw new Error(msgRes.error || "Message failed");
+                            const agentRes = await requestSupportAgentReply({ ticketId });
                             setComposeBody("");
                             setComposeSubject("");
                             setComposeFiles([]);
                             setComposeOpen(false);
                             await refreshSupport();
+                            const latestThread = await listSupportMessages(ticketId);
+                            setSupportMessages(latestThread.ok ? latestThread.messages : []);
                             setSelectedTicketId(ticketId);
-                            setSupportNotice(L("Ticket created. We'll reply soon.", "Ticket creado. Te responderemos pronto."));
+                            setSupportNotice(
+                              agentRes.ok && agentRes.canAnswer
+                                ? L(
+                                    "Ticket created. The service agent replied below.",
+                                    "Ticket creado. El agente de servicio respondió abajo."
+                                  )
+                                : L(
+                                    "Ticket created. We're reviewing it and will reply within 24 to 48 hours.",
+                                    "Ticket creado. Ya lo estamos evaluando y responderemos en 24 a 48 horas."
+                                  )
+                            );
                           } catch (err) {
                             console.error("[support] create failed", err);
                             setSupportNotice(L("We couldn't create the ticket.", "No pudimos crear el ticket."));
@@ -813,14 +827,20 @@ export default function MessageCenterPage() {
                       <div
                         key={msg.id}
                         className={`rounded-xl border px-4 py-3 text-xs ${
-                          msg.author_role === "admin"
+                          msg.author_role === "assistant"
+                            ? "border-sky-400/30 bg-sky-500/10"
+                            : msg.author_role === "admin"
                             ? "border-emerald-400/30 bg-emerald-500/10"
                             : "border-slate-800 bg-slate-950/40"
                         }`}
                       >
                         <div className="flex items-center justify-between gap-2">
                           <div className="text-[11px] font-semibold text-slate-200">
-                            {msg.author_role === "admin" ? L("Support", "Soporte") : L("You", "Tú")}
+                            {msg.author_role === "assistant"
+                              ? L("Service agent", "Agente de servicio")
+                              : msg.author_role === "admin"
+                                ? L("Support", "Soporte")
+                                : L("You", "Tú")}
                           </div>
                           <div className="text-[10px] text-slate-500">{fmtDate(msg.created_at)}</div>
                         </div>
@@ -888,12 +908,27 @@ export default function MessageCenterPage() {
                               authorRole: isAdmin ? "admin" : "user",
                             });
                             if (!res.ok) throw new Error(res.error || "Reply failed");
+                            const agentRes = !isAdmin
+                              ? await requestSupportAgentReply({ ticketId: selectedTicket.id })
+                              : null;
                             setReplyBody("");
                             setReplyFiles([]);
                             await refreshSupport();
                             const msgRes = await listSupportMessages(selectedTicket.id);
                             setSupportMessages(msgRes.ok ? msgRes.messages : []);
-                            setSupportNotice(L("Reply sent.", "Respuesta enviada."));
+                            setSupportNotice(
+                              !isAdmin && agentRes?.ok && agentRes.canAnswer
+                                ? L(
+                                    "Reply sent. The service agent also answered in the thread.",
+                                    "Respuesta enviada. El agente de servicio también respondió en el hilo."
+                                  )
+                                : !isAdmin
+                                  ? L(
+                                      "Reply sent. The case stays under review for a 24 to 48 hour follow-up if needed.",
+                                      "Respuesta enviada. El caso queda bajo revisión para seguimiento en 24 a 48 horas si hace falta."
+                                    )
+                                  : L("Reply sent.", "Respuesta enviada.")
+                            );
                           } catch (err) {
                             console.error("[support] reply failed", err);
                             setSupportNotice(L("We couldn't send the reply.", "No pudimos enviar la respuesta."));

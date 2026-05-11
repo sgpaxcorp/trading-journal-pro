@@ -80,6 +80,14 @@ export default function ChallengesPage() {
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const challengeStats = useMemo(() => {
+    const progress = Object.values(progressMap).filter(Boolean) as ChallengeProgress[];
+    return {
+      active: progress.filter((p) => p.status === "active").length,
+      completed: progress.filter((p) => p.status === "completed").length,
+      greenDays: progress.reduce((sum, p) => sum + (p.processGreenDays || 0), 0),
+    };
+  }, [progressMap]);
 
   /* ---------- Cargar progreso y perfil ---------- */
   useEffect(() => {
@@ -161,11 +169,14 @@ export default function ChallengesPage() {
   return (
     <div className="min-h-screen bg-slate-950 text-slate-50">
       <TopNav />
-      <main className="mx-auto max-w-6xl px-4 pb-16 pt-8">
+      <main className="mx-auto max-w-6xl px-4 pb-16 pt-6">
         {/* Header */}
-        <header className="mb-8 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+        <header className="mb-5 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
           <div>
-            <h1 className="text-3xl font-semibold tracking-tight">{L("Challenges", "Retos")}</h1>
+            <p className="text-[11px] uppercase tracking-[0.24em] text-emerald-300">
+              {L("Process training", "Entrenamiento de proceso")}
+            </p>
+            <h1 className="mt-1 text-2xl font-semibold tracking-tight">{L("Challenges", "Retos")}</h1>
             <p className="mt-2 max-w-2xl text-sm text-slate-400">
               {L(
                 "Structured missions to build consistency, discipline, and risk control. The point is to win on process, not chase P&L.",
@@ -174,34 +185,50 @@ export default function ChallengesPage() {
             </p>
           </div>
 
-          {profile && (
-            <div className="rounded-2xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-xs text-emerald-200">
-              <p>
-                {L("Level", "Nivel")}{" "}
-                <span className="font-semibold text-emerald-100">
-                  {profile.level}
-                </span>{" "}
-                · {L("Tier", "Nivel")}{" "}
-                <span className="font-semibold text-emerald-100">
-                  {profile.tier}
-                </span>
-              </p>
-              <p className="mt-1">
-                {profile.xp.toLocaleString()} XP • {profile.badges.length}{" "}
-                {L("badges unlocked", "insignias desbloqueadas")}
-              </p>
-            </div>
-          )}
+          <div className="flex flex-wrap items-center gap-2">
+            <Link
+              href="/dashboard"
+              className="rounded-full border border-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-200 transition hover:border-emerald-400 hover:text-emerald-200"
+            >
+              {L("Dashboard", "Dashboard")}
+            </Link>
+            <Link
+              href="/globalranking"
+              className="rounded-full border border-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-200 transition hover:border-emerald-400 hover:text-emerald-200"
+            >
+              {L("Ranking", "Ranking")}
+            </Link>
+          </div>
         </header>
 
+        <section className="mb-5 grid gap-3 sm:grid-cols-3">
+          <div className="rounded-xl border border-slate-800 bg-slate-900/60 px-4 py-3">
+            <p className="text-[10px] uppercase tracking-[0.22em] text-slate-500">{L("Active", "Activos")}</p>
+            <p className="mt-1 text-xl font-semibold text-slate-100">{challengeStats.active}</p>
+          </div>
+          <div className="rounded-xl border border-slate-800 bg-slate-900/60 px-4 py-3">
+            <p className="text-[10px] uppercase tracking-[0.22em] text-slate-500">{L("Completed", "Completados")}</p>
+            <p className="mt-1 text-xl font-semibold text-slate-100">{challengeStats.completed}</p>
+          </div>
+          <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3">
+            <p className="text-[10px] uppercase tracking-[0.22em] text-emerald-300">{L("Process-green", "Verdes de proceso")}</p>
+            <p className="mt-1 text-xl font-semibold text-emerald-100">{challengeStats.greenDays}</p>
+            {profile ? (
+              <p className="mt-1 text-[11px] text-emerald-200/80">
+                {profile.xp.toLocaleString()} XP · {profile.badges.length} {L("badges", "insignias")}
+              </p>
+            ) : null}
+          </div>
+        </section>
+
         {error && (
-          <div className="mb-6 rounded-2xl border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+          <div className="mb-5 rounded-xl border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
             {error}
           </div>
         )}
 
         {/* Cards */}
-        <section className="grid gap-6 md:grid-cols-2">
+        <section className="grid gap-4 md:grid-cols-2">
           {CHALLENGES.map((c) => {
             const progress = progressMap[c.id];
             const status = progress?.status ?? null;
@@ -220,11 +247,11 @@ export default function ChallengesPage() {
             return (
               <article
                 key={c.id}
-                className="relative flex flex-col rounded-3xl border border-emerald-500/15 bg-slate-900/70 px-5 py-5 shadow-[0_0_40px_rgba(16,185,129,0.12)]"
+                className="relative flex flex-col rounded-xl border border-slate-800 bg-slate-900/70 px-5 py-4"
               >
                 {/* Title & description */}
                 <div className="flex-1 space-y-2">
-                  <h2 className="text-xl font-semibold text-slate-50">
+                  <h2 className="text-base font-semibold text-slate-50">
                     {c.title}
                   </h2>
                   <p className="text-sm text-slate-300">{c.shortDescription}</p>
@@ -329,7 +356,7 @@ export default function ChallengesPage() {
       {/* Dialog para Start / Restart */}
       {dialogOpen && selectedChallenge && dialogMode && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-3xl border border-slate-800 bg-slate-900 p-5 shadow-xl">
+          <div className="w-full max-w-md rounded-xl border border-slate-800 bg-slate-900 p-5 shadow-xl">
             <p className="text-[11px] uppercase tracking-wide text-emerald-300 mb-1">
               {dialogMode === "start" ? L("Start challenge", "Iniciar reto") : L("Restart challenge", "Reiniciar reto")}
             </p>

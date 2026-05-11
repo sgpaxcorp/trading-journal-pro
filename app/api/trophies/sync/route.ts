@@ -396,7 +396,6 @@ export async function POST(req: NextRequest) {
     const newTrophies: any[] = [];
     const seen = new Set<string>();
 
-    let rpcWorked = false;
     let rpcInserted = 0;
 
     // 1) Try the native RPC (if present). It also updates profile snapshots in some deployments.
@@ -404,7 +403,6 @@ export async function POST(req: NextRequest) {
       const supabaseUser = createUserClient(token);
       const { data: rpcData, error: rpcErr } = await supabaseUser.rpc("nt_award_trophies");
       if (!rpcErr) {
-        rpcWorked = true;
         rpcInserted = Number((rpcData as any)?.new_trophies ?? 0);
 
         if (rpcInserted > 0) {
@@ -439,8 +437,10 @@ export async function POST(req: NextRequest) {
       // ignore and fall back to manual sync
     }
 
-    // 2) Manual fallback if RPC is missing or returns nothing.
-    if (!rpcWorked || rpcInserted === 0) {
+    // 2) Always run the service-role evaluator after the RPC.
+    // Some deployed RPC versions only know about a subset of rules; this second
+    // pass makes the sync complete while still de-duping trophies already earned.
+    {
       const defs = await listTrophyDefinitions();
 
       const { data: earnedRows, error: earnedErr } = await supabaseAdmin

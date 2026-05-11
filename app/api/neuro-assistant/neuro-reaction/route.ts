@@ -289,7 +289,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized", text: "" }, { status: 401 });
     }
 
-    const rate = rateLimit(`neuro-reaction:user:${authUser.userId}`, {
+    const rate = await rateLimit(`neuro-reaction:user:${authUser.userId}`, {
       limit: 60,
       windowMs: 60_000,
     });

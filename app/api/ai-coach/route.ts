@@ -1937,7 +1937,7 @@ export async function POST(req: Request) {
     const advancedGate = await requireAdvancedPlan(authUser.userId);
     if (advancedGate) return advancedGate;
 
-    const rate = rateLimit(`ai-coach:user:${authUser.userId}`, {
+    const rate = await rateLimit(`ai-coach:user:${authUser.userId}`, {
       limit: 10,
       windowMs: 60_000,
     });

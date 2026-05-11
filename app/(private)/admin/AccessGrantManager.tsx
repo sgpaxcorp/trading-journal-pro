@@ -15,6 +15,37 @@ type Notice = {
 
 const GROUP_ORDER = ["core", "performance", "tools", "community", "addons"] as const;
 
+const GROUP_META = {
+  core: {
+    en: { title: "Core", hint: "Main workspace access" },
+    es: { title: "Core", hint: "Acceso principal al workspace" },
+  },
+  performance: {
+    en: { title: "Performance", hint: "Analytics and coaching" },
+    es: { title: "Performance", hint: "Analítica y coaching" },
+  },
+  tools: {
+    en: { title: "Tools", hint: "Execution utilities" },
+    es: { title: "Herramientas", hint: "Utilidades de ejecución" },
+  },
+  community: {
+    en: { title: "Community", hint: "Social and ranking areas" },
+    es: { title: "Comunidad", hint: "Áreas sociales y de ranking" },
+  },
+  addons: {
+    en: { title: "Add-ons", hint: "Extra capabilities" },
+    es: { title: "Add-ons", hint: "Capacidades extra" },
+  },
+} as const;
+
+function fallbackGrantLabel(value: string) {
+  return String(value || "")
+    .split(/[_-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
 export default function AccessGrantManager({ lang }: Props) {
   const isEs = lang === "es";
   const L = (en: string, es: string) => (isEs ? es : en);
@@ -33,8 +64,14 @@ export default function AccessGrantManager({ lang }: Props) {
     return GROUP_ORDER.map((group) => ({
       group,
       items: ACCESS_GRANTS.filter((item) => item.group === group),
+      selectedCount: ACCESS_GRANTS.filter((item) => item.group === group && selectedKeys[item.key]).length,
     })).filter((section) => section.items.length > 0);
-  }, []);
+  }, [selectedKeys]);
+
+  const totalSelected = useMemo(
+    () => ACCESS_GRANTS.filter((item) => selectedKeys[item.key]).length,
+    [selectedKeys]
+  );
 
   function toggleKey(key: AccessGrantKey) {
     setSelectedKeys((prev) => ({
@@ -111,31 +148,37 @@ export default function AccessGrantManager({ lang }: Props) {
   }
 
   return (
-    <section className="rounded-2xl border border-slate-800 bg-slate-900/60 p-6 space-y-5">
-      <div className="flex flex-col gap-2">
+    <section className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5 md:p-6 space-y-5">
+      <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <p className="text-[11px] uppercase tracking-[0.2em] text-emerald-300">
           {L("Manual access", "Acceso manual")}
         </p>
-        <h2 className="text-xl font-semibold">
-          {L("Create free-access users", "Crear usuarios con acceso gratis")}
-        </h2>
-        <p className="text-sm text-slate-400">
-          {L(
-            "Create or update a user without Stripe, then grant only the modules you want them to access.",
-            "Crea o actualiza un usuario sin Stripe y dale solo los módulos a los que quieras que entre."
-          )}
-        </p>
+        <div className="space-y-1">
+          <h2 className="text-lg font-semibold">
+            {L("Create free-access users", "Crear usuarios con acceso gratis")}
+          </h2>
+          <p className="text-sm text-slate-400">
+            {L(
+              "Create or update a user without Stripe, then grant only the modules you want them to access.",
+              "Crea o actualiza un usuario sin Stripe y dale solo los módulos a los que quieras que entre."
+            )}
+          </p>
+        </div>
+        <div className="rounded-full border border-slate-700 bg-slate-950/70 px-3 py-1.5 text-[11px] text-slate-300">
+          {L("Selected grants", "Accesos seleccionados")}:{" "}
+          <span className="font-semibold text-slate-100">{totalSelected}</span>
+        </div>
       </div>
 
       <form className="space-y-5" onSubmit={handleSubmit}>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
           <label className="flex flex-col gap-2">
             <span className="text-xs text-slate-400">{L("Email", "Email")}</span>
             <input
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-slate-100 outline-none"
+              className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-slate-100 outline-none"
               placeholder="user@example.com"
               required
             />
@@ -148,7 +191,7 @@ export default function AccessGrantManager({ lang }: Props) {
               type="text"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-slate-100 outline-none"
+              className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-slate-100 outline-none"
               placeholder={L("Required for new users", "Requerido para usuarios nuevos")}
             />
           </label>
@@ -158,7 +201,7 @@ export default function AccessGrantManager({ lang }: Props) {
               type="text"
               value={firstName}
               onChange={(e) => setFirstName(e.target.value)}
-              className="rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-slate-100 outline-none"
+              className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-slate-100 outline-none"
             />
           </label>
           <label className="flex flex-col gap-2">
@@ -167,82 +210,93 @@ export default function AccessGrantManager({ lang }: Props) {
               type="text"
               value={lastName}
               onChange={(e) => setLastName(e.target.value)}
-              className="rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-slate-100 outline-none"
+              className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-slate-100 outline-none"
             />
           </label>
         </div>
 
-        <div className="flex flex-wrap gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <button
             type="button"
             onClick={selectCoreBundle}
-            className="rounded-xl border border-slate-700 px-4 py-2 text-sm text-slate-200"
+            className="rounded-full border border-slate-700 px-3 py-1.5 text-xs text-slate-200"
           >
             {L("Select core bundle", "Seleccionar bundle core")}
           </button>
           <button
             type="button"
             onClick={clearAll}
-            className="rounded-xl border border-slate-700 px-4 py-2 text-sm text-slate-400"
+            className="rounded-full border border-slate-700 px-3 py-1.5 text-xs text-slate-400"
           >
             {L("Clear all", "Limpiar todo")}
           </button>
         </div>
 
-        <div className="space-y-4">
+        <div className="space-y-3">
           {grouped.map((section) => (
-            <div key={section.group} className="rounded-2xl border border-slate-800 bg-slate-950/60 overflow-hidden">
-              <div className="border-b border-slate-800 px-4 py-3">
-                <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">
-                  {section.group === "core"
-                    ? L("Core", "Core")
-                    : section.group === "performance"
-                    ? L("Performance", "Performance")
-                    : section.group === "tools"
-                    ? L("Tools", "Herramientas")
-                    : section.group === "community"
-                    ? L("Community", "Comunidad")
-                    : L("Add-ons", "Add-ons")}
-                </p>
+            <div key={section.group} className="rounded-2xl border border-slate-800 bg-slate-950/50 overflow-hidden">
+              <div className="flex items-center justify-between gap-3 border-b border-slate-800 px-4 py-3">
+                <div>
+                  <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">
+                    {isEs ? GROUP_META[section.group].es.title : GROUP_META[section.group].en.title}
+                  </p>
+                  <p className="mt-1 text-[11px] text-slate-500">
+                    {isEs ? GROUP_META[section.group].es.hint : GROUP_META[section.group].en.hint}
+                  </p>
+                </div>
+                <div className="rounded-full border border-slate-700 bg-slate-900/70 px-2.5 py-1 text-[10px] text-slate-300">
+                  {section.selectedCount}/{section.items.length}
+                </div>
               </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="text-left text-slate-400">
-                      <th className="px-4 py-3 font-medium">{L("Module", "Módulo")}</th>
-                      <th className="px-4 py-3 font-medium">{L("Route", "Ruta")}</th>
-                      <th className="px-4 py-3 font-medium">{L("Grant", "Grant")}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {section.items.map((item) => (
-                      <tr key={item.key} className="border-t border-slate-800 align-top">
-                        <td className="px-4 py-3">
-                          <p className="font-medium text-slate-100">
-                            {isEs ? item.label.es : item.label.en}
-                          </p>
-                          <p className="mt-1 text-xs text-slate-400">
-                            {isEs ? item.description.es : item.description.en}
-                          </p>
-                        </td>
-                        <td className="px-4 py-3 text-xs text-sky-300">
-                          {item.primaryPath}
-                        </td>
-                        <td className="px-4 py-3">
-                          <label className="inline-flex items-center gap-2 rounded-full border border-slate-700 px-3 py-1.5 text-xs text-slate-200">
-                            <input
-                              type="checkbox"
-                              checked={Boolean(selectedKeys[item.key])}
-                              onChange={() => toggleKey(item.key)}
-                              className="h-4 w-4 rounded border-slate-600 bg-slate-950"
-                            />
-                            {L("Allow", "Permitir")}
-                          </label>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+
+              <div className="divide-y divide-slate-800">
+                {section.items.map((item) => {
+                  const checked = Boolean(selectedKeys[item.key]);
+                  return (
+                    <label
+                      key={item.key}
+                      className="flex cursor-pointer items-start gap-3 px-4 py-3 transition hover:bg-slate-900/40"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggleKey(item.key)}
+                        className="mt-0.5 h-4 w-4 rounded border-slate-600 bg-slate-950"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium text-slate-100">
+                              {isEs ? item.label.es : item.label.en}
+                            </p>
+                            <p className="mt-1 text-[11px] leading-5 text-slate-400">
+                              {isEs ? item.description.es : item.description.en}
+                            </p>
+                          </div>
+                          <span
+                            className={`shrink-0 rounded-full border px-2.5 py-1 text-[10px] ${
+                              checked
+                                ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-200"
+                                : "border-slate-700 bg-slate-900 text-slate-400"
+                            }`}
+                          >
+                            {checked ? L("Allowed", "Activo") : L("Off", "Off")}
+                          </span>
+                        </div>
+                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                          <span className="rounded-full border border-slate-700 bg-slate-900/70 px-2 py-0.5 text-[10px] text-slate-500">
+                            {fallbackGrantLabel(item.key)}
+                          </span>
+                          {item.key === "platform_access" ? (
+                            <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] text-emerald-200">
+                              {L("Base access", "Acceso base")}
+                            </span>
+                          ) : null}
+                        </div>
+                      </div>
+                    </label>
+                  );
+                })}
               </div>
             </div>
           ))}

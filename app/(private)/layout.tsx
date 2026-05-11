@@ -27,6 +27,27 @@ const ALLOW_WITHOUT_ACTIVE_SUB = [
   "/admin",
 ];
 
+function FullscreenStatus({
+  title,
+  message,
+}: {
+  title: string;
+  message: string;
+}) {
+  return (
+    <>
+      <div className="min-h-screen bg-slate-950 text-slate-50 flex flex-col items-center justify-center">
+        <div className="px-6 py-4 rounded-xl border border-emerald-400/60 bg-slate-900/80 shadow-lg max-w-sm text-center">
+          <p className="text-sm font-semibold text-emerald-300 mb-1">{title}</p>
+          <p className="text-[11px] text-slate-300">{message}</p>
+        </div>
+      </div>
+
+      <CandleAssistant />
+    </>
+  );
+}
+
 export default function PrivateLayout({ children }: PrivateLayoutProps) {
   const router = useRouter();
   const pathname = usePathname();
@@ -238,24 +259,31 @@ export default function PrivateLayout({ children }: PrivateLayoutProps) {
     !isOnAllowedRoute &&
     refreshAttempts < MAX_REFRESH_ATTEMPTS;
 
+  if (loading) {
+    return (
+      <FullscreenStatus
+        title="Loading your workspace…"
+        message="We’re checking your session before opening private pages."
+      />
+    );
+  }
+
+  if (!user) {
+    return (
+      <FullscreenStatus
+        title="Redirecting to sign in…"
+        message="Private pages require an active account session."
+      />
+    );
+  }
+
   // Pantalla de "verificando tu pago" mientras damos tiempo al webhook
   if (isVerifyingSubscription) {
     return (
-      <>
-        <div className="min-h-screen bg-slate-950 text-slate-50 flex flex-col items-center justify-center">
-          <div className="px-6 py-4 rounded-xl border border-emerald-400/60 bg-slate-900/80 shadow-lg max-w-sm text-center">
-            <p className="text-sm font-semibold text-emerald-300 mb-1">
-              Verifying your access…
-            </p>
-            <p className="text-[11px] text-slate-300">
-              We’re syncing your access status. This usually takes just a few seconds.
-            </p>
-          </div>
-        </div>
-
-        {/* Keep assistant available */}
-        <CandleAssistant />
-      </>
+      <FullscreenStatus
+        title="Verifying your access…"
+        message="We’re syncing your access status. This usually takes just a few seconds."
+      />
     );
   }
 

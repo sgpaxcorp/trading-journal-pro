@@ -6,9 +6,11 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
 import TopNav from "@/app/components/TopNav";
+import TrophyToasts, { type TrophyToastItem } from "@/app/components/TrophyToasts";
 import { useAuth } from "@/context/AuthContext";
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
+import { syncMyTrophies } from "@/lib/trophiesSupabase";
 
 import {
   CHALLENGES,
@@ -91,6 +93,7 @@ export default function ChallengeDetailPage() {
   const [followedPlan, setFollowedPlan] = useState<boolean>(true);
   const [note, setNote] = useState<string>("");
   const [checkinBusy, setCheckinBusy] = useState<boolean>(false);
+  const [trophyToasts, setTrophyToasts] = useState<TrophyToastItem[]>([]);
 
   const processGreen = journalCompleted && respectedMaxLoss && followedPlan;
 
@@ -288,6 +291,29 @@ export default function ChallengeDetailPage() {
       const logs = await listChallengeDayLogs({ userId, runId: res.progress.runId, limit: 120 });
       setDayLogs(logs);
 
+      try {
+        const sync = await syncMyTrophies(userId);
+        const newTrophies = sync.newTrophies ?? [];
+        if (newTrophies.length) {
+          setTrophyToasts((prev) => {
+            const next = [...prev];
+            for (const trophy of newTrophies) {
+              next.push({
+                id: `${trophy.trophy_id}-${trophy.earned_at ?? Date.now()}`,
+                title: trophy.title,
+                subtitle: trophy.description,
+                xp: trophy.xp,
+                tier: trophy.tier,
+                icon: trophy.icon ?? null,
+              });
+            }
+            return next.slice(-4);
+          });
+        }
+      } catch (syncErr) {
+        console.warn("[ChallengeDetailPage] trophy sync failed:", syncErr);
+      }
+
       await refreshGamification();
 
       // If user just edited a past day, keep the date selection.
@@ -314,6 +340,10 @@ export default function ChallengeDetailPage() {
   return (
     <div className="min-h-screen bg-slate-950 text-slate-50">
       <TopNav />
+      <TrophyToasts
+        items={trophyToasts}
+        onDismiss={(id) => setTrophyToasts((prev) => prev.filter((t) => t.id !== id))}
+      />
       <main className="mx-auto max-w-5xl px-4 pb-16 pt-8">
         <div className="mb-6 flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
           <div className="space-y-1">

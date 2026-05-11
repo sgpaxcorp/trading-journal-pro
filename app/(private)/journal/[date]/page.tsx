@@ -8,6 +8,7 @@ import { useParams, useRouter } from "next/navigation";
 
 import type { JournalWidgetId, JournalWidgetDef } from "@/app/components/JournalGrid";
 
+import TopNav from "@/app/components/TopNav";
 import JournalInkField from "@/app/components/JournalInkField";
 import RichTextEditor from "@/app/components/RichTextEditor";
 
@@ -3960,7 +3961,9 @@ export default function DailyJournalPage() {
   }, [tourStepIndexByHash]);
 
   return (
-    <main className="min-h-screen bg-slate-950 text-slate-50 px-4 md:px-8 py-6">
+    <>
+      <TopNav />
+      <main className="min-h-screen bg-slate-950 text-slate-50 px-4 md:px-8 py-6">
       {prevDateIso && (
         <button
           type="button"
@@ -4318,6 +4321,7 @@ export default function DailyJournalPage() {
           </button>
         </div>
       </div>
-    </main>
+      </main>
+    </>
   );
 }

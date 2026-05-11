@@ -48,7 +48,7 @@ async function findAuthUserByEmail(email: string) {
 }
 
 export async function POST(req: NextRequest) {
-  const rate = rateLimit(`auth-signup-resend:${getClientIp(req)}`, {
+  const rate = await rateLimit(`auth-signup-resend:${getClientIp(req)}`, {
     limit: 6,
     windowMs: 10 * 60_000,
   });

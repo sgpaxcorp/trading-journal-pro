@@ -1,6 +1,7 @@
 import { supabaseMobile } from "./supabase";
 
-export const MOBILE_PASSWORD_RESET_REDIRECT_URL = "com.sgpax.neurotraderjournal://reset-password";
+export const MOBILE_PASSWORD_RESET_REDIRECT_URL = "https://www.neurotrader-journal.com/reset-password";
+export const LEGACY_MOBILE_PASSWORD_RESET_REDIRECT_URL = "com.sgpax.neurotraderjournal://reset-password";
 
 function appendParams(target: URLSearchParams, source: URLSearchParams) {
   source.forEach((value, key) => {

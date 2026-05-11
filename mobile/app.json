@@ -17,6 +17,10 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.sgpax.neurotraderjournal",
       "appleTeamId": "2BWGA2LDRC",
+      "associatedDomains": [
+        "applinks:www.neurotrader-journal.com",
+        "applinks:neurotrader-journal.com"
+      ],
       "infoPlist": {
         "CFBundleDisplayName": "Neuro Trader"
       },

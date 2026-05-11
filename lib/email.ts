@@ -79,6 +79,21 @@ export type AutomatedEmailPreview = {
   preview: EmailContent;
 };
 
+export type AdminBroadcastTemplateKey = AutomatedEmailKey | "custom_broadcast";
+
+type AdminBroadcastArgs = {
+  to: string;
+  templateKey?: AdminBroadcastTemplateKey;
+  subject: string;
+  title: string;
+  message: string;
+  highlight?: string | null;
+  ctaLabel?: string | null;
+  ctaUrl?: string | null;
+  footerNote?: string | null;
+  locale?: string | null;
+};
+
 type NeuroTemplateArgs = {
   title: string;
   preheader?: string;
@@ -1393,6 +1408,98 @@ export function getEmailSenderStatus() {
   };
 }
 
+function getBroadcastTemplateMeta(templateKey?: AdminBroadcastTemplateKey) {
+  if (!templateKey || templateKey === "custom_broadcast") {
+    return {
+      category: "Operations" as const,
+      label: "System announcement",
+      description: "General platform broadcast",
+    };
+  }
+
+  const row = getAutomatedEmailCatalog().find((item) => item.key === templateKey);
+  if (row) {
+    return {
+      category: row.category,
+      label: row.name,
+      description: row.description,
+    };
+  }
+
+  return {
+    category: "Operations" as const,
+    label: "System announcement",
+    description: "General platform broadcast",
+  };
+}
+
+function buildAdminBroadcastContent(args: AdminBroadcastArgs): EmailContent {
+  const locale = normalizeEmailLocale(args.locale);
+  const templateMeta = getBroadcastTemplateMeta(args.templateKey);
+  const greeting = locale === "es" ? "Hola trader," : "Hi trader,";
+  const categoryLabel =
+    locale === "es"
+      ? templateMeta.category === "Authentication"
+        ? "Autenticación"
+        : templateMeta.category === "Billing"
+          ? "Billing"
+          : templateMeta.category === "Lifecycle"
+            ? "Lifecycle"
+            : "Comunicado"
+      : templateMeta.category === "Operations"
+        ? "Announcement"
+        : templateMeta.category;
+  const paragraphs = String(args.message || "")
+    .split(/\n\s*\n/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  const safeParagraphs =
+    paragraphs.length > 0
+      ? paragraphs
+      : [
+          locale === "es"
+            ? "Este mensaje fue enviado manualmente desde el centro admin."
+            : "This message was sent manually from the admin center.",
+        ];
+
+  const text = [
+    greeting,
+    "",
+    args.highlight ? args.highlight.trim() : "",
+    "",
+    ...safeParagraphs,
+    "",
+    args.ctaLabel && args.ctaUrl ? `${args.ctaLabel}: ${args.ctaUrl}` : "",
+    "",
+    locale === "es" ? "Equipo de NeuroTrader Journal" : "NeuroTrader Journal Team",
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  const html = buildNeuroTraderHtml({
+    title: args.title,
+    eyebrow: `${categoryLabel} · ${templateMeta.label}`,
+    preheader: safeParagraphs.join(" ").slice(0, 140),
+    greeting,
+    highlight: args.highlight?.trim() || undefined,
+    paragraphs: safeParagraphs,
+    ctaLabel: args.ctaLabel?.trim() || undefined,
+    ctaUrl: args.ctaUrl?.trim() || undefined,
+    footerNote:
+      args.footerNote?.trim() ||
+      (locale === "es"
+        ? "Recibes este email porque tienes una cuenta activa dentro de NeuroTrader Journal."
+        : "You’re receiving this email because you have an active account inside NeuroTrader Journal."),
+  });
+
+  return {
+    subject: args.subject,
+    text,
+    html,
+  };
+}
+
 export function getAutomatedEmailCatalog(): AutomatedEmailPreview[] {
   return [
     {
@@ -1750,6 +1857,66 @@ export async function sendAutomatedEmailTest(args: {
     default:
       throw new Error(`Unsupported email key: ${args.key}`);
   }
+}
+
+export async function sendAdminBroadcastEmail(args: AdminBroadcastArgs) {
+  const content = buildAdminBroadcastContent(args);
+  await sendEmailBase({
+    to: args.to.trim().toLowerCase(),
+    from: FROM_EMAIL,
+    ...content,
+  });
+}
+
+export async function sendAdminBroadcastToAllUsers(
+  args: Omit<AdminBroadcastArgs, "to">
+) {
+  const { data, error } = await supabaseAdmin
+    .from("profiles")
+    .select("email")
+    .not("email", "is", null);
+
+  if (error) throw error;
+
+  const recipients = Array.from(
+    new Set(
+      (data ?? [])
+        .map((row: any) => String(row?.email ?? "").trim().toLowerCase())
+        .filter((email) => email && email.includes("@"))
+    )
+  );
+
+  let sent = 0;
+  const failed: string[] = [];
+  const chunkSize = 20;
+
+  for (let index = 0; index < recipients.length; index += chunkSize) {
+    const chunk = recipients.slice(index, index + chunkSize);
+    const results = await Promise.allSettled(
+      chunk.map((email) =>
+        sendAdminBroadcastEmail({
+          ...args,
+          to: email,
+        })
+      )
+    );
+
+    results.forEach((result, chunkIndex) => {
+      if (result.status === "fulfilled") {
+        sent += 1;
+      } else {
+        failed.push(chunk[chunkIndex]);
+        console.error("[email] broadcast send failure:", chunk[chunkIndex], result.reason);
+      }
+    });
+  }
+
+  return {
+    total: recipients.length,
+    sent,
+    failed: failed.length,
+    failedRecipients: failed.slice(0, 20),
+  };
 }
 
 export async function sendEmailConfirmationEmail(args: {

@@ -1,7 +1,6 @@
 // app/api/stripe/create-checkout-session/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
-import { getOptionFlowBetaApiPayload } from "@/lib/optionFlowBeta";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 
 type PlanId = "core" | "advanced";
@@ -29,10 +28,6 @@ const PRICE_IDS: Record<PlanId, Record<BillingCycle, string>> = {
     monthly: process.env.STRIPE_PRICE_ADVANCED_MONTHLY ?? "",
     annual: process.env.STRIPE_PRICE_ADVANCED_ANNUAL ?? "",
   },
-};
-const OPTION_FLOW_PRICES = {
-  monthly: process.env.STRIPE_PRICE_OPTIONFLOW_MONTHLY ?? "",
-  annual: process.env.STRIPE_PRICE_OPTIONFLOW_ANNUAL ?? "",
 };
 const BROKER_SYNC_PRICES = {
   monthly: process.env.STRIPE_PRICE_BROKER_SYNC_MONTHLY ?? "",
@@ -163,13 +158,8 @@ export async function POST(req: NextRequest) {
     const planId = body.planId as PlanId | undefined;
     const billingCycle = body.billingCycle as BillingCycle | undefined;
     const couponCodeRaw = body.couponCode as string | undefined; // opcional
-    const addonOptionFlowRequested = Boolean(body.addonOptionFlow);
     const addonBrokerSync = Boolean(body.addonBrokerSync);
     const partnerCode = normalizePartnerCode(body.partnerCode);
-
-    if (addonOptionFlowRequested) {
-      return NextResponse.json(getOptionFlowBetaApiPayload("en"), { status: 403 });
-    }
 
     if (!planId) {
       return NextResponse.json({ error: "Missing planId" }, { status: 400 });
@@ -246,7 +236,6 @@ export async function POST(req: NextRequest) {
       | undefined;
 
     let effectivePlanId: PlanId = planId;
-    let effectiveAddonOptionFlow = false;
     let effectiveAddonBrokerSync = addonBrokerSync;
     let promoDiscountInfo: ResolvedDiscount | null = null;
 
@@ -291,12 +280,6 @@ export async function POST(req: NextRequest) {
         { status: 500 }
       );
     }
-    if (effectiveAddonOptionFlow && !OPTION_FLOW_PRICES[finalBillingCycle]) {
-      return NextResponse.json(
-        { error: "Option Flow price ID not configured" },
-        { status: 500 }
-      );
-    }
     if (effectiveAddonBrokerSync && !BROKER_SYNC_PRICES[finalBillingCycle]) {
       return NextResponse.json(
         { error: "Broker sync price ID not configured" },
@@ -313,12 +296,6 @@ export async function POST(req: NextRequest) {
         quantity: 1,
       },
     ];
-    if (effectiveAddonOptionFlow) {
-      lineItems.push({
-        price: OPTION_FLOW_PRICES[finalBillingCycle],
-        quantity: 1,
-      });
-    }
     if (effectiveAddonBrokerSync) {
       lineItems.push({
         price: BROKER_SYNC_PRICES[finalBillingCycle],
@@ -342,7 +319,7 @@ export async function POST(req: NextRequest) {
         couponCode,
         couponId: promoDiscountInfo?.couponId ?? "",
         promotionCodeId: promoDiscountInfo?.promotionCodeId ?? "",
-        addonOptionFlow: effectiveAddonOptionFlow ? "true" : "false",
+        addonOptionFlow: "false",
         addonBrokerSync: effectiveAddonBrokerSync ? "true" : "false",
         testerAllAccess:
           promoDiscountInfo?.isTesterAllAccess ? "true" : "false",
@@ -358,7 +335,7 @@ export async function POST(req: NextRequest) {
           couponCode,
           couponId: promoDiscountInfo?.couponId ?? "",
           promotionCodeId: promoDiscountInfo?.promotionCodeId ?? "",
-          addonOptionFlow: effectiveAddonOptionFlow ? "true" : "false",
+          addonOptionFlow: "false",
           addonBrokerSync: effectiveAddonBrokerSync ? "true" : "false",
           testerAllAccess:
             promoDiscountInfo?.isTesterAllAccess ? "true" : "false",

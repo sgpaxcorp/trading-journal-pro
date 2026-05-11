@@ -1,7 +1,6 @@
 // app/api/stripe/create-addon-session/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
-import { getOptionFlowBetaApiPayload } from "@/lib/optionFlowBeta";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {});
@@ -11,12 +10,6 @@ const ADDON_CONFIG: Record<
   string,
   { monthly: string; annual: string; successPath: string; cancelPath?: string }
 > = {
-  option_flow: {
-    monthly: process.env.STRIPE_PRICE_OPTIONFLOW_MONTHLY ?? "",
-    annual: process.env.STRIPE_PRICE_OPTIONFLOW_ANNUAL ?? "",
-    successPath: "/option-flow?checkout=success",
-    cancelPath: "/option-flow?checkout=cancel",
-  },
   broker_sync: {
     monthly: process.env.STRIPE_PRICE_BROKER_SYNC_MONTHLY ?? "",
     annual: process.env.STRIPE_PRICE_BROKER_SYNC_ANNUAL ?? "",
@@ -24,7 +17,7 @@ const ADDON_CONFIG: Record<
     cancelPath: "/import?addon=broker_sync&checkout=cancel",
   },
 };
-const DEFAULT_ADDON_KEY = "option_flow";
+const DEFAULT_ADDON_KEY = "broker_sync";
 
 function resolveAppUrl(req: NextRequest) {
   const origin = req.headers.get("origin") ?? "";
@@ -56,10 +49,6 @@ export async function POST(req: NextRequest) {
     const addonCfg = ADDON_CONFIG[addonKey];
     if (!addonCfg) {
       return NextResponse.json({ error: "Invalid add-on" }, { status: 400 });
-    }
-
-    if (addonKey === "option_flow") {
-      return NextResponse.json(getOptionFlowBetaApiPayload("en"), { status: 403 });
     }
 
     const billingCycle = (body?.billingCycle as "monthly" | "annual" | undefined) || "monthly";

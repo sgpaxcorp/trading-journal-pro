@@ -17,7 +17,7 @@ function escapeHtml(value: string) {
 
 export async function POST(req: NextRequest) {
   try {
-    const rate = rateLimit(`contact:ip:${getClientIp(req)}`, {
+    const rate = await rateLimit(`contact:ip:${getClientIp(req)}`, {
       limit: 5,
       windowMs: 10 * 60_000,
     });

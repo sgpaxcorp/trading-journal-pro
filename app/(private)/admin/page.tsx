@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import TopNav from "@/app/components/TopNav";
 import AccessGrantManager from "@/app/(private)/admin/AccessGrantManager";
 import AdminEmailAutomations from "@/app/(private)/admin/AdminEmailAutomations";
+import AdminSupportInbox from "@/app/(private)/admin/AdminSupportInbox";
 import AdminUsersManager from "@/app/(private)/admin/AdminUsersManager";
 import { useAuth } from "@/context/AuthContext";
 import { useAppSettings } from "@/lib/appSettings";
@@ -38,7 +39,8 @@ type Metrics = {
   conversionRate: number;
 };
 
-type AdminTab = "overview" | "growth" | "usage" | "emails" | "users" | "operations";
+type AdminTab = "overview" | "growth" | "usage" | "emails" | "users" | "inbox";
+type UsersSubview = "directory" | "access";
 
 function Sparkline({
   data,
@@ -197,6 +199,7 @@ export default function AdminDashboardPage() {
   const L = (en: string, es: string) => (isEs ? es : en);
 
   const [activeTab, setActiveTab] = useState<AdminTab>("overview");
+  const [usersSubview, setUsersSubview] = useState<UsersSubview>("directory");
   const [metrics, setMetrics] = useState<Metrics | null>(null);
   const [loadingMetrics, setLoadingMetrics] = useState(true);
   const [forbidden, setForbidden] = useState(false);
@@ -320,9 +323,9 @@ export default function AdminDashboardPage() {
         description: L("User management, inactivity, and outreach segments.", "Gestión de usuarios, inactividad y segmentos."),
       },
       {
-        key: "operations" as const,
-        label: L("Operations", "Operaciones"),
-        description: L("Manual access and admin controls.", "Acceso manual y controles de admin."),
+        key: "inbox" as const,
+        label: L("Inbox", "Inbox"),
+        description: L("Support threads, staff replies, and AI service triage.", "Tickets de soporte, respuestas del staff y triage IA."),
       },
     ],
     [L]
@@ -684,98 +687,126 @@ export default function AdminDashboardPage() {
 
         {activeTab === "emails" && (
           <div className="space-y-6">
+            <SectionShell
+              eyebrow={L("Messaging", "Mensajería")}
+              title={L("Daily motivation schedule", "Horario de motivación diaria")}
+              description={L(
+                "Control the send hour for the daily motivational message in New York time. The broader message library and broadcast tools live in this same workspace.",
+                "Controla la hora de envío del mensaje motivacional diario en hora de New York. La librería de mensajes y los broadcasts viven dentro de este mismo workspace."
+              )}
+              right={
+                <button
+                  type="button"
+                  onClick={handleSaveSchedule}
+                  disabled={scheduleLoading || scheduleSaving}
+                  className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-sm font-medium text-emerald-200 disabled:opacity-50"
+                >
+                  {scheduleSaving ? L("Saving…", "Guardando…") : L("Save schedule", "Guardar horario")}
+                </button>
+              }
+            >
+              <div className="grid gap-4 lg:grid-cols-[0.44fr_0.56fr]">
+                <div className="rounded-2xl border border-slate-800 bg-slate-950/50 p-5">
+                  <label className="flex flex-col gap-2">
+                    <span className="text-xs text-slate-400">{L("Hour (ET)", "Hora (ET)")}</span>
+                    <select
+                      value={scheduleHourNy}
+                      onChange={(e) => setScheduleHourNy(e.target.value)}
+                      className="rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-slate-100 outline-none"
+                      disabled={scheduleLoading || scheduleSaving}
+                    >
+                      {Array.from({ length: 24 }, (_, hour) => (
+                        <option key={hour} value={String(hour)}>
+                          {String(hour).padStart(2, "0")}:00 ET
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <p className="mt-3 text-xs text-slate-500">
+                    {L(
+                      "Current cron resolution is hourly, so minutes stay fixed at :00.",
+                      "La resolución actual del cron es por hora, así que los minutos quedan fijos en :00."
+                    )}
+                  </p>
+                </div>
+
+                <div className="rounded-2xl border border-slate-800 bg-slate-950/50 p-5">
+                  <p className="text-[11px] uppercase tracking-[0.24em] text-slate-500">
+                    {L("Messaging note", "Nota de mensajería")}
+                  </p>
+                  <div className="mt-3 space-y-3 text-sm text-slate-400">
+                    <p>
+                      {L(
+                        "This schedule controls when the app sends the daily motivation to the full user base.",
+                        "Este horario controla cuándo la app envía la motivación diaria a toda la base de usuarios."
+                      )}
+                    </p>
+                    <p>
+                      {L(
+                        "Keep manual broadcasts, previews, and motivation content together here so the communication tools stay in one place.",
+                        "Mantén aquí juntos los broadcasts manuales, previews y contenido motivacional para que la comunicación viva en un solo lugar."
+                      )}
+                    </p>
+                    {scheduleNotice ? <p className="text-emerald-300">{scheduleNotice}</p> : null}
+                  </div>
+                </div>
+              </div>
+            </SectionShell>
             <AdminEmailAutomations lang={lang} />
           </div>
         )}
 
         {activeTab === "users" && (
           <div className="space-y-6">
-            <AdminUsersManager lang={lang} />
-            <AccessGrantManager lang={lang} />
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div>
+                <p className="text-[11px] uppercase tracking-[0.24em] text-slate-500">
+                  {L("Users workspace", "Workspace de usuarios")}
+                </p>
+                <p className="mt-1 text-sm text-slate-400">
+                  {L(
+                    "Switch between the user directory and manual access grants so this area stays focused and compact.",
+                    "Cambia entre el directorio de usuarios y los accesos manuales para que esta área se mantenga enfocada y compacta."
+                  )}
+                </p>
+              </div>
+              <div className="inline-flex rounded-full border border-slate-800 bg-slate-950/70 p-1 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setUsersSubview("directory")}
+                  className={`rounded-full px-4 py-2 transition ${
+                    usersSubview === "directory"
+                      ? "bg-emerald-400 text-slate-950 font-semibold"
+                      : "text-slate-300 hover:text-slate-50"
+                  }`}
+                >
+                  {L("User directory", "Directorio")}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setUsersSubview("access")}
+                  className={`rounded-full px-4 py-2 transition ${
+                    usersSubview === "access"
+                      ? "bg-emerald-400 text-slate-950 font-semibold"
+                      : "text-slate-300 hover:text-slate-50"
+                  }`}
+                >
+                  {L("Manual access", "Acceso manual")}
+                </button>
+              </div>
+            </div>
+
+            {usersSubview === "directory" ? (
+              <AdminUsersManager lang={lang} />
+            ) : (
+              <AccessGrantManager lang={lang} />
+            )}
           </div>
         )}
 
-        {activeTab === "operations" && (
+        {activeTab === "inbox" && (
           <div className="space-y-6">
-            <SectionShell
-              eyebrow={L("Operations", "Operaciones")}
-              title={L("Admin controls", "Controles admin")}
-              description={L(
-                "Use this area for internal admin controls and operational settings.",
-                "Usa esta área para controles internos y ajustes operativos del admin."
-              )}
-            >
-              <div className="grid grid-cols-1 gap-6 xl:grid-cols-[0.85fr_1.15fr]">
-                <div className="rounded-2xl border border-slate-800 bg-slate-950/50 p-5 space-y-5">
-                  <div className="space-y-2">
-                    <p className="text-[11px] uppercase tracking-[0.24em] text-slate-500">
-                      {L("Motivation schedule", "Horario de motivación")}
-                    </p>
-                    <h3 className="text-lg font-semibold text-slate-100">
-                      {L("Daily motivational push hour", "Hora del push motivacional diario")}
-                    </h3>
-                    <p className="text-sm text-slate-400">
-                      {L(
-                        "This controls the daily motivational message in New York time. Friday, Saturday, and Sunday keep their own special message types.",
-                        "Esto controla el mensaje motivacional diario en hora de New York. Viernes, sábado y domingo mantienen sus tipos especiales."
-                      )}
-                    </p>
-                  </div>
-
-                  <div className="flex flex-col gap-3 md:flex-row md:items-end">
-                    <label className="flex flex-col gap-2">
-                      <span className="text-xs text-slate-400">{L("Hour (ET)", "Hora (ET)")}</span>
-                      <select
-                        value={scheduleHourNy}
-                        onChange={(e) => setScheduleHourNy(e.target.value)}
-                        className="rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-slate-100 outline-none"
-                        disabled={scheduleLoading || scheduleSaving}
-                      >
-                        {Array.from({ length: 24 }, (_, hour) => (
-                          <option key={hour} value={String(hour)}>
-                            {String(hour).padStart(2, "0")}:00 ET
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <button
-                      type="button"
-                      onClick={handleSaveSchedule}
-                      disabled={scheduleLoading || scheduleSaving}
-                      className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-sm font-medium text-emerald-200 disabled:opacity-50"
-                    >
-                      {scheduleSaving ? L("Saving…", "Guardando…") : L("Save schedule", "Guardar horario")}
-                    </button>
-                  </div>
-
-                  <p className="text-xs text-slate-500">
-                    {L(
-                      "Current cron resolution is hourly, so minutes stay fixed at :00.",
-                      "La resolución actual del cron es por hora, así que los minutos quedan fijos en :00."
-                    )}
-                  </p>
-                  {scheduleNotice ? <p className="text-sm text-emerald-300">{scheduleNotice}</p> : null}
-                </div>
-
-                <div className="rounded-2xl border border-slate-800 bg-slate-950/50 p-5">
-                  <div className="space-y-2">
-                    <p className="text-[11px] uppercase tracking-[0.24em] text-slate-500">
-                      {L("Operations note", "Nota operativa")}
-                    </p>
-                    <h3 className="text-lg font-semibold text-slate-100">
-                      {L("Operational workspace", "Workspace operativo")}
-                    </h3>
-                    <p className="text-sm text-slate-400">
-                      {L(
-                        "Keep this tab focused on platform controls. User creation, banning, deletion, and outreach segmentation now live under the dedicated Users tab.",
-                        "Mantén este tab enfocado en controles de plataforma. La creación de usuarios, ban, borrado y segmentación ahora viven en el tab dedicado de Users."
-                      )}
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </SectionShell>
-
+            <AdminSupportInbox lang={lang} />
           </div>
         )}
       </div>

@@ -12,7 +12,7 @@ type RecoveryProfileRow = {
 };
 
 export async function POST(req: NextRequest) {
-  const rate = rateLimit(`auth-account-recovery:${getClientIp(req)}`, {
+  const rate = await rateLimit(`auth-account-recovery:${getClientIp(req)}`, {
     limit: 5,
     windowMs: 10 * 60_000,
   });

@@ -12,7 +12,7 @@ type RecoveryProfileRow = {
 };
 
 export async function POST(req: NextRequest) {
-  const rate = rateLimit(`auth-password-reset:${getClientIp(req)}`, {
+  const rate = await rateLimit(`auth-password-reset:${getClientIp(req)}`, {
     limit: 5,
     windowMs: 10 * 60_000,
   });

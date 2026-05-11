@@ -684,7 +684,7 @@ export default function TopNav() {
 
   return (
     <nav className={navClass}>
-      <div className="flex flex-wrap items-center px-4 py-3 md:px-6 gap-x-6 gap-y-3 w-full">
+      <div className="flex flex-wrap items-center px-4 py-2.5 md:px-6 gap-x-5 gap-y-2 w-full">
         {/* Brand */}
         <Link
           href="/dashboard"
@@ -696,7 +696,7 @@ export default function TopNav() {
           <img
             src="/neurotrader-logo.svg"
             alt="Neuro Trader Journal"
-            className="h-24 md:h-28 lg:h-32 w-auto object-contain"
+            className="h-14 md:h-16 lg:h-20 w-auto object-contain"
             draggable={false}
           />
         </Link>

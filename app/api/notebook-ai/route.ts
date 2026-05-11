@@ -19,7 +19,7 @@ export async function POST(req: Request) {
     const advancedGate = await requireAdvancedPlan(authUser.userId);
     if (advancedGate) return advancedGate;
 
-    const rate = rateLimit(`notebook-ai:user:${authUser.userId}`, {
+    const rate = await rateLimit(`notebook-ai:user:${authUser.userId}`, {
       limit: 6,
       windowMs: 60_000,
     });

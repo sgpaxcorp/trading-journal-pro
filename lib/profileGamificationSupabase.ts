@@ -38,18 +38,14 @@ function toNum(x: unknown, fb = 0): number {
 }
 
 function computeLevelFromXp(xp: number): number {
-  // Simple and stable thresholds (tweak later if you want more levels).
-  if (xp < 1000) return 1;
-  if (xp < 3000) return 2;
-  if (xp < 7000) return 3;
-  return 4;
+  return Math.max(1, Math.floor(Math.max(0, xp) / 500) + 1);
 }
 
-function computeTierFromLevel(level: number): ProfileTier {
-  if (level <= 1) return "Bronze";
-  if (level === 2) return "Silver";
-  if (level === 3) return "Gold";
-  return "Elite";
+function computeTierFromXp(xp: number): ProfileTier {
+  if (xp >= 5000) return "Elite";
+  if (xp >= 2500) return "Gold";
+  if (xp >= 1000) return "Silver";
+  return "Bronze";
 }
 
 function computeBadges(progress: ChallengeProgress[]): string[] {
@@ -106,7 +102,7 @@ async function readCachedGamificationFromDb(userId: string): Promise<ProfileGami
     const level = toNum((data as any).level, computeLevelFromXp(xp)) || 1;
 
     const tierRaw = (data as any).tier;
-    const tier: ProfileTier = isProfileTier(tierRaw) ? tierRaw : computeTierFromLevel(level);
+    const tier: ProfileTier = isProfileTier(tierRaw) ? tierRaw : computeTierFromXp(xp);
 
     const badges = Array.isArray((data as any).badges)
       ? (data as any).badges.map((b: any) => String(b)).filter(Boolean)
@@ -200,7 +196,7 @@ export async function getProfileGamification(
 
   const xp = challengeXp + trophyXp;
   const level = computeLevelFromXp(xp);
-  const tier = computeTierFromLevel(level);
+  const tier = computeTierFromXp(xp);
   const badges = computeBadges(progress || []);
 
   const snapshot: ProfileGamification = { xp, level, tier, badges };

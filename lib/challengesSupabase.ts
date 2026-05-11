@@ -358,11 +358,10 @@ function computeLevelFromXp(xp: number): number {
   return Math.max(1, Math.floor(safe / 500) + 1);
 }
 
-function computeTierFromLevel(level: number): string {
-  if (level >= 30) return "Diamond";
-  if (level >= 20) return "Platinum";
-  if (level >= 12) return "Gold";
-  if (level >= 6) return "Silver";
+function computeTierFromXp(xp: number): string {
+  if (xp >= 5000) return "Elite";
+  if (xp >= 2500) return "Gold";
+  if (xp >= 1000) return "Silver";
   return "Bronze";
 }
 
@@ -400,7 +399,7 @@ async function applyXpAndBadge(params: {
 
   const nextXp = Math.max(0, curXp + delta);
   const nextLevel = computeLevelFromXp(nextXp);
-  const nextTier = computeTierFromLevel(nextLevel);
+  const nextTier = computeTierFromXp(nextXp);
 
   let nextBadges = curBadges;
   if (badge && !curBadges.includes(badge)) {
@@ -802,4 +801,3 @@ export async function logChallengeDay(params: {
     dayLog,
   };
 }
-

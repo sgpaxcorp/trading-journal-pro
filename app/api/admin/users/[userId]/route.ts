@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
 
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
+import { ACCESS_GRANTS, isAccessGrantKey, type AccessGrantKey } from "@/lib/accessGrants";
 
 export const runtime = "nodejs";
 
@@ -168,6 +169,153 @@ async function performFullReset(userId: string) {
   };
 }
 
+function toISO(daysAgo: number) {
+  return new Date(Date.now() - daysAgo * 24 * 60 * 60 * 1000).toISOString();
+}
+
+async function syncAdminEntitlements(userId: string, keys: AccessGrantKey[]) {
+  const now = new Date().toISOString();
+  const selected = new Set<AccessGrantKey>(keys);
+  const allKeys = ACCESS_GRANTS.map((grant) => grant.key);
+  const toDisable = allKeys.filter((key) => !selected.has(key));
+
+  if (keys.length > 0) {
+    const rows = keys.map((key) => ({
+      user_id: userId,
+      entitlement_key: key,
+      status: "active",
+      source: "admin",
+      started_at: now,
+      ends_at: null,
+      metadata: {
+        granted_via: "admin_panel",
+        manual: true,
+      },
+    }));
+
+    const { error } = await supabaseAdmin.from("user_entitlements").upsert(rows, {
+      onConflict: "user_id,entitlement_key",
+    });
+    if (error) throw error;
+  }
+
+  if (toDisable.length > 0) {
+    const { error } = await supabaseAdmin
+      .from("user_entitlements")
+      .update({
+        status: "inactive",
+        ends_at: now,
+        updated_at: now,
+      })
+      .eq("user_id", userId)
+      .in("entitlement_key", toDisable)
+      .in("source", ["admin", "manual", "demo"]);
+
+    if (error) throw error;
+  }
+}
+
+async function buildUserDetail(userId: string) {
+  const { data: authData, error: authError } = await supabaseAdmin.auth.admin.getUserById(userId);
+  if (authError || !authData?.user) {
+    throw new Error(authError?.message ?? "User not found.");
+  }
+
+  const since30 = toISO(30);
+  const since120 = toISO(120);
+
+  const [{ data: profile }, { data: entitlements }, { data: sessions30 }, { data: sessions120 }, { data: events30 }] =
+    await Promise.all([
+      supabaseAdmin
+        .from("profiles")
+        .select("id,email,first_name,last_name,plan,subscription_status,show_in_ranking,created_at")
+        .eq("id", userId)
+        .maybeSingle(),
+      supabaseAdmin
+        .from("user_entitlements")
+        .select("entitlement_key,status,source")
+        .eq("user_id", userId),
+      supabaseAdmin
+        .from("usage_sessions")
+        .select("user_id")
+        .eq("user_id", userId)
+        .gte("started_at", since30),
+      supabaseAdmin
+        .from("usage_sessions")
+        .select("user_id,last_seen_at,started_at")
+        .eq("user_id", userId)
+        .gte("started_at", since120),
+      supabaseAdmin
+        .from("usage_events")
+        .select("user_id")
+        .eq("user_id", userId)
+        .gte("created_at", since30),
+    ]);
+
+  const activeEntitlements = (entitlements ?? [])
+    .filter((row: any) => {
+      const status = String(row?.status ?? "").toLowerCase();
+      return status === "active" || status === "trialing" || status === "paid";
+    })
+    .map((row: any) => String(row?.entitlement_key ?? ""))
+    .filter(Boolean)
+    .sort();
+
+  const accessSource =
+    (entitlements ?? []).find((row: any) => row?.source)?.source ??
+    ((authData.user.user_metadata?.accessSource as string | undefined) ?? null);
+
+  let lastActiveAt: string | null = null;
+  for (const row of sessions120 ?? []) {
+    const candidate = String((row as any)?.last_seen_at ?? (row as any)?.started_at ?? "");
+    if (!candidate) continue;
+    if (!lastActiveAt || candidate > lastActiveAt) lastActiveAt = candidate;
+  }
+
+  const firstName = String((profile as any)?.first_name ?? authData.user.user_metadata?.first_name ?? "");
+  const lastName = String((profile as any)?.last_name ?? authData.user.user_metadata?.last_name ?? "");
+  const fullName = `${firstName} ${lastName}`.trim() || String(authData.user.email ?? "User");
+
+  return {
+    id: String(authData.user.id),
+    email: String(authData.user.email ?? ""),
+    fullName,
+    firstName,
+    lastName,
+    createdAt: ((profile as any)?.created_at ?? authData.user.created_at ?? null) as string | null,
+    lastSignInAt: (authData.user.last_sign_in_at ?? null) as string | null,
+    lastActiveAt,
+    bannedUntil: (authData.user.banned_until ?? null) as string | null,
+    plan: ((profile as any)?.plan ?? authData.user.user_metadata?.plan ?? null) as string | null,
+    subscriptionStatus: ((profile as any)?.subscription_status ?? authData.user.user_metadata?.subscriptionStatus ?? null) as string | null,
+    showInRanking: Boolean((profile as any)?.show_in_ranking ?? false),
+    sessions30d: (sessions30 ?? []).length,
+    events30d: (events30 ?? []).length,
+    activeEntitlements,
+    accessSource,
+  };
+}
+
+export async function GET(
+  req: NextRequest,
+  { params }: { params: Promise<{ userId: string }> }
+) {
+  try {
+    const admin = await getAdminAuth(req);
+    if (!admin) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+
+    const { userId } = await params;
+    if (!userId) {
+      return NextResponse.json({ error: "Missing user id." }, { status: 400 });
+    }
+
+    const user = await buildUserDetail(userId);
+    return NextResponse.json({ ok: true, user });
+  } catch (err: any) {
+    return NextResponse.json({ error: err?.message ?? "Unexpected error" }, { status: 500 });
+  }
+}
+
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ userId: string }> }
@@ -177,7 +325,7 @@ export async function PATCH(
     if (!admin) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
     const { userId } = await params;
-    const body = (await req.json().catch(() => ({}))) as { action?: string };
+    const body = (await req.json().catch(() => ({}))) as { action?: string; accessKeys?: string[] };
     const action = String(body?.action ?? "").toLowerCase();
 
     if (!userId) {
@@ -214,6 +362,21 @@ export async function PATCH(
     if (action === "reset") {
       const result = await performFullReset(userId);
       return NextResponse.json({ ok: true, action: "reset", result });
+    }
+
+    if (action === "update_access") {
+      const rawKeys = Array.isArray(body?.accessKeys) ? body.accessKeys : [];
+      const accessKeys = Array.from(
+        new Set(
+          rawKeys
+            .map((value) => String(value))
+            .filter((value): value is AccessGrantKey => isAccessGrantKey(value))
+        )
+      );
+
+      await syncAdminEntitlements(userId, accessKeys);
+      const user = await buildUserDetail(userId);
+      return NextResponse.json({ ok: true, action: "update_access", user, accessKeys });
     }
 
     return NextResponse.json({ error: "Unsupported action." }, { status: 400 });

@@ -56,7 +56,7 @@ export async function POST(req: NextRequest) {
   }
 
   const ip = getClientIp(req);
-  const limiter = rateLimit(`optionflow-outcome:${auth.userId || ip}`, {
+  const limiter = await rateLimit(`optionflow-outcome:${auth.userId || ip}`, {
     limit: 10,
     windowMs: 60_000,
   });

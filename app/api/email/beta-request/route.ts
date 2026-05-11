@@ -22,7 +22,7 @@ export async function POST(req: NextRequest) {
   }
 
   const ip = getClientIp(req);
-  const limiter = rateLimit(`beta-request:${email}:${ip}`, {
+  const limiter = await rateLimit(`beta-request:${email}:${ip}`, {
     limit: 3,
     windowMs: 60 * 60 * 1000,
   });

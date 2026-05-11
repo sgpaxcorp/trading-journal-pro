@@ -18,7 +18,7 @@ type RateLimitResult = {
 
 const buckets = new Map<string, Bucket>();
 
-export function rateLimit(key: string, options: RateLimitOptions): RateLimitResult {
+function rateLimitLocal(key: string, options: RateLimitOptions): RateLimitResult {
   const now = Date.now();
   const { limit, windowMs } = options;
 
@@ -36,6 +36,46 @@ export function rateLimit(key: string, options: RateLimitOptions): RateLimitResu
     resetAt: bucket.resetAt,
     limit,
   };
+}
+
+export async function rateLimit(
+  key: string,
+  options: RateLimitOptions
+): Promise<RateLimitResult> {
+  if (process.env.NODE_ENV === "test") {
+    return rateLimitLocal(key, options);
+  }
+
+  try {
+    const { supabaseAdmin } = await import("@/lib/supaBaseAdmin");
+    const { data, error } = await supabaseAdmin.rpc("check_rate_limit", {
+      p_bucket_key: key,
+      p_limit: options.limit,
+      p_window_ms: options.windowMs,
+    });
+
+    if (error) throw error;
+
+    const row = Array.isArray(data) ? data[0] : data;
+    const resetAt = row?.reset_at ? new Date(String(row.reset_at)).getTime() : Date.now() + options.windowMs;
+
+    if (!row || Number.isNaN(resetAt)) {
+      throw new Error("Invalid rate limit response.");
+    }
+
+    return {
+      allowed: Boolean(row.allowed),
+      remaining: Math.max(0, Number(row.remaining ?? 0)),
+      resetAt,
+      limit: Math.max(1, Number(row.limit_value ?? options.limit)),
+    };
+  } catch (error) {
+    if (process.env.NODE_ENV !== "production") {
+      console.warn("[rateLimit] falling back to local bucket store:", error);
+      return rateLimitLocal(key, options);
+    }
+    throw error;
+  }
 }
 
 export function getClientIp(req: Request): string {

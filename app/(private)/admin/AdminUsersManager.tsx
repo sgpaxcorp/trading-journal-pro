@@ -1,7 +1,9 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
+import { getAccessGrantDefinition, isAccessGrantKey } from "@/lib/accessGrants";
 import { supabaseBrowser } from "@/lib/supaBaseClient";
 
 type Props = {
@@ -69,9 +71,24 @@ function toneForActivity(state: ReturnType<typeof getActivityState>) {
   return "border-slate-700 bg-slate-900 text-slate-300";
 }
 
+function fallbackGrantLabel(value: string) {
+  return String(value || "")
+    .split(/[_-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
 export default function AdminUsersManager({ lang }: Props) {
   const isEs = lang === "es";
   const L = (en: string, es: string) => (isEs ? es : en);
+  const formatGrantLabel = (grant: string) => {
+    if (isAccessGrantKey(grant)) {
+      const definition = getAccessGrantDefinition(grant);
+      if (definition) return isEs ? definition.label.es : definition.label.en;
+    }
+    return fallbackGrantLabel(grant);
+  };
 
   const [rows, setRows] = useState<AdminUserSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -81,7 +98,6 @@ export default function AdminUsersManager({ lang }: Props) {
   const [accountFilter, setAccountFilter] = useState<AccountFilter>("all");
   const [sortBy, setSortBy] = useState<SortOption>("most_used");
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
-  const [resetEmailConfirm, setResetEmailConfirm] = useState("");
   const [notice, setNotice] = useState<{ tone: "success" | "error" | "info"; text: string } | null>(null);
 
   async function fetchUsers() {
@@ -217,7 +233,6 @@ export default function AdminUsersManager({ lang }: Props) {
             "El usuario fue reseteado por completo y removido del workspace."
           ),
         });
-        setResetEmailConfirm("");
       } else {
         setNotice({
           tone: "success",
@@ -235,9 +250,6 @@ export default function AdminUsersManager({ lang }: Props) {
   }
 
   const selectedActivityState = selectedUser ? getActivityState(selectedUser) : null;
-  const canReset =
-    Boolean(selectedUser) &&
-    resetEmailConfirm.trim().toLowerCase() === String(selectedUser?.email ?? "").trim().toLowerCase();
 
   return (
     <section className="rounded-3xl border border-slate-800 bg-slate-900/60 p-6 md:p-7 space-y-6">
@@ -336,7 +348,7 @@ export default function AdminUsersManager({ lang }: Props) {
                   <th className="py-3 pr-4">{L("Activity", "Actividad")}</th>
                   <th className="py-3 pr-4">{L("Plan / status", "Plan / estado")}</th>
                   <th className="py-3 pr-4">{L("Usage 30d", "Uso 30d")}</th>
-                  <th className="py-3 pr-4">{L("Access", "Acceso")}</th>
+                  <th className="py-3 pr-4">{L("Included", "Incluido")}</th>
                   <th className="py-3 text-right">{L("Quick actions", "Acciones rápidas")}</th>
                 </tr>
               </thead>
@@ -358,7 +370,6 @@ export default function AdminUsersManager({ lang }: Props) {
                           type="button"
                           onClick={() => {
                             setSelectedUserId(row.id);
-                            setResetEmailConfirm("");
                           }}
                           className="space-y-1 text-left"
                         >
@@ -413,34 +424,38 @@ export default function AdminUsersManager({ lang }: Props) {
                         </div>
                       </td>
                       <td className="py-4 pr-4">
-                        <div className="flex flex-wrap gap-2">
-                          {row.activeEntitlements.slice(0, 4).map((grant) => (
-                            <span
-                              key={grant}
-                              className="rounded-full border border-slate-700 bg-slate-900 px-2 py-1 text-[10px] text-slate-300"
-                            >
-                              {grant}
-                            </span>
-                          ))}
-                          {row.activeEntitlements.length > 4 ? (
-                            <span className="rounded-full border border-slate-700 bg-slate-900 px-2 py-1 text-[10px] text-slate-400">
-                              +{row.activeEntitlements.length - 4}
-                            </span>
-                          ) : null}
+                        <div className="space-y-2 text-xs">
+                          <div className="text-slate-200">
+                            {row.activeEntitlements.length} {L("modules enabled", "módulos activos")}
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            {row.activeEntitlements.slice(0, 2).map((grant) => (
+                              <span
+                                key={grant}
+                                className="rounded-full border border-slate-700 bg-slate-900 px-2 py-1 text-[10px] text-slate-300"
+                              >
+                                {formatGrantLabel(grant)}
+                              </span>
+                            ))}
+                            {row.activeEntitlements.length > 2 ? (
+                              <span className="rounded-full border border-slate-700 bg-slate-900 px-2 py-1 text-[10px] text-slate-400">
+                                +{row.activeEntitlements.length - 2}
+                              </span>
+                            ) : null}
+                          </div>
                         </div>
                       </td>
                       <td className="py-4 text-right">
                         <div className="flex flex-wrap justify-end gap-2">
-                          <button
-                            type="button"
+                          <Link
+                            href={`/admin/users/${row.id}`}
                             onClick={() => {
                               setSelectedUserId(row.id);
-                              setResetEmailConfirm("");
                             }}
                             className="rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-xs font-medium text-slate-200"
                           >
-                            {L("Open", "Abrir")}
-                          </button>
+                            {L("Manage", "Gestionar")}
+                          </Link>
                           <button
                             type="button"
                             onClick={() => void runAction(row.id, isBanned ? "unban" : "ban")}
@@ -544,7 +559,7 @@ export default function AdminUsersManager({ lang }: Props) {
               <p className="text-sm text-slate-400">
                 {selectedUser
                   ? selectedUser.email
-                  : L("Choose a row from the table to inspect details and run stronger actions.", "Elige una fila de la tabla para inspeccionar detalles y ejecutar acciones fuertes.")}
+                  : L("Choose a row from the table to open the user profile and edit what they can access.", "Elige una fila de la tabla para abrir el perfil del usuario y editar a qué puede acceder.")}
               </p>
             </div>
 
@@ -576,13 +591,11 @@ export default function AdminUsersManager({ lang }: Props) {
                   </div>
 
                   <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
-                    <div className="text-slate-500">{L("Billing", "Billing")}</div>
+                    <div className="text-slate-500">{L("Plan", "Plan")}</div>
                     <div className="mt-2 text-slate-100">
                       {selectedUser.plan ?? "—"} · {selectedUser.subscriptionStatus ?? "—"}
                     </div>
-                    <div className="mt-1 text-slate-400">
-                      {L("Source", "Origen")}: {selectedUser.accessSource ?? "—"}
-                    </div>
+                    <div className="mt-1 text-slate-400">{selectedUser.activeEntitlements.length} {L("modules enabled", "módulos activos")}</div>
                   </div>
 
                   <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
@@ -597,100 +610,26 @@ export default function AdminUsersManager({ lang }: Props) {
                 </div>
 
                 <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
-                  <div className="text-[11px] uppercase tracking-[0.2em] text-slate-500">{L("Entitlements", "Entitlements")}</div>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {selectedUser.activeEntitlements.length ? (
-                      selectedUser.activeEntitlements.map((grant) => (
-                        <span
-                          key={grant}
-                          className="rounded-full border border-slate-700 bg-slate-950 px-2.5 py-1 text-[10px] text-slate-300"
-                        >
-                          {grant}
-                        </span>
-                      ))
-                    ) : (
-                      <span className="text-sm text-slate-500">{L("No active entitlements.", "Sin entitlements activos.")}</span>
+                  <div className="text-[11px] uppercase tracking-[0.2em] text-slate-500">{L("Next step", "Siguiente paso")}</div>
+                  <p className="mt-2 text-sm text-slate-400">
+                    {L(
+                      "Open the user profile to turn modules on or off, review included areas, and handle stronger account actions in one dedicated place.",
+                      "Abre el perfil del usuario para prender o apagar módulos, revisar las áreas incluidas y manejar acciones fuertes de la cuenta en un solo lugar."
                     )}
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <button
-                    type="button"
-                    onClick={() => void runAction(selectedUser.id, selectedUser.bannedUntil ? "unban" : "ban")}
-                    disabled={busyId === `${selectedUser.bannedUntil ? "unban" : "ban"}:${selectedUser.id}`}
-                    className={`rounded-xl border px-4 py-3 text-sm font-medium ${
-                      selectedUser.bannedUntil
-                        ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
-                        : "border-amber-500/30 bg-amber-500/10 text-amber-200"
-                    } disabled:opacity-50`}
+                  </p>
+                  <Link
+                    href={`/admin/users/${selectedUser.id}`}
+                    className="mt-4 inline-flex rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-sm font-medium text-emerald-200"
                   >
-                    {selectedUser.bannedUntil ? L("Unban user", "Desbanear usuario") : L("Ban user", "Banear usuario")}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const confirmed = window.confirm(
-                        L(
-                          `Delete auth account for ${selectedUser.email}? This is permanent.`,
-                          `¿Borrar la cuenta auth de ${selectedUser.email}? Esto es permanente.`
-                        )
-                      );
-                      if (confirmed) void runAction(selectedUser.id, "delete");
-                    }}
-                    disabled={busyId === `delete:${selectedUser.id}`}
-                    className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm font-medium text-rose-200 disabled:opacity-50"
-                  >
-                    {L("Delete auth user", "Borrar usuario auth")}
-                  </button>
-                </div>
-
-                <div className="rounded-2xl border border-rose-500/25 bg-rose-500/10 p-5 space-y-4">
-                  <div className="space-y-2">
-                    <p className="text-[11px] uppercase tracking-[0.2em] text-rose-300">{L("Danger zone", "Zona de peligro")}</p>
-                    <h4 className="text-base font-semibold text-rose-100">
-                      {L("Full reset user", "Reset total del usuario")}
-                    </h4>
-                    <p className="text-sm text-rose-100/80">
-                      {L(
-                        "This cancels active Stripe subscriptions when possible, removes user-owned files from Supabase Storage, deletes the auth user, and lets the database cleanup trigger remove the rest of the user-owned data.",
-                        "Esto cancela suscripciones activas de Stripe cuando sea posible, elimina archivos del usuario en Supabase Storage, borra el usuario auth y deja que el trigger de cleanup de la base elimine el resto de la data del usuario."
-                      )}
-                    </p>
-                  </div>
-
-                  <label className="flex flex-col gap-2">
-                    <span className="text-xs text-rose-100/70">
-                      {L(
-                        "Type the exact email to enable the full reset button",
-                        "Escribe el email exacto para habilitar el botón de reset total"
-                      )}
-                    </span>
-                    <input
-                      value={resetEmailConfirm}
-                      onChange={(e) => setResetEmailConfirm(e.target.value)}
-                      className="rounded-xl border border-rose-500/30 bg-slate-950 px-4 py-3 text-sm text-slate-100 outline-none"
-                      placeholder={selectedUser.email}
-                    />
-                  </label>
-
-                  <button
-                    type="button"
-                    onClick={() => void runAction(selectedUser.id, "reset")}
-                    disabled={!canReset || busyId === `reset:${selectedUser.id}`}
-                    className="w-full rounded-xl border border-rose-500/35 bg-rose-500/15 px-4 py-3 text-sm font-semibold text-rose-100 disabled:opacity-50"
-                  >
-                    {busyId === `reset:${selectedUser.id}`
-                      ? L("Resetting user…", "Reseteando usuario…")
-                      : L("Full reset user", "Reset total del usuario")}
-                  </button>
+                    {L("Open user profile", "Abrir perfil del usuario")}
+                  </Link>
                 </div>
               </>
             ) : (
               <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5 text-sm text-slate-400">
                 {L(
-                  "Choose a user from the table to see details, access, usage, and dangerous actions.",
-                  "Elige un usuario de la tabla para ver detalles, acceso, uso y acciones peligrosas."
+                  "Choose a user from the table to open the dedicated profile page and manage their modules there.",
+                  "Elige un usuario de la tabla para abrir la página dedicada del perfil y manejar allí sus módulos."
                 )}
               </div>
             )}

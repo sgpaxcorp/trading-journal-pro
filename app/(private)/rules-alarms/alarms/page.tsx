@@ -835,13 +835,13 @@ export default function AlarmsConsolePage() {
   return (
     <main className="min-h-screen bg-slate-950 text-slate-50">
       <TopNav />
-      <div className="px-6 md:px-10 py-8 max-w-7xl mx-auto">
+      <div className="px-6 md:px-10 py-6 max-w-7xl mx-auto">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div>
           <div className="text-[11px] uppercase tracking-[0.32em] text-emerald-400">
             {L("Rules & Alarms • Alarms", "Reglas y alarmas • Alarmas")}
           </div>
-          <h1 className="mt-2 text-3xl font-semibold text-slate-100">
+          <h1 className="mt-2 text-2xl font-semibold text-slate-100">
             {L("Active alarms & audit trail", "Alarmas activas y auditoría")}
           </h1>
           <p className="mt-2 max-w-2xl text-sm text-slate-400">
@@ -853,6 +853,12 @@ export default function AlarmsConsolePage() {
           </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          <Link
+            href="/rules-alarms/reminders"
+            className="inline-flex items-center rounded-xl border border-slate-700 bg-slate-950/30 px-3 py-2 text-xs font-semibold text-slate-100 transition hover:border-emerald-500/60 hover:bg-emerald-500/10 hover:text-emerald-200"
+          >
+            {L("Open reminders", "Abrir recordatorios")}
+          </Link>
           <button
             type="button"
             onClick={() => router.push("/dashboard")}
@@ -894,7 +900,7 @@ export default function AlarmsConsolePage() {
         </div>
       )}
 
-        <div className="mt-6 grid gap-4 md:grid-cols-3">
+        <div className="mt-5 grid gap-3 md:grid-cols-3">
         <KpiCard label={L("Active alarms", "Alarmas activas")} value={String(activeEvents.length)} sub={L("Currently firing", "Disparándose ahora")} />
         <KpiCard label={L("Snoozed", "Pospuestas")} value={String(snoozedEvents.length)} sub={L("Hidden temporarily", "Ocultas temporalmente")} />
         <KpiCard
@@ -904,7 +910,7 @@ export default function AlarmsConsolePage() {
         />
       </div>
 
-        <div className="mt-6 flex flex-wrap gap-2">
+        <div className="mt-5 flex flex-wrap gap-2">
         {[
           ["active", L(`Active (${activeEvents.length})`, `Activas (${activeEvents.length})`)],
           ["rules", L(`Rules (${rules.length})`, `Reglas (${rules.length})`)],

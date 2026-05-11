@@ -322,7 +322,7 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
     }
   }
 
-  async function handleAddonCheckout(addonKey: "option_flow" | "broker_sync") {
+  async function handleAddonCheckout(addonKey: "broker_sync") {
     if (authLoading) return;
     if (!user) {
       setError(L("You need to sign in before starting checkout.", "Debes iniciar sesión antes de iniciar el checkout."));
@@ -421,8 +421,7 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
     }
   };
   const nextBillingDate = subscriptionInfo?.current_period_end ?? null;
-  const accessUntilDate = subscriptionInfo?.current_period_end ?? null;
-  const hasRenewalSettings = subscriptionLoading || Boolean(subscriptionInfo);
+  const hasRenewalSettings = Boolean(subscriptionInfo) || (subscriptionLoading && hasActivePlan);
   const subscriptionStatusLabel = subscriptionInfo?.status
     ? subscriptionInfo.status.replace(/_/g, " ")
     : statusLabel;
@@ -677,13 +676,16 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">
-                  {L("Add-ons", "Add-ons")}
+                  {L("Private beta", "Beta privada")}
                 </p>
                 <h2 className="text-lg font-semibold text-slate-100">
-                  {L("Option Flow Intelligence", "Option Flow Intelligence")}
+                  {L("Beta access requests", "Solicitudes de acceso beta")}
                 </h2>
                 <p className="text-xs text-slate-400 mt-1">
-                  {optionFlowBeta.description}
+                  {L(
+                    "Option Flow is not sold here. If you want to participate in the beta, send a request and we will activate access from Admin Center.",
+                    "Option Flow no se vende aquí. Si quieres participar en el beta, envía la solicitud y activaremos el acceso desde Admin Center."
+                  )}
                 </p>
               </div>
               <span className="rounded-full border border-slate-700 bg-slate-950/70 px-3 py-1 text-[11px] text-slate-300">
@@ -699,8 +701,8 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
               <div>
                 <p className="text-sm font-semibold text-slate-100">
                   {addonActive
-                    ? L("Beta access enabled for your account", "El acceso beta está activo para tu cuenta")
-                    : L("Private beta by request", "Beta privada por solicitud")}
+                    ? L("Option Flow beta access is active", "El acceso beta de Option Flow está activo")
+                    : L("Send an email request to join the beta", "Envía una solicitud por email para entrar al beta")}
                 </p>
                 <p className="text-[11px] text-slate-400">
                   {addonActive
@@ -753,6 +755,9 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
 
             <div className="flex items-center justify-between">
               <div>
+                <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">
+                  {L("Add-on", "Add-on")}
+                </p>
                 <h2 className="text-lg font-semibold text-slate-100">
                   {L("Broker Sync (SnapTrade)", "Broker Sync (SnapTrade)")}
                 </h2>
@@ -788,6 +793,14 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
                     ? L("Annual add-on", "Add-on anual")
                     : L("Monthly add-on", "Add-on mensual")}
                 </p>
+                {!hasActivePlan ? (
+                  <p className="mt-1 text-[11px] text-slate-500">
+                    {L(
+                      "Add it now and it will be included in the Stripe checkout at the bottom.",
+                      "Agrégalo ahora y se incluirá en el checkout de Stripe al final."
+                    )}
+                  </p>
+                ) : null}
               </div>
 
               <div className="flex flex-wrap items-center gap-3">
@@ -836,12 +849,12 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
                   {L("Renewal settings", "Ajustes de renovación")}
                 </p>
                 <h2 className="text-lg font-semibold text-slate-100">
-                  {L("Auto-renew & billing timing", "Auto-renovación y calendario de cobro")}
+                  {L("Auto-renew & next billing date", "Auto-renovación y próxima fecha de cobro")}
                 </h2>
                 <p className="text-xs text-slate-400 mt-1">
                   {L(
-                    "Keep renewal controls simple here. Card updates, invoices, and cancellation live in the billing portal.",
-                    "Mantén aquí los controles de renovación simples. Actualizar tarjeta, invoices y cancelación vive en el portal de billing."
+                    "Keep this area simple: auto-renew on or off, plus the next billing date. Everything else stays in the billing portal.",
+                    "Mantén esta área simple: auto-renovación encendida o apagada, y la próxima fecha de cobro. Todo lo demás se queda en el portal de billing."
                   )}
                 </p>
               </div>
@@ -935,12 +948,12 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
                             {L("Billing portal", "Portal de billing")}
                           </p>
                           <p className="mt-2 text-sm font-semibold text-emerald-50">
-                            {L("Need a billing change?", "¿Necesitas un cambio de billing?")}
+                            {L("Need the secure billing portal?", "¿Necesitas el portal seguro de billing?")}
                           </p>
                           <p className="mt-1 text-[11px] text-emerald-100/80">
                             {L(
-                              "Use the secure portal for card updates, invoices, and cancellation.",
-                              "Usa el portal seguro para actualizar tarjeta, invoices y cancelación."
+                              "Open it only when you need invoices, card changes, or other billing actions outside of auto-renew.",
+                              "Ábrelo solo cuando necesites invoices, cambios de tarjeta u otras acciones de billing fuera de la auto-renovación."
                             )}
                           </p>
                         </div>
@@ -949,7 +962,7 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
                           onClick={handleOpenBillingManagement}
                           className="rounded-xl bg-emerald-400 px-4 py-2 text-xs font-semibold text-slate-950 hover:bg-emerald-300"
                         >
-                          {L("Manage billing", "Gestionar billing")}
+                          {L("Open billing portal", "Abrir portal de billing")}
                         </button>
                       </div>
                     </div>
