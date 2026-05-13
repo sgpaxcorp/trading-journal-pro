@@ -1,153 +1,16 @@
 "use client";
 
 import Link from "next/link";
-import type { CSSProperties } from "react";
+import {
+  catalogText,
+  PLAN_CATALOG,
+  PLAN_COMPARISON_ROWS,
+  type CatalogLocale,
+  type PlanCell,
+} from "@/lib/planCatalog";
+import type { PlanId } from "@/lib/types";
 
-type PlanId = "core" | "advanced";
-
-type PlanRow = {
-  section?: string;
-  subheader?: string;
-  label?: string;
-  core?: string | boolean;
-  advanced?: string | boolean;
-  indent?: number;
-  sectionStyle?: CSSProperties;
-  subheaderStyle?: CSSProperties;
-  labelStyle?: CSSProperties;
-};
-
-const ROWS: PlanRow[] = [
-  { section: "GENERAL", sectionStyle: { fontSize: "15px", color: "#e5e7eb" } },
-  { label: "Trading accounts", core: "5", advanced: "Unlimited" },
-  { label: "Support", core: "Email support", advanced: "Priority email & chat" },
-  { label: "Mobile app (iOS)", core: true, advanced: true },
-  { section: "JOURNAL & PLANNING", sectionStyle: { fontSize: "15px", color: "#e5e7eb" } },
-  { label: "Growth plan & daily targets", core: true, advanced: true },
-  { label: "Daily Journal", core: true, advanced: true },
-  { label: "Premarket, inside trade & after trade notes", core: true, advanced: true },
-  { label: "Journal checklist", core: true, advanced: true },
-  { label: "Setup rules & triggers", core: true, advanced: true },
-  { label: "Alerts & reminders", core: "Basic", advanced: "Advanced" },
-  {
-    subheader: "Advanced Notebook",
-    subheaderStyle: { paddingLeft: "24px", fontSize: "15px", color: "#22c55e", fontWeight: 600 },
-  },
-  { label: "Notebook library", indent: 1, core: false, advanced: true },
-  { label: "Custom notebooks, sections & pages", indent: 1, core: false, advanced: true },
-  { label: "Rich text & ink pages", indent: 1, core: false, advanced: true },
-  { section: "REPORTING", sectionStyle: { fontSize: "15px", color: "#e5e7eb" } },
-  { label: "Calendar results", core: true, advanced: true },
-  { label: "Equity curve & balance chart", core: true, advanced: true },
-  { label: "Cashflow tracking", core: false, advanced: true },
-  { label: "Profit & Loss Track (business accounting)", core: false, advanced: true },
-  { label: "Advanced PDF exports", core: false, advanced: true },
-  { section: "ANALYTICS", sectionStyle: { fontSize: "15px", color: "#e5e7eb" } },
-  { label: "Core KPIs", core: true, advanced: true },
-  { label: "Streaks", core: true, advanced: true },
-  { label: "Time-of-day breakdown", core: false, advanced: true },
-  { label: "Instrument & strategy breakdowns", core: false, advanced: true },
-  { label: "Risk metrics", core: false, advanced: true },
-  { label: "Edge breakdowns", core: false, advanced: true },
-  { section: "OTHER TOOLS", sectionStyle: { fontSize: "15px", color: "#e5e7eb" } },
-  { label: "Trade review workspace", core: true, advanced: true },
-  { label: "Back-Studying workspace", core: false, advanced: true },
-  { label: "Audit workbench", core: false, advanced: true },
-  { label: "Manual broker imports", core: true, advanced: true },
-  { label: "Challenges", core: true, advanced: true },
-  { label: "Global ranking (opt-in)", core: true, advanced: true },
-  { label: "Option Flow Intelligence (private beta)", core: "Private beta", advanced: "Private beta" },
-  { label: "Broker Sync (SnapTrade) (add-on)", core: "Add-on", advanced: "Add-on" },
-  { section: "COACHING PROGRAM & AI", sectionStyle: { fontSize: "15px", color: "#e5e7eb" } },
-  { label: "AI coaching & action plans", core: false, advanced: true },
-  { label: "Mindset prompts", core: false, advanced: true },
-  { section: "ADD-ON: OPTION FLOW INTELLIGENCE", sectionStyle: { fontSize: "15px", color: "#34d399" } },
-  { label: "Flow analysis summary", core: "Private beta", advanced: "Private beta" },
-  { label: "Premarket attack plan (PDF)", core: "Private beta", advanced: "Private beta" },
-  { label: "Downloadable PDF report", core: "Private beta", advanced: "Private beta" },
-  { label: "Key levels & risk notes", core: "Private beta", advanced: "Private beta" },
-  { label: "Screenshot or CSV ingest", core: "Private beta", advanced: "Private beta" },
-  { section: "ADD-ON: BROKER SYNC (SNAPTRADE)", sectionStyle: { fontSize: "15px", color: "#34d399" } },
-  { label: "Broker connection portal", core: "Add-on", advanced: "Add-on" },
-  { label: "Auto sync trades into Journal", core: "Add-on", advanced: "Add-on" },
-  { label: "Accounts, balances & activity", core: "Add-on", advanced: "Add-on" },
-];
-
-const ES_MAP: Record<string, string> = {
-  GENERAL: "GENERAL",
-  "JOURNAL & PLANNING": "JOURNAL Y PLANIFICACIÓN",
-  "PLANNING & RULES": "PLANIFICACIÓN Y REGLAS",
-  NOTEBOOK: "NOTEBOOK",
-  REPORTING: "REPORTES",
-  ANALYTICS: "ANALÍTICA",
-  "OTHER TOOLS": "OTRAS HERRAMIENTAS",
-  "COACHING PROGRAM & AI": "PROGRAMA DE COACHING E IA",
-  "ADD-ON: OPTION FLOW INTELLIGENCE": "ADD-ON: OPTION FLOW INTELLIGENCE",
-  "ADD-ON: BROKER SYNC (SNAPTRADE)": "ADD-ON: BROKER SYNC (SNAPTRADE)",
-  "Trading accounts": "Cuentas de trading",
-  Unlimited: "Ilimitadas",
-  Support: "Soporte",
-  "Mobile app (iOS)": "Aplicación móvil (iOS)",
-  "Growth plan & daily targets": "Plan de crecimiento y metas diarias",
-  "Daily Journal": "Journal diario",
-  "Premarket, inside trade & after trade notes": "Notas de premarket, inside trade y after trade",
-  "Journal checklist": "Checklist del journal",
-  "Setup rules & triggers": "Reglas y disparadores de setup",
-  "Alerts & reminders": "Alertas y recordatorios",
-  "Daily checklist": "Checklist diario",
-  "Advanced Notebook": "Notebook Advanced",
-  Notebook: "Notebook",
-  "Notebook library": "Biblioteca de notebooks",
-  "Custom notebooks, sections & pages": "Libretas custom, secciones y páginas",
-  "Rich text & ink pages": "Páginas rich text e ink",
-  "Premarket plan": "Plan premarket",
-  "Entries & exits": "Entradas y salidas",
-  "Emotions & tags": "Emociones y etiquetas",
-  "Lessons learned": "Lecciones aprendidas",
-  Templates: "Plantillas",
-  "Images & screenshots": "Imágenes y screenshots",
-  "Calendar results": "Calendario de resultados",
-  "Equity curve & balance chart": "Curva de equity y balance",
-  "Cashflow tracking": "Seguimiento de cashflows",
-  "Profit & Loss Track (business accounting)": "Profit & Loss Track (contabilidad)",
-  "Advanced PDF exports": "Exportaciones PDF avanzadas",
-  "AI summary report": "Reporte resumen con IA",
-  "Core KPIs": "KPIs clave",
-  "Time-of-day breakdown": "Desglose por hora",
-  "Instrument & strategy breakdowns": "Desglose por instrumento y estrategia",
-  "Risk metrics": "Métricas de riesgo",
-  "Edge breakdowns": "Breakdowns de edge",
-  Streaks: "Rachas",
-  "Trade review workspace": "Workspace de revisión de trades",
-  "Back-Studying workspace": "Workspace de Back-Studying",
-  "Audit workbench": "Audit workbench",
-  "Manual broker imports": "Imports manuales de bróker",
-  Challenges: "Retos",
-  "Global ranking (opt-in)": "Ranking global (opcional)",
-  "Option Flow Intelligence (private beta)": "Option Flow Intelligence (beta privada)",
-  "Broker Sync (SnapTrade) (add-on)": "Broker Sync (SnapTrade) (add-on)",
-  "Private beta": "Beta privada",
-  "AI coaching & action plans": "AI coaching y planes de acción",
-  "Mindset prompts": "Prompts de mindset",
-  "Flow analysis summary": "Resumen de análisis de flujo",
-  "Premarket attack plan (PDF)": "Plan de ataque premarket (PDF)",
-  "Downloadable PDF report": "Reporte PDF descargable",
-  "Key levels & risk notes": "Niveles clave y notas de riesgo",
-  "Screenshot or CSV ingest": "Ingesta por screenshot o CSV",
-  "Broker connection portal": "Portal de conexión de bróker",
-  "Auto sync trades into Journal": "Sincronización automática de trades al Journal",
-  "Accounts, balances & activity": "Cuentas, balances y actividad",
-  "Email support": "Soporte por email",
-  "Priority email & chat": "Email y chat prioritario",
-  "Best value": "Mejor valor",
-  Features: "Características",
-  "Compare Plans": "Comparar planes",
-  "Add-on": "Add-on",
-  Core: "Core",
-  Advanced: "Avanzado",
-};
-
-function renderCell(value: string | boolean | undefined, translate: (text: string) => string) {
+function renderCell(value: PlanCell | undefined, lang: CatalogLocale) {
   if (value === true) {
     return (
       <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-emerald-500/15 border border-emerald-400/70 text-emerald-300 text-xs">
@@ -158,7 +21,7 @@ function renderCell(value: string | boolean | undefined, translate: (text: strin
   if (value === false || value === undefined) {
     return <span className="text-slate-600 text-xs">—</span>;
   }
-  return <span className="text-[11px] text-slate-100">{translate(value)}</span>;
+  return <span className="text-[11px] text-slate-100">{catalogText(value, lang)}</span>;
 }
 
 type PlanComparisonTableProps = {
@@ -176,11 +39,6 @@ export function PlanComparisonTable({
   lang,
   showCtas = true,
 }: PlanComparisonTableProps) {
-  const translate = (text?: string) => {
-    if (!text) return "";
-    return lang === "es" ? ES_MAP[text] || text : text;
-  };
-
   return (
     <div className="max-w-6xl mx-auto rounded-2xl overflow-hidden bg-slate-950/96 border border-slate-800 shadow-2xl shadow-emerald-500/5">
       <table className="w-full border-collapse text-left">
@@ -198,7 +56,7 @@ export function PlanComparisonTable({
                   className="uppercase tracking-wide text-slate-400 font-semibold"
                   style={{ fontSize: "16px" }}
                 >
-                  {L("Core", "Core")}
+                  {catalogText(PLAN_CATALOG.core.name, lang)}
                 </span>
                 <span className="text-emerald-400 font-bold leading-none" style={{ fontSize: "25px" }}>
                   ${priceFor("core").toFixed(2)}
@@ -216,8 +74,8 @@ export function PlanComparisonTable({
                 )}
                 <span className="text-slate-500 max-w-[180px]" style={{ fontSize: "12px", lineHeight: "1.4" }}>
                   {L(
-                    "Ideal for independent traders who want structure and clarity.",
-                    "Ideal para traders independientes que buscan estructura y claridad."
+                    PLAN_CATALOG.core.comparisonDescription.en,
+                    PLAN_CATALOG.core.comparisonDescription.es
                   )}
                 </span>
                 {showCtas && (
@@ -235,7 +93,7 @@ export function PlanComparisonTable({
               <div className="flex flex-col items-center gap-3">
                 <div className="flex items-center gap-2">
                   <span className="uppercase tracking-wide text-emerald-300 font-semibold" style={{ fontSize: "16px" }}>
-                    {L("Advanced", "Advanced")}
+                    {catalogText(PLAN_CATALOG.advanced.name, lang)}
                   </span>
                   <span
                     className="px-2 py-0.5 rounded-full bg-emerald-400/10 text-emerald-300 border border-emerald-500/40"
@@ -260,8 +118,8 @@ export function PlanComparisonTable({
                 )}
                 <span className="text-slate-500 max-w-[200px] text-center" style={{ fontSize: "12px", lineHeight: "1.4" }}>
                   {L(
-                    "For serious traders, coaches, prop-firm style tracking, and business-level reporting.",
-                    "Para traders serios, coaches, tracking estilo prop-firm y reportes a nivel negocio."
+                    PLAN_CATALOG.advanced.comparisonDescription.en,
+                    PLAN_CATALOG.advanced.comparisonDescription.es
                   )}
                 </span>
                 {showCtas && (
@@ -278,22 +136,22 @@ export function PlanComparisonTable({
           </tr>
         </thead>
         <tbody>
-          {ROWS.map((row, i) => {
-            if (row.section) {
+          {PLAN_COMPARISON_ROWS.map((row, i) => {
+            if (row.kind === "section") {
               return (
                 <tr key={`section-${i}`} className="bg-slate-900/95">
                   <td
                     colSpan={3}
                     className="px-4 py-3 font-bold uppercase tracking-wide"
-                    style={{ fontSize: "15px", color: "#e5e7eb", ...(row.sectionStyle || {}) }}
+                    style={{ fontSize: "15px", color: row.tone === "addon" ? "#34d399" : "#e5e7eb" }}
                   >
-                    {translate(row.section)}
+                    {catalogText(row.label, lang)}
                   </td>
                 </tr>
               );
             }
 
-            if (row.subheader) {
+            if (row.kind === "subheader") {
               return (
                 <tr key={`subheader-${i}`} className="bg-emerald-900/10 border-y border-emerald-700/40">
                   <td
@@ -304,10 +162,9 @@ export function PlanComparisonTable({
                       fontSize: "13px",
                       color: "#22c55e",
                       textTransform: "none",
-                      ...(row.subheaderStyle || {}),
                     }}
                   >
-                    {translate(row.subheader)}
+                    {catalogText(row.label, lang)}
                   </td>
                 </tr>
               );
@@ -318,15 +175,15 @@ export function PlanComparisonTable({
               <tr key={i} className={i % 2 === 0 ? "bg-slate-950/95" : "bg-slate-950/90"}>
                 <td
                   className={`px-4 py-3 text-slate-100 border-t border-slate-900 ${paddingClass}`}
-                  style={{ fontSize: "12px", lineHeight: "1.5", ...(row.labelStyle || {}) }}
+                  style={{ fontSize: "12px", lineHeight: "1.5" }}
                 >
-                  {translate(row.label)}
+                  {catalogText(row.label, lang)}
                 </td>
                 <td className="px-4 py-3 text-center border-t border-slate-900" style={{ fontSize: "12px" }}>
-                  {renderCell(row.core, translate)}
+                  {renderCell(row.core, lang)}
                 </td>
                 <td className="px-4 py-3 text-center border-t border-slate-900" style={{ fontSize: "12px" }}>
-                  {renderCell(row.advanced, translate)}
+                  {renderCell(row.advanced, lang)}
                 </td>
               </tr>
             );

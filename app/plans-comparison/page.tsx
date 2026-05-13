@@ -7,6 +7,7 @@ import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
 import { PlanComparisonTable } from "../components/PlanComparisonTable";
 import { BrokerSupportTable } from "../components/BrokerSupportTable";
+import { planMonthlyPrice } from "@/lib/planCatalog";
 
 export default function PlansComparison() {
   const year = new Date().getFullYear();
@@ -16,13 +17,8 @@ export default function PlansComparison() {
   const L = (en: string, es: string) => (isEs ? es : en);
   const [billingCycle, setBillingCycle] = useState<"monthly" | "annual">("monthly");
 
-  const PRICES = {
-    core: { monthly: 15.99, annual: 159.90 },
-    advanced: { monthly: 26.99, annual: 269.90 },
-  } as const;
-
   const priceFor = (planId: "core" | "advanced") =>
-    billingCycle === "monthly" ? PRICES[planId].monthly : PRICES[planId].annual / 12;
+    planMonthlyPrice(planId, billingCycle);
 
   return (
     <main className="min-h-screen bg-slate-950 text-slate-50 flex flex-col">
@@ -110,10 +106,10 @@ export default function PlansComparison() {
         <div className="mt-10">
           <BrokerSupportTable
             L={L}
-            title={L("Check broker support before you add Broker Sync", "Verifica brokers antes de activar Broker Sync")}
+            title={L("Choose the best broker data path", "Escoge la mejor ruta para tu data del bróker")}
             subtitle={L(
-              "SnapTrade coverage plus CSV-only brokers listed below.",
-              "Cobertura SnapTrade y brokers solo CSV listados abajo."
+              "Secure sync, broker statements, order history, and CSV/XLSX imports help turn raw broker activity into audit-ready records.",
+              "Sync seguro, statements del bróker, order history e imports CSV/XLSX ayudan a convertir actividad cruda del bróker en récords listos para auditar."
             )}
           />
         </div>

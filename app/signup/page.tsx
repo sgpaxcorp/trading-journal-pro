@@ -91,6 +91,9 @@ function SignUpPageInner() {
   const planParam = searchParams.get("plan");
   const planFromQuery: PlanId =
     planParam === "advanced" ? "advanced" : "core";
+  const cycleParam = searchParams.get("cycle");
+  const billingCycleFromQuery =
+    cycleParam === "annual" ? "annual" : "monthly";
   const partnerRaw = searchParams.get("partner") ?? searchParams.get("ref");
   const partnerCode = String(partnerRaw ?? "")
     .trim()
@@ -201,6 +204,7 @@ function SignUpPageInner() {
       const planParamValue = planFromQuery;
       const q = new URLSearchParams();
       q.set("plan", planParamValue);
+      q.set("cycle", billingCycleFromQuery);
       if (partnerCode) q.set("partner", partnerCode);
       router.push(`/billing?${q.toString()}`);
     } catch (err: any) {

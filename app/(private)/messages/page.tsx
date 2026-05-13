@@ -340,8 +340,8 @@ export default function MessageCenterPage() {
             <p className="mt-2 text-sm text-slate-400">
               {section === "support"
                 ? L(
-                    "Track support requests, screenshots, and replies in one place.",
-                    "Gestiona solicitudes de soporte, screenshots y respuestas en un solo lugar."
+                    "Use the 24/7 virtual support agent, track screenshots, and keep every ticket moving until it is resolved.",
+                    "Usa el agente virtual 24/7, adjunta screenshots y mantén cada ticket en seguimiento hasta resolverlo."
                   )
                 : L(
                     "All notifications in one place. Use filters to jump into Alarms or Reminders.",
@@ -519,7 +519,10 @@ export default function MessageCenterPage() {
                     {L("Support tickets", "Tickets de soporte")}
                   </div>
                   <p className="mt-1 text-xs text-slate-400">
-                    {L("Conversations with support.", "Conversaciones con soporte.")}
+                    {L(
+                      "Virtual agent 24/7 plus ticket follow-up.",
+                      "Agente virtual 24/7 más seguimiento de tickets."
+                    )}
                   </p>
                 </div>
                 {!isAdmin && (

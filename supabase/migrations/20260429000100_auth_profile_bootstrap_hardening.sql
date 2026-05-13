@@ -54,7 +54,8 @@ begin
     postal_address,
     plan,
     subscription_status,
-    onboarding_completed
+    onboarding_completed,
+    show_in_ranking
   )
   values (
     new.id,
@@ -69,7 +70,8 @@ begin
       nullif(meta->>'subscriptionStatus', ''),
       'pending'
     ),
-    false
+    false,
+    true
   )
   on conflict (id) do update
   set
@@ -79,7 +81,8 @@ begin
     phone = coalesce(excluded.phone, profiles.phone),
     postal_address = coalesce(excluded.postal_address, profiles.postal_address),
     plan = coalesce(excluded.plan, profiles.plan),
-    subscription_status = coalesce(excluded.subscription_status, profiles.subscription_status);
+    subscription_status = coalesce(excluded.subscription_status, profiles.subscription_status),
+    show_in_ranking = coalesce(profiles.show_in_ranking, excluded.show_in_ranking);
 
   return new;
 exception

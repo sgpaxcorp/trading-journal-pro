@@ -7,8 +7,17 @@ import { supabase } from "@/lib/supaBaseClient";
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
 import { PlanComparisonTable } from "@/app/components/PlanComparisonTable";
-
-type PlanId = "core" | "advanced";
+import {
+  ADVANCED_UNLOCKS,
+  ADVANCED_UPGRADE_PILLARS,
+  BROKER_SYNC_ADDON,
+  advancedUpgradePriceLabel,
+  brokerSyncPrice,
+  catalogText,
+  PLAN_CATALOG,
+  planMonthlyPrice,
+} from "@/lib/planCatalog";
+import type { PlanId } from "@/lib/types";
 
 type SimpleUser = {
   id: string;
@@ -39,18 +48,8 @@ export default function PricingPage() {
     setPartnerCode(code);
   }, []);
 
-  const PRICES = {
-    core: { monthly: 15.99, annual: 159.90 },
-    advanced: { monthly: 26.99, annual: 269.90 },
-  } as const;
-
-  const BROKER_SYNC = {
-    monthly: 5.0,
-    annual: 50.0,
-  } as const;
-
   const priceFor = (planId: PlanId) =>
-    billingCycle === "monthly" ? PRICES[planId].monthly : PRICES[planId].annual / 12;
+    planMonthlyPrice(planId, billingCycle);
 
   // Load current user from Supabase on mount
   useEffect(() => {
@@ -83,7 +82,11 @@ export default function PricingPage() {
 
     // If user is not logged1 in, send to signup and keep plan in query
     if (!user) {
-      router.push(`/signup?plan=${planId}`);
+      const q = new URLSearchParams();
+      q.set("plan", planId);
+      q.set("cycle", billingCycle);
+      if (partnerCode) q.set("partner", partnerCode);
+      router.push(`/signup?${q.toString()}`);
       return;
     }
 
@@ -225,6 +228,12 @@ export default function PricingPage() {
               <h2 className="text-sm font-semibold text-slate-50 mb-1">
                 {L("Core", "Core")}
               </h2>
+              <p className="mb-3 rounded-xl border border-slate-800 bg-slate-900/80 px-3 py-2 text-[10px] leading-relaxed text-slate-300">
+                {L(
+                  "Best starting point for structure, journaling, calendar, and core KPIs.",
+                  "El mejor punto de partida para estructura, journal, calendario y KPIs clave."
+                )}
+              </p>
               <div className="flex items-center gap-2">
                 <p className="text-emerald-400 text-3xl font-semibold leading-none">
                   ${priceFor("core").toFixed(2)}
@@ -242,24 +251,13 @@ export default function PricingPage() {
                 )}
               </div>
               <p className="text-[10px] text-slate-300 mt-2">
-                {L(
-                  "Ideal for active traders who want structure, clear goals and emotional control without overcomplicating things.",
-                  "Ideal para traders activos que buscan estructura, metas claras y control emocional sin complicarse."
-                )}
+                {catalogText(PLAN_CATALOG.core.description, lang)}
               </p>
               <div className="mt-3 h-px bg-slate-800" />
-              <ul className="mt-3 space-y-1.5 text-[16px] text-slate-200">
-                <li>✓ {L("Five (5) trading accounts", "Cinco (5) cuentas de trading")}</li>
-                <li>✓ {L("Premarket plan + journal entries/exits", "Plan premarket + entradas/salidas")}</li>
-                <li>✓ {L("Emotions, tags, and lessons learned", "Emociones, etiquetas y lecciones")}</li>
-                <li>✓ {L("Calendar results", "Calendario de resultados")}</li>
-                <li>✓ {L("Equity curve + balance chart", "Curva de equity + balance")}</li>
-                <li>✓ {L("Core KPIs", "KPIs clave")}</li>
-                <li>✓ {L("Basic alerts & reminders", "Alertas y recordatorios básicos")}</li>
-                <li>✓ {L("Manual broker imports", "Imports manuales de bróker")}</li>
-                <li>✓ {L("Trade review workspace & challenges", "Trade review y retos")}</li>
-                <li>✓ {L("Global ranking (opt-in)", "Ranking global (opcional)")}</li>
-                <li>✓ {L("Mobile app (iOS)", "Aplicación móvil (iOS)")}</li>
+              <ul className="mt-3 space-y-1.5 text-[12px] text-slate-200">
+                {PLAN_CATALOG.core.pricingFeatures.map((feature) => (
+                  <li key={feature.en}>✓ {catalogText(feature, lang)}</li>
+                ))}
               </ul>
               <button
                 onClick={() => handleStart("core")}
@@ -280,7 +278,7 @@ export default function PricingPage() {
               </Link>
 
               <p className="mt-2 text-[9px] text-slate-500">
-                {L("Perfect for personal accounts and first evaluations.", "Perfecto para cuentas personales y primeras evaluaciones.")}
+                {catalogText(PLAN_CATALOG.core.pricingFootnote, lang)}
               </p>
             </div>
 
@@ -313,26 +311,36 @@ export default function PricingPage() {
                   )}
                 </div>
                 <p className="text-[10px] text-slate-300 mt-2">
-                  {L(
-                    "For full-time and funded traders who need deep analytics, advanced alerts and reports ready for prop firms.",
-                    "Para traders full-time o fondeados que necesitan analítica profunda, alertas avanzadas y reportes listos para prop firms."
-                  )}
+                  {catalogText(PLAN_CATALOG.advanced.description, lang)}
                 </p>
+                <div className="mt-3 rounded-2xl border border-emerald-300/40 bg-emerald-300/10 p-3">
+                  <p className="text-[11px] font-semibold text-emerald-100">
+                    {advancedUpgradePriceLabel(lang, billingCycle)}
+                  </p>
+                  <p className="mt-1 text-[10px] leading-relaxed text-emerald-50/85">
+                    {L(
+                      "Unlock the full operating layer: AI coaching, business P&L, advanced statistics, audit tools, reports, and priority support.",
+                      "Desbloquea la capa completa: AI coaching, P&L de negocio, estadística avanzada, auditoría, reportes y soporte prioritario."
+                    )}
+                  </p>
+                </div>
+                <div className="mt-3 grid grid-cols-1 gap-2">
+                  {ADVANCED_UPGRADE_PILLARS.map((pillar) => (
+                    <div key={pillar.label.en} className="rounded-xl border border-emerald-300/20 bg-slate-900/80 px-3 py-2">
+                      <p className="text-[10px] font-semibold text-emerald-200">
+                        {catalogText(pillar.label, lang)}
+                      </p>
+                      <p className="mt-0.5 text-[9px] leading-relaxed text-slate-300">
+                        {catalogText(pillar.body, lang)}
+                      </p>
+                    </div>
+                  ))}
+                </div>
                 <div className="mt-3 h-px bg-slate-800" />
-                <ul className="mt-3 space-y-1.5 text-[16px] text-slate-200">
-                  <li>✓ {L("Unlimited trading accounts", "Cuentas de trading ilimitadas")}</li>
-                  <li>✓ {L("Everything in Core", "Todo lo de Core")}</li>
-                  <li>✓ {L("Notebook workspace", "Workspace de Notebook")}</li>
-                  <li>✓ {L("Cashflow tracking", "Seguimiento de cashflows")}</li>
-                  <li>✓ {L("Time-of-day & instrument breakdowns", "Desglose por hora e instrumento")}</li>
-                  <li>✓ {L("Risk metrics + streaks", "Métricas de riesgo + rachas")}</li>
-                  <li>✓ {L("Profit & Loss Track (business accounting)", "Profit & Loss Track (contabilidad)")}</li>
-                  <li>✓ {L("Back-Studying & Audit workbench", "Back-Studying y Audit workbench")}</li>
-                  <li>✓ {L("Advanced alerts & reminders", "Alertas y recordatorios avanzados")}</li>
-                  <li>✓ {L("AI coaching & action plans", "AI coaching y planes de acción")}</li>
-                  <li>✓ {L("Advanced PDF exports", "Exportaciones PDF avanzadas")}</li>
-                  <li>✓ {L("Priority email & chat support", "Soporte prioritario por email y chat")}</li>
-                  <li>✓ {L("Mobile app (iOS)", "Aplicación móvil (iOS)")}</li>
+                <ul className="mt-3 space-y-1.5 text-[12px] text-slate-200">
+                  {ADVANCED_UNLOCKS.map((feature) => (
+                    <li key={feature.en}>✓ {catalogText(feature, lang)}</li>
+                  ))}
                 </ul>
                 <button
                   onClick={() => handleStart("advanced")}
@@ -353,10 +361,7 @@ export default function PricingPage() {
                 </Link>
 
                 <p className="mt-2 text-[9px] text-emerald-300">
-                  {L(
-                    "If you treat trading like a business, this is your plan.",
-                    "Si tratas el trading como un negocio, este es tu plan."
-                  )}
+                  {catalogText(PLAN_CATALOG.advanced.pricingFootnote, lang)}
                 </p>
               </div>
             </div>
@@ -405,19 +410,16 @@ export default function PricingPage() {
                   {L("Add-on", "Add-on")}
                 </p>
                 <h3 className="text-sm font-semibold text-slate-50">
-                  {L("Broker Sync (SnapTrade)", "Broker Sync (SnapTrade)")}
+                  {BROKER_SYNC_ADDON.name}
                 </h3>
                 <p className="text-[10px] text-slate-300 mt-1">
-                  {L(
-                    "Connect your broker and sync transactions directly into your Journal.",
-                    "Conecta tu bróker y sincroniza transacciones directamente en tu Journal."
-                  )}
+                  {catalogText(BROKER_SYNC_ADDON.description, lang)}
+                </p>
+                <p className="mt-2 text-[10px] leading-relaxed text-emerald-200/85">
+                  {catalogText(BROKER_SYNC_ADDON.dataQualityNote, lang)}
                 </p>
                 <p className="mt-2 text-[10px] text-slate-400">
-                  {L(
-                    "Supported brokers (US): Alpaca, Alpaca Paper, Chase, E*Trade, Empower, Fidelity, Moomoo, Public, Robinhood, Schwab, Schwab OAuth, tastytrade, TD Direct Investing, TradeStation, TradeStation Paper, Tradier, Vanguard US, Webull US, Webull US OAuth, Wells Fargo. International: Interactive Brokers, Coinbase (crypto).",
-                    "Brokers soportados (US): Alpaca, Alpaca Paper, Chase, E*Trade, Empower, Fidelity, Moomoo, Public, Robinhood, Schwab, Schwab OAuth, tastytrade, TD Direct Investing, TradeStation, TradeStation Paper, Tradier, Vanguard US, Webull US, Webull US OAuth, Wells Fargo. Internacionales: Interactive Brokers, Coinbase (crypto)."
-                  )}
+                  {catalogText(BROKER_SYNC_ADDON.supportedBrokers, lang)}
                 </p>
               </div>
               <div className="flex items-center gap-3">
@@ -428,8 +430,8 @@ export default function PricingPage() {
                   <div className="text-emerald-200 text-2xl font-semibold leading-none">
                     ${
                       billingCycle === "monthly"
-                        ? BROKER_SYNC.monthly.toFixed(2)
-                        : BROKER_SYNC.annual.toFixed(2)
+                        ? brokerSyncPrice("monthly").toFixed(2)
+                        : brokerSyncPrice("annual").toFixed(2)
                     }
                   </div>
                   <div className="text-[9px] text-slate-400">

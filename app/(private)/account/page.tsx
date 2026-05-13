@@ -195,8 +195,11 @@ export default function AccountPage() {
 
   if (loading || !user) {
     return (
-      <main className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center">
-        <p className="text-slate-400 text-sm">{L("Loading account…", "Cargando cuenta…")}</p>
+      <main className="min-h-screen bg-slate-950 text-slate-50">
+        <TopNav />
+        <div className="flex min-h-[60vh] items-center justify-center px-6">
+          <p className="text-slate-400 text-sm">{L("Loading account…", "Cargando cuenta…")}</p>
+        </div>
       </main>
     );
   }

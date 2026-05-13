@@ -1,5 +1,5 @@
--- Part 3/4: Ranking/profile RPCs that use challenge XP + trophy XP.
--- Run after part 2.
+-- Make the consistency leaderboard useful by default while keeping PII out.
+-- Public ranking rows must never fall back to email as a display name.
 
 alter table if exists public.profiles
   add column if not exists ranking_name text,
@@ -8,6 +8,26 @@ alter table if exists public.profiles
 
 alter table if exists public.profiles
   alter column show_in_ranking set default true;
+
+do $$
+begin
+  if exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'profiles'
+      and column_name = 'subscription_status'
+  ) then
+    update public.profiles
+       set show_in_ranking = true
+     where coalesce(show_in_ranking, false) = false
+       and lower(coalesce(subscription_status, '')) in ('active', 'trialing', 'paid');
+  else
+    update public.profiles
+       set show_in_ranking = true
+     where show_in_ranking is null;
+  end if;
+end $$;
 
 create index if not exists profiles_show_in_ranking_idx
   on public.profiles(show_in_ranking)
@@ -200,5 +220,3 @@ grant execute on function public.nt_public_leaderboard(integer, integer) to auth
 grant execute on function public.nt_public_user_profile(uuid) to authenticated;
 
 notify pgrst, 'reload schema';
-
-select 'part 3 complete: ranking RPCs' as status;

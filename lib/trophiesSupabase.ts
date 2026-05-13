@@ -331,22 +331,20 @@ export async function listPublicLeaderboard(
 
   if (error) throw error;
 
-  return (data ?? []).map((r: any, idx: number) => ({
-    rank:
-      typeof r.rank === "number"
-        ? r.rank
-        : Number.isFinite(r.rank)
-        ? Number(r.rank)
-        : idx + 1 + offset,
-    user_id: String(r.user_id),
-    display_name: String(r.display_name ?? "Trader"),
-    avatar_url: (r.avatar_url ?? null) as string | null,
-    tier: (r.tier ?? "Bronze") as TrophyTier,
-    xp_total: Number(r.xp_total ?? 0),
-    trophies_count: Number(
-      r.trophies_count ?? r.trophies_total ?? r.trophies ?? 0
-    ),
-  }));
+  return (data ?? []).map((r: any, idx: number) => {
+    const rawRank = Number(r.rank);
+    return {
+      rank: Number.isFinite(rawRank) && rawRank > 0 ? rawRank : idx + 1 + offset,
+      user_id: String(r.user_id),
+      display_name: String(r.display_name ?? "Trader"),
+      avatar_url: (r.avatar_url ?? null) as string | null,
+      tier: (r.tier ?? "Bronze") as TrophyTier,
+      xp_total: Number(r.xp_total ?? 0),
+      trophies_count: Number(
+        r.trophies_count ?? r.trophies_total ?? r.trophies ?? 0
+      ),
+    };
+  });
 }
 
 export async function getPublicUserProfile(
@@ -381,12 +379,9 @@ export async function getPublicUserProfile(
     xp_total: xp,
     trophies_count: Number((row as any).trophies_count ?? (row as any).trophies_total ?? 0),
     level: Number((row as any).level ?? getLevelFromXp(xp)),
-    rank:
-      typeof (row as any).rank === "number"
-        ? (row as any).rank
-        : Number.isFinite(Number((row as any).rank))
-          ? Number((row as any).rank)
-          : null,
+    rank: Number.isFinite(Number((row as any).rank)) && Number((row as any).rank) > 0
+      ? Number((row as any).rank)
+      : null,
     show_in_ranking: Boolean((row as any).show_in_ranking ?? false),
   };
 }

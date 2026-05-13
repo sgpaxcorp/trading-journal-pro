@@ -116,7 +116,7 @@ async function upsertProfile(supabase, params) {
     plan,
     subscription_status: subscriptionStatus,
     onboarding_completed: Boolean(existing?.onboarding_completed ?? false),
-    show_in_ranking: Boolean(existing?.show_in_ranking ?? false),
+    show_in_ranking: Boolean(existing?.show_in_ranking ?? true),
   };
 
   const { error } = await supabase.from("profiles").upsert(payload, { onConflict: "id" });

@@ -4,750 +4,644 @@ import Link from "next/link";
 import FloatingAskButton from "./components/FloatingAskButton";
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
-import { BrokerSupportTable } from "./components/BrokerSupportTable";
+import {
+  ADVANCED_UNLOCKS,
+  ADVANCED_UPGRADE_PILLARS,
+  BROKER_SYNC_ADDON,
+  PLAN_CATALOG,
+  advancedUpgradePriceLabel,
+  catalogText,
+  planPriceLabel,
+} from "@/lib/planCatalog";
+
+type ProductPreviewKind = "dashboard" | "growth" | "coach";
+
+function ProductPreview({
+  kind,
+  L,
+}: {
+  kind: ProductPreviewKind;
+  L: (en: string, es: string) => string;
+}) {
+  if (kind === "growth") {
+    return (
+      <div className="h-48 rounded-md border border-white/10 bg-[#07101d] p-4">
+        <div className="flex items-center justify-between text-[11px] text-slate-400">
+          <span>{L("Growth timeline", "Timeline de growth")}</span>
+          <span className="text-emerald-300">{L("10 months", "10 meses")}</span>
+        </div>
+        <div className="mt-5 flex h-20 items-end gap-2">
+          {[18, 24, 31, 39, 45, 52, 61, 68, 76, 86].map((height, index) => (
+            <div key={index} className="flex h-full flex-1 flex-col justify-end gap-1">
+              <div
+                className="w-full rounded-sm bg-emerald-400/80"
+                style={{ height: `${Math.max(10, height * 0.58)}px` }}
+              />
+              <span className="text-[9px] text-slate-500">{index + 1}</span>
+            </div>
+          ))}
+        </div>
+        <div className="mt-5 grid grid-cols-3 gap-2 text-[10px]">
+          <div className="rounded-md border border-white/10 bg-[#0b1828] p-2">
+            <p className="text-slate-500">{L("Start", "Inicio")}</p>
+            <p className="font-semibold text-white">$10,000</p>
+          </div>
+          <div className="rounded-md border border-white/10 bg-[#0b1828] p-2">
+            <p className="text-slate-500">{L("Risk", "Riesgo")}</p>
+            <p className="font-semibold text-white">0.5R</p>
+          </div>
+          <div className="rounded-md border border-emerald-300/25 bg-emerald-300/10 p-2">
+            <p className="text-emerald-200">{L("Target", "Meta")}</p>
+            <p className="font-semibold text-white">$25,000</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (kind === "coach") {
+    return (
+      <div className="h-48 rounded-md border border-white/10 bg-[#07101d] p-4">
+        <div className="flex items-center justify-between text-[11px] text-slate-400">
+          <span>{L("AI coaching", "AI coaching")}</span>
+          <span className="text-sky-300">{L("Objective review", "Revisión objetiva")}</span>
+        </div>
+        <div className="mt-4 space-y-2">
+          <div className="max-w-[82%] rounded-md border border-white/10 bg-[#0b1828] px-3 py-2 text-xs text-slate-200">
+            {L("Why did I lose discipline after 2 PM?", "¿Por qué perdí disciplina después de las 2 PM?")}
+          </div>
+          <div className="ml-auto max-w-[88%] rounded-md border border-emerald-300/25 bg-emerald-300/10 px-3 py-2 text-xs text-emerald-100">
+            {L(
+              "Your late-session trades show lower win rate and higher emotional tags. Reduce size after target is reached.",
+              "Tus trades tarde muestran menor win rate y más tags emocionales. Baja size después de llegar a la meta."
+            )}
+          </div>
+          <div className="rounded-md border border-white/10 bg-[#0b1828] px-3 py-2 text-xs text-slate-300">
+            {L("Action: lock max trades per session to 3.", "Acción: limita trades por sesión a 3.")}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="h-48 rounded-md border border-white/10 bg-[#07101d] p-4">
+      <div className="flex items-center justify-between text-[11px] text-slate-400">
+        <span>{L("Daily command center", "Centro diario")}</span>
+        <span className="text-emerald-300">{L("Live view", "Vista activa")}</span>
+      </div>
+      <div className="mt-4 grid grid-cols-3 gap-2">
+        {[
+          ["$24.8k", L("Equity", "Equity")],
+          ["61%", L("Win rate", "Win rate")],
+          ["3", L("Rules hit", "Reglas")],
+        ].map(([value, label]) => (
+          <div key={label} className="rounded-md border border-white/10 bg-[#0b1828] p-2">
+            <p className="text-base font-semibold text-white">{value}</p>
+            <p className="text-[10px] text-slate-500">{label}</p>
+          </div>
+        ))}
+      </div>
+      <div className="mt-4 grid grid-cols-7 gap-1.5">
+        {Array.from({ length: 21 }).map((_, index) => {
+          const positive = [0, 1, 4, 6, 8, 10, 14, 17, 20].includes(index);
+          const negative = [3, 11, 16].includes(index);
+          return (
+            <div
+              key={index}
+              className={`h-5 rounded-sm ${positive ? "bg-emerald-400/85" : negative ? "bg-sky-400/80" : "bg-slate-700/80"}`}
+            />
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 export default function Home() {
   const { locale } = useAppSettings();
   const lang = resolveLocale(locale);
   const isEs = lang === "es";
   const L = (en: string, es: string) => (isEs ? es : en);
-  const cardGradient = "from-emerald-500/10 via-blue-500/10 to-violet-500/12";
-  const cardGlow = "from-emerald-500/14 via-blue-500/10 to-violet-500/14";
-  const cardBase =
-    "relative overflow-hidden rounded-2xl bg-gradient-to-br p-6 shadow-[0_12px_38px_rgba(0,0,0,0.35)] min-h-[140px] h-full";
-  const cardTitleClass = "relative text-white font-semibold text-[13px]";
-  const cardDescClass = "relative text-white/80 text-[11px] mt-2 leading-relaxed";
-  const year = new Date().getFullYear();
+  const t = (copy: { en: string; es: string }) => catalogText(copy, lang);
+
+  const heroMetrics = [
+    {
+      value: L("Plan creation", "Creación del plan"),
+      label: L(
+        "Build your Growth Plan with targets, dates, risk rails, daily goals, and rules.",
+        "Crea tu Growth Plan con metas, fechas, límites de riesgo, objetivos diarios y reglas."
+      ),
+    },
+    {
+      value: L("AI follow-up", "Seguimiento IA"),
+      label: L(
+        "AI Coach evaluates execution against your plan and turns drift into action items.",
+        "AI Coach evalúa tu ejecución contra el plan y convierte desvíos en acciones."
+      ),
+    },
+    {
+      value: L("Statistics", "Estadística"),
+      label: L(
+        "KPIs, calendar results, streaks, risk metrics, and performance breakdowns.",
+        "KPIs, calendario, rachas, métricas de riesgo y breakdowns de performance."
+      ),
+    },
+    {
+      value: L("Business", "Negocio"),
+      label: L(
+        "P&L, cashflow, reports, rules, and accountability for serious trading operations.",
+        "P&L, cashflow, reportes, reglas y accountability para operar como negocio."
+      ),
+    },
+  ];
+
+  const operatingLoop = [
+    {
+      title: L("Plan", "Planifica"),
+      body: L(
+        "Create your Growth Plan with target equity, dates, daily goals, max loss, risk per trade, and rules.",
+        "Crea tu Growth Plan con equity objetivo, fechas, metas diarias, max loss, riesgo por trade y reglas."
+      ),
+    },
+    {
+      title: L("Execute", "Ejecuta"),
+      body: L(
+        "Log trades, emotions, setups, and decisions without losing the flow of the trading day.",
+        "Registra trades, emociones, setups y decisiones sin romper el ritmo del día de trading."
+      ),
+    },
+    {
+      title: L("Review", "Revisa"),
+      body: L(
+        "AI Coach compares your execution against the plan, flags drift, and gives the next action.",
+        "AI Coach compara tu ejecución contra el plan, marca desvíos y te da la próxima acción."
+      ),
+    },
+  ];
+
+  const productViews = [
+    {
+      title: L("Dashboard", "Dashboard"),
+      body: L("A clean daily command center for equity, risk, and account health.", "Un centro diario para equity, riesgo y salud de cuenta."),
+      kind: "dashboard" as const,
+    },
+    {
+      title: L("Growth Plan", "Growth Plan"),
+      body: L(
+        "Your plan becomes the standard AI Coach uses to evaluate execution.",
+        "Tu plan se convierte en el estándar que AI Coach usa para evaluar tu ejecución."
+      ),
+      kind: "growth" as const,
+    },
+    {
+      title: L("AI Coach", "AI Coach"),
+      body: L("Objective feedback from your actual trading behavior.", "Feedback objetivo basado en tu comportamiento real."),
+      kind: "coach" as const,
+    },
+  ];
+
+  const focusAreas = [
+    {
+      label: L("Growth Plan", "Growth Plan"),
+      detail: L(
+        "Create the trading business plan: target, timeline, risk rails, rules, and checkpoints.",
+        "Crea el plan de negocio: meta, timeline, riesgo, reglas y checkpoints."
+      ),
+    },
+    {
+      label: L("AI plan accountability", "Accountability IA del plan"),
+      detail: L(
+        "AI Coach reviews whether your trades, behavior, and risk stayed aligned with the plan.",
+        "AI Coach revisa si tus trades, conducta y riesgo se mantuvieron alineados al plan."
+      ),
+    },
+    {
+      label: L("Daily journal", "Journal diario"),
+      detail: L("Premarket, entries, exits, emotions, tags, lessons, and screenshots.", "Premarket, entradas, salidas, emociones, tags, lecciones y screenshots."),
+    },
+    {
+      label: L("Rules & alarms", "Reglas y alarmas"),
+      detail: L("Max loss, daily targets, reminders, and process checks before the next trade.", "Max loss, metas diarias, recordatorios y checks antes del próximo trade."),
+    },
+  ];
+
+  const planIds = ["core", "advanced"] as const;
 
   return (
-    <main className="min-h-screen bg-slate-950 text-slate-50 overflow-x-hidden">
-      {/* Top Bar */}
-      <header className="w-full flex flex-col md:flex-row md:items-center md:justify-between gap-3 px-4 sm:px-6 md:px-12 py-4 border-b border-slate-800 bg-slate-950/90 backdrop-blur">
-        <div className="flex items-center gap-3">
-          <img
-            src="/neurotrader-logo.svg"
-            alt="Neuro Trader Journal"
-            className="h-20 md:h-24 w-auto object-contain"
-            draggable={false}
-          />
-          <span className="text-sm md:text-base font-semibold tracking-tight bg-linear-to-r from-emerald-400 via-sky-400 to-indigo-400 text-transparent bg-clip-text">
-            Neuro Trader Journal
-          </span>
+    <main className="min-h-screen bg-[#050814] text-slate-50 overflow-x-hidden">
+      <header className="absolute inset-x-0 top-0 z-30">
+        <div className="mx-auto mt-4 flex w-[calc(100%-2rem)] max-w-7xl flex-col gap-3 rounded-lg border border-white/10 bg-[#050814]/78 px-4 py-3 shadow-[0_18px_60px_rgba(0,0,0,0.32)] backdrop-blur-xl md:flex-row md:items-center md:justify-between md:px-5">
+          <Link href="/" className="flex items-center gap-3" aria-label="NeuroTrader Journal home">
+            <img
+              src="/neurotrader-logo-web.png"
+              alt="NeuroTrader Journal"
+              className="h-9 w-auto object-contain md:h-10"
+              draggable={false}
+            />
+            <span className="sr-only">Neuro Trader Journal</span>
+          </Link>
+
+          <nav className="flex flex-wrap items-center gap-2 text-xs text-slate-300 md:justify-end">
+            <Link href="/signin" className="rounded-md px-3 py-2 text-white/82 hover:bg-white/10 hover:text-white">
+              {L("Sign in", "Ingresar")}
+            </Link>
+            <Link href="/plans-comparison" className="rounded-md border border-white/18 px-3 py-2 font-semibold text-white hover:border-emerald-300 hover:text-emerald-100">
+              {L("Compare plans", "Comparar planes")}
+            </Link>
+            <Link href="/signup" className="rounded-md bg-emerald-400 px-4 py-2 font-semibold text-slate-950 hover:bg-emerald-300">
+              {L("Create my journal", "Crear mi journal")}
+            </Link>
+          </nav>
         </div>
-        <nav className="w-full md:w-auto flex flex-wrap items-center justify-start md:justify-end gap-2 md:gap-4 text-[10px] md:text-sm text-slate-400">
-          <Link href="/plans-comparison" className="hover:text-emerald-400">
-            {L("Features", "Features")}
-          </Link>
-          <Link href="/pricing" className="hover:text-emerald-400">
-            {L("Pricing", "Precios")}
-          </Link>
-          <Link href="/about" className="hover:text-emerald-400">
-            {L("About Us", "Sobre nosotros")}
-          </Link>
-          <Link href="/growthaccountsimulator" className="hover:text-emerald-400">
-            {L("Growth Account Simulator", "Simulador de crecimiento")}
-          </Link>
-          <Link
-            href="/signin"
-            className="px-2.5 md:px-3 py-1.5 rounded-full border border-slate-600 hover:border-emerald-400 transition text-[10px] md:text-sm"
-          >
-            {L("Sign in", "Ingresar")}
-          </Link>
-          <Link
-            href="/signup"
-            className="px-2.5 md:px-3 py-1.5 rounded-full bg-emerald-400 text-slate-950 font-semibold hover:bg-emerald-300 transition text-[10px] md:text-sm"
-          >
-            {L("Begin Now", "Comenzar")}
-          </Link>
-        </nav>
       </header>
 
-      {/* Hero */}
-      <section className="px-6 md:px-12 pt-10 pb-16 flex flex-col lg:flex-row items-center gap-10">
-        {/* Left: Text */}
-        <div className="w-full lg:w-1/2 space-y-6">
-          <p className="text-emerald-400 text-xs uppercase tracking-[0.2em]">
-            {L("Embrace the process", "Abraza el proceso")}
-          </p>
-          <h1 className="text-3xl md:text-4xl lg:text-5xl font-semibold leading-tight">
-            {L("Treat trading like a business.", "Convierte el trading en un negocio.")}{" "}
-            <span className="text-emerald-400">
-              {L("Master your psychology.", "Domina tu psicología.")}
-            </span>
-          </h1>
-          <p className="text-slate-300 text-sm md:text-base leading-relaxed">
-            {L(
-              "Neuro Trader Journal helps you build structure, measure performance, and keep your execution aligned with your plan. The core edge is your mindset — not just the trade.",
-              "Neuro Trader Journal te ayuda a crear estructura, medir rendimiento y mantener la ejecución alineada con tu plan. La ventaja principal es tu mentalidad — no solo el trade."
-            )}
-          </p>
-          <ul className="text-slate-300 text-sm md:text-base space-y-2">
-            <li>• {L("Automate journaling: import single trades, premium-selling, and complex options strategies.", "Automatiza el journal: importa trades simples, ventas de prima y estrategias complejas de opciones.")}</li>
-            <li>• {L("Build rules, goals, and alerts to protect your downside.", "Crea reglas, metas y alertas para proteger tu downside.")}</li>
-            <li>• {L("Run your trading like a business with clear accountability.", "Opera como negocio con responsabilidad clara.")}</li>
-            <li>• {L("Switch languages (English/Spanish) and toggle Neuro Mode or Light Mode.", "Cambia idiomas (inglés/español) y alterna entre Neuro Mode o Light Mode.")}</li>
-          </ul>
-          <div className="flex flex-wrap gap-3 pt-2">
-            <Link
-              href="/signup"
-              className="px-5 py-2.5 rounded-xl bg-emerald-400 text-slate-950 text-sm md:text-base font-semibold hover:bg-emerald-300 transition"
-            >
-              {L("Create My Journal", "Crear mi journal")}
-            </Link>
-            <Link
-              href="/pricing"
-              className="px-5 py-2.5 rounded-xl border border-slate-600 text-slate-200 text-sm md:text-base hover:border-emerald-400 transition"
-            >
-              {L("View pricing & plans", "Ver precios y planes")}
-            </Link>
-          </div>
-          <p className="text-[10px] text-slate-500 pt-1">
-            {L(
-              "No spreadsheets. No shaming. Just structure, risk rules and clear feedback to stop overtrading.",
-              "Sin spreadsheets. Sin shame. Solo estructura, reglas de riesgo y feedback claro para frenar el overtrading."
-            )}
-          </p>
-        </div>
-
-        {/* Right: Visual platform preview */}
-        <div className="w-full lg:w-1/2 flex justify-center">
-          <div className="relative w-full max-w-xl">
-            {/* Gradient background */}
-            <div
-              className="absolute -inset-4 rounded-4xl bg-linear-to-tr from-indigo-600/35 via-fuchsia-500/35 to-emerald-400/25 blur-2 opacity-90"
-              aria-hidden="true"
-            />
-
-            {/* Main dashboard card */}
-            <div className="relative bg-slate-950/98 rounded-[26px] border border-slate-800 shadow-2xl p-4 flex flex-col gap-3">
-              {/* Top bar */}
-              <div className="flex items-center justify-between text-[9px] text-slate-400">
-                <div className="flex items-center gap-2">
-                  <span className="px-1.5 py-0.5 rounded-full bg-slate-900/90 border border-slate-700 text-[8px] text-emerald-300">
-                    {L("Dashboard", "Dashboard")}
-                  </span>
-                  <span>{L("All accounts", "Todas las cuentas")}</span>
-                </div>
-                <span className="text-slate-500">{L("Goal mode · AI coach", "Modo metas · Coach IA")}</span>
+      <section className="relative min-h-[86svh] overflow-hidden bg-[#06110f] pt-28">
+        <div className="absolute inset-0">
+          <div className="absolute inset-0 bg-[#06110f]" />
+          <div className="absolute inset-x-0 top-24 mx-auto h-[520px] w-[1180px] max-w-[96vw] opacity-60">
+            <div className="absolute left-[8%] top-5 h-60 w-[520px] max-w-[62vw] rounded-lg border border-emerald-300/20 bg-[#071421]/95 p-4 shadow-[0_24px_80px_rgba(0,0,0,0.48)]">
+              <div className="mb-4 flex items-center justify-between text-[11px] text-slate-400">
+                <span>{L("Dashboard", "Dashboard")}</span>
+                <span className="text-emerald-300">{L("On track", "En ruta")}</span>
               </div>
-
-              {/* Metrics row */}
-              <div className="grid grid-cols-3 gap-2 text-[9px]">
-                <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-2">
-                  <p className="text-slate-500">{L("Equity", "Equity")}</p>
-                  <p className="text-[13px] font-semibold text-emerald-400">
-                    $12,940
-                  </p>
-                  <p className="text-[8px] text-emerald-300">{L("+4.7% this month", "+4.7% este mes")}</p>
-                </div>
-                <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-2">
-                  <p className="text-slate-500">{L("Win rate", "Win rate")}</p>
-                  <p className="text-[13px] font-semibold text-slate-50">61%</p>
-                  <p className="text-[8px] text-slate-500">{L("Last 50 trades", "Últimos 50 trades")}</p>
-                </div>
-                <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-2">
-                  <p className="text-slate-500">{L("Max loss rule", "Regla de max loss")}</p>
-                  <p className="text-[13px] font-semibold text-sky-400">{L("On", "Activa")}</p>
-                  <p className="text-[8px] text-slate-500">{L("Protected", "Protegido")}</p>
-                </div>
+              <div className="grid grid-cols-3 gap-3">
+                {[
+                  ["$24.8k", L("Equity", "Equity")],
+                  ["61%", L("Win rate", "Win rate")],
+                  ["0.8R", L("Avg risk", "Riesgo prom.")],
+                ].map(([value, label]) => (
+                  <div key={label} className="rounded-md border border-white/10 bg-[#091827] p-3">
+                    <p className="text-lg font-semibold text-white">{value}</p>
+                    <p className="text-[11px] text-slate-400">{label}</p>
+                  </div>
+                ))}
               </div>
-
-              {/* Heatmap + equity mini-chart */}
-              <div className="grid grid-cols-5 gap-2 items-end">
-                {/* Heatmap */}
-                <div className="col-span-2 flex flex-wrap gap-[3px]">
-                  {Array.from({ length: 20 }).map((_, i) => {
-                    const gain = [1, 2, 4, 5, 7, 10, 13, 16, 18].includes(i);
-                    const loss = [3, 8, 14].includes(i);
-                    const color = gain
-                      ? "bg-emerald-400/85"
-                      : loss
-                      ? "bg-sky-500/80"
-                      : "bg-slate-700/90";
-                    return (
-                      <div
-                        key={i}
-                        className={`w-3 h-3 rounded-[3px] ${color}`}
-                      />
-                    );
-                  })}
-                </div>
-                {/* Equity bars */}
-                <div className="col-span-3 h-14 bg-slate-900/90 rounded-xl border border-slate-800 px-1.5 flex items-end gap-1.5 relative overflow-hidden">
-                  {[40, 42, 39, 45, 48, 52, 50, 56, 61, 66].map((v, i) => {
-                    const min = 38;
-                    const max = 68;
-                    const h = ((v - min) / (max - min)) * 32 + 4;
-                    return (
-                      <div
-                        key={i}
-                        className="w-1.5 rounded-full bg-emerald-400/75"
-                        style={{ height: h }}
-                      />
-                    );
-                  })}
-                  <div className="absolute inset-x-0 bottom-2 h-px bg-slate-800/70" />
-                  <span className="absolute right-2 top-1 text-[7px] text-emerald-300">
-                    {L("Above goal", "Sobre la meta")}
-                  </span>
-                </div>
-              </div>
-
-              {/* AI coach */}
-              <div className="px-2 py-1.5 rounded-xl bg-slate-900/95 border border-slate-800 text-[8px] text-slate-300">
-                <span className="text-emerald-300 font-semibold">
-                  {L("AI Coach:", "Coach IA:")}
-                </span>{" "}
-                {L(
-                  "You're ahead of plan. Best performance in structured morning sessions. Avoid emotional late-day trades.",
-                  "Vas por encima del plan. Mejor rendimiento en sesiones estructuradas de la mañana. Evita trades emocionales al final del día."
-                )}
-              </div>
-            </div>
-
-            {/* Calendar card */}
-            <div className="absolute -bottom-4 right-1 w-52 sm:w-60 bg-slate-950/98 rounded-2xl border border-slate-800 shadow-2xl p-3 text-[8px]">
-              <div className="flex justify-between items-center mb-1">
-                <span className="text-slate-400">{L("Monthly P&L", "P&L mensual")}</span>
-                <span className="text-emerald-300 font-semibold">+ $1,487</span>
-              </div>
-              <div className="grid grid-cols-7 gap-[3px] mb-1">
-                {Array.from({ length: 21 }).map((_, i) => {
-                  const gain = [1, 2, 4, 6, 9, 12, 15, 18].includes(i);
-                  const loss = [3, 7, 13, 19].includes(i);
-                  const base = "h-4 rounded-[3px] border border-slate-900";
-                  const color = gain
-                    ? "bg-emerald-400/85"
-                    : loss
-                    ? "bg-sky-500/80"
-                    : "bg-slate-800/90";
-                  return <div key={i} className={`${base} ${color}`} />;
-                })}
-              </div>
-              <p className="text-[7px] text-slate-400">
-                {L(
-                  "Green days push you toward your target. Blue days stay controlled under your max loss.",
-                  "Los días verdes te acercan a tu meta. Los azules se mantienen controlados bajo tu max loss."
-                )}
-              </p>
-            </div>
-
-            {/* Journal note card */}
-            <div className="absolute -bottom-10 left-0 w-40 sm:w-44 bg-slate-950/98 rounded-2xl border border-slate-800 shadow-2xl p-3 text-[8px]">
-              <p className="text-[8px] text-slate-400 mb-1">
-                {L("Journal entry preview", "Vista previa del journal")}
-              </p>
-              <p className="text-[8px] text-slate-200">
-                {L("Reason: VWAP bounce · Risk 0.5R", "Razón: rebote VWAP · Riesgo 0.5R")}
-              </p>
-              <p className="text-[8px] text-slate-200">
-                {L("Emotion: felt confident ✅", "Emoción: me sentí confiado ✅")}
-              </p>
-              <p className="text-[7px] text-emerald-300 mt-1">
-                {L("AI: repeat this setup, avoid revenge trades.", "IA: repite este setup, evita revenge trades.")}
-              </p>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Trading like a business + roadmap */}
-      <section className="px-6 md:px-12 pb-16">
-        <div className="max-w-6xl mx-auto">
-          <div className="flex flex-col gap-3 mb-6">
-            <p className="text-emerald-400 text-xs uppercase tracking-[0.2em]">
-              {L("Trading like a business", "Trading como negocio")}
-            </p>
-            <h2 className="text-2xl md:text-3xl font-semibold">
-              {L(
-                "A business roadmap for disciplined trading.",
-                "Un roadmap de negocio para operar con disciplina."
-              )}
-            </h2>
-            <p className="text-slate-300 text-sm md:text-base max-w-3xl">
-              {L(
-                "Build structure, log everything, lead yourself, and let AI review the data for patterns that win and patterns that lose.",
-                "Crea estructura, registra todo, lidera tu proceso y deja que la IA detecte patrones que ganan y patrones que pierden."
-              )}
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-[1.25fr,0.75fr] gap-8 items-start">
-            {/* Roadmap visual (pro) */}
-            <div className="relative rounded-3xl border border-slate-800 bg-slate-950/90 p-6 overflow-hidden">
-              <div className="absolute inset-0 bg-[radial-gradient(circle_at_12%_18%,rgba(16,185,129,0.28),transparent_48%),radial-gradient(circle_at_50%_10%,rgba(139,92,246,0.22),transparent_50%),radial-gradient(circle_at_85%_18%,rgba(56,189,248,0.24),transparent_52%)]" />
-              <div className="absolute inset-0 opacity-20 pointer-events-none">
-                <svg viewBox="0 0 800 240" className="w-full h-full">
-                  <path
-                    d="M20 200 C120 140, 220 160, 320 120 C420 80, 520 140, 620 90 C700 60, 760 80, 780 40"
-                    fill="none"
-                    stroke="rgba(56,189,248,0.9)"
-                    strokeWidth="3"
-                    strokeDasharray="6 6"
+              <div className="mt-5 flex h-24 items-end gap-2 rounded-md border border-white/10 bg-[#081220] px-3 pb-3">
+                {[28, 34, 31, 42, 46, 54, 50, 61, 68, 76, 72, 84].map((height, index) => (
+                  <div
+                    key={index}
+                    className="w-full rounded-sm bg-emerald-400/75"
+                    style={{ height: `${height}%` }}
                   />
-                  {[
-                    [80, 170, 20],
-                    [140, 150, -10],
-                    [200, 160, 12],
-                    [260, 130, -8],
-                    [320, 120, 18],
-                    [380, 105, -12],
-                    [440, 120, 10],
-                    [500, 95, -16],
-                    [560, 110, 14],
-                    [620, 85, -20],
-                    [680, 70, 22],
-                  ].map(([x, y, h], i) => (
-                    <g key={i}>
-                      <line x1={x} y1={y - 22} x2={x} y2={y + 22} stroke="rgba(226,232,240,0.9)" strokeWidth="2.5" />
-                      <rect
-                        x={x - 7}
-                        y={h >= 0 ? y - h : y}
-                        width="14"
-                        height={Math.abs(h)}
-                        rx="3"
-                        fill={h >= 0 ? "rgba(52,211,153,0.9)" : "rgba(139,92,246,0.85)"}
-                      />
-                    </g>
-                  ))}
-                </svg>
-              </div>
-
-              <div className="relative">
-                <div className="flex items-center justify-between text-[10px] text-slate-400">
-                  <span>{L("Success roadmap", "Roadmap de éxito")}</span>
-                  <span className="text-emerald-300">{L("Trading business system", "Sistema de negocio")}</span>
-                </div>
-
-                <div className="mt-6 grid grid-cols-1 md:grid-cols-5 gap-3">
-                  {[
-                    {
-                      step: "01",
-                      title: L("Create a plan", "Crea un plan"),
-                      desc: L("Start here. Structure + risk limits.", "Empieza aquí. Estructura + límites de riesgo."),
-                    },
-                    {
-                      step: "02",
-                      title: L("Log", "Registro"),
-                      desc: L("Trades + sentiment", "Trades + sentimiento"),
-                    },
-                    {
-                      step: "03",
-                      title: L("Rules", "Reglas"),
-                      desc: L("Discipline & alerts", "Disciplina y alertas"),
-                    },
-                    {
-                      step: "04",
-                      title: L("Metrics", "Métricas"),
-                      desc: L("KPIs & streaks", "KPIs y rachas"),
-                    },
-                    {
-                      step: "05",
-                      title: L("AI Review", "Revisión IA"),
-                      desc: L("Patterns + new path", "Patrones + nuevo rumbo"),
-                    },
-                  ].map((item) => (
-                    <div key={item.step} className="rounded-2xl border border-slate-800 bg-slate-900/85 p-4 text-center">
-                      <div className="mx-auto mb-2 h-9 w-9 rounded-full border border-emerald-400/60 bg-emerald-500/15 flex items-center justify-center text-[11px] text-emerald-300 font-semibold">
-                        {item.step}
-                      </div>
-                      <p className="text-slate-50 text-[12px] font-semibold">{item.title}</p>
-                      <p className="text-slate-400 text-[10px] mt-1">{item.desc}</p>
-                    </div>
-                  ))}
-                </div>
-
-                <div className="mt-5 rounded-2xl border border-slate-800 bg-slate-900/80 p-4 text-[11px] text-slate-400">
-                  {L(
-                    "Log every trade and sentiment. Follow your rules. Monitor your metrics. AI reviews your data and finds winning and losing patterns.",
-                    "Registra cada trade y sentimiento. Sigue tus reglas. Monitorea tus métricas. La IA revisa tus datos y detecta patrones ganadores y perdedores."
-                  )}
-                </div>
+                ))}
               </div>
             </div>
 
-            <div className="relative">
-              <div className="absolute -inset-6 rounded-4xl bg-linear-to-br from-emerald-500/15 via-indigo-500/10 to-transparent blur-2xl" />
-              <div className="relative p-1">
-                <p className="text-emerald-400 text-xs uppercase tracking-[0.2em]">
-                  {L("How the platform helps you", "Cómo la plataforma te ayuda")}
-                </p>
-                <h3 className="text-2xl md:text-3xl font-semibold mt-2">
-                  {L(
-                    "A system that turns your execution into a repeatable business.",
-                    "Un sistema que convierte tu ejecución en un negocio repetible."
-                  )}
-                </h3>
-                <div className="mt-2 flex items-center justify-end text-[10px] text-emerald-300 font-semibold">
-                  {L("Built-in system", "Sistema integrado")}
-                </div>
-                <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 items-stretch">
-                  {[
-                    {
-                      label: L("Create a structured plan", "Crear un plan estructurado"),
-                      desc: L(
-                        "Start with a clear plan to build structure and targets.",
-                        "Empieza con un plan claro para crear estructura y metas."
-                      ),
-                    },
-                    {
-                      label: L("Log execution + sentiment", "Registrar ejecución + sentimiento"),
-                      desc: L(
-                        "Knowing yourself leads to better decisions.",
-                        "Conocerte mejor te ayuda a tomar mejores decisiones."
-                      ),
-                    },
-                    {
-                      label: L("Rules = self‑leadership", "Reglas = auto‑liderazgo"),
-                      desc: L(
-                        "Follow the rules you set. Respect your process.",
-                        "Cumple tus reglas y respeta tu proceso."
-                      ),
-                    },
-                    {
-                      label: L("Metrics that reveal your edge", "Métricas que revelan tu edge"),
-                      desc: L(
-                        "Understand execution and decisions to improve.",
-                        "Entiende tu ejecución y decisiones para mejorar."
-                      ),
-                    },
-                    {
-                      label: L("AI coach that stays objective", "IA objetiva como coach"),
-                      desc: L(
-                        "AI reviews every decision, sentiment, and strategy to suggest a better path.",
-                        "La IA revisa cada decisión, sentimiento y estrategia para sugerir un mejor camino."
-                      ),
-                    },
-                    {
-                      label: L("Turn trading into a business", "Convierte el trading en un negocio"),
-                      desc: L(
-                        "Build your business plan: goals, rules, schedule, cost control, and when to scale or pause.",
-                        "Crea tu plan de negocio: objetivos, reglas, horario, control de costos y cuándo escalar o pausar."
-                      ),
-                    },
-                    {
-                      label: L("Reduce uncertainty with process", "Reduce la incertidumbre con proceso"),
-                      desc: L(
-                        "Anchors you to a clear flow: setup → entry → management → exit → review.",
-                        "Te ancla a un flujo claro: setup → entrada → gestión → salida → revisión."
-                      ),
-                    },
-                    {
-                      label: L("Risk management that protects capital", "Gestión de riesgo que protege capital"),
-                      desc: L(
-                        "Define risk per trade, daily/weekly limits, sizing rules, and when to stop.",
-                        "Define riesgo por trade, límites diarios/semanales, sizing y cuándo detenerte."
-                      ),
-                    },
-                  ].map((row, i) => (
-                    <div
-                      key={i}
-                      className={`${cardBase} ${cardGradient}`}
-                    >
-                      <div className={`pointer-events-none absolute -inset-6 rounded-3xl bg-gradient-to-br ${cardGlow} blur-2xl opacity-30 animate-pulse [animation-duration:7s]`} />
-                      <div className={cardTitleClass}>{row.label}</div>
-                      <div className={cardDescClass}>{row.desc}</div>
-                    </div>
-                  ))}
-                </div>
+            <div className="absolute right-[7%] top-16 h-72 w-[430px] max-w-[54vw] rounded-lg border border-sky-300/20 bg-[#08111f]/95 p-4 shadow-[0_24px_80px_rgba(0,0,0,0.48)]">
+              <div className="mb-4 flex items-center justify-between text-[11px] text-slate-400">
+                <span>{L("Journal", "Journal")}</span>
+                <span>{L("AI review", "Revisión IA")}</span>
               </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Automated journaling section */}
-      <section className="px-6 md:px-12 pb-16">
-        <div className="max-w-6xl mx-auto space-y-6">
-          <div className="relative p-1">
-            <p className="text-emerald-400 text-xs uppercase tracking-[0.2em]">
-              {L("Automate journaling", "Automatiza el journaling")}
-            </p>
-            <h3 className="text-xl md:text-2xl font-semibold mt-2">
-              {L(
-                "Import trades and let the system classify everything.",
-                "Importa trades y deja que el sistema clasifique todo."
-              )}
-            </h3>
-            <p className="text-slate-300 text-sm mt-3">
-              {L(
-                "Single trades, premium-selling, and complex options strategies are mapped to your journal automatically.",
-                "Trades simples, ventas de prima y estrategias complejas de opciones se mapean al journal automáticamente."
-              )}
-            </p>
-          </div>
-
-          <div className="relative p-1">
-            <div className="flex items-center justify-between text-[10px] text-slate-400">
-              <span>{L("Automated journaling system", "Sistema de journaling automático")}</span>
-              <span className="text-emerald-300 font-semibold">{L("Consistent", "Consistente")}</span>
-            </div>
-            <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 items-stretch">
               {[
-                {
-                  label: L("Single trades + multi‑leg", "Trades simples + multi‑leg"),
-                  desc: L(
-                    "Imports and maps every leg automatically.",
-                    "Importa y mapea cada pierna automáticamente."
-                  ),
-                },
-                {
-                  label: L("Premium selling strategies", "Estrategias de venta de prima"),
-                  desc: L(
-                    "Tracks credits, debits, and rollouts in one place.",
-                    "Registra créditos, débitos y rollouts en un solo lugar."
-                  ),
-                },
-                {
-                  label: L("Complex options flows", "Flujos complejos de opciones"),
-                  desc: L(
-                    "Classifies strategy types and timestamps them.",
-                    "Clasifica tipos de estrategia y sus timestamps."
-                  ),
-                },
-                {
-                  label: L("Structured in minutes", "Estructurado en minutos"),
-                  desc: L(
-                    "Analytics are ready as soon as the import finishes.",
-                    "La analítica queda lista al terminar la importación."
-                  ),
-                },
-              ].map((row, i) => (
-                <div
-                  key={i}
-                  className={`${cardBase} ${cardGradient}`}
-                >
-                  <div className={`pointer-events-none absolute -inset-6 rounded-3xl bg-gradient-to-br ${cardGlow} blur-2xl opacity-30 animate-pulse [animation-duration:7s]`} />
-                  <div className={cardTitleClass}>{row.label}</div>
-                  <div className={cardDescClass}>{row.desc}</div>
+                L("Premarket plan locked", "Plan premarket listo"),
+                L("Entry matched setup", "Entrada alineada al setup"),
+                L("Emotion: controlled", "Emoción: controlada"),
+              ].map((line) => (
+                <div key={line} className="mb-3 rounded-md border border-white/10 bg-[#0b1828] px-3 py-2 text-xs text-slate-200">
+                  {line}
                 </div>
               ))}
+              <div className="rounded-md border border-emerald-300/25 bg-emerald-300/10 p-3 text-xs text-emerald-100">
+                {L(
+                  "Repeat the morning setup. Avoid late-day revenge entries.",
+                  "Repite el setup de la mañana. Evita entradas emocionales al final del día."
+                )}
+              </div>
+            </div>
+
+            <div className="absolute bottom-0 left-[22%] h-36 w-[620px] max-w-[68vw] rounded-lg border border-amber-300/20 bg-[#10101a]/95 p-4 shadow-[0_24px_80px_rgba(0,0,0,0.48)]">
+              <div className="grid h-full grid-cols-7 gap-2">
+                {Array.from({ length: 21 }).map((_, index) => {
+                  const positive = [1, 2, 4, 7, 9, 12, 15, 18, 20].includes(index);
+                  const negative = [3, 8, 13].includes(index);
+                  return (
+                    <div
+                      key={index}
+                      className={`rounded-md border border-black/20 ${
+                        positive ? "bg-emerald-400/80" : negative ? "bg-sky-400/80" : "bg-slate-700/70"
+                      }`}
+                    />
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+          <div className="absolute inset-0 bg-black/70" />
+        </div>
+
+        <div className="relative z-10 mx-auto flex min-h-[calc(86svh-7rem)] w-full max-w-7xl flex-col justify-center px-4 pb-10 md:px-8">
+          <div className="max-w-3xl">
+            <div className="mb-5 flex flex-col items-start gap-3">
+              <img
+                src="/neurotrader-logo-web.png"
+                alt="NeuroTrader Journal"
+                className="h-12 w-auto max-w-[88vw] object-contain md:h-16"
+                draggable={false}
+              />
+              <p className="text-sm font-semibold text-emerald-300">
+              {L("Trading journal + risk operating system", "Journal de trading + sistema de riesgo")}
+              </p>
+            </div>
+            <h1 className="text-5xl font-semibold leading-none text-white md:text-7xl">
+              {L("Trade like a business.", "Opera como negocio.")}
+            </h1>
+            <p className="mt-6 max-w-2xl text-base leading-7 text-slate-200 md:text-lg">
+              {L(
+                "Create your trading plan, execute with structure, and let AI Coach evaluate your real decisions against the plan.",
+                "Crea tu plan de trading, ejecuta con estructura y deja que AI Coach evalúe tus decisiones reales contra ese plan."
+              )}
+            </p>
+            <div className="mt-7 flex flex-wrap gap-3">
+              <Link href="/signup" className="rounded-md bg-emerald-400 px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-emerald-300">
+                {L("Create my journal", "Crear mi journal")}
+              </Link>
+              <Link href="/plans-comparison" className="rounded-md border border-white/25 px-5 py-3 text-sm font-semibold text-white hover:border-emerald-300">
+                {L("Compare plans", "Comparar planes")}
+              </Link>
             </div>
           </div>
 
-          <BrokerSupportTable
-            L={L}
-            title={L("Supported brokers for Broker Sync & CSV import", "Brokers soportados para Broker Sync y CSV")}
-            subtitle={L(
-              "If your broker is not listed, use CSV import or wait for SnapTrade coverage.",
-              "Si tu bróker no está listado, usa importación CSV o espera cobertura de SnapTrade."
-            )}
-          />
-        </div>
-      </section>
-
-      {/* Why this journal is different */}
-      <section className="px-6 md:px-12 pb-20">
-        <div className="max-w-6xl mx-auto">
-          <p className="text-emerald-400 text-xs uppercase tracking-[0.2em]">
-            {L("Why this journal is different", "¿Qué hace diferente este journal?")}
-          </p>
-          <h3 className="text-2xl md:text-3xl font-semibold mt-2">
-            {L(
-              "Built for serious traders who treat this as a business.",
-              "Creado para traders serios que lo tratan como un negocio."
-            )}
-          </h3>
-          <div className="mt-6 grid grid-cols-1 md:grid-cols-4 gap-4">
-            {[
-              {
-                title: L("Automated journaling", "Journaling automatizado"),
-                desc: L(
-                  "Import trades fast. Single, premium-selling, and complex options strategies are mapped instantly.",
-                  "Importa trades rápido. Trades simples, venta de prima y estrategias complejas quedan mapeadas al instante."
-                ),
-              },
-              {
-                title: L("Unlimited accountability", "Accountability real"),
-                desc: L(
-                  "Rules, goals, and alerts keep you honest and consistent.",
-                  "Reglas, metas y alertas te mantienen honesto y consistente."
-                ),
-              },
-              {
-                title: L("AI trading review", "Revisión con IA"),
-                desc: L(
-                  "AI detects winning patterns and warns you about losing behaviors.",
-                  "La IA detecta patrones ganadores y te advierte sobre comportamientos perdedores."
-                ),
-              },
-              {
-                title: L("Automated analytics statistics", "Analítica automática"),
-                desc: L(
-                  "No manual calculations. Your performance stats are generated instantly.",
-                  "Sin cálculos manuales. Tus estadísticas se generan al instante."
-                ),
-              },
-            ].map((card) => (
-              <div
-                key={card.title}
-                className={`${cardBase} ${cardGradient}`}
-              >
-                <div className={`pointer-events-none absolute -inset-6 rounded-3xl bg-gradient-to-br ${cardGlow} blur-2xl opacity-30 animate-pulse [animation-duration:7s]`} />
-                <p className={cardTitleClass}>{card.title}</p>
-                <p className={cardDescClass}>{card.desc}</p>
+          <div className="mt-10 grid max-w-4xl grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {heroMetrics.map((item) => (
+              <div key={item.label} className="rounded-lg border border-white/10 bg-white/[0.06] p-4 backdrop-blur">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-300">{item.value}</p>
+                <p className="mt-2 text-xs leading-5 text-slate-200">{item.label}</p>
               </div>
             ))}
           </div>
         </div>
       </section>
 
-      {/* ALL STARTS WITH PLANNING */}
-      <section className="px-6 md:px-12 pb-16">
-        <div className="w-full max-w-6xl mx-auto grid lg:grid-cols-[1.4fr,1.6fr] gap-8 items-center">
-          {/* Left copy */}
-          <div className="space-y-4">
-            <p className="text-[10px] uppercase tracking-[0.22em] text-emerald-400">
-              {L("It all starts with planning", "Todo empieza con la planificación")}
+      <section className="border-y border-white/10 bg-[#07111d]">
+        <div className="mx-auto grid w-full max-w-7xl grid-cols-1 gap-3 px-4 py-5 md:grid-cols-3 md:px-8">
+          {operatingLoop.map((item) => (
+            <article key={item.title} className="rounded-lg border border-white/10 bg-[#091524] p-5">
+              <h2 className="text-lg font-semibold text-white">{item.title}</h2>
+              <p className="mt-2 text-sm leading-6 text-slate-300">{item.body}</p>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section className="bg-[#050814] px-4 py-16 md:px-8">
+        <div className="mx-auto w-full max-w-7xl">
+          <div className="mb-8 max-w-3xl">
+            <p className="text-sm font-semibold text-emerald-300">
+              {L("Built around the trader's daily workflow", "Diseñado alrededor del flujo diario del trader")}
             </p>
-            <h2 className="text-2xl md:text-3xl font-semibold">
-              {L(
-                "Design your money growth plan before you click buy or sell.",
-                "Diseña tu plan de crecimiento del dinero antes de dar click en comprar o vender."
-              )}
+            <h2 className="mt-3 text-3xl font-semibold text-white md:text-4xl">
+              {L("Less clutter. More signal.", "Menos ruido. Más señal.")}
             </h2>
-            <p className="text-sm md:text-base text-slate-300 leading-relaxed">
+            <p className="mt-3 text-sm leading-6 text-slate-300 md:text-base">
               {L(
-                "Here you can create a money growth plan, define a clear monetary goal, and build a trading action plan that guides you through planning, execution, and results tracking — like a real trading business.",
-                "Aquí puedes crear un plan de crecimiento del dinero, definir una meta monetaria clara y construir un plan de acción de trading que te guía al planear, ejecutar y registrar resultados — como un negocio real de trading."
-              )}
-            </p>
-            <div className="flex flex-wrap gap-2 text-[10px]">
-              <span className="px-3 py-1.5 rounded-full bg-slate-900/90 border border-emerald-400/40 text-emerald-300">
-                {L("Plan: balance, risk, target", "Plan: balance, riesgo, meta")}
-              </span>
-              <span className="px-3 py-1.5 rounded-full bg-slate-900/90 border border-slate-700 text-slate-300">
-                {L("Execute: follow rules & alerts", "Ejecuta: sigue reglas y alertas")}
-              </span>
-              <span className="px-3 py-1.5 rounded-full bg-slate-900/90 border border-sky-500/40 text-sky-300">
-                {L("Record: AI-grade journal & P&L", "Registra: journal y P&L con IA")}
-              </span>
-            </div>
-            <p className="text-[10px] text-slate-400">
-              {L(
-                "Turn your plan into a visual roadmap: see in seconds if today’s trades move you closer or further from your goal.",
-                "Convierte tu plan en un mapa visual: en segundos verás si los trades de hoy te acercan o alejan de tu meta."
+                "The platform keeps planning, execution, review, rules, and accountability connected instead of scattered across spreadsheets and notes.",
+                "La plataforma mantiene planificación, ejecución, revisión, reglas y accountability conectados en vez de regados entre spreadsheets y notas."
               )}
             </p>
           </div>
 
-          {/* Right: Marketing chart */}
-          <div className="relative">
-            <div
-              className="absolute -inset-3 rounded-3xl bg-linear-to-tr from-emerald-500/20 via-indigo-500/15 to-sky-500/15 blur-2xl opacity-90"
-              aria-hidden="true"
-            />
-            <div className="relative bg-slate-950/98 border border-slate-800/90 rounded-3xl p-4 md:p-5 shadow-2xl space-y-3">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-[9px] text-slate-400 uppercase tracking-wide">
-                    {L("Growth plan snapshot", "Resumen del plan")}
-                  </p>
-                  <p className="text-sm font-semibold text-slate-50">
-                    {L("From plan to tracked execution", "Del plan a la ejecución medida")}
-                  </p>
-                </div>
-                <div className="text-right">
-                  <p className="text-[8px] text-slate-500">
-                    {L("Target equity", "Equity objetivo")}
-                  </p>
-                  <p className="text-[13px] font-semibold text-emerald-400">
-                    $25,000
-                  </p>
-                  <p className="text-[8px] text-emerald-300">
-                    {L("+8% avg monthly goal", "+8% meta mensual promedio")}
-                  </p>
-                </div>
-              </div>
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+            {productViews.map((view) => (
+              <article key={view.title} className="rounded-lg border border-white/10 bg-[#08111f] p-4">
+                <ProductPreview kind={view.kind} L={L} />
+                <h3 className="mt-4 text-lg font-semibold text-white">{view.title}</h3>
+                <p className="mt-2 text-sm leading-6 text-slate-300">{view.body}</p>
+              </article>
+            ))}
+          </div>
+        </div>
+      </section>
 
-              <div className="mt-1 bg-slate-900/90 rounded-2xl border border-slate-800 px-3 py-2">
-                <div className="flex justify-between items-center mb-1">
-                  <span className="text-[8px] text-slate-400">
-                    {L("Projected vs actual growth", "Crecimiento proyectado vs real")}
-                  </span>
-                  <span className="text-[8px] text-emerald-300">
-                    {L("On track ✅", "En ruta ✅")}
-                  </span>
-                </div>
-                <div className="relative h-20 flex items-end gap-1.5">
-                  <div className="absolute inset-x-0 bottom-4 h-px bg-linear-to-r from-emerald-500/15 via-emerald-400/30 to-sky-400/20" />
-                  {[20, 25, 30, 36, 42, 49, 57, 63, 71, 80].map((v, i) => {
-                    const h = 8 + (v / 80) * 40;
-                    const cls =
-                      i >= 6 ? "bg-emerald-400" : "bg-emerald-400/55";
-                    return (
-                      <div
-                        key={i}
-                        className={`w-[7px] rounded-full ${cls}`}
-                        style={{ height: h }}
-                      />
-                    );
-                  })}
-                  <span className="absolute left-0 bottom-0 text-[7px] text-slate-500">
-                    {L("Month 1", "Mes 1")}
-                  </span>
-                  <span className="absolute right-0 bottom-0 text-[7px] text-emerald-300">
-                    {L("Month 10", "Mes 10")}
-                  </span>
-                </div>
-              </div>
+      <section className="bg-[#07100f] px-4 py-16 md:px-8">
+        <div className="mx-auto grid w-full max-w-7xl gap-8 lg:grid-cols-[0.9fr_1.1fr] lg:items-start">
+          <div>
+            <p className="text-sm font-semibold text-emerald-300">
+              {L("What you control every day", "Lo que controlas cada día")}
+            </p>
+            <h2 className="mt-3 text-3xl font-semibold text-white md:text-4xl">
+              {L("Discipline becomes measurable.", "La disciplina se vuelve medible.")}
+            </h2>
+            <p className="mt-3 text-sm leading-6 text-slate-300 md:text-base">
+              {L(
+                "NeuroTrader is built for the parts of trading that actually decide whether you survive: process, risk, repetition, and honest review.",
+                "NeuroTrader está construido para las partes del trading que deciden si sobrevives: proceso, riesgo, repetición y revisión honesta."
+              )}
+            </p>
+            <div className="mt-6">
+              <Link href="/signup" className="inline-flex rounded-md bg-emerald-400 px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-emerald-300">
+                {L("Start the workflow", "Comenzar el flujo")}
+              </Link>
+            </div>
+          </div>
 
-              <div className="grid grid-cols-3 gap-2 text-[8px] mt-1">
-                <div className="bg-slate-900/95 border border-emerald-400/40 rounded-xl p-2">
-                  <p className="text-[8px] font-semibold text-emerald-300">
-                    {L("1 · Plan", "1 · Plan")}
-                  </p>
-                  <p className="text-slate-300">
-                    {L(
-                      "Set starting balance, target equity, daily % and timeline.",
-                      "Define balance inicial, equity objetivo, % diario y horizonte."
-                    )}
-                  </p>
-                </div>
-                <div className="bg-slate-900/95 border border-slate-700 rounded-xl p-2">
-                  <p className="text-[8px] font-semibold text-slate-200">
-                    {L("2 · Execute", "2 · Ejecuta")}
-                  </p>
-                  <p className="text-slate-300">
-                    {L(
-                      "Trade inside your rules with goal & max-loss alerts.",
-                      "Opera dentro de tus reglas con alertas de meta y pérdida máxima."
-                    )}
-                  </p>
-                </div>
-                <div className="bg-slate-900/95 border border-sky-500/40 rounded-xl p-2">
-                  <p className="text-[8px] font-semibold text-sky-300">
-                    {L("3 · Record", "3 · Registra")}
-                  </p>
-                  <p className="text-slate-300">
-                    {L(
-                      "Journal every session, let AI measure progress & patterns.",
-                      "Registra cada sesión y deja que la IA mida progreso y patrones."
-                    )}
-                  </p>
-                </div>
-              </div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {focusAreas.map((item) => (
+              <article key={item.label} className="rounded-lg border border-white/10 bg-[#081524] p-5">
+                <h3 className="text-base font-semibold text-white">{item.label}</h3>
+                <p className="mt-2 text-sm leading-6 text-slate-300">{item.detail}</p>
+              </article>
+            ))}
+          </div>
+        </div>
+      </section>
 
-              <div className="mt-2 flex items-center justify-between gap-3">
-                <p className="text-[8px] text-slate-400 max-w-[70%]">
-                  {L(
-                    "Build your full plan in minutes and let the platform keep you accountable every single day.",
-                    "Construye tu plan completo en minutos y deja que la plataforma te haga rendir cuentas cada día."
-                  )}
-                </p>
-                <Link
-                  href="/signup"
-                  className="px-3 py-1.5 rounded-xl bg-emerald-400 text-slate-950 text-[8px] font-semibold hover:bg-emerald-300"
+      <section className="bg-[#050814] px-4 py-16 md:px-8">
+        <div className="mx-auto w-full max-w-7xl">
+          <div className="mb-8 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+            <div className="max-w-3xl">
+              <p className="text-sm font-semibold text-emerald-300">
+                {L("Plans that match how you trade", "Planes según cómo operas")}
+              </p>
+              <h2 className="mt-3 text-3xl font-semibold text-white md:text-4xl">
+                {L("Core builds structure. Advanced unlocks the full trading business system.", "Core crea estructura. Advanced desbloquea el sistema completo de negocio.")}
+              </h2>
+              <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-300">
+                {L(
+                  "The upgrade is not just more features. It adds the layers that serious traders pay for: deeper statistics, business reporting, audit tools, and AI coaching.",
+                  "El upgrade no es solo más features. Añade las capas que un trader serio necesita: estadística profunda, reportes de negocio, auditoría y AI coaching."
+                )}
+              </p>
+            </div>
+            <Link href="/plans-comparison" className="rounded-md border border-white/20 px-4 py-2 text-sm font-semibold text-white hover:border-emerald-300">
+              {L("See full comparison", "Ver comparación completa")}
+            </Link>
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            {planIds.map((planId) => {
+              const plan = PLAN_CATALOG[planId];
+              const featured = planId === "advanced";
+
+              return (
+                <article
+                  key={planId}
+                  className={`rounded-lg border p-6 ${
+                    featured
+                      ? "border-emerald-300/60 bg-[#09201d]"
+                      : "border-white/10 bg-[#08111f]"
+                  }`}
                 >
-                  {L("Start planning", "Empezar a planificar")}
-                </Link>
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <h3 className="text-2xl font-semibold text-white">{t(plan.name)}</h3>
+                      <p className="mt-2 max-w-xl text-sm leading-6 text-slate-300">{t(plan.comparisonDescription)}</p>
+                    </div>
+                    {plan.badge ? (
+                      <span className="rounded-md border border-emerald-300/50 bg-emerald-300/10 px-3 py-1 text-xs font-semibold text-emerald-200">
+                        {t(plan.badge)}
+                      </span>
+                    ) : null}
+                  </div>
+
+                  {featured ? (
+                    <div className="mt-5 rounded-lg border border-emerald-300/35 bg-emerald-300/10 p-4">
+                      <p className="text-sm font-semibold text-emerald-100">
+                        {advancedUpgradePriceLabel(lang)}
+                      </p>
+                      <p className="mt-1 text-xs leading-5 text-emerald-50/85">
+                        {L(
+                          "That unlocks AI coaching, business P&L, advanced statistics, audit tools, reports, and unlimited scale.",
+                          "Eso desbloquea AI coaching, P&L de negocio, estadística avanzada, auditoría, reportes y escala ilimitada."
+                        )}
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="mt-5 rounded-lg border border-white/10 bg-white/[0.03] p-4">
+                      <p className="text-sm font-semibold text-slate-100">
+                        {L("Foundation plan", "Plan base")}
+                      </p>
+                      <p className="mt-1 text-xs leading-5 text-slate-300">
+                        {L(
+                          "Great for structure and journaling. Upgrade when you want AI, business reports, and deeper statistics.",
+                          "Excelente para estructura y journal. Haz upgrade cuando quieras IA, reportes de negocio y estadística profunda."
+                        )}
+                      </p>
+                    </div>
+                  )}
+
+                  <p className="mt-5 text-3xl font-semibold text-white">
+                    {planPriceLabel(planId, lang)}
+                  </p>
+                  {featured ? (
+                    <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-3">
+                      {ADVANCED_UPGRADE_PILLARS.map((pillar) => (
+                        <div key={pillar.label.en} className="rounded-md border border-emerald-300/25 bg-[#061a17] p-3">
+                          <p className="text-[11px] font-semibold text-emerald-200">{t(pillar.label)}</p>
+                          <p className="mt-1 text-[11px] leading-4 text-emerald-50/75">{t(pillar.body)}</p>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                  <ul className="mt-5 grid grid-cols-1 gap-2 text-sm text-slate-200 sm:grid-cols-2">
+                    {(featured ? ADVANCED_UNLOCKS : plan.pricingFeatures.slice(0, 8)).map((feature) => (
+                      <li key={feature.en} className="flex gap-2">
+                        <span className="mt-1 h-2 w-2 shrink-0 rounded-sm bg-emerald-300" />
+                        <span>{t(feature)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </article>
+              );
+            })}
+          </div>
+
+          <div className="mt-4 rounded-lg border border-white/10 bg-[#08111f] p-5">
+            <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+              <div>
+                <h3 className="text-lg font-semibold text-white">{BROKER_SYNC_ADDON.name}</h3>
+                <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-300">
+                  {t(BROKER_SYNC_ADDON.description)} {L("Optional add-on at checkout.", "Add-on opcional en checkout.")}
+                </p>
               </div>
+              <p className="text-lg font-semibold text-emerald-300">
+                $5.00 {L("/ month", "/ mes")}
+              </p>
             </div>
           </div>
         </div>
       </section>
 
-      {/* Ask Anything button */}
+      <section className="bg-[#07111d] px-4 py-16 md:px-8">
+        <div className="mx-auto grid w-full max-w-7xl gap-8 lg:grid-cols-[0.9fr_1.1fr] lg:items-center">
+          <div>
+            <p className="text-sm font-semibold text-emerald-300">
+              {L("Broker coverage", "Cobertura de brokers")}
+            </p>
+            <h2 className="mt-3 text-3xl font-semibold text-white md:text-4xl">
+              {L("Turn broker history into a trading edge.", "Convierte tu historial del bróker en ventaja operativa.")}
+            </h2>
+            <p className="mt-3 text-sm leading-6 text-slate-300 md:text-base">
+              {L(
+                "Neuro Trader gives users flexible data paths: secure broker sync, account statements, order history, and supported CSV/XLSX imports. The result is a cleaner execution record, stronger audit trail, sharper analytics, and AI coaching based on what actually happened.",
+                "Neuro Trader le da al usuario rutas flexibles para traer su data: sync seguro del bróker, account statements, order history e imports CSV/XLSX soportados. El resultado es un récord de ejecución más limpio, una auditoría más fuerte, mejor analítica y AI coaching basado en lo que realmente pasó."
+              )}
+            </p>
+            <Link href="/plans-comparison" className="mt-6 inline-flex rounded-md border border-white/20 px-4 py-2 text-sm font-semibold text-white hover:border-emerald-300">
+              {L("View broker data paths", "Ver rutas de data del bróker")}
+            </Link>
+          </div>
+          <div className="rounded-lg border border-white/10 bg-[#08111f] p-5">
+            <h3 className="text-lg font-semibold text-white">
+              {L("From broker data to sharper decisions", "De data del bróker a mejores decisiones")}
+            </h3>
+            <p className="mt-2 text-sm leading-6 text-slate-300">{t(BROKER_SYNC_ADDON.description)}</p>
+            <p className="mt-3 text-sm leading-6 text-emerald-100/80">{t(BROKER_SYNC_ADDON.dataQualityNote)}</p>
+            <div className="mt-5 flex flex-wrap gap-2">
+              {[
+                "Secure sync",
+                "Broker statements",
+                "Order history",
+                "Entry/exit timestamps",
+                "Fees & commissions",
+                "Account activity",
+                "Alpaca",
+                "Fidelity",
+                "Robinhood",
+                "Schwab",
+                "tastytrade",
+                "TradeStation",
+                "Webull",
+                "Interactive Brokers",
+                "Coinbase",
+                "CSV import",
+              ].map((broker) => (
+                <span key={broker} className="rounded-md border border-white/10 bg-[#0b1828] px-3 py-2 text-xs text-slate-200">
+                  {broker}
+                </span>
+              ))}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="bg-[#050814] px-4 py-16 md:px-8">
+        <div className="mx-auto grid w-full max-w-7xl gap-8 rounded-lg border border-white/10 bg-[#08111f] p-6 md:grid-cols-[1fr_auto] md:items-center md:p-8">
+          <div>
+            <p className="text-sm font-semibold text-emerald-300">
+              {L("Ready for the public launch flow", "Listo para el flujo público")}
+            </p>
+            <h2 className="mt-2 text-3xl font-semibold text-white md:text-4xl">
+              {L("Create the account, verify email, choose a plan, and start tracking.", "Crea la cuenta, verifica email, escoge plan y empieza a medir.")}
+            </h2>
+            <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-300 md:text-base">
+              {L(
+                "The signup path connects the same plan catalog, payment flow, welcome emails, admin controls, 24/7 virtual support, iOS access, and Android coming soon positioning.",
+                "El flujo de registro conecta el mismo catálogo de planes, pago, emails de bienvenida, controles admin, soporte virtual 24/7, acceso iOS y Android próximamente."
+              )}
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-3 md:justify-end">
+            <Link href="/signup" className="rounded-md bg-emerald-400 px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-emerald-300">
+              {L("Create account", "Crear cuenta")}
+            </Link>
+            <Link href="/pricing" className="rounded-md border border-white/20 px-5 py-3 text-sm font-semibold text-white hover:border-emerald-300">
+              {L("View pricing", "Ver precios")}
+            </Link>
+          </div>
+        </div>
+      </section>
+
       <FloatingAskButton />
     </main>
   );

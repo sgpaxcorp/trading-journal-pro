@@ -12,6 +12,16 @@ import { resolveLocale } from "@/lib/i18n";
 import { getOptionFlowBetaCopy } from "@/lib/optionFlowBeta";
 import { supabaseBrowser } from "@/lib/supaBaseClient";
 import { listMyEntitlements } from "@/lib/entitlementsSupabase";
+import {
+  ADVANCED_UNLOCKS,
+  ADVANCED_UPGRADE_PILLARS,
+  BROKER_SYNC_ADDON,
+  advancedUpgradePriceLabel,
+  brokerSyncPrice,
+  catalogText,
+  PLAN_CATALOG,
+  planMonthlyPrice,
+} from "@/lib/planCatalog";
 
 type BillingClientProps = {
   initialPlan: PlanId; // "core" | "advanced"
@@ -66,17 +76,8 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
   const [renewalLoading, setRenewalLoading] = useState(false);
   const [renewalNotice, setRenewalNotice] = useState<string | null>(null);
 
-  const PRICES = {
-    core: { monthly: 15.99, annual: 159.90 },
-    advanced: { monthly: 26.99, annual: 269.90 },
-  } as const;
-  const BROKER_SYNC_PRICES = {
-    monthly: 5.0,
-    annual: 50.0,
-  } as const;
-
   const priceFor = (planId: PlanId) =>
-    billingCycle === "monthly" ? PRICES[planId].monthly : PRICES[planId].annual / 12;
+    planMonthlyPrice(planId, billingCycle);
 
   useEffect(() => {
     const cycle = searchParams?.get("cycle");
@@ -568,12 +569,9 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
                 </p>
               )}
               <ul className="space-y-1 text-[11px] text-slate-300">
-                <li>• {L("Full daily journal & calendar", "Diario diario completo y calendario")}</li>
-                <li>• {L("Trade review workspace", "Workspace de revisión de trades")}</li>
-                <li>• {L("Basic analytics", "Analítica básica")}</li>
-                <li>• {L("Manual broker imports", "Imports manuales de bróker")}</li>
-                <li>• {L("Basic alerts & reminders", "Alertas y recordatorios básicos")}</li>
-                <li>• {L("Mobile app (iOS)", "Aplicación móvil (iOS)")}</li>
+                {PLAN_CATALOG.core.billingHighlights.map((feature) => (
+                  <li key={feature.en}>• {catalogText(feature, lang)}</li>
+                ))}
               </ul>
             </motion.button>
 
@@ -649,24 +647,38 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
               )}
 
               <p className="relative text-[11px] text-slate-100/90 mb-2">
-                {L(
-                  "Designed for traders who want deep analytics, mindset feedback and AI coaching.",
-                  "Diseñado para traders que quieren analítica profunda, feedback de mindset y AI coaching."
-                )}
+                {catalogText(PLAN_CATALOG.advanced.description, lang)}
               </p>
 
+              <div className="relative mb-3 rounded-2xl border border-emerald-300/40 bg-emerald-300/10 px-3 py-2">
+                <p className="text-[11px] font-semibold text-emerald-100">
+                  {advancedUpgradePriceLabel(lang, billingCycle)}
+                </p>
+                <p className="mt-1 text-[10px] leading-relaxed text-emerald-50/85">
+                  {L(
+                    "This is the full operating layer: AI coaching, business P&L, advanced statistics, audit tools, reports, and priority support.",
+                    "Esta es la capa completa: AI coaching, P&L de negocio, estadística avanzada, auditoría, reportes y soporte prioritario."
+                  )}
+                </p>
+              </div>
+
+              <div className="relative mb-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
+                {ADVANCED_UPGRADE_PILLARS.map((pillar) => (
+                  <div key={pillar.label.en} className="rounded-xl border border-emerald-300/20 bg-slate-950/55 px-3 py-2">
+                    <p className="text-[10px] font-semibold text-emerald-100">
+                      {catalogText(pillar.label, lang)}
+                    </p>
+                    <p className="mt-0.5 text-[9px] leading-relaxed text-slate-100/75">
+                      {catalogText(pillar.body, lang)}
+                    </p>
+                  </div>
+                ))}
+              </div>
+
               <ul className="relative space-y-1 text-[11px] text-slate-50">
-                <li>• {L("Everything in Core", "Todo lo de Core")}</li>
-                <li>• {L("Notebook workspace", "Workspace de notebook")}</li>
-                <li>• {L("Cashflow tracking", "Seguimiento de cashflow")}</li>
-                <li>• {L("Audit workbench", "Audit workbench")}</li>
-                <li>• {L("Advanced analytics & breakdowns", "Analítica avanzada y breakdowns")}</li>
-                <li>• {L("Profit & Loss Track (business accounting)", "Profit & Loss Track (contabilidad)")}</li>
-                <li>• {L("AI coaching & mindset tools", "AI coaching y herramientas de mindset")}</li>
-                <li>• {L("Back-Studying & Audit workbench", "Back-Studying y Audit workbench")}</li>
-                <li>• {L("Advanced PDF exports", "Exportaciones PDF avanzadas")}</li>
-                <li>• {L("Priority improvements & new features", "Mejoras prioritarias y nuevas features")}</li>
-                <li>• {L("Mobile app (iOS)", "Aplicación móvil (iOS)")}</li>
+                {ADVANCED_UNLOCKS.map((feature) => (
+                  <li key={feature.en}>• {catalogText(feature, lang)}</li>
+                ))}
               </ul>
             </motion.button>
           </div>
@@ -759,19 +771,16 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
                   {L("Add-on", "Add-on")}
                 </p>
                 <h2 className="text-lg font-semibold text-slate-100">
-                  {L("Broker Sync (SnapTrade)", "Broker Sync (SnapTrade)")}
+                  {BROKER_SYNC_ADDON.name}
                 </h2>
                 <p className="text-xs text-slate-400 mt-1">
-                  {L(
-                    "Connect your broker and sync transactions directly into the Journal.",
-                    "Conecta tu bróker y sincroniza transacciones directo al Journal."
-                  )}
+                  {catalogText(BROKER_SYNC_ADDON.description, lang)}
+                </p>
+                <p className="mt-2 text-[11px] leading-relaxed text-emerald-200/85">
+                  {catalogText(BROKER_SYNC_ADDON.dataQualityNote, lang)}
                 </p>
                 <p className="mt-1 text-[11px] text-slate-500">
-                  {L(
-                    "Supported (US): Alpaca, Alpaca Paper, Chase, E*Trade, Empower, Fidelity, Moomoo, Public, Robinhood, Schwab, Schwab OAuth, tastytrade, TD Direct Investing, TradeStation, TradeStation Paper, Tradier, Vanguard US, Webull US, Webull US OAuth, Wells Fargo. International: Interactive Brokers, Coinbase (crypto).",
-                    "Soporta (US): Alpaca, Alpaca Paper, Chase, E*Trade, Empower, Fidelity, Moomoo, Public, Robinhood, Schwab, Schwab OAuth, tastytrade, TD Direct Investing, TradeStation, TradeStation Paper, Tradier, Vanguard US, Webull US, Webull US OAuth, Wells Fargo. Internacionales: Interactive Brokers, Coinbase (crypto)."
-                  )}
+                  {catalogText(BROKER_SYNC_ADDON.supportedBrokers, lang)}
                 </p>
               </div>
               <span className="rounded-full border border-slate-700 bg-slate-950/70 px-3 py-1 text-[11px] text-slate-300">
@@ -786,7 +795,7 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
             <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
               <div>
                 <p className="text-sm font-semibold text-slate-100">
-                  ${billingCycle === "annual" ? BROKER_SYNC_PRICES.annual.toFixed(2) : BROKER_SYNC_PRICES.monthly.toFixed(2)}
+                  ${brokerSyncPrice(billingCycle).toFixed(2)}
                 </p>
                 <p className="text-[11px] text-slate-400">
                   {billingCycle === "annual"

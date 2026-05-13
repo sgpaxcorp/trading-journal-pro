@@ -1,4 +1,5 @@
 import type { BillingCycle, CostCategory, TraderType } from "@/lib/profitLossTrackSupabase";
+import { PLAN_PRICES } from "@/lib/planCatalog";
 
 export type SuggestedCostPreset = {
   presetKey: string;
@@ -23,14 +24,14 @@ export const TRADER_TYPE_LABELS: Record<TraderType, { en: string; es: string }> 
 
 export const SUGGESTED_COST_PRESETS: SuggestedCostPreset[] = [
   {
-    presetKey: "journal-core",
+    presetKey: "journal-advanced",
     traderTypes: ["minimal", "options", "futures", "funded", "swing"],
     name: "Trading journal",
     vendor: "Neuro Trader Journal",
     category: "software",
     billingCycle: "monthly",
-    amount: 26.99,
-    notes: "Core journaling and performance review stack.",
+    amount: PLAN_PRICES.advanced.monthly,
+    notes: "Advanced journaling, analytics, and performance review stack.",
   },
   {
     presetKey: "charting-platform",

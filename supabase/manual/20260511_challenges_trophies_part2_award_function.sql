@@ -1,6 +1,24 @@
 -- Part 2/4: Trophy award RPC.
 -- Run after part 1.
 
+do $$
+begin
+  if exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'profile_gamification'
+      and column_name = 'badges'
+      and udt_name like '\_%'
+  ) then
+    alter table public.profile_gamification alter column badges drop default;
+    alter table public.profile_gamification
+      alter column badges type jsonb
+      using to_jsonb(coalesce(badges, array[]::text[]));
+    alter table public.profile_gamification alter column badges set default '[]'::jsonb;
+  end if;
+end $$;
+
 create or replace function public.nt_best_streak_from_dates(input_dates date[])
 returns integer
 language plpgsql

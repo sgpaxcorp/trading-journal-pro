@@ -7,6 +7,7 @@ import TrophyToasts, { type TrophyToastItem } from "@/app/components/TrophyToast
 import { useAuth } from "@/context/AuthContext";
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
+import { supabaseBrowser } from "@/lib/supaBaseClient";
 import {
   getPublicUserProfile,
   listPublicLeaderboard,
@@ -45,6 +46,7 @@ export default function GlobalRankingPage() {
   const [me, setMe] = useState<PublicUserProfile | null>(null);
   const [loadingRows, setLoadingRows] = useState(true);
   const [syncing, setSyncing] = useState(false);
+  const [visibilitySaving, setVisibilitySaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const [toasts, setToasts] = useState<TrophyToastItem[]>([]);
@@ -52,6 +54,7 @@ export default function GlobalRankingPage() {
   // Keep as a plain string so TS doesn't spread `string | undefined` everywhere.
   // When `user` isn't ready yet, this becomes "" and we guard accordingly.
   const userId: string = (user?.id as string) ?? "";
+  const hasValidRank = typeof me?.rank === "number" && me.rank > 0;
 
   // Auto-sync trophies on load (no button)
   useEffect(() => {
@@ -120,6 +123,36 @@ export default function GlobalRankingPage() {
     };
   }, [loading, userId]);
 
+  async function handleShowInRanking() {
+    if (!userId) return;
+    setVisibilitySaving(true);
+    setError(null);
+    try {
+      const { error: updateError } = await supabaseBrowser
+        .from("profiles")
+        .update({ show_in_ranking: true })
+        .eq("id", userId);
+      if (updateError) throw updateError;
+
+      const [board, mine] = await Promise.all([
+        listPublicLeaderboard(25),
+        getPublicUserProfile(userId),
+      ]);
+      setRows(board || []);
+      setMe(mine || null);
+    } catch (err) {
+      console.error("[GlobalRanking] Visibility update error:", err);
+      setError(
+        L(
+          "We couldn't update your ranking visibility. Please try again.",
+          "No pudimos actualizar tu visibilidad en el ranking. Intenta de nuevo."
+        )
+      );
+    } finally {
+      setVisibilitySaving(false);
+    }
+  }
+
   if (loading) {
     return (
       <main className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center">
@@ -178,10 +211,10 @@ export default function GlobalRankingPage() {
               <div>
                 <p className="text-xs text-slate-400">{L("Your snapshot", "Tu resumen")}</p>
                 <p className="mt-1 text-sm text-slate-200">
-                  {typeof me?.rank === "number" ? (
+                  {hasValidRank ? (
                     <>
                       {L("Your rank:", "Tu rango:")}{" "}
-                      <span className="font-semibold text-emerald-200">#{me.rank}</span>
+                      <span className="font-semibold text-emerald-200">#{me?.rank}</span>
                       {me ? (
                         <>
                           {" "}({me.xp_total?.toLocaleString?.() ?? me.xp_total} XP · {me.trophies_count}{" "}
@@ -196,20 +229,30 @@ export default function GlobalRankingPage() {
                       <span className="text-slate-500"> · {L("Not in the top 25 yet", "Aún no estás en el top 25")}</span>
                     </>
                   ) : me ? (
-                    <>
+                    <span>
                       {me.xp_total?.toLocaleString?.() ?? me.xp_total} XP · {me.trophies_count}{" "}
                       {L("trophies", "trofeos")}
                       <span className="text-slate-500">
-                        {" "}· {L("Ranking hidden in your privacy settings", "Ranking oculto en tu configuración de privacidad")}
+                        {" "}· {L("Hidden from the ranking", "Oculto del ranking")}
                       </span>
-                    </>
+                    </span>
                   ) : (
                     <span className="text-slate-500">{L("Loading…", "Cargando…")}</span>
                   )}
                 </p>
               </div>
 
-              <div className="flex items-center gap-2 text-[11px] text-slate-400">
+              <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-400">
+                {me && !me.show_in_ranking && (
+                  <button
+                    type="button"
+                    disabled={visibilitySaving}
+                    onClick={handleShowInRanking}
+                    className="rounded-full border border-emerald-500/30 bg-emerald-400 px-3 py-1 font-semibold text-slate-950 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {visibilitySaving ? L("Updating…", "Actualizando…") : L("Show me in ranking", "Mostrarme en ranking")}
+                  </button>
+                )}
                 <span className="rounded-full border border-slate-700 bg-slate-950/40 px-3 py-1">
                   {L("Showing top", "Mostrando top")}{" "}
                   <span className="text-slate-200 font-semibold">25</span>
@@ -251,16 +294,44 @@ export default function GlobalRankingPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800">
+                  {rows.length === 0 && (
+                    <tr>
+                      <td colSpan={6} className="px-5 py-8">
+                        <div className="max-w-2xl">
+                          <p className="text-sm font-semibold text-slate-100">
+                            {L("No public ranking entries yet.", "Todavía no hay usuarios visibles en el ranking.")}
+                          </p>
+                          <p className="mt-2 text-xs leading-5 text-slate-400">
+                            {L(
+                              "Users appear here once ranking visibility is enabled and they have challenge or trophy XP. Only display name, XP, tier and trophies are shown.",
+                              "Los usuarios aparecen aquí cuando tienen la visibilidad del ranking activa y XP de retos o trofeos. Solo se muestra nombre público, XP, nivel y trofeos."
+                            )}
+                          </p>
+                          {me && !me.show_in_ranking && (
+                            <button
+                              type="button"
+                              disabled={visibilitySaving}
+                              onClick={handleShowInRanking}
+                              className="mt-4 rounded-xl bg-emerald-400 px-4 py-2 text-xs font-semibold text-slate-950 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              {visibilitySaving ? L("Updating…", "Actualizando…") : L("Show my profile", "Mostrar mi perfil")}
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  )}
                   {rows.map((r, idx) => {
                     const isMe = r.user_id === userId;
                     const name = r.display_name || L("Trader", "Trader");
+                    const rank = typeof r.rank === "number" && r.rank > 0 ? r.rank : idx + 1;
 
                     return (
                       <tr
                         key={r.user_id}
                         className={isMe ? "bg-emerald-500/5" : "hover:bg-slate-900/70"}
                       >
-                        <td className="px-5 py-4 text-slate-200 font-semibold">#{idx + 1}</td>
+                        <td className="px-5 py-4 text-slate-200 font-semibold">#{rank}</td>
                         <td className="px-5 py-4">
                           <div className="flex items-center gap-2">
                             <span className="font-medium text-slate-100">{name}</span>

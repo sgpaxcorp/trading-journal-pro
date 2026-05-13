@@ -8,6 +8,14 @@ import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
 import { isActiveProfileStatus, shouldAllowLocalProfileAccessFallback } from "@/lib/accessControl";
 import { fetchAccessStatus } from "@/lib/accessStatusClient";
+import {
+  ADVANCED_UNLOCKS,
+  advancedUpgradePriceLabel,
+  catalogText,
+  PLAN_CATALOG,
+  planPriceLabel,
+  type BillingCycle,
+} from "@/lib/planCatalog";
 
 type PlanId = "core" | "advanced";
 type Step = 1 | 2 | 3 | 4 | 5;
@@ -29,25 +37,6 @@ const buildSteps = (L: (en: string, es: string) => string): { id: Step; label: s
   { id: 5, label: L("Confirmed", "Confirmado"), description: L("Access your trading workspace.", "Accede a tu espacio de trading.") },
 ];
 
-const buildPlanCopy = (L: (en: string, es: string) => string): Record<PlanId, { name: string; price: string; description: string }> => ({
-  core: {
-    name: L("Core", "Core"),
-    price: L("$15.99 / month", "$15.99 / mes"),
-    description: L(
-      "Ideal for active traders who want structure, clear goals and emotional control without overcomplicating things.",
-      "Ideal para traders activos que buscan estructura, metas claras y control emocional sin complicarse."
-    ),
-  },
-  advanced: {
-    name: L("Advanced", "Advanced"),
-    price: L("$26.99 / month", "$26.99 / mes"),
-    description: L(
-      "For full-time and funded traders who need deep analytics, advanced alerts and reports ready for prop firms.",
-      "Para traders full-time o fondeados que necesitan analítica profunda, alertas avanzadas y reportes listos para prop firms."
-    ),
-  },
-});
-
 function classNames(...classes: (string | false | null | undefined)[]) {
   return classes.filter(Boolean).join(" ");
 }
@@ -61,7 +50,8 @@ export default function StartClient({ initialPlan }: StartClientProps) {
   const L = (en: string, es: string) => (isEs ? es : en);
 
   const steps = useMemo(() => buildSteps(L), [lang]);
-  const planCopy = useMemo(() => buildPlanCopy(L), [lang]);
+  const billingCycleFromQuery: BillingCycle =
+    searchParams.get("cycle") === "annual" ? "annual" : "monthly";
 
   // 👇 Leemos los query params que mandamos desde /confirmed
   const stepFromQuery = searchParams.get("step");
@@ -318,6 +308,7 @@ export default function StartClient({ initialPlan }: StartClientProps) {
         },
         body: JSON.stringify({
           planId: selectedPlan,
+          billingCycle: billingCycleFromQuery,
         }),
       });
 
@@ -512,8 +503,8 @@ export default function StartClient({ initialPlan }: StartClientProps) {
     }
 
     if (currentStep === 3) {
-      const core = planCopy.core;
-      const adv = planCopy.advanced;
+      const core = PLAN_CATALOG.core;
+      const adv = PLAN_CATALOG.advanced;
 
       return (
         <div>
@@ -541,13 +532,15 @@ export default function StartClient({ initialPlan }: StartClientProps) {
             >
               <div className="flex items-center justify-between mb-1">
                 <span className="font-semibold text-slate-50">
-                  {core.name}
+                  {catalogText(core.name, lang)}
                 </span>
                 <span className="text-[11px] text-emerald-400">
-                  {core.price}
+                  {planPriceLabel("core", lang, billingCycleFromQuery)}
                 </span>
               </div>
-              <p className="text-[11px] text-slate-300">{core.description}</p>
+              <p className="text-[11px] text-slate-300">
+                {catalogText(PLAN_CATALOG.core.startDescription, lang)}
+              </p>
             </button>
 
             {/* Advanced card */}
@@ -563,13 +556,31 @@ export default function StartClient({ initialPlan }: StartClientProps) {
             >
               <div className="flex items-center justify-between mb-1">
                 <span className="font-semibold text-emerald-300">
-                  {adv.name}
+                  {catalogText(adv.name, lang)}
                 </span>
                 <span className="text-[11px] text-emerald-400">
-                  {adv.price}
+                  {planPriceLabel("advanced", lang, billingCycleFromQuery)}
                 </span>
               </div>
-              <p className="text-[11px] text-slate-300">{adv.description}</p>
+              <p className="text-[11px] text-slate-300">
+                {catalogText(adv.startDescription, lang)}
+              </p>
+              <div className="mt-3 rounded-xl border border-emerald-300/35 bg-emerald-300/10 px-3 py-2">
+                <p className="text-[11px] font-semibold text-emerald-100">
+                  {advancedUpgradePriceLabel(lang, billingCycleFromQuery)}
+                </p>
+                <p className="mt-1 text-[10px] leading-relaxed text-emerald-50/80">
+                  {L(
+                    "AI coaching, business P&L, advanced statistics, audit tools, reports, and unlimited scale.",
+                    "AI coaching, P&L de negocio, estadística avanzada, auditoría, reportes y escala ilimitada."
+                  )}
+                </p>
+              </div>
+              <ul className="mt-3 grid grid-cols-1 gap-1 text-[10px] text-slate-200">
+                {ADVANCED_UNLOCKS.slice(1, 5).map((feature) => (
+                  <li key={feature.en}>✓ {catalogText(feature, lang)}</li>
+                ))}
+              </ul>
             </button>
           </div>
 
@@ -597,7 +608,7 @@ export default function StartClient({ initialPlan }: StartClientProps) {
     }
 
     if (currentStep === 4) {
-      const plan = planCopy[selectedPlan];
+      const plan = PLAN_CATALOG[selectedPlan];
 
       return (
         <div>
@@ -614,9 +625,9 @@ export default function StartClient({ initialPlan }: StartClientProps) {
           <div className="mb-4 rounded-xl border border-slate-700 bg-slate-900/60 p-4 text-xs">
             <p className="text-slate-300 mb-1">{L("Selected plan", "Plan seleccionado")}</p>
             <p className="font-semibold text-slate-50">
-              {plan.name}{" "}
+              {catalogText(plan.name, lang)}{" "}
               <span className="text-[11px] text-slate-400">
-                ({plan.price})
+                ({planPriceLabel(selectedPlan, lang, billingCycleFromQuery)})
               </span>
             </p>
             <p className="mt-2 text-[11px] text-slate-400">

@@ -1720,19 +1720,24 @@ export default function NotebookPage() {
   // Loading global
   if (authLoading || accountsLoading || entriesLoading || nbLoading) {
     return (
-      <main className="min-h-screen bg-slate-950 text-slate-50 px-6 md:px-10 py-8">
-        <h1 className="text-3xl font-semibold tracking-tight">
-          {L("Daily notebook", "Notebook diario")}
-        </h1>
-        <p className="text-slate-400 mt-2 text-sm">
-          {L("Loading your notebook…", "Cargando tu notebook…")}
-        </p>
+      <main className="min-h-screen bg-slate-950 text-slate-50">
+        <TopNav />
+        <div className="px-6 md:px-10 py-8">
+          <h1 className="text-3xl font-semibold tracking-tight">
+            {L("Daily notebook", "Notebook diario")}
+          </h1>
+          <p className="text-slate-400 mt-2 text-sm">
+            {L("Loading your notebook…", "Cargando tu notebook…")}
+          </p>
+        </div>
       </main>
     );
   }
 
   return (
-    <main className="min-h-screen bg-slate-950 text-slate-50 px-6 md:px-10 py-8">
+    <main className="min-h-screen bg-slate-950 text-slate-50">
+      <TopNav />
+      <div className="px-6 md:px-10 py-8">
       {/* Header */}
       <header className="flex flex-col gap-3">
         <div className="flex items-center justify-between gap-3">
@@ -3240,6 +3245,7 @@ export default function NotebookPage() {
           </div>
         </section>
       )}
+      </div>
     </main>
   );
 }

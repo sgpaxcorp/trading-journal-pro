@@ -89,6 +89,24 @@ alter table if exists public.profile_gamification
   add column if not exists created_at timestamptz default now(),
   add column if not exists updated_at timestamptz default now();
 
+do $$
+begin
+  if exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'profile_gamification'
+      and column_name = 'badges'
+      and udt_name like '\_%'
+  ) then
+    alter table public.profile_gamification alter column badges drop default;
+    alter table public.profile_gamification
+      alter column badges type jsonb
+      using to_jsonb(coalesce(badges, array[]::text[]));
+    alter table public.profile_gamification alter column badges set default '[]'::jsonb;
+  end if;
+end $$;
+
 create index if not exists challenge_runs_user_status_idx
   on public.challenge_runs(user_id, status, created_at desc);
 create index if not exists challenge_runs_user_challenge_idx

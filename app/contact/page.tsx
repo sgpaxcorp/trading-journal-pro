@@ -10,6 +10,7 @@ import {
   createSupportTicket,
   uploadSupportAttachments,
   addSupportMessage,
+  requestSupportAgentReply,
   type SupportAttachment,
 } from "@/lib/supportTicketsSupabase";
 
@@ -88,7 +89,18 @@ export default function ContactPage() {
           authorRole: "user",
         });
         if (!msgRes.ok) throw new Error(msgRes.error || "Message failed");
-        setStatus(L("Support ticket created. We’ll reply soon.", "Ticket creado. Te responderemos pronto."));
+        const agentRes = await requestSupportAgentReply({ ticketId });
+        setStatus(
+          agentRes.ok && agentRes.canAnswer
+            ? L(
+                "Ticket created. The 24/7 virtual support agent replied in your Message Center.",
+                "Ticket creado. El agente virtual 24/7 respondió en tu Centro de mensajes."
+              )
+            : L(
+                "Ticket created. The virtual agent routed it for follow-up and we’ll work it until it’s resolved.",
+                "Ticket creado. El agente virtual lo escaló para seguimiento y lo trabajaremos hasta resolverlo."
+              )
+        );
       } else {
         const captchaToken = hcaptchaSiteKey
           ? (document.querySelector('[name="h-captcha-response"]') as HTMLTextAreaElement | null)?.value || ""
@@ -106,7 +118,7 @@ export default function ContactPage() {
         const body = await res.json();
         if (!res.ok) throw new Error(body?.error || "Contact failed");
 
-        setStatus(L("Message sent. We’ll reply soon.", "Mensaje enviado. Te responderemos pronto."));
+        setStatus(L("Message sent. Our team will route it for follow-up.", "Mensaje enviado. Nuestro equipo lo canalizará para seguimiento."));
       }
       setName("");
       setEmail("");
@@ -150,8 +162,8 @@ export default function ContactPage() {
             <h2 className="text-lg font-semibold">{L("Support & inquiries", "Soporte y consultas")}</h2>
             <p className="mt-2 text-sm text-slate-400">
               {L(
-                "Tell us how we can help. Our team reviews every request.",
-                "Cuéntanos cómo podemos ayudar. Nuestro equipo revisa cada solicitud."
+                "Get help through our 24/7 virtual support agent. If a ticket needs deeper review, we keep following up until it is resolved.",
+                "Recibe ayuda con nuestro agente virtual 24/7. Si un ticket requiere revisión adicional, le damos seguimiento hasta resolverlo."
               )}
             </p>
             <div className="mt-4 space-y-3 text-sm">
@@ -160,8 +172,8 @@ export default function ContactPage() {
                 <p className="font-semibold text-emerald-300">support@neurotrader-journal.com</p>
               </div>
               <div>
-                <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">{L("Response time", "Tiempo de respuesta")}</p>
-                <p className="text-slate-300">{L("Typically within 24–48 hours.", "Normalmente dentro de 24–48 horas.")}</p>
+                <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">{L("Support model", "Modelo de soporte")}</p>
+                <p className="text-slate-300">{L("Virtual agent 24/7 + ticket follow-up until resolved.", "Agente virtual 24/7 + seguimiento de ticket hasta resolver.")}</p>
               </div>
             </div>
           </section>

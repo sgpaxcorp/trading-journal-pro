@@ -2275,8 +2275,11 @@ export default function BackStudyPage() {
   return (
     <Suspense
       fallback={
-        <main className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center">
-          <p className="text-slate-400 text-sm">Loading back-study…</p>
+        <main className="min-h-screen bg-slate-950 text-slate-50">
+          <TopNav />
+          <div className="flex min-h-[60vh] items-center justify-center px-6">
+            <p className="text-slate-400 text-sm">Loading back-study…</p>
+          </div>
         </main>
       }
     >

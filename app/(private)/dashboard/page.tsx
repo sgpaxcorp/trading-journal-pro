@@ -3995,20 +3995,26 @@ export default function DashboardPage() {
   /* ========== Render Page ========== */
   if (loading || !viewDate) {
     return (
-      <main className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center">
-        <p className="text-base text-slate-400">
-          {L("Loading your dashboard...", "Cargando tu dashboard...")}
-        </p>
+      <main className="min-h-screen bg-slate-950 text-slate-50">
+        <TopNav />
+        <div className="flex min-h-[60vh] items-center justify-center px-6">
+          <p className="text-base text-slate-400">
+            {L("Loading your dashboard...", "Cargando tu dashboard...")}
+          </p>
+        </div>
       </main>
     );
   }
 
   if (!user) {
     return (
-      <main className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center">
-        <p className="text-base text-slate-400">
-          {L("Redirecting to sign in...", "Redirigiendo para iniciar sesión...")}
-        </p>
+      <main className="min-h-screen bg-slate-950 text-slate-50">
+        <TopNav />
+        <div className="flex min-h-[60vh] items-center justify-center px-6">
+          <p className="text-base text-slate-400">
+            {L("Redirecting to sign in...", "Redirigiendo para iniciar sesión...")}
+          </p>
+        </div>
       </main>
     );
   }

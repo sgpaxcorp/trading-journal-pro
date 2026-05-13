@@ -86,6 +86,24 @@ alter table if exists public.profile_gamification
   add column if not exists created_at timestamptz default now(),
   add column if not exists updated_at timestamptz default now();
 
+do $$
+begin
+  if exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'profile_gamification'
+      and column_name = 'badges'
+      and udt_name like '\_%'
+  ) then
+    alter table public.profile_gamification alter column badges drop default;
+    alter table public.profile_gamification
+      alter column badges type jsonb
+      using to_jsonb(coalesce(badges, array[]::text[]));
+    alter table public.profile_gamification alter column badges set default '[]'::jsonb;
+  end if;
+end $$;
+
 create index if not exists challenge_runs_user_status_idx
   on public.challenge_runs(user_id, status, created_at desc);
 create index if not exists challenge_runs_user_challenge_idx
@@ -372,8 +390,11 @@ $$;
 
 alter table if exists public.profiles
   add column if not exists ranking_name text,
-  add column if not exists show_in_ranking boolean default false,
+  add column if not exists show_in_ranking boolean default true,
   add column if not exists avatar_url text;
+
+alter table if exists public.profiles
+  alter column show_in_ranking set default true;
 
 create index if not exists profiles_show_in_ranking_idx
   on public.profiles(show_in_ranking)
@@ -420,11 +441,10 @@ as $$
       coalesce(
         nullif(p.ranking_name, ''),
         nullif(trim(coalesce(p.first_name, '') || ' ' || coalesce(p.last_name, '')), ''),
-        p.email,
-        'Trader'
+        'Trader ' || upper(substr(replace(p.id::text, '-', ''), 1, 6))
       ) as display_name,
       p.avatar_url,
-      coalesce(p.show_in_ranking, false) as show_in_ranking
+      coalesce(p.show_in_ranking, true) as show_in_ranking
     from public.profiles p
   ),
   ranked as (
@@ -506,11 +526,10 @@ as $$
       coalesce(
         nullif(p.ranking_name, ''),
         nullif(trim(coalesce(p.first_name, '') || ' ' || coalesce(p.last_name, '')), ''),
-        p.email,
-        'Trader'
+        'Trader ' || upper(substr(replace(p.id::text, '-', ''), 1, 6))
       ) as display_name,
       p.avatar_url,
-      coalesce(p.show_in_ranking, false) as show_in_ranking
+      coalesce(p.show_in_ranking, true) as show_in_ranking
     from public.profiles p
   ),
   ranked as (

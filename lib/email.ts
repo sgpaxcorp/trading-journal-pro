@@ -4,6 +4,7 @@ import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 import { jsPDF } from "jspdf";
+import { PLAN_PRICES } from "@/lib/planCatalog";
 
 const APP_URL =
   process.env.NEXT_PUBLIC_APP_URL ||
@@ -1625,7 +1626,7 @@ export function getAutomatedEmailCatalog(): AutomatedEmailPreview[] {
         email: "trader@example.com",
         name: "Steven",
         plan: "advanced",
-        amount: 26.99,
+        amount: PLAN_PRICES.advanced.monthly,
         billingCycle: "monthly",
         subscriptionId: "sub_123456789",
         invoiceNumber: "7D8E2A9-0005",
@@ -1645,7 +1646,7 @@ export function getAutomatedEmailCatalog(): AutomatedEmailPreview[] {
         email: "trader@example.com",
         name: "Steven",
         plan: "advanced",
-        amount: 26.99,
+        amount: PLAN_PRICES.advanced.monthly,
         billingCycle: "monthly",
         renewalDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
       }),
@@ -1662,7 +1663,7 @@ export function getAutomatedEmailCatalog(): AutomatedEmailPreview[] {
         email: "trader@example.com",
         name: "Steven",
         plan: "advanced",
-        amount: 26.99,
+        amount: PLAN_PRICES.advanced.monthly,
         billingCycle: "monthly",
         invoiceNumber: "7D8E2A9-0006",
         nextAttemptAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(),
@@ -1795,7 +1796,7 @@ export async function sendAutomatedEmailTest(args: {
         email,
         name: "Admin preview",
         plan: "advanced",
-        amount: 26.99,
+        amount: PLAN_PRICES.advanced.monthly,
         billingCycle: "monthly",
         subscriptionId: "sub_preview_001",
         invoiceNumber: "7D8E2A9-0005",
@@ -1807,7 +1808,7 @@ export async function sendAutomatedEmailTest(args: {
         email,
         name: "Admin preview",
         plan: "advanced",
-        amount: 26.99,
+        amount: PLAN_PRICES.advanced.monthly,
         billingCycle: "monthly",
         renewalDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
       });
@@ -1816,7 +1817,7 @@ export async function sendAutomatedEmailTest(args: {
         email,
         name: "Admin preview",
         plan: "advanced",
-        amount: 26.99,
+        amount: PLAN_PRICES.advanced.monthly,
         billingCycle: "monthly",
         invoiceNumber: "7D8E2A9-0006",
         nextAttemptAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(),

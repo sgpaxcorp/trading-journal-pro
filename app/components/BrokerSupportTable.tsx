@@ -4,7 +4,7 @@ import { Fragment } from "react";
 
 type BrokerSupport = {
   name: string;
-  region: "US" | "International" | "CSV only";
+  region: "US" | "International" | "File import";
   snaptrade: boolean;
   csv: boolean;
 };
@@ -39,13 +39,13 @@ const BROKERS: BrokerSupport[] = [
   { name: "Wells Fargo", region: "US", snaptrade: true, csv: false },
   { name: "Interactive Brokers", region: "International", snaptrade: true, csv: true },
   { name: "Coinbase (crypto)", region: "International", snaptrade: true, csv: true },
-  { name: "Thinkorswim (Schwab/TOS)", region: "CSV only", snaptrade: false, csv: true },
-  { name: "Tradovate", region: "CSV only", snaptrade: false, csv: true },
-  { name: "NinjaTrader", region: "CSV only", snaptrade: false, csv: true },
-  { name: "Binance", region: "CSV only", snaptrade: false, csv: true },
+  { name: "Thinkorswim (Schwab/TOS)", region: "File import", snaptrade: false, csv: true },
+  { name: "Tradovate", region: "File import", snaptrade: false, csv: true },
+  { name: "NinjaTrader", region: "File import", snaptrade: false, csv: true },
+  { name: "Binance", region: "File import", snaptrade: false, csv: true },
 ];
 
-const REGION_ORDER: BrokerSupport["region"][] = ["US", "International", "CSV only"];
+const REGION_ORDER: BrokerSupport["region"][] = ["US", "International", "File import"];
 
 function Check({ active }: { active: boolean }) {
   if (!active) {
@@ -68,10 +68,10 @@ export function BrokerSupportTable({
     region,
     label:
       region === "US"
-        ? L("Broker Sync (SnapTrade) — US", "Broker Sync (SnapTrade) — US")
+          ? L("Secure broker sync — US", "Sync seguro del bróker — US")
         : region === "International"
-          ? L("Broker Sync (SnapTrade) — International", "Broker Sync (SnapTrade) — Internacional")
-          : L("CSV import only (no SnapTrade)", "Solo importación CSV (sin SnapTrade)"),
+          ? L("Secure broker sync — International", "Sync seguro del bróker — Internacional")
+          : L("Direct file imports", "Imports directos de archivos"),
     items: BROKERS.filter((b) => b.region === region),
   }));
 
@@ -82,13 +82,13 @@ export function BrokerSupportTable({
           {L("Supported brokers", "Brokers soportados")}
         </p>
         <h3 className="text-xl md:text-2xl font-semibold text-slate-50">
-          {title ?? L("Broker Sync + CSV import coverage", "Cobertura de Broker Sync + CSV")}
+          {title ?? L("Broker data coverage", "Cobertura de data del bróker")}
         </h3>
         <p className="text-[11px] text-slate-400">
           {subtitle ??
             L(
-              "Check if your broker connects via SnapTrade or if you should use CSV import.",
-              "Verifica si tu bróker conecta vía SnapTrade o si debes usar importación CSV."
+              "Use the strongest data path for each broker: secure sync, account statements, order history, or supported CSV/XLSX files.",
+              "Usa la ruta de data más fuerte para cada bróker: sync seguro, account statements, order history o archivos CSV/XLSX soportados."
             )}
         </p>
       </div>
@@ -99,8 +99,8 @@ export function BrokerSupportTable({
             <tr className="border-b border-slate-800 text-slate-300">
               <th className="py-3 pr-3">{L("Broker", "Broker")}</th>
               <th className="py-3 pr-3">{L("Region", "Región")}</th>
-              <th className="py-3 pr-3 text-center">{L("Sync (SnapTrade)", "Sync (SnapTrade)")}</th>
-              <th className="py-3 text-center">{L("CSV import", "Importación CSV")}</th>
+              <th className="py-3 pr-3 text-center">{L("Secure sync", "Sync seguro")}</th>
+              <th className="py-3 text-center">{L("Statement / file import", "Import statement / archivo")}</th>
             </tr>
           </thead>
           <tbody>
@@ -119,7 +119,7 @@ export function BrokerSupportTable({
                         ? L("US", "EE. UU.")
                         : item.region === "International"
                           ? L("International", "Internacional")
-                          : L("CSV only", "Solo CSV")}
+                          : L("File import", "Import de archivo")}
                     </td>
                     <td className="py-2 pr-3 text-center">
                       <Check active={item.snaptrade} />

@@ -8,51 +8,7 @@ import type { PlanId } from "@/lib/types";
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
 import { supabaseBrowser } from "@/lib/supaBaseClient";
-
-const PLAN_COPY: Record<
-  PlanId,
-  {
-    name: string;
-    priceLabel: string;
-    description: { en: string; es: string };
-    features: { en: string; es: string }[];
-  }
-> = {
-  core: {
-    name: "Core",
-    priceLabel: "$15.99 / month",
-    description: {
-      en: "Core trading journal and essential performance stats.",
-      es: "Diario de trading base y estadísticas esenciales de performance.",
-    },
-    features: [
-      { en: "Daily P&L tracking", es: "Seguimiento diario de P&L" },
-      { en: "Basic analytics & calendar", es: "Analítica básica y calendario" },
-      { en: "Growth plan basics", es: "Fundamentos del Growth Plan" },
-      { en: "Trade review workspace", es: "Workspace de revisión de trades" },
-      { en: "Manual broker imports", es: "Imports manuales de bróker" },
-      { en: "Mobile app (iOS)", es: "Aplicación móvil (iOS)" },
-    ],
-  },
-  advanced: {
-    name: "Professional",
-    priceLabel: "$26.99 / month",
-    description: {
-      en: "Advanced analytics, psychology tools and AI coaching for serious traders.",
-      es: "Analítica avanzada, psicología y AI coaching para traders serios.",
-    },
-    features: [
-      { en: "Everything in Core", es: "Todo lo de Core" },
-      { en: "Advanced analytics & breakdowns", es: "Analítica avanzada y breakdowns" },
-      { en: "Profit & Loss Track (business accounting)", es: "Profit & Loss Track (contabilidad)" },
-      { en: "AI coaching & mindset tools", es: "AI coaching y herramientas de mindset" },
-      { en: "Notebook, Cashflow, Back-Studying & Audit", es: "Notebook, Cashflow, Back-Studying y Audit" },
-      { en: "Advanced PDF exports", es: "Exportaciones PDF avanzadas" },
-      { en: "Priority improvements & features", es: "Mejoras y features prioritarios" },
-      { en: "Mobile app (iOS)", es: "Aplicación móvil (iOS)" },
-    ],
-  },
-};
+import { catalogText, PLAN_CATALOG, planPriceLabel } from "@/lib/planCatalog";
 
 export default function PlansPage() {
   const { user } = useAuth();
@@ -121,8 +77,8 @@ export default function PlansPage() {
     }
   }
 
-  const core = PLAN_COPY.core;
-  const professional = PLAN_COPY.advanced;
+  const core = PLAN_CATALOG.core;
+  const advanced = PLAN_CATALOG.advanced;
 
   return (
     <main className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center px-4">
@@ -152,22 +108,22 @@ export default function PlansPage() {
               {L("Starter", "Starter")}
             </p>
             <h2 className="text-lg font-semibold text-slate-50 mt-1">
-              {core.name}
+              {catalogText(core.name, lang)}
             </h2>
             <p className="text-sm text-emerald-300 mt-1">
-              {core.priceLabel}
+              {planPriceLabel("core", lang)}
             </p>
             <p className="text-[11px] text-slate-400 mt-2">
-              {isEs ? core.description.es : core.description.en}
+              {catalogText(core.description, lang)}
             </p>
             <ul className="mt-3 space-y-1 text-[11px] text-slate-200">
-              {core.features.map((f) => (
-                <li key={f.en}>• {isEs ? f.es : f.en}</li>
+              {core.billingHighlights.map((f) => (
+                <li key={f.en}>• {catalogText(f, lang)}</li>
               ))}
             </ul>
           </button>
 
-          {/* Professional card */}
+          {/* Advanced card */}
           <button
             type="button"
             onClick={() => setSelectedPlan("advanced")}
@@ -184,17 +140,17 @@ export default function PlansPage() {
               {L("For serious traders", "Para traders serios")}
             </p>
             <h2 className="text-lg font-semibold text-slate-50 mt-1">
-              {professional.name}
+              {catalogText(advanced.name, lang)}
             </h2>
             <p className="text-sm text-emerald-300 mt-1">
-              {professional.priceLabel}
+              {planPriceLabel("advanced", lang)}
             </p>
             <p className="text-[11px] text-slate-400 mt-2">
-              {isEs ? professional.description.es : professional.description.en}
+              {catalogText(advanced.description, lang)}
             </p>
             <ul className="mt-3 space-y-1 text-[11px] text-slate-200">
-              {professional.features.map((f) => (
-                <li key={f.en}>• {isEs ? f.es : f.en}</li>
+              {advanced.billingHighlights.map((f) => (
+                <li key={f.en}>• {catalogText(f, lang)}</li>
               ))}
             </ul>
           </button>
@@ -219,7 +175,7 @@ export default function PlansPage() {
           >
             {loading
               ? L("Redirecting to Stripe…", "Redirigiendo a Stripe…")
-              : `${L("Continue with Stripe", "Continuar con Stripe")} (${PLAN_COPY[selectedPlan].name})`}
+              : `${L("Continue with Stripe", "Continuar con Stripe")} (${catalogText(PLAN_CATALOG[selectedPlan].name, lang)})`}
           </button>
         </div>
       </div>
