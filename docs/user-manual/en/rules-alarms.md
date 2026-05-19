@@ -1,8 +1,8 @@
-# Rules & Alarms
+# Trading Protection System
 ## Access
-- Left navigation → `Rules & Alarms` → `Alarms`.
+- Left navigation → `Trading Protection System` → `Critical Alarms`.
 
-Rules & Alarms is your automated discipline console. It watches your configured alarm rules, checks your trading day, and creates active alarms when something needs your attention.
+Trading Protection System is your automated discipline console. It watches your configured protection rules, checks your trading day, and creates active alarms when something needs your attention.
 
 ## What this page is for
 Use this page to:
@@ -238,7 +238,7 @@ If you are just starting, enable or create these first:
 This gives you a strong first layer of discipline coverage.
 
 ## Important note
-Rules & Alarms is designed to protect:
+Trading Protection System is designed to protect:
 - risk
 - process
 - journal hygiene

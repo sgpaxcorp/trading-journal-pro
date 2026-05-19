@@ -107,7 +107,7 @@ function KpiCard({ label, value, sub }: { label: string; value: string; sub?: st
   );
 }
 
-export default function RemindersConsolePage() {
+export default function RoutineChecksConsolePage() {
   const router = useRouter();
   const { user } = useAuth();
   const userId = user?.id || "";
@@ -230,8 +230,8 @@ export default function RemindersConsolePage() {
       setFlash({
         type: "success",
         msg: L(
-          "Test reminder fired. You should see a popup within a few seconds.",
-          "Recordatorio de prueba enviado. Deberías ver un pop‑up en unos segundos."
+          "Test routine check fired. You should see a popup within a few seconds.",
+          "Chequeo de rutina de prueba enviado. Deberías ver un pop‑up en unos segundos."
         ),
       });
       await refreshAll();
@@ -303,8 +303,8 @@ export default function RemindersConsolePage() {
       setFlash({
         type: "error",
         msg: L(
-          `Limit reached. Your ${planKey === "advanced" ? "Advanced" : "Core"} plan allows up to ${customLimit} custom reminders.`,
-          `Límite alcanzado. Tu plan ${planKey === "advanced" ? "Advanced" : "Core"} permite hasta ${customLimit} recordatorios personalizados.`
+          `Limit reached. Your ${planKey === "advanced" ? "Advanced" : "Core"} plan allows up to ${customLimit} custom routine checks.`,
+          `Límite alcanzado. Tu plan ${planKey === "advanced" ? "Advanced" : "Core"} permite hasta ${customLimit} chequeos de rutina personalizados.`
         ),
       });
       return;
@@ -345,7 +345,7 @@ export default function RemindersConsolePage() {
         return;
       }
 
-      setFlash({ type: "success", msg: L("Custom reminder created.", "Recordatorio personalizado creado.") });
+      setFlash({ type: "success", msg: L("Custom routine check created.", "Chequeo de rutina personalizado creado.") });
       setNewTitle("");
       setNewMessage("");
       setNewThreshold("");
@@ -362,15 +362,15 @@ export default function RemindersConsolePage() {
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <div className="text-[11px] uppercase tracking-[0.32em] text-emerald-400">
-            {L("Rules & Alarms • Reminders", "Reglas y alarmas • Recordatorios")}
+            {L("Trading Protection System • Routine Checks", "Sistema de protección de trading • Chequeos de rutina")}
           </div>
           <h1 className="mt-2 text-2xl font-semibold text-slate-100">
-            {L("Reminders & pop-ups", "Recordatorios y pop‑ups")}
+            {L("Routine checks", "Chequeos de rutina")}
           </h1>
           <p className="mt-2 max-w-2xl text-sm text-slate-400">
             {L(
-              "Behavioral reminders that trigger pop-ups and in-app alerts. Designed to enforce stop rules and protect decision quality.",
-              "Recordatorios conductuales que disparan pop‑ups y alertas in‑app. Diseñados para reforzar reglas y proteger la calidad de decisión."
+              "Quiet, high-value check-ins for premarket, journaling, and daily process habits. Keep them useful, timed, and specific so protection never feels like noise.",
+              "Checks suaves y valiosos para premarket, journaling y hábitos diarios del proceso. Mantenlos útiles, precisos y específicos para que la protección nunca se sienta como ruido."
             )}
           </p>
         </div>
@@ -380,7 +380,7 @@ export default function RemindersConsolePage() {
             href="/rules-alarms/alarms"
             className="inline-flex items-center rounded-xl border border-slate-700 bg-slate-950/30 px-3 py-2 text-xs font-semibold text-slate-100 transition hover:border-emerald-500/60 hover:bg-emerald-500/10 hover:text-emerald-200"
           >
-            {L("Open alarms", "Abrir alarmas")}
+            {L("Open critical alarms", "Abrir alarmas críticas")}
           </Link>
           <button
             type="button"
@@ -424,9 +424,9 @@ export default function RemindersConsolePage() {
       )}
 
         <div className="mt-5 grid gap-3 md:grid-cols-3">
-        <KpiCard label={L("Active reminders", "Recordatorios activos")} value={String(activeEvents.length)} sub={L("Currently firing", "Disparándose ahora")} />
+        <KpiCard label={L("Active checks", "Checks activos")} value={String(activeEvents.length)} sub={L("Currently firing", "Disparándose ahora")} />
         <KpiCard label={L("Snoozed", "Pospuestos")} value={String(snoozedEvents.length)} sub={L("Hidden temporarily", "Ocultos temporalmente")} />
-        <KpiCard label={L("Rules enabled", "Reglas activas")} value={String(rules.filter((r) => r.enabled).length)} sub={L("Reminder rules", "Reglas de recordatorio")} />
+        <KpiCard label={L("Rules enabled", "Reglas activas")} value={String(rules.filter((r) => r.enabled).length)} sub={L("Routine check rules", "Reglas de chequeo")} />
       </div>
 
         <div className="mt-5 flex flex-wrap gap-2">
@@ -455,8 +455,8 @@ export default function RemindersConsolePage() {
           <section className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div>
-                <div className="text-xs uppercase tracking-[0.28em] text-slate-500">{L("Active reminders", "Recordatorios activos")}</div>
-                <p className="mt-2 text-sm text-slate-400">{L("Click a reminder to see details and actions.", "Haz clic en un recordatorio para ver detalles y acciones.")}</p>
+                <div className="text-xs uppercase tracking-[0.28em] text-slate-500">{L("Active routine checks", "Chequeos de rutina activos")}</div>
+                <p className="mt-2 text-sm text-slate-400">{L("Click a check to see details and actions.", "Haz clic en un chequeo para ver detalles y acciones.")}</p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <div className="relative">
@@ -464,7 +464,7 @@ export default function RemindersConsolePage() {
                   <input
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
-                    placeholder={L("Search reminders...", "Buscar recordatorios...")}
+                    placeholder={L("Search checks...", "Buscar chequeos...")}
                     className="w-48 rounded-xl border border-slate-700 bg-slate-950/40 pl-9 pr-3 py-2 text-xs text-slate-200 placeholder:text-slate-500 focus:border-emerald-400"
                   />
                 </div>
@@ -485,7 +485,7 @@ export default function RemindersConsolePage() {
             <div className="mt-5 space-y-3">
               {filteredActiveEvents.length === 0 ? (
                 <div className="rounded-xl border border-dashed border-slate-700 bg-slate-950/30 p-4 text-sm text-slate-400">
-                  {L("No reminders match your filters.", "No hay recordatorios que coincidan con tus filtros.")}
+                  {L("No routine checks match your filters.", "No hay chequeos de rutina que coincidan con tus filtros.")}
                 </div>
               ) : (
                 filteredActiveEvents.map((e) => (
@@ -502,11 +502,11 @@ export default function RemindersConsolePage() {
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex items-center gap-2">
                         <SeverityPill severity={e.severity} />
-                        <span className="text-[11px] uppercase tracking-[0.2em] text-slate-500">{L("reminder", "recordatorio")}</span>
+                        <span className="text-[11px] uppercase tracking-[0.2em] text-slate-500">{L("routine check", "chequeo de rutina")}</span>
                       </div>
                       <div className="text-xs text-slate-400">{fmtDate(e.triggered_at)}</div>
                     </div>
-                    <div className="mt-2 text-sm font-semibold text-slate-100">{e.title || L("Reminder", "Recordatorio")}</div>
+                    <div className="mt-2 text-sm font-semibold text-slate-100">{e.title || L("Routine check", "Chequeo de rutina")}</div>
                     <div className="mt-1 text-xs text-slate-400 line-clamp-2">{e.message || "—"}</div>
                   </button>
                 ))
@@ -518,15 +518,15 @@ export default function RemindersConsolePage() {
             <section className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <div className="text-xs uppercase tracking-[0.28em] text-slate-500">{L("Reminder detail", "Detalle del recordatorio")}</div>
-                  <p className="mt-2 text-sm text-slate-400">{L("Review the reminder and take action.", "Revisa el recordatorio y toma acción.")}</p>
+                  <div className="text-xs uppercase tracking-[0.28em] text-slate-500">{L("Check detail", "Detalle del chequeo")}</div>
+                  <p className="mt-2 text-sm text-slate-400">{L("Review the check and take action.", "Revisa el chequeo y toma acción.")}</p>
                 </div>
                 {selectedEvent ? <SeverityPill severity={selectedEvent.severity} /> : null}
               </div>
 
               {!selectedEvent ? (
                 <div className="mt-6 rounded-xl border border-dashed border-slate-700 bg-slate-950/30 p-4 text-sm text-slate-400">
-                  {L("Select a reminder from the left to inspect details and actions.", "Selecciona un recordatorio a la izquierda para ver detalles y acciones.")}
+                  {L("Select a routine check from the left to inspect details and actions.", "Selecciona un chequeo de rutina a la izquierda para ver detalles y acciones.")}
                 </div>
               ) : (
                 <div className="mt-5 space-y-4">
@@ -542,7 +542,7 @@ export default function RemindersConsolePage() {
                     </div>
                     <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
                       <div className="text-[11px] uppercase tracking-[0.2em] text-slate-500">{L("Category", "Categoría")}</div>
-                      <div className="mt-1 text-sm text-slate-200">{selectedEvent.category || L("reminder", "recordatorio")}</div>
+                      <div className="mt-1 text-sm text-slate-200">{selectedEvent.category || L("routine check", "chequeo de rutina")}</div>
                     </div>
                   </div>
 
@@ -576,7 +576,7 @@ export default function RemindersConsolePage() {
 
             <section className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
               <div className="text-xs uppercase tracking-[0.28em] text-slate-500">{L("Quick controls", "Controles rápidos")}</div>
-              <p className="mt-2 text-sm text-slate-400">{L("Snoozing hides the reminder until the chosen time.", "Posponer oculta el recordatorio hasta el momento elegido.")}</p>
+              <p className="mt-2 text-sm text-slate-400">{L("Snoozing hides the check until the chosen time.", "Posponer oculta el chequeo hasta el momento elegido.")}</p>
               <div className="mt-4 flex flex-wrap gap-2">
                 <button
                   className="rounded-lg border border-slate-700 bg-slate-900/40 px-3 py-2 text-xs font-semibold text-slate-100 hover:border-emerald-400/60 hover:bg-emerald-500/10"
@@ -602,8 +602,13 @@ export default function RemindersConsolePage() {
         <section className="mt-6 rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
           <div className="flex items-center justify-between gap-4">
             <div>
-              <div className="text-xs uppercase tracking-[0.28em] text-slate-500">{L("Reminder rules", "Reglas de recordatorios")}</div>
-              <p className="mt-2 text-sm text-slate-400">{L("Toggle rules on/off and trigger tests.", "Activa o desactiva reglas y dispara pruebas.")}</p>
+              <div className="text-xs uppercase tracking-[0.28em] text-slate-500">{L("Routine check rules", "Reglas de chequeo")}</div>
+              <p className="mt-2 text-sm text-slate-400">
+                {L(
+                  "Keep these light: premarket reset, journaling closeout, and process check-ins.",
+                  "Mantén esto liviano: reset de premarket, cierre de journal y checks del proceso."
+                )}
+              </p>
             </div>
             <div className="text-xs text-slate-400">{busy ? L("Working…", "Trabajando…") : ""}</div>
           </div>
@@ -612,18 +617,18 @@ export default function RemindersConsolePage() {
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <div className="text-[11px] uppercase tracking-[0.28em] text-slate-500">
-                  {L("Create custom reminder", "Crear recordatorio personalizado")}
+                  {L("Create routine check", "Crear chequeo de rutina")}
                 </div>
                 <p className="mt-1 text-sm text-slate-400">
                   {L(
-                    "Pick a trigger and optional thresholds. Custom reminders are in addition to core rules.",
-                    "Elige un disparador y umbrales opcionales. Los recordatorios personalizados son adicionales a las reglas core."
+                    "Pick a trigger and optional thresholds. Custom checks are in addition to core protection rules.",
+                    "Elige un disparador y umbrales opcionales. Los chequeos personalizados son adicionales a las reglas core de protección."
                   )}
                 </p>
               </div>
               <div className="flex items-center gap-3 text-xs text-slate-400">
                 <span>
-                  {L("Custom reminders:", "Recordatorios personalizados:")}{" "}
+                  {L("Custom checks:", "Chequeos personalizados:")}{" "}
                   <span className="text-slate-200 font-semibold">{customRulesCount}/{customLimit}</span>
                 </span>
                 <button
@@ -631,7 +636,7 @@ export default function RemindersConsolePage() {
                   onClick={() => setShowCreate((v) => !v)}
                   className="rounded-lg border border-slate-700 bg-slate-900/40 px-3 py-2 text-xs font-semibold text-slate-100 hover:border-emerald-400/60 hover:bg-emerald-500/10"
                 >
-                  {showCreate ? L("Hide form", "Ocultar formulario") : L("Add reminder", "Agregar recordatorio")}
+                  {showCreate ? L("Hide form", "Ocultar formulario") : L("Add check", "Agregar chequeo")}
                 </button>
               </div>
             </div>
@@ -639,8 +644,8 @@ export default function RemindersConsolePage() {
             {remainingCustom === 0 ? (
               <div className="mt-3 rounded-lg border border-amber-800 bg-amber-950/30 px-3 py-2 text-xs text-amber-200">
                 {L(
-                  `Limit reached. Your ${planKey === "advanced" ? "Advanced" : "Core"} plan allows up to ${customLimit} custom reminders.`,
-                  `Límite alcanzado. Tu plan ${planKey === "advanced" ? "Advanced" : "Core"} permite hasta ${customLimit} recordatorios personalizados.`
+                  `Limit reached. Your ${planKey === "advanced" ? "Advanced" : "Core"} plan allows up to ${customLimit} custom routine checks.`,
+                  `Límite alcanzado. Tu plan ${planKey === "advanced" ? "Advanced" : "Core"} permite hasta ${customLimit} chequeos de rutina personalizados.`
                 )}
               </div>
             ) : null}
@@ -706,7 +711,7 @@ export default function RemindersConsolePage() {
                     value={newMessage}
                     onChange={(e) => setNewMessage(e.target.value)}
                     rows={3}
-                    placeholder={L("Explain what to do when this reminder triggers.", "Explica qué hacer cuando se dispare este recordatorio.")}
+                    placeholder={L("Explain what to do when this check triggers.", "Explica qué hacer cuando se dispare este chequeo.")}
                     className="w-full rounded-xl border border-slate-700 bg-slate-950/40 px-3 py-2 text-xs text-slate-200 placeholder:text-slate-500 focus:border-emerald-400"
                   />
                 </div>
@@ -743,7 +748,7 @@ export default function RemindersConsolePage() {
                     disabled={busy || !userId || remainingCustom <= 0}
                     className="rounded-lg border border-emerald-500/50 bg-emerald-500/10 px-4 py-2 text-xs font-semibold text-emerald-200 hover:bg-emerald-500/20 disabled:opacity-50"
                   >
-                    {L("Create reminder", "Crear recordatorio")}
+                    {L("Create check", "Crear chequeo")}
                   </button>
                 </div>
               </form>
@@ -827,8 +832,8 @@ export default function RemindersConsolePage() {
         <section className="mt-6 rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
           <div className="flex items-center justify-between gap-4">
             <div>
-              <div className="text-xs uppercase tracking-[0.28em] text-slate-500">{L("Reminder history", "Historial de recordatorios")}</div>
-              <p className="mt-2 text-sm text-slate-400">{L("A record of reminders and your actions.", "Registro de recordatorios y tus acciones.")}</p>
+              <div className="text-xs uppercase tracking-[0.28em] text-slate-500">{L("Routine check history", "Historial de chequeos de rutina")}</div>
+              <p className="mt-2 text-sm text-slate-400">{L("A record of checks and your actions.", "Registro de chequeos y tus acciones.")}</p>
             </div>
             <button
               className="rounded-lg border border-slate-700 bg-slate-900/40 px-3 py-2 text-xs font-semibold text-slate-100 hover:border-emerald-400/60 hover:bg-emerald-500/10"
@@ -841,7 +846,7 @@ export default function RemindersConsolePage() {
 
           {historyEvents.length === 0 ? (
             <div className="mt-4 rounded-xl border border-dashed border-slate-700 bg-slate-950/30 p-4 text-sm text-slate-400">
-              {L("No reminder history yet.", "Aún no hay historial de recordatorios.")}
+              {L("No routine check history yet.", "Aún no hay historial de chequeos de rutina.")}
             </div>
           ) : (
             <div className="mt-5 overflow-hidden rounded-xl border border-slate-800">
@@ -861,7 +866,7 @@ export default function RemindersConsolePage() {
                       <td className="px-4 py-3">
                         <SeverityPill severity={e.severity} />
                       </td>
-                      <td className="px-4 py-3 text-slate-100">{e.title || L("Reminder", "Recordatorio")}</td>
+                      <td className="px-4 py-3 text-slate-100">{e.title || L("Routine check", "Chequeo de rutina")}</td>
                       <td className="px-4 py-3 text-slate-300">{e.dismissed ? L("Dismissed", "Descartado") : e.status}</td>
                     </tr>
                   ))}

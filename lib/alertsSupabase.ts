@@ -690,6 +690,160 @@ export async function createAlertRule(
   }
 }
 
+export async function syncGrowthPlanProtectionRules(
+  userId: string,
+  input: {
+    dailyGoalUsd?: number | null;
+    dailyGoalPercent?: number | null;
+    maxLossUsd?: number | null;
+    maxLossPercent?: number | null;
+    startingBalance?: number | null;
+    targetBalance?: number | null;
+    planStartDate?: string | null;
+    targetDate?: string | null;
+  }
+): Promise<OkRes<{ created: number; updated: number; disabled: number }>> {
+  try {
+    const positive = (value: unknown) => {
+      const n = Number(value);
+      return Number.isFinite(n) && n > 0 ? n : 0;
+    };
+
+    const existingRes = await supabaseBrowser
+      .from("ntj_alert_rules")
+      .select("id,key,trigger_type,config")
+      .eq("user_id", userId)
+      .limit(500);
+
+    if (existingRes.error) return { ok: false, error: existingRes.error.message };
+
+    const rows = existingRes.data ?? [];
+    const findExisting = (protectionKey: string, triggerType: string) =>
+      rows.find((row: any) => {
+        const cfg = safeObj(row?.config);
+        return (
+          row?.key === protectionKey ||
+          cfg.protection_key === protectionKey ||
+          (cfg.origin === "growth_plan" && String(row?.trigger_type ?? "").toUpperCase() === triggerType)
+        );
+      });
+
+    const commonConfig = {
+      source: "system",
+      origin: "growth_plan",
+      category: "growth_plan",
+      starting_balance: positive(input.startingBalance),
+      target_balance: positive(input.targetBalance),
+      plan_start_date: input.planStartDate ?? null,
+      target_date: input.targetDate ?? null,
+      synced_at: new Date().toISOString(),
+    };
+
+    const desired: Array<{
+      key: string;
+      trigger_type: string;
+      title: string;
+      message: string;
+      severity: AlertSeverity;
+      channels: AlertChannel[];
+      kind: AlertKind;
+      config: Record<string, unknown>;
+    }> = [];
+
+    const maxLossUsd = positive(input.maxLossUsd);
+    if (maxLossUsd > 0) {
+      desired.push({
+        key: "growth_plan_max_loss",
+        trigger_type: "MAX_LOSS",
+        title: "Growth Plan max loss guardrail",
+        message: "Your Growth Plan max daily loss has been hit. Stop trading, protect capital, and journal the decision before another entry.",
+        severity: "critical",
+        channels: ["popup", "inapp", "voice"],
+        kind: "alarm",
+        config: {
+          ...commonConfig,
+          kind: "alarm",
+          protection_key: "growth_plan_max_loss",
+          max_loss: maxLossUsd,
+          max_loss_percent: positive(input.maxLossPercent),
+        },
+      });
+    }
+
+    const dailyGoalUsd = positive(input.dailyGoalUsd);
+    if (dailyGoalUsd > 0) {
+      desired.push({
+        key: "growth_plan_daily_goal",
+        trigger_type: "DAILY_GOAL",
+        title: "Growth Plan daily goal reached",
+        message: "Your planned daily goal is reached. Protect the win, stop forcing trades, and journal what worked.",
+        severity: "success",
+        channels: ["popup", "inapp"],
+        kind: "alarm",
+        config: {
+          ...commonConfig,
+          kind: "alarm",
+          protection_key: "growth_plan_daily_goal",
+          daily_goal: dailyGoalUsd,
+          daily_goal_percent: positive(input.dailyGoalPercent),
+        },
+      });
+    }
+
+    let created = 0;
+    let updated = 0;
+    let disabled = 0;
+
+    for (const rule of desired) {
+      const existing = findExisting(rule.key, rule.trigger_type);
+      if (existing?.id) {
+        const res = await updateAlertRule(userId, String(existing.id), {
+          title: rule.title,
+          message: rule.message,
+          severity: rule.severity,
+          enabled: true,
+          channels: rule.channels,
+          kind: rule.kind,
+          category: "growth_plan",
+          config: rule.config,
+        });
+        if (!res.ok) return { ok: false, error: res.error };
+        updated += 1;
+      } else {
+        const res = await createAlertRule(userId, {
+          key: rule.key,
+          trigger_type: rule.trigger_type,
+          title: rule.title,
+          message: rule.message,
+          severity: rule.severity,
+          enabled: true,
+          channels: rule.channels,
+          kind: rule.kind,
+          category: "growth_plan",
+          config: rule.config,
+        });
+        if (!res.ok) return { ok: false, error: res.error };
+        created += 1;
+      }
+    }
+
+    const desiredKeys = new Set(desired.map((rule) => rule.key));
+    for (const key of ["growth_plan_max_loss", "growth_plan_daily_goal"]) {
+      if (desiredKeys.has(key)) continue;
+      const existing = findExisting(key, key === "growth_plan_max_loss" ? "MAX_LOSS" : "DAILY_GOAL");
+      if (!existing?.id) continue;
+      const res = await updateAlertRule(userId, String(existing.id), { enabled: false });
+      if (!res.ok) return { ok: false, error: res.error };
+      disabled += 1;
+    }
+
+    return { ok: true, data: { created, updated, disabled } };
+  } catch (e: any) {
+    console.error(LOG, "syncGrowthPlanProtectionRules error", e);
+    return { ok: false, error: e?.message ?? "Unknown error" };
+  }
+}
+
 export async function fireTestEventFromRule(
   userId: string,
   ruleId: string,

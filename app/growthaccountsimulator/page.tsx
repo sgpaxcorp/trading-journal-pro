@@ -2,12 +2,18 @@
 
 import { useState, useMemo } from "react";
 import Link from "next/link";
-import jsPDF from "jspdf";
-import autoTable from "jspdf-autotable";
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
 
 type Period = "daily" | "weekly" | "monthly";
+
+async function loadPdfTools() {
+  const [{ jsPDF }, autoTableModule] = await Promise.all([
+    import("jspdf"),
+    import("jspdf-autotable"),
+  ]);
+  return { jsPDF, autoTable: autoTableModule.default };
+}
 
 export default function GrowthAccountSimulator() {
   const { locale } = useAppSettings();
@@ -48,7 +54,8 @@ export default function GrowthAccountSimulator() {
       ? simulation[simulation.length - 1].balance
       : startingBalance;
 
-  const handleDownloadPdf = () => {
+  const handleDownloadPdf = async () => {
+    const { jsPDF, autoTable } = await loadPdfTools();
     const doc = new jsPDF();
 
     // Logo TJ

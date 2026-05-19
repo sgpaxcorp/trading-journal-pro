@@ -53,6 +53,10 @@ function speakOnce(text: string) {
   }
 }
 
+function isDocumentVisible(): boolean {
+  return typeof document === "undefined" || document.visibilityState === "visible";
+}
+
 export default function GlobalAlertPopups() {
   const { user } = useAuth();
   const userId = user?.id ?? null;
@@ -162,25 +166,41 @@ export default function GlobalAlertPopups() {
   useEffect(() => {
     if (!userId) return;
 
-    pull().catch(() => void 0);
+    const initialPull = window.setTimeout(() => {
+      if (!isDocumentVisible()) return;
+      pull().catch(() => void 0);
+    }, 4500);
+
+    const pullWhenVisible = () => {
+      if (!isDocumentVisible()) return;
+      pull().catch(() => void 0);
+    };
 
     const sub = subscribeToAlertEvents(userId, () => {
-      pull().catch(() => void 0);
+      pullWhenVisible();
     });
 
     const t = window.setInterval(() => {
-      pull().catch(() => void 0);
-    }, 10_000);
+      pullWhenVisible();
+    }, 5 * 60_000);
 
     // Immediate pull hook (used after firing test events / running engine)
     const onForcePull = () => {
       pull().catch(() => void 0);
     };
+    const onResume = () => {
+      pullWhenVisible();
+    };
     window.addEventListener("ntj_alert_force_pull", onForcePull);
+    window.addEventListener("visibilitychange", onResume);
+    window.addEventListener("online", onResume);
 
     return () => {
+      window.clearTimeout(initialPull);
       window.clearInterval(t);
       window.removeEventListener("ntj_alert_force_pull", onForcePull);
+      window.removeEventListener("visibilitychange", onResume);
+      window.removeEventListener("online", onResume);
       sub?.unsubscribe?.();
     };
   }, [userId, pull]);

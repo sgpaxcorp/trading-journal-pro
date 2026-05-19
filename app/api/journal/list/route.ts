@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
+import { requirePlatformAccess } from "@/lib/serverPlatformAccess";
 
 export const runtime = "nodejs";
 
@@ -44,22 +45,16 @@ async function resolveActiveAccountId(userId: string): Promise<string | null> {
 
 export async function GET(req: NextRequest) {
   try {
-    const authHeader = req.headers.get("authorization") || "";
-    const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
-    if (!token) return NextResponse.json({ entries: [] }, { status: 401 });
+    const access = await requirePlatformAccess(req);
+    if (!access.ok) return access.response;
 
-    const { data: authData, error: authErr } = await supabaseAdmin.auth.getUser(token);
-    if (authErr || !authData?.user) {
-      return NextResponse.json({ entries: [] }, { status: 401 });
-    }
-
-    const userId = authData.user.id;
-    const email = authData.user.email ?? "";
+    const userId = access.context.userId;
+    const email = access.context.user.email ?? "";
     const legacyUid =
-      (authData.user.user_metadata as any)?.uid ||
-      (authData.user.user_metadata as any)?.legacy_uid ||
-      (authData.user.user_metadata as any)?.legacy_user_id ||
-      (authData.user.user_metadata as any)?.user_uid ||
+      (access.context.user.user_metadata as any)?.uid ||
+      (access.context.user.user_metadata as any)?.legacy_uid ||
+      (access.context.user.user_metadata as any)?.legacy_user_id ||
+      (access.context.user.user_metadata as any)?.user_uid ||
       "";
 
     const { searchParams } = new URL(req.url);

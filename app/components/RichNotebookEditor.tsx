@@ -94,7 +94,7 @@ const TextStyle = Mark.create({
   },
 });
 
-type RichNotebookEditorProps = {
+export type RichNotebookEditorProps = {
   value: string;
   onChange?: (html: string) => void;
   placeholder?: string;

@@ -2,8 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import jsPDF from "jspdf";
-import autoTable from "jspdf-autotable";
 import {
   ResponsiveContainer,
   LineChart,
@@ -90,6 +88,14 @@ const RANGE_MONTHS: Record<RangeKey, number> = {
   semiannual: 6,
   annual: 12,
 };
+
+async function loadPdfTools() {
+  const [{ jsPDF }, autoTableModule] = await Promise.all([
+    import("jspdf"),
+    import("jspdf-autotable"),
+  ]);
+  return { jsPDF, autoTable: autoTableModule.default };
+}
 
 const CATEGORY_LABELS: Record<CostCategory, { en: string; es: string }> = {
   subscription: { en: "Subscriptions", es: "Suscripciones" },
@@ -1377,7 +1383,8 @@ export default function ProfitLossTrackPage() {
     );
   }
 
-  function downloadClosePackagePdf() {
+  async function downloadClosePackagePdf() {
+    const { jsPDF, autoTable } = await loadPdfTools();
     const doc = new jsPDF({ unit: "pt", format: "letter" });
     const marginX = 42;
     let cursorY = 44;
@@ -1496,9 +1503,10 @@ export default function ProfitLossTrackPage() {
     );
   }
 
-  function downloadCategoryPdf() {
+  async function downloadCategoryPdf() {
     if (!selectedBudgetCategoryDetail) return;
 
+    const { jsPDF, autoTable } = await loadPdfTools();
     const doc = new jsPDF({ unit: "pt", format: "letter" });
     const marginX = 42;
     let cursorY = 44;

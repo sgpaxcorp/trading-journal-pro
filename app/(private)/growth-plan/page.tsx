@@ -5,8 +5,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
-import { jsPDF } from "jspdf";
-import autoTable from "jspdf-autotable";
 import TopNav from "@/app/components/TopNav";
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
@@ -37,9 +35,8 @@ import {
 
 import { listCashflows, signedCashflowAmount } from "@/lib/cashflowsSupabase";
 import { syncMyTrophies } from "@/lib/trophiesSupabase";
+import { syncGrowthPlanProtectionRules } from "@/lib/alertsSupabase";
 import { useTradingAccounts } from "@/hooks/useTradingAccounts";
-
-import { pushNeuroMessage } from "@/app/components/neuroEventBus";
 
 /* ================= Helpers ================= */
 const toNum = (s: string, fb = 0) => {
@@ -62,6 +59,14 @@ const todayLong = () => {
       : undefined;
   return new Date().toLocaleDateString(locale, { year: "numeric", month: "long", day: "2-digit" });
 };
+
+async function loadPdfTools() {
+  const [{ jsPDF }, autoTableModule] = await Promise.all([
+    import("jspdf"),
+    import("jspdf-autotable"),
+  ]);
+  return { jsPDF, autoTable: autoTableModule.default };
+}
 
 const isoDate = (d = new Date()) => {
   const y = d.getFullYear();
@@ -326,6 +331,7 @@ async function generateAndDownloadPDF(
   },
   lang: "en" | "es"
 ) {
+  const { jsPDF, autoTable } = await loadPdfTools();
   const doc = new jsPDF({ unit: "pt", format: "letter" });
   const M = 56;
   const L = (en: string, es: string) => (lang === "es" ? es : en);
@@ -495,30 +501,10 @@ async function generateAndDownloadPDF(
   doc.save("growth-plan.pdf");
 }
 
-/* ================= Neuro Reaction =================
-   - We use /api/neuro-reaction for:
-     1) "field_help" (short explanations for each field)
-     2) coaching nudges (risk too high, saved plan, etc.)
-*/
-async function neuroReact(event: string, lang: "en" | "es", data: any) {
-  try {
-    const session = await supabaseBrowser.auth.getSession();
-    const token = session?.data?.session?.access_token;
-    const headers: Record<string, string> = { "Content-Type": "application/json" };
-    if (token) headers.Authorization = `Bearer ${token}`;
+function pushNeuroMessage(_message: string) {}
 
-    const res = await fetch("/api/neuro-assistant/neuro-reaction", {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ event, lang, data }),
-    });
-    if (!res.ok) return null;
-    const j = await res.json();
-    const text = (j?.text as string) || "";
-    return text.trim() ? text : null;
-  } catch {
-    return null;
-  }
+async function neuroReact(_event: string, _lang: "en" | "es", _data: any) {
+  return null;
 }
 
 function uuid() {
@@ -847,7 +833,7 @@ const STEP_TITLES_ES: Record<WizardStep, string> = {
   4: "Estrategia y reglas",
 };
 
-type AssistantLang = "en" | "es"; // stored in Supabase (inside growth plan record)
+type GrowthPlanLocale = "en" | "es";
 
 type PlannedWithdrawal = PlannedWithdrawalEvent;
 
@@ -876,7 +862,7 @@ export default function GrowthPlanPage() {
   const { activeAccountId, loading: accountsLoading } = useTradingAccounts();
   const router = useRouter();
   const { locale } = useAppSettings();
-  const lang = resolveLocale(locale) as AssistantLang;
+  const lang = resolveLocale(locale) as GrowthPlanLocale;
   const isEs = lang === "es";
   const L = (en: string, es: string) => (isEs ? es : en);
   const stepTitles = isEs ? STEP_TITLES_ES : STEP_TITLES_EN;
@@ -892,9 +878,6 @@ export default function GrowthPlanPage() {
   const [loadedStartingBalance, setLoadedStartingBalance] = useState<number | null>(null);
   const [liveCurrentBalance, setLiveCurrentBalance] = useState<number | null>(null);
   const [isFollowOnDraft, setIsFollowOnDraft] = useState(false);
-
-  // Neuro language toggle is stored in Supabase (kept in steps._ui.lang)
-  const [assistantLang, setAssistantLang] = useState<AssistantLang>(lang);
 
   // Strings for inputs
   const [startingBalanceStr, setStartingBalanceStr] = useState("");
@@ -1465,23 +1448,7 @@ export default function GrowthPlanPage() {
             setCashflowNet(0);
           }
 
-          // ✅ Neuro language from Supabase (stored inside plan to keep "everything in Supabase")
-          // We store it in stepsData._ui.lang (does not require schema changes)
-          const anySteps = (existing.steps as any) || {};
-          const savedLang = (anySteps?._ui?.lang as AssistantLang | undefined) ?? "en";
-          setAssistantLang(savedLang);
           setAutoPhasesGenerated(true);
-
-          const t =
-            (await neuroReact("growth_plan_loaded", savedLang, {
-              hasExistingPlan: true,
-              step: stepTitles[0],
-            })) ||
-            L(
-              "Loaded your Growth Plan. We'll go step-by-step: Goal & Numbers → Prepare → Analysis → Journal → Strategy & Rules.",
-              "Cargamos tu plan. Vamos paso a paso: Meta y números → Preparación → Análisis → Journal → Estrategia y reglas."
-            );
-          pushNeuroMessage(t);
         } else {
           // new plan
           setHasExistingPlan(false);
@@ -1505,17 +1472,7 @@ export default function GrowthPlanPage() {
           setPlanPhases([]);
           setAutoPhasesGenerated(false);
 
-          const t =
-            (await neuroReact("growth_plan_loaded", assistantLang, {
-              hasExistingPlan: false,
-              step: stepTitles[0],
-            })) ||
-            L(
-              "Welcome. Start by entering your account numbers and risk rules. Then we build your trading process step-by-step.",
-              "Bienvenido. Empieza ingresando tus números de cuenta y reglas de riesgo. Luego construimos tu proceso paso a paso."
-            );
-          pushNeuroMessage(t);
-                  }
+        }
       } catch (e) {
         console.error("[GrowthPlan] load error", e);
       }
@@ -1524,32 +1481,7 @@ export default function GrowthPlanPage() {
     return () => {
       mounted = false;
     };
-  }, [loading, user, accountsLoading, activeAccountId]); // intentionally not depending on assistantLang to avoid reloading loop
-
-  // save assistant language to Supabase (inside steps._ui.lang)
-  const langSaveTimer = useRef<any>(null);
-  async function persistAssistantLang(nextLang: AssistantLang) {
-    // merge into stepsData without breaking types
-    const mergedSteps: any = { ...(stepsData as any) };
-    mergedSteps._ui = { ...(mergedSteps._ui ?? {}), lang: nextLang };
-
-    setStepsData(mergedSteps);
-
-    // debounce to avoid spamming writes
-    if (langSaveTimer.current) clearTimeout(langSaveTimer.current);
-    langSaveTimer.current = setTimeout(async () => {
-      try {
-        await upsertGrowthPlanSupabase(
-          {
-            steps: mergedSteps,
-          } as any,
-          activeAccountId
-        );
-      } catch (e) {
-        console.error("[GrowthPlan] persistAssistantLang error", e);
-      }
-    }, 500);
-  }
+  }, [loading, user, accountsLoading, activeAccountId]);
 
   // risk coaching (throttled)
   const lastRiskNudgeRef = useRef<number>(0);
@@ -1564,7 +1496,7 @@ export default function GrowthPlanPage() {
 
     (async () => {
       const text =
-        (await neuroReact("risk_too_high", assistantLang, {
+        (await neuroReact("risk_too_high", lang, {
           riskPct: riskPerTradePct,
           riskUsd,
           startingBalance: baseBalanceForDollars,
@@ -1579,9 +1511,9 @@ export default function GrowthPlanPage() {
         );
       pushNeuroMessage(text);
           })();
-  }, [riskPerTradePct, riskUsd, baseBalanceForDollars, user, assistantLang]);
+  }, [riskPerTradePct, riskUsd, baseBalanceForDollars, user, lang]);
 
-  // Field help throttle (so Neuro doesn’t spam)
+  // Field help throttle.
   const lastFieldHelpRef = useRef<Record<string, number>>({});
   async function fieldHelp(field: string, extra?: any) {
     const now = Date.now();
@@ -1589,7 +1521,7 @@ export default function GrowthPlanPage() {
     if (now - last < 8000) return; // per-field throttle
     lastFieldHelpRef.current[field] = now;
 
-    const text = await neuroReact("field_help", assistantLang, { field, ...extra });
+    const text = await neuroReact("field_help", lang, { field, ...extra });
     if (text) {
       pushNeuroMessage(text);
           }
@@ -1818,7 +1750,7 @@ export default function GrowthPlanPage() {
     );
 
     const text =
-      (await neuroReact("pdf_downloaded", assistantLang, { mode: "suggested" })) ||
+      (await neuroReact("pdf_downloaded", lang, { mode: "suggested" })) ||
       L(
         "Downloaded. This schedule is structure—not a promise. Now commit to execute it.",
         "Descargado. Este calendario es estructura, no promesa. Ahora comprométete a ejecutarlo."
@@ -2672,7 +2604,7 @@ export default function GrowthPlanPage() {
     const next = (Math.min(4, step + 1) as WizardStep);
     setStep(next);
     const t =
-      (await neuroReact("wizard_step_next", assistantLang, { to: stepTitles[next] })) ||
+      (await neuroReact("wizard_step_next", lang, { to: stepTitles[next] })) ||
       (isEs ? `Siguiente: ${stepTitles[next]}.` : `Next: ${stepTitles[next]}.`);
     pushNeuroMessage(t);
       }
@@ -2682,7 +2614,7 @@ export default function GrowthPlanPage() {
     const prev = (Math.max(0, step - 1) as WizardStep);
     setStep(prev);
     const t =
-      (await neuroReact("wizard_step_back", assistantLang, { to: stepTitles[prev] })) ||
+      (await neuroReact("wizard_step_back", lang, { to: stepTitles[prev] })) ||
       (isEs ? `Volver a: ${stepTitles[prev]}.` : `Back to: ${stepTitles[prev]}.`);
     pushNeuroMessage(t);
       }
@@ -2690,7 +2622,7 @@ export default function GrowthPlanPage() {
   async function onStepClick(s: WizardStep) {
     setStep(s);
     const t =
-      (await neuroReact("wizard_step_clicked", assistantLang, { to: stepTitles[s] })) ||
+      (await neuroReact("wizard_step_clicked", lang, { to: stepTitles[s] })) ||
       (isEs ? `Abierto: ${stepTitles[s]}.` : `Opened: ${stepTitles[s]}.`);
     pushNeuroMessage(t);
       }
@@ -2792,7 +2724,7 @@ export default function GrowthPlanPage() {
 
     // persist assistant lang inside steps._ui.lang (Supabase only)
     const mergedSteps: any = { ...(stepsData as any) };
-    mergedSteps._ui = { ...(mergedSteps._ui ?? {}), lang: assistantLang, autoPhaseCadence: "weekly" };
+    mergedSteps._ui = { ...(mergedSteps._ui ?? {}), autoPhaseCadence: "weekly" };
 
     const effectivePlanStart = planStartDate || isoToday();
     const payload: Partial<GrowthPlan> = {
@@ -2822,6 +2754,37 @@ export default function GrowthPlanPage() {
       setPlannedWithdrawals(nextPlannedWithdrawals);
       setPlanPhases(autoPhasePayload);
       await upsertGrowthPlanSupabase(payload, activeAccountId);
+
+      let protectionSummary = "";
+      if (user?.id) {
+        const protectionRes = await syncGrowthPlanProtectionRules(String(user.id), {
+          dailyGoalUsd: requiredGoalDollar,
+          dailyGoalPercent: dailyPctForSave,
+          maxLossUsd: maxLossDollar,
+          maxLossPercent: maxDailyLossPercent,
+          startingBalance: baseBalanceForDollars,
+          targetBalance,
+          planStartDate: effectivePlanStart,
+          targetDate: targetDateStr || null,
+        });
+        if (protectionRes.ok) {
+          const touched =
+            protectionRes.data.created + protectionRes.data.updated + protectionRes.data.disabled;
+          if (touched > 0) {
+            protectionSummary = L(
+              "Trading Protection System updated: your daily goal and max loss are now protected by plan-based alarms.",
+              "Sistema de protección actualizado: tu meta diaria y max loss quedaron protegidos con alarmas basadas en el plan."
+            );
+          }
+        } else {
+          console.warn("[GrowthPlan] protection sync failed:", protectionRes.error);
+          protectionSummary = L(
+            "Growth Plan saved, but protection alarms could not sync. Open Trading Protection System to review alarms.",
+            "Growth Plan guardado, pero no se pudieron sincronizar las alarmas de protección. Abre el Sistema de protección para revisar."
+          );
+        }
+      }
+
       if (user?.id) {
         void syncMyTrophies(String(user.id)).catch((err) => {
           console.warn("[GrowthPlan] trophy sync failed:", err);
@@ -2829,7 +2792,7 @@ export default function GrowthPlanPage() {
       }
 
       const msg =
-        (await neuroReact("growth_plan_saved", assistantLang, {
+        (await neuroReact("growth_plan_saved", lang, {
           selectedPlan: "suggested",
           riskPct: riskPerTradePct,
           riskUsd,
@@ -2844,9 +2807,12 @@ export default function GrowthPlanPage() {
         );
 
       pushNeuroMessage(msg);
+      if (protectionSummary) {
+        pushNeuroMessage(protectionSummary);
+      }
 
       const coachSummary =
-        (await neuroReact("growth_plan_post_save_summary", assistantLang, {
+        (await neuroReact("growth_plan_post_save_summary", lang, {
           dailyGoalPercent: dailyPctForSave,
           maxDailyLossPercent,
           lossDaysPerWeek,
@@ -2915,7 +2881,6 @@ export default function GrowthPlanPage() {
               </h1>
             </div>
 
-            {/* ✅ Neuro language toggle (saved to Supabase inside plan) */}
             <div className="flex flex-wrap items-center justify-end gap-2">
               <Link
                 href="/dashboard"
@@ -2923,41 +2888,6 @@ export default function GrowthPlanPage() {
               >
                 {L("Dashboard", "Dashboard")}
               </Link>
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-slate-400">Neuro:</span>
-                <div className="inline-flex items-center rounded-full border border-slate-700 bg-slate-950/70 p-0.5 text-[11px]">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setAssistantLang("en");
-                      persistAssistantLang("en");
-                      pushNeuroMessage(L("Neuro language set to EN.", "Idioma de Neuro: EN."));
-                                        }}
-                    className={`px-3 py-1 rounded-full transition ${
-                      assistantLang === "en"
-                        ? "bg-emerald-400 text-slate-950 font-semibold"
-                        : "text-slate-300 hover:text-slate-50"
-                    }`}
-                  >
-                    EN
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setAssistantLang("es");
-                      persistAssistantLang("es");
-                      pushNeuroMessage(L("Neuro language set to ES.", "Idioma de Neuro: ES."));
-                                        }}
-                    className={`px-3 py-1 rounded-full transition ${
-                      assistantLang === "es"
-                        ? "bg-emerald-400 text-slate-950 font-semibold"
-                        : "text-slate-300 hover:text-slate-50"
-                    }`}
-                  >
-                    ES
-                  </button>
-                </div>
-              </div>
             </div>
           </div>
 
@@ -2968,8 +2898,8 @@ export default function GrowthPlanPage() {
             )}{" "}
             <b>{L("Prepare → Analysis → Journal → Strategy & Rules", "Preparar → Análisis → Journal → Estrategia y reglas")}</b>.{" "}
             {L(
-              "Neuro and AI Coach will use this to coach you based on real execution.",
-              "Neuro y el Coach IA usarán esto para guiarte según tu ejecución real."
+              "AI Coach will use this to coach you based on real execution.",
+              "El Coach IA usará esto para guiarte según tu ejecución real."
             )}
           </p>
 
@@ -3358,8 +3288,8 @@ export default function GrowthPlanPage() {
             </p>
             <p className="text-slate-400 text-sm">
               {L(
-                "Select what your analysis is based on. Neuro uses this to flag when you trade outside your identity.",
-                "Selecciona en qué basas tu análisis. Neuro usa esto para alertar cuando operas fuera de tu identidad."
+                "Select what your analysis is based on. AI Coach uses this to flag when you trade outside your identity.",
+                "Selecciona en qué basas tu análisis. El Coach IA usa esto para alertar cuando operas fuera de tu identidad."
               )}
             </p>
 
@@ -3467,6 +3397,17 @@ export default function GrowthPlanPage() {
                 "Define tus reglas no negociables y tus estrategias. Este es el playbook que ejecutas."
               )}
             </p>
+            <div className="rounded-2xl border border-emerald-500/25 bg-emerald-500/10 p-4 text-sm text-emerald-50">
+              <p className="font-semibold">
+                {L("Plan rules become protection.", "Las reglas del plan se convierten en protección.")}
+              </p>
+              <p className="mt-1 text-emerald-50/80">
+                {L(
+                  "When you save, NeuroTrader syncs your max daily loss and daily goal into the Trading Protection System so the platform can help you obey the plan.",
+                  "Cuando guardas, NeuroTrader sincroniza tu max loss diario y meta diaria al Sistema de protección para ayudarte a obedecer el plan."
+                )}
+              </p>
+            </div>
 
             {/* Rules (Non-negotiables) */}
             <div id="gp-rules" className="mt-3 bg-slate-950/70 border border-slate-800 rounded-2xl p-4 space-y-3">

@@ -1444,12 +1444,16 @@ export default function DashboardPage() {
 
     const loadAll = async () => {
       try {
-        const dbPlan = await getGrowthPlanSupabaseByAccount(activeAccountId);
-        if (!cancelled) setPlan(dbPlan ?? null);
+        const [dbPlan, dbEntries, checklistRow] = await Promise.all([
+          getGrowthPlanSupabaseByAccount(activeAccountId),
+          journalUserId ? getAllJournalEntries(journalUserId, activeAccountId) : Promise.resolve([]),
+          journalUserId ? getDailyChecklist(journalUserId, rollingTodayStr) : Promise.resolve(null),
+        ]);
 
-        // Journal entries (trading P&L)
-        const dbEntries = journalUserId ? await getAllJournalEntries(journalUserId, activeAccountId) : [];
-        if (!cancelled) setEntries(dbEntries);
+        if (!cancelled) {
+          setPlan(dbPlan ?? null);
+          setEntries(dbEntries);
+        }
 
         // Cashflows (deposits/withdrawals)
         try {
@@ -1475,9 +1479,6 @@ export default function DashboardPage() {
           console.warn("[dashboard] cashflows load error:", err);
           if (!cancelled) setCashflows([]);
         }
-
-        // this can return ANY shape → normalize
-        const checklistRow: any = journalUserId ? await getDailyChecklist(journalUserId, rollingTodayStr) : null;
 
         const defaultChecklist: string[] = [
           L("Respect your max daily loss limit.", "Respeta tu pérdida máxima diaria."),
@@ -1545,7 +1546,7 @@ export default function DashboardPage() {
     return () => {
       alive = false;
     };
-  }, [loading, user]);
+  }, [activeAccountId, accountsLoading, loading, user]);
 
   // Rebuild calendar
   useEffect(() => {

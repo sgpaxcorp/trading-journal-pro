@@ -13,8 +13,12 @@ import {
  * GlobalRealtimeNotifications (trophies)
  *
  * This component is intentionally focused on trophy celebrations.
- * Alerts (Rules & Alarms) are handled by `GlobalAlertRuleEngine` + `GlobalAlertPopups`.
+ * Alerts (Trading Protection System) are handled by `GlobalAlertRuleEngine` + `GlobalAlertPopups`.
  */
+
+function isDocumentVisible(): boolean {
+  return typeof document === "undefined" || document.visibilityState === "visible";
+}
 
 export default function GlobalRealtimeNotifications() {
   const { user } = useAuth() as any;
@@ -71,23 +75,39 @@ export default function GlobalRealtimeNotifications() {
   useEffect(() => {
     if (!userId) return;
 
-    pullTrophies().catch(() => {});
+    const initialPull = window.setTimeout(() => {
+      if (!isDocumentVisible()) return;
+      pullTrophies().catch(() => {});
+    }, 8000);
+
+    const pullWhenVisible = () => {
+      if (!isDocumentVisible()) return;
+      pullTrophies().catch(() => {});
+    };
 
     const sub = subscribeToTrophyNotifications(userId, () => {
-      pullTrophies().catch(() => {});
+      pullWhenVisible();
     });
 
     const poll = window.setInterval(() => {
-      pullTrophies().catch(() => {});
-    }, 45000);
+      pullWhenVisible();
+    }, 10 * 60_000);
+
+    window.addEventListener("visibilitychange", pullWhenVisible);
+    window.addEventListener("online", pullWhenVisible);
 
     return () => {
+      try {
+        window.clearTimeout(initialPull);
+      } catch {}
       try {
         sub?.unsubscribe?.();
       } catch {}
       try {
         window.clearInterval(poll);
       } catch {}
+      window.removeEventListener("visibilitychange", pullWhenVisible);
+      window.removeEventListener("online", pullWhenVisible);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);

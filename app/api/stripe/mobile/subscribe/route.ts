@@ -24,6 +24,17 @@ const PRICE_IDS: Record<PlanId, Record<BillingCycle, string>> = {
 
 export async function POST(req: NextRequest) {
   try {
+    if (process.env.ENABLE_MOBILE_STRIPE_SUBSCRIBE !== "true") {
+      return NextResponse.json(
+        {
+          error: "Mobile subscription checkout is disabled. Complete subscription on the web.",
+          code: "web_billing_required",
+          billingUrl: "https://www.neurotrader-journal.com/pricing",
+        },
+        { status: 410 }
+      );
+    }
+
     const authHeader = req.headers.get("authorization") || "";
     const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
     if (!token) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

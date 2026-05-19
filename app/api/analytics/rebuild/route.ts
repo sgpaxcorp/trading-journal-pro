@@ -2,6 +2,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 import { buildSnapshotAndEdges, type SessionRow, type TradeRow } from "@/lib/analyticsEngine";
+import { requirePlatformAccess } from "@/lib/serverPlatformAccess";
 
 export const runtime = "nodejs";
 
@@ -162,19 +163,10 @@ async function fetchSessions(userId: string): Promise<SessionRow[]> {
 
 export async function POST(req: NextRequest) {
   try {
-    const authHeader = req.headers.get("authorization") || "";
-    const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
-    if (!token) {
-      return NextResponse.json({ error: "Missing Bearer token" }, { status: 401 });
-    }
+    const access = await requirePlatformAccess(req);
+    if (!access.ok) return access.response;
 
-    // Validate user
-    const { data: authData, error: authErr } = await supabaseAdmin.auth.getUser(token);
-    if (authErr || !authData?.user) {
-      return NextResponse.json({ error: "Invalid token" }, { status: 401 });
-    }
-
-    const userId = authData.user.id; // UUID from Supabase Auth
+    const userId = access.context.userId; // UUID from Supabase Auth
     const body = await req.json().catch(() => ({}));
 
     const asOfDate = typeof body?.asOfDate === "string" ? body.asOfDate : undefined;

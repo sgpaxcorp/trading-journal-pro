@@ -62,7 +62,7 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     "nav.notebook": "Notebook",
     "nav.backStudy": "Back-Studying",
     "nav.challenges": "Challenges",
-    "nav.rules": "Rules & Alarms",
+    "nav.rules": "Trading Protection System",
     "nav.forum": "Forum",
     "nav.optionFlow": "Option Flow Intelligence",
     "nav.globalRanking": "Global Ranking",
@@ -72,7 +72,7 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     "nav.notebook.title": "Notebook",
     "nav.backStudy.title": "Back-Studying",
     "nav.challenges.title": "Challenges",
-    "nav.rules.title": "Rules & Alarms",
+    "nav.rules.title": "Trading Protection System",
     "nav.forum.title": "Forum",
     "nav.optionFlow.title": "Option Flow Intelligence",
     "nav.globalRanking.title": "Global Ranking",
@@ -120,10 +120,10 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     /* -----------------
        Rules dropdown
     ------------------ */
-    "nav.rules.reminders.title": "Reminders",
-    "nav.rules.reminders.desc": "Reminders that you need when something happens.",
-    "nav.rules.alarms.title": "Alarms",
-    "nav.rules.alarms.desc": "Notifications for breaking rules.",
+    "nav.rules.reminders.title": "Routine Checks",
+    "nav.rules.reminders.desc": "Quiet check-ins for premarket, journaling, and process habits.",
+    "nav.rules.alarms.title": "Critical Alarms",
+    "nav.rules.alarms.desc": "Popups for max loss, daily goal, open positions, and broken rules.",
 
     /* -----------------
        Forum dropdown
@@ -318,7 +318,7 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     "nav.notebook": "Cuaderno",
     "nav.backStudy": "Back-Studying",
     "nav.challenges": "Retos",
-    "nav.rules": "Reglas y alarmas",
+    "nav.rules": "Sistema de protección de trading",
     "nav.forum": "Foro",
     "nav.optionFlow": "Inteligencia de flujo de opciones",
     "nav.globalRanking": "Ranking global",
@@ -328,7 +328,7 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     "nav.notebook.title": "Cuaderno",
     "nav.backStudy.title": "Back-Studying",
     "nav.challenges.title": "Retos",
-    "nav.rules.title": "Reglas y alarmas",
+    "nav.rules.title": "Sistema de protección de trading",
     "nav.forum.title": "Foro",
     "nav.optionFlow.title": "Inteligencia de flujo de opciones",
     "nav.globalRanking.title": "Ranking global",
@@ -374,10 +374,10 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     /* -----------------
        Rules dropdown
     ------------------ */
-    "nav.rules.reminders.title": "Recordatorios",
-    "nav.rules.reminders.desc": "Recordatorios cuando algo ocurre.",
-    "nav.rules.alarms.title": "Alarmas",
-    "nav.rules.alarms.desc": "Notificaciones por romper reglas.",
+    "nav.rules.reminders.title": "Chequeos de rutina",
+    "nav.rules.reminders.desc": "Checks suaves para premarket, journaling y hábitos del proceso.",
+    "nav.rules.alarms.title": "Alarmas críticas",
+    "nav.rules.alarms.desc": "Popups para max loss, meta diaria, posiciones abiertas y reglas rotas.",
 
     /* -----------------
        Forum dropdown

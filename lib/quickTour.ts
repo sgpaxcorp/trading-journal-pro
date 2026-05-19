@@ -433,15 +433,15 @@ const BUILDERS: QuickTourBuilder[] = [
     guideHref: "/help/rules-alarms",
     match: (path) => path.startsWith("/rules-alarms"),
     build: (L) => ({
-      title: L("Rules & Alarms", "Reglas y alarmas"),
+      title: L("Trading Protection System", "Sistema de protección de trading"),
       summary: L(
-        "This page turns discipline into automation. It exists to protect the process when emotion gets loud.",
-        "Esta página convierte disciplina en automatización. Existe para proteger el proceso cuando la emoción sube el volumen."
+        "This page turns your plan into protection. It exists to help you obey your rules when emotion gets loud.",
+        "Esta página convierte tu plan en protección. Existe para ayudarte a obedecer tus reglas cuando la emoción sube el volumen."
       ),
       bullets: [
-        L("Use reminders for routine habits such as premarket and journaling.", "Usa recordatorios para hábitos de rutina como premarket y journaling."),
-        L("Use alarms for critical live safety signals only.", "Usa alarmas solo para señales críticas de seguridad en vivo."),
-        L("If a rule matters, automate the reminder before you trust memory.", "Si una regla importa, automatiza el recordatorio antes de confiar en la memoria."),
+        L("Use routine checks for premarket, journaling, and closeout habits.", "Usa chequeos de rutina para premarket, journaling y cierre del día."),
+        L("Use critical alarms for hard safety signals only.", "Usa alarmas críticas solo para señales duras de seguridad."),
+        L("If a rule matters, protect it before you trust memory.", "Si una regla importa, protégela antes de confiar en la memoria."),
       ],
       steps: [
         {
@@ -601,23 +601,23 @@ const BUILDERS: QuickTourBuilder[] = [
     guideHref: "/help",
     match: (path) => path.startsWith("/messages"),
     build: (L) => ({
-      title: L("Messages & alerts", "Mensajes y alertas"),
+      title: L("Support Center", "Centro de soporte"),
       summary: L(
-        "This inbox centralizes notifications, reminders, and system messages that matter to your process.",
-        "Esta bandeja centraliza notificaciones, recordatorios y mensajes del sistema que importan para tu proceso."
+        "This is your support workspace: open tickets, send details, and let the 24/7 virtual agent answer or escalate.",
+        "Este es tu workspace de soporte: abre tickets, envía detalles y deja que el agente virtual 24/7 conteste o escale."
       ),
       bullets: [
-        L("Review reminders and alerts here instead of relying on memory.", "Revisa aquí recordatorios y alertas en vez de depender de la memoria."),
-        L("Treat this as an operational inbox, not as social noise.", "Trátala como una bandeja operativa, no como ruido social."),
-        L("If something is critical, connect it back to Rules & Alarms or the Journal workflow.", "Si algo es crítico, conéctalo de vuelta con Rules & Alarms o con el flujo del Journal."),
+        L("Use tickets for bugs, billing questions, feature ideas, and account help.", "Usa tickets para bugs, billing, ideas de mejora y ayuda de cuenta."),
+        L("The virtual agent replies immediately when it has an answer.", "El agente virtual contesta de inmediato cuando tiene respuesta."),
+        L("If the agent cannot solve it, the ticket stays open for human follow-up.", "Si el agente no puede resolverlo, el ticket queda abierto para seguimiento humano."),
       ],
       steps: [
         {
           id: "messages-header",
-          title: L("Operational inbox", "Bandeja operativa"),
+          title: L("Support workspace", "Workspace de soporte"),
           body: L(
-            "Use this screen to catch platform signals that require attention, follow-up, or action.",
-            "Usa esta pantalla para capturar señales de la plataforma que requieren atención, seguimiento o acción."
+            "Use this screen to keep platform conversations organized until each ticket is resolved.",
+            "Usa esta pantalla para mantener las conversaciones de la plataforma organizadas hasta que cada ticket se resuelva."
           ),
           selector: "main h1",
         },

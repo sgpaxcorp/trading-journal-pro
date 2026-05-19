@@ -51,8 +51,8 @@ Your playbook: rules, patterns, and lessons you want to repeat.
 **Back‑Study**  
 Visual replay to validate entries/exits and refine setups.
 
-**Rules & Alarms**  
-Discipline safeguards and reminders.
+**Trading Protection System**  
+Critical alarms and routine checks that help you obey the plan, not just write it.
 
 **Challenges**  
 Habit and consistency programs tied to your journal behavior.

@@ -196,10 +196,10 @@ export const ACCESS_GRANTS: AccessGrantDefinition[] = [
   {
     key: "page_rules_alarms",
     group: "tools",
-    label: { en: "Rules & Alarms", es: "Rules & Alarms" },
+    label: { en: "Trading Protection System", es: "Sistema de protección de trading" },
     description: {
-      en: "Rules, alarms, and reminders pages.",
-      es: "Páginas de reglas, alarmas y reminders.",
+      en: "Critical alarms and quiet routine checks tied to the user's trading plan.",
+      es: "Alarmas críticas y chequeos de rutina conectados al plan de trading del usuario.",
     },
     primaryPath: "/rules-alarms/alarms",
     paths: ["/rules-alarms/alarms", "/rules-alarms/reminders"],

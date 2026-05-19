@@ -7,6 +7,7 @@ const EXTRA_API_URL =
   Constants.expoConfig?.extra?.apiUrl ||
   "";
 const API_BASE_URL = (process.env.EXPO_PUBLIC_API_URL || EXTRA_API_URL || DEFAULT_API_URL).replace(/\/+$/, "");
+const inFlightGets = new Map<string, Promise<unknown>>();
 
 async function getAccessToken() {
   if (!supabaseMobile) return "";
@@ -17,36 +18,49 @@ async function getAccessToken() {
 export async function apiGet<T>(path: string): Promise<T> {
   const token = await getAccessToken();
   const url = `${API_BASE_URL}${path.startsWith("/") ? path : `/${path}`}`;
-  const res = await fetch(url, {
-    method: "GET",
-    headers: {
-      authorization: token ? `Bearer ${token}` : "",
-    },
-  });
-  const contentType = res.headers.get("content-type") || "";
-  if (!res.ok) {
+  const cacheKey = `${token ? token.slice(-18) : "anon"}:${url}`;
+  const existing = inFlightGets.get(cacheKey) as Promise<T> | undefined;
+  if (existing) return existing;
+
+  const request = (async () => {
+    const res = await fetch(url, {
+      method: "GET",
+      headers: {
+        authorization: token ? `Bearer ${token}` : "",
+      },
+    });
+    const contentType = res.headers.get("content-type") || "";
+    if (!res.ok) {
+      if (contentType.includes("text/html")) {
+        throw new Error(`API error: received HTML from ${url}`);
+      }
+      if (contentType.includes("application/json")) {
+        const body = await res.json().catch(() => null);
+        const message =
+          body?.error ||
+          body?.message ||
+          (body?.code === "advanced_required"
+            ? "Advanced plan required."
+            : body?.code === "broker_sync_required"
+            ? "Broker Sync add-on required."
+            : "");
+        throw new Error(message || `Request failed (${res.status})`);
+      }
+      const text = await res.text();
+      throw new Error(text || `Request failed (${res.status})`);
+    }
     if (contentType.includes("text/html")) {
       throw new Error(`API error: received HTML from ${url}`);
     }
-    if (contentType.includes("application/json")) {
-      const body = await res.json().catch(() => null);
-      const message =
-        body?.error ||
-        body?.message ||
-        (body?.code === "advanced_required"
-          ? "Advanced plan required."
-          : body?.code === "broker_sync_required"
-          ? "Broker Sync add-on required."
-          : "");
-      throw new Error(message || `Request failed (${res.status})`);
-    }
-    const text = await res.text();
-    throw new Error(text || `Request failed (${res.status})`);
+    return (await res.json()) as T;
+  })();
+
+  inFlightGets.set(cacheKey, request);
+  try {
+    return await request;
+  } finally {
+    inFlightGets.delete(cacheKey);
   }
-  if (contentType.includes("text/html")) {
-    throw new Error(`API error: received HTML from ${url}`);
-  }
-  return (await res.json()) as T;
 }
 
 export async function apiPost<T>(path: string, body: Record<string, unknown>): Promise<T> {

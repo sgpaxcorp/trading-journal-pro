@@ -10,6 +10,7 @@ import {
   type TrophyRuleOp,
   type TrophyTier,
 } from "@/lib/trophyCatalog";
+import { requirePlatformAccess } from "@/lib/serverPlatformAccess";
 
 export const runtime = "nodejs";
 
@@ -381,17 +382,12 @@ async function updateProfileSnapshots(userId: string) {
 
 export async function POST(req: NextRequest) {
   try {
-    const authHeader = req.headers.get("authorization") || "";
-    const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
-    if (!token) return NextResponse.json({ inserted: 0, newTrophies: [] }, { status: 401 });
+    const access = await requirePlatformAccess(req);
+    if (!access.ok) return access.response;
 
-    const { data: authData, error: authErr } = await supabaseAdmin.auth.getUser(token);
-    if (authErr || !authData?.user) {
-      return NextResponse.json({ inserted: 0, newTrophies: [] }, { status: 401 });
-    }
-
-    const userId = authData.user.id;
-    const email = authData.user.email || null;
+    const token = access.context.token;
+    const userId = access.context.userId;
+    const email = access.context.user.email || null;
 
     const newTrophies: any[] = [];
     const seen = new Set<string>();

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
-import { getAuthUser } from "@/lib/authServer";
 import { notifyGoalAchievement, type GoalScope } from "@/lib/goalAchievementNotifications";
+import { requirePlatformAccess } from "@/lib/serverPlatformAccess";
 
 export const runtime = "nodejs";
 
@@ -25,10 +25,9 @@ function isGoalScope(value: unknown): value is GoalScope {
 
 export async function POST(req: Request) {
   try {
-    const auth = await getAuthUser(req);
-    if (!auth) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const access = await requirePlatformAccess(req);
+    if (!access.ok) return access.response;
+    const auth = { userId: access.context.userId };
 
     const body = (await req.json()) as GoalAchievementBody;
     const goalScope = body?.goalScope;

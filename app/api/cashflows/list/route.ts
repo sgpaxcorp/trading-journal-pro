@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 import { requireAdvancedPlan } from "@/lib/serverFeatureAccess";
+import { requirePlatformAccess } from "@/lib/serverPlatformAccess";
 
 export const runtime = "nodejs";
 
@@ -93,16 +94,10 @@ async function resolveActiveAccountId(userId: string): Promise<string | null> {
 
 export async function GET(req: NextRequest) {
   try {
-    const authHeader = req.headers.get("authorization") || "";
-    const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
-    if (!token) return NextResponse.json({ cashflows: [] }, { status: 401 });
+    const access = await requirePlatformAccess(req);
+    if (!access.ok) return access.response;
 
-    const { data: authData, error: authErr } = await supabaseAdmin.auth.getUser(token);
-    if (authErr || !authData?.user) {
-      return NextResponse.json({ cashflows: [] }, { status: 401 });
-    }
-
-    const userId = authData.user.id;
+    const userId = access.context.userId;
     const advancedGate = await requireAdvancedPlan(userId);
     if (advancedGate) return advancedGate;
 

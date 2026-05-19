@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 import { isActiveEntitlementStatus, PLATFORM_ACCESS_ENTITLEMENT } from "@/lib/accessControl";
-import { hasAnyRecognizedAccessGrant } from "@/lib/accessGrants";
 import { normalizePlanTier, planFromProfile } from "@/lib/planAccess";
+import { requirePlatformAccess } from "@/lib/serverPlatformAccess";
 
 export const runtime = "nodejs";
 
@@ -14,16 +14,10 @@ function maxAccountsForPlan(planRaw: string | null | undefined): number {
 
 export async function POST(req: NextRequest) {
   try {
-    const authHeader = req.headers.get("authorization") || "";
-    const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
-    if (!token) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const access = await requirePlatformAccess(req);
+    if (!access.ok) return access.response;
 
-    const { data: authData, error: authErr } = await supabaseAdmin.auth.getUser(token);
-    if (authErr || !authData?.user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const userId = authData.user.id;
+    const userId = access.context.userId;
     const body = await req.json().catch(() => ({}));
     const name = String(body?.name || "").trim();
     const broker = String(body?.broker || "").trim() || null;
@@ -32,19 +26,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Missing account name" }, { status: 400 });
     }
 
-    const [{ data: profile }, { data: entitlements }] = await Promise.all([
-      supabaseAdmin.from("profiles").select("plan, subscription_status").eq("id", userId).maybeSingle(),
-      supabaseAdmin
-        .from("user_entitlements")
-        .select("entitlement_key, status, metadata")
-        .eq("user_id", userId)
-        .in("status", ["active", "trialing"]),
-    ]);
-
-    const entitlementRows = Array.isArray(entitlements) ? entitlements : [];
-    if (!hasAnyRecognizedAccessGrant(entitlementRows as any[])) {
-      return NextResponse.json({ error: "Access required." }, { status: 403 });
-    }
+    const entitlementRows = access.context.entitlements;
+    const profile = access.context.profile;
 
     const platformEntitlement = entitlementRows.find(
       (row) => String((row as any)?.entitlement_key ?? "") === PLATFORM_ACCESS_ENTITLEMENT

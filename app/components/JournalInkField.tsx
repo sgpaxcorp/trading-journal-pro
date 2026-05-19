@@ -1,9 +1,10 @@
 "use client";
 
 import { useState } from "react";
+import dynamic from "next/dynamic";
 import { PencilLine, RotateCcw, Trash2, TriangleAlert, Type } from "lucide-react";
 
-import RichTextEditor from "@/app/components/RichTextEditor";
+import type { RichTextEditorProps } from "@/app/components/RichTextEditor";
 import NotebookInkCanvas from "@/app/components/NotebookInkCanvas";
 import {
   buildNotebookInkPayload,
@@ -29,6 +30,14 @@ const PALETTE = [
   { id: "sky", value: "#7DD3FC" },
   { id: "amber", value: "#FDE68A" },
 ];
+
+const RichTextEditor = dynamic<RichTextEditorProps>(
+  () => import("@/app/components/RichTextEditor"),
+  {
+    ssr: false,
+    loading: () => <div className="min-h-[180px] rounded-lg border border-slate-700/70 bg-slate-950/40" />,
+  }
+);
 
 function saveEditableValue(
   content: string,

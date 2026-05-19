@@ -25,20 +25,32 @@ export type AccessStatusResponse = {
   };
 };
 
+let inFlightAccessStatus: Promise<AccessStatusResponse | null> | null = null;
+
 export async function fetchAccessStatus(): Promise<AccessStatusResponse | null> {
   const { data: sessionData } = await supabaseBrowser.auth.getSession();
   const token = sessionData?.session?.access_token;
   if (!token) return null;
 
-  const res = await fetch("/api/access/status", {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
-    cache: "no-store",
-  });
+  if (inFlightAccessStatus) return inFlightAccessStatus;
 
-  if (!res.ok) return null;
-  const body = (await res.json()) as AccessStatusResponse;
-  if (!body?.ok) return null;
-  return body;
+  inFlightAccessStatus = (async () => {
+    const res = await fetch("/api/access/status", {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      cache: "no-store",
+    });
+
+    if (!res.ok) return null;
+    const body = (await res.json()) as AccessStatusResponse;
+    if (!body?.ok) return null;
+    return body;
+  })();
+
+  try {
+    return await inFlightAccessStatus;
+  } finally {
+    inFlightAccessStatus = null;
+  }
 }

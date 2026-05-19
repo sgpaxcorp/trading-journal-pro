@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
+import { requirePlatformAccess } from "@/lib/serverPlatformAccess";
 
 export const runtime = "nodejs";
 
@@ -12,16 +13,8 @@ function isoDate(value: Date) {
 
 export async function GET(req: NextRequest) {
   try {
-    const authHeader = req.headers.get("authorization") || "";
-    const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
-    if (!token) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const { data: authData, error: authErr } = await supabaseAdmin.auth.getUser(token);
-    if (authErr || !authData?.user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const access = await requirePlatformAccess(req);
+    if (!access.ok) return access.response;
 
     const { searchParams } = new URL(req.url);
     const dateParam = searchParams.get("date");
@@ -30,7 +23,7 @@ export async function GET(req: NextRequest) {
     const { data, error } = await supabaseAdmin
       .from("daily_checklists")
       .select("items, notes")
-      .eq("user_id", authData.user.id)
+      .eq("user_id", access.context.userId)
       .eq("date", date)
       .maybeSingle();
 

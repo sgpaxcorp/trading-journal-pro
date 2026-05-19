@@ -2,8 +2,6 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import jsPDF from "jspdf";
-import autoTable from "jspdf-autotable";
 
 import TopNav from "@/app/components/TopNav";
 import { useAuth } from "@/context/AuthContext";
@@ -158,6 +156,14 @@ const LOCALE_TAG: Record<Lang, string> = {
 const MAX_ROWS_BASE = 400;
 const MAX_ROWS_WITH_IMAGES = 150;
 const MAX_SCREENSHOTS_FOR_MODEL = 2;
+
+async function loadPdfTools() {
+  const [{ jsPDF }, autoTableModule] = await Promise.all([
+    import("jspdf"),
+    import("jspdf-autotable"),
+  ]);
+  return { jsPDF, autoTable: autoTableModule.default };
+}
 const MAX_CSV_MB = 12;
 const MAX_CSV_BYTES = MAX_CSV_MB * 1024 * 1024;
 
@@ -2163,6 +2169,7 @@ export default function OptionFlowPage() {
   }
 
   async function buildPdfDoc(payload: AnalysisData, planHtmlOverride?: string) {
+    const { jsPDF, autoTable } = await loadPdfTools();
     const doc = new jsPDF({ unit: "pt", format: "letter" });
     doc.setLineHeightFactor(1.5);
     const margin = 40;

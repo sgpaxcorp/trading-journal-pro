@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 import { parseNotes } from "@/lib/journalNotes";
+import { requirePlatformAccess } from "@/lib/serverPlatformAccess";
 
 export const runtime = "nodejs";
 
@@ -37,17 +38,11 @@ async function loadEntry(userId: string, date: string, accountId: string | null)
 
 export async function GET(req: NextRequest) {
   try {
-    const authHeader = req.headers.get("authorization") || "";
-    const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
-    if (!token) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const access = await requirePlatformAccess(req);
+    if (!access.ok) return access.response;
 
-    const { data: authData, error: authErr } = await supabaseAdmin.auth.getUser(token);
-    if (authErr || !authData?.user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const userId = authData.user.id;
-    const email = authData.user.email ?? null;
+    const userId = access.context.userId;
+    const email = access.context.user.email ?? null;
     const { searchParams } = new URL(req.url);
     const date = toDateString(searchParams.get("date"));
     const requestedAccountId = searchParams.get("accountId") || "";
@@ -79,17 +74,11 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const authHeader = req.headers.get("authorization") || "";
-    const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
-    if (!token) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const access = await requirePlatformAccess(req);
+    if (!access.ok) return access.response;
 
-    const { data: authData, error: authErr } = await supabaseAdmin.auth.getUser(token);
-    if (authErr || !authData?.user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const userId = authData.user.id;
-    const email = authData.user.email ?? null;
+    const userId = access.context.userId;
+    const email = access.context.user.email ?? null;
     const body = await req.json();
     const date = toDateString(body?.date);
     const requestedAccountId = body?.accountId ? String(body.accountId) : "";

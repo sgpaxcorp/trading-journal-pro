@@ -9,8 +9,9 @@ import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { createNativeStackNavigator, type NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaProvider } from "react-native-safe-area-context";
+import { enableFreeze, enableScreens } from "react-native-screens";
 import type { Session } from "@supabase/supabase-js";
-import { ActivityIndicator, Linking, Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, InteractionManager, Linking, Pressable, StyleSheet, Text, View } from "react-native";
 import * as Notifications from "expo-notifications";
 
 import { DashboardScreen } from "./src/screens/DashboardScreen";
@@ -40,6 +41,10 @@ import { MoreSheet } from "./src/components/MoreSheet";
 import { PlanGate } from "./src/components/PlanGate";
 import { t } from "./src/lib/i18n";
 import { usePlanAccess } from "./src/lib/usePlanAccess";
+import { apiGet } from "./src/lib/api";
+
+enableScreens(true);
+enableFreeze(true);
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -62,6 +67,7 @@ type MainTabParamList = {
 type RootStackParamList = {
   Auth: undefined;
   Tabs: undefined;
+  PaymentRequired: undefined;
   ResetPassword: undefined;
   Module: { title: string; description: string };
   Settings: undefined;
@@ -79,6 +85,10 @@ const Tab = createBottomTabNavigator<MainTabParamList>();
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const navigationRef = createNavigationContainerRef<RootStackParamList>();
 const WEB_BASE = "https://www.neurotrader-journal.com";
+
+type AccessStatusResponse = {
+  hasAppAccess?: boolean;
+};
 
 function MainTabs() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
@@ -272,7 +282,10 @@ function MainTabs() {
   return (
     <>
       <Tab.Navigator
+        detachInactiveScreens
         screenOptions={({ route }) => ({
+          lazy: true,
+          freezeOnBlur: true,
           headerStyle: { backgroundColor: colors.surface },
           headerTintColor: colors.textPrimary,
           headerTitleStyle: { fontWeight: "700" },
@@ -371,9 +384,166 @@ function MainTabs() {
   );
 }
 
+function PaymentRequiredScreen({
+  checking,
+  error,
+  onRetry,
+  onSignOut,
+}: {
+  checking: boolean;
+  error: string | null;
+  onRetry: () => void;
+  onSignOut: () => void;
+}) {
+  const { colors } = useTheme();
+  const { language } = useLanguage();
+  const styles = useMemo(
+    () =>
+      StyleSheet.create({
+        screen: {
+          flex: 1,
+          backgroundColor: colors.background,
+          padding: 24,
+          justifyContent: "center",
+        },
+        eyebrow: {
+          color: colors.primary,
+          fontSize: 12,
+          fontWeight: "800",
+          letterSpacing: 1.8,
+          textTransform: "uppercase",
+          marginBottom: 10,
+        },
+        title: {
+          color: colors.textPrimary,
+          fontSize: 30,
+          lineHeight: 36,
+          fontWeight: "900",
+          marginBottom: 12,
+        },
+        body: {
+          color: colors.textMuted,
+          fontSize: 15,
+          lineHeight: 22,
+          marginBottom: 22,
+        },
+        panel: {
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: colors.border,
+          backgroundColor: colors.surface,
+          borderRadius: 8,
+          padding: 16,
+          marginBottom: 22,
+        },
+        panelTitle: {
+          color: colors.textPrimary,
+          fontSize: 15,
+          fontWeight: "800",
+          marginBottom: 6,
+        },
+        panelText: {
+          color: colors.textMuted,
+          fontSize: 13,
+          lineHeight: 19,
+        },
+        error: {
+          color: "#fda4af",
+          fontSize: 12,
+          lineHeight: 18,
+          marginBottom: 12,
+        },
+        button: {
+          minHeight: 48,
+          borderRadius: 8,
+          alignItems: "center",
+          justifyContent: "center",
+          paddingHorizontal: 16,
+          marginTop: 10,
+        },
+        primaryButton: {
+          backgroundColor: colors.primary,
+        },
+        secondaryButton: {
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: colors.border,
+          backgroundColor: "transparent",
+        },
+        dangerButton: {
+          backgroundColor: "transparent",
+        },
+        primaryText: {
+          color: "#00130f",
+          fontSize: 14,
+          fontWeight: "900",
+        },
+        secondaryText: {
+          color: colors.textPrimary,
+          fontSize: 14,
+          fontWeight: "800",
+        },
+        dangerText: {
+          color: colors.textMuted,
+          fontSize: 13,
+          fontWeight: "700",
+        },
+      }),
+    [colors]
+  );
+
+  const openWebsite = useCallback(() => {
+    void Linking.openURL(WEB_BASE);
+  }, []);
+
+  return (
+    <View style={styles.screen}>
+      <Text style={styles.eyebrow}>{t(language, "Account access", "Acceso de cuenta")}</Text>
+      <Text style={styles.title}>
+        {t(language, "Sign in with an active NeuroTrader account.", "Entra con una cuenta activa de NeuroTrader.")}
+      </Text>
+      <Text style={styles.body}>
+        {t(
+          language,
+          "The mobile app is free to download and is built for existing members. Your journal unlocks when your account already has active access.",
+          "El app movil es gratis para descargar y esta creado para miembros existentes. Tu journal se desbloquea cuando tu cuenta ya tiene acceso activo."
+        )}
+      </Text>
+
+      <View style={styles.panel}>
+        <Text style={styles.panelTitle}>
+          {t(language, "Why this matters", "Por que esto importa")}
+        </Text>
+        <Text style={styles.panelText}>
+          {t(
+            language,
+            "Your journal, rules, analytics, trophies, and broker tools stay protected behind the same account access check on web and mobile.",
+            "Tu journal, reglas, analiticas, trophies y herramientas de broker quedan protegidas con la misma validacion de cuenta en web y mobile."
+          )}
+        </Text>
+      </View>
+
+      {error ? <Text style={styles.error}>{error}</Text> : null}
+
+      <Pressable style={[styles.button, styles.primaryButton]} onPress={onRetry} disabled={checking}>
+        <Text style={styles.primaryText}>
+          {checking ? t(language, "Checking...", "Verificando...") : t(language, "Check access", "Verificar acceso")}
+        </Text>
+      </Pressable>
+      <Pressable style={[styles.button, styles.secondaryButton]} onPress={openWebsite}>
+        <Text style={styles.secondaryText}>{t(language, "Open website", "Abrir website")}</Text>
+      </Pressable>
+      <Pressable style={[styles.button, styles.dangerButton]} onPress={onSignOut}>
+        <Text style={styles.dangerText}>{t(language, "Sign out", "Cerrar sesion")}</Text>
+      </Pressable>
+    </View>
+  );
+}
+
 function AppShell() {
   const [session, setSession] = useState<Session | null>(null);
   const [authReady, setAuthReady] = useState(false);
+  const [accessReady, setAccessReady] = useState(!hasSupabaseConfig);
+  const [hasAppAccess, setHasAppAccess] = useState(!hasSupabaseConfig);
+  const [accessError, setAccessError] = useState<string | null>(null);
   const [navReady, setNavReady] = useState(false);
   const [recoverySessionReady, setRecoverySessionReady] = useState(false);
   const [recoveryError, setRecoveryError] = useState<string | null>(null);
@@ -429,6 +599,44 @@ function AppShell() {
     };
   }, []);
 
+  const refreshAccessStatus = useCallback(async () => {
+    if (!hasSupabaseConfig) {
+      setHasAppAccess(true);
+      setAccessReady(true);
+      setAccessError(null);
+      return;
+    }
+    if (!session?.user?.id) {
+      setHasAppAccess(false);
+      setAccessReady(true);
+      setAccessError(null);
+      return;
+    }
+
+    setAccessReady(false);
+    setAccessError(null);
+    try {
+      const access = await apiGet<AccessStatusResponse>("/api/access/status");
+      setHasAppAccess(Boolean(access?.hasAppAccess));
+    } catch (err) {
+      setHasAppAccess(false);
+      setAccessError(err instanceof Error ? err.message : "Unable to verify account access.");
+    } finally {
+      setAccessReady(true);
+    }
+  }, [session?.user?.id, session?.access_token]);
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      await refreshAccessStatus();
+      if (!active) return;
+    })();
+    return () => {
+      active = false;
+    };
+  }, [refreshAccessStatus]);
+
   useEffect(() => {
     if (!supabaseMobile) return;
 
@@ -467,27 +675,38 @@ function AppShell() {
   }, []);
 
   useEffect(() => {
-    if (!session?.user?.id) return;
+    if (!session?.user?.id || !hasAppAccess) return;
 
     let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
 
-    (async () => {
-      try {
-        await registerDeviceForPush({
-          locale: language,
-          promptIfNeeded: false,
-        });
-      } catch (err) {
-        if (!cancelled) {
-          console.warn("[mobile] push auto-registration failed:", err);
-        }
-      }
-    })();
+    const task = InteractionManager.runAfterInteractions(() => {
+      timer = setTimeout(() => {
+        (async () => {
+          try {
+            await registerDeviceForPush({
+              locale: language,
+              promptIfNeeded: false,
+            });
+          } catch (err) {
+            if (!cancelled) {
+              console.warn("[mobile] push auto-registration failed:", err);
+            }
+          }
+        })();
+      }, 1200);
+    });
 
     return () => {
       cancelled = true;
+      try {
+        task.cancel?.();
+      } catch {}
+      if (timer) {
+        clearTimeout(timer);
+      }
     };
-  }, [session?.user?.id, language]);
+  }, [session?.user?.id, hasAppAccess, language]);
 
   useEffect(() => {
     if (!navReady || !shouldOpenResetScreen || !navigationRef.isReady()) return;
@@ -495,18 +714,40 @@ function AppShell() {
     setShouldOpenResetScreen(false);
   }, [navReady, shouldOpenResetScreen]);
 
-  const shouldShowMainTabs = Boolean(session) || !hasSupabaseConfig;
+  const shouldShowMainTabs = !hasSupabaseConfig || (Boolean(session) && hasAppAccess);
+  const shouldShowPaymentRequired = hasSupabaseConfig && Boolean(session) && accessReady && !hasAppAccess;
+  const shouldShowLoading = !authReady || (hasSupabaseConfig && Boolean(session) && !accessReady);
+  const postAuthRoute: "Tabs" | "PaymentRequired" | "Auth" = shouldShowMainTabs
+    ? "Tabs"
+    : shouldShowPaymentRequired
+    ? "PaymentRequired"
+    : "Auth";
+
+  const handleSignOut = useCallback(() => {
+    void supabaseMobile?.auth.signOut();
+    setSession(null);
+    setHasAppAccess(false);
+    setAccessReady(true);
+    setAccessError(null);
+    if (navigationRef.isReady()) {
+      navigationRef.reset({
+        index: 0,
+        routes: [{ name: "Auth" }],
+      });
+    }
+  }, []);
 
   const handleResetPasswordDone = useCallback(() => {
     setRecoveryError(null);
     setRecoverySessionReady(false);
+    void refreshAccessStatus();
     if (navigationRef.isReady()) {
       navigationRef.reset({
         index: 0,
-        routes: [{ name: "Tabs" }],
+        routes: [{ name: postAuthRoute }],
       });
     }
-  }, []);
+  }, [postAuthRoute, refreshAccessStatus]);
 
   const handleResetPasswordCancel = useCallback(() => {
     setRecoveryError(null);
@@ -514,14 +755,14 @@ function AppShell() {
     if (!navigationRef.isReady()) return;
     navigationRef.reset({
       index: 0,
-      routes: [{ name: shouldShowMainTabs ? "Tabs" : "Auth" }],
+      routes: [{ name: postAuthRoute }],
     });
-  }, [shouldShowMainTabs]);
+  }, [postAuthRoute]);
 
   return (
     <NavigationContainer ref={navigationRef} onReady={() => setNavReady(true)}>
       <StatusBar style={themeMode === "light" ? "dark" : "light"} />
-      {!authReady ? (
+      {shouldShowLoading ? (
         <View style={loadingStyles.loading}>
           <ActivityIndicator color={colors.primary} />
           <Text style={loadingStyles.loadingText}>Loading...</Text>
@@ -537,6 +778,17 @@ function AppShell() {
           {shouldShowMainTabs ? (
             <Stack.Screen name="Tabs" options={{ headerShown: false }}>
               {() => <MainTabs />}
+            </Stack.Screen>
+          ) : shouldShowPaymentRequired ? (
+            <Stack.Screen name="PaymentRequired" options={{ headerShown: false }}>
+              {() => (
+                <PaymentRequiredScreen
+                  checking={!accessReady}
+                  error={accessError}
+                  onRetry={refreshAccessStatus}
+                  onSignOut={handleSignOut}
+                />
+              )}
             </Stack.Screen>
           ) : (
             <Stack.Screen name="Auth" options={{ headerShown: false }} component={AuthScreen} />

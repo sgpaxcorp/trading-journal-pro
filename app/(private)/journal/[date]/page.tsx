@@ -10,7 +10,6 @@ import type { JournalWidgetId, JournalWidgetDef } from "@/app/components/Journal
 
 import TopNav from "@/app/components/TopNav";
 import JournalInkField from "@/app/components/JournalInkField";
-import RichTextEditor from "@/app/components/RichTextEditor";
 
 import type { JournalEntry } from "@/lib/journalTypes";
 import { getAllJournalEntries, getJournalEntryByDate, saveJournalEntry } from "@/lib/journalSupabase";

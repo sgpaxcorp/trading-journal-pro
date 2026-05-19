@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 import { buildSnapshotAndEdges, type SessionRow, type TradeRow } from "@/lib/analyticsEngine";
 import { getServerPlanForUser } from "@/lib/serverFeatureAccess";
+import { requirePlatformAccess } from "@/lib/serverPlatformAccess";
 
 export const runtime = "nodejs";
 
@@ -316,17 +317,11 @@ async function fetchSessions(userId: string, email?: string | null, accountId?: 
 
 export async function GET(req: NextRequest) {
   try {
-    const authHeader = req.headers.get("authorization") || "";
-    const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
-    if (!token) return NextResponse.json({ snapshot: null, topEdges: [] }, { status: 401 });
+    const access = await requirePlatformAccess(req);
+    if (!access.ok) return access.response;
 
-    const { data: authData, error: authErr } = await supabaseAdmin.auth.getUser(token);
-    if (authErr || !authData?.user) {
-      return NextResponse.json({ snapshot: null, topEdges: [] }, { status: 401 });
-    }
-
-    const userId = authData.user.id;
-    const email = authData.user.email ?? null;
+    const userId = access.context.userId;
+    const email = access.context.user.email ?? null;
     const { searchParams } = new URL(req.url);
     const requestedAccountId = searchParams.get("accountId") || "";
     const { data: pref } = await supabaseAdmin

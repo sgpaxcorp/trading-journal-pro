@@ -24,7 +24,7 @@ const NAV_GROUPS = (lang: "en" | "es") => {
         { href: "/help/ai-coaching", label: isEs ? "AI Coaching" : "AI Coaching" },
         { href: "/help/notebook", label: isEs ? "Notebook" : "Notebook" },
         { href: "/help/back-study", label: isEs ? "Back‑Study" : "Back‑Study" },
-        { href: "/help/rules-alarms", label: isEs ? "Reglas y alarmas" : "Rules & Alarms" },
+        { href: "/help/rules-alarms", label: isEs ? "Sistema de protección" : "Trading Protection System" },
         { href: "/help/challenges", label: isEs ? "Retos" : "Challenges" },
         { href: "/help/audit", label: isEs ? "Auditoría" : "Audit" },
         { href: "/help/kpis", label: isEs ? "KPIs y metricas" : "KPIs & Metrics" },

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
+import { requirePlatformAccess } from "@/lib/serverPlatformAccess";
 
 export const runtime = "nodejs";
 
@@ -16,16 +17,8 @@ type RegisterBody = {
 
 export async function POST(req: NextRequest) {
   try {
-    const authHeader = req.headers.get("authorization") || "";
-    const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
-    if (!token) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const { data: authData, error: authErr } = await supabaseAdmin.auth.getUser(token);
-    if (authErr || !authData?.user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const access = await requirePlatformAccess(req);
+    if (!access.ok) return access.response;
 
     const body = (await req.json()) as RegisterBody;
     const expoPushToken = String(body?.expoPushToken || "").trim();
@@ -47,7 +40,7 @@ export async function POST(req: NextRequest) {
         : existing?.daily_reminder_enabled ?? true;
 
     const payload = {
-      user_id: authData.user.id,
+      user_id: access.context.userId,
       expo_push_token: expoPushToken,
       platform: body?.platform ?? null,
       device_id: body?.deviceId ?? null,

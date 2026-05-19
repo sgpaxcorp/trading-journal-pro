@@ -8,6 +8,7 @@ import {
   parseTosOrderHistoryFromRows,
 } from "@/lib/brokers/tos/parseTosOrderHistory";
 import type { NormalizedOrderEvent } from "@/lib/brokers/types";
+import { requirePlatformAccess } from "@/lib/serverPlatformAccess";
 
 export const runtime = "nodejs";
 
@@ -490,16 +491,10 @@ function futureRootFromSymbol(sym: string): string {
 export async function POST(req: NextRequest) {
   const startedAt = Date.now();
 
-  const authHeader = req.headers.get("authorization") || "";
-  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
-  if (!token)
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const access = await requirePlatformAccess(req);
+  if (!access.ok) return access.response;
 
-  const { data: authData, error: authErr } = await supabaseAdmin.auth.getUser(token);
-  if (authErr || !authData?.user)
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-  const userId = authData.user.id;
+  const userId = access.context.userId;
   const activeAccountId = await resolveActiveAccountId(userId);
 
   const form = (await req.formData()) as unknown as {

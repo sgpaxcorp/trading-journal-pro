@@ -9,7 +9,6 @@ import { useAuth } from "@/context/AuthContext";
 import type { PlanId } from "@/lib/types";
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
-import { getOptionFlowBetaCopy } from "@/lib/optionFlowBeta";
 import { supabaseBrowser } from "@/lib/supaBaseClient";
 import { listMyEntitlements } from "@/lib/entitlementsSupabase";
 import {
@@ -48,7 +47,6 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
   const lang = resolveLocale(locale);
   const isEs = lang === "es";
   const L = (en: string, es: string) => (isEs ? es : en);
-  const optionFlowBeta = getOptionFlowBetaCopy(isEs ? "es" : "en");
 
   const [selectedPlan, setSelectedPlan] = useState<PlanId>(initialPlan);
   const [loading, setLoading] = useState(false);
@@ -56,12 +54,9 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
   const [currentPlan, setCurrentPlan] = useState<PlanId | "none">(initialPlan);
   const [currentStatus, setCurrentStatus] = useState<string | null>(null);
   const [loadingProfile, setLoadingProfile] = useState(true);
-  const [addonActive, setAddonActive] = useState(false);
   const [addonLoading, setAddonLoading] = useState(false);
   const [brokerAddonActive, setBrokerAddonActive] = useState(false);
   const [brokerAddonSelected, setBrokerAddonSelected] = useState(false);
-  const [betaRequestSending, setBetaRequestSending] = useState(false);
-  const [betaRequestNotice, setBetaRequestNotice] = useState<string | null>(null);
   const [billingCycle, setBillingCycle] = useState<"monthly" | "annual">("monthly");
   const [partnerCode, setPartnerCode] = useState(
     String(initialPartnerCode || "")
@@ -142,18 +137,12 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
       setAddonLoading(true);
       try {
         const entitlements = await listMyEntitlements(userId);
-        const active = entitlements.some(
-          (e) =>
-            e.entitlement_key === "option_flow" &&
-            (e.status === "active" || e.status === "trialing")
-        );
         const brokerActive = entitlements.some(
           (e) =>
             e.entitlement_key === "broker_sync" &&
             (e.status === "active" || e.status === "trialing")
         );
         if (!cancelled) {
-          setAddonActive(active);
           setBrokerAddonActive(brokerActive);
         }
       } catch (err) {
@@ -265,61 +254,6 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
       setError(err.message ?? L("Something went wrong starting checkout.", "Algo salió mal iniciando el checkout."));
     } finally {
       setLoading(false);
-    }
-  }
-
-  async function handleRequestOptionFlowAccess() {
-    if (!user?.email) {
-      setBetaRequestNotice(
-        L(
-          "Sign in first so we know which account should receive beta access.",
-          "Primero inicia sesión para saber qué cuenta debe recibir el acceso beta."
-        )
-      );
-      return;
-    }
-
-    try {
-      setBetaRequestSending(true);
-      setBetaRequestNotice(null);
-
-      const res = await fetch("/api/email/beta-request", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          email: user.email,
-          name:
-            [user.user_metadata?.first_name, user.user_metadata?.last_name]
-              .filter(Boolean)
-              .join(" ")
-              .trim() || user.email,
-          feature: "option_flow",
-        }),
-      });
-
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        throw new Error(
-          body?.error ||
-            L("Could not send beta request right now.", "No se pudo enviar la solicitud beta ahora mismo.")
-        );
-      }
-
-      setBetaRequestNotice(
-        L(
-          "Request sent. We will review it in Admin Center and activate your access there.",
-          "Solicitud enviada. La revisaremos en Admin Center y activaremos tu acceso desde allí."
-        )
-      );
-    } catch (err: any) {
-      setBetaRequestNotice(
-        err?.message ||
-          L("Could not send beta request right now.", "No se pudo enviar la solicitud beta ahora mismo.")
-      );
-    } finally {
-      setBetaRequestSending(false);
     }
   }
 
@@ -685,86 +619,6 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
 
           {/* Add-ons */}
           <div className="mt-8 border-t border-slate-800/80 pt-6 space-y-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">
-                  {L("Private beta", "Beta privada")}
-                </p>
-                <h2 className="text-lg font-semibold text-slate-100">
-                  {L("Beta access requests", "Solicitudes de acceso beta")}
-                </h2>
-                <p className="text-xs text-slate-400 mt-1">
-                  {L(
-                    "Option Flow is not sold here. If you want to participate in the beta, send a request and we will activate access from Admin Center.",
-                    "Option Flow no se vende aquí. Si quieres participar en el beta, envía la solicitud y activaremos el acceso desde Admin Center."
-                  )}
-                </p>
-              </div>
-              <span className="rounded-full border border-slate-700 bg-slate-950/70 px-3 py-1 text-[11px] text-slate-300">
-                {addonLoading
-                  ? L("Checking…", "Verificando…")
-                  : addonActive
-                  ? L("Beta enabled", "Beta activado")
-                  : optionFlowBeta.badge}
-              </span>
-            </div>
-
-            <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-              <div>
-                <p className="text-sm font-semibold text-slate-100">
-                  {addonActive
-                    ? L("Option Flow beta access is active", "El acceso beta de Option Flow está activo")
-                    : L("Send an email request to join the beta", "Envía una solicitud por email para entrar al beta")}
-                </p>
-                <p className="text-[11px] text-slate-400">
-                  {addonActive
-                    ? L(
-                        "Your access is controlled from Admin Center. You can open the workspace directly.",
-                        "Tu acceso se controla desde Admin Center. Puedes abrir el workspace directamente."
-                      )
-                    : L(
-                        "This module is not sold here yet. Send a request and we can activate it from Admin Center.",
-                        "Este módulo todavía no se vende aquí. Envía la solicitud y lo activamos desde Admin Center."
-                      )}
-                </p>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-3">
-                {addonActive ? (
-                  <button
-                    type="button"
-                    onClick={() => router.push("/option-flow")}
-                    className="rounded-xl bg-emerald-400 px-4 py-2 text-xs font-semibold text-slate-950 hover:bg-emerald-300"
-                  >
-                    {L("Open beta workspace", "Abrir workspace beta")}
-                  </button>
-                ) : (
-                  <>
-                    <button
-                      type="button"
-                      onClick={handleRequestOptionFlowAccess}
-                      disabled={betaRequestSending}
-                      className="rounded-xl bg-emerald-400 px-4 py-2 text-xs font-semibold text-slate-950 hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      {betaRequestSending
-                        ? L("Sending request…", "Enviando solicitud…")
-                        : L("Request beta access", "Solicitar acceso beta")}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => router.push("/help/option-flow")}
-                      className="rounded-xl border border-slate-700 px-4 py-2 text-xs text-slate-300 hover:border-emerald-400 hover:text-emerald-200"
-                    >
-                      {optionFlowBeta.learnMore}
-                    </button>
-                  </>
-                )}
-              </div>
-            </div>
-            {betaRequestNotice ? (
-              <p className="text-[11px] text-slate-300">{betaRequestNotice}</p>
-            ) : null}
-
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">

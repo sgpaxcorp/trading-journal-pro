@@ -2,8 +2,6 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import jsPDF from "jspdf";
-import autoTable from "jspdf-autotable";
 import TopNav from "@/app/components/TopNav";
 import { useAuth } from "@/context/AuthContext";
 import { useAppSettings } from "@/lib/appSettings";
@@ -31,6 +29,14 @@ type Invoice = {
     price?: number | null;
   }[];
 };
+
+async function loadPdfTools() {
+  const [{ jsPDF }, autoTableModule] = await Promise.all([
+    import("jspdf"),
+    import("jspdf-autotable"),
+  ]);
+  return { jsPDF, autoTable: autoTableModule.default };
+}
 
 export default function BillingHistoryPage() {
   const { user, loading } = useAuth();
@@ -128,6 +134,7 @@ export default function BillingHistoryPage() {
   }
 
   async function downloadInvoicePdf(inv: Invoice) {
+    const { jsPDF, autoTable } = await loadPdfTools();
     const doc = new jsPDF({ unit: "pt", format: "letter" });
     const marginX = 48;
     const startY = 48;

@@ -16,6 +16,10 @@ function emitForcePull(): void {
   }
 }
 
+function isDocumentVisible(): boolean {
+  return typeof document === "undefined" || document.visibilityState === "visible";
+}
+
 export default function GlobalAlertRuleEngine() {
   const { user } = useAuth();
   const { locale } = useAppSettings();
@@ -93,15 +97,27 @@ export default function GlobalAlertRuleEngine() {
     mountedRef.current = true;
     if (!userId) return () => {};
 
-    void runOnce();
+    const initialTimer = window.setTimeout(() => {
+      if (!mountedRef.current) return;
+      if (!isDocumentVisible()) return;
+      void runOnce();
+    }, 5000);
     const timer = window.setInterval(() => {
       if (!mountedRef.current) return;
+      if (!isDocumentVisible()) return;
       void runOnce();
-    }, 30_000);
+    }, 5 * 60_000);
+    const onVisibility = () => {
+      if (!mountedRef.current || !isDocumentVisible()) return;
+      void runOnce();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
 
     return () => {
       mountedRef.current = false;
+      window.clearTimeout(initialTimer);
       window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisibility);
     };
   }, [runOnce, userId]);
 

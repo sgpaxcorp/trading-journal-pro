@@ -1,8 +1,8 @@
-# Rules & Alarms
+# Sistema de protección de trading
 ## Acceso
-- Navegación izquierda → `Rules & Alarms` → `Alarms`.
+- Navegación izquierda → `Sistema de protección de trading` → `Alarmas críticas`.
 
-Rules & Alarms es tu consola automática de disciplina. Vigila tus reglas activas, revisa tu día de trading y crea alarmas cuando algo necesita atención.
+Sistema de protección de trading es tu consola automática de disciplina. Vigila tus reglas activas, revisa tu día de trading y crea alarmas cuando algo necesita atención.
 
 ## Para qué sirve esta página
 Usa esta página para:
@@ -238,7 +238,7 @@ Si vas comenzando, activa o crea primero:
 Eso te da una primera capa sólida de disciplina.
 
 ## Nota importante
-Rules & Alarms está diseñado para proteger:
+Sistema de protección de trading está diseñado para proteger:
 - riesgo
 - proceso
 - higiene del journal

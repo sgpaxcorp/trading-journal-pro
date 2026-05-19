@@ -8,7 +8,6 @@ import { syncMyTrophies } from "@/lib/trophiesSupabase";
 import { isActiveProfileStatus, shouldAllowLocalProfileAccessFallback } from "@/lib/accessControl";
 import { fetchAccessStatus } from "@/lib/accessStatusClient";
 import { canAccessPrivatePath, firstAccessiblePrivatePath } from "@/lib/accessGrants";
-import CandleAssistant from "@/app/components/NeuroAssistant";
 import RouteQuickTour from "@/app/components/RouteQuickTour";
 import GlobalAlertPopups from "@/app/components/GlobalAlertPopups";
 import GlobalAlertRuleEngine from "@/app/components/GlobalAlertRuleEngine";
@@ -35,16 +34,12 @@ function FullscreenStatus({
   message: string;
 }) {
   return (
-    <>
-      <div className="min-h-screen bg-slate-950 text-slate-50 flex flex-col items-center justify-center">
-        <div className="px-6 py-4 rounded-xl border border-emerald-400/60 bg-slate-900/80 shadow-lg max-w-sm text-center">
-          <p className="text-sm font-semibold text-emerald-300 mb-1">{title}</p>
-          <p className="text-[11px] text-slate-300">{message}</p>
-        </div>
+    <div className="min-h-screen bg-slate-950 text-slate-50 flex flex-col items-center justify-center">
+      <div className="px-6 py-4 rounded-xl border border-emerald-400/60 bg-slate-900/80 shadow-lg max-w-sm text-center">
+        <p className="text-sm font-semibold text-emerald-300 mb-1">{title}</p>
+        <p className="text-[11px] text-slate-300">{message}</p>
       </div>
-
-      <CandleAssistant />
-    </>
+    </div>
   );
 }
 
@@ -247,9 +242,12 @@ export default function PrivateLayout({ children }: PrivateLayoutProps) {
       // If localStorage fails, just proceed without caching
     }
 
-    syncMyTrophies(userId).catch((err) => {
-      console.warn("[PrivateLayout] trophy sync failed:", err);
-    });
+    const timer = window.setTimeout(() => {
+      syncMyTrophies(userId).catch((err) => {
+        console.warn("[PrivateLayout] trophy sync failed:", err);
+      });
+    }, 3500);
+    return () => window.clearTimeout(timer);
   }, [userId]);
 
   const isVerifyingSubscription =
@@ -296,7 +294,7 @@ export default function PrivateLayout({ children }: PrivateLayoutProps) {
         </>
       ) : null}
 
-      {/* ✅ GLOBAL Rules & Alarms engine + delivery */}
+      {/* GLOBAL Trading Protection System engine + delivery */}
       {userId && isActive && profileChecked ? (
         <>
           <GlobalAlertRuleEngine />
@@ -304,8 +302,6 @@ export default function PrivateLayout({ children }: PrivateLayoutProps) {
           <GlobalRealtimeNotifications />
         </>
       ) : null}
-
-      <CandleAssistant />
     </>
   );
 }

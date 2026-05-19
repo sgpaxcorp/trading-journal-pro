@@ -1,23 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 import { ensureBaseTrophyDefinitions } from "@/lib/trophyCatalog";
+import { requirePlatformAccess } from "@/lib/serverPlatformAccess";
 
 export const runtime = "nodejs";
 
 export async function GET(req: NextRequest) {
   try {
-    const authHeader = req.headers.get("authorization") || "";
-    const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
-    if (!token) {
-      return NextResponse.json({ definitions: [], earned: [] }, { status: 401 });
-    }
+    const access = await requirePlatformAccess(req);
+    if (!access.ok) return access.response;
 
-    const { data: authData, error: authErr } = await supabaseAdmin.auth.getUser(token);
-    if (authErr || !authData?.user) {
-      return NextResponse.json({ definitions: [], earned: [] }, { status: 401 });
-    }
-
-    const userId = authData.user.id;
+    const userId = access.context.userId;
 
     await ensureBaseTrophyDefinitions(supabaseAdmin);
 

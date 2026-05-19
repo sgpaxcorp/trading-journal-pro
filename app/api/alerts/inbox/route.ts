@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
-import { getAuthUser } from "@/lib/authServer";
+import { requirePlatformAccess } from "@/lib/serverPlatformAccess";
 
 const SYSTEM_RULE_KEY = "ai_coach_plan";
 
@@ -13,10 +13,9 @@ function isoDate(d = new Date()) {
 
 export async function POST(req: Request) {
   try {
-    const auth = await getAuthUser(req);
-    if (!auth) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const access = await requirePlatformAccess(req);
+    if (!access.ok) return access.response;
+    const auth = { userId: access.context.userId };
 
     const body = await req.json();
     const title = String(body?.title ?? "AI Coaching update").trim();

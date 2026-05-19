@@ -51,8 +51,8 @@ Tu playbook: reglas, patrones y lecciones que quieres repetir.
 **Back‑Study**  
 Revisión visual para validar entradas/salidas y afinar setups.
 
-**Rules & Alarms**  
-Recordatorios y frenos de disciplina.
+**Sistema de protección de trading**  
+Alarmas críticas y chequeos de rutina que te ayudan a obedecer el plan, no solo escribirlo.
 
 **Challenges**  
 Programas de hábito y consistencia.

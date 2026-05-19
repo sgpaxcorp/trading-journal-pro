@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { MessageSquare } from "lucide-react";
@@ -10,7 +10,6 @@ import { supabaseBrowser } from "@/lib/supaBaseClient";
 
 import { useAppSettings, type Theme } from "@/lib/appSettings";
 import { resolveLocale, t, type Locale } from "@/lib/i18n";
-import { listAlertEvents, subscribeToAlertEvents } from "@/lib/alertsSupabase";
 import { QUICK_TOUR_OPEN_EVENT, getQuickTourContext } from "@/lib/quickTour";
 
 type NavItem = {
@@ -240,12 +239,9 @@ function HelpMenu({ theme, lang }: { theme: Theme; lang: Locale }) {
   );
 }
 
-/* ========== ALERTS INBOX (message icon + badge) ========== */
+/* ========== SUPPORT CENTER (message icon) ========== */
 
-function AlertsInboxButton({ theme, lang }: { theme: Theme; lang: Locale }) {
-  const { user } = useAuth() as any;
-  const userId = (user as any)?.id || (user as any)?.uid || "";
-  const [count, setCount] = useState(0);
+function SupportCenterButton({ theme, lang }: { theme: Theme; lang: Locale }) {
   const L = (en: string, es: string) => (lang === "es" ? es : en);
 
   const isLight = theme === "light";
@@ -254,58 +250,14 @@ function AlertsInboxButton({ theme, lang }: { theme: Theme; lang: Locale }) {
     ? "border-slate-300 bg-white text-slate-700 hover:border-emerald-400 hover:text-emerald-700"
     : "border-slate-700 bg-slate-900 text-slate-300 hover:border-emerald-400 hover:text-emerald-300";
 
-  const refresh = useCallback(async () => {
-    if (!userId) {
-      setCount(0);
-      return;
-    }
-    const res = await listAlertEvents(userId, { includeDismissed: false, limit: 200 });
-    if (!res.ok) {
-      setCount(0);
-      return;
-    }
-    setCount(res.data.events.length);
-  }, [userId]);
-
-  useEffect(() => {
-    refresh().catch(() => void 0);
-  }, [refresh]);
-
-  useEffect(() => {
-    if (!userId) return;
-    const sub = subscribeToAlertEvents(userId, () => {
-      refresh().catch(() => void 0);
-    });
-
-    const t = window.setInterval(() => {
-      refresh().catch(() => void 0);
-    }, 30_000);
-
-    const onForce = () => refresh().catch(() => void 0);
-    window.addEventListener("ntj_alert_force_pull", onForce);
-
-    return () => {
-      window.clearInterval(t);
-      window.removeEventListener("ntj_alert_force_pull", onForce);
-      sub?.unsubscribe?.();
-    };
-  }, [userId, refresh]);
-
-  const label = count > 9 ? "9+" : String(count);
-
   return (
     <Link
       href="/messages"
       className={`relative flex h-9 w-9 items-center justify-center rounded-full border text-sm transition ${btnClass}`}
-      aria-label={L("Alerts inbox", "Bandeja de alertas")}
-      title={L("Alerts inbox", "Bandeja de alertas")}
+      aria-label={L("Support Center", "Centro de soporte")}
+      title={L("Support Center", "Centro de soporte")}
     >
       <MessageSquare className="h-4 w-4" />
-      {count > 0 ? (
-        <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] rounded-full bg-emerald-400 text-[10px] font-semibold text-slate-950 flex items-center justify-center px-1 shadow-sm">
-          {label}
-        </span>
-      ) : null}
     </Link>
   );
 }
@@ -376,9 +328,24 @@ function AccountMenu({ theme, lang }: { theme: Theme; lang: Locale }) {
     if (!user?.id) return;
 
     let cancelled = false;
+    const cacheKey = `ntj_topnav_profile_plan_${user.id}`;
+    const cacheTtlMs = 5 * 60 * 1000;
 
     async function fetchProfilePlan() {
       try {
+        try {
+          const cached = window.sessionStorage.getItem(cacheKey);
+          if (cached) {
+            const parsed = JSON.parse(cached) as { plan?: string | null; ts?: number };
+            if (parsed?.ts && Date.now() - parsed.ts < cacheTtlMs) {
+              if (!cancelled) setProfilePlan(parsed.plan ?? null);
+              return;
+            }
+          }
+        } catch {
+          // cache is best-effort only
+        }
+
         const { data, error } = await supabaseBrowser
           .from("profiles")
           .select("plan, subscription_status")
@@ -393,8 +360,14 @@ function AccountMenu({ theme, lang }: { theme: Theme; lang: Locale }) {
         const activeStatus = ["active", "trialing", "paid"].includes(
           String((data as any)?.subscription_status ?? "").toLowerCase()
         );
+        const nextPlan = data?.plan && activeStatus ? (data.plan as string) : null;
         if (!cancelled) {
-          setProfilePlan(data?.plan && activeStatus ? (data.plan as string) : null);
+          setProfilePlan(nextPlan);
+        }
+        try {
+          window.sessionStorage.setItem(cacheKey, JSON.stringify({ plan: nextPlan, ts: Date.now() }));
+        } catch {
+          // ignore
         }
       } catch (err) {
         console.error("[TopNav] Unexpected error fetching profile plan:", err);
@@ -643,16 +616,16 @@ const challenges: NavItem[] = [
 
 const rules: NavItem[] = [
   {
-    id: "reminders",
-    titleKey: "nav.rules.reminders.title",
-    descriptionKey: "nav.rules.reminders.desc",
-    href: "/rules-alarms/reminders",
-  },
-  {
     id: "alarms",
     titleKey: "nav.rules.alarms.title",
     descriptionKey: "nav.rules.alarms.desc",
     href: "/rules-alarms/alarms",
+  },
+  {
+    id: "routine-checks",
+    titleKey: "nav.rules.reminders.title",
+    descriptionKey: "nav.rules.reminders.desc",
+    href: "/rules-alarms/reminders",
   },
 ];
 
@@ -755,7 +728,7 @@ export default function TopNav() {
 
         {/* Right side: Help + Account */}
         <div className="flex items-center gap-3 shrink-0">
-          <AlertsInboxButton theme={theme} lang={lang} />
+          <SupportCenterButton theme={theme} lang={lang} />
           <HelpMenu theme={theme} lang={lang} />
           <AccountMenu theme={theme} lang={lang} />
         </div>

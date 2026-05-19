@@ -838,18 +838,18 @@ export default function AlarmsConsolePage() {
       <div className="px-6 md:px-10 py-6 max-w-7xl mx-auto">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div>
-          <div className="text-[11px] uppercase tracking-[0.32em] text-emerald-400">
-            {L("Rules & Alarms • Alarms", "Reglas y alarmas • Alarmas")}
-          </div>
-          <h1 className="mt-2 text-2xl font-semibold text-slate-100">
-            {L("Active alarms & audit trail", "Alarmas activas y auditoría")}
-          </h1>
-          <p className="mt-2 max-w-2xl text-sm text-slate-400">
-            {L(
-              "Monitor open positions, expiring options, and key risk rules. When an alarm fires, resolve it with a snooze, dismissal, or a close-at-price action.",
-              "Monitorea posiciones abiertas, opciones por expirar y reglas clave de riesgo. Cuando se dispare una alarma, resuélvela con posponer, descartar o cerrar a precio."
-            )}
-          </p>
+            <div className="text-[11px] uppercase tracking-[0.32em] text-emerald-400">
+              {L("Trading Protection System • Critical Alarms", "Sistema de protección de trading • Alarmas críticas")}
+            </div>
+            <h1 className="mt-2 text-2xl font-semibold text-slate-100">
+              {L("Critical alarms & rule enforcement", "Alarmas críticas y ejecución de reglas")}
+            </h1>
+            <p className="mt-2 max-w-2xl text-sm text-slate-400">
+              {L(
+                "This is the layer that helps you obey your plan: max loss, daily goal, open positions, expiring options, and broken rules trigger popups before small mistakes become expensive.",
+                "Esta es la capa que te ayuda a obedecer tu plan: max loss, meta diaria, posiciones abiertas, opciones por expirar y reglas rotas disparan popups antes de que errores pequeños se vuelvan caros."
+              )}
+            </p>
           </div>
 
         <div className="flex flex-wrap items-center gap-2">
@@ -857,7 +857,7 @@ export default function AlarmsConsolePage() {
             href="/rules-alarms/reminders"
             className="inline-flex items-center rounded-xl border border-slate-700 bg-slate-950/30 px-3 py-2 text-xs font-semibold text-slate-100 transition hover:border-emerald-500/60 hover:bg-emerald-500/10 hover:text-emerald-200"
           >
-            {L("Open reminders", "Abrir recordatorios")}
+            {L("Open routine checks", "Abrir chequeos de rutina")}
           </Link>
           <button
             type="button"
@@ -1096,8 +1096,13 @@ export default function AlarmsConsolePage() {
         <section className="mt-6 rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
           <div className="flex items-center justify-between gap-4">
             <div>
-              <div className="text-xs uppercase tracking-[0.28em] text-slate-500">{L("Alarm rules", "Reglas de alarmas")}</div>
-              <p className="mt-2 text-sm text-slate-400">{L("Toggle rules on/off and trigger test alarms.", "Activa o desactiva reglas y dispara pruebas.")}</p>
+              <div className="text-xs uppercase tracking-[0.28em] text-slate-500">{L("Protection rules", "Reglas de protección")}</div>
+              <p className="mt-2 text-sm text-slate-400">
+                {L(
+                  "Convert hard trading rules into enforceable popups, then test them before the session starts.",
+                  "Convierte reglas duras de trading en popups accionables y pruébalas antes de que empiece la sesión."
+                )}
+              </p>
             </div>
             <div className="text-xs text-slate-400">{busy ? L("Working…", "Trabajando…") : ""}</div>
           </div>

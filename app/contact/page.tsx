@@ -93,8 +93,8 @@ export default function ContactPage() {
         setStatus(
           agentRes.ok && agentRes.canAnswer
             ? L(
-                "Ticket created. The 24/7 virtual support agent replied in your Message Center.",
-                "Ticket creado. El agente virtual 24/7 respondió en tu Centro de mensajes."
+                "Ticket created. The 24/7 virtual support agent replied in your Support Center.",
+                "Ticket creado. El agente virtual 24/7 respondió en tu Centro de soporte."
               )
             : L(
                 "Ticket created. The virtual agent routed it for follow-up and we’ll work it until it’s resolved.",

@@ -5,6 +5,7 @@ import { parseTosOrderHistory } from "@/lib/brokers/tos/parseTosOrderHistory";
 import type { NormalizedOrderEvent } from "@/lib/brokers/types";
 import { createHash } from "crypto";
 import { requireAdvancedPlan } from "@/lib/serverFeatureAccess";
+import { requirePlatformAccess } from "@/lib/serverPlatformAccess";
 
 export const runtime = "nodejs";
 
@@ -121,14 +122,10 @@ function buildExecutionDiscipline(audit: any) {
 
 export async function GET(req: NextRequest) {
   try {
-    const authHeader = req.headers.get("authorization") || "";
-    const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
-    if (!token) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const access = await requirePlatformAccess(req);
+    if (!access.ok) return access.response;
 
-    const { data: authData, error: authErr } = await supabaseAdmin.auth.getUser(token);
-    if (authErr || !authData?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-    const userId = authData.user.id;
+    const userId = access.context.userId;
     const advancedGate = await requireAdvancedPlan(userId);
     if (advancedGate) return advancedGate;
 
@@ -331,14 +328,10 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const authHeader = req.headers.get("authorization") || "";
-    const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
-    if (!token) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const access = await requirePlatformAccess(req);
+    if (!access.ok) return access.response;
 
-    const { data: authData, error: authErr } = await supabaseAdmin.auth.getUser(token);
-    if (authErr || !authData?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-    const userId = authData.user.id;
+    const userId = access.context.userId;
     const advancedGate = await requireAdvancedPlan(userId);
     if (advancedGate) return advancedGate;
 

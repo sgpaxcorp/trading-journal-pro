@@ -324,8 +324,8 @@ export default function AdminDashboardPage() {
       },
       {
         key: "inbox" as const,
-        label: L("Inbox", "Inbox"),
-        description: L("Support threads, staff replies, and AI service triage.", "Tickets de soporte, respuestas del staff y triage IA."),
+        label: L("Support Center", "Centro de soporte"),
+        description: L("User tickets, priority queue, staff replies, and AI service triage.", "Tickets, prioridad, respuestas del staff y triage IA."),
       },
     ],
     [L]

@@ -129,29 +129,29 @@ export default function Home() {
     {
       value: L("Plan creation", "Creación del plan"),
       label: L(
-        "Build your Growth Plan with targets, dates, risk rails, daily goals, and rules.",
-        "Crea tu Growth Plan con metas, fechas, límites de riesgo, objetivos diarios y reglas."
+        "Build a measurable Growth Plan with target equity, deadline, max daily loss, risk per trade, daily goal, and checkpoints.",
+        "Crea un Growth Plan medible con equity objetivo, fecha límite, max loss diario, riesgo por trade, meta diaria y checkpoints."
       ),
     },
     {
       value: L("AI follow-up", "Seguimiento IA"),
       label: L(
-        "AI Coach evaluates execution against your plan and turns drift into action items.",
-        "AI Coach evalúa tu ejecución contra el plan y convierte desvíos en acciones."
+        "AI Coach compares execution, rule adherence, risk utilization, and emotional drift against the plan.",
+        "AI Coach compara ejecución, cumplimiento de reglas, uso de riesgo y desvío emocional contra el plan."
       ),
     },
     {
-      value: L("Statistics", "Estadística"),
+      value: L("Performance metrics", "Métricas de performance"),
       label: L(
-        "KPIs, calendar results, streaks, risk metrics, and performance breakdowns.",
-        "KPIs, calendario, rachas, métricas de riesgo y breakdowns de performance."
+        "Track KPIs that matter: win rate, expectancy, streaks, risk discipline, calendar results, and account pacing.",
+        "Mide KPIs que importan: win rate, expectancy, rachas, disciplina de riesgo, calendario y ritmo de cuenta."
       ),
     },
     {
-      value: L("Business", "Negocio"),
+      value: L("Business strategy", "Estrategia de negocio"),
       label: L(
-        "P&L, cashflow, reports, rules, and accountability for serious trading operations.",
-        "P&L, cashflow, reportes, reglas y accountability para operar como negocio."
+        "Turn trading into an operation with P&L, cashflow, reports, audits, and accountability.",
+        "Convierte el trading en una operación con P&L, cashflow, reportes, auditoría y accountability."
       ),
     },
   ];
@@ -160,22 +160,22 @@ export default function Home() {
     {
       title: L("Plan", "Planifica"),
       body: L(
-        "Create your Growth Plan with target equity, dates, daily goals, max loss, risk per trade, and rules.",
-        "Crea tu Growth Plan con equity objetivo, fechas, metas diarias, max loss, riesgo por trade y reglas."
+        "Create a realistic Growth Plan with measurable targets, risk rails, and non-negotiable rules.",
+        "Crea un Growth Plan realista con metas medibles, límites de riesgo y reglas no negociables."
       ),
     },
     {
-      title: L("Execute", "Ejecuta"),
+      title: L("Protect", "Protege"),
       body: L(
-        "Log trades, emotions, setups, and decisions without losing the flow of the trading day.",
-        "Registra trades, emociones, setups y decisiones sin romper el ritmo del día de trading."
+        "The Trading Protection System watches max loss, daily goal, open positions, and rule breaks so discipline is not left to memory.",
+        "El Sistema de protección vigila max loss, meta diaria, posiciones abiertas y reglas rotas para que la disciplina no dependa de la memoria."
       ),
     },
     {
       title: L("Review", "Revisa"),
       body: L(
-        "AI Coach compares your execution against the plan, flags drift, and gives the next action.",
-        "AI Coach compara tu ejecución contra el plan, marca desvíos y te da la próxima acción."
+        "AI Coach connects your journal, trades, metrics, and rules into the next action you should take.",
+        "AI Coach conecta tu journal, trades, métricas y reglas con la próxima acción que debes tomar."
       ),
     },
   ];
@@ -189,8 +189,8 @@ export default function Home() {
     {
       title: L("Growth Plan", "Growth Plan"),
       body: L(
-        "Your plan becomes the standard AI Coach uses to evaluate execution.",
-        "Tu plan se convierte en el estándar que AI Coach usa para evaluar tu ejecución."
+        "Your plan becomes the measurable standard for targets, risk, checkpoints, and coaching.",
+        "Tu plan se convierte en el estándar medible para metas, riesgo, checkpoints y coaching."
       ),
       kind: "growth" as const,
     },
@@ -221,8 +221,11 @@ export default function Home() {
       detail: L("Premarket, entries, exits, emotions, tags, lessons, and screenshots.", "Premarket, entradas, salidas, emociones, tags, lecciones y screenshots."),
     },
     {
-      label: L("Rules & alarms", "Reglas y alarmas"),
-      detail: L("Max loss, daily targets, reminders, and process checks before the next trade.", "Max loss, metas diarias, recordatorios y checks antes del próximo trade."),
+      label: L("Trading Protection System", "Sistema de protección de trading"),
+      detail: L(
+        "NeuroTrader does not only let you write rules. It helps you obey them with critical alarms, routine checks, and virtual coaching context.",
+        "NeuroTrader no solo te deja escribir reglas. Te ayuda a obedecerlas con alarmas críticas, chequeos de rutina y contexto para coaching virtual."
+      ),
     },
   ];
 
@@ -340,16 +343,16 @@ export default function Home() {
                 draggable={false}
               />
               <p className="text-sm font-semibold text-emerald-300">
-              {L("Trading journal + risk operating system", "Journal de trading + sistema de riesgo")}
+              {L("Trading operating system + AI discipline coach", "Sistema operativo de trading + coach IA de disciplina")}
               </p>
             </div>
             <h1 className="text-5xl font-semibold leading-none text-white md:text-7xl">
-              {L("Trade like a business.", "Opera como negocio.")}
+              {L("More than a journal. A system that helps you obey your plan.", "Más que un journal. Un sistema que te ayuda a obedecer tu plan.")}
             </h1>
             <p className="mt-6 max-w-2xl text-base leading-7 text-slate-200 md:text-lg">
               {L(
-                "Create your trading plan, execute with structure, and let AI Coach evaluate your real decisions against the plan.",
-                "Crea tu plan de trading, ejecuta con estructura y deja que AI Coach evalúe tus decisiones reales contra ese plan."
+                "Build a realistic, measurable Growth Plan, track the metrics that matter, and let NeuroTrader watch your rules while AI Coach turns your behavior into action.",
+                "Crea un Growth Plan realista y medible, mide los KPIs que importan y deja que NeuroTrader vigile tus reglas mientras AI Coach convierte tu conducta en acción."
               )}
             </p>
             <div className="mt-7 flex flex-wrap gap-3">
@@ -395,8 +398,8 @@ export default function Home() {
             </h2>
             <p className="mt-3 text-sm leading-6 text-slate-300 md:text-base">
               {L(
-                "The platform keeps planning, execution, review, rules, and accountability connected instead of scattered across spreadsheets and notes.",
-                "La plataforma mantiene planificación, ejecución, revisión, reglas y accountability conectados en vez de regados entre spreadsheets y notas."
+                "The platform keeps planning, execution, review, rule protection, and accountability connected instead of scattered across spreadsheets, notes, and memory.",
+                "La plataforma mantiene planificación, ejecución, revisión, protección de reglas y accountability conectados en vez de regados entre spreadsheets, notas y memoria."
               )}
             </p>
           </div>
@@ -424,8 +427,8 @@ export default function Home() {
             </h2>
             <p className="mt-3 text-sm leading-6 text-slate-300 md:text-base">
               {L(
-                "NeuroTrader is built for the parts of trading that actually decide whether you survive: process, risk, repetition, and honest review.",
-                "NeuroTrader está construido para las partes del trading que deciden si sobrevives: proceso, riesgo, repetición y revisión honesta."
+                "NeuroTrader is built for the parts of trading that decide whether you survive: measurable goals, risk discipline, rule obedience, repetition, and honest review.",
+                "NeuroTrader está construido para lo que decide si sobrevives: metas medibles, disciplina de riesgo, obedecer reglas, repetición y revisión honesta."
               )}
             </p>
             <div className="mt-6">

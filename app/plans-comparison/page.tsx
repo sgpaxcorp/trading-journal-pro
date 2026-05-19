@@ -7,7 +7,7 @@ import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
 import { PlanComparisonTable } from "../components/PlanComparisonTable";
 import { BrokerSupportTable } from "../components/BrokerSupportTable";
-import { planMonthlyPrice } from "@/lib/planCatalog";
+import { advancedUpgradePriceLabel, planMonthlyPrice } from "@/lib/planCatalog";
 
 export default function PlansComparison() {
   const year = new Date().getFullYear();
@@ -39,14 +39,14 @@ export default function PlansComparison() {
             </h1>
             <p className="text-[10px] md:text-xs text-emerald-400 mt-1 max-w-xl">
               {L(
-                "Trade Journal Pro: structure, data, and trading psychology — all in one place.",
-                "Trade Journal Pro: estructura, datos y psicología de trading — todo en un solo lugar."
+                "NeuroTrader Journal: structure, discipline, business reporting, and AI coaching in one trading operating system.",
+                "NeuroTrader Journal: estructura, disciplina, reportes de negocio y AI coaching en un solo sistema operativo de trading."
               )}
             </p>
             <p className="text-[10px] md:text-xs text-slate-400 mt-1 max-w-xl">
               {L(
-                "Choose between a solid foundation for your journal or the complete ecosystem with logging, advanced analytics, and AI coaching.",
-                "Elige entre una base sólida para tu journal o el ecosistema completo con logging, analítica avanzada y AI coaching."
+                "Core gives you the foundation. Advanced adds the business layer: AI plan follow-up, deeper statistics, audit tools, and priority support.",
+                "Core te da la base. Advanced añade la capa de negocio: seguimiento AI del plan, estadística profunda, auditoría y soporte prioritario."
               )}
             </p>
           </div>
@@ -93,6 +93,41 @@ export default function PlansComparison() {
               </Link>
             </div>
           </div>
+        </div>
+
+        <div className="mx-auto mb-8 grid max-w-6xl gap-3 md:grid-cols-3">
+          {[
+            {
+              eyebrow: L("Advanced value", "Valor de Advanced"),
+              title: advancedUpgradePriceLabel(lang, billingCycle),
+              body: L(
+                "The upgrade is built around business-grade clarity: AI coaching, deep stats, P&L, cashflow, and audit workflows.",
+                "El upgrade está diseñado para claridad de negocio: AI coaching, estadísticas profundas, P&L, cashflow y auditoría."
+              ),
+            },
+            {
+              eyebrow: L("AI follow-up", "Seguimiento AI"),
+              title: L("Your plan gets monitored", "Tu plan recibe seguimiento"),
+              body: L(
+                "Advanced connects the Growth Plan, journal behavior, emotions, and rule obedience into coaching that tells the trader what to fix next.",
+                "Advanced conecta Growth Plan, journal, emociones y obediencia a reglas para decirle al trader qué corregir después."
+              ),
+            },
+            {
+              eyebrow: L("Data quality", "Calidad de data"),
+              title: L("Broker statements matter", "Los statements importan"),
+              body: L(
+                "The more complete your broker data is, the sharper the audit, reports, and AI coaching become.",
+                "Mientras más completa sea la data del bróker, más precisa se vuelve la auditoría, los reportes y el AI coaching."
+              ),
+            },
+          ].map((item) => (
+            <div key={item.eyebrow} className="rounded-lg border border-slate-800 bg-slate-950/80 p-4">
+              <p className="text-[10px] uppercase tracking-[0.22em] text-emerald-300">{item.eyebrow}</p>
+              <h2 className="mt-2 text-base font-semibold text-slate-50">{item.title}</h2>
+              <p className="mt-2 text-xs leading-5 text-slate-400">{item.body}</p>
+            </div>
+          ))}
         </div>
 
         <PlanComparisonTable

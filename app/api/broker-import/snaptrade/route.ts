@@ -4,6 +4,7 @@ import { getSnaptradeUser } from "@/lib/snaptradeStorage";
 import { formatSnaptradeError, snaptradeGetActivities } from "@/lib/snaptradeClient";
 import { createHash } from "crypto";
 import { requireBrokerSyncAddon } from "@/lib/serverFeatureAccess";
+import { requirePlatformAccess } from "@/lib/serverPlatformAccess";
 
 export const runtime = "nodejs";
 
@@ -47,14 +48,10 @@ function buildTradeHash(parts: Array<string | number | null | undefined>) {
 export async function POST(req: NextRequest) {
   const startedAt = Date.now();
 
-  const authHeader = req.headers.get("authorization") || "";
-  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
-  if (!token) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const access = await requirePlatformAccess(req);
+  if (!access.ok) return access.response;
 
-  const { data: authData, error: authErr } = await supabaseAdmin.auth.getUser(token);
-  if (authErr || !authData?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-  const userId = authData.user.id;
+  const userId = access.context.userId;
   const brokerSyncFree =
     process.env.BROKER_SYNC_FREE === "true" || process.env.NEXT_PUBLIC_BROKER_SYNC_FREE === "true";
   if (!brokerSyncFree) {
