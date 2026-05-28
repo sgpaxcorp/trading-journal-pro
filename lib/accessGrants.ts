@@ -14,6 +14,7 @@ export type AccessGrantKey =
   | "page_ai_coaching"
   | "page_profit_loss_track"
   | "option_flow"
+  | "neuro_analysis"
   | "broker_sync"
   | "page_notebook"
   | "page_back_study"
@@ -170,6 +171,17 @@ export const ACCESS_GRANTS: AccessGrantDefinition[] = [
     },
     primaryPath: "/option-flow",
     paths: ["/option-flow"],
+  },
+  {
+    key: "neuro_analysis",
+    group: "addons",
+    label: { en: "Neuro Analysis", es: "Neuro Analysis" },
+    description: {
+      en: "CFA-style equity research, Buffett framework, projections, and virtual allocation.",
+      es: "Research de acciones tipo CFA, framework Buffett, proyecciones y allocation virtual.",
+    },
+    primaryPath: "/neuro-analysis",
+    paths: ["/neuro-analysis"],
   },
   {
     key: "page_notebook",

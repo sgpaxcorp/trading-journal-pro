@@ -64,7 +64,8 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     "nav.challenges": "Challenges",
     "nav.rules": "Trading Protection System",
     "nav.forum": "Forum",
-    "nav.optionFlow": "Option Flow Intelligence",
+    "nav.optionFlow": "Smart Tools",
+    "nav.smartTools": "Smart Tools",
     "nav.globalRanking": "Global Ranking",
 
     // Backwards-compatible aliases (older patches)
@@ -74,8 +75,17 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     "nav.challenges.title": "Challenges",
     "nav.rules.title": "Trading Protection System",
     "nav.forum.title": "Forum",
-    "nav.optionFlow.title": "Option Flow Intelligence",
+    "nav.optionFlow.title": "Smart Tools",
+    "nav.smartTools.title": "Smart Tools",
     "nav.globalRanking.title": "Global Ranking",
+
+    /* -----------------
+       Smart Tools dropdown items
+    ------------------ */
+    "nav.smartTools.optionFlow.title": "Option Flow Intelligence",
+    "nav.smartTools.optionFlow.desc": "Options flow reports, premarket plans, and outcome review.",
+    "nav.smartTools.neuroAnalysis.title": "Neuro Analysis",
+    "nav.smartTools.neuroAnalysis.desc": "CFA-style company research, Buffett principles, future projections, and virtual allocation.",
 
     /* -----------------
        Performance dropdown items
@@ -320,7 +330,8 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     "nav.challenges": "Retos",
     "nav.rules": "Sistema de protección de trading",
     "nav.forum": "Foro",
-    "nav.optionFlow": "Inteligencia de flujo de opciones",
+    "nav.optionFlow": "Smart Tools",
+    "nav.smartTools": "Smart Tools",
     "nav.globalRanking": "Ranking global",
 
     // Aliases
@@ -330,8 +341,17 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     "nav.challenges.title": "Retos",
     "nav.rules.title": "Sistema de protección de trading",
     "nav.forum.title": "Foro",
-    "nav.optionFlow.title": "Inteligencia de flujo de opciones",
+    "nav.optionFlow.title": "Smart Tools",
+    "nav.smartTools.title": "Smart Tools",
     "nav.globalRanking.title": "Ranking global",
+
+    /* -----------------
+       Smart Tools dropdown items
+    ------------------ */
+    "nav.smartTools.optionFlow.title": "Option Flow Intelligence",
+    "nav.smartTools.optionFlow.desc": "Reportes de options flow, planes premarket y revisión de outcomes.",
+    "nav.smartTools.neuroAnalysis.title": "Neuro Analysis",
+    "nav.smartTools.neuroAnalysis.desc": "Research tipo CFA, principios Buffett, proyecciones futuras y allocation virtual.",
 
     /* -----------------
        Performance dropdown items

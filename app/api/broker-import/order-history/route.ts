@@ -6,6 +6,7 @@ import type { NormalizedOrderEvent } from "@/lib/brokers/types";
 import { createHash } from "crypto";
 import { requireAdvancedPlan } from "@/lib/serverFeatureAccess";
 import { requirePlatformAccess } from "@/lib/serverPlatformAccess";
+import { getClientIp, rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
 
 export const runtime = "nodejs";
 
@@ -21,6 +22,134 @@ async function resolveActiveAccountId(userId: string): Promise<string | null> {
 function normalizeSymbol(raw: string | null): string {
   return String(raw ?? "").trim().toUpperCase();
 }
+
+function parseTimeToMinutesFlexible(raw: string | null): number | null {
+  const s = String(raw ?? "").trim().toUpperCase();
+  if (!s) return null;
+  const m = s.match(/^(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM)?$/);
+  if (!m) return null;
+
+  let hour = Number(m[1]);
+  const minute = Number(m[2]);
+  const ampm = m[3];
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null;
+
+  if (ampm === "AM" && hour === 12) hour = 0;
+  if (ampm === "PM" && hour !== 12) hour += 12;
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
+  return hour * 60 + minute;
+}
+
+function boundedInt(raw: string | null, fallback: number, min: number, max: number): number {
+  const n = Number.parseInt(String(raw ?? ""), 10);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, n));
+}
+
+function getTimeZoneOffsetMinutes(date: Date, timeZone: string): number {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).formatToParts(date);
+
+  const values: Record<string, string> = {};
+  parts.forEach((part) => {
+    if (part.type !== "literal") values[part.type] = part.value;
+  });
+
+  const utcTs = Date.UTC(
+    Number(values.year),
+    Number(values.month) - 1,
+    Number(values.day),
+    Number(values.hour),
+    Number(values.minute),
+    Number(values.second)
+  );
+
+  return (utcTs - date.getTime()) / 60000;
+}
+
+function zonedDateTimeToUtcMs(date: string, minutes: number, timeZone: string): number | null {
+  const m = String(date || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return null;
+  const year = Number(m[1]);
+  const month = Number(m[2]);
+  const day = Number(m[3]);
+  if (!year || !month || !day) return null;
+
+  const hour = Math.floor(minutes / 60);
+  const minute = minutes % 60;
+  const wallAsUtc = Date.UTC(year, month - 1, day, hour, minute, 0);
+  const firstOffset = getTimeZoneOffsetMinutes(new Date(wallAsUtc), timeZone);
+  const firstUtc = wallAsUtc - firstOffset * 60_000;
+  const secondOffset = getTimeZoneOffsetMinutes(new Date(firstUtc), timeZone);
+  return wallAsUtc - secondOffset * 60_000;
+}
+
+function formatDateInTimeZone(ms: number, timeZone: string): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date(ms));
+}
+
+function datesForUtcWindow(fromMs: number, toMs: number, timeZone: string): string[] {
+  const dates = new Set<string>();
+  const stepMs = 12 * 60 * 60_000;
+  for (let cursor = fromMs; cursor <= toMs; cursor += stepMs) {
+    dates.add(formatDateInTimeZone(cursor, timeZone));
+  }
+  dates.add(formatDateInTimeZone(toMs, timeZone));
+  return Array.from(dates).sort();
+}
+
+function buildEventWindow(searchParams: URLSearchParams, date: string) {
+  const entryMins = parseTimeToMinutesFlexible(searchParams.get("entryTime"));
+  const exitMins = parseTimeToMinutesFlexible(searchParams.get("exitTime"));
+  if (entryMins == null && exitMins == null) return null;
+
+  const timeZone = String(searchParams.get("windowTz") || "America/New_York").trim() || "America/New_York";
+  const preBufferMinutes = boundedInt(searchParams.get("preBufferMinutes"), 30, 0, 240);
+  const postBufferMinutes = boundedInt(searchParams.get("postBufferMinutes"), 90, 0, 360);
+  const startMins = (entryMins ?? exitMins ?? 0) - preBufferMinutes;
+  const endMins = (exitMins ?? entryMins ?? 0) + postBufferMinutes;
+  const startDayOffset = Math.floor(startMins / (24 * 60));
+  const endDayOffset = Math.floor(endMins / (24 * 60));
+  const addDays = (ymd: string, days: number) => {
+    const d = new Date(`${ymd}T00:00:00Z`);
+    d.setUTCDate(d.getUTCDate() + days);
+    return d.toISOString().slice(0, 10);
+  };
+
+  const normalizedStartMins = ((startMins % (24 * 60)) + 24 * 60) % (24 * 60);
+  const normalizedEndMins = ((endMins % (24 * 60)) + 24 * 60) % (24 * 60);
+  let fromMs = zonedDateTimeToUtcMs(addDays(date, startDayOffset), normalizedStartMins, timeZone);
+  let toMs = zonedDateTimeToUtcMs(addDays(date, endDayOffset), normalizedEndMins, timeZone);
+  if (fromMs == null || toMs == null) return null;
+  if (toMs < fromMs) toMs += 24 * 60 * 60_000;
+
+  return {
+    fromMs,
+    toMs,
+    fromUtc: new Date(fromMs).toISOString(),
+    toUtc: new Date(toMs).toISOString(),
+    dates: datesForUtcWindow(fromMs, toMs, timeZone),
+    timeZone,
+    entryTime: searchParams.get("entryTime"),
+    exitTime: searchParams.get("exitTime"),
+    preBufferMinutes,
+    postBufferMinutes,
+  };
+}
+
 function sha256(s: string) {
   return createHash("sha256").update(s).digest("hex");
 }
@@ -140,14 +269,17 @@ export async function GET(req: NextRequest) {
 
     const instrumentKey = String(searchParams.get("instrument_key") ?? "").trim();
     const symbol = normalizeSymbol(searchParams.get("symbol"));
+    const eventWindow = buildEventWindow(searchParams, date);
+    const dateScope = eventWindow?.dates?.length ? eventWindow.dates : [date];
 
     let q = supabaseAdmin
       .from("broker_order_events")
       .select("*")
       .eq("user_id", userId)
       .eq("account_id", accountId)
-      .eq("date", date)
       .order("ts_utc", { ascending: true });
+
+    q = dateScope.length > 1 ? q.in("date", dateScope) : q.eq("date", dateScope[0]);
 
     const { data, error } = await q;
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -191,7 +323,14 @@ export async function GET(req: NextRequest) {
       deduped.push(e);
     }
 
-    const audit = auditOrderEvents(deduped as NormalizedOrderEvent[]);
+    const auditedEvents = eventWindow
+      ? deduped.filter((e) => {
+          const ts = Date.parse(String(e.ts_utc ?? ""));
+          return Number.isFinite(ts) && ts >= eventWindow.fromMs && ts <= eventWindow.toMs;
+        })
+      : deduped;
+
+    const audit = auditOrderEvents(auditedEvents as NormalizedOrderEvent[]);
 
     // ---- Growth plan + checklist compliance ----
     let growthPlan: any | null = null;
@@ -315,7 +454,21 @@ export async function GET(req: NextRequest) {
       accountId,
       instrument_key: instrumentKey || null,
       symbol: symbol || null,
-      events: deduped,
+      event_window: eventWindow
+        ? {
+            from_utc: eventWindow.fromUtc,
+            to_utc: eventWindow.toUtc,
+            date_scope: eventWindow.dates,
+            time_zone: eventWindow.timeZone,
+            entry_time: eventWindow.entryTime,
+            exit_time: eventWindow.exitTime,
+            pre_buffer_minutes: eventWindow.preBufferMinutes,
+            post_buffer_minutes: eventWindow.postBufferMinutes,
+            matched_events: auditedEvents.length,
+            total_events_before_window: deduped.length,
+          }
+        : null,
+      events: auditedEvents,
       audit,
       process_review: processReview,
       execution_discipline: executionDiscipline,
@@ -334,6 +487,17 @@ export async function POST(req: NextRequest) {
     const userId = access.context.userId;
     const advancedGate = await requireAdvancedPlan(userId);
     if (advancedGate) return advancedGate;
+
+    const limiter = await rateLimit(`broker-order-history:${userId}:${getClientIp(req)}`, {
+      limit: 12,
+      windowMs: 10 * 60_000,
+    });
+    if (!limiter.allowed) {
+      return NextResponse.json(
+        { error: "Too many order-history imports. Please try again later." },
+        { status: 429, headers: rateLimitHeaders(limiter) }
+      );
+    }
 
     const body = await req.json();
     const rawText = String(body?.rawText ?? "");

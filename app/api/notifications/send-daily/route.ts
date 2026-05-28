@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { requireCronSecret } from "@/lib/cronAuth";
+import { requirePlatformAccess } from "@/lib/serverPlatformAccess";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 
 export const runtime = "nodejs";
@@ -34,17 +36,6 @@ function shouldSendNowNY() {
   const { weekday, hour, minute } = getNewYorkTimeParts();
   const isWeekday = ["Mon", "Tue", "Wed", "Thu", "Fri"].includes(weekday);
   return isWeekday && hour === 8 && minute === 30;
-}
-
-function tryDecodeUserId(token: string) {
-  try {
-    const [, payload] = token.split(".");
-    if (!payload) return null;
-    const decoded = JSON.parse(Buffer.from(payload, "base64").toString("utf8"));
-    return typeof decoded?.sub === "string" ? decoded.sub : null;
-  } catch {
-    return null;
-  }
 }
 
 function buildMessage(locale: string | null) {
@@ -99,36 +90,24 @@ async function handleRequest(req: NextRequest) {
     const url = new URL(req.url);
     const forceParam = url.searchParams.get("force");
     const force = forceParam === "1" || forceParam === "true";
+    const cronAuth = requireCronSecret(req);
+    let authenticatedForceUserId: string | null = null;
+    if (!cronAuth.ok) {
+      if (!force) return cronAuth.response;
+      const access = await requirePlatformAccess(req);
+      if (!access.ok) return access.response;
+      authenticatedForceUserId = access.context.userId;
+    }
+
     const body = force ? await req.json().catch(() => ({})) : {};
     const bodyToken =
       typeof (body as any)?.expoPushToken === "string" ? String((body as any).expoPushToken).trim() : "";
     const bodyLocale =
       typeof (body as any)?.locale === "string" ? String((body as any).locale).trim() : null;
     const forceBodyToken = force && bodyToken && isExpoPushToken(bodyToken);
-
-    const secret = process.env.CRON_SECRET || "";
-    const authHeader = req.headers.get("authorization") || "";
-    const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
-    const vercelCronHeader = req.headers.get("x-vercel-cron");
-    const isVercelCron = Boolean(vercelCronHeader) && vercelCronHeader !== "false";
-    const hasValidSecret = secret && token === secret;
-    let userId: string | null = null;
-
-    if (force && token && !hasValidSecret) {
-      const { data: authData, error: authErr } = await supabaseAdmin.auth.getUser(token);
-      if (!authErr && authData?.user?.id) {
-        userId = authData.user.id;
-      } else {
-        userId = tryDecodeUserId(token);
-      }
-    }
-
-    if (!force && !isVercelCron && !hasValidSecret) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-    if (force && !isVercelCron && !hasValidSecret && !userId && !forceBodyToken) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const requestedUserId =
+      force && typeof (body as any)?.userId === "string" ? String((body as any).userId).trim() : null;
+    const userId = cronAuth.ok ? requestedUserId : authenticatedForceUserId;
 
     if (!force && !shouldSendNowNY()) {
       return NextResponse.json({ ok: true, sent: 0, detail: "Outside 8:30 AM ET weekday window." });
@@ -136,6 +115,19 @@ async function handleRequest(req: NextRequest) {
 
     let rows: PushRow[] = [];
     if (forceBodyToken) {
+      if (!cronAuth.ok && authenticatedForceUserId) {
+        const { data: tokenOwner, error: tokenOwnerErr } = await supabaseAdmin
+          .from("push_tokens")
+          .select("user_id")
+          .eq("expo_push_token", bodyToken)
+          .maybeSingle();
+        if (tokenOwnerErr) {
+          return NextResponse.json({ error: tokenOwnerErr.message }, { status: 500 });
+        }
+        if (String((tokenOwner as any)?.user_id ?? "") !== authenticatedForceUserId) {
+          return NextResponse.json({ error: "Token does not belong to this user." }, { status: 403 });
+        }
+      }
       rows = [{ expo_push_token: bodyToken, locale: bodyLocale, user_id: userId }];
     } else {
       let query = supabaseAdmin

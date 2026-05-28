@@ -3,6 +3,11 @@ import Stripe from "stripe";
 
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 import { ACCESS_GRANTS, isAccessGrantKey, type AccessGrantKey } from "@/lib/accessGrants";
+import {
+  recordAdminAuditEvent,
+  requireActionConfirmation,
+  requireTargetEmailConfirmation,
+} from "@/lib/adminAudit";
 
 export const runtime = "nodejs";
 
@@ -167,6 +172,11 @@ async function performFullReset(userId: string) {
     removedStorageObjects:
       avatarCount + supportAttachmentCount + optionFlowReportCount + optionFlowOutcomeCount,
   };
+}
+
+async function getTargetEmail(userId: string): Promise<string | null> {
+  const { data } = await supabaseAdmin.auth.admin.getUserById(userId);
+  return data?.user?.email ?? null;
 }
 
 function toISO(daysAgo: number) {
@@ -340,26 +350,52 @@ export async function PATCH(
     }
 
     if (action === "ban") {
+      requireActionConfirmation(body, "ban");
       const { error } = await supabaseAdmin.auth.admin.updateUserById(userId, {
         ban_duration: "876000h",
       } as any);
       if (error) {
         return NextResponse.json({ error: error.message ?? "Could not ban user." }, { status: 500 });
       }
+      await recordAdminAuditEvent({
+        req,
+        adminUserId: admin.id,
+        adminEmail: admin.email,
+        action: "admin_user_ban",
+        targetUserId: userId,
+      });
       return NextResponse.json({ ok: true, action: "ban" });
     }
 
     if (action === "unban") {
+      requireActionConfirmation(body, "unban");
       const { error } = await supabaseAdmin.auth.admin.updateUserById(userId, {
         ban_duration: "none",
       } as any);
       if (error) {
         return NextResponse.json({ error: error.message ?? "Could not unban user." }, { status: 500 });
       }
+      await recordAdminAuditEvent({
+        req,
+        adminUserId: admin.id,
+        adminEmail: admin.email,
+        action: "admin_user_unban",
+        targetUserId: userId,
+      });
       return NextResponse.json({ ok: true, action: "unban" });
     }
 
     if (action === "reset") {
+      const targetEmail = await getTargetEmail(userId);
+      requireTargetEmailConfirmation(body, targetEmail);
+      await recordAdminAuditEvent({
+        req,
+        adminUserId: admin.id,
+        adminEmail: admin.email,
+        action: "admin_user_full_reset",
+        targetUserId: userId,
+        metadata: { targetEmail },
+      });
       const result = await performFullReset(userId);
       return NextResponse.json({ ok: true, action: "reset", result });
     }
@@ -374,9 +410,17 @@ export async function PATCH(
         )
       );
 
-      await syncAdminEntitlements(userId, accessKeys);
-      const user = await buildUserDetail(userId);
-      return NextResponse.json({ ok: true, action: "update_access", user, accessKeys });
+    await syncAdminEntitlements(userId, accessKeys);
+    await recordAdminAuditEvent({
+      req,
+      adminUserId: admin.id,
+      adminEmail: admin.email,
+      action: "admin_user_access_update",
+      targetUserId: userId,
+      metadata: { accessKeys },
+    });
+    const user = await buildUserDetail(userId);
+    return NextResponse.json({ ok: true, action: "update_access", user, accessKeys });
     }
 
     return NextResponse.json({ error: "Unsupported action." }, { status: 400 });
@@ -405,6 +449,19 @@ export async function DELETE(
         { status: 400 }
       );
     }
+
+    const body = await req.json().catch(() => ({}));
+    const targetEmail = await getTargetEmail(userId);
+    requireTargetEmailConfirmation(body, targetEmail);
+
+    await recordAdminAuditEvent({
+      req,
+      adminUserId: admin.id,
+      adminEmail: admin.email,
+      action: "admin_user_delete",
+      targetUserId: userId,
+      metadata: { targetEmail },
+    });
 
     const { error } = await supabaseAdmin.auth.admin.deleteUser(userId);
     if (error) {

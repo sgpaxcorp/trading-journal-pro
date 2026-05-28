@@ -50,12 +50,12 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    const value = (data as any)?.value_json ?? { hour_ny: 13, minute_ny: 0, label: "1:00 PM EST" };
+    const value = (data as any)?.value_json ?? { hour_ny: 8, minute_ny: 30, label: "8:30 AM ET" };
     return NextResponse.json({
       dailyMotivationSchedule: {
-        hourNy: Number(value?.hour_ny ?? 13),
-        minuteNy: Number(value?.minute_ny ?? 0),
-        label: String(value?.label ?? "1:00 PM EST"),
+        hourNy: Number(value?.hour_ny ?? 8),
+        minuteNy: Number(value?.minute_ny ?? 30),
+        label: String(value?.label ?? "8:30 AM ET"),
         updatedAt: (data as any)?.updated_at ?? null,
       },
     });
@@ -76,21 +76,25 @@ export async function POST(req: NextRequest) {
     if (!Number.isInteger(hourNy) || hourNy < 0 || hourNy > 23) {
       return NextResponse.json({ error: "Invalid hourNy" }, { status: 400 });
     }
-    if (minuteNy !== 0) {
-      return NextResponse.json({ error: "Only hourly scheduling is supported right now." }, { status: 400 });
+    if (!Number.isInteger(minuteNy) || minuteNy < 0 || minuteNy > 59) {
+      return NextResponse.json({ error: "Invalid minuteNy" }, { status: 400 });
+    }
+    if (minuteNy !== 0 && minuteNy !== 30) {
+      return NextResponse.json({ error: "Only :00 and :30 scheduling is supported right now." }, { status: 400 });
     }
 
-    const label24 = `${String(hourNy).padStart(2, "0")}:00 ET`;
+    const minuteLabel = String(minuteNy).padStart(2, "0");
+    const label24 = `${String(hourNy).padStart(2, "0")}:${minuteLabel} ET`;
     const humanHour = hourNy === 0 ? 12 : hourNy > 12 ? hourNy - 12 : hourNy;
     const ampm = hourNy >= 12 ? "PM" : "AM";
-    const label = `${humanHour}:00 ${ampm} EST`;
+    const label = `${humanHour}:${minuteLabel} ${ampm} ET`;
 
     const { error } = await supabaseAdmin.from("admin_settings").upsert(
       {
         key: "daily_motivation_schedule",
         value_json: {
           hour_ny: hourNy,
-          minute_ny: 0,
+          minute_ny: minuteNy,
           label,
           label_24: label24,
         },
@@ -107,7 +111,7 @@ export async function POST(req: NextRequest) {
       ok: true,
       dailyMotivationSchedule: {
         hourNy,
-        minuteNy: 0,
+        minuteNy,
         label,
       },
     });

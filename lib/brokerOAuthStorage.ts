@@ -1,3 +1,5 @@
+import "server-only";
+
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 
 export type BrokerOAuthConnection = {

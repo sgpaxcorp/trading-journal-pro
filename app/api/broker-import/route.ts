@@ -9,8 +9,11 @@ import {
 } from "@/lib/brokers/tos/parseTosOrderHistory";
 import type { NormalizedOrderEvent } from "@/lib/brokers/types";
 import { requirePlatformAccess } from "@/lib/serverPlatformAccess";
+import { getClientIp, rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
 
 export const runtime = "nodejs";
+
+const MAX_IMPORT_FILE_BYTES = 12 * 1024 * 1024;
 
 async function resolveActiveAccountId(userId: string): Promise<string | null> {
   const { data } = await supabaseAdmin
@@ -496,6 +499,16 @@ export async function POST(req: NextRequest) {
 
   const userId = access.context.userId;
   const activeAccountId = await resolveActiveAccountId(userId);
+  const limiter = await rateLimit(`broker-import:${userId}:${getClientIp(req)}`, {
+    limit: 8,
+    windowMs: 10 * 60_000,
+  });
+  if (!limiter.allowed) {
+    return NextResponse.json(
+      { error: "Too many import attempts. Please try again later." },
+      { status: 429, headers: rateLimitHeaders(limiter) }
+    );
+  }
 
   const form = (await req.formData()) as unknown as {
     get: (name: string) => FormDataEntryValue | null;
@@ -510,6 +523,22 @@ export async function POST(req: NextRequest) {
   const file = getFormValue("file");
   if (!(file instanceof File))
     return NextResponse.json({ error: "Missing file" }, { status: 400 });
+
+  const fileName = String(file.name ?? "").toLowerCase();
+  const isCsvUpload = fileName.endsWith(".csv");
+  const isExcelUpload = fileName.endsWith(".xlsx");
+  if (!isCsvUpload && !isExcelUpload) {
+    return NextResponse.json(
+      { error: "Unsupported file type. Please upload CSV / XLSX." },
+      { status: 400 }
+    );
+  }
+  if (file.size > MAX_IMPORT_FILE_BYTES) {
+    return NextResponse.json(
+      { error: "File too large. Please upload a file up to 12MB." },
+      { status: 413 }
+    );
+  }
 
   // 1) Create batch
   const { data: batch, error: batchErr } = await supabaseAdmin

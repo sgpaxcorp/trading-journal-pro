@@ -3,8 +3,12 @@ import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 import { isActiveEntitlementStatus, PLATFORM_ACCESS_ENTITLEMENT } from "@/lib/accessControl";
 import { normalizePlanTier, planFromProfile } from "@/lib/planAccess";
 import { requirePlatformAccess } from "@/lib/serverPlatformAccess";
+import { getClientIp, rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
 
 export const runtime = "nodejs";
+
+const MAX_ACCOUNT_NAME_LENGTH = 80;
+const MAX_BROKER_NAME_LENGTH = 80;
 
 function maxAccountsForPlan(planRaw: string | null | undefined): number {
   const plan = normalizePlanTier(planRaw);
@@ -18,9 +22,20 @@ export async function POST(req: NextRequest) {
     if (!access.ok) return access.response;
 
     const userId = access.context.userId;
+    const limiter = await rateLimit(`trading-account-create:${userId}:${getClientIp(req)}`, {
+      limit: 12,
+      windowMs: 60_000,
+    });
+    if (!limiter.allowed) {
+      return NextResponse.json(
+        { error: "Too many account creation attempts. Please try again later." },
+        { status: 429, headers: rateLimitHeaders(limiter) }
+      );
+    }
+
     const body = await req.json().catch(() => ({}));
-    const name = String(body?.name || "").trim();
-    const broker = String(body?.broker || "").trim() || null;
+    const name = String(body?.name || "").trim().slice(0, MAX_ACCOUNT_NAME_LENGTH);
+    const broker = String(body?.broker || "").trim().slice(0, MAX_BROKER_NAME_LENGTH) || null;
 
     if (!name) {
       return NextResponse.json({ error: "Missing account name" }, { status: 400 });

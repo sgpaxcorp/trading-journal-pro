@@ -25,6 +25,7 @@ type NavItem = {
 type DropdownProps = {
   title?: string;
   titleKey?: string;
+  titleBadge?: string;
   items: NavItem[];
   theme: Theme;
   lang: Locale;
@@ -32,7 +33,7 @@ type DropdownProps = {
 };
 
 /* ========== Reusable Dropdown component (main nav menus) ========== */
-function Dropdown({ title, titleKey, items, theme, lang, dataTour }: DropdownProps) {
+function Dropdown({ title, titleKey, titleBadge, items, theme, lang, dataTour }: DropdownProps) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
 
@@ -85,6 +86,11 @@ function Dropdown({ title, titleKey, items, theme, lang, dataTour }: DropdownPro
         className={`nt-menu-button flex items-center gap-1 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${buttonClass}`}
       >
         {label}
+        {titleBadge ? (
+          <span className="ml-1 rounded-full border border-sky-400/40 bg-sky-400/10 px-1.5 py-0.5 text-[9px] font-semibold text-sky-300">
+            {titleBadge}
+          </span>
+        ) : null}
         <span
           className={`text-[11px] transition-transform ${open ? "rotate-180" : ""}`}
         >
@@ -629,6 +635,23 @@ const rules: NavItem[] = [
   },
 ];
 
+const smartTools: NavItem[] = [
+  {
+    id: "option-flow-intelligence",
+    titleKey: "nav.smartTools.optionFlow.title",
+    descriptionKey: "nav.smartTools.optionFlow.desc",
+    href: "/option-flow",
+    badge: "BETA",
+  },
+  {
+    id: "neuro-analysis",
+    titleKey: "nav.smartTools.neuroAnalysis.title",
+    descriptionKey: "nav.smartTools.neuroAnalysis.desc",
+    href: "/neuro-analysis",
+    badge: "BETA",
+  },
+];
+
 const forum: NavItem[] = [
   {
     id: "community-feed",
@@ -641,9 +664,39 @@ const forum: NavItem[] = [
 /* ========== TopNav ========== */
 
 export default function TopNav() {
+  const { user } = useAuth() as any;
   const { theme, locale } = useAppSettings();
   const lang = resolveLocale(locale);
   const L = (en: string, es: string) => (lang === "es" ? es : en);
+  const [smartToolsAllowed, setSmartToolsAllowed] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    async function checkSmartToolsAccess() {
+      if (!user?.id) {
+        if (alive) setSmartToolsAllowed(false);
+        return;
+      }
+
+      const { data } = await supabaseBrowser.auth.getSession();
+      const token = data?.session?.access_token;
+      if (!token) {
+        if (alive) setSmartToolsAllowed(false);
+        return;
+      }
+
+      const res = await fetch("/api/smart-tools/access", {
+        headers: { Authorization: `Bearer ${token}` },
+      }).catch(() => null);
+      const json = res ? await res.json().catch(() => ({})) : {};
+      if (alive) setSmartToolsAllowed(Boolean(json?.allowed));
+    }
+
+    void checkSmartToolsAccess();
+    return () => {
+      alive = false;
+    };
+  }, [user?.id]);
 
   const isLight = theme === "light";
 
@@ -692,12 +745,16 @@ export default function TopNav() {
             {t("nav.backStudy", lang)}
           </Link>
 
-          <Link href="/option-flow" className={`${linkClass} inline-flex items-center gap-2`} data-tour="nav-option-flow">
-            <span>{t("nav.optionFlow", lang)}</span>
-            <span className="rounded-full border border-emerald-400/50 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-200">
-              BETA
-            </span>
-          </Link>
+          {smartToolsAllowed ? (
+            <Dropdown
+              titleKey="nav.smartTools"
+              titleBadge="BETA"
+              items={smartTools}
+              theme={theme}
+              lang={lang}
+              dataTour="nav-option-flow"
+            />
+          ) : null}
 
           <Dropdown
             titleKey="nav.challenges"

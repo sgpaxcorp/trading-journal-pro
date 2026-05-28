@@ -219,7 +219,7 @@ export default function AdminUserDetailPage({
     }
   }
 
-  async function runAction(action: UserAction) {
+  async function runAction(action: UserAction, targetEmailConfirmation?: string) {
     if (!detail) return;
     const { data: sessionData } = await supabaseBrowser.auth.getSession();
     const token = sessionData?.session?.access_token;
@@ -232,13 +232,21 @@ export default function AdminUserDetailPage({
     setNotice(null);
     try {
       const method = action === "delete" ? "DELETE" : "PATCH";
+      const payload =
+        action === "delete"
+          ? { targetEmailConfirmation: targetEmailConfirmation ?? "" }
+          : {
+              action,
+              confirmation: action === "ban" || action === "unban" ? action : undefined,
+              targetEmailConfirmation: action === "reset" ? resetEmailConfirm : undefined,
+            };
       const res = await fetch(`/api/admin/users/${detail.id}`, {
         method,
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: method === "DELETE" ? undefined : JSON.stringify({ action }),
+        body: JSON.stringify(payload),
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -521,7 +529,17 @@ export default function AdminUserDetailPage({
                           `¿Borrar la cuenta auth de ${detail.email}? Esto es permanente.`
                         )
                       );
-                      if (confirmed) void runAction("delete");
+                      if (!confirmed) return;
+                      const typed = window.prompt(
+                        L(
+                          "Type the exact email to confirm deletion.",
+                          "Escribe el email exacto para confirmar el borrado."
+                        ),
+                        ""
+                      );
+                      if (typed?.trim().toLowerCase() === detail.email.trim().toLowerCase()) {
+                        void runAction("delete", typed);
+                      }
                     }}
                     disabled={busyId === "delete"}
                     className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm font-medium text-rose-200 disabled:opacity-50"

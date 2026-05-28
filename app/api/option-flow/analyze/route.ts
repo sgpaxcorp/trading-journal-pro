@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
 import { getOptionFlowBetaApiPayload, hasOptionFlowBetaAccess, resolveOptionFlowLang } from "@/lib/optionFlowBeta";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
+import { getClientIp, rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
 
 export const runtime = "nodejs";
 
@@ -11,6 +12,8 @@ const openai = new OpenAI({
 
 const DEFAULT_MODEL = process.env.OPENAI_OPTIONFLOW_MODEL || "gpt-4.1";
 const VISION_MODEL = process.env.OPENAI_OPTIONFLOW_VISION_MODEL || "gpt-4o";
+const MAX_SCREENSHOTS = 4;
+const MAX_SCREENSHOT_DATA_URL_CHARS = 7_000_000;
 const BYPASS_ENTITLEMENT =
   String(process.env.OPTIONFLOW_BYPASS_ENTITLEMENT ?? "").toLowerCase() === "true" ||
   String(process.env.OPTIONFLOW_BYPASS_ENTITLEMENT ?? "") === "1";
@@ -574,6 +577,15 @@ function safeRows(rows: any[], limit = 200) {
   return rows.slice(0, Math.max(1, limit));
 }
 
+function safeScreenshotDataUrls(input: unknown): string[] {
+  if (!Array.isArray(input)) return [];
+  const urls = input
+    .map((url) => String(url ?? ""))
+    .filter((url) => /^data:image\/(?:png|jpe?g|webp);base64,/i.test(url))
+    .slice(0, MAX_SCREENSHOTS);
+  return urls.filter((url) => url.length <= MAX_SCREENSHOT_DATA_URL_CHARS);
+}
+
 export async function POST(req: NextRequest) {
   try {
     const authHeader = req.headers.get("authorization") || "";
@@ -590,6 +602,17 @@ export async function POST(req: NextRequest) {
 
     if (!BYPASS_ENTITLEMENT && !(await hasOptionFlowBetaAccess(userId))) {
       return NextResponse.json(getOptionFlowBetaApiPayload(requestLang), { status: 403 });
+    }
+
+    const limiter = await rateLimit(`optionflow-analyze:${userId}:${getClientIp(req)}`, {
+      limit: 8,
+      windowMs: 60_000,
+    });
+    if (!limiter.allowed) {
+      return NextResponse.json(
+        { error: "Rate limit exceeded" },
+        { status: 429, headers: rateLimitHeaders(limiter) }
+      );
     }
 
     const body = await req.json();
@@ -614,6 +637,9 @@ export async function POST(req: NextRequest) {
     };
 
     const trimmedRows = safeRows(rows ?? [], 200);
+    const safeScreenshots = safeScreenshotDataUrls(screenshotDataUrls);
+    const safeAnalystNotes = String(analystNotes ?? "").slice(0, 3000);
+    const safeTradeIntent = String(tradeIntent ?? "").slice(0, 1000);
 
     const lang = String(language || "en").toLowerCase().startsWith("es") ? "es" : "en";
     const isEs = lang === "es";
@@ -870,8 +896,8 @@ Return only valid JSON with this shape:
       recentOutcomes = [];
     }
 
-    const ocrRows = await extractRowsFromScreenshots(screenshotDataUrls ?? [], provider, lang);
-    const mergedRawRows = [...(rows ?? []), ...ocrRows];
+    const ocrRows = await extractRowsFromScreenshots(safeScreenshots, provider, lang);
+    const mergedRawRows = [...trimmedRows, ...ocrRows];
     let normalizedRows = dedupeRows(mergedRawRows.map((row) => normalizeFlowRow(row)));
     if (underlying) {
       const target = normalizeSymbol(underlying);
@@ -934,8 +960,8 @@ Return only valid JSON with this shape:
       provider,
       underlying,
       previousClose,
-      tradeIntent,
-      analystNotes,
+      tradeIntent: safeTradeIntent,
+      analystNotes: safeAnalystNotes,
       recentMemory,
       recentOutcomes,
       dataQuality,
@@ -951,13 +977,12 @@ Return only valid JSON with this shape:
       String(process.env.OPTIONFLOW_INCLUDE_SCREENSHOTS_LLM ?? "").toLowerCase() === "true";
     const hasScreens =
       includeScreensForLLM &&
-      Array.isArray(screenshotDataUrls) &&
-      screenshotDataUrls.length > 0;
+      safeScreenshots.length > 0;
     const modelToUse = hasScreens ? VISION_MODEL : DEFAULT_MODEL;
     const userContent: any = hasScreens
       ? [
           { type: "text", text: JSON.stringify(userPayload, null, 2) },
-          ...screenshotDataUrls!.map((url) => ({
+          ...safeScreenshots.map((url) => ({
             type: "image_url",
             image_url: { url },
           })),

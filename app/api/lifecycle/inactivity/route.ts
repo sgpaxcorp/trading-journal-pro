@@ -3,6 +3,7 @@ import {
   sendInactivityReminderEmail,
   type InactivityReminderStage,
 } from "@/lib/email";
+import { requireCronSecret } from "@/lib/cronAuth";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 
 export const runtime = "nodejs";
@@ -44,13 +45,7 @@ type UsageSessionRow = {
 };
 
 function isAuthorized(req: NextRequest) {
-  const secret = process.env.CRON_SECRET || "";
-  const authHeader = req.headers.get("authorization") || "";
-  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
-  const vercelCronHeader = req.headers.get("x-vercel-cron");
-  const isVercelCron = Boolean(vercelCronHeader) && vercelCronHeader !== "false";
-  const hasValidSecret = Boolean(secret) && token === secret;
-  return isVercelCron || hasValidSecret;
+  return requireCronSecret(req).ok;
 }
 
 function clampNumber(value: string | null, fallback: number, min: number, max: number) {

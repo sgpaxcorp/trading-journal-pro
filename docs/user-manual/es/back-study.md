@@ -9,18 +9,19 @@
 
 ## Qué es ahora Back-Study
 Back-Study ya no es solo una página de replay visual. Ahora es un workspace de revisión del trade que combina:
-1. Replay visual desde las entradas y salidas del journal.
-2. Auditoría determinística de ejecución desde el order history importado del broker.
-3. Cumplimiento del proceso frente al checklist y las reglas del Growth Plan.
-4. Handoff directo al AI Coach con el contexto del trade seleccionado.
+1. Reconstrucción de round trips desde las entradas y salidas del journal.
+2. Replay visual del trade seleccionado.
+3. Auditoría determinística de ejecución desde el order history importado del broker.
+4. Cumplimiento del proceso frente al checklist y las reglas del Growth Plan.
+5. Handoff directo al AI Coach con el trade seleccionado y el contexto del audit.
 
 ## Modo Trade review
 ### Qué aparece en la página
 1. Selector de sesión.
-2. Selector de trade para el día seleccionado.
+2. Selector de trade para el día seleccionado. Si operaste el mismo símbolo varias veces, cada round trip aparece separado.
 3. Controles de timeframe, rango histórico y modo horario.
 4. Charts del subyacente y, cuando exista, del contrato usado.
-5. Para `Advanced`, resumen de auditoría de ejecución del trade seleccionado.
+5. Para `Advanced`, resumen de auditoría filtrado a la ventana del trade seleccionado cuando hay hora de entrada/salida.
 6. Para `Advanced`, secuencia del trade basada en eventos del broker.
 7. Para `Advanced`, revisión de proceso e insights determinísticos.
 8. Para `Advanced`, evidencia cruda de ejecución.
@@ -39,6 +40,8 @@ Back-Study ya no es solo una página de replay visual. Ahora es un workspace de 
 El chart muestra contexto. El audit muestra verdad de ejecución.
 
 Si ambos no coinciden, confía primero en la auditoría del broker.
+
+En `Trade review`, el audit usa la ventana del trade seleccionado con un margen alrededor de entrada y salida. El chart puede verse en hora local o en hora de mercado, pero la ventana del audit del broker se calcula en hora de mercado/fuente para que la evidencia de ejecución se mantenga consistente. `Audit workbench` sigue siendo la auditoría amplia del día por instrumento.
 
 ## Modo Audit workbench
 Usa `Audit workbench` cuando quieras un análisis determinístico más amplio por fecha e instrumento, fuera del flujo puntual del replay.
@@ -59,4 +62,4 @@ Este modo sirve cuando:
 - Usa `Trade review` después de cada trade importante o al menos semanalmente.
 - Usa `Audit workbench` cuando un trade se sienta raro, desordenado o cargado de ejecución.
 - Si falta data del contrato, trata esa vista como proxy, no como verdad exacta.
-- Usa AI Coach solo después de revisar tanto el replay como el audit.
+- Usa AI Coach después de revisar tanto el replay como el audit. Cuando se abre desde Back-Study, el coach recibe el trade seleccionado, la ventana del chart, detalles del journal y la auditoría de ejecución cuando existe.

@@ -7,8 +7,7 @@ import TopNav from "@/app/components/TopNav";
 import { useAuth } from "@/context/AuthContext";
 import { useTradingAccounts } from "@/hooks/useTradingAccounts";
 import { supabaseBrowser } from "@/lib/supaBaseClient";
-import { hasEntitlement } from "@/lib/entitlementsSupabase";
-import { getOptionFlowBetaCopy } from "@/lib/optionFlowBeta";
+import { getOptionFlowBetaCopy } from "@/lib/optionFlowBetaCopy";
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
 
@@ -436,7 +435,9 @@ function sanitizeStyle(styleValue: string): string {
       const value = rest.join(":").trim();
       if (!prop || !value) return "";
       if (!ALLOWED_STYLE_PROPS.has(prop)) return "";
-      if (/expression\s*\(|javascript\s*:/i.test(value)) return "";
+      if (/expression\s*\(|javascript\s*:|url\s*\(|@import|behavior\s*:|binding\s*:|data\s*:/i.test(value)) {
+        return "";
+      }
       return `${prop}: ${value}`;
     })
     .filter(Boolean)
@@ -444,7 +445,7 @@ function sanitizeStyle(styleValue: string): string {
 }
 
 function isSafeUrl(value: string) {
-  return /^(?:(?:https?|mailto|tel):|data:image\/)/i.test(value);
+  return /^(?:https?|mailto|tel):/i.test(value) || /^data:image\/(?:png|jpe?g|gif|webp);base64,/i.test(value);
 }
 
 function sanitizeOptionFlowHtml(html: string) {
@@ -504,10 +505,9 @@ function sanitizeOptionFlowHtml(html: string) {
 function extractPlanLines(html?: string | null): string[] {
   if (!html) return [];
   try {
-    const container = document.createElement("div");
-    container.innerHTML = html;
+    const doc = new DOMParser().parseFromString(sanitizeOptionFlowHtml(html), "text/html");
     const lines: string[] = [];
-    const nodes = container.querySelectorAll("h1,h2,h3,h4,p,li");
+    const nodes = doc.body.querySelectorAll("h1,h2,h3,h4,p,li");
     nodes.forEach((node) => {
       const text = node.textContent?.trim();
       if (!text) return;
@@ -2867,7 +2867,15 @@ export default function OptionFlowPage() {
         return;
       }
       setChecking(true);
-      const ok = await hasEntitlement(userId, "option_flow");
+      const { data } = await supabaseBrowser.auth.getSession();
+      const token = data?.session?.access_token;
+      const res = token
+        ? await fetch("/api/smart-tools/access", {
+            headers: { Authorization: `Bearer ${token}` },
+          }).catch(() => null)
+        : null;
+      const json = res ? await res.json().catch(() => ({})) : {};
+      const ok = Boolean(json?.allowed);
       if (!alive) return;
       setEntitled(ok);
       setChecking(false);

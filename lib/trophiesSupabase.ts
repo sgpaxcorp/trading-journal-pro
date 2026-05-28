@@ -1,7 +1,5 @@
 import { supabaseBrowser } from "@/lib/supaBaseClient";
 import {
-  applyCounterAliases,
-  computeBestStreak,
   describeTrophyUnlock,
   normalizeRuleKey,
   normalizeRuleOp,
@@ -195,100 +193,28 @@ export async function syncMyTrophies(userId: string): Promise<TrophySyncResult> 
 
   // Prefer server-side sync to bypass RLS in production.
   if (typeof window !== "undefined") {
-    try {
-      const { data: sessionData } = await supabaseBrowser.auth.getSession();
-      const token = sessionData?.session?.access_token;
-      if (token) {
-        const res = await fetch("/api/trophies/sync", {
-          method: "POST",
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (res.ok) {
-          const body = await res.json();
-          return {
-            inserted: Number(body?.inserted ?? 0),
-            newTrophies: Array.isArray(body?.newTrophies) ? body.newTrophies : [],
-          };
-        }
-      }
-    } catch (err) {
-      console.warn("[trophiesSupabase] server sync failed, falling back:", err);
+    const { data: sessionData } = await supabaseBrowser.auth.getSession();
+    const token = sessionData?.session?.access_token;
+    if (!token) return { inserted: 0, newTrophies: [] };
+
+    const res = await fetch("/api/trophies/sync", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(String((body as any)?.error || "Trophy sync failed"));
     }
+
+    return {
+      inserted: Number((body as any)?.inserted ?? 0),
+      newTrophies: Array.isArray((body as any)?.newTrophies)
+        ? (body as any).newTrophies
+        : [],
+    };
   }
 
-  // Load definitions (include secrets so they can be earned)
-  const defs = await listTrophyDefinitions({ includeSecret: true });
-
-  // Read existing earned trophy ids
-  const { data: earnedRows, error: earnedErr } = await supabaseBrowser
-    .from("user_trophies")
-    .select("trophy_id")
-    .eq("user_id", userId);
-
-  if (earnedErr) throw earnedErr;
-
-  const earnedSet = new Set<string>((earnedRows ?? []).map((r: any) => String(r.trophy_id)));
-
-  // Compute counters for rule evaluation
-  const counters = await getUserTrophyCounters(userId);
-
-  const newlyEarned = defs.filter((d) => {
-    if (earnedSet.has(d.id)) return false;
-    const current = Number((counters as any)[d.rule_key] ?? 0);
-    switch (d.rule_op) {
-      case "eq":
-        return current === d.rule_value;
-      case "lte":
-        return current <= d.rule_value;
-      case "gte":
-      default:
-        return current >= d.rule_value;
-    }
-  });
-
-  if (!newlyEarned.length) return { inserted: 0, newTrophies: [] };
-
-  const insertPayload = newlyEarned.map((d) => ({
-    user_id: userId,
-    trophy_id: d.id,
-    earned_at: new Date().toISOString(),
-  }));
-
-  const { error: insErr } = await supabaseBrowser
-    .from("user_trophies")
-    .insert(insertPayload, { defaultToNull: false });
-
-  // If duplicates happen, we ignore (another tab already inserted)
-  if (insErr && !String(insErr.message || "").toLowerCase().includes("duplicate")) {
-    throw insErr;
-  }
-
-  // Re-fetch the newly inserted trophies joined with definition fields for UI
-  const { data: joined, error: joinedErr } = await supabaseBrowser
-    .from("user_trophies")
-    .select(
-      "trophy_id, earned_at, trophy_definitions(id, title, description, tier, xp, category, icon)"
-    )
-    .eq("user_id", userId)
-    .in(
-      "trophy_id",
-      newlyEarned.map((d) => d.id)
-    );
-
-  if (joinedErr) throw joinedErr;
-
-  const newTrophies: PublicUserTrophy[] = (joined ?? []).map((row: any) => ({
-    trophy_id: String(row.trophy_id),
-    earned_at: row.earned_at ? String(row.earned_at) : null,
-    title: String(row.trophy_definitions?.title ?? "Trophy"),
-    description: String(row.trophy_definitions?.description ?? ""),
-    tier: (row.trophy_definitions?.tier ?? "Bronze") as TrophyTier,
-    xp: Number(row.trophy_definitions?.xp ?? 0),
-    category: String(row.trophy_definitions?.category ?? "General"),
-    icon: (row.trophy_definitions?.icon ?? null) as string | null,
-  }));
-
-  return { inserted: newlyEarned.length, newTrophies };
+  return { inserted: 0, newTrophies: [] };
 }
 
 /**
@@ -468,157 +394,4 @@ export async function listMyTrophies(
   limit = 200
 ): Promise<PublicUserTrophy[]> {
   return listPublicUserTrophies(userId, limit);
-}
-
-/* ===========================
-   Rule counters (extend later)
-   =========================== */
-
-async function getUserTrophyCounters(userId: string): Promise<Record<string, number>> {
-  // Journal entries: count distinct dates + compute best streak
-  const { data: journalDays, error: journalErr } = await supabaseBrowser
-    .from("journal_entries")
-    .select("date")
-    .eq("user_id", userId);
-
-  if (journalErr) {
-    // If table is not present in some environments, return safe defaults
-    console.warn("[Trophies] journal_entries query failed:", journalErr);
-  }
-
-  const dates = (journalDays ?? [])
-    .map((r: any) => String(r.date))
-    .filter(Boolean);
-
-  const uniqueDates = Array.from(new Set(dates)).sort(); // YYYY-MM-DD lex sort is ok
-
-  const days_logged = uniqueDates.length;
-  const best_streak = computeBestStreak(uniqueDates);
-
-  // Growth plan created?
-  // Support multiple table names used across NeuroTraderJournal versions.
-  const plan_created = await (async () => {
-    const tables = [
-      "ntj_growth_plans",
-      "growth_plans",
-      "growth_plan",
-      "cash_flow_plans",
-      "cash_flow_plan",
-      "plan",
-    ];
-
-    const userCols = ["user_id", "userId", "uid", "user_uid"];
-
-    for (const table of tables) {
-      for (const col of userCols) {
-        try {
-          const { data, error } = await supabaseBrowser
-            .from(table)
-            .select("id")
-            .eq(col, userId)
-            .limit(1);
-
-          if (error) continue;
-          if (data && data.length > 0) return 1;
-        } catch {
-          // ignore
-        }
-      }
-    }
-
-    return 0;
-  })();
-
-  // Challenges completed
-  const { data: completedChallenges, error: chErr } = await supabaseBrowser
-    .from("challenge_runs")
-    .select("id")
-    .eq("user_id", userId)
-    .eq("status", "completed");
-
-  if (chErr) {
-    console.warn("[Trophies] challenge_runs query failed:", chErr);
-  }
-
-  const challenges_completed = (completedChallenges ?? []).length;
-
-  let daily_goal_reached = 0;
-  let weekly_goal_reached = 0;
-  let monthly_goal_reached = 0;
-  let quarterly_goal_reached = 0;
-
-  try {
-    const { data: goalDeliveries, error: goalErr } = await supabaseBrowser
-      .from("goal_achievement_deliveries")
-      .select("goal_scope, period_key")
-      .eq("user_id", userId)
-      .eq("channel", "inapp");
-
-    if (goalErr) {
-      console.warn("[Trophies] goal_achievement_deliveries query failed:", goalErr);
-    } else {
-      const scopes = {
-        day: new Set<string>(),
-        week: new Set<string>(),
-        month: new Set<string>(),
-        quarter: new Set<string>(),
-      };
-
-      for (const row of goalDeliveries ?? []) {
-        const scope = String((row as any)?.goal_scope ?? "").trim();
-        const periodKey = String((row as any)?.period_key ?? "").trim();
-        if (!periodKey) continue;
-        if (scope === "day" || scope === "week" || scope === "month" || scope === "quarter") {
-          scopes[scope].add(periodKey);
-        }
-      }
-
-      daily_goal_reached = scopes.day.size;
-      weekly_goal_reached = scopes.week.size;
-      monthly_goal_reached = scopes.month.size;
-      quarterly_goal_reached = scopes.quarter.size;
-    }
-  } catch {
-    // ignore
-  }
-
-  if (daily_goal_reached === 0) {
-    try {
-      const { data: snapshotDays, error: snapshotErr } = await supabaseBrowser
-        .from("daily_snapshots")
-        .select("date")
-        .eq("user_id", userId)
-        .eq("goal_met", true);
-
-      if (snapshotErr) {
-        console.warn("[Trophies] daily_snapshots query failed:", snapshotErr);
-      } else {
-        daily_goal_reached = new Set(
-          (snapshotDays ?? []).map((row: any) => String(row?.date ?? "")).filter(Boolean)
-        ).size;
-      }
-    } catch {
-      // ignore
-    }
-  }
-
-  const counters = {
-    days_logged,
-    best_streak,
-    plan_created,
-    challenges_completed,
-    daily_goal_reached,
-    weekly_goal_reached,
-    monthly_goal_reached,
-    quarterly_goal_reached,
-    // aliases for different rule keys used across deployments
-    growth_plan_created: plan_created,
-    growth_plan: plan_created,
-    plan_saved: plan_created,
-    journal_days: days_logged,
-    trading_days_logged: days_logged,
-    streak_best: best_streak,
-  };
-
-  return applyCounterAliases(counters);
 }

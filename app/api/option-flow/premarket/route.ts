@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
 import { getOptionFlowBetaApiPayload, resolveOptionFlowLang } from "@/lib/optionFlowBeta";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
+import { getClientIp, rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
+import { isSmartToolsOwner } from "@/lib/smartToolsAccess";
 
 export const runtime = "nodejs";
 
@@ -10,23 +12,9 @@ const openai = new OpenAI({
 });
 
 const DEFAULT_MODEL = process.env.OPENAI_OPTIONFLOW_MODEL || "gpt-4.1";
-const ENTITLEMENT_KEY = "option_flow";
 const BYPASS_ENTITLEMENT =
   String(process.env.OPTIONFLOW_BYPASS_ENTITLEMENT ?? "").toLowerCase() === "true" ||
   String(process.env.OPTIONFLOW_BYPASS_ENTITLEMENT ?? "") === "1";
-
-async function requireEntitlement(userId: string): Promise<boolean> {
-  if (!userId) return false;
-  const { data, error } = await supabaseAdmin
-    .from("user_entitlements")
-    .select("status")
-    .eq("user_id", userId)
-    .eq("entitlement_key", ENTITLEMENT_KEY)
-    .in("status", ["active", "trialing"])
-    .limit(1);
-  if (error) return false;
-  return (data ?? []).length > 0;
-}
 
 export async function POST(req: NextRequest) {
   try {
@@ -43,10 +31,21 @@ export async function POST(req: NextRequest) {
     const requestLang = resolveOptionFlowLang(req.headers.get("accept-language"));
 
     if (!BYPASS_ENTITLEMENT) {
-      const hasEnt = await requireEntitlement(userId);
+      const hasEnt = await isSmartToolsOwner({ userId, email: authData.user.email ?? null });
       if (!hasEnt) {
         return NextResponse.json(getOptionFlowBetaApiPayload(requestLang), { status: 403 });
       }
+    }
+
+    const limiter = await rateLimit(`optionflow-premarket:${userId}:${getClientIp(req)}`, {
+      limit: 8,
+      windowMs: 60_000,
+    });
+    if (!limiter.allowed) {
+      return NextResponse.json(
+        { error: "Rate limit exceeded" },
+        { status: 429, headers: rateLimitHeaders(limiter) }
+      );
     }
 
     const body = await req.json();
@@ -69,6 +68,9 @@ export async function POST(req: NextRequest) {
       tradeIntent?: string | null;
       language?: string;
     };
+    const safeSummary = String(summary ?? "").slice(0, 4000);
+    const safeNotes = String(notes ?? "").slice(0, 2000);
+    const safeKeyTrades = Array.isArray(keyTrades) ? keyTrades.slice(0, 12) : [];
 
     const lang = String(language || "en").toLowerCase().startsWith("es") ? "es" : "en";
     const systemPrompt =
@@ -90,9 +92,9 @@ Keep it structured with headings and bullet points.
     const userPayload = {
       underlying,
       previousClose,
-      summary,
-      keyTrades,
-      notes,
+      summary: safeSummary,
+      keyTrades: safeKeyTrades,
+      notes: safeNotes,
       tradeIntent,
     };
 

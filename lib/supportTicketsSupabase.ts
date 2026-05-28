@@ -234,8 +234,26 @@ export async function uploadSupportAttachments(params: {
 }) {
   const files = params.files ?? [];
   if (!files.length) return { ok: true as const, attachments: [] as SupportAttachment[] };
+  const maxBytes = 10 * 1024 * 1024;
+  const allowedTypes = new Set([
+    "application/pdf",
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    "text/csv",
+    "text/plain",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  ]);
+  const allowedExt = new Set(["pdf", "jpg", "jpeg", "png", "webp", "csv", "txt", "xlsx"]);
   const uploaded: SupportAttachment[] = [];
   for (const file of files) {
+    const ext = (file.name.split(".").pop() || "").toLowerCase();
+    if (file.size > maxBytes) {
+      return { ok: false as const, error: "Attachment must be 10MB or less.", attachments: [] as SupportAttachment[] };
+    }
+    if (!allowedExt.has(ext) || (file.type && !allowedTypes.has(file.type))) {
+      return { ok: false as const, error: "Unsupported attachment type.", attachments: [] as SupportAttachment[] };
+    }
     const safeName = file.name.replace(/[^\w.\-]+/g, "_");
     const path = `${params.userId}/${params.ticketId}/${Date.now()}-${safeName}`;
     const { error } = await supabaseBrowser.storage

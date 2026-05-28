@@ -464,6 +464,8 @@ export default function AdminEmailAutomations({ lang }: Props) {
                   <iframe
                     title={`${item.name} preview`}
                     srcDoc={item.preview.html}
+                    sandbox=""
+                    referrerPolicy="no-referrer"
                     className="h-[360px] w-full"
                   />
                 </div>

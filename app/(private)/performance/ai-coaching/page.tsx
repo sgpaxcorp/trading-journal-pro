@@ -356,7 +356,11 @@ type BackStudyParams = {
   exitTime?: string | null;
   tf?: string | null;
   range?: string | null;
+  tradeId?: string | null;
+  handoffKey?: string | null;
 };
+
+const BACK_STUDY_AUDIT_HANDOFF_PREFIX = "ntj:back-study:audit-handoff";
 
 type YahooCandle = {
   time: number; // ms since epoch (UTC)
@@ -1840,6 +1844,7 @@ function AiCoachingPageInner() {
   const [coachUserProfile, setCoachUserProfile] = useState<UserProfileForCoach | null>(null);
   const [backStudyTradeContext, setBackStudyTradeContext] = useState<string | null>(null);
   const [backStudyUnderlyingContext, setBackStudyUnderlyingContext] = useState<string | null>(null);
+  const [backStudyAuditContext, setBackStudyAuditContext] = useState<string | null>(null);
 
   const [dataLoading, setDataLoading] = useState<boolean>(true);
 
@@ -2291,8 +2296,98 @@ function AiCoachingPageInner() {
       exitTime: searchParams.get("exitTime"),
       tf: searchParams.get("tf"),
       range: searchParams.get("range"),
+      tradeId: searchParams.get("tradeId"),
+      handoffKey: searchParams.get("handoffKey"),
     };
   }, [searchParams]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !backStudyParams?.handoffKey) {
+      setBackStudyAuditContext(null);
+      return;
+    }
+
+    if (!backStudyParams.handoffKey.startsWith(BACK_STUDY_AUDIT_HANDOFF_PREFIX)) {
+      setBackStudyAuditContext(null);
+      return;
+    }
+
+    try {
+      const raw = window.sessionStorage.getItem(backStudyParams.handoffKey);
+      if (!raw) {
+        setBackStudyAuditContext(null);
+        return;
+      }
+
+      const payload = JSON.parse(raw);
+      const trade = payload?.trade ?? {};
+      const eventWindow = payload?.eventWindow ?? null;
+      const audit = payload?.audit ?? {};
+      const processReview = payload?.processReview ?? null;
+      const executionDiscipline = payload?.executionDiscipline ?? null;
+      const lines: string[] = [];
+
+      lines.push(L("Back-study execution audit handoff:", "Handoff de auditoría de ejecución desde Back-Study:"));
+      if (trade?.sequence != null || trade?.symbol) {
+        lines.push(
+          `- ${L("Selected trade", "Trade seleccionado")}: ${
+            trade?.sequence != null ? `${L("Trade", "Trade")} ${trade.sequence} · ` : ""
+          }${trade?.symbol ?? backStudyParams.symbol} ${trade?.entryTime ?? ""} → ${trade?.exitTime ?? ""}`.trim()
+        );
+      }
+      if (audit?.brokerEventsCount != null) {
+        lines.push(`- ${L("Broker events reviewed", "Eventos del broker revisados")}: ${audit.brokerEventsCount}`);
+      }
+      if (eventWindow?.from_utc && eventWindow?.to_utc) {
+        lines.push(
+          `- ${L("Audited event window", "Ventana de eventos auditada")}: ${eventWindow.from_utc} → ${eventWindow.to_utc} (${eventWindow.time_zone ?? "timezone unknown"})`
+        );
+        if (eventWindow?.matched_events != null && eventWindow?.total_events_before_window != null) {
+          lines.push(
+            `- ${L("Events inside selected trade window", "Eventos dentro de la ventana del trade")}: ${eventWindow.matched_events}/${eventWindow.total_events_before_window}`
+          );
+        }
+      }
+      if (audit?.summary) {
+        lines.push(`${L("Execution audit summary", "Resumen de auditoría de ejecución")}: ${audit.summary}`);
+      }
+      if (executionDiscipline?.score != null) {
+        lines.push(`${L("Execution discipline score", "Score de disciplina de ejecución")}: ${executionDiscipline.score}%`);
+      }
+      if (processReview?.score != null) {
+        lines.push(`${L("Process review score", "Score de revisión del proceso")}: ${processReview.score}%`);
+      }
+
+      const metrics = audit ?? {};
+      lines.push(
+        `${L("Execution flags", "Flags de ejecución")}: OCO=${metrics.ocoUsed ?? "unknown"}, STOP=${
+          metrics.stopPresent ?? "unknown"
+        }, manual_market_exit=${metrics.manualMarketExit ?? "unknown"}, stop_mods=${metrics.stopModCount ?? "unknown"}`
+      );
+
+      if (Array.isArray(audit?.insights) && audit.insights.length) {
+        lines.push(L("Deterministic insights:", "Insights determinísticos:"));
+        audit.insights.slice(0, 6).forEach((item: unknown) => lines.push(`- ${String(item)}`));
+      }
+      if (Array.isArray(executionDiscipline?.checks) && executionDiscipline.checks.length) {
+        lines.push(L("Execution discipline checks:", "Checks de disciplina de ejecución:"));
+        executionDiscipline.checks.slice(0, 6).forEach((check: any) => {
+          lines.push(`- ${String(check?.status ?? "unknown").toUpperCase()} · ${check?.label ?? ""}: ${check?.reason ?? ""}`);
+        });
+      }
+      if (Array.isArray(processReview?.rules) && processReview.rules.length) {
+        lines.push(L("Growth Plan rule checks:", "Checks de reglas del Growth Plan:"));
+        processReview.rules.slice(0, 6).forEach((rule: any) => {
+          lines.push(`- ${String(rule?.status ?? "unknown").toUpperCase()} · ${rule?.label ?? ""}: ${rule?.reason ?? ""}`);
+        });
+      }
+
+      setBackStudyAuditContext(lines.filter(Boolean).join("\n"));
+    } catch (err) {
+      console.warn("[AI Coaching] back-study audit handoff parse error:", err);
+      setBackStudyAuditContext(null);
+    }
+  }, [backStudyParams, lang]);
 
   useEffect(() => {
     if (!backStudyParams || !coachUserProfile?.id || !activeAccountId) {
@@ -2532,6 +2627,12 @@ function AiCoachingPageInner() {
       lines.push(backStudyTradeContext);
     }
 
+    if (backStudyAuditContext) {
+      lines.push("");
+      lines.push(L("Execution audit details:", "Detalle de auditoría de ejecución:"));
+      lines.push(backStudyAuditContext);
+    }
+
     if (backStudyUnderlyingContext) {
       lines.push("");
       lines.push(L("Underlying intraday context:", "Contexto intradía del subyacente:"));
@@ -2539,7 +2640,7 @@ function AiCoachingPageInner() {
     }
 
     return lines.filter(Boolean).join("\n");
-  }, [backStudyParams, backStudyTradeContext, backStudyUnderlyingContext, lang]);
+  }, [backStudyParams, backStudyTradeContext, backStudyAuditContext, backStudyUnderlyingContext, lang]);
 
   /* ---------- Protect route ---------- */
   useEffect(() => {

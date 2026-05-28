@@ -1,3 +1,5 @@
+import "server-only";
+
 import { Snaptrade } from "snaptrade-typescript-sdk";
 import type { AuthenticationApiLoginSnapTradeUserRequest } from "snaptrade-typescript-sdk";
 

@@ -1,6 +1,16 @@
 "use client";
 
 import Link from "next/link";
+import {
+  ArrowDown,
+  ArrowRight,
+  BrainCircuit,
+  FileText,
+  SquarePen,
+  ShieldCheck,
+  Target,
+  type LucideIcon,
+} from "lucide-react";
 import FloatingAskButton from "./components/FloatingAskButton";
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
@@ -156,28 +166,82 @@ export default function Home() {
     },
   ];
 
-  const operatingLoop = [
+  const planFlowAnchor = {
+    eyebrow: L("Growth Plan", "Growth Plan"),
+    title: L("Create the plan once.", "Crea el plan una vez."),
+    body: L(
+      "Set measurable targets, risk rails, and non-negotiable rules. Then the rest of the product exists to protect that plan.",
+      "Define metas medibles, límites de riesgo y reglas no negociables. Luego el resto del producto existe para proteger ese plan."
+    ),
+    rails: [
+      { label: L("Target equity", "Equity objetivo"), value: "$25,000" },
+      { label: L("Risk per trade", "Riesgo por trade"), value: "$40" },
+      { label: L("Daily max loss", "Max loss diario"), value: "$120" },
+      { label: L("Core rule", "Regla clave"), value: L("Wait for reclaim", "Esperar reclaim") },
+    ],
+  };
+
+  const workflowExperience = [
     {
-      title: L("Plan", "Planifica"),
-      body: L(
-        "Create a realistic Growth Plan with measurable targets, risk rails, and non-negotiable rules.",
-        "Crea un Growth Plan realista con metas medibles, límites de riesgo y reglas no negociables."
-      ),
+      step: "01",
+      title: L("Journal", "Journal"),
+      action: L("Capture", "Captura"),
+      body: L("Log what really happened.", "Guarda lo que realmente pasó."),
+      signal: L("Raw facts", "Hechos crudos"),
+      example: [
+        "SPY long 10:14 AM",
+        L("Exit 10:37 AM • +$84", "Salida 10:37 AM • +$84"),
+      ],
+      icon: FileText as LucideIcon,
+      iconShell: "border-emerald-300/30 bg-emerald-400/12 text-emerald-100",
+      signalShell: "border-emerald-300/20 bg-emerald-400/10 text-emerald-100/80",
+      glow: "from-emerald-400/30 via-emerald-300/10 to-transparent",
     },
     {
-      title: L("Protect", "Protege"),
-      body: L(
-        "The Trading Protection System watches max loss, daily goal, open positions, and rule breaks so discipline is not left to memory.",
-        "El Sistema de protección vigila max loss, meta diaria, posiciones abiertas y reglas rotas para que la disciplina no dependa de la memoria."
-      ),
+      step: "02",
+      title: L("Notebook", "Notebook"),
+      action: L("Think", "Piensa"),
+      body: L("See the day and make meaning.", "Ve el día y sácale sentido."),
+      signal: L("Context", "Contexto"),
+      example: [
+        L("A+ setup: liquidity reclaim", "Setup A+: liquidity reclaim"),
+        L("Held plan, rushed one partial", "Siguió el plan, apuró un parcial"),
+      ],
+      icon: SquarePen as LucideIcon,
+      iconShell: "border-sky-300/30 bg-sky-400/12 text-sky-100",
+      signalShell: "border-sky-300/20 bg-sky-400/10 text-sky-100/80",
+      glow: "from-sky-400/28 via-sky-300/10 to-transparent",
     },
     {
-      title: L("Review", "Revisa"),
-      body: L(
-        "AI Coach connects your journal, trades, metrics, and rules into the next action you should take.",
-        "AI Coach conecta tu journal, trades, métricas y reglas con la próxima acción que debes tomar."
-      ),
+      step: "03",
+      title: L("AI Coaching", "AI Coaching"),
+      action: L("Interpret", "Interpreta"),
+      body: L("Expose drift and the next move.", "Destapa el drift y el próximo paso."),
+      signal: L("Insight", "Insight"),
+      example: [
+        L("Rule held: risk stayed inside $40", "Regla cumplida: el riesgo se quedó dentro de $40"),
+        L("Drift found: fear showed up before target", "Drift detectado: apareció miedo antes del target"),
+      ],
+      coachRead: {
+        label: L("Coach read vs plan", "Lectura del coach vs plan"),
+        title: L("You respected the risk rule but cut the winner early.", "Respetaste la regla de riesgo pero cortaste la ganadora temprano."),
+        body: L(
+          "The plan stayed intact on risk. The real leak was trust: you took profit before the setup fully paid.",
+          "El plan se mantuvo intacto en riesgo. La fuga real fue confianza: tomaste profit antes de que el setup pagara completo."
+        ),
+        next: L("Next action: hold first partial until the planned trigger confirms.", "Próxima acción: aguanta el primer parcial hasta que confirme el trigger planeado."),
+      },
+      icon: BrainCircuit as LucideIcon,
+      iconShell: "border-violet-300/30 bg-violet-400/12 text-violet-100",
+      signalShell: "border-violet-300/20 bg-violet-400/10 text-violet-100/80",
+      glow: "from-violet-400/28 via-violet-300/10 to-transparent",
     },
+  ];
+
+  const workflowLoopSignals = [
+    L("Facts", "Hechos"),
+    L("Context", "Contexto"),
+    L("Insight", "Insight"),
   ];
 
   const productViews = [
@@ -376,14 +440,284 @@ export default function Home() {
         </div>
       </section>
 
-      <section className="border-y border-white/10 bg-[#07111d]">
-        <div className="mx-auto grid w-full max-w-7xl grid-cols-1 gap-3 px-4 py-5 md:grid-cols-3 md:px-8">
-          {operatingLoop.map((item) => (
-            <article key={item.title} className="rounded-lg border border-white/10 bg-[#091524] p-5">
-              <h2 className="text-lg font-semibold text-white">{item.title}</h2>
-              <p className="mt-2 text-sm leading-6 text-slate-300">{item.body}</p>
-            </article>
-          ))}
+      <section className="bg-[#06110f] px-4 py-16 md:px-8">
+        <div className="mx-auto w-full max-w-7xl">
+          <div className="max-w-3xl">
+            <p className="text-sm font-semibold text-emerald-300">
+              {L("How the product works together", "Cómo funciona el producto en conjunto")}
+            </p>
+            <h2 className="mt-3 text-3xl font-semibold text-white md:text-4xl">
+              {L(
+                "Build the plan. Protect it with one operating loop.",
+                "Crea el plan. Protégelo con un solo loop operativo."
+              )}
+            </h2>
+            <p className="mt-3 text-sm leading-6 text-slate-300 md:text-base">
+              {L(
+                "The flow starts with the Growth Plan. Then Capture, Think, Interpret, and Guide work together to keep that plan alive during real trading.",
+                "El flujo empieza con el Growth Plan. Luego Capture, Think, Interpret y Guide trabajan juntos para mantener ese plan vivo durante el trading real."
+              )}
+            </p>
+          </div>
+
+          <div className="mt-8 rounded-[30px] border border-white/10 bg-[#081524] p-3 shadow-[0_26px_80px_rgba(0,0,0,0.34)] md:p-5 xl:p-6">
+            <div className="relative overflow-hidden rounded-[28px] border border-white/10 bg-[radial-gradient(circle_at_top,rgba(30,41,59,0.62),rgba(6,16,25,0.96)_56%)] px-4 py-5 md:px-6 md:py-6 xl:px-8 xl:py-8">
+              <div className="pointer-events-none absolute inset-x-0 top-0 h-40 bg-[radial-gradient(circle_at_top,rgba(16,185,129,0.16),transparent_65%)]" />
+              <div className="pointer-events-none absolute inset-y-10 right-0 w-48 bg-[radial-gradient(circle,rgba(251,191,36,0.12),transparent_68%)] blur-3xl" />
+
+              <div className="relative z-10 rounded-[24px] border border-emerald-300/14 bg-emerald-400/[0.06] p-4 md:p-5">
+                <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                  <div className="max-w-2xl">
+                    <div className="inline-flex items-center gap-2 rounded-full border border-emerald-300/20 bg-emerald-400/10 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.22em] text-emerald-100/90">
+                      <Target className="h-3.5 w-3.5" />
+                      {planFlowAnchor.eyebrow}
+                    </div>
+                    <h3 className="mt-4 text-2xl font-semibold text-white md:text-[30px]">
+                      {planFlowAnchor.title}
+                    </h3>
+                    <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-200">
+                      {planFlowAnchor.body}
+                    </p>
+                  </div>
+
+                  <div className="xl:max-w-[360px]">
+                    <div className="rounded-[22px] border border-white/10 bg-[#071320] p-4">
+                      <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">
+                        <ShieldCheck className="h-4 w-4 text-emerald-300" />
+                        {L("Example plan", "Plan de ejemplo")}
+                      </div>
+                      <div className="mt-3 grid grid-cols-2 gap-2">
+                        {planFlowAnchor.rails.map((rail) => (
+                          <div key={rail.label} className="rounded-2xl border border-white/8 bg-white/[0.03] px-3 py-3">
+                            <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+                              {rail.label}
+                            </p>
+                            <p className="mt-1 text-xs font-medium text-slate-200">{rail.value}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="relative z-10 flex justify-center py-4 md:py-5">
+                <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-[#0b1625] px-4 py-2 text-[10px] font-semibold uppercase tracking-[0.24em] text-slate-300">
+                  <ShieldCheck className="h-3.5 w-3.5 text-emerald-300" />
+                  {L("Protected by 4 pillars", "Protegido por 4 pilares")}
+                </div>
+              </div>
+
+              <div className="relative z-10 flex flex-wrap items-center justify-between gap-3">
+                <div className="inline-flex items-center gap-2 rounded-full border border-emerald-300/20 bg-emerald-400/10 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.22em] text-emerald-100/90">
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-300" />
+                  {L("Execution starts", "Empieza la ejecución")}
+                </div>
+                <div className="hidden md:flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-300">
+                  {workflowLoopSignals.map((signal, index) => (
+                    <div key={signal} className="flex items-center gap-2">
+                      <span>{signal}</span>
+                      {index < workflowLoopSignals.length - 1 ? (
+                        <ArrowRight className="h-3 w-3 text-slate-500" />
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+                <div className="inline-flex items-center gap-2 rounded-full border border-amber-300/20 bg-amber-400/10 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.22em] text-amber-100/90">
+                  <span className="h-1.5 w-1.5 rounded-full bg-amber-300" />
+                  {L("Plan stays active", "El plan sigue activo")}
+                </div>
+              </div>
+
+              <div className="mt-6 hidden xl:block">
+                <div className="relative">
+                  <div className="pointer-events-none absolute left-[11%] right-[11%] top-10">
+                    <div className="h-px bg-gradient-to-r from-emerald-300/10 via-sky-300/55 via-55% to-amber-300/30" />
+                    <div className="absolute inset-x-0 -top-2 h-5 bg-gradient-to-r from-emerald-400/0 via-sky-300/18 to-amber-400/0 blur-2xl" />
+                  </div>
+
+                  <div className="grid grid-cols-4 gap-4">
+                    {workflowExperience.map((item, index) => {
+                      const Icon = item.icon;
+                      return (
+                        <article key={item.title} className="relative pt-2">
+                          <div className="relative z-10 mx-auto flex h-20 w-20 items-center justify-center rounded-full border border-white/12 bg-[#0d1a2b] shadow-[0_18px_45px_rgba(0,0,0,0.34)]">
+                            <div className={`flex h-14 w-14 items-center justify-center rounded-full border ${item.iconShell}`}>
+                              <Icon className="h-6 w-6" />
+                            </div>
+                          </div>
+
+                          {index < workflowExperience.length - 1 ? (
+                            <div className="pointer-events-none absolute left-[calc(50%+42px)] right-[-16px] top-10 z-20 flex items-center justify-end text-slate-300">
+                              <ArrowRight className="h-4 w-4" />
+                            </div>
+                          ) : null}
+
+                          <div className={`relative mt-5 overflow-hidden rounded-[24px] border p-5 ${item.coachRead ? "border-violet-300/18 bg-[linear-gradient(180deg,rgba(27,19,46,0.96),rgba(10,24,39,0.96))]" : "border-white/10 bg-[#0a1827]/96"}`}>
+                            <div className={`pointer-events-none absolute inset-x-5 top-0 h-24 bg-gradient-to-b ${item.glow} blur-2xl`} />
+                            <div className="relative z-10">
+                              <div className="flex items-center justify-between gap-3">
+                                <span className="text-[11px] font-semibold uppercase tracking-[0.24em] text-emerald-300">
+                                  {item.step}
+                                </span>
+                                <span className={`rounded-full border px-2.5 py-1 text-[10px] font-semibold ${item.signalShell}`}>
+                                  {item.signal}
+                                </span>
+                              </div>
+
+                              <p className="mt-5 text-[11px] uppercase tracking-[0.2em] text-slate-500">
+                                {item.title}
+                              </p>
+                              <h3 className="mt-2 text-[34px] font-semibold leading-none text-white">
+                                {item.action}
+                              </h3>
+                              <p className="mt-4 text-sm leading-6 text-slate-300">
+                                {item.body}
+                              </p>
+
+                              <div className="mt-4 space-y-1.5">
+                                {item.example.map((line) => (
+                                  <div
+                                    key={line}
+                                    className="rounded-2xl border border-white/8 bg-white/[0.03] px-3 py-2 text-[11px] leading-5 text-slate-200"
+                                  >
+                                    {line}
+                                  </div>
+                                ))}
+                              </div>
+
+                              {item.coachRead ? (
+                                <div className="mt-4 rounded-[20px] border border-violet-300/20 bg-violet-400/[0.08] p-3">
+                                  <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-violet-100/80">
+                                    {item.coachRead.label}
+                                  </p>
+                                  <p className="mt-2 text-sm font-semibold leading-6 text-white">
+                                    {item.coachRead.title}
+                                  </p>
+                                  <p className="mt-2 text-[12px] leading-5 text-slate-200">
+                                    {item.coachRead.body}
+                                  </p>
+                                  <div className="mt-3 rounded-2xl border border-violet-300/18 bg-[#120f22] px-3 py-2 text-[11px] leading-5 text-violet-50">
+                                    {item.coachRead.next}
+                                  </div>
+                                </div>
+                              ) : null}
+                            </div>
+                          </div>
+                        </article>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-6 space-y-3 xl:hidden">
+                {workflowExperience.map((item, index) => {
+                  const Icon = item.icon;
+                  return (
+                    <div key={item.title}>
+                      <article className={`relative overflow-hidden rounded-[24px] border p-5 ${item.coachRead ? "border-violet-300/18 bg-[linear-gradient(180deg,rgba(27,19,46,0.96),rgba(10,24,39,0.96))]" : "border-white/10 bg-[#0a1827]/96"}`}>
+                        <div className={`pointer-events-none absolute inset-x-5 top-0 h-20 bg-gradient-to-b ${item.glow} blur-2xl`} />
+                        <div className="relative z-10 flex items-start gap-4">
+                          <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full border border-white/12 bg-[#0d1a2b]">
+                            <div className={`flex h-10 w-10 items-center justify-center rounded-full border ${item.iconShell}`}>
+                              <Icon className="h-4.5 w-4.5" />
+                            </div>
+                          </div>
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="text-[11px] font-semibold uppercase tracking-[0.22em] text-emerald-300">
+                                {item.step}
+                              </span>
+                              <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${item.signalShell}`}>
+                                {item.signal}
+                              </span>
+                            </div>
+                            <p className="mt-3 text-[11px] uppercase tracking-[0.18em] text-slate-500">
+                              {item.title}
+                            </p>
+                            <h3 className="mt-1 text-2xl font-semibold leading-none text-white">
+                              {item.action}
+                            </h3>
+                            <p className="mt-3 text-sm leading-6 text-slate-300">
+                              {item.body}
+                            </p>
+                            <div className="mt-3 space-y-1.5">
+                              {item.example.map((line) => (
+                                <div
+                                  key={line}
+                                  className="rounded-2xl border border-white/8 bg-white/[0.03] px-3 py-2 text-[11px] leading-5 text-slate-200"
+                                >
+                                  {line}
+                                </div>
+                              ))}
+                            </div>
+
+                            {item.coachRead ? (
+                              <div className="mt-3 rounded-[20px] border border-violet-300/20 bg-violet-400/[0.08] p-3">
+                                <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-violet-100/80">
+                                  {item.coachRead.label}
+                                </p>
+                                <p className="mt-2 text-sm font-semibold leading-6 text-white">
+                                  {item.coachRead.title}
+                                </p>
+                                <p className="mt-2 text-[12px] leading-5 text-slate-200">
+                                  {item.coachRead.body}
+                                </p>
+                                <div className="mt-3 rounded-2xl border border-violet-300/18 bg-[#120f22] px-3 py-2 text-[11px] leading-5 text-violet-50">
+                                  {item.coachRead.next}
+                                </div>
+                              </div>
+                            ) : null}
+                          </div>
+                        </div>
+                      </article>
+
+                      {index < workflowExperience.length - 1 ? (
+                        <div className="flex justify-center py-2">
+                          <div className="flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-[#0c1522] text-slate-400">
+                            <ArrowDown className="h-4 w-4" />
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="relative z-10 mt-5 grid gap-3 xl:grid-cols-[1.15fr_0.85fr]">
+                <div className="rounded-[22px] border border-white/10 bg-[#061019] px-4 py-4">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">
+                    {L("How the plan gets protected", "Cómo se protege el plan")}
+                  </p>
+                  <div className="mt-3 grid gap-2 md:grid-cols-4">
+                    {[
+                      L("Capture the session", "Captura la sesión"),
+                      L("Think through the day", "Piensa el día"),
+                      L("Interpret the drift", "Interpreta el drift"),
+                      L("Guide the next move", "Guía el próximo paso"),
+                    ].map((line) => (
+                      <div key={line} className="rounded-2xl border border-white/8 bg-white/[0.03] px-3 py-3 text-xs font-medium text-slate-200">
+                        {line}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="rounded-[22px] border border-emerald-300/14 bg-emerald-400/[0.05] px-4 py-4">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-emerald-200/85">
+                    {L("Protected outcome", "Resultado protegido")}
+                  </p>
+                  <p className="mt-3 text-sm leading-6 text-slate-200">
+                    {L(
+                      "The last layer is not another report. It helps the trader carry the original plan into the next session with cleaner execution and better awareness.",
+                      "La última capa no es otro reporte. Ayuda al trader a llevar el plan original hacia la próxima sesión con mejor ejecución y más claridad."
+                    )}
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </section>
 

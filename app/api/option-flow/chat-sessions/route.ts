@@ -2,12 +2,25 @@ import { NextRequest, NextResponse } from "next/server";
 import { getOptionFlowBetaApiPayload, hasOptionFlowBetaAccess, resolveOptionFlowLang } from "@/lib/optionFlowBeta";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 import { getAuthUser } from "@/lib/authServer";
+import { getClientIp, rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 const BYPASS_BETA_GATE =
   String(process.env.OPTIONFLOW_BYPASS_ENTITLEMENT ?? "").toLowerCase() === "true" ||
   String(process.env.OPTIONFLOW_BYPASS_ENTITLEMENT ?? "") === "1";
+
+function clampText(value: unknown, maxLength: number) {
+  const text = String(value ?? "").trim();
+  return text.length > maxLength ? text.slice(0, maxLength) : text;
+}
+
+function normalizeIsoDate(value: unknown) {
+  const text = clampText(value, 80);
+  if (!text) return null;
+  const time = Date.parse(text);
+  return Number.isFinite(time) ? new Date(time).toISOString() : null;
+}
 
 export async function GET(req: NextRequest) {
   const auth = await getAuthUser(req);
@@ -21,7 +34,7 @@ export async function GET(req: NextRequest) {
     );
   }
   const { searchParams } = new URL(req.url);
-  const analysisId = searchParams.get("analysisId");
+  const analysisId = clampText(searchParams.get("analysisId"), 80);
   try {
     let query = supabaseAdmin
       .from("option_flow_chat_sessions")
@@ -53,10 +66,21 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const body = await req.json();
-    const analysisId = body?.analysisId ?? null;
-    const reportCreatedAt = body?.reportCreatedAt ?? null;
-    const title = body?.title ?? null;
+    const limiter = await rateLimit(`option-flow-chat-session:${auth.userId}:${getClientIp(req)}`, {
+      limit: 20,
+      windowMs: 60_000,
+    });
+    if (!limiter.allowed) {
+      return NextResponse.json(
+        { error: "Too many chat session requests. Please wait a moment." },
+        { status: 429, headers: rateLimitHeaders(limiter) }
+      );
+    }
+
+    const body = await req.json().catch(() => ({}));
+    const analysisId = clampText(body?.analysisId, 80) || null;
+    const reportCreatedAt = normalizeIsoDate(body?.reportCreatedAt);
+    const title = clampText(body?.title, 160) || null;
     const forceNew = Boolean(body?.forceNew);
 
     if (!forceNew) {

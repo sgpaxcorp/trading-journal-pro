@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
 import crypto from "crypto";
+import { requireCronSecret } from "@/lib/cronAuth";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 import { sendSubscriptionWinbackEmail } from "@/lib/email";
 
@@ -15,15 +16,8 @@ function buildPromoCode(prefix = "RETURN50") {
 
 async function handleRequest(req: NextRequest) {
   try {
-    const secret = process.env.CRON_SECRET || "";
-    const authHeader = req.headers.get("authorization") || "";
-    const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
-    const vercelCronHeader = req.headers.get("x-vercel-cron");
-    const isVercelCron = Boolean(vercelCronHeader) && vercelCronHeader !== "false";
-    const hasValidSecret = Boolean(secret) && token === secret;
-    if (!isVercelCron && !hasValidSecret) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const cronAuth = requireCronSecret(req);
+    if (!cronAuth.ok) return cronAuth.response;
 
     const nowIso = new Date().toISOString();
 

@@ -236,88 +236,6 @@ export const CHALLENGES: ChallengeDefinition[] = [
    Small utilities
 ========================= */
 
-function requireDef(id: ChallengeId): ChallengeDefinition {
-  const d = CHALLENGES.find((x) => x.id === id);
-  if (!d) throw new Error(`Unknown challenge id: ${id}`);
-  return d;
-}
-
-function requiredGreenDays(def: ChallengeDefinition): number {
-  return Math.max(1, Math.ceil(def.durationDays * def.requiredGreenPct));
-}
-
-function clampInt(n: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, Math.floor(n)));
-}
-
-function isoToday(): string {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
-
-function isIsoDate(s: string): boolean {
-  return /^\d{4}-\d{2}-\d{2}$/.test(s);
-}
-
-function computeXp(def: ChallengeDefinition, input: ChallengeDayInput) {
-  const journal = input.journalCompleted ? def.xp.journal : 0;
-  const maxLoss = input.respectedMaxLoss ? def.xp.respectedMaxLoss : 0;
-  const plan = input.followedPlan ? def.xp.followedPlan : 0;
-
-  const processGreen =
-    Boolean(input.journalCompleted) &&
-    Boolean(input.respectedMaxLoss) &&
-    Boolean(input.followedPlan);
-
-  const bonus = processGreen ? def.xp.processGreenBonus : 0;
-
-  const xpAwarded = clampInt(journal + maxLoss + plan + bonus, 0, 1000);
-
-  return {
-    xpAwarded,
-    processGreen,
-    maxLossBreak: !input.respectedMaxLoss,
-  };
-}
-
-function computeStreaks(days: { day: string; process_green: boolean }[]) {
-  // Streak logic: consecutive logged days (by date) where process_green = true.
-  // If a user skips days, the streak breaks (simple + predictable).
-  const sorted = [...days]
-    .filter((d) => isIsoDate(d.day))
-    .sort((a, b) => a.day.localeCompare(b.day));
-
-  let best = 0;
-  let current = 0;
-
-  let prevDate: Date | null = null;
-
-  for (const row of sorted) {
-    const d = new Date(row.day + "T00:00:00");
-    if (Number.isNaN(d.getTime())) continue;
-
-    const isConsecutive =
-      prevDate &&
-      (d.getTime() - prevDate.getTime()) / (24 * 60 * 60 * 1000) === 1;
-
-    if (!row.process_green) {
-      current = 0;
-    } else {
-      if (!prevDate || isConsecutive) current += 1;
-      else current = 1;
-
-      if (current > best) best = current;
-    }
-
-    prevDate = d;
-  }
-
-  return { currentStreak: current, bestStreak: best };
-}
-
 function mapRunToProgress(run: ChallengeRunRow): ChallengeProgress {
   return {
     runId: run.id,
@@ -338,90 +256,26 @@ function mapRunToProgress(run: ChallengeRunRow): ChallengeProgress {
   };
 }
 
-/* =========================
-   Profile gamification helpers (XP + badges)
-========================= */
+async function postChallengeApi<T>(path: string, body: unknown): Promise<T> {
+  const { data: sessionData } = await supabaseBrowser.auth.getSession();
+  const token = sessionData?.session?.access_token;
+  if (!token) throw new Error("Missing session");
 
-type ProfileGamificationRow = {
-  user_id: string;
-  xp: number;
-  level: number;
-  tier: string;
-  badges: any; // jsonb array
-  created_at: string;
-  updated_at: string;
-};
+  const res = await fetch(path, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
 
-function computeLevelFromXp(xp: number): number {
-  // Simple curve: 500 XP per level.
-  const safe = Math.max(0, Math.floor(xp));
-  return Math.max(1, Math.floor(safe / 500) + 1);
-}
-
-function computeTierFromXp(xp: number): string {
-  if (xp >= 5000) return "Elite";
-  if (xp >= 2500) return "Gold";
-  if (xp >= 1000) return "Silver";
-  return "Bronze";
-}
-
-async function applyXpAndBadge(params: {
-  userId: string;
-  xpDelta: number;
-  badgeToAdd?: string | null;
-}) {
-  const { userId, xpDelta, badgeToAdd } = params;
-  if (!userId) return;
-
-  const delta = Math.floor(xpDelta || 0);
-  const badge = (badgeToAdd || "").trim();
-
-  if (delta === 0 && !badge) return;
-
-  const { data: existing, error: selErr } = await supabaseBrowser
-    .from("profile_gamification")
-    .select("user_id,xp,level,tier,badges")
-    .eq("user_id", userId)
-    .maybeSingle();
-
-  if (selErr) {
-    // If the table doesn't exist yet in a dev environment, avoid crashing the app.
-    console.warn("[challenges] profile_gamification select failed:", selErr);
-    return;
+  const payload = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(String((payload as any)?.error || "Challenge request failed"));
   }
 
-  const curXp = Number((existing as any)?.xp ?? 0) || 0;
-
-  const curBadgesRaw = (existing as any)?.badges;
-  const curBadges: string[] = Array.isArray(curBadgesRaw)
-    ? curBadgesRaw.map((x: any) => String(x))
-    : [];
-
-  const nextXp = Math.max(0, curXp + delta);
-  const nextLevel = computeLevelFromXp(nextXp);
-  const nextTier = computeTierFromXp(nextXp);
-
-  let nextBadges = curBadges;
-  if (badge && !curBadges.includes(badge)) {
-    nextBadges = [...curBadges, badge];
-  }
-
-  const payload = {
-    user_id: userId,
-    xp: nextXp,
-    level: nextLevel,
-    tier: nextTier,
-    badges: nextBadges,
-    updated_at: new Date().toISOString(),
-  };
-
-  const { error: upErr } = await supabaseBrowser
-    .from("profile_gamification")
-    .upsert(payload as any, { onConflict: "user_id" });
-
-  if (upErr) {
-    console.warn("[challenges] profile_gamification upsert failed:", upErr);
-  }
+  return payload as T;
 }
 
 /* =========================
@@ -545,42 +399,11 @@ export async function startChallenge(
 ): Promise<ChallengeProgress> {
   if (!userId) throw new Error("Missing userId");
 
-  const def = requireDef(challengeId);
-  const req = requiredGreenDays(def);
-
-  // Archive any current active run as "restarted" (single active run guarantee)
-  await supabaseBrowser
-    .from("challenge_runs")
-    .update({ status: "restarted", ended_at: new Date().toISOString() })
-    .eq("user_id", userId)
-    .eq("challenge_id", challengeId)
-    .eq("status", "active");
-
-  const { data, error } = await supabaseBrowser
-    .from("challenge_runs")
-    .insert({
-      user_id: userId,
-      challenge_id: challengeId,
-      status: "active",
-      duration_days: def.durationDays,
-      required_green_days: req,
-      days_tracked: 0,
-      process_green_days: 0,
-      max_loss_breaks: 0,
-      xp_earned: 0,
-      current_streak: 0,
-      best_streak: 0,
-      last_tracked_date: null,
-      started_at: new Date().toISOString(),
-    })
-    .select(
-      "id,user_id,challenge_id,status,duration_days,required_green_days,days_tracked,process_green_days,max_loss_breaks,xp_earned,current_streak,best_streak,last_tracked_date,started_at,ended_at,created_at,updated_at"
-    )
-    .single();
-
-  if (error) throw error;
-
-  return mapRunToProgress(data as unknown as ChallengeRunRow);
+  const result = await postChallengeApi<{ progress: ChallengeProgress }>(
+    "/api/challenges/start",
+    { challengeId }
+  );
+  return result.progress;
 }
 
 export async function logChallengeDay(params: {
@@ -594,210 +417,8 @@ export async function logChallengeDay(params: {
   if (!userId) throw new Error("Missing userId");
   if (!runId) throw new Error("Missing runId");
 
-  const def = requireDef(challengeId);
-
-  const dayIso = (input.day || "").trim() || isoToday();
-  if (!isIsoDate(dayIso)) throw new Error("Invalid day (expected YYYY-MM-DD)");
-
-  // Load current run (for duration + required greens + status)
-  const { data: runRow, error: runErr } = await supabaseBrowser
-    .from("challenge_runs")
-    .select(
-      "id,user_id,challenge_id,status,duration_days,required_green_days,days_tracked,process_green_days,max_loss_breaks,xp_earned,current_streak,best_streak,last_tracked_date,started_at,ended_at,created_at,updated_at"
-    )
-    .eq("id", runId)
-    .eq("user_id", userId)
-    .maybeSingle();
-
-  if (runErr) throw runErr;
-  if (!runRow) throw new Error("Challenge run not found");
-
-  const run = runRow as unknown as ChallengeRunRow;
-
-  if (String(run.challenge_id) !== String(challengeId)) {
-    throw new Error("Run does not match challenge");
-  }
-
-  // Only allow check-ins when active
-  if (run.status !== "active") {
-    throw new Error("This challenge run is not active.");
-  }
-
-  // Read existing day log (for XP delta)
-  const { data: existingDay, error: exErr } = await supabaseBrowser
-    .from("challenge_run_days")
-    .select(
-      "id,xp_awarded,day,run_id,user_id,challenge_id,journal_completed,respected_max_loss,followed_plan,process_green,max_loss_break,note,created_at,updated_at"
-    )
-    .eq("run_id", runId)
-    .eq("day", dayIso)
-    .eq("user_id", userId)
-    .maybeSingle();
-
-  if (exErr) throw exErr;
-
-  const prevXp = existingDay ? Number((existingDay as any).xp_awarded) || 0 : 0;
-
-  const { xpAwarded, processGreen, maxLossBreak } = computeXp(def, {
-    ...input,
-    day: dayIso,
-  });
-
-  const payload = {
-    run_id: runId,
-    user_id: userId,
-    challenge_id: challengeId,
-    day: dayIso,
-    journal_completed: Boolean(input.journalCompleted),
-    respected_max_loss: Boolean(input.respectedMaxLoss),
-    followed_plan: Boolean(input.followedPlan),
-    process_green: processGreen,
-    max_loss_break: maxLossBreak,
-    xp_awarded: xpAwarded,
-    note: (input.note || "").trim() || null,
-  };
-
-  // Insert/update
-  let savedRow: any = null;
-
-  if (existingDay?.id) {
-    const { data: upd, error: updErr } = await supabaseBrowser
-      .from("challenge_run_days")
-      .update(payload)
-      .eq("id", existingDay.id)
-      .select(
-        "id,run_id,user_id,challenge_id,day,journal_completed,respected_max_loss,followed_plan,process_green,max_loss_break,xp_awarded,note,created_at,updated_at"
-      )
-      .single();
-
-    if (updErr) throw updErr;
-    savedRow = upd;
-  } else {
-    const { data: ins, error: insErr } = await supabaseBrowser
-      .from("challenge_run_days")
-      .insert(payload)
-      .select(
-        "id,run_id,user_id,challenge_id,day,journal_completed,respected_max_loss,followed_plan,process_green,max_loss_break,xp_awarded,note,created_at,updated_at"
-      )
-      .single();
-
-    if (insErr) throw insErr;
-    savedRow = ins;
-  }
-
-  const newXp = xpAwarded;
-  let xpDelta = newXp - prevXp;
-
-  // Recompute aggregates from all days (small N, safe)
-  const { data: allDaysRaw, error: listErr } = await supabaseBrowser
-    .from("challenge_run_days")
-    .select("day,process_green,max_loss_break,xp_awarded")
-    .eq("run_id", runId)
-    .eq("user_id", userId);
-
-  if (listErr) throw listErr;
-
-  const allDays = (allDaysRaw as any[]) || [];
-
-  const daysTracked = allDays.length;
-  const processGreenDays = allDays.filter((d) => Boolean(d.process_green)).length;
-  const maxLossBreaks = allDays.filter((d) => Boolean(d.max_loss_break)).length;
-  const xpEarnedBase = allDays.reduce(
-    (sum, d) => sum + (Number(d.xp_awarded) || 0),
-    0
+  return postChallengeApi<{ progress: ChallengeProgress; dayLog: ChallengeDayLog | null }>(
+    "/api/challenges/check-in",
+    { runId, challengeId, input }
   );
-
-  const lastTracked =
-    allDays
-      .map((d) => String(d.day || ""))
-      .filter((s) => isIsoDate(s))
-      .sort()
-      .slice(-1)[0] || null;
-
-  const { currentStreak, bestStreak } = computeStreaks(
-    allDays.map((d) => ({
-      day: String(d.day || ""),
-      process_green: Boolean(d.process_green),
-    }))
-  );
-
-  // Finalize run if duration reached
-  let nextStatus: ChallengeStatus = run.status as ChallengeStatus;
-  let endedAt: string | null = run.ended_at;
-
-  let completionBonus = 0;
-  let badgeToAdd: string | null = null;
-
-  if (run.status === "active" && daysTracked >= run.duration_days) {
-    const completed = processGreenDays >= run.required_green_days;
-    nextStatus = completed ? "completed" : "failed";
-    endedAt = new Date().toISOString();
-
-    if (completed) {
-      completionBonus = def.xp.completionBonus;
-      badgeToAdd = def.completionBadge;
-    }
-  }
-
-  const xpEarned = xpEarnedBase + completionBonus;
-
-  // If we are transitioning to completed, award completion bonus to profile XP.
-  // (Only when the run transitions from active → completed.)
-  if (run.status === "active" && nextStatus === "completed" && completionBonus > 0) {
-    xpDelta += completionBonus;
-  }
-
-  // Update run summary
-  const { data: updatedRun, error: updRunErr } = await supabaseBrowser
-    .from("challenge_runs")
-    .update({
-      status: nextStatus,
-      ended_at: endedAt,
-      days_tracked: daysTracked,
-      process_green_days: processGreenDays,
-      max_loss_breaks: maxLossBreaks,
-      xp_earned: xpEarned,
-      current_streak: currentStreak,
-      best_streak: bestStreak,
-      last_tracked_date: lastTracked,
-    })
-    .eq("id", runId)
-    .eq("user_id", userId)
-    .select(
-      "id,user_id,challenge_id,status,duration_days,required_green_days,days_tracked,process_green_days,max_loss_breaks,xp_earned,current_streak,best_streak,last_tracked_date,started_at,ended_at,created_at,updated_at"
-    )
-    .single();
-
-  if (updRunErr) throw updRunErr;
-
-  // Apply XP + badge (best-effort — does not block challenge logging)
-  await applyXpAndBadge({
-    userId,
-    xpDelta,
-    badgeToAdd,
-  });
-
-  const dayLog: ChallengeDayLog | null = savedRow
-    ? {
-        id: String(savedRow.id),
-        runId: String(savedRow.run_id),
-        userId: String(savedRow.user_id),
-        challengeId: String(savedRow.challenge_id) as ChallengeId,
-        day: String(savedRow.day),
-        journalCompleted: Boolean(savedRow.journal_completed),
-        respectedMaxLoss: Boolean(savedRow.respected_max_loss),
-        followedPlan: Boolean(savedRow.followed_plan),
-        processGreen: Boolean(savedRow.process_green),
-        maxLossBreak: Boolean(savedRow.max_loss_break),
-        xpAwarded: Number(savedRow.xp_awarded) || 0,
-        note: savedRow.note != null ? String(savedRow.note) : null,
-        createdAt: String(savedRow.created_at),
-        updatedAt: String(savedRow.updated_at),
-      }
-    : null;
-
-  return {
-    progress: mapRunToProgress(updatedRun as unknown as ChallengeRunRow),
-    dayLog,
-  };
 }

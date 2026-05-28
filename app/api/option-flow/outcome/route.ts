@@ -4,6 +4,7 @@ import { getOptionFlowBetaApiPayload, resolveOptionFlowLang } from "@/lib/option
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 import { getAuthUser } from "@/lib/authServer";
 import { getClientIp, rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
+import { isSmartToolsOwner } from "@/lib/smartToolsAccess";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -12,30 +13,20 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const DEFAULT_MODEL = process.env.OPENAI_OPTIONFLOW_MODEL || "gpt-4.1";
 const VISION_MODEL = process.env.OPENAI_OPTIONFLOW_VISION_MODEL || "gpt-4o";
 
-const ENTITLEMENT_KEY = "option_flow";
+const MAX_CHART_BYTES = 6 * 1024 * 1024;
+const ALLOWED_CHART_MIMES = new Set(["image/png", "image/jpeg", "image/webp"]);
 const BYPASS_ENTITLEMENT =
   String(process.env.OPTIONFLOW_BYPASS_ENTITLEMENT ?? "").toLowerCase() === "true" ||
   String(process.env.OPTIONFLOW_BYPASS_ENTITLEMENT ?? "") === "1";
-
-async function requireEntitlement(userId: string): Promise<boolean> {
-  if (!userId) return false;
-  const { data, error } = await supabaseAdmin
-    .from("user_entitlements")
-    .select("status")
-    .eq("user_id", userId)
-    .eq("entitlement_key", ENTITLEMENT_KEY)
-    .in("status", ["active", "trialing"])
-    .limit(1);
-  if (error) return false;
-  return (data ?? []).length > 0;
-}
 
 function decodeDataUrl(dataUrl?: string | null): { mime: string; buffer: Buffer } | null {
   if (!dataUrl) return null;
   const match = dataUrl.match(/^data:(.+);base64,(.+)$/);
   if (!match) return null;
   const mime = match[1];
+  if (!ALLOWED_CHART_MIMES.has(mime)) return null;
   const buffer = Buffer.from(match[2], "base64");
+  if (buffer.length > MAX_CHART_BYTES) return null;
   return { mime, buffer };
 }
 
@@ -46,7 +37,7 @@ export async function POST(req: NextRequest) {
   }
 
   if (!BYPASS_ENTITLEMENT) {
-    const hasEnt = await requireEntitlement(auth.userId);
+    const hasEnt = await isSmartToolsOwner(auth);
     if (!hasEnt) {
       return NextResponse.json(
         getOptionFlowBetaApiPayload(resolveOptionFlowLang(req.headers.get("accept-language"))),

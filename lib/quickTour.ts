@@ -351,11 +351,11 @@ const BUILDERS: QuickTourBuilder[] = [
     build: (L) => ({
       title: L("Option Flow Intelligence", "Option Flow Intelligence"),
       summary: L(
-        "This workspace is for flow reports, premarket context, and idea validation before the opening bell.",
-        "Este workspace es para reportes de flujo, contexto premarket y validación de ideas antes de la apertura."
+        "This workspace is for options flow reports, premarket context, and outcome review.",
+        "Este workspace es para reportes de options flow, contexto premarket y revisión de outcomes."
       ),
       bullets: [
-        L("Upload flow reports cleanly and keep screenshot evidence focused.", "Sube reportes de flujo limpios y mantén la evidencia visual enfocada."),
+        L("Upload flow reports cleanly and keep screenshot evidence focused.", "Sube reportes de flow limpios y mantén la evidencia visual enfocada."),
         L("Use the output to strengthen the premarket plan, not to chase noise.", "Usa la salida para fortalecer el plan premarket, no para perseguir ruido."),
         L("Push the plan into the Journal if you want the thesis to stay inside the daily workflow.", "Envía el plan al Journal si quieres que la tesis quede dentro del flujo diario."),
       ],
@@ -366,6 +366,34 @@ const BUILDERS: QuickTourBuilder[] = [
           body: L(
             "Think of this page as a premarket intelligence layer. It should sharpen your thesis before execution, not replace your process.",
             "Piensa esta página como una capa de inteligencia premarket. Debe afinar tu tesis antes de ejecutar, no reemplazar tu proceso."
+          ),
+          selector: "main h1",
+        },
+      ],
+    }),
+  },
+  {
+    key: "neuro-analysis",
+    guideHref: "/neuro-analysis",
+    match: (path) => path.startsWith("/neuro-analysis"),
+    build: (L) => ({
+      title: L("Neuro Analysis", "Neuro Analysis"),
+      summary: L(
+        "This workspace is for CFA-style company research, Buffett principles, projections, and virtual allocation simulation.",
+        "Este workspace es para research de compañías tipo CFA, principios Buffett, proyecciones y simulación virtual de allocation."
+      ),
+      bullets: [
+        L("Use it to frame business quality, financial statements, valuation, risk, and portfolio fit.", "Úsalo para estructurar calidad del negocio, estados financieros, valuation, riesgo y encaje en portfolio."),
+        L("Future projections should be scenario based: bear, base, and bull.", "Las proyecciones futuras deben ser por escenarios: bear, base y bull."),
+        L("Outputs are analysis and simulation support, not guaranteed financial advice.", "Las salidas son apoyo de análisis y simulación, no consejo financiero garantizado."),
+      ],
+      steps: [
+        {
+          id: "neuro-header",
+          title: L("Research command center", "Centro de research"),
+          body: L(
+            "Start with the company, capital, horizon, and assumptions before reviewing scenarios.",
+            "Empieza con la compañía, capital, horizonte y supuestos antes de revisar escenarios."
           ),
           selector: "main h1",
         },

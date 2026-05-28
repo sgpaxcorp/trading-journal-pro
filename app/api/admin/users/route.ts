@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 import { ACCESS_GRANTS, isAccessGrantKey, type AccessGrantKey } from "@/lib/accessGrants";
+import { recordAdminAuditEvent } from "@/lib/adminAudit";
 
 function parseAdminEmails(envValue?: string | null) {
   return (envValue || "")
@@ -256,6 +257,18 @@ export async function POST(req: NextRequest) {
     });
 
     await syncAdminEntitlements(authUser.id, accessKeys);
+    await recordAdminAuditEvent({
+      req,
+      adminUserId: admin.id,
+      adminEmail: admin.email,
+      action: isNewUser ? "admin_user_create" : "admin_user_update",
+      targetUserId: authUser.id,
+      metadata: {
+        email,
+        accessKeys,
+        updatedPassword: password.length >= 8,
+      },
+    });
 
     return NextResponse.json({
       ok: true,
@@ -279,21 +292,33 @@ export async function GET(req: NextRequest) {
     const admin = await getAdminAuth(req);
     if (!admin) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
-    const users: any[] = [];
-    for (let page = 1; page <= 25; page += 1) {
-      const { data, error } = await supabaseAdmin.auth.admin.listUsers({
-        page,
-        perPage: 200,
-      });
-      if (error) throw error;
-      const batch = data?.users ?? [];
-      users.push(...batch);
-      if (batch.length < 200) break;
-    }
+    const url = new URL(req.url);
+    const page = Math.max(1, Math.floor(Number(url.searchParams.get("page") ?? 1) || 1));
+    const perPage = Math.min(
+      100,
+      Math.max(10, Math.floor(Number(url.searchParams.get("perPage") ?? 50) || 50))
+    );
+
+    const { data: authPage, error: authPageError } = await supabaseAdmin.auth.admin.listUsers({
+      page,
+      perPage,
+    });
+    if (authPageError) throw authPageError;
+
+    const users = authPage?.users ?? [];
 
     const userIds = users.map((user) => String(user.id)).filter(Boolean);
     if (!userIds.length) {
-      return NextResponse.json({ ok: true, users: [] });
+      return NextResponse.json({
+        ok: true,
+        users: [],
+        pagination: {
+          page,
+          perPage,
+          hasMore: false,
+          returned: 0,
+        },
+      });
     }
 
     const since30 = toISO(30);
@@ -391,7 +416,16 @@ export async function GET(req: NextRequest) {
       };
     });
 
-    return NextResponse.json({ ok: true, users: summaries });
+    return NextResponse.json({
+      ok: true,
+      users: summaries,
+      pagination: {
+        page,
+        perPage,
+        hasMore: users.length === perPage,
+        returned: users.length,
+      },
+    });
   } catch (err: any) {
     return NextResponse.json({ error: err?.message ?? "Unexpected error" }, { status: 500 });
   }

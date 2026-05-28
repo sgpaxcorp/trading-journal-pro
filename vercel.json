@@ -6,7 +6,7 @@
     },
     {
       "path": "/api/notifications/send-daily-motivation",
-      "schedule": "0 * * * *"
+      "schedule": "*/30 * * * *"
     },
     {
       "path": "/api/notifications/send-daily-goal",

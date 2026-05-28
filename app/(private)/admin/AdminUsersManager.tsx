@@ -97,10 +97,13 @@ export default function AdminUsersManager({ lang }: Props) {
   const [activityFilter, setActivityFilter] = useState<ActivityFilter>("all");
   const [accountFilter, setAccountFilter] = useState<AccountFilter>("all");
   const [sortBy, setSortBy] = useState<SortOption>("most_used");
+  const [page, setPage] = useState(1);
+  const [hasMoreUsers, setHasMoreUsers] = useState(false);
+  const [returnedUsers, setReturnedUsers] = useState(0);
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ tone: "success" | "error" | "info"; text: string } | null>(null);
 
-  async function fetchUsers() {
+  async function fetchUsers(nextPage = page) {
     setLoading(true);
     setNotice(null);
     try {
@@ -110,7 +113,11 @@ export default function AdminUsersManager({ lang }: Props) {
         setNotice({ tone: "error", text: L("Admin session missing.", "Falta la sesión de admin.") });
         return;
       }
-      const res = await fetch("/api/admin/users", {
+      const params = new URLSearchParams({
+        page: String(nextPage),
+        perPage: "50",
+      });
+      const res = await fetch(`/api/admin/users?${params.toString()}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const body = await res.json().catch(() => ({}));
@@ -123,6 +130,9 @@ export default function AdminUsersManager({ lang }: Props) {
       }
       const nextRows = Array.isArray(body?.users) ? body.users : [];
       setRows(nextRows);
+      setPage(Number(body?.pagination?.page ?? nextPage));
+      setHasMoreUsers(Boolean(body?.pagination?.hasMore));
+      setReturnedUsers(Number(body?.pagination?.returned ?? nextRows.length));
       setSelectedUserId((current) =>
         nextRows.some((row: AdminUserSummary) => row.id === current) ? current : nextRows[0]?.id ?? null
       );
@@ -207,14 +217,23 @@ export default function AdminUsersManager({ lang }: Props) {
     setBusyId(`${action}:${userId}`);
     setNotice(null);
     try {
+      const targetUser = rows.find((row) => row.id === userId) ?? null;
       const method = action === "delete" ? "DELETE" : "PATCH";
+      const payload =
+        action === "delete"
+          ? { targetEmailConfirmation: targetUser?.email ?? "" }
+          : {
+              action,
+              confirmation: action === "ban" || action === "unban" ? action : undefined,
+              targetEmailConfirmation: action === "reset" ? targetUser?.email ?? "" : undefined,
+            };
       const res = await fetch(`/api/admin/users/${userId}`, {
         method,
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: method === "DELETE" ? undefined : JSON.stringify({ action }),
+        body: JSON.stringify(payload),
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -243,7 +262,7 @@ export default function AdminUsersManager({ lang }: Props) {
         });
       }
 
-      await fetchUsers();
+      await fetchUsers(page);
     } finally {
       setBusyId(null);
     }
@@ -262,8 +281,8 @@ export default function AdminUsersManager({ lang }: Props) {
         </h2>
         <p className="text-sm text-slate-400">
           {L(
-            "Review who is active, who is fading, and execute strong account actions from one organized admin surface.",
-            "Revisa quién está activo, quién se está enfriando y ejecuta acciones fuertes de cuenta desde una sola superficie admin organizada."
+            "Review a paginated user page, find fading accounts, and open a dedicated user profile for strong account actions.",
+            "Revisa una página paginada de usuarios, encuentra cuentas en enfriamiento y abre el perfil dedicado para acciones fuertes de cuenta."
           )}
         </p>
       </div>
@@ -338,6 +357,31 @@ export default function AdminUsersManager({ lang }: Props) {
                 <option value="oldest">{L("Oldest accounts", "Cuentas más antiguas")}</option>
               </select>
             </label>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-800 pt-4">
+            <p className="text-xs text-slate-400">
+              {L("Server page", "Página del servidor")} {page} · {returnedUsers}{" "}
+              {L("users loaded", "usuarios cargados")}
+            </p>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => void fetchUsers(Math.max(1, page - 1))}
+                disabled={loading || page <= 1}
+                className="rounded-xl border border-slate-700 px-3 py-2 text-xs text-slate-200 disabled:opacity-50"
+              >
+                {L("Previous", "Anterior")}
+              </button>
+              <button
+                type="button"
+                onClick={() => void fetchUsers(page + 1)}
+                disabled={loading || !hasMoreUsers}
+                className="rounded-xl border border-slate-700 px-3 py-2 text-xs text-slate-200 disabled:opacity-50"
+              >
+                {L("Next", "Siguiente")}
+              </button>
+            </div>
           </div>
 
           <div className="overflow-x-auto">

@@ -2,6 +2,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
+import { getClientIp, rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
 
 type PlanId = "core" | "advanced";
 type BillingCycle = "monthly" | "annual";
@@ -153,6 +154,17 @@ export async function POST(req: NextRequest) {
 
     const userId = authData.user.id;
     const email = authData.user.email ?? "";
+
+    const limiter = await rateLimit(`stripe-checkout:${userId}:${getClientIp(req)}`, {
+      limit: 10,
+      windowMs: 10 * 60_000,
+    });
+    if (!limiter.allowed) {
+      return NextResponse.json(
+        { error: "Too many checkout attempts. Please try again later." },
+        { status: 429, headers: rateLimitHeaders(limiter) }
+      );
+    }
 
     const body = await req.json();
     const planId = body.planId as PlanId | undefined;

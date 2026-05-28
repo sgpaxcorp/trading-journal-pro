@@ -122,12 +122,38 @@ function formatShortDateTime(value?: string | null, locale?: string) {
 function getNotebookPreview(raw: any, fallbackText: string): string | null {
   if (!raw) return null;
 
+  const previewFromStructured = (value: any): string | null => {
+    const candidates = [
+      value?.premarket,
+      value?.live,
+      value?.post,
+      value?.after_review?.notes?.didWell,
+      value?.after_review?.notes?.improve,
+    ];
+
+    for (const candidate of candidates) {
+      const clean = clampText(stripHtml(typeof candidate === "string" ? candidate : ""), 140);
+      if (clean) return clean;
+    }
+
+    return null;
+  };
+
   if (typeof raw === "string") {
     const trimmed = raw.trim();
     if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
-      return fallbackText;
+      try {
+        const parsed = JSON.parse(trimmed);
+        return previewFromStructured(parsed) || fallbackText;
+      } catch {
+        return fallbackText;
+      }
     }
     return trimmed;
+  }
+
+  if (typeof raw === "object") {
+    return previewFromStructured(raw) || fallbackText;
   }
 
   return null;
@@ -142,6 +168,31 @@ function clampText(input: string, max = 900): string {
   if (!input) return "";
   if (input.length <= max) return input;
   return `${input.slice(0, max).trim()}…`;
+}
+
+function parseTimeToMinutes(raw?: string | null): number | null {
+  const value = String(raw ?? "").trim();
+  if (!value) return null;
+
+  const match = value.match(/^(\d{1,2}):(\d{2})(?:\s*([AaPp])\.?\s*[Mm]\.?)?$/);
+  if (!match) return null;
+
+  let hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  const meridiem = match[3]?.toLowerCase() ?? null;
+
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return null;
+  if (minutes < 0 || minutes > 59) return null;
+
+  if (meridiem) {
+    if (hours < 1 || hours > 12) return null;
+    if (meridiem === "p" && hours < 12) hours += 12;
+    if (meridiem === "a" && hours === 12) hours = 0;
+  } else if (hours < 0 || hours > 23) {
+    return null;
+  }
+
+  return hours * 60 + minutes;
 }
 
 function getNotebookBodyPreview(
@@ -230,43 +281,6 @@ function parseNotesJson(raw: unknown): Record<string, any> | null {
   } catch {
     return null;
   }
-}
-
-const NOTEBOOK_STOPWORDS = new Set([
-  "the", "and", "for", "with", "from", "this", "that", "what", "where", "when", "why", "how",
-  "que", "qué", "como", "cómo", "donde", "dónde", "cuando", "cuándo", "por", "para", "con",
-  "del", "las", "los", "una", "uno", "unas", "unos", "sobre", "esto", "esta", "este",
-  "please", "pls", "quiero", "busca", "buscar", "encuentra", "find", "locate", "show",
-]);
-
-function tokenizeForSearch(input: string): string[] {
-  if (!input) return [];
-  return input
-    .toLowerCase()
-    .replace(/[^a-z0-9áéíóúüñ]+/gi, " ")
-    .split(" ")
-    .map((t) => t.trim())
-    .filter((t) => t.length >= 3 && !NOTEBOOK_STOPWORDS.has(t));
-}
-
-function extractQuotedPhrases(input: string): string[] {
-  const phrases: string[] = [];
-  const matches = input.match(/"([^"]+)"|'([^']+)'/g);
-  if (!matches) return phrases;
-  for (const m of matches) {
-    const cleaned = m.replace(/^["']|["']$/g, "").trim();
-    if (cleaned.length >= 3) phrases.push(cleaned);
-  }
-  return phrases;
-}
-
-function buildSnippet(text: string, token: string, max = 140): string {
-  if (!text) return "";
-  const idx = text.toLowerCase().indexOf(token.toLowerCase());
-  if (idx < 0) return text.slice(0, max).trim();
-  const start = Math.max(0, idx - 40);
-  const end = Math.min(text.length, idx + max);
-  return text.slice(start, end).trim();
 }
 
 // IDs generados por Supabase
@@ -389,21 +403,6 @@ function getUsFederalHolidays(year: number, lang: "en" | "es"): Holiday[] {
   return holidays;
 }
 
-/* Detectar idioma de la pregunta (simple) */
-function detectLanguage(q: string): "es" | "en" | "auto" {
-  const s = q.toLowerCase();
-  if (!s.trim()) return "auto";
-  if (
-    /[áéíóúñü¿¡]/.test(s) ||
-    /\b(qué|como|cómo|porque|por qué|cuál|días|semanas|meses|ganancia|pérdida|plan|riesgo|entrada|salida)\b/.test(
-      s
-    )
-  ) {
-    return "es";
-  }
-  return "en";
-}
-
 /* =========================
    Component
 ========================= */
@@ -418,6 +417,7 @@ export default function NotebookPage() {
   const isEs = lang === "es";
   const L = (en: string, es: string) => (isEs ? es : en);
   const userId = useMemo(() => (user as any)?.id || (user as any)?.uid || "", [user]);
+  const notebookAccountId = activeAccountId ?? null;
   const describeSurface = (surface: NotebookSurfaceMeta) => {
     if (surface.kind === "ios-ink") {
       return {
@@ -492,7 +492,7 @@ export default function NotebookPage() {
   // Cargar entries desde Supabase
   useEffect(() => {
     if (planLoading || plan !== "advanced") return;
-    if (authLoading || !userId || accountsLoading || !activeAccountId) return;
+    if (authLoading || !userId || accountsLoading) return;
 
     const load = async () => {
       try {
@@ -500,7 +500,7 @@ export default function NotebookPage() {
         if (!userId) {
           setEntries([]);
         } else {
-          const all = await getAllJournalEntries(userId, activeAccountId);
+          const all = await getAllJournalEntries(userId, notebookAccountId);
           setEntries(all);
         }
       } catch (err) {
@@ -512,7 +512,7 @@ export default function NotebookPage() {
     };
 
     void load();
-  }, [planLoading, plan, authLoading, userId, accountsLoading, activeAccountId]);
+  }, [planLoading, plan, authLoading, userId, accountsLoading, notebookAccountId]);
 
   const sorted = useMemo(
     () =>
@@ -742,10 +742,10 @@ export default function NotebookPage() {
   }
 
   async function reloadNotebookWorkspace(selection?: NotebookSelection) {
-    if (!userId || !activeAccountId) return;
+    if (!userId) return;
     setNbLoading(true);
     try {
-      const data = await listNotebookData(userId, activeAccountId);
+      const data = await listNotebookData(userId, notebookAccountId);
       applyNotebookWorkspaceData(data, selection);
     } finally {
       setNbLoading(false);
@@ -754,13 +754,13 @@ export default function NotebookPage() {
 
   useEffect(() => {
     if (planLoading || plan !== "advanced") return;
-    if (authLoading || !userId || accountsLoading || !activeAccountId) return;
+    if (authLoading || !userId || accountsLoading) return;
 
     let alive = true;
     const load = async () => {
       setNbLoading(true);
       try {
-        const data = await listNotebookData(userId, activeAccountId);
+        const data = await listNotebookData(userId, notebookAccountId);
         if (!alive) return;
         applyNotebookWorkspaceData(data);
       } finally {
@@ -777,7 +777,7 @@ export default function NotebookPage() {
     authLoading,
     userId,
     accountsLoading,
-    activeAccountId,
+    notebookAccountId,
   ]);
 
   // Free notes por fecha (Supabase)
@@ -794,11 +794,11 @@ export default function NotebookPage() {
 
   useEffect(() => {
     if (planLoading || plan !== "advanced") return;
-    if (authLoading || !userId || accountsLoading || !activeAccountId) return;
+    if (authLoading || !userId || accountsLoading) return;
 
     let alive = true;
     const loadAll = async () => {
-      const rows = await listFreeNotebookNotes(userId, activeAccountId);
+      const rows = await listFreeNotebookNotes(userId, notebookAccountId);
       if (!alive) return;
       setAllFreeNotes(rows);
     };
@@ -807,18 +807,18 @@ export default function NotebookPage() {
     return () => {
       alive = false;
     };
-  }, [planLoading, plan, authLoading, userId, accountsLoading, activeAccountId]);
+  }, [planLoading, plan, authLoading, userId, accountsLoading, notebookAccountId]);
 
   useEffect(() => {
     if (!selectedJournalDate) return;
-    if (authLoading || !userId || accountsLoading || !activeAccountId) return;
+    if (authLoading || !userId || accountsLoading) return;
     if (loadedFreeNotesRef.current[selectedJournalDate]) return;
 
     let alive = true;
     const loadFreeNotes = async () => {
       const content = await getFreeNotebookNote(
         userId,
-        activeAccountId,
+        notebookAccountId,
         selectedJournalDate
       );
       if (!alive) return;
@@ -839,7 +839,7 @@ export default function NotebookPage() {
     return () => {
       alive = false;
     };
-  }, [selectedJournalDate, authLoading, userId, accountsLoading, activeAccountId]);
+  }, [selectedJournalDate, authLoading, userId, accountsLoading, notebookAccountId]);
 
   const todayStr = useMemo(() => toYMD(new Date()), []);
   const currentYear = useMemo(() => new Date().getFullYear(), []);
@@ -960,11 +960,6 @@ export default function NotebookPage() {
     }
   }, [activeSectionPages, activePageId]);
 
-  // AI coach state (para la página seleccionada del journal)
-  const [aiQuestion, setAiQuestion] = useState("");
-  const [aiAnswer, setAiAnswer] = useState<string | null>(null);
-  const [aiLoading, setAiLoading] = useState(false);
-
   const freeNotesByDateFromRows = useMemo(() => {
     const map: Record<string, NotebookEditableContent> = {};
     allFreeNotes.forEach((row) => {
@@ -983,7 +978,6 @@ export default function NotebookPage() {
     (selectedJournalDate && freeNotesByDate[selectedJournalDate]) ||
     (selectedJournalDate && dailyNotebookByDate[selectedJournalDate]) ||
     createNotebookEditableContent();
-  const selectedFreeNotes = selectedFreeNote.content;
   const selectedFreeNoteSurface = describeSurface(
     getNotebookSurfaceMeta(selectedFreeNote.content, selectedFreeNote.ink)
   );
@@ -1019,6 +1013,114 @@ export default function NotebookPage() {
       body: postText,
     },
   ];
+  const sortedEntriesForDay = [...entriesFromNotes].sort((a: any, b: any) => {
+    const aMinutes = parseTimeToMinutes(a?.time);
+    const bMinutes = parseTimeToMinutes(b?.time);
+    if (aMinutes == null && bMinutes == null) return 0;
+    if (aMinutes == null) return 1;
+    if (bMinutes == null) return -1;
+    return aMinutes - bMinutes;
+  });
+  const sortedExitsForDay = [...exitsFromNotes].sort((a: any, b: any) => {
+    const aMinutes = parseTimeToMinutes(a?.time);
+    const bMinutes = parseTimeToMinutes(b?.time);
+    if (aMinutes == null && bMinutes == null) return 0;
+    if (aMinutes == null) return 1;
+    if (bMinutes == null) return -1;
+    return aMinutes - bMinutes;
+  });
+  const firstEntryForDay = sortedEntriesForDay[0] ?? null;
+  const lastExitForDay = sortedExitsForDay[sortedExitsForDay.length - 1] ?? null;
+  const firstEntryMinutes = parseTimeToMinutes(firstEntryForDay?.time);
+  const lastExitMinutes = parseTimeToMinutes(lastExitForDay?.time);
+  const marketWindowMinutes =
+    firstEntryMinutes != null &&
+    lastExitMinutes != null &&
+    lastExitMinutes >= firstEntryMinutes
+      ? lastExitMinutes - firstEntryMinutes
+      : null;
+  const tradedSymbols = Array.from(
+    new Set(
+      [...entriesFromNotes, ...exitsFromNotes]
+        .map((row: any) => String(row?.symbol ?? "").trim().toUpperCase())
+        .filter(Boolean)
+    )
+  );
+  const timelineRows = [...entriesFromNotes, ...exitsFromNotes]
+    .map((row: any, index) => ({
+      id: `${row?.id ?? row?.symbol ?? "row"}-${index}`,
+      type: entriesFromNotes.includes(row) ? "entry" : "exit",
+      symbol: String(row?.symbol ?? "").trim().toUpperCase(),
+      time: String(row?.time ?? "").trim(),
+      quantity: String(row?.quantity ?? "").trim(),
+      side: String(row?.side ?? "").trim(),
+      sortMinutes: parseTimeToMinutes(row?.time),
+    }))
+    .sort((a, b) => {
+      if (a.sortMinutes == null && b.sortMinutes == null) return 0;
+      if (a.sortMinutes == null) return 1;
+      if (b.sortMinutes == null) return -1;
+      return a.sortMinutes - b.sortMinutes;
+    });
+  const dayOutcomeLabel =
+    selectedJournalPnl > 0
+      ? L("Green day", "Día verde")
+      : selectedJournalPnl < 0
+      ? L("Learning day", "Día de aprendizaje")
+      : L("Flat day", "Día flat");
+  const timeInMarketLabel =
+    marketWindowMinutes == null
+      ? L("No full trade window logged", "No hay ventana completa de trade registrada")
+      : marketWindowMinutes >= 60
+      ? L(
+          `${Math.floor(marketWindowMinutes / 60)}h ${marketWindowMinutes % 60}m in market`,
+          `${Math.floor(marketWindowMinutes / 60)}h ${marketWindowMinutes % 60}m en mercado`
+        )
+      : L(`${marketWindowMinutes}m in market`, `${marketWindowMinutes}m en mercado`);
+  const dayBriefItems = [
+    {
+      label: L("Started with", "Empezaste con"),
+      detail: firstEntryForDay
+        ? `${String(firstEntryForDay.symbol ?? "").toUpperCase()}${firstEntryForDay.time ? ` · ${firstEntryForDay.time}` : ""}`
+        : L("No entry fills logged yet", "Todavía no hay fills de entrada"),
+    },
+    {
+      label: L("Closed with", "Cerraste con"),
+      detail: lastExitForDay
+        ? `${String(lastExitForDay.symbol ?? "").toUpperCase()}${lastExitForDay.time ? ` · ${lastExitForDay.time}` : ""}`
+        : L("No exit fills logged yet", "Todavía no hay fills de salida"),
+    },
+    {
+      label: L("Time window", "Ventana del trade"),
+      detail: timeInMarketLabel,
+    },
+    {
+      label: L("Result", "Resultado"),
+      detail: `${selectedJournalPnl > 0 ? "+" : ""}$${selectedJournalPnl.toFixed(2)} · ${dayOutcomeLabel}`,
+    },
+  ];
+  const notebookPrompts = [
+    L(
+      "What changed between your premarket idea and the live trade once you had real price action?",
+      "¿Qué cambió entre tu idea de premarket y el trade en vivo cuando ya tenías acción real del precio?"
+    ),
+    selectedJournalPnl >= 0
+      ? L(
+          "What part of today's execution was repeatable skill and what part might have been market gift?",
+          "¿Qué parte de la ejecución de hoy fue habilidad repetible y qué parte pudo haber sido regalo del mercado?"
+        )
+      : L(
+          "Where did today's damage come from first: setup quality, timing, sizing, or behavior?",
+          "¿De dónde vino primero el daño de hoy: calidad del setup, timing, sizing o comportamiento?"
+        ),
+    L(
+      "Write the one sentence tomorrow's version of you needs to read before the open.",
+      "Escribe la única frase que tu versión de mañana necesita leer antes de la apertura."
+    ),
+  ];
+  const openCoachingHref = selectedJournalDate
+    ? `/performance/ai-coaching?date=${encodeURIComponent(selectedJournalDate)}`
+    : "/performance/ai-coaching";
   const createNotebookSections = useMemo(
     () =>
       createNotebookId
@@ -1045,7 +1147,7 @@ export default function NotebookPage() {
   );
 
   const handleFreeNotesChange = (nextValue: NotebookEditableContent) => {
-    if (!selectedJournalDate || !userId || !activeAccountId) return;
+    if (!selectedJournalDate || !userId) return;
     setFreeNotesSaveState((prev) => ({
       ...prev,
       [selectedJournalDate]: { state: "saving" },
@@ -1064,7 +1166,7 @@ export default function NotebookPage() {
       void (async () => {
         const ok = await upsertFreeNotebookNote(
           userId,
-          activeAccountId,
+          notebookAccountId,
           selectedJournalDate,
           nextValue.content,
           nextValue.ink
@@ -1078,202 +1180,6 @@ export default function NotebookPage() {
         }));
       })();
     }, 400);
-  };
-
-  const handleAskAi = async () => {
-    if (!aiQuestion.trim()) return;
-
-    setAiLoading(true);
-    setAiAnswer(null);
-
-    try {
-      const anyEntry = (selectedJournalEntry as any) ?? {};
-      const notes = parseNotesJson(anyEntry.notes) ?? (anyEntry.notes || {});
-
-      const structuredNotes = {
-        premarket: clampText(stripHtml(
-          notes.premarket ||
-            notes.preMarket ||
-            notes.pre ||
-            anyEntry.premarket ||
-            ""
-        )),
-        live: clampText(stripHtml(
-          notes.live ||
-            notes.session ||
-            notes.during ||
-            anyEntry.live ||
-            ""
-        )),
-        post: clampText(stripHtml(
-          notes.post ||
-            notes.postMarket ||
-            notes.after ||
-            anyEntry.post ||
-            ""
-        )),
-      };
-
-      const notebookNameById = new Map(nbData.notebooks.map((n) => [n.id, n.name]));
-      const sectionNameById = new Map(nbData.sections.map((s) => [s.id, s.name]));
-
-      const journalIndex = entries.flatMap((entry: any) => {
-        const parsed = parseNotesJson(entry?.notes);
-        const dateStr = String(entry?.date || "").slice(0, 10);
-        if (!dateStr) return [];
-
-        const pre = clampText(stripHtml(parsed?.premarket ?? entry?.premarket ?? ""));
-        const live = clampText(stripHtml(parsed?.live ?? entry?.live ?? ""));
-        const post = clampText(stripHtml(parsed?.post ?? entry?.post ?? ""));
-
-        const rows: any[] = [];
-        if (pre) rows.push({ source: "journal", date: dateStr, block: "premarket", text: pre });
-        if (live) rows.push({ source: "journal", date: dateStr, block: "inside", text: live });
-        if (post) rows.push({ source: "journal", date: dateStr, block: "after", text: post });
-        return rows;
-      });
-
-      const freeNotesIndex = (allFreeNotes?.length ? allFreeNotes : []).map((row) => ({
-        source: "free_notes",
-        date: row.entry_date,
-        block: "free",
-        text: clampText(stripHtml(row.content || "")),
-      })).filter((row) => row.text);
-
-      if (
-        selectedJournalDate &&
-        selectedFreeNotes &&
-        !freeNotesIndex.some((n) => n.date === selectedJournalDate)
-      ) {
-        freeNotesIndex.push({
-          source: "free_notes",
-          date: selectedJournalDate,
-          block: "free",
-          text: clampText(stripHtml(selectedFreeNotes)),
-        });
-      }
-
-      const customIndex = nbData.pages.map((p) => ({
-        source: "custom",
-        notebook: notebookNameById.get(p.notebook_id) || "Notebook",
-        section: p.section_id ? sectionNameById.get(p.section_id) || null : null,
-        page: p.title || "Untitled page",
-        text: clampText(stripHtml(p.content || "")),
-      })).filter((row) => row.text);
-
-      const notebookIndex = [
-        ...journalIndex,
-        ...freeNotesIndex,
-        ...customIndex,
-      ];
-
-      const tokens = tokenizeForSearch(aiQuestion);
-      const phrases = extractQuotedPhrases(aiQuestion);
-
-      const searchHits = notebookIndex
-        .map((item) => {
-          const hay = item.text.toLowerCase();
-          let score = 0;
-          for (const phrase of phrases) {
-            if (hay.includes(phrase.toLowerCase())) score += 10;
-          }
-          for (const token of tokens) {
-            if (hay.includes(token)) score += 1;
-          }
-          return { item, score };
-        })
-        .filter((x) => x.score > 0)
-        .sort((a, b) => b.score - a.score)
-        .slice(0, 12)
-        .map(({ item, score }) => {
-          const token = phrases[0] || tokens[0] || "";
-          const snippet = token ? buildSnippet(item.text, token) : item.text.slice(0, 160).trim();
-          let location = "";
-          if (item.source === "journal") {
-            const blockLabel =
-              item.block === "premarket"
-                ? "Premarket"
-                : item.block === "inside"
-                ? "Inside trade"
-                : item.block === "after"
-                ? "After market"
-                : "Notes";
-            location = `Journal ${item.date} · ${blockLabel}`;
-          } else if (item.source === "free_notes") {
-            location = `Journal ${item.date} · Free notebook`;
-          } else {
-            const parts = [
-              `Notebook "${item.notebook}"`,
-              item.section ? `Section "${item.section}"` : null,
-              `Page "${item.page}"`,
-            ].filter(Boolean);
-            location = parts.join(" > ");
-          }
-          return { location, snippet, source: item.source, score };
-        });
-
-      const languageHint = detectLanguage(aiQuestion);
-
-      const session = await supabaseBrowser.auth.getSession();
-      const token = session?.data?.session?.access_token;
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
-      if (token) headers.Authorization = `Bearer ${token}`;
-
-      const res = await fetch("/api/notebook-ai", {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          question: aiQuestion,
-          language: languageHint,
-          notebook: {
-            selectedDate: anyEntry.date || selectedJournalDate || null,
-            selectedNotes: structuredNotes,
-            selectedFreeNotes: clampText(stripHtml(selectedFreeNotes || "")),
-            selectedTags: combinedTags,
-            activePage: (() => {
-              const page = nbData.pages.find((p) => p.id === activePageId);
-              if (!page) return null;
-              return {
-                notebook: notebookNameById.get(page.notebook_id) || "Notebook",
-                section: page.section_id ? sectionNameById.get(page.section_id) || null : null,
-                page: page.title || "Untitled page",
-                text: clampText(stripHtml(page.content || "")),
-              };
-            })(),
-            indexStats: {
-              journalBlocks: journalIndex.length,
-              freeNotesBlocks: freeNotesIndex.length,
-              customPages: customIndex.length,
-              totalBlocks: notebookIndex.length,
-            },
-            searchHits,
-          },
-        }),
-      });
-
-      if (!res.ok) {
-        throw new Error("Bad response");
-      }
-
-      const data = await res.json();
-      setAiAnswer(
-        data.answer ??
-          L(
-            "The AI coach did not return a message. Please try again.",
-            "El coach AI no devolvió un mensaje. Intenta de nuevo."
-          )
-      );
-    } catch (err) {
-      console.error(err);
-      setAiAnswer(
-        L(
-          "There was an error talking to the AI coach. Please try again in a moment.",
-          "Hubo un error al hablar con el coach AI. Intenta de nuevo en un momento."
-        )
-      );
-    } finally {
-      setAiLoading(false);
-    }
   };
 
   // acciones para custom notebooks (Supabase)
@@ -1342,7 +1248,7 @@ export default function NotebookPage() {
   };
 
   const handleCreateNotebookItem = async () => {
-    if (!userId || !activeAccountId || !createMode) return;
+    if (!userId || !createMode) return;
 
     const trimmed = createName.trim();
     const untitledNotebook = L("Untitled notebook", "Notebook sin título");
@@ -1365,7 +1271,7 @@ export default function NotebookPage() {
       if (createMode === "book") {
         const created = await createNotebookBook(
           userId,
-          activeAccountId,
+          notebookAccountId,
           trimmed || untitledNotebook
         );
         if (!created) {
@@ -1644,13 +1550,16 @@ export default function NotebookPage() {
     pageSaveTimers.current[id] = setTimeout(() => {
       void (async () => {
         try {
-          await updateNotebookPage(userId, id, {
+          const ok = await updateNotebookPage(userId, id, {
             title: nextPage.title,
             content: nextPage.content,
             section_id: nextPage.section_id ?? null,
             notebook_id: nextPage.notebook_id,
             ink: nextPage.ink,
           });
+          if (!ok) {
+            throw new Error("Notebook page save failed");
+          }
           setPageSaveState((prev) => ({
             ...prev,
             [id]: { state: "saved", ts: Date.now() },
@@ -2158,58 +2067,118 @@ export default function NotebookPage() {
                             </div>
                           </div>
 
-                          <div className="rounded-3xl border border-emerald-500/40 bg-linear-to-br from-slate-950 via-slate-950 to-emerald-900/30 p-4 md:p-5 space-y-3">
+                          <div className="rounded-3xl border border-emerald-500/40 bg-linear-to-br from-slate-950 via-slate-950 to-emerald-900/30 p-4 md:p-5 space-y-4">
                             <div>
                               <p className="text-[11px] uppercase tracking-[0.18em] text-emerald-300">
-                                {L("AI coach", "Coach AI")}
+                                {L("Day brief", "Resumen del día")}
                               </p>
                               <h3 className="mt-1 text-lg font-semibold text-emerald-50">
                                 {L(
-                                  "Ask about this day and your notebook",
-                                  "Pregunta sobre este día y tu notebook"
+                                  "Everything you need before you start writing",
+                                  "Todo lo que necesitas antes de empezar a escribir"
                                 )}
                               </h3>
                               <p className="mt-1 text-sm leading-6 text-emerald-50/80">
                                 {L(
-                                  "The AI can summarize patterns, locate notes, and help you connect your journal blocks with your free-form notebook.",
-                                  "El AI puede resumir patrones, ubicar notas y ayudarte a conectar los bloques del journal con tu notebook libre."
+                                  "Notebook is your thinking layer. Keep the facts visible here, write the meaning in your note, and move to AI Coaching only when you want deeper pattern analysis.",
+                                  "Notebook es tu capa de pensamiento. Mantén los hechos visibles aquí, escribe el significado en tu nota y ve a AI Coaching solo cuando quieras análisis más profundo de patrones."
                                 )}
                               </p>
                             </div>
 
-                            <textarea
-                              value={aiQuestion}
-                              onChange={(e) => setAiQuestion(e.target.value)}
-                              placeholder={L(
-                                "Example: What pattern keeps repeating in my execution on days like this one?",
-                                "Ejemplo: ¿Qué patrón se sigue repitiendo en mi ejecución en días como este?"
-                              )}
-                              className="w-full rounded-2xl border border-emerald-500/40 bg-slate-950/80 px-3 py-2 text-xs text-slate-100 resize-y min-h-[110px] focus:outline-none focus:ring-1 focus:ring-emerald-400/70"
-                            />
+                            <div className="grid gap-3 md:grid-cols-2">
+                              {dayBriefItems.map((item) => (
+                                <div
+                                  key={item.label}
+                                  className="rounded-2xl border border-emerald-500/20 bg-slate-950/60 p-3"
+                                >
+                                  <p className="text-[11px] uppercase tracking-[0.18em] text-emerald-200/80">
+                                    {item.label}
+                                  </p>
+                                  <p className="mt-2 text-sm font-medium leading-6 text-emerald-50">
+                                    {item.detail}
+                                  </p>
+                                </div>
+                              ))}
+                            </div>
 
-                            <button
-                              type="button"
-                              onClick={handleAskAi}
-                              disabled={aiLoading || !aiQuestion.trim()}
-                              className="inline-flex items-center justify-center rounded-full bg-emerald-500 px-3 py-1.5 text-xs font-semibold text-slate-950 hover:bg-emerald-400 disabled:opacity-50 disabled:cursor-not-allowed transition"
-                            >
-                              {aiLoading
-                                ? L("Thinking…", "Pensando…")
-                                : L("Ask AI about this day", "Preguntar al AI sobre este día")}
-                            </button>
-
-                            {aiAnswer ? (
-                              <div className="rounded-2xl border border-emerald-500/40 bg-slate-950/80 px-3 py-3 text-xs leading-6 text-emerald-50 whitespace-pre-wrap">
-                                {aiAnswer}
+                            <div className="rounded-2xl border border-white/10 bg-slate-950/70 p-3">
+                              <div className="flex items-center justify-between gap-3">
+                                <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
+                                  {L("Trade timeline", "Timeline del trade")}
+                                </p>
+                                <p className="text-[11px] text-slate-400">
+                                  {tradedSymbols.length > 0
+                                    ? tradedSymbols.join(", ")
+                                    : L("No symbols yet", "Aún sin símbolos")}
+                                </p>
                               </div>
-                            ) : (
-                              <div className="rounded-2xl border border-dashed border-emerald-500/30 bg-slate-950/40 px-3 py-3 text-xs leading-6 text-emerald-50/70">
-                                {L(
-                                  "Ask a direct question and the AI will answer only with the notebook and journal context available for this day.",
-                                  "Haz una pregunta directa y el AI responderá solo con el contexto del notebook y del journal disponible para este día."
+                              <div className="mt-3 space-y-2">
+                                {timelineRows.length > 0 ? (
+                                  timelineRows.slice(0, 6).map((row) => (
+                                    <div
+                                      key={row.id}
+                                      className="flex items-start justify-between gap-3 rounded-xl border border-slate-800 bg-slate-900/60 px-3 py-2"
+                                    >
+                                      <div>
+                                        <p className="text-xs font-semibold text-slate-100">
+                                          {row.type === "entry"
+                                            ? L("Entry", "Entrada")
+                                            : L("Exit", "Salida")}{" "}
+                                          · {row.symbol || L("No symbol", "Sin símbolo")}
+                                        </p>
+                                        <p className="mt-1 text-[11px] text-slate-400">
+                                          {[row.side, row.quantity ? `${row.quantity} ${L("qty", "cant.")}` : ""]
+                                            .filter(Boolean)
+                                            .join(" · ")}
+                                        </p>
+                                      </div>
+                                      <span className="text-[11px] font-medium text-slate-300">
+                                        {row.time || "—"}
+                                      </span>
+                                    </div>
+                                  ))
+                                ) : (
+                                  <p className="text-xs leading-6 text-slate-400">
+                                    {L(
+                                      "No trade timeline yet. As you log entries and exits in Journal, this day summary becomes more useful.",
+                                      "Todavía no hay timeline de trades. A medida que registres entradas y salidas en Journal, este resumen del día se vuelve más útil."
+                                    )}
+                                  </p>
                                 )}
                               </div>
-                            )}
+                            </div>
+
+                            <div className="rounded-2xl border border-sky-400/20 bg-sky-500/10 p-3">
+                              <p className="text-[11px] uppercase tracking-[0.18em] text-sky-200">
+                                {L("Write from here", "Escribe desde aquí")}
+                              </p>
+                              <div className="mt-3 space-y-2">
+                                {notebookPrompts.map((prompt) => (
+                                  <div
+                                    key={prompt}
+                                    className="rounded-xl border border-sky-400/20 bg-slate-950/60 px-3 py-2 text-xs leading-6 text-sky-50"
+                                  >
+                                    {prompt}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Link
+                                href={openCoachingHref}
+                                className="inline-flex items-center justify-center rounded-full bg-emerald-500 px-3 py-1.5 text-xs font-semibold text-slate-950 hover:bg-emerald-400 transition"
+                              >
+                                {L("Open full coaching", "Abrir coaching completo")}
+                              </Link>
+                              <Link
+                                href={`/journal/${(selectedJournalEntry as any).date}`}
+                                className="inline-flex items-center justify-center rounded-full border border-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:border-emerald-400/50 hover:text-emerald-100 transition"
+                              >
+                                {L("Return to journal execution", "Volver a la ejecución del journal")}
+                              </Link>
+                            </div>
                           </div>
                         </div>
                       </>

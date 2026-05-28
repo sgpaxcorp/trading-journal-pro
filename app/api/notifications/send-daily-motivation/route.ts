@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { requireCronSecret } from "@/lib/cronAuth";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 
 export const runtime = "nodejs";
@@ -12,6 +13,7 @@ type PushRow = {
 
 type MotivationRow = {
   id: string;
+  slug: string | null;
   locale: string;
   title: string | null;
   body: string;
@@ -24,7 +26,8 @@ type MotivationRow = {
 
 const NY_TZ = "America/New_York";
 const MOTIVATION_RULE_KEY = "daily_motivation";
-const DEFAULT_HOUR_NY = 13;
+const DEFAULT_HOUR_NY = 8;
+const DEFAULT_MINUTE_NY = 30;
 
 function isExpoPushToken(token: string) {
   return token.startsWith("ExponentPushToken") || token.startsWith("ExpoPushToken");
@@ -80,20 +83,12 @@ function getNyDayOfYear(now = new Date()) {
   return Math.floor((currentUtc - startUtc) / 86400000) + 1;
 }
 
-function shouldSendNowNY(targetHour: number, now = new Date()) {
-  const { hour } = getNewYorkParts(now);
-  return hour === targetHour;
-}
-
-function tryDecodeUserId(token: string) {
-  try {
-    const [, payload] = token.split(".");
-    if (!payload) return null;
-    const decoded = JSON.parse(Buffer.from(payload, "base64").toString("utf8"));
-    return typeof decoded?.sub === "string" ? decoded.sub : null;
-  } catch {
-    return null;
-  }
+function shouldSendNowNY(targetHour: number, targetMinute: number, now = new Date()) {
+  const { hour, minute } = getNewYorkParts(now);
+  const currentMinuteOfDay = hour * 60 + minute;
+  const targetMinuteOfDay = targetHour * 60 + targetMinute;
+  const diff = currentMinuteOfDay - targetMinuteOfDay;
+  return diff >= 0 && diff < 60;
 }
 
 function fallbackMessageForWeekday(weekday: string, locale: string | null) {
@@ -211,17 +206,23 @@ async function ensureRule(userId: string, title: string, message: string) {
   return String((createdRule as any)?.id || "");
 }
 
-async function getMotivationHourNy() {
+async function getMotivationScheduleNy() {
   const { data, error } = await supabaseAdmin
     .from("admin_settings")
     .select("value_json")
     .eq("key", "daily_motivation_schedule")
     .maybeSingle();
 
-  if (error) return DEFAULT_HOUR_NY;
+  if (error) return { hour: DEFAULT_HOUR_NY, minute: DEFAULT_MINUTE_NY };
   const hour = Number((data as any)?.value_json?.hour_ny ?? DEFAULT_HOUR_NY);
-  if (!Number.isInteger(hour) || hour < 0 || hour > 23) return DEFAULT_HOUR_NY;
-  return hour;
+  const minute = Number((data as any)?.value_json?.minute_ny ?? DEFAULT_MINUTE_NY);
+  if (!Number.isInteger(hour) || hour < 0 || hour > 23) {
+    return { hour: DEFAULT_HOUR_NY, minute: DEFAULT_MINUTE_NY };
+  }
+  if (!Number.isInteger(minute) || minute < 0 || minute > 59) {
+    return { hour, minute: DEFAULT_MINUTE_NY };
+  }
+  return { hour, minute };
 }
 
 async function insertInAppEvent(params: {
@@ -278,6 +279,46 @@ async function insertInAppEvent(params: {
   }
 }
 
+async function ensureFallbackMessage(localeCode: string, weekday: string, targetHour: number) {
+  const fallback = fallbackMessageForWeekday(weekday, localeCode);
+  const isWeekendMessage = weekday === "fri" || weekday === "sat" || weekday === "sun";
+  const slug = isWeekendMessage ? `motivation-${localeCode}-${weekday}` : `motivation-${localeCode}-weekday`;
+
+  const { data, error } = await supabaseAdmin
+    .from("motivational_messages")
+    .upsert(
+      {
+        slug,
+        locale: localeCode,
+        title: fallback.title,
+        body: fallback.body,
+        weekday: isWeekendMessage ? weekday : null,
+        day_of_year: null,
+        audience: "all",
+        delivery_hour_ny: targetHour,
+        active: true,
+        push_enabled: true,
+        inapp_enabled: true,
+      },
+      { onConflict: "slug" }
+    )
+    .select("id, slug, locale, title, body, weekday, day_of_year, delivery_hour_ny, push_enabled, inapp_enabled")
+    .single();
+
+  if (error) throw new Error(error.message);
+  return data as MotivationRow;
+}
+
+function chooseMessageFromPool(pool: MotivationRow[], weekday: string, dayOfYear: number) {
+  const exactDay = pool.find((row) => row.day_of_year === dayOfYear);
+  if (exactDay) return exactDay;
+
+  const weekdaySpecific = pool.find((row) => row.weekday === weekday);
+  if (weekdaySpecific) return weekdaySpecific;
+
+  return pool.find((row) => !row.weekday && row.day_of_year == null) ?? null;
+}
+
 async function fetchMessage(locale: string | null, targetHour: number, now = new Date()) {
   const dayOfYear = getNyDayOfYear(now);
   const weekday = getNewYorkParts(now).weekday;
@@ -285,42 +326,29 @@ async function fetchMessage(locale: string | null, targetHour: number, now = new
 
   const { data, error } = await supabaseAdmin
     .from("motivational_messages")
-    .select("id, locale, title, body, weekday, day_of_year, delivery_hour_ny, push_enabled, inapp_enabled")
+    .select("id, slug, locale, title, body, weekday, day_of_year, delivery_hour_ny, push_enabled, inapp_enabled")
     .eq("active", true)
     .in("locale", [localeCode, "en"]);
 
   if (error) throw new Error(error.message);
 
-  const rows = ((data ?? []) as MotivationRow[]).filter((row) => {
-    const hour = typeof row.delivery_hour_ny === "number" ? row.delivery_hour_ny : DEFAULT_HOUR_NY;
+  const rows = (data ?? []) as MotivationRow[];
+  const exactHourRows = rows.filter((row) => {
+    const hour = typeof row.delivery_hour_ny === "number" ? row.delivery_hour_ny : targetHour;
     return hour === targetHour;
   });
+  const candidateRows = exactHourRows.length ? exactHourRows : rows;
 
-  const localeRows = rows.filter((row) => row.locale === localeCode);
-  const fallbackRows = rows.filter((row) => row.locale === "en");
-  const pool = localeRows.length ? localeRows : fallbackRows;
+  const localeRows = candidateRows.filter((row) => row.locale === localeCode);
+  const fallbackRows = candidateRows.filter((row) => row.locale === "en");
 
-  const weekdaySpecific = pool.find((row) => row.weekday === weekday);
-  if (weekdaySpecific) return weekdaySpecific;
+  const localized = chooseMessageFromPool(localeRows, weekday, dayOfYear);
+  if (localized) return localized;
 
-  const exactDay = pool.find((row) => row.day_of_year === dayOfYear);
-  if (exactDay) return exactDay;
+  const english = chooseMessageFromPool(fallbackRows, weekday, dayOfYear);
+  if (english) return english;
 
-  const generic = pool.find((row) => !row.weekday && row.day_of_year == null);
-  if (generic) return generic;
-
-  const fallback = fallbackMessageForWeekday(weekday, localeCode);
-  return {
-    id: `fallback-${localeCode}-${weekday}-${dayOfYear}`,
-    locale: localeCode,
-    title: fallback.title,
-    body: fallback.body,
-    weekday: weekday,
-    day_of_year: dayOfYear,
-    delivery_hour_ny: DEFAULT_HOUR_NY,
-    push_enabled: true,
-    inapp_enabled: true,
-  } satisfies MotivationRow;
+  return ensureFallbackMessage(localeCode, weekday, targetHour);
 }
 
 async function handleRequest(req: NextRequest) {
@@ -328,35 +356,16 @@ async function handleRequest(req: NextRequest) {
     const url = new URL(req.url);
     const forceParam = url.searchParams.get("force");
     const force = forceParam === "1" || forceParam === "true";
+    const cronAuth = requireCronSecret(req);
+    if (!cronAuth.ok) return cronAuth.response;
+
     const body = force ? await req.json().catch(() => ({})) : {};
+    const userId = force && typeof (body as any)?.userId === "string" ? String((body as any).userId).trim() : null;
 
-    const secret = process.env.CRON_SECRET || "";
-    const authHeader = req.headers.get("authorization") || "";
-    const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
-    const vercelCronHeader = req.headers.get("x-vercel-cron");
-    const isVercelCron = Boolean(vercelCronHeader) && vercelCronHeader !== "false";
-    const hasValidSecret = secret && token === secret;
-    let userId: string | null = null;
-
-    if (force && token && !hasValidSecret) {
-      const { data: authData, error: authErr } = await supabaseAdmin.auth.getUser(token);
-      if (!authErr && authData?.user?.id) {
-        userId = authData.user.id;
-      } else {
-        userId = tryDecodeUserId(token);
-      }
-    }
-
-    if (!force && !isVercelCron && !hasValidSecret) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-    if (force && !isVercelCron && !hasValidSecret && !userId) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const targetHour = await getMotivationHourNy();
-    if (!force && !shouldSendNowNY(targetHour)) {
-      return NextResponse.json({ ok: true, sent: 0, detail: `Outside ${targetHour}:00 ET window.` });
+    const targetSchedule = await getMotivationScheduleNy();
+    if (!force && !shouldSendNowNY(targetSchedule.hour, targetSchedule.minute)) {
+      const label = `${String(targetSchedule.hour).padStart(2, "0")}:${String(targetSchedule.minute).padStart(2, "0")} ET`;
+      return NextResponse.json({ ok: true, sent: 0, detail: `Outside ${label} delivery window.` });
     }
 
     let query = supabaseAdmin
@@ -385,7 +394,7 @@ async function handleRequest(req: NextRequest) {
 
     for (const row of rows) {
       if (!row.user_id) continue;
-      const motivation = await fetchMessage(row.locale, targetHour);
+      const motivation = await fetchMessage(row.locale, targetSchedule.hour);
       const title = String(motivation.title || "Neuro Trader Journal");
       const bodyText = String(motivation.body || "").trim();
       if (!bodyText) continue;

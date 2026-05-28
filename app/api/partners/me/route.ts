@@ -7,13 +7,21 @@ import {
   getPartnerDashboard,
   getPartnerProfile,
 } from "@/lib/partnerProgram";
+import { getClientIp, rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
 
 function resolveAppUrl(req: NextRequest) {
-  const origin = req.headers.get("origin") ?? "";
   const envUrl = (process.env.NEXT_PUBLIC_APP_URL || "").trim();
-  if (origin.startsWith("http://") || origin.startsWith("https://")) return origin;
   if (envUrl.startsWith("http://") || envUrl.startsWith("https://")) return envUrl;
-  return "http://localhost:3000";
+  return req.nextUrl.origin;
+}
+
+function clampText(value: unknown, maxLength: number) {
+  const text = String(value ?? "").trim();
+  return text.length > maxLength ? text.slice(0, maxLength) : text;
+}
+
+function isEmail(value: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 }
 
 export async function GET(req: NextRequest) {
@@ -63,12 +71,23 @@ export async function POST(req: NextRequest) {
     const auth = await getAuthUser(req);
     if (!auth?.userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
+    const limiter = await rateLimit(`partner-profile:${auth.userId}:${getClientIp(req)}`, {
+      limit: 6,
+      windowMs: 10 * 60_000,
+    });
+    if (!limiter.allowed) {
+      return NextResponse.json(
+        { error: "Too many partner profile updates. Please wait a moment." },
+        { status: 429, headers: rateLimitHeaders(limiter) }
+      );
+    }
+
     const body = await req.json().catch(() => ({}));
-    const legalName = String(body?.legalName ?? "").trim();
-    const agreementName = String(body?.agreementName ?? "").trim();
+    const legalName = clampText(body?.legalName, 120);
+    const agreementName = clampText(body?.agreementName, 120);
     const agreementAccepted = Boolean(body?.agreementAccepted);
     const payoutPreference = String(body?.payoutPreference ?? "credit").trim() === "cash" ? "cash" : "credit";
-    const payoutEmailRaw = String(body?.payoutEmail ?? "").trim().toLowerCase();
+    const payoutEmailRaw = clampText(body?.payoutEmail, 254).toLowerCase();
     const payoutEmail = payoutEmailRaw || auth.email || null;
 
     if (!legalName || legalName.length < 3) {
@@ -82,6 +101,9 @@ export async function POST(req: NextRequest) {
     }
     if (payoutPreference === "cash" && !payoutEmail) {
       return NextResponse.json({ error: "Payout email is required for cash payouts." }, { status: 400 });
+    }
+    if (payoutPreference === "cash" && payoutEmail && !isEmail(payoutEmail)) {
+      return NextResponse.json({ error: "Enter a valid payout email." }, { status: 400 });
     }
 
     const existing = await getPartnerProfile(auth.userId);

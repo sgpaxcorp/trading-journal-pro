@@ -374,7 +374,7 @@ begin
       when xp_total >= 1000 then 'Silver'
       else 'Bronze'
     end,
-    coalesce((select pg.badges from public.profile_gamification pg where pg.user_id = uid), '[]'::jsonb),
+    coalesce((select to_jsonb(pg.badges) from public.profile_gamification pg where pg.user_id = uid), '[]'::jsonb),
     now()
   )
   on conflict (user_id) do update set

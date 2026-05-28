@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
 import { getOptionFlowBetaApiPayload, resolveOptionFlowLang } from "@/lib/optionFlowBeta";
-import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 import { getAuthUser } from "@/lib/authServer";
 import { getClientIp, rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
+import { isSmartToolsOwner } from "@/lib/smartToolsAccess";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -11,23 +11,9 @@ export const dynamic = "force-dynamic";
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const DEFAULT_MODEL = process.env.OPENAI_OPTIONFLOW_CHAT_MODEL || process.env.OPENAI_OPTIONFLOW_MODEL || "gpt-4.1";
 
-const ENTITLEMENT_KEY = "option_flow";
 const BYPASS_ENTITLEMENT =
   String(process.env.OPTIONFLOW_BYPASS_ENTITLEMENT ?? "").toLowerCase() === "true" ||
   String(process.env.OPTIONFLOW_BYPASS_ENTITLEMENT ?? "") === "1";
-
-async function requireEntitlement(userId: string): Promise<boolean> {
-  if (!userId) return false;
-  const { data, error } = await supabaseAdmin
-    .from("user_entitlements")
-    .select("status")
-    .eq("user_id", userId)
-    .eq("entitlement_key", ENTITLEMENT_KEY)
-    .in("status", ["active", "trialing"])
-    .limit(1);
-  if (error) return false;
-  return (data ?? []).length > 0;
-}
 
 function safeRows(rows: any[], limit = 160) {
   if (!Array.isArray(rows)) return [];
@@ -41,7 +27,7 @@ export async function POST(req: NextRequest) {
   }
 
   if (!BYPASS_ENTITLEMENT) {
-    const hasEnt = await requireEntitlement(auth.userId);
+    const hasEnt = await isSmartToolsOwner(auth);
     if (!hasEnt) {
       return NextResponse.json(
         getOptionFlowBetaApiPayload(resolveOptionFlowLang(req.headers.get("accept-language"))),

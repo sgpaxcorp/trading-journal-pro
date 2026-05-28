@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { notifyGoalAchievement } from "@/lib/goalAchievementNotifications";
+import { requireCronSecret } from "@/lib/cronAuth";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 
 export const runtime = "nodejs";
@@ -26,24 +27,9 @@ async function handleRequest(req: NextRequest) {
     const forceParam = url.searchParams.get("force");
     const force = forceParam === "1" || forceParam === "true";
 
-    const secret = process.env.CRON_SECRET || "";
-    const authHeader = req.headers.get("authorization") || "";
-    const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
-    const vercelCronHeader = req.headers.get("x-vercel-cron");
-    const isVercelCron = Boolean(vercelCronHeader) && vercelCronHeader !== "false";
-    const hasValidSecret = Boolean(secret) && token === secret;
-    let forceUserId: string | null = null;
-
-    if (force && token && !hasValidSecret) {
-      const { data: authData, error: authErr } = await supabaseAdmin.auth.getUser(token);
-      if (!authErr && authData?.user?.id) {
-        forceUserId = authData.user.id;
-      }
-    }
-
-    if (!isVercelCron && !hasValidSecret && !forceUserId) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const cronAuth = requireCronSecret(req);
+    if (!cronAuth.ok) return cronAuth.response;
+    const forceUserId = url.searchParams.get("userId");
 
     const nyDate = getNyDateString();
 
@@ -62,7 +48,9 @@ async function handleRequest(req: NextRequest) {
       return NextResponse.json({ error: snapError.message }, { status: 500 });
     }
 
-    const userIds = Array.from(new Set((snapshots ?? []).map((row: any) => String(row?.user_id ?? "")).filter(Boolean)));
+    const userIds: string[] = Array.from(
+      new Set<string>((snapshots ?? []).map((row: any) => String(row?.user_id ?? "")).filter(Boolean))
+    );
     if (userIds.length === 0) {
       return NextResponse.json({ ok: true, sent: 0, inAppInserted: 0, detail: "No goal-met users today." });
     }

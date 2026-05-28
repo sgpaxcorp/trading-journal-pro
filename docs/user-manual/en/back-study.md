@@ -9,18 +9,19 @@
 
 ## What Back-Study is now
 Back-Study is no longer just a chart replay page. It is a trade review workspace that combines:
-1. Chart replay from your journal entries and exits.
-2. Deterministic execution audit from imported broker order history.
-3. Process compliance against checklist and Growth Plan rules.
-4. Direct handoff to AI Coach with the selected trade context.
+1. Round-trip trade reconstruction from your journal entries and exits.
+2. Chart replay for the selected trade.
+3. Deterministic execution audit from imported broker order history.
+4. Process compliance against checklist and Growth Plan rules.
+5. Direct handoff to AI Coach with the selected trade and audit context.
 
 ## Trade review mode
 ### What appears on the page
 1. Session selector.
-2. Trade selector for the selected day.
+2. Trade selector for the selected day. If you traded the same symbol multiple times, each round trip appears separately.
 3. Timeframe, history range, and time mode controls.
 4. Replay charts for underlying and, when available, the contract used.
-5. For `Advanced`, execution-audit summary for the selected trade.
+5. For `Advanced`, execution-audit summary filtered to the selected trade window when entry/exit times are available.
 6. For `Advanced`, trade sequence from broker events.
 7. For `Advanced`, process review and deterministic insights.
 8. For `Advanced`, raw execution evidence.
@@ -39,6 +40,8 @@ Back-Study is no longer just a chart replay page. It is a trade review workspace
 The chart shows context. The audit shows execution truth.
 
 If both disagree, trust the broker audit first.
+
+In `Trade review`, the audit uses the selected trade window with a buffer around entry and exit. The replay chart can be viewed in local time or market time, but the broker audit window is calculated in market/source time so the execution evidence stays consistent. `Audit workbench` remains the broader full-day instrument audit.
 
 ## Audit workbench mode
 Use `Audit workbench` when you want a broader deterministic analysis by date and instrument, outside the selected replay flow.
@@ -59,4 +62,4 @@ This mode is useful when:
 - Use `Trade review` after each meaningful trade or at least weekly.
 - Use `Audit workbench` when a trade feels suspicious, messy, or execution-heavy.
 - Treat missing contract data as a proxy view, not exact truth.
-- Use AI Coach only after reviewing both replay and audit context.
+- Use AI Coach after reviewing both replay and audit context. When opened from Back-Study, the coach receives the selected trade, chart window, journal details, and execution audit when available.
