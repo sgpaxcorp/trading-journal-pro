@@ -703,13 +703,13 @@ export default function BalanceChartPage() {
         {!plan ? (
           <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5 text-sm text-slate-300">
             {L(
-              "No Growth Plan found yet (table:",
-              "Aún no hay un Growth Plan (tabla:"
+              "No Trading Business Plan found yet (table:",
+              "Aún no hay un Plan de Empresa de Trading (tabla:"
             )}{" "}
             <span className="text-slate-100 font-semibold">growth_plans</span>).{" "}
             {L("Create one in", "Crea uno en")}{" "}
             <Link className="text-emerald-300 hover:text-emerald-200 underline" href="/growth-plan">
-              {L("Growth Plan Wizard", "Growth Plan Wizard")}
+              {L("Trading Business Plan Wizard", "Asistente de Plan de Empresa de Trading")}
             </Link>
             .
           </div>

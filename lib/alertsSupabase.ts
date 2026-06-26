@@ -755,8 +755,8 @@ export async function syncGrowthPlanProtectionRules(
       desired.push({
         key: "growth_plan_max_loss",
         trigger_type: "MAX_LOSS",
-        title: "Growth Plan max loss guardrail",
-        message: "Your Growth Plan max daily loss has been hit. Stop trading, protect capital, and journal the decision before another entry.",
+        title: "Trading Business Plan max loss guardrail",
+        message: "Your Trading Business Plan max daily loss has been hit. Stop trading, protect capital, and record the decision before another entry.",
         severity: "critical",
         channels: ["popup", "inapp", "voice"],
         kind: "alarm",
@@ -775,8 +775,8 @@ export async function syncGrowthPlanProtectionRules(
       desired.push({
         key: "growth_plan_daily_goal",
         trigger_type: "DAILY_GOAL",
-        title: "Growth Plan daily goal reached",
-        message: "Your planned daily goal is reached. Protect the win, stop forcing trades, and journal what worked.",
+        title: "Trading Business Plan daily goal reached",
+        message: "Your planned daily goal is reached. Protect the win, stop forcing trades, and record what worked.",
         severity: "success",
         channels: ["popup", "inapp"],
         kind: "alarm",

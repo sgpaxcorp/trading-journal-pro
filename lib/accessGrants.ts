@@ -19,9 +19,7 @@ export type AccessGrantKey =
   | "page_notebook"
   | "page_back_study"
   | "page_rules_alarms"
-  | "page_challenges"
-  | "page_forum"
-  | "page_global_ranking";
+  | "page_forum";
 
 export type AccessGrantDefinition = {
   key: AccessGrantKey;
@@ -60,10 +58,10 @@ export const ACCESS_GRANTS: AccessGrantDefinition[] = [
   {
     key: "page_dashboard",
     group: "core",
-    label: { en: "Dashboard", es: "Dashboard" },
+    label: { en: "Business Center", es: "Centro Empresarial" },
     description: {
-      en: "Dashboard and account overview.",
-      es: "Dashboard y visión general de la cuenta.",
+      en: "Business center and account overview.",
+      es: "Centro empresarial y visión general de la cuenta.",
     },
     primaryPath: "/dashboard",
     paths: ["/dashboard"],
@@ -71,10 +69,10 @@ export const ACCESS_GRANTS: AccessGrantDefinition[] = [
   {
     key: "page_growth_plan",
     group: "core",
-    label: { en: "Growth Plan", es: "Growth Plan" },
+    label: { en: "Trading Business Plan", es: "Plan de Empresa de Trading" },
     description: {
-      en: "Growth plan and checkpoint planning.",
-      es: "Growth plan y planificación de checkpoints.",
+      en: "Trading Business Plan and checkpoint planning.",
+      es: "Plan de Empresa de Trading y planificación de checkpoints.",
     },
     primaryPath: "/growth-plan",
     paths: ["/growth-plan"],
@@ -82,10 +80,10 @@ export const ACCESS_GRANTS: AccessGrantDefinition[] = [
   {
     key: "page_journal",
     group: "core",
-    label: { en: "Daily Journal", es: "Daily Journal" },
+    label: { en: "Execution Journal", es: "Registro de Ejecución" },
     description: {
-      en: "Journal planning, in-trade logging, and after-trade review.",
-      es: "Planificación del journal, registro en-trade y revisión post-trade.",
+      en: "Premarket planning, in-trade logging, and after-trade execution review.",
+      es: "Planificación premarket, registro en-trade y revisión de ejecución post-trade.",
     },
     primaryPath: "/journal",
     paths: ["/journal"],
@@ -126,7 +124,7 @@ export const ACCESS_GRANTS: AccessGrantDefinition[] = [
   {
     key: "page_analytics",
     group: "performance",
-    label: { en: "Analytics", es: "Analytics" },
+    label: { en: "Business Analytics", es: "Analítica Empresarial" },
     description: {
       en: "Statistics, charts, and plan analytics pages.",
       es: "Estadísticas, charts y páginas de analytics del plan.",
@@ -142,7 +140,7 @@ export const ACCESS_GRANTS: AccessGrantDefinition[] = [
   {
     key: "page_ai_coaching",
     group: "performance",
-    label: { en: "AI Coaching", es: "AI Coaching" },
+    label: { en: "Business AI Coaching", es: "Coach Empresarial IA" },
     description: {
       en: "AI coaching and review workflow.",
       es: "Coaching con IA y flujo de revisión.",
@@ -177,8 +175,8 @@ export const ACCESS_GRANTS: AccessGrantDefinition[] = [
     group: "addons",
     label: { en: "Neuro Analysis", es: "Neuro Analysis" },
     description: {
-      en: "CFA-style equity research, Buffett framework, projections, and virtual allocation.",
-      es: "Research de acciones tipo CFA, framework Buffett, proyecciones y allocation virtual.",
+      en: "Company intelligence, projections, and virtual allocation simulation.",
+      es: "Inteligencia de compañías, proyecciones y simulación de allocation virtual.",
     },
     primaryPath: "/neuro-analysis",
     paths: ["/neuro-analysis"],
@@ -186,7 +184,7 @@ export const ACCESS_GRANTS: AccessGrantDefinition[] = [
   {
     key: "page_notebook",
     group: "tools",
-    label: { en: "Notebook", es: "Notebook" },
+    label: { en: "Business Notebook", es: "Notebook Empresarial" },
     description: {
       en: "Freeform notes and research notebook.",
       es: "Notas libres y notebook de research.",
@@ -197,7 +195,7 @@ export const ACCESS_GRANTS: AccessGrantDefinition[] = [
   {
     key: "page_back_study",
     group: "tools",
-    label: { en: "Back-Study", es: "Back-Study" },
+    label: { en: "Strategy Review Lab", es: "Laboratorio de Revisión" },
     description: {
       en: "Back-study and replay workflows.",
       es: "Back-study y flujos de replay.",
@@ -208,24 +206,13 @@ export const ACCESS_GRANTS: AccessGrantDefinition[] = [
   {
     key: "page_rules_alarms",
     group: "tools",
-    label: { en: "Trading Protection System", es: "Sistema de protección de trading" },
+    label: { en: "Business Protection System", es: "Sistema de Protección Empresarial" },
     description: {
-      en: "Critical alarms and quiet routine checks tied to the user's trading plan.",
-      es: "Alarmas críticas y chequeos de rutina conectados al plan de trading del usuario.",
+      en: "Critical alarms and quiet routine checks tied to the user's trading business plan.",
+      es: "Alarmas críticas y chequeos de rutina conectados al plan de empresa de trading del usuario.",
     },
     primaryPath: "/rules-alarms/alarms",
     paths: ["/rules-alarms/alarms", "/rules-alarms/reminders"],
-  },
-  {
-    key: "page_challenges",
-    group: "community",
-    label: { en: "Challenges", es: "Challenges" },
-    description: {
-      en: "Challenges hub and individual challenge pages.",
-      es: "Hub de challenges y páginas individuales de challenge.",
-    },
-    primaryPath: "/challenges",
-    paths: ["/challenges"],
   },
   {
     key: "page_forum",
@@ -237,17 +224,6 @@ export const ACCESS_GRANTS: AccessGrantDefinition[] = [
     },
     primaryPath: "/forum/community-feed",
     paths: ["/forum"],
-  },
-  {
-    key: "page_global_ranking",
-    group: "community",
-    label: { en: "Global Ranking", es: "Global Ranking" },
-    description: {
-      en: "Leaderboard and trophies ranking views.",
-      es: "Leaderboard y vistas de ranking de trofeos.",
-    },
-    primaryPath: "/globalranking",
-    paths: ["/globalranking"],
   },
 ];
 

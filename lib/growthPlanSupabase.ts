@@ -58,6 +58,13 @@ export type GrowthPlanExecutionSystem = {
 };
 
 export type GrowthPlanSteps = {
+  business_analysis?: {
+    profile?: Record<string, string>;
+    selectedScenarioId?: string | null;
+    selectedScenario?: Record<string, unknown> | null;
+    scenarios?: Array<Record<string, unknown>>;
+    updatedAt?: string;
+  };
   prepare?: {
     title?: string;
     checklist?: GrowthPlanChecklistItem[];

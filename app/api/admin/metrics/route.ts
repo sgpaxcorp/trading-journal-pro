@@ -1,27 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireAdminUser } from "@/lib/adminAuth";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 import { PLATFORM_ACCESS_ENTITLEMENT } from "@/lib/accessControl";
-
-function parseAdminEmails(envValue?: string | null) {
-  return (envValue || "")
-    .split(",")
-    .map((v) => v.trim().toLowerCase())
-    .filter(Boolean);
-}
-
-async function isAdmin(userId: string, email?: string | null): Promise<boolean> {
-  const { data, error } = await supabaseAdmin
-    .from("admin_users")
-    .select("user_id, active")
-    .eq("user_id", userId)
-    .eq("active", true)
-    .limit(1);
-  if (!error && (data ?? []).length > 0) return true;
-
-  const allowList = parseAdminEmails(process.env.ADMIN_EMAILS);
-  if (email && allowList.includes(email.toLowerCase())) return true;
-  return false;
-}
 
 function toISO(daysAgo: number) {
   return new Date(Date.now() - daysAgo * 24 * 60 * 60 * 1000).toISOString();
@@ -55,18 +35,8 @@ function buildDailySeries<T extends Record<string, any>>(
 
 export async function GET(req: NextRequest) {
   try {
-    const authHeader = req.headers.get("authorization") || "";
-    const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
-    if (!token) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-    const { data: authData, error: authErr } = await supabaseAdmin.auth.getUser(token);
-    if (authErr || !authData?.user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const userId = authData.user.id;
-    const admin = await isAdmin(userId, authData.user.email);
-    if (!admin) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    const admin = await requireAdminUser(req, { action: "metrics:read", limit: 60, windowMs: 60_000 });
+    if (!admin.ok) return admin.response;
 
     const since7 = toISO(7);
     const since30 = toISO(30);

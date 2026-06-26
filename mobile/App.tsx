@@ -20,13 +20,10 @@ import { AnalyticsScreen } from "./src/screens/AnalyticsScreen";
 import { AICoachScreen } from "./src/screens/AICoachScreen";
 import { SettingsScreen } from "./src/screens/MoreScreen";
 import { OtherScreen } from "./src/screens/OtherScreen";
-import { GlobalRankingScreen } from "./src/screens/GlobalRankingScreen";
 import { JournalDateScreen } from "./src/screens/JournalDateScreen";
-import { TrophiesScreen } from "./src/screens/TrophiesScreen";
 import { NotebookScreen } from "./src/screens/NotebookScreen";
 import { NotebookWorkspaceScreen } from "./src/screens/NotebookWorkspaceScreen";
 import { NotebookEditorScreen } from "./src/screens/NotebookEditorScreen";
-import { ChallengesScreen } from "./src/screens/ChallengesScreen";
 import { BrokerConnectScreen } from "./src/screens/BrokerConnectScreen";
 import { AuthScreen } from "./src/screens/AuthScreen";
 import { ResetPasswordScreen } from "./src/screens/ResetPasswordScreen";
@@ -37,9 +34,9 @@ import { hasSupabaseConfig, supabaseMobile } from "./src/lib/supabase";
 import { createRecoverySessionFromUrl, isPasswordRecoveryUrl } from "./src/lib/authRecovery";
 import { registerDeviceForPush } from "./src/lib/pushNotifications";
 import { ModulePlaceholderScreen } from "./src/screens/ModulePlaceholderScreen";
-import { MoreSheet } from "./src/components/MoreSheet";
 import { PlanGate } from "./src/components/PlanGate";
 import { t } from "./src/lib/i18n";
+import type { ModuleRouteOptions, ModuleRouteParams } from "./src/lib/moduleNavigation";
 import { usePlanAccess } from "./src/lib/usePlanAccess";
 import { apiGet } from "./src/lib/api";
 
@@ -69,15 +66,12 @@ type RootStackParamList = {
   Tabs: undefined;
   PaymentRequired: undefined;
   ResetPassword: undefined;
-  Module: { title: string; description: string };
+  Module: ModuleRouteParams;
   Settings: undefined;
   JournalDate: { date?: string } | undefined;
-  GlobalRanking: undefined;
-  Trophies: undefined;
   Notebook: undefined;
   NotebookWorkspace: { notebookId: string; title?: string };
   NotebookEditor: { kind: "page" | "free"; id: string; title?: string };
-  Challenges: undefined;
   BrokerConnect: undefined;
 };
 
@@ -95,15 +89,24 @@ function MainTabs() {
   const { colors } = useTheme();
   const { language } = useLanguage();
   const planAccess = usePlanAccess();
-  const [moreOpen, setMoreOpen] = useState(false);
+  const tabTitles = useMemo(
+    () => ({
+      Dashboard: t(language, "Business", "Empresa"),
+      Calendar: t(language, "Calendar", "Calendario"),
+      Analytics: t(language, "Analytics", "Analíticas"),
+      AICoach: t(language, "Business Coach", "Coach Empresarial"),
+      Other: t(language, "Business", "Empresa"),
+    }),
+    [language]
+  );
 
-  const openModule = useCallback((title: string, description: string) => {
+  const openModule = useCallback((title: string, description: string, options?: ModuleRouteOptions) => {
     const parent = navigation.getParent<NativeStackNavigationProp<RootStackParamList>>();
     if (parent) {
-      parent.navigate("Module", { title, description });
+      parent.navigate("Module", { title, description, ...options });
       return;
     }
-    navigation.navigate("Module", { title, description });
+    navigation.navigate("Module", { title, description, ...options });
   }, [navigation]);
 
   const openSettings = useCallback(() => {
@@ -125,33 +128,16 @@ function MainTabs() {
     navigation.navigate("JournalDate", date ? { date } : undefined);
   }, [navigation]);
 
-  const openGlobalRanking = useCallback(() => {
-    const parent = navigation.getParent<NativeStackNavigationProp<RootStackParamList>>();
-    if (parent) {
-      parent.navigate("GlobalRanking");
-      return;
-    }
-    navigation.navigate("GlobalRanking");
-  }, [navigation]);
-
-  const openTrophies = useCallback(() => {
-    const parent = navigation.getParent<NativeStackNavigationProp<RootStackParamList>>();
-    if (parent) {
-      parent.navigate("Trophies");
-      return;
-    }
-    navigation.navigate("Trophies");
-  }, [navigation]);
-
   const openNotebook = useCallback(() => {
-    if (!planAccess.loading && !planAccess.isAdvanced) {
+    if (!planAccess.loading && !planAccess.hasNotebook) {
       openModule(
-        t(language, "Notebook · Advanced", "Notebook · Advanced"),
+        t(language, "Business Notebook · Advanced", "Notebook Empresarial · Advanced"),
         t(
           language,
-          "Custom notebooks, sections, pages, ink, and research notes are included in Advanced.",
-          "Libretas custom, secciones, páginas, ink y notas de research están incluidas en Advanced."
-        )
+          "Business notebooks, sections, pages, ink, and research notes are included in Advanced.",
+          "Notebooks empresariales, secciones, páginas, ink y notas de research están incluidas en Advanced."
+        ),
+        { badge: "Advanced" }
       );
       return;
     }
@@ -161,16 +147,7 @@ function MainTabs() {
       return;
     }
     navigation.navigate("Notebook");
-  }, [language, navigation, openModule, planAccess.isAdvanced, planAccess.loading]);
-
-  const openChallenges = useCallback(() => {
-    const parent = navigation.getParent<NativeStackNavigationProp<RootStackParamList>>();
-    if (parent) {
-      parent.navigate("Challenges");
-      return;
-    }
-    navigation.navigate("Challenges");
-  }, [navigation]);
+  }, [language, navigation, openModule, planAccess.hasNotebook, planAccess.loading]);
 
   const openBrokerConnect = useCallback(() => {
     if (!planAccess.loading && !planAccess.hasBrokerSync) {
@@ -180,7 +157,8 @@ function MainTabs() {
           language,
           "Broker connection and automatic sync require the Broker Sync add-on.",
           "La conexión de bróker y sincronización automática requieren el add-on Broker Sync."
-        )
+        ),
+        { badge: t(language, "Add-on", "Add-on") }
       );
       return;
     }
@@ -192,95 +170,7 @@ function MainTabs() {
     navigation.navigate("BrokerConnect");
   }, [language, navigation, openModule, planAccess.hasBrokerSync, planAccess.loading]);
 
-  const handleMoreSelect = useCallback((action: () => void) => {
-    setMoreOpen(false);
-    setTimeout(action, 120);
-  }, []);
-
-  const moreItems = useMemo(
-    () => [
-      {
-        key: "settings",
-        label: t(language, "Settings", "Ajustes"),
-        iconName: "settings-outline" as const,
-        onPress: () => handleMoreSelect(openSettings),
-      },
-      {
-        key: "trophies",
-        label: t(language, "Trophies", "Trofeos"),
-        iconName: "trophy-outline" as const,
-        onPress: () => handleMoreSelect(openTrophies),
-      },
-      {
-        key: "ranking",
-        label: t(language, "Global ranking", "Ranking global"),
-        iconName: "globe-outline" as const,
-        onPress: () => handleMoreSelect(openGlobalRanking),
-      },
-      {
-        key: "journal",
-        label: t(language, "Journal", "Journal"),
-        iconName: "book-outline" as const,
-        onPress: () => handleMoreSelect(openJournalDate),
-      },
-      {
-        key: "notebook",
-        label: planAccess.isAdvanced
-          ? t(language, "Notebook", "Notebook")
-          : t(language, "Notebook · Advanced", "Notebook · Advanced"),
-        iconName: "document-text-outline" as const,
-        onPress: () => handleMoreSelect(openNotebook),
-      },
-      {
-        key: "challenges",
-        label: t(language, "Challenges", "Retos"),
-        iconName: "flame-outline" as const,
-        onPress: () => handleMoreSelect(openChallenges),
-      },
-      {
-        key: "broker-connect",
-        label: planAccess.hasBrokerSync
-          ? t(language, "Broker connect", "Conectar bróker")
-          : t(language, "Broker Sync · Add-on", "Broker Sync · Add-on"),
-        iconName: "link-outline" as const,
-        onPress: () => handleMoreSelect(openBrokerConnect),
-      },
-      {
-        key: "about",
-        label: t(language, "About us", "Sobre nosotros"),
-        iconName: "information-circle-outline" as const,
-        onPress: () => handleMoreSelect(() => Linking.openURL(`${WEB_BASE}/about`)),
-      },
-      {
-        key: "terms",
-        label: t(language, "Terms", "Términos"),
-        iconName: "document-text-outline" as const,
-        onPress: () => handleMoreSelect(() => Linking.openURL(`${WEB_BASE}/terms`)),
-      },
-      {
-        key: "privacy",
-        label: t(language, "Privacy", "Privacidad"),
-        iconName: "shield-checkmark-outline" as const,
-        onPress: () => handleMoreSelect(() => Linking.openURL(`${WEB_BASE}/privacy`)),
-      },
-    ],
-    [
-      handleMoreSelect,
-      language,
-      openChallenges,
-      openGlobalRanking,
-      openJournalDate,
-      openNotebook,
-      openSettings,
-      openTrophies,
-      openBrokerConnect,
-      planAccess.hasBrokerSync,
-      planAccess.isAdvanced,
-    ]
-  );
-
   return (
-    <>
       <Tab.Navigator
         detachInactiveScreens
         screenOptions={({ route }) => ({
@@ -290,7 +180,7 @@ function MainTabs() {
           headerTintColor: colors.textPrimary,
           headerTitleStyle: { fontWeight: "700" },
           headerTitle: () => (
-            <Text style={[styles.headerText, { color: colors.textPrimary }]}>{route.name}</Text>
+            <Text style={[styles.headerText, { color: colors.textPrimary }]}>{tabTitles[route.name]}</Text>
           ),
           tabBarStyle: { backgroundColor: colors.surface, borderTopColor: colors.border },
           tabBarActiveTintColor: colors.primary,
@@ -302,85 +192,50 @@ function MainTabs() {
             if (route.name === "Calendar") return <Ionicons name="calendar-outline" size={size} color={color} />;
             if (route.name === "Analytics") return <Ionicons name="stats-chart-outline" size={size} color={color} />;
             if (route.name === "AICoach") return <Ionicons name="sparkles-outline" size={size} color={color} />;
-            return <Ionicons name="ellipsis-horizontal-circle-outline" size={size} color={color} />;
+            return <Ionicons name="grid-outline" size={size} color={color} />;
           },
         })}
       >
-        <Tab.Screen name="Dashboard" options={{ title: "Home" }}>
+        <Tab.Screen name="Dashboard" options={{ title: "Business" }}>
           {() => <DashboardScreen onOpenModule={openModule} onOpenJournalDate={openJournalDate} />}
         </Tab.Screen>
         <Tab.Screen name="Calendar" options={{ title: "Calendar" }}>
           {() => <CalendarScreen onOpenModule={openModule} onOpenJournalDate={openJournalDate} />}
         </Tab.Screen>
         <Tab.Screen name="Analytics" options={{ title: "Analytics" }}>
-          {() => <AnalyticsScreen onOpenModule={openModule} isAdvanced={planAccess.isAdvanced} />}
+          {() => <AnalyticsScreen onOpenModule={openModule} isAdvanced={planAccess.hasAdvancedAnalytics} />}
         </Tab.Screen>
-        <Tab.Screen name="AICoach" options={{ title: "AI Coach" }}>
+        <Tab.Screen name="AICoach" options={{ title: "Business Coach" }}>
           {() =>
-            planAccess.isAdvanced ? (
+            planAccess.hasAICoaching ? (
               <AICoachScreen onOpenModule={openModule} />
             ) : (
               <PlanGate
-                title={t(language, "AI Coach", "AI Coach")}
+                title={t(language, "Business AI Coach", "Coach Empresarial IA")}
                 badge="Advanced"
                 loading={planAccess.loading}
                 subtitle={t(
                   language,
-                  "AI Coaching, action plans, and mindset feedback are included in Advanced.",
-                  "AI Coaching, planes de acción y feedback de mindset están incluidos en Advanced."
+                  "Business AI Coaching, action plans, and mindset feedback are included in Advanced.",
+                  "Business AI Coaching, planes de acción y feedback de mindset están incluidos en Advanced."
                 )}
               />
             )
           }
         </Tab.Screen>
-        <Tab.Screen
-          name="Other"
-          options={{
-            title: "More",
-            tabBarButton: ({ children, style, accessibilityState, accessibilityLabel, testID }) => (
-              <Pressable
-                onPress={() => setMoreOpen(true)}
-                accessibilityRole="button"
-                accessibilityLabel={accessibilityLabel ?? "More"}
-                accessibilityState={accessibilityState}
-                style={style}
-                testID={testID}
-              >
-                {children}
-              </Pressable>
-            ),
-          }}
-          listeners={{
-            tabPress: (e) => {
-              e.preventDefault();
-              setMoreOpen(true);
-            },
-          }}
-        >
+        <Tab.Screen name="Other" options={{ title: tabTitles.Other }}>
           {() => (
             <OtherScreen
               onOpenModule={openModule}
               onOpenSettings={openSettings}
-              onOpenGlobalRanking={openGlobalRanking}
-              onOpenTrophies={openTrophies}
               onOpenNotebook={openNotebook}
-              onOpenChallenges={openChallenges}
               onOpenJournalDate={openJournalDate}
               onOpenBrokerConnect={openBrokerConnect}
-              isAdvanced={planAccess.isAdvanced}
-              hasBrokerSync={planAccess.hasBrokerSync}
+              planAccess={planAccess}
             />
           )}
         </Tab.Screen>
       </Tab.Navigator>
-
-      <MoreSheet
-        visible={moreOpen}
-        title={t(language, "More", "Más")}
-        items={moreItems}
-        onClose={() => setMoreOpen(false)}
-      />
-    </>
   );
 }
 
@@ -498,13 +353,13 @@ function PaymentRequiredScreen({
     <View style={styles.screen}>
       <Text style={styles.eyebrow}>{t(language, "Account access", "Acceso de cuenta")}</Text>
       <Text style={styles.title}>
-        {t(language, "Sign in with an active NeuroTrader account.", "Entra con una cuenta activa de NeuroTrader.")}
+        {t(language, "Sign in with an active Trader Entrepreneur account.", "Entra con una cuenta activa de Empresario Trader.")}
       </Text>
       <Text style={styles.body}>
         {t(
           language,
-          "The mobile app is free to download and is built for existing members. Your journal unlocks when your account already has active access.",
-          "El app movil es gratis para descargar y esta creado para miembros existentes. Tu journal se desbloquea cuando tu cuenta ya tiene acceso activo."
+          "The mobile app is free to download and is built for existing members. Your trading business workspace unlocks when your account already has active access.",
+          "El app móvil es gratis para descargar y está creado para miembros existentes. Tu espacio de empresa de trading se desbloquea cuando tu cuenta ya tiene acceso activo."
         )}
       </Text>
 
@@ -515,8 +370,8 @@ function PaymentRequiredScreen({
         <Text style={styles.panelText}>
           {t(
             language,
-            "Your journal, rules, analytics, trophies, and broker tools stay protected behind the same account access check on web and mobile.",
-            "Tu journal, reglas, analiticas, trophies y herramientas de broker quedan protegidas con la misma validacion de cuenta en web y mobile."
+            "Your execution records, rules, analytics, notebooks, and broker tools stay protected behind the same business account access check on web and mobile.",
+            "Tus registros de ejecución, reglas, analíticas, notebooks y herramientas de bróker quedan protegidas con la misma validación de cuenta empresarial en web y mobile."
           )}
         </Text>
       </View>
@@ -819,37 +674,22 @@ function AppShell() {
           <Stack.Screen
             name="JournalDate"
             component={JournalDateScreen}
-            options={{ title: "Journal" }}
-          />
-          <Stack.Screen
-            name="GlobalRanking"
-            component={GlobalRankingScreen}
-            options={{ title: "Global ranking" }}
-          />
-          <Stack.Screen
-            name="Trophies"
-            component={TrophiesScreen}
-            options={{ title: "Trophies" }}
+            options={{ title: "Execution Journal" }}
           />
           <Stack.Screen
             name="Notebook"
             component={NotebookScreen}
-            options={{ title: "Notebook" }}
+            options={{ title: "Business Notebook" }}
           />
           <Stack.Screen
             name="NotebookWorkspace"
             component={NotebookWorkspaceScreen}
-            options={({ route }) => ({ title: (route.params as { title?: string } | undefined)?.title ?? "Notebook" })}
+            options={({ route }) => ({ title: (route.params as { title?: string } | undefined)?.title ?? "Business Notebook" })}
           />
           <Stack.Screen
             name="NotebookEditor"
             component={NotebookEditorScreen}
-            options={{ title: "Notebook" }}
-          />
-          <Stack.Screen
-            name="Challenges"
-            component={ChallengesScreen}
-            options={{ title: "Challenges" }}
+            options={{ title: "Business Notebook" }}
           />
           <Stack.Screen
             name="BrokerConnect"

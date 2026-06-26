@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 import { sendEmailConfirmationEmail } from "@/lib/email";
+import { validatePasswordPolicyEn } from "@/lib/passwordPolicy";
 import { getClientIp, rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
 
 export const runtime = "nodejs";
@@ -15,6 +16,11 @@ type Body = {
   address?: string;
   plan?: string;
   source?: "signup" | "start";
+};
+
+const GENERIC_RESEND_RESPONSE = {
+  ok: true,
+  message: "If that email has a pending account, a new verification code is on the way.",
 };
 
 function splitFullName(fullName: string) {
@@ -82,25 +88,20 @@ export async function POST(req: NextRequest) {
     if (!email || !email.includes("@")) {
       return NextResponse.json({ error: "A valid email is required." }, { status: 400 });
     }
-    if (password.length < 8) {
+    const passwordError = validatePasswordPolicyEn(password);
+    if (passwordError) {
       return NextResponse.json(
-        { error: "Password is required to resend the signup verification code." },
+        { error: passwordError },
         { status: 400 }
       );
     }
 
     const existingUser = await findAuthUserByEmail(email);
     if (!existingUser) {
-      return NextResponse.json(
-        { error: "No pending account was found for that email. Please create the account again." },
-        { status: 404 }
-      );
+      return NextResponse.json(GENERIC_RESEND_RESPONSE);
     }
     if ((existingUser as any)?.email_confirmed_at) {
-      return NextResponse.json(
-        { error: "This email is already verified. Please sign in." },
-        { status: 400 }
-      );
+      return NextResponse.json(GENERIC_RESEND_RESPONSE);
     }
 
     const origin = new URL(req.url).origin;
@@ -127,10 +128,8 @@ export async function POST(req: NextRequest) {
     });
 
     if (error || !data?.user || !data?.properties?.email_otp) {
-      return NextResponse.json(
-        { error: error?.message ?? "Unable to resend verification email." },
-        { status: 400 }
-      );
+      console.warn("[auth/signup/resend] suppressed resend error:", error?.message ?? "Unknown error");
+      return NextResponse.json(GENERIC_RESEND_RESPONSE);
     }
 
     const userId = data.user.id;
@@ -161,7 +160,7 @@ export async function POST(req: NextRequest) {
       continueUrl,
     });
 
-    return NextResponse.json({ ok: true });
+    return NextResponse.json(GENERIC_RESEND_RESPONSE);
   } catch (err: any) {
     console.error("[auth/signup/resend] error:", err);
     return NextResponse.json(

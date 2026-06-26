@@ -2740,7 +2740,7 @@ export default function OptionFlowPage() {
         pageHeight - 10,
         { align: "right" }
       );
-      doc.text("Neuro Trader Journal", margin, pageHeight - 10);
+      doc.text("Neuro Trader", margin, pageHeight - 10);
       doc.setTextColor(0, 0, 0);
     }
 
@@ -4315,7 +4315,174 @@ export default function OptionFlowPage() {
             {message && <p className="mt-3 text-xs text-amber-200">{message}</p>}
           </section>
         ) : (
-          <section className="grid grid-cols-1 gap-6">
+          <section className="grid grid-cols-1 gap-5 xl:grid-cols-[0.72fr_1.28fr]">
+            <aside className="space-y-4">
+              <div className="rounded-3xl border border-slate-800 bg-slate-900/60 p-5">
+                <p className="text-[11px] uppercase tracking-[0.3em] text-emerald-300">
+                  {isEs ? "Workflow guiado" : "Guided workflow"}
+                </p>
+                <h2 className="mt-2 text-lg font-semibold text-slate-50">
+                  {isEs ? "Casi automático, paso a paso" : "Almost automatic, step by step"}
+                </h2>
+                <p className="mt-2 text-sm leading-relaxed text-slate-400">
+                  {isEs
+                    ? "Adjunta el flow, deja que el sistema extraiga lo importante, genera el plan y guarda el resultado para comparar contra el mercado real."
+                    : "Attach the flow, let the system extract what matters, generate the plan, then save the outcome to compare it against the real market."}
+                </p>
+
+                <div className="mt-5 space-y-3">
+                  {[
+                    {
+                      title: isEs ? "1. Cargar flow" : "1. Load flow",
+                      body: isEs
+                        ? "Pega screenshots o sube CSV/XLSX del proveedor."
+                        : "Paste screenshots or upload provider CSV/XLSX.",
+                      done: canAnalyze,
+                    },
+                    {
+                      title: isEs ? "2. Analizar prints" : "2. Analyze prints",
+                      body: isEs
+                        ? "Detecta bias, niveles, expiraciones y trades clave."
+                        : "Detect bias, levels, expirations, and key trades.",
+                      done: Boolean(analysisData),
+                    },
+                    {
+                      title: isEs ? "3. Crear plan" : "3. Build plan",
+                      body: isEs
+                        ? "Convierte el análisis en un plan de premarket accionable."
+                        : "Turn the analysis into an actionable premarket plan.",
+                      done: Boolean(planHtml),
+                    },
+                    {
+                      title: isEs ? "4. Medir resultado" : "4. Measure outcome",
+                      body: isEs
+                        ? "Registra qué pasó para mejorar la lectura futura."
+                        : "Record what happened to improve future reads.",
+                      done: Boolean(postMortem),
+                    },
+                  ].map((step) => (
+                    <div
+                      key={step.title}
+                      className="rounded-2xl border border-slate-800 bg-slate-950/50 p-3"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-semibold text-slate-100">{step.title}</p>
+                          <p className="mt-1 text-xs leading-relaxed text-slate-400">{step.body}</p>
+                        </div>
+                        <span
+                          className={`shrink-0 rounded-full border px-2 py-1 text-[10px] ${
+                            step.done
+                              ? "border-emerald-400/60 bg-emerald-500/10 text-emerald-200"
+                              : "border-slate-700 bg-slate-900/70 text-slate-400"
+                          }`}
+                        >
+                          {step.done ? (isEs ? "Listo" : "Ready") : isEs ? "Pendiente" : "Pending"}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="rounded-3xl border border-slate-800 bg-slate-900/60 p-5">
+                <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">
+                  {isEs ? "Readiness" : "Readiness"}
+                </p>
+                <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
+                  <span className="rounded-2xl border border-slate-800 bg-slate-950/50 px-3 py-2 text-slate-300">
+                    {csvFile
+                      ? isEs
+                        ? "Archivo cargado"
+                        : "File loaded"
+                      : isEs
+                      ? "Sin archivo"
+                      : "No file"}
+                  </span>
+                  <span className="rounded-2xl border border-slate-800 bg-slate-950/50 px-3 py-2 text-slate-300">
+                    {pastedShots.length
+                      ? `${pastedShots.length} ${
+                          isEs ? "screenshot(s)" : "screenshot(s)"
+                        }`
+                      : isEs
+                      ? "Sin screenshots"
+                      : "No screenshots"}
+                  </span>
+                  <span className="rounded-2xl border border-slate-800 bg-slate-950/50 px-3 py-2 text-slate-300">
+                    {underlying.trim()
+                      ? `${isEs ? "Ticker" : "Ticker"} ${underlying.trim().toUpperCase()}`
+                      : analyzeAll
+                      ? isEs
+                        ? "Analiza todo"
+                        : "Analyze all"
+                      : isEs
+                      ? "Ticker opcional"
+                      : "Ticker optional"}
+                  </span>
+                  <span className="rounded-2xl border border-slate-800 bg-slate-950/50 px-3 py-2 text-slate-300">
+                    {analysisData
+                      ? isEs
+                        ? "Análisis listo"
+                        : "Analysis ready"
+                      : isEs
+                      ? "Esperando análisis"
+                      : "Waiting analysis"}
+                  </span>
+                </div>
+
+                <div className="mt-5 space-y-2">
+                  <button
+                    type="button"
+                    onClick={handleAnalyzeClick}
+                    disabled={!canAnalyze || analyzing || parsing || planning || savingToJournal}
+                    className="w-full rounded-2xl bg-emerald-400 px-4 py-3 text-sm font-semibold text-slate-950 hover:bg-emerald-300 disabled:opacity-60"
+                  >
+                    {parsing || analyzing
+                      ? isEs
+                        ? "Analizando flow..."
+                        : "Analyzing flow..."
+                      : isEs
+                      ? "Analizar flow adjunto"
+                      : "Analyze attached flow"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handlePremarketPlan(planNotes || analysisNotes)}
+                    disabled={!summary || analyzing || parsing || planning || savingToJournal}
+                    className="w-full rounded-2xl border border-slate-700 bg-slate-950/60 px-4 py-3 text-sm font-semibold text-slate-200 hover:border-emerald-400 hover:text-emerald-200 disabled:opacity-50"
+                  >
+                    {planning
+                      ? isEs
+                        ? "Creando plan..."
+                        : "Building plan..."
+                      : isEs
+                      ? "Generar plan de premarket"
+                      : "Generate premarket plan"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSaveToJournal}
+                    disabled={!planHtml || savingToJournal}
+                    className="w-full rounded-2xl border border-slate-700 bg-slate-950/60 px-4 py-3 text-sm font-semibold text-slate-200 hover:border-emerald-400 hover:text-emerald-200 disabled:opacity-50"
+                  >
+                    {savingToJournal
+                      ? isEs
+                        ? "Guardando..."
+                        : "Saving..."
+                      : isEs
+                      ? "Enviar plan al journal"
+                      : "Send plan to journal"}
+                  </button>
+                </div>
+
+                <p className="mt-4 text-xs leading-relaxed text-slate-500">
+                  {isEs
+                    ? "Este módulo analiza flows y planes de trading. Neuro Analysis queda separado para investigación de compañías y simulación de portfolio."
+                    : "This module analyzes option flows and trading plans. Neuro Analysis stays separate for company research and portfolio simulation."}
+                </p>
+              </div>
+            </aside>
+
             {renderChatPanel(false)}
           </section>
         )}

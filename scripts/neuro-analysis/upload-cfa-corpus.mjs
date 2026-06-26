@@ -28,6 +28,11 @@ loadDotEnvLocal();
 
 const corpusDir = process.env.NEURO_ANALYSIS_CFA_PDF_DIR || DEFAULT_CFA_DIR;
 const apiKey = process.env.OPENAI_API_KEY;
+const existingVectorStoreId = process.env.NEURO_ANALYSIS_CFA_VECTOR_STORE_ID;
+const forceNew = process.argv.includes("--force-new");
+const manifestPath =
+  process.env.NEURO_ANALYSIS_CFA_MANIFEST_PATH ||
+  path.resolve(process.cwd(), "tmp/neuro-analysis-corpus-manifest.json");
 
 if (!apiKey) {
   console.error("Missing OPENAI_API_KEY.");
@@ -53,14 +58,25 @@ if (pdfPaths.length === 0) {
 const totalBytes = pdfPaths.reduce((sum, filePath) => sum + fs.statSync(filePath).size, 0);
 const client = new OpenAI({ apiKey });
 
-console.log(`Found ${pdfPaths.length} CFA PDFs (${(totalBytes / 1024 / 1024).toFixed(1)} MB).`);
-console.log("Creating Neuro Analysis CFA vector store...");
+if (existingVectorStoreId && !forceNew) {
+  console.log(`Existing Neuro Analysis private research vector store configured: ${existingVectorStoreId}`);
+  const store = await client.vectorStores.retrieve(existingVectorStoreId);
+  console.log(`Status: ${store.status}`);
+  console.log(`Files completed: ${store.file_counts?.completed ?? 0}`);
+  console.log(`Files total: ${store.file_counts?.total ?? 0}`);
+  console.log(`Usage: ${((store.usage_bytes ?? 0) / 1024 / 1024).toFixed(1)} MB`);
+  console.log("Use --force-new to create a replacement vector store.");
+  process.exit(store.status === "completed" ? 0 : 1);
+}
+
+console.log(`Found ${pdfPaths.length} private research PDFs (${(totalBytes / 1024 / 1024).toFixed(1)} MB).`);
+console.log("Creating Neuro Analysis private research vector store...");
 
 const vectorStore = await client.vectorStores.create({
-  name: `Neuro Analysis CFA Level I Corpus ${new Date().toISOString().slice(0, 10)}`,
+  name: `Neuro Analysis Private Research Corpus ${new Date().toISOString().slice(0, 10)}`,
   metadata: {
     product: "neuro_analysis",
-    corpus: "cfa_level_i",
+    corpus: "private_research_methodology",
     source: "private_user_uploaded_curriculum",
   },
 });
@@ -97,6 +113,27 @@ if (batch.file_counts.failed > 0) {
   process.exit(1);
 }
 
+fs.mkdirSync(path.dirname(manifestPath), { recursive: true });
+fs.writeFileSync(
+  manifestPath,
+  JSON.stringify(
+    {
+      vectorStoreId: vectorStore.id,
+      createdAt: new Date().toISOString(),
+      corpusDir,
+      files: pdfPaths.map((filePath, index) => ({
+        path: filePath,
+        fileId: fileIds[index],
+        bytes: fs.statSync(filePath).size,
+      })),
+      fileCounts: batch.file_counts,
+    },
+    null,
+    2
+  )
+);
+
 console.log("");
+console.log(`Manifest written to ${manifestPath}`);
 console.log("Add this to .env.local:");
 console.log(`NEURO_ANALYSIS_CFA_VECTOR_STORE_ID=${vectorStore.id}`);

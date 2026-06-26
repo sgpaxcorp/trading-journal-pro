@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireAdminActionSecret, requireAdminUser } from "@/lib/adminAuth";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 import {
   getAutomatedEmailCatalog,
@@ -10,44 +11,10 @@ import {
   type AdminBroadcastTemplateKey,
 } from "@/lib/email";
 
-function parseAdminEmails(envValue?: string | null) {
-  return (envValue || "")
-    .split(",")
-    .map((v) => v.trim().toLowerCase())
-    .filter(Boolean);
-}
-
-async function isAdmin(userId: string, email?: string | null): Promise<boolean> {
-  const { data, error } = await supabaseAdmin
-    .from("admin_users")
-    .select("user_id, active")
-    .eq("user_id", userId)
-    .eq("active", true)
-    .limit(1);
-  if (!error && (data ?? []).length > 0) return true;
-
-  const allowList = parseAdminEmails(process.env.ADMIN_EMAILS);
-  if (email && allowList.includes(email.toLowerCase())) return true;
-  return false;
-}
-
-async function getAdminAuth(req: NextRequest) {
-  const authHeader = req.headers.get("authorization") || "";
-  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
-  if (!token) return null;
-
-  const { data: authData, error: authErr } = await supabaseAdmin.auth.getUser(token);
-  if (authErr || !authData?.user) return null;
-
-  const ok = await isAdmin(authData.user.id, authData.user.email);
-  if (!ok) return null;
-  return authData.user;
-}
-
 export async function GET(req: NextRequest) {
   try {
-    const admin = await getAdminAuth(req);
-    if (!admin) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    const admin = await requireAdminUser(req, { action: "email-automations:read", limit: 60, windowMs: 60_000 });
+    if (!admin.ok) return admin.response;
 
     const { count } = await supabaseAdmin
       .from("profiles")
@@ -57,7 +24,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       sender: getEmailSenderStatus(),
       automations: getAutomatedEmailCatalog(),
-      adminEmail: admin.email ?? "",
+      adminEmail: admin.user.email ?? "",
       broadcastAudienceCount: count ?? 0,
     });
   } catch (err: any) {
@@ -67,14 +34,14 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const admin = await getAdminAuth(req);
-    if (!admin) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    const admin = await requireAdminUser(req, { action: "email-automations:write", limit: 20, windowMs: 10 * 60_000 });
+    if (!admin.ok) return admin.response;
 
     const body = await req.json().catch(() => ({}));
     const action = String(body?.action ?? "test_automation");
 
     if (action === "broadcast_preview") {
-      const to = String(body?.to ?? admin.email ?? "").trim().toLowerCase();
+      const to = String(body?.to ?? admin.user.email ?? "").trim().toLowerCase();
       if (!to || !to.includes("@")) {
         return NextResponse.json({ error: "A valid preview recipient is required." }, { status: 400 });
       }
@@ -106,6 +73,9 @@ export async function POST(req: NextRequest) {
     }
 
     if (action === "broadcast_all") {
+      const stepUpResponse = requireAdminActionSecret(req, body);
+      if (stepUpResponse) return stepUpResponse;
+
       const subject = String(body?.subject ?? "").trim();
       const title = String(body?.title ?? "").trim();
       const message = String(body?.message ?? "").trim();
@@ -139,7 +109,7 @@ export async function POST(req: NextRequest) {
     }
 
     const key = String(body?.key ?? "") as AutomatedEmailKey;
-    const to = String(body?.to ?? admin.email ?? "").trim().toLowerCase();
+    const to = String(body?.to ?? admin.user.email ?? "").trim().toLowerCase();
     if (!to || !to.includes("@")) {
       return NextResponse.json({ error: "A valid test recipient is required." }, { status: 400 });
     }

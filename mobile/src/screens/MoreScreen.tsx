@@ -6,6 +6,7 @@ import { ScreenScaffold } from "../components/ScreenScaffold";
 import { apiPost } from "../lib/api";
 import { useLanguage } from "../lib/LanguageContext";
 import { t } from "../lib/i18n";
+import { passwordPolicyHint, validatePasswordPolicy } from "../lib/passwordPolicy";
 import { registerDeviceForPush } from "../lib/pushNotifications";
 import { useSupabaseUser } from "../lib/useSupabaseUser";
 import { supabaseMobile } from "../lib/supabase";
@@ -25,6 +26,7 @@ export function SettingsScreen() {
     phone: "",
   });
   const [password, setPassword] = useState("");
+  const [currentPassword, setCurrentPassword] = useState("");
   const [passwordConfirm, setPasswordConfirm] = useState("");
   const [passwordLoading, setPasswordLoading] = useState(false);
   const [notificationReady, setNotificationReady] = useState(false);
@@ -166,11 +168,16 @@ export function SettingsScreen() {
   async function handleChangePassword() {
     if (!supabaseMobile) return;
     const sb = supabaseMobile;
-    if (!password || password.length < 8) {
+    if (!currentPassword) {
       Alert.alert(
-        t(language, "Password too short", "Contraseña muy corta"),
-        t(language, "Use at least 8 characters.", "Usa mínimo 8 caracteres.")
+        t(language, "Current password required", "Contraseña actual requerida"),
+        t(language, "Enter your current password before changing it.", "Ingresa tu contraseña actual antes de cambiarla.")
       );
+      return;
+    }
+    const passwordError = validatePasswordPolicy(password, language);
+    if (passwordError) {
+      Alert.alert(t(language, "Password does not meet requirements", "La contraseña no cumple los requisitos"), passwordError);
       return;
     }
     if (password !== passwordConfirm) {
@@ -182,8 +189,28 @@ export function SettingsScreen() {
     }
     try {
       setPasswordLoading(true);
+      const email = user?.email;
+      if (!email) {
+        throw new Error(
+          t(
+            language,
+            "We could not find your email. Sign out and sign in again.",
+            "No encontramos tu correo. Cierra sesión e inicia nuevamente."
+          )
+        );
+      }
+
+      const { error: signInError } = await sb.auth.signInWithPassword({
+        email,
+        password: currentPassword,
+      });
+      if (signInError) {
+        throw new Error(t(language, "Current password is incorrect.", "La contraseña actual es incorrecta."));
+      }
+
       const { error } = await sb.auth.updateUser({ password });
       if (error) throw error;
+      setCurrentPassword("");
       setPassword("");
       setPasswordConfirm("");
       Alert.alert(
@@ -476,12 +503,21 @@ export function SettingsScreen() {
         <Text style={styles.sectionTitle}>{t(language, "Security", "Seguridad")}</Text>
         <TextInput
           style={styles.input}
+          placeholder={t(language, "Current password", "Contraseña actual")}
+          placeholderTextColor={colors.textMuted}
+          secureTextEntry
+          value={currentPassword}
+          onChangeText={setCurrentPassword}
+        />
+        <TextInput
+          style={styles.input}
           placeholder={t(language, "New password", "Nueva contraseña")}
           placeholderTextColor={colors.textMuted}
           secureTextEntry
           value={password}
           onChangeText={setPassword}
         />
+        <Text style={styles.helperText}>{passwordPolicyHint(language)}</Text>
         <TextInput
           style={styles.input}
           placeholder={t(language, "Confirm password", "Confirmar contraseña")}
@@ -639,6 +675,12 @@ const createStyles = (colors: ThemeColors) => {
     sectionHint: {
       color: colors.textMuted,
       fontSize: 12,
+    },
+    helperText: {
+      color: colors.textMuted,
+      fontSize: 11,
+      lineHeight: 16,
+      marginTop: -4,
     },
     toggleRow: {
       flexDirection: "row",

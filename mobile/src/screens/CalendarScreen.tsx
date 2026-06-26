@@ -5,6 +5,7 @@ import { ScreenScaffold } from "../components/ScreenScaffold";
 import { apiGet } from "../lib/api";
 import { useLanguage } from "../lib/LanguageContext";
 import { t } from "../lib/i18n";
+import type { OpenModuleFn } from "../lib/moduleNavigation";
 import { type ThemeColors } from "../theme";
 import { useTheme } from "../lib/ThemeContext";
 
@@ -168,7 +169,7 @@ type AccountSeriesResponse = {
 };
 
 type CalendarScreenProps = {
-  onOpenModule: (title: string, description: string) => void;
+  onOpenModule: OpenModuleFn;
   onOpenJournalDate: (date: string) => void;
 };
 
@@ -190,6 +191,18 @@ export function CalendarScreen({ onOpenJournalDate }: CalendarScreenProps) {
       }),
     [language, monthCursor]
   );
+  const monthRange = useMemo(() => {
+    const start = new Date(monthCursor.getFullYear(), monthCursor.getMonth(), 1);
+    const end = new Date(monthCursor.getFullYear(), monthCursor.getMonth() + 1, 0);
+    return {
+      fromDate: toYMD(start),
+      toDate: toYMD(end),
+    };
+  }, [monthCursor]);
+  const accountSeriesPath = useMemo(
+    () => `/api/account/series?fromDate=${monthRange.fromDate}&toDate=${monthRange.toDate}&seriesDays=45`,
+    [monthRange.fromDate, monthRange.toDate]
+  );
   const days = useMemo(() => buildCalendarDays(monthCursor), [monthCursor]);
   const pnlMap = useMemo(() => new Map(daily.map((d) => [d.date, d.value])), [daily]);
   const holidayMap = useMemo(() => {
@@ -207,7 +220,7 @@ export function CalendarScreen({ onOpenJournalDate }: CalendarScreenProps) {
           setLoading(true);
         }
         setError(null);
-        const res = await apiGet<AccountSeriesResponse>("/api/account/series");
+        const res = await apiGet<AccountSeriesResponse>(accountSeriesPath);
         if (!active) return;
         setDaily(res.daily ?? []);
       } catch (err: any) {
@@ -226,13 +239,13 @@ export function CalendarScreen({ onOpenJournalDate }: CalendarScreenProps) {
     return () => {
       active = false;
     };
-  }, []);
+  }, [accountSeriesPath]);
 
   async function handleRefresh() {
     setError(null);
     setRefreshing(true);
     try {
-      const res = await apiGet<AccountSeriesResponse>("/api/account/series");
+      const res = await apiGet<AccountSeriesResponse>(accountSeriesPath);
       setDaily(res.daily ?? []);
     } catch (err: any) {
       setError(err?.message ?? "Failed to refresh calendar.");
@@ -246,8 +259,8 @@ export function CalendarScreen({ onOpenJournalDate }: CalendarScreenProps) {
       title={t(language, "Calendar", "Calendario")}
       subtitle={t(
         language,
-        "Track your daily performance and open each journal day.",
-        "Sigue tu desempeño diario y abre cada día del journal."
+        "Track your daily business performance and open each execution record.",
+        "Sigue tu rendimiento empresarial diario y abre cada registro de ejecución."
       )}
       scrollable={false}
       refreshing={refreshing}
@@ -279,7 +292,7 @@ export function CalendarScreen({ onOpenJournalDate }: CalendarScreenProps) {
           <Text style={styles.monthSubtitle}>
             {loading
               ? t(language, "Loading daily results…", "Cargando resultados diarios…")
-              : t(language, "Tap any day to open your journal.", "Toca cualquier día para abrir tu journal.")}
+              : t(language, "Tap any day to open its execution record.", "Toca cualquier día para abrir su registro de ejecución.")}
           </Text>
         </View>
 

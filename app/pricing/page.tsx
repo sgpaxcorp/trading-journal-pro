@@ -157,15 +157,15 @@ export default function PricingPage() {
         <header className="w-full max-w-5xl flex flex-col gap-6 md:flex-row md:items-end md:justify-between mb-10">
           <div>
             <p className="text-emerald-400 text-[10px] uppercase tracking-[0.2em]">
-              {L("Choose your edge", "Elige tu ventaja")}
+              {L("Choose your business layer", "Elige tu capa empresarial")}
             </p>
             <h1 className="text-2xl md:text-3xl font-semibold">
-              {L("Pricing for serious & funded traders", "Precios para traders serios y fondeados")}
+              {L("Business plans for Trader Entrepreneurs", "Planes empresariales para Empresarios Traders")}
             </h1>
             <p className="text-[11px] md:text-xs text-slate-300 mt-1">
               {L(
-                "Clear, simple plans designed to keep you disciplined, consistent, and ready for prop firms & challenges.",
-                "Planes claros y simples diseñados para mantenerte disciplinado, consistente y listo para prop firms y challenges."
+                "Clear plans designed to help you start, operate, track, and improve your trading business.",
+                "Planes claros diseñados para ayudarte a comenzar, operar, medir y mejorar tu empresa de trading."
               )}
             </p>
           </div>
@@ -208,8 +208,8 @@ export default function PricingPage() {
         {/* Copy */}
         <div className="w-full max-w-5xl mb-4 text-[10px] md:text-xs text-slate-400">
           {L(
-            "No contracts. No hidden fees. Just a trading journal built to protect your psychology, enforce your rules, and show real progress.",
-            "Sin contratos. Sin cargos ocultos. Un journal creado para proteger tu psicología, reforzar tus reglas y mostrar progreso real."
+            "No contracts. No hidden fees. A trading business platform built to organize your plan, execution, performance, and AI coaching in one place.",
+            "Sin contratos. Sin cargos ocultos. Una plataforma empresarial de trading creada para organizar tu plan, ejecución, rendimiento y coaching IA en un solo lugar."
           )}
         </div>
 
@@ -230,8 +230,8 @@ export default function PricingPage() {
               </h2>
               <p className="mb-3 rounded-xl border border-slate-800 bg-slate-900/80 px-3 py-2 text-[10px] leading-relaxed text-slate-300">
                 {L(
-                  "Best starting point for structure, journaling, calendar, and core KPIs.",
-                  "El mejor punto de partida para estructura, journal, calendario y KPIs clave."
+                  "Best starting point to organize the trading business foundation: plan, execution record, calendar, and core KPIs.",
+                  "El mejor punto de partida para organizar la base de la empresa de trading: plan, registro de ejecución, calendario y KPIs clave."
                 )}
               </p>
               <div className="flex items-center gap-2">
@@ -264,7 +264,7 @@ export default function PricingPage() {
                 disabled={loadingPlan !== null}
                 className="mt-5 w-full py-2 rounded-xl bg-emerald-400 text-slate-950 text-xs font-semibold hover:bg-emerald-300 transition disabled:opacity-60 disabled:cursor-not-allowed"
               >
-                <span>{L("Start Core", "Empezar Core")}</span>
+                <span>{L("Start Core Business", "Comenzar Core Empresarial")}</span>
                 {loadingPlan === "core" && (
                   <span className="ml-2 inline-flex h-3 w-3 animate-spin rounded-full border-2 border-slate-950 border-t-transparent" />
                 )}
@@ -319,8 +319,8 @@ export default function PricingPage() {
                   </p>
                   <p className="mt-1 text-[10px] leading-relaxed text-emerald-50/85">
                     {L(
-                      "Unlock the full operating layer: AI coaching, business P&L, advanced statistics, audit tools, reports, and priority support.",
-                      "Desbloquea la capa completa: AI coaching, P&L de negocio, estadística avanzada, auditoría, reportes y soporte prioritario."
+                      "Unlock the full business operating layer: AI coaching, business P&L, advanced statistics, audit tools, reports, and priority support.",
+                      "Desbloquea la capa operativa empresarial completa: AI coaching, P&L de negocio, estadística avanzada, auditoría, reportes y soporte prioritario."
                     )}
                   </p>
                 </div>
@@ -347,7 +347,7 @@ export default function PricingPage() {
                   disabled={loadingPlan !== null}
                   className="mt-5 w-full py-2 rounded-xl bg-emerald-400 text-slate-950 text-xs font-semibold hover:bg-emerald-300 transition disabled:opacity-60 disabled:cursor-not-allowed"
                 >
-                  <span>{L("Start Advanced", "Empezar Advanced")}</span>
+                  <span>{L("Start Advanced Business", "Comenzar Advanced Empresarial")}</span>
                   {loadingPlan === "advanced" && (
                     <span className="ml-2 inline-flex h-3 w-3 animate-spin rounded-full border-2 border-slate-950 border-t-transparent" />
                   )}
@@ -456,12 +456,12 @@ export default function PricingPage() {
                   {L("Comparison", "Comparación")}
                 </p>
                 <h2 className="text-lg md:text-xl font-semibold">
-                  {L("Full plan comparison", "Comparación completa de planes")}
+                  {L("Full business plan comparison", "Comparación completa de planes empresariales")}
                 </h2>
                 <p className="text-[10px] md:text-xs text-slate-400">
                   {L(
-                    "Everything included, line by line, in Core vs Advanced.",
-                    "Todo incluido, línea por línea, en Core vs Advanced."
+                    "Everything included, line by line, in Core Business vs Advanced Business.",
+                    "Todo incluido, línea por línea, en Core Empresarial vs Advanced Empresarial."
                   )}
                 </p>
               </div>
@@ -500,12 +500,12 @@ export default function PricingPage() {
                   {L("Newsletter", "Newsletter")}
                 </div>
                 <h3 className="text-sm font-semibold mt-1">
-                  {L("Monthly discipline insights", "Disciplina mensual")}
+                  {L("Monthly business execution insights", "Insights mensuales de ejecución empresarial")}
                 </h3>
                 <p className="text-[10px] text-slate-300 mt-2">
                   {L(
-                    "Articles and playbooks focused on trader discipline and execution.",
-                    "Artículos y playbooks enfocados en disciplina y ejecución."
+                    "Articles and playbooks focused on Trader Entrepreneur execution, risk, and operating structure.",
+                    "Artículos y playbooks enfocados en ejecución, riesgo y estructura operativa para Empresarios Traders."
                   )}
                 </p>
                 <span className="mt-3 inline-flex rounded-full border border-emerald-400/40 bg-emerald-500/10 px-2 py-0.5 text-[9px] text-emerald-200">
@@ -518,12 +518,12 @@ export default function PricingPage() {
                   {L("Neuro Clubs", "Neuro Clubs")}
                 </div>
                 <h3 className="text-sm font-semibold mt-1">
-                  {L("Shared stats & competitions", "Estadísticas compartidas y retos")}
+                  {L("Shared business benchmarks", "Benchmarks empresariales compartidos")}
                 </h3>
                 <p className="text-[10px] text-slate-300 mt-2">
                   {L(
-                    "Communities can share journal stats, compare progress, and run score-based competitions (no P&L).",
-                    "Comunidades podrán compartir estadísticas, comparar progreso y competir por puntuación (sin P&L)."
+                    "Communities can share execution stats and compare process quality without exposing private P&L.",
+                    "Comunidades podrán compartir estadísticas de ejecución y comparar calidad de proceso sin exponer P&L privado."
                   )}
                 </p>
                 <span className="mt-3 inline-flex rounded-full border border-emerald-400/40 bg-emerald-500/10 px-2 py-0.5 text-[9px] text-emerald-200">
@@ -540,8 +540,8 @@ export default function PricingPage() {
                 </h3>
                 <p className="text-[10px] text-slate-300 mt-2">
                   {L(
-                    "Limited merch for traders focused on discipline and process.",
-                    "Merch limitado para traders enfocados en disciplina y proceso."
+                    "Limited merch for Trader Entrepreneurs focused on discipline, process, and business identity.",
+                    "Merch limitado para Empresarios Traders enfocados en disciplina, proceso e identidad empresarial."
                   )}
                 </p>
                 <span className="mt-3 inline-flex rounded-full border border-emerald-400/40 bg-emerald-500/10 px-2 py-0.5 text-[9px] text-emerald-200">
@@ -554,12 +554,12 @@ export default function PricingPage() {
                   {L("Neuro Arena", "Neuro Arena")}
                 </div>
                 <h3 className="text-sm font-semibold mt-1">
-                  {L("Competitive stat challenges", "Competencias por estadísticas")}
+                  {L("Business milestone reviews", "Revisiones de milestones empresariales")}
                 </h3>
                 <p className="text-[10px] text-slate-300 mt-2">
                   {L(
-                    "Timeboxed events with prizes for the best stats (hats, shirts, keychains).",
-                    "Eventos con premios para los mejores stats (gorras, camisas, llaveros)."
+                    "Structured review sessions around plan progress, rule protection, and execution quality.",
+                    "Sesiones estructuradas de revisión sobre progreso del plan, protección de reglas y calidad de ejecución."
                   )}
                 </p>
                 <span className="mt-3 inline-flex rounded-full border border-emerald-400/40 bg-emerald-500/10 px-2 py-0.5 text-[9px] text-emerald-200">

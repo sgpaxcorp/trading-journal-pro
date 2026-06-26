@@ -1,24 +1,25 @@
 import { ModuleTile } from "../components/ModuleTile";
 import { ScreenScaffold } from "../components/ScreenScaffold";
+import type { OpenModuleFn } from "../lib/moduleNavigation";
 
 type JournalScreenProps = {
-  onOpenModule: (title: string, description: string) => void;
+  onOpenModule: OpenModuleFn;
 };
 
 export function JournalScreen({ onOpenModule }: JournalScreenProps) {
   return (
     <ScreenScaffold
-      title="Journal mobile"
-      subtitle="Objetivo: escribir rápido en pre-market, inside trade y after trade desde iPhone."
+      title="Execution Journal mobile"
+      subtitle="Objetivo: registrar rápido pre-market, inside trade y after trade desde iPhone."
     >
       <ModuleTile
-        title="Daily journal"
-        description="Abrir fecha y editar widgets del journal."
+        title="Daily execution record"
+        description="Abrir fecha y editar el registro de ejecución."
         iconName="document-text-outline"
         onPress={() =>
           onOpenModule(
-            "Daily journal",
-            "Integración pendiente: reutilizar modelo de la página /journal/[date] sin importar archivos."
+            "Daily execution record",
+            "Integración pendiente: reutilizar modelo de la página /journal/[date] como registro de ejecución."
           )
         }
       />
@@ -29,7 +30,7 @@ export function JournalScreen({ onOpenModule }: JournalScreenProps) {
         onPress={() =>
           onOpenModule(
             "Inside trade notes",
-            "Plan: agregar editor optimizado móvil + timestamp para que AI Coaching lo use."
+            "Plan: agregar editor optimizado móvil + timestamp para que Business AI Coaching lo use."
           )
         }
       />

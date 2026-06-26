@@ -38,10 +38,6 @@ import {
   upsertGrowthPlanSupabase,
   type GrowthPlanChecklistItem,
 } from "@/lib/growthPlanSupabase";
-import {
-  getProfileGamification,
-  type ProfileGamification,
-} from "@/lib/profileGamificationSupabase";
 
 import {
   listCashflows,
@@ -357,6 +353,10 @@ type BackStudyParams = {
   tf?: string | null;
   range?: string | null;
   tradeId?: string | null;
+  timeMode?: string | null;
+  windowTz?: string | null;
+  instrumentKey?: string | null;
+  instrumentAmbiguous?: string | null;
   handoffKey?: string | null;
 };
 
@@ -528,7 +528,7 @@ function getSmartPromptGroups(isEs: boolean): {
           id: "checkpoint-rescue",
           label: "Rescatar el checkpoint",
           prompt:
-            "Analiza mi journal y mi Growth Plan para decirme qué amenaza más mi próximo checkpoint. Quiero el patrón principal, la evidencia del journal y la acción concreta para la próxima sesión.",
+            "Analiza mis registros de ejecución y mi Plan de Empresa de Trading para decirme qué amenaza más mi próximo checkpoint. Quiero el patrón principal, la evidencia real y la acción concreta para la próxima sesión.",
           mode: "plan-rescue",
           range: "plan",
         },
@@ -536,7 +536,7 @@ function getSmartPromptGroups(isEs: boolean): {
           id: "costly-behavior",
           label: "Conducta más costosa",
           prompt:
-            "Tomando los últimos 30 días, ¿cuál es la conducta que más me está costando probabilidad de cumplir el Growth Plan? Dímelo con evidencia y con una regla operativa concreta.",
+            "Tomando los últimos 30 días, ¿cuál es la conducta que más me está costando probabilidad de cumplir mi Plan de Empresa de Trading? Dímelo con evidencia y una regla operativa concreta.",
           mode: "plan-rescue",
           range: "last30",
         },
@@ -544,7 +544,7 @@ function getSmartPromptGroups(isEs: boolean): {
           id: "risk-vs-plan",
           label: "Riesgo vs plan",
           prompt:
-            "Compara mi ejecución reciente con los risk rails de mi Growth Plan. Quiero saber dónde estoy filtrando edge en size, pérdida diaria, frecuencia o disciplina.",
+            "Compara mi ejecución reciente con los risk rails de mi Plan de Empresa de Trading. Quiero saber dónde estoy filtrando edge en size, pérdida diaria, frecuencia o disciplina.",
           mode: "risk-discipline",
           range: "last30",
         },
@@ -578,7 +578,7 @@ function getSmartPromptGroups(isEs: boolean): {
           id: "emotion-drift",
           label: "Patrón emocional",
           prompt:
-            "Lee el drift emocional en mi journal y dime qué patrón psicológico aparece antes de mis peores decisiones.",
+            "Lee el drift emocional en mis registros de ejecución y dime qué patrón psicológico aparece antes de mis peores decisiones.",
           mode: "psychology-patterns",
           range: "last90",
         },
@@ -594,7 +594,7 @@ function getSmartPromptGroups(isEs: boolean): {
           id: "premarket-focus",
           label: "Foco pre-market",
           prompt:
-            "Sintetiza mi journal, mi capa Neuro y mis resultados en un foco concreto de pre-market para mañana.",
+            "Sintetiza mis registros de ejecución, mi capa Neuro y mis resultados en un foco concreto de pre-market para mañana.",
           mode: "psychology-patterns",
           range: "last30",
         },
@@ -608,7 +608,7 @@ function getSmartPromptGroups(isEs: boolean): {
         id: "checkpoint-rescue",
         label: "Rescue the checkpoint",
         prompt:
-          "Analyze my journal and Growth Plan to tell me what is threatening my next checkpoint most. I want the main pattern, the journal evidence, and the one action I should take next session.",
+          "Analyze my execution records and Trading Business Plan to tell me what is threatening my next checkpoint most. I want the main pattern, real evidence, and the one action I should take next session.",
         mode: "plan-rescue",
         range: "plan",
       },
@@ -616,7 +616,7 @@ function getSmartPromptGroups(isEs: boolean): {
         id: "costly-behavior",
         label: "Most expensive behavior",
         prompt:
-          "Using the last 30 days, what behavior is costing me the most probability of hitting my Growth Plan? Show me the evidence and turn it into one concrete operating rule.",
+          "Using the last 30 days, what behavior is costing me the most probability of hitting my Trading Business Plan? Show me the evidence and turn it into one concrete operating rule.",
         mode: "plan-rescue",
         range: "last30",
       },
@@ -624,7 +624,7 @@ function getSmartPromptGroups(isEs: boolean): {
         id: "risk-vs-plan",
         label: "Risk vs plan",
         prompt:
-          "Compare my recent execution with the risk rails in my Growth Plan. I want to know where I am leaking edge in size, daily loss discipline, frequency, or rule adherence.",
+          "Compare my recent execution with the risk rails in my Trading Business Plan. I want to know where I am leaking edge in size, daily loss discipline, frequency, or rule adherence.",
         mode: "risk-discipline",
         range: "last30",
       },
@@ -658,7 +658,7 @@ function getSmartPromptGroups(isEs: boolean): {
         id: "emotion-drift",
         label: "Emotional drift pattern",
         prompt:
-          "Read the emotional drift in my journal and tell me which psychological pattern appears before my worst decisions.",
+          "Read the emotional drift in my execution records and tell me which psychological pattern appears before my worst decisions.",
         mode: "psychology-patterns",
         range: "last90",
       },
@@ -674,7 +674,7 @@ function getSmartPromptGroups(isEs: boolean): {
         id: "premarket-focus",
         label: "Pre-market focus",
         prompt:
-          "Synthesize my journal, Neuro layer, and results into one concrete pre-market focus for tomorrow.",
+          "Synthesize my execution records, Neuro layer, and results into one concrete pre-market focus for tomorrow.",
         mode: "psychology-patterns",
         range: "last30",
       },
@@ -1754,13 +1754,13 @@ function AiCoachingPageInner() {
             { value: "plan", label: "Desde el plan" },
             { value: "last30", label: "Últimos 30 días" },
             { value: "last90", label: "Últimos 90 días" },
-            { value: "all", label: "Todo el journal" },
+            { value: "all", label: "Todo el registro de ejecución" },
           ]
         : [
             { value: "plan", label: "Since plan start" },
             { value: "last30", label: "Last 30 days" },
             { value: "last90", label: "Last 90 days" },
-            { value: "all", label: "All journal history" },
+            { value: "all", label: "All execution history" },
           ],
     [isEs]
   );
@@ -1794,7 +1794,6 @@ function AiCoachingPageInner() {
   const [tradesByDate, setTradesByDate] = useState<Record<string, TradesPayload>>({});
   const [tradeRows, setTradeRows] = useState<JournalTradeRow[]>([]);
   const [fullSnapshot, setFullSnapshot] = useState<AiCoachSnapshot | null>(null);
-  const [gamification, setGamification] = useState<ProfileGamification | null>(null);
 
   // Chat persistence
   const [threads, setThreads] = useState<AiCoachThreadRow[]>([]);
@@ -1845,6 +1844,7 @@ function AiCoachingPageInner() {
   const [backStudyTradeContext, setBackStudyTradeContext] = useState<string | null>(null);
   const [backStudyUnderlyingContext, setBackStudyUnderlyingContext] = useState<string | null>(null);
   const [backStudyAuditContext, setBackStudyAuditContext] = useState<string | null>(null);
+  const [backStudyHandoffTrade, setBackStudyHandoffTrade] = useState<any | null>(null);
 
   const [dataLoading, setDataLoading] = useState<boolean>(true);
 
@@ -1900,8 +1900,8 @@ function AiCoachingPageInner() {
       setPlanRuleAction({
         kind: "error",
         message: L(
-          "Load an active Growth Plan before applying coach rules.",
-          "Carga un Growth Plan activo antes de aplicar reglas del coach."
+          "Load an active Trading Business Plan before applying coach rules.",
+          "Carga un Plan de Empresa de Trading activo antes de aplicar reglas del coach."
         ),
       });
       return;
@@ -1985,7 +1985,7 @@ function AiCoachingPageInner() {
         kind: "error",
         message:
           err?.message ||
-          L("Could not update the Growth Plan rules.", "No se pudo actualizar las reglas del Growth Plan."),
+          L("Could not update the Trading Business Plan rules.", "No se pudo actualizar las reglas del Plan de Empresa de Trading."),
       });
     } finally {
       setPlanRuleSaving(null);
@@ -2089,7 +2089,7 @@ function AiCoachingPageInner() {
         <div className="flex items-start justify-between gap-3">
           <div>
             <p className="text-[10px] uppercase tracking-[0.18em] text-violet-200">
-              {L("Growth Plan suggestions", "Sugerencias para el Growth Plan")}
+              {L("Trading Business Plan suggestions", "Sugerencias para el Plan de Empresa de Trading")}
             </p>
             <p className="mt-1 text-slate-300">
               {L(
@@ -2102,7 +2102,7 @@ function AiCoachingPageInner() {
             href="/growth-plan"
             className="shrink-0 rounded-full border border-violet-300/30 px-3 py-1 text-[11px] text-violet-100 transition hover:border-violet-200 hover:text-white"
           >
-            {L("Open plan", "Abrir plan")}
+            {L("Open business plan", "Abrir plan empresarial")}
           </Link>
         </div>
 
@@ -2205,8 +2205,8 @@ function AiCoachingPageInner() {
               mode: "plan-rescue",
               range: "last30",
               prompt: L(
-                "Rewrite the suggested rule changes as clean Do and Don't rules for my Growth Plan. Keep them short, operational, and realistic for my next sessions.",
-                "Reescribe los cambios de reglas sugeridos como reglas Do y Don't limpias para mi Growth Plan. Mantenlas cortas, operativas y realistas para mis próximas sesiones."
+                "Rewrite the suggested rule changes as clean Do and Don't rules for my Trading Business Plan. Keep them short, operational, and realistic for my next sessions.",
+                "Reescribe los cambios de reglas sugeridos como reglas Do y Don't limpias para mi Plan de Empresa de Trading. Mantenlas cortas, operativas y realistas para mis próximas sesiones."
               ),
             })
           }
@@ -2297,6 +2297,10 @@ function AiCoachingPageInner() {
       tf: searchParams.get("tf"),
       range: searchParams.get("range"),
       tradeId: searchParams.get("tradeId"),
+      timeMode: searchParams.get("timeMode"),
+      windowTz: searchParams.get("windowTz"),
+      instrumentKey: searchParams.get("instrumentKey"),
+      instrumentAmbiguous: searchParams.get("instrumentAmbiguous"),
       handoffKey: searchParams.get("handoffKey"),
     };
   }, [searchParams]);
@@ -2304,11 +2308,13 @@ function AiCoachingPageInner() {
   useEffect(() => {
     if (typeof window === "undefined" || !backStudyParams?.handoffKey) {
       setBackStudyAuditContext(null);
+      setBackStudyHandoffTrade(null);
       return;
     }
 
     if (!backStudyParams.handoffKey.startsWith(BACK_STUDY_AUDIT_HANDOFF_PREFIX)) {
       setBackStudyAuditContext(null);
+      setBackStudyHandoffTrade(null);
       return;
     }
 
@@ -2316,11 +2322,13 @@ function AiCoachingPageInner() {
       const raw = window.sessionStorage.getItem(backStudyParams.handoffKey);
       if (!raw) {
         setBackStudyAuditContext(null);
+        setBackStudyHandoffTrade(null);
         return;
       }
 
       const payload = JSON.parse(raw);
       const trade = payload?.trade ?? {};
+      setBackStudyHandoffTrade(trade && typeof trade === "object" ? trade : null);
       const eventWindow = payload?.eventWindow ?? null;
       const audit = payload?.audit ?? {};
       const processReview = payload?.processReview ?? null;
@@ -2333,6 +2341,13 @@ function AiCoachingPageInner() {
           `- ${L("Selected trade", "Trade seleccionado")}: ${
             trade?.sequence != null ? `${L("Trade", "Trade")} ${trade.sequence} · ` : ""
           }${trade?.symbol ?? backStudyParams.symbol} ${trade?.entryTime ?? ""} → ${trade?.exitTime ?? ""}`.trim()
+        );
+      }
+      if (trade?.instrumentKey || trade?.instrumentKeyAmbiguous) {
+        lines.push(
+          `- ${L("Instrument filter", "Filtro de instrumento")}: ${
+            trade?.instrumentKey ?? L("symbol-level fallback", "fallback por simbolo")
+          }${trade?.instrumentKeyAmbiguous ? ` (${L("ambiguous contract", "contrato ambiguo")})` : ""}`
         );
       }
       if (audit?.brokerEventsCount != null) {
@@ -2376,7 +2391,7 @@ function AiCoachingPageInner() {
         });
       }
       if (Array.isArray(processReview?.rules) && processReview.rules.length) {
-        lines.push(L("Growth Plan rule checks:", "Checks de reglas del Growth Plan:"));
+        lines.push(L("Trading Business Plan rule checks:", "Checks de reglas del Plan de Empresa de Trading:"));
         processReview.rules.slice(0, 6).forEach((rule: any) => {
           lines.push(`- ${String(rule?.status ?? "unknown").toUpperCase()} · ${rule?.label ?? ""}: ${rule?.reason ?? ""}`);
         });
@@ -2386,6 +2401,7 @@ function AiCoachingPageInner() {
     } catch (err) {
       console.warn("[AI Coaching] back-study audit handoff parse error:", err);
       setBackStudyAuditContext(null);
+      setBackStudyHandoffTrade(null);
     }
   }, [backStudyParams, lang]);
 
@@ -2406,8 +2422,26 @@ function AiCoachingPageInner() {
         ]);
         if (!alive) return;
 
-        const entries = Array.isArray(trades?.entries) ? trades.entries : [];
-        const exits = Array.isArray(trades?.exits) ? trades.exits : [];
+        const handoffEntries = Array.isArray(backStudyHandoffTrade?.entries) ? backStudyHandoffTrade.entries : [];
+        const handoffExits = Array.isArray(backStudyHandoffTrade?.exits) ? backStudyHandoffTrade.exits : [];
+        const handoffSourceIds = new Set(
+          [
+            ...(Array.isArray(backStudyHandoffTrade?.sourceRowIds) ? backStudyHandoffTrade.sourceRowIds : []),
+            ...handoffEntries.map((row: any) => row?.id),
+            ...handoffExits.map((row: any) => row?.id),
+          ]
+            .map((id) => String(id ?? "").trim())
+            .filter(Boolean)
+        );
+
+        let entries = Array.isArray(trades?.entries) ? trades.entries : [];
+        let exits = Array.isArray(trades?.exits) ? trades.exits : [];
+        if (handoffSourceIds.size) {
+          const filteredEntries = entries.filter((row: any) => handoffSourceIds.has(String(row?.id ?? "").trim()));
+          const filteredExits = exits.filter((row: any) => handoffSourceIds.has(String(row?.id ?? "").trim()));
+          entries = filteredEntries.length ? filteredEntries : handoffEntries;
+          exits = filteredExits.length ? filteredExits : handoffExits;
+        }
 
         const timeline = [
           ...entries.map((t) => ({ ...t, leg: "ENTRY" })),
@@ -2429,7 +2463,21 @@ function AiCoachingPageInner() {
         const netPnl = Number.isFinite(Number(netPnlRaw)) ? Number(netPnlRaw) : null;
 
         const lines: string[] = [];
-        lines.push(L("Back-study trade details (from journal_trades):", "Detalle de back-study (desde journal_trades):"));
+        lines.push(
+          handoffSourceIds.size
+            ? L(
+                "Back-study selected trade details (filtered by source rows):",
+                "Detalle del trade seleccionado de Back-Study (filtrado por rows fuente):"
+              )
+            : L("Back-study trade details (from journal_trades):", "Detalle de back-study (desde journal_trades):")
+        );
+        if (backStudyHandoffTrade?.instrumentKey || backStudyHandoffTrade?.instrumentKeyAmbiguous) {
+          lines.push(
+            `${L("Instrument filter", "Filtro de instrumento")}: ${
+              backStudyHandoffTrade.instrumentKey ?? L("symbol-level fallback", "fallback por simbolo")
+            }${backStudyHandoffTrade.instrumentKeyAmbiguous ? ` (${L("ambiguous", "ambiguo")})` : ""}`
+          );
+        }
         if (netPnl != null) {
           lines.push(`${L("Session net P&L", "P&L neto de la sesión")}: ${netPnl.toFixed(2)} USD`);
         }
@@ -2468,7 +2516,7 @@ function AiCoachingPageInner() {
     return () => {
       alive = false;
     };
-  }, [backStudyParams, coachUserProfile?.id, activeAccountId, lang]);
+  }, [backStudyParams, backStudyHandoffTrade, coachUserProfile?.id, activeAccountId, lang]);
 
   useEffect(() => {
     if (!backStudyParams?.symbol || !backStudyParams?.date) {
@@ -2609,9 +2657,18 @@ function AiCoachingPageInner() {
       `- ${L("Underlying symbol", "Símbolo subyacente")}: ${backStudyParams.symbol}`,
       `- ${L("Session date (local calendar)", "Fecha de sesión (calendario local)")}: ${backStudyParams.date}`,
       backStudyParams.entryTime && backStudyParams.exitTime
-        ? `- ${L("Intraday window", "Ventana intradía")}: ${backStudyParams.entryTime} → ${backStudyParams.exitTime} (${L("local time", "hora local")})`
+        ? `- ${L("Intraday window", "Ventana intradía")}: ${backStudyParams.entryTime} → ${backStudyParams.exitTime} (${
+            backStudyParams.timeMode === "local" ? L("local chart time", "hora local del chart") : "ET"
+          })`
         : backStudyParams.entryTime
-        ? `- ${L("Entry time", "Hora de entrada")}: ${backStudyParams.entryTime} (${L("local time", "hora local")})`
+        ? `- ${L("Entry time", "Hora de entrada")}: ${backStudyParams.entryTime} (${
+            backStudyParams.timeMode === "local" ? L("local chart time", "hora local del chart") : "ET"
+          })`
+        : null,
+      backStudyParams.instrumentKey
+        ? `- ${L("Exact instrument key", "Instrument key exacto")}: ${backStudyParams.instrumentKey}`
+        : backStudyParams.instrumentAmbiguous
+        ? `- ${L("Instrument precision", "Precisión de instrumento")}: ${L("contract ambiguous; symbol-level fallback", "contrato ambiguo; fallback por símbolo")}`
         : null,
       backStudyParams.tf ? `- ${L("Chart timeframe selected", "Timeframe seleccionado")}: ${backStudyParams.tf}` : null,
       backStudyParams.range ? `- ${L("Historical range loaded", "Rango histórico cargado")}: ${backStudyParams.range}` : null,
@@ -2623,7 +2680,7 @@ function AiCoachingPageInner() {
 
     if (backStudyTradeContext) {
       lines.push("");
-      lines.push(L("Journal trade details:", "Detalle de trades del journal:"));
+      lines.push(L("Execution trade details:", "Detalle de trades del registro de ejecución:"));
       lines.push(backStudyTradeContext);
     }
 
@@ -2674,7 +2731,7 @@ function AiCoachingPageInner() {
         if (qsThread && initialThreads.some((t) => t.id === qsThread)) {
           threadToUse = initialThreads.find((t) => t.id === qsThread) || null;
         } else {
-          threadToUse = await getOrCreateMostRecentAiCoachThread({ userId, defaultTitle: L("AI Coaching", "Coaching AI") });
+          threadToUse = await getOrCreateMostRecentAiCoachThread({ userId, defaultTitle: L("Business AI Coaching", "Coach Empresarial IA") });
         }
 
         const refreshedThreads = threadToUse
@@ -2781,12 +2838,7 @@ function AiCoachingPageInner() {
         if (!alive) return;
         setFullSnapshot(full);
 
-        // 7) Gamification
-        const g = userId ? await getProfileGamification(userId) : null;
-        if (!alive) return;
-        setGamification(g);
-
-        // 8) Coach memory snapshot
+        // 7) Coach memory snapshot
         if (!alive) return;
         await fetchCoachMemory();
       } catch (err) {
@@ -2797,7 +2849,6 @@ function AiCoachingPageInner() {
         setCashflows([]);
         setAccountSeriesTotals(null);
         setFullSnapshot(null);
-        setGamification(null);
       } finally {
         if (alive) setDataLoading(false);
       }
@@ -2834,8 +2885,8 @@ function AiCoachingPageInner() {
             ? "Desde el inicio del plan hasta hoy"
             : "From plan start to today"
           : isEs
-            ? "Todo el journal"
-            : "All journal history",
+            ? "Todo el registro de ejecución"
+            : "All execution history",
       };
     }
 
@@ -2861,7 +2912,7 @@ function AiCoachingPageInner() {
       preset: coachRangePreset,
       startIso: earliestIso,
       endIso,
-      label: isEs ? "Todo el journal" : "All journal history",
+      label: isEs ? "Todo el registro de ejecución" : "All execution history",
     };
   }, [coachRangePreset, entries, planStartIso, isEs]);
 
@@ -3322,7 +3373,7 @@ function AiCoachingPageInner() {
 
     const t = await createAiCoachThread({
       userId: coachUserProfile.id,
-      title: L("AI Coaching", "Coaching AI"),
+      title: L("Business AI Coaching", "Coach Empresarial IA"),
       metadata: backStudyParams ? { backStudyParams } : null,
     });
 
@@ -3543,7 +3594,6 @@ function AiCoachingPageInner() {
             rangeEndIso: coachRangeBounds.endIso || null,
           },
           fullSnapshot,
-          gamification,
           userProfile: coachUserProfile,
 
           // Style hints
@@ -3558,7 +3608,7 @@ function AiCoachingPageInner() {
             rangePreset: coachRangePreset,
             rangeStartIso: coachRangeBounds.startIso || null,
             rangeEndIso: coachRangeBounds.endIso || null,
-            useChallengesAndGamification: true,
+            useBusinessPlanContext: true,
             useAnalyticsSummary: true,
             useRelevantSessions: true,
             evaluateExitTimingFromChart: true,
@@ -3664,8 +3714,8 @@ function AiCoachingPageInner() {
             : {
                 label: L("Plan rescue", "Rescate del plan"),
                 description: L(
-                  "Anchor the conversation to the Growth Plan, the next checkpoint, and the highest-leverage behavior to improve plan attainment.",
-                  "Ancla la conversación al Growth Plan, al próximo checkpoint y a la conducta de mayor leverage para mejorar el cumplimiento del plan."
+                  "Anchor the conversation to the Trading Business Plan, the next checkpoint, and the highest-leverage behavior to improve plan attainment.",
+                  "Ancla la conversación al Plan de Empresa de Trading, al próximo checkpoint y a la conducta de mayor leverage para mejorar el cumplimiento del plan."
                 ),
               };
 
@@ -3707,8 +3757,8 @@ function AiCoachingPageInner() {
             </p>
             <h1 className="text-xl font-semibold mt-2">
               {L(
-                "AI Coaching is included in Advanced",
-                "AI Coaching está incluido en Advanced"
+                "Business AI Coaching is included in Advanced",
+                "Business AI Coaching está incluido en Advanced"
               )}
             </h1>
             <p className="text-sm text-slate-400 mt-2">
@@ -3750,12 +3800,12 @@ function AiCoachingPageInner() {
             </div>
             <div>
               <h1 className="text-2xl font-semibold">
-                {L("Your AI Trading Coach", "Tu coach de trading con IA")}
+                {L("Your Business AI Coach", "Tu Coach Empresarial IA")}
               </h1>
               <p className="text-sm text-slate-400 mt-1">
                 {L(
-                  "Practical coaching on risk, psychology and process, using your journal, analytics, challenges and growth plan.",
-                  "Coaching práctico de riesgo, psicología y proceso usando tu journal, analytics, retos y plan de crecimiento."
+                  "Practical coaching on risk, psychology, process, execution records, analytics, business rules, and your Trading Business Plan.",
+                  "Coaching práctico de riesgo, psicología, proceso, registros de ejecución, analítica, reglas empresariales y tu Plan de Empresa de Trading."
                 )}
               </p>
               {coachUserProfile && (
@@ -3771,19 +3821,6 @@ function AiCoachingPageInner() {
           </div>
 
           <div className="flex flex-col items-end gap-2">
-            {gamification && (
-              <div className="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-3 py-1 text-[11px] text-emerald-200">
-                {L("Level", "Nivel")}{" "}
-                <span className="font-semibold text-emerald-100">
-                  {gamification.level}
-                </span>{" "}
-                · {L("Tier", "Rango")}{" "}
-                <span className="font-semibold text-emerald-100">
-                  {gamification.tier}
-                </span>{" "}
-                · {gamification.xp.toLocaleString()} XP
-              </div>
-            )}
             <Link
               href="/performance/analytics-statistics"
               className="text-xs rounded-full border border-slate-700 px-3 py-1 hover:bg-slate-800"
@@ -3830,8 +3867,8 @@ function AiCoachingPageInner() {
               </p>
               <p className="mt-2 text-xs text-slate-400">
                 {L(
-                  "The coach searches all sessions inside this range, then retrieves the journal evidence most relevant to your question and your Growth Plan.",
-                  "El coach busca todas las sesiones dentro de este rango y luego recupera la evidencia del journal más relevante para tu pregunta y tu Growth Plan."
+                  "The coach searches all sessions inside this range, then retrieves the execution evidence most relevant to your question and your Trading Business Plan.",
+                  "El coach busca todas las sesiones dentro de este rango y luego recupera la evidencia de ejecución más relevante para tu pregunta y tu Plan de Empresa de Trading."
                 )}
               </p>
             </div>
@@ -3928,8 +3965,8 @@ function AiCoachingPageInner() {
                 </p>
                 <p className="text-xs text-slate-400">
                   {L(
-                    "Ask questions, attach a chart screenshot, and get focused feedback anchored to the selected journal range and Growth Plan.",
-                    "Haz preguntas, adjunta un screenshot y recibe feedback enfocado, anclado al rango del journal seleccionado y al Growth Plan."
+                    "Ask questions, attach a chart screenshot, and get focused feedback anchored to the selected execution range and Trading Business Plan.",
+                    "Haz preguntas, adjunta un screenshot y recibe feedback enfocado, anclado al rango de ejecución seleccionado y al Plan de Empresa de Trading."
                   )}{" "}
                   {L("You can write in English or Spanish.", "Puedes escribir en español o inglés.")}
                 </p>
@@ -3944,7 +3981,7 @@ function AiCoachingPageInner() {
                 >
                   {threads.map((t) => (
                     <option key={t.id} value={t.id}>
-                      {t.title || L("AI Coaching", "AI Coaching")} · {String(t.updated_at || "").slice(0, 10)}
+                      {t.title || L("Business AI Coaching", "Business AI Coaching")} · {String(t.updated_at || "").slice(0, 10)}
                     </option>
                   ))}
                 </select>
@@ -3965,7 +4002,7 @@ function AiCoachingPageInner() {
                   <div className="flex items-center justify-between gap-3">
                     <div>
                       <p className="text-xs uppercase tracking-[0.18em] text-emerald-300">
-                        {L("Coach memory snapshot", "Memoria del coach")}
+                        {L("Business coach memory snapshot", "Memoria del coach empresarial")}
                       </p>
                       <p className="text-[11px] text-slate-400">
                         {L("What the coach has learned about you so far.", "Lo que el coach ha aprendido sobre ti.")}
@@ -4089,7 +4126,7 @@ function AiCoachingPageInner() {
                 <div className="rounded-2xl border border-slate-800 bg-slate-950/50 p-3">
                   <div className="mb-2 flex items-center justify-between gap-3">
                     <p className="text-[11px] uppercase tracking-[0.16em] text-slate-400">
-                      {L("Prompt library", "Biblioteca de prompts")}
+                      {L("Business prompt library", "Biblioteca de prompts empresariales")}
                     </p>
                     <p className="text-[10px] text-slate-500">
                       {L("Selecting one loads lens + range + question.", "Al seleccionar uno carga lente + rango + pregunta.")}
@@ -4104,7 +4141,7 @@ function AiCoachingPageInner() {
                     <option value="">
                       {L("Choose a smart prompt...", "Elige un prompt inteligente...")}
                     </option>
-                    <optgroup label={L("Growth Plan plays", "Prompts de Growth Plan")}>
+                    <optgroup label={L("Trading Business Plan plays", "Prompts del Plan de Empresa de Trading")}>
                       {promptGroups.primary.map((template) => (
                         <option key={template.id} value={template.id}>
                           {template.label}
@@ -4152,7 +4189,7 @@ function AiCoachingPageInner() {
                     placeholder={
                       coachUiIsEs
                         ? "Pregunta al coach sobre tus últimas operaciones, emociones, retos o disciplina del plan..."
-                        : "Ask your coach about your last trades, emotions, challenges, or plan adherence..."
+                        : "Ask your coach about your last trades, emotions, business rules, or plan adherence..."
                     }
                     value={question}
                     onChange={(e) => setQuestion(e.target.value)}
@@ -4292,8 +4329,8 @@ function AiCoachingPageInner() {
             {!snapshot && !dataLoading && (
               <p className="text-xs text-amber-300">
                 {L(
-                  "You need at least one journal session saved before the coach can analyze your data.",
-                  "Necesitas al menos una sesión en el journal para que el coach pueda analizar tus datos."
+                  "You need at least one execution record saved before the coach can analyze your data.",
+                  "Necesitas al menos un registro de ejecución guardado para que el coach pueda analizar tus datos."
                 )}
               </p>
             )}

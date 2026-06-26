@@ -1,10 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
+import { getClientIp, rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
 
 export const runtime = "nodejs";
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {});
+type DeleteAccountBody = {
+  confirmation?: string;
+  email?: string;
+};
+
+function getStripeClient() {
+  const secretKey = process.env.STRIPE_SECRET_KEY;
+  if (!secretKey) return null;
+  return new Stripe(secretKey, {});
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -18,8 +28,32 @@ export async function POST(req: NextRequest) {
     }
 
     const userId = authData.user.id;
+    const limiter = await rateLimit(`account-delete:${userId}:${getClientIp(req)}`, {
+      limit: 3,
+      windowMs: 60 * 60_000,
+    });
+    if (!limiter.allowed) {
+      return NextResponse.json(
+        { error: "Too many account deletion attempts. Please try again later." },
+        { status: 429, headers: rateLimitHeaders(limiter) }
+      );
+    }
 
-    if (!process.env.STRIPE_SECRET_KEY) {
+    const body = (await req.json().catch(() => ({}))) as DeleteAccountBody;
+    const confirmation = String(body?.confirmation ?? "").trim().toUpperCase();
+    const email = String(body?.email ?? "").trim().toLowerCase();
+    const authEmail = String(authData.user.email ?? "").trim().toLowerCase();
+
+    if (confirmation !== "DELETE") {
+      return NextResponse.json({ error: "Confirmation phrase is required." }, { status: 400 });
+    }
+
+    if (authEmail && email !== authEmail) {
+      return NextResponse.json({ error: "Account email confirmation does not match." }, { status: 400 });
+    }
+
+    const stripe = getStripeClient();
+    if (!stripe) {
       return NextResponse.json({ error: "Stripe secret key not configured." }, { status: 500 });
     }
 

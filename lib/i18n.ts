@@ -58,80 +58,67 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     /* -----------------
        TopNav (canonical)
     ------------------ */
-    "nav.performance": "Performance",
-    "nav.notebook": "Notebook",
-    "nav.backStudy": "Back-Studying",
-    "nav.challenges": "Challenges",
-    "nav.rules": "Trading Protection System",
+    "nav.performance": "Business Performance",
+    "nav.notebook": "Business Notebook",
+    "nav.backStudy": "Strategy Review Lab",
+    "nav.rules": "Business Protection System",
     "nav.forum": "Forum",
-    "nav.optionFlow": "Smart Tools",
-    "nav.smartTools": "Smart Tools",
-    "nav.globalRanking": "Global Ranking",
+    "nav.optionFlow": "Market Intelligence Tools",
+    "nav.smartTools": "Market Intelligence Tools",
 
     // Backwards-compatible aliases (older patches)
-    "nav.performance.title": "Performance",
-    "nav.notebook.title": "Notebook",
-    "nav.backStudy.title": "Back-Studying",
-    "nav.challenges.title": "Challenges",
-    "nav.rules.title": "Trading Protection System",
+    "nav.performance.title": "Business Performance",
+    "nav.notebook.title": "Business Notebook",
+    "nav.backStudy.title": "Strategy Review Lab",
+    "nav.rules.title": "Business Protection System",
     "nav.forum.title": "Forum",
-    "nav.optionFlow.title": "Smart Tools",
-    "nav.smartTools.title": "Smart Tools",
-    "nav.globalRanking.title": "Global Ranking",
+    "nav.optionFlow.title": "Market Intelligence Tools",
+    "nav.smartTools.title": "Market Intelligence Tools",
 
     /* -----------------
        Smart Tools dropdown items
     ------------------ */
     "nav.smartTools.optionFlow.title": "Option Flow Intelligence",
-    "nav.smartTools.optionFlow.desc": "Options flow reports, premarket plans, and outcome review.",
+    "nav.smartTools.optionFlow.desc": "Options flow reports, premarket plans, and outcome review for the business.",
     "nav.smartTools.neuroAnalysis.title": "Neuro Analysis",
-    "nav.smartTools.neuroAnalysis.desc": "CFA-style company research, Buffett principles, future projections, and virtual allocation.",
+    "nav.smartTools.neuroAnalysis.desc": "Company intelligence, future projections, and virtual allocation simulation.",
 
     /* -----------------
        Performance dropdown items
     ------------------ */
-    "nav.performance.balanceChart.title": "Balance chart",
+    "nav.performance.balanceChart.title": "Business balance chart",
     "nav.performance.balanceChart.desc":
-      "Evolution of your account and daily comparison vs. your target.",
-    "nav.performance.analyticsStatistics.title": "Analytics Statistics",
+      "Evolution of your account and daily comparison vs. your business target.",
+    "nav.performance.analyticsStatistics.title": "Business Analytics",
     "nav.performance.analyticsStatistics.desc":
-      "Analyze your historical data with statistics.",
-    "nav.performance.planSummary.title": "Plan Summary",
-    "nav.performance.planSummary.desc": "Structured overview of your Growth Plan.",
-    "nav.performance.aiCoaching.title": "AI Coaching",
-    "nav.performance.aiCoaching.desc": "Coaching ideas based on your metrics.",
-    "nav.performance.profitLoss.title": "Profit & Loss Track",
+      "Analyze your historical data with business statistics.",
+    "nav.performance.planSummary.title": "Trading Business Plan",
+    "nav.performance.planSummary.desc": "Structured overview of your Trading Business Plan.",
+    "nav.performance.aiCoaching.title": "Business AI Coach",
+    "nav.performance.aiCoaching.desc": "Coaching ideas based on your metrics and business plan.",
+    "nav.performance.profitLoss.title": "Business P&L Office",
     "nav.performance.profitLoss.desc":
       "Track business expenses, subscriptions, and net profitability.",
-    "nav.performance.cashFlow.title": "Cash Flow Tracking",
+    "nav.performance.cashFlow.title": "Business Cash Flow",
     "nav.performance.cashFlow.desc": "Track your deposits and withdrawals plan.",
 
     // Common aliases we have seen in screenshots / older code
-    "nav.performance.balance.title": "Balance chart",
+    "nav.performance.balance.title": "Business balance chart",
     "nav.performance.balance.desc":
-      "Evolution of your account and daily comparison vs. your target.",
-    "nav.performance.analytics.title": "Analytics Statistics",
+      "Evolution of your account and daily comparison vs. your business target.",
+    "nav.performance.analytics.title": "Business Analytics",
     "nav.performance.analytics.desc":
-      "Analyze your historical data with statistics.",
-    "nav.performance.ai.title": "AI Coaching",
-    "nav.performance.ai.desc": "Coaching ideas based on your metrics.",
-    "nav.performance.plan.title": "Cash Flow Tracking",
+      "Analyze your historical data with business statistics.",
+    "nav.performance.ai.title": "Business AI Coach",
+    "nav.performance.ai.desc": "Coaching ideas based on your metrics and business plan.",
+    "nav.performance.plan.title": "Business Cash Flow",
     "nav.performance.plan.desc": "Track your deposits and withdrawals plan.",
-
-    /* -----------------
-       Challenges dropdown
-    ------------------ */
-    "nav.challenges.item.title": "Challenges",
-    "nav.challenges.item.desc": "Consistency challenge with rules.",
-    // Older alias
-    "nav.challenges.main.title": "Challenges",
-    "nav.challenges.main.desc": "Consistency challenge with rules.",
 
     /* -----------------
        Rules dropdown
     ------------------ */
     "nav.rules.reminders.title": "Routine Checks",
-    "nav.rules.reminders.desc": "Quiet check-ins for premarket, journaling, and process habits.",
+    "nav.rules.reminders.desc": "Quiet check-ins for premarket, execution records, and business process habits.",
     "nav.rules.alarms.title": "Critical Alarms",
     "nav.rules.alarms.desc": "Popups for max loss, daily goal, open positions, and broken rules.",
 
@@ -139,45 +126,45 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
        Forum dropdown
     ------------------ */
     "nav.forum.community.title": "Community feed",
-    "nav.forum.community.desc": "Share progress with other traders.",
+    "nav.forum.community.desc": "Share progress with other Trader Entrepreneurs.",
     // Older alias
     "nav.forum.communityFeed.title": "Community feed",
-    "nav.forum.communityFeed.desc": "Share progress with other traders.",
+    "nav.forum.communityFeed.desc": "Share progress with other Trader Entrepreneurs.",
 
     /* -----------------
        Help menu (canonical)
     ------------------ */
     "help.title": "Need help with this page?",
     "help.desc":
-      "This dashboard is your central hub: you can see your P&L calendar, weekly summaries, streaks and daily targets. Use the widgets to customize what matters most for your process.",
-    "help.point1": "Click on any day in the calendar to open that journal.",
-    "help.point2": "Use the widget toggles to show/hide blocks you care about.",
-    "help.point3": "Edit your growth plan to update targets and calculations.",
+      "This Business Center is your operating hub: you can see your P&L calendar, weekly summaries, plan progress, and business milestones. Use it to keep the parts of your trading business connected.",
+    "help.point1": "Click on any day in the calendar to open that execution record.",
+    "help.point2": "Use the dashboard controls to focus the business signals you care about.",
+    "help.point3": "Edit your Trading Business Plan to update targets and calculations.",
     "help.gettingStarted": "Getting started guide",
-    "help.dashboardTour": "Dashboard tour",
-    "help.bullet.calendar": "Click on any day in the calendar to open that journal.",
-    "help.bullet.widgets": "Use the widget toggles to show/hide blocks you care about.",
-    "help.bullet.plan": "Edit your growth plan to update targets and calculations.",
+    "help.dashboardTour": "Business Center tour",
+    "help.bullet.calendar": "Click on any day in the calendar to open that execution record.",
+    "help.bullet.widgets": "Use the dashboard controls to focus the business signals you care about.",
+    "help.bullet.plan": "Edit your Trading Business Plan to update targets and calculations.",
 
     // Older aliases
     "help.button": "Help",
-    "help.bullet1": "Click on any day in the calendar to open that journal.",
-    "help.bullet2": "Use the widget toggles to show/hide blocks you care about.",
-    "help.bullet3": "Edit your growth plan to update targets and calculations.",
+    "help.bullet1": "Click on any day in the calendar to open that execution record.",
+    "help.bullet2": "Use the dashboard controls to focus the business signals you care about.",
+    "help.bullet3": "Edit your Trading Business Plan to update targets and calculations.",
     "help.link.gettingStarted": "Getting started guide",
-    "help.link.dashboardTour": "Dashboard tour",
+    "help.link.dashboardTour": "Business Center tour",
     "help.link.activateTour": "Activate quick tour",
 
     /* -----------------
        Account menu (TopNav avatar dropdown) - canonical
     ------------------ */
-    "account.menu.accountSettings": "Account settings",
+    "account.menu.accountSettings": "Trader Entrepreneur Account",
     "account.menu.preferences": "Preferences",
     "account.menu.changePassword": "Change password",
-    "account.menu.billing": "Billing & subscription",
+    "account.menu.billing": "Business billing & subscription",
     "account.menu.billingHistory": "Billing history",
     "account.menu.signOut": "Sign out",
-    "account.menu.profilePhoto": "Profile & photo",
+    "account.menu.profilePhoto": "Trader profile & photo",
     "account.menu.security": "Security",
     "account.menu.upgrade": "Upgrade / cancel",
     "account.menu.invoices": "Invoices",
@@ -185,27 +172,27 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     "account.menu.noSubscription": "No subscription active",
     "account.menu.currentPlan": "Current plan",
     "account.menu.plan": "Plan",
-    "account.menu.profile": "Profile & photo",
+    "account.menu.profile": "Trader profile & photo",
     "account.menu.langTheme": "Language & theme",
     "account.noSubscription": "No subscription active",
     "account.plan.label": "Plan",
 
     // Simple labels used by menu UI
-    Account: "Account",
+    Account: "Trader Entrepreneur Account",
     Preferences: "Preferences",
     "Security & Privacy": "Security & Privacy",
-    Billing: "Billing",
+    Billing: "Business Billing",
     "Billing History": "Billing history",
     Plan: "Plan",
 
     // Older alias namespace (accountMenu.*)
-    "accountMenu.accountSettings": "Account settings",
+    "accountMenu.accountSettings": "Trader Entrepreneur Account",
     "accountMenu.preferences": "Preferences",
     "accountMenu.changePassword": "Change password",
-    "accountMenu.billing": "Billing & subscription",
+    "accountMenu.billing": "Business billing & subscription",
     "accountMenu.billingHistory": "Billing history",
     "accountMenu.signOut": "Sign out",
-    "accountMenu.profilePhoto": "Profile & photo",
+    "accountMenu.profilePhoto": "Trader profile & photo",
     "accountMenu.security": "Security",
     "accountMenu.upgrade": "Upgrade / cancel",
     "accountMenu.invoices": "Invoices",
@@ -217,17 +204,17 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     /* -----------------
        Account tabs (Account pages)
     ------------------ */
-    "account.tabs.settings": "Account settings",
+    "account.tabs.settings": "Trader Entrepreneur Account",
     "account.tabs.preferences": "Preferences",
     "account.tabs.password": "Change password",
-    "account.tabs.billing": "Billing & subscription",
+    "account.tabs.billing": "Business billing & subscription",
     "account.tabs.billingHistory": "Billing history",
 
     // Older (seen in some pages)
-    "account.settings": "Account settings",
+    "account.settings": "Trader Entrepreneur Account",
     "account.preferences": "Preferences",
     "account.password": "Change password",
-    "account.billing": "Billing & subscription",
+    "account.billing": "Business billing & subscription",
     "account.billingHistory": "Billing history",
 
     /* -----------------
@@ -240,9 +227,9 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     /* -----------------
        Footer (canonical)
     ------------------ */
-    "footer.brand": "Neuro Trader Journal",
+    "footer.brand": "Neuro Trader",
     "footer.description":
-      "Tools designed for every trader — in any market — who wants to centralize their trading journey, master self-awareness, and elevate performance. Centralize your journal, understand your patterns, and execute with precision. Because the better you know yourself — the stronger your edge.",
+      "A Trading Business Platform for Trader Entrepreneurs who want to centralize their plan, execution, performance, protection, and AI coaching in one operating system.",
     "footer.links.login": "Log In",
     "footer.links.staff": "Staff login",
     "footer.links.blog": "Blog",
@@ -253,7 +240,7 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     "footer.links.terms": "Terms & Conditions",
     "footer.links.about": "About Us",
     "footer.copyright":
-      "Built for traders who want structure, risk control, and a healthier mindset.",
+      "Built for Trader Entrepreneurs who want structure, risk control, and business clarity.",
 
     // Older aliases (footer.link.*)
     "footer.link.login": "Log In",
@@ -296,7 +283,7 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     /* -----------------
        Misc / Future account strings (safe to keep)
     ------------------ */
-    "account.title": "Account settings",
+    "account.title": "Trader Entrepreneur Account",
     "account.subtitle":
       "Update your identity, contact information and manage preferences.",
   },
@@ -324,78 +311,66 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     /* -----------------
        TopNav (canonical)
     ------------------ */
-    "nav.performance": "Rendimiento",
-    "nav.notebook": "Cuaderno",
-    "nav.backStudy": "Back-Studying",
-    "nav.challenges": "Retos",
-    "nav.rules": "Sistema de protección de trading",
+    "nav.performance": "Rendimiento Empresarial",
+    "nav.notebook": "Notebook Empresarial",
+    "nav.backStudy": "Laboratorio de Revisión",
+    "nav.rules": "Sistema de Protección Empresarial",
     "nav.forum": "Foro",
-    "nav.optionFlow": "Smart Tools",
-    "nav.smartTools": "Smart Tools",
-    "nav.globalRanking": "Ranking global",
+    "nav.optionFlow": "Herramientas de Inteligencia de Mercado",
+    "nav.smartTools": "Herramientas de Inteligencia de Mercado",
 
     // Aliases
-    "nav.performance.title": "Rendimiento",
-    "nav.notebook.title": "Cuaderno",
-    "nav.backStudy.title": "Back-Studying",
-    "nav.challenges.title": "Retos",
-    "nav.rules.title": "Sistema de protección de trading",
+    "nav.performance.title": "Rendimiento Empresarial",
+    "nav.notebook.title": "Notebook Empresarial",
+    "nav.backStudy.title": "Laboratorio de Revisión",
+    "nav.rules.title": "Sistema de Protección Empresarial",
     "nav.forum.title": "Foro",
-    "nav.optionFlow.title": "Smart Tools",
-    "nav.smartTools.title": "Smart Tools",
-    "nav.globalRanking.title": "Ranking global",
+    "nav.optionFlow.title": "Herramientas de Inteligencia de Mercado",
+    "nav.smartTools.title": "Herramientas de Inteligencia de Mercado",
 
     /* -----------------
        Smart Tools dropdown items
     ------------------ */
     "nav.smartTools.optionFlow.title": "Option Flow Intelligence",
-    "nav.smartTools.optionFlow.desc": "Reportes de options flow, planes premarket y revisión de outcomes.",
+    "nav.smartTools.optionFlow.desc": "Reportes de options flow, planes premarket y revisión de resultados para el negocio.",
     "nav.smartTools.neuroAnalysis.title": "Neuro Analysis",
-    "nav.smartTools.neuroAnalysis.desc": "Research tipo CFA, principios Buffett, proyecciones futuras y allocation virtual.",
+    "nav.smartTools.neuroAnalysis.desc": "Inteligencia de compañías, proyecciones futuras y simulación de allocation virtual.",
 
     /* -----------------
        Performance dropdown items
     ------------------ */
-    "nav.performance.balanceChart.title": "Gráfico de balance",
+    "nav.performance.balanceChart.title": "Gráfico de balance empresarial",
     "nav.performance.balanceChart.desc":
-      "Evolución de tu cuenta y comparación diaria vs. tu objetivo.",
-    "nav.performance.analyticsStatistics.title": "Estadísticas",
+      "Evolución de tu cuenta y comparación diaria vs. tu meta empresarial.",
+    "nav.performance.analyticsStatistics.title": "Analítica Empresarial",
     "nav.performance.analyticsStatistics.desc":
-      "Analiza tu historial con estadísticas.",
-    "nav.performance.planSummary.title": "Resumen del plan",
-    "nav.performance.planSummary.desc": "Vista estructurada de tu Growth Plan.",
-    "nav.performance.aiCoaching.title": "Coaching con IA",
-    "nav.performance.aiCoaching.desc": "Ideas de coaching basadas en tus métricas.",
-    "nav.performance.profitLoss.title": "Profit & Loss Track",
+      "Analiza tu historial con estadísticas empresariales.",
+    "nav.performance.planSummary.title": "Plan de Empresa de Trading",
+    "nav.performance.planSummary.desc": "Vista estructurada de tu Plan de Empresa de Trading.",
+    "nav.performance.aiCoaching.title": "Coach Empresarial IA",
+    "nav.performance.aiCoaching.desc": "Ideas de coaching basadas en tus métricas y plan empresarial.",
+    "nav.performance.profitLoss.title": "Oficina de P&L Empresarial",
     "nav.performance.profitLoss.desc":
-      "Controla gastos, suscripciones y la rentabilidad neta.",
-    "nav.performance.cashFlow.title": "Flujo de caja",
+      "Controla gastos, suscripciones y la rentabilidad neta del negocio.",
+    "nav.performance.cashFlow.title": "Flujo de Caja Empresarial",
     "nav.performance.cashFlow.desc": "Registra depósitos y retiros.",
 
     // Aliases
-    "nav.performance.balance.title": "Gráfico de balance",
+    "nav.performance.balance.title": "Gráfico de balance empresarial",
     "nav.performance.balance.desc":
-      "Evolución de tu cuenta y comparación diaria vs. tu objetivo.",
-    "nav.performance.analytics.title": "Estadísticas",
-    "nav.performance.analytics.desc": "Analiza tu historial con estadísticas.",
-    "nav.performance.ai.title": "Coaching con IA",
-    "nav.performance.ai.desc": "Ideas de coaching basadas en tus métricas.",
-    "nav.performance.plan.title": "Flujo de caja",
+      "Evolución de tu cuenta y comparación diaria vs. tu meta empresarial.",
+    "nav.performance.analytics.title": "Analítica Empresarial",
+    "nav.performance.analytics.desc": "Analiza tu historial con estadísticas empresariales.",
+    "nav.performance.ai.title": "Coach Empresarial IA",
+    "nav.performance.ai.desc": "Ideas de coaching basadas en tus métricas y plan empresarial.",
+    "nav.performance.plan.title": "Flujo de Caja Empresarial",
     "nav.performance.plan.desc": "Registra depósitos y retiros.",
-
-    /* -----------------
-       Challenges dropdown
-    ------------------ */
-    "nav.challenges.item.title": "Retos",
-    "nav.challenges.item.desc": "Reto de consistencia con reglas.",
-    "nav.challenges.main.title": "Retos",
-    "nav.challenges.main.desc": "Reto de consistencia con reglas.",
 
     /* -----------------
        Rules dropdown
     ------------------ */
     "nav.rules.reminders.title": "Chequeos de rutina",
-    "nav.rules.reminders.desc": "Checks suaves para premarket, journaling y hábitos del proceso.",
+    "nav.rules.reminders.desc": "Checks suaves para premarket, registro de ejecución y hábitos del proceso empresarial.",
     "nav.rules.alarms.title": "Alarmas críticas",
     "nav.rules.alarms.desc": "Popups para max loss, meta diaria, posiciones abiertas y reglas rotas.",
 
@@ -403,44 +378,44 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
        Forum dropdown
     ------------------ */
     "nav.forum.community.title": "Comunidad",
-    "nav.forum.community.desc": "Comparte tu progreso con otros traders.",
+    "nav.forum.community.desc": "Comparte tu progreso con otros Empresarios Traders.",
     "nav.forum.communityFeed.title": "Comunidad",
-    "nav.forum.communityFeed.desc": "Comparte tu progreso con otros traders.",
+    "nav.forum.communityFeed.desc": "Comparte tu progreso con otros Empresarios Traders.",
 
     /* -----------------
        Help menu
     ------------------ */
     "help.title": "¿Necesitas ayuda con esta página?",
     "help.desc":
-      "Este dashboard es tu centro: puedes ver tu calendario de P&L, resúmenes semanales, rachas y objetivos diarios. Usa los widgets para priorizar lo que importa.",
-    "help.point1": "Haz clic en un día del calendario para abrir ese journal.",
-    "help.point2": "Usa los toggles para mostrar/ocultar widgets.",
-    "help.point3": "Edita tu plan de crecimiento para actualizar cálculos.",
+      "Este Centro Empresarial es tu hub operativo: puedes ver tu calendario de P&L, resúmenes semanales, progreso del plan y milestones empresariales. Úsalo para mantener conectadas las partes de tu empresa de trading.",
+    "help.point1": "Haz clic en un día del calendario para abrir ese registro de ejecución.",
+    "help.point2": "Usa los controles del dashboard para enfocar las señales empresariales que importan.",
+    "help.point3": "Edita tu Plan de Empresa de Trading para actualizar cálculos.",
     "help.gettingStarted": "Guía de inicio",
-    "help.dashboardTour": "Tour del dashboard",
-    "help.bullet.calendar": "Haz clic en un día del calendario para abrir ese journal.",
-    "help.bullet.widgets": "Usa los toggles para mostrar/ocultar widgets.",
-    "help.bullet.plan": "Edita tu plan de crecimiento para actualizar cálculos.",
+    "help.dashboardTour": "Tour del Centro Empresarial",
+    "help.bullet.calendar": "Haz clic en un día del calendario para abrir ese registro de ejecución.",
+    "help.bullet.widgets": "Usa los controles del dashboard para enfocar las señales empresariales que importan.",
+    "help.bullet.plan": "Edita tu Plan de Empresa de Trading para actualizar cálculos.",
 
     // Aliases
     "help.button": "Ayuda",
-    "help.bullet1": "Haz clic en un día del calendario para abrir ese journal.",
-    "help.bullet2": "Usa los toggles para mostrar/ocultar widgets.",
-    "help.bullet3": "Edita tu plan de crecimiento para actualizar cálculos.",
+    "help.bullet1": "Haz clic en un día del calendario para abrir ese registro de ejecución.",
+    "help.bullet2": "Usa los controles del dashboard para enfocar las señales empresariales que importan.",
+    "help.bullet3": "Edita tu Plan de Empresa de Trading para actualizar cálculos.",
     "help.link.gettingStarted": "Guía de inicio",
-    "help.link.dashboardTour": "Tour del dashboard",
+    "help.link.dashboardTour": "Tour del Centro Empresarial",
     "help.link.activateTour": "Activar tour rápido",
 
     /* -----------------
        Account menu
     ------------------ */
-    "account.menu.accountSettings": "Configuración de cuenta",
+    "account.menu.accountSettings": "Cuenta de Empresario Trader",
     "account.menu.preferences": "Preferencias",
     "account.menu.changePassword": "Cambiar contraseña",
-    "account.menu.billing": "Facturación y suscripción",
+    "account.menu.billing": "Facturación empresarial y suscripción",
     "account.menu.billingHistory": "Historial de facturación",
     "account.menu.signOut": "Cerrar sesión",
-    "account.menu.profilePhoto": "Perfil y foto",
+    "account.menu.profilePhoto": "Perfil trader y foto",
     "account.menu.security": "Seguridad",
     "account.menu.upgrade": "Mejorar / cancelar",
     "account.menu.invoices": "Facturas",
@@ -448,27 +423,27 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     "account.menu.noSubscription": "Sin suscripción activa",
     "account.menu.currentPlan": "Plan actual",
     "account.menu.plan": "Plan",
-    "account.menu.profile": "Perfil y foto",
+    "account.menu.profile": "Perfil trader y foto",
     "account.menu.langTheme": "Idioma y tema",
     "account.noSubscription": "Sin suscripción activa",
     "account.plan.label": "Plan",
 
     // Etiquetas simples usadas en menús
-    Account: "Cuenta",
+    Account: "Cuenta de Empresario Trader",
     Preferences: "Preferencias",
     "Security & Privacy": "Seguridad y privacidad",
-    Billing: "Facturación",
+    Billing: "Facturación Empresarial",
     "Billing History": "Historial de facturación",
     Plan: "Plan",
 
     // Older alias namespace (accountMenu.*)
-    "accountMenu.accountSettings": "Configuración de cuenta",
+    "accountMenu.accountSettings": "Cuenta de Empresario Trader",
     "accountMenu.preferences": "Preferencias",
     "accountMenu.changePassword": "Cambiar contraseña",
-    "accountMenu.billing": "Facturación y suscripción",
+    "accountMenu.billing": "Facturación empresarial y suscripción",
     "accountMenu.billingHistory": "Historial de facturación",
     "accountMenu.signOut": "Cerrar sesión",
-    "accountMenu.profilePhoto": "Perfil y foto",
+    "accountMenu.profilePhoto": "Perfil trader y foto",
     "accountMenu.security": "Seguridad",
     "accountMenu.upgrade": "Mejorar / cancelar",
     "accountMenu.invoices": "Facturas",
@@ -480,17 +455,17 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     /* -----------------
        Account tabs
     ------------------ */
-    "account.tabs.settings": "Configuración de cuenta",
+    "account.tabs.settings": "Cuenta de Empresario Trader",
     "account.tabs.preferences": "Preferencias",
     "account.tabs.password": "Cambiar contraseña",
-    "account.tabs.billing": "Facturación y suscripción",
+    "account.tabs.billing": "Facturación empresarial y suscripción",
     "account.tabs.billingHistory": "Historial de facturación",
 
     // Older
-    "account.settings": "Configuración de cuenta",
+    "account.settings": "Cuenta de Empresario Trader",
     "account.preferences": "Preferencias",
     "account.password": "Cambiar contraseña",
-    "account.billing": "Facturación y suscripción",
+    "account.billing": "Facturación empresarial y suscripción",
     "account.billingHistory": "Historial de facturación",
 
     /* -----------------
@@ -503,9 +478,9 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     /* -----------------
        Footer
     ------------------ */
-    "footer.brand": "Neuro Trader Journal",
+    "footer.brand": "Neuro Trader",
     "footer.description":
-      "Herramientas diseñadas para traders — en cualquier mercado — que desean centralizar su progreso, dominar la autoobservación y elevar su desempeño. Centraliza tu journal, entiende tus patrones y ejecuta con precisión. Mientras mejor te conozcas — más fuerte será tu ventaja.",
+      "Una Plataforma Empresarial de Trading para Empresarios Traders que quieren centralizar su plan, ejecución, rendimiento, protección y coaching IA en un solo sistema operativo.",
     "footer.links.login": "Iniciar sesión",
     "footer.links.staff": "Staff login",
     "footer.links.blog": "Blog",
@@ -516,7 +491,7 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     "footer.links.terms": "Términos y condiciones",
     "footer.links.about": "Sobre nosotros",
     "footer.copyright":
-      "Creado para traders que buscan estructura, control de riesgo y una mentalidad más saludable.",
+      "Creado para Empresarios Traders que buscan estructura, control de riesgo y claridad empresarial.",
 
     // Aliases
     "footer.link.login": "Iniciar sesión",
@@ -559,9 +534,9 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     /* -----------------
        Misc / Future
     ------------------ */
-    "account.title": "Configuración de cuenta",
+    "account.title": "Cuenta de Empresario Trader",
     "account.subtitle":
-      "Actualiza tu identidad, información de contacto y preferencias.",
+      "Actualiza tu identidad, información de contacto y preferencias empresariales.",
   },
 };
 

@@ -66,11 +66,19 @@ function isMissingColumn(err: any): boolean {
 async function queryCashflowsTable(
   table: string,
   userId: string,
-  accountId?: string | null
+  accountId?: string | null,
+  fromDate?: string,
+  toDate?: string
 ): Promise<{ data: any[]; error: any | null }> {
   let q = supabaseAdmin.from(table).select("*").eq("user_id", userId);
   if (accountId) {
     q = q.eq("account_id", accountId);
+  }
+  if (fromDate) {
+    q = q.gte("date", fromDate);
+  }
+  if (toDate) {
+    q = q.lte("date", toDate);
   }
   let { data, error } = await q.order("date", { ascending: false }).order("created_at", { ascending: false });
 
@@ -109,9 +117,9 @@ export async function GET(req: NextRequest) {
 
     let rows: any[] = [];
 
-    let primary = await queryCashflowsTable("cashflows", userId, accountId);
+    let primary = await queryCashflowsTable("cashflows", userId, accountId, fromDate, toDate);
     if (primary.error && isMissingRelation(primary.error)) {
-      const legacy = await queryCashflowsTable("ntj_cashflows", userId, accountId);
+      const legacy = await queryCashflowsTable("ntj_cashflows", userId, accountId, fromDate, toDate);
       if (legacy.error) throw legacy.error;
       rows = legacy.data;
     } else if (primary.error) {
@@ -119,7 +127,7 @@ export async function GET(req: NextRequest) {
     } else {
       rows = primary.data;
       if (!rows.length) {
-        const legacy = await queryCashflowsTable("ntj_cashflows", userId, accountId);
+        const legacy = await queryCashflowsTable("ntj_cashflows", userId, accountId, fromDate, toDate);
         if (!legacy.error && legacy.data?.length) rows = legacy.data;
       }
     }

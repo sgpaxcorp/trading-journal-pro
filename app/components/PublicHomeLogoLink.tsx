@@ -36,12 +36,12 @@ export default function PublicHomeLogoLink({
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         src="/neurotrader-logo.svg"
-        alt="Neuro Trader Journal"
+        alt="Neuro Trader"
         className={imgClass}
       />
       {showLabel && !compact ? (
         <span className="text-xs text-slate-300">
-          {user ? "Dashboard" : "Home"}
+          {user ? "Business" : "Home"}
         </span>
       ) : null}
     </Link>

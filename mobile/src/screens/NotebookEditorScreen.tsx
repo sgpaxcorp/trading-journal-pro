@@ -105,7 +105,7 @@ export function NotebookEditorScreen() {
   const [renaming, setRenaming] = useState(false);
 
   const loadData = useCallback(async () => {
-    if (!planAccess.isAdvanced) return;
+    if (!planAccess.hasNotebook) return;
     if (!supabaseMobile || !user?.id || !kind || !id) return;
     setLoading(true);
     setError(null);
@@ -163,15 +163,15 @@ export function NotebookEditorScreen() {
     } finally {
       setLoading(false);
     }
-  }, [id, kind, language, planAccess.isAdvanced, user?.id]);
+  }, [id, kind, language, planAccess.hasNotebook, user?.id]);
 
   useEffect(() => {
-    if (!planAccess.isAdvanced) return;
+    if (!planAccess.hasNotebook) return;
     void loadData();
-  }, [loadData, planAccess.isAdvanced]);
+  }, [loadData, planAccess.hasNotebook]);
 
   async function handleSave() {
-    if (!planAccess.isAdvanced) return;
+    if (!planAccess.hasNotebook) return;
     if (!supabaseMobile || !user?.id || !kind || !id) return;
     setSaving(true);
     setError(null);
@@ -226,7 +226,7 @@ export function NotebookEditorScreen() {
   }
 
   async function handleRename() {
-    if (!planAccess.isAdvanced) return;
+    if (!planAccess.hasNotebook) return;
     if (!supabaseMobile || !user?.id || kind !== "page") {
       setRenameOpen(false);
       return;
@@ -256,7 +256,7 @@ export function NotebookEditorScreen() {
     }
   }
 
-  const screenTitle = currentTitle || title || t(language, "Notebook page", "Página del notebook");
+  const screenTitle = currentTitle || title || t(language, "Business Notebook page", "Página del Notebook Empresarial");
   const screenSubtitle =
     kind === "page"
       ? t(
@@ -266,20 +266,20 @@ export function NotebookEditorScreen() {
         )
       : t(
           language,
-          "Your journal day page stays focused here: write or draw without distractions.",
-          "La página del journal del día se mantiene enfocada aquí: escribe o dibuja sin distracciones."
+          "Your daily business page stays focused here: write or draw without distractions.",
+          "Tu página empresarial diaria se mantiene enfocada aquí: escribe o dibuja sin distracciones."
         );
 
-  if (!planAccess.isAdvanced) {
+  if (!planAccess.hasNotebook) {
     return (
       <PlanGate
-        title={t(language, "Notebook", "Notebook")}
+        title={t(language, "Business Notebook", "Notebook Empresarial")}
         badge="Advanced"
         loading={planAccess.loading}
         subtitle={t(
           language,
-          "Notebook page editing, ink, rich text, and daily pages are included in Advanced.",
-          "La edición de páginas, ink, rich text y páginas diarias de Notebook están incluidas en Advanced."
+          "Business Notebook page editing, ink, rich text, and daily pages are included in Advanced.",
+          "La edición de páginas del Notebook Empresarial, ink, rich text y páginas diarias están incluidas en Advanced."
         )}
       />
     );
@@ -323,7 +323,7 @@ export function NotebookEditorScreen() {
           </View>
 
           <InkField
-            label={kind === "page" ? t(language, "Notebook page", "Página del notebook") : t(language, "Journal page", "Página del journal")}
+            label={kind === "page" ? t(language, "Business Notebook page", "Página del Notebook Empresarial") : t(language, "Daily business page", "Página empresarial diaria")}
             mode={mode}
             onModeChange={setMode}
             textValue={content}

@@ -183,7 +183,7 @@ export default function FloatingAskButton() {
       {open && (
         <div className="fixed bottom-20 right-6 z-40 w-80 max-w-[90vw] rounded-lg border border-slate-800 bg-slate-950 shadow-2xl shadow-slate-900/80 p-3 flex flex-col gap-2">
           <p className="text-[11px] font-semibold text-slate-100">
-            {L("Neuro Trader Journal — Sales Advisor", "Neuro Trader Journal — Asesor comercial")}
+            {L("Neuro Trader — Business Advisor", "Neuro Trader — Asesor Empresarial")}
           </p>
           <p className="text-[10px] text-slate-400">
             {L(

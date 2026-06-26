@@ -3,28 +3,14 @@
 import type { JournalEntry } from "@/lib/journalTypes";
 import { getAllJournalEntries } from "@/lib/journalSupabase";
 
-import {
-  getAllChallengeProgress,
-  type ChallengeProgress,
-} from "@/lib/challengesSupabase";
-
-import {
-  getProfileGamification,
-  type ProfileGamification,
-} from "@/lib/profileGamificationSupabase";
-
 /**
  * Mantengo el mismo shape que tu snapshot local:
  * - journalEntries
  * - growthPlan (por ahora null porque aún lo lees local en la page)
- * - challenges
- * - profileGamification
  */
 export type AiCoachSnapshot = {
   journalEntries: JournalEntry[];
   growthPlan: null;
-  challenges: ChallengeProgress[];
-  profileGamification: ProfileGamification;
 };
 
 /**
@@ -36,22 +22,14 @@ export async function buildAiCoachSnapshot(userId: string, accountId?: string | 
     return {
       journalEntries: [],
       growthPlan: null,
-      challenges: [],
-      profileGamification: { xp: 0, level: 1, tier: "Bronze", badges: [] },
     };
   }
 
-  const [journalEntries, challenges, profileGamification] = await Promise.all([
-    getAllJournalEntries(userId, accountId),
-    getAllChallengeProgress(userId),
-    getProfileGamification(userId),
-  ]);
+  const journalEntries = await getAllJournalEntries(userId, accountId);
 
   return {
     journalEntries,
     growthPlan: null,
-    challenges,
-    profileGamification,
   };
 }
 

@@ -37,14 +37,14 @@ const BUILDERS: QuickTourBuilder[] = [
     guideHref: "/help/dashboard-widgets",
     match: (path) => path.startsWith("/dashboard"),
     build: (L) => ({
-      title: L("Dashboard", "Dashboard"),
+      title: L("Business Center", "Centro Empresarial"),
       summary: L(
-        "Use the Dashboard to separate three realities: real account progress, plan pacing, and what you actually did this week.",
-        "Usa el Dashboard para separar tres realidades: progreso real de la cuenta, ritmo contra el plan y lo que de verdad hiciste esta semana."
+        "Use the Business Center to separate three realities: real account progress, business plan pacing, and what you actually did this week.",
+        "Usa el Centro Empresarial para separar tres realidades: progreso real de la cuenta, ritmo del plan empresarial y lo que de verdad hiciste esta semana."
       ),
       bullets: [
         L("Account Progress answers how your equity is truly doing.", "Account Progress responde cómo va de verdad tu equity."),
-        L("Plan Progress answers whether you are ahead or behind the Growth Plan.", "Plan Progress responde si vas adelantado o atrasado contra el Growth Plan."),
+        L("Plan Progress answers whether you are ahead or behind the Trading Business Plan.", "Plan Progress responde si vas adelantado o atrasado contra el Plan de Empresa de Trading."),
         L("Weekly Summary and the P&L Calendar keep realized performance separate from the plan.", "Weekly Summary y el calendario P&L separan el rendimiento realizado del plan."),
       ],
       steps: [
@@ -79,8 +79,8 @@ const BUILDERS: QuickTourBuilder[] = [
           id: "dashboard-calendar",
           title: L("P&L Calendar", "Calendario P&L"),
           body: L(
-            "Use the calendar to audit the month day by day and jump directly into the Journal session behind any result.",
-            "Usa el calendario para auditar el mes día a día y saltar directo al Journal detrás de cualquier resultado."
+            "Use the calendar to audit the month day by day and jump directly into the execution record behind any result.",
+            "Usa el calendario para auditar el mes día a día y saltar directo al registro de ejecución detrás de cualquier resultado."
           ),
           selector: '[data-tour="dash-widget-calendar"]',
         },
@@ -92,10 +92,10 @@ const BUILDERS: QuickTourBuilder[] = [
     guideHref: "/help/growth-plan",
     match: (path) => path.startsWith("/growth-plan"),
     build: (L) => ({
-      title: L("Growth Plan", "Growth Plan"),
+      title: L("Trading Business Plan", "Plan de Empresa de Trading"),
       summary: L(
-        "This page is the source of truth for pacing, risk, and milestone math. The rest of the platform reads from what you define here.",
-        "Esta página es la fuente de verdad para ritmo, riesgo y la matemática de metas. El resto de la plataforma lee lo que defines aquí."
+        "This page is the source of truth for business pacing, risk, operating rules, and milestone math. The rest of Neuro Trader reads from what you define here.",
+        "Esta página es la fuente de verdad para ritmo empresarial, riesgo, reglas operativas y matemática de metas. El resto de Neuro Trader lee lo que defines aquí."
       ),
       bullets: [
         L("Starting balance anchors every projection and reference return.", "El balance inicial ancla cada proyección y retorno de referencia."),
@@ -161,10 +161,10 @@ const BUILDERS: QuickTourBuilder[] = [
     guideHref: "/help/journal",
     match: (path) => path.startsWith("/journal/"),
     build: (L) => ({
-      title: L("Journal", "Journal"),
+      title: L("Execution Journal", "Registro de Ejecución"),
       summary: L(
-        "The Journal is where execution becomes data. A complete day captures plan, live decisions, review, and Neuro Layer truth.",
-        "El Journal es donde la ejecución se convierte en datos. Un día completo captura plan, decisiones en vivo, revisión y verdad del Neuro Layer."
+        "The Execution Journal is where the trading business records what actually happened. A complete day captures plan, live decisions, review, and Neuro Layer truth.",
+        "El Registro de Ejecución es donde la empresa de trading documenta lo que realmente pasó. Un día completo captura plan, decisiones en vivo, revisión y verdad del Neuro Layer."
       ),
       bullets: [
         L("Premarket defines bias, levels, setup, and risk before the session starts.", "Premarket define sesgo, niveles, setup y riesgo antes de que comience la sesión."),
@@ -293,15 +293,15 @@ const BUILDERS: QuickTourBuilder[] = [
     guideHref: "/help/ai-coaching",
     match: (path) => path.startsWith("/performance/ai-coaching"),
     build: (L) => ({
-      title: L("AI Coaching", "AI Coaching"),
+      title: L("Business AI Coach", "Coach Empresarial IA"),
       summary: L(
-        "AI Coaching reads your journal, trades, analytics, and Neuro Layer context to turn patterns into action items.",
-        "AI Coaching lee tu journal, trades, analítica y contexto del Neuro Layer para convertir patrones en action items."
+        "Business AI Coaching reads your execution records, trades, analytics, Neuro Layer context, and Trading Business Plan to turn patterns into next actions.",
+        "El Coach Empresarial IA lee tus registros de ejecución, trades, analítica, contexto Neuro y Plan de Empresa de Trading para convertir patrones en próximas acciones."
       ),
       bullets: [
         L("Use a clean date range with enough sessions.", "Usa un rango limpio con suficientes sesiones."),
         L("Ask specific questions about discipline, execution, risk, or performance.", "Haz preguntas específicas sobre disciplina, ejecución, riesgo o performance."),
-        L("Good Neuro Layer inputs make coaching sharper and more personal.", "Buenos inputs del Neuro Layer hacen el coaching más preciso y más personal."),
+        L("Good Neuro Layer inputs make the business coach sharper and more personal.", "Buenos inputs del Neuro Layer hacen al coach empresarial más preciso y más personal."),
       ],
       steps: [
         {
@@ -357,7 +357,7 @@ const BUILDERS: QuickTourBuilder[] = [
       bullets: [
         L("Upload flow reports cleanly and keep screenshot evidence focused.", "Sube reportes de flow limpios y mantén la evidencia visual enfocada."),
         L("Use the output to strengthen the premarket plan, not to chase noise.", "Usa la salida para fortalecer el plan premarket, no para perseguir ruido."),
-        L("Push the plan into the Journal if you want the thesis to stay inside the daily workflow.", "Envía el plan al Journal si quieres que la tesis quede dentro del flujo diario."),
+        L("Push the plan into the Execution Journal if you want the thesis to stay inside the daily workflow.", "Envía el plan al Registro de Ejecución si quieres que la tesis quede dentro del flujo diario."),
       ],
       steps: [
         {
@@ -379,8 +379,8 @@ const BUILDERS: QuickTourBuilder[] = [
     build: (L) => ({
       title: L("Neuro Analysis", "Neuro Analysis"),
       summary: L(
-        "This workspace is for CFA-style company research, Buffett principles, projections, and virtual allocation simulation.",
-        "Este workspace es para research de compañías tipo CFA, principios Buffett, proyecciones y simulación virtual de allocation."
+        "This workspace is for company intelligence, projections, and virtual allocation simulation.",
+        "Este workspace es para inteligencia de compañías, proyecciones y simulación virtual de allocation."
       ),
       bullets: [
         L("Use it to frame business quality, financial statements, valuation, risk, and portfolio fit.", "Úsalo para estructurar calidad del negocio, estados financieros, valuation, riesgo y encaje en portfolio."),
@@ -461,13 +461,13 @@ const BUILDERS: QuickTourBuilder[] = [
     guideHref: "/help/rules-alarms",
     match: (path) => path.startsWith("/rules-alarms"),
     build: (L) => ({
-      title: L("Trading Protection System", "Sistema de protección de trading"),
+      title: L("Business Protection System", "Sistema de Protección Empresarial"),
       summary: L(
-        "This page turns your plan into protection. It exists to help you obey your rules when emotion gets loud.",
-        "Esta página convierte tu plan en protección. Existe para ayudarte a obedecer tus reglas cuando la emoción sube el volumen."
+        "This page turns your Trading Business Plan into protection. It exists to help you obey your risk and routine rules when emotion gets loud.",
+        "Esta página convierte tu Plan de Empresa de Trading en protección. Existe para ayudarte a obedecer tus reglas de riesgo y rutina cuando la emoción sube el volumen."
       ),
       bullets: [
-        L("Use routine checks for premarket, journaling, and closeout habits.", "Usa chequeos de rutina para premarket, journaling y cierre del día."),
+        L("Use routine checks for premarket, execution records, and closeout habits.", "Usa chequeos de rutina para premarket, registros de ejecución y cierre del día."),
         L("Use critical alarms for hard safety signals only.", "Usa alarmas críticas solo para señales duras de seguridad."),
         L("If a rule matters, protect it before you trust memory.", "Si una regla importa, protégela antes de confiar en la memoria."),
       ],
@@ -478,34 +478,6 @@ const BUILDERS: QuickTourBuilder[] = [
           body: L(
             "Define rules that protect risk and routine. Good alarms reduce avoidable mistakes before they become costly behavior.",
             "Define reglas que protejan riesgo y rutina. Buenas alarmas reducen errores evitables antes de que se conviertan en conducta costosa."
-          ),
-          selector: "main h1",
-        },
-      ],
-    }),
-  },
-  {
-    key: "challenges",
-    guideHref: "/help/challenges",
-    match: (path) => path.startsWith("/challenges"),
-    build: (L) => ({
-      title: L("Challenges", "Retos"),
-      summary: L(
-        "Challenges are short consistency programs. Use them to train one behavior at a time instead of trying to fix everything at once.",
-        "Los retos son programas cortos de consistencia. Úsalos para entrenar una conducta a la vez en vez de intentar arreglar todo de golpe."
-      ),
-      bullets: [
-        L("Pick one challenge that matches your current weakness or plan objective.", "Elige un reto que coincida con tu debilidad actual o con el objetivo del plan."),
-        L("Track the challenge inside Dashboard and Journal, not only inside the challenge page.", "Da seguimiento al reto desde Dashboard y Journal, no solo dentro de la página del reto."),
-        L("Consistency beats intensity. One clean challenge is enough.", "La consistencia le gana a la intensidad. Un reto limpio es suficiente."),
-      ],
-      steps: [
-        {
-          id: "challenges-header",
-          title: L("Consistency programs", "Programas de consistencia"),
-          body: L(
-            "Use challenges to reinforce one operating behavior until it becomes standard. They work best when aligned with the Growth Plan.",
-            "Usa los retos para reforzar una conducta operativa hasta que se vuelva estándar. Funcionan mejor cuando están alineados con el Growth Plan."
           ),
           selector: "main h1",
         },
@@ -541,45 +513,17 @@ const BUILDERS: QuickTourBuilder[] = [
     }),
   },
   {
-    key: "global-ranking",
-    guideHref: "/help/global-ranking",
-    match: (path) => path.startsWith("/globalranking"),
-    build: (L) => ({
-      title: L("Global Ranking", "Ranking global"),
-      summary: L(
-        "The ranking is live feedback from XP and trophies. Treat it as a consistency scoreboard, not as identity.",
-        "El ranking es feedback en vivo a partir de XP y trofeos. Trátalo como un scoreboard de consistencia, no como identidad."
-      ),
-      bullets: [
-        L("Your snapshot shows XP, trophies, and whether you are inside the top 25.", "Tu snapshot muestra XP, trofeos y si estás dentro del top 25."),
-        L("Public profiles expose trophies and ranking stats only.", "Los perfiles públicos muestran solo trofeos y estadísticas de ranking."),
-        L("Use trophy progress as reinforcement for disciplined behavior.", "Usa el progreso de trofeos como refuerzo de conducta disciplinada."),
-      ],
-      steps: [
-        {
-          id: "ranking-header",
-          title: L("Ranking snapshot", "Snapshot del ranking"),
-          body: L(
-            "Track your level, XP, and trophy count here. The value is in consistency feedback over time, not in one-day comparison.",
-            "Sigue aquí tu nivel, XP y cantidad de trofeos. El valor está en el feedback de consistencia en el tiempo, no en la comparación de un solo día."
-          ),
-          selector: "main h1",
-        },
-      ],
-    }),
-  },
-  {
     key: "account-settings",
     guideHref: "/help/settings",
     match: (path) => startsWithAny(path, ["/account", "/account/preferences", "/account/password"]),
     build: (L) => ({
-      title: L("Account & Settings", "Cuenta y ajustes"),
+      title: L("Trader Entrepreneur Account", "Cuenta de Empresario Trader"),
       summary: L(
-        "This area controls profile, language, theme, privacy, and account security settings.",
-        "Esta área controla perfil, idioma, tema, privacidad y ajustes de seguridad de la cuenta."
+        "This area controls your trader entrepreneur identity, language, theme, privacy, and account security settings.",
+        "Esta área controla tu identidad de empresario trader, idioma, tema, privacidad y ajustes de seguridad de la cuenta."
       ),
       bullets: [
-        L("Keep your profile and ranking visibility intentional.", "Mantén intencional tu perfil y visibilidad en el ranking."),
+        L("Keep your profile, business data, and security settings intentional.", "Mantén intencional tu perfil, data empresarial y seguridad."),
         L("Use preferences to align the app with your workflow and language.", "Usa preferencias para alinear la app con tu flujo y tu idioma."),
         L("Treat password and security updates as operational maintenance.", "Trata las actualizaciones de contraseña y seguridad como mantenimiento operativo."),
       ],
@@ -659,8 +603,8 @@ const BUILDERS: QuickTourBuilder[] = [
     build: (L) => ({
       title: L("Workspace guide", "Guía del workspace"),
       summary: L(
-        "Every screen in Neuro Trader Journal should reinforce the loop: plan, execute, journal, review, improve.",
-        "Cada pantalla en Neuro Trader Journal debe reforzar el ciclo: plan, ejecutar, journalear, revisar, mejorar."
+        "Every screen in Neuro Trader should reinforce the business loop: plan, protect, execute, record, review, improve.",
+        "Cada pantalla en Neuro Trader debe reforzar el ciclo empresarial: planificar, proteger, ejecutar, registrar, revisar, mejorar."
       ),
       bullets: [
         L("Use the page title to confirm what this screen is responsible for.", "Usa el título de la página para confirmar de qué es responsable esta pantalla."),

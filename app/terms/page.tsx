@@ -10,9 +10,9 @@ const CONTENT = {
     title: "Terms of Service",
     updated: "Effective Date: January 17, 2026",
     intro:
-      "These Terms of Service (\"Terms\") govern your access to and use of the Neuro Trader Journal website, applications, and related services (collectively, the \"Service\") provided by SG PAX CORP. (\"Neuro Trader Journal\", \"NTJ\", \"we\", \"us\", or \"our\").",
+      "These Terms of Service (\"Terms\") govern your access to and use of the Neuro Trader website, applications, and related services (collectively, the \"Service\") provided by SG PAX CORP. (\"Neuro Trader\", \"NTJ\", \"we\", \"us\", or \"our\").",
     important:
-      "IMPORTANT: NTJ is a journaling, analytics, and educational/coaching platform. NTJ is not a broker-dealer, investment adviser, commodity trading advisor, or financial planner. Nothing in the Service is intended to be (or should be construed as) investment, trading, legal, tax, or accounting advice.",
+      "IMPORTANT: NTJ is a trading business organization, analytics, and educational/coaching platform. NTJ is not a broker-dealer, investment adviser, commodity trading advisor, or financial planner. Nothing in the Service is intended to be (or should be construed as) investment, trading, legal, tax, or accounting advice.",
     sections: [
       {
         title: "1. Acceptance of Terms",
@@ -22,7 +22,7 @@ const CONTENT = {
       {
         title: "2. Description of the Service",
         body:
-          "The Service may include features such as trade journaling, trade analytics, performance metrics, tagging and notes, screenshots and attachments, dashboards, integrations with third-party platforms, community or sharing features (if enabled), and AI-assisted coaching and insights. We may add, remove, or modify features at any time. You are responsible for obtaining and maintaining all devices, software, and internet access necessary to use the Service.",
+          "The Service may include features such as execution records, trading business plans, trade analytics, performance metrics, tagging and notes, screenshots and attachments, dashboards, integrations with third-party platforms, community or sharing features (if enabled), and AI-assisted coaching and insights. We may add, remove, or modify features at any time. You are responsible for obtaining and maintaining all devices, software, and internet access necessary to use the Service.",
       },
       {
         title: "3. Eligibility and Account Registration",
@@ -32,32 +32,32 @@ const CONTENT = {
       {
         title: "4. Data Inputs, Integrations, and User Responsibility",
         body:
-          "The accuracy and usefulness of journaling, analytics, metrics, and AI Coaching outputs depend on the quality and completeness of the data you provide and/or authorize NTJ to import through integrations. You are solely responsible for: (1) entering, uploading, or importing your trading data correctly and completely; (2) reviewing imported data for accuracy (including fills, commissions, fees, timestamps, and instrument details); (3) confirming that your broker, prop firm, or third-party platform data is accurate and reflects your official records; and (4) understanding how your broker/platform calculates metrics (e.g., realized vs. unrealized PnL, net vs. gross PnL). You acknowledge that third-party integrations may be unavailable, delayed, incomplete, or inaccurate due to third-party systems, permissions, API changes, outages, or other causes outside our control.",
+          "The accuracy and usefulness of execution records, analytics, metrics, and Business AI Coaching outputs depend on the quality and completeness of the data you provide and/or authorize NTJ to import through integrations. You are solely responsible for: (1) entering, uploading, or importing your trading data correctly and completely; (2) reviewing imported data for accuracy (including fills, commissions, fees, timestamps, and instrument details); (3) confirming that your broker, prop firm, or third-party platform data is accurate and reflects your official records; and (4) understanding how your broker/platform calculates metrics (e.g., realized vs. unrealized PnL, net vs. gross PnL). You acknowledge that third-party integrations may be unavailable, delayed, incomplete, or inaccurate due to third-party systems, permissions, API changes, outages, or other causes outside our control.",
       },
       {
-        title: "5. AI Coaching and AI-Assisted Insights",
+        title: "5. Business AI Coaching and AI-Assisted Insights",
         body:
-          "The Service may provide AI-assisted coaching, pattern detection, summaries, recommendations, trade reviews, risk/mindset prompts, and other automated insights (\"AI Coaching\"). AI Coaching is provided for informational and educational purposes only.",
+          "The Service may provide AI-assisted coaching, pattern detection, summaries, recommendations, trade reviews, risk/mindset prompts, and other automated insights (\"Business AI Coaching\"). Business AI Coaching is provided for informational and educational purposes only.",
       },
       {
         title: "5.1 AI May Be Inaccurate or Incomplete",
         body:
-          "AI Coaching outputs are generated by automated systems and may contain errors, omissions, hallucinations, incorrect assumptions, or outdated information. We do not guarantee the accuracy, completeness, reliability, or usefulness of any AI Coaching output.",
+          "Business AI Coaching outputs are generated by automated systems and may contain errors, omissions, hallucinations, incorrect assumptions, or outdated information. We do not guarantee the accuracy, completeness, reliability, or usefulness of any Business AI Coaching output.",
       },
       {
         title: "5.2 AI Relies on Your Data and Context",
         body:
-          "AI Coaching analyzes information based on the data you enter, upload, import, or otherwise provide (including trade data, notes, tags, and preferences). Because AI Coaching depends on your inputs, you are responsible for ensuring that your data is accurate and complete. Incorrect or incomplete inputs may produce misleading outputs.",
+          "Business AI Coaching analyzes information based on the data you enter, upload, import, or otherwise provide (including trade data, notes, tags, and preferences). Because Business AI Coaching depends on your inputs, you are responsible for ensuring that your data is accurate and complete. Incorrect or incomplete inputs may produce misleading outputs.",
       },
       {
         title: "5.3 No Financial Advice; You Must Independently Evaluate",
         body:
-          "AI Coaching is not investment advice, trading advice, or a recommendation to buy or sell any security, derivative, futures contract, forex pair, cryptocurrency, or any other instrument. Any actions you take based on AI Coaching are taken at your sole discretion and risk. You must independently evaluate any suggestion, recommendation, or analysis and decide whether to act.",
+          "Business AI Coaching is not investment advice, trading advice, or a recommendation to buy or sell any security, derivative, futures contract, forex pair, cryptocurrency, or any other instrument. Any actions you take based on Business AI Coaching are taken at your sole discretion and risk. You must independently evaluate any suggestion, recommendation, or analysis and decide whether to act.",
       },
       {
         title: "5.4 Assumption of Risk",
         body:
-          "You assume all risks associated with relying on or using AI Coaching, including the risk of trading losses, missed opportunities, or adverse outcomes. NTJ disclaims all liability for decisions made based on AI Coaching.",
+          "You assume all risks associated with relying on or using Business AI Coaching, including the risk of trading losses, missed opportunities, or adverse outcomes. NTJ disclaims all liability for decisions made based on Business AI Coaching.",
       },
       {
         title: "6. Trading Risk Disclosure",
@@ -92,12 +92,12 @@ const CONTENT = {
       {
         title: "12. Disclaimers",
         body:
-          "THE SERVICE (INCLUDING AI COACHING) IS PROVIDED ON AN \"AS IS\" AND \"AS AVAILABLE\" BASIS. TO THE MAXIMUM EXTENT PERMITTED BY LAW, NTJ DISCLAIMS ALL WARRANTIES, EXPRESS OR IMPLIED, INCLUDING IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, NON-INFRINGEMENT, AND ANY WARRANTIES ARISING OUT OF COURSE OF DEALING OR USAGE OF TRADE. WE DO NOT WARRANT THAT THE SERVICE WILL BE UNINTERRUPTED, ERROR-FREE, SECURE, OR THAT ANY DATA OR RESULTS (INCLUDING METRICS, PNL, OR AI COACHING OUTPUTS) WILL BE ACCURATE OR RELIABLE.",
+          "THE SERVICE (INCLUDING BUSINESS AI COACHING) IS PROVIDED ON AN \"AS IS\" AND \"AS AVAILABLE\" BASIS. TO THE MAXIMUM EXTENT PERMITTED BY LAW, NTJ DISCLAIMS ALL WARRANTIES, EXPRESS OR IMPLIED, INCLUDING IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, NON-INFRINGEMENT, AND ANY WARRANTIES ARISING OUT OF COURSE OF DEALING OR USAGE OF TRADE. WE DO NOT WARRANT THAT THE SERVICE WILL BE UNINTERRUPTED, ERROR-FREE, SECURE, OR THAT ANY DATA OR RESULTS (INCLUDING METRICS, PNL, OR BUSINESS AI COACHING OUTPUTS) WILL BE ACCURATE OR RELIABLE.",
       },
       {
         title: "13. Limitation of Liability",
         body:
-          "TO THE MAXIMUM EXTENT PERMITTED BY LAW, IN NO EVENT WILL NTJ OR ITS AFFILIATES, OFFICERS, DIRECTORS, EMPLOYEES, AGENTS, SUPPLIERS, OR LICENSORS BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, EXEMPLARY, OR PUNITIVE DAMAGES, OR ANY LOSS OF PROFITS, REVENUE, DATA, GOODWILL, OR OTHER INTANGIBLE LOSSES, ARISING OUT OF OR RELATED TO YOUR USE OF (OR INABILITY TO USE) THE SERVICE, INCLUDING ANY RELIANCE ON AI COACHING. TO THE MAXIMUM EXTENT PERMITTED BY LAW, NTJ'S TOTAL LIABILITY FOR ANY CLAIM ARISING OUT OF OR RELATING TO THE SERVICE WILL NOT EXCEED THE AMOUNT YOU PAID TO NTJ FOR THE SERVICE IN THE TWELVE (12) MONTHS PRECEDING THE EVENT GIVING RISE TO THE CLAIM. SOME JURISDICTIONS DO NOT ALLOW CERTAIN LIMITATIONS OF LIABILITY, SO SOME OF THE ABOVE LIMITATIONS MAY NOT APPLY TO YOU.",
+          "TO THE MAXIMUM EXTENT PERMITTED BY LAW, IN NO EVENT WILL NTJ OR ITS AFFILIATES, OFFICERS, DIRECTORS, EMPLOYEES, AGENTS, SUPPLIERS, OR LICENSORS BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, EXEMPLARY, OR PUNITIVE DAMAGES, OR ANY LOSS OF PROFITS, REVENUE, DATA, GOODWILL, OR OTHER INTANGIBLE LOSSES, ARISING OUT OF OR RELATED TO YOUR USE OF (OR INABILITY TO USE) THE SERVICE, INCLUDING ANY RELIANCE ON BUSINESS AI COACHING. TO THE MAXIMUM EXTENT PERMITTED BY LAW, NTJ'S TOTAL LIABILITY FOR ANY CLAIM ARISING OUT OF OR RELATING TO THE SERVICE WILL NOT EXCEED THE AMOUNT YOU PAID TO NTJ FOR THE SERVICE IN THE TWELVE (12) MONTHS PRECEDING THE EVENT GIVING RISE TO THE CLAIM. SOME JURISDICTIONS DO NOT ALLOW CERTAIN LIMITATIONS OF LIABILITY, SO SOME OF THE ABOVE LIMITATIONS MAY NOT APPLY TO YOU.",
       },
       {
         title: "14. Indemnification",
@@ -135,9 +135,9 @@ const CONTENT = {
     title: "Términos de Servicio",
     updated: "Fecha de vigencia: 17 de enero de 2026",
     intro:
-      "Estos Términos de Servicio (los \"Términos\") rigen tu acceso y uso del sitio web, las aplicaciones y los servicios relacionados de Neuro Trader Journal (colectivamente, el \"Servicio\") provistos por SG PAX CORP. (\"Neuro Trader Journal\", \"NTJ\", \"nosotros\", \"nos\" o \"nuestro\").",
+      "Estos Términos de Servicio (los \"Términos\") rigen tu acceso y uso del sitio web, las aplicaciones y los servicios relacionados de Neuro Trader (colectivamente, el \"Servicio\") provistos por SG PAX CORP. (\"Neuro Trader\", \"NTJ\", \"nosotros\", \"nos\" o \"nuestro\").",
     important:
-      "IMPORTANTE: NTJ es una plataforma de journaling, analítica y educación/coaching. NTJ no es broker-dealer, asesor de inversiones, asesor de trading de commodities ni planificador financiero. Nada en el Servicio pretende ser (ni debe interpretarse como) asesoría de inversión, trading, legal, fiscal o contable.",
+      "IMPORTANTE: NTJ es una plataforma de organización empresarial de trading, analítica y educación/coaching. NTJ no es broker-dealer, asesor de inversiones, asesor de trading de commodities ni planificador financiero. Nada en el Servicio pretende ser (ni debe interpretarse como) asesoría de inversión, trading, legal, fiscal o contable.",
     sections: [
       {
         title: "1. Aceptación de los Términos",
@@ -147,7 +147,7 @@ const CONTENT = {
       {
         title: "2. Descripción del Servicio",
         body:
-          "El Servicio puede incluir funciones como journaling de trades, analítica de trading, métricas de rendimiento, etiquetas y notas, screenshots y adjuntos, dashboards, integraciones con plataformas de terceros, funciones comunitarias o de compartición (si están habilitadas), y coaching e insights con IA. Podemos añadir, eliminar o modificar funciones en cualquier momento. Eres responsable de obtener y mantener todos los dispositivos, software y acceso a internet necesarios para usar el Servicio.",
+          "El Servicio puede incluir funciones como registros de ejecución, planes de empresa de trading, analítica de trading, métricas de rendimiento, etiquetas y notas, screenshots y adjuntos, dashboards, integraciones con plataformas de terceros, funciones comunitarias o de compartición (si están habilitadas), y coaching e insights con IA. Podemos añadir, eliminar o modificar funciones en cualquier momento. Eres responsable de obtener y mantener todos los dispositivos, software y acceso a internet necesarios para usar el Servicio.",
       },
       {
         title: "3. Elegibilidad y registro de cuenta",
@@ -157,32 +157,32 @@ const CONTENT = {
       {
         title: "4. Inputs de datos, integraciones y responsabilidad del usuario",
         body:
-          "La precisión y utilidad del journaling, analítica, métricas y outputs de AI Coaching dependen de la calidad y completitud de los datos que proporcionas y/o autorizas a NTJ a importar mediante integraciones. Eres exclusivamente responsable de: (1) ingresar, subir o importar tu data de trading de forma correcta y completa; (2) revisar la data importada para asegurar exactitud (fills, comisiones, fees, timestamps, detalles del instrumento); (3) confirmar que la data de tu broker, prop firm o plataforma es precisa y coincide con tus registros oficiales; y (4) entender cómo tu broker/plataforma calcula métricas (por ejemplo, PnL realizado vs. no realizado, PnL neto vs. bruto). Reconoces que las integraciones de terceros pueden estar no disponibles, retrasadas, incompletas o inexactas por causas fuera de nuestro control.",
+          "La precisión y utilidad de los registros de ejecución, analítica, métricas y outputs del Business AI Coaching dependen de la calidad y completitud de los datos que proporcionas y/o autorizas a NTJ a importar mediante integraciones. Eres exclusivamente responsable de: (1) ingresar, subir o importar tu data de trading de forma correcta y completa; (2) revisar la data importada para asegurar exactitud (fills, comisiones, fees, timestamps, detalles del instrumento); (3) confirmar que la data de tu broker, prop firm o plataforma es precisa y coincide con tus registros oficiales; y (4) entender cómo tu broker/plataforma calcula métricas (por ejemplo, PnL realizado vs. no realizado, PnL neto vs. bruto). Reconoces que las integraciones de terceros pueden estar no disponibles, retrasadas, incompletas o inexactas por causas fuera de nuestro control.",
       },
       {
-        title: "5. AI Coaching e insights asistidos por IA",
+        title: "5. Business AI Coaching e insights asistidos por IA",
         body:
-          "El Servicio puede proporcionar coaching con IA, detección de patrones, resúmenes, recomendaciones, revisiones de trades, prompts de riesgo/mindset y otros insights automatizados (\"AI Coaching\"). AI Coaching se brinda con fines informativos y educativos.",
+          "El Servicio puede proporcionar coaching con IA, detección de patrones, resúmenes, recomendaciones, revisiones de trades, prompts de riesgo/mindset y otros insights automatizados (\"Business AI Coaching\"). Business AI Coaching se brinda con fines informativos y educativos.",
       },
       {
         title: "5.1 La IA puede ser inexacta o incompleta",
         body:
-          "Los outputs de AI Coaching son generados por sistemas automáticos y pueden contener errores, omisiones, alucinaciones, supuestos incorrectos o información desactualizada. No garantizamos la exactitud, completitud o utilidad de los outputs.",
+          "Los outputs del Business AI Coaching son generados por sistemas automáticos y pueden contener errores, omisiones, alucinaciones, supuestos incorrectos o información desactualizada. No garantizamos la exactitud, completitud o utilidad de los outputs.",
       },
       {
         title: "5.2 La IA depende de tus datos y contexto",
         body:
-          "AI Coaching analiza información basada en los datos que ingresas, subes, importas o proporcionas (incluyendo data de trading, notas, etiquetas y preferencias). Como depende de tus inputs, eres responsable de que sean precisos y completos. Inputs incorrectos pueden generar outputs engañosos.",
+          "Business AI Coaching analiza información basada en los datos que ingresas, subes, importas o proporcionas (incluyendo data de trading, notas, etiquetas y preferencias). Como depende de tus inputs, eres responsable de que sean precisos y completos. Inputs incorrectos pueden generar outputs engañosos.",
       },
       {
         title: "5.3 Sin asesoría financiera; debes evaluar por tu cuenta",
         body:
-          "AI Coaching no es asesoría de inversión ni recomendación para comprar o vender ningún instrumento. Cualquier acción basada en AI Coaching es bajo tu propio criterio y riesgo. Debes evaluar de forma independiente cualquier sugerencia, recomendación o análisis antes de actuar.",
+          "Business AI Coaching no es asesoría de inversión ni recomendación para comprar o vender ningún instrumento. Cualquier acción basada en Business AI Coaching es bajo tu propio criterio y riesgo. Debes evaluar de forma independiente cualquier sugerencia, recomendación o análisis antes de actuar.",
       },
       {
         title: "5.4 Asunción de riesgo",
         body:
-          "Asumes todos los riesgos asociados a usar o confiar en AI Coaching, incluyendo pérdidas, oportunidades perdidas o resultados adversos. NTJ no asume responsabilidad por decisiones tomadas con base en AI Coaching.",
+          "Asumes todos los riesgos asociados a usar o confiar en Business AI Coaching, incluyendo pérdidas, oportunidades perdidas o resultados adversos. NTJ no asume responsabilidad por decisiones tomadas con base en Business AI Coaching.",
       },
       {
         title: "6. Divulgación de riesgo de trading",
@@ -217,12 +217,12 @@ const CONTENT = {
       {
         title: "12. Renuncias",
         body:
-          "EL SERVICIO (INCLUYENDO AI COACHING) SE OFRECE \"TAL CUAL\" Y \"SEGÚN DISPONIBILIDAD\". EN LA MÁXIMA MEDIDA PERMITIDA POR LA LEY, NTJ RENUNCIA A TODAS LAS GARANTÍAS, EXPRESAS O IMPLÍCITAS, INCLUYENDO GARANTÍAS IMPLÍCITAS DE COMERCIABILIDAD, IDONEIDAD PARA UN PROPÓSITO PARTICULAR, NO INFRACCIÓN Y CUALQUIER GARANTÍA DERIVADA DEL CURSO DE NEGOCIOS O USO COMERCIAL. NO GARANTIZAMOS QUE EL SERVICIO SEA ININTERRUMPIDO, LIBRE DE ERRORES, SEGURO, NI QUE CUALQUIER DATO O RESULTADO (MÉTRICAS, PNL O OUTPUTS DE IA) SEA PRECISO O CONFIABLE.",
+          "EL SERVICIO (INCLUYENDO BUSINESS AI COACHING) SE OFRECE \"TAL CUAL\" Y \"SEGÚN DISPONIBILIDAD\". EN LA MÁXIMA MEDIDA PERMITIDA POR LA LEY, NTJ RENUNCIA A TODAS LAS GARANTÍAS, EXPRESAS O IMPLÍCITAS, INCLUYENDO GARANTÍAS IMPLÍCITAS DE COMERCIABILIDAD, IDONEIDAD PARA UN PROPÓSITO PARTICULAR, NO INFRACCIÓN Y CUALQUIER GARANTÍA DERIVADA DEL CURSO DE NEGOCIOS O USO COMERCIAL. NO GARANTIZAMOS QUE EL SERVICIO SEA ININTERRUMPIDO, LIBRE DE ERRORES, SEGURO, NI QUE CUALQUIER DATO O RESULTADO (MÉTRICAS, PNL O OUTPUTS DE IA) SEA PRECISO O CONFIABLE.",
       },
       {
         title: "13. Limitación de responsabilidad",
         body:
-          "EN LA MÁXIMA MEDIDA PERMITIDA POR LA LEY, NTJ Y SUS AFILIADOS NO SERÁN RESPONSABLES POR DAÑOS INDIRECTOS, INCIDENTALES, ESPECIALES, CONSECUENCIALES, EJEMPLARES O PUNITIVOS, O POR PÉRDIDA DE GANANCIAS, INGRESOS, DATOS O GOODWILL, DERIVADOS DEL USO O INCAPACIDAD DE USO DEL SERVICIO, INCLUYENDO CUALQUIER CONFIANZA EN AI COACHING. EN LA MÁXIMA MEDIDA PERMITIDA POR LA LEY, LA RESPONSABILIDAD TOTAL DE NTJ NO EXCEDERÁ EL MONTO PAGADO A NTJ POR EL SERVICIO EN LOS DOCE (12) MESES ANTERIORES AL EVENTO QUE DIO ORIGEN AL RECLAMO. ALGUNAS JURISDICCIONES NO PERMITEN CIERTAS LIMITACIONES, POR LO QUE ALGUNAS LIMITACIONES PUEDEN NO APLICARTE.",
+          "EN LA MÁXIMA MEDIDA PERMITIDA POR LA LEY, NTJ Y SUS AFILIADOS NO SERÁN RESPONSABLES POR DAÑOS INDIRECTOS, INCIDENTALES, ESPECIALES, CONSECUENCIALES, EJEMPLARES O PUNITIVOS, O POR PÉRDIDA DE GANANCIAS, INGRESOS, DATOS O GOODWILL, DERIVADOS DEL USO O INCAPACIDAD DE USO DEL SERVICIO, INCLUYENDO CUALQUIER CONFIANZA EN BUSINESS AI COACHING. EN LA MÁXIMA MEDIDA PERMITIDA POR LA LEY, LA RESPONSABILIDAD TOTAL DE NTJ NO EXCEDERÁ EL MONTO PAGADO A NTJ POR EL SERVICIO EN LOS DOCE (12) MESES ANTERIORES AL EVENTO QUE DIO ORIGEN AL RECLAMO. ALGUNAS JURISDICCIONES NO PERMITEN CIERTAS LIMITACIONES, POR LO QUE ALGUNAS LIMITACIONES PUEDEN NO APLICARTE.",
       },
       {
         title: "14. Indemnización",

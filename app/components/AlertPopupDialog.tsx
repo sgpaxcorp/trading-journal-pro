@@ -174,7 +174,7 @@ export default function AlertPopupDialog({ open, busy, data, onClose, onSnooze, 
                   href={`/journal/${openJournalDate}`}
                   className="rounded-lg border border-emerald-700/50 bg-emerald-950/30 px-3 py-2 text-sm text-emerald-100 hover:bg-emerald-950/50"
                 >
-                  {L("Open journal", "Abrir journal")}
+                  {L("Open execution record", "Abrir registro de ejecución")}
                 </Link>
               ) : null}
               {onSnooze ? (

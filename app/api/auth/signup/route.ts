@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 import { sendEmailConfirmationEmail } from "@/lib/email";
+import { validatePasswordPolicyEn } from "@/lib/passwordPolicy";
 import { getClientIp, rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
 
 export const runtime = "nodejs";
@@ -62,8 +63,9 @@ export async function POST(req: NextRequest) {
     if (!email || !email.includes("@")) {
       return NextResponse.json({ error: "A valid email is required." }, { status: 400 });
     }
-    if (password.length < 8) {
-      return NextResponse.json({ error: "Password must be at least 8 characters." }, { status: 400 });
+    const passwordError = validatePasswordPolicyEn(password);
+    if (passwordError) {
+      return NextResponse.json({ error: passwordError }, { status: 400 });
     }
 
     const origin = new URL(req.url).origin;

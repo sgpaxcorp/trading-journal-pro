@@ -71,7 +71,7 @@ export default function Footer() {
           <div className="flex items-center gap-2">
             <img
               src={brandLogoSrc}
-              alt="Neuro Trader Journal"
+              alt="Neuro Trader"
               className="h-10 md:h-12 w-auto object-contain"
               draggable={false}
             />

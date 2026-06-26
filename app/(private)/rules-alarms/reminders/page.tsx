@@ -362,15 +362,15 @@ export default function RoutineChecksConsolePage() {
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <div className="text-[11px] uppercase tracking-[0.32em] text-emerald-400">
-            {L("Trading Protection System • Routine Checks", "Sistema de protección de trading • Chequeos de rutina")}
+            {L("Business Protection System • Routine Checks", "Sistema de Protección Empresarial • Chequeos de rutina")}
           </div>
           <h1 className="mt-2 text-2xl font-semibold text-slate-100">
             {L("Routine checks", "Chequeos de rutina")}
           </h1>
           <p className="mt-2 max-w-2xl text-sm text-slate-400">
             {L(
-              "Quiet, high-value check-ins for premarket, journaling, and daily process habits. Keep them useful, timed, and specific so protection never feels like noise.",
-              "Checks suaves y valiosos para premarket, journaling y hábitos diarios del proceso. Mantenlos útiles, precisos y específicos para que la protección nunca se sienta como ruido."
+              "Quiet, high-value check-ins for premarket, execution records, and daily process habits. Keep them useful, timed, and specific so protection never feels like noise.",
+              "Checks suaves y valiosos para premarket, registros de ejecución y hábitos diarios del proceso. Mantenlos útiles, precisos y específicos para que la protección nunca se sienta como ruido."
             )}
           </p>
         </div>
@@ -552,7 +552,7 @@ export default function RoutineChecksConsolePage() {
                         href={`/journal/${detailOpenJournalDate}`}
                         className="rounded-lg border border-slate-700 bg-slate-900/40 px-3 py-2 text-xs font-semibold text-slate-100 hover:border-emerald-400/60 hover:bg-emerald-500/10"
                       >
-                        {L("Open journal", "Abrir journal")}
+                        {L("Open execution record", "Abrir registro de ejecución")}
                       </Link>
                     ) : null}
                     <button
@@ -605,8 +605,8 @@ export default function RoutineChecksConsolePage() {
               <div className="text-xs uppercase tracking-[0.28em] text-slate-500">{L("Routine check rules", "Reglas de chequeo")}</div>
               <p className="mt-2 text-sm text-slate-400">
                 {L(
-                  "Keep these light: premarket reset, journaling closeout, and process check-ins.",
-                  "Mantén esto liviano: reset de premarket, cierre de journal y checks del proceso."
+                  "Keep these light: premarket reset, execution closeout, and process check-ins.",
+                  "Mantén esto liviano: reset de premarket, cierre de ejecución y checks del proceso."
                 )}
               </p>
             </div>

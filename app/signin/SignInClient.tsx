@@ -134,9 +134,9 @@ export default function SignInClient({ nextPath }: SignInClientProps) {
   return (
     <main className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center px-4">
       <div className="w-full max-w-md bg-slate-900/90 border border-slate-800 rounded-2xl p-6 shadow-2xl">
-        <h1 className="text-xl font-semibold mb-2">Log in</h1>
+        <h1 className="text-xl font-semibold mb-2">{L("Log in", "Ingresar")}</h1>
         <p className="text-xs text-slate-400 mb-4">
-          {L("Enter your credentials to access your trading journal.", "Ingresa tus credenciales para acceder a tu journal.")}
+          {L("Enter your credentials to access your trading business workspace.", "Ingresa tus credenciales para acceder a tu espacio de empresa de trading.")}
         </p>
 
         {error && (
@@ -184,12 +184,12 @@ export default function SignInClient({ nextPath }: SignInClientProps) {
 
         <div className="mt-4 flex items-center justify-between">
           <p className="text-[11px] text-slate-500">
-            {L("Don't have an account yet?", "¿Aún no tienes cuenta?")}{" "}
+            {L("Don't have a Trader Entrepreneur account yet?", "¿Aún no tienes cuenta de Empresario Trader?")}{" "}
             <Link
               href="/signup"
               className="text-emerald-300 hover:text-emerald-200"
             >
-              {L("Create one", "Crear una")}
+              {L("Start one", "Comenzar una")}
             </Link>
             .
           </p>

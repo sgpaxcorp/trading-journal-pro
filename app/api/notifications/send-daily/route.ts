@@ -42,12 +42,12 @@ function buildMessage(locale: string | null) {
   const isEs = String(locale || "").toLowerCase().startsWith("es");
   if (isEs) {
     return {
-      title: "Neuro Trader Journal",
+      title: "Neuro Trader",
       body: "El mercado abre a las 9:30 AM. Es hora de prepararte para el premarket.",
     };
   }
   return {
-    title: "Neuro Trader Journal",
+    title: "Neuro Trader",
     body: "The market opens at 9:30 AM. Time to prepare for premarket.",
   };
 }

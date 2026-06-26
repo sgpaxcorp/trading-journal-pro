@@ -330,14 +330,30 @@ export async function GET(req: NextRequest) {
       .eq("user_id", userId)
       .maybeSingle();
     const accountId = requestedAccountId || (pref as any)?.active_account_id || null;
+    const accountKey = accountId ?? "";
 
+    let analyticsHasAccountId = true;
     let { data: snap, error: snapErr } = await supabaseAdmin
       .from("analytics_snapshots")
       .select("*")
       .eq("user_id", userId)
+      .eq("account_id", accountKey)
       .order("as_of_date", { ascending: false })
       .limit(1)
       .maybeSingle();
+
+    if (snapErr && isMissingColumnError(snapErr, "account_id")) {
+      analyticsHasAccountId = false;
+      const retry = await supabaseAdmin
+        .from("analytics_snapshots")
+        .select("*")
+        .eq("user_id", userId)
+        .order("as_of_date", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      snap = retry.data as any;
+      snapErr = retry.error;
+    }
 
     if (snapErr) throw snapErr;
 
@@ -375,6 +391,7 @@ export async function GET(req: NextRequest) {
         .upsert(
           {
             user_id: userId,
+            ...(analyticsHasAccountId ? { account_id: accountKey } : {}),
             as_of_date: snapshot.as_of_date,
             range_start: snapshot.range_start,
             range_end: snapshot.range_end,
@@ -393,7 +410,11 @@ export async function GET(req: NextRequest) {
             worst_day_pnl: snapshot.worst_day_pnl,
             payload: snapshot.payload,
           },
-          { onConflict: "user_id,as_of_date,range_start,range_end" }
+          {
+            onConflict: analyticsHasAccountId
+              ? "user_id,account_id,as_of_date,range_start,range_end"
+              : "user_id,as_of_date,range_start,range_end",
+          }
         );
 
       if (upsertErr) throw upsertErr;
@@ -403,12 +424,12 @@ export async function GET(req: NextRequest) {
         .delete()
         .eq("user_id", userId)
         .eq("as_of_date", snapshot.as_of_date);
-      if (accountId) {
-        deleteQuery = deleteQuery.eq("account_id", accountId);
+      if (analyticsHasAccountId) {
+        deleteQuery = deleteQuery.eq("account_id", accountKey);
       }
 
       let { error: deleteErr } = await deleteQuery;
-      if (deleteErr && accountId && isMissingColumnError(deleteErr, "account_id")) {
+      if (deleteErr && isMissingColumnError(deleteErr, "account_id")) {
         const retry = await supabaseAdmin
           .from("analytics_edges")
           .delete()
@@ -420,13 +441,13 @@ export async function GET(req: NextRequest) {
       if (deleteErr) throw deleteErr;
 
       const batchSize = 500;
-      let includeAccountId = Boolean(accountId);
+      let includeAccountId = analyticsHasAccountId;
       for (let i = 0; i < edges.length; i += batchSize) {
         const base = edges.slice(i, i + batchSize);
         const buildBatch = (withAccountId: boolean) =>
           base.map((e) => ({
             user_id: userId,
-            account_id: withAccountId ? accountId : undefined,
+            account_id: withAccountId ? accountKey : undefined,
             as_of_date: snapshot.as_of_date,
             symbol: e.symbol,
             kind: e.kind,
@@ -467,6 +488,7 @@ export async function GET(req: NextRequest) {
 
       snap = {
         user_id: userId,
+        ...(analyticsHasAccountId ? { account_id: accountKey } : {}),
         as_of_date: snapshot.as_of_date,
         range_start: snapshot.range_start,
         range_end: snapshot.range_end,
@@ -499,12 +521,12 @@ export async function GET(req: NextRequest) {
       .order("edge_score", { ascending: false })
       .limit(200);
 
-    if (accountId) {
-      edgesQuery = edgesQuery.eq("account_id", accountId);
+    if (analyticsHasAccountId) {
+      edgesQuery = edgesQuery.eq("account_id", accountKey);
     }
 
     let { data: edges, error: edgesErr } = await edgesQuery;
-    if (edgesErr && accountId && isMissingColumnError(edgesErr, "account_id")) {
+    if (edgesErr && isMissingColumnError(edgesErr, "account_id")) {
       const retry = await supabaseAdmin
         .from("analytics_edges")
         .select(
@@ -721,11 +743,15 @@ export async function GET(req: NextRequest) {
 
     if (summaryUpdated) {
       const nextPayload = { ...(payload || {}), summary };
-      await supabaseAdmin
+      let updateQuery = supabaseAdmin
         .from("analytics_snapshots")
         .update({ payload: nextPayload })
         .eq("user_id", userId)
         .eq("as_of_date", snap.as_of_date);
+      if (analyticsHasAccountId) {
+        updateQuery = updateQuery.eq("account_id", accountKey);
+      }
+      await updateQuery;
     }
 
     const normalized = {

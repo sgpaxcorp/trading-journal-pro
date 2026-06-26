@@ -10,7 +10,7 @@ def extract_flow_from_image(image_bytes: bytes, prompt_text: str) -> FlowTable:
     if not settings.openai_api_key:
         raise RuntimeError("OPENAI_API_KEY not set")
 
-    client = OpenAI(api_key=settings.openai_api_key)
+    client = OpenAI(api_key=settings.openai_api_key, timeout=30.0)
     b64 = base64.b64encode(image_bytes).decode("utf-8")
 
     resp = client.responses.create(

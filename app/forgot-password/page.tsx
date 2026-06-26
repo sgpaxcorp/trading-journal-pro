@@ -50,8 +50,8 @@ export default function ForgotPasswordPage() {
         <h1 className="mt-3 text-3xl font-semibold text-slate-50">{L("Reset your password", "Resetea tu contraseña")}</h1>
         <p className="mt-3 text-sm leading-7 text-slate-400">
           {L(
-            "Enter the email address linked to your NeuroTrader Journal account. We’ll send a secure reset link designed with the same branded flow users receive in production.",
-            "Ingresa el email vinculado a tu cuenta de NeuroTrader Journal. Te enviaremos un enlace seguro de reset con el mismo flujo visual que reciben los usuarios en producción."
+            "Enter the email address linked to your NeuroTrader account. We’ll send a secure reset link designed with the same branded flow users receive in production.",
+            "Ingresa el email vinculado a tu cuenta de NeuroTrader. Te enviaremos un enlace seguro de reset con el mismo flujo visual que reciben los usuarios en producción."
           )}
         </p>
 

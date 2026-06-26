@@ -8,6 +8,7 @@ import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
 import { isActiveProfileStatus, shouldAllowLocalProfileAccessFallback } from "@/lib/accessControl";
 import { fetchAccessStatus } from "@/lib/accessStatusClient";
+import { passwordPolicyHint, validatePasswordPolicy } from "@/lib/passwordPolicy";
 import {
   ADVANCED_UNLOCKS,
   advancedUpgradePriceLabel,
@@ -30,11 +31,11 @@ type StartClientProps = {
 };
 
 const buildSteps = (L: (en: string, es: string) => string): { id: Step; label: string; description: string }[] => [
-  { id: 1, label: L("Information", "Información"), description: L("Create your account credentials.", "Crea tus credenciales de cuenta.") },
+  { id: 1, label: L("Business account", "Cuenta empresarial"), description: L("Create your Trader Entrepreneur credentials.", "Crea tus credenciales de Empresario Trader.") },
   { id: 2, label: L("Verify email", "Verificar email"), description: L("Enter the code we sent you.", "Ingresa el código que te enviamos.") },
-  { id: 3, label: L("Plan selection", "Selección de plan"), description: L("Choose between Core or Advanced.", "Elige entre Core o Advanced.") },
+  { id: 3, label: L("Business plan", "Plan empresarial"), description: L("Choose between Core Business or Advanced Business.", "Elige entre Core Empresarial o Advanced Empresarial.") },
   { id: 4, label: L("Checkout", "Checkout"), description: L("Complete secure payment with Stripe.", "Completa el pago seguro con Stripe.") },
-  { id: 5, label: L("Confirmed", "Confirmado"), description: L("Access your trading workspace.", "Accede a tu espacio de trading.") },
+  { id: 5, label: L("Confirmed", "Confirmado"), description: L("Access your trading business workspace.", "Accede a tu espacio de empresa de trading.") },
 ];
 
 function classNames(...classes: (string | false | null | undefined)[]) {
@@ -148,6 +149,11 @@ export default function StartClient({ initialPlan }: StartClientProps) {
 
     if (!infoForm.email || !infoForm.password) {
       setError(L("Please enter a valid email and password.", "Ingresa un email y contraseña válidos."));
+      return;
+    }
+    const passwordError = validatePasswordPolicy(infoForm.password, L);
+    if (passwordError) {
+      setError(passwordError);
       return;
     }
 
@@ -273,7 +279,7 @@ export default function StartClient({ initialPlan }: StartClientProps) {
     setError(null);
     if (!user) {
       // Si por alguna razón no hay usuario, forzamos volver a step 1 para crearlo
-      setError(L("Please create your account first.", "Primero crea tu cuenta."));
+      setError(L("Please create your business account first.", "Primero crea tu cuenta empresarial."));
       setCurrentStep(1);
       return;
     }
@@ -344,12 +350,12 @@ export default function StartClient({ initialPlan }: StartClientProps) {
       return (
         <div>
           <h2 className="text-xl md:text-2xl font-semibold mb-2">
-            {L("Create your account", "Crea tu cuenta")}
+            {L("Start your trading business", "Comienza tu empresa de trading")}
           </h2>
           <p className="text-xs text-slate-400 mb-4">
             {L(
-              "Step 1 of 5 – Your login details. Next you will verify your email and choose your plan.",
-              "Paso 1 de 5 – Tus datos de acceso. Luego verificarás tu email y elegirás tu plan."
+              "Step 1 of 5 - Create the login for your Trader Entrepreneur workspace. Next you will verify your email and choose your business plan.",
+              "Paso 1 de 5 - Crea el acceso para tu espacio de Empresario Trader. Luego verificarás tu email y elegirás tu plan empresarial."
             )}
           </p>
 
@@ -371,7 +377,7 @@ export default function StartClient({ initialPlan }: StartClientProps) {
                   }))
                 }
                 className="w-full rounded-lg bg-slate-900/80 border border-slate-700 px-3 py-2 text-xs md:text-sm outline-none focus:border-emerald-400"
-                placeholder={L("How should we call you?", "¿Cómo quieres que te llamemos?")}
+                placeholder={L("How should your coach call you?", "¿Cómo quieres que te llame tu coach?")}
               />
             </div>
 
@@ -401,16 +407,17 @@ export default function StartClient({ initialPlan }: StartClientProps) {
                   }))
                 }
                 className="w-full rounded-lg bg-slate-900/80 border border-slate-700 px-3 py-2 text-xs md:text-sm outline-none focus:border-emerald-400"
-                placeholder={L("At least 8 characters", "Al menos 8 caracteres")}
+                placeholder={L("At least 12 characters", "Al menos 12 caracteres")}
                 required
               />
+              <p className="mt-1 text-[10px] text-slate-500">{passwordPolicyHint(L)}</p>
             </div>
 
             <div className="flex items-center justify-between pt-2">
               <p className="text-[10px] text-slate-500">
                 {L(
-                  "By continuing, you agree to our terms and privacy policy.",
-                  "Al continuar, aceptas nuestros términos y política de privacidad."
+              "By continuing, you agree to our terms and privacy policy for your trading business workspace.",
+              "Al continuar, aceptas nuestros términos y política de privacidad para tu espacio de empresa de trading."
                 )}
               </p>
               <button
@@ -435,8 +442,8 @@ export default function StartClient({ initialPlan }: StartClientProps) {
           </h2>
           <p className="text-xs text-slate-400 mb-4">
             {L(
-              "Step 2 of 5 – We sent a 6-digit code to your email. Enter it below to continue.",
-              "Paso 2 de 5 – Te enviamos un código de 6 dígitos. Escríbelo abajo para continuar."
+              "Step 2 of 5 - We sent an 8-digit code to your email. Enter it below to continue.",
+              "Paso 2 de 5 - Te enviamos un código de 8 dígitos. Escríbelo abajo para continuar."
             )}
           </p>
 
@@ -509,12 +516,12 @@ export default function StartClient({ initialPlan }: StartClientProps) {
       return (
         <div>
           <h2 className="text-xl md:text-2xl font-semibold mb-2">
-            {L("Choose your plan", "Elige tu plan")}
+            {L("Choose your business plan", "Elige tu plan empresarial")}
           </h2>
           <p className="text-xs text-slate-400 mb-4">
             {L(
-              "Step 3 of 5 – Select the plan that matches how you trade. You can upgrade later as your account grows.",
-              "Paso 3 de 5 – Selecciona el plan que encaje con tu forma de operar. Puedes hacer upgrade más adelante."
+              "Step 3 of 5 - Select the plan that matches how you want to operate your trading business. You can upgrade later as the business grows.",
+              "Paso 3 de 5 - Selecciona el plan que encaje con cómo quieres operar tu empresa de trading. Puedes hacer upgrade más adelante mientras el negocio crece."
             )}
           </p>
 
@@ -623,7 +630,7 @@ export default function StartClient({ initialPlan }: StartClientProps) {
           </p>
 
           <div className="mb-4 rounded-xl border border-slate-700 bg-slate-900/60 p-4 text-xs">
-            <p className="text-slate-300 mb-1">{L("Selected plan", "Plan seleccionado")}</p>
+            <p className="text-slate-300 mb-1">{L("Selected business plan", "Plan empresarial seleccionado")}</p>
             <p className="font-semibold text-slate-50">
               {catalogText(plan.name, lang)}{" "}
               <span className="text-[11px] text-slate-400">
@@ -667,7 +674,7 @@ export default function StartClient({ initialPlan }: StartClientProps) {
       <div className="w-full max-w-5xl bg-slate-900/90 border border-slate-800 rounded-2xl p-6 md:p-8 shadow-2xl grid grid-cols-1 md:grid-cols-[220px,1fr] gap-6">
         {/* Sidebar Steps */}
         <aside className="border-b md:border-b-0 md:border-r border-slate-800 pb-4 md:pb-0 md:pr-6">
-          <h1 className="text-lg font-semibold mb-4">{L("Get started", "Comienza")}</h1>
+          <h1 className="text-lg font-semibold mb-4">{L("Start Business", "Comienza Empresa")}</h1>
           <ul className="space-y-3 text-xs">
             {steps.map((step) => {
               const isActive = step.id === currentStep;
@@ -709,8 +716,8 @@ export default function StartClient({ initialPlan }: StartClientProps) {
           </ul>
           <p className="mt-6 text-[10px] text-slate-500 border-t border-slate-800 pt-3">
             {L(
-              "Secure payments powered by Stripe. NeuroTrader sends your receipt and onboarding emails after your subscription is confirmed.",
-              "Pagos seguros con Stripe. NeuroTrader envía tu recibo y emails de onboarding cuando se confirma tu suscripción."
+              "Secure payments powered by Stripe. NeuroTrader sends your receipt and trading business onboarding emails after your subscription is confirmed.",
+              "Pagos seguros con Stripe. NeuroTrader envía tu recibo y emails de onboarding empresarial cuando se confirma tu suscripción."
             )}
           </p>
         </aside>

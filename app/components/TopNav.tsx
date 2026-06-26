@@ -611,15 +611,6 @@ const performance: NavItem[] = [
   },
 ];
 
-const challenges: NavItem[] = [
-  {
-    id: "challenges",
-    titleKey: "nav.challenges.item.title",
-    descriptionKey: "nav.challenges.item.desc",
-    href: "/challenges",
-  },
-];
-
 const rules: NavItem[] = [
   {
     id: "alarms",
@@ -721,7 +712,7 @@ export default function TopNav() {
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src="/neurotrader-logo.svg"
-            alt="Neuro Trader Journal"
+            alt="Neuro Trader"
             className="h-14 md:h-16 lg:h-20 w-auto object-contain"
             draggable={false}
           />
@@ -757,13 +748,6 @@ export default function TopNav() {
           ) : null}
 
           <Dropdown
-            titleKey="nav.challenges"
-            items={challenges}
-            theme={theme}
-            lang={lang}
-            dataTour="nav-challenges"
-          />
-          <Dropdown
             titleKey="nav.rules"
             items={rules}
             theme={theme}
@@ -778,9 +762,6 @@ export default function TopNav() {
             dataTour="nav-forum"
           />
 
-          <Link href="/globalranking" className={linkClass} data-tour="nav-global-ranking">
-            {t("nav.globalRanking", lang)}
-          </Link>
         </div>
 
         {/* Right side: Help + Account */}

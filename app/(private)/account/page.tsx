@@ -12,10 +12,7 @@ import { useAuth } from "@/context/AuthContext";
 import { supabaseBrowser } from "@/lib/supaBaseClient";
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
-import {
-  getProfileGamification,
-  type ProfileGamification,
-} from "@/lib/profileGamificationSupabase";
+import type { BusinessMilestoneProgress } from "@/lib/businessMilestones";
 import { useTradingAccounts } from "@/hooks/useTradingAccounts";
 
 type ProfileState = {
@@ -35,7 +32,6 @@ export default function AccountPage() {
   const lang = resolveLocale(locale);
   const isEs = lang === "es";
   const L = (en: string, es: string) => (isEs ? es : en);
-  const localeTag = isEs ? "es-ES" : "en-US";
 
   const [profile, setProfile] = useState<ProfileState>({
     firstName: "",
@@ -46,8 +42,8 @@ export default function AccountPage() {
     avatarUrl: null,
   });
 
-  const [gamification, setGamification] =
-    useState<ProfileGamification | null>(null);
+  const [businessMilestones, setBusinessMilestones] = useState<BusinessMilestoneProgress[]>([]);
+  const [milestoneCount, setMilestoneCount] = useState({ completed: 0, total: 0 });
 
   const {
     accounts,
@@ -152,8 +148,8 @@ export default function AccountPage() {
           setLoadingProfile(false);
           setError(
             L(
-              "We couldn't load your profile from the database, but you can edit it below.",
-              "No pudimos cargar tu perfil desde la base de datos, pero puedes editarlo abajo."
+              "We couldn't load your Trader Entrepreneur profile from the database, but you can edit it below.",
+              "No pudimos cargar tu perfil de Empresario Trader desde la base de datos, pero puedes editarlo abajo."
             )
           );
         }
@@ -167,38 +163,49 @@ export default function AccountPage() {
     };
   }, [user?.id, user?.email]);
 
-  /* ---------- Load gamification snapshot (Supabase async) ---------- */
+  /* ---------- Load business milestones ---------- */
   useEffect(() => {
     if (!user?.id) return;
 
     let cancelled = false;
 
-    async function loadGamification() {
+    async function loadBusinessMilestones() {
       try {
-        const g = await getProfileGamification(user.id, {
-          syncToDb: true,
-          fallbackToDbCache: true,
+        const { data: sessionData } = await supabaseBrowser.auth.getSession();
+        const token = sessionData?.session?.access_token;
+        if (!token) return;
+        const params = new URLSearchParams({ lang });
+        if (activeAccountId) params.set("accountId", activeAccountId);
+        const res = await fetch(`/api/business-milestones/sync?${params.toString()}`, {
+          headers: { Authorization: `Bearer ${token}` },
         });
-        if (!cancelled) setGamification(g);
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(body?.error ?? "Unable to load business milestones.");
+        if (cancelled) return;
+        const milestones = Array.isArray(body?.milestones) ? body.milestones : [];
+        setBusinessMilestones(milestones);
+        setMilestoneCount({
+          completed: Number(body?.completedCount ?? milestones.filter((item: any) => item.completed).length),
+          total: Number(body?.totalCount ?? milestones.length),
+        });
       } catch (e) {
-        // no bloqueamos la página si falla gamification
-        console.warn("[Account] Gamification load error:", e);
+        console.warn("[Account] Business milestones load error:", e);
       }
     }
 
-    void loadGamification();
+    void loadBusinessMilestones();
 
     return () => {
       cancelled = true;
     };
-  }, [user?.id]);
+  }, [user?.id, activeAccountId, lang]);
 
   if (loading || !user) {
     return (
       <main className="min-h-screen bg-slate-950 text-slate-50">
         <TopNav />
         <div className="flex min-h-[60vh] items-center justify-center px-6">
-          <p className="text-slate-400 text-sm">{L("Loading account…", "Cargando cuenta…")}</p>
+          <p className="text-slate-400 text-sm">{L("Loading Trader Entrepreneur account…", "Cargando cuenta de Empresario Trader…")}</p>
         </div>
       </main>
     );
@@ -253,27 +260,16 @@ export default function AccountPage() {
         setError(
           upsertError.message ||
             L(
-              "We couldn't save your profile. Please try again.",
-              "No pudimos guardar tu perfil. Intenta de nuevo."
+              "We couldn't save your Trader Entrepreneur profile. Please try again.",
+              "No pudimos guardar tu perfil de Empresario Trader. Intenta de nuevo."
             )
         );
       } else {
-        setMessage(L("Profile updated successfully.", "Perfil actualizado con éxito."));
-
-        // refresca gamification por si cambias algo y quieres re-render limpio
-        try {
-          const g = await getProfileGamification(user.id, {
-            syncToDb: true,
-            fallbackToDbCache: true,
-          });
-          setGamification(g);
-        } catch {
-          // ignore
-        }
+        setMessage(L("Trader Entrepreneur profile updated successfully.", "Perfil de Empresario Trader actualizado con éxito."));
       }
     } catch (err: any) {
       console.error("[Account] Unexpected error saving profile:", err);
-      setError(L("Something went wrong while saving your profile.", "Algo salió mal al guardar tu perfil."));
+      setError(L("Something went wrong while saving your Trader Entrepreneur profile.", "Algo salió mal al guardar tu perfil de Empresario Trader."));
     } finally {
       setSaving(false);
     }
@@ -370,13 +366,13 @@ export default function AccountPage() {
         <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <p className="text-[11px] uppercase tracking-[0.25em] text-emerald-400">
-              {L("Account", "Cuenta")}
+              {L("Trader Entrepreneur Account", "Cuenta de Empresario Trader")}
             </p>
-            <h1 className="text-3xl font-semibold mt-1">{L("Account settings", "Configuración de cuenta")}</h1>
+            <h1 className="text-3xl font-semibold mt-1">{L("Trading Business Account", "Cuenta de Empresa de Trading")}</h1>
             <p className="text-sm text-slate-400 mt-2 max-w-xl">
               {L(
-                "Update your identity, contact information and see your gamification progress inside NeuroTrader Journal.",
-                "Actualiza tu identidad, información de contacto y revisa tu progreso de gamificación dentro de NeuroTrader Journal."
+                "Update your identity, contact information, trading accounts, and progress inside your NeuroTrader business workspace.",
+                "Actualiza tu identidad, información de contacto, cuentas de trading y progreso dentro de tu espacio empresarial de NeuroTrader."
               )}
             </p>
           </div>
@@ -397,7 +393,7 @@ export default function AccountPage() {
                 : "text-slate-300 border border-slate-700 hover:border-emerald-400 hover:text-emerald-200"
             } transition`}
           >
-            {L("Account settings", "Configuración de cuenta")}
+            {L("Trader Entrepreneur Account", "Cuenta de Empresario Trader")}
           </a>
 
           <a
@@ -429,7 +425,7 @@ export default function AccountPage() {
                 : "text-slate-300 border border-slate-700 hover:border-emerald-400 hover:text-emerald-200"
             } transition`}
           >
-            {L("Billing & subscription", "Facturación y suscripción")}
+            {L("Business billing & subscription", "Facturación empresarial y suscripción")}
           </a>
           <a
             href="/billing/history"
@@ -443,12 +439,12 @@ export default function AccountPage() {
           </a>
         </nav>
 
-        {/* Layout: profile form + gamification card */}
+        {/* Layout: profile form + business milestones card */}
         <div className="grid gap-6 md:grid-cols-[minmax(0,1.25fr)_minmax(0,0.9fr)] mt-2">
           {/* Profile & identity */}
           <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5 space-y-5">
             <h2 className="text-sm font-semibold text-slate-100">
-              {L("Profile & identity", "Perfil e identidad")}
+              {L("Trader identity", "Identidad Trader")}
             </h2>
 
             {/* Avatar + upload */}
@@ -468,8 +464,8 @@ export default function AccountPage() {
               <div className="text-xs text-slate-400">
                 <p>
                   {L(
-                    "This avatar is used in the top navigation, AI feedback and rankings.",
-                    "Este avatar se usa en la navegación superior, feedback de IA y rankings."
+                    "This avatar is used in the top navigation, AI feedback, and your business account.",
+                    "Este avatar se usa en la navegación superior, feedback de IA y tu cuenta empresarial."
                   )}
                 </p>
                 <div className="mt-2 flex items-center gap-2">
@@ -532,7 +528,7 @@ export default function AccountPage() {
                   placeholder={L("Email", "Correo")}
                 />
                 <p className="mt-1 text-[10px] text-slate-500">
-                  {L("This email is used for your account and rankings.", "Este correo se usa para tu cuenta y rankings.")}
+                  {L("This email is used for your business account and security.", "Este correo se usa para tu cuenta empresarial y seguridad.")}
                 </p>
               </div>
 
@@ -593,109 +589,72 @@ export default function AccountPage() {
               )}
               {loadingProfile && (
                 <p className="text-[11px] text-slate-500 mt-1">
-                  {L("Loading profile…", "Cargando perfil…")}
+                  {L("Loading Trader Entrepreneur profile…", "Cargando perfil de Empresario Trader…")}
                 </p>
               )}
             </form>
           </section>
 
-          {/* Gamification & progress */}
+          {/* Business Milestones */}
           <section className="rounded-2xl border border-emerald-500/30 bg-slate-900/80 p-5 text-sm">
             <h2 className="text-sm font-semibold text-emerald-200">
-              {L("Gamification & progress", "Gamificación y progreso")}
+              {L("Business Milestones", "Hitos empresariales")}
             </h2>
+            <p className="mt-2 text-xs text-slate-400">
+              {L(
+                "Progress is measured by business infrastructure completed, not points. Each milestone is tied to your plan, rules, protection, and execution evidence.",
+                "El progreso se mide por infraestructura empresarial completada, no puntos. Cada hito se conecta a tu plan, reglas, protección y evidencia de ejecución."
+              )}
+            </p>
 
-            {!gamification && (
-              <p className="mt-3 text-xs text-slate-400">
-                {L(
-                  "Once you start challenges, your XP, level and tier will appear here. Complete process-green days and finish challenges to earn rewards.",
-                  "Cuando empieces los desafíos, tu XP, nivel y tier aparecerán aquí. Completa días en verde y desafíos para ganar recompensas."
-                )}
-              </p>
-            )}
+            <div className="mt-4 rounded-xl border border-slate-800 bg-slate-950/70 p-3">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500">
+                  {L("Completed", "Completados")}
+                </p>
+                <p className="text-lg font-semibold text-emerald-300">
+                  {milestoneCount.completed}/{milestoneCount.total || businessMilestones.length || 0}
+                </p>
+              </div>
+              <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-slate-900">
+                <div
+                  className="h-full rounded-full bg-emerald-400"
+                  style={{
+                    width: `${Math.min(
+                      100,
+                      milestoneCount.total ? (milestoneCount.completed / milestoneCount.total) * 100 : 0
+                    )}%`,
+                  }}
+                />
+              </div>
+            </div>
 
-            {gamification && (
-              <>
-                <div className="mt-3 grid grid-cols-2 gap-3 text-xs">
-                  <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-3">
-                    <p className="text-[11px] text-slate-400">{L("Level", "Nivel")}</p>
-                    <p className="mt-1 text-lg font-semibold text-emerald-300">
-                      {gamification.level}
-                    </p>
-                    <p className="text-[11px] text-slate-500">
-                      {L("Based on total XP earned.", "Basado en el XP total ganado.")}
-                    </p>
-                  </div>
-
-                  <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-3">
-                    <p className="text-[11px] text-slate-400">{L("Tier", "Tier")}</p>
-                    <p className="mt-1 text-lg font-semibold text-emerald-300">
-                      {gamification.tier}
-                    </p>
-                    <p className="text-[11px] text-slate-500">
-                      {L("Higher tiers unlock more rewards.", "Tiers más altos desbloquean más recompensas.")}
-                    </p>
-                  </div>
-
-                  <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-3 col-span-2">
-                    <p className="text-[11px] text-slate-400">
-                      {L("Total XP across challenges", "XP total en desafíos")}
-                    </p>
-                    <p className="mt-1 text-lg font-semibold text-emerald-200">
-                      {gamification.xp.toLocaleString(localeTag)} XP
-                    </p>
-
-                    <div className="mt-2 h-1.5 w-full rounded-full bg-slate-900 overflow-hidden">
-                      {(() => {
-                        const xp = gamification.xp;
-                        let pct = 0;
-                        if (xp < 1000) pct = (xp / 1000) * 100;
-                        else if (xp < 3000) pct = ((xp - 1000) / 2000) * 100;
-                        else if (xp < 7000) pct = ((xp - 3000) / 4000) * 100;
-                        else pct = 100;
-                        return (
-                          <div
-                            className="h-full rounded-full bg-emerald-400"
-                            style={{ width: `${Math.min(100, pct)}%` }}
-                          />
-                        );
-                      })()}
+            <div className="mt-3 space-y-2">
+              {businessMilestones.slice(0, 7).map((milestone) => (
+                <div
+                  key={milestone.key}
+                  className={`rounded-xl border px-3 py-2 ${
+                    milestone.completed
+                      ? "border-emerald-500/30 bg-emerald-500/10"
+                      : "border-slate-800 bg-slate-950/50"
+                  }`}
+                >
+                  <div className="flex items-start gap-2">
+                    <span className={milestone.completed ? "text-emerald-300" : "text-slate-600"}>
+                      {milestone.completed ? "✓" : "•"}
+                    </span>
+                    <div>
+                      <p className="text-xs font-semibold text-slate-100">
+                        {milestone.title[lang]}
+                      </p>
+                      <p className="mt-0.5 text-[11px] text-slate-500">
+                        {milestone.description[lang]}
+                      </p>
                     </div>
-                    <p className="mt-1 text-[11px] text-slate-500">
-                      {L(
-                        "XP comes from process-green days and completed challenges.",
-                        "El XP proviene de días en verde y desafíos completados."
-                      )}
-                    </p>
                   </div>
                 </div>
-
-                {gamification.badges.length > 0 && (
-                  <div className="mt-3">
-                    <p className="text-[11px] text-slate-400 mb-1">
-                      {L("Badges unlocked", "Insignias desbloqueadas")}
-                    </p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {gamification.badges.map((b: string) => (
-                        <span
-                          key={b}
-                          className="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-200"
-                        >
-                          {b}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                <p className="mt-3 text-[11px] text-slate-500">
-                  {L(
-                    "Your AI coach and global rankings will use this profile (level, tier, XP and badges) to adjust feedback and rewards.",
-                    "Tu coach de IA y los rankings globales usarán este perfil (nivel, tier, XP e insignias) para ajustar feedback y recompensas."
-                  )}
-                </p>
-              </>
-            )}
+              ))}
+            </div>
           </section>
         </div>
 
@@ -704,15 +663,15 @@ export default function AccountPage() {
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <p className="text-[11px] uppercase tracking-[0.25em] text-emerald-400">
-                {L("Trading accounts", "Cuentas de trading")}
+                {L("Trading business accounts", "Cuentas de empresa de trading")}
               </p>
               <h2 className="text-lg font-semibold text-slate-100">
-                {L("Broker-specific journals", "Journals por broker")}
+                {L("Broker-specific business books", "Libros empresariales por bróker")}
               </h2>
               <p className="text-xs text-slate-400 mt-1 max-w-2xl">
                 {L(
-                  "Each trading account keeps its own journal, analytics, and cashflows. Switch accounts from the top nav.",
-                  "Cada cuenta mantiene su propio journal, analíticas y cashflows. Cambia de cuenta desde la barra superior."
+                  "Each trading account keeps its own execution records, analytics, and cashflows. Switch accounts from the top nav.",
+                  "Cada cuenta mantiene sus propios registros de ejecución, analíticas y cashflows. Cambia de cuenta desde la barra superior."
                 )}
               </p>
             </div>
@@ -845,7 +804,7 @@ export default function AccountPage() {
               <p className="text-sm font-semibold text-rose-200">{L("Delete account", "Eliminar cuenta")}</p>
               <p className="text-xs text-rose-200/80 mt-1 max-w-xl">
                 {L(
-                  "This permanently deletes your user and ALL related data (journal, analytics, trades, trophies, etc.). This cannot be undone.",
+                  "This permanently deletes your user and ALL related data (journal, analytics, trades, business milestones, etc.). This cannot be undone.",
                   "Esto elimina permanentemente tu usuario y TODA tu data (journal, analíticas, trades, trofeos, etc.). No se puede deshacer."
                 )}
               </p>
@@ -882,7 +841,14 @@ export default function AccountPage() {
 
                   const res = await fetch("/api/account/delete", {
                     method: "POST",
-                    headers: { Authorization: `Bearer ${token}` },
+                    headers: {
+                      Authorization: `Bearer ${token}`,
+                      "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify({
+                      confirmation: deleteConfirm.trim().toUpperCase(),
+                      email: profile.email || user.email || "",
+                    }),
                   });
                   const json = await res.json().catch(() => ({}));
                   if (!res.ok) throw new Error(json?.error || L("Delete failed.", "No se pudo eliminar."));

@@ -403,15 +403,90 @@ export async function GET(req: NextRequest) {
           status = "pass";
           reason = `P&L ${pnl.toFixed(2)} dentro del límite diario ${dailyLossLimit.toFixed(2)}.`;
         }
+      } else if (
+        labelLower.includes("stop loss") ||
+        labelLower.includes("protective stop") ||
+        labelLower.includes("stop presente") ||
+        labelLower.includes("usar stop") ||
+        labelLower.includes("stop placed")
+      ) {
+        if (audit?.stop_present === true) {
+          status = "pass";
+          reason = "El audit detectó un stop protector en el historial del broker.";
+        } else if (audit?.stop_present === false) {
+          status = "fail";
+          reason = "El audit no detectó un stop protector en el historial del broker.";
+        } else {
+          status = "unknown";
+          reason = "No hay evidencia suficiente del broker para confirmar el stop.";
+        }
+      } else if (labelLower.includes("oco")) {
+        if (audit?.oco_used === true) {
+          status = "pass";
+          reason = "El audit detectó estructura OCO.";
+        } else if (audit?.oco_used === false) {
+          status = "fail";
+          reason = "El audit no detectó estructura OCO.";
+        } else {
+          status = "unknown";
+          reason = "No hay evidencia suficiente del broker para confirmar OCO.";
+        }
+      } else if (
+        labelLower.includes("manual market") ||
+        labelLower.includes("market exit") ||
+        labelLower.includes("mkt exit") ||
+        labelLower.includes("salida manual") ||
+        labelLower.includes("salida mkt")
+      ) {
+        if (audit?.manual_market_exit === true) {
+          status = "fail";
+          reason = "El audit detectó una salida manual a mercado.";
+        } else if (audit?.manual_market_exit === false) {
+          status = "pass";
+          reason = "El audit no detectó salida manual a mercado.";
+        } else {
+          status = "unknown";
+          reason = "No hay evidencia suficiente del broker para confirmar la salida.";
+        }
+      } else if (
+        labelLower.includes("checklist") ||
+        labelLower.includes("check-list") ||
+        labelLower.includes("rutina") ||
+        labelLower.includes("process") ||
+        labelLower.includes("proceso")
+      ) {
+        if (checklistPct == null) {
+          status = "unknown";
+          reason = "No hay checklist del día para evaluar esta regla.";
+        } else if (checklistPct >= 100) {
+          status = "pass";
+          reason = "El checklist del día está completado al 100%.";
+        } else {
+          status = "fail";
+          reason = `Checklist incompleto: ${checklistDone}/${checklistTotal} completado.`;
+        }
+      } else if (
+        labelLower.includes("respected plan") ||
+        labelLower.includes("follow plan") ||
+        labelLower.includes("seguir plan") ||
+        labelLower.includes("respetar plan")
+      ) {
+        if (journalEntry?.respected_plan === true) {
+          status = "pass";
+          reason = "El journal marcó que el plan fue respetado.";
+        } else if (journalEntry?.respected_plan === false) {
+          status = "fail";
+          reason = "El journal marcó que el plan no fue respetado.";
+        } else {
+          status = "unknown";
+          reason = "El journal no tiene respuesta de respected_plan para esta sesión.";
+        }
       } else if (labelLower.includes("risk") || labelLower.includes("riesgo")) {
         status = "unknown";
         reason = "No hay datos de riesgo por trade en el audit.";
       } else if (labelLower.includes("revenge")) {
         status = "unknown";
         reason = "No hay señal objetiva de revenge trading en los datos del audit.";
-      } else if (labelLower.includes("proceso") || labelLower.includes("process")) {
-        status = "unknown";
-        reason = "Regla cualitativa. Requiere evaluación manual.";
       }
 
       return { label, status, reason };

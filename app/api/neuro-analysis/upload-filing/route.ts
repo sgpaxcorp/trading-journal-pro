@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import OpenAI, { toFile } from "openai";
 
 import { getAuthUser } from "@/lib/authServer";
+import { checkNeuroQuota, checkNeuroStorageQuota, recordNeuroUsage } from "@/lib/neuroAnalysisQuota";
 import { rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
 import { requireSmartToolsOwner } from "@/lib/smartToolsAccess";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
@@ -113,15 +114,31 @@ export async function POST(req: Request) {
     const fileName = String(file.name ?? "").trim() || `${ticker}-${filingForm}.pdf`;
     const isPdf = file.type === "application/pdf" || fileName.toLowerCase().endsWith(".pdf");
     if (!isPdf) {
-      return NextResponse.json({ error: "Only PDF filings are supported." }, { status: 400 });
+      return NextResponse.json({ error: "Only PDF documents are supported." }, { status: 400 });
     }
     if (file.size <= 0) {
       return NextResponse.json({ error: "The PDF is empty." }, { status: 400 });
     }
     if (file.size > MAX_FILING_PDF_BYTES) {
       return NextResponse.json(
-        { error: "PDF is too large. Upload a filing up to 35MB." },
+        { error: "PDF is too large. Upload a document up to 35MB." },
         { status: 413 }
+      );
+    }
+
+    const quota = await checkNeuroQuota(authUser.userId, "filing_upload");
+    if (!quota.allowed) {
+      return NextResponse.json(
+        { error: "Monthly document upload quota exceeded.", quota },
+        { status: 429 }
+      );
+    }
+
+    const storageQuota = await checkNeuroStorageQuota(authUser.userId, file.size);
+    if (!storageQuota.allowed) {
+      return NextResponse.json(
+        { error: "Document storage quota exceeded.", quota: storageQuota },
+        { status: 429 }
       );
     }
 
@@ -172,7 +189,7 @@ export async function POST(req: Request) {
 
     if (batch.file_counts.failed > 0 || batch.status === "failed") {
       return NextResponse.json(
-        { error: "OpenAI could not index this PDF. Try a cleaner SEC filing PDF." },
+        { error: "The system could not index this PDF. Try a cleaner company document PDF." },
         { status: 422 }
       );
     }
@@ -210,6 +227,19 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: dbError.message }, { status: 500 });
     }
 
+    await recordNeuroUsage({
+      userId: authUser.userId,
+      eventType: "filing_upload",
+      bytes: openaiFile.bytes ?? file.size,
+      metadata: {
+        ticker,
+        form: filingForm,
+        fiscalYear,
+        fileName,
+        vectorStoreId: readyStore.id,
+      },
+    });
+
     return NextResponse.json({
       id: dbRow?.id ?? null,
       ticker,
@@ -231,7 +261,7 @@ export async function POST(req: Request) {
   } catch (error: any) {
     console.error("[neuro-analysis/upload-filing] error:", error);
     return NextResponse.json(
-      { error: error?.message || "Filing upload failed." },
+      { error: error?.message || "Document upload failed." },
       { status: 500 }
     );
   }

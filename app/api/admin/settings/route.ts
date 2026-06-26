@@ -1,44 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireAdminUser } from "@/lib/adminAuth";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
-
-function parseAdminEmails(envValue?: string | null) {
-  return (envValue || "")
-    .split(",")
-    .map((v) => v.trim().toLowerCase())
-    .filter(Boolean);
-}
-
-async function isAdmin(userId: string, email?: string | null): Promise<boolean> {
-  const { data, error } = await supabaseAdmin
-    .from("admin_users")
-    .select("user_id, active")
-    .eq("user_id", userId)
-    .eq("active", true)
-    .limit(1);
-  if (!error && (data ?? []).length > 0) return true;
-
-  const allowList = parseAdminEmails(process.env.ADMIN_EMAILS);
-  if (email && allowList.includes(email.toLowerCase())) return true;
-  return false;
-}
-
-async function getAdminAuth(req: NextRequest) {
-  const authHeader = req.headers.get("authorization") || "";
-  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
-  if (!token) return null;
-
-  const { data: authData, error: authErr } = await supabaseAdmin.auth.getUser(token);
-  if (authErr || !authData?.user) return null;
-
-  const ok = await isAdmin(authData.user.id, authData.user.email);
-  if (!ok) return null;
-  return authData.user;
-}
 
 export async function GET(req: NextRequest) {
   try {
-    const user = await getAdminAuth(req);
-    if (!user) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    const admin = await requireAdminUser(req, { action: "settings:read", limit: 120, windowMs: 60_000 });
+    if (!admin.ok) return admin.response;
 
     const { data, error } = await supabaseAdmin
       .from("admin_settings")
@@ -66,8 +33,8 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const user = await getAdminAuth(req);
-    if (!user) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    const admin = await requireAdminUser(req, { action: "settings:write", limit: 20, windowMs: 10 * 60_000 });
+    if (!admin.ok) return admin.response;
 
     const body = await req.json().catch(() => ({}));
     const hourNy = Number(body?.hourNy);
@@ -98,7 +65,7 @@ export async function POST(req: NextRequest) {
           label,
           label_24: label24,
         },
-        updated_by: user.id,
+        updated_by: admin.user.id,
       },
       { onConflict: "key" }
     );

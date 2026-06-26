@@ -18,10 +18,9 @@ export const I18N_MESSAGES: Record<string, MessageDict> = {
     "common.cancel": "Cancel",
 
     // Nav (optional)
-    "nav.dashboard": "Dashboard",
-    "nav.journal": "Journal",
-    "nav.challenges": "Challenges",
-    "nav.performance": "Performance",
+    "nav.dashboard": "Business Center",
+    "nav.journal": "Execution Journal",
+    "nav.performance": "Business Performance",
     "nav.forum": "Forum",
   },
 
@@ -41,10 +40,9 @@ export const I18N_MESSAGES: Record<string, MessageDict> = {
     "common.cancel": "Cancelar",
 
     // Nav (optional)
-    "nav.dashboard": "Dashboard",
-    "nav.journal": "Journal",
-    "nav.challenges": "Retos",
-    "nav.performance": "Performance",
+    "nav.dashboard": "Centro Empresarial",
+    "nav.journal": "Registro de Ejecución",
+    "nav.performance": "Rendimiento Empresarial",
     "nav.forum": "Foro",
   },
 };

@@ -1,10 +1,13 @@
 import { NextResponse } from "next/server";
+import OpenAI from "openai";
 
 import { getAuthUser } from "@/lib/authServer";
 import { requireSmartToolsOwner } from "@/lib/smartToolsAccess";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 
 export const runtime = "nodejs";
+
+const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 function sanitizeTicker(value: string | null) {
   return String(value ?? "")
@@ -32,6 +35,7 @@ export async function GET(req: Request) {
       "id,ticker,form,fiscal_year,period,period_end,file_name,openai_file_id,vector_store_id,bytes,usage_bytes,status,expires_at,created_at"
     )
     .eq("user_id", authUser.userId)
+    .is("deleted_at", null)
     .order("ticker", { ascending: true })
     .order("fiscal_year", { ascending: false, nullsFirst: false })
     .order("created_at", { ascending: false })
@@ -62,4 +66,43 @@ export async function GET(req: Request) {
       createdAt: row.created_at,
     })),
   });
+}
+
+export async function DELETE(req: Request) {
+  const authUser = await getAuthUser(req);
+  if (!authUser) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const smartToolsGate = await requireSmartToolsOwner(authUser);
+  if (smartToolsGate) return smartToolsGate;
+
+  const url = new URL(req.url);
+  const id = String(url.searchParams.get("id") ?? "").trim();
+  if (!id) return NextResponse.json({ error: "Document id is required." }, { status: 400 });
+
+  const { data: row, error: loadError } = await supabaseAdmin
+    .from("neuro_analysis_filings")
+    .select("id,openai_file_id")
+    .eq("id", id)
+    .eq("user_id", authUser.userId)
+    .maybeSingle();
+  if (loadError) return NextResponse.json({ error: loadError.message }, { status: 500 });
+  if (!row) return NextResponse.json({ error: "Document not found." }, { status: 404 });
+
+  const { error } = await supabaseAdmin
+    .from("neuro_analysis_filings")
+    .update({
+      deleted_at: new Date().toISOString(),
+      stale_reason: "user_deleted",
+    })
+    .eq("id", id)
+    .eq("user_id", authUser.userId);
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  if (process.env.OPENAI_API_KEY && row.openai_file_id) {
+    await client.files.delete(String(row.openai_file_id)).catch(() => null);
+  }
+
+  return NextResponse.json({ ok: true, id });
 }

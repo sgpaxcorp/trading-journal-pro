@@ -27,12 +27,12 @@ export default function AboutPage() {
               {L("ABOUT US", "SOBRE NOSOTROS")}
             </p>
             <h1 className="text-3xl md:text-4xl font-semibold">
-              {L("The story behind Neuro Trader Journal", "La historia detrás de Neuro Trader Journal")}
+              {L("The story behind Neuro Trader", "La historia detrás de Neuro Trader")}
             </h1>
             <p className="text-sm md:text-base text-slate-300 max-w-2xl">
               {L(
-                "Built from real trading pain, designed to turn chaos into structure.",
-                "Nació del dolor real del trading, diseñado para transformar el caos en estructura."
+                "Built from real trading pain, designed to help Trader Entrepreneurs build structure around their business.",
+                "Nació del dolor real del trading, diseñado para ayudar a Empresarios Traders a construir estructura alrededor de su negocio."
               )}
             </p>
           </div>
@@ -48,19 +48,19 @@ export default function AboutPage() {
         <section className="max-w-6xl mx-auto mt-10 grid grid-cols-1 lg:grid-cols-[1.6fr_1fr] gap-8">
           <div className="bg-slate-900/70 border border-slate-800 rounded-2xl p-6 md:p-8 shadow-2xl">
             <h2 className="text-xl font-semibold mb-3">
-              {L("Why Neuro Trader Journal was created", "Por qué se creó Neuro Trader Journal")}
+              {L("Why Neuro Trader was created", "Por qué se creó Neuro Trader")}
             </h2>
             <div className="space-y-4 text-sm text-slate-300 leading-relaxed">
               <p>
                 {L(
-                  "Steven J. Otero Vélez was born in Puerto Rico and spent more than three years in the markets living a roller‑coaster: great days, rough days, and a mind that changed pace with every candle. He won, he lost, he got frustrated, he got motivated… and repeated the cycle. It wasn’t a lack of effort. It was a lack of structure.",
-                  "Steven J. Otero Vélez nació en Puerto Rico y se pasó más de tres años en los mercados viviendo en modo montaña rusa: días de gloria, días de golpe, y una mente que cambiaba de ritmo con cada vela. Ganaba, perdía, se frustraba, se motivaba… y repetía el ciclo. No era falta de ganas. Era falta de estructura."
+                  "Steven J. Otero Vélez was born in Puerto Rico and spent more than three years in the markets living the pressure most independent traders know: strong days, painful days, shifting emotions, and decisions that needed more structure than memory could provide. It was not a lack of effort. It was a lack of an operating system.",
+                  "Steven J. Otero Vélez nació en Puerto Rico y pasó más de tres años en los mercados viviendo la presión que muchos traders independientes conocen: días fuertes, días duros, emociones cambiantes y decisiones que necesitaban más estructura que la memoria. No era falta de ganas. Era falta de un sistema operativo."
                 )}
               </p>
               <p>
                 {L(
-                  "He knew the uncomfortable truth: without a journal, there is no real progress. But his “journal” was scattered everywhere — notebooks, spreadsheets, formulas, loose notes, and tools that never spoke to each other. Every attempt to organize the chaos ended in more chaos. And when he tried online journals, it was worse: too much manual work, no flow, heavy interfaces, and the feeling that you needed to be an accountant just to log a trade.",
-                  "Él sabía la verdad incómoda: sin journal no hay progreso real. Pero su “journal” estaba regado por todos lados — libretas, spreadsheets, fórmulas, notas sueltas y herramientas que nunca hablaban entre sí. Cada intento de ordenar el caos terminaba en más caos. Y cuando probó journals online, la experiencia fue peor: demasiado trabajo manual, cero fluidez, interfaces pesadas, y esa sensación de que necesitabas ser un contador para registrar una operación."
+                  "He knew the uncomfortable truth: a trading business cannot improve if the plan, execution, emotions, P&L, rules, and reviews live in disconnected places. Notebooks, spreadsheets, formulas, broker statements, and screenshots all held part of the truth, but none of them gave the full business picture.",
+                  "Él sabía una verdad incómoda: una empresa de trading no puede mejorar si el plan, la ejecución, las emociones, el P&L, las reglas y las revisiones viven en lugares desconectados. Libretas, spreadsheets, fórmulas, estados de cuenta del bróker y screenshots tenían partes de la verdad, pero ninguno mostraba la imagen completa del negocio."
                 )}
               </p>
               <p>
@@ -71,14 +71,14 @@ export default function AboutPage() {
               </p>
               <p>
                 {L(
-                  "That became a personal journal with AI, statistics, and P&L tracking — not just to measure money, but to understand what matters most: the trader behind every decision. He wanted to see invisible patterns, detect when he was trading with clarity versus impulse, and turn every trade into useful data instead of another anecdote.",
-                  "Así nació la idea de construir un journal personal con IA, estadísticas y tracking de P&L, no solo para medir el dinero… sino para entender lo más importante: el trader detrás de cada decisión. Quería ver patrones invisibles, detectar cuándo estaba operando por claridad y cuándo por impulso, y convertir cada trade en data útil en lugar de una anécdota más."
+                  "That became Neuro Trader: a Trading Business Platform with planning, execution records, AI coaching, statistics, P&L tracking, protection systems, and notebooks working together. The goal was not only to measure money. The goal was to understand the operator behind every decision and turn each session into business intelligence.",
+                  "Así nació Neuro Trader: una Plataforma Empresarial de Trading con planificación, registros de ejecución, AI coaching, estadísticas, tracking de P&L, sistemas de protección y notebooks trabajando en conjunto. La meta no era solo medir dinero. La meta era entender al operador detrás de cada decisión y convertir cada sesión en inteligencia empresarial."
                 )}
               </p>
               <p>
                 {L(
-                  "That’s how Neuro Trader Journal was born: an all‑in‑one system designed to be simple, fast, and intuitive — no friction, no overwhelm, no turning journaling into another job. And when the system was running, the clarity appeared: emotional patterns, decision quality under pressure, the exact moments discipline broke — and, with that, the ability to fix them. Because in the end, that’s what Steven was chasing from day one: stop trading like a hobbyist and build the discipline to operate like a professional.",
-                  "De ahí salió Neuro Trader Journal: un sistema todo‑en‑uno, diseñado para ser simple, rápido e intuitivo, sin fricción, sin abrumar, sin convertir el journaling en otro trabajo. Y cuando ese sistema estuvo en marcha, ocurrió lo que muchos traders buscan durante años: claridad real. Empezaron a aparecer los mapas ocultos: los patrones emocionales, la calidad de decisiones bajo presión, los momentos exactos donde se rompía la disciplina… y, con eso, la capacidad de corregirlos. Porque al final, eso era lo que Steven perseguía desde el día uno: dejar de tradear como un hobbyista a merced del ánimo del día… y construir la disciplina para operar como un profesional."
+                  "The product is built for Trader Entrepreneurs who want one place to create their Trading Business Plan, protect it during real execution, review what happened, and improve with context instead of guessing. It is structure for the business side of trading, without making the trader feel buried in admin work.",
+                  "El producto está creado para Empresarios Traders que quieren un solo lugar para crear su Plan de Empresa de Trading, protegerlo durante la ejecución real, revisar lo que pasó y mejorar con contexto en vez de adivinar. Es estructura para el lado empresarial del trading, sin enterrar al trader en trabajo administrativo."
                 )}
               </p>
             </div>
@@ -91,14 +91,14 @@ export default function AboutPage() {
               </p>
               <h3 className="text-lg font-semibold mt-2">
                 {L(
-                  "Transform the trader mindset: from hobby to professional execution.",
-                  "Transformar la mentalidad del trader: del hobby a la ejecución profesional."
+                  "Help Trader Entrepreneurs build, operate, and improve their trading business.",
+                  "Ayudar a Empresarios Traders a crear, operar y mejorar su empresa de trading."
                 )}
               </h3>
               <p className="mt-3 text-sm text-slate-300 leading-relaxed">
                 {L(
-                  "Neuro Trader Journal exists so every trader truly knows themselves and builds structure, discipline, and emotional awareness, turning trading into a measurable business with clear rules, quantifiable performance, and consistent execution — without improvisation or emotion-driven decisions.",
-                  "Neuro Trader Journal existe para que cada trader se conozca de verdad y construya estructura, disciplina y conciencia emocional, convirtiendo el trading en un negocio medible: con reglas claras, desempeño cuantificable y ejecución consistente, sin improvisación ni decisiones dominadas por la emoción."
+                  "Neuro Trader exists so every Trader Entrepreneur can organize the business side of trading with clear plans, measurable performance, protected rules, and coaching that reflects what actually happened.",
+                  "Neuro Trader existe para que cada Empresario Trader pueda organizar el lado empresarial del trading con planes claros, rendimiento medible, reglas protegidas y coaching basado en lo que realmente pasó."
                 )}
               </p>
             </div>
@@ -109,14 +109,14 @@ export default function AboutPage() {
               </p>
               <h3 className="text-lg font-semibold mt-2">
                 {L(
-                  "Be the global standard for trading performance and mindset.",
-                  "Ser el estándar global de rendimiento y mentalidad en trading."
+                  "Become the global business platform for Trader Entrepreneurs.",
+                  "Convertirnos en la plataforma empresarial global para Empresarios Traders."
                 )}
               </h3>
               <p className="mt-3 text-sm text-slate-300 leading-relaxed">
                 {L(
-                  "Turn Neuro Trader Journal into the platform traders worldwide use to capture every data point that matters, uncover real patterns, and continuously improve performance and mindset until they operate with the level and consistency of a professional.",
-                  "Convertir a Neuro Trader Journal en la plataforma que traders en todo el mundo usan para capturar cada dato que importa, descubrir patrones reales y mejorar continuamente su performance y su mindset hasta operar con el nivel y la consistencia de un profesional."
+                  "Turn Neuro Trader into the platform traders worldwide use to create their Trading Business Plan, capture execution, understand real patterns, and improve the business with clarity.",
+                  "Convertir a Neuro Trader en la plataforma que traders en todo el mundo usan para crear su Plan de Empresa de Trading, capturar ejecución, entender patrones reales y mejorar el negocio con claridad."
                 )}
               </p>
             </div>
@@ -129,7 +129,7 @@ export default function AboutPage() {
             <div className="flex items-center gap-4">
               <img
                 src="/neurotrader%20logo%20for%20Web.png"
-                alt="Neuro Trader Journal"
+                alt="Neuro Trader"
                 className="h-12 w-auto object-contain"
                 draggable={false}
               />
@@ -142,8 +142,8 @@ export default function AboutPage() {
             </div>
             <p className="text-sm text-slate-300 leading-relaxed max-w-3xl">
               {L(
-                "Neuro Trader Journal is his commitment to help traders build a repeatable process, reduce emotional noise, and measure what actually matters.",
-                "Neuro Trader Journal es su compromiso de ayudar a los traders a crear un proceso repetible, reducir el ruido emocional y medir lo que realmente importa."
+                "Neuro Trader is his commitment to help Trader Entrepreneurs build a repeatable operating process, reduce emotional noise, and measure what actually matters to the business.",
+                "Neuro Trader es su compromiso de ayudar a Empresarios Traders a crear un proceso operativo repetible, reducir el ruido emocional y medir lo que realmente importa para el negocio."
               )}
             </p>
           </div>

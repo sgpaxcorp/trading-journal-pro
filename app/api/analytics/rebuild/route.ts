@@ -64,6 +64,19 @@ function extractEmotions(row: any): string[] | null {
   return normalizeStringArray(raw);
 }
 
+function isMissingColumnError(err: any, column?: string) {
+  if (!err) return false;
+  if (err.code === "42703") return true;
+  if (String(err.code || "").startsWith("PGRST")) return true;
+  const msg = String(err.message || "").toLowerCase();
+  if (!msg) return false;
+  if (msg.includes("schema cache") && msg.includes("column")) return true;
+  if (msg.includes("could not find") && msg.includes("column")) return true;
+  if (msg.includes("does not exist") && msg.includes("column")) return true;
+  if (column && msg.includes(column.toLowerCase())) return true;
+  return false;
+}
+
 function safeUpper(s: string) {
   return (s || "").trim().toUpperCase();
 }
@@ -122,13 +135,36 @@ function toTradeRow(t: any): TradeRow | null {
   };
 }
 
-async function fetchSessions(userId: string): Promise<SessionRow[]> {
+async function resolveActiveAccountId(userId: string): Promise<string | null> {
+  const { data } = await supabaseAdmin
+    .from("user_preferences")
+    .select("active_account_id")
+    .eq("user_id", userId)
+    .maybeSingle();
+  return (data as any)?.active_account_id ?? null;
+}
+
+async function fetchSessions(userId: string, accountId?: string | null): Promise<SessionRow[]> {
   // Ajusta el select según tu tabla real
-  const { data, error } = await supabaseAdmin
+  let q = supabaseAdmin
     .from(JOURNAL_TABLE)
     .select("*")
     .eq(USER_ID_COL, userId)
     .order(DATE_COL, { ascending: true });
+
+  if (accountId) q = q.eq("account_id", accountId);
+
+  let { data, error } = await q;
+
+  if (error && accountId && isMissingColumnError(error, "account_id")) {
+    const retry = await supabaseAdmin
+      .from(JOURNAL_TABLE)
+      .select("*")
+      .eq(USER_ID_COL, userId)
+      .order(DATE_COL, { ascending: true });
+    data = retry.data as any[] | null;
+    error = retry.error;
+  }
 
   if (error) throw error;
 
@@ -172,8 +208,14 @@ export async function POST(req: NextRequest) {
     const asOfDate = typeof body?.asOfDate === "string" ? body.asOfDate : undefined;
     const rangeStart = typeof body?.rangeStart === "string" ? body.rangeStart : null;
     const rangeEnd = typeof body?.rangeEnd === "string" ? body.rangeEnd : null;
+    const requestedAccountId = typeof body?.accountId === "string" ? body.accountId : "";
+    const accountId = requestedAccountId || (await resolveActiveAccountId(userId));
+    const accountKey = accountId ?? "";
 
-    const sessions = await fetchSessions(userId);
+    const probe = await supabaseAdmin.from("analytics_snapshots").select("account_id").limit(1);
+    const analyticsHasAccountId = !isMissingColumnError(probe.error, "account_id");
+
+    const sessions = await fetchSessions(userId, accountId);
 
     const { snapshot, edges } = buildSnapshotAndEdges({
       sessions,
@@ -187,9 +229,10 @@ export async function POST(req: NextRequest) {
     const { error: snapErr } = await supabaseAdmin
       .from("analytics_snapshots")
       .upsert(
-        {
-          user_id: userId,
-          as_of_date: snapshot.as_of_date,
+          {
+            user_id: userId,
+            ...(analyticsHasAccountId ? { account_id: accountKey } : {}),
+            as_of_date: snapshot.as_of_date,
           range_start: snapshot.range_start,
           range_end: snapshot.range_end,
           sessions_count: snapshot.sessions_count,
@@ -207,17 +250,25 @@ export async function POST(req: NextRequest) {
           worst_day_pnl: snapshot.worst_day_pnl,
           payload: snapshot.payload,
         },
-        { onConflict: "user_id,as_of_date,range_start,range_end" }
+        {
+          onConflict: analyticsHasAccountId
+            ? "user_id,account_id,as_of_date,range_start,range_end"
+            : "user_id,as_of_date,range_start,range_end",
+        }
       );
 
     if (snapErr) throw snapErr;
 
     // 2) Replace edges for that date (fast + avoids conflict issues)
-    const { error: delErr } = await supabaseAdmin
+    let deleteQuery = supabaseAdmin
       .from("analytics_edges")
       .delete()
       .eq("user_id", userId)
       .eq("as_of_date", snapshot.as_of_date);
+    if (analyticsHasAccountId) {
+      deleteQuery = deleteQuery.eq("account_id", accountKey);
+    }
+    const { error: delErr } = await deleteQuery;
 
     if (delErr) throw delErr;
 
@@ -226,6 +277,7 @@ export async function POST(req: NextRequest) {
     for (let i = 0; i < edges.length; i += batchSize) {
       const batch = edges.slice(i, i + batchSize).map((e) => ({
         user_id: userId,
+        ...(analyticsHasAccountId ? { account_id: accountKey } : {}),
         as_of_date: snapshot.as_of_date,
 
         symbol: e.symbol,

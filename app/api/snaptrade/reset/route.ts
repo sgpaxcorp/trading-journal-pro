@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSnaptradeUser } from "@/lib/snaptradeStorage";
 import { formatSnaptradeError, snaptradeDeleteUser } from "@/lib/snaptradeClient";
+import { rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 import { requireBrokerSyncAddon } from "@/lib/serverFeatureAccess";
 import { requirePlatformAccess } from "@/lib/serverPlatformAccess";
@@ -12,6 +13,18 @@ export async function POST(req: Request) {
     const access = await requirePlatformAccess(req);
     if (!access.ok) return access.response;
     const auth = { userId: access.context.userId };
+    const limiter = await rateLimit(`snaptrade-reset:user:${auth.userId}`, {
+      limit: 5,
+      windowMs: 10 * 60_000,
+    });
+    if (!limiter.allowed) {
+      const retryAfter = Math.max(1, Math.ceil((limiter.resetAt - Date.now()) / 1000));
+      return NextResponse.json(
+        { error: "Rate limit exceeded" },
+        { status: 429, headers: { "Retry-After": String(retryAfter), ...rateLimitHeaders(limiter) } }
+      );
+    }
+
     const brokerSyncFree =
       process.env.BROKER_SYNC_FREE === "true" || process.env.NEXT_PUBLIC_BROKER_SYNC_FREE === "true";
     if (!brokerSyncFree) {

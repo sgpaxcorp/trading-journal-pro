@@ -1,41 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireAdminActionSecret, requireAdminUser } from "@/lib/adminAuth";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 import { ACCESS_GRANTS, isAccessGrantKey, type AccessGrantKey } from "@/lib/accessGrants";
 import { recordAdminAuditEvent } from "@/lib/adminAudit";
-
-function parseAdminEmails(envValue?: string | null) {
-  return (envValue || "")
-    .split(",")
-    .map((v) => v.trim().toLowerCase())
-    .filter(Boolean);
-}
-
-async function isAdmin(userId: string, email?: string | null): Promise<boolean> {
-  const { data, error } = await supabaseAdmin
-    .from("admin_users")
-    .select("user_id, active")
-    .eq("user_id", userId)
-    .eq("active", true)
-    .limit(1);
-  if (!error && (data ?? []).length > 0) return true;
-
-  const allowList = parseAdminEmails(process.env.ADMIN_EMAILS);
-  if (email && allowList.includes(email.toLowerCase())) return true;
-  return false;
-}
-
-async function getAdminAuth(req: NextRequest) {
-  const authHeader = req.headers.get("authorization") || "";
-  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
-  if (!token) return null;
-
-  const { data: authData, error: authErr } = await supabaseAdmin.auth.getUser(token);
-  if (authErr || !authData?.user) return null;
-
-  const ok = await isAdmin(authData.user.id, authData.user.email);
-  if (!ok) return null;
-  return authData.user;
-}
+import { validatePasswordPolicyEn } from "@/lib/passwordPolicy";
 
 async function findAuthUserByEmail(email: string) {
   const normalized = email.trim().toLowerCase();
@@ -141,7 +109,6 @@ type AdminUserSummary = {
   bannedUntil: string | null;
   plan: string | null;
   subscriptionStatus: string | null;
-  showInRanking: boolean;
   sessions30d: number;
   events30d: number;
   activeEntitlements: string[];
@@ -158,10 +125,13 @@ type Body = {
 
 export async function POST(req: NextRequest) {
   try {
-    const admin = await getAdminAuth(req);
-    if (!admin) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    const admin = await requireAdminUser(req, { action: "users:write", limit: 20, windowMs: 10 * 60_000 });
+    if (!admin.ok) return admin.response;
 
     const body = (await req.json().catch(() => ({}))) as Body;
+    const stepUpResponse = requireAdminActionSecret(req, body);
+    if (stepUpResponse) return stepUpResponse;
+
     const email = String(body?.email ?? "").trim().toLowerCase();
     const password = String(body?.password ?? "");
     const firstName = String(body?.firstName ?? "").trim();
@@ -188,11 +158,13 @@ export async function POST(req: NextRequest) {
 
     let authUser = await findAuthUserByEmail(email);
     const isNewUser = !authUser;
+    const passwordWasProvided = password.length > 0;
+    const passwordError = passwordWasProvided ? validatePasswordPolicyEn(password) : null;
 
     if (!authUser) {
-      if (password.length < 8) {
+      if (!passwordWasProvided || passwordError) {
         return NextResponse.json(
-          { error: "Password must be at least 8 characters for new users." },
+          { error: passwordError ?? "Password is required for new users." },
           { status: 400 }
         );
       }
@@ -230,7 +202,11 @@ export async function POST(req: NextRequest) {
         },
       };
 
-      if (password.length >= 8) {
+      if (passwordWasProvided && passwordError) {
+        return NextResponse.json({ error: passwordError }, { status: 400 });
+      }
+
+      if (passwordWasProvided) {
         updatePayload.password = password;
       }
 
@@ -259,14 +235,14 @@ export async function POST(req: NextRequest) {
     await syncAdminEntitlements(authUser.id, accessKeys);
     await recordAdminAuditEvent({
       req,
-      adminUserId: admin.id,
-      adminEmail: admin.email,
+      adminUserId: admin.user.id,
+      adminEmail: admin.user.email,
       action: isNewUser ? "admin_user_create" : "admin_user_update",
       targetUserId: authUser.id,
       metadata: {
         email,
         accessKeys,
-        updatedPassword: password.length >= 8,
+        updatedPassword: passwordWasProvided,
       },
     });
 
@@ -289,8 +265,8 @@ export async function POST(req: NextRequest) {
 
 export async function GET(req: NextRequest) {
   try {
-    const admin = await getAdminAuth(req);
-    if (!admin) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    const admin = await requireAdminUser(req, { action: "users:read", limit: 60, windowMs: 60_000 });
+    if (!admin.ok) return admin.response;
 
     const url = new URL(req.url);
     const page = Math.max(1, Math.floor(Number(url.searchParams.get("page") ?? 1) || 1));
@@ -328,7 +304,7 @@ export async function GET(req: NextRequest) {
       await Promise.all([
         supabaseAdmin
           .from("profiles")
-          .select("id,email,first_name,last_name,plan,subscription_status,show_in_ranking,created_at")
+          .select("id,email,first_name,last_name,plan,subscription_status,created_at")
           .in("id", userIds),
         supabaseAdmin
           .from("user_entitlements")
@@ -408,7 +384,6 @@ export async function GET(req: NextRequest) {
         bannedUntil: (authUser.banned_until ?? null) as string | null,
         plan: (profile?.plan ?? authUser.user_metadata?.plan ?? null) as string | null,
         subscriptionStatus: (profile?.subscription_status ?? authUser.user_metadata?.subscriptionStatus ?? null) as string | null,
-        showInRanking: Boolean(profile?.show_in_ranking ?? false),
         sessions30d: sessions30ByUser.get(String(authUser.id)) ?? 0,
         events30d: events30ByUser.get(String(authUser.id)) ?? 0,
         activeEntitlements: (activeEntitlementsByUser.get(String(authUser.id)) ?? []).sort(),

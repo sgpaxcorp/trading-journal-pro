@@ -108,6 +108,12 @@ async function queryCashflowsTable(
   if (opts?.accountId) {
     q = q.eq("account_id", opts.accountId);
   }
+  if (opts?.fromDate) {
+    q = q.gte("date", opts.fromDate);
+  }
+  if (opts?.toDate) {
+    q = q.lte("date", opts.toDate);
+  }
 
   let { data, error } = await q.order("date", { ascending: false }).order("created_at", { ascending: false });
 

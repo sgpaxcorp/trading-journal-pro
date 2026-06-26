@@ -5,6 +5,7 @@ import { getClientIp, rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
 const SUPPORT_EMAIL = "support@neurotrader-journal.com";
 const HCAPTCHA_SECRET = process.env.HCAPTCHA_SECRET_KEY || "";
+const HCAPTCHA_TIMEOUT_MS = 5_000;
 
 function escapeHtml(value: string) {
   return value
@@ -56,6 +57,8 @@ export async function POST(req: NextRequest) {
       if (!captchaToken) {
         return NextResponse.json({ error: "Captcha required" }, { status: 400 });
       }
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), HCAPTCHA_TIMEOUT_MS);
       const verifyRes = await fetch("https://hcaptcha.com/siteverify", {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -64,7 +67,8 @@ export async function POST(req: NextRequest) {
           response: captchaToken,
           remoteip: getClientIp(req),
         }).toString(),
-      });
+        signal: controller.signal,
+      }).finally(() => clearTimeout(timer));
       const verifyBody = (await verifyRes.json().catch(() => ({}))) as { success?: boolean };
       if (!verifyBody?.success) {
         return NextResponse.json({ error: "Captcha failed" }, { status: 400 });

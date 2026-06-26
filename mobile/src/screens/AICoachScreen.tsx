@@ -14,6 +14,7 @@ import { ScreenScaffold } from "../components/ScreenScaffold";
 import { apiGet, apiPost } from "../lib/api";
 import { useLanguage } from "../lib/LanguageContext";
 import { t } from "../lib/i18n";
+import type { OpenModuleFn } from "../lib/moduleNavigation";
 import { useSupabaseUser } from "../lib/useSupabaseUser";
 import { supabaseMobile } from "../lib/supabase";
 import { type ThemeColors } from "../theme";
@@ -21,8 +22,10 @@ import { useTheme } from "../lib/ThemeContext";
 import { parseNotes, type StoredTradeRow, type TradesPayload } from "../lib/journalNotes";
 
 type AICoachScreenProps = {
-  onOpenModule: (title: string, description: string) => void;
+  onOpenModule: OpenModuleFn;
 };
+
+const ACCOUNT_SERIES_CONTEXT_PATH = "/api/account/series?seriesDays=365";
 
 type CoachThread = {
   id: string;
@@ -443,7 +446,7 @@ export function AICoachScreen({}: AICoachScreenProps) {
     const sb = supabaseMobile;
     const { data, error } = await sb
       .from("ai_coach_threads")
-      .insert({ user_id: user.id, title: "AI Coaching", summary: null })
+      .insert({ user_id: user.id, title: "Business AI Coaching", summary: null })
       .select("id,title,summary,created_at,updated_at")
       .single();
     if (error) throw error;
@@ -502,7 +505,7 @@ export function AICoachScreen({}: AICoachScreenProps) {
       const toDate = isoDate(today);
 
       const [seriesRes, analyticsRes] = await Promise.all([
-        apiGet<AccountSeriesResponse>("/api/account/series"),
+        apiGet<AccountSeriesResponse>(ACCOUNT_SERIES_CONTEXT_PATH),
         apiGet<AnalyticsSnapshotResponse>("/api/analytics/snapshot"),
       ]);
 
@@ -831,7 +834,7 @@ export function AICoachScreen({}: AICoachScreenProps) {
         coachingFocus: {
           useAnalyticsSummary: true,
           useRelevantSessions: relevantSessions.length > 0,
-          useChallengesAndGamification: false,
+          useBusinessMilestones: true,
         },
       });
 
@@ -897,11 +900,11 @@ export function AICoachScreen({}: AICoachScreenProps) {
 
   return (
     <ScreenScaffold
-      title={t(language, "AI Coach", "AI Coach")}
+      title={t(language, "Business AI Coach", "Coach Empresarial IA")}
       subtitle={t(
         language,
-        "Live coaching based on your journal, plan, and performance.",
-        "Coaching en vivo basado en tu journal, plan y desempeño."
+        "Live coaching based on your execution records, Trading Business Plan, and performance.",
+        "Coaching en vivo basado en tus registros de ejecución, Plan de Empresa de Trading y desempeño."
       )}
       refreshing={refreshing}
       onRefresh={handleRefresh}
@@ -928,7 +931,7 @@ export function AICoachScreen({}: AICoachScreenProps) {
                 onPress={() => setActiveThread(thread)}
                 style={[styles.threadCard, isActive && styles.threadCardActive]}
               >
-                <Text style={styles.threadTitle}>{thread.title || "AI Coaching"}</Text>
+                <Text style={styles.threadTitle}>{thread.title || "Business AI Coaching"}</Text>
                 <Text style={styles.threadDate}>{(thread.updated_at || thread.created_at).slice(0, 10)}</Text>
               </Pressable>
             );
@@ -939,7 +942,7 @@ export function AICoachScreen({}: AICoachScreenProps) {
       {screenError ? <Text style={styles.errorText}>{screenError}</Text> : null}
       {loadingContext ? (
         <Text style={styles.contextText}>
-          {t(language, "Syncing journal, analytics, and plan for the coach…", "Sincronizando journal, analíticas y plan para el coach…")}
+          {t(language, "Syncing execution records, analytics, and business plan for the coach…", "Sincronizando registros de ejecución, analíticas y plan empresarial para el coach…")}
         </Text>
       ) : null}
 

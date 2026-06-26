@@ -24,7 +24,7 @@ export default function GoToDashboard({
   const lang = resolveLocale(locale);
   const isEs = lang === "es";
   const L = (en: string, es: string) => (isEs ? es : en);
-  const resolvedLabel = label || L("Go to Dashboard", "Ir al dashboard");
+  const resolvedLabel = label || L("Go to Business Center", "Ir al Centro Empresarial");
 
   // Ocultar si el pathname hace match exacto o por prefijo con cualquiera en hideOn
   const shouldHide = useMemo(() => {

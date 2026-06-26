@@ -99,12 +99,12 @@ export default function BillingSuccessClient() {
           </div>
 
           <h2 className="text-xl md:text-2xl font-semibold mb-2">
-            {L("You're ready to journal like a pro", "Ya puedes llevar tu journal como pro")}
+            {L("You're ready to operate your trading business", "Ya puedes operar tu empresa de trading")}
           </h2>
           <p className="text-xs text-slate-400 mb-4">
             {L(
-              "Your account is now connected to an active subscription. You can go straight to your dashboard and start using your journal, or review your growth plan first.",
-              "Tu cuenta ya está conectada a una suscripción activa. Puedes ir directo al dashboard y empezar a usar tu journal, o revisar tu Growth Plan primero."
+              "Your account is now connected to an active subscription. You can go straight to your Business Center and start operating, or review your Trading Business Plan first.",
+              "Tu cuenta ya está conectada a una suscripción activa. Puedes ir directo al Centro Empresarial y empezar a operar, o revisar tu Plan de Empresa de Trading primero."
             )}
           </p>
 
@@ -120,13 +120,13 @@ export default function BillingSuccessClient() {
               href="/dashboard"
               className="inline-flex px-6 py-2.5 rounded-xl bg-emerald-400 text-slate-950 font-semibold hover:bg-emerald-300"
             >
-              {L("Go to dashboard", "Ir al dashboard")}
+              {L("Go to Business Center", "Ir al Centro Empresarial")}
             </Link>
             <Link
               href="/growth-plan"
               className="inline-flex px-4 py-2.5 rounded-xl border border-slate-700 text-slate-300 hover:border-emerald-400"
             >
-              {L("Review my growth plan", "Revisar mi Growth Plan")}
+              {L("Review my Trading Business Plan", "Revisar mi Plan de Empresa de Trading")}
             </Link>
             <Link
               href="/"

@@ -131,10 +131,22 @@ function cashflowSigned(cf: CashflowRow): number {
   return cf.type === "withdrawal" ? -Math.abs(cf.amount) : Math.abs(cf.amount);
 }
 
-async function queryCashflows(table: string, userId: string, accountId?: string | null) {
+async function queryCashflows(
+  table: string,
+  userId: string,
+  accountId?: string | null,
+  fromDate?: string,
+  toDate?: string
+) {
   let q = supabaseAdmin.from(table).select("*").eq("user_id", userId);
   if (accountId) {
     q = q.eq("account_id", accountId);
+  }
+  if (fromDate) {
+    q = q.gte("date", fromDate);
+  }
+  if (toDate) {
+    q = q.lte("date", toDate);
   }
   let { data, error } = await q.order("date", { ascending: true }).order("created_at", { ascending: true });
 
@@ -148,6 +160,8 @@ async function queryCashflows(table: string, userId: string, accountId?: string 
   // If account_id column doesn't exist, retry without account filter
   if (error && accountId && isMissingColumnError(error, "account_id")) {
     let retry = supabaseAdmin.from(table).select("*").eq("user_id", userId);
+    if (fromDate) retry = retry.gte("date", fromDate);
+    if (toDate) retry = retry.lte("date", toDate);
     retry = retry.order("date", { ascending: true }).order("created_at", { ascending: true });
     const res = await retry;
     data = res.data as any[] | null;
@@ -258,13 +272,15 @@ async function getGrowthPlanRow(
 async function listCashflowsForUser(
   userId: string,
   email?: string | null,
-  accountId?: string | null
+  accountId?: string | null,
+  fromDate?: string,
+  toDate?: string
 ): Promise<CashflowRow[]> {
   // Primary: cashflows
   let rows: any[] = [];
-  let primary = await queryCashflows("cashflows", userId, accountId);
+  let primary = await queryCashflows("cashflows", userId, accountId, fromDate, toDate);
   if (primary.error && primary.error.code === "42P01") {
-    const legacy = await queryCashflows("ntj_cashflows", userId, accountId);
+    const legacy = await queryCashflows("ntj_cashflows", userId, accountId, fromDate, toDate);
     if (legacy.error) throw legacy.error;
     rows = legacy.data;
   } else if (primary.error) {
@@ -272,14 +288,14 @@ async function listCashflowsForUser(
   } else {
     rows = primary.data;
     if (!rows.length) {
-      const legacy = await queryCashflows("ntj_cashflows", userId, accountId);
+      const legacy = await queryCashflows("ntj_cashflows", userId, accountId, fromDate, toDate);
       if (!legacy.error && legacy.data?.length) rows = legacy.data;
     }
   }
 
   if ((!rows || rows.length === 0) && email) {
     try {
-      const emailRows = await queryCashflows("cashflows", email, accountId);
+      const emailRows = await queryCashflows("cashflows", email, accountId, fromDate, toDate);
       if (!emailRows.error && emailRows.data?.length) rows = emailRows.data;
     } catch {
       // ignore
@@ -289,13 +305,21 @@ async function listCashflowsForUser(
   return rows.map(mapCashflowRow);
 }
 
-async function listJournalEntries(userId: string, email?: string | null, accountId?: string | null) {
+async function listJournalEntries(
+  userId: string,
+  email?: string | null,
+  accountId?: string | null,
+  fromDate?: string,
+  toDate?: string
+) {
   let q = supabaseAdmin
     .from("journal_entries")
     .select("date, pnl")
     .eq("user_id", userId)
     .order("date", { ascending: true });
   if (accountId) q = q.eq("account_id", accountId);
+  if (fromDate) q = q.gte("date", fromDate);
+  if (toDate) q = q.lte("date", toDate);
 
   let { data, error } = await q;
 
@@ -319,6 +343,8 @@ async function listJournalEntries(userId: string, email?: string | null, account
         .eq("user_id", email)
         .order("date", { ascending: true });
       if (accountId) altQ = altQ.eq("account_id", accountId);
+      if (fromDate) altQ = altQ.gte("date", fromDate);
+      if (toDate) altQ = altQ.lte("date", toDate);
       const alt = await altQ;
       if (!alt.error && alt.data?.length) data = alt.data as any[];
     } catch {
@@ -344,6 +370,15 @@ export async function GET(req: NextRequest) {
     const email = access.context.user.email ?? null;
     const { searchParams } = new URL(req.url);
     const requestedAccountId = searchParams.get("accountId") || "";
+    const requestedFromDate = searchParams.get("fromDate") || "";
+    const requestedToDate = searchParams.get("toDate") || "";
+    const fromDate = looksLikeYYYYMMDD(requestedFromDate) ? requestedFromDate : "";
+    const toDate = looksLikeYYYYMMDD(requestedToDate) ? requestedToDate : "";
+    const requestedSeriesDays = Number(searchParams.get("seriesDays") || 0);
+    const seriesDays =
+      Number.isFinite(requestedSeriesDays) && requestedSeriesDays > 0
+        ? Math.min(2000, Math.max(1, Math.floor(requestedSeriesDays)))
+        : 0;
     const { data: pref } = await supabaseAdmin
       .from("user_preferences")
       .select("active_account_id")
@@ -383,8 +418,8 @@ export async function GET(req: NextRequest) {
           }
         : null);
 
-    const journalRows = await listJournalEntries(userId, email, accountId);
-    const cashflows = await listCashflowsForUser(userId, email, accountId);
+    const journalRows = await listJournalEntries(userId, email, accountId, fromDate, toDate);
+    const cashflows = await listCashflowsForUser(userId, email, accountId, fromDate, toDate);
 
     const pnlByDate: Record<string, number> = {};
     let minDate = "";
@@ -410,9 +445,13 @@ export async function GET(req: NextRequest) {
     }
 
     const todayIso = isoDate(new Date());
-    if (!maxDate || maxDate < todayIso) maxDate = todayIso;
+    if (toDate) {
+      maxDate = toDate;
+    } else if (!maxDate || maxDate < todayIso) {
+      maxDate = todayIso;
+    }
 
-    const startIso = planStartIso || minDate || todayIso;
+    const startIso = fromDate || planStartIso || minDate || todayIso;
     const dateList = listDatesBetween(startIso, maxDate);
 
     // Build actual series
@@ -488,6 +527,7 @@ export async function GET(req: NextRequest) {
     const canSeeCashflow = userPlan === "advanced";
     const visibleCashflowNet = canSeeCashflow ? totalCashflowNet : 0;
     const visibleCurrentBalance = startingBalance + totalTradingPnl + visibleCashflowNet;
+    const trimPoints = (points: SeriesPoint[]) => (seriesDays > 0 ? points.slice(-seriesDays) : points);
 
     return NextResponse.json({
       plan: {
@@ -495,7 +535,8 @@ export async function GET(req: NextRequest) {
         targetBalance,
         adjustedTargetBalance: Number(targetBalance.toFixed(2)),
         dailyTargetPct,
-        planStartIso: startIso,
+        planStartIso: planStartIso || startIso,
+        seriesStartIso: startIso,
         targetDate: String(plan?.target_date ?? plan?.targetDate ?? ""),
         planMode: String(plan?.plan_mode ?? plan?.planMode ?? ""),
         planPhases: plan?.plan_phases ?? plan?.planPhases ?? null,
@@ -509,10 +550,10 @@ export async function GET(req: NextRequest) {
         cashflowNet: Number(visibleCashflowNet.toFixed(2)),
         currentBalance: Number(visibleCurrentBalance.toFixed(2)),
       },
-      series: canSeeCashflow ? series : tradingSeries,
-      projected,
-      cashflow: canSeeCashflow ? cashflow : [],
-      daily,
+      series: trimPoints(canSeeCashflow ? series : tradingSeries),
+      projected: trimPoints(projected),
+      cashflow: canSeeCashflow ? trimPoints(cashflow) : [],
+      daily: trimPoints(daily),
     });
   } catch (err: any) {
     console.error("[account/series] error:", err);

@@ -8,27 +8,8 @@ import Link from "next/link";
 import type { PlanId } from "@/lib/types";
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
+import { passwordPolicyHint, validatePasswordPolicy } from "@/lib/passwordPolicy";
 import { supabaseBrowser } from "@/lib/supaBaseClient";
-
-// Password fuerte: mínimo 8, mayúscula, minúscula, número y símbolo.
-function validatePassword(password: string, L: (en: string, es: string) => string): string | null {
-  if (password.length < 8) {
-    return L("Password must be at least 8 characters long.", "La contraseña debe tener al menos 8 caracteres.");
-  }
-  if (!/[A-Z]/.test(password)) {
-    return L("Password must include at least one uppercase letter.", "La contraseña debe incluir al menos una mayúscula.");
-  }
-  if (!/[a-z]/.test(password)) {
-    return L("Password must include at least one lowercase letter.", "La contraseña debe incluir al menos una minúscula.");
-  }
-  if (!/[0-9]/.test(password)) {
-    return L("Password must include at least one number.", "La contraseña debe incluir al menos un número.");
-  }
-  if (!/[!@#$%^&*()_+\-=[\]{};':\"\\|,.<>/?]/.test(password)) {
-    return L("Password must include at least one special character.", "La contraseña debe incluir al menos un carácter especial.");
-  }
-  return null;
-}
 
 type StepUi = "form" | "verify";
 
@@ -53,13 +34,13 @@ function Stepper({
     <div className="space-y-2">
       <div className="flex items-center justify-between text-[10px] text-slate-400 mb-1">
         <span className={stepIndex >= 1 ? "text-emerald-300 font-semibold" : ""}>
-          {L("1. Create account", "1. Crear cuenta")}
+          {L("1. Business account", "1. Cuenta empresarial")}
         </span>
         <span className={stepIndex >= 2 ? "text-emerald-300 font-semibold" : ""}>
           {L("2. Verify email", "2. Verificar email")}
         </span>
         <span className={stepIndex >= 3 ? "text-emerald-300 font-semibold" : ""}>
-          {L("3. Choose plan", "3. Elegir plan")}
+          {L("3. Choose business plan", "3. Elegir plan empresarial")}
         </span>
         <span className={stepIndex >= 4 ? "text-emerald-300 font-semibold" : ""}>
           {L("4. Pay & confirm", "4. Pagar y confirmar")}
@@ -128,7 +109,7 @@ function SignUpPageInner() {
     try {
       const normalizedEmail = email.trim().toLowerCase();
 
-      const pwError = validatePassword(password, L);
+      const pwError = validatePasswordPolicy(password, L);
       if (pwError) {
         setPasswordError(pwError);
         setLoading(false);
@@ -273,7 +254,7 @@ function SignUpPageInner() {
             {L("Verify your email", "Verifica tu email")}
           </h1>
           <p className="text-xs text-slate-400">
-            {L("We sent a 6-digit code to:", "Te enviamos un código de 6 dígitos a:")}
+            {L("We sent an 8-digit code to:", "Te enviamos un código de 8 dígitos a:")}
           </p>
           <p className="text-xs font-semibold text-emerald-300 break-all">
             {submittedEmail}
@@ -281,8 +262,8 @@ function SignUpPageInner() {
 
           <p className="text-xs text-slate-400">
             {L(
-              "You must confirm your email before choosing a plan or paying.",
-              "Debes confirmar tu email antes de elegir plan o pagar."
+            "You must confirm your email before choosing a business plan or paying.",
+            "Debes confirmar tu email antes de elegir un plan empresarial o pagar."
             )}
           </p>
           {partnerCode ? (
@@ -369,12 +350,12 @@ function SignUpPageInner() {
         <Stepper current="form" L={L} />
 
         <h1 className="text-xl font-semibold text-slate-50 mt-4">
-          {L("Step 1 · Create your account", "Paso 1 · Crea tu cuenta")}
+          {L("Step 1 · Start your trading business", "Paso 1 · Comienza tu empresa de trading")}
         </h1>
         <p className="text-xs text-slate-400">
           {L(
-            "First create your NeuroTrader Journal account with a valid email. After this, you'll go to Step 2 to choose your plan and pay securely with Stripe.",
-            "Primero crea tu cuenta de NeuroTrader Journal con un email válido. Luego irás al Paso 2 para elegir tu plan y pagar de forma segura con Stripe."
+            "Create your Trader Entrepreneur account with a valid email. After this, you'll verify it, choose your business plan, and pay securely with Stripe.",
+            "Crea tu cuenta de Empresario Trader con un email válido. Luego la verificarás, escogerás tu plan empresarial y pagarás de forma segura con Stripe."
           )}
         </p>
         {partnerCode ? (
@@ -457,10 +438,7 @@ function SignUpPageInner() {
               placeholder={L("Create a strong password", "Crea una contraseña segura")}
             />
             <p className="mt-1 text-[9px] text-slate-500">
-              {L(
-                "Minimum 8 characters, with at least 1 uppercase, 1 lowercase, 1 number and 1 special character.",
-                "Mínimo 8 caracteres, con al menos 1 mayúscula, 1 minúscula, 1 número y 1 carácter especial."
-              )}
+              {passwordPolicyHint(L)}
             </p>
             {passwordError && (
               <p className="mt-1 text-[10px] text-red-400">{passwordError}</p>
@@ -475,13 +453,13 @@ function SignUpPageInner() {
             className="w-full mt-2 px-4 py-2.5 rounded-xl bg-emerald-400 text-slate-950 text-xs font-semibold hover:bg-emerald-300 transition shadow-lg shadow-emerald-500/20 disabled:opacity-60"
           >
             {loading
-              ? L("Creating your account…", "Creando tu cuenta…")
-              : L("Create account – go to Step 2", "Crear cuenta – ir al Paso 2")}
+              ? L("Creating your business account…", "Creando tu cuenta empresarial…")
+              : L("Start trading business – go to Step 2", "Comenzar empresa de trading – ir al Paso 2")}
           </button>
         </form>
 
         <p className="text-[9px] text-slate-500 text-center">
-          {L("Already have an account?", "¿Ya tienes cuenta?")}{" "}
+          {L("Already have a Trader Entrepreneur account?", "¿Ya tienes cuenta de Empresario Trader?")}{" "}
           <Link
             href="/signin"
             className="text-emerald-400 hover:text-emerald-300"

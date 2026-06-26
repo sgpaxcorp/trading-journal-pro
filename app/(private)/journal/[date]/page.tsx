@@ -15,7 +15,6 @@ import type { JournalEntry } from "@/lib/journalTypes";
 import { getAllJournalEntries, getJournalEntryByDate, saveJournalEntry } from "@/lib/journalSupabase";
 
 import { getJournalTradesForDay, saveJournalTradesForDay } from "@/lib/journalTradesSupabase";
-import { syncMyTrophies } from "@/lib/trophiesSupabase";
 
 import type { StoredTradeRow } from "@/lib/journalNotes";
 import { type InstrumentType } from "@/lib/journalNotes";
@@ -160,7 +159,7 @@ const DEFAULT_CHECKLIST_PRESETS: JournalChecklistPresets = {
   ],
   after: [
     "Screenshots saved",
-    "Journal updated",
+    "Execution record updated",
     "Mistakes noted",
     "Lesson captured",
     "Next action defined",
@@ -201,7 +200,7 @@ const PROCESS_ITEM_LABELS: Record<string, string> = {
   "Managed per plan": "Gestionado según el plan",
   "No averaging down": "Sin promediar en contra",
   "Screenshots saved": "Capturas guardadas",
-  "Journal updated": "Journal actualizado",
+  "Execution record updated": "Registro de ejecución actualizado",
   "Mistakes noted": "Errores anotados",
   "Lesson captured": "Lección capturada",
   "Next action defined": "Próxima acción definida",
@@ -2227,11 +2226,6 @@ export default function DailyJournalPage() {
         );
         setTimeout(() => setMsg(""), 2000);
       }
-      if (userId) {
-        void syncMyTrophies(String(userId)).catch((err) => {
-          console.warn("[Journal] trophy sync failed:", err);
-        });
-      }
       try {
         window.dispatchEvent(new Event("ntj_alert_engine_run_now"));
       } catch {
@@ -3649,8 +3643,8 @@ export default function DailyJournalPage() {
         <WidgetCard
           title={L("Neuro Layer", "Neuro Layer")}
           subtitle={L(
-            "Decision replay, drift, and truth from the same journal.",
-            "Decision replay, drift y verdad desde el mismo journal."
+            "Decision replay, drift, and truth from the same execution record.",
+            "Decision replay, drift y verdad desde el mismo registro de ejecución."
           )}
         >
           <div className="grid grid-cols-1 md:grid-cols-[auto,1fr] gap-3">
@@ -3988,15 +3982,15 @@ export default function DailyJournalPage() {
         <div className="flex items-start sm:items-center justify-between gap-4 mb-4">
           <div data-tour="journal-date-header">
             <p className="text-emerald-400 text-xs uppercase tracking-[0.25em]">
-              {L("Daily Journal", "Journal diario")}
+              {L("Execution Journal", "Registro de Ejecución")}
             </p>
             <h1 className="text-[28px] md:text-[32px] font-semibold mt-1">
               {parsedDate} — {L("session review", "revisión de sesión")}
             </h1>
             <p className="text-[15px] text-slate-400 mt-1">
               {L(
-                "Log trades, screenshots, emotions and rule compliance.",
-                "Registra trades, screenshots, emociones y cumplimiento de reglas."
+                "Record trades, screenshots, emotions, and rule compliance for your trading business.",
+                "Registra trades, screenshots, emociones y cumplimiento de reglas para tu empresa de trading."
               )}
             </p>
           </div>

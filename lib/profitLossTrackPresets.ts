@@ -26,12 +26,12 @@ export const SUGGESTED_COST_PRESETS: SuggestedCostPreset[] = [
   {
     presetKey: "journal-advanced",
     traderTypes: ["minimal", "options", "futures", "funded", "swing"],
-    name: "Trading journal",
-    vendor: "Neuro Trader Journal",
+    name: "Trading business platform",
+    vendor: "Neuro Trader",
     category: "software",
     billingCycle: "monthly",
     amount: PLAN_PRICES.advanced.monthly,
-    notes: "Advanced journaling, analytics, and performance review stack.",
+    notes: "Execution records, analytics, AI review, and business performance stack.",
   },
   {
     presetKey: "charting-platform",
@@ -86,7 +86,7 @@ export const SUGGESTED_COST_PRESETS: SuggestedCostPreset[] = [
   {
     presetKey: "funding-fees",
     traderTypes: ["funded"],
-    name: "Funding / challenge fees",
+    name: "Funding / evaluation fees",
     vendor: "Prop firm",
     category: "funding",
     billingCycle: "monthly",

@@ -35,18 +35,18 @@ export default function PlansComparison() {
         <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between max-w-6xl mx-auto mb-8">
           <div>
             <h1 className="text-2xl md:text-3xl font-semibold">
-              {L("Compare Plans", "Comparar planes")}
+              {L("Compare Business Plans", "Comparar Planes Empresariales")}
             </h1>
             <p className="text-[10px] md:text-xs text-emerald-400 mt-1 max-w-xl">
               {L(
-                "NeuroTrader Journal: structure, discipline, business reporting, and AI coaching in one trading operating system.",
-                "NeuroTrader Journal: estructura, disciplina, reportes de negocio y AI coaching en un solo sistema operativo de trading."
+                "NeuroTrader: the Trading Business Platform for Trader Entrepreneurs, with structure, reporting, protection, and AI coaching in one operating system.",
+                "NeuroTrader: la Plataforma Empresarial de Trading para Empresarios Traders, con estructura, reportes, protección y AI coaching en un solo sistema operativo."
               )}
             </p>
             <p className="text-[10px] md:text-xs text-slate-400 mt-1 max-w-xl">
               {L(
-                "Core gives you the foundation. Advanced adds the business layer: AI plan follow-up, deeper statistics, audit tools, and priority support.",
-                "Core te da la base. Advanced añade la capa de negocio: seguimiento AI del plan, estadística profunda, auditoría y soporte prioritario."
+                "Core gives you the business foundation. Advanced adds the intelligence layer: AI plan follow-up, deeper statistics, audit tools, and priority support.",
+                "Core te da la base empresarial. Advanced añade la capa de inteligencia: seguimiento AI del plan, estadística profunda, auditoría y soporte prioritario."
               )}
             </p>
           </div>
@@ -102,15 +102,15 @@ export default function PlansComparison() {
               title: advancedUpgradePriceLabel(lang, billingCycle),
               body: L(
                 "The upgrade is built around business-grade clarity: AI coaching, deep stats, P&L, cashflow, and audit workflows.",
-                "El upgrade está diseñado para claridad de negocio: AI coaching, estadísticas profundas, P&L, cashflow y auditoría."
+                "El upgrade está diseñado para claridad empresarial: AI coaching, estadísticas profundas, P&L, cashflow y auditoría."
               ),
             },
             {
               eyebrow: L("AI follow-up", "Seguimiento AI"),
               title: L("Your plan gets monitored", "Tu plan recibe seguimiento"),
               body: L(
-                "Advanced connects the Growth Plan, journal behavior, emotions, and rule obedience into coaching that tells the trader what to fix next.",
-                "Advanced conecta Growth Plan, journal, emociones y obediencia a reglas para decirle al trader qué corregir después."
+                "Advanced connects the Trading Business Plan, execution behavior, emotions, and rule obedience into coaching that tells the Trader Entrepreneur what to fix next.",
+                "Advanced conecta el Plan de Empresa de Trading, ejecución, emociones y obediencia a reglas para decirle al Empresario Trader qué corregir después."
               ),
             },
             {

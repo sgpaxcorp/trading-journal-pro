@@ -4,14 +4,12 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { supabaseBrowser } from "@/lib/supaBaseClient";
-import { syncMyTrophies } from "@/lib/trophiesSupabase";
 import { isActiveProfileStatus, shouldAllowLocalProfileAccessFallback } from "@/lib/accessControl";
 import { fetchAccessStatus } from "@/lib/accessStatusClient";
 import { canAccessPrivatePath, firstAccessiblePrivatePath } from "@/lib/accessGrants";
 import RouteQuickTour from "@/app/components/RouteQuickTour";
 import GlobalAlertPopups from "@/app/components/GlobalAlertPopups";
 import GlobalAlertRuleEngine from "@/app/components/GlobalAlertRuleEngine";
-import GlobalRealtimeNotifications from "@/app/components/GlobalRealtimeNotifications";
 
 type PrivateLayoutProps = {
   children: React.ReactNode;
@@ -226,30 +224,6 @@ export default function PrivateLayout({ children }: PrivateLayoutProps) {
     pathname.startsWith(p)
   );
 
-  // Background trophy sync for legacy users (runs once per session window)
-  useEffect(() => {
-    if (!userId) return;
-
-    const key = `ntj_trophy_sync_${userId}`;
-    const now = Date.now();
-    const windowMs = 6 * 60 * 60 * 1000; // 6 hours
-
-    try {
-      const last = Number(localStorage.getItem(key) || 0);
-      if (Number.isFinite(last) && now - last < windowMs) return;
-      localStorage.setItem(key, String(now));
-    } catch {
-      // If localStorage fails, just proceed without caching
-    }
-
-    const timer = window.setTimeout(() => {
-      syncMyTrophies(userId).catch((err) => {
-        console.warn("[PrivateLayout] trophy sync failed:", err);
-      });
-    }, 3500);
-    return () => window.clearTimeout(timer);
-  }, [userId]);
-
   const isVerifyingSubscription =
     !!userId &&
     profileChecked &&
@@ -299,7 +273,6 @@ export default function PrivateLayout({ children }: PrivateLayoutProps) {
         <>
           <GlobalAlertRuleEngine />
           <GlobalAlertPopups />
-          <GlobalRealtimeNotifications />
         </>
       ) : null}
     </>

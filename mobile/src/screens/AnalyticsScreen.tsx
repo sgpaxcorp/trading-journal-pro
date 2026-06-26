@@ -5,11 +5,12 @@ import { ScreenScaffold } from "../components/ScreenScaffold";
 import { apiGet } from "../lib/api";
 import { useLanguage } from "../lib/LanguageContext";
 import { t } from "../lib/i18n";
+import type { OpenModuleFn } from "../lib/moduleNavigation";
 import { type ThemeColors } from "../theme";
 import { useTheme } from "../lib/ThemeContext";
 
 type AnalyticsScreenProps = {
-  onOpenModule: (title: string, description: string) => void;
+  onOpenModule: OpenModuleFn;
   isAdvanced?: boolean;
 };
 
@@ -83,6 +84,8 @@ type EdgeRow = {
 
 type AnalyticsStyles = ReturnType<typeof createStyles>;
 
+const ACCOUNT_SERIES_PATH = "/api/account/series?seriesDays=180";
+
 const hexToRgba = (hex: string, alpha: number) => {
   const raw = hex.replace("#", "");
   const value =
@@ -129,7 +132,7 @@ export function AnalyticsScreen({ isAdvanced = false }: AnalyticsScreenProps) {
         setError(null);
         const [snapRes, seriesRes] = await Promise.all([
           apiGet<{ snapshot: AnalyticsSnapshot | null; topEdges: EdgeRow[] }>("/api/analytics/snapshot"),
-          apiGet<AccountSeriesResponse>("/api/account/series"),
+          apiGet<AccountSeriesResponse>(ACCOUNT_SERIES_PATH),
         ]);
         if (!active) return;
         setSnapshot(snapRes.snapshot);
@@ -160,7 +163,7 @@ export function AnalyticsScreen({ isAdvanced = false }: AnalyticsScreenProps) {
       setError(null);
       const [snapRes, seriesRes] = await Promise.all([
         apiGet<{ snapshot: AnalyticsSnapshot | null; topEdges: EdgeRow[] }>("/api/analytics/snapshot"),
-        apiGet<AccountSeriesResponse>("/api/account/series"),
+        apiGet<AccountSeriesResponse>(ACCOUNT_SERIES_PATH),
       ]);
       if (!active) return;
       setSnapshot(snapRes.snapshot);
@@ -274,7 +277,7 @@ export function AnalyticsScreen({ isAdvanced = false }: AnalyticsScreenProps) {
         {(isAdvanced
           ? [
           { id: "overview", label: t(language, "Overview", "Resumen") },
-          { id: "performance", label: t(language, "Performance", "Performance") },
+          { id: "performance", label: t(language, "Business Performance", "Rendimiento Empresarial") },
           { id: "risk", label: t(language, "Risk", "Riesgo") },
           { id: "time", label: t(language, "Time", "Tiempo") },
         ]
@@ -293,10 +296,13 @@ export function AnalyticsScreen({ isAdvanced = false }: AnalyticsScreenProps) {
         <View style={styles.sectionCard}>
           <Text style={styles.sectionTitle}>{t(language, "Overview", "Resumen")}</Text>
           <View style={styles.statGrid}>
+            <StatCard styles={styles} label={t(language, "Sessions", "Sesiones")} value={String(snapshot?.totalSessions ?? "—")} tone="neutral" />
             <StatCard styles={styles} label={t(language, "Total trades", "Total trades")} value={String(snapshot?.totalTrades ?? "—")} tone="neutral" />
             <StatCard styles={styles} label={t(language, "Win rate", "Win rate")} value={formatPct(snapshot?.winRate)} tone="positive" />
             <StatCard styles={styles} label={t(language, "Net P&L", "P&L neto")} value={formatValue(snapshot?.netPnl)} tone={toneFor(snapshot?.netPnl)} />
             <StatCard styles={styles} label={t(language, "Avg / session", "Promedio / sesión")} value={formatValue(snapshot?.avgNetPerSession)} tone={toneFor(snapshot?.avgNetPerSession)} />
+            <StatCard styles={styles} label={t(language, "Win streak", "Racha verde")} value={snapshot?.longestWinStreak != null ? String(snapshot.longestWinStreak) : "—"} tone="positive" />
+            <StatCard styles={styles} label={t(language, "Loss streak", "Racha roja")} value={snapshot?.longestLossStreak != null ? String(snapshot.longestLossStreak) : "—"} tone="negative" />
             <StatCard styles={styles} label={t(language, "Max drawdown", "Max drawdown")} value={formatValue(snapshot?.maxDrawdown)} tone={toneFor(snapshot?.maxDrawdown, false)} />
             <StatCard styles={styles} label={t(language, "Profit factor", "Profit factor")} value={snapshot?.profitFactor != null ? snapshot.profitFactor.toFixed(2) : "—"} tone={toneFor(snapshot?.profitFactor)} />
           </View>
@@ -354,8 +360,8 @@ export function AnalyticsScreen({ isAdvanced = false }: AnalyticsScreenProps) {
               <Text style={styles.lockedText}>
                 {t(
                   language,
-                  "Advanced unlocks performance, risk, timing, symbols, and edge breakdowns.",
-                  "Advanced desbloquea performance, riesgo, timing, símbolos y breakdowns de edge."
+                  "Advanced unlocks time-of-day, symbol, edge, risk, cashflow, and business reporting layers.",
+                  "Advanced desbloquea las capas de horario, símbolo, edge, riesgo, cashflow y reportes de negocio."
                 )}
               </Text>
             </View>
@@ -365,7 +371,7 @@ export function AnalyticsScreen({ isAdvanced = false }: AnalyticsScreenProps) {
 
       {section === "performance" && (
         <View style={styles.sectionCard}>
-          <Text style={styles.sectionTitle}>{t(language, "Performance", "Performance")}</Text>
+          <Text style={styles.sectionTitle}>{t(language, "Business Performance", "Rendimiento Empresarial")}</Text>
           <View style={styles.statGrid}>
             <StatCard styles={styles} label={t(language, "Gross P&L", "P&L bruto")} value={formatValue(snapshot?.grossPnl)} tone={toneFor(snapshot?.grossPnl)} />
             <StatCard styles={styles} label={t(language, "Net P&L", "P&L neto")} value={formatValue(snapshot?.netPnl)} tone={toneFor(snapshot?.netPnl)} />

@@ -30,6 +30,7 @@ import { supabaseBrowser } from "@/lib/supaBaseClient";
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
 import { useTradingAccounts } from "@/hooks/useTradingAccounts";
+import type { BusinessMilestoneProgress } from "@/lib/businessMilestones";
 
 import TopNav from "@/app/components/TopNav";
 
@@ -1170,6 +1171,8 @@ export default function DashboardPage() {
   const [accountMessage, setAccountMessage] = useState<string | null>(null);
   const [dailyCoachMessage, setDailyCoachMessage] = useState<MotivationMessageRow | null>(null);
   const [coachReminder, setCoachReminder] = useState<DashboardCoachReminder | null>(null);
+  const [businessMilestones, setBusinessMilestones] = useState<BusinessMilestoneProgress[]>([]);
+  const [milestoneCount, setMilestoneCount] = useState({ completed: 0, total: 0 });
   const [systemPanelTab, setSystemPanelTab] = useState<SystemPanelTab>("focus");
   const [coachNow, setCoachNow] = useState(() => new Date());
   const coachDayKey = useMemo(() => {
@@ -1225,8 +1228,8 @@ export default function DashboardPage() {
   const dashboardNeuroMemory: NeuroMemory = neuroMemory ?? {
     title: L("Latest Neuro read", "Última lectura Neuro"),
     body: L(
-      "Your latest AI behavior read will appear here after a Neuro-tagged journal entry.",
-      "Tu lectura de comportamiento con IA aparecerá aquí después de una entrada con Neuro Layer."
+      "Your latest AI behavior read will appear here after a Neuro-tagged execution record.",
+      "Tu lectura de comportamiento con IA aparecerá aquí después de un registro de ejecución con Neuro Layer."
     ),
     kind: "strength",
   };
@@ -1609,6 +1612,38 @@ export default function DashboardPage() {
       alive = false;
     };
   }, [entries, viewDate, user, activeAccountId]);
+
+  useEffect(() => {
+    if (!user || accountsLoading || !activeAccountId) return;
+    let alive = true;
+    const milestoneAccountId = activeAccountId;
+    async function loadBusinessMilestones() {
+      try {
+        const { data: sessionData } = await supabaseBrowser.auth.getSession();
+        const token = sessionData?.session?.access_token;
+        if (!token) return;
+        const params = new URLSearchParams({ accountId: milestoneAccountId, lang: isEs ? "es" : "en" });
+        const res = await fetch(`/api/business-milestones/sync?${params.toString()}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(body?.error ?? "Unable to load business milestones.");
+        if (!alive) return;
+        const milestones = Array.isArray(body?.milestones) ? body.milestones : [];
+        setBusinessMilestones(milestones);
+        setMilestoneCount({
+          completed: Number(body?.completedCount ?? milestones.filter((item: any) => item.completed).length),
+          total: Number(body?.totalCount ?? milestones.length),
+        });
+      } catch (err) {
+        console.warn("[Dashboard] business milestones load failed:", err);
+      }
+    }
+    void loadBusinessMilestones();
+    return () => {
+      alive = false;
+    };
+  }, [user, accountsLoading, activeAccountId, isEs]);
 
   const weekRows = useMemo(() => {
     const rows: Array<{ rowIndex: number; weekOfYear: number }> = [];
@@ -2867,16 +2902,16 @@ export default function DashboardPage() {
         <>
           <p className={widgetTitleClass}>
             <span className={widgetTitleTextClass}>
-              {L("Plan Progress", "Progreso del plan")}
+              {L("Business Plan Progress", "Progreso del plan empresarial")}
             </span>
             <span className={widgetDragHintClass}>⠿</span>
           </p>
 
           {!plan ? (
             <p className="text-[14px] text-slate-500 mt-2">
-              {L("No growth plan set yet.", "Aún no tienes un plan de crecimiento.")}{" "}
+              {L("No Trading Business Plan set yet.", "Aún no tienes un Plan de Empresa de Trading.")}{" "}
               <Link href="/growth-plan" data-tour="dash-edit-growth-plan" className="text-emerald-400 underline">
-                {L("Create your plan now.", "Crea tu plan ahora.")}
+                {L("Create your business plan now.", "Crea tu plan empresarial ahora.")}
               </Link>
             </p>
           ) : plan?.planMode === "manual" ? (
@@ -2907,7 +2942,7 @@ export default function DashboardPage() {
               <p className="text-[13px] text-slate-500 mt-2">
                 {L("Add manual phases to activate this widget.", "Agrega fases manuales para activar este widget.")}{" "}
                 <Link href="/growth-plan" data-tour="dash-edit-growth-plan" className="text-emerald-400 underline">
-                  {L("Edit Growth Plan", "Editar Growth Plan")}
+                  {L("Edit Trading Business Plan", "Editar Plan de Empresa de Trading")}
                 </Link>
               </p>
             )
@@ -2918,7 +2953,7 @@ export default function DashboardPage() {
                 "Agrega una fecha meta para activar metas automáticas."
               )}{" "}
               <Link href="/growth-plan" data-tour="dash-edit-growth-plan" className="text-emerald-400 underline">
-                {L("Edit Growth Plan", "Editar Growth Plan")}
+                {L("Edit Trading Business Plan", "Editar Plan de Empresa de Trading")}
               </Link>
             </p>
           ) : cadenceProgress ? (
@@ -3186,8 +3221,8 @@ export default function DashboardPage() {
           : coachReminder
             ? ""
             : L(
-                "No AI session yet. This tab stays anchored to your Growth Plan so the next coaching pass lands on something real.",
-                "Todavía no hay sesión AI. Esta pestaña se ancla a tu Growth Plan para que el próximo coaching aterrice sobre algo real."
+                "No AI session yet. This tab stays anchored to your Trading Business Plan so the next coaching pass lands on something real.",
+                "Todavía no hay sesión IA. Esta pestaña se ancla a tu Plan de Empresa de Trading para que el próximo coaching aterrice sobre algo real."
               );
       const aiCoachReadoutRows = dedupeRows([
         { label: L("What I see", "Lo que veo"), value: equalsText(aiCoachRead, aiPlanTitle) ? "" : aiCoachRead },
@@ -3231,7 +3266,7 @@ export default function DashboardPage() {
                 ))}
                 {items.length > 5 ? (
                   <p className="pt-1 text-[12px] text-slate-500">
-                    +{items.length - 5} {L("more in Growth Plan", "más en Growth Plan")}
+                    +{items.length - 5} {L("more in Trading Business Plan", "más en el Plan de Empresa de Trading")}
                   </p>
                 ) : null}
               </>
@@ -3318,15 +3353,15 @@ export default function DashboardPage() {
                     ))}
                     {todayChecklist.length > 5 ? (
                       <li className="px-1 text-[12px] text-slate-500">
-                        +{todayChecklist.length - 5} {L("more in today's journal", "más en el journal de hoy")}
+                    +{todayChecklist.length - 5} {L("more in today's execution record", "más en el registro de ejecución de hoy")}
                       </li>
                     ) : null}
                   </ul>
                 ) : (
                   <p className="mt-2 text-[13px] text-slate-500">
-                    {L("Add your Trading System steps in Growth Plan.", "Agrega tus pasos del Sistema de Trading en el Growth Plan.")}{" "}
+                    {L("Add your trading system steps in the Trading Business Plan.", "Agrega tus pasos del sistema de trading en el Plan de Empresa de Trading.")}{" "}
                     <Link href="/growth-plan" data-tour="dash-edit-growth-plan" className="text-emerald-400 underline">
-                      {L("Edit Growth Plan", "Editar Growth Plan")}
+                      {L("Edit Trading Business Plan", "Editar Plan de Empresa de Trading")}
                     </Link>
                   </p>
                 )}
@@ -3335,7 +3370,7 @@ export default function DashboardPage() {
                   href={`/journal/${rollingTodayStr}`}
                   className="mt-3 inline-flex rounded-xl bg-emerald-400 px-4 py-2 text-[13px] font-semibold text-slate-950 transition hover:bg-emerald-300"
                 >
-                  {L("Open today's journal", "Abrir el journal de hoy")}
+                  {L("Open today's execution record", "Abrir el registro de ejecución de hoy")}
                 </Link>
               </div>
 
@@ -3384,9 +3419,9 @@ export default function DashboardPage() {
                   </>
                 ) : (
                   <p className="mt-2 text-[13px] text-slate-500">
-                    {L("Add your strategy and rules in Growth Plan.", "Agrega tu estrategia y reglas en Growth Plan.")}{" "}
+                    {L("Add your strategy and rules in the Trading Business Plan.", "Agrega tu estrategia y reglas en el Plan de Empresa de Trading.")}{" "}
                     <Link href="/growth-plan" data-tour="dash-edit-growth-plan" className="text-emerald-400 underline">
-                      {L("Edit Growth Plan", "Editar Growth Plan")}
+                      {L("Edit Trading Business Plan", "Editar Plan de Empresa de Trading")}
                     </Link>
                   </p>
                 )}
@@ -3401,9 +3436,9 @@ export default function DashboardPage() {
               {orderList.length ? renderRuleCard(L("Order", "Orden"), orderList, "text-cyan-200", "text-cyan-300") : null}
               {!hasRules && plan ? (
                 <p className="text-[12px] text-slate-500 lg:col-span-full">
-                  {L("Add your Do/Don't rules in Growth Plan.", "Agrega tus reglas de Hacer/No hacer en el Growth Plan.")}{" "}
+                  {L("Add your Do/Don't rules in the Trading Business Plan.", "Agrega tus reglas de Hacer/No hacer en el Plan de Empresa de Trading.")}{" "}
                   <Link href="/growth-plan" data-tour="dash-edit-growth-plan" className="text-emerald-400 underline">
-                    {L("Edit Growth Plan", "Editar Growth Plan")}
+                    {L("Edit Trading Business Plan", "Editar Plan de Empresa de Trading")}
                   </Link>
                 </p>
               ) : null}
@@ -3414,7 +3449,7 @@ export default function DashboardPage() {
             <div className="mt-3 rounded-xl border border-violet-300/20 bg-[linear-gradient(135deg,rgba(139,92,246,0.14),rgba(15,23,42,0.88))] p-3">
               <div className="flex flex-wrap items-center gap-2">
                 <p className="text-[11px] uppercase tracking-[0.2em] text-violet-200">
-                  {L("Latest AI coaching plan", "Último plan AI Coaching")}
+                  {L("Latest Business AI plan", "Último plan del Coach Empresarial IA")}
                 </p>
                 {coachReminder?.updatedAt ? (
                   <span className="rounded-full border border-violet-300/20 bg-violet-400/10 px-2.5 py-1 text-[10px] text-violet-100">
@@ -3461,13 +3496,13 @@ export default function DashboardPage() {
                   href="/performance/ai-coaching"
                   className="rounded-full bg-violet-300 px-4 py-2 text-[12px] font-semibold text-slate-950 transition hover:bg-violet-200"
                 >
-                  {L("Open AI Coaching", "Abrir AI Coaching")}
+                  {L("Open Business AI Coach", "Abrir Coach Empresarial IA")}
                 </Link>
                 <Link
                   href="/growth-plan"
                   className="rounded-full border border-violet-300/30 px-4 py-2 text-[12px] font-semibold text-violet-100 transition hover:border-violet-200 hover:text-white"
                 >
-                  {L("Open Growth Plan", "Abrir Growth Plan")}
+                  {L("Open Trading Business Plan", "Abrir Plan de Empresa de Trading")}
                 </Link>
               </div>
             </div>
@@ -3565,7 +3600,7 @@ export default function DashboardPage() {
                   href={`/journal/${sessionDateStr}`}
                   className="inline-flex mt-3 px-3 py-1.5 rounded-lg bg-emerald-400 text-slate-950 text-[13px] font-semibold hover:bg-emerald-300 transition"
                 >
-                  {L("Open today's journal", "Abrir el journal de hoy")}
+                  {L("Open today's execution record", "Abrir el registro de ejecución de hoy")}
                 </Link>
               </>
             ) : plan ? (
@@ -3590,8 +3625,8 @@ export default function DashboardPage() {
             ) : (
               <p className="text-[13px] text-slate-400">
                 {L(
-                  "Set a daily % target in your growth plan to enable this widget.",
-                  "Configura un % diario en tu plan de crecimiento para activar este widget."
+                  "Set a daily % target in your Trading Business Plan to enable this widget.",
+                  "Configura un % diario en tu Plan de Empresa de Trading para activar este widget."
                 )}
               </p>
             )}
@@ -3796,7 +3831,7 @@ export default function DashboardPage() {
                             }}
                             className="text-[11px] mt-1 opacity-85 underline decoration-dotted"
                           >
-                            {L("Open journal ↗", "Abrir journal ↗")}
+                            {L("Open execution record ↗", "Abrir registro ↗")}
                           </button>
                         </div>
                       ) : hasDate ? (
@@ -3812,7 +3847,7 @@ export default function DashboardPage() {
                             </>
                           ) : (
                             <p className="text-[11px] text-slate-500">
-                              {L("Add journal", "Agregar journal")}
+                              {L("Add execution record", "Agregar registro")}
                             </p>
                           )}
                         </div>
@@ -3840,7 +3875,7 @@ export default function DashboardPage() {
                   onClick={() => onOpenJournal(selectedDate)}
                   className="rounded-full border border-emerald-400/60 bg-emerald-500/10 px-4 py-2 text-xs font-semibold text-emerald-200 hover:bg-emerald-500/20"
                 >
-                  {L("Open journal", "Abrir journal")}
+                  {L("Open execution record", "Abrir registro de ejecución")}
                 </button>
               ) : null}
             </div>
@@ -3993,6 +4028,73 @@ export default function DashboardPage() {
     </section>
   );
 
+  const completedMilestones = businessMilestones.filter((item) => item.completed);
+  const nextMilestones = businessMilestones.filter((item) => !item.completed).slice(0, 2);
+  const renderBusinessMilestones = () => (
+    <section className="mb-6 rounded-2xl border border-emerald-500/25 bg-slate-900/85 p-4 shadow-[0_18px_70px_rgba(2,6,23,0.2)]">
+      <div className="grid gap-4 lg:grid-cols-[0.8fr_1.2fr] lg:items-center">
+        <div>
+          <p className="text-[11px] uppercase tracking-[0.24em] text-emerald-300">
+            {L("Business Milestones", "Hitos empresariales")}
+          </p>
+          <div className="mt-2 flex items-end gap-2">
+            <span className="text-3xl font-semibold text-slate-50">
+              {milestoneCount.completed}
+            </span>
+            <span className="pb-1 text-sm text-slate-400">
+              / {milestoneCount.total || businessMilestones.length || 0} {L("completed", "completados")}
+            </span>
+          </div>
+          <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-slate-950">
+            <div
+              className="h-full rounded-full bg-emerald-400"
+              style={{
+                width: `${Math.min(
+                  100,
+                  milestoneCount.total ? (milestoneCount.completed / milestoneCount.total) * 100 : 0
+                )}%`,
+              }}
+            />
+          </div>
+        </div>
+
+        <div className="grid gap-2 md:grid-cols-2">
+          {(completedMilestones.slice(0, 2).length ? completedMilestones.slice(0, 2) : businessMilestones.slice(0, 2)).map(
+            (milestone) => (
+              <div
+                key={milestone.key}
+                className={`rounded-xl border px-3 py-2 ${
+                  milestone.completed
+                    ? "border-emerald-500/30 bg-emerald-500/10"
+                    : "border-slate-800 bg-slate-950/60"
+                }`}
+              >
+                <p className="text-xs font-semibold text-slate-100">
+                  {milestone.completed ? "✓ " : "• "}
+                  {milestone.title[lang]}
+                </p>
+                <p className="mt-1 text-[11px] leading-relaxed text-slate-500">
+                  {milestone.description[lang]}
+                </p>
+              </div>
+            )
+          )}
+
+          {nextMilestones.length > 0 ? (
+            <div className="rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-2 md:col-span-2">
+              <p className="text-[10px] uppercase tracking-[0.22em] text-slate-500">
+                {L("Next milestone", "Próximo hito")}
+              </p>
+              <p className="mt-1 text-xs font-semibold text-slate-100">
+                {nextMilestones[0].title[lang]}
+              </p>
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </section>
+  );
+
   /* ========== Render Page ========== */
   if (loading || !viewDate) {
     return (
@@ -4028,15 +4130,15 @@ export default function DashboardPage() {
         <header className="flex flex-col md:flex-row justify-between gap-4 mb-8">
           <div>
             <p className="text-emerald-400 text-xs uppercase tracking-[0.25em]">
-              {L("Trading Journal Pro", "Trading Journal Pro")}
+              {L("Trading Business Platform", "Plataforma Empresarial de Trading")}
             </p>
             <h1 className="text-4xl font-semibold mt-1">
-              {L("Dashboard overview", "Resumen del dashboard")}
+              {L("Business Center", "Centro Empresarial")}
             </h1>
             <p className="text-[14px] md:text-[16px] text-slate-400 mt-2 max-w-3xl">
               {L(
-                `Welcome back, ${name}. Structured like a pro journal, built to compete with any premium platform.`,
-                `Bienvenido de nuevo, ${name}. Estructurado como un journal pro, listo para competir con cualquier plataforma premium.`
+                `Welcome back, ${name}. Your trading business is organized, measurable, and ready for the next decision.`,
+                `Bienvenido de nuevo, ${name}. Tu empresa de trading está organizada, medible y lista para la próxima decisión.`
               )}
             </p>
           </div>
@@ -4047,7 +4149,7 @@ export default function DashboardPage() {
               data-tour="dash-edit-growth-plan"
               className="px-4 py-2 rounded-xl bg-emerald-400 text-slate-950 text-[14px] font-semibold hover:bg-emerald-300 transition"
             >
-              {L("Edit growth plan", "Editar plan de crecimiento")}
+              {L("Edit business plan", "Editar plan empresarial")}
             </Link>
 
             {accounts.length > 0 && (
@@ -4113,6 +4215,8 @@ export default function DashboardPage() {
             )}
           </div>
         </header>
+
+        {renderBusinessMilestones()}
 
         {showAccountCreate && (
           <section className="mb-6 rounded-xl border border-slate-800 bg-slate-950/70 p-4 max-w-md">

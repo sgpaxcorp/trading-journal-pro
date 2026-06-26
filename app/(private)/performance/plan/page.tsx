@@ -514,13 +514,13 @@ export default function PlanPage() {
         {!plan ? (
           <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5 text-sm text-slate-300">
             {L(
-              "No Growth Plan found yet (table:",
-              "Aún no hay un Growth Plan (tabla:"
+              "No Trading Business Plan found yet (table:",
+              "Aún no hay un Plan de Empresa de Trading (tabla:"
             )}{" "}
             <span className="text-slate-100 font-semibold">growth_plans</span>).{" "}
             {L("Create one in", "Crea uno en")}{" "}
             <Link className="text-emerald-300 hover:text-emerald-200 underline" href="/growth-plan">
-              {L("Growth Plan Wizard", "Asistente de plan")}
+              {L("Trading Business Plan Wizard", "Asistente de Plan de Empresa de Trading")}
             </Link>
             .
           </div>
@@ -912,8 +912,8 @@ export default function PlanPage() {
                   <ul className="list-disc pl-5 space-y-1">
                     <li>
                       {L(
-                        "Trading P&L is calculated only from your journal/trade imports.",
-                        "El P&L de trading se calcula solo desde tu journal/imports."
+                        "Trading P&L is calculated only from your execution records and trade imports.",
+                        "El P&L de trading se calcula solo desde tus registros de ejecución e imports."
                       )}
                     </li>
                     <li>

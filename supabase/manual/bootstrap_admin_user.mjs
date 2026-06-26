@@ -19,9 +19,7 @@ const ALL_ACCESS_KEYS = [
   "page_notebook",
   "page_back_study",
   "page_rules_alarms",
-  "page_challenges",
   "page_forum",
-  "page_global_ranking",
 ];
 
 function loadEnvFile(filePath) {
@@ -100,7 +98,7 @@ async function upsertProfile(supabase, params) {
 
   const { data: existing, error: existingError } = await supabase
     .from("profiles")
-    .select("onboarding_completed, show_in_ranking")
+    .select("onboarding_completed")
     .eq("id", userId)
     .maybeSingle();
 
@@ -116,7 +114,6 @@ async function upsertProfile(supabase, params) {
     plan,
     subscription_status: subscriptionStatus,
     onboarding_completed: Boolean(existing?.onboarding_completed ?? false),
-    show_in_ranking: Boolean(existing?.show_in_ranking ?? true),
   };
 
   const { error } = await supabase.from("profiles").upsert(payload, { onConflict: "id" });

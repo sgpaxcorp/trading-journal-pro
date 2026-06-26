@@ -8,7 +8,7 @@ import PublicHomeLogoLink from "@/app/components/PublicHomeLogoLink";
 const CONTENT = {
   en: {
     intro:
-      "This Privacy Policy explains how Neuro Trader Journal (\"NTJ\", \"we\", \"us\", or \"our\"), operated by SG PAX CORP., collects, uses, shares, and protects information in connection with the Neuro Trader Journal website, applications, and related services (collectively, the \"Service\").",
+      "This Privacy Policy explains how Neuro Trader (\"NTJ\", \"we\", \"us\", or \"our\"), operated by SG PAX CORP., collects, uses, shares, and protects information in connection with the Neuro Trader website, applications, and related services (collectively, the \"Service\").",
     sections: [
       {
         title: "1. Scope",
@@ -19,7 +19,7 @@ const CONTENT = {
         title: "2. Information We Collect",
         bullets: [
           "Account Information: name, email address, login credentials (stored in hashed form where applicable), and subscription status.",
-          "Trading Journal Data: trade records, fills, timestamps, instrument details, commissions/fees, screenshots, notes, tags, and related analytics inputs.",
+          "Trading Business Data: execution records, trade records, fills, timestamps, instrument details, commissions/fees, screenshots, notes, tags, plans, and related analytics inputs.",
           "Integration Data: information you authorize us to import from third-party platforms (for example, broker/platform trade history).",
           "Usage Data: log data and analytics about how you use the Service (e.g., pages viewed, features used, device/browser information, IP address).",
           "Support Communications: messages and attachments you send to our support team.",
@@ -38,9 +38,9 @@ const CONTENT = {
         ],
       },
       {
-        title: "4. AI Coaching and Automated Processing",
+        title: "4. Business AI Coaching and Automated Processing",
         body:
-          "If you use AI Coaching features, NTJ may process your trading journal data, notes, and related context to generate summaries, insights, and suggestions. AI Coaching outputs depend on the data you provide or import. You are responsible for ensuring your inputs are accurate and complete. AI Coaching may produce inaccurate, incomplete, or misleading output. You should independently evaluate any AI Coaching output before relying on it.",
+          "If you use Business AI Coaching features, NTJ may process your trading business data, execution records, notes, plans, and related context to generate summaries, insights, and suggestions. Business AI Coaching outputs depend on the data you provide or import. You are responsible for ensuring your inputs are accurate and complete. Business AI Coaching may produce inaccurate, incomplete, or misleading output. You should independently evaluate any Business AI Coaching output before relying on it.",
       },
       {
         title: "5. How We Share Information",
@@ -97,7 +97,7 @@ const CONTENT = {
   },
   es: {
     intro:
-      "Esta Política de Privacidad explica cómo Neuro Trader Journal (\"NTJ\", \"nosotros\", \"nos\" o \"nuestro\"), operado por SG PAX CORP., recopila, utiliza, comparte y protege la información en relación con el sitio web, las aplicaciones y los servicios relacionados de Neuro Trader Journal (colectivamente, el \"Servicio\").",
+      "Esta Política de Privacidad explica cómo Neuro Trader (\"NTJ\", \"nosotros\", \"nos\" o \"nuestro\"), operado por SG PAX CORP., recopila, utiliza, comparte y protege la información en relación con el sitio web, las aplicaciones y los servicios relacionados de Neuro Trader (colectivamente, el \"Servicio\").",
     sections: [
       {
         title: "1. Alcance",
@@ -108,7 +108,7 @@ const CONTENT = {
         title: "2. Información que recopilamos",
         bullets: [
           "Información de cuenta: nombre, correo electrónico, credenciales de inicio de sesión (almacenadas en forma cifrada cuando corresponda) y estado de suscripción.",
-          "Datos del journal de trading: registros de operaciones, fills, timestamps, detalles del instrumento, comisiones/tarifas, screenshots, notas, etiquetas y entradas relacionadas con analítica.",
+          "Datos de la empresa de trading: registros de ejecución, operaciones, fills, timestamps, detalles del instrumento, comisiones/tarifas, screenshots, notas, etiquetas, planes y entradas relacionadas con analítica.",
           "Datos de integraciones: información que autorizas a importar desde plataformas de terceros (por ejemplo, historial de trading del broker/plataforma).",
           "Datos de uso: logs y analítica sobre cómo usas el Servicio (páginas vistas, funciones utilizadas, información del dispositivo/navegador, dirección IP).",
           "Comunicaciones de soporte: mensajes y adjuntos enviados a nuestro equipo de soporte.",
@@ -127,9 +127,9 @@ const CONTENT = {
         ],
       },
       {
-        title: "4. AI Coaching y procesamiento automatizado",
+        title: "4. Business AI Coaching y procesamiento automatizado",
         body:
-          "Si usas funciones de AI Coaching, NTJ puede procesar tus datos del journal, notas y contexto relacionado para generar resúmenes, insights y sugerencias. Las salidas del AI Coaching dependen de la data que proveas o importes. Eres responsable de asegurar que tus inputs sean precisos y completos. El AI Coaching puede generar resultados inexactos, incompletos o engañosos. Debes evaluar cualquier salida antes de tomar decisiones.",
+          "Si usas funciones de Business AI Coaching, NTJ puede procesar tus datos de empresa de trading, registros de ejecución, notas, planes y contexto relacionado para generar resúmenes, insights y sugerencias. Las salidas del Business AI Coaching dependen de la data que proveas o importes. Eres responsable de asegurar que tus inputs sean precisos y completos. El Business AI Coaching puede generar resultados inexactos, incompletos o engañosos. Debes evaluar cualquier salida antes de tomar decisiones.",
       },
       {
         title: "5. Cómo compartimos la información",

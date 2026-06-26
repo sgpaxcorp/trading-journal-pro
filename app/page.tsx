@@ -37,7 +37,7 @@ function ProductPreview({
     return (
       <div className="h-48 rounded-md border border-white/10 bg-[#07101d] p-4">
         <div className="flex items-center justify-between text-[11px] text-slate-400">
-          <span>{L("Growth timeline", "Timeline de growth")}</span>
+          <span>{L("Business plan timeline", "Timeline del plan empresarial")}</span>
           <span className="text-emerald-300">{L("10 months", "10 meses")}</span>
         </div>
         <div className="mt-5 flex h-20 items-end gap-2">
@@ -73,8 +73,8 @@ function ProductPreview({
     return (
       <div className="h-48 rounded-md border border-white/10 bg-[#07101d] p-4">
         <div className="flex items-center justify-between text-[11px] text-slate-400">
-          <span>{L("AI coaching", "AI coaching")}</span>
-          <span className="text-sky-300">{L("Objective review", "Revisión objetiva")}</span>
+          <span>{L("Business AI coach", "Coach empresarial IA")}</span>
+          <span className="text-sky-300">{L("Objective business review", "Revisión empresarial objetiva")}</span>
         </div>
         <div className="mt-4 space-y-2">
           <div className="max-w-[82%] rounded-md border border-white/10 bg-[#0b1828] px-3 py-2 text-xs text-slate-200">
@@ -97,8 +97,8 @@ function ProductPreview({
   return (
     <div className="h-48 rounded-md border border-white/10 bg-[#07101d] p-4">
       <div className="flex items-center justify-between text-[11px] text-slate-400">
-        <span>{L("Daily command center", "Centro diario")}</span>
-        <span className="text-emerald-300">{L("Live view", "Vista activa")}</span>
+        <span>{L("Business Center", "Centro Empresarial")}</span>
+        <span className="text-emerald-300">{L("Live operation", "Operación activa")}</span>
       </div>
       <div className="mt-4 grid grid-cols-3 gap-2">
         {[
@@ -137,21 +137,21 @@ export default function Home() {
 
   const heroMetrics = [
     {
-      value: L("Plan creation", "Creación del plan"),
+      value: L("Business plan creation", "Creación del plan empresarial"),
       label: L(
-        "Build a measurable Growth Plan with target equity, deadline, max daily loss, risk per trade, daily goal, and checkpoints.",
-        "Crea un Growth Plan medible con equity objetivo, fecha límite, max loss diario, riesgo por trade, meta diaria y checkpoints."
+        "Build a measurable Trading Business Plan with target equity, deadline, max daily loss, risk per trade, daily goal, and checkpoints.",
+        "Crea un Plan de Empresa de Trading medible con equity objetivo, fecha límite, max loss diario, riesgo por trade, meta diaria y checkpoints."
       ),
     },
     {
-      value: L("AI follow-up", "Seguimiento IA"),
+      value: L("AI business follow-up", "Seguimiento empresarial IA"),
       label: L(
-        "AI Coach compares execution, rule adherence, risk utilization, and emotional drift against the plan.",
-        "AI Coach compara ejecución, cumplimiento de reglas, uso de riesgo y desvío emocional contra el plan."
+        "Business AI Coach compares execution, rule adherence, risk utilization, and emotional drift against the plan.",
+        "El Coach Empresarial IA compara ejecución, cumplimiento de reglas, uso de riesgo y desvío emocional contra el plan."
       ),
     },
     {
-      value: L("Performance metrics", "Métricas de performance"),
+      value: L("Business performance metrics", "Métricas de rendimiento empresarial"),
       label: L(
         "Track KPIs that matter: win rate, expectancy, streaks, risk discipline, calendar results, and account pacing.",
         "Mide KPIs que importan: win rate, expectancy, rachas, disciplina de riesgo, calendario y ritmo de cuenta."
@@ -167,11 +167,11 @@ export default function Home() {
   ];
 
   const planFlowAnchor = {
-    eyebrow: L("Growth Plan", "Growth Plan"),
-    title: L("Create the plan once.", "Crea el plan una vez."),
+    eyebrow: L("Trading Business Plan", "Plan de Empresa de Trading"),
+    title: L("Create the business plan once.", "Crea el plan empresarial una vez."),
     body: L(
-      "Set measurable targets, risk rails, and non-negotiable rules. Then the rest of the product exists to protect that plan.",
-      "Define metas medibles, límites de riesgo y reglas no negociables. Luego el resto del producto existe para proteger ese plan."
+      "Set measurable targets, risk rails, and non-negotiable rules for your trading business. Then the rest of the product exists to protect that plan.",
+      "Define metas medibles, límites de riesgo y reglas no negociables para tu empresa de trading. Luego el resto del producto existe para proteger ese plan."
     ),
     rails: [
       { label: L("Target equity", "Equity objetivo"), value: "$25,000" },
@@ -184,7 +184,7 @@ export default function Home() {
   const workflowExperience = [
     {
       step: "01",
-      title: L("Journal", "Journal"),
+      title: L("Execution Journal", "Registro de Ejecución"),
       action: L("Capture", "Captura"),
       body: L("Log what really happened.", "Guarda lo que realmente pasó."),
       signal: L("Raw facts", "Hechos crudos"),
@@ -199,7 +199,7 @@ export default function Home() {
     },
     {
       step: "02",
-      title: L("Notebook", "Notebook"),
+      title: L("Business Notebook", "Notebook Empresarial"),
       action: L("Think", "Piensa"),
       body: L("See the day and make meaning.", "Ve el día y sácale sentido."),
       signal: L("Context", "Contexto"),
@@ -214,7 +214,7 @@ export default function Home() {
     },
     {
       step: "03",
-      title: L("AI Coaching", "AI Coaching"),
+      title: L("Business Performance Coach", "Coach de Rendimiento Empresarial"),
       action: L("Interpret", "Interpreta"),
       body: L("Expose drift and the next move.", "Destapa el drift y el próximo paso."),
       signal: L("Insight", "Insight"),
@@ -246,49 +246,49 @@ export default function Home() {
 
   const productViews = [
     {
-      title: L("Dashboard", "Dashboard"),
-      body: L("A clean daily command center for equity, risk, and account health.", "Un centro diario para equity, riesgo y salud de cuenta."),
+      title: L("Business Center", "Centro Empresarial"),
+      body: L("A clean daily command center for equity, risk, execution, and account health.", "Un centro diario para equity, riesgo, ejecución y salud de cuenta."),
       kind: "dashboard" as const,
     },
     {
-      title: L("Growth Plan", "Growth Plan"),
+      title: L("Trading Business Plan", "Plan de Empresa de Trading"),
       body: L(
-        "Your plan becomes the measurable standard for targets, risk, checkpoints, and coaching.",
-        "Tu plan se convierte en el estándar medible para metas, riesgo, checkpoints y coaching."
+        "Your business plan becomes the measurable standard for targets, risk, checkpoints, and coaching.",
+        "Tu plan empresarial se convierte en el estándar medible para metas, riesgo, checkpoints y coaching."
       ),
       kind: "growth" as const,
     },
     {
-      title: L("AI Coach", "AI Coach"),
-      body: L("Objective feedback from your actual trading behavior.", "Feedback objetivo basado en tu comportamiento real."),
+      title: L("Business AI Coach", "Coach Empresarial IA"),
+      body: L("Objective feedback from your actual trading behavior and business plan.", "Feedback objetivo basado en tu conducta real y tu plan empresarial."),
       kind: "coach" as const,
     },
   ];
 
   const focusAreas = [
     {
-      label: L("Growth Plan", "Growth Plan"),
+      label: L("Trading Business Plan", "Plan de Empresa de Trading"),
       detail: L(
-        "Create the trading business plan: target, timeline, risk rails, rules, and checkpoints.",
-        "Crea el plan de negocio: meta, timeline, riesgo, reglas y checkpoints."
+        "Create the operating plan for the business: target, timeline, risk rails, rules, and checkpoints.",
+        "Crea el plan operativo del negocio: meta, timeline, riesgo, reglas y checkpoints."
       ),
     },
     {
-      label: L("AI plan accountability", "Accountability IA del plan"),
+      label: L("AI business accountability", "Accountability empresarial IA"),
       detail: L(
-        "AI Coach reviews whether your trades, behavior, and risk stayed aligned with the plan.",
-        "AI Coach revisa si tus trades, conducta y riesgo se mantuvieron alineados al plan."
+        "Business AI Coach reviews whether your trades, behavior, and risk stayed aligned with the business plan.",
+        "El Coach Empresarial IA revisa si tus trades, conducta y riesgo se mantuvieron alineados al plan empresarial."
       ),
     },
     {
-      label: L("Daily journal", "Journal diario"),
+      label: L("Execution Journal", "Registro de Ejecución"),
       detail: L("Premarket, entries, exits, emotions, tags, lessons, and screenshots.", "Premarket, entradas, salidas, emociones, tags, lecciones y screenshots."),
     },
     {
-      label: L("Trading Protection System", "Sistema de protección de trading"),
+      label: L("Business Protection System", "Sistema de Protección Empresarial"),
       detail: L(
-        "NeuroTrader does not only let you write rules. It helps you obey them with critical alarms, routine checks, and virtual coaching context.",
-        "NeuroTrader no solo te deja escribir reglas. Te ayuda a obedecerlas con alarmas críticas, chequeos de rutina y contexto para coaching virtual."
+        "NeuroTrader does not only let you write rules. It helps your trading business obey them with critical alarms, routine checks, and coaching context.",
+        "NeuroTrader no solo te deja escribir reglas. Ayuda a tu empresa de trading a obedecerlas con alarmas críticas, chequeos de rutina y contexto de coaching."
       ),
     },
   ];
@@ -299,14 +299,14 @@ export default function Home() {
     <main className="min-h-screen bg-[#050814] text-slate-50 overflow-x-hidden">
       <header className="absolute inset-x-0 top-0 z-30">
         <div className="mx-auto mt-4 flex w-[calc(100%-2rem)] max-w-7xl flex-col gap-3 rounded-lg border border-white/10 bg-[#050814]/78 px-4 py-3 shadow-[0_18px_60px_rgba(0,0,0,0.32)] backdrop-blur-xl md:flex-row md:items-center md:justify-between md:px-5">
-          <Link href="/" className="flex items-center gap-3" aria-label="NeuroTrader Journal home">
+          <Link href="/" className="flex items-center gap-3" aria-label="NeuroTrader home">
             <img
               src="/neurotrader-logo-web.png"
-              alt="NeuroTrader Journal"
+              alt="NeuroTrader"
               className="h-9 w-auto object-contain md:h-10"
               draggable={false}
             />
-            <span className="sr-only">Neuro Trader Journal</span>
+            <span className="sr-only">Neuro Trader</span>
           </Link>
 
           <nav className="flex flex-wrap items-center gap-2 text-xs text-slate-300 md:justify-end">
@@ -314,10 +314,10 @@ export default function Home() {
               {L("Sign in", "Ingresar")}
             </Link>
             <Link href="/plans-comparison" className="rounded-md border border-white/18 px-3 py-2 font-semibold text-white hover:border-emerald-300 hover:text-emerald-100">
-              {L("Compare plans", "Comparar planes")}
+              {L("Compare business plans", "Comparar planes empresariales")}
             </Link>
             <Link href="/signup" className="rounded-md bg-emerald-400 px-4 py-2 font-semibold text-slate-950 hover:bg-emerald-300">
-              {L("Create my journal", "Crear mi journal")}
+              {L("Start your trading business", "Comienza tu empresa de trading")}
             </Link>
           </nav>
         </div>
@@ -329,7 +329,7 @@ export default function Home() {
           <div className="absolute inset-x-0 top-24 mx-auto h-[520px] w-[1180px] max-w-[96vw] opacity-60">
             <div className="absolute left-[8%] top-5 h-60 w-[520px] max-w-[62vw] rounded-lg border border-emerald-300/20 bg-[#071421]/95 p-4 shadow-[0_24px_80px_rgba(0,0,0,0.48)]">
               <div className="mb-4 flex items-center justify-between text-[11px] text-slate-400">
-                <span>{L("Dashboard", "Dashboard")}</span>
+                <span>{L("Business Center", "Centro Empresarial")}</span>
                 <span className="text-emerald-300">{L("On track", "En ruta")}</span>
               </div>
               <div className="grid grid-cols-3 gap-3">
@@ -357,8 +357,8 @@ export default function Home() {
 
             <div className="absolute right-[7%] top-16 h-72 w-[430px] max-w-[54vw] rounded-lg border border-sky-300/20 bg-[#08111f]/95 p-4 shadow-[0_24px_80px_rgba(0,0,0,0.48)]">
               <div className="mb-4 flex items-center justify-between text-[11px] text-slate-400">
-                <span>{L("Journal", "Journal")}</span>
-                <span>{L("AI review", "Revisión IA")}</span>
+                <span>{L("Execution Journal", "Registro de Ejecución")}</span>
+                <span>{L("AI business review", "Revisión empresarial IA")}</span>
               </div>
               {[
                 L("Premarket plan locked", "Plan premarket listo"),
@@ -402,29 +402,29 @@ export default function Home() {
             <div className="mb-5 flex flex-col items-start gap-3">
               <img
                 src="/neurotrader-logo-web.png"
-                alt="NeuroTrader Journal"
+                alt="NeuroTrader"
                 className="h-12 w-auto max-w-[88vw] object-contain md:h-16"
                 draggable={false}
               />
               <p className="text-sm font-semibold text-emerald-300">
-              {L("Trading operating system + AI discipline coach", "Sistema operativo de trading + coach IA de disciplina")}
+              {L("Trading Business Platform for Trader Entrepreneurs", "Plataforma empresarial de trading para Empresarios Traders")}
               </p>
             </div>
             <h1 className="text-5xl font-semibold leading-none text-white md:text-7xl">
-              {L("More than a journal. A system that helps you obey your plan.", "Más que un journal. Un sistema que te ayuda a obedecer tu plan.")}
+              {L("Start Your Trading Business.", "Comienza Tu Empresa de Trading.")}
             </h1>
             <p className="mt-6 max-w-2xl text-base leading-7 text-slate-200 md:text-lg">
               {L(
-                "Build a realistic, measurable Growth Plan, track the metrics that matter, and let NeuroTrader watch your rules while AI Coach turns your behavior into action.",
-                "Crea un Growth Plan realista y medible, mide los KPIs que importan y deja que NeuroTrader vigile tus reglas mientras AI Coach convierte tu conducta en acción."
+                "NeuroTrader gives Trader Entrepreneurs the structure to build, operate, track, and improve a trading business from one platform.",
+                "NeuroTrader le da al Empresario Trader la estructura para crear, operar, medir y mejorar una empresa de trading desde una sola plataforma."
               )}
             </p>
             <div className="mt-7 flex flex-wrap gap-3">
               <Link href="/signup" className="rounded-md bg-emerald-400 px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-emerald-300">
-                {L("Create my journal", "Crear mi journal")}
+                {L("Start Your Trading Business", "Comienza Tu Empresa de Trading")}
               </Link>
               <Link href="/plans-comparison" className="rounded-md border border-white/25 px-5 py-3 text-sm font-semibold text-white hover:border-emerald-300">
-                {L("Compare plans", "Comparar planes")}
+                {L("Compare Business Plans", "Comparar Planes Empresariales")}
               </Link>
             </div>
           </div>
@@ -448,14 +448,14 @@ export default function Home() {
             </p>
             <h2 className="mt-3 text-3xl font-semibold text-white md:text-4xl">
               {L(
-                "Build the plan. Protect it with one operating loop.",
-                "Crea el plan. Protégelo con un solo loop operativo."
+                "Build the business plan. Protect it with one operating loop.",
+                "Crea el plan empresarial. Protégelo con un solo loop operativo."
               )}
             </h2>
             <p className="mt-3 text-sm leading-6 text-slate-300 md:text-base">
               {L(
-                "The flow starts with the Growth Plan. Then Capture, Think, Interpret, and Guide work together to keep that plan alive during real trading.",
-                "El flujo empieza con el Growth Plan. Luego Capture, Think, Interpret y Guide trabajan juntos para mantener ese plan vivo durante el trading real."
+                "The flow starts with the Trading Business Plan. Then Capture, Think, Interpret, and Guide work together to keep that plan alive during real trading.",
+                "El flujo empieza con el Plan de Empresa de Trading. Luego Capture, Think, Interpret y Guide trabajan juntos para mantener ese plan vivo durante el trading real."
               )}
             </p>
           </div>
@@ -504,14 +504,14 @@ export default function Home() {
               <div className="relative z-10 flex justify-center py-4 md:py-5">
                 <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-[#0b1625] px-4 py-2 text-[10px] font-semibold uppercase tracking-[0.24em] text-slate-300">
                   <ShieldCheck className="h-3.5 w-3.5 text-emerald-300" />
-                  {L("Protected by 4 pillars", "Protegido por 4 pilares")}
+                  {L("Business protected by 4 pillars", "Empresa protegida por 4 pilares")}
                 </div>
               </div>
 
               <div className="relative z-10 flex flex-wrap items-center justify-between gap-3">
                 <div className="inline-flex items-center gap-2 rounded-full border border-emerald-300/20 bg-emerald-400/10 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.22em] text-emerald-100/90">
                   <span className="h-1.5 w-1.5 rounded-full bg-emerald-300" />
-                  {L("Execution starts", "Empieza la ejecución")}
+                    {L("Business execution starts", "Empieza la ejecución empresarial")}
                 </div>
                 <div className="hidden md:flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-300">
                   {workflowLoopSignals.map((signal, index) => (
@@ -525,7 +525,7 @@ export default function Home() {
                 </div>
                 <div className="inline-flex items-center gap-2 rounded-full border border-amber-300/20 bg-amber-400/10 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.22em] text-amber-100/90">
                   <span className="h-1.5 w-1.5 rounded-full bg-amber-300" />
-                  {L("Plan stays active", "El plan sigue activo")}
+                    {L("Business plan stays active", "El plan empresarial sigue activo")}
                 </div>
               </div>
 
@@ -725,7 +725,7 @@ export default function Home() {
         <div className="mx-auto w-full max-w-7xl">
           <div className="mb-8 max-w-3xl">
             <p className="text-sm font-semibold text-emerald-300">
-              {L("Built around the trader's daily workflow", "Diseñado alrededor del flujo diario del trader")}
+              {L("Built around the Trader Entrepreneur's daily operation", "Diseñado alrededor de la operación diaria del Empresario Trader")}
             </p>
             <h2 className="mt-3 text-3xl font-semibold text-white md:text-4xl">
               {L("Less clutter. More signal.", "Menos ruido. Más señal.")}
@@ -757,17 +757,17 @@ export default function Home() {
               {L("What you control every day", "Lo que controlas cada día")}
             </p>
             <h2 className="mt-3 text-3xl font-semibold text-white md:text-4xl">
-              {L("Discipline becomes measurable.", "La disciplina se vuelve medible.")}
+              {L("Your trading business becomes measurable.", "Tu empresa de trading se vuelve medible.")}
             </h2>
             <p className="mt-3 text-sm leading-6 text-slate-300 md:text-base">
               {L(
-                "NeuroTrader is built for the parts of trading that decide whether you survive: measurable goals, risk discipline, rule obedience, repetition, and honest review.",
-                "NeuroTrader está construido para lo que decide si sobrevives: metas medibles, disciplina de riesgo, obedecer reglas, repetición y revisión honesta."
+                "NeuroTrader is built for the parts of a trading business that need structure: measurable goals, risk discipline, rule obedience, repetition, and honest review.",
+                "NeuroTrader está construido para las partes de una empresa de trading que necesitan estructura: metas medibles, disciplina de riesgo, obedecer reglas, repetición y revisión honesta."
               )}
             </p>
             <div className="mt-6">
               <Link href="/signup" className="inline-flex rounded-md bg-emerald-400 px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-emerald-300">
-                {L("Start the workflow", "Comenzar el flujo")}
+                {L("Start the business workflow", "Comenzar el flujo empresarial")}
               </Link>
             </div>
           </div>
@@ -795,8 +795,8 @@ export default function Home() {
               </h2>
               <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-300">
                 {L(
-                  "The upgrade is not just more features. It adds the layers that serious traders pay for: deeper statistics, business reporting, audit tools, and AI coaching.",
-                  "El upgrade no es solo más features. Añade las capas que un trader serio necesita: estadística profunda, reportes de negocio, auditoría y AI coaching."
+                  "The upgrade is not just more features. It adds the operating layers a Trader Entrepreneur needs: deeper statistics, business reporting, audit tools, and AI coaching.",
+                  "El upgrade no es solo más features. Añade las capas operativas que necesita un Empresario Trader: estadística profunda, reportes de negocio, auditoría y AI coaching."
                 )}
               </p>
             </div>
@@ -850,8 +850,8 @@ export default function Home() {
                       </p>
                       <p className="mt-1 text-xs leading-5 text-slate-300">
                         {L(
-                          "Great for structure and journaling. Upgrade when you want AI, business reports, and deeper statistics.",
-                          "Excelente para estructura y journal. Haz upgrade cuando quieras IA, reportes de negocio y estadística profunda."
+                          "Great for building the operating foundation. Upgrade when you want AI, business reports, and deeper statistics.",
+                          "Excelente para construir la base operativa. Haz upgrade cuando quieras IA, reportes de negocio y estadística profunda."
                         )}
                       </p>
                     </div>
@@ -956,24 +956,24 @@ export default function Home() {
         <div className="mx-auto grid w-full max-w-7xl gap-8 rounded-lg border border-white/10 bg-[#08111f] p-6 md:grid-cols-[1fr_auto] md:items-center md:p-8">
           <div>
             <p className="text-sm font-semibold text-emerald-300">
-              {L("Ready for the public launch flow", "Listo para el flujo público")}
+              {L("Ready to open your trading business workspace", "Listo para abrir tu espacio de empresa de trading")}
             </p>
             <h2 className="mt-2 text-3xl font-semibold text-white md:text-4xl">
-              {L("Create the account, verify email, choose a plan, and start tracking.", "Crea la cuenta, verifica email, escoge plan y empieza a medir.")}
+              {L("Create the business account, verify email, choose a plan, and start operating.", "Crea la cuenta empresarial, verifica email, escoge plan y empieza a operar.")}
             </h2>
             <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-300 md:text-base">
               {L(
-                "The signup path connects the same plan catalog, payment flow, welcome emails, admin controls, 24/7 virtual support, iOS access, and Android coming soon positioning.",
-                "El flujo de registro conecta el mismo catálogo de planes, pago, emails de bienvenida, controles admin, soporte virtual 24/7, acceso iOS y Android próximamente."
+                "The signup path connects the same business plan catalog, payment flow, welcome emails, admin controls, 24/7 virtual support, iOS access, and Android coming soon positioning.",
+                "El flujo de registro conecta el mismo catálogo de planes empresariales, pago, emails de bienvenida, controles admin, soporte virtual 24/7, acceso iOS y Android próximamente."
               )}
             </p>
           </div>
           <div className="flex flex-wrap gap-3 md:justify-end">
             <Link href="/signup" className="rounded-md bg-emerald-400 px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-emerald-300">
-              {L("Create account", "Crear cuenta")}
+              {L("Start Your Trading Business", "Comienza Tu Empresa de Trading")}
             </Link>
             <Link href="/pricing" className="rounded-md border border-white/20 px-5 py-3 text-sm font-semibold text-white hover:border-emerald-300">
-              {L("View pricing", "Ver precios")}
+              {L("View Business Plans", "Ver Planes Empresariales")}
             </Link>
           </div>
         </div>

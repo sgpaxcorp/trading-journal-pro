@@ -20,15 +20,15 @@ export default function BillingCompletePage() {
 
         <p className="text-xs text-slate-400">
           {L(
-            "Your Neuro Trader Journal account was created, but you don't have an active subscription yet.",
-            "Tu cuenta de Neuro Trader Journal fue creada, pero aún no tienes una suscripción activa."
+            "Your Neuro Trader account was created, but you don't have an active subscription yet.",
+            "Tu cuenta de Neuro Trader fue creada, pero aún no tienes una suscripción activa."
           )}
         </p>
 
         <p className="text-xs text-slate-400">
           {L(
-            "To access your dashboard, journal, back-study and AI features, please complete your payment for the Core or Advanced plan.",
-            "Para acceder a tu dashboard, journal, back-study y funciones de IA, completa el pago del plan Core o Advanced."
+            "To access your Business Center, Execution Journal, strategy review and AI features, please complete your payment for the Core or Advanced plan.",
+            "Para acceder a tu Centro Empresarial, Registro de Ejecución, revisión estratégica y funciones de IA, completa el pago del plan Core o Advanced."
           )}
         </p>
 

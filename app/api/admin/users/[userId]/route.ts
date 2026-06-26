@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
 
+import { requireAdminActionSecret, requireAdminUser } from "@/lib/adminAuth";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 import { ACCESS_GRANTS, isAccessGrantKey, type AccessGrantKey } from "@/lib/accessGrants";
 import {
@@ -14,40 +15,6 @@ export const runtime = "nodejs";
 const stripe = process.env.STRIPE_SECRET_KEY
   ? new Stripe(process.env.STRIPE_SECRET_KEY as string, {})
   : null;
-
-function parseAdminEmails(envValue?: string | null) {
-  return (envValue || "")
-    .split(",")
-    .map((v) => v.trim().toLowerCase())
-    .filter(Boolean);
-}
-
-async function isAdmin(userId: string, email?: string | null): Promise<boolean> {
-  const { data, error } = await supabaseAdmin
-    .from("admin_users")
-    .select("user_id, active")
-    .eq("user_id", userId)
-    .eq("active", true)
-    .limit(1);
-  if (!error && (data ?? []).length > 0) return true;
-
-  const allowList = parseAdminEmails(process.env.ADMIN_EMAILS);
-  if (email && allowList.includes(email.toLowerCase())) return true;
-  return false;
-}
-
-async function getAdminAuth(req: NextRequest) {
-  const authHeader = req.headers.get("authorization") || "";
-  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
-  if (!token) return null;
-
-  const { data: authData, error: authErr } = await supabaseAdmin.auth.getUser(token);
-  if (authErr || !authData?.user) return null;
-
-  const ok = await isAdmin(authData.user.id, authData.user.email);
-  if (!ok) return null;
-  return authData.user;
-}
 
 async function listBucketPaths(bucket: string, prefix: string) {
   const found: string[] = [];
@@ -238,7 +205,7 @@ async function buildUserDetail(userId: string) {
     await Promise.all([
       supabaseAdmin
         .from("profiles")
-        .select("id,email,first_name,last_name,plan,subscription_status,show_in_ranking,created_at")
+        .select("id,email,first_name,last_name,plan,subscription_status,created_at")
         .eq("id", userId)
         .maybeSingle(),
       supabaseAdmin
@@ -298,7 +265,6 @@ async function buildUserDetail(userId: string) {
     bannedUntil: (authData.user.banned_until ?? null) as string | null,
     plan: ((profile as any)?.plan ?? authData.user.user_metadata?.plan ?? null) as string | null,
     subscriptionStatus: ((profile as any)?.subscription_status ?? authData.user.user_metadata?.subscriptionStatus ?? null) as string | null,
-    showInRanking: Boolean((profile as any)?.show_in_ranking ?? false),
     sessions30d: (sessions30 ?? []).length,
     events30d: (events30 ?? []).length,
     activeEntitlements,
@@ -311,8 +277,8 @@ export async function GET(
   { params }: { params: Promise<{ userId: string }> }
 ) {
   try {
-    const admin = await getAdminAuth(req);
-    if (!admin) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    const admin = await requireAdminUser(req, { action: "users:detail:read", limit: 120, windowMs: 60_000 });
+    if (!admin.ok) return admin.response;
 
     const { userId } = await params;
     if (!userId) {
@@ -331,8 +297,8 @@ export async function PATCH(
   { params }: { params: Promise<{ userId: string }> }
 ) {
   try {
-    const admin = await getAdminAuth(req);
-    if (!admin) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    const admin = await requireAdminUser(req, { action: "users:detail:write", limit: 20, windowMs: 10 * 60_000 });
+    if (!admin.ok) return admin.response;
 
     const { userId } = await params;
     const body = (await req.json().catch(() => ({}))) as { action?: string; accessKeys?: string[] };
@@ -342,7 +308,7 @@ export async function PATCH(
       return NextResponse.json({ error: "Missing user id." }, { status: 400 });
     }
 
-    if (admin.id === userId && action === "reset") {
+    if (admin.user.id === userId && action === "reset") {
       return NextResponse.json(
         { error: "You cannot full-reset your own admin account from this panel." },
         { status: 400 }
@@ -350,6 +316,9 @@ export async function PATCH(
     }
 
     if (action === "ban") {
+      const stepUpResponse = requireAdminActionSecret(req, body);
+      if (stepUpResponse) return stepUpResponse;
+
       requireActionConfirmation(body, "ban");
       const { error } = await supabaseAdmin.auth.admin.updateUserById(userId, {
         ban_duration: "876000h",
@@ -359,8 +328,8 @@ export async function PATCH(
       }
       await recordAdminAuditEvent({
         req,
-        adminUserId: admin.id,
-        adminEmail: admin.email,
+        adminUserId: admin.user.id,
+        adminEmail: admin.user.email,
         action: "admin_user_ban",
         targetUserId: userId,
       });
@@ -377,8 +346,8 @@ export async function PATCH(
       }
       await recordAdminAuditEvent({
         req,
-        adminUserId: admin.id,
-        adminEmail: admin.email,
+        adminUserId: admin.user.id,
+        adminEmail: admin.user.email,
         action: "admin_user_unban",
         targetUserId: userId,
       });
@@ -386,12 +355,15 @@ export async function PATCH(
     }
 
     if (action === "reset") {
+      const stepUpResponse = requireAdminActionSecret(req, body);
+      if (stepUpResponse) return stepUpResponse;
+
       const targetEmail = await getTargetEmail(userId);
       requireTargetEmailConfirmation(body, targetEmail);
       await recordAdminAuditEvent({
         req,
-        adminUserId: admin.id,
-        adminEmail: admin.email,
+        adminUserId: admin.user.id,
+        adminEmail: admin.user.email,
         action: "admin_user_full_reset",
         targetUserId: userId,
         metadata: { targetEmail },
@@ -401,6 +373,9 @@ export async function PATCH(
     }
 
     if (action === "update_access") {
+      const stepUpResponse = requireAdminActionSecret(req, body);
+      if (stepUpResponse) return stepUpResponse;
+
       const rawKeys = Array.isArray(body?.accessKeys) ? body.accessKeys : [];
       const accessKeys = Array.from(
         new Set(
@@ -410,17 +385,17 @@ export async function PATCH(
         )
       );
 
-    await syncAdminEntitlements(userId, accessKeys);
-    await recordAdminAuditEvent({
-      req,
-      adminUserId: admin.id,
-      adminEmail: admin.email,
-      action: "admin_user_access_update",
-      targetUserId: userId,
-      metadata: { accessKeys },
-    });
-    const user = await buildUserDetail(userId);
-    return NextResponse.json({ ok: true, action: "update_access", user, accessKeys });
+      await syncAdminEntitlements(userId, accessKeys);
+      await recordAdminAuditEvent({
+        req,
+        adminUserId: admin.user.id,
+        adminEmail: admin.user.email,
+        action: "admin_user_access_update",
+        targetUserId: userId,
+        metadata: { accessKeys },
+      });
+      const user = await buildUserDetail(userId);
+      return NextResponse.json({ ok: true, action: "update_access", user, accessKeys });
     }
 
     return NextResponse.json({ error: "Unsupported action." }, { status: 400 });
@@ -435,15 +410,15 @@ export async function DELETE(
   { params }: { params: Promise<{ userId: string }> }
 ) {
   try {
-    const admin = await getAdminAuth(req);
-    if (!admin) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    const admin = await requireAdminUser(req, { action: "users:detail:delete", limit: 10, windowMs: 10 * 60_000 });
+    if (!admin.ok) return admin.response;
 
     const { userId } = await params;
     if (!userId) {
       return NextResponse.json({ error: "Missing user id." }, { status: 400 });
     }
 
-    if (admin.id === userId) {
+    if (admin.user.id === userId) {
       return NextResponse.json(
         { error: "You cannot delete your own admin account from this panel." },
         { status: 400 }
@@ -451,13 +426,16 @@ export async function DELETE(
     }
 
     const body = await req.json().catch(() => ({}));
+    const stepUpResponse = requireAdminActionSecret(req, body);
+    if (stepUpResponse) return stepUpResponse;
+
     const targetEmail = await getTargetEmail(userId);
     requireTargetEmailConfirmation(body, targetEmail);
 
     await recordAdminAuditEvent({
       req,
-      adminUserId: admin.id,
-      adminEmail: admin.email,
+      adminUserId: admin.user.id,
+      adminEmail: admin.user.email,
       action: "admin_user_delete",
       targetUserId: userId,
       metadata: { targetEmail },

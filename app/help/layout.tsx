@@ -10,22 +10,21 @@ const NAV_GROUPS = (lang: "en" | "es") => {
       items: [
         { href: "/help", label: isEs ? "Resumen" : "Overview" },
         { href: "/help/getting-started", label: isEs ? "Guia de inicio" : "Getting Started" },
-        { href: "/help/growth-plan", label: isEs ? "Plan de crecimiento" : "Growth Plan" },
+        { href: "/help/growth-plan", label: isEs ? "Plan de Empresa de Trading" : "Trading Business Plan" },
       ],
     },
     {
       title: isEs ? "Uso diario" : "Daily use",
       items: [
-        { href: "/help/journal", label: isEs ? "Entradas de Journal" : "Journal Entries" },
+        { href: "/help/journal", label: isEs ? "Registros de ejecución" : "Execution Records" },
         { href: "/help/neuro-layer", label: isEs ? "Neuro Layer" : "Neuro Layer" },
         { href: "/help/workflows", label: isEs ? "Flujos de trabajo" : "Workflows" },
-        { href: "/help/dashboard-widgets", label: isEs ? "Dashboard y widgets" : "Dashboard & Widgets" },
+        { href: "/help/dashboard-widgets", label: isEs ? "Centro Empresarial" : "Business Center" },
         { href: "/help/analytics", label: isEs ? "Analitica y rendimiento" : "Analytics & Performance" },
-        { href: "/help/ai-coaching", label: isEs ? "AI Coaching" : "AI Coaching" },
+        { href: "/help/ai-coaching", label: isEs ? "Coach Empresarial IA" : "Business AI Coach" },
         { href: "/help/notebook", label: isEs ? "Notebook" : "Notebook" },
         { href: "/help/back-study", label: isEs ? "Back‑Study" : "Back‑Study" },
-        { href: "/help/rules-alarms", label: isEs ? "Sistema de protección" : "Trading Protection System" },
-        { href: "/help/challenges", label: isEs ? "Retos" : "Challenges" },
+        { href: "/help/rules-alarms", label: isEs ? "Sistema de Protección Empresarial" : "Business Protection System" },
         { href: "/help/audit", label: isEs ? "Auditoría" : "Audit" },
         { href: "/help/kpis", label: isEs ? "KPIs y metricas" : "KPIs & Metrics" },
       ],
@@ -51,7 +50,6 @@ const NAV_GROUPS = (lang: "en" | "es") => {
       title: isEs ? "Comunidad" : "Community",
       items: [
         { href: "/help/forum", label: isEs ? "Comunidad" : "Community Forum" },
-        { href: "/help/global-ranking", label: isEs ? "Ranking global" : "Global Ranking" },
       ],
     },
   ];
@@ -74,7 +72,7 @@ export default async function HelpLayout({ children }: { children: React.ReactNo
             {isEs ? "Centro de ayuda" : "Help Center"}
           </p>
           <h1 className="text-2xl font-semibold text-slate-100">
-            {isEs ? "Manual de Neuro Trader Journal" : "Neuro Trader Journal Manual"}
+            {isEs ? "Manual de Neuro Trader" : "Neuro Trader Manual"}
           </h1>
         </header>
 

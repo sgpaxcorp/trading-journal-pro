@@ -96,43 +96,43 @@ function fallbackMessageForWeekday(weekday: string, locale: string | null) {
   if (weekday === "fri") {
     return isEs
       ? {
-          title: "Neuro Trader Journal",
+          title: "Neuro Trader",
           body: "Viernes: cierra la semana con disciplina. Protege lo ganado y termina limpio.",
         }
       : {
-          title: "Neuro Trader Journal",
+          title: "Neuro Trader",
           body: "Friday: close the week with discipline. Protect gains and finish clean.",
         };
   }
   if (weekday === "sat") {
     return isEs
       ? {
-          title: "Neuro Trader Journal",
+          title: "Neuro Trader",
           body: "Sabado: suelta el mercado, descansa y recarga la mente.",
         }
       : {
-          title: "Neuro Trader Journal",
+          title: "Neuro Trader",
           body: "Saturday: let the market go, rest, and reset your mind.",
         };
   }
   if (weekday === "sun") {
     return isEs
       ? {
-          title: "Neuro Trader Journal",
+          title: "Neuro Trader",
           body: "Domingo: preparacion. Revisa tu plan, tu calendario y entra a la semana con claridad.",
         }
       : {
-          title: "Neuro Trader Journal",
+          title: "Neuro Trader",
           body: "Sunday: preparation day. Review your plan, your calendar, and enter the week with clarity.",
         };
   }
   return isEs
     ? {
-        title: "Neuro Trader Journal",
+        title: "Neuro Trader",
         body: "Un dia disciplinado vale mas que un impulso brillante. Ejecuta tu proceso.",
       }
     : {
-        title: "Neuro Trader Journal",
+        title: "Neuro Trader",
         body: "A disciplined day beats a brilliant impulse. Execute your process.",
       };
 }
@@ -395,7 +395,7 @@ async function handleRequest(req: NextRequest) {
     for (const row of rows) {
       if (!row.user_id) continue;
       const motivation = await fetchMessage(row.locale, targetSchedule.hour);
-      const title = String(motivation.title || "Neuro Trader Journal");
+      const title = String(motivation.title || "Neuro Trader");
       const bodyText = String(motivation.body || "").trim();
       if (!bodyText) continue;
 

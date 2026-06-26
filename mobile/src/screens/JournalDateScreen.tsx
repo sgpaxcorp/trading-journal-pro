@@ -122,7 +122,7 @@ const CHECKLIST_ITEMS: ChecklistSnapshot = {
   ],
   after: [
     "Screenshots saved",
-    "Journal updated",
+    "Execution record updated",
     "Mistakes noted",
     "Lesson captured",
     "Next action defined",
@@ -144,7 +144,7 @@ const CHECKLIST_LABELS: Record<string, string> = {
   "Managed per plan": "Gestionado según el plan",
   "No averaging down": "Sin promediar en contra",
   "Screenshots saved": "Capturas guardadas",
-  "Journal updated": "Journal actualizado",
+  "Execution record updated": "Registro de ejecución actualizado",
   "Mistakes noted": "Errores anotados",
   "Lesson captured": "Lección capturada",
   "Next action defined": "Próxima acción definida",
@@ -656,7 +656,7 @@ export function JournalDateScreen() {
         applyLoadedJournal(entry, tradeRows as JournalTradeRow[] | null | undefined, parsed, (uiData as any)?.settings);
       } catch (err: any) {
         if (!active) return;
-        setError(err?.message ?? "Failed to load journal.");
+        setError(err?.message ?? "Failed to load execution record.");
       } finally {
         if (!active) return;
         if (!isRefresh) setLoading(false);
@@ -703,7 +703,7 @@ export function JournalDateScreen() {
       setStatus(null);
       setError(null);
     } catch (err: any) {
-      setError(err?.message ?? "Failed to load journal.");
+      setError(err?.message ?? "Failed to load execution record.");
     } finally {
       setRefreshing(false);
     }
@@ -1287,11 +1287,11 @@ export function JournalDateScreen() {
 
   return (
     <ScreenScaffold
-      title={t(language, "Journal date", "Journal por fecha")}
+      title={t(language, "Execution Journal", "Registro de Ejecución")}
       subtitle={t(
         language,
-        "Fill your journal on mobile. CSV imports remain on the web.",
-        "Llena tu journal en móvil. El CSV se importa en la web."
+        "Record execution on mobile. CSV imports remain on the web.",
+        "Registra ejecución en móvil. El CSV se importa en la web."
       )}
       refreshing={refreshing}
       onRefresh={handleRefresh}
@@ -1315,7 +1315,7 @@ export function JournalDateScreen() {
       {loading ? (
         <View style={styles.loadingRow}>
           <ActivityIndicator color={colors.primary} />
-          <Text style={styles.loadingText}>{t(language, "Loading journal…", "Cargando journal…")}</Text>
+          <Text style={styles.loadingText}>{t(language, "Loading execution record…", "Cargando registro de ejecución…")}</Text>
         </View>
       ) : (
         <>
@@ -1358,7 +1358,7 @@ export function JournalDateScreen() {
           </ScrollView>
           <Pressable style={[styles.saveButton, saving && styles.saveButtonDisabled]} onPress={handleSave}>
             <Text style={styles.saveButtonText}>
-              {saving ? t(language, "Saving…", "Guardando…") : t(language, "Save journal", "Guardar journal")}
+              {saving ? t(language, "Saving…", "Guardando…") : t(language, "Save execution record", "Guardar registro de ejecución")}
             </Text>
           </Pressable>
         </>

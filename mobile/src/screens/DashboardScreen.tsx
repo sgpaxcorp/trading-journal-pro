@@ -16,6 +16,7 @@ import { ScreenScaffold } from "../components/ScreenScaffold";
 import { apiGet, apiPost } from "../lib/api";
 import { useLanguage } from "../lib/LanguageContext";
 import { t } from "../lib/i18n";
+import type { OpenModuleFn } from "../lib/moduleNavigation";
 import { parseNotes, type StoredTradeRow, type TradesPayload } from "../lib/journalNotes";
 import { supabaseMobile } from "../lib/supabase";
 import { useSupabaseUser } from "../lib/useSupabaseUser";
@@ -23,11 +24,12 @@ import { useTheme } from "../lib/ThemeContext";
 import { DARK_COLORS, type ThemeColors } from "../theme";
 
 type DashboardScreenProps = {
-  onOpenModule: (title: string, description: string) => void;
+  onOpenModule: OpenModuleFn;
   onOpenJournalDate: (date: string) => void;
 };
 
 const coachBrain = require("../../assets/neurotrader-logo-icon.png");
+const ACCOUNT_SERIES_PATH = "/api/account/series?seriesDays=180";
 
 type SeriesPoint = { date: string; value: number };
 
@@ -477,7 +479,7 @@ function buildDashboardNeuroMemory(entries: JournalEntry[], lang: "en" | "es"): 
   const fallback: DashboardNeuroMemory = {
     title: tx("Latest Neuro read", "Última lectura Neuro"),
     body: tx(
-      "Your latest AI behavior read will appear here after a Neuro-tagged journal entry.",
+      "Your latest AI behavior read will appear here after a Neuro-tagged execution record.",
       "Tu lectura de comportamiento con IA aparecerá aquí después de una entrada con Neuro Layer."
     ),
     kind: "strength",
@@ -956,7 +958,7 @@ export function DashboardScreen({ onOpenModule: _onOpenModule, onOpenJournalDate
         if (isRefresh) setRefreshing(true);
         else setLoading(true);
         setError(null);
-        const seriesRes = await apiGet<AccountSeriesResponse>("/api/account/series");
+        const seriesRes = await apiGet<AccountSeriesResponse>(ACCOUNT_SERIES_PATH);
         if (!active) return;
         setSeries(seriesRes ?? null);
       } catch (err: any) {
@@ -1577,7 +1579,7 @@ export function DashboardScreen({ onOpenModule: _onOpenModule, onOpenJournalDate
       const fromDate = from.toISOString().slice(0, 10);
 
       const [seriesRes, journalRes] = await Promise.all([
-        apiGet<AccountSeriesResponse>("/api/account/series"),
+        apiGet<AccountSeriesResponse>(ACCOUNT_SERIES_PATH),
         apiGet<JournalListResponse>(`/api/journal/list?fromDate=${fromDate}&toDate=${toDate}`),
       ]);
 
@@ -1712,8 +1714,8 @@ export function DashboardScreen({ onOpenModule: _onOpenModule, onOpenJournalDate
         <Text style={styles.daySummaryHint}>
           {t(
             language,
-            "No journal days found in the last 45 days.",
-            "No hay días de journal en los últimos 45 días."
+            "No execution days found in the last 45 days.",
+            "No hay días de ejecución en los últimos 45 días."
           )}
         </Text>
       ) : (
@@ -1770,7 +1772,7 @@ export function DashboardScreen({ onOpenModule: _onOpenModule, onOpenJournalDate
       )}
 
       {journalLoading ? (
-        <Text style={styles.loadingText}>{t(language, "Syncing journal…", "Sincronizando journal…")}</Text>
+        <Text style={styles.loadingText}>{t(language, "Syncing execution records…", "Sincronizando registros de ejecución…")}</Text>
       ) : null}
     </View>
   );
@@ -1794,8 +1796,8 @@ export function DashboardScreen({ onOpenModule: _onOpenModule, onOpenJournalDate
       : !coachReminder
         ? t(
             language,
-            "No AI session yet. This tab stays anchored to your Growth Plan so the next coaching pass lands on something real.",
-            "Todavía no hay sesión AI. Esta pestaña se ancla a tu Growth Plan para que el próximo coaching aterrice sobre algo real."
+            "No AI session yet. This tab stays anchored to your Trading Business Plan so the next coaching pass lands on something real.",
+            "Todavía no hay sesión AI. Esta pestaña se ancla a tu Plan de Empresa de Trading para que el próximo coaching aterrice sobre algo real."
           )
         : "";
   const aiCoachReadoutRows = dedupeRows([
@@ -1845,7 +1847,7 @@ export function DashboardScreen({ onOpenModule: _onOpenModule, onOpenJournalDate
         ))}
       {items.length > (isCompactTopCards ? 3 : 5) ? (
         <Text style={styles.systemHint}>
-          +{items.length - (isCompactTopCards ? 3 : 5)} {t(language, "more in Growth Plan", "más en Growth Plan")}
+          +{items.length - (isCompactTopCards ? 3 : 5)} {t(language, "more in Trading Business Plan", "más en Plan de Empresa de Trading")}
         </Text>
       ) : null}
     </View>
@@ -1853,7 +1855,7 @@ export function DashboardScreen({ onOpenModule: _onOpenModule, onOpenJournalDate
 
   return (
     <ScreenScaffold
-      title={t(language, "Dashboard", "Dashboard")}
+      title={t(language, "Business Center", "Centro Empresarial")}
       subtitle={t(
         language,
         "Your daily overview: progress, streaks, and key actions.",
@@ -2017,9 +2019,9 @@ export function DashboardScreen({ onOpenModule: _onOpenModule, onOpenJournalDate
 
               {!planProgress ? (
                 <Text style={styles.progressNote}>
-                  {t(language, "No growth plan set yet.", "Aún no tienes un Growth Plan.")}{" "}
+                  {t(language, "No Trading Business Plan set yet.", "Aún no tienes un Plan de Empresa de Trading.")}{" "}
                   <Text style={styles.systemLink} onPress={() => Linking.openURL(WEB_GROWTH_PLAN_URL)}>
-                    {t(language, "Open Growth Plan →", "Abrir Growth Plan →")}
+                    {t(language, "Open Trading Business Plan →", "Abrir Plan de Empresa de Trading →")}
                   </Text>
                 </Text>
               ) : (
@@ -2226,7 +2228,7 @@ export function DashboardScreen({ onOpenModule: _onOpenModule, onOpenJournalDate
                       {todayChecklist.length > (isCompactTopCards ? 4 : 5) ? (
                         <Text style={styles.systemHint}>
                           +{todayChecklist.length - (isCompactTopCards ? 4 : 5)}{" "}
-                          {t(language, "more in today's journal", "más en el journal de hoy")}
+                          {t(language, "more in today's execution record", "más en el registro de ejecución de hoy")}
                         </Text>
                       ) : null}
                     </View>
@@ -2234,18 +2236,18 @@ export function DashboardScreen({ onOpenModule: _onOpenModule, onOpenJournalDate
                     <Text style={styles.systemHint}>
                       {t(
                         language,
-                        "Add your Trading System steps in Growth Plan.",
-                        "Agrega tus pasos del Sistema de Trading en el Growth Plan."
+                        "Add your Trading System steps in Trading Business Plan.",
+                        "Agrega tus pasos del Sistema de Trading en el Plan de Empresa de Trading."
                       )}{" "}
                       <Text style={styles.systemLink} onPress={() => Linking.openURL(WEB_GROWTH_PLAN_URL)}>
-                        {t(language, "Edit Growth Plan", "Editar Growth Plan")}
+                        {t(language, "Edit Trading Business Plan", "Editar Plan de Empresa de Trading")}
                       </Text>
                     </Text>
                   )}
 
                   <Pressable style={[styles.systemJournalButton, isCompactTopCards && styles.systemJournalButtonCompact]} onPress={() => onOpenJournalDate(todayStr)}>
                     <Text style={styles.systemJournalButtonText}>
-                      {t(language, "Open today's journal", "Abrir el journal de hoy")}
+                      {t(language, "Open today's execution record", "Abrir registro de ejecución de hoy")}
                     </Text>
                   </Pressable>
                 </View>
@@ -2294,7 +2296,7 @@ export function DashboardScreen({ onOpenModule: _onOpenModule, onOpenJournalDate
 
                       {strategyCards.length > 1 ? (
                         <Text style={styles.systemHint}>
-                          +{strategyCards.length - 1} {t(language, "more strategies in Growth Plan", "más estrategias en Growth Plan")}
+                          +{strategyCards.length - 1} {t(language, "more strategies in Trading Business Plan", "más estrategias en Plan de Empresa de Trading")}
                         </Text>
                       ) : null}
                     </View>
@@ -2302,9 +2304,9 @@ export function DashboardScreen({ onOpenModule: _onOpenModule, onOpenJournalDate
                     <Text style={styles.strategyBody}>{strategyNotes}</Text>
                   ) : (
                     <Text style={styles.systemHint}>
-                      {t(language, "Add your strategy and rules in Growth Plan.", "Agrega tu estrategia y reglas en Growth Plan.")}{" "}
+                      {t(language, "Add your strategy and rules in Trading Business Plan.", "Agrega tu estrategia y reglas en Plan de Empresa de Trading.")}{" "}
                       <Text style={styles.systemLink} onPress={() => Linking.openURL(WEB_GROWTH_PLAN_URL)}>
-                        {t(language, "Edit Growth Plan", "Editar Growth Plan")}
+                        {t(language, "Edit Trading Business Plan", "Editar Plan de Empresa de Trading")}
                       </Text>
                     </Text>
                   )}
@@ -2325,11 +2327,11 @@ export function DashboardScreen({ onOpenModule: _onOpenModule, onOpenJournalDate
                   <Text style={[styles.systemHint, styles.systemTabHint]}>
                     {t(
                       language,
-                      "Add your Do/Don't rules in Growth Plan.",
-                      "Agrega tus reglas Hacer/No hacer en Growth Plan."
+                      "Add your Do/Don't rules in Trading Business Plan.",
+                      "Agrega tus reglas Hacer/No hacer en Plan de Empresa de Trading."
                     )}{" "}
                     <Text style={styles.systemLink} onPress={() => Linking.openURL(WEB_GROWTH_PLAN_URL)}>
-                      {t(language, "Edit Growth Plan", "Editar Growth Plan")}
+                      {t(language, "Edit Trading Business Plan", "Editar Plan de Empresa de Trading")}
                     </Text>
                   </Text>
                 ) : null}
@@ -2340,7 +2342,7 @@ export function DashboardScreen({ onOpenModule: _onOpenModule, onOpenJournalDate
               <View style={[styles.systemTabPanel, styles.aiPlanPanel]}>
                 <View style={styles.aiPlanHeaderRow}>
                   <Text style={styles.aiPlanEyebrow}>
-                    {t(language, "Latest AI coaching plan", "Último plan AI Coaching")}
+                    {t(language, "Latest Business AI plan", "Último plan del Coach Empresarial IA")}
                   </Text>
                   {latestCoachDate ? <Text style={styles.aiPlanDate}>{latestCoachDate}</Text> : null}
                 </View>
@@ -2377,10 +2379,10 @@ export function DashboardScreen({ onOpenModule: _onOpenModule, onOpenJournalDate
 
                 <View style={styles.systemActionRow}>
                   <Pressable style={styles.aiCoachButton} onPress={() => Linking.openURL(WEB_AI_COACH_URL)}>
-                    <Text style={styles.aiCoachButtonText}>{t(language, "Open AI Coach", "Abrir AI Coach")}</Text>
+                    <Text style={styles.aiCoachButtonText}>{t(language, "Open Business AI Coach", "Abrir Coach Empresarial IA")}</Text>
                   </Pressable>
                   <Pressable style={styles.systemSecondaryButton} onPress={() => Linking.openURL(WEB_GROWTH_PLAN_URL)}>
-                    <Text style={styles.systemSecondaryButtonText}>{t(language, "Growth Plan", "Growth Plan")}</Text>
+                    <Text style={styles.systemSecondaryButtonText}>{t(language, "Business Plan", "Plan Empresarial")}</Text>
                   </Pressable>
                 </View>
               </View>

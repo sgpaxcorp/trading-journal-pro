@@ -115,11 +115,34 @@ function rowToJournalEntry(row: any): JournalEntry {
    GET: todos los journals
 ========================= */
 
-export async function getAllJournalEntries(userId: string, accountId?: string | null): Promise<JournalEntry[]> {
+type JournalEntryQueryOptions = {
+  accountId?: string | null;
+  fromDate?: string;
+  toDate?: string;
+};
+
+export async function getAllJournalEntries(
+  userId: string,
+  accountIdOrOptions?: string | null | JournalEntryQueryOptions,
+  rangeOptions?: { fromDate?: string; toDate?: string }
+): Promise<JournalEntry[]> {
   if (!userId) return [];
 
+  const opts: JournalEntryQueryOptions =
+    typeof accountIdOrOptions === "object" && accountIdOrOptions !== null
+      ? accountIdOrOptions
+      : {
+          accountId: accountIdOrOptions ?? null,
+          fromDate: rangeOptions?.fromDate,
+          toDate: rangeOptions?.toDate,
+        };
+
   // Prefer server-side read (bypasses RLS / legacy id mismatches)
-  const serverRows = await fetchJournalEntriesViaApi({ accountId });
+  const serverRows = await fetchJournalEntriesViaApi({
+    accountId: opts.accountId,
+    fromDate: opts.fromDate,
+    toDate: opts.toDate,
+  });
   if (serverRows && serverRows.length > 0) {
     return serverRows.map(rowToJournalEntry);
   }
@@ -131,8 +154,14 @@ export async function getAllJournalEntries(userId: string, accountId?: string | 
     )
     .eq("user_id", userId);
 
-  if (accountId) {
-    query = query.eq("account_id", accountId);
+  if (opts.accountId) {
+    query = query.eq("account_id", opts.accountId);
+  }
+  if (opts.fromDate) {
+    query = query.gte("date", opts.fromDate);
+  }
+  if (opts.toDate) {
+    query = query.lte("date", opts.toDate);
   }
 
   const { data, error } = await query.order("date", { ascending: true });

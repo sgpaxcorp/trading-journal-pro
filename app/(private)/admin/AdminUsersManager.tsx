@@ -22,7 +22,6 @@ type AdminUserSummary = {
   bannedUntil: string | null;
   plan: string | null;
   subscriptionStatus: string | null;
-  showInRanking: boolean;
   sessions30d: number;
   events30d: number;
   activeEntitlements: string[];
@@ -446,9 +445,6 @@ export default function AdminUsersManager({ lang }: Props) {
                       <td className="py-4 pr-4">
                         <div className="space-y-1 text-xs">
                           <div className="text-slate-200">{row.plan ?? "—"} · {row.subscriptionStatus ?? "—"}</div>
-                          <div className="text-slate-400">
-                            {row.showInRanking ? L("Ranking visible", "Ranking visible") : L("Ranking hidden", "Ranking oculto")}
-                          </div>
                           <div className="text-slate-500">
                             {L("Source", "Origen")}: {row.accessSource ?? "—"}
                           </div>

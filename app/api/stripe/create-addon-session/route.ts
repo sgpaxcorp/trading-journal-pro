@@ -2,6 +2,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
+import { getClientIp, rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {});
 const APP_URL = (process.env.NEXT_PUBLIC_APP_URL || "").trim();
@@ -43,6 +44,23 @@ export async function POST(req: NextRequest) {
 
     const userId = authData.user.id;
     const email = authData.user.email ?? "";
+    const limiter = await rateLimit(`stripe-addon-checkout:${userId}:${getClientIp(req)}`, {
+      limit: 10,
+      windowMs: 10 * 60_000,
+    });
+    if (!limiter.allowed) {
+      const retryAfter = Math.max(1, Math.ceil((limiter.resetAt - Date.now()) / 1000));
+      return NextResponse.json(
+        { error: "Too many checkout attempts. Please try again later." },
+        {
+          status: 429,
+          headers: {
+            "Retry-After": String(retryAfter),
+            ...rateLimitHeaders(limiter),
+          },
+        }
+      );
+    }
 
     const body = await req.json();
     const addonKey = (body.addonKey as string | undefined) || DEFAULT_ADDON_KEY;

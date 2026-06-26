@@ -418,7 +418,7 @@ export default function OrderHistoryAuditPanel({
                   </ul>
                 ) : (
                   <p className="mt-2 text-sm text-slate-400">
-                    {L("No active rules found in Growth Plan.", "No hay reglas activas en el Growth Plan.")}
+                    {L("No active rules found in the Trading Business Plan.", "No hay reglas activas en el Plan de Empresa de Trading.")}
                   </p>
                 )}
               </div>

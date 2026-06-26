@@ -5,6 +5,7 @@ import { requireBrokerSyncAddon } from "@/lib/serverFeatureAccess";
 import { requirePlatformAccess } from "@/lib/serverPlatformAccess";
 
 export const runtime = "nodejs";
+const MAX_ORDER_LOOKBACK_DAYS = 180;
 
 function queryToObject(searchParams: URLSearchParams) {
   const out: Record<string, string> = {};
@@ -14,6 +15,15 @@ function queryToObject(searchParams: URLSearchParams) {
     }
   });
   return out;
+}
+
+function parseDays(value?: string) {
+  if (!value) return undefined;
+  const days = Number(value);
+  if (!Number.isInteger(days) || days < 1 || days > MAX_ORDER_LOOKBACK_DAYS) {
+    return null;
+  }
+  return days;
 }
 
 export async function GET(
@@ -45,8 +55,13 @@ export async function GET(
     const { searchParams } = new URL(req.url);
     const extra = queryToObject(searchParams);
 
-    const daysRaw = extra?.days ? Number(extra.days) : undefined;
-    const days = Number.isFinite(daysRaw) ? daysRaw : undefined;
+    const days = parseDays(extra?.days);
+    if (days === null) {
+      return NextResponse.json(
+        { error: `days must be an integer between 1 and ${MAX_ORDER_LOOKBACK_DAYS}.` },
+        { status: 400 }
+      );
+    }
     const data = await snaptradeGetOrders(row.snaptrade_user_id, row.snaptrade_user_secret, accountId, days);
     return NextResponse.json({ orders: data?.orders ?? data });
   } catch (err: any) {

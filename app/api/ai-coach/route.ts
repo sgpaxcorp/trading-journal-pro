@@ -45,7 +45,6 @@ type AiCoachRequestBody = {
   growthPlan?: any;
   cashflowsSummary?: any;
   fullSnapshot?: any;
-  gamification?: any;
   userProfile?: any;
 
   stylePreset?: any;
@@ -1184,7 +1183,7 @@ function buildGrowthPlanOperatingBlock(body: AiCoachRequestBody): string {
     const planStartDate = safeString(growthPlan?.planStartDate || "");
 
     lines.push(
-      `Growth Plan objective: start=${usd(start)}, target=${usd(target)}${targetDate ? `, targetDate=${targetDate}` : ""}${planStartDate ? `, planStart=${planStartDate}` : ""}${planMode ? `, mode=${planMode}` : ""}`
+      `Trading Business Plan objective: start=${usd(start)}, target=${usd(target)}${targetDate ? `, targetDate=${targetDate}` : ""}${planStartDate ? `, planStart=${planStartDate}` : ""}${planMode ? `, mode=${planMode}` : ""}`
     );
     lines.push(
       `Risk rails: dailyTarget=${pct(dailyTargetPct)}, maxDailyLoss=${pct(maxDailyLossPercent)}, maxRiskPerTrade=${Number.isFinite(maxRiskPerTradeUsd) && maxRiskPerTradeUsd > 0 ? usd(maxRiskPerTradeUsd) : pct(maxRiskPerTradePercent)}, tradingDays=${Number.isFinite(tradingDays) ? tradingDays : "—"}, lossDaysPerWeek=${Number.isFinite(lossDaysPerWeek) ? lossDaysPerWeek : "—"}`
@@ -1444,10 +1443,10 @@ function buildFullJournalRetrievalBlock(body: AiCoachRequestBody): string {
 
   const lines: string[] = [];
   lines.push(
-    `Full journal scan: sessions=${filtered.length}, green=${greenSessions}, red=${redSessions}, planViolations=${planViolations}${startIso ? `, window=${startIso}${endIso ? ` → ${endIso}` : ""}` : ""}`
+    `Full execution record scan: sessions=${filtered.length}, green=${greenSessions}, red=${redSessions}, planViolations=${planViolations}${startIso ? `, window=${startIso}${endIso ? ` → ${endIso}` : ""}` : ""}`
   );
   lines.push(
-    "Retrieved from full journal corpus:\n" +
+    "Retrieved from full execution record corpus:\n" +
       selected
         .map((entry) => {
           const bits = [
@@ -1547,30 +1546,6 @@ function buildContextText(body: AiCoachRequestBody, lang: "es" | "en"): string {
     lines.push(comparisonsBlock);
   }
 
-  const gamification = body.gamification || body.fullSnapshot?.profileGamification;
-  if (gamification) {
-    const level = Number(gamification?.level);
-    const tier = safeString(gamification?.tier || "");
-    const xp = Number(gamification?.xp);
-    const badges = Array.isArray(gamification?.badges) ? gamification.badges.length : 0;
-    lines.push(
-      `Gamification: level=${Number.isFinite(level) ? level : "—"}, tier=${tier || "—"}, xp=${Number.isFinite(xp) ? xp : "—"}, badges=${badges}`
-    );
-  }
-
-  const challenges = Array.isArray(body.fullSnapshot?.challenges) ? body.fullSnapshot?.challenges : [];
-  if (challenges.length) {
-    const summarized = challenges.slice(0, 6).map((c: any) => {
-      const id = safeString(c?.challengeId || c?.challenge_id || "");
-      const status = safeString(c?.status || "");
-      const tracked = Number(c?.daysTracked ?? c?.days_tracked);
-      const duration = Number(c?.durationDays ?? c?.duration_days);
-      const streak = Number(c?.currentStreak ?? c?.current_streak);
-      return `- ${id || "(challenge)"} · status=${status || "—"} · ${Number.isFinite(tracked) ? tracked : "—"}/${Number.isFinite(duration) ? duration : "—"} days · streak=${Number.isFinite(streak) ? streak : "—"}`;
-    });
-    lines.push("Challenges (latest runs):\n" + summarized.join("\n"));
-  }
-
   const recent = Array.isArray(body.recentSessions) ? body.recentSessions : [];
   const relevant = Array.isArray(body.relevantSessions) ? body.relevantSessions : [];
 
@@ -1625,12 +1600,12 @@ function buildSystemPrompt(params: {
 
   if (lang === "es") {
     return [
-      "Eres un coach de trading 1:1. Tu objetivo principal es aumentar la probabilidad de que el usuario cumpla su Growth Plan y el próximo checkpoint usando SOLO el contexto provisto.",
+      "Eres un coach 1:1 para Empresarios Traders. Tu objetivo principal es aumentar la probabilidad de que el usuario cumpla su Plan de Empresa de Trading y el próximo checkpoint usando SOLO el contexto provisto.",
       "Estilo obligatorio:",
       `- Habla como un coach humano (cercano, directo, sin sonar robótico). Puedes usar el nombre del usuario: ${firstName}.`,
       "- Responde a la pregunta específica primero; no des un reporte genérico.",
-      "- Si hay contexto de Growth Plan, piensa como un operador del plan: primero ubica al usuario contra la meta, luego identifica el bloqueo principal, luego da la acción de mayor leverage.",
-      "- Si el Growth Plan incluye estrategia, reglas o límites exactos, úsalos como ancla factual. Puedes sintetizarlos en lenguaje más claro y humano, pero sin distorsionar el significado.",
+      "- Si hay contexto de Plan de Empresa de Trading, piensa como un operador del plan: primero ubica al usuario contra la meta, luego identifica el bloqueo principal, luego da la acción de mayor leverage.",
+      "- Si el Plan de Empresa de Trading incluye estrategia, reglas o límites exactos, úsalos como ancla factual. Puedes sintetizarlos en lenguaje más claro y humano, pero sin distorsionar el significado.",
       "- Mantén la respuesta en segmentos cortos (párrafos breves + bullets cuando ayude).",
       `- ${allowTables ? "Puedes usar tablas si el usuario las pidió." : "NO uses tablas Markdown salvo que el usuario explícitamente pida una tabla/desglose."}`,
       "- NO asumas ni inventes datos. Si algo no está en el contexto, dilo explícitamente.",
@@ -1642,7 +1617,7 @@ function buildSystemPrompt(params: {
       "- Si hay KPIs en el contexto, interprétalos usando su definición y notas; si un KPI no tiene valor, di que falta data.",
       "- Si el contexto incluye entradas/salidas o una secuencia cronológica, NARRA lo que pasó (orden de entradas/salidas, re-entrada, stop-out, recuperación) usando los tiempos/precios del contexto.",
       "- Si el contexto incluye Neuro Layer / Neuro Score / Neuro Insight, úsalo para comparar plan inicial, ejecución real y verdad post-trade. Señala drift cognitivo solo cuando el soporte sea claro.",
-      "- Usa el journal completo de forma inteligente: prioriza las sesiones recuperadas del corpus completo cuando expliquen mejor el patrón que las sesiones recientes.",
+      "- Usa el registro de ejecución completo de forma inteligente: prioriza las sesiones recuperadas del corpus completo cuando expliquen mejor el patrón que las sesiones recientes.",
       "- Pre‑prompt obligatorio: si NO hay resultados de Audit (Order History) en el contexto, pide al usuario que vaya a Back‑Studying → Audit y comparta el resumen o screenshots.",
       "- Si el usuario pregunta por “qué hubiera pasado” pero solo hay subyacente (sin precio real del contrato), explica la limitación y pide el precio del contrato a esa hora para continuar.",
       "- Nunca digas que “no puedes ver imágenes”. Si hay screenshot adjunto o contexto de back-study, úsalo.",
@@ -1658,12 +1633,12 @@ function buildSystemPrompt(params: {
   }
 
   return [
-    "You are a 1:1 trading coach. Your primary job is to increase the user's probability of reaching the Growth Plan and the next checkpoint using ONLY the provided context.",
+    "You are a 1:1 coach for Trader Entrepreneurs. Your primary job is to increase the user's probability of reaching the Trading Business Plan and the next checkpoint using ONLY the provided context.",
     "Required style:",
     `- Sound human (warm, direct, not robotic). You may use the user's name: ${firstName}.`,
     "- Answer the user's specific question first; do not produce a generic report.",
-    "- If Growth Plan context exists, think like a plan operator: first locate the user versus the target, then identify the main blocker, then give the highest-leverage next action.",
-    "- If the Growth Plan contains exact strategy, rule, or risk language, use it as factual anchor. You may synthesize it into clearer, more human wording, but do not distort the meaning.",
+    "- If Trading Business Plan context exists, think like a plan operator: first locate the user versus the target, then identify the main blocker, then give the highest-leverage next action.",
+    "- If the Trading Business Plan contains exact strategy, rule, or risk language, use it as factual anchor. You may synthesize it into clearer, more human wording, but do not distort the meaning.",
     "- Keep it concise with short paragraphs and bullets when helpful.",
     `- ${allowTables ? "You may use tables if the user asked for them." : "Do NOT use Markdown tables unless the user explicitly asked for a table/breakdown."}`,
     "- Do NOT assume or invent data. If something is not in the context, say so explicitly.",
@@ -1675,7 +1650,7 @@ function buildSystemPrompt(params: {
     "- If KPI results are provided, interpret them using their definition/notes; if a KPI has no value, say data is insufficient.",
     "- If context includes entries/exits or a chronological sequence, NARRATE what happened (entry/exit order, re-entry, stop-out, recovery) using the times/prices from context.",
     "- If Neuro Layer / Neuro Score / Neuro Insight are present, use them to compare the original plan, live execution, and post-trade truth. Only call cognitive drift when the support is clear.",
-    "- Use the full journal intelligently: prioritize sessions retrieved from the full journal corpus when they explain the pattern better than the recent sample.",
+    "- Use the full execution record intelligently: prioritize sessions retrieved from the full corpus when they explain the pattern better than the recent sample.",
     "- Required pre‑prompt: if Audit (Order History) results are NOT in context, ask the user to open Back‑Studying → Audit and share the summary or screenshots.",
     "- If the user asks “what would have happened” but only underlying prices exist (no option contract price), state the limitation and ask for the contract price at that time to continue.",
     "- Never say you “can’t see images”. If a screenshot or back-study context is provided, use it.",
@@ -1846,11 +1821,11 @@ async function buildCoachActionPlan(params: {
   const system =
     lang === "es"
       ? [
-          "Extrae un plan de acción operativo desde una respuesta de coaching de trading, anclado al Growth Plan del usuario.",
+          "Extrae un plan de acción operativo desde una respuesta de coaching de trading, anclado al Plan de Empresa de Trading del usuario.",
           "Devuelve SOLO JSON válido con este shape exacto:",
           '{"summary":"", "whatISee":"", "whatIsDrifting":"", "whatToProtect":"", "whatChangesNextSession":"", "nextAction":"", "ruleToAdd":"", "ruleToRemove":"", "checkpointFocus":""}',
           "Reglas:",
-          "- Usa SOLO dos fuentes: 1) el bloque Growth Plan context, 2) la respuesta del coach.",
+          "- Usa SOLO dos fuentes: 1) el bloque Trading Business Plan context, 2) la respuesta del coach.",
           "- NO inventes reglas, porcentajes, tamaños, instrumentos, setups, checkpoints ni límites.",
           "- Usa el plan del usuario como base factual, pero puedes reformular en lenguaje más claro, más útil y más humano si sigues siendo fiel al significado.",
           "- Debe sentirse como un coach real: observador, honesto, concreto y sin vender certezas.",
@@ -1866,11 +1841,11 @@ async function buildCoachActionPlan(params: {
           "- Si una clave no está soportada por el contexto, usa string vacío.",
         ].join("\n")
       : [
-          "Extract an operational action plan from a trading coaching response, anchored to the user's Growth Plan.",
+          "Extract an operational action plan from a trading coaching response, anchored to the user's Trading Business Plan.",
           "Return ONLY valid JSON with this exact shape:",
           '{"summary":"", "whatISee":"", "whatIsDrifting":"", "whatToProtect":"", "whatChangesNextSession":"", "nextAction":"", "ruleToAdd":"", "ruleToRemove":"", "checkpointFocus":""}',
           "Rules:",
-          "- Use ONLY two sources: 1) the Growth Plan context block, 2) the coach response.",
+          "- Use ONLY two sources: 1) the Trading Business Plan context block, 2) the coach response.",
           "- Do NOT invent rules, percentages, sizes, instruments, setups, checkpoints, or limits.",
           "- Use the user's plan as factual base, but you may rephrase it into clearer, more useful, more human language if you stay faithful to the meaning.",
           "- It should feel like a real coach: observant, honest, concrete, and free of false certainty.",
@@ -1894,7 +1869,7 @@ async function buildCoachActionPlan(params: {
       { role: "system", content: system },
       {
         role: "user",
-        content: `Growth Plan context:\n${clampText(planContext, 2400) || "(none)"}\n\nQuestion:\n${clampText(
+        content: `Trading Business Plan context:\n${clampText(planContext, 2400) || "(none)"}\n\nQuestion:\n${clampText(
           question,
           500
         )}\n\nCoach response:\n${clampText(coachText, 2200)}`,

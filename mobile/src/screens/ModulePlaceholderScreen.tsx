@@ -1,17 +1,15 @@
 import { RouteProp, useNavigation } from "@react-navigation/native";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Linking, Pressable, StyleSheet, Text, View } from "react-native";
 import { useMemo } from "react";
 
 import { useLanguage } from "../lib/LanguageContext";
 import { t } from "../lib/i18n";
+import type { ModuleRouteParams } from "../lib/moduleNavigation";
 import { type ThemeColors } from "../theme";
 import { useTheme } from "../lib/ThemeContext";
 
 type Params = {
-  Module: {
-    title: string;
-    description: string;
-  };
+  Module: ModuleRouteParams;
 };
 
 type Props = {
@@ -27,23 +25,36 @@ export function ModulePlaceholderScreen({ route }: Props) {
   return (
     <View style={styles.root}>
       <View style={styles.card}>
-        <Text style={styles.badge}>{t(language, "Overview", "Resumen")}</Text>
+        <Text style={styles.badge}>{route.params.badge ?? t(language, "Overview", "Resumen")}</Text>
         <Text style={styles.title}>{route.params.title}</Text>
         <Text style={styles.description}>{route.params.description}</Text>
 
         <View style={styles.ruleBox}>
           <Text style={styles.ruleText}>
-            {t(
-              language,
-              "This section will show your data as soon as you start using the feature.",
-              "Esta sección mostrará tu data cuando empieces a usar la función."
-            )}
+            {route.params.detail ??
+              t(
+                language,
+                "This section will show your data as soon as you start using the feature.",
+                "Esta sección mostrará tu data cuando empieces a usar la función."
+              )}
           </Text>
         </View>
 
-        <Pressable style={styles.cta} onPress={() => navigation.goBack()}>
-          <Text style={styles.ctaText}>{t(language, "Go back", "Volver")}</Text>
-        </Pressable>
+        <View style={styles.actionRow}>
+          {route.params.ctaUrl ? (
+            <Pressable
+              style={[styles.cta, styles.secondaryCta]}
+              onPress={() => void Linking.openURL(route.params.ctaUrl!)}
+            >
+              <Text style={styles.secondaryCtaText}>
+                {route.params.ctaLabel ?? t(language, "Open website", "Abrir website")}
+              </Text>
+            </Pressable>
+          ) : null}
+          <Pressable style={styles.cta} onPress={() => navigation.goBack()}>
+            <Text style={styles.ctaText}>{t(language, "Go back", "Volver")}</Text>
+          </Pressable>
+        </View>
       </View>
     </View>
   );
@@ -110,8 +121,24 @@ const createStyles = (colors: ThemeColors) =>
       paddingHorizontal: 12,
       paddingVertical: 8,
     },
+    actionRow: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: 10,
+      marginTop: 6,
+    },
     ctaText: {
       color: colors.onPrimary,
+      fontSize: 12,
+      fontWeight: "700",
+    },
+    secondaryCta: {
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    secondaryCtaText: {
+      color: colors.textPrimary,
       fontSize: 12,
       fontWeight: "700",
     },

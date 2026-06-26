@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { supabaseBrowser } from "@/lib/supaBaseClient";
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
+import { passwordPolicyHint, validatePasswordPolicy } from "@/lib/passwordPolicy";
 
 export default function ResetPasswordClient() {
   const router = useRouter();
@@ -67,8 +68,9 @@ export default function ResetPasswordClient() {
     setError(null);
     setMessage(null);
 
-    if (password.length < 8) {
-      setError(L("Password must be at least 8 characters.", "La contraseña debe tener al menos 8 caracteres."));
+    const passwordError = validatePasswordPolicy(password, L);
+    if (passwordError) {
+      setError(passwordError);
       return;
     }
     if (password !== confirm) {
@@ -107,8 +109,8 @@ export default function ResetPasswordClient() {
                 "Esta ruta de preview se usa en los emails de prueba del admin. Muestra la página exacta que reciben los usuarios, sin cambiar ninguna contraseña real."
               )
             : L(
-                "Open the reset email from the same browser, then choose a new password for your NeuroTrader Journal account.",
-                "Abre el email de reset desde este mismo navegador y luego elige una nueva contraseña para tu cuenta de NeuroTrader Journal."
+                "Open the reset email from the same browser, then choose a new password for your NeuroTrader account.",
+                "Abre el email de reset desde este mismo navegador y luego elige una nueva contraseña para tu cuenta de NeuroTrader."
               )}
         </p>
 
@@ -135,6 +137,7 @@ export default function ResetPasswordClient() {
               className="rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-slate-100 outline-none focus:border-emerald-400"
               autoComplete="new-password"
             />
+            <span className="text-[10px] text-slate-500">{passwordPolicyHint(L)}</span>
           </label>
           <label className="flex flex-col gap-2">
             <span className="text-xs text-slate-400">{L("Confirm new password", "Confirmar nueva contraseña")}</span>

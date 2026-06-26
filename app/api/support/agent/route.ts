@@ -5,6 +5,7 @@ import OpenAI from "openai";
 import { NextRequest, NextResponse } from "next/server";
 
 import { getAuthUser } from "@/lib/authServer";
+import { isAdminAccount } from "@/lib/adminAuth";
 import { getClientIp, rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 
@@ -39,27 +40,6 @@ type AgentDecision = {
   rationale: string;
   suggestedCategory: string;
 };
-
-function parseAdminEmails(envValue?: string | null) {
-  return (envValue || "")
-    .split(",")
-    .map((value) => value.trim().toLowerCase())
-    .filter(Boolean);
-}
-
-async function isAdmin(userId: string, email?: string | null) {
-  const { data, error } = await supabaseAdmin
-    .from("admin_users")
-    .select("user_id,active")
-    .eq("user_id", userId)
-    .eq("active", true)
-    .limit(1);
-
-  if (!error && (data ?? []).length > 0) return true;
-
-  const allowList = parseAdminEmails(process.env.ADMIN_EMAILS);
-  return Boolean(email && allowList.includes(email.toLowerCase()));
-}
 
 function detectLanguage(text: string): "es" | "en" {
   const lower = text.toLowerCase();
@@ -233,14 +213,14 @@ async function createAgentDecision(params: {
   const instructions =
     params.language === "es"
       ? [
-          "Eres el agente de servicio de NeuroTrader Journal.",
+          "Eres el agente de servicio de NeuroTrader, la plataforma empresarial de trading para Empresarios Traders.",
           "Responde solo con información sustentada por la conversación y el contexto de ayuda provisto.",
           "Si la pregunta requiere revisar cuenta específica, pagos excepcionales, reembolso, bug técnico, activación manual, o algo no claramente cubierto por la documentación, NO inventes: marca canAnswer=false.",
           "Si sí puedes responder, da una respuesta corta, clara y útil en el mismo idioma del usuario.",
           "Devuelve JSON válido solamente con las claves: canAnswer, reply, rationale, suggestedCategory.",
         ].join(" ")
       : [
-          "You are the NeuroTrader Journal service agent.",
+          "You are the NeuroTrader service agent, the Trading Business Platform for Trader Entrepreneurs.",
           "Answer only with information supported by the ticket conversation and the provided help context.",
           "If the request needs account-specific investigation, refund exceptions, technical bug triage, manual activation, or anything not clearly supported by the docs, do NOT guess: set canAnswer=false.",
           "If you can answer, keep it short, clear, and useful in the user's language.",
@@ -301,7 +281,7 @@ export async function POST(req: NextRequest) {
         .select("id,user_id,subject,status")
         .eq("id", ticketId)
         .maybeSingle(),
-      isAdmin(authUser.userId, authUser.email),
+      isAdminAccount(authUser.userId, authUser.email),
     ]);
 
     if (ticketError || !ticket) {

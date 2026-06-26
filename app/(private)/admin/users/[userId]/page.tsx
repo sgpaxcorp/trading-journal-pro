@@ -28,7 +28,6 @@ type AdminUserDetail = {
   bannedUntil: string | null;
   plan: string | null;
   subscriptionStatus: string | null;
-  showInRanking: boolean;
   sessions30d: number;
   events30d: number;
   activeEntitlements: string[];
@@ -53,8 +52,8 @@ const GROUP_META = {
     es: { title: "Herramientas", hint: "Utilidades de ejecución" },
   },
   community: {
-    en: { title: "Community", hint: "Social and ranking areas" },
-    es: { title: "Comunidad", hint: "Áreas sociales y ranking" },
+    en: { title: "Community", hint: "Social areas" },
+    es: { title: "Comunidad", hint: "Áreas sociales" },
   },
   addons: {
     en: { title: "Add-ons", hint: "Extra capabilities" },
@@ -391,12 +390,6 @@ export default function AdminUserDetailPage({
                 <div className="rounded-2xl border border-slate-800 bg-slate-950/50 p-4">
                   <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">{L("Last activity", "Última actividad")}</div>
                   <div className="mt-2 text-sm text-slate-100">{formatDateTime(detail.lastActiveAt)}</div>
-                </div>
-                <div className="rounded-2xl border border-slate-800 bg-slate-950/50 p-4">
-                  <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">{L("Ranking", "Ranking")}</div>
-                  <div className="mt-2 text-sm text-slate-100">
-                    {detail.showInRanking ? L("Visible", "Visible") : L("Hidden", "Oculto")}
-                  </div>
                 </div>
                 <div className="rounded-2xl border border-slate-800 bg-slate-950/50 p-4">
                   <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">{L("Source", "Origen")}</div>

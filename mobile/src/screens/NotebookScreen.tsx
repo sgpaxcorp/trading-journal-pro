@@ -104,7 +104,7 @@ export function NotebookScreen() {
   const [manageBookError, setManageBookError] = useState<string | null>(null);
 
   async function reloadNotebookData(options?: { showLoading?: boolean }) {
-    if (!planAccess.isAdvanced) return;
+    if (!planAccess.hasNotebook) return;
     if (!supabaseMobile || !user?.id) return;
 
     const showLoading = options?.showLoading ?? false;
@@ -173,10 +173,10 @@ export function NotebookScreen() {
   }
 
   useEffect(() => {
-    if (!planAccess.isAdvanced) return;
+    if (!planAccess.hasNotebook) return;
     if (!supabaseMobile || !user?.id) return;
     void reloadNotebookData({ showLoading: true });
-  }, [language, planAccess.isAdvanced, user?.id]);
+  }, [language, planAccess.hasNotebook, user?.id]);
 
   useEffect(() => {
     if (activeShelf === "journal" && journalDates.length === 0 && books.length > 0) {
@@ -188,7 +188,7 @@ export function NotebookScreen() {
   }, [activeShelf, books.length, journalDates.length]);
 
   async function handleRefresh() {
-    if (!planAccess.isAdvanced) return;
+    if (!planAccess.hasNotebook) return;
     if (!supabaseMobile || !user?.id) return;
     setRefreshing(true);
     try {
@@ -231,24 +231,24 @@ export function NotebookScreen() {
             stripHtml(note?.content) ||
             t(
               language,
-              "Open this journal notebook page.",
-              "Abre esta página del journal notebook."
+              "Open this daily business notebook page.",
+              "Abre esta página diaria del notebook empresarial."
             ),
         };
       }),
     [journalDates, journalNoteMap, language]
   );
 
-  if (!planAccess.isAdvanced) {
+  if (!planAccess.hasNotebook) {
     return (
       <PlanGate
-        title={t(language, "Notebook", "Notebook")}
+        title={t(language, "Business Notebook", "Notebook Empresarial")}
         badge="Advanced"
         loading={planAccess.loading}
         subtitle={t(
           language,
-          "Custom notebooks, Journal Notebook pages, sections, ink, and research notes are included in Advanced.",
-          "Libretas custom, Journal Notebook pages, secciones, ink y notas de research están incluidas en Advanced."
+          "Custom business notebooks, daily pages, sections, ink, and research notes are included in Advanced.",
+          "Notebooks empresariales custom, páginas diarias, secciones, ink y notas de research están incluidas en Advanced."
         )}
       />
     );
@@ -279,7 +279,7 @@ export function NotebookScreen() {
     } catch (err: any) {
       setError(
         err?.message ??
-          t(language, "We couldn't open this journal page.", "No pudimos abrir esta página del journal.")
+          t(language, "We couldn't open this daily business page.", "No pudimos abrir esta página empresarial diaria.")
       );
     }
   }
@@ -409,11 +409,11 @@ export function NotebookScreen() {
 
   return (
     <ScreenScaffold
-      title={t(language, "Notebook", "Notebook")}
+      title={t(language, "Business Notebook", "Notebook Empresarial")}
       subtitle={t(
         language,
-        "Open journal pages by date or manage your custom notebook library.",
-        "Abre páginas del journal por fecha o gestiona tu biblioteca de notebooks custom."
+        "Open daily business pages by date or manage your custom notebook library.",
+        "Abre páginas empresariales diarias por fecha o gestiona tu biblioteca de notebooks custom."
       )}
       refreshing={refreshing}
       onRefresh={handleRefresh}
@@ -442,12 +442,12 @@ export function NotebookScreen() {
               <View style={[styles.shelfIconBubble, activeShelf === "journal" && styles.shelfIconBubbleActive]}>
                 <Ionicons name="calendar-clear-outline" size={22} color={colors.primary} />
               </View>
-              <Text style={styles.shelfTitle}>{t(language, "Journal Notebook", "Journal Notebook")}</Text>
+              <Text style={styles.shelfTitle}>{t(language, "Daily Business Pages", "Páginas Empresariales Diarias")}</Text>
               <Text style={styles.shelfCaption}>
                 {t(
                   language,
-                  "Each day from Journal Date lives here as its own notebook page.",
-                  "Cada día de Journal Date vive aquí como su propia página."
+                  "Each execution day lives here as its own notebook page.",
+                  "Cada día de ejecución vive aquí como su propia página."
                 )}
               </Text>
             </Pressable>
@@ -463,7 +463,7 @@ export function NotebookScreen() {
               <View style={[styles.shelfIconBubble, activeShelf === "custom" && styles.shelfIconBubbleActive]}>
                 <Ionicons name="library-outline" size={22} color={colors.primary} />
               </View>
-              <Text style={styles.shelfTitle}>{t(language, "Custom Notebooks", "Custom Notebooks")}</Text>
+              <Text style={styles.shelfTitle}>{t(language, "Custom Business Notebooks", "Notebooks Empresariales Custom")}</Text>
               <Text style={styles.shelfCaption}>
                 {t(
                   language,
@@ -477,13 +477,13 @@ export function NotebookScreen() {
           {activeShelf === "journal" ? (
             <View style={styles.sectionCard}>
               <Text style={styles.sectionTitle}>
-                {t(language, "Journal Notebook", "Journal Notebook")}
+                {t(language, "Daily Business Pages", "Páginas Empresariales Diarias")}
               </Text>
               <Text style={styles.sectionHint}>
                 {t(
                   language,
-                  "These pages come from days you created or traded in Journal Date.",
-                  "Estas páginas salen de los días que creaste o tradeaste en Journal Date."
+                  "These pages come from days you created or traded in the Execution Journal.",
+                  "Estas páginas salen de los días que creaste u operaste en el Registro de Ejecución."
                 )}
               </Text>
 
@@ -493,8 +493,8 @@ export function NotebookScreen() {
                   <Text style={styles.emptyText}>
                     {t(
                       language,
-                      "No journal notebook pages yet. Once you trade or write in Journal Date, the day appears here.",
-                      "Aún no hay páginas del journal notebook. Cuando tradees o escribas en Journal Date, el día aparecerá aquí."
+                      "No daily business pages yet. Once you trade or write in the Execution Journal, the day appears here.",
+                      "Aún no hay páginas empresariales diarias. Cuando tradees o escribas en el Registro de Ejecución, el día aparecerá aquí."
                     )}
                   </Text>
                 </View>
@@ -524,7 +524,7 @@ export function NotebookScreen() {
           ) : (
             <View style={styles.sectionCard}>
               <Text style={styles.sectionTitle}>
-                {t(language, "Custom Notebooks", "Custom Notebooks")}
+                {t(language, "Custom Business Notebooks", "Notebooks Empresariales Custom")}
               </Text>
               <Text style={styles.sectionHint}>
                 {t(

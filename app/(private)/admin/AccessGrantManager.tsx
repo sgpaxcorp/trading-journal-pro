@@ -29,8 +29,8 @@ const GROUP_META = {
     es: { title: "Herramientas", hint: "Utilidades de ejecución" },
   },
   community: {
-    en: { title: "Community", hint: "Social and ranking areas" },
-    es: { title: "Comunidad", hint: "Áreas sociales y de ranking" },
+    en: { title: "Community", hint: "Social areas" },
+    es: { title: "Comunidad", hint: "Áreas sociales" },
   },
   addons: {
     en: { title: "Add-ons", hint: "Extra capabilities" },

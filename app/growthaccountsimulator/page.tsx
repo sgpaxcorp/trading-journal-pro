@@ -118,7 +118,7 @@ export default function GrowthAccountSimulator() {
     <main className="min-h-screen bg-slate-950 text-slate-50 flex flex-col items-center justify-center px-6 py-10">
       <div className="max-w-2xl w-full bg-slate-900/90 border border-slate-800 rounded-2xl p-8 shadow-2xl">
         <h1 className="text-3xl font-semibold text-center mb-4 text-emerald-400">
-          {L("Growth Plan Simulator", "Simulador de Growth Plan")}
+          {L("Trading Business Plan Simulator", "Simulador de Plan de Empresa de Trading")}
         </h1>
         <p className="text-slate-400 text-center mb-8 text-sm">
           {L(

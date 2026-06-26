@@ -54,6 +54,21 @@ export type WebullTokenResponse = {
   refresh_expires_in?: number;
 };
 
+const WEBULL_FETCH_TIMEOUT_MS = 10_000;
+
+async function fetchWithTimeout(url: string, init: RequestInit) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), WEBULL_FETCH_TIMEOUT_MS);
+  try {
+    return await fetch(url, {
+      ...init,
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function getWebullConfig() {
   const clientId = process.env.WEBULL_CLIENT_ID?.trim();
   const clientSecret = process.env.WEBULL_CLIENT_SECRET?.trim();
@@ -111,7 +126,7 @@ export function buildWebullAuthUrl(opts: { state: string; scope?: string; redire
 async function requestWebullToken(payload: Record<string, string>) {
   const cfg = getWebullConfig();
   const body = new URLSearchParams(payload);
-  const res = await fetch(`${cfg.apiBase}/openapi/oauth2/token`, {
+  const res = await fetchWithTimeout(`${cfg.apiBase}/openapi/oauth2/token`, {
     method: "POST",
     headers: {
       "Content-Type": "application/x-www-form-urlencoded",
@@ -305,7 +320,7 @@ export async function webullRequest(
     Object.assign(headers, buildSignatureHeaders(url, body));
   }
 
-  const res = await fetch(url.toString(), {
+  const res = await fetchWithTimeout(url.toString(), {
     method,
     headers,
     body: body || undefined,

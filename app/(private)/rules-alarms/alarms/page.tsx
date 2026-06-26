@@ -839,7 +839,7 @@ export default function AlarmsConsolePage() {
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div>
             <div className="text-[11px] uppercase tracking-[0.32em] text-emerald-400">
-              {L("Trading Protection System • Critical Alarms", "Sistema de protección de trading • Alarmas críticas")}
+              {L("Business Protection System • Critical Alarms", "Sistema de Protección Empresarial • Alarmas críticas")}
             </div>
             <h1 className="mt-2 text-2xl font-semibold text-slate-100">
               {L("Critical alarms & rule enforcement", "Alarmas críticas y ejecución de reglas")}
@@ -1039,7 +1039,7 @@ export default function AlarmsConsolePage() {
                         href={`/journal/${detailOpenJournalDate}`}
                         className="rounded-lg border border-slate-700 bg-slate-900/40 px-3 py-2 text-xs font-semibold text-slate-100 hover:border-emerald-400/60 hover:bg-emerald-500/10"
                       >
-                        {L("Open journal", "Abrir journal")}
+                        {L("Open execution record", "Abrir registro de ejecución")}
                       </Link>
                     ) : null}
                     <button
@@ -1399,8 +1399,8 @@ export default function AlarmsConsolePage() {
                   <div className="rounded-xl border border-slate-800 bg-slate-950/30 p-4 text-sm text-slate-400">
                     {auditOpenCount > 0
                       ? L(
-                          `Open positions detected (${auditOpenCount}), but details are missing. Save your journal trades or sync trades to enable audit actions.`,
-                          `Se detectaron posiciones abiertas (${auditOpenCount}), pero faltan detalles. Guarda tus trades del journal o sincroniza trades para habilitar acciones de auditoría.`
+                          `Open positions detected (${auditOpenCount}), but details are missing. Save your execution trades or sync trades to enable audit actions.`,
+                          `Se detectaron posiciones abiertas (${auditOpenCount}), pero faltan detalles. Guarda tus trades de ejecución o sincroniza trades para habilitar acciones de auditoría.`
                         )
                       : L("No open positions detected.", "No se detectaron posiciones abiertas.")}
                   </div>
@@ -1428,7 +1428,7 @@ export default function AlarmsConsolePage() {
                           </div>
                           <div className="text-[11px] text-slate-500">{L("trade id:", "trade id:")} {tradeId || "—"}</div>
                           {journalDate ? (
-                            <div className="text-[11px] text-slate-500">{L("journal date:", "fecha de journal:")} {journalDate}</div>
+                            <div className="text-[11px] text-slate-500">{L("execution date:", "fecha de ejecución:")} {journalDate}</div>
                           ) : null}
                         </div>
 
@@ -1438,7 +1438,7 @@ export default function AlarmsConsolePage() {
                               href={`/journal/${journalDate}`}
                               className="rounded-lg border border-slate-700 bg-slate-900/40 px-3 py-2 text-xs font-semibold text-slate-100 hover:border-emerald-400/60 hover:bg-emerald-500/10"
                             >
-                              {L("Open journal", "Abrir journal")}
+                              {L("Open execution record", "Abrir registro de ejecución")}
                             </Link>
                           ) : null}
                           <button
@@ -1528,7 +1528,7 @@ export default function AlarmsConsolePage() {
                               </div>
                               <div className="text-[11px] text-slate-500">{L("trade id:", "trade id:")} {tradeId || "—"}</div>
                               {journalDate ? (
-                                <div className="text-[11px] text-slate-500">{L("journal date:", "fecha de journal:")} {journalDate}</div>
+                                <div className="text-[11px] text-slate-500">{L("execution date:", "fecha de ejecución:")} {journalDate}</div>
                               ) : null}
                             </div>
 
@@ -1538,7 +1538,7 @@ export default function AlarmsConsolePage() {
                                   href={`/journal/${journalDate}`}
                                   className="rounded-lg border border-slate-700 bg-slate-900/40 px-3 py-2 text-xs font-semibold text-slate-100 hover:border-emerald-400/60 hover:bg-emerald-500/10"
                                 >
-                                  {L("Open journal", "Abrir journal")}
+                                  {L("Open execution record", "Abrir registro de ejecución")}
                                 </Link>
                               ) : null}
                               <button

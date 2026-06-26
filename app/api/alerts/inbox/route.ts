@@ -18,7 +18,7 @@ export async function POST(req: Request) {
     const auth = { userId: access.context.userId };
 
     const body = await req.json();
-    const title = String(body?.title ?? "AI Coaching update").trim();
+    const title = String(body?.title ?? "Business AI Coach update").trim();
     const message = String(body?.message ?? "").trim();
     const category = String(body?.category ?? "ai_coach").trim();
 

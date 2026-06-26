@@ -98,7 +98,7 @@ export async function getOrCreateMostRecentAiCoachThread(params: {
   userId: string;
   defaultTitle?: string;
 }): Promise<AiCoachThreadRow | null> {
-  const { userId, defaultTitle = "AI Coaching" } = params;
+  const { userId, defaultTitle = "Business AI Coaching" } = params;
 
   const threads = await listAiCoachThreads(userId, { limit: 1 });
   if (threads.length) return threads[0];

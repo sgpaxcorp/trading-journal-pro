@@ -1602,8 +1602,8 @@ export default function NotebookPage() {
             </h1>
             <p className="text-sm text-slate-400 mt-2">
               {L(
-                "Upgrade to Advanced to unlock the full notebook experience, custom pages, and richer journaling.",
-                "Actualiza a Advanced para desbloquear el notebook completo, páginas personalizadas y un journaling más profundo."
+                "Upgrade to Advanced to unlock the full notebook experience, custom pages, and richer execution context.",
+                "Actualiza a Advanced para desbloquear el notebook completo, páginas personalizadas y contexto de ejecución más profundo."
               )}
             </p>
             <div className="mt-4 flex flex-wrap gap-3">
@@ -1755,8 +1755,8 @@ export default function NotebookPage() {
                     <p className="mt-2 text-sm leading-7 text-slate-300">
                       {selectedJournalPreview ||
                         L(
-                          "Review your journal blocks, then use the notebook space to write the context that does not fit inside the structured journal.",
-                          "Revisa tus bloques del journal y luego usa el espacio del notebook para escribir el contexto que no cabe dentro del journal estructurado."
+                          "Review your execution blocks, then use the notebook space to write the context that does not fit inside the structured execution record.",
+                          "Revisa tus bloques de ejecución y luego usa el espacio del notebook para escribir el contexto que no cabe dentro del registro estructurado."
                         )}
                     </p>
                   </div>
@@ -1767,7 +1767,7 @@ export default function NotebookPage() {
                         href={`/journal/${(selectedJournalEntry as any).date}`}
                         className="rounded-full bg-sky-400 px-3 py-1.5 text-xs font-semibold text-slate-950 hover:bg-sky-300 transition"
                       >
-                        {L("Open full journal page", "Abrir journal completo")}
+                        {L("Open full execution record", "Abrir registro completo")}
                       </Link>
                       <Link
                         href={`/journal/${todayStr}`}
@@ -2080,8 +2080,8 @@ export default function NotebookPage() {
                               </h3>
                               <p className="mt-1 text-sm leading-6 text-emerald-50/80">
                                 {L(
-                                  "Notebook is your thinking layer. Keep the facts visible here, write the meaning in your note, and move to AI Coaching only when you want deeper pattern analysis.",
-                                  "Notebook es tu capa de pensamiento. Mantén los hechos visibles aquí, escribe el significado en tu nota y ve a AI Coaching solo cuando quieras análisis más profundo de patrones."
+                                  "Notebook is your thinking layer. Keep the facts visible here, write the meaning in your note, and move to Business AI Coaching only when you want deeper pattern analysis.",
+                                  "Notebook es tu capa de pensamiento. Mantén los hechos visibles aquí, escribe el significado en tu nota y ve al Business AI Coaching solo cuando quieras análisis más profundo de patrones."
                                 )}
                               </p>
                             </div>

@@ -20,6 +20,14 @@ import type { TradesPayload } from "@/lib/journalNotes";
 
 import { type InstrumentType } from "@/lib/journalNotes";
 import {
+  buildInstrumentKeyFromTrade,
+  buildTradeViewsForSession,
+  normalizeBackStudyTradeRows as normalizeTradeRows,
+  parseOptionSymbol,
+  type BackStudyTradeRow,
+  type BackStudyTradeView,
+} from "@/lib/backStudy/tradeReconstruction";
+import {
   createChart,
   CandlestickSeries,
   createSeriesMarkers,
@@ -69,47 +77,15 @@ const CHART_RANGES: {
   { id: "1Y", label: "1 Year", yahooRange: "1y" },
 ];
 
-type SideType = "long" | "short";
-
-type EntryTradeRow = {
-  id?: string;
-  symbol: string;
-  kind: InstrumentType;
-  side: SideType;
-  price: string | number;
-  quantity: string | number;
-  time: string;
-  dte?: number | null;
-  expiry?: string | null;
-};
-
-type ExitTradeRow = EntryTradeRow;
+type EntryTradeRow = BackStudyTradeRow;
+type ExitTradeRow = BackStudyTradeRow;
 
 type SessionWithTrades = JournalEntry & {
   entries: EntryTradeRow[];
   exits: ExitTradeRow[];
 };
 
-type TradeView = {
-  id: string;
-  sequence: number;
-  date: string; // YYYY-MM-DD
-  symbol: string;
-  kind: InstrumentType;
-  entryTime: string;
-  exitTime: string;
-  entryPrice: number | null;
-  exitPrice: number | null;
-  entryAvgPrice: number | null;
-  exitAvgPrice: number | null;
-  entryQty: number;
-  exitQty: number;
-  entries: EntryTradeRow[];
-  exits: ExitTradeRow[];
-  underlyingSymbol: string;
-  contractSymbol?: string;
-  sourceRowIds: string[];
-};
+type TradeView = BackStudyTradeView;
 
 type ChartState = {
   loading: boolean;
@@ -358,275 +334,6 @@ function parseNotesTrades(notesRaw: unknown): {
   }
 }
 
-function normalizeSide(raw: any): SideType {
-  const s = String(raw ?? "").toLowerCase();
-  if (s === "short") return "short";
-  return "long";
-}
-
-function normalizeTradeRows(rows: any[]): EntryTradeRow[] {
-  return rows.map((r, index) => ({
-    id:
-      r?.id != null
-        ? String(r.id)
-        : [
-            String(r?.symbol ?? "").trim(),
-            String(r?.kind ?? "stock").trim(),
-            String(r?.time ?? "").trim(),
-            String(r?.price ?? "").trim(),
-            index,
-          ]
-            .filter(Boolean)
-            .join("-"),
-    symbol: String(r?.symbol ?? ""),
-    kind: (r?.kind ?? "stock") as InstrumentType,
-    side: normalizeSide(r?.side),
-    price: r?.price ?? "",
-    quantity: r?.quantity ?? "",
-    time: String(r?.time ?? ""),
-    dte: r?.dte ?? null,
-    expiry: r?.expiry ?? null,
-  }));
-}
-
-function rowQuantity(row: EntryTradeRow): number {
-  const qty = toNumber(row.quantity);
-  return qty != null && Number.isFinite(qty) ? Math.abs(qty) : 0;
-}
-
-function averageTradePrice(rows: EntryTradeRow[]): number | null {
-  const weighted = rows
-    .map((row) => ({ price: toNumber(row.price), qty: rowQuantity(row) }))
-    .filter((row): row is { price: number; qty: number } => row.price != null && row.qty > 0);
-
-  if (weighted.length) {
-    const totalQty = weighted.reduce((sum, row) => sum + row.qty, 0);
-    if (totalQty > 0) {
-      return weighted.reduce((sum, row) => sum + row.price * row.qty, 0) / totalQty;
-    }
-  }
-
-  const prices = rows
-    .map((row) => toNumber(row.price))
-    .filter((value): value is number => value != null && Number.isFinite(value));
-  if (!prices.length) return null;
-  return prices.reduce((sum, price) => sum + price, 0) / prices.length;
-}
-
-function sortRowsByTime<T extends EntryTradeRow>(rows: T[]): T[] {
-  return [...rows].sort((a, b) => {
-    const ta = parseTimeToMinutesFlexible(a.time || "");
-    const tb = parseTimeToMinutesFlexible(b.time || "");
-    if (ta == null && tb == null) return 0;
-    if (ta == null) return 1;
-    if (tb == null) return -1;
-    return ta - tb;
-  });
-}
-
-function buildTradeViewFromLegs(
-  session: SessionWithTrades,
-  symbol: string,
-  kindRaw: string,
-  entries: EntryTradeRow[],
-  exits: ExitTradeRow[],
-  sequence: number
-): TradeView | null {
-  if (!entries.length && !exits.length) return null;
-
-  const entSorted = sortRowsByTime(entries);
-  const exSorted = sortRowsByTime(exits);
-  const entryRow = entSorted[0] || exSorted[0];
-  const exitRow = exSorted[exSorted.length - 1] || entSorted[entSorted.length - 1] || entryRow;
-  if (!entryRow || !exitRow) return null;
-
-  const kind = ((entryRow?.kind || exSorted[0]?.kind || kindRaw || "stock") as InstrumentType) || "stock";
-  const entryTime = entryRow?.time || "09:30";
-  const exitTime = exitRow?.time || entryTime;
-  const entryPrice = toNumber(entryRow?.price);
-  const exitPrice = toNumber(exitRow?.price);
-  const entryAvgPrice = averageTradePrice(entSorted);
-  const exitAvgPrice = averageTradePrice(exSorted);
-  const entryQty = entSorted.reduce((sum, row) => sum + rowQuantity(row), 0);
-  const exitQty = exSorted.reduce((sum, row) => sum + rowQuantity(row), 0);
-
-  let underlyingSymbol = symbol;
-  let contractSymbol: string | undefined;
-
-  if ((kind as string) === "option") {
-    const parsed = parseSPXOptionSymbol(symbol);
-    const generic = parseGenericOptionUnderlying(symbol);
-    if (parsed) {
-      underlyingSymbol = parsed.underlying;
-      contractSymbol = symbol;
-    } else if (generic) {
-      underlyingSymbol = generic;
-      contractSymbol = symbol;
-    } else {
-      underlyingSymbol = symbol;
-      contractSymbol = symbol;
-    }
-  }
-
-  const sourceRowIds = [...entSorted, ...exSorted]
-    .map((row) => String(row.id ?? "").trim())
-    .filter(Boolean);
-  const sourceKey = sourceRowIds.length ? sourceRowIds.join(":") : `${entryTime}-${exitTime}`;
-  const id = `${session.date}-${symbol}-${kind}-${sequence}-${sourceKey}`;
-
-  return {
-    id,
-    sequence,
-    date: session.date,
-    symbol,
-    kind,
-    entryTime,
-    exitTime,
-    entryPrice,
-    exitPrice,
-    entryAvgPrice: entryAvgPrice != null && Number.isFinite(entryAvgPrice) ? entryAvgPrice : null,
-    exitAvgPrice: exitAvgPrice != null && Number.isFinite(exitAvgPrice) ? exitAvgPrice : null,
-    entryQty: Number.isFinite(entryQty) ? entryQty : 0,
-    exitQty: Number.isFinite(exitQty) ? exitQty : 0,
-    entries: entSorted,
-    exits: exSorted,
-    underlyingSymbol,
-    contractSymbol,
-    sourceRowIds,
-  };
-}
-
-function splitRoundTripTradesForGroup(
-  session: SessionWithTrades,
-  symbol: string,
-  kindRaw: string,
-  entries: EntryTradeRow[],
-  exits: ExitTradeRow[]
-): TradeView[] {
-  type TradeEvent = {
-    leg: "entry" | "exit";
-    row: EntryTradeRow;
-    minutes: number | null;
-    order: number;
-  };
-
-  const events: TradeEvent[] = [
-    ...entries.map((row, order) => ({
-      leg: "entry" as const,
-      row,
-      minutes: parseTimeToMinutesFlexible(row.time || ""),
-      order,
-    })),
-    ...exits.map((row, order) => ({
-      leg: "exit" as const,
-      row,
-      minutes: parseTimeToMinutesFlexible(row.time || ""),
-      order: entries.length + order,
-    })),
-  ].sort((a, b) => {
-    if (a.minutes == null && b.minutes == null) return a.order - b.order;
-    if (a.minutes == null) return 1;
-    if (b.minutes == null) return -1;
-    if (a.minutes !== b.minutes) return a.minutes - b.minutes;
-    if (a.leg !== b.leg) return a.leg === "entry" ? -1 : 1;
-    return a.order - b.order;
-  });
-
-  const out: TradeView[] = [];
-  let currentEntries: EntryTradeRow[] = [];
-  let currentExits: ExitTradeRow[] = [];
-  let openQty = 0;
-  let hasKnownQty = false;
-  let sequence = 1;
-
-  const flush = () => {
-    const trade = buildTradeViewFromLegs(session, symbol, kindRaw, currentEntries, currentExits, sequence);
-    if (trade) {
-      out.push(trade);
-      sequence += 1;
-    }
-    currentEntries = [];
-    currentExits = [];
-    openQty = 0;
-    hasKnownQty = false;
-  };
-
-  events.forEach((event) => {
-    if (event.leg === "entry") {
-      if (currentEntries.length && currentExits.length && (!hasKnownQty || openQty <= 0)) {
-        flush();
-      }
-
-      currentEntries.push(event.row);
-      const qty = rowQuantity(event.row);
-      if (qty > 0) {
-        openQty += qty;
-        hasKnownQty = true;
-      } else if (!hasKnownQty && openQty <= 0) {
-        openQty = 1;
-      }
-      return;
-    }
-
-    currentExits.push(event.row);
-    const qty = rowQuantity(event.row);
-    if (qty > 0) {
-      openQty -= qty;
-      hasKnownQty = true;
-    } else if (!hasKnownQty) {
-      openQty = 0;
-    }
-
-    if (hasKnownQty && openQty <= 0) {
-      flush();
-    }
-  });
-
-  flush();
-  return out;
-}
-
-function parseSPXOptionSymbol(raw: string) {
-  const s = safeUpper(raw).replace(/^[\.\-]/, "");
-  // Example: SPXW251121C6565 / SPX251121P6000
-  const m = s.match(/^([A-Z]+W?)(\d{6})([CP])(\d+(?:\.\d+)?)$/);
-  if (!m) return null;
-
-  const underlying = m[1];
-  const yy = Number(m[2].slice(0, 2));
-  const mm = Number(m[2].slice(2, 4));
-  const dd = Number(m[2].slice(4, 6));
-  const right = m[3] as "C" | "P";
-  const strike = Number(m[4]);
-  if (!yy || !mm || !dd) return null;
-
-  const year = 2000 + yy;
-  const expiry = new Date(year, mm - 1, dd);
-  if (Number.isNaN(expiry.getTime())) return null;
-
-  return { underlying, expiry, right, strike };
-}
-
-function parseGenericOptionUnderlying(raw: string) {
-  const s = safeUpper(raw).replace(/\s+/g, "");
-  const m = s.match(/^([A-Z]{1,6})\d{6}[CP]\d+/);
-  if (!m) return null;
-  return m[1];
-}
-
-function buildInstrumentKeyFromTrade(trade: TradeView): string | null {
-  if (trade.kind !== "option") return null;
-
-  const parsed = parseSPXOptionSymbol(trade.symbol);
-  if (parsed) {
-    const expiry = parsed.expiry.toISOString().slice(0, 10);
-    const strike = Number.isInteger(parsed.strike) ? String(parsed.strike) : String(parsed.strike);
-    return `${parsed.underlying.replace(/W$/, "")}|${expiry}|${parsed.right}|${strike}`;
-  }
-
-  return null;
-}
-
 function buildAuditHandoffPayload(trade: TradeView, auditResult: AuditResponse | null) {
   if (!auditResult) return null;
   const metrics = auditResult.audit ?? {};
@@ -642,11 +349,40 @@ function buildAuditHandoffPayload(trade: TradeView, auditResult: AuditResponse |
       symbol: trade.symbol,
       underlyingSymbol: trade.underlyingSymbol,
       contractSymbol: trade.contractSymbol ?? null,
+      instrumentKey: trade.instrumentKey,
+      instrumentKeySource: trade.instrumentKeySource,
+      instrumentKeyAmbiguous: trade.instrumentKeyAmbiguous,
       entryTime: trade.entryTime,
       exitTime: trade.exitTime,
+      entryAvgPrice: trade.entryAvgPrice,
+      exitAvgPrice: trade.exitAvgPrice,
       entryQty: trade.entryQty,
       exitQty: trade.exitQty,
       sourceRowIds: trade.sourceRowIds,
+      entries: trade.entries.map((row) => ({
+        id: row.id ?? null,
+        symbol: row.symbol,
+        kind: row.kind,
+        side: row.side,
+        price: row.price,
+        quantity: row.quantity,
+        time: row.time,
+        premiumSide: row.premiumSide ?? null,
+        optionStrategy: row.optionStrategy ?? null,
+        expiry: row.expiry ?? null,
+      })),
+      exits: trade.exits.map((row) => ({
+        id: row.id ?? null,
+        symbol: row.symbol,
+        kind: row.kind,
+        side: row.side,
+        price: row.price,
+        quantity: row.quantity,
+        time: row.time,
+        premiumSide: row.premiumSide ?? null,
+        optionStrategy: row.optionStrategy ?? null,
+        expiry: row.expiry ?? null,
+      })),
     },
     eventWindow: auditResult.event_window ?? null,
     audit: {
@@ -709,7 +445,7 @@ function normalizeSymbolForYahoo(
   let s = raw.replace(/^[\.\-]/, "").replace(/^\//, "");
 
   if (kind === "option") {
-    const parsed = parseSPXOptionSymbol(s);
+    const parsed = parseOptionSymbol(s);
     if (parsed) {
       let base = parsed.underlying.replace(/W$/, ""); // SPXW → SPX
       if (base === "SPX") return "^SPX";
@@ -796,6 +532,12 @@ type InteractiveCandleChartProps = {
   selectedDate: string;
   entryPoints: Array<{ time: string; price?: number | null; label?: string }>;
   exitPoints: Array<{ time: string; price?: number | null; label?: string }>;
+  auditPoints?: Array<{
+    timestampMs: number;
+    price?: number | null;
+    label: string;
+    tone: "fill" | "stop" | "cancel";
+  }>;
   timeMode: TimeMode;
   entryColor?: string;
   exitColor?: string;
@@ -814,6 +556,7 @@ function InteractiveCandleChart({
   selectedDate,
   entryPoints,
   exitPoints,
+  auditPoints = [],
   timeMode,
   entryColor = "#22c55e",
   exitColor = "#38bdf8",
@@ -952,6 +695,20 @@ function InteractiveCandleChart({
       return bestIdx;
     };
 
+    const findNearestTimestamp = (targetMs: number | null) => {
+      if (targetMs == null || !Number.isFinite(targetMs)) return null;
+      let bestDiff = Infinity;
+      let bestIdx: number | null = null;
+      candles.forEach((c, idx) => {
+        const diff = Math.abs(c.time - targetMs);
+        if (diff < bestDiff) {
+          bestDiff = diff;
+          bestIdx = idx;
+        }
+      });
+      return bestIdx;
+    };
+
     const markers: any[] = [];
 
     entryPoints.forEach((pt, i) => {
@@ -994,6 +751,30 @@ function InteractiveCandleChart({
       });
     });
 
+    auditPoints.forEach((pt) => {
+      const idx = findNearestTimestamp(pt.timestampMs);
+      if (idx == null) return;
+      const c = candles[idx];
+      const tone =
+        pt.tone === "stop"
+          ? { color: "#fb7185", shape: "square", position: "aboveBar" }
+          : pt.tone === "cancel"
+          ? { color: "#fbbf24", shape: "circle", position: "aboveBar" }
+          : { color: "#c084fc", shape: "circle", position: "belowBar" };
+      markers.push({
+        time: Math.floor(shiftMsByMode(c.time, timeMode) / 1000),
+        position: tone.position,
+        color: tone.color,
+        shape: tone.shape,
+        text: [
+          pt.label,
+          pt.price != null ? `@ ${pt.price.toFixed(2)}` : null,
+        ]
+          .filter(Boolean)
+          .join(" · "),
+      });
+    });
+
     if (markersPluginRef.current) {
       markersPluginRef.current.setMarkers(markers);
     }
@@ -1002,6 +783,7 @@ function InteractiveCandleChart({
     selectedDate,
     entryPoints,
     exitPoints,
+    auditPoints,
     timeMode,
     entryColor,
     exitColor,
@@ -1052,6 +834,12 @@ function InteractiveCandleChart({
               />
               <span className="text-slate-300">{exitLabel}</span>
             </div>
+            {auditPoints.length ? (
+              <div className="flex items-center gap-1">
+                <span className="inline-block h-2 w-4 rounded bg-violet-400" />
+                <span className="text-slate-300">Broker</span>
+              </div>
+            ) : null}
           </div>
 
           <div className="flex items-center gap-1 text-[11px]">
@@ -1137,6 +925,7 @@ function BackStudyPageInner() {
   const lang = resolveLocale(locale);
   const isEs = lang === "es";
   const L = (en: string, es: string) => (isEs ? es : en);
+  const yesNo = (value: boolean) => (value ? L("Yes", "Sí") : L("No", "No"));
   const canAccessAudit = plan === "advanced";
 
   const activeTab =
@@ -1206,7 +995,7 @@ function BackStudyPageInner() {
       } catch (err) {
         console.error("Error loading journal entries for back-study:", err);
         if (isMounted) {
-          setEntriesError(L("Could not load your journal entries.", "No se pudieron cargar tus entradas del journal."));
+          setEntriesError(L("Could not load your execution records.", "No se pudieron cargar tus registros de ejecución."));
         }
       } finally {
         if (isMounted) {
@@ -1242,38 +1031,14 @@ function BackStudyPageInner() {
   }, [entries, journalTradesMap]);
 
   const trades: TradeView[] = useMemo(() => {
-    const list: TradeView[] = [];
-
-    sessions.forEach((session) => {
-      const ent = session.entries || [];
-      const ex = session.exits || [];
-
-      const symKindSet = new Set<string>();
-      ent.forEach((t) =>
-        symKindSet.add(`${safeUpper(t.symbol)}|${t.kind || "stock"}`)
-      );
-      ex.forEach((t) =>
-        symKindSet.add(`${safeUpper(t.symbol)}|${t.kind || "stock"}`)
-      );
-      symKindSet.delete("|");
-
-      symKindSet.forEach((key) => {
-        const [sym, kindRaw] = key.split("|");
-        if (!sym) return;
-
-        const entList = ent.filter(
-          (t) => safeUpper(t.symbol) === sym && (t.kind || "stock") === kindRaw
-        );
-        const exList = ex.filter(
-          (t) => safeUpper(t.symbol) === sym && (t.kind || "stock") === kindRaw
-        );
-        if (!entList.length && !exList.length) return;
-
-        list.push(...splitRoundTripTradesForGroup(session, sym, kindRaw, entList, exList));
+    return sessions
+      .flatMap((session) => buildTradeViewsForSession(session))
+      .sort((a, b) => {
+        if (a.date !== b.date) return a.date < b.date ? 1 : -1;
+        const at = parseTimeToMinutesFlexible(a.entryTime) ?? 24 * 60;
+        const bt = parseTimeToMinutesFlexible(b.entryTime) ?? 24 * 60;
+        return at - bt;
       });
-    });
-
-    return list.sort((a, b) => (a.date < b.date ? 1 : -1));
   }, [sessions]);
 
   const [selectedDate, setSelectedDate] = useState<string>("");
@@ -1289,10 +1054,16 @@ function BackStudyPageInner() {
       setSelectedTradeId("");
       return;
     }
-    const first = trades[0];
+    if (selectedTradeId && trades.some((trade) => trade.id === selectedTradeId)) {
+      const current = trades.find((trade) => trade.id === selectedTradeId);
+      if (current && current.date !== selectedDate) setSelectedDate(current.date);
+      return;
+    }
+    const sameDateFirst = selectedDate ? trades.find((trade) => trade.date === selectedDate) : null;
+    const first = sameDateFirst ?? trades[0];
     setSelectedDate(first.date);
     setSelectedTradeId(first.id);
-  }, [trades]);
+  }, [trades, selectedDate, selectedTradeId]);
 
   const datesAvailable = Array.from(new Set(trades.map((t) => t.date))).sort(
     (a, b) => (a < b ? 1 : -1)
@@ -1411,16 +1182,26 @@ function BackStudyPageInner() {
 
     // Underlying
     try {
-      const uc = await fetchCandles(
+      let uc = await fetchCandles(
         underlyingSymbol,
         timeframe,
         chartRange,
         kind,
         selectedTrade.date
       );
+      let underlyingFallbackMessage: string | null = null;
+      if (!uc.length && timeframe !== "1d") {
+        uc = await fetchCandles(underlyingSymbol, "1d", chartRange, kind, selectedTrade.date);
+        if (uc.length) {
+          underlyingFallbackMessage = L(
+            "Intraday chart data was unavailable for this date/range. Showing daily context instead.",
+            "No hubo data intradía para esa fecha/rango. Mostrando contexto diario."
+          );
+        }
+      }
       setUnderlyingState({
         loading: false,
-        error: null,
+        error: underlyingFallbackMessage,
         candles: uc,
       });
     } catch (err) {
@@ -1449,17 +1230,29 @@ function BackStudyPageInner() {
             candles: cc,
           });
         } else {
-          const fallback = await fetchCandles(
+          let fallback = await fetchCandles(
             underlyingSymbol,
             timeframe,
             chartRange,
             kind,
             selectedTrade.date
           );
+          let fallbackMessage = L(
+            "No specific contract data found. Showing underlying instead.",
+            "No se encontro data exacta del contrato. Mostrando el underlying."
+          );
+          if (!fallback.length && timeframe !== "1d") {
+            fallback = await fetchCandles(underlyingSymbol, "1d", chartRange, kind, selectedTrade.date);
+            if (fallback.length) {
+              fallbackMessage = L(
+                "No specific contract/intraday data found. Showing daily underlying context instead.",
+                "No se encontro data exacta del contrato/intradia. Mostrando contexto diario del underlying."
+              );
+            }
+          }
           setContractState({
             loading: false,
-            error:
-              "No specific contract data found. Showing underlying instead.",
+            error: fallbackMessage,
             candles: fallback,
           });
         }
@@ -1552,7 +1345,11 @@ function BackStudyPageInner() {
       tf: timeframe,
       range: chartRange,
       tradeId: selectedTrade.id,
+      timeMode,
+      windowTz: "America/New_York",
     });
+    if (selectedTrade.instrumentKey) params.set("instrumentKey", selectedTrade.instrumentKey);
+    if (selectedTrade.instrumentKeyAmbiguous) params.set("instrumentAmbiguous", "1");
 
     const auditHandoff = buildAuditHandoffPayload(selectedTrade, auditResult);
     if (auditHandoff && typeof window !== "undefined") {
@@ -1566,6 +1363,49 @@ function BackStudyPageInner() {
     }
 
     router.push(`/performance/ai-coaching?${params.toString()}`);
+  };
+
+  const handleDownloadSnapshot = () => {
+    if (!selectedTrade || typeof window === "undefined") return;
+    const payload = {
+      generatedAt: new Date().toISOString(),
+      replay: {
+        timeframe,
+        chartRange,
+        timeMode,
+      },
+      trade: {
+        id: selectedTrade.id,
+        sequence: selectedTrade.sequence,
+        date: selectedTrade.date,
+        symbol: selectedTrade.symbol,
+        kind: selectedTrade.kind,
+        underlyingSymbol: selectedTrade.underlyingSymbol,
+        contractSymbol: selectedTrade.contractSymbol ?? null,
+        instrumentKey: selectedTrade.instrumentKey,
+        instrumentKeySource: selectedTrade.instrumentKeySource,
+        instrumentKeyAmbiguous: selectedTrade.instrumentKeyAmbiguous,
+        entryTime: selectedTrade.entryTime,
+        exitTime: selectedTrade.exitTime,
+        entryAvgPrice: selectedTrade.entryAvgPrice,
+        exitAvgPrice: selectedTrade.exitAvgPrice,
+        entryQty: selectedTrade.entryQty,
+        exitQty: selectedTrade.exitQty,
+        sourceRowIds: selectedTrade.sourceRowIds,
+        entries: selectedTrade.entries,
+        exits: selectedTrade.exits,
+      },
+      audit: auditResult,
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `back-study-${selectedTrade.date}-${selectedTrade.symbol}-${selectedTrade.sequence}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
   };
 
   useEffect(() => {
@@ -1592,6 +1432,44 @@ function BackStudyPageInner() {
   const auditInsights = auditMetrics?.insights ?? [];
   const auditEvidence = auditMetrics?.evidence ?? null;
   const auditEventWindow = auditResult?.event_window ?? null;
+  const auditChartPoints = useMemo(() => {
+    if (!auditEvidence) return [];
+    const points: Array<{
+      timestampMs: number;
+      price?: number | null;
+      label: string;
+      tone: "fill" | "stop" | "cancel";
+    }> = [];
+    auditEvidence.fills?.slice(0, 24).forEach((fill, idx) => {
+      const timestampMs = Date.parse(String(fill.ts_utc ?? ""));
+      if (!Number.isFinite(timestampMs)) return;
+      points.push({
+        timestampMs,
+        label: `${L("Broker fill", "Fill broker")} ${idx + 1}`,
+        tone: "fill",
+      });
+    });
+    auditEvidence.stop_events?.slice(0, 24).forEach((stop, idx) => {
+      const timestampMs = Date.parse(String(stop.ts_utc ?? ""));
+      if (!Number.isFinite(timestampMs)) return;
+      points.push({
+        timestampMs,
+        price: typeof stop.stop_price === "number" ? stop.stop_price : null,
+        label: `${L("Stop event", "Evento stop")} ${idx + 1}`,
+        tone: "stop",
+      });
+    });
+    auditEvidence.cancel_events?.slice(0, 12).forEach((cancel, idx) => {
+      const timestampMs = Date.parse(String(cancel.ts_utc ?? ""));
+      if (!Number.isFinite(timestampMs)) return;
+      points.push({
+        timestampMs,
+        label: `${L("Cancel", "Cancelacion")} ${idx + 1}`,
+        tone: "cancel",
+      });
+    });
+    return points.sort((a, b) => a.timestampMs - b.timestampMs);
+  }, [auditEvidence, lang]);
   const auditWindowHasNoMatches =
     !auditLoading &&
     !auditError &&
@@ -1633,8 +1511,8 @@ function BackStudyPageInner() {
                     )
                   : canAccessAudit
                   ? L(
-                      "Back-Study now works as a trade review workspace: chart replay, execution truth from audit, process compliance, and direct handoff to AI Coach.",
-                      "Back-Study ahora funciona como un workspace de revisión del trade: replay visual, verdad de ejecución desde audit, cumplimiento del proceso y handoff directo al AI Coach."
+                      "Back-Study now works as a trade review workspace: chart replay, execution truth from audit, process compliance, and direct handoff to Business AI Coach.",
+                      "Back-Study ahora funciona como un workspace de revisión del trade: replay visual, verdad de ejecución desde audit, cumplimiento del proceso y handoff directo al Coach Empresarial IA."
                     )
                   : L(
                       "Use Trade review to replay the chart, review entries and exits, and document what happened in the trade.",
@@ -1733,8 +1611,8 @@ function BackStudyPageInner() {
                   </p>
                   <p className="mt-1 text-sm text-amber-100/75">
                     {L(
-                      "Back-Study needs an active account so it can load the correct journal trades and broker audit data.",
-                      "Back-Study necesita una cuenta activa para cargar los trades correctos del journal y la auditoría del broker."
+                      "Back-Study needs an active account so it can load the correct execution trades and broker audit data.",
+                      "Back-Study necesita una cuenta activa para cargar los trades correctos del registro de ejecución y la auditoría del broker."
                     )}
                   </p>
                 </section>
@@ -1756,8 +1634,8 @@ function BackStudyPageInner() {
                   </p>
                   <p className="text-sm text-slate-400">
                     {L(
-                      "Make sure you have Entries and Exits saved in the journal (notes JSON) so they can be replayed here.",
-                      "Asegúrate de tener Entradas y Salidas guardadas en el journal (notes JSON) para poder reproducirlas aquí."
+                      "Make sure you have Entries and Exits saved in the execution record so they can be replayed here.",
+                      "Asegúrate de tener Entradas y Salidas guardadas en el registro de ejecución para poder reproducirlas aquí."
                     )}
                   </p>
                 </section>
@@ -1969,7 +1847,15 @@ function BackStudyPageInner() {
                         >
                           {auditLoading
                             ? L("Preparing audit handoff…", "Preparando handoff del audit…")
-                            : L("Ask AI Coach about this trade", "Preguntar al coach AI sobre este trade")}
+                            : L("Ask Business AI Coach about this trade", "Preguntar al Coach Empresarial IA sobre este trade")}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleDownloadSnapshot}
+                          className="w-full rounded-xl border border-slate-700 px-4 py-2 text-xs font-semibold text-slate-200 transition hover:border-sky-400 hover:text-sky-200"
+                          disabled={!selectedTrade}
+                        >
+                          {L("Export review snapshot", "Exportar snapshot de revisión")}
                         </button>
                       </div>
                     </div>
@@ -2070,6 +1956,14 @@ function BackStudyPageInner() {
                                   </span>
                                 </p>
                               ) : null}
+                              {canAccessAudit && selectedTrade.instrumentKeyAmbiguous ? (
+                                <p className="mt-2 rounded-xl border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-amber-100">
+                                  {L(
+                                    "Option contract is ambiguous, so broker audit may fall back to symbol-level matching.",
+                                    "El contrato de opcion esta ambiguo; el audit del broker puede caer a matching por simbolo."
+                                  )}
+                                </p>
+                              ) : null}
                             </div>
                           </div>
                         </div>
@@ -2092,6 +1986,7 @@ function BackStudyPageInner() {
                               selectedDate={selectedTrade.date}
                               entryPoints={entryPoints}
                               exitPoints={exitPoints}
+                              auditPoints={auditChartPoints}
                               timeMode={timeMode}
                               entryColor="#22c55e"
                               exitColor="#38bdf8"
@@ -2132,6 +2027,7 @@ function BackStudyPageInner() {
                                   selectedDate={selectedTrade.date}
                                   entryPoints={entryPoints}
                                   exitPoints={exitPoints}
+                                  auditPoints={auditChartPoints}
                                   timeMode={timeMode}
                                   entryColor="#22c55e"
                                   exitColor="#38bdf8"
@@ -2203,8 +2099,8 @@ function BackStudyPageInner() {
                                     </p>
                                     <p className="mt-1 text-xs text-amber-100/75">
                                       {L(
-                                        "Check the journal entry/exit times or open the full audit to inspect the broader day.",
-                                        "Verifica las horas de entrada/salida del journal o abre el audit completo para inspeccionar el día más amplio."
+                                        "Check the execution record entry/exit times or open the full audit to inspect the broader day.",
+                                        "Verifica las horas de entrada/salida del registro de ejecución o abre el audit completo para inspeccionar el día más amplio."
                                       )}
                                     </p>
                                   </div>
@@ -2213,12 +2109,12 @@ function BackStudyPageInner() {
                                 <div className="mt-4 grid gap-3 sm:grid-cols-2">
                                   <ReviewMetricCard
                                     label={L("OCO used", "OCO usado")}
-                                    value={auditMetrics ? (auditMetrics.oco_used ? "Yes" : "No") : "—"}
+                                    value={auditMetrics ? yesNo(!!auditMetrics.oco_used) : "—"}
                                     tone="default"
                                   />
                                   <ReviewMetricCard
                                     label={L("Stop present", "Stop presente")}
-                                    value={auditMetrics ? (auditMetrics.stop_present ? "Yes" : "No") : "—"}
+                                    value={auditMetrics ? yesNo(!!auditMetrics.stop_present) : "—"}
                                     tone="default"
                                   />
                                   <ReviewMetricCard
@@ -2228,7 +2124,7 @@ function BackStudyPageInner() {
                                   />
                                   <ReviewMetricCard
                                     label={L("Manual market exit", "Salida manual")}
-                                    value={auditMetrics ? (auditMetrics.manual_market_exit ? "Yes" : "No") : "—"}
+                                    value={auditMetrics ? yesNo(!!auditMetrics.manual_market_exit) : "—"}
                                     tone={auditMetrics?.manual_market_exit ? "rose" : "default"}
                                   />
                                 </div>
@@ -2312,8 +2208,8 @@ function BackStudyPageInner() {
                             </p>
                             <p className="mt-3 text-sm text-slate-300">
                               {L(
-                                "When you ask AI Coach from here, it receives the selected trade, chart window, journal details, and the execution audit when available.",
-                                "Cuando preguntas al AI Coach desde aquí, recibe el trade seleccionado, la ventana del chart, el detalle del journal y la auditoría de ejecución cuando existe."
+                                "When you ask Business AI Coach from here, it receives the selected trade, chart window, execution details, and the execution audit when available.",
+                                "Cuando preguntas al Coach Empresarial IA desde aquí, recibe el trade seleccionado, la ventana del chart, el detalle de ejecución y la auditoría cuando existe."
                               )}
                             </p>
                           </div>
@@ -2365,8 +2261,8 @@ function BackStudyPageInner() {
                                   <div>{L("Exits", "Salidas")}: {tradeSeq.exit_count} ({tradeSeq.exit_qty})</div>
                                   <div>{L("Stop mods", "Stops mod.")}: {tradeSeq.stop_mod_count}</div>
                                   <div>{L("Time to stop", "Tiempo al stop")}: {formatSecondsForReview(tradeSeq.time_to_first_stop_sec ?? null)}</div>
-                                  <div>{L("OCO", "OCO")}: {tradeSeq.oco_used ? "Yes" : "No"}</div>
-                                  <div>{L("Manual MKT exit", "Salida MKT manual")}: {tradeSeq.manual_market_exit ? "Yes" : "No"}</div>
+                                  <div>{L("OCO", "OCO")}: {yesNo(!!tradeSeq.oco_used)}</div>
+                                  <div>{L("Manual MKT exit", "Salida MKT manual")}: {yesNo(!!tradeSeq.manual_market_exit)}</div>
                                 </div>
                                 <p className="mt-3 text-xs text-slate-400">{tradeSeq.summary}</p>
                               </div>
@@ -2468,7 +2364,7 @@ function BackStudyPageInner() {
                                   </ul>
                                 ) : (
                                   <p className="mt-2 text-slate-400">
-                                    {L("No active rules found in Growth Plan.", "No hay reglas activas en el Growth Plan.")}
+                                    {L("No active rules found in the Trading Business Plan.", "No hay reglas activas en el Plan de Empresa de Trading.")}
                                   </p>
                                 )}
                               </div>
@@ -2517,6 +2413,12 @@ function BackStudyPageInner() {
                     <section className="rounded-2xl border border-slate-800 bg-slate-900/80 p-4 md:p-5">
                       <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">
                         {L("Raw execution evidence", "Evidencia cruda de ejecución")}
+                      </p>
+                      <p className="mt-2 max-w-3xl text-sm text-slate-400">
+                        {L(
+                          "These are the broker events used to explain the deterministic audit: stops, cancels/replaces, and fills inside the selected trade window.",
+                          "Estos son los eventos del broker usados para explicar la auditoría determinística: stops, cancelaciones/reemplazos y fills dentro de la ventana del trade."
+                        )}
                       </p>
                       <div className="mt-4 grid gap-4 lg:grid-cols-3">
                         <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">

@@ -3,6 +3,7 @@ import { ActivityIndicator, Image, Pressable, StyleSheet, Text, TextInput, View 
 
 import { useLanguage } from "../lib/LanguageContext";
 import { t } from "../lib/i18n";
+import { passwordPolicyHint, validatePasswordPolicy } from "../lib/passwordPolicy";
 import { supabaseMobile } from "../lib/supabase";
 import { useTheme } from "../lib/ThemeContext";
 import { type ThemeColors } from "../theme";
@@ -40,8 +41,9 @@ export function ResetPasswordScreen({
     setError(null);
     setMessage(null);
 
-    if (password.length < 8) {
-      setError(t(language, "Password must be at least 8 characters.", "La contraseña debe tener al menos 8 caracteres."));
+    const passwordError = validatePasswordPolicy(password, language);
+    if (passwordError) {
+      setError(passwordError);
       return;
     }
     if (password !== confirm) {
@@ -122,6 +124,7 @@ export function ResetPasswordScreen({
           placeholderTextColor={colors.textMuted}
           style={styles.input}
         />
+        <Text style={styles.policyText}>{passwordPolicyHint(language)}</Text>
         <TextInput
           value={confirm}
           onChangeText={setConfirm}
@@ -247,5 +250,11 @@ const createStyles = (colors: ThemeColors) =>
       color: colors.danger,
       fontSize: 12,
       lineHeight: 18,
+    },
+    policyText: {
+      color: colors.textMuted,
+      fontSize: 11,
+      lineHeight: 16,
+      marginTop: -6,
     },
   });

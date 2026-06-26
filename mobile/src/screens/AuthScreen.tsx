@@ -149,8 +149,8 @@ export function AuthScreen() {
     mode === "signin"
       ? t(
           language,
-          "Sign in with your existing account to access your dashboard, journal, and analytics.",
-          "Inicia sesión con tu cuenta existente para acceder a tu dashboard, journal y analíticas."
+          "Sign in with your Trader Entrepreneur account to access your trading business workspace.",
+          "Inicia sesión con tu cuenta de Empresario Trader para acceder a tu espacio de empresa de trading."
         )
       : mode === "forgotPassword"
         ? t(
@@ -220,10 +220,10 @@ export function AuthScreen() {
 
             <View style={styles.tertiaryRow}>
               <Text style={styles.helperText}>
-                {t(language, "Need a new account?", "¿Necesitas una cuenta nueva?")}
+                {t(language, "Need a Trader Entrepreneur account?", "¿Necesitas una cuenta de Empresario Trader?")}
               </Text>
               <Pressable onPress={() => Linking.openURL(`${WEB_BASE}/signup`)}>
-                <Text style={styles.tertiaryLink}>{t(language, "Create one on the web", "Créala en la web")}</Text>
+                <Text style={styles.tertiaryLink}>{t(language, "Start your trading business on the web", "Comienza tu empresa de trading en la web")}</Text>
               </Pressable>
             </View>
           </>

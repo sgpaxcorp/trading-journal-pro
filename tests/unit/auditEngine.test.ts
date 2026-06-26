@@ -108,4 +108,57 @@ describe("auditOrderEvents", () => {
     expect(audit.summary.length).toBeGreaterThan(0);
     expect(audit.trades[0].time_to_first_stop_sec).toBe(300);
   });
+
+  it("keeps separate broker trade sequences when a position fully closes and reopens", () => {
+    const twoTrips: NormalizedOrderEvent[] = [
+      {
+        ...events[0],
+        ts_utc: "2026-02-13T14:00:00Z",
+        side: "BUY",
+        pos_effect: "TO_OPEN",
+        qty: 2,
+        order_type: "LMT",
+      },
+      {
+        ...events[4],
+        ts_utc: "2026-02-13T14:05:00Z",
+        side: "SELL",
+        pos_effect: "TO_CLOSE",
+        qty: 1,
+        order_type: "LMT",
+      },
+      {
+        ...events[4],
+        ts_utc: "2026-02-13T14:10:00Z",
+        side: "SELL",
+        pos_effect: "TO_CLOSE",
+        qty: 1,
+        order_type: "LMT",
+      },
+      {
+        ...events[0],
+        ts_utc: "2026-02-13T14:30:00Z",
+        side: "BUY",
+        pos_effect: "TO_OPEN",
+        qty: 1,
+        order_type: "LMT",
+      },
+      {
+        ...events[4],
+        ts_utc: "2026-02-13T14:45:00Z",
+        side: "SELL",
+        pos_effect: "TO_CLOSE",
+        qty: 1,
+        order_type: "MKT",
+      },
+    ];
+
+    const audit = auditOrderEvents(twoTrips);
+
+    expect(audit.trade_count).toBe(2);
+    expect(audit.trades.map((trade) => trade.entry_qty)).toEqual([2, 1]);
+    expect(audit.trades.map((trade) => trade.exit_qty)).toEqual([2, 1]);
+    expect(audit.trades[0].exit_ts).toBe("2026-02-13T14:10:00Z");
+    expect(audit.trades[1].manual_market_exit).toBe(true);
+  });
 });

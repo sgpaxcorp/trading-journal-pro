@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 import { sendSubscriptionCancellationEmail } from "@/lib/email";
+import { getClientIp, rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
 
 export const runtime = "nodejs";
 
@@ -21,6 +22,23 @@ export async function POST(req: NextRequest) {
     const { user, error } = await getAuthedUser(req);
     if (error || !user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    const limiter = await rateLimit(`stripe-cancel:${user.id}:${getClientIp(req)}`, {
+      limit: 5,
+      windowMs: 60 * 60_000,
+    });
+    if (!limiter.allowed) {
+      const retryAfter = Math.max(1, Math.ceil((limiter.resetAt - Date.now()) / 1000));
+      return NextResponse.json(
+        { error: "Too many cancellation attempts. Please try again later." },
+        {
+          status: 429,
+          headers: {
+            "Retry-After": String(retryAfter),
+            ...rateLimitHeaders(limiter),
+          },
+        }
+      );
     }
 
     const body = await req.json();

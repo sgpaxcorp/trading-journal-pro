@@ -8,6 +8,7 @@ import { useAuth } from "@/context/AuthContext";
 import { supabaseBrowser } from "@/lib/supaBaseClient";
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
+import { passwordPolicyHint, validatePasswordPolicy } from "@/lib/passwordPolicy";
 
 export default function ChangePasswordPage() {
   const { user, loading } = useAuth() as any;
@@ -23,10 +24,6 @@ export default function ChangePasswordPage() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [showInRanking, setShowInRanking] = useState(true);
-  const [privacySaving, setPrivacySaving] = useState(false);
-  const [privacyMessage, setPrivacyMessage] = useState<string | null>(null);
-  const [privacyError, setPrivacyError] = useState<string | null>(null);
 
   /* ---------- Auth guard ---------- */
   useEffect(() => {
@@ -34,35 +31,6 @@ export default function ChangePasswordPage() {
       router.replace("/signin");
     }
   }, [loading, user, router]);
-
-  useEffect(() => {
-    if (!user?.id) return;
-    let cancelled = false;
-
-    async function loadPrivacy() {
-      setPrivacyError(null);
-      try {
-        const { data, error: prefError } = await supabaseBrowser
-          .from("profiles")
-          .select("show_in_ranking")
-          .eq("id", user.id)
-          .maybeSingle();
-
-        if (prefError) throw prefError;
-        if (!cancelled && data && typeof (data as any).show_in_ranking === "boolean") {
-          setShowInRanking(Boolean((data as any).show_in_ranking));
-        }
-      } catch (err) {
-        console.warn("[Security] Unable to load ranking preference:", err);
-      }
-    }
-
-    loadPrivacy();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [user?.id]);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -76,8 +44,9 @@ export default function ChangePasswordPage() {
       return;
     }
 
-    if (newPassword.length < 8) {
-      setError(L("New password must be at least 8 characters.", "La nueva contraseña debe tener al menos 8 caracteres."));
+    const passwordError = validatePasswordPolicy(newPassword, L);
+    if (passwordError) {
+      setError(passwordError);
       return;
     }
 
@@ -136,34 +105,6 @@ export default function ChangePasswordPage() {
     }
   }
 
-  async function handleRankingToggle(next: boolean) {
-    if (!user?.id) return;
-    setPrivacySaving(true);
-    setPrivacyMessage(null);
-    setPrivacyError(null);
-    try {
-      const { error: prefError } = await supabaseBrowser
-        .from("profiles")
-        .update({ show_in_ranking: next })
-        .eq("id", user.id);
-      if (prefError) throw prefError;
-      setShowInRanking(next);
-      setPrivacyMessage(
-        next
-          ? L("You're now visible in the global ranking.", "Ahora eres visible en el ranking global.")
-          : L("You’ve been hidden from the global ranking.", "Te hemos ocultado del ranking global.")
-      );
-    } catch (err: any) {
-      console.error("[Security] Ranking visibility update error:", err);
-      setPrivacyError(
-        err?.message ||
-          L("We couldn't update this setting.", "No pudimos actualizar este ajuste.")
-      );
-    } finally {
-      setPrivacySaving(false);
-    }
-  }
-
   if (loading || !user) {
     return (
       <main className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center">
@@ -216,6 +157,7 @@ export default function ChangePasswordPage() {
                 onChange={(e) => setNewPassword(e.target.value)}
                 className="w-full rounded-md bg-slate-950 border border-slate-700 px-3 py-2 text-xs text-slate-100 outline-none focus:border-emerald-400"
               />
+              <p className="mt-1 text-[10px] text-slate-500">{passwordPolicyHint(L)}</p>
             </div>
 
             <div>
@@ -260,56 +202,6 @@ export default function ChangePasswordPage() {
           </form>
         </section>
 
-        <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5 space-y-4">
-          <div>
-            <p className="text-[11px] uppercase tracking-[0.25em] text-emerald-400">
-              {L("Privacy", "Privacidad")}
-            </p>
-            <h2 className="text-lg font-semibold mt-1">
-              {L("Global ranking visibility", "Visibilidad en ranking global")}
-            </h2>
-            <p className="text-xs text-slate-400 mt-2">
-              {L(
-                "Choose whether your profile appears in the public global ranking.",
-                "Elige si tu perfil aparece en el ranking global público."
-              )}
-            </p>
-          </div>
-
-          <div className="flex items-center justify-between rounded-xl border border-slate-800 bg-slate-950/60 px-4 py-3">
-            <div>
-              <p className="text-sm font-semibold text-slate-100">
-                {showInRanking ? L("Visible in ranking", "Visible en ranking") : L("Hidden from ranking", "Oculto del ranking")}
-              </p>
-              <p className="text-[11px] text-slate-500 mt-1">
-                {L(
-                  "This only affects your public ranking profile. Your private stats are always safe.",
-                  "Esto solo afecta tu perfil público en el ranking. Tus estadísticas privadas siempre están seguras."
-                )}
-              </p>
-            </div>
-
-            <button
-              type="button"
-              disabled={privacySaving}
-              onClick={() => handleRankingToggle(!showInRanking)}
-              className={`rounded-full px-4 py-2 text-[11px] font-semibold transition ${
-                showInRanking
-                  ? "bg-emerald-400 text-slate-950 hover:bg-emerald-300"
-                  : "bg-slate-800 text-slate-200 hover:bg-slate-700"
-              } ${privacySaving ? "opacity-60 cursor-not-allowed" : ""}`}
-            >
-              {showInRanking ? L("Hide me", "Ocultarme") : L("Show me", "Mostrarme")}
-            </button>
-          </div>
-
-          {privacyMessage && (
-            <p className="text-[11px] text-emerald-300">{privacyMessage}</p>
-          )}
-          {privacyError && (
-            <p className="text-[11px] text-red-400">{privacyError}</p>
-          )}
-        </section>
       </div>
     </main>
   );

@@ -22,7 +22,7 @@ export default function PartnerTermsPage() {
         <div className="flex items-center gap-4">
           <img
             src="/neurotrader-logo.svg"
-            alt="Neuro Trader Journal"
+            alt="Neuro Trader"
             className="h-14 w-auto"
             draggable={false}
           />

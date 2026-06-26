@@ -326,12 +326,12 @@ export default function PlanSummaryPage() {
       <div className="px-6 md:px-10 py-8 max-w-7xl mx-auto space-y-6">
         <header className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <p className="text-emerald-400 uppercase tracking-[0.24em] text-[11px]">Neuro Trader Journal</p>
-            <h1 className="text-3xl font-semibold">{L("Plan Summary", "Resumen del plan")}</h1>
+            <p className="text-emerald-400 uppercase tracking-[0.24em] text-[11px]">Neuro Trader</p>
+            <h1 className="text-3xl font-semibold">{L("Trading Business Plan Summary", "Resumen del Plan de Empresa de Trading")}</h1>
             <p className="text-sm text-slate-400 mt-1">
               {L(
-                "Wall‑Street style briefing of your Growth Plan, targets, and risk envelope.",
-                "Briefing estilo Wall‑Street de tu plan, metas y rango de riesgo."
+                "Executive briefing of your Trading Business Plan, targets, and risk envelope.",
+                "Briefing ejecutivo de tu Plan de Empresa de Trading, metas y rango de riesgo."
               )}
             </p>
           </div>
@@ -341,7 +341,7 @@ export default function PlanSummaryPage() {
               href="/growth-plan"
               className="inline-flex items-center rounded-xl border border-slate-700 px-3 py-1.5 text-xs font-medium text-slate-200 hover:border-emerald-400 hover:text-emerald-300 transition"
             >
-              {L("Edit growth plan →", "Editar plan →")}
+              {L("Edit business plan →", "Editar plan empresarial →")}
             </Link>
             <Link
               href="/performance/plan"
@@ -360,9 +360,9 @@ export default function PlanSummaryPage() {
 
         {!plan ? (
           <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-6 text-sm text-slate-300">
-            {L("No Growth Plan found yet.", "Aún no hay un Growth Plan.")}{" "}
+            {L("No Trading Business Plan found yet.", "Aún no hay un Plan de Empresa de Trading.")}{" "}
             <Link className="text-emerald-300 hover:text-emerald-200 underline" href="/growth-plan">
-              {L("Create your plan", "Crea tu plan")}
+              {L("Create your business plan", "Crea tu plan empresarial")}
             </Link>
             .
           </div>
@@ -780,7 +780,7 @@ export default function PlanSummaryPage() {
                 {phaseRanking.length > 0 ? (
                   <div className="mt-4 rounded-xl border border-slate-800 bg-slate-950/60 p-3">
                     <p className="text-xs text-slate-500 uppercase tracking-[0.2em]">
-                      {L("Internal phase ranking", "Ranking interno de fases")}
+                      {L("Internal phase order", "Orden interno de fases")}
                     </p>
                     <div className="mt-2 space-y-2 text-xs text-slate-300">
                       {phaseRanking.slice(0, 5).map((phase, idx) => (

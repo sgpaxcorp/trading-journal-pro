@@ -1578,9 +1578,13 @@ export default function AnalyticsStatisticsPage() {
       setLoadingData(true);
       try {
         const primaryId = journalUserId || userId || "";
-        let all = primaryId ? await getAllJournalEntries(primaryId, activeAccountId) : [];
+        const queryRange = {
+          fromDate: looksLikeYYYYMMDD(dateRange.startIso) ? dateRange.startIso : undefined,
+          toDate: looksLikeYYYYMMDD(dateRange.endIso) ? dateRange.endIso : undefined,
+        };
+        let all = primaryId ? await getAllJournalEntries(primaryId, activeAccountId, queryRange) : [];
         if ((!all || all.length === 0) && userId && userId !== primaryId) {
-          const alt = await getAllJournalEntries(userId, activeAccountId);
+          const alt = await getAllJournalEntries(userId, activeAccountId, queryRange);
           if (alt?.length) all = alt;
         }
         if (!alive) return;
@@ -1599,7 +1603,7 @@ export default function AnalyticsStatisticsPage() {
     return () => {
       alive = false;
     };
-  }, [journalUserId, userId, accountsLoading, activeAccountId]);
+  }, [journalUserId, userId, dateRange.startIso, dateRange.endIso, accountsLoading, activeAccountId]);
 
   // Load journal_trades for timing analytics (entries/exits per fill)
   useEffect(() => {
@@ -1735,7 +1739,10 @@ export default function AnalyticsStatisticsPage() {
         const token = sessionData?.session?.access_token;
         if (!token) return;
 
-        const res = await fetch(`/api/account/series?accountId=${encodeURIComponent(activeAccountId)}`, {
+        const params = new URLSearchParams({ accountId: activeAccountId });
+        if (looksLikeYYYYMMDD(dateRange.startIso)) params.set("fromDate", dateRange.startIso);
+        if (looksLikeYYYYMMDD(dateRange.endIso)) params.set("toDate", dateRange.endIso);
+        const res = await fetch(`/api/account/series?${params.toString()}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
         if (!res.ok) return;
@@ -1755,7 +1762,7 @@ export default function AnalyticsStatisticsPage() {
     return () => {
       alive = false;
     };
-  }, [loading, accountsLoading, activeAccountId]);
+  }, [loading, accountsLoading, activeAccountId, dateRange.startIso, dateRange.endIso]);
 
   const tradeDates = useMemo(() => {
     return new Set(
@@ -2139,6 +2146,176 @@ export default function AnalyticsStatisticsPage() {
     });
   }, [kpiTrades, uiEquity, performanceReturns]);
 
+  const tradingIntelligence = useMemo(() => {
+    const totalTrades = snapshot?.totalTrades ?? tradeStats.tradeCount ?? uiTotals.totalSessions;
+    const expectancy = uiTotals.expectancy;
+    const profitFactor = uiTotals.profitFactor;
+    const maxDrawdownPct = snapshot?.maxDrawdownPct ?? null;
+    const process = processScore;
+
+    const edgeScore =
+      totalTrades < 10
+        ? 35
+        : expectancy > 0
+          ? profitFactor != null && profitFactor >= 1.5
+            ? 92
+            : profitFactor != null && profitFactor >= 1.2
+              ? 82
+              : 68
+          : 34;
+    const riskScore =
+      maxDrawdownPct == null
+        ? 55
+        : maxDrawdownPct <= 5
+          ? 92
+          : maxDrawdownPct <= 10
+            ? 78
+            : maxDrawdownPct <= 20
+              ? 55
+              : 28;
+    const processComponent = process != null ? process : 55;
+    const sampleScore = totalTrades >= 100 ? 92 : totalTrades >= 50 ? 76 : totalTrades >= 30 ? 62 : 36;
+    const healthScore = Math.max(
+      0,
+      Math.min(100, Math.round(edgeScore * 0.35 + riskScore * 0.25 + processComponent * 0.25 + sampleScore * 0.15))
+    );
+
+    const healthTone: StatTone = healthScore >= 75 ? "good" : healthScore < 55 ? "bad" : "neutral";
+    const healthLabel =
+      healthScore >= 85
+        ? L("Institutional-grade profile", "Perfil institucional")
+        : healthScore >= 75
+          ? L("Tradable and improving", "Operable y mejorando")
+          : healthScore >= 55
+            ? L("Developing edge", "Edge en desarrollo")
+            : L("Needs protection first", "Primero necesita protección");
+
+    const sampleMessage =
+      totalTrades >= 100
+        ? L("Sample is strong enough to trust the main patterns.", "La muestra ya permite confiar mejor en los patrones principales.")
+        : totalTrades >= 50
+          ? L("Sample is usable, but keep validating before scaling size.", "La muestra es usable, pero valida más antes de subir tamaño.")
+          : totalTrades >= 30
+            ? L("Early sample. Read patterns, but do not overfit.", "Muestra temprana. Lee patrones, pero no sobre-optimices.")
+            : L("Not enough trades yet. Focus on clean data and process first.", "Aún falta muestra. Enfócate primero en data limpia y proceso.");
+
+    const edgeStatus =
+      totalTrades < 30
+        ? L("Not statistically proven yet", "Aún no probado estadísticamente")
+        : expectancy > 0 && profitFactor != null && profitFactor >= 1.2
+          ? L("Positive edge detected", "Edge positivo detectado")
+          : expectancy > 0
+            ? L("Positive, but thin", "Positivo, pero fino")
+            : L("Edge leak detected", "Fuga de edge detectada");
+
+    const survivalStatus =
+      maxDrawdownPct == null
+        ? L("Needs equity data", "Necesita data de equity")
+        : maxDrawdownPct <= 5
+          ? L("Risk is controlled", "Riesgo controlado")
+          : maxDrawdownPct <= 10
+            ? L("Risk is acceptable, watch size", "Riesgo aceptable, vigila tamaño")
+            : maxDrawdownPct <= 20
+              ? L("Drawdown pressure is high", "Presión de drawdown alta")
+              : L("Account protection required", "Protección de cuenta requerida");
+
+    const processStatus =
+      process == null
+        ? L("Needs checklist data", "Necesita data de checklist")
+        : process >= 85
+          ? L("Process is strong", "Proceso fuerte")
+          : process >= 70
+            ? L("Process is workable", "Proceso trabajable")
+            : L("Rules need enforcement", "Hay que reforzar reglas");
+
+    const scalingStatus =
+      healthScore >= 75 && totalTrades >= 50
+        ? L("Can scale carefully", "Puede escalar con cuidado")
+        : totalTrades < 30
+          ? L("Do not scale yet", "No escalar todavía")
+          : L("Stabilize before scaling", "Estabilizar antes de escalar");
+
+    const bestSymbol = snapshot?.bySymbol?.[0] ?? null;
+    const worstSymbol = snapshot?.bySymbol?.slice().sort((a, b) => a.pnl - b.pnl)[0] ?? null;
+    const bestDow = snapshot?.byDOW?.slice().sort((a, b) => b.pnl - a.pnl)[0] ?? null;
+    const worstDow = snapshot?.byDOW?.slice().sort((a, b) => a.pnl - b.pnl)[0] ?? null;
+    const bestHour = snapshot?.byHour?.slice().sort((a, b) => b.pnl - a.pnl)[0] ?? null;
+    const worstHour = snapshot?.byHour?.slice().sort((a, b) => a.pnl - b.pnl)[0] ?? null;
+
+    const moneyMap = [
+      {
+        label: L("Best symbol", "Mejor símbolo"),
+        value: bestSymbol ? bestSymbol.symbol : "—",
+        detail: bestSymbol ? `${fmtUsd(bestSymbol.pnl)} · ${bestSymbol.trades} ${L("trades", "trades")}` : L("Needs symbol data", "Necesita data de símbolo"),
+      },
+      {
+        label: L("Worst leak", "Mayor fuga"),
+        value: worstSymbol ? worstSymbol.symbol : "—",
+        detail: worstSymbol ? `${fmtUsd(worstSymbol.pnl)} · ${worstSymbol.trades} ${L("trades", "trades")}` : L("Needs symbol data", "Necesita data de símbolo"),
+      },
+      {
+        label: L("Best day", "Mejor día"),
+        value: bestDow ? bestDow.dow : "—",
+        detail: bestDow ? `${fmtUsd(bestDow.pnl)} · ${fmtPct(bestDow.winRate)}` : L("Needs day data", "Necesita data por día"),
+      },
+      {
+        label: L("Best hour", "Mejor hora"),
+        value: bestHour ? bestHour.hour : "—",
+        detail: bestHour ? `${fmtUsd(bestHour.pnl)} · ${fmtPct(bestHour.winRate)}` : L("Needs trade times", "Necesita horas de trades"),
+      },
+    ];
+
+    const action =
+      totalTrades < 30
+        ? L(
+            "Collect at least 30 clean trades before trusting conclusions. Do not increase size yet.",
+            "Acumula al menos 30 trades limpios antes de confiar en conclusiones. No subas tamaño todavía."
+          )
+        : expectancy <= 0
+          ? L(
+              "Your next priority is reducing average loss or cutting the weakest symbol/setup.",
+              "Tu prioridad es reducir la pérdida promedio o eliminar el símbolo/setup más débil."
+            )
+          : maxDrawdownPct != null && maxDrawdownPct > 10
+            ? L(
+                "The edge exists, but account survival is the constraint. Reduce daily risk before scaling.",
+                "El edge existe, pero la supervivencia de la cuenta es la restricción. Reduce riesgo diario antes de escalar."
+              )
+            : process != null && process < 70
+              ? L(
+                  "Your numbers improve only if rules become automatic. Convert weak rules into alarms.",
+                  "Los números mejoran solo si las reglas se vuelven automáticas. Convierte reglas débiles en alarmas."
+                )
+              : L(
+                  "Protect the strongest pattern, avoid the weakest leak, and scale only with rule compliance.",
+                  "Protege el patrón más fuerte, evita la fuga más débil y escala solo con cumplimiento de reglas."
+                );
+
+    const leak =
+      worstSymbol && worstSymbol.pnl < 0
+        ? L("Main leak: ", "Fuga principal: ") + `${worstSymbol.symbol} (${fmtUsd(worstSymbol.pnl)})`
+        : worstDow && worstDow.pnl < 0
+          ? L("Main leak: ", "Fuga principal: ") + `${worstDow.dow} (${fmtUsd(worstDow.pnl)})`
+          : worstHour && worstHour.pnl < 0
+            ? L("Main leak: ", "Fuga principal: ") + `${worstHour.hour} (${fmtUsd(worstHour.pnl)})`
+            : L("No major leak detected in the current range.", "No se detecta una fuga grande en el rango actual.");
+
+    return {
+      healthScore,
+      healthTone,
+      healthLabel,
+      sampleMessage,
+      edgeStatus,
+      survivalStatus,
+      processStatus,
+      scalingStatus,
+      action,
+      leak,
+      moneyMap,
+      totalTrades,
+    };
+  }, [L, processScore, snapshot, tradeStats.tradeCount, uiTotals.expectancy, uiTotals.profitFactor, uiTotals.totalSessions]);
+
   if (loading || !user) {
     return (
       <main className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center">
@@ -2156,12 +2333,12 @@ export default function AnalyticsStatisticsPage() {
           <div className="flex items-center justify-between gap-3">
             <div>
               <h1 className="text-3xl font-semibold">
-                {L("Analytics & Statistics", "Análisis y estadísticas")}
+                {L("Trading Intelligence Center", "Centro de inteligencia de trading")}
               </h1>
               <p className="text-sm text-slate-400 mt-1">
                 {L(
-                  "Deep performance breakdown for your trading journal. Deposits/withdrawals are pulled from",
-                  "Desglose profundo del performance de tu journal. Depósitos/retiros se leen desde"
+                  "A decision dashboard for edge, survival, process, and where your trading actually makes money. Deposits/withdrawals are pulled from",
+                  "Un tablero de decisión para edge, supervivencia, proceso y dónde tu trading realmente produce dinero. Depósitos/retiros se leen desde"
                 )}{" "}
                 <span className="font-mono">cashflows</span>{" "}
                 {L(
@@ -2176,11 +2353,11 @@ export default function AnalyticsStatisticsPage() {
                 href="/dashboard"
                 className="inline-flex items-center rounded-xl border border-slate-700 px-3 py-1.5 text-xs font-medium text-slate-200 hover:border-emerald-400 hover:text-emerald-300 transition"
               >
-                {L("Dashboard →", "Dashboard →")}
+                {L("Business Center ->", "Centro Empresarial ->")}
               </Link>
 
               <Link
-                href="/balance-chart"
+                href="/performance/balance-chart"
                 className="inline-flex items-center rounded-xl border border-slate-700 px-3 py-1.5 text-xs font-medium text-slate-200 hover:border-emerald-400 hover:text-emerald-300 transition"
               >
                 {L("Balance chart →", "Gráfico de balance →")}
@@ -2233,7 +2410,9 @@ export default function AnalyticsStatisticsPage() {
           </div>
 
           <div className="text-xs text-slate-500">
-            {dateRange.startIso ? (
+            {loadingData ? (
+              <span>{L("Loading trading data…", "Cargando data de trading…")}</span>
+            ) : dateRange.startIso ? (
               <span>
                 {dateRange.startIso} → {dateRange.endIso}
               </span>
@@ -2243,87 +2422,99 @@ export default function AnalyticsStatisticsPage() {
           </div>
         </section>
 
-        {/* Top KPIs */}
-        <section className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-          <KpiCard
-            label={L("Sessions", "Sesiones")}
-            value={uiTotals.totalSessions.toLocaleString()}
-            sub={loadingData ? L("Loading…", "Cargando…") : ""}
-            help={L(
-              "Trading days with activity inside the selected range.",
-              "Días con actividad de trading dentro del rango seleccionado."
-            )}
-          />
-          <KpiCard
-            label={L("Win rate", "Tasa de acierto")}
-            value={fmtPct(uiTotals.winRate)}
-            sub={
-              lang === "es"
-                ? `${uiTotals.wins}G / ${uiTotals.losses}Apr / ${uiTotals.breakevens}Plano`
-                : `${uiTotals.wins}W / ${uiTotals.losses}Learn / ${uiTotals.breakevens}Flat`
-            }
-            help={L(
-              "Wins divided by (wins + lessons). Flat days are excluded.",
-              "Ganadas dividido entre (ganadas + aprendizajes). Días planos se excluyen."
-            )}
-          />
-          <KpiCard
-            label={L("Net P&L", "P&L neto")}
-            value={fmtUsd(uiTotals.netPnl)}
-            valueClass={uiTotals.netPnl >= 0 ? "text-emerald-300" : "text-sky-300"}
-            sub={`${L("Fees", "Comisiones")}: ${fmtUsd(uiTotals.totalFees)}`}
-            help={L(
-              "Sum of net P&L after fees across the selected sessions.",
-              "Suma del P&L neto (después de comisiones) en el rango seleccionado."
-            )}
-          />
-          <KpiCard
-            label={L("Process score", "Score de proceso")}
-            value={processScore != null ? `${processScore}%` : "—"}
-            sub={
-              processChecklistMeta?.date && processChecklistMeta.total > 0
-                ? `${L("Latest", "Último")}: ${processChecklistMeta.date} · ${processChecklistMeta.completed}/${processChecklistMeta.total}`
-                : processChecklistMeta?.date
-                ? `${L("Latest", "Último")}: ${processChecklistMeta.date}`
-                : ""
-            }
-            help={L(
-              "Compliance score for the latest session in range, based on daily checklist completion and evaluable non‑negotiable rules.",
-              "Score de cumplimiento para la última sesión del rango, basado en checklist diario y reglas no‑negociables evaluables."
-            )}
-          />
-          {isAdvanced ? (
-            <KpiCard
-              label={L("Expectancy", "Expectativa")}
-              value={fmtUsd(uiTotals.expectancy)}
-              sub={uiTotals.profitFactor != null ? `PF: ${uiTotals.profitFactor.toFixed(2)}` : "PF: —"}
-              help={L(
-                "Expected result per session: P(win)×avgWin − P(lesson)×avgLesson.",
-                "Resultado esperado por sesión: P(ganar)×promedioWin − P(aprender)×promedioLesson."
-              )}
-            />
-          ) : (
-            <div className="relative overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
-              <div className="absolute inset-0 bg-slate-950/60 backdrop-blur-[2px]" />
-              <div className="relative z-10">
-                <p className="text-[10px] uppercase tracking-[0.3em] text-slate-400">
-                  {L("Advanced KPI", "KPI avanzado")}
-                </p>
-                <p className="mt-2 text-sm text-slate-300">
-                  {L(
-                    "Unlock expectancy & profit factor",
-                    "Desbloquea expectativa y profit factor"
-                  )}
-                </p>
-                <Link
-                  href="/billing"
-                  className="mt-3 inline-flex text-[11px] text-emerald-300 hover:text-emerald-200"
+        {/* Trading intelligence diagnosis */}
+        <section className="mb-6 overflow-hidden rounded-2xl border border-emerald-400/20 bg-[radial-gradient(circle_at_top_left,_rgba(16,185,129,0.20),_transparent_34%),linear-gradient(135deg,_rgba(15,23,42,0.96),_rgba(2,6,23,0.98))] p-5">
+          <div className="grid gap-5 xl:grid-cols-[360px_1fr]">
+            <div className="rounded-2xl border border-slate-800 bg-slate-950/50 p-5">
+              <p className="text-[11px] uppercase tracking-[0.3em] text-emerald-300">
+                {L("Trading health", "Salud del trading")}
+              </p>
+              <div className="mt-4 flex items-end gap-3">
+                <span
+                  className={[
+                    "text-6xl font-semibold leading-none",
+                    tradingIntelligence.healthTone === "good"
+                      ? "text-emerald-200"
+                      : tradingIntelligence.healthTone === "bad"
+                        ? "text-sky-200"
+                        : "text-slate-100",
+                  ].join(" ")}
                 >
-                  {L("Upgrade to Advanced →", "Actualizar a Advanced →")}
-                </Link>
+                  {tradingIntelligence.healthScore}
+                </span>
+                <span className="pb-2 text-sm text-slate-400">/100</span>
+              </div>
+              <p className="mt-3 text-lg font-semibold text-slate-100">
+                {tradingIntelligence.healthLabel}
+              </p>
+              <p className="mt-2 text-sm text-slate-400">
+                {tradingIntelligence.sampleMessage}
+              </p>
+              <div className="mt-4 h-2 rounded-full bg-slate-800">
+                <div
+                  className="h-2 rounded-full bg-linear-to-r from-sky-400 via-emerald-300 to-emerald-400"
+                  style={{ width: `${tradingIntelligence.healthScore}%` }}
+                />
               </div>
             </div>
-          )}
+
+            <div className="grid gap-4">
+              <div className="grid gap-3 md:grid-cols-4">
+                {[
+                  { label: L("Edge", "Edge"), value: tradingIntelligence.edgeStatus, detail: `${L("Expectancy", "Expectativa")}: ${fmtUsd(uiTotals.expectancy)}` },
+                  { label: L("Survival", "Supervivencia"), value: tradingIntelligence.survivalStatus, detail: `${L("Max DD", "Máx DD")}: ${snapshot ? fmtPct(snapshot.maxDrawdownPct) : "—"}` },
+                  {
+                    label: L("Process", "Proceso"),
+                    value: tradingIntelligence.processStatus,
+                    detail:
+                      processScore != null
+                        ? processChecklistMeta?.date && processChecklistMeta.total > 0
+                          ? `${processScore}% · ${processChecklistMeta.completed}/${processChecklistMeta.total}`
+                          : `${processScore}%`
+                        : L("Needs checklist", "Necesita checklist"),
+                  },
+                  { label: L("Scaling", "Escalar"), value: tradingIntelligence.scalingStatus, detail: `${tradingIntelligence.totalTrades} ${L("trades analyzed", "trades analizados")}` },
+                ].map((item) => (
+                  <div key={item.label} className="rounded-xl border border-slate-800 bg-slate-950/45 p-3">
+                    <p className="text-[10px] uppercase tracking-[0.24em] text-slate-500">{item.label}</p>
+                    <p className="mt-2 text-sm font-semibold text-slate-100">{item.value}</p>
+                    <p className="mt-1 text-xs text-slate-500">{item.detail}</p>
+                  </div>
+                ))}
+              </div>
+
+              <div className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
+                <div className="rounded-xl border border-slate-800 bg-slate-950/45 p-4">
+                  <p className="text-[11px] uppercase tracking-[0.3em] text-slate-500">
+                    {L("Coach diagnosis", "Diagnóstico del coach")}
+                  </p>
+                  <p className="mt-3 text-base font-semibold text-slate-100">
+                    {tradingIntelligence.action}
+                  </p>
+                  <p className="mt-2 text-sm text-slate-400">
+                    {tradingIntelligence.leak}
+                  </p>
+                </div>
+
+                <div className="rounded-xl border border-slate-800 bg-slate-950/45 p-4">
+                  <p className="text-[11px] uppercase tracking-[0.3em] text-slate-500">
+                    {L("Money map", "Mapa del dinero")}
+                  </p>
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-1">
+                    {tradingIntelligence.moneyMap.map((item) => (
+                      <div key={item.label} className="flex items-center justify-between gap-3 rounded-lg border border-slate-800/80 bg-slate-950/50 px-3 py-2">
+                        <div>
+                          <p className="text-[11px] text-slate-500">{item.label}</p>
+                          <p className="text-sm font-semibold text-slate-100">{item.value}</p>
+                        </div>
+                        <p className="text-right text-xs text-slate-400">{item.detail}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
         </section>
 
         <section className="mb-6 grid grid-cols-1 xl:grid-cols-2 gap-4">
@@ -2393,17 +2584,17 @@ export default function AnalyticsStatisticsPage() {
 
             {!plan ? (
               <div className="mt-3 text-sm text-slate-400">
-                {L("Create a Growth Plan to compare the account against plan pacing.", "Crea un Growth Plan para comparar la cuenta contra el ritmo del plan.")}{" "}
+                {L("Create a Trading Business Plan to compare the account against business pacing.", "Crea un Plan de Empresa de Trading para comparar la cuenta contra el ritmo empresarial.")}{" "}
                 <Link href="/growth-plan" className="text-emerald-300 hover:text-emerald-200 underline">
-                  {L("Open Growth Plan", "Abrir Growth Plan")}
+                  {L("Open Trading Business Plan", "Abrir Plan de Empresa de Trading")}
                 </Link>
               </div>
             ) : scopeMode !== "plan" ? (
               <div className="mt-3 space-y-3">
                 <p className="text-sm text-slate-300">
                   {L(
-                    "Plan Analytics is most accurate in Plan scope because it aligns the range with the Growth Plan start.",
-                    "Plan Analytics es más precisa en alcance Plan porque alinea el rango con el inicio del Growth Plan."
+                    "Plan Analytics is most accurate in Plan scope because it aligns the range with the Trading Business Plan start.",
+                    "Plan Analytics es más precisa en alcance Plan porque alinea el rango con el inicio del Plan de Empresa de Trading."
                   )}
                 </p>
                 <p className="text-xs text-slate-500">
@@ -2415,8 +2606,8 @@ export default function AnalyticsStatisticsPage() {
               <>
                 <p className="mt-2 text-sm text-slate-300">
                   {L(
-                    "This lens compares balance now against the current checkpoint and the full Growth Plan target.",
-                    "Esta vista compara el balance actual contra el checkpoint actual y contra la meta total del Growth Plan."
+                    "This lens compares balance now against the current checkpoint and the full Trading Business Plan target.",
+                    "Esta vista compara el balance actual contra el checkpoint actual y contra la meta total del Plan de Empresa de Trading."
                   )}
                 </p>
 
@@ -2501,13 +2692,13 @@ export default function AnalyticsStatisticsPage() {
         <section className="mb-6">
           <div className="flex flex-wrap gap-2">
             {([
-              ["overview", L("Overview", "Resumen")],
-              ["performance", L("Performance", "Rendimiento")],
+              ["overview", L("Intelligence", "Inteligencia")],
+              ["performance", L("Monthly", "Mensual")],
               ["risk", L("Risk", "Riesgo")],
-              ["time", L("Time", "Tiempo")],
-              ["instruments", L("Instruments", "Instrumentos")],
-              ["trades", L("Trades", "Operaciones")],
-              ["statistics", L("Statistics", "Estadísticas")],
+              ["time", L("Timing", "Horarios")],
+              ["instruments", L("Money Map", "Mapa del dinero")],
+              ["trades", L("Trade Log", "Registro")],
+              ["statistics", L("KPI Lab", "Laboratorio KPI")],
             ] as Array<[AnalyticsGroupId, string]>).map(([id, label]) => (
               <button
                 key={id}
@@ -2541,8 +2732,8 @@ export default function AnalyticsStatisticsPage() {
             {L("No trade sessions found in this date range.", "No se encontraron sesiones en este rango.")}
             <div className="text-xs text-slate-500 mt-2">
               {L(
-                "If you expected data, confirm your journal entries are saved in Supabase for user id",
-                "Si esperabas datos, confirma que tus entradas están guardadas en Supabase para el usuario"
+                "If you expected data, confirm your execution records are saved in Supabase for user id",
+                "Si esperabas datos, confirma que tus registros de ejecución están guardados en Supabase para el usuario"
               )}{" "}
               <span className="font-mono">{String(userId || "")}</span>.
             </div>
@@ -2674,31 +2865,6 @@ function InfoDot({ text }: { text: string }) {
     >
       i
     </span>
-  );
-}
-
-function KpiCard({
-  label,
-  value,
-  sub,
-  valueClass,
-  help,
-}: {
-  label: string;
-  value: string;
-  sub?: string;
-  valueClass?: string;
-  help: string;
-}) {
-  return (
-    <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
-      <div className="text-[11px] text-slate-500 tracking-widest uppercase flex items-center">
-        <span>{label}</span>
-        <InfoDot text={help} />
-      </div>
-      <div className={["mt-1 text-2xl font-semibold", valueClass || ""].join(" ")}>{value}</div>
-      {sub ? <div className="mt-1 text-xs text-slate-400">{sub}</div> : null}
-    </div>
   );
 }
 
@@ -3357,8 +3523,8 @@ function TimeSection({ lang, snapshot }: { lang: Lang; snapshot: AnalyticsSnapsh
         {byHour.length === 0 ? (
           <p className="text-sm text-slate-400">
             {T(
-              "No data (requires trade times in your journal).",
-              "Sin datos (requiere horas de trades en tu journal)."
+              "No data (requires trade times in your execution records).",
+              "Sin datos (requiere horas de trades en tus registros de ejecución)."
             )}
           </p>
         ) : (
@@ -3885,7 +4051,7 @@ function StatisticsSection({
 
   return (
     <div className="space-y-6">
-      <Card title={T("Simple trading stats", "Métricas simples de trading")}>
+      <Card title={T("Trader basics", "Base del trader")}>
         <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-sm">
           {beginnerStats.map((stat) => (
             <MiniStat
@@ -3898,14 +4064,14 @@ function StatisticsSection({
         </div>
         <p className="mt-4 text-[11px] text-slate-500">
           {T(
-            "These metrics are meant to answer the basics fast: how often you win, how big your good/bad days are, how long you hold winners vs losers, and what each active day usually produces.",
-            "Estas métricas responden lo básico rápido: con qué frecuencia ganas, qué tamaño tienen tus días buenos/malos, cuánto tiempo mantienes ganadores vs perdedores y qué suele producir cada día activo."
+            "This is the plain-language layer: how often you win, how large good/bad days are, how long you hold winners vs losers, and what each active day usually produces.",
+            "Esta es la capa en lenguaje simple: con qué frecuencia ganas, qué tamaño tienen tus días buenos/malos, cuánto tiempo mantienes ganadores vs perdedores y qué suele producir cada día activo."
           )}
         </p>
       </Card>
 
       <Card
-        title={T("Advanced trading KPIs", "KPIs avanzados de trading")}
+        title={T("Advanced KPI Lab", "Laboratorio KPI avanzado")}
         right={(
           <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
             <span>{T("Category", "Categoría")}</span>

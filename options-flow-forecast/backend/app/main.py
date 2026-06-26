@@ -1,10 +1,11 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException, Depends, Header
+from fastapi import FastAPI, UploadFile, File, HTTPException, Depends, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlmodel import Session, select
 import uuid
 import json
 import os
+import time
 
 from .core.config import settings
 from .core.logging import configure_logging
@@ -20,6 +21,17 @@ configure_logging()
 init_db()
 
 app = FastAPI(title="options-flow-forecast")
+RATE_BUCKETS: dict[str, tuple[int, float]] = {}
+FLOW_CONTENT_TYPES = {
+    "text/csv",
+    "application/csv",
+    "application/vnd.ms-excel",
+    "text/plain",
+    "image/png",
+    "image/jpeg",
+    "image/webp",
+}
+CHART_CONTENT_TYPES = {"image/png", "image/jpeg", "image/webp"}
 
 
 def parse_cors_origins(raw: str) -> list[str]:
@@ -40,14 +52,39 @@ if cors_origins:
 
 def require_api_key(x_api_key: str = Header(default="")):
     expected = settings.options_flow_api_key
-    if expected and x_api_key != expected:
+    if not expected:
+        if settings.allow_unsafe_dev_no_api_key:
+            return
+        raise HTTPException(status_code=503, detail="OPTIONS_FLOW_API_KEY is not configured")
+    if x_api_key != expected:
         raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+def enforce_rate_limit(req: Request, x_api_key: str = Header(default="")):
+    limit = max(1, int(settings.rate_limit_per_minute))
+    now = time.monotonic()
+    window = 60.0
+    client = req.client.host if req.client else "unknown"
+    key = f"{client}:{x_api_key or 'anonymous'}"
+    count, reset_at = RATE_BUCKETS.get(key, (0, now + window))
+    if now > reset_at:
+        count, reset_at = 0, now + window
+    count += 1
+    RATE_BUCKETS[key] = (count, reset_at)
+    if count > limit:
+        raise HTTPException(status_code=429, detail="Rate limit exceeded")
 
 
 def enforce_upload_size(data: bytes):
     max_bytes = int(settings.max_upload_mb) * 1024 * 1024
     if max_bytes > 0 and len(data) > max_bytes:
         raise HTTPException(status_code=413, detail="File too large")
+
+
+def enforce_content_type(file: UploadFile, allowed: set[str]):
+    content_type = (file.content_type or "application/octet-stream").lower()
+    if content_type not in allowed:
+        raise HTTPException(status_code=415, detail="Unsupported file type")
 
 
 def load_prompt() -> str:
@@ -62,8 +99,10 @@ async def ingest_flow(
     provider: str | None = None,
     symbol: str | None = None,
     _: None = Depends(require_api_key),
+    __: None = Depends(enforce_rate_limit),
     session: Session = Depends(get_session),
 ):
+    enforce_content_type(file, FLOW_CONTENT_TYPES)
     data = await file.read()
     if not data:
         raise HTTPException(status_code=400, detail="Empty file")
@@ -100,8 +139,10 @@ async def ingest_chart(
     file: UploadFile = File(...),
     symbol: str | None = None,
     _: None = Depends(require_api_key),
+    __: None = Depends(enforce_rate_limit),
     session: Session = Depends(get_session),
 ):
+    enforce_content_type(file, CHART_CONTENT_TYPES)
     data = await file.read()
     if not data:
         raise HTTPException(status_code=400, detail="Empty file")
@@ -128,6 +169,7 @@ async def ingest_chart(
 async def analyze(
     req: AnalyzeRequest,
     _: None = Depends(require_api_key),
+    __: None = Depends(enforce_rate_limit),
     session: Session = Depends(get_session),
 ):
     flow_upload = session.exec(select(UploadModel).where(UploadModel.id == req.flow_upload_id)).first()
@@ -196,6 +238,7 @@ async def analyze(
 async def feedback(
     req: FeedbackRequest,
     _: None = Depends(require_api_key),
+    __: None = Depends(enforce_rate_limit),
     session: Session = Depends(get_session),
 ):
     fb = FeedbackModel(

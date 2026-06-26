@@ -14,14 +14,14 @@ const APP_URL =
 const FROM_EMAIL =
   process.env.RESEND_FROM_EMAIL ||
   process.env.EMAIL_FROM ||
-  "NeuroTrader Journal <support@neurotrader-journal.com>";
+  "NeuroTrader <support@neurotrader-journal.com>";
 
 const AUTH_FROM_EMAIL =
   process.env.RESEND_AUTH_FROM_EMAIL ||
   process.env.AUTH_FROM_EMAIL ||
   process.env.RESEND_NO_REPLY_EMAIL ||
   process.env.NO_REPLY_FROM_EMAIL ||
-  "NeuroTrader Journal <no-reply@neurotrader-journal.com>";
+  "NeuroTrader <no-reply@neurotrader-journal.com>";
 
 const resend = process.env.RESEND_API_KEY
   ? new Resend(process.env.RESEND_API_KEY)
@@ -218,7 +218,7 @@ function formatTodayJournalDate() {
 
 function formatPlanLabel(plan?: string | null) {
   const clean = String(plan ?? "").trim().toLowerCase();
-  if (!clean) return "NeuroTrader Journal";
+  if (!clean) return "NeuroTrader";
   if (clean === "advanced") return "Advanced";
   if (clean === "core") return "Core";
   return clean
@@ -311,7 +311,7 @@ function buildSubscriptionReceiptPdfAttachment(args: {
   const paidOn = formatEmailDate(args.chargeDate) ?? formatEmailDate(new Date()) ?? "";
   const receiptNumber =
     args.invoiceNumber || buildFallbackReceiptNumber({ email: args.email, chargeDate: args.chargeDate });
-  const customerName = args.name || "NeuroTrader Journal customer";
+  const customerName = args.name || "NeuroTrader customer";
 
   const doc = new jsPDF({ unit: "pt", format: "letter" });
   const pageWidth = doc.internal.pageSize.getWidth();
@@ -320,9 +320,9 @@ function buildSubscriptionReceiptPdfAttachment(args: {
 
   doc.setProperties({
     title: `Receipt ${receiptNumber}`,
-    subject: "NeuroTrader Journal subscription receipt",
+    subject: "NeuroTrader subscription receipt",
     author: "SG PAX Corp.",
-    creator: "NeuroTrader Journal",
+    creator: "NeuroTrader",
   });
 
   doc.setFillColor(248, 251, 255);
@@ -340,13 +340,13 @@ function buildSubscriptionReceiptPdfAttachment(args: {
     doc.setFont("helvetica", "bold");
     doc.setFontSize(17);
     doc.setTextColor(248, 250, 252);
-    doc.text("NeuroTrader Journal", margin + 24, 88);
+    doc.text("NeuroTrader", margin + 24, 88);
   }
 
   doc.setFont("helvetica", "normal");
   doc.setFontSize(9);
   doc.setTextColor(203, 213, 225);
-  doc.text("Trading structure. Neuro awareness. Repeatable execution.", margin + 24, 116);
+  doc.text("Trading business structure. Neuro awareness. Repeatable execution.", margin + 24, 116);
 
   doc.setFont("helvetica", "bold");
   doc.setFontSize(10);
@@ -379,7 +379,7 @@ function buildSubscriptionReceiptPdfAttachment(args: {
   doc.setFont("helvetica", "normal");
   doc.setFontSize(10);
   doc.setTextColor(71, 85, 105);
-  doc.text("Merchant of record for NeuroTrader Journal", margin + 24, 252, { maxWidth: 220 });
+  doc.text("Merchant of record for NeuroTrader", margin + 24, 252, { maxWidth: 220 });
   doc.text("support@neurotrader-journal.com", margin + 24, 269);
   doc.text("https://www.neurotrader-journal.com", margin + 24, 286);
   doc.text(args.email, pageWidth / 2 + 8, 252, { maxWidth: 210 });
@@ -419,7 +419,7 @@ function buildSubscriptionReceiptPdfAttachment(args: {
   doc.setFont("helvetica", "bold");
   doc.setFontSize(12);
   doc.setTextColor(15, 23, 42);
-  doc.text(`NeuroTrader Journal - ${planLabel} plan`, margin + 20, tableTop + 82);
+  doc.text(`NeuroTrader - ${planLabel} plan`, margin + 20, tableTop + 82);
   doc.setFont("helvetica", "normal");
   doc.setFontSize(9);
   doc.setTextColor(100, 116, 139);
@@ -450,7 +450,7 @@ function buildSubscriptionReceiptPdfAttachment(args: {
   doc.setFontSize(8);
   doc.setTextColor(100, 116, 139);
   const legalLines = [
-    "This receipt confirms payment for a NeuroTrader Journal subscription billed by SG PAX Corp.",
+    "This receipt confirms payment for a NeuroTrader subscription billed by SG PAX Corp.",
     args.subscriptionId ? `Stripe subscription reference: ${args.subscriptionId}` : "",
     "For billing questions, contact support@neurotrader-journal.com.",
   ].filter(Boolean);
@@ -482,7 +482,7 @@ function buildNeuroTraderHtml({
 }: NeuroTemplateArgs): string {
   const preheaderText =
     preheader ||
-    "Structured journaling, AI coaching, and trading clarity inside NeuroTrader Journal.";
+    "Trading business structure, AI coaching, and execution clarity inside NeuroTrader.";
   const logoUrl = resolveEmailLogoUrl();
 
   const factsHtml = Array.isArray(facts) && facts.length
@@ -501,7 +501,7 @@ function buildNeuroTraderHtml({
     ? `<div style="margin:22px auto 10px auto;max-width:336px;border:1px solid #99f6e4;border-radius:24px;background:linear-gradient(180deg,#ecfdf5 0%,#f0fdfa 100%);padding:20px 18px 18px 18px;text-align:center;box-shadow:0 16px 34px rgba(16,185,129,0.14);">
          <div style="font-size:10px;letter-spacing:0.24em;text-transform:uppercase;color:#0f766e;margin:0 0 10px 0;font-weight:800;text-align:center;">Verification code</div>
          <div style="font-size:36px;line-height:1;font-weight:900;letter-spacing:0.26em;color:#062f2b;text-align:center;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">${escapeHtml(code)}</div>
-         <div style="margin-top:12px;color:#475569;font-size:12px;line-height:1.6;text-align:center;">Enter this code inside NeuroTrader Journal to continue.</div>
+         <div style="margin-top:12px;color:#475569;font-size:12px;line-height:1.6;text-align:center;">Enter this code inside NeuroTrader to continue.</div>
        </div>`
     : "";
 
@@ -552,8 +552,8 @@ function buildNeuroTraderHtml({
                     <table width="100%" role="presentation" cellPadding="0" cellSpacing="0">
                       <tr>
                         <td align="left">
-                          <img src="${logoUrl}" width="196" alt="NeuroTrader Journal" style="display:block;width:196px;max-width:196px;height:auto;border:0;outline:none;text-decoration:none;" />
-                          <div style="padding:7px 0 0 0;color:#64748b;font-size:11px;line-height:1.5;">Trading structure. Neuro awareness. Repeatable execution.</div>
+                          <img src="${logoUrl}" width="196" alt="NeuroTrader" style="display:block;width:196px;max-width:196px;height:auto;border:0;outline:none;text-decoration:none;" />
+                          <div style="padding:7px 0 0 0;color:#64748b;font-size:11px;line-height:1.5;">Trading business structure. Neuro awareness. Repeatable execution.</div>
                         </td>
                       </tr>
                       <tr>
@@ -579,8 +579,8 @@ function buildNeuroTraderHtml({
                 </tr>
                 <tr>
                   <td style="padding:16px 24px 18px 24px;border-top:1px solid #e2e8f0;background:#ffffff;">
-                    <p style="margin:0;color:#64748b;font-size:11px;line-height:1.6;">You’re receiving this email because you have an account, subscription, or admin-triggered email flow inside <span style="color:#0f172a;font-weight:800;">NeuroTrader Journal</span>.</p>
-                    <p style="margin:6px 0 0 0;color:#94a3b8;font-size:10px;line-height:1.6;">© ${new Date().getFullYear()} NeuroTrader Journal. All rights reserved.</p>
+                    <p style="margin:0;color:#64748b;font-size:11px;line-height:1.6;">You’re receiving this email because you have an account, subscription, or admin-triggered email flow inside <span style="color:#0f172a;font-weight:800;">NeuroTrader</span>.</p>
+                    <p style="margin:6px 0 0 0;color:#94a3b8;font-size:10px;line-height:1.6;">© ${new Date().getFullYear()} NeuroTrader. All rights reserved.</p>
                   </td>
                 </tr>
                 <tr>
@@ -634,13 +634,13 @@ function buildEmailConfirmationContent(args: {
   confirmationCode: string;
   continueUrl?: string | null;
 }) : EmailContent {
-  const safeName = args.name || "trader";
+  const safeName = args.name || "Trader Entrepreneur";
   const continueUrl = args.continueUrl || resolveAppUrl("/signup");
-  const subject = "Confirm your NeuroTrader Journal account";
+  const subject = "Confirm your NeuroTrader account";
   const text = [
     `Hi ${safeName},`,
     "",
-    "Welcome to NeuroTrader Journal.",
+    "Welcome to your new trading business platform.",
     "",
     `Your verification code is: ${args.confirmationCode}`,
     "",
@@ -649,19 +649,19 @@ function buildEmailConfirmationContent(args: {
     "",
     "If you didn’t request this account, you can safely ignore this email.",
     "",
-    "NeuroTrader Journal Team",
+    "NeuroTrader Team",
   ].join("\n");
 
   const html = buildNeuroTraderHtml({
     title: "Confirm your account",
     eyebrow: "Authentication",
-    preheader: "Use your secure code to verify your NeuroTrader Journal account.",
+    preheader: "Use your secure code to verify your NeuroTrader account.",
     greeting: `Hi ${escapeHtml(safeName)},`,
-    highlight: "Verify your email to unlock your journal, billing step, and onboarding flow.",
+    highlight: "Verify your email to unlock your trading business workspace, billing step, and onboarding flow.",
     code: args.confirmationCode,
     paragraphs: [
-      "Use the verification code above inside NeuroTrader Journal to confirm your email and continue setup.",
-      "Once verified, you can choose your plan, complete checkout, and enter your trading workspace.",
+      "Use the verification code above inside NeuroTrader to confirm your email and continue setup.",
+      "Once verified, you can choose your business plan, complete checkout, and enter your trading business workspace.",
     ],
     facts: [
       { label: "Email", value: escapeHtml(args.email) },
@@ -680,17 +680,17 @@ function buildPasswordResetContent(args: {
   name?: string | null;
   resetUrl: string;
 }) : EmailContent {
-  const safeName = args.name || "trader";
-  const subject = "Reset your NeuroTrader Journal password";
+  const safeName = args.name || "Trader Entrepreneur";
+  const subject = "Reset your NeuroTrader password";
   const text = [
     `Hi ${safeName},`,
     "",
-    "We received a request to reset your NeuroTrader Journal password.",
+    "We received a request to reset your NeuroTrader password.",
     `Use this secure link to continue: ${args.resetUrl}`,
     "",
     "If you did not request a reset, you can ignore this email.",
     "",
-    "NeuroTrader Journal Team",
+    "NeuroTrader Team",
   ].join("\n");
 
   const html = buildNeuroTraderHtml({
@@ -700,7 +700,7 @@ function buildPasswordResetContent(args: {
     greeting: `Hi ${escapeHtml(safeName)},`,
     highlight: "Your password reset link is ready.",
     paragraphs: [
-      "Open the secure link below to set a new password and recover access to your NeuroTrader Journal account.",
+      "Open the secure link below to set a new password and recover access to your NeuroTrader account.",
       "For your safety, use the link from the device where you normally sign in.",
     ],
     facts: [
@@ -722,29 +722,29 @@ function buildAccountRecoveryContent(args: {
   name?: string | null;
   resetUrl: string;
 }) : EmailContent {
-  const safeName = args.name || "trader";
+  const safeName = args.name || "Trader Entrepreneur";
   const signInUrl = resolveAppUrl("/signin");
-  const subject = "Your NeuroTrader Journal account details";
+  const subject = "Your NeuroTrader account details";
   const text = [
     `Hi ${safeName},`,
     "",
-    "Here is the account we found for NeuroTrader Journal:",
+    "Here is the account we found for NeuroTrader:",
     `Sign-in email: ${args.email}`,
     "",
     `If you also want to reset your password, use this secure link: ${args.resetUrl}`,
     `Sign in here: ${signInUrl}`,
     "",
-    "NeuroTrader Journal Team",
+    "NeuroTrader Team",
   ].join("\n");
 
   const html = buildNeuroTraderHtml({
     title: "Account recovery",
     eyebrow: "Authentication",
-    preheader: "We found your NeuroTrader Journal sign-in details.",
+    preheader: "We found your NeuroTrader sign-in details.",
     greeting: `Hi ${escapeHtml(safeName)},`,
     highlight: `Your sign-in email is <strong>${escapeHtml(args.email)}</strong>.`,
     paragraphs: [
-      "Use the sign-in email above to access NeuroTrader Journal.",
+      "Use the sign-in email above to access NeuroTrader.",
       "If you also need a new password, use the reset link below and choose a new one right away.",
     ],
     facts: [
@@ -766,45 +766,45 @@ function buildWelcomeEmailContent(args: {
   name?: string | null;
   locale?: string | null;
 }) : EmailContent {
-  const safeName = args.name || "trader";
+  const safeName = args.name || "Trader Entrepreneur";
   const locale = normalizeEmailLocale(args.locale);
   const copy =
     locale === "es"
       ? {
-          subject: "Bienvenido a NeuroTrader Journal",
-          title: "Bienvenido a NeuroTrader Journal",
+          subject: "Bienvenido a tu nueva plataforma de negocio de trading",
+          title: "Bienvenido a tu nueva plataforma de negocio de trading",
           eyebrow: "Inicio",
-          preheader: "Tu nueva etapa como trader comienza ahora.",
+          preheader: "Tu empresa de trading comienza ahora.",
           greeting: `Hola ${safeName},`,
-          highlight: "Bienvenido a tu nueva etapa como trader.",
+          highlight: "Tu Centro Empresarial está listo para operar tu empresa de trading.",
           paragraphs: [
-            "Tu espacio de trabajo está listo para journaling estructurado, analytics y coaching de IA conectado a cómo realmente operas.",
-            "Si sigues tus reglas, respetas tu plan y no permites que las emociones tomen el volante, puedes llegar muy lejos. La meta no es operar más; es operar con disciplina, contexto y ejecución repetible.",
-            "Empieza registrando tus sesiones, marcando patrones emocionales y revisando tu ejecución con contexto.",
+            "Tu espacio empresarial está listo para planificar, registrar ejecución, medir rendimiento y recibir coaching de IA conectado a cómo realmente operas.",
+            "La meta no es operar más; es operar tu empresa de trading con disciplina, contexto, protección de reglas y ejecución repetible.",
+            "Empieza creando o revisando tu Plan de Empresa de Trading, registrando tus sesiones y marcando patrones emocionales con contexto.",
           ],
           factEmail: "Correo",
-          ctaLabel: "Abrir dashboard",
+          ctaLabel: "Abrir Centro Empresarial",
           secondaryLabel: "Iniciar sesión",
           footerNote: "Si no creaste esta cuenta, puedes ignorar este email.",
-          team: "Equipo de NeuroTrader Journal",
+          team: "Equipo de NeuroTrader",
         }
       : {
-          subject: "Welcome to NeuroTrader Journal",
-          title: "Welcome to NeuroTrader Journal",
+          subject: "Welcome to your new trading business platform",
+          title: "Welcome to your new trading business platform",
           eyebrow: "Lifecycle",
-          preheader: "Your new trading journey starts now.",
+          preheader: "Your trading business starts now.",
           greeting: `Hi ${safeName},`,
-          highlight: "Welcome to your new journey in trading.",
+          highlight: "Your Business Center is ready to operate your trading business.",
           paragraphs: [
-            "Your workspace is ready for structured journaling, analytics, and AI coaching tied to how you actually trade.",
-            "If you follow your rules, respect your plan, and do not let emotions take the wheel, you can go very far. The goal is not to trade more; it is to trade with discipline, context, and repeatable execution.",
-            "Start logging your sessions, marking emotional patterns, and reviewing your execution with context.",
+            "Your business workspace is ready for planning, execution records, performance tracking, and AI coaching tied to how you actually trade.",
+            "The goal is not to trade more; it is to operate your trading business with discipline, context, rule protection, and repeatable execution.",
+            "Start by creating or reviewing your Trading Business Plan, logging sessions, and marking emotional patterns with context.",
           ],
           factEmail: "Email",
-          ctaLabel: "Open dashboard",
+          ctaLabel: "Open Business Center",
           secondaryLabel: "Open sign in",
           footerNote: "If you didn’t create this account, you can ignore this email.",
-          team: "NeuroTrader Journal Team",
+          team: "NeuroTrader Team",
         };
 
   const subject = copy.subject;
@@ -845,7 +845,7 @@ function buildInactivityReminderContent(args: {
   locale?: string | null;
 }) : EmailContent {
   const locale = normalizeEmailLocale(args.locale);
-  const safeName = args.name || "trader";
+  const safeName = args.name || "Trader Entrepreneur";
   const daysLabel = `${args.daysInactive}+ ${locale === "es" ? "días" : "days"}`;
   const journalUrl = resolveAppUrl(`/journal/${formatTodayJournalDate()}`);
   const dashboardUrl = resolveAppUrl("/dashboard");
@@ -853,15 +853,15 @@ function buildInactivityReminderContent(args: {
   const stageCopy = {
     en: {
       3: {
-        subject: "Your trading journal is waiting for today's context",
-        title: "Your process is waiting",
+        subject: "Your trading business is waiting for today's context",
+        title: "Your business process is waiting",
         preheader: "Three days away can blur the context. Log one clean update today.",
         highlight: "Three quiet days is enough for execution context to fade.",
         paragraphs: [
-          "You have not opened NeuroTrader Journal for about 3 days. Before the week gets noisy, log one quick note: what changed, what you felt, and what rule matters next.",
-          "The goal is not to catch up perfectly. It is to keep your Growth Plan connected to the trader you are becoming.",
+          "You have not opened NeuroTrader for about 3 days. Before the week gets noisy, log one quick note: what changed, what you felt, and what rule matters next.",
+          "The goal is not to catch up perfectly. It is to keep your Trading Business Plan connected to the operator you are becoming.",
         ],
-        ctaLabel: "Open my journal",
+        ctaLabel: "Open my execution record",
         secondaryLabel: "Open dashboard",
         factLabel: "Inactive for",
       },
@@ -871,10 +871,10 @@ function buildInactivityReminderContent(args: {
         preheader: "A clean reset beats a silent gap. Start with one honest entry.",
         highlight: "You do not need to rebuild everything today. You only need one honest entry.",
         paragraphs: [
-          "You have been away from NeuroTrader Journal for about 15 days. That gap matters because your Growth Plan needs fresh data: execution, emotions, mistakes, and wins.",
-          "Open the journal, write what happened, and pick the next rule you will protect. Small honest resets are how disciplined traders get back in rhythm.",
+          "You have been away from NeuroTrader for about 15 days. That gap matters because your Trading Business Plan needs fresh data: execution, emotions, mistakes, and wins.",
+          "Open the execution record, write what happened, and pick the next rule you will protect. Small honest resets are how Trader Entrepreneurs get back in rhythm.",
         ],
-        ctaLabel: "Restart my journal",
+        ctaLabel: "Restart my execution record",
         secondaryLabel: "Review dashboard",
         factLabel: "Inactive for",
       },
@@ -884,8 +884,8 @@ function buildInactivityReminderContent(args: {
         preheader: "After 30 days away, the next move is simple: log one session and rebuild from there.",
         highlight: "After a month away, the comeback starts with one small, structured entry.",
         paragraphs: [
-          "You have been away from NeuroTrader Journal for about 30 days. No judgment. The danger is not the gap; it is letting the gap erase what your trading is teaching you.",
-          "Open your journal and create one entry today. One session, one emotion, one rule, one next action. That is enough to reconnect with your plan.",
+          "You have been away from NeuroTrader for about 30 days. No judgment. The danger is not the gap; it is letting the gap erase what your trading business is teaching you.",
+          "Open your execution record and create one entry today. One session, one emotion, one rule, one next action. That is enough to reconnect with your plan.",
         ],
         ctaLabel: "Create one entry",
         secondaryLabel: "Open dashboard",
@@ -894,15 +894,15 @@ function buildInactivityReminderContent(args: {
     },
     es: {
       3: {
-        subject: "Tu journal de trading está esperando el contexto de hoy",
+        subject: "Tu empresa de trading está esperando el contexto de hoy",
         title: "Tu proceso te espera",
         preheader: "Tres días fuera pueden borrar contexto. Registra una nota limpia hoy.",
         highlight: "Tres días sin registrar es suficiente para que se pierda contexto de ejecución.",
         paragraphs: [
-          "No has abierto NeuroTrader Journal en aproximadamente 3 días. Antes de que la semana se ponga ruidosa, registra una nota rápida: qué cambió, qué sentiste y qué regla importa ahora.",
-          "La meta no es ponerte al día perfecto. La meta es mantener tu Growth Plan conectado con el trader en el que te estás convirtiendo.",
+          "No has abierto NeuroTrader en aproximadamente 3 días. Antes de que la semana se ponga ruidosa, registra una nota rápida: qué cambió, qué sentiste y qué regla importa ahora.",
+          "La meta no es ponerte al día perfecto. La meta es mantener tu Plan de Empresa de Trading conectado con el operador en el que te estás convirtiendo.",
         ],
-        ctaLabel: "Abrir mi journal",
+        ctaLabel: "Abrir mi registro de ejecución",
         secondaryLabel: "Abrir dashboard",
         factLabel: "Inactivo por",
       },
@@ -912,10 +912,10 @@ function buildInactivityReminderContent(args: {
         preheader: "Un reinicio limpio vale más que un silencio largo. Empieza con una entrada honesta.",
         highlight: "No tienes que reconstruirlo todo hoy. Solo necesitas una entrada honesta.",
         paragraphs: [
-          "Has estado fuera de NeuroTrader Journal por aproximadamente 15 días. Ese espacio importa porque tu Growth Plan necesita data fresca: ejecución, emociones, errores y victorias.",
-          "Abre el journal, escribe qué pasó y elige la próxima regla que vas a proteger. Los reinicios pequeños y honestos son parte de volver al ritmo.",
+          "Has estado fuera de NeuroTrader por aproximadamente 15 días. Ese espacio importa porque tu Plan de Empresa de Trading necesita data fresca: ejecución, emociones, errores y victorias.",
+          "Abre el registro de ejecución, escribe qué pasó y elige la próxima regla que vas a proteger. Los reinicios pequeños y honestos son parte de volver al ritmo.",
         ],
-        ctaLabel: "Reiniciar mi journal",
+        ctaLabel: "Reiniciar mi registro de ejecución",
         secondaryLabel: "Revisar dashboard",
         factLabel: "Inactivo por",
       },
@@ -925,8 +925,8 @@ function buildInactivityReminderContent(args: {
         preheader: "Luego de 30 días fuera, el próximo paso es simple: registra una sesión y reconstruye desde ahí.",
         highlight: "Después de un mes fuera, el regreso empieza con una entrada pequeña y estructurada.",
         paragraphs: [
-          "Has estado fuera de NeuroTrader Journal por aproximadamente 30 días. Sin juicio. El peligro no es el gap; es permitir que el gap borre lo que tu trading te está enseñando.",
-          "Abre tu journal y crea una entrada hoy. Una sesión, una emoción, una regla, una próxima acción. Eso basta para reconectar con tu plan.",
+          "Has estado fuera de NeuroTrader por aproximadamente 30 días. Sin juicio. El peligro no es el gap; es permitir que el gap borre lo que tu empresa de trading te está enseñando.",
+          "Abre tu registro de ejecución y crea una entrada hoy. Una sesión, una emoción, una regla, una próxima acción. Eso basta para reconectar con tu plan.",
         ],
         ctaLabel: "Crear una entrada",
         secondaryLabel: "Abrir dashboard",
@@ -946,7 +946,7 @@ function buildInactivityReminderContent(args: {
 
   const copy = stageCopy[locale][args.daysInactive];
   const greeting = locale === "es" ? `Hola ${safeName},` : `Hi ${safeName},`;
-  const team = locale === "es" ? "Equipo de NeuroTrader Journal" : "NeuroTrader Journal Team";
+  const team = locale === "es" ? "Equipo de NeuroTrader" : "NeuroTrader Team";
   const emailLabel = locale === "es" ? "Correo" : "Email";
 
   const text = [
@@ -996,8 +996,8 @@ function buildSubscriptionReceiptContent(args: {
   invoiceUrl?: string | null;
   chargeDate?: string | null;
 }) : EmailContent {
-  const safeName = args.name || "trader";
-  const subject = "Your NeuroTrader Journal subscription receipt";
+  const safeName = args.name || "Trader Entrepreneur";
+  const subject = "Your NeuroTrader subscription receipt";
   const amountText = formatMoney(args.amount);
   const planLabel = formatPlanLabel(args.plan);
   const billingLabel = formatBillingCycleLabel(args.billingCycle);
@@ -1016,7 +1016,7 @@ function buildSubscriptionReceiptContent(args: {
     args.invoiceUrl ? `Invoice: ${args.invoiceUrl}` : "",
     `Billing: ${resolveAppUrl("/billing")}`,
     "",
-    "NeuroTrader Journal Team",
+    "NeuroTrader Team",
   ].filter(Boolean).join("\n");
 
   const html = buildNeuroTraderHtml({
@@ -1026,8 +1026,8 @@ function buildSubscriptionReceiptContent(args: {
     greeting: `Hi ${escapeHtml(safeName)},`,
     highlight: `Your <strong>${escapeHtml(planLabel)}</strong>${billingLabel ? ` <strong>${escapeHtml(billingLabel.toLowerCase())}</strong>` : ""} payment was processed successfully. Your SG PAX Corp. PDF receipt is attached.`,
     paragraphs: [
-      "Your subscription payment has been processed and your workspace remains active inside NeuroTrader Journal.",
-      "The attached receipt is issued by SG PAX Corp. for NeuroTrader Journal subscription access.",
+      "Your subscription payment has been processed and your trading business workspace remains active inside NeuroTrader.",
+      "The attached receipt is issued by SG PAX Corp. for NeuroTrader subscription access.",
       "You can review billing details, plan changes, and renewal settings from the Billing section at any time.",
     ],
     facts: [
@@ -1059,21 +1059,21 @@ function buildSubscriptionConfirmationContent(args: {
   billingCycle?: string | null;
   subscriptionId?: string | null;
 }) : EmailContent {
-  const safeName = args.name || "trader";
+  const safeName = args.name || "Trader Entrepreneur";
   const planLabel = formatPlanLabel(args.plan);
   const billingLabel = formatBillingCycleLabel(args.billingCycle);
   const subject = `Your ${planLabel} plan is active`;
   const text = [
     `Hi ${safeName},`,
     "",
-    `Your NeuroTrader Journal ${planLabel} plan is active.`,
+    `Your NeuroTrader ${planLabel} plan is active.`,
     billingLabel ? `Billing cycle: ${billingLabel}` : "",
     args.subscriptionId ? `Subscription ID: ${args.subscriptionId}` : "",
     "",
     `Open billing: ${resolveAppUrl("/billing")}`,
-    `Open dashboard: ${resolveAppUrl("/dashboard")}`,
+    `Open Business Center: ${resolveAppUrl("/dashboard")}`,
     "",
-    "NeuroTrader Journal Team",
+    "NeuroTrader Team",
   ].filter(Boolean).join("\n");
 
   const html = buildNeuroTraderHtml({
@@ -1083,8 +1083,8 @@ function buildSubscriptionConfirmationContent(args: {
     greeting: `Hi ${escapeHtml(safeName)},`,
     highlight: `Your <strong>${escapeHtml(planLabel)}</strong> plan is now active${billingLabel ? ` on a <strong>${escapeHtml(billingLabel.toLowerCase())}</strong> cycle` : ""}.`,
     paragraphs: [
-      "Your checkout finished successfully and your subscription is now active inside NeuroTrader Journal.",
-      "From here, you can open your dashboard, review Billing, and start journaling without waiting on Stripe-hosted emails.",
+      "Your checkout finished successfully and your subscription is now active inside NeuroTrader.",
+      "From here, you can open your Business Center, review Billing, and start operating your trading business without waiting on Stripe-hosted emails.",
     ],
     facts: [
       { label: "Plan", value: escapeHtml(planLabel) },
@@ -1092,7 +1092,7 @@ function buildSubscriptionConfirmationContent(args: {
       ...(args.subscriptionId ? [{ label: "Subscription", value: escapeHtml(args.subscriptionId) }] : []),
       { label: "Email", value: escapeHtml(args.email) },
     ],
-    ctaLabel: "Open dashboard",
+    ctaLabel: "Open Business Center",
     ctaUrl: resolveAppUrl("/dashboard"),
     secondaryLabel: "Open billing",
     secondaryUrl: resolveAppUrl("/billing"),
@@ -1109,7 +1109,7 @@ function buildSubscriptionRenewalReminderContent(args: {
   billingCycle?: string | null;
   renewalDate?: string | null;
 }) : EmailContent {
-  const safeName = args.name || "trader";
+  const safeName = args.name || "Trader Entrepreneur";
   const planLabel = formatPlanLabel(args.plan);
   const billingLabel = formatBillingCycleLabel(args.billingCycle);
   const renewalDateText = formatEmailDate(args.renewalDate);
@@ -1124,7 +1124,7 @@ function buildSubscriptionRenewalReminderContent(args: {
     "",
     `Review billing: ${resolveAppUrl("/billing")}`,
     "",
-    "NeuroTrader Journal Team",
+    "NeuroTrader Team",
   ].filter(Boolean).join("\n");
 
   const html = buildNeuroTraderHtml({
@@ -1136,7 +1136,7 @@ function buildSubscriptionRenewalReminderContent(args: {
       ? `Your <strong>${escapeHtml(planLabel)}</strong> plan is scheduled to renew on <strong>${escapeHtml(renewalDateText)}</strong>.`
       : `Your <strong>${escapeHtml(planLabel)}</strong> plan is scheduled to renew soon.`,
     paragraphs: [
-      "This is a heads-up from NeuroTrader Journal so you can review your billing details before the next charge goes through.",
+      "This is a heads-up from NeuroTrader so you can review your billing details before the next charge goes through.",
       "If you want to update your payment method, switch plans, or cancel before renewal, open Billing from the button below.",
     ],
     facts: [
@@ -1162,7 +1162,7 @@ function buildSubscriptionPaymentIssueContent(args: {
   invoiceUrl?: string | null;
   nextAttemptAt?: string | null;
 }) : EmailContent {
-  const safeName = args.name || "trader";
+  const safeName = args.name || "Trader Entrepreneur";
   const planLabel = formatPlanLabel(args.plan);
   const amountText = formatMoney(args.amount);
   const billingLabel = formatBillingCycleLabel(args.billingCycle);
@@ -1180,7 +1180,7 @@ function buildSubscriptionPaymentIssueContent(args: {
     `Update billing: ${resolveAppUrl("/billing")}`,
     args.invoiceUrl ? `Invoice: ${args.invoiceUrl}` : "",
     "",
-    "NeuroTrader Journal Team",
+    "NeuroTrader Team",
   ].filter(Boolean).join("\n");
 
   const html = buildNeuroTraderHtml({
@@ -1224,7 +1224,7 @@ function buildSubscriptionPaymentMethodExpiringContent(args: {
   expMonth?: number | null;
   expYear?: number | null;
 }) : EmailContent {
-  const safeName = args.name || "trader";
+  const safeName = args.name || "Trader Entrepreneur";
   const planLabel = formatPlanLabel(args.plan || "advanced");
   const brand = args.brand ? args.brand.charAt(0).toUpperCase() + args.brand.slice(1) : "Card";
   const last4 = args.last4 ? `ending in ${args.last4}` : "on file";
@@ -1239,11 +1239,11 @@ function buildSubscriptionPaymentMethodExpiringContent(args: {
     `Your ${brand} payment method ${last4} expires ${expiry}.`,
     `Plan: ${planLabel}`,
     "",
-    "Please update your billing details before the next renewal so your NeuroTrader Journal access stays uninterrupted.",
+    "Please update your billing details before the next renewal so your NeuroTrader access stays uninterrupted.",
     "",
     `Update billing: ${resolveAppUrl("/billing")}`,
     "",
-    "NeuroTrader Journal Team",
+    "NeuroTrader Team",
   ].join("\n");
 
   const html = buildNeuroTraderHtml({
@@ -1253,8 +1253,8 @@ function buildSubscriptionPaymentMethodExpiringContent(args: {
     greeting: `Hi ${escapeHtml(safeName)},`,
     highlight: `Your <strong>${escapeHtml(brand)}</strong> payment method <strong>${escapeHtml(last4)}</strong> expires <strong>${escapeHtml(expiry)}</strong>.`,
     paragraphs: [
-      "This is a proactive billing reminder from NeuroTrader Journal.",
-      "Please update your payment method before the next renewal so your workspace, journal, analytics, and coaching access stay uninterrupted.",
+      "This is a proactive billing reminder from NeuroTrader.",
+      "Please update your payment method before the next renewal so your trading business workspace, execution records, analytics, and coaching access stay uninterrupted.",
     ],
     facts: [
       { label: "Plan", value: escapeHtml(planLabel) },
@@ -1274,10 +1274,10 @@ function buildSubscriptionCancellationContent(args: {
   periodEnd?: string | null;
   nextBillingDate?: string | null;
 }) : EmailContent {
-  const safeName = args.name || "trader";
+  const safeName = args.name || "Trader Entrepreneur";
   const periodText = args.periodEnd ? new Date(args.periodEnd).toLocaleDateString("en-US") : "the end of your current billing period";
   const nextBillingText = args.nextBillingDate ? new Date(args.nextBillingDate).toLocaleDateString("en-US") : periodText;
-  const subject = "Your NeuroTrader Journal cancellation is scheduled";
+  const subject = "Your NeuroTrader cancellation is scheduled";
   const text = [
     `Hi ${safeName},`,
     "",
@@ -1287,7 +1287,7 @@ function buildSubscriptionCancellationContent(args: {
     "",
     `Billing: ${resolveAppUrl("/billing")}`,
     "",
-    "NeuroTrader Journal Team",
+    "NeuroTrader Team",
   ].join("\n");
 
   const html = buildNeuroTraderHtml({
@@ -1317,8 +1317,8 @@ function buildSubscriptionWinbackContent(args: {
   name?: string | null;
   promotionCode: string;
 }) : EmailContent {
-  const safeName = args.name || "trader";
-  const subject = "Come back to NeuroTrader Journal with 50% off";
+  const safeName = args.name || "Trader Entrepreneur";
+  const subject = "Come back to NeuroTrader with 50% off";
   const text = [
     `Hi ${safeName},`,
     "",
@@ -1326,7 +1326,7 @@ function buildSubscriptionWinbackContent(args: {
     `Promo code: ${args.promotionCode}`,
     `Billing: ${resolveAppUrl("/billing")}`,
     "",
-    "NeuroTrader Journal Team",
+    "NeuroTrader Team",
   ].join("\n");
 
   const html = buildNeuroTraderHtml({
@@ -1336,7 +1336,7 @@ function buildSubscriptionWinbackContent(args: {
     greeting: `Hi ${escapeHtml(safeName)},`,
     highlight: `Promo code: <strong>${escapeHtml(args.promotionCode)}</strong>`,
     paragraphs: [
-      "Use this code to return to NeuroTrader Journal with 50% off your next subscription.",
+      "Use this code to return to NeuroTrader with 50% off your next subscription.",
       "If you want help reactivating or choosing the right plan again, reply to this email and we’ll help.",
     ],
     facts: [
@@ -1359,7 +1359,7 @@ function buildProfitLossAlertContent(args: {
   ctaUrl?: string | null;
   detailLines?: string[];
 }) : EmailContent {
-  const safeName = args.name || "trader";
+  const safeName = args.name || "Trader Entrepreneur";
   const ctaUrl = args.ctaUrl || resolveAppUrl("/performance/profit-loss-track");
   const subject = `Profit & Loss Track: ${args.title}`;
   const details = (args.detailLines ?? []).filter(Boolean);
@@ -1378,7 +1378,7 @@ function buildProfitLossAlertContent(args: {
     "",
     ctaUrl,
     "",
-    "NeuroTrader Journal Team",
+    "NeuroTrader Team",
   ].join("\n");
 
   const html = buildNeuroTraderHtml({
@@ -1437,7 +1437,7 @@ function getBroadcastTemplateMeta(templateKey?: AdminBroadcastTemplateKey) {
 function buildAdminBroadcastContent(args: AdminBroadcastArgs): EmailContent {
   const locale = normalizeEmailLocale(args.locale);
   const templateMeta = getBroadcastTemplateMeta(args.templateKey);
-  const greeting = locale === "es" ? "Hola trader," : "Hi trader,";
+  const greeting = locale === "es" ? "Hola Empresario Trader," : "Hi Trader Entrepreneur,";
   const categoryLabel =
     locale === "es"
       ? templateMeta.category === "Authentication"
@@ -1473,7 +1473,7 @@ function buildAdminBroadcastContent(args: AdminBroadcastArgs): EmailContent {
     "",
     args.ctaLabel && args.ctaUrl ? `${args.ctaLabel}: ${args.ctaUrl}` : "",
     "",
-    locale === "es" ? "Equipo de NeuroTrader Journal" : "NeuroTrader Journal Team",
+    locale === "es" ? "Equipo de NeuroTrader" : "NeuroTrader Team",
   ]
     .filter(Boolean)
     .join("\n");
@@ -1490,8 +1490,8 @@ function buildAdminBroadcastContent(args: AdminBroadcastArgs): EmailContent {
     footerNote:
       args.footerNote?.trim() ||
       (locale === "es"
-        ? "Recibes este email porque tienes una cuenta activa dentro de NeuroTrader Journal."
-        : "You’re receiving this email because you have an active account inside NeuroTrader Journal."),
+        ? "Recibes este email porque tienes una cuenta activa dentro de NeuroTrader."
+        : "You’re receiving this email because you have an active account inside NeuroTrader."),
   });
 
   return {
@@ -1955,15 +1955,15 @@ export async function sendAccountRecoveryEmail(args: {
 
 export async function sendWelcomeEmail(user: AppUser) {
   const locale = await resolveEmailLocale({ userId: user.id, email: user.email });
-  const content = buildWelcomeEmailContent({ email: user.email, name: user.name || "trader", locale });
+  const content = buildWelcomeEmailContent({ email: user.email, name: user.name || "Trader Entrepreneur", locale });
   await sendEmailBase({ to: user.email, ...content });
 }
 
 export async function sendSubscriptionReceiptEmail(user: AppUser, plan: PlanId) {
-  const content = buildSubscriptionReceiptContent({ email: user.email, name: user.name || "trader", plan });
+  const content = buildSubscriptionReceiptContent({ email: user.email, name: user.name || "Trader Entrepreneur", plan });
   const receiptPdf = buildSubscriptionReceiptPdfAttachment({
     email: user.email,
-    name: user.name || "trader",
+    name: user.name || "Trader Entrepreneur",
     plan,
   });
   await sendEmailBase({ to: user.email, ...content, attachments: [receiptPdf] });
@@ -1973,7 +1973,7 @@ export async function sendBetaRequestEmail(args: { name: string; email: string }
   const { name, email } = args;
   const subject = `Option Flow beta access request - ${email}`;
   const text = [
-    "New NeuroTrader Journal Option Flow beta access request:",
+    "New NeuroTrader Option Flow beta access request:",
     "",
     `Name: ${name}`,
     `Email: ${email}`,

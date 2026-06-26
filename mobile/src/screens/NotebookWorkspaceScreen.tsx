@@ -118,7 +118,7 @@ export function NotebookWorkspaceScreen() {
 
   const loadWorkspace = useCallback(
     async (options?: { showLoading?: boolean; isRefresh?: boolean }) => {
-      if (!planAccess.isAdvanced) return;
+      if (!planAccess.hasNotebook) return;
       if (!supabaseMobile || !user?.id || !notebookId) return;
 
       const showLoading = options?.showLoading ?? false;
@@ -180,14 +180,14 @@ export function NotebookWorkspaceScreen() {
         if (isRefresh) setRefreshing(false);
       }
     },
-    [language, notebookId, planAccess.isAdvanced, user?.id]
+    [language, notebookId, planAccess.hasNotebook, user?.id]
   );
 
   useFocusEffect(
     useCallback(() => {
-      if (!planAccess.isAdvanced) return;
+      if (!planAccess.hasNotebook) return;
       void loadWorkspace({ showLoading: true });
-    }, [loadWorkspace, planAccess.isAdvanced])
+    }, [loadWorkspace, planAccess.hasNotebook])
   );
 
   useEffect(() => {
@@ -209,7 +209,7 @@ export function NotebookWorkspaceScreen() {
     [pages, selectedSectionId]
   );
 
-  if (!planAccess.isAdvanced) {
+  if (!planAccess.hasNotebook) {
     return (
       <PlanGate
         title={t(language, "Notebook", "Notebook")}
