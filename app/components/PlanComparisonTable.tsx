@@ -40,8 +40,8 @@ export function PlanComparisonTable({
   showCtas = true,
 }: PlanComparisonTableProps) {
   return (
-    <div className="max-w-6xl mx-auto rounded-2xl overflow-hidden bg-slate-950/96 border border-slate-800 shadow-2xl shadow-emerald-500/5">
-      <table className="w-full border-collapse text-left">
+    <div className="w-full max-w-full md:max-w-6xl mx-auto rounded-2xl overflow-x-auto overflow-y-hidden bg-slate-950/96 border border-slate-800 shadow-2xl shadow-emerald-500/5">
+      <table className="min-w-[720px] w-full border-collapse text-left">
         <thead>
           <tr className="bg-slate-900/95 border-b border-slate-800">
             <th
@@ -84,7 +84,7 @@ export function PlanComparisonTable({
                     className="mt-2 inline-flex justify-center items-center px-6 py-3 rounded-2xl bg-emerald-400 text-slate-950 font-semibold shadow-lg shadow-emerald-500/25 hover:bg-emerald-300 hover:shadow-emerald-400/30 transition"
                     style={{ fontSize: "14px" }}
                   >
-                    {L("Get Started Core", "Empezar Core")}
+                    {L("Start Core Business", "Comenzar Core Empresarial")}
                   </Link>
                 )}
               </div>
@@ -128,7 +128,7 @@ export function PlanComparisonTable({
                     className="mt-2 inline-flex justify-center items-center px-6 py-3 rounded-2xl bg-emerald-400 text-slate-950 font-semibold shadow-lg shadow-emerald-500/25 hover:bg-emerald-300 hover:shadow-emerald-400/30 transition"
                     style={{ fontSize: "14px" }}
                   >
-                    {L("Get Started Advanced", "Empezar Advanced")}
+                    {L("Start Advanced Business", "Comenzar Advanced Empresarial")}
                   </Link>
                 )}
               </div>

@@ -234,17 +234,17 @@ export function AnalyticsScreen({ isAdvanced = false }: AnalyticsScreenProps) {
 
   return (
     <ScreenScaffold
-      title={t(language, "Analytics", "Analíticas")}
+      title={t(language, "Business KPIs", "KPIs Empresariales")}
       subtitle={t(
         language,
-        "Institutional KPIs, performance, and risk overview.",
-        "KPIs institucionales, performance y riesgo."
+        "Business performance, risk, edge, and execution quality in one mobile view.",
+        "Rendimiento empresarial, riesgo, edge y calidad de ejecución en una vista móvil."
       )}
       refreshing={refreshing}
       onRefresh={handleRefresh}
     >
       <View style={styles.banner}>
-        <Text style={styles.bannerTitle}>{t(language, "Quick stats", "Resumen rápido")}</Text>
+        <Text style={styles.bannerTitle}>{t(language, "Business snapshot", "Snapshot empresarial")}</Text>
         {loading ? (
           <View style={styles.loadingRow}>
             <ActivityIndicator color={colors.primary} />
@@ -301,8 +301,8 @@ export function AnalyticsScreen({ isAdvanced = false }: AnalyticsScreenProps) {
             <StatCard styles={styles} label={t(language, "Win rate", "Win rate")} value={formatPct(snapshot?.winRate)} tone="positive" />
             <StatCard styles={styles} label={t(language, "Net P&L", "P&L neto")} value={formatValue(snapshot?.netPnl)} tone={toneFor(snapshot?.netPnl)} />
             <StatCard styles={styles} label={t(language, "Avg / session", "Promedio / sesión")} value={formatValue(snapshot?.avgNetPerSession)} tone={toneFor(snapshot?.avgNetPerSession)} />
-            <StatCard styles={styles} label={t(language, "Win streak", "Racha verde")} value={snapshot?.longestWinStreak != null ? String(snapshot.longestWinStreak) : "—"} tone="positive" />
-            <StatCard styles={styles} label={t(language, "Loss streak", "Racha roja")} value={snapshot?.longestLossStreak != null ? String(snapshot.longestLossStreak) : "—"} tone="negative" />
+            <StatCard styles={styles} label={t(language, "Best winning run", "Mejor serie ganadora")} value={snapshot?.longestWinStreak != null ? String(snapshot.longestWinStreak) : "—"} tone="positive" />
+            <StatCard styles={styles} label={t(language, "Longest loss run", "Mayor serie de pérdida")} value={snapshot?.longestLossStreak != null ? String(snapshot.longestLossStreak) : "—"} tone="negative" />
             <StatCard styles={styles} label={t(language, "Max drawdown", "Max drawdown")} value={formatValue(snapshot?.maxDrawdown)} tone={toneFor(snapshot?.maxDrawdown, false)} />
             <StatCard styles={styles} label={t(language, "Profit factor", "Profit factor")} value={snapshot?.profitFactor != null ? snapshot.profitFactor.toFixed(2) : "—"} tone={toneFor(snapshot?.profitFactor)} />
           </View>

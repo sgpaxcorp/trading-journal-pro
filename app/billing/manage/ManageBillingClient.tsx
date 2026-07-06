@@ -66,15 +66,15 @@ export default function ManageBillingClient() {
     <main className="flex min-h-screen items-center justify-center bg-slate-950 px-4 text-slate-50">
       <div className="w-full max-w-md rounded-3xl border border-slate-800 bg-slate-900/90 p-6 shadow-[0_30px_110px_rgba(16,185,129,0.25)]">
         <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-emerald-300">
-          {L("Billing", "Facturación")}
+          {L("Business Billing", "Facturación Empresarial")}
         </p>
         <h1 className="mt-3 text-2xl font-bold text-slate-50">
-          {L("Opening billing portal", "Abriendo portal de facturación")}
+          {L("Opening Business Billing portal", "Abriendo portal de facturación empresarial")}
         </h1>
         <p className="mt-3 text-sm leading-6 text-slate-300">
           {L(
-            "We are sending you to the secure billing portal to manage invoices, payment methods, and subscription settings.",
-            "Te estamos enviando al portal seguro de facturación para administrar invoices, métodos de pago y ajustes de suscripción."
+            "We are sending you to the secure billing portal to manage invoices, payment methods, and trading business access settings.",
+            "Te estamos enviando al portal seguro de facturación para administrar invoices, métodos de pago y ajustes de acceso empresarial."
           )}
         </p>
 
@@ -97,14 +97,14 @@ export default function ManageBillingClient() {
             disabled={opening || loading}
             className="rounded-xl bg-emerald-400 px-4 py-2.5 text-sm font-semibold text-slate-950 hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {L("Open billing portal", "Abrir portal de facturación")}
+            {L("Open Business Billing portal", "Abrir portal de facturación empresarial")}
           </button>
           <button
             type="button"
             onClick={() => router.push("/billing")}
             className="rounded-xl border border-slate-700 px-4 py-2.5 text-sm font-semibold text-slate-200 hover:border-emerald-400 hover:text-emerald-200"
           >
-            {L("Back to billing", "Volver a facturación")}
+            {L("Back to Business Billing", "Volver a Facturación Empresarial")}
           </button>
         </div>
       </div>

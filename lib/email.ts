@@ -306,12 +306,12 @@ function buildSubscriptionReceiptPdfAttachment(args: {
   chargeDate?: string | null;
 }): EmailAttachment {
   const planLabel = formatPlanLabel(args.plan);
-  const billingLabel = formatBillingCycleLabel(args.billingCycle) ?? "Subscription";
+  const billingLabel = formatBillingCycleLabel(args.billingCycle) ?? "Business access";
   const amountText = formatMoney(args.amount);
   const paidOn = formatEmailDate(args.chargeDate) ?? formatEmailDate(new Date()) ?? "";
   const receiptNumber =
     args.invoiceNumber || buildFallbackReceiptNumber({ email: args.email, chargeDate: args.chargeDate });
-  const customerName = args.name || "NeuroTrader customer";
+  const customerName = args.name || "Trader Entrepreneur";
 
   const doc = new jsPDF({ unit: "pt", format: "letter" });
   const pageWidth = doc.internal.pageSize.getWidth();
@@ -320,7 +320,7 @@ function buildSubscriptionReceiptPdfAttachment(args: {
 
   doc.setProperties({
     title: `Receipt ${receiptNumber}`,
-    subject: "NeuroTrader subscription receipt",
+    subject: "NeuroTrader business access receipt",
     author: "SG PAX Corp.",
     creator: "NeuroTrader",
   });
@@ -358,7 +358,7 @@ function buildSubscriptionReceiptPdfAttachment(args: {
   doc.setFont("helvetica", "normal");
   doc.setFontSize(9);
   doc.setTextColor(203, 213, 225);
-  doc.text("Paid subscription payment", pageWidth - margin - 24, 121, { align: "right" });
+  doc.text("Paid business access payment", pageWidth - margin - 24, 121, { align: "right" });
 
   doc.setFillColor(255, 255, 255);
   doc.roundedRect(margin, 178, pageWidth - margin * 2, 170, 18, 18, "F");
@@ -423,7 +423,7 @@ function buildSubscriptionReceiptPdfAttachment(args: {
   doc.setFont("helvetica", "normal");
   doc.setFontSize(9);
   doc.setTextColor(100, 116, 139);
-  doc.text(`${billingLabel} subscription access`, margin + 20, tableTop + 101);
+  doc.text(`${billingLabel} business access`, margin + 20, tableTop + 101);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(11);
   doc.setTextColor(15, 23, 42);
@@ -450,7 +450,7 @@ function buildSubscriptionReceiptPdfAttachment(args: {
   doc.setFontSize(8);
   doc.setTextColor(100, 116, 139);
   const legalLines = [
-    "This receipt confirms payment for a NeuroTrader subscription billed by SG PAX Corp.",
+    "This receipt confirms payment for NeuroTrader business access billed by SG PAX Corp.",
     args.subscriptionId ? `Stripe subscription reference: ${args.subscriptionId}` : "",
     "For billing questions, contact support@neurotrader-journal.com.",
   ].filter(Boolean);
@@ -661,7 +661,7 @@ function buildEmailConfirmationContent(args: {
     code: args.confirmationCode,
     paragraphs: [
       "Use the verification code above inside NeuroTrader to confirm your email and continue setup.",
-      "Once verified, you can choose your business plan, complete checkout, and enter your trading business workspace.",
+      "Once verified, you can choose your business plan, complete secure payment, and enter your trading business workspace.",
     ],
     facts: [
       { label: "Email", value: escapeHtml(args.email) },
@@ -997,7 +997,7 @@ function buildSubscriptionReceiptContent(args: {
   chargeDate?: string | null;
 }) : EmailContent {
   const safeName = args.name || "Trader Entrepreneur";
-  const subject = "Your NeuroTrader subscription receipt";
+  const subject = "Your NeuroTrader business access receipt";
   const amountText = formatMoney(args.amount);
   const planLabel = formatPlanLabel(args.plan);
   const billingLabel = formatBillingCycleLabel(args.billingCycle);
@@ -1005,13 +1005,13 @@ function buildSubscriptionReceiptContent(args: {
   const text = [
     `Hi ${safeName},`,
     "",
-    `Your ${planLabel} subscription payment was confirmed.`,
+    `Your ${planLabel} business access payment was confirmed.`,
     `Amount: ${amountText}`,
     "A SG PAX Corp. PDF receipt is attached for your records.",
     billingLabel ? `Billing cycle: ${billingLabel}` : "",
     chargeDateText ? `Paid on: ${chargeDateText}` : "",
     args.invoiceNumber ? `Invoice: ${args.invoiceNumber}` : "",
-    args.subscriptionId ? `Subscription ID: ${args.subscriptionId}` : "",
+    args.subscriptionId ? `Stripe subscription reference: ${args.subscriptionId}` : "",
     "",
     args.invoiceUrl ? `Invoice: ${args.invoiceUrl}` : "",
     `Billing: ${resolveAppUrl("/billing")}`,
@@ -1020,15 +1020,15 @@ function buildSubscriptionReceiptContent(args: {
   ].filter(Boolean).join("\n");
 
   const html = buildNeuroTraderHtml({
-    title: "Subscription receipt",
+    title: "Business access receipt",
     eyebrow: "Billing",
-    preheader: "Your subscription payment has been confirmed. PDF receipt attached.",
+    preheader: "Your NeuroTrader business access payment has been confirmed. PDF receipt attached.",
     greeting: `Hi ${escapeHtml(safeName)},`,
     highlight: `Your <strong>${escapeHtml(planLabel)}</strong>${billingLabel ? ` <strong>${escapeHtml(billingLabel.toLowerCase())}</strong>` : ""} payment was processed successfully. Your SG PAX Corp. PDF receipt is attached.`,
     paragraphs: [
-      "Your subscription payment has been processed and your trading business workspace remains active inside NeuroTrader.",
-      "The attached receipt is issued by SG PAX Corp. for NeuroTrader subscription access.",
-      "You can review billing details, plan changes, and renewal settings from the Billing section at any time.",
+      "Your business access payment has been processed and your trading business workspace remains active inside NeuroTrader.",
+      "The attached receipt is issued by SG PAX Corp. for NeuroTrader business access.",
+      "You can review business billing details, plan changes, and renewal settings from Business Billing at any time.",
     ],
     facts: [
       { label: "Billed by", value: "SG PAX Corp." },
@@ -1037,9 +1037,9 @@ function buildSubscriptionReceiptContent(args: {
       ...(billingLabel ? [{ label: "Billing", value: escapeHtml(billingLabel) }] : []),
       ...(chargeDateText ? [{ label: "Paid on", value: escapeHtml(chargeDateText) }] : []),
       ...(args.invoiceNumber ? [{ label: "Invoice", value: escapeHtml(args.invoiceNumber) }] : []),
-      ...(args.subscriptionId ? [{ label: "Subscription", value: escapeHtml(args.subscriptionId) }] : []),
+      ...(args.subscriptionId ? [{ label: "Stripe reference", value: escapeHtml(args.subscriptionId) }] : []),
     ],
-    ctaLabel: "Open billing",
+    ctaLabel: "Open Business Billing",
     ctaUrl: resolveAppUrl("/billing/manage"),
     ...(args.invoiceUrl
       ? {
@@ -1062,13 +1062,13 @@ function buildSubscriptionConfirmationContent(args: {
   const safeName = args.name || "Trader Entrepreneur";
   const planLabel = formatPlanLabel(args.plan);
   const billingLabel = formatBillingCycleLabel(args.billingCycle);
-  const subject = `Your ${planLabel} plan is active`;
+  const subject = `Your ${planLabel} business access is active`;
   const text = [
     `Hi ${safeName},`,
     "",
-    `Your NeuroTrader ${planLabel} plan is active.`,
+    `Your NeuroTrader ${planLabel} business access is active.`,
     billingLabel ? `Billing cycle: ${billingLabel}` : "",
-    args.subscriptionId ? `Subscription ID: ${args.subscriptionId}` : "",
+    args.subscriptionId ? `Stripe subscription reference: ${args.subscriptionId}` : "",
     "",
     `Open billing: ${resolveAppUrl("/billing")}`,
     `Open Business Center: ${resolveAppUrl("/dashboard")}`,
@@ -1077,24 +1077,24 @@ function buildSubscriptionConfirmationContent(args: {
   ].filter(Boolean).join("\n");
 
   const html = buildNeuroTraderHtml({
-    title: `${planLabel} plan confirmed`,
+    title: `${planLabel} business access confirmed`,
     eyebrow: "Billing",
-    preheader: "Your subscription is active and ready to use.",
+    preheader: "Your NeuroTrader business access is active and ready to use.",
     greeting: `Hi ${escapeHtml(safeName)},`,
-    highlight: `Your <strong>${escapeHtml(planLabel)}</strong> plan is now active${billingLabel ? ` on a <strong>${escapeHtml(billingLabel.toLowerCase())}</strong> cycle` : ""}.`,
+    highlight: `Your <strong>${escapeHtml(planLabel)}</strong> business access is now active${billingLabel ? ` on a <strong>${escapeHtml(billingLabel.toLowerCase())}</strong> cycle` : ""}.`,
     paragraphs: [
-      "Your checkout finished successfully and your subscription is now active inside NeuroTrader.",
-      "From here, you can open your Business Center, review Billing, and start operating your trading business without waiting on Stripe-hosted emails.",
+      "Your secure payment finished successfully and your business access is now active inside NeuroTrader.",
+      "From here, you can open your Business Center, review Business Billing, and start operating your trading business without waiting on Stripe-hosted emails.",
     ],
     facts: [
       { label: "Plan", value: escapeHtml(planLabel) },
       ...(billingLabel ? [{ label: "Billing", value: escapeHtml(billingLabel) }] : []),
-      ...(args.subscriptionId ? [{ label: "Subscription", value: escapeHtml(args.subscriptionId) }] : []),
+      ...(args.subscriptionId ? [{ label: "Stripe reference", value: escapeHtml(args.subscriptionId) }] : []),
       { label: "Email", value: escapeHtml(args.email) },
     ],
     ctaLabel: "Open Business Center",
     ctaUrl: resolveAppUrl("/dashboard"),
-    secondaryLabel: "Open billing",
+    secondaryLabel: "Open Business Billing",
     secondaryUrl: resolveAppUrl("/billing"),
   });
 
@@ -1114,11 +1114,11 @@ function buildSubscriptionRenewalReminderContent(args: {
   const billingLabel = formatBillingCycleLabel(args.billingCycle);
   const renewalDateText = formatEmailDate(args.renewalDate);
   const amountText = formatMoney(args.amount);
-  const subject = `Upcoming renewal for your ${planLabel} plan`;
+  const subject = `Upcoming business access renewal for your ${planLabel} plan`;
   const text = [
     `Hi ${safeName},`,
     "",
-    `Your ${planLabel} plan is scheduled to renew${renewalDateText ? ` on ${renewalDateText}` : " soon"}.`,
+    `Your ${planLabel} business access is scheduled to renew${renewalDateText ? ` on ${renewalDateText}` : " soon"}.`,
     `Amount: ${amountText}`,
     billingLabel ? `Billing cycle: ${billingLabel}` : "",
     "",
@@ -1130,14 +1130,14 @@ function buildSubscriptionRenewalReminderContent(args: {
   const html = buildNeuroTraderHtml({
     title: "Renewal reminder",
     eyebrow: "Billing",
-    preheader: "Your next subscription charge is coming up.",
+    preheader: "Your next NeuroTrader business access charge is coming up.",
     greeting: `Hi ${escapeHtml(safeName)},`,
     highlight: renewalDateText
-      ? `Your <strong>${escapeHtml(planLabel)}</strong> plan is scheduled to renew on <strong>${escapeHtml(renewalDateText)}</strong>.`
-      : `Your <strong>${escapeHtml(planLabel)}</strong> plan is scheduled to renew soon.`,
+      ? `Your <strong>${escapeHtml(planLabel)}</strong> business access is scheduled to renew on <strong>${escapeHtml(renewalDateText)}</strong>.`
+      : `Your <strong>${escapeHtml(planLabel)}</strong> business access is scheduled to renew soon.`,
     paragraphs: [
-      "This is a heads-up from NeuroTrader so you can review your billing details before the next charge goes through.",
-      "If you want to update your payment method, switch plans, or cancel before renewal, open Billing from the button below.",
+      "This is a heads-up from NeuroTrader so you can review your business billing details before the next charge goes through.",
+      "If you want to update your payment method, switch plans, or cancel before renewal, open Business Billing from the button below.",
     ],
     facts: [
       { label: "Plan", value: escapeHtml(planLabel) },
@@ -1145,7 +1145,7 @@ function buildSubscriptionRenewalReminderContent(args: {
       ...(billingLabel ? [{ label: "Billing", value: escapeHtml(billingLabel) }] : []),
       ...(renewalDateText ? [{ label: "Renewal date", value: escapeHtml(renewalDateText) }] : []),
     ],
-    ctaLabel: "Review billing",
+    ctaLabel: "Review Business Billing",
     ctaUrl: resolveAppUrl("/billing"),
   });
 
@@ -1167,11 +1167,11 @@ function buildSubscriptionPaymentIssueContent(args: {
   const amountText = formatMoney(args.amount);
   const billingLabel = formatBillingCycleLabel(args.billingCycle);
   const nextAttemptText = formatEmailDate(args.nextAttemptAt);
-  const subject = `Payment issue on your ${planLabel} plan`;
+  const subject = `Business access payment issue on your ${planLabel} plan`;
   const text = [
     `Hi ${safeName},`,
     "",
-    `We couldn't process the latest payment for your ${planLabel} plan.`,
+    `We couldn't process the latest payment for your ${planLabel} business access.`,
     `Amount: ${amountText}`,
     billingLabel ? `Billing cycle: ${billingLabel}` : "",
     args.invoiceNumber ? `Invoice: ${args.invoiceNumber}` : "",
@@ -1186,11 +1186,11 @@ function buildSubscriptionPaymentIssueContent(args: {
   const html = buildNeuroTraderHtml({
     title: "Payment update needed",
     eyebrow: "Billing",
-    preheader: "Your latest subscription payment needs attention.",
+    preheader: "Your latest NeuroTrader business access payment needs attention.",
     greeting: `Hi ${escapeHtml(safeName)},`,
-    highlight: `We couldn't process the latest payment for your <strong>${escapeHtml(planLabel)}</strong> plan.`,
+    highlight: `We couldn't process the latest payment for your <strong>${escapeHtml(planLabel)}</strong> business access.`,
     paragraphs: [
-      "Please review your payment method so your subscription stays active without interruption.",
+      "Please review your payment method so your trading business workspace stays active without interruption.",
       nextAttemptText
         ? `Stripe will try again on <strong>${escapeHtml(nextAttemptText)}</strong> unless you update billing first.`
         : "Open Billing to update your payment method or review the invoice before the next retry.",
@@ -1202,7 +1202,7 @@ function buildSubscriptionPaymentIssueContent(args: {
       ...(args.invoiceNumber ? [{ label: "Invoice", value: escapeHtml(args.invoiceNumber) }] : []),
       ...(nextAttemptText ? [{ label: "Next attempt", value: escapeHtml(nextAttemptText) }] : []),
     ],
-    ctaLabel: "Update billing",
+    ctaLabel: "Update Business Billing",
     ctaUrl: resolveAppUrl("/billing/update-payment"),
     ...(args.invoiceUrl
       ? {
@@ -1249,7 +1249,7 @@ function buildSubscriptionPaymentMethodExpiringContent(args: {
   const html = buildNeuroTraderHtml({
     title: "Payment method expiring",
     eyebrow: "Billing",
-    preheader: "Update your card before it expires to avoid subscription interruption.",
+    preheader: "Update your card before it expires to avoid business access interruption.",
     greeting: `Hi ${escapeHtml(safeName)},`,
     highlight: `Your <strong>${escapeHtml(brand)}</strong> payment method <strong>${escapeHtml(last4)}</strong> expires <strong>${escapeHtml(expiry)}</strong>.`,
     paragraphs: [
@@ -1277,11 +1277,11 @@ function buildSubscriptionCancellationContent(args: {
   const safeName = args.name || "Trader Entrepreneur";
   const periodText = args.periodEnd ? new Date(args.periodEnd).toLocaleDateString("en-US") : "the end of your current billing period";
   const nextBillingText = args.nextBillingDate ? new Date(args.nextBillingDate).toLocaleDateString("en-US") : periodText;
-  const subject = "Your NeuroTrader cancellation is scheduled";
+  const subject = "Your NeuroTrader business access cancellation is scheduled";
   const text = [
     `Hi ${safeName},`,
     "",
-    "We are sorry to see you go.",
+    "We are sorry to see your business access pause.",
     `Next billing cycle date: ${nextBillingText}`,
     `Access remains active through: ${periodText}`,
     "",
@@ -1293,19 +1293,19 @@ function buildSubscriptionCancellationContent(args: {
   const html = buildNeuroTraderHtml({
     title: "Cancellation scheduled",
     eyebrow: "Billing",
-    preheader: "Your membership remains active until the end of the current cycle.",
+    preheader: "Your business access remains active until the end of the current cycle.",
     greeting: `Hi ${escapeHtml(safeName)},`,
     highlight: `Access remains active through <strong>${escapeHtml(periodText)}</strong>.`,
     paragraphs: [
       `Your next billing cycle date was <strong>${escapeHtml(nextBillingText)}</strong>.`,
-      "If you canceled today after a recent payment, your membership still remains active until the end of the current billing period.",
+      "If you canceled today after a recent payment, your business access still remains active until the end of the current billing period.",
       "You can turn auto-renew back on at any time from Billing.",
     ],
     facts: [
       { label: "Next billing", value: escapeHtml(nextBillingText) },
       { label: "Active until", value: escapeHtml(periodText) },
     ],
-    ctaLabel: "Open billing",
+    ctaLabel: "Open Business Billing",
     ctaUrl: resolveAppUrl("/billing"),
   });
 
@@ -1318,11 +1318,11 @@ function buildSubscriptionWinbackContent(args: {
   promotionCode: string;
 }) : EmailContent {
   const safeName = args.name || "Trader Entrepreneur";
-  const subject = "Come back to NeuroTrader with 50% off";
+  const subject = "Restart your NeuroTrader business access with 50% off";
   const text = [
     `Hi ${safeName},`,
     "",
-    "We’d love to have you back.",
+    "We would love to help you restart your trading business workspace.",
     `Promo code: ${args.promotionCode}`,
     `Billing: ${resolveAppUrl("/billing")}`,
     "",
@@ -1336,14 +1336,14 @@ function buildSubscriptionWinbackContent(args: {
     greeting: `Hi ${escapeHtml(safeName)},`,
     highlight: `Promo code: <strong>${escapeHtml(args.promotionCode)}</strong>`,
     paragraphs: [
-      "Use this code to return to NeuroTrader with 50% off your next subscription.",
+      "Use this code to return to NeuroTrader with 50% off your next business access cycle.",
       "If you want help reactivating or choosing the right plan again, reply to this email and we’ll help.",
     ],
     facts: [
       { label: "Code", value: escapeHtml(args.promotionCode) },
       { label: "Offer", value: "50% off" },
     ],
-    ctaLabel: "Resume subscription",
+    ctaLabel: "Resume business access",
     ctaUrl: resolveAppUrl("/billing"),
   });
 
@@ -1602,8 +1602,8 @@ export function getAutomatedEmailCatalog(): AutomatedEmailPreview[] {
       key: "subscription_confirmation",
       category: "Billing",
       name: "Subscription confirmation",
-      description: "Sent right after checkout so the user sees a branded confirmation from the platform instead of a plain Stripe-only message.",
-      trigger: "Stripe checkout completed",
+      description: "Sent right after secure payment so the Trader Entrepreneur sees a branded confirmation from the platform instead of a plain Stripe-only message.",
+      trigger: "Stripe payment completed",
       delivery: "Resend via Stripe webhook",
       from: FROM_EMAIL,
       preview: buildSubscriptionConfirmationContent({
@@ -1617,8 +1617,8 @@ export function getAutomatedEmailCatalog(): AutomatedEmailPreview[] {
     {
       key: "subscription_receipt",
       category: "Billing",
-      name: "Subscription receipt",
-      description: "Sent after a successful subscription purchase or renewal.",
+      name: "Business access receipt",
+      description: "Sent after a successful NeuroTrader business access purchase or renewal.",
       trigger: "Stripe invoice.paid",
       delivery: "Resend via Stripe webhook",
       from: FROM_EMAIL,
@@ -1638,7 +1638,7 @@ export function getAutomatedEmailCatalog(): AutomatedEmailPreview[] {
       key: "subscription_renewal_reminder",
       category: "Billing",
       name: "Renewal reminder",
-      description: "Sent before the next subscription charge so the user can review billing inside the app instead of relying on Stripe reminders.",
+      description: "Sent before the next business access charge so the Trader Entrepreneur can review Business Billing inside the app instead of relying on Stripe reminders.",
       trigger: "Stripe invoice.upcoming",
       delivery: "Resend via Stripe webhook",
       from: FROM_EMAIL,
@@ -1655,7 +1655,7 @@ export function getAutomatedEmailCatalog(): AutomatedEmailPreview[] {
       key: "subscription_payment_issue",
       category: "Billing",
       name: "Payment issue",
-      description: "Sent when Stripe cannot collect a subscription payment and the user needs to update billing.",
+      description: "Sent when Stripe cannot collect a business access payment and the Trader Entrepreneur needs to update Business Billing.",
       trigger: "Stripe invoice.payment_failed",
       delivery: "Resend via Stripe webhook",
       from: FROM_EMAIL,

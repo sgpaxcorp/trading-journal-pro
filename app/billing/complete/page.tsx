@@ -15,20 +15,20 @@ export default function BillingCompletePage() {
     <main className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center px-4">
       <div className="w-full max-w-md bg-slate-900/90 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
         <h1 className="text-xl font-semibold text-slate-50">
-          {L("Finish activating your account", "Termina de activar tu cuenta")}
+          {L("Finish activating your Trader Entrepreneur account", "Termina de activar tu cuenta de Empresario Trader")}
         </h1>
 
         <p className="text-xs text-slate-400">
           {L(
-            "Your Neuro Trader account was created, but you don't have an active subscription yet.",
-            "Tu cuenta de Neuro Trader fue creada, pero aún no tienes una suscripción activa."
+            "Your NeuroTrader business account was created, but your business access is not active yet.",
+            "Tu cuenta empresarial de NeuroTrader fue creada, pero tu acceso empresarial aún no está activo."
           )}
         </p>
 
         <p className="text-xs text-slate-400">
           {L(
-            "To access your Business Center, Execution Journal, strategy review and AI features, please complete your payment for the Core or Advanced plan.",
-            "Para acceder a tu Centro Empresarial, Registro de Ejecución, revisión estratégica y funciones de IA, completa el pago del plan Core o Advanced."
+            "To access your Business Center, Execution Record, strategy review, and AI features, complete secure payment for the Core or Advanced business plan.",
+            "Para acceder a tu Centro Empresarial, Registro de Ejecución, revisión estratégica y funciones de IA, completa el pago seguro del plan empresarial Core o Advanced."
           )}
         </p>
 

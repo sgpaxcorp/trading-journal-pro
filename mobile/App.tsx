@@ -91,11 +91,11 @@ function MainTabs() {
   const planAccess = usePlanAccess();
   const tabTitles = useMemo(
     () => ({
-      Dashboard: t(language, "Business", "Empresa"),
-      Calendar: t(language, "Calendar", "Calendario"),
-      Analytics: t(language, "Analytics", "Analíticas"),
+      Dashboard: t(language, "Business Center", "Centro Empresarial"),
+      Calendar: t(language, "P&L Calendar", "Calendario P&L"),
+      Analytics: t(language, "Business KPIs", "KPIs Empresariales"),
       AICoach: t(language, "Business Coach", "Coach Empresarial"),
-      Other: t(language, "Business", "Empresa"),
+      Other: t(language, "Platform", "Plataforma"),
     }),
     [language]
   );
@@ -196,16 +196,16 @@ function MainTabs() {
           },
         })}
       >
-        <Tab.Screen name="Dashboard" options={{ title: "Business" }}>
+        <Tab.Screen name="Dashboard" options={{ title: t(language, "Center", "Centro") }}>
           {() => <DashboardScreen onOpenModule={openModule} onOpenJournalDate={openJournalDate} />}
         </Tab.Screen>
-        <Tab.Screen name="Calendar" options={{ title: "Calendar" }}>
+        <Tab.Screen name="Calendar" options={{ title: "P&L" }}>
           {() => <CalendarScreen onOpenModule={openModule} onOpenJournalDate={openJournalDate} />}
         </Tab.Screen>
-        <Tab.Screen name="Analytics" options={{ title: "Analytics" }}>
+        <Tab.Screen name="Analytics" options={{ title: "KPIs" }}>
           {() => <AnalyticsScreen onOpenModule={openModule} isAdvanced={planAccess.hasAdvancedAnalytics} />}
         </Tab.Screen>
-        <Tab.Screen name="AICoach" options={{ title: "Business Coach" }}>
+        <Tab.Screen name="AICoach" options={{ title: t(language, "Coach", "Coach") }}>
           {() =>
             planAccess.hasAICoaching ? (
               <AICoachScreen onOpenModule={openModule} />
@@ -351,7 +351,7 @@ function PaymentRequiredScreen({
 
   return (
     <View style={styles.screen}>
-      <Text style={styles.eyebrow}>{t(language, "Account access", "Acceso de cuenta")}</Text>
+      <Text style={styles.eyebrow}>{t(language, "Business access", "Acceso empresarial")}</Text>
       <Text style={styles.title}>
         {t(language, "Sign in with an active Trader Entrepreneur account.", "Entra con una cuenta activa de Empresario Trader.")}
       </Text>

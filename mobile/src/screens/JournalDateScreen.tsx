@@ -1290,8 +1290,8 @@ export function JournalDateScreen() {
       title={t(language, "Execution Journal", "Registro de Ejecución")}
       subtitle={t(
         language,
-        "Record execution on mobile. CSV imports remain on the web.",
-        "Registra ejecución en móvil. El CSV se importa en la web."
+        "Record business execution on mobile. CSV imports remain on the web.",
+        "Registra la ejecución del negocio en móvil. El CSV se importa en la web."
       )}
       refreshing={refreshing}
       onRefresh={handleRefresh}

@@ -66,15 +66,15 @@ export default function UpdatePaymentClient() {
     <main className="flex min-h-screen items-center justify-center bg-slate-950 px-4 text-slate-50">
       <div className="w-full max-w-md rounded-3xl border border-slate-800 bg-slate-900/90 p-6 shadow-[0_30px_110px_rgba(16,185,129,0.25)]">
         <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-emerald-300">
-          {L("Billing", "Facturación")}
+          {L("Business Billing", "Facturación Empresarial")}
         </p>
         <h1 className="mt-3 text-2xl font-bold text-slate-50">
           {L("Opening payment method update", "Abriendo cambio de método de pago")}
         </h1>
         <p className="mt-3 text-sm leading-6 text-slate-300">
           {L(
-            "We are sending you to the secure Stripe billing portal to replace or update your card.",
-            "Te estamos enviando al portal seguro de Stripe para reemplazar o actualizar tu tarjeta."
+            "We are sending you to the secure Stripe portal to protect your trading business access by replacing or updating your card.",
+            "Te estamos enviando al portal seguro de Stripe para proteger tu acceso empresarial actualizando o reemplazando tu tarjeta."
           )}
         </p>
 
@@ -104,7 +104,7 @@ export default function UpdatePaymentClient() {
             onClick={() => router.push("/billing")}
             className="rounded-xl border border-slate-700 px-4 py-2.5 text-sm font-semibold text-slate-200 hover:border-emerald-400 hover:text-emerald-200"
           >
-            {L("Back to billing", "Volver a facturación")}
+            {L("Back to Business Billing", "Volver a Facturación Empresarial")}
           </button>
         </div>
       </div>

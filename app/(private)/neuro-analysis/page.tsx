@@ -43,6 +43,7 @@ import { resolveLocale } from "@/lib/i18n";
 import { supabaseBrowser } from "@/lib/supaBaseClient";
 
 type Lang = "en" | "es";
+type WorkspaceTab = "research" | "portfolio";
 
 type Holding = {
   id: string;
@@ -459,6 +460,7 @@ export default function NeuroAnalysisPage() {
   const [documentLookup, setDocumentLookup] = useState<any[]>([]);
   const [documentLookupLoading, setDocumentLookupLoading] = useState(false);
   const [documentLookupError, setDocumentLookupError] = useState("");
+  const [activeWorkspaceTab, setActiveWorkspaceTab] = useState<WorkspaceTab>("research");
 
   useEffect(() => {
     setResearchGoal(
@@ -572,8 +574,11 @@ export default function NeuroAnalysisPage() {
   const readinessItems = [
     {
       done: portfolio.rows.length > 0,
-      title: L("Portfolio loaded", "Portfolio cargado"),
-      body: L("Add positions manually or import a research-only portfolio.", "Añade posiciones manuales o importa un portfolio solo para research."),
+      title: L("Capital inputs loaded", "Capital cargado"),
+      body: L(
+        "Use Portfolio Import to add positions manually or bring in a read-only portfolio.",
+        "Usa Portfolio Import para añadir posiciones manuales o traer un portfolio solo lectura."
+      ),
     },
     {
       done: Boolean(marketData),
@@ -819,6 +824,7 @@ export default function NeuroAnalysisPage() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get("portfolio") === "connected") {
+      setActiveWorkspaceTab("portfolio");
       void loadResearchPortfolio(false);
       window.history.replaceState({}, "", window.location.pathname);
     }
@@ -1174,16 +1180,16 @@ export default function NeuroAnalysisPage() {
                   Smart Tools Beta
                 </span>
                 <span className="rounded-full border border-emerald-400/40 bg-emerald-500/10 px-3 py-1 text-[11px] font-semibold uppercase text-emerald-200">
-                  {L("Research-only portfolio", "Portfolio solo para research")}
+                  {L("Research desk", "Mesa de research")}
                 </span>
               </div>
               <h1 className="mt-3 text-2xl font-semibold tracking-normal sm:text-3xl">
-                Neuro Analysis
+                {L("Neuro Analysis Research", "Neuro Analysis Research")}
               </h1>
               <p className="mt-2 max-w-4xl text-sm leading-6 text-slate-400">
                 {L(
-                  "Add what you own, import a read-only portfolio, and let Neuro gather market data, company documents, metrics, projections, and allocation guidance in one guided flow.",
-                  "Añade lo que tienes, importa un portfolio read-only y deja que Neuro reúna data de mercado, documentos, métricas, proyecciones y allocation en un flujo guiado."
+                  "Build an evidence-backed research case from capital inputs, market data, company documents, projections, and Neuro's verdict. Portfolio import now lives in its own workspace so this page stays focused on research.",
+                  "Construye un caso de research con capital, data de mercado, documentos de compañía, proyecciones y el veredicto de Neuro. La importación de portfolio vive en su propio workspace para que esta página se mantenga enfocada en research."
                 )}
               </p>
               <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center">
@@ -1208,25 +1214,72 @@ export default function NeuroAnalysisPage() {
 
             <div className="grid grid-cols-3 gap-2 text-sm xl:w-[520px]">
               <Readout label={L("Readiness", "Preparación")} value={`${readinessScore}%`} />
-              <Readout label={L("Portfolio", "Portfolio")} value={formatCurrency(portfolio.totalValue, localeTag)} />
+              <Readout label={L("Research capital", "Capital research")} value={formatCurrency(portfolio.totalValue, localeTag)} />
               <Readout label={L("Focus", "Foco")} value={focusTicker || "-"} />
             </div>
           </div>
         </header>
 
-        <section className="grid grid-cols-1 gap-5 xl:grid-cols-[1.08fr_0.92fr]">
+        <nav
+          aria-label={L("Neuro Analysis workspaces", "Workspaces de Neuro Analysis")}
+          className="grid grid-cols-1 gap-3 rounded-xl border border-slate-800 bg-slate-900/70 p-2 sm:grid-cols-2"
+        >
+          {[
+            {
+              id: "research" as const,
+              icon: Search,
+              title: L("Research Desk", "Research Desk"),
+              body: L("Company intelligence, documents, market layer, and Neuro verdict.", "Inteligencia de compañía, documentos, mercado y veredicto Neuro."),
+            },
+            {
+              id: "portfolio" as const,
+              icon: WalletCards,
+              title: L("Portfolio Import", "Portfolio Import"),
+              body: L("Connect a broker or enter positions manually as research inputs.", "Conecta broker o entra posiciones manuales como insumo de research."),
+            },
+          ].map((tab) => {
+            const Icon = tab.icon;
+            const active = activeWorkspaceTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setActiveWorkspaceTab(tab.id)}
+                className={`flex items-start gap-3 rounded-lg border p-4 text-left transition ${
+                  active
+                    ? "border-emerald-400/70 bg-emerald-400/10 text-emerald-50"
+                    : "border-slate-800 bg-slate-950/45 text-slate-300 hover:border-sky-400/70 hover:text-sky-100"
+                }`}
+              >
+                <Icon className={`mt-0.5 h-4 w-4 shrink-0 ${active ? "text-emerald-300" : "text-sky-300"}`} />
+                <span>
+                  <span className="block text-sm font-semibold">{tab.title}</span>
+                  <span className="mt-1 block text-xs leading-5 text-slate-500">{tab.body}</span>
+                </span>
+              </button>
+            );
+          })}
+        </nav>
+
+        <section
+          className={
+            activeWorkspaceTab === "portfolio"
+              ? "space-y-5"
+              : "grid grid-cols-1 gap-5 xl:grid-cols-[1.08fr_0.92fr]"
+          }
+        >
           <div className="space-y-5">
-            <div className="rounded-xl border border-slate-800 bg-slate-900/75 p-5">
+            <div className={`${activeWorkspaceTab === "portfolio" ? "" : "hidden"} rounded-xl border border-slate-800 bg-slate-900/75 p-5`}>
               <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                 <div>
                   <div className="flex items-center gap-2">
                     <WalletCards className="h-4 w-4 text-emerald-300" />
-                    <h2 className="text-base font-semibold">{L("Research Portfolio", "Research Portfolio")}</h2>
+                    <h2 className="text-base font-semibold">{L("Portfolio Import", "Portfolio Import")}</h2>
                   </div>
                   <p className="mt-2 text-sm leading-6 text-slate-400">
                     {L(
-                      "This portfolio is isolated from your execution journal. It is only used for analysis and simulation.",
-                      "Este portfolio está separado de tu journal de trading. Solo se usa para análisis y simulación."
+                      "Connect a broker read-only or maintain manual positions here. These positions feed Neuro Research, but this workspace stays separate from the research report itself.",
+                      "Conecta un broker solo lectura o mantén posiciones manuales aquí. Estas posiciones alimentan Neuro Research, pero este workspace queda separado del reporte de research."
                     )}
                   </p>
                 </div>
@@ -1254,7 +1307,7 @@ export default function NeuroAnalysisPage() {
 
               {brokerAccounts.length > 0 ? (
                 <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center">
-                  <label className="text-xs font-semibold text-slate-400">{L("Research account", "Cuenta de research")}</label>
+                  <label className="text-xs font-semibold text-slate-400">{L("Import account", "Cuenta para importar")}</label>
                   <select
                     value={brokerAccountId}
                     onChange={(event) => setBrokerAccountId(event.target.value)}
@@ -1310,8 +1363,8 @@ export default function NeuroAnalysisPage() {
                       <tr>
                         <td colSpan={9} className="px-3 py-8 text-center text-sm text-slate-500">
                           {L(
-                            "Import a portfolio or add positions manually to begin.",
-                            "Importa un portfolio o añade posiciones manualmente para comenzar."
+                            "Import a read-only portfolio or add positions manually to create research inputs.",
+                            "Importa un portfolio solo lectura o añade posiciones manualmente para crear los insumos de research."
                           )}
                         </td>
                       </tr>
@@ -1396,7 +1449,7 @@ export default function NeuroAnalysisPage() {
               </button>
             </div>
 
-            <div className="rounded-xl border border-slate-800 bg-slate-900/75 p-5">
+            <div className={`${activeWorkspaceTab === "research" ? "" : "hidden"} rounded-xl border border-slate-800 bg-slate-900/75 p-5`}>
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
                   <div className="flex items-center gap-2">
@@ -1451,7 +1504,7 @@ export default function NeuroAnalysisPage() {
             </div>
           </div>
 
-          <aside className="space-y-5">
+          <aside className={activeWorkspaceTab === "research" ? "space-y-5" : "hidden"}>
             <div className="rounded-xl border border-sky-500/30 bg-sky-500/5 p-5">
               <div className="flex items-center gap-2">
                 <Sparkles className="h-4 w-4 text-sky-300" />
@@ -1459,8 +1512,8 @@ export default function NeuroAnalysisPage() {
               </div>
               <p className="mt-2 text-sm leading-6 text-slate-300">
                 {L(
-                  "Neuro checks what you own, pulls the current data layer, reads company documents, and turns it into a research verdict.",
-                  "Neuro revisa lo que tienes, carga la capa actual de data, lee documentos de compañía y lo convierte en un veredicto de research."
+                  "Neuro reads the selected capital inputs, current market layer, and company documents, then turns them into a research verdict.",
+                  "Neuro lee el capital seleccionado, la capa actual de mercado y los documentos de compañía, y lo convierte en un veredicto de research."
                 )}
               </p>
 
@@ -1487,8 +1540,18 @@ export default function NeuroAnalysisPage() {
                 className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-sky-400 px-4 py-3 text-sm font-semibold text-slate-950 hover:bg-sky-300 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {agentLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-                {agentLoading ? L("Running analysis...", "Corriendo análisis...") : L("Analyze my portfolio", "Analizar mi portfolio")}
+                {agentLoading ? L("Running research...", "Corriendo research...") : L("Run research analysis", "Correr research analysis")}
               </button>
+              {portfolio.rows.length === 0 ? (
+                <button
+                  type="button"
+                  onClick={() => setActiveWorkspaceTab("portfolio")}
+                  className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-lg border border-slate-700 bg-slate-950/60 px-4 py-2 text-xs font-semibold text-slate-200 hover:border-emerald-400 hover:text-emerald-200"
+                >
+                  <WalletCards className="h-3.5 w-3.5" />
+                  {L("Open Portfolio Import", "Abrir Portfolio Import")}
+                </button>
+              ) : null}
               {agentError ? <p className="mt-3 text-xs text-rose-300">{agentError}</p> : null}
             </div>
 
@@ -1678,7 +1741,7 @@ export default function NeuroAnalysisPage() {
           </aside>
         </section>
 
-        <section className="space-y-4">
+        <section className={activeWorkspaceTab === "research" ? "space-y-4" : "hidden"}>
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-2">
               <BarChart3 className="h-4 w-4 text-emerald-300" />
@@ -1771,7 +1834,7 @@ export default function NeuroAnalysisPage() {
           </div>
         </section>
 
-        {engineSnapshot ? (
+        {activeWorkspaceTab === "research" && engineSnapshot ? (
           <section className="rounded-xl border border-emerald-500/25 bg-slate-900/80 p-5">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex items-center gap-2">
@@ -1839,7 +1902,7 @@ export default function NeuroAnalysisPage() {
           </section>
         ) : null}
 
-        {agentReport ? (
+        {activeWorkspaceTab === "research" && agentReport ? (
           <section className="rounded-xl border border-sky-500/30 bg-slate-900/80 p-5">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex items-center gap-2">
@@ -1861,7 +1924,7 @@ export default function NeuroAnalysisPage() {
           </section>
         ) : null}
 
-        <section className="grid grid-cols-1 gap-4 lg:grid-cols-4">
+        <section className={activeWorkspaceTab === "research" ? "grid grid-cols-1 gap-4 lg:grid-cols-4" : "hidden"}>
           {PREMIUM_OUTPUTS.map((item) => (
             <div key={item.title} className="rounded-xl border border-slate-800 bg-slate-900/75 p-5">
               <BriefcaseBusiness className="h-4 w-4 text-emerald-300" />
@@ -1871,7 +1934,7 @@ export default function NeuroAnalysisPage() {
           ))}
         </section>
 
-        <div className="rounded-xl border border-slate-800 bg-slate-900/75 p-4 text-xs leading-5 text-slate-500">
+        <div className={activeWorkspaceTab === "research" ? "rounded-xl border border-slate-800 bg-slate-900/75 p-4 text-xs leading-5 text-slate-500" : "hidden"}>
           <div className="flex items-start gap-2">
             <ChevronRight className="mt-0.5 h-3.5 w-3.5 text-sky-300" />
             <p>

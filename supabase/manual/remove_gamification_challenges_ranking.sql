@@ -78,10 +78,11 @@ where table_schema = 'public'
   and table_name = 'profiles'
   and column_name in ('show_in_ranking', 'ranking_name');
 
-create temp table if not exists ntj_cleanup_verification (
+drop table if exists pg_temp.ntj_cleanup_verification;
+create temp table ntj_cleanup_verification (
   check_name text primary key,
   remaining jsonb not null
-) on commit drop;
+);
 
 do $$
 declare

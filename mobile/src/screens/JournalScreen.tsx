@@ -1,5 +1,7 @@
 import { ModuleTile } from "../components/ModuleTile";
 import { ScreenScaffold } from "../components/ScreenScaffold";
+import { useLanguage } from "../lib/LanguageContext";
+import { t } from "../lib/i18n";
 import type { OpenModuleFn } from "../lib/moduleNavigation";
 
 type JournalScreenProps = {
@@ -7,41 +9,70 @@ type JournalScreenProps = {
 };
 
 export function JournalScreen({ onOpenModule }: JournalScreenProps) {
+  const { language } = useLanguage();
   return (
     <ScreenScaffold
-      title="Execution Journal mobile"
-      subtitle="Objetivo: registrar rápido pre-market, inside trade y after trade desde iPhone."
+      title={t(language, "Execution Record", "Registro de Ejecución")}
+      subtitle={t(
+        language,
+        "Fast mobile capture for the facts of the trading business: premarket, live execution, after-trade notes, and evidence.",
+        "Captura móvil rápida de los hechos de la empresa de trading: premarket, ejecución en vivo, notas post-trade y evidencia."
+      )}
     >
       <ModuleTile
-        title="Daily execution record"
-        description="Abrir fecha y editar el registro de ejecución."
+        title={t(language, "Daily business record", "Registro empresarial diario")}
+        description={t(
+          language,
+          "Open a date and capture the execution record for the business.",
+          "Abre una fecha y captura el registro de ejecución del negocio."
+        )}
         iconName="document-text-outline"
         onPress={() =>
           onOpenModule(
-            "Daily execution record",
-            "Integración pendiente: reutilizar modelo de la página /journal/[date] como registro de ejecución."
+            t(language, "Daily business record", "Registro empresarial diario"),
+            t(
+              language,
+              "This mobile flow opens the same execution evidence model used by the web platform.",
+              "Este flujo móvil abre el mismo modelo de evidencia de ejecución que usa la plataforma web."
+            )
           )
         }
       />
       <ModuleTile
-        title="Inside trade notes"
-        description="Entrada rápida en medio de la operación."
+        title={t(language, "Live execution notes", "Notas de ejecución en vivo")}
+        description={t(
+          language,
+          "Timestamped notes while the trade is active, so the business has evidence later.",
+          "Notas con timestamp mientras el trade está activo, para que el negocio tenga evidencia luego."
+        )}
         iconName="pencil-outline"
         onPress={() =>
           onOpenModule(
-            "Inside trade notes",
-            "Plan: agregar editor optimizado móvil + timestamp para que Business AI Coaching lo use."
+            t(language, "Live execution notes", "Notas de ejecución en vivo"),
+            t(
+              language,
+              "Use this to preserve context for Business AI Coaching without leaving the trading flow.",
+              "Úsalo para preservar contexto para Business AI Coaching sin salir del flujo de trading."
+            )
           )
         }
       />
       <ModuleTile
-        title="Voice capture"
-        description="Registrar idea por voz y convertir a texto."
+        title={t(language, "Voice business capture", "Captura empresarial por voz")}
+        description={t(
+          language,
+          "Capture a business observation by voice and turn it into reviewable notes.",
+          "Captura una observación del negocio por voz y conviértela en notas revisables."
+        )}
         iconName="mic-outline"
         onPress={() =>
           onOpenModule(
-            "Voice capture",
-            "Plan fase siguiente: dictado/transcripción para notas inside trade sin romper flujo."
+            t(language, "Voice business capture", "Captura empresarial por voz"),
+            t(
+              language,
+              "Next phase: mobile dictation/transcription for live execution notes without breaking flow.",
+              "Próxima fase: dictado/transcripción móvil para notas de ejecución en vivo sin romper el flujo."
+            )
           )
         }
       />

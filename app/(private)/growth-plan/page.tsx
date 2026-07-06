@@ -889,6 +889,23 @@ type BusinessScenario = {
   recommended: boolean;
 };
 
+type PlanRealismVerdict = "aligned" | "stretch" | "strained" | "unrealistic" | "incomplete";
+
+type PlanRealismReview = {
+  verdict: PlanRealismVerdict;
+  shouldSurface: boolean;
+  requiredGoalPct: number;
+  requiredCompoundDailyPct: number;
+  scenarioDailyGoalPct: number;
+  scenarioProjectedBalance: number;
+  scenarioGapUsd: number;
+  scenarioGapPct: number;
+  targetMultiple: number;
+  tradingDays: number;
+  estimatedCompletionDate: string | null;
+  policyBand: "bankable" | "review" | "out_of_policy" | "incomplete";
+};
+
 const EMPTY_BUSINESS_PROFILE: BusinessProfile = {
   riskProfile: "",
   experience: "",
@@ -1009,6 +1026,167 @@ function buildBusinessScenarios(params: {
 
   const best = scored.reduce((winner, item) => (item.fitScore > winner.fitScore ? item : winner), scored[0]);
   return scored.map((item) => ({ ...item, recommended: item.id === best.id }));
+}
+
+function listTradingDaysFrom(startIso: string, count: number): string[] {
+  const start = new Date(startIso);
+  if (!Number.isFinite(start.getTime()) || count <= 0) return [];
+
+  const out: string[] = [];
+  const holidayCache = new Map<number, Set<string>>();
+  const holidaysForYear = (year: number) => {
+    const cached = holidayCache.get(year);
+    if (cached) return cached;
+    const set = new Set(getUsMarketHolidayDates(year));
+    holidayCache.set(year, set);
+    return set;
+  };
+
+  for (
+    let d = new Date(start);
+    out.length < count && out.length < 1800;
+    d = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1)
+  ) {
+    const ds = toYMD(d);
+    const dow = d.getDay();
+    const isTradingDay = dow !== 0 && dow !== 6 && !holidaysForYear(d.getFullYear()).has(ds);
+    if (isTradingDay) out.push(ds);
+  }
+  return out;
+}
+
+function simulateScenarioToTarget(params: {
+  starting: number;
+  target: number;
+  startIso: string;
+  deadlineIso: string;
+  scenario: BusinessScenario;
+  plannedWithdrawals?: PlannedWithdrawal[];
+}) {
+  const { starting, target, startIso, deadlineIso, scenario, plannedWithdrawals = [] } = params;
+  const deadlineTradingDays = listTradingDaysBetween(startIso, deadlineIso);
+  const horizonDays = Math.max(deadlineTradingDays.length, 1);
+  const simulationDays = listTradingDaysFrom(startIso, Math.max(horizonDays, 1300));
+  const withdrawalByDate = new Map<string, number>();
+  for (const withdrawal of plannedWithdrawals) {
+    const date = toDateOnlyStr(withdrawal.plannedDate);
+    const amount = Math.max(0, Number(withdrawal.amount ?? 0));
+    if (!date || amount <= 0) continue;
+    withdrawalByDate.set(date, (withdrawalByDate.get(date) ?? 0) + amount);
+  }
+
+  let balance = Math.max(0, starting);
+  let projectedAtDeadline = balance;
+  let completionDate: string | null = balance >= target ? startIso : null;
+  const perWeekLossDays = clampInt(scenario.lossDaysPerWeek, 0, 5);
+
+  for (let i = 0; i < simulationDays.length; i += 1) {
+    const date = simulationDays[i];
+    const isLossDay = perWeekLossDays > 0 && i % 5 < perWeekLossDays;
+    const pct = isLossDay ? -Math.max(0, scenario.maxDailyLossPct) : Math.max(0, scenario.dailyGoalPct);
+    balance = Math.max(0, balance + balance * (pct / 100));
+    balance = Math.max(0, balance - (withdrawalByDate.get(date) ?? 0));
+
+    if (i === horizonDays - 1) projectedAtDeadline = balance;
+    if (!completionDate && target > 0 && balance >= target) {
+      completionDate = date;
+      if (i >= horizonDays - 1) break;
+    }
+  }
+
+  return {
+    projectedAtDeadline: Number(projectedAtDeadline.toFixed(2)),
+    completionDate,
+  };
+}
+
+function buildPlanRealismReview(params: {
+  starting: number;
+  target: number;
+  startIso: string;
+  targetIso: string;
+  tradingDays: number;
+  requiredGoalPct: number;
+  scenario: BusinessScenario | null;
+  plannedWithdrawals?: PlannedWithdrawal[];
+}): PlanRealismReview {
+  const { starting, target, startIso, targetIso, tradingDays, requiredGoalPct, scenario, plannedWithdrawals } = params;
+  const targetMultiple = starting > 0 && target > 0 ? target / starting : 0;
+  const requiredCompoundDailyPct =
+    starting > 0 && target > 0 && tradingDays > 0
+      ? (Math.pow(target / starting, 1 / tradingDays) - 1) * 100
+      : 0;
+
+  if (!scenario || starting <= 0 || target <= 0 || !targetIso || tradingDays <= 0 || target <= starting) {
+    return {
+      verdict: "incomplete",
+      shouldSurface: false,
+      requiredGoalPct: Math.max(0, requiredGoalPct),
+      requiredCompoundDailyPct: Math.max(0, requiredCompoundDailyPct),
+      scenarioDailyGoalPct: scenario?.dailyGoalPct ?? 0,
+      scenarioProjectedBalance: starting,
+      scenarioGapUsd: 0,
+      scenarioGapPct: 0,
+      targetMultiple,
+      tradingDays,
+      estimatedCompletionDate: null,
+      policyBand: "incomplete",
+    };
+  }
+
+  const simulation = simulateScenarioToTarget({
+    starting,
+    target,
+    startIso,
+    deadlineIso: targetIso,
+    scenario,
+    plannedWithdrawals,
+  });
+  const scenarioProjectedBalance = simulation.projectedAtDeadline;
+  const scenarioGapUsd = Math.max(0, target - scenarioProjectedBalance);
+  const scenarioGapPct = target > 0 ? (scenarioGapUsd / target) * 100 : 0;
+  const requiredVsScenario = scenario.dailyGoalPct > 0 ? requiredGoalPct / scenario.dailyGoalPct : Number.POSITIVE_INFINITY;
+  const oneYearEquivalentMultiple = tradingDays > 0 ? Math.pow(targetMultiple || 1, 252 / tradingDays) : 0;
+
+  // Internal planning policy, not a promise of real-world returns. Calibrated conservatively
+  // against regulator risk disclosures and day-trading profitability research.
+  let verdict: PlanRealismVerdict = "aligned";
+  if (
+    requiredGoalPct >= 3 ||
+    requiredCompoundDailyPct >= 2 ||
+    requiredVsScenario >= 3 ||
+    targetMultiple >= 10 ||
+    oneYearEquivalentMultiple >= 12 ||
+    scenarioGapPct >= 50
+  ) {
+    verdict = "unrealistic";
+  } else if (
+    requiredGoalPct >= 1.75 ||
+    requiredCompoundDailyPct >= 1.15 ||
+    requiredVsScenario >= 1.8 ||
+    targetMultiple >= 4 ||
+    oneYearEquivalentMultiple >= 5 ||
+    scenarioGapPct >= 25
+  ) {
+    verdict = "strained";
+  } else if (requiredGoalPct > scenario.dailyGoalPct * 1.15 || scenarioGapPct >= 10) {
+    verdict = "stretch";
+  }
+
+  return {
+    verdict,
+    shouldSurface: verdict === "strained" || verdict === "unrealistic",
+    requiredGoalPct: Math.max(0, requiredGoalPct),
+    requiredCompoundDailyPct: Math.max(0, requiredCompoundDailyPct),
+    scenarioDailyGoalPct: scenario.dailyGoalPct,
+    scenarioProjectedBalance,
+    scenarioGapUsd,
+    scenarioGapPct,
+    targetMultiple,
+    tradingDays,
+    estimatedCompletionDate: simulation.completionDate,
+    policyBand: verdict === "unrealistic" ? "out_of_policy" : verdict === "strained" ? "review" : "bankable",
+  };
 }
 
 export default function GrowthPlanPage() {
@@ -1822,6 +2000,8 @@ export default function GrowthPlanPage() {
   const projectedCompletionBalance = projection.completionBalance ?? null;
   const projectedTargetReached = projection.targetReached;
   const projectedCompletedEarly = projection.completedEarly;
+  const projectedCompletesOnSchedule =
+    !!projectedCompletionDate && !!targetDateStr && projectedCompletionDate <= targetDateStr;
   const liveTargetReached =
     liveCurrentBalance !== null &&
     targetBalance > 0 &&
@@ -1917,6 +2097,33 @@ export default function GrowthPlanPage() {
     () => businessScenarios.find((scenario) => scenario.id === selectedScenarioId) ?? null,
     [businessScenarios, selectedScenarioId]
   );
+  const reviewScenario = useMemo(
+    () => selectedBusinessScenario ?? businessScenarios.find((scenario) => scenario.recommended) ?? null,
+    [businessScenarios, selectedBusinessScenario]
+  );
+  const planRealismReview = useMemo(
+    () =>
+      buildPlanRealismReview({
+        starting: startingBalance,
+        target: targetBalance,
+        startIso: effectivePlanStartDate,
+        targetIso: targetDateStr,
+        tradingDays: businessScenarioTradingDays,
+        requiredGoalPct,
+        scenario: reviewScenario,
+        plannedWithdrawals: generatedPlannedWithdrawals,
+      }),
+    [
+      businessScenarioTradingDays,
+      effectivePlanStartDate,
+      generatedPlannedWithdrawals,
+      requiredGoalPct,
+      reviewScenario,
+      startingBalance,
+      targetBalance,
+      targetDateStr,
+    ]
+  );
 
   const autoCadenceUnit = L("Week", "Semana");
 
@@ -1984,8 +2191,55 @@ export default function GrowthPlanPage() {
       ),
       isComplete: businessAnalysisComplete,
       content: (
-        <div id="gp-business-analysis" className="space-y-4">
-          <div className="grid gap-3 lg:grid-cols-5">
+        <div id="gp-business-analysis" className="space-y-5">
+          <div className="rounded-2xl border border-slate-700/80 bg-[linear-gradient(135deg,rgba(15,23,42,0.96),rgba(2,6,23,0.98))] p-4 shadow-[0_18px_50px_rgba(0,0,0,0.28)]">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="text-[11px] uppercase tracking-[0.28em] text-cyan-200">
+                  {L("Capital policy profile", "Perfil de política de capital")}
+                </p>
+                <p className="mt-1 text-sm font-semibold text-slate-100">
+                  {L(
+                    "Set the operating posture before the plan talks numbers.",
+                    "Define la postura operativa antes de que el plan hable números."
+                  )}
+                </p>
+              </div>
+              <span className="rounded-full border border-slate-600 bg-slate-950/70 px-3 py-1 text-[11px] font-semibold text-slate-300">
+                {L("Private back-office inputs", "Inputs privados de back-office")}
+              </span>
+            </div>
+            <div className="mt-4 grid gap-2 md:grid-cols-3">
+              <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-3">
+                <p className="text-[10px] uppercase tracking-[0.18em] text-slate-500">
+                  {L("Starting capital", "Capital inicial")}
+                </p>
+                <p className="mt-1 text-lg font-semibold text-slate-100">
+                  {startingBalance > 0 ? currency(startingBalance) : "—"}
+                </p>
+              </div>
+              <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-3">
+                <p className="text-[10px] uppercase tracking-[0.18em] text-slate-500">
+                  {L("Business target", "Meta empresarial")}
+                </p>
+                <p className="mt-1 text-lg font-semibold text-slate-100">
+                  {targetBalance > 0 ? currency(targetBalance) : "—"}
+                </p>
+              </div>
+              <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-3">
+                <p className="text-[10px] uppercase tracking-[0.18em] text-slate-500">
+                  {L("Trading runway", "Runway de trading")}
+                </p>
+                <p className="mt-1 text-lg font-semibold text-slate-100">
+                  {businessScenarioTradingDays > 0
+                    ? L(`${businessScenarioTradingDays} trading days`, `${businessScenarioTradingDays} días de trading`)
+                    : "—"}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid gap-3 xl:grid-cols-5">
             {[
               {
                 key: "riskProfile",
@@ -2033,7 +2287,7 @@ export default function GrowthPlanPage() {
                 ],
               },
             ].map((field) => (
-              <div key={field.key} className="rounded-xl border border-slate-800 bg-slate-950/50 p-3">
+              <div key={field.key} className="rounded-2xl border border-slate-800 bg-slate-950/70 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
                 <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">{field.label}</p>
                 <div className="mt-2 flex flex-col gap-1.5">
                   {field.options.map(([value, label]) => {
@@ -2050,8 +2304,8 @@ export default function GrowthPlanPage() {
                         }
                         className={`rounded-lg border px-2 py-1.5 text-left text-xs transition ${
                           active
-                            ? "border-emerald-400 bg-emerald-400/10 text-emerald-200"
-                            : "border-slate-800 text-slate-300 hover:border-slate-600"
+                            ? "border-cyan-300 bg-cyan-300/10 text-cyan-100 shadow-[0_0_0_1px_rgba(103,232,249,0.08)]"
+                            : "border-slate-800 text-slate-300 hover:border-slate-600 hover:bg-slate-900/70"
                         }`}
                       >
                         {label}
@@ -2067,12 +2321,12 @@ export default function GrowthPlanPage() {
             <div className="flex flex-wrap items-end justify-between gap-3">
               <div>
                 <p className="text-[11px] uppercase tracking-[0.24em] text-emerald-300">
-                  {L("Scenario modeling", "Modelado de escenarios")}
+                  {L("Operating scenario desk", "Mesa de escenarios operativos")}
                 </p>
                 <p className="mt-1 text-xs text-slate-500">
                   {L(
-                    "These are operating models, not promises. The goal is to select the risk structure your business can actually execute.",
-                    "Estos son modelos operativos, no promesas. La meta es escoger la estructura de riesgo que tu empresa puede ejecutar de verdad."
+                    "These are capital policies, not promises. Select the risk structure your trading business can actually execute.",
+                    "Estas son políticas de capital, no promesas. Escoge la estructura de riesgo que tu empresa de trading puede ejecutar de verdad."
                   )}
                 </p>
               </div>
@@ -2083,18 +2337,87 @@ export default function GrowthPlanPage() {
               ) : null}
             </div>
 
+            {planRealismReview.shouldSurface ? (
+              <div
+                className={`mt-3 rounded-2xl border p-4 ${
+                  planRealismReview.verdict === "unrealistic"
+                    ? "border-red-400/40 bg-red-500/10"
+                    : "border-amber-400/40 bg-amber-500/10"
+                }`}
+              >
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p
+                      className={`text-[11px] uppercase tracking-[0.24em] ${
+                        planRealismReview.verdict === "unrealistic" ? "text-red-200" : "text-amber-200"
+                      }`}
+                    >
+                      {L("Back-office plan review", "Revisión back-office del plan")}
+                    </p>
+                    <p className="mt-1 text-sm font-semibold text-slate-100">
+                      {planRealismReview.verdict === "unrealistic"
+                        ? L(
+                            "This objective is outside the current operating policy.",
+                            "Este objetivo está fuera de la política operativa actual."
+                          )
+                        : L(
+                            "This objective needs a formal risk review before it is bankable.",
+                            "Este objetivo necesita revisión formal de riesgo antes de ser bancable."
+                          )}
+                    </p>
+                    <p className="mt-1 max-w-4xl text-xs leading-5 text-slate-300">
+                      {L(
+                        `To move from ${currency(startingBalance)} to ${currency(targetBalance)} by ${targetDateStr || "the target date"}, this plan needs about ${planRealismReview.requiredGoalPct.toFixed(2)}% on goal-days. The active operating model budgets ${planRealismReview.scenarioDailyGoalPct.toFixed(2)}%. At that pace, the projected deadline balance is ${currency(planRealismReview.scenarioProjectedBalance)}.`,
+                        `Para mover la cuenta de ${currency(startingBalance)} a ${currency(targetBalance)} para ${targetDateStr || "la fecha objetivo"}, el plan necesita aprox. ${planRealismReview.requiredGoalPct.toFixed(2)}% en días de meta. El modelo operativo activo presupone ${planRealismReview.scenarioDailyGoalPct.toFixed(2)}%. A ese ritmo, el balance proyectado en la fecha límite es ${currency(planRealismReview.scenarioProjectedBalance)}.`
+                      )}
+                    </p>
+                  </div>
+                  <span className="rounded-full border border-slate-600 bg-slate-950/70 px-3 py-1 text-[11px] font-semibold text-slate-200">
+                    {planRealismReview.policyBand === "out_of_policy"
+                      ? L("Out of policy", "Fuera de política")
+                      : L("Needs review", "Requiere revisión")}
+                  </span>
+                </div>
+                <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                  <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+                    <p className="text-[10px] uppercase tracking-[0.18em] text-slate-500">
+                      {L("Required/day", "Requerido/día")}
+                    </p>
+                    <p className="mt-1 text-base font-semibold text-slate-100">
+                      {planRealismReview.requiredCompoundDailyPct.toFixed(2)}%
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+                    <p className="text-[10px] uppercase tracking-[0.18em] text-slate-500">
+                      {L("Deadline gap", "Brecha al deadline")}
+                    </p>
+                    <p className="mt-1 text-base font-semibold text-slate-100">
+                      {currency(planRealismReview.scenarioGapUsd)}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+                    <p className="text-[10px] uppercase tracking-[0.18em] text-slate-500">
+                      {L("Suggested action", "Acción sugerida")}
+                    </p>
+                    <p className="mt-1 text-xs font-semibold text-slate-100">
+                      {L("Extend time, lower target, or fund the next phase.", "Extiende tiempo, baja meta o capitaliza la próxima fase.")}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
             <div className="mt-3 grid gap-3 xl:grid-cols-3">
               {businessScenarios.map((scenario) => {
                 const selected = selectedScenarioId === scenario.id;
-                const needsMorePace = requiredGoalPct > 0 && requiredGoalPct > scenario.dailyGoalPct;
                 return (
                   <div
                     key={scenario.id}
-                    className={`rounded-2xl border p-4 transition ${
+                    className={`rounded-2xl border p-4 transition shadow-[0_18px_45px_rgba(0,0,0,0.18)] ${
                       selected
-                        ? "border-emerald-400 bg-emerald-400/10"
+                        ? "border-cyan-300 bg-cyan-300/10"
                         : scenario.recommended
-                          ? "border-cyan-400/40 bg-cyan-400/10"
+                          ? "border-slate-600 bg-slate-900/70"
                           : "border-slate-800 bg-slate-950/50"
                     }`}
                   >
@@ -2128,31 +2451,22 @@ export default function GrowthPlanPage() {
 
                     <div className="mt-3 grid grid-cols-2 gap-2 text-[11px]">
                       <div className="rounded-lg border border-slate-800 bg-slate-950/50 p-2">
-                        <p className="text-slate-500">{L("Goal/day", "Meta/día")}</p>
+                        <p className="text-slate-500">{L("Daily objective", "Objetivo diario")}</p>
                         <p className="font-semibold text-emerald-300">{scenario.dailyGoalPct.toFixed(2)}%</p>
                       </div>
                       <div className="rounded-lg border border-slate-800 bg-slate-950/50 p-2">
-                        <p className="text-slate-500">{L("Risk/trade", "Riesgo/trade")}</p>
+                        <p className="text-slate-500">{L("Risk unit", "Unidad de riesgo")}</p>
                         <p className="font-semibold text-emerald-300">{scenario.riskPerTradePct.toFixed(2)}%</p>
                       </div>
                       <div className="rounded-lg border border-slate-800 bg-slate-950/50 p-2">
-                        <p className="text-slate-500">{L("Max loss", "Max loss")}</p>
+                        <p className="text-slate-500">{L("Daily stop", "Stop diario")}</p>
                         <p className="font-semibold text-emerald-300">{scenario.maxDailyLossPct.toFixed(2)}%</p>
                       </div>
                       <div className="rounded-lg border border-slate-800 bg-slate-950/50 p-2">
-                        <p className="text-slate-500">{L("Fit", "Encaje")}</p>
+                        <p className="text-slate-500">{L("Suitability", "Suitability")}</p>
                         <p className="font-semibold text-emerald-300">{scenario.fitScore}%</p>
                       </div>
                     </div>
-
-                    {needsMorePace ? (
-                      <p className="mt-2 text-[11px] text-amber-200">
-                        {L(
-                          `Your current target needs about ${requiredGoalPct.toFixed(2)}% on goal-days, above this model. Consider more time, lower target, or tighter risk.`,
-                          `Tu meta actual requiere aprox. ${requiredGoalPct.toFixed(2)}% en días de meta, por encima de este modelo. Considera más tiempo, menor meta o riesgo más controlado.`
-                        )}
-                      </p>
-                    ) : null}
 
                     <button
                       type="button"
@@ -2642,11 +2956,17 @@ export default function GrowthPlanPage() {
       ),
       isComplete: autoPhasesGenerated,
       content: (
-        <div id="gp-phase-builder" className="rounded-xl border border-slate-800 bg-slate-900/50 p-3">
+        <div id="gp-phase-builder" className="rounded-2xl border border-slate-700/80 bg-[linear-gradient(135deg,rgba(15,23,42,0.96),rgba(2,6,23,0.98))] p-4 shadow-[0_18px_50px_rgba(0,0,0,0.28)]">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
               <p className="text-[11px] text-slate-500 tracking-widest uppercase">
-                {L("Cadence", "Cadencia")}
+                {L("Capital schedule", "Calendario de capital")}
+              </p>
+              <p className="mt-1 text-sm font-semibold text-slate-100">
+                {L(
+                  "A business banking view of the plan: runway, checkpoints, and deadline risk.",
+                  "Una vista business banking del plan: runway, checkpoints y riesgo de deadline."
+                )}
               </p>
             </div>
             <span className="text-xs text-slate-500">
@@ -2663,6 +2983,70 @@ export default function GrowthPlanPage() {
               {L("Based on trading days (NYSE holidays excluded).", "Basado en días de trading (feriados NYSE excluidos).")}
             </span>
           </div>
+          <div className="mt-4 grid gap-2 md:grid-cols-4">
+            <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-3">
+              <p className="text-[10px] uppercase tracking-[0.18em] text-slate-500">
+                {L("Starting capital", "Capital inicial")}
+              </p>
+              <p className="mt-1 text-lg font-semibold text-slate-100">{currency(startingBalance)}</p>
+            </div>
+            <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-3">
+              <p className="text-[10px] uppercase tracking-[0.18em] text-slate-500">
+                {L("Target capital", "Capital objetivo")}
+              </p>
+              <p className="mt-1 text-lg font-semibold text-slate-100">{currency(targetBalance)}</p>
+            </div>
+            <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-3">
+              <p className="text-[10px] uppercase tracking-[0.18em] text-slate-500">
+                {L("Required goal-day", "Día de meta requerido")}
+              </p>
+              <p className="mt-1 text-lg font-semibold text-slate-100">{requiredGoalPct.toFixed(2)}%</p>
+            </div>
+            <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-3">
+              <p className="text-[10px] uppercase tracking-[0.18em] text-slate-500">
+                {L("Deadline", "Deadline")}
+              </p>
+              <p className="mt-1 text-lg font-semibold text-slate-100">{targetDateStr || "—"}</p>
+            </div>
+          </div>
+          {planRealismReview.shouldSurface ? (
+            <div
+              className={`mt-3 rounded-2xl border p-4 ${
+                planRealismReview.verdict === "unrealistic"
+                  ? "border-red-400/40 bg-red-500/10"
+                  : "border-amber-400/40 bg-amber-500/10"
+              }`}
+            >
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p
+                    className={`text-[11px] uppercase tracking-[0.24em] ${
+                      planRealismReview.verdict === "unrealistic" ? "text-red-200" : "text-amber-200"
+                    }`}
+                  >
+                    {L("Deadline risk", "Riesgo de deadline")}
+                  </p>
+                  <p className="mt-1 text-sm font-semibold text-slate-100">
+                    {L(
+                      "The current operating model does not support the target by the selected date.",
+                      "El modelo operativo actual no sostiene la meta para la fecha seleccionada."
+                    )}
+                  </p>
+                  <p className="mt-1 text-xs leading-5 text-slate-300">
+                    {L(
+                      `Under the active scenario, projected deadline capital is ${currency(planRealismReview.scenarioProjectedBalance)} versus a target of ${currency(targetBalance)}. Treat this as a capital-policy issue, not a motivation issue.`,
+                      `Bajo el escenario activo, el capital proyectado al deadline es ${currency(planRealismReview.scenarioProjectedBalance)} contra una meta de ${currency(targetBalance)}. Trata esto como un asunto de política de capital, no de motivación.`
+                    )}
+                  </p>
+                </div>
+                <span className="rounded-full border border-slate-600 bg-slate-950/70 px-3 py-1 text-[11px] font-semibold text-slate-200">
+                  {planRealismReview.estimatedCompletionDate
+                    ? L(`Est. completion ${planRealismReview.estimatedCompletionDate}`, `Cierre est. ${planRealismReview.estimatedCompletionDate}`)
+                    : L("No reliable completion", "Sin cierre confiable")}
+                </span>
+              </div>
+            </div>
+          ) : null}
           {!autoPhasesGenerated ? (
             <p className="mt-3 text-xs text-slate-500">
               {canGeneratePhases
@@ -2683,61 +3067,90 @@ export default function GrowthPlanPage() {
               )}
             </p>
           ) : (
-            <div className="mt-3 rounded-xl border border-slate-800 bg-slate-950/40 p-3">
-              <p className="text-[12px] text-slate-500">
-                {L("First checkpoint", "Primer checkpoint")} · {autoCadenceUnit}{" "}
-                {firstMonthMeta?.weekIndex ?? 1}/{firstMonthMeta?.weeksInMonth ?? autoPhases.length}
-                {firstMonthMeta?.monthIndex ? (
-                  <span className="text-slate-400">
-                    {" "}
-                    · {L("Month", "Mes")} {firstMonthMeta.monthIndex}
-                  </span>
-                ) : null}
-              </p>
-              <p className="text-[18px] text-emerald-300 font-semibold">
-                {currency(autoPhases[0].targetEquity)}
-              </p>
-              {firstMonthMeta?.monthGoal ? (
-                <p className="text-[12px] text-slate-500 mt-1">
-                  {L("Month goal (profit):", "Meta del mes (ganancia):")}{" "}
-                  <span className="text-slate-200">{currency(firstMonthMeta.monthGoal)}</span>
-                </p>
-              ) : null}
-              {(autoPhases[0].monthWithdrawal ?? 0) > 0 ? (
-                <p className="text-[11px] text-slate-500">
-                  {L("Month withdrawal:", "Retiro del mes:")}{" "}
-                  <span className="text-sky-300">{currency(autoPhases[0].monthWithdrawal ?? 0)}</span>
-                </p>
-              ) : null}
-              {firstMonthMeta?.weeklyPct ? (
-                <p className="text-[11px] text-slate-500">
-                  {L("Weekly share:", "Porción semanal:")}{" "}
-                  <span className="text-slate-200">
-                    {firstMonthMeta.weeklyPct.toFixed(1)}%
-                  </span>
-                </p>
-              ) : null}
-              {firstMonthMeta?.weeklyGoal ? (
-                <p className="text-[11px] text-slate-500">
-                  {L("Weekly goal (profit):", "Meta semanal (ganancia):")}{" "}
-                  <span className="text-slate-200">
-                    {currency(firstMonthMeta.weeklyGoal)}
-                  </span>
-                </p>
-              ) : null}
-              {autoPhases[0].targetDate ? (
-                <p className="text-[12px] text-slate-500 mt-1">
-                  {L("Target date:", "Fecha objetivo:")}{" "}
-                  <span className="text-slate-200">{autoPhases[0].targetDate}</span>
-                </p>
-              ) : null}
+            <div className="mt-3 rounded-2xl border border-slate-800 bg-slate-950/50 p-4">
+              <div className="grid gap-3 lg:grid-cols-[1fr_1.4fr]">
+                <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-3">
+                  <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500">
+                    {L("First checkpoint", "Primer checkpoint")}
+                  </p>
+                  <p className="mt-2 text-[12px] text-slate-500">
+                    {autoCadenceUnit} {firstMonthMeta?.weekIndex ?? 1}/{firstMonthMeta?.weeksInMonth ?? autoPhases.length}
+                    {firstMonthMeta?.monthIndex ? (
+                      <span className="text-slate-400">
+                        {" "}
+                        · {L("Month", "Mes")} {firstMonthMeta.monthIndex}
+                      </span>
+                    ) : null}
+                  </p>
+                  <p className="mt-1 text-2xl font-semibold text-emerald-300">
+                    {currency(autoPhases[0].targetEquity)}
+                  </p>
+                  {autoPhases[0].targetDate ? (
+                    <p className="mt-1 text-[12px] text-slate-500">
+                      {L("Due:", "Vence:")}{" "}
+                      <span className="text-slate-200">{autoPhases[0].targetDate}</span>
+                    </p>
+                  ) : null}
+                </div>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {firstMonthMeta?.monthGoal ? (
+                    <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-3">
+                      <p className="text-[10px] uppercase tracking-[0.18em] text-slate-500">
+                        {L("Month profit target", "Meta mensual de ganancia")}
+                      </p>
+                      <p className="mt-1 text-base font-semibold text-slate-100">{currency(firstMonthMeta.monthGoal)}</p>
+                    </div>
+                  ) : null}
+                  {firstMonthMeta?.weeklyGoal ? (
+                    <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-3">
+                      <p className="text-[10px] uppercase tracking-[0.18em] text-slate-500">
+                        {L("Weekly profit target", "Meta semanal de ganancia")}
+                      </p>
+                      <p className="mt-1 text-base font-semibold text-slate-100">{currency(firstMonthMeta.weeklyGoal)}</p>
+                    </div>
+                  ) : null}
+                  {firstMonthMeta?.weeklyPct ? (
+                    <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-3">
+                      <p className="text-[10px] uppercase tracking-[0.18em] text-slate-500">
+                        {L("Weekly allocation", "Asignación semanal")}
+                      </p>
+                      <p className="mt-1 text-base font-semibold text-slate-100">{firstMonthMeta.weeklyPct.toFixed(1)}%</p>
+                    </div>
+                  ) : null}
+                  {(autoPhases[0].monthWithdrawal ?? 0) > 0 ? (
+                    <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-3">
+                      <p className="text-[10px] uppercase tracking-[0.18em] text-slate-500">
+                        {L("Month withdrawal", "Retiro del mes")}
+                      </p>
+                      <p className="mt-1 text-base font-semibold text-sky-300">{currency(autoPhases[0].monthWithdrawal ?? 0)}</p>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
               {projectedTargetReached && projectedCompletionDate ? (
-                <div className="mt-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3">
-                  <p className="text-[11px] text-emerald-200 tracking-widest uppercase">
-                    {L("Projected completion", "Cierre proyectado")}
+                <div
+                  className={`mt-3 rounded-xl border p-3 ${
+                    projectedCompletesOnSchedule
+                      ? "border-emerald-500/30 bg-emerald-500/10"
+                      : "border-amber-400/40 bg-amber-500/10"
+                  }`}
+                >
+                  <p
+                    className={`text-[11px] tracking-widest uppercase ${
+                      projectedCompletesOnSchedule ? "text-emerald-200" : "text-amber-200"
+                    }`}
+                  >
+                    {projectedCompletesOnSchedule
+                      ? L("Projected completion", "Cierre proyectado")
+                      : L("Projected completion misses deadline", "Cierre proyectado fuera de deadline")}
                   </p>
                   <p className="mt-1 text-sm text-slate-100">
-                    {projectedCompletedEarly
+                    {!projectedCompletesOnSchedule
+                      ? L(
+                          `At the current risk policy, this plan reaches the target on ${projectedCompletionDate}, after the selected deadline ${targetDateStr}.`,
+                          `Con la política de riesgo actual, este plan alcanza la meta el ${projectedCompletionDate}, después del deadline seleccionado ${targetDateStr}.`
+                        )
+                      : projectedCompletedEarly
                       ? L(
                           `This plan reaches the target on ${projectedCompletionDate} and stops there instead of forcing a fake drawdown back to the goal.`,
                           `Este plan alcanza la meta el ${projectedCompletionDate} y se detiene ahí en vez de forzar un drawdown artificial de regreso a la meta.`
@@ -2750,7 +3163,7 @@ export default function GrowthPlanPage() {
                   {projectedCompletionBalance !== null ? (
                     <p className="mt-1 text-[12px] text-slate-300">
                       {L("Projected balance at completion:", "Balance proyectado al cierre:")}{" "}
-                      <span className="text-emerald-300">{currency(projectedCompletionBalance)}</span>
+                      <span className={projectedCompletesOnSchedule ? "text-emerald-300" : "text-amber-200"}>{currency(projectedCompletionBalance)}</span>
                     </p>
                   ) : null}
                 </div>
@@ -3158,6 +3571,21 @@ export default function GrowthPlanPage() {
         recommended: scenario.recommended,
         projectedEndBalance: scenario.projectedEndBalance,
       })),
+      realismReview: {
+        verdict: planRealismReview.verdict,
+        policyBand: planRealismReview.policyBand,
+        requiredGoalPct: planRealismReview.requiredGoalPct,
+        requiredCompoundDailyPct: planRealismReview.requiredCompoundDailyPct,
+        scenarioDailyGoalPct: planRealismReview.scenarioDailyGoalPct,
+        scenarioProjectedBalance: planRealismReview.scenarioProjectedBalance,
+        scenarioGapUsd: planRealismReview.scenarioGapUsd,
+        scenarioGapPct: planRealismReview.scenarioGapPct,
+        targetMultiple: planRealismReview.targetMultiple,
+        tradingDays: planRealismReview.tradingDays,
+        estimatedCompletionDate: planRealismReview.estimatedCompletionDate,
+        surfacedToUser: planRealismReview.shouldSurface,
+        reviewedAt: new Date().toISOString(),
+      },
       updatedAt: new Date().toISOString(),
     };
 
@@ -3375,23 +3803,23 @@ export default function GrowthPlanPage() {
 
         {/* Guided Mode */}
         {guidedMode ? (
-          <div className="rounded-xl border border-emerald-400/25 bg-emerald-400/5 p-3 space-y-2">
+          <div className="space-y-2 rounded-2xl border border-slate-700/80 bg-slate-950/70 p-4 shadow-[0_18px_45px_rgba(0,0,0,0.2)]">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <p className="text-[10px] text-emerald-300 uppercase tracking-[0.28em]">
-                  {L("Plan Coach", "Coach del Plan")}
+                <p className="text-[10px] text-cyan-200 uppercase tracking-[0.28em]">
+                  {L("Capital Plan Desk", "Mesa de Plan de Capital")}
                 </p>
                 <p className="text-xs text-slate-300">
                   {L(
-                    "We’ll guide you step‑by‑step. Complete the items below to unlock the next section.",
-                    "Te guío paso a paso. Completa lo siguiente para desbloquear la próxima sección."
+                    "Back-office checklist for completing the plan before it becomes the operating standard.",
+                    "Checklist back-office para completar el plan antes de convertirlo en estándar operativo."
                   )}
                 </p>
               </div>
               <button
                 type="button"
                 onClick={() => setGuidedMode(false)}
-                className="rounded-full border border-slate-700 px-2.5 py-1 text-[11px] text-slate-300 hover:border-emerald-400 hover:text-emerald-300"
+                className="rounded-full border border-slate-700 px-2.5 py-1 text-[11px] text-slate-300 hover:border-cyan-300 hover:text-cyan-200"
               >
                 {L("Hide", "Ocultar")}
               </button>
@@ -3400,7 +3828,7 @@ export default function GrowthPlanPage() {
             <div className="flex items-center gap-3">
               <div className="h-1.5 flex-1 rounded-full bg-slate-800 overflow-hidden">
                 <div
-                  className="h-full rounded-full bg-emerald-400 transition"
+                  className="h-full rounded-full bg-cyan-300 transition"
                   style={{ width: `${Math.min(100, Math.max(6, guideProgress * 100))}%` }}
                 />
               </div>
@@ -3415,8 +3843,8 @@ export default function GrowthPlanPage() {
                 onClick={() => scrollToAnchor(nextTask.anchor)}
                 className={`flex items-center justify-between gap-2 rounded-lg border px-2.5 py-1.5 text-left text-xs transition ${
                   nextTask.done
-                    ? "border-emerald-400/40 bg-emerald-400/10 text-emerald-200"
-                    : "border-slate-800 bg-slate-950/40 text-slate-300 hover:border-emerald-400/60"
+                    ? "border-cyan-300/40 bg-cyan-300/10 text-cyan-100"
+                    : "border-slate-800 bg-slate-950/40 text-slate-300 hover:border-cyan-300/60"
                 }`}
               >
                 <span>
@@ -3449,7 +3877,7 @@ export default function GrowthPlanPage() {
                   setStep(nextStep);
                   scrollToAnchor(`gp-step-${nextStep}`);
                 }}
-                className="rounded-xl bg-emerald-400 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-emerald-300"
+                className="rounded-xl bg-cyan-300 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-cyan-200"
               >
                 {nextTask?.anchor
                   ? L("Go to next item", "Ir al siguiente item")
@@ -3463,7 +3891,7 @@ export default function GrowthPlanPage() {
                   setStep(0);
                   setStep0Stage(0);
                 }}
-                className="rounded-xl border border-slate-700 px-4 py-2 text-sm text-slate-300 hover:border-emerald-400 hover:text-emerald-300"
+                className="rounded-xl border border-slate-700 px-4 py-2 text-sm text-slate-300 hover:border-cyan-300 hover:text-cyan-200"
               >
                 {L("Back to numbers", "Volver a números")}
               </button>
@@ -3473,9 +3901,9 @@ export default function GrowthPlanPage() {
           <button
             type="button"
             onClick={() => setGuidedMode(true)}
-            className="self-start rounded-full border border-slate-800 px-3 py-1 text-xs text-slate-400 hover:border-emerald-400 hover:text-emerald-300"
+            className="self-start rounded-full border border-slate-800 px-3 py-1 text-xs text-slate-400 hover:border-cyan-300 hover:text-cyan-200"
           >
-            {L("Show Plan Coach", "Mostrar Coach del Plan")}
+            {L("Show Capital Plan Desk", "Mostrar Mesa de Plan de Capital")}
           </button>
         )}
 

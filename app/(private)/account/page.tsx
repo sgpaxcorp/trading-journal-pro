@@ -425,7 +425,7 @@ export default function AccountPage() {
                 : "text-slate-300 border border-slate-700 hover:border-emerald-400 hover:text-emerald-200"
             } transition`}
           >
-            {L("Business billing & subscription", "Facturación empresarial y suscripción")}
+            {L("Business Billing & Access", "Facturación y acceso empresarial")}
           </a>
           <a
             href="/billing/history"

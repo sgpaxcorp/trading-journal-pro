@@ -208,7 +208,7 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
     if (authLoading) return;
 
     if (!user) {
-      setError(L("You need to sign in before starting checkout.", "Debes iniciar sesión antes de iniciar el checkout."));
+      setError(L("You need to sign in before starting secure payment.", "Debes iniciar sesión antes de iniciar el pago seguro."));
       // Si quisieras redirect: router.push(`/signin?redirect=/billing?plan=${selectedPlan}`);
       return;
     }
@@ -243,15 +243,15 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
       const data = await res.json();
 
       if (!res.ok) {
-        throw new Error(data.error || L("Failed to start checkout", "No se pudo iniciar el checkout"));
+        throw new Error(data.error || L("Failed to start secure payment", "No se pudo iniciar el pago seguro"));
       }
       if (!data.url) {
-        throw new Error(L("Missing checkout URL", "Falta la URL de checkout"));
+        throw new Error(L("Missing secure payment URL", "Falta la URL de pago seguro"));
       }
 
       window.location.href = data.url as string;
     } catch (err: any) {
-      setError(err.message ?? L("Something went wrong starting checkout.", "Algo salió mal iniciando el checkout."));
+      setError(err.message ?? L("Something went wrong starting secure payment.", "Algo salió mal iniciando el pago seguro."));
     } finally {
       setLoading(false);
     }
@@ -260,7 +260,7 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
   async function handleAddonCheckout(addonKey: "broker_sync") {
     if (authLoading) return;
     if (!user) {
-      setError(L("You need to sign in before starting checkout.", "Debes iniciar sesión antes de iniciar el checkout."));
+      setError(L("You need to sign in before starting secure payment.", "Debes iniciar sesión antes de iniciar el pago seguro."));
       return;
     }
 
@@ -286,12 +286,12 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
       });
 
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || L("Failed to start checkout", "No se pudo iniciar el checkout"));
-      if (!data.url) throw new Error(L("Missing checkout URL", "Falta la URL de checkout"));
+      if (!res.ok) throw new Error(data.error || L("Failed to start secure payment", "No se pudo iniciar el pago seguro"));
+      if (!data.url) throw new Error(L("Missing secure payment URL", "Falta la URL de pago seguro"));
 
       window.location.href = data.url as string;
     } catch (err: any) {
-      setError(err.message ?? L("Something went wrong starting checkout.", "Algo salió mal iniciando el checkout."));
+      setError(err.message ?? L("Something went wrong starting secure payment.", "Algo salió mal iniciando el pago seguro."));
     } finally {
       setLoading(false);
     }
@@ -338,7 +338,7 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
   const isCurrentSelection = hasActivePlan && selectedPlan === currentPlan;
   const currentPlanLabel =
     currentPlan === "advanced"
-      ? L("Advance", "Advance")
+      ? L("Advanced", "Advanced")
       : currentPlan === "core"
       ? L("Core", "Core")
       : L("No active plan", "Sin plan activo");
@@ -387,17 +387,17 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
           {/* Header */}
           <div className="mb-8">
             <p className="text-[11px] font-semibold tracking-[0.2em] text-emerald-400 uppercase">
-              {L("Billing", "Facturación")}
+              {L("Business Billing", "Facturación Empresarial")}
             </p>
             <div className="mt-2 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
               <div>
                 <h1 className="text-2xl md:text-3xl font-semibold text-slate-50">
-                  {L("Plans & add-ons", "Planes y add-ons")}
+                  {L("Business access & add-ons", "Acceso empresarial y add-ons")}
                 </h1>
                 <p className="mt-2 text-xs md:text-sm text-slate-300 max-w-2xl">
                   {L(
-                    "Pick the plan that matches how you trade. Add-ons are optional, and you can upgrade or cancel any time.",
-                    "Elige el plan que encaja con tu forma de operar. Los add-ons son opcionales y puedes actualizar o cancelar cuando quieras."
+                    "Choose the operating layer for your trading business. Add-ons are optional, and you can upgrade or cancel any time.",
+                    "Elige la capa operativa para tu empresa de trading. Los add-ons son opcionales y puedes actualizar o cancelar cuando quieras."
                   )}
                 </p>
               </div>
@@ -450,7 +450,7 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
                     </span>
                   </div>
                   <p className="mt-2 text-[10px] text-slate-500">
-                    {L("Manage billing or upgrade any time.", "Administra tu facturación o haz upgrade cuando quieras.")}
+                    {L("Manage business billing or upgrade any time.", "Administra tu facturación empresarial o haz upgrade cuando quieras.")}
                   </p>
                 </div>
               )}
@@ -659,8 +659,8 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
                 {!hasActivePlan ? (
                   <p className="mt-1 text-[11px] text-slate-500">
                     {L(
-                      "Add it now and it will be included in the Stripe checkout at the bottom.",
-                      "Agrégalo ahora y se incluirá en el checkout de Stripe al final."
+                      "Add it now and it will be included in the secure Stripe payment below.",
+                      "Agrégalo ahora y se incluirá en el pago seguro de Stripe abajo."
                     )}
                   </p>
                 ) : null}
@@ -709,15 +709,15 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">
-                  {L("Renewal settings", "Ajustes de renovación")}
+                  {L("Business access renewal", "Renovación de acceso empresarial")}
                 </p>
                 <h2 className="text-lg font-semibold text-slate-100">
                   {L("Auto-renew & next billing date", "Auto-renovación y próxima fecha de cobro")}
                 </h2>
                 <p className="text-xs text-slate-400 mt-1">
                   {L(
-                    "Keep this area simple: auto-renew on or off, plus the next billing date. Everything else stays in the billing portal.",
-                    "Mantén esta área simple: auto-renovación encendida o apagada, y la próxima fecha de cobro. Todo lo demás se queda en el portal de billing."
+                    "Keep this area simple: auto-renew on or off, plus the next billing date for your trading business access. Everything else stays in the billing portal.",
+                    "Mantén esta área simple: auto-renovación encendida o apagada, y la próxima fecha de cobro de tu acceso empresarial. Todo lo demás se queda en el portal de billing."
                   )}
                 </p>
               </div>
@@ -725,12 +725,12 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
 
             <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5 space-y-4">
               {subscriptionLoading ? (
-                <p className="text-xs text-slate-400">{L("Loading subscription…", "Cargando suscripción…")}</p>
+                <p className="text-xs text-slate-400">{L("Loading business access…", "Cargando acceso empresarial…")}</p>
               ) : !subscriptionInfo ? (
                 <p className="text-xs text-slate-400">
                   {L(
-                    "Subscription details are not available yet. Open the billing portal if you need to manage renewal settings now.",
-                    "Los detalles de la suscripción todavía no están disponibles. Abre el portal de billing si necesitas gestionar la renovación ahora."
+                    "Business access details are not available yet. Open the billing portal if you need to manage renewal settings now.",
+                    "Los detalles del acceso empresarial todavía no están disponibles. Abre el portal de billing si necesitas gestionar la renovación ahora."
                   )}
                 </p>
               ) : (
@@ -775,8 +775,8 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
                       <p className="mt-2 text-[11px] text-slate-400">
                         {autoRenewEnabled
                           ? L(
-                              "Your plan renews automatically on the next billing date unless you turn it off.",
-                              "Tu plan se renueva automáticamente en la próxima fecha de cobro a menos que lo apagues."
+                              "Your business access renews automatically on the next billing date unless you turn it off.",
+                              "Tu acceso empresarial se renueva automáticamente en la próxima fecha de cobro a menos que lo apagues."
                             )
                           : L(
                               "No future charge is scheduled. Your access still remains active through the date shown above.",
@@ -808,15 +808,15 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
                       <div className="flex h-full flex-col gap-3 md:justify-between">
                         <div>
                           <p className="text-[10px] uppercase tracking-[0.2em] text-emerald-300/80">
-                            {L("Billing portal", "Portal de billing")}
+                            {L("Secure billing portal", "Portal seguro de billing")}
                           </p>
                           <p className="mt-2 text-sm font-semibold text-emerald-50">
                             {L("Need the secure billing portal?", "¿Necesitas el portal seguro de billing?")}
                           </p>
                           <p className="mt-1 text-[11px] text-emerald-100/80">
                             {L(
-                              "Open it only when you need invoices, card changes, or other billing actions outside of auto-renew.",
-                              "Ábrelo solo cuando necesites invoices, cambios de tarjeta u otras acciones de billing fuera de la auto-renovación."
+                              "Open it when you need invoices, card changes, or other business billing actions outside of auto-renew.",
+                              "Ábrelo cuando necesites invoices, cambios de tarjeta u otras acciones de facturación empresarial fuera de la auto-renovación."
                             )}
                           </p>
                         </div>
@@ -869,8 +869,8 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
               </div>
               <p className="mt-3 text-[11px] text-slate-400">
                 {L(
-                  "You will be redirected to Stripe at the end to complete your subscription.",
-                  "Al final serás redirigido a Stripe para completar tu suscripción."
+                  "You will be redirected to Stripe to activate or update your NeuroTrader business access.",
+                  "Serás redirigido a Stripe para activar o actualizar tu acceso empresarial a NeuroTrader."
                 )}
               </p>
             </div>
@@ -887,7 +887,7 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
                     ? isCurrentSelection
                       ? L("Current plan selected", "Plan actual seleccionado")
                       : `${L("Continue with", "Continuar con")} ${selectedPlan === "core" ? L("Core", "Core") : L("Advanced", "Advanced")}`
-                    : L("Checkout with Stripe", "Pagar con Stripe")}
+                    : L("Secure payment with Stripe", "Pago seguro con Stripe")}
                 </span>
                 {(loading || authLoading) && (
                   <span className="ml-2 inline-flex h-3 w-3 animate-spin rounded-full border-2 border-slate-950 border-t-transparent" />

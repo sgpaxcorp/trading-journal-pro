@@ -122,7 +122,7 @@ export default function AccountPreferencesPage() {
                 : "text-slate-300 border border-slate-700 hover:border-emerald-400 hover:text-emerald-200"
             } transition`}
           >
-            {t("account.billing", lang, "Billing & subscription")}
+            {t("account.billing", lang, "Business Billing & Access")}
           </a>
 
           <a

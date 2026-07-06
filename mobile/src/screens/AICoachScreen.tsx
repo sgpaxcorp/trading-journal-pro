@@ -73,6 +73,7 @@ type AccountSeriesResponse = {
     targetDate?: string;
     maxDailyLossPercent?: number;
     steps?: {
+      business_analysis?: Record<string, unknown> | null;
       prepare?: {
         checklist?: Array<{ id?: string; text?: string; isActive?: boolean }>;
       };
@@ -778,6 +779,7 @@ export function AICoachScreen({}: AICoachScreenProps) {
               dailyTargetPct: toNum(accountSeries.plan.dailyTargetPct, 0),
               maxDailyLossPercent: toNum(accountSeries.plan.maxDailyLossPercent, 0),
               planStartDate: accountSeries.plan.planStartIso ?? null,
+              businessAnalysis: accountSeries.plan.steps?.business_analysis ?? null,
               executionSystem: accountSeries.plan.steps?.execution_and_journal?.system
                 ? {
                     doList: Array.isArray(accountSeries.plan.steps.execution_and_journal.system?.doList)

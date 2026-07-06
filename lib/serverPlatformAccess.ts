@@ -48,7 +48,7 @@ type AccessResult =
   | { ok: true; context: PlatformAccessContext }
   | { ok: false; response: NextResponse };
 
-export function subscriptionRequiredResponse(message = "Active subscription required.") {
+export function subscriptionRequiredResponse(message = "Active business access required.") {
   return NextResponse.json(
     {
       error: message,

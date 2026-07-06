@@ -34,7 +34,7 @@ const buildSteps = (L: (en: string, es: string) => string): { id: Step; label: s
   { id: 1, label: L("Business account", "Cuenta empresarial"), description: L("Create your Trader Entrepreneur credentials.", "Crea tus credenciales de Empresario Trader.") },
   { id: 2, label: L("Verify email", "Verificar email"), description: L("Enter the code we sent you.", "Ingresa el código que te enviamos.") },
   { id: 3, label: L("Business plan", "Plan empresarial"), description: L("Choose between Core Business or Advanced Business.", "Elige entre Core Empresarial o Advanced Empresarial.") },
-  { id: 4, label: L("Checkout", "Checkout"), description: L("Complete secure payment with Stripe.", "Completa el pago seguro con Stripe.") },
+  { id: 4, label: L("Secure payment", "Pago seguro"), description: L("Complete secure payment with Stripe.", "Completa el pago seguro con Stripe.") },
   { id: 5, label: L("Confirmed", "Confirmado"), description: L("Access your trading business workspace.", "Accede a tu espacio de empresa de trading.") },
 ];
 
@@ -286,7 +286,7 @@ export default function StartClient({ initialPlan }: StartClientProps) {
     setCurrentStep(4);
   }
 
-  // Paso 3: Stripe Checkout
+  // Paso 4: Stripe secure payment
   async function handleCheckout() {
     setError(null);
     if (!user) {
@@ -322,7 +322,7 @@ export default function StartClient({ initialPlan }: StartClientProps) {
 
       if (!res.ok) {
         const message =
-          body?.error ?? L("Error creating checkout session. Please try again.", "Error creando la sesión de checkout. Intenta de nuevo.");
+          body?.error ?? L("Error creating secure payment session. Please try again.", "Error creando la sesión de pago seguro. Intenta de nuevo.");
         setError(message);
         setLoadingCheckout(false);
         return;
@@ -330,15 +330,15 @@ export default function StartClient({ initialPlan }: StartClientProps) {
 
       const url = body?.url as string | undefined;
       if (!url) {
-        setError(L("Missing checkout URL from Stripe.", "Falta la URL de checkout de Stripe."));
+        setError(L("Missing secure payment URL from Stripe.", "Falta la URL de pago seguro de Stripe."));
         setLoadingCheckout(false);
         return;
       }
 
       window.location.href = url;
     } catch (err: any) {
-      console.error("Error starting Stripe checkout:", err);
-      setError(err?.message ?? L("Unexpected error starting checkout.", "Error inesperado iniciando checkout."));
+      console.error("Error starting Stripe secure payment:", err);
+      setError(err?.message ?? L("Unexpected error starting secure payment.", "Error inesperado iniciando pago seguro."));
       setLoadingCheckout(false);
     }
   }
@@ -607,7 +607,7 @@ export default function StartClient({ initialPlan }: StartClientProps) {
               onClick={handlePlanContinue}
               className="inline-flex px-5 py-2 rounded-xl bg-emerald-400 text-slate-950 text-xs font-semibold hover:bg-emerald-300"
             >
-              {L("Continue to checkout", "Continuar al checkout")}
+              {L("Continue to secure payment", "Continuar al pago seguro")}
             </button>
           </div>
         </div>
@@ -620,12 +620,12 @@ export default function StartClient({ initialPlan }: StartClientProps) {
       return (
         <div>
           <h2 className="text-xl md:text-2xl font-semibold mb-2">
-            {L("Secure checkout", "Checkout seguro")}
+            {L("Secure payment", "Pago seguro")}
           </h2>
           <p className="text-xs text-slate-400 mb-4">
             {L(
-              "Step 4 of 5 – You will be redirected to Stripe to complete your payment. You can enter a promotion code directly on the Stripe checkout page.",
-              "Paso 4 de 5 – Serás redirigido a Stripe para completar tu pago. Puedes introducir un código de promoción directamente en Stripe."
+              "Step 4 of 5 - You will be redirected to Stripe to complete secure payment. You can enter a promotion code directly on the Stripe payment page.",
+              "Paso 4 de 5 - Serás redirigido a Stripe para completar el pago seguro. Puedes introducir un código de promoción directamente en Stripe."
             )}
           </p>
 

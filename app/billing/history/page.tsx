@@ -153,7 +153,7 @@ export default function BillingHistoryPage() {
     doc.setFont("helvetica", "bold");
     doc.setFontSize(20);
     doc.text(
-      isEs ? "Factura Neuro Trader" : "Neuro Trader Invoice",
+      isEs ? "Factura empresarial NeuroTrader" : "NeuroTrader Business Invoice",
       marginX,
       logo ? startY + logoHeight + 18 : startY + 30
     );
@@ -185,7 +185,7 @@ export default function BillingHistoryPage() {
 
     const tableStart = logo ? startY + logoHeight + 140 : startY + 150;
     const lines = (inv.lines || []).map((l) => [
-      l.description || L("Subscription", "Suscripción"),
+      l.description || L("Business access", "Acceso empresarial"),
       l.quantity ?? "",
       formatAmount(l.amount ?? 0, inv.currency),
     ]);
@@ -204,8 +204,8 @@ export default function BillingHistoryPage() {
     doc.setFontSize(9);
     doc.text(
       isEs
-        ? "Gracias por tu suscripción. Este documento es para fines de facturación."
-        : "Thank you for your subscription. This document is for billing purposes only.",
+        ? "Gracias por tu pago de acceso empresarial NeuroTrader. Este documento es para fines de facturación."
+        : "Thank you for your NeuroTrader business access payment. This document is for billing purposes only.",
       marginX,
       doc.internal.pageSize.height - 40
     );
@@ -254,11 +254,11 @@ export default function BillingHistoryPage() {
       <div className="max-w-4xl mx-auto px-6 md:px-8 py-8 space-y-6">
         <header>
           <p className="text-[11px] uppercase tracking-[0.25em] text-emerald-400">
-            {L("Billing", "Facturación")}
+            {L("Business Billing", "Facturación Empresarial")}
           </p>
-          <h1 className="text-3xl font-semibold mt-1">{L("Billing history", "Historial de facturación")}</h1>
+          <h1 className="text-3xl font-semibold mt-1">{L("Business billing history", "Historial de facturación empresarial")}</h1>
           <p className="text-sm text-slate-400 mt-2">
-            {L("View past invoices and payments for your subscription.", "Revisa facturas y pagos anteriores de tu suscripción.")}
+            {L("View past invoices and payments for your NeuroTrader business access.", "Revisa facturas y pagos anteriores de tu acceso empresarial a NeuroTrader.")}
           </p>
         </header>
 
@@ -267,8 +267,8 @@ export default function BillingHistoryPage() {
             <div>
               <p className="text-[11px] text-slate-400">
                 {L(
-                  "We summarize invoices by month to keep your billing clean.",
-                  "Resumimos las facturas por mes para mantener tu billing limpio."
+                  "We summarize invoices by month to keep your business billing clean.",
+                  "Resumimos las facturas por mes para mantener limpia tu facturación empresarial."
                 )}
               </p>
               {!showAllInvoices && displayInvoices.length > 5 && (

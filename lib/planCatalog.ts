@@ -129,7 +129,7 @@ export const PLAN_CATALOG: Record<
       { en: "Android app coming soon", es: "Aplicación Android próximamente" },
     ],
     billingHighlights: [
-      { en: "Execution Journal, calendar, and Trading Business Plan", es: "Registro de Ejecución, calendario y Plan de Empresa de Trading" },
+      { en: "Execution Record, calendar, and Trading Business Plan", es: "Registro de Ejecución, calendario y Plan de Empresa de Trading" },
       { en: "Strategy review / back-study basics", es: "Revisión estratégica / back-study básico" },
       { en: "Core KPIs and balance chart", es: "KPIs core y balance chart" },
       { en: "Broker data imports: statements, order history, CSV/XLSX", es: "Imports de data del bróker: statements, order history, CSV/XLSX" },
@@ -209,7 +209,7 @@ export const PLAN_COMPARISON_ROWS: PlanComparisonRow[] = [
   { kind: "feature", label: { en: "Protection insights handed to Business AI Coach", es: "Insights de protección conectados al Coach Empresarial IA" }, core: false, advanced: true },
 
   { kind: "section", label: { en: "EXECUTION RECORD & REVIEW", es: "REGISTRO DE EJECUCIÓN Y REVISIÓN" } },
-  { kind: "feature", label: { en: "Execution Journal", es: "Registro de Ejecución" }, core: true, advanced: true },
+  { kind: "feature", label: { en: "Execution Record", es: "Registro de Ejecución" }, core: true, advanced: true },
   { kind: "feature", label: { en: "Premarket, inside trade & after trade notes", es: "Notas de premarket, inside trade y after trade" }, core: true, advanced: true },
   { kind: "feature", label: { en: "Execution checklist", es: "Checklist de ejecución" }, core: true, advanced: true },
   { kind: "feature", label: { en: "Setup rules & triggers", es: "Reglas y disparadores de setup" }, core: true, advanced: true },

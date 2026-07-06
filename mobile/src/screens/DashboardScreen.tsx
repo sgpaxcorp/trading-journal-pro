@@ -308,54 +308,58 @@ function getNewYorkDayOfYear(now = new Date()) {
   return Math.floor((currentUtc - startUtc) / 86400000) + 1;
 }
 
-function fallbackCoachMessage(weekday: string, lang: "en" | "es") {
-  const tx = (en: string, es: string) => (lang === "es" ? es : en);
-  if (weekday === "fri") {
-    return {
-      title: tx("Neuro Trader Friday", "Neuro Trader viernes"),
-      body: tx(
-        "Close the week with emotional neutrality. Your edge grows when review is honest and ego stays quiet.",
-        "Cierra la semana con neutralidad emocional. Tu edge crece cuando la revisión es honesta y el ego se queda en silencio."
-      ),
-    };
-  }
-  if (weekday === "sat") {
-    return {
-      title: tx("Neuro Trader reset", "Reset Neuro Trader"),
-      body: tx(
-        "Rest is part of execution. Reset your nervous system today so you do not trade next week from fatigue.",
-        "Descansar también es parte de la ejecución. Resetea tu sistema nervioso hoy para no operar la próxima semana desde el cansancio."
-      ),
-    };
-  }
-  if (weekday === "sun") {
-    return {
-      title: tx("Neuro Trader preparation", "Preparación Neuro Trader"),
-      body: tx(
-        "Prepare your levels, calendar, and scenarios. Confidence tomorrow comes from clarity tonight.",
-        "Prepara niveles, calendario y escenarios. La confianza de mañana nace de la claridad de esta noche."
-      ),
-    };
-  }
-  return {
-    title: tx("Neuro Trader focus", "Enfoque Neuro Trader"),
-    body: tx(
-      "Trade from process, not from impulse. The mind you bring to the screen determines the quality of every decision.",
-      "Opera desde el proceso, no desde el impulso. La mente con la que llegas a la pantalla determina la calidad de cada decisión."
-    ),
-  };
-}
-
 function buildFallbackCoachRow(lang: "en" | "es", now = new Date()): MotivationMessageRow {
   const dayParts = getNewYorkDayParts(now);
-  const fallback = fallbackCoachMessage(dayParts.weekday, lang);
+  const dayOfYear = getNewYorkDayOfYear(now);
+  const tx = (en: string, es: string) => (lang === "es" ? es : en);
+  const openers = [
+    tx("Start with ownership.", "Empieza con mentalidad de dueño."),
+    tx("Treat today like a boardroom decision.", "Trata hoy como una decisión de junta directiva."),
+    tx("Your first edge today is restraint.", "Tu primer edge hoy es la contención."),
+    tx("Open the session with numbers, not emotion.", "Abre la sesión con números, no con emoción."),
+    tx("Let the plan speak before the candle does.", "Deja que el plan hable antes que la vela."),
+    tx("A clean no is also a business decision.", "Un no limpio también es una decisión empresarial."),
+    tx("Process creates the room for confidence.", "El proceso crea espacio para la confianza."),
+  ];
+  const focuses = [
+    tx("Confirm the valid setup, risk per trade, daily max loss, and the rule that cannot be negotiated.", "Confirma el setup válido, riesgo por trade, pérdida máxima diaria y la regla que no se negocia."),
+    tx("Protect your risk rails before you look for speed.", "Protege tus límites de riesgo antes de buscar velocidad."),
+    tx("Separate market opportunity from business permission.", "Separa oportunidad de mercado de permiso empresarial."),
+    tx("Make evidence stronger than impulse.", "Haz que la evidencia pese más que el impulso."),
+    tx("Start by protecting the downside of the business.", "Empieza protegiendo el downside del negocio."),
+    tx("Use your Trading Business Plan as the filter for every idea.", "Usa tu Plan de Empresa de Trading como filtro para cada idea."),
+    tx("Notice any urge to recover, prove, or force.", "Observa cualquier urgencia de recuperar, probar o forzar."),
+  ];
+  const actions = [
+    tx("If the trade is not inside the plan, pass with confidence.", "Si el trade no está dentro del plan, pásalo con confianza."),
+    tx("Write the risk before you touch execution.", "Escribe el riesgo antes de tocar la ejecución."),
+    tx("Use the checklist before trusting conviction.", "Usa el checklist antes de confiar en la convicción."),
+    tx("Pause after wins so euphoria does not become risk.", "Pausa después de ganar para que la euforia no se convierta en riesgo."),
+    tx("Pause after losses so frustration does not become strategy.", "Pausa después de perder para que la frustración no se convierta en estrategia."),
+    tx("When the plan says stop, protect the company.", "Cuando el plan diga stop, protege la empresa."),
+    tx("Trade only what you can explain after the session.", "Opera solo lo que puedas explicar después de la sesión."),
+  ];
+  const closers = [
+    tx("Small disciplined days build serious operators.", "Días pequeños y disciplinados construyen operadores serios."),
+    tx("The goal is not drama; the goal is repeatability.", "La meta no es drama; la meta es repetición."),
+    tx("Control today so the plan still has tomorrow.", "Controla hoy para que el plan todavía tenga mañana."),
+    tx("Calm execution is a business asset.", "La ejecución calmada es un activo empresarial."),
+    tx("Make today boring in the best possible way.", "Haz que hoy sea aburrido de la mejor manera posible."),
+    tx("Your job is to protect the plan from pressure.", "Tu trabajo es proteger el plan de la presión."),
+    tx("One clean session is real progress.", "Una sesión limpia ya es progreso real."),
+  ];
+  const pick = (items: string[], multiplier: number, offset = 0) => items[((dayOfYear - 1) * multiplier + offset) % items.length];
+  const fallback = {
+    title: tx("Business briefing", "Briefing empresarial"),
+    body: [pick(openers, 5), pick(focuses, 7, 2), pick(actions, 11, 4), pick(closers, 13, 1)].join(" "),
+  };
   return {
-    id: `fallback-${lang}-${getNewYorkDayOfYear(now)}`,
+    id: `fallback-${lang}-${dayOfYear}`,
     locale: lang,
     title: fallback.title,
     body: fallback.body,
     weekday: dayParts.weekday,
-    day_of_year: getNewYorkDayOfYear(now),
+    day_of_year: dayOfYear,
   };
 }
 
@@ -422,42 +426,42 @@ function personalizeCoachMessage(
     lang === "es"
       ? {
           morning: [
-            "Hoy quiero que empieces con calma, enfoque y una sola intención clara.",
-            "Antes de abrir el mercado, vuelve a tu proceso y baja el ruido.",
-            "Arranca liviano: claridad primero, velocidad después.",
-            "Que tu primera decisión hoy nazca del plan, no de la urgencia.",
+            "Hoy empieza como empresario trader: primero plan, después ejecución.",
+            "Antes de abrir el mercado, confirma tus reglas de negocio y baja el ruido.",
+            "Arranca con estructura: riesgo definido, setup claro y capital protegido.",
+            "Que tu primera decisión nazca del plan empresarial, no de la urgencia.",
           ],
           afternoon: [
-            "Haz una pausa corta y revisa si sigues operando desde el plan.",
-            "A esta hora la disciplina vale más que la energía.",
-            "Vuelve al centro antes de la próxima ejecución.",
-            "Si el ritmo sube, responde con más proceso, no con más prisa.",
+            "Haz una pausa y revisa si el negocio sigue dentro de sus reglas.",
+            "A esta hora protege el capital antes de buscar otra oportunidad.",
+            "Vuelve al plan antes de la próxima ejecución.",
+            "Si el ritmo sube, responde con más estructura, no con más prisa.",
           ],
           evening: [
-            "Cierra con honestidad: lo que aprendes hoy protege tu mañana.",
-            "Esta noche vale más la claridad que el juicio duro.",
-            "Baja revoluciones y quédate con la lección más útil del día.",
-            "Termina el día cuidando tu mente igual que cuidas tu riesgo.",
+            "Cierra como negocio: números, reglas cumplidas y lección útil.",
+            "Esta noche vale más la claridad operativa que el juicio duro.",
+            "Baja revoluciones y deja evidencia para mejorar mañana.",
+            "Termina el día cuidando tu mente igual que cuidas el capital.",
           ],
         }
       : {
           morning: [
-            "Start today with calm, focus, and one clear intention.",
-            "Before the market opens, come back to your process and lower the noise.",
-            "Begin light: clarity first, speed second.",
-            "Let your first decision today come from the plan, not urgency.",
+            "Start as a Trader Entrepreneur today: plan first, execution second.",
+            "Before the market opens, confirm your business rules and lower the noise.",
+            "Begin with structure: defined risk, clear setup, protected capital.",
+            "Let your first decision come from the business plan, not urgency.",
           ],
           afternoon: [
-            "Take a short pause and check whether you are still trading from plan.",
-            "At this hour, discipline matters more than energy.",
-            "Come back to center before the next execution.",
-            "If the tempo rises, answer with more process, not more rush.",
+            "Take a short pause and check whether the business is still inside its rules.",
+            "At this hour, protect capital before seeking another opportunity.",
+            "Come back to the plan before the next execution.",
+            "If the tempo rises, answer with more structure, not more rush.",
           ],
           evening: [
-            "Close with honesty: what you learn today protects tomorrow.",
-            "Tonight, clarity is worth more than harsh self-judgment.",
-            "Lower the noise and keep the most useful lesson from the day.",
-            "End the day protecting your mind the same way you protect risk.",
+            "Close like a business: numbers, rules followed, useful lesson.",
+            "Tonight, operating clarity is worth more than harsh self-judgment.",
+            "Lower the noise and leave evidence for tomorrow's improvement.",
+            "End the day protecting your mind the same way you protect capital.",
           ],
         };
   const introPool = intros[moment];
@@ -1858,8 +1862,8 @@ export function DashboardScreen({ onOpenModule: _onOpenModule, onOpenJournalDate
       title={t(language, "Business Center", "Centro Empresarial")}
       subtitle={t(
         language,
-        "Your daily overview: progress, streaks, and key actions.",
-        "Tu resumen diario: progreso, rachas y acciones clave."
+        "Your daily trading business overview: plan, risk, execution, and key actions.",
+        "Tu resumen diario de empresa de trading: plan, riesgo, ejecución y acciones clave."
       )}
       refreshing={refreshing}
       onRefresh={handleRefresh}
@@ -1878,7 +1882,7 @@ export function DashboardScreen({ onOpenModule: _onOpenModule, onOpenJournalDate
               <View style={styles.coachAccentRail} />
               <View style={styles.coachBannerHeader}>
                 <View style={styles.coachHeaderMeta}>
-                  <Text style={styles.heroEyebrow}>{t(language, "Daily coach message", "Mensaje diario del coach")}</Text>
+                  <Text style={styles.heroEyebrow}>{t(language, "Daily business briefing", "Briefing empresarial diario")}</Text>
                   <GradientTitleText
                     text={personalizedCoachMessage.title || t(language, "Coach note for today", "Nota del coach para hoy")}
                     style={styles.coachTitle}

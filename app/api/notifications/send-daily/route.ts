@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { buildAnnualMotivationMessage } from "@/lib/annualMotivation";
 import { requireCronSecret } from "@/lib/cronAuth";
 import { requirePlatformAccess } from "@/lib/serverPlatformAccess";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
@@ -21,15 +22,28 @@ function isExpoPushToken(token: string) {
 function getNewYorkTimeParts() {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: NY_TZ,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
     weekday: "short",
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,
   }).formatToParts(new Date());
+  const year = Number(parts.find((p) => p.type === "year")?.value ?? "1970");
+  const month = Number(parts.find((p) => p.type === "month")?.value ?? "1");
+  const day = Number(parts.find((p) => p.type === "day")?.value ?? "1");
   const weekday = parts.find((p) => p.type === "weekday")?.value ?? "Mon";
   const hour = Number(parts.find((p) => p.type === "hour")?.value ?? "0");
   const minute = Number(parts.find((p) => p.type === "minute")?.value ?? "0");
-  return { weekday, hour, minute };
+  return { year, month, day, weekday, hour, minute };
+}
+
+function getNewYorkDayOfYear() {
+  const { year, month, day } = getNewYorkTimeParts();
+  const startUtc = Date.UTC(year, 0, 1);
+  const currentUtc = Date.UTC(year, month - 1, day);
+  return Math.floor((currentUtc - startUtc) / 86400000) + 1;
 }
 
 function shouldSendNowNY() {
@@ -39,17 +53,7 @@ function shouldSendNowNY() {
 }
 
 function buildMessage(locale: string | null) {
-  const isEs = String(locale || "").toLowerCase().startsWith("es");
-  if (isEs) {
-    return {
-      title: "Neuro Trader",
-      body: "El mercado abre a las 9:30 AM. Es hora de prepararte para el premarket.",
-    };
-  }
-  return {
-    title: "Neuro Trader",
-    body: "The market opens at 9:30 AM. Time to prepare for premarket.",
-  };
+  return buildAnnualMotivationMessage(getNewYorkDayOfYear(), locale);
 }
 
 async function sendExpoMessages(messages: Array<Record<string, unknown>>) {

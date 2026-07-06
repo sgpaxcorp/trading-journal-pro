@@ -161,7 +161,7 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     "account.menu.accountSettings": "Trader Entrepreneur Account",
     "account.menu.preferences": "Preferences",
     "account.menu.changePassword": "Change password",
-    "account.menu.billing": "Business billing & subscription",
+    "account.menu.billing": "Business Billing & Access",
     "account.menu.billingHistory": "Billing history",
     "account.menu.signOut": "Sign out",
     "account.menu.profilePhoto": "Trader profile & photo",
@@ -169,12 +169,12 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     "account.menu.upgrade": "Upgrade / cancel",
     "account.menu.invoices": "Invoices",
     "account.menu.noPlan": "No plan set",
-    "account.menu.noSubscription": "No subscription active",
+    "account.menu.noSubscription": "No business access active",
     "account.menu.currentPlan": "Current plan",
     "account.menu.plan": "Plan",
     "account.menu.profile": "Trader profile & photo",
     "account.menu.langTheme": "Language & theme",
-    "account.noSubscription": "No subscription active",
+    "account.noSubscription": "No business access active",
     "account.plan.label": "Plan",
 
     // Simple labels used by menu UI
@@ -189,7 +189,7 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     "accountMenu.accountSettings": "Trader Entrepreneur Account",
     "accountMenu.preferences": "Preferences",
     "accountMenu.changePassword": "Change password",
-    "accountMenu.billing": "Business billing & subscription",
+    "accountMenu.billing": "Business Billing & Access",
     "accountMenu.billingHistory": "Billing history",
     "accountMenu.signOut": "Sign out",
     "accountMenu.profilePhoto": "Trader profile & photo",
@@ -197,7 +197,7 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     "accountMenu.upgrade": "Upgrade / cancel",
     "accountMenu.invoices": "Invoices",
     "accountMenu.noPlan": "No plan set",
-    "accountMenu.noSubscription": "No subscription active",
+    "accountMenu.noSubscription": "No business access active",
     "accountMenu.currentPlan": "Current plan",
     "accountMenu.plan": "Plan",
 
@@ -207,14 +207,14 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     "account.tabs.settings": "Trader Entrepreneur Account",
     "account.tabs.preferences": "Preferences",
     "account.tabs.password": "Change password",
-    "account.tabs.billing": "Business billing & subscription",
+    "account.tabs.billing": "Business Billing & Access",
     "account.tabs.billingHistory": "Billing history",
 
     // Older (seen in some pages)
     "account.settings": "Trader Entrepreneur Account",
     "account.preferences": "Preferences",
     "account.password": "Change password",
-    "account.billing": "Business billing & subscription",
+    "account.billing": "Business Billing & Access",
     "account.billingHistory": "Billing history",
 
     /* -----------------
@@ -412,7 +412,7 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     "account.menu.accountSettings": "Cuenta de Empresario Trader",
     "account.menu.preferences": "Preferencias",
     "account.menu.changePassword": "Cambiar contraseña",
-    "account.menu.billing": "Facturación empresarial y suscripción",
+    "account.menu.billing": "Facturación y acceso empresarial",
     "account.menu.billingHistory": "Historial de facturación",
     "account.menu.signOut": "Cerrar sesión",
     "account.menu.profilePhoto": "Perfil trader y foto",
@@ -420,12 +420,12 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     "account.menu.upgrade": "Mejorar / cancelar",
     "account.menu.invoices": "Facturas",
     "account.menu.noPlan": "Sin plan",
-    "account.menu.noSubscription": "Sin suscripción activa",
+    "account.menu.noSubscription": "Sin acceso empresarial activo",
     "account.menu.currentPlan": "Plan actual",
     "account.menu.plan": "Plan",
     "account.menu.profile": "Perfil trader y foto",
     "account.menu.langTheme": "Idioma y tema",
-    "account.noSubscription": "Sin suscripción activa",
+    "account.noSubscription": "Sin acceso empresarial activo",
     "account.plan.label": "Plan",
 
     // Etiquetas simples usadas en menús
@@ -440,7 +440,7 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     "accountMenu.accountSettings": "Cuenta de Empresario Trader",
     "accountMenu.preferences": "Preferencias",
     "accountMenu.changePassword": "Cambiar contraseña",
-    "accountMenu.billing": "Facturación empresarial y suscripción",
+    "accountMenu.billing": "Facturación y acceso empresarial",
     "accountMenu.billingHistory": "Historial de facturación",
     "accountMenu.signOut": "Cerrar sesión",
     "accountMenu.profilePhoto": "Perfil trader y foto",
@@ -448,7 +448,7 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     "accountMenu.upgrade": "Mejorar / cancelar",
     "accountMenu.invoices": "Facturas",
     "accountMenu.noPlan": "Sin plan",
-    "accountMenu.noSubscription": "Sin suscripción activa",
+    "accountMenu.noSubscription": "Sin acceso empresarial activo",
     "accountMenu.currentPlan": "Plan actual",
     "accountMenu.plan": "Plan",
 
@@ -458,14 +458,14 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     "account.tabs.settings": "Cuenta de Empresario Trader",
     "account.tabs.preferences": "Preferencias",
     "account.tabs.password": "Cambiar contraseña",
-    "account.tabs.billing": "Facturación empresarial y suscripción",
+    "account.tabs.billing": "Facturación y acceso empresarial",
     "account.tabs.billingHistory": "Historial de facturación",
 
     // Older
     "account.settings": "Cuenta de Empresario Trader",
     "account.preferences": "Preferencias",
     "account.password": "Cambiar contraseña",
-    "account.billing": "Facturación empresarial y suscripción",
+    "account.billing": "Facturación y acceso empresarial",
     "account.billingHistory": "Historial de facturación",
 
     /* -----------------

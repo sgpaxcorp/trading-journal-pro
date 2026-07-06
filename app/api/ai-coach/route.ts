@@ -1189,6 +1189,25 @@ function buildGrowthPlanOperatingBlock(body: AiCoachRequestBody): string {
       `Risk rails: dailyTarget=${pct(dailyTargetPct)}, maxDailyLoss=${pct(maxDailyLossPercent)}, maxRiskPerTrade=${Number.isFinite(maxRiskPerTradeUsd) && maxRiskPerTradeUsd > 0 ? usd(maxRiskPerTradeUsd) : pct(maxRiskPerTradePercent)}, tradingDays=${Number.isFinite(tradingDays) ? tradingDays : "—"}, lossDaysPerWeek=${Number.isFinite(lossDaysPerWeek) ? lossDaysPerWeek : "—"}`
     );
 
+    const businessAnalysis = growthPlan?.businessAnalysis && typeof growthPlan.businessAnalysis === "object" ? growthPlan.businessAnalysis : null;
+    const realismReview =
+      businessAnalysis?.realismReview && typeof businessAnalysis.realismReview === "object"
+        ? businessAnalysis.realismReview
+        : null;
+    if (realismReview) {
+      const verdict = safeString((realismReview as any)?.verdict || "");
+      const policyBand = safeString((realismReview as any)?.policyBand || "");
+      const requiredGoalPct = Number((realismReview as any)?.requiredGoalPct);
+      const requiredCompoundDailyPct = Number((realismReview as any)?.requiredCompoundDailyPct);
+      const scenarioDailyGoalPct = Number((realismReview as any)?.scenarioDailyGoalPct);
+      const scenarioProjectedBalance = Number((realismReview as any)?.scenarioProjectedBalance);
+      const scenarioGapUsd = Number((realismReview as any)?.scenarioGapUsd);
+      const estimatedCompletionDate = safeString((realismReview as any)?.estimatedCompletionDate || "");
+      lines.push(
+        `Plan realism review: verdict=${verdict || "—"}${policyBand ? `, policyBand=${policyBand}` : ""}, requiredGoalDay=${pct(requiredGoalPct)}, requiredDailyCompound=${pct(requiredCompoundDailyPct)}, operatingModelDailyGoal=${pct(scenarioDailyGoalPct)}, modelDeadlineBalance=${usd(scenarioProjectedBalance)}, deadlineGap=${usd(scenarioGapUsd)}${estimatedCompletionDate ? `, estimatedCompletion=${estimatedCompletionDate}` : ""}. Use this as deterministic plan feasibility context; do not invent a better outcome.`
+      );
+    }
+
     const activeRules = safeArray<any>(growthPlan?.rules)
       .map((rule) => ({
         label: safeString(rule?.label).trim(),

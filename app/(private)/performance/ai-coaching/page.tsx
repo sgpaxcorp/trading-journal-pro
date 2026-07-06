@@ -3524,6 +3524,7 @@ function AiCoachingPageInner() {
                 tradingDays: toNum(growthPlan.trading_days, 0),
                 lossDaysPerWeek: toNum(growthPlan.loss_days_per_week, 0),
                 planStartDate: planStartIsoFromPlan(growthPlan),
+                businessAnalysis: growthPlan.steps?.business_analysis ?? null,
                 rules: Array.isArray(growthPlan.rules)
                   ? growthPlan.rules
                       .filter((rule) => rule && rule.isActive !== false)

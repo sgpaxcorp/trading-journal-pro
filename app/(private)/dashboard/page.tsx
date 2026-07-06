@@ -28,6 +28,7 @@ import { listCashflows, signedCashflowAmount, type Cashflow } from "@/lib/cashfl
 import { getDailyChecklist } from "@/lib/checklistSupabase";
 import { supabaseBrowser } from "@/lib/supaBaseClient";
 import { useAppSettings } from "@/lib/appSettings";
+import { buildAnnualMotivationMessage } from "@/lib/annualMotivation";
 import { resolveLocale } from "@/lib/i18n";
 import { useTradingAccounts } from "@/hooks/useTradingAccounts";
 import type { BusinessMilestoneProgress } from "@/lib/businessMilestones";
@@ -120,47 +121,9 @@ function getNewYorkDayOfYear(now = new Date()) {
   return Math.floor((currentUtc - startUtc) / 86400000) + 1;
 }
 
-function fallbackCoachMessage(weekday: string, lang: "en" | "es") {
-  const t = (en: string, es: string) => (lang === "es" ? es : en);
-  if (weekday === "fri") {
-    return {
-      title: t("Neuro Trader Friday", "Neuro Trader viernes"),
-      body: t(
-        "Close the week with emotional neutrality. Your edge grows when review is honest and ego stays quiet.",
-        "Cierra la semana con neutralidad emocional. Tu edge crece cuando la revisión es honesta y el ego se queda en silencio."
-      ),
-    };
-  }
-  if (weekday === "sat") {
-    return {
-      title: t("Neuro Trader reset", "Reset Neuro Trader"),
-      body: t(
-        "Rest is part of execution. Reset your nervous system today so you do not trade next week from fatigue.",
-        "Descansar también es parte de la ejecución. Resetea tu sistema nervioso hoy para no operar la próxima semana desde el cansancio."
-      ),
-    };
-  }
-  if (weekday === "sun") {
-    return {
-      title: t("Neuro Trader preparation", "Preparación Neuro Trader"),
-      body: t(
-        "Prepare your levels, calendar, and scenarios. Confidence tomorrow comes from clarity tonight.",
-        "Prepara niveles, calendario y escenarios. La confianza de mañana nace de la claridad de esta noche."
-      ),
-    };
-  }
-  return {
-    title: t("Neuro Trader focus", "Enfoque Neuro Trader"),
-    body: t(
-      "Trade from process, not from impulse. The mind you bring to the screen determines the quality of every decision.",
-      "Opera desde el proceso, no desde el impulso. La mente con la que llegas a la pantalla determina la calidad de cada decisión."
-    ),
-  };
-}
-
 function buildFallbackCoachRow(lang: "en" | "es", now = new Date()): MotivationMessageRow {
   const dayParts = getNewYorkDayParts(now);
-  const fallback = fallbackCoachMessage(dayParts.weekday, lang);
+  const fallback = buildAnnualMotivationMessage(getNewYorkDayOfYear(now), lang);
   return {
     id: `fallback-${lang}-${getNewYorkDayOfYear(now)}`,
     locale: lang,

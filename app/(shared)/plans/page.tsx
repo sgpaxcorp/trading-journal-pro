@@ -61,18 +61,18 @@ export default function PlansPage() {
 
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || L("Checkout error.", "Error de checkout."));
+        throw new Error(data.error || L("Secure payment error.", "Error de pago seguro."));
       }
 
       const data = await res.json();
       if (data.url) {
-        // Redirigir a Stripe Checkout
+        // Redirigir a Stripe secure payment.
         window.location.href = data.url;
       } else {
-        throw new Error(L("No checkout URL returned.", "No se recibió la URL de checkout."));
+        throw new Error(L("No secure payment URL returned.", "No se recibió la URL de pago seguro."));
       }
     } catch (err: any) {
-      setError(err.message || L("Something went wrong starting checkout.", "Algo salió mal iniciando el checkout."));
+      setError(err.message || L("Something went wrong starting secure payment.", "Algo salió mal iniciando el pago seguro."));
       setLoading(false);
     }
   }
@@ -84,12 +84,12 @@ export default function PlansPage() {
     <main className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center px-4">
       <div className="w-full max-w-3xl bg-slate-900/90 border border-slate-800 rounded-2xl p-6 shadow-xl">
         <h1 className="text-2xl font-semibold text-slate-50 mb-1">
-          {L("Choose your plan", "Elige tu plan")}
+          {L("Choose your business access", "Elige tu acceso empresarial")}
         </h1>
         <p className="text-xs text-slate-400 mb-4">
           {L(
-            "Select the subscription that best fits your trading process. You'll be redirected to a secure Stripe checkout to complete payment.",
-            "Selecciona la suscripción que mejor se adapte a tu proceso. Serás redirigido a un checkout seguro de Stripe para completar el pago."
+            "Select the business plan that fits how you want to operate your trading business. You'll be redirected to secure Stripe payment.",
+            "Selecciona el plan empresarial que encaja con cómo quieres operar tu empresa de trading. Serás redirigido al pago seguro de Stripe."
           )}
         </p>
 
@@ -105,7 +105,7 @@ export default function PlansPage() {
             }`}
           >
             <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">
-              {L("Starter", "Starter")}
+              {L("Business foundation", "Base empresarial")}
             </p>
             <h2 className="text-lg font-semibold text-slate-50 mt-1">
               {catalogText(core.name, lang)}
@@ -137,7 +137,7 @@ export default function PlansPage() {
               {L("Most popular", "Más popular")}
             </span>
             <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">
-              {L("For serious traders", "Para traders serios")}
+              {L("Full business intelligence", "Inteligencia empresarial completa")}
             </p>
             <h2 className="text-lg font-semibold text-slate-50 mt-1">
               {catalogText(advanced.name, lang)}
@@ -163,8 +163,8 @@ export default function PlansPage() {
         <div className="flex flex-col md:flex-row items-center justify-between gap-3 mt-2">
           <p className="text-[10px] text-slate-500">
             {L(
-              "Your subscription can unlock additional features like advanced analytics, AI coaching and more. You can manage your plan in Settings later.",
-              "Tu suscripción puede desbloquear features adicionales como analítica avanzada, AI coaching y más. Luego podrás gestionar tu plan en Settings."
+              "Your business access unlocks the operating tools, analytics, AI coaching, and records your trading company needs. You can manage your plan from Business Billing later.",
+              "Tu acceso empresarial desbloquea herramientas operativas, analítica, AI coaching y registros que necesita tu empresa de trading. Luego podrás gestionar tu plan desde Facturación Empresarial."
             )}
           </p>
           <button
@@ -175,7 +175,7 @@ export default function PlansPage() {
           >
             {loading
               ? L("Redirecting to Stripe…", "Redirigiendo a Stripe…")
-              : `${L("Continue with Stripe", "Continuar con Stripe")} (${catalogText(PLAN_CATALOG[selectedPlan].name, lang)})`}
+              : `${L("Secure payment with Stripe", "Pago seguro con Stripe")} (${catalogText(PLAN_CATALOG[selectedPlan].name, lang)})`}
           </button>
         </div>
       </div>

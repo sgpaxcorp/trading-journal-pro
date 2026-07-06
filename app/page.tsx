@@ -888,7 +888,7 @@ export default function Home() {
               <div>
                 <h3 className="text-lg font-semibold text-white">{BROKER_SYNC_ADDON.name}</h3>
                 <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-300">
-                  {t(BROKER_SYNC_ADDON.description)} {L("Optional add-on at checkout.", "Add-on opcional en checkout.")}
+                  {t(BROKER_SYNC_ADDON.description)} {L("Optional add-on during secure payment.", "Add-on opcional durante el pago seguro.")}
                 </p>
               </div>
               <p className="text-lg font-semibold text-emerald-300">

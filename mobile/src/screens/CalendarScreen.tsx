@@ -256,7 +256,7 @@ export function CalendarScreen({ onOpenJournalDate }: CalendarScreenProps) {
 
   return (
     <ScreenScaffold
-      title={t(language, "Calendar", "Calendario")}
+      title={t(language, "Business P&L Calendar", "Calendario P&L Empresarial")}
       subtitle={t(
         language,
         "Track your daily business performance and open each execution record.",

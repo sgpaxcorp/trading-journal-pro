@@ -27,7 +27,7 @@ export async function POST(req: NextRequest) {
     if (process.env.ENABLE_MOBILE_STRIPE_SUBSCRIBE !== "true") {
       return NextResponse.json(
         {
-          error: "Mobile subscription checkout is disabled. Complete subscription on the web.",
+          error: "Mobile business access payment is disabled. Complete business access setup on the web.",
           code: "web_billing_required",
           billingUrl: "https://www.neurotrader-journal.com/pricing",
         },

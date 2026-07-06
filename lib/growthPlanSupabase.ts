@@ -63,6 +63,7 @@ export type GrowthPlanSteps = {
     selectedScenarioId?: string | null;
     selectedScenario?: Record<string, unknown> | null;
     scenarios?: Array<Record<string, unknown>>;
+    realismReview?: Record<string, unknown>;
     updatedAt?: string;
   };
   prepare?: {

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { buildAnnualMotivationMessage } from "@/lib/annualMotivation";
 import { requireCronSecret } from "@/lib/cronAuth";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 
@@ -89,52 +90,6 @@ function shouldSendNowNY(targetHour: number, targetMinute: number, now = new Dat
   const targetMinuteOfDay = targetHour * 60 + targetMinute;
   const diff = currentMinuteOfDay - targetMinuteOfDay;
   return diff >= 0 && diff < 60;
-}
-
-function fallbackMessageForWeekday(weekday: string, locale: string | null) {
-  const isEs = String(locale || "").toLowerCase().startsWith("es");
-  if (weekday === "fri") {
-    return isEs
-      ? {
-          title: "Neuro Trader",
-          body: "Viernes: cierra la semana con disciplina. Protege lo ganado y termina limpio.",
-        }
-      : {
-          title: "Neuro Trader",
-          body: "Friday: close the week with discipline. Protect gains and finish clean.",
-        };
-  }
-  if (weekday === "sat") {
-    return isEs
-      ? {
-          title: "Neuro Trader",
-          body: "Sabado: suelta el mercado, descansa y recarga la mente.",
-        }
-      : {
-          title: "Neuro Trader",
-          body: "Saturday: let the market go, rest, and reset your mind.",
-        };
-  }
-  if (weekday === "sun") {
-    return isEs
-      ? {
-          title: "Neuro Trader",
-          body: "Domingo: preparacion. Revisa tu plan, tu calendario y entra a la semana con claridad.",
-        }
-      : {
-          title: "Neuro Trader",
-          body: "Sunday: preparation day. Review your plan, your calendar, and enter the week with clarity.",
-        };
-  }
-  return isEs
-    ? {
-        title: "Neuro Trader",
-        body: "Un dia disciplinado vale mas que un impulso brillante. Ejecuta tu proceso.",
-      }
-    : {
-        title: "Neuro Trader",
-        body: "A disciplined day beats a brilliant impulse. Execute your process.",
-      };
 }
 
 async function sendExpoMessages(messages: Array<Record<string, unknown>>) {
@@ -279,10 +234,9 @@ async function insertInAppEvent(params: {
   }
 }
 
-async function ensureFallbackMessage(localeCode: string, weekday: string, targetHour: number) {
-  const fallback = fallbackMessageForWeekday(weekday, localeCode);
-  const isWeekendMessage = weekday === "fri" || weekday === "sat" || weekday === "sun";
-  const slug = isWeekendMessage ? `motivation-${localeCode}-${weekday}` : `motivation-${localeCode}-weekday`;
+async function ensureFallbackMessage(localeCode: string, targetHour: number, dayOfYear: number) {
+  const fallback = buildAnnualMotivationMessage(dayOfYear, localeCode);
+  const slug = `motivation-${localeCode}-day-${String(dayOfYear).padStart(3, "0")}`;
 
   const { data, error } = await supabaseAdmin
     .from("motivational_messages")
@@ -292,8 +246,8 @@ async function ensureFallbackMessage(localeCode: string, weekday: string, target
         locale: localeCode,
         title: fallback.title,
         body: fallback.body,
-        weekday: isWeekendMessage ? weekday : null,
-        day_of_year: null,
+        weekday: null,
+        day_of_year: dayOfYear,
         audience: "all",
         delivery_hour_ny: targetHour,
         active: true,
@@ -348,7 +302,7 @@ async function fetchMessage(locale: string | null, targetHour: number, now = new
   const english = chooseMessageFromPool(fallbackRows, weekday, dayOfYear);
   if (english) return english;
 
-  return ensureFallbackMessage(localeCode, weekday, targetHour);
+  return ensureFallbackMessage(localeCode, targetHour, dayOfYear);
 }
 
 async function handleRequest(req: NextRequest) {

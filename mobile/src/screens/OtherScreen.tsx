@@ -215,8 +215,8 @@ export function OtherScreen({
             title={t(language, "Business Protection System", "Sistema de Protección Empresarial")}
             description={t(
               language,
-              "Plan-based alarms, reminders, and rule protection.",
-              "Alarmas, recordatorios y protección conectados al plan."
+              "Plan-based alarms, business briefings, and rule protection.",
+              "Alarmas, briefings empresariales y protección conectados al plan."
             )}
             badges={["Web", "Core"]}
             iconName="shield-checkmark-outline"
@@ -225,8 +225,8 @@ export function OtherScreen({
                 title: t(language, "Business Protection System", "Sistema de Protección Empresarial"),
                 description: t(
                   language,
-                  "Protection alarms and reminders are managed on the web workspace.",
-                  "Las alarmas y recordatorios de protección se gestionan en el workspace web."
+                  "Protection alarms and business briefings are managed on the web workspace.",
+                  "Las alarmas de protección y los briefings empresariales se gestionan en el workspace web."
                 ),
                 badge: t(language, "Web workspace", "Workspace web"),
                 detail: t(

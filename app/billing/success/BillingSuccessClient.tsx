@@ -10,10 +10,10 @@ import { resolveLocale } from "@/lib/i18n";
 type Step = 1 | 2 | 3 | 4;
 
 const buildSteps = (L: (en: string, es: string) => string): { id: Step; label: string; description: string }[] => [
-  { id: 1, label: L("Information", "Información"), description: L("Create your account credentials.", "Crea tus credenciales de cuenta.") },
-  { id: 2, label: L("Plan selection", "Selección de plan"), description: L("Choose between Core or Advanced.", "Elige entre Core o Advanced.") },
-  { id: 3, label: L("Checkout", "Checkout"), description: L("Complete secure payment with Stripe.", "Completa el pago seguro con Stripe.") },
-  { id: 4, label: L("Confirmed", "Confirmado"), description: L("Access your trading workspace.", "Accede a tu espacio de trading.") },
+  { id: 1, label: L("Business account", "Cuenta empresarial"), description: L("Create your Trader Entrepreneur access.", "Crea tu acceso de Empresario Trader.") },
+  { id: 2, label: L("Business plan", "Plan empresarial"), description: L("Choose Core Business or Advanced Business.", "Elige Core Empresarial o Advanced Empresarial.") },
+  { id: 3, label: L("Secure payment", "Pago seguro"), description: L("Complete payment with Stripe.", "Completa el pago con Stripe.") },
+  { id: 4, label: L("Activated", "Activado"), description: L("Open your Business Center.", "Abre tu Centro Empresarial.") },
 ];
 
 function classNames(...classes: (string | boolean | null | undefined)[]) {
@@ -34,7 +34,7 @@ export default function BillingSuccessClient() {
       <div className="w-full max-w-5xl bg-slate-900/90 border border-slate-800 rounded-2xl p-6 md:p-8 shadow-2xl grid grid-cols-1 md:grid-cols-[220px,1fr] gap-6">
         {/* Sidebar Steps */}
         <aside className="border-b md:border-b-0 md:border-r border-slate-800 pb-4 md:pb-0 md:pr-6">
-          <h1 className="text-lg font-semibold mb-4">{L("Subscription flow", "Flujo de suscripción")}</h1>
+          <h1 className="text-lg font-semibold mb-4">{L("Business activation flow", "Flujo de activación empresarial")}</h1>
           <ul className="space-y-3 text-xs">
             {steps.map((step) => {
               const isActive = step.id === 4;
@@ -76,8 +76,8 @@ export default function BillingSuccessClient() {
           </ul>
           <p className="mt-6 text-[10px] text-slate-500 border-t border-slate-800 pt-3">
             {L(
-              "Secure payments powered by Stripe. NeuroTrader is sending your receipt and onboarding emails to your inbox.",
-              "Pagos seguros con Stripe. NeuroTrader enviará tu recibo y emails de onboarding a tu correo."
+              "Secure payments powered by Stripe. NeuroTrader is sending your receipt and business onboarding emails to your inbox.",
+              "Pagos seguros con Stripe. NeuroTrader enviará tu recibo y emails de onboarding empresarial a tu correo."
             )}
           </p>
         </aside>
@@ -86,14 +86,14 @@ export default function BillingSuccessClient() {
         <section>
           <div className="mb-4 rounded-xl border border-emerald-500/50 bg-emerald-500/5 px-4 py-3">
             <p className="text-xs text-emerald-300 font-semibold">
-              {L("Payment confirmed 🎉", "Pago confirmado 🎉")}
+              {L("Payment confirmed", "Pago confirmado")}
             </p>
             <p className="text-[11px] text-emerald-100 mt-1">
-              {L("Your subscription is now active. We are sending you:", "Tu suscripción ya está activa. Te estamos enviando:")}
+              {L("Your NeuroTrader business access is now active. We are sending you:", "Tu acceso empresarial a NeuroTrader ya está activo. Te estamos enviando:")}
             </p>
             <ul className="mt-2 text-[11px] text-emerald-50 list-disc list-inside space-y-1">
               <li>{L("A welcome email.", "Un email de bienvenida.")}</li>
-              <li>{L("A SG PAX Corp. PDF receipt for your NeuroTrader subscription.", "Un recibo PDF de SG PAX Corp. por tu suscripción de NeuroTrader.")}</li>
+              <li>{L("A SG PAX Corp. PDF receipt for your NeuroTrader business access.", "Un recibo PDF de SG PAX Corp. por tu acceso empresarial a NeuroTrader.")}</li>
               <li>{L("An email about your Trading Psychology Learn Book (PDF).", "Un email sobre tu Trading Psychology Learn Book (PDF).")}</li>
             </ul>
           </div>
@@ -103,8 +103,8 @@ export default function BillingSuccessClient() {
           </h2>
           <p className="text-xs text-slate-400 mb-4">
             {L(
-              "Your account is now connected to an active subscription. You can go straight to your Business Center and start operating, or review your Trading Business Plan first.",
-              "Tu cuenta ya está conectada a una suscripción activa. Puedes ir directo al Centro Empresarial y empezar a operar, o revisar tu Plan de Empresa de Trading primero."
+              "Your Trader Entrepreneur account is now connected to active business access. You can go straight to your Business Center and start operating, or review your Trading Business Plan first.",
+              "Tu cuenta de Empresario Trader ya está conectada a un acceso empresarial activo. Puedes ir directo al Centro Empresarial y empezar a operar, o revisar tu Plan de Empresa de Trading primero."
             )}
           </p>
 

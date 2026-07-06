@@ -115,7 +115,7 @@ export default function PricingPage() {
       });
 
       if (!res.ok) {
-        let message = L("Unable to start checkout.", "No se pudo iniciar el checkout.");
+        let message = L("Unable to start secure payment.", "No se pudo iniciar el pago seguro.");
         try {
           const body = await res.json();
           if (body?.error) message = body.error;
@@ -128,14 +128,14 @@ export default function PricingPage() {
       const data = await res.json();
 
       if (!data.url) {
-        throw new Error(L("Missing checkout URL from Stripe.", "Falta la URL de checkout de Stripe."));
+        throw new Error(L("Missing secure payment URL from Stripe.", "Falta la URL de pago seguro de Stripe."));
       }
 
-      // Redirect to Stripe Checkout
+      // Redirect to Stripe secure payment.
       window.location.href = data.url;
     } catch (err: any) {
-      console.error("Error starting checkout:", err);
-      setError(err?.message ?? L("Something went wrong starting checkout.", "Algo salió mal iniciando el checkout."));
+      console.error("Error starting secure payment:", err);
+      setError(err?.message ?? L("Something went wrong starting secure payment.", "Algo salió mal iniciando el pago seguro."));
       setLoadingPlan(null);
     }
   }

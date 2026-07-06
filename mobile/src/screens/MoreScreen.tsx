@@ -232,8 +232,8 @@ export function SettingsScreen() {
         t(language, "Enable notifications", "Habilita notificaciones"),
         t(
           language,
-          "Please allow notifications in Settings to receive reminders.",
-          "Activa notificaciones en Ajustes para recibir recordatorios."
+          "Please allow notifications in Settings to receive business briefings.",
+          "Activa notificaciones en Ajustes para recibir briefings empresariales."
         ),
         [
           { text: t(language, "Cancel", "Cancelar"), style: "cancel" },
@@ -257,8 +257,8 @@ export function SettingsScreen() {
             t(language, "Notification setup required", "Configuración necesaria"),
             t(
               language,
-              "We could not register this device for reminders yet.",
-              "No pudimos registrar este dispositivo para recordatorios."
+              "We could not register this device for business briefings yet.",
+              "No pudimos registrar este dispositivo para briefings empresariales."
             )
           );
           return;
@@ -301,8 +301,8 @@ export function SettingsScreen() {
         t(language, "Enable notifications", "Habilita notificaciones"),
         t(
           language,
-          "Please allow notifications in Settings to receive reminders.",
-          "Activa notificaciones en Ajustes para recibir recordatorios."
+          "Please allow notifications in Settings to receive business briefings.",
+          "Activa notificaciones en Ajustes para recibir briefings empresariales."
         )
       );
       return;
@@ -324,8 +324,8 @@ export function SettingsScreen() {
           t(language, "Notification setup required", "Configuración necesaria"),
           t(
             language,
-            "We could not register this device for reminders yet.",
-            "No pudimos registrar este dispositivo para recordatorios."
+            "We could not register this device for business briefings yet.",
+            "No pudimos registrar este dispositivo para briefings empresariales."
           )
         );
         return;
@@ -393,8 +393,8 @@ export function SettingsScreen() {
         t(language, "Enable notifications", "Habilita notificaciones"),
         t(
           language,
-          "Please allow notifications in Settings to receive reminders.",
-          "Activa notificaciones en Ajustes para recibir recordatorios."
+          "Please allow notifications in Settings to receive business briefings.",
+          "Activa notificaciones en Ajustes para recibir briefings empresariales."
         )
       );
       return;
@@ -408,15 +408,15 @@ export function SettingsScreen() {
       const sent = typeof res?.sent === "number" ? res.sent : 0;
       const detail = res?.detail || "";
       Alert.alert(
-        t(language, "Server reminder sent", "Recordatorio enviado"),
+        t(language, "Business briefing sent", "Briefing empresarial enviado"),
         detail
           ? detail
           : sent > 0
             ? `${t(language, "Sent", "Enviadas")}: ${sent}`
             : t(
                 language,
-                "No tokens available or reminders disabled.",
-                "No hay tokens disponibles o los recordatorios están desactivados."
+                "No tokens available or business briefings disabled.",
+                "No hay tokens disponibles o los briefings empresariales están desactivados."
               )
       );
     } catch (err: any) {
@@ -445,21 +445,21 @@ export function SettingsScreen() {
       title={t(language, "Settings", "Ajustes")}
       subtitle={t(
         language,
-        "Manage your account, preferences, and security.",
-        "Gestiona tu cuenta, preferencias y seguridad."
+        "Manage your Trader Entrepreneur account, preferences, and security.",
+        "Gestiona tu cuenta de Empresario Trader, preferencias y seguridad."
       )}
       refreshing={refreshing}
       onRefresh={handleRefresh}
     >
       <View style={styles.profileCard}>
-        <Text style={styles.profileTitle}>{t(language, "Account", "Cuenta")}</Text>
+        <Text style={styles.profileTitle}>{t(language, "Trader Entrepreneur Account", "Cuenta de Empresario Trader")}</Text>
         <Text style={styles.profileText}>
           {user?.email ?? t(language, "No email detected yet.", "Aún no hay email detectado.")}
         </Text>
       </View>
 
       <View style={styles.sectionCard}>
-        <Text style={styles.sectionTitle}>{t(language, "Profile", "Perfil")}</Text>
+        <Text style={styles.sectionTitle}>{t(language, "Business profile", "Perfil empresarial")}</Text>
         {profileLoading ? (
           <Text style={styles.sectionHint}>{t(language, "Loading profile…", "Cargando perfil…")}</Text>
         ) : (
@@ -542,13 +542,13 @@ export function SettingsScreen() {
         <Text style={styles.sectionHint}>
           {t(
             language,
-            "Daily reminder at 9:00 AM ET (30 min before open) + daily goal alerts.",
-            "Recordatorio diario a las 9:00 AM ET (30 min antes de abrir) + alertas de meta diaria."
+            "8:30 AM ET business briefing + daily goal and protection alerts.",
+            "Briefing empresarial 8:30 AM ET + alertas de meta diaria y protección."
           )}
         </Text>
         <View style={styles.toggleRow}>
           <Text style={styles.toggleLabel}>
-            {t(language, "Daily reminder", "Recordatorio diario")}
+            {t(language, "Business briefing", "Briefing empresarial")}
           </Text>
           <Switch
             value={notificationEnabled}
@@ -562,8 +562,8 @@ export function SettingsScreen() {
           <Text style={styles.sectionHint}>
             {t(
               language,
-              "Notifications are off for this device. Enable them in iOS Settings.",
-              "Las notificaciones están apagadas en este dispositivo. Actívalas en Ajustes."
+              "Business notifications are off for this device. Enable them in iOS Settings.",
+              "Las notificaciones empresariales están apagadas en este dispositivo. Actívalas en Ajustes."
             )}
           </Text>
         ) : null}
@@ -575,7 +575,7 @@ export function SettingsScreen() {
           <Text style={styles.saveButtonText}>
             {testNotifLoading
               ? t(language, "Sending…", "Enviando…")
-              : t(language, "Send test notification", "Enviar notificación de prueba")}
+              : t(language, "Send test business briefing", "Enviar briefing empresarial de prueba")}
           </Text>
         </Pressable>
         <Pressable
@@ -586,7 +586,7 @@ export function SettingsScreen() {
           <Text style={styles.saveButtonSecondaryText}>
             {serverNotifLoading
               ? t(language, "Sending…", "Enviando…")
-              : t(language, "Send server reminder", "Enviar recordatorio del servidor")}
+              : t(language, "Send 8:30 briefing", "Enviar briefing 8:30")}
           </Text>
         </Pressable>
       </View>

@@ -209,7 +209,7 @@ export default function ConfirmedPage() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.35 }}
         >
-          {L("Welcome — your training begins now", "Bienvenido — tu entrenamiento comienza ahora")}
+          {L("Welcome to your trading business platform", "Bienvenido a tu plataforma de empresa de trading")}
         </motion.h1>
 
         <motion.p
@@ -219,8 +219,8 @@ export default function ConfirmedPage() {
           transition={{ delay: 0.45 }}
         >
           {L(
-            "Your account is live and your email is confirmed.",
-            "Tu cuenta está activa y tu email está confirmado."
+            "Your Trader Entrepreneur account is live and your email is confirmed.",
+            "Tu cuenta de Empresario Trader está activa y tu email está confirmado."
           )}
         </motion.p>
 
@@ -231,8 +231,8 @@ export default function ConfirmedPage() {
           transition={{ delay: 0.55 }}
         >
           {L(
-            "From now on, every journal entry is a rep for your brain. You're not here to gamble — you're here to train your nervous system to think, execute, and recover like a professional trader.",
-            "Desde ahora, cada entrada del journal es una repetición para tu cerebro. No estás aquí para apostar — estás aquí para entrenar tu sistema nervioso a pensar, ejecutar y recuperarte como un trader profesional."
+            "From here, NeuroTrader becomes the operating system for your trading business: plan, risk, execution records, performance, and AI coaching connected in one place.",
+            "Desde aquí, NeuroTrader se convierte en el sistema operativo de tu empresa de trading: plan, riesgo, registro de ejecución, rendimiento y AI coaching conectados en un solo lugar."
           )}
         </motion.p>
 
@@ -243,12 +243,12 @@ export default function ConfirmedPage() {
           transition={{ delay: 0.65 }}
         >
           <p className="text-emerald-200 font-semibold mb-1">
-            {L("Trader psychology code", "Código de psicología del trader")}
+            {L("Trader Entrepreneur code", "Código del Empresario Trader")}
           </p>
           <p>
             {L(
-              "Process over outcome. Risk before reward. Calm is a weapon. Consistency is the only edge that compounds.",
-              "Proceso sobre resultado. Riesgo antes de recompensa. La calma es un arma. La consistencia es el único edge que compone."
+              "Plan before execution. Risk before reward. Data before emotion. Consistency is the operating edge that compounds.",
+              "Plan antes de ejecución. Riesgo antes de recompensa. Data antes de emoción. La consistencia es el edge operativo que compone."
             )}
           </p>
         </motion.div>
@@ -260,8 +260,8 @@ export default function ConfirmedPage() {
           transition={{ delay: 0.65 }}
         >
           {L(
-            "This is Day 1 of your new routine: clear rules, defined risk and brutal honesty with yourself. The journal will track your P&L, but the real edge we care about is your psychology.",
-            "Este es el Día 1 de tu nueva rutina: reglas claras, riesgo definido y brutal honestidad contigo mismo. El journal seguirá tu P&L, pero el edge real que nos importa es tu psicología."
+            "This is Day 1 of treating trading like a company: clear rules, defined risk, honest execution records, and measurable business progress.",
+            "Este es el Día 1 de tratar el trading como empresa: reglas claras, riesgo definido, registros honestos de ejecución y progreso empresarial medible."
           )}
         </motion.p>
 
@@ -276,7 +276,7 @@ export default function ConfirmedPage() {
             href="/dashboard"
             className="inline-flex px-6 py-2.5 rounded-xl bg-emerald-400 text-slate-950 text-xs md:text-sm font-semibold hover:bg-emerald-300 shadow-lg shadow-emerald-500/25"
           >
-            {L("Go to dashboard", "Ir al dashboard")}
+            {L("Go to Business Center", "Ir al Centro Empresarial")}
           </Link>
         </motion.div>
 
@@ -287,8 +287,8 @@ export default function ConfirmedPage() {
           transition={{ delay: 1 }}
         >
           {L(
-            "Breathe, follow your plan, and let the data show you who you're becoming as a trader.",
-            "Respira, sigue tu plan y deja que los datos te muestren en quién te estás convirtiendo como trader."
+            "Open your Business Center, protect the plan, and let the data show how your trading business is really operating.",
+            "Abre tu Centro Empresarial, protege el plan y deja que los datos muestren cómo realmente está operando tu empresa de trading."
           )}
         </motion.p>
       </motion.div>
