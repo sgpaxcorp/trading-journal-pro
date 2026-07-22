@@ -181,22 +181,16 @@ export default function ConfirmedPage() {
       </div>
 
       <motion.div
-        initial={{ opacity: 0, y: 24 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.6, ease: "easeOut" }}
+        initial={false}
         className="relative z-10 w-full max-w-3xl bg-slate-900/90 border border-emerald-500/30 rounded-2xl p-6 md:p-10 shadow-[0_0_80px_rgba(16,185,129,0.25)] overflow-hidden"
       >
         {/* Check icon */}
         <motion.div
           className="w-14 h-14 md:w-16 md:h-16 rounded-2xl bg-emerald-500/10 border border-emerald-400/60 flex items-center justify-center mb-5"
-          initial={{ scale: 0.5, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          transition={{ delay: 0.2, type: "spring", stiffness: 220, damping: 16 }}
+          initial={false}
         >
           <motion.span
-            initial={{ scale: 0.4, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            transition={{ delay: 0.35, type: "spring", stiffness: 260, damping: 20 }}
+            initial={false}
             className="text-2xl md:text-3xl text-emerald-400"
           >
             ✓
@@ -205,18 +199,14 @@ export default function ConfirmedPage() {
 
         <motion.h1
           className="text-2xl md:text-4xl font-semibold mb-2 text-transparent bg-clip-text bg-[linear-gradient(120deg,#a7f3d0,#22c55e,#38bdf8,#22c55e)] bg-[length:240%_240%] title-gradient-glow"
-          initial={{ opacity: 0, y: 12 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.35 }}
+          initial={false}
         >
           {L("Welcome to your trading business platform", "Bienvenido a tu plataforma de empresa de trading")}
         </motion.h1>
 
         <motion.p
           className="text-xs md:text-sm text-emerald-300 mb-3"
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.45 }}
+          initial={false}
         >
           {L(
             "Your Trader Entrepreneur account is live and your email is confirmed.",
@@ -226,9 +216,7 @@ export default function ConfirmedPage() {
 
         <motion.p
           className="text-xs md:text-sm text-slate-200 mb-3"
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.55 }}
+          initial={false}
         >
           {L(
             "From here, NeuroTrader becomes the operating system for your trading business: plan, risk, execution records, performance, and AI coaching connected in one place.",
@@ -238,9 +226,7 @@ export default function ConfirmedPage() {
 
         <motion.div
           className="mt-4 rounded-2xl border border-emerald-400/30 bg-emerald-500/5 p-4 text-[11px] md:text-xs text-slate-200"
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.65 }}
+          initial={false}
         >
           <p className="text-emerald-200 font-semibold mb-1">
             {L("Trader Entrepreneur code", "Código del Empresario Trader")}
@@ -255,9 +241,7 @@ export default function ConfirmedPage() {
 
         <motion.p
           className="text-[11px] md:text-xs text-slate-400"
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.65 }}
+          initial={false}
         >
           {L(
             "This is Day 1 of treating trading like a company: clear rules, defined risk, honest execution records, and measurable business progress.",
@@ -267,9 +251,7 @@ export default function ConfirmedPage() {
 
         <motion.div
           className="mt-6 flex flex-wrap gap-3"
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.8 }}
+          initial={false}
         >
           {/* Botón principal → Dashboard */}
           <Link
@@ -282,9 +264,7 @@ export default function ConfirmedPage() {
 
         <motion.p
           className="mt-5 text-[10px] md:text-[11px] text-slate-500"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 1 }}
+          initial={false}
         >
           {L(
             "Open your Business Center, protect the plan, and let the data show how your trading business is really operating.",
