@@ -3,6 +3,12 @@ import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 import { getClientIp, rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
+import { BROKER_SYNC_ADDON } from "@/lib/planCatalog";
+import {
+  isMissingStripePriceError,
+  resolveStripePriceId,
+  STRIPE_PRICE_CONFIG_ERROR,
+} from "@/lib/stripePriceResolver";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {});
 const APP_URL = (process.env.NEXT_PUBLIC_APP_URL || "").trim();
@@ -70,12 +76,17 @@ export async function POST(req: NextRequest) {
     }
 
     const billingCycle = (body?.billingCycle as "monthly" | "annual" | undefined) || "monthly";
-    const priceId =
-      billingCycle === "annual" ? addonCfg.annual || addonCfg.monthly : addonCfg.monthly;
+    const priceId = await resolveStripePriceId(stripe, {
+      label: `${addonKey} ${billingCycle}`,
+      configuredId: billingCycle === "annual" ? addonCfg.annual : addonCfg.monthly,
+      billingCycle,
+      unitAmount: Math.round(BROKER_SYNC_ADDON.prices[billingCycle] * 100),
+      productNames: ["Broker Sync", "Broker Data Sync", "Broker Data Sync & Imports"],
+    });
 
     if (!priceId) {
       return NextResponse.json(
-        { error: "Price ID not configured for add-on" },
+        { error: STRIPE_PRICE_CONFIG_ERROR, code: "stripe_addon_price_not_configured" },
         { status: 500 }
       );
     }
@@ -143,7 +154,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ url: session.url });
   } catch (err: any) {
     console.error("Error creating add-on Checkout session:", err);
-    const message = err?.raw?.message || err?.message || "Error creating checkout session";
-    return NextResponse.json({ error: message }, { status: 500 });
+    const message = isMissingStripePriceError(err)
+      ? STRIPE_PRICE_CONFIG_ERROR
+      : err?.raw?.message || err?.message || "Error creating checkout session";
+    return NextResponse.json(
+      {
+        error: message,
+        code: isMissingStripePriceError(err) ? "stripe_price_not_found" : "stripe_checkout_failed",
+      },
+      { status: 500 }
+    );
   }
 }

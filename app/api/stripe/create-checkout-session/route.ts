@@ -3,6 +3,12 @@ import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 import { getClientIp, rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
+import { BROKER_SYNC_ADDON, PLAN_PRICES } from "@/lib/planCatalog";
+import {
+  isMissingStripePriceError,
+  resolveStripePriceId,
+  STRIPE_PRICE_CONFIG_ERROR,
+} from "@/lib/stripePriceResolver";
 
 type PlanId = "core" | "advanced";
 type BillingCycle = "monthly" | "annual";
@@ -33,6 +39,16 @@ const PRICE_IDS: Record<PlanId, Record<BillingCycle, string>> = {
 const BROKER_SYNC_PRICES = {
   monthly: process.env.STRIPE_PRICE_BROKER_SYNC_MONTHLY ?? "",
   annual: process.env.STRIPE_PRICE_BROKER_SYNC_ANNUAL ?? "",
+};
+const PLAN_PRICE_PRODUCT_NAMES: Record<PlanId, Record<BillingCycle, string[]>> = {
+  core: {
+    monthly: ["Core"],
+    annual: ["Core Annual", "Core Anual"],
+  },
+  advanced: {
+    monthly: ["Advanced"],
+    annual: ["Advanced Annual", "Advanced Anual", "Advance Anual"],
+  },
 };
 const TESTER_PROMO_CODES = new Set(
   String(process.env.STRIPE_TESTER_PROMO_CODES ?? "")
@@ -279,7 +295,13 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const priceId = PRICE_IDS[effectivePlanId][finalBillingCycle];
+    const priceId = await resolveStripePriceId(stripe, {
+      label: `${effectivePlanId} ${finalBillingCycle}`,
+      configuredId: PRICE_IDS[effectivePlanId][finalBillingCycle],
+      billingCycle: finalBillingCycle,
+      unitAmount: Math.round(PLAN_PRICES[effectivePlanId][finalBillingCycle] * 100),
+      productNames: PLAN_PRICE_PRODUCT_NAMES[effectivePlanId][finalBillingCycle],
+    });
     if (!priceId) {
       console.error(
         "[CHECKOUT] Missing priceId for plan",
@@ -288,15 +310,25 @@ export async function POST(req: NextRequest) {
         finalBillingCycle
       );
       return NextResponse.json(
-        { error: "Price ID not configured for this plan" },
+        { error: STRIPE_PRICE_CONFIG_ERROR, code: "stripe_price_not_configured" },
         { status: 500 }
       );
     }
-    if (effectiveAddonBrokerSync && !BROKER_SYNC_PRICES[finalBillingCycle]) {
-      return NextResponse.json(
-        { error: "Broker sync price ID not configured" },
-        { status: 500 }
-      );
+    let brokerSyncPriceId: string | null = null;
+    if (effectiveAddonBrokerSync) {
+      brokerSyncPriceId = await resolveStripePriceId(stripe, {
+        label: `broker_sync ${finalBillingCycle}`,
+        configuredId: BROKER_SYNC_PRICES[finalBillingCycle],
+        billingCycle: finalBillingCycle,
+        unitAmount: Math.round(BROKER_SYNC_ADDON.prices[finalBillingCycle] * 100),
+        productNames: ["Broker Sync", "Broker Data Sync", "Broker Data Sync & Imports"],
+      });
+      if (!brokerSyncPriceId) {
+        return NextResponse.json(
+          { error: STRIPE_PRICE_CONFIG_ERROR, code: "stripe_broker_sync_price_not_configured" },
+          { status: 500 }
+        );
+      }
     }
 
     // =====================================================
@@ -308,9 +340,9 @@ export async function POST(req: NextRequest) {
         quantity: 1,
       },
     ];
-    if (effectiveAddonBrokerSync) {
+    if (effectiveAddonBrokerSync && brokerSyncPriceId) {
       lineItems.push({
-        price: BROKER_SYNC_PRICES[finalBillingCycle],
+        price: brokerSyncPriceId,
         quantity: 1,
       });
     }
@@ -365,11 +397,16 @@ export async function POST(req: NextRequest) {
   } catch (err: any) {
     console.error("Error creating Stripe Checkout session:", err);
 
-    const message =
-      err?.raw?.message ||
-      err?.message ||
-      "Error creating checkout session";
+    const message = isMissingStripePriceError(err)
+      ? STRIPE_PRICE_CONFIG_ERROR
+      : err?.raw?.message || err?.message || "Error creating checkout session";
 
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json(
+      {
+        error: message,
+        code: isMissingStripePriceError(err) ? "stripe_price_not_found" : "stripe_checkout_failed",
+      },
+      { status: 500 }
+    );
   }
 }

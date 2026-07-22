@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
+import { PLAN_PRICES } from "@/lib/planCatalog";
+import {
+  isMissingStripePriceError,
+  resolveStripePriceId,
+  STRIPE_PRICE_CONFIG_ERROR,
+} from "@/lib/stripePriceResolver";
 
 type PlanId = "core" | "advanced";
 type BillingCycle = "monthly" | "annual";
@@ -19,6 +25,16 @@ const PRICE_IDS: Record<PlanId, Record<BillingCycle, string>> = {
   advanced: {
     monthly: process.env.STRIPE_PRICE_ADVANCED_MONTHLY ?? "",
     annual: process.env.STRIPE_PRICE_ADVANCED_ANNUAL ?? "",
+  },
+};
+const PLAN_PRICE_PRODUCT_NAMES: Record<PlanId, Record<BillingCycle, string[]>> = {
+  core: {
+    monthly: ["Core"],
+    annual: ["Core Annual", "Core Anual"],
+  },
+  advanced: {
+    monthly: ["Advanced"],
+    annual: ["Advanced Annual", "Advanced Anual", "Advance Anual"],
   },
 };
 
@@ -84,9 +100,21 @@ export async function POST(req: NextRequest) {
       await supabaseAdmin.from("profiles").update({ stripe_customer_id: customerId }).eq("id", userId);
     }
 
-    const lineItems: Stripe.SubscriptionCreateParams.Item[] = [
-      { price: PRICE_IDS[planId][billingCycle], quantity: 1 },
-    ];
+    const priceId = await resolveStripePriceId(stripe, {
+      label: `${planId} ${billingCycle}`,
+      configuredId: PRICE_IDS[planId][billingCycle],
+      billingCycle,
+      unitAmount: Math.round(PLAN_PRICES[planId][billingCycle] * 100),
+      productNames: PLAN_PRICE_PRODUCT_NAMES[planId][billingCycle],
+    });
+    if (!priceId) {
+      return NextResponse.json(
+        { error: STRIPE_PRICE_CONFIG_ERROR, code: "stripe_price_not_configured" },
+        { status: 500 }
+      );
+    }
+
+    const lineItems: Stripe.SubscriptionCreateParams.Item[] = [{ price: priceId, quantity: 1 }];
 
     const subscription = await stripe.subscriptions.create({
       customer: customerId,
@@ -129,6 +157,15 @@ export async function POST(req: NextRequest) {
     });
   } catch (err: any) {
     console.error("[stripe/mobile/subscribe] error:", err);
-    return NextResponse.json({ error: err?.message ?? "Unknown error" }, { status: 500 });
+    const message = isMissingStripePriceError(err)
+      ? STRIPE_PRICE_CONFIG_ERROR
+      : err?.message ?? "Unknown error";
+    return NextResponse.json(
+      {
+        error: message,
+        code: isMissingStripePriceError(err) ? "stripe_price_not_found" : "stripe_mobile_checkout_failed",
+      },
+      { status: 500 }
+    );
   }
 }
