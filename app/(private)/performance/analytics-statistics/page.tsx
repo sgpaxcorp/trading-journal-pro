@@ -1471,6 +1471,7 @@ export default function AnalyticsStatisticsPage() {
   const [planMode, setPlanMode] = useState<"auto" | "manual" | "">("");
   const [planRules, setPlanRules] = useState<any[]>([]);
   const [planMaxDailyLossPct, setPlanMaxDailyLossPct] = useState<number>(0);
+  const [planAverageTradingDaysPerWeek, setPlanAverageTradingDaysPerWeek] = useState<number>(5);
   const [planLossDaysPerWeek, setPlanLossDaysPerWeek] = useState<number>(0);
   const [planPlannedWithdrawals, setPlanPlannedWithdrawals] = useState<PlannedWithdrawalEvent[]>([]);
   const [planPlannedWithdrawalSettings, setPlanPlannedWithdrawalSettings] = useState<PlannedWithdrawalSettings | null>(null);
@@ -1507,7 +1508,7 @@ export default function AnalyticsStatisticsPage() {
 
       try {
         const SELECT_GROWTH_PLAN =
-          "starting_balance,target_balance,target_date,plan_start_date,plan_mode,created_at,updated_at,max_daily_loss_percent,loss_days_per_week,rules,planned_withdrawals,planned_withdrawal_settings" as const;
+          "starting_balance,target_balance,target_date,plan_start_date,plan_mode,created_at,updated_at,max_daily_loss_percent,loss_days_per_week,steps,rules,planned_withdrawals,planned_withdrawal_settings" as const;
         const { data, error } = await supabaseBrowser
           .from("growth_plans")
           .select(SELECT_GROWTH_PLAN)
@@ -1527,6 +1528,7 @@ export default function AnalyticsStatisticsPage() {
           setPlanTargetDate("");
           setPlanRules([]);
           setPlanMaxDailyLossPct(0);
+          setPlanAverageTradingDaysPerWeek(5);
           setPlanLossDaysPerWeek(0);
           setPlanPlannedWithdrawals([]);
           setPlanPlannedWithdrawalSettings(null);
@@ -1539,6 +1541,23 @@ export default function AnalyticsStatisticsPage() {
         const target = toNumberMaybe(row?.target_balance ?? 0);
         const targetDate = String(row?.target_date ?? "").slice(0, 10);
         const mode = String(row?.plan_mode ?? "");
+        const businessAnalysis = row?.steps?.business_analysis && typeof row.steps.business_analysis === "object"
+          ? row.steps.business_analysis
+          : null;
+        const averageTradingDaysPerWeek = Math.max(
+          1,
+          Math.min(
+            5,
+            Math.floor(
+              toNumberMaybe(
+                businessAnalysis?.averageTradingDaysPerWeek ??
+                  businessAnalysis?.operatingModel?.averageTradingDaysPerWeek ??
+                  row?.steps?._ui?.averageTradingDaysPerWeek ??
+                  5
+              )
+            )
+          )
+        );
 
         setPlanStartingBalance(starting);
         setPlanStartIso(looksLikeYYYYMMDD(startIso) ? startIso : "");
@@ -1547,7 +1566,8 @@ export default function AnalyticsStatisticsPage() {
         setPlanMode(mode === "manual" ? "manual" : mode === "auto" ? "auto" : "");
         setPlanRules(Array.isArray(row?.rules) ? row.rules : []);
         setPlanMaxDailyLossPct(toNumberMaybe(row?.max_daily_loss_percent ?? 0));
-        setPlanLossDaysPerWeek(Math.max(0, Math.min(5, Math.floor(toNumberMaybe(row?.loss_days_per_week ?? 0)))));
+        setPlanAverageTradingDaysPerWeek(averageTradingDaysPerWeek);
+        setPlanLossDaysPerWeek(Math.max(0, Math.min(averageTradingDaysPerWeek, Math.floor(toNumberMaybe(row?.loss_days_per_week ?? 0)))));
         setPlanPlannedWithdrawals(normalizePlannedWithdrawals(row?.planned_withdrawals ?? []));
         setPlanPlannedWithdrawalSettings(normalizeWithdrawalSettings(row?.planned_withdrawal_settings));
       } catch (err) {
@@ -1556,6 +1576,7 @@ export default function AnalyticsStatisticsPage() {
         setPlanStartIso("");
         setPlanRules([]);
         setPlanMaxDailyLossPct(0);
+        setPlanAverageTradingDaysPerWeek(5);
         setPlanLossDaysPerWeek(0);
         setPlanPlannedWithdrawals([]);
         setPlanPlannedWithdrawalSettings(null);
@@ -1989,6 +2010,7 @@ export default function AnalyticsStatisticsPage() {
       target: planTargetBalance,
       startIso: planStartIso,
       targetIso: planTargetDate,
+      averageTradingDaysPerWeek: planAverageTradingDaysPerWeek,
       lossDaysPerWeek: planLossDaysPerWeek,
       maxDailyLossPercent: planMaxDailyLossPct,
       withdrawalSettings: planPlannedWithdrawalSettings,
@@ -1996,6 +2018,7 @@ export default function AnalyticsStatisticsPage() {
     });
   }, [
     planLossDaysPerWeek,
+    planAverageTradingDaysPerWeek,
     planMaxDailyLossPct,
     planPlannedWithdrawalSettings,
     planPlannedWithdrawals,

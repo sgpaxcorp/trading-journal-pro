@@ -187,6 +187,13 @@ function scenarioGrowths(baseGrowth: number): Record<ScenarioName, number> {
   };
 }
 
+function valuationStatusFromUpside(upside: number | null) {
+  if (upside == null) return "unknown";
+  if (upside >= 0.15) return "undervalued";
+  if (upside <= -0.15) return "overvalued";
+  return "fairly_valued";
+}
+
 function targetWeightFromQuality(input: {
   marginOfSafety: number | null;
   fcfMargin: number | null;
@@ -287,31 +294,43 @@ export function buildNeuroAnalysisEngine(input: {
       const marketCap = maybeNumber(market?.market?.marketCap);
       const baseGrowth = deriveGrowth(market, assumptions.baseGrowthPct ?? null);
       const growths = scenarioGrowths(baseGrowth);
+      const debt = maybeNumber(latest?.totalDebt) ?? 0;
+      const scenarioValueForHorizon = (scenario: ScenarioName, years: number) => {
+        const equityValue = dcfValue({
+          baseCashFlow,
+          growth: growths[scenario],
+          discountRate,
+          terminalGrowth,
+          horizonYears: years,
+        });
+        const adjustedEquityValue = equityValue == null ? null : Math.max(0, equityValue - debt);
+        const upsideToMarket =
+          adjustedEquityValue != null && marketCap && marketCap > 0
+            ? adjustedEquityValue / marketCap - 1
+            : null;
+        return {
+          growth: growths[scenario],
+          intrinsicEquityValue: adjustedEquityValue,
+          upsideToMarket,
+        };
+      };
       const scenarioValues = Object.fromEntries(
         (Object.keys(growths) as ScenarioName[]).map((scenario) => {
-          const equityValue = dcfValue({
-            baseCashFlow,
-            growth: growths[scenario],
-            discountRate,
-            terminalGrowth,
-            horizonYears,
-          });
-          const debt = maybeNumber(latest?.totalDebt) ?? 0;
-          const adjustedEquityValue = equityValue == null ? null : Math.max(0, equityValue - debt);
-          const upsideToMarket =
-            adjustedEquityValue != null && marketCap && marketCap > 0
-              ? adjustedEquityValue / marketCap - 1
-              : null;
-          return [
-            scenario,
-            {
-              growth: growths[scenario],
-              intrinsicEquityValue: adjustedEquityValue,
-              upsideToMarket,
-            },
-          ];
+          return [scenario, scenarioValueForHorizon(scenario, horizonYears)];
         })
       ) as Record<ScenarioName, { growth: number; intrinsicEquityValue: number | null; upsideToMarket: number | null }>;
+      const valuationLadder = Array.from({ length: 9 }, (_, index) => index + 2).map((year) => {
+        const bear = scenarioValueForHorizon("bear", year);
+        const base = scenarioValueForHorizon("base", year);
+        const bull = scenarioValueForHorizon("bull", year);
+        return {
+          year,
+          bear,
+          base,
+          bull,
+          valuationStatus: valuationStatusFromUpside(base.upsideToMarket),
+        };
+      });
 
       const marginOfSafety = pct(scenarioValues.base.upsideToMarket);
       const docs = documentReadiness.find((row) => row.ticker === ticker);
@@ -338,9 +357,20 @@ export function buildNeuroAnalysisEngine(input: {
           fcfMargin,
           debtToEquity,
           marginOfSafety,
+          valuationStatus: valuationStatusFromUpside(marginOfSafety),
           verdict,
         },
         scenarios: scenarioValues,
+        valuationProfile: {
+          currentMarketCap: marketCap,
+          currentPrice: price,
+          baseCashFlow,
+          discountRatePct: discountRate * 100,
+          terminalGrowthPct: terminalGrowth * 100,
+          selectedHorizonYears: horizonYears,
+          selectedHorizonScenarios: scenarioValues,
+          projectionYears: valuationLadder,
+        },
         documentReadiness: docs ?? null,
       };
     })

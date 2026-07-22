@@ -22,18 +22,43 @@
         "applinks:neurotrader-journal.com"
       ],
       "infoPlist": {
-        "CFBundleDisplayName": "Neuro Trader"
+        "CFBundleDisplayName": "Neuro Trader",
+        "ITSAppUsesNonExemptEncryption": false
       },
-      "buildNumber": "2"
+      "buildNumber": "3"
     },
     "android": {
+      "package": "com.sgpax.neurotraderjournal",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "versionCode": 2
+      "permissions": [
+        "POST_NOTIFICATIONS"
+      ],
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [
+            {
+              "scheme": "https",
+              "host": "www.neurotrader-journal.com"
+            },
+            {
+              "scheme": "https",
+              "host": "neurotrader-journal.com"
+            }
+          ],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
+        }
+      ],
+      "versionCode": 3
     },
     "web": {
       "favicon": "./assets/favicon.png"

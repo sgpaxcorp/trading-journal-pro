@@ -74,6 +74,7 @@ type GrowthPlanSummary = {
   targetDate?: string;
   planMode?: string;
   planPhases?: unknown;
+  averageTradingDaysPerWeek?: number;
   lossDaysPerWeek?: number;
   tradingDays?: number;
   maxDailyLossPercent?: number;
@@ -216,6 +217,19 @@ type PlanProgressCard = {
     title: string;
     data: CadenceProgressPeriod;
   }>;
+};
+
+type BusinessProgressSummary = {
+  startBalance: number;
+  targetBalance: number;
+  goalAmount: number;
+  gainedAmount: number;
+  remainingAmount: number;
+  overallProgress: number;
+  operatingDaysPerWeek: number;
+  lossDaysPerWeek: number;
+  targetDate: string | null;
+  daysRemaining: number | null;
 };
 
 const DASHBOARD_TITLE_STOPS = ["#7CF7CF", "#63D6FF", "#9A7CFF", "#2BE3A7"] as const;
@@ -691,22 +705,53 @@ function listTradingDaysBetween(startIso: string, endIso: string): string[] {
   return days;
 }
 
+function resolveAverageTradingDaysPerWeek(value?: number | null): number {
+  if (value == null) return 5;
+  const n = Number(value);
+  if (!Number.isFinite(n)) return 5;
+  return clampInt(n, 1, 5);
+}
+
+function weekKeyFromIso(dateIso: string): string {
+  const d = new Date(`${dateIso}T00:00:00`);
+  if (!Number.isFinite(d.getTime())) return String(dateIso).slice(0, 10);
+  const dow = d.getDay();
+  const mondayOffset = dow === 0 ? -6 : 1 - dow;
+  d.setDate(d.getDate() + mondayOffset);
+  return toYMD(d);
+}
+
+function selectTradingDaysByWeeklyAverage(tradingDays: string[], averageTradingDaysPerWeek: number): string[] {
+  const daysPerWeek = resolveAverageTradingDaysPerWeek(averageTradingDaysPerWeek);
+  if (daysPerWeek >= 5) return tradingDays;
+  const seenByWeek = new Map<string, number>();
+  return tradingDays.filter((dateIso) => {
+    const key = weekKeyFromIso(dateIso);
+    const count = seenByWeek.get(key) ?? 0;
+    if (count >= daysPerWeek) return false;
+    seenByWeek.set(key, count + 1);
+    return true;
+  });
+}
+
 function computeRequiredGoalPct(
   starting: number,
   target: number,
   totalDays: number,
   lossDaysPerWeek: number,
-  lossPct: number
+  lossPct: number,
+  averageTradingDaysPerWeek = 5
 ) {
   const total = clampInt(totalDays, 0);
   if (total === 0 || starting <= 0 || target <= 0) return { goalPctDecimal: 0 };
 
-  const perWeek = clampInt(lossDaysPerWeek, 0, 5);
+  const daysPerCycle = resolveAverageTradingDaysPerWeek(averageTradingDaysPerWeek);
+  const perWeek = clampInt(lossDaysPerWeek, 0, daysPerCycle);
   let totalLossDays = 0;
   let prodLoss = 1;
 
   for (let day = 1; day <= total; day++) {
-    const dayInWeek = (day - 1) % 5;
+    const dayInWeek = (day - 1) % daysPerCycle;
     const isLoss = perWeek > 0 && dayInWeek < perWeek;
     if (isLoss) {
       totalLossDays += 1;
@@ -728,15 +773,24 @@ function buildBalancedPlanSuggested(
   target: number,
   totalDays: number,
   lossDaysPerWeek: number,
-  lossPct: number
+  lossPct: number,
+  averageTradingDaysPerWeek = 5
 ) {
-  const { goalPctDecimal } = computeRequiredGoalPct(starting, target, totalDays, lossDaysPerWeek, lossPct);
+  const { goalPctDecimal } = computeRequiredGoalPct(
+    starting,
+    target,
+    totalDays,
+    lossDaysPerWeek,
+    lossPct,
+    averageTradingDaysPerWeek
+  );
   let balance = starting;
   const rows: PlanRow[] = [];
-  const perWeek = clampInt(lossDaysPerWeek, 0, 5);
+  const daysPerCycle = resolveAverageTradingDaysPerWeek(averageTradingDaysPerWeek);
+  const perWeek = clampInt(lossDaysPerWeek, 0, daysPerCycle);
 
   for (let day = 1; day <= totalDays; day++) {
-    const dayInWeek = (day - 1) % 5;
+    const dayInWeek = (day - 1) % daysPerCycle;
     const isLoss = perWeek > 0 && dayInWeek < perWeek;
     const pct = isLoss ? -lossPct : goalPctDecimal * 100;
     const expectedUsd = balance * (pct / 100);
@@ -760,10 +814,15 @@ function buildWeeklyMilestonesFromMonthlyGoals(
   startIso: string,
   targetIso: string,
   lossDaysPerWeek: number,
-  maxDailyLossPercent: number
+  maxDailyLossPercent: number,
+  averageTradingDaysPerWeek = 5
 ): CadenceTarget[] {
   if (starting <= 0 || target <= 0) return [];
-  const tradingDays = listTradingDaysBetween(startIso, targetIso);
+  const daysPerCycle = resolveAverageTradingDaysPerWeek(averageTradingDaysPerWeek);
+  const tradingDays = selectTradingDaysByWeeklyAverage(
+    listTradingDaysBetween(startIso, targetIso),
+    daysPerCycle
+  );
   if (tradingDays.length === 0) return [];
 
   const planRows = buildBalancedPlanSuggested(
@@ -771,7 +830,8 @@ function buildWeeklyMilestonesFromMonthlyGoals(
     target,
     tradingDays.length,
     lossDaysPerWeek,
-    Math.max(0, maxDailyLossPercent)
+    Math.max(0, maxDailyLossPercent),
+    daysPerCycle
   );
   if (!planRows.length) return [];
 
@@ -793,10 +853,10 @@ function buildWeeklyMilestonesFromMonthlyGoals(
     const endIndex = indices[indices.length - 1];
     const monthStartBalance = startIndex > 0 ? planRows[startIndex - 1]?.endBalance ?? starting : starting;
     const monthEndBalance = planRows[endIndex]?.endBalance ?? target;
-    const weeksInMonth = Math.max(1, Math.ceil(indices.length / 5));
+    const weeksInMonth = Math.max(1, Math.ceil(indices.length / daysPerCycle));
 
     for (let week = 1; week <= weeksInMonth; week++) {
-      const weekEndIndex = Math.min(endIndex, startIndex + week * 5 - 1);
+      const weekEndIndex = Math.min(endIndex, startIndex + week * daysPerCycle - 1);
       const fraction = week / weeksInMonth;
       milestones.push({
         targetEquity: monthStartBalance + (monthEndBalance - monthStartBalance) * fraction,
@@ -1401,7 +1461,8 @@ export function DashboardScreen({ onOpenModule: _onOpenModule, onOpenJournalDate
       startIso,
       targetIso,
       Number(plan.lossDaysPerWeek ?? 0),
-      Number(plan.maxDailyLossPercent ?? 0)
+      Number(plan.maxDailyLossPercent ?? 0),
+      Number(plan.averageTradingDaysPerWeek ?? 5)
     );
     if (!milestones.length) return null;
 
@@ -1517,6 +1578,40 @@ export function DashboardScreen({ onOpenModule: _onOpenModule, onOpenJournalDate
       periods: [],
     };
   }, [adjustedTargetBalance, cadenceProgress, currentBalance, language, manualPhaseMetrics, plan, targetDateStr]);
+
+  const businessProgress = useMemo<BusinessProgressSummary | null>(() => {
+    if (!plan || adjustedTargetBalance <= 0) return null;
+    const startBalance = Number(plan.startingBalance ?? 0);
+    const targetBalance = adjustedTargetBalance;
+    const goalAmount = Math.max(0, targetBalance - startBalance);
+    const gainedAmount = currentBalance - startBalance;
+    const remainingAmount = Math.max(0, targetBalance - currentBalance);
+    const overallProgress =
+      goalAmount > 0 ? Math.max(0, Math.min(1.25, gainedAmount / goalAmount)) : currentBalance >= targetBalance ? 1 : 0;
+    const operatingDaysPerWeek = resolveAverageTradingDaysPerWeek(
+      Number(plan.averageTradingDaysPerWeek ?? plan.tradingDays ?? 5)
+    );
+    const lossDaysPerWeek = Math.max(0, Number(plan.lossDaysPerWeek ?? 0) || 0);
+    const deadline = targetDateStr ? new Date(`${targetDateStr}T00:00:00`) : null;
+    const today = new Date(`${todayStr}T00:00:00`);
+    const daysRemaining =
+      deadline && Number.isFinite(deadline.getTime())
+        ? Math.ceil((deadline.getTime() - today.getTime()) / (24 * 60 * 60 * 1000))
+        : null;
+
+    return {
+      startBalance,
+      targetBalance,
+      goalAmount,
+      gainedAmount,
+      remainingAmount,
+      overallProgress,
+      operatingDaysPerWeek,
+      lossDaysPerWeek,
+      targetDate: targetDateStr,
+      daysRemaining,
+    };
+  }, [adjustedTargetBalance, currentBalance, plan, targetDateStr, todayStr]);
 
   const daySummaryDates = useMemo(
     () =>
@@ -2019,20 +2114,127 @@ export function DashboardScreen({ onOpenModule: _onOpenModule, onOpenJournalDate
             </View>
 
             <View style={[styles.progressCard, !isWideProgressLayout && styles.progressCardFull]}>
-              <GradientTitleText text={t(language, "Plan Progress", "Progreso del plan")} style={styles.progressTitle} />
+              <GradientTitleText text={t(language, "Business Progress", "Progreso del negocio")} style={styles.progressTitle} />
 
               {!planProgress ? (
                 <Text style={styles.progressNote}>
-                  {t(language, "No Trading Business Plan set yet.", "Aún no tienes un Plan de Empresa de Trading.")}{" "}
+                  {t(
+                    language,
+                    "No Trading Business Plan set yet. Create one to track the business target, operating cadence, and active checkpoints here.",
+                    "Aún no tienes un Plan de Empresa de Trading. Crea uno para ver aquí la meta del negocio, cadencia operativa y checkpoints activos."
+                  )}{" "}
                   <Text style={styles.systemLink} onPress={() => Linking.openURL(WEB_GROWTH_PLAN_URL)}>
                     {t(language, "Open Trading Business Plan →", "Abrir Plan de Empresa de Trading →")}
                   </Text>
                 </Text>
               ) : (
                 <>
+                  {businessProgress ? (
+                    <>
+                      <View style={styles.businessProgressHero}>
+                        <View style={styles.businessProgressHeader}>
+                          <View style={styles.snapshotMain}>
+                            <Text style={styles.snapshotEyebrow}>
+                              {t(language, "Business target", "Meta del negocio")}
+                            </Text>
+                            <Text style={styles.snapshotValue}>
+                              {formatCurrency(businessProgress.startBalance)} → {formatCurrency(businessProgress.targetBalance)}
+                            </Text>
+                            <Text style={styles.snapshotHint}>
+                              {businessProgress.targetDate
+                                ? t(
+                                    language,
+                                    `Target date ${businessProgress.targetDate}`,
+                                    `Fecha meta ${businessProgress.targetDate}`
+                                  )
+                                : t(language, "No target date set.", "Sin fecha meta definida.")}
+                            </Text>
+                          </View>
+
+                          <View style={styles.businessProgressPercentBlock}>
+                            <Text style={styles.businessProgressPercent}>
+                              {formatPercent(businessProgress.overallProgress * 100, 0)}
+                            </Text>
+                            <Text style={styles.snapshotBadgeLabel}>{t(language, "complete", "completado")}</Text>
+                          </View>
+                        </View>
+
+                        <View style={styles.progressTrack}>
+                          <View
+                            style={[
+                              styles.progressFillBusiness,
+                              { width: `${Math.max(0, Math.min(100, businessProgress.overallProgress * 100))}%` },
+                            ]}
+                          />
+                        </View>
+
+                        <View style={styles.businessProgressMetaRow}>
+                          <View style={styles.businessProgressMetaPill}>
+                            <Text style={styles.snapshotBadgeLabel}>{t(language, "Remaining", "Falta")}</Text>
+                            <Text style={[styles.metricValue, styles.metricToneWarning]}>
+                              {formatCurrency(businessProgress.remainingAmount)}
+                            </Text>
+                          </View>
+                          <View style={styles.businessProgressMetaPill}>
+                            <Text style={styles.snapshotBadgeLabel}>{t(language, "Built so far", "Construido")}</Text>
+                            <Text
+                              style={[
+                                styles.metricValue,
+                                businessProgress.gainedAmount >= 0 ? styles.metricTonePositive : styles.metricToneNegative,
+                              ]}
+                            >
+                              {formatSigned(businessProgress.gainedAmount)}
+                            </Text>
+                          </View>
+                          <View style={styles.businessProgressMetaPill}>
+                            <Text style={styles.snapshotBadgeLabel}>{t(language, "Operating days", "Días operativos")}</Text>
+                            <Text style={styles.metricValue}>
+                              {businessProgress.operatingDaysPerWeek}
+                              {t(language, "/week", "/semana")}
+                            </Text>
+                          </View>
+                          <View style={styles.businessProgressMetaPill}>
+                            <Text style={styles.snapshotBadgeLabel}>{t(language, "Deadline", "Vence")}</Text>
+                            <Text style={styles.metricValue}>
+                              {businessProgress.daysRemaining == null
+                                ? "—"
+                                : businessProgress.daysRemaining >= 0
+                                  ? `${businessProgress.daysRemaining}d`
+                                  : t(language, "Past", "Pasada")}
+                            </Text>
+                          </View>
+                        </View>
+                      </View>
+
+                      <Text style={styles.progressNote}>
+                        {businessProgress.goalAmount > 0
+                          ? t(
+                              language,
+                              "This tracks the full business plan from starting capital to final target, while the checkpoint below keeps the next execution phase measurable.",
+                              "Esto mide el plan completo desde el capital inicial hasta la meta final, mientras el checkpoint de abajo mantiene medible la próxima fase de ejecución."
+                            )
+                          : t(
+                              language,
+                              "Set a target above starting capital to unlock full business progress tracking.",
+                              "Define una meta mayor al capital inicial para activar el progreso completo del negocio."
+                            )}{" "}
+                        {t(language, "Operating model:", "Modelo operativo:")}{" "}
+                        <Text style={styles.snapshotHintStrong}>
+                          {businessProgress.operatingDaysPerWeek}
+                          {t(language, " trading days/week", " días de trading/semana")}
+                        </Text>
+                        {" · "}
+                        <Text style={styles.snapshotHintStrong}>
+                          {businessProgress.lossDaysPerWeek}
+                          {t(language, " planned loss days/week", " días de pérdida planificados/semana")}
+                        </Text>
+                      </Text>
+                    </>
+                  ) : null}
+
                   <View style={[styles.snapshotCard, styles.planSnapshotCard]}>
                     <View style={styles.snapshotMain}>
-                      <Text style={styles.planPhaseLabel}>{t(language, "Current phase", "Fase actual")}</Text>
+                      <Text style={styles.planPhaseLabel}>{t(language, "Active checkpoint", "Checkpoint activo")}</Text>
                       <Text style={styles.planPhaseValue}>{planProgress.phaseLabel}</Text>
                     </View>
                     {planProgress.targetDate ? (
@@ -2075,8 +2277,8 @@ export function DashboardScreen({ onOpenModule: _onOpenModule, onOpenJournalDate
                   <Text style={styles.progressNote}>
                     {t(
                       language,
-                      "This compares balance now against the current target. Overall plan target:",
-                      "Esto compara el balance actual contra la meta actual. Meta total del plan:"
+                      "This compares balance now against the active checkpoint. Overall business target:",
+                      "Esto compara el balance actual contra el checkpoint activo. Meta total del negocio:"
                     )}{" "}
                     <Text style={styles.snapshotHintStrong}>{formatCurrency(planProgress.overallTargetBalance)}</Text>
                   </Text>
@@ -3111,6 +3313,52 @@ const createStyles = (colors: ThemeColors) => {
     planSnapshotCard: {
       alignItems: "center",
     },
+    businessProgressHero: {
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: isDark ? "rgba(43, 227, 167, 0.42)" : "rgba(15, 157, 122, 0.22)",
+      backgroundColor: isDark ? "rgba(5, 28, 39, 0.92)" : "#F6FFFB",
+      padding: 12,
+      gap: 12,
+      overflow: "hidden",
+    },
+    businessProgressHeader: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "flex-start",
+      gap: 12,
+    },
+    businessProgressPercentBlock: {
+      minWidth: 92,
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: isDark ? "rgba(124, 247, 207, 0.42)" : "rgba(15, 157, 122, 0.28)",
+      backgroundColor: isDark ? "rgba(5, 16, 31, 0.78)" : "#FFFFFF",
+      paddingHorizontal: 10,
+      paddingVertical: 9,
+      alignItems: "center",
+      gap: 3,
+    },
+    businessProgressPercent: {
+      color: colors.success,
+      fontSize: 21,
+      fontWeight: "900",
+    },
+    businessProgressMetaRow: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: 8,
+    },
+    businessProgressMetaPill: {
+      width: "48%",
+      borderRadius: 13,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: isDark ? "rgba(2, 8, 24, 0.66)" : "#FFFFFF",
+      paddingHorizontal: 10,
+      paddingVertical: 9,
+      gap: 4,
+    },
     snapshotMain: {
       flex: 1,
       gap: 4,
@@ -3250,6 +3498,11 @@ const createStyles = (colors: ThemeColors) => {
       height: "100%",
       borderRadius: 999,
       backgroundColor: colors.info,
+    },
+    progressFillBusiness: {
+      height: "100%",
+      borderRadius: 999,
+      backgroundColor: colors.success,
     },
     progressNote: {
       color: colors.textMuted,

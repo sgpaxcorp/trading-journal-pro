@@ -419,6 +419,34 @@ function listTradingDaysBetween(startIso: string, endIso: string): string[] {
   return days;
 }
 
+function resolveAverageTradingDaysPerWeek(value?: number | string | null): number {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return 5;
+  return clampInt(n, 1, 5);
+}
+
+function weekKeyFromIso(dateIso: string): string {
+  const d = new Date(`${dateIso}T00:00:00`);
+  if (!Number.isFinite(d.getTime())) return String(dateIso).slice(0, 10);
+  const dow = d.getDay();
+  const mondayOffset = dow === 0 ? -6 : 1 - dow;
+  d.setDate(d.getDate() + mondayOffset);
+  return toYMD(d);
+}
+
+function selectTradingDaysByWeeklyAverage(tradingDays: string[], averageTradingDaysPerWeek?: number | string | null): string[] {
+  const daysPerWeek = resolveAverageTradingDaysPerWeek(averageTradingDaysPerWeek);
+  if (daysPerWeek >= 5) return tradingDays;
+  const seenByWeek = new Map<string, number>();
+  return tradingDays.filter((dateIso) => {
+    const key = weekKeyFromIso(dateIso);
+    const count = seenByWeek.get(key) ?? 0;
+    if (count >= daysPerWeek) return false;
+    seenByWeek.set(key, count + 1);
+    return true;
+  });
+}
+
 function buildAutoPhases(
   starting: number,
   target: number,
@@ -497,19 +525,21 @@ function computeRequiredGoalPct(
   target: number,
   totalDays: number,
   lossDaysPerWeek: number,
-  lossPct: number
+  lossPct: number,
+  averageTradingDaysPerWeek = 5
 ): { goalPctDecimal: number } {
   const D = clampInt(totalDays, 0);
   if (D === 0 || starting <= 0 || target <= 0) {
     return { goalPctDecimal: 0 };
   }
 
-  const perWeek = clampInt(lossDaysPerWeek, 0, 5);
+  const daysPerCycle = resolveAverageTradingDaysPerWeek(averageTradingDaysPerWeek);
+  const perWeek = clampInt(lossDaysPerWeek, 0, daysPerCycle);
   let totalLossDays = 0;
   let prodLoss = 1;
 
   for (let d = 1; d <= D; d++) {
-    const dayInWeek = (d - 1) % 5;
+    const dayInWeek = (d - 1) % daysPerCycle;
     const isLoss = perWeek > 0 && dayInWeek < perWeek;
     if (isLoss) {
       totalLossDays++;
@@ -532,17 +562,26 @@ function buildBalancedPlanSuggested(
   target: number,
   totalDays: number,
   lossDaysPerWeek: number,
-  lossPct: number
+  lossPct: number,
+  averageTradingDaysPerWeek = 5
 ): { rows: PlanRow[]; requiredGoalPct: number } {
-  const { goalPctDecimal } = computeRequiredGoalPct(starting, target, totalDays, lossDaysPerWeek, lossPct);
+  const { goalPctDecimal } = computeRequiredGoalPct(
+    starting,
+    target,
+    totalDays,
+    lossDaysPerWeek,
+    lossPct,
+    averageTradingDaysPerWeek
+  );
   const goalPct = goalPctDecimal * 100;
 
   let bal = starting;
   const rows: PlanRow[] = [];
-  const perWeek = clampInt(lossDaysPerWeek, 0, 5);
+  const daysPerCycle = resolveAverageTradingDaysPerWeek(averageTradingDaysPerWeek);
+  const perWeek = clampInt(lossDaysPerWeek, 0, daysPerCycle);
 
   for (let d = 1; d <= totalDays; d++) {
-    const dayInWeek = (d - 1) % 5;
+    const dayInWeek = (d - 1) % daysPerCycle;
     const isLoss = perWeek > 0 && dayInWeek < perWeek;
     const pct = isLoss ? -lossPct : goalPct;
     const expectedUSD = bal * (pct / 100);
@@ -571,10 +610,15 @@ function buildWeeklyMilestonesFromMonthlyGoals(
   startIso: string,
   targetIso: string,
   lossDaysPerWeek: number,
-  maxDailyLossPercent: number
+  maxDailyLossPercent: number,
+  averageTradingDaysPerWeek = 5
 ): CadenceTarget[] {
   if (starting <= 0 || target <= 0) return [];
-  const tradingDays = listTradingDaysBetween(startIso, targetIso);
+  const daysPerCycle = resolveAverageTradingDaysPerWeek(averageTradingDaysPerWeek);
+  const tradingDays = selectTradingDaysByWeeklyAverage(
+    listTradingDaysBetween(startIso, targetIso),
+    daysPerCycle
+  );
   if (tradingDays.length === 0) return [];
   const totalTradingDays = tradingDays.length;
 
@@ -583,7 +627,8 @@ function buildWeeklyMilestonesFromMonthlyGoals(
     target,
     totalTradingDays,
     lossDaysPerWeek,
-    Math.max(0, maxDailyLossPercent)
+    Math.max(0, maxDailyLossPercent),
+    daysPerCycle
   );
   const planRows = plan.rows;
   if (planRows.length === 0) return [];
@@ -607,10 +652,10 @@ function buildWeeklyMilestonesFromMonthlyGoals(
     const monthStartBalance = startIndex > 0 ? planRows[startIndex - 1]?.endBalance ?? starting : starting;
     const monthEndBalance = planRows[endIndex]?.endBalance ?? planRows[planRows.length - 1]?.endBalance ?? target;
     const monthGoalProfit = monthEndBalance - monthStartBalance;
-    const weeksInMonth = Math.max(1, Math.ceil(indices.length / 5));
+    const weeksInMonth = Math.max(1, Math.ceil(indices.length / daysPerCycle));
 
     for (let w = 1; w <= weeksInMonth; w++) {
-      const weekEndIndex = Math.min(endIndex, startIndex + w * 5 - 1);
+      const weekEndIndex = Math.min(endIndex, startIndex + w * daysPerCycle - 1);
       const fraction = w / weeksInMonth;
       const targetEquity = monthStartBalance + (monthEndBalance - monthStartBalance) * fraction;
       const targetDate = tradingDays[weekEndIndex] ?? tradingDays[tradingDays.length - 1] ?? targetIso;
@@ -2234,6 +2279,13 @@ export default function DashboardPage() {
     const maxDailyLossPercent = Number(
       (plan as any)?.maxDailyLossPercent ?? (plan as any)?.max_daily_loss_percent ?? 0
     ) || 0;
+    const businessAnalysis = (plan as any)?.steps?.business_analysis;
+    const averageTradingDaysPerWeek = resolveAverageTradingDaysPerWeek(
+      businessAnalysis?.averageTradingDaysPerWeek ??
+        businessAnalysis?.operatingModel?.averageTradingDaysPerWeek ??
+        (plan as any)?.steps?._ui?.averageTradingDaysPerWeek ??
+        5
+    );
 
     const milestones = buildWeeklyMilestonesFromMonthlyGoals(
       starting,
@@ -2241,7 +2293,8 @@ export default function DashboardPage() {
       planStartStr,
       targetDateStr,
       lossDaysPerWeek,
-      maxDailyLossPercent
+      maxDailyLossPercent,
+      averageTradingDaysPerWeek
     );
     if (!milestones.length) return null;
 
@@ -4093,7 +4146,7 @@ export default function DashboardPage() {
         <header className="flex flex-col md:flex-row justify-between gap-4 mb-8">
           <div>
             <p className="text-emerald-400 text-xs uppercase tracking-[0.25em]">
-              {L("Trading Business Platform", "Plataforma Empresarial de Trading")}
+              {L("Trading Business Operating System", "Sistema Operativo de Empresa de Trading")}
             </p>
             <h1 className="text-4xl font-semibold mt-1">
               {L("Business Center", "Centro Empresarial")}

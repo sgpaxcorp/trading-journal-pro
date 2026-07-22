@@ -95,7 +95,7 @@ function MainTabs() {
       Calendar: t(language, "P&L Calendar", "Calendario P&L"),
       Analytics: t(language, "Business KPIs", "KPIs Empresariales"),
       AICoach: t(language, "Business Coach", "Coach Empresarial"),
-      Other: t(language, "Platform", "Plataforma"),
+      Other: t(language, "Workspace", "Workspace"),
     }),
     [language]
   );
@@ -358,8 +358,8 @@ function PaymentRequiredScreen({
       <Text style={styles.body}>
         {t(
           language,
-          "The mobile app is free to download and is built for existing members. Your trading business workspace unlocks when your account already has active access.",
-          "El app móvil es gratis para descargar y está creado para miembros existentes. Tu espacio de empresa de trading se desbloquea cuando tu cuenta ya tiene acceso activo."
+          "The mobile app is free to download and opens for active NeuroTrader members with account access enabled.",
+          "El app móvil es gratis para descargar y se abre para miembros activos de NeuroTrader con acceso de cuenta habilitado."
         )}
       </Text>
 
@@ -370,8 +370,8 @@ function PaymentRequiredScreen({
         <Text style={styles.panelText}>
           {t(
             language,
-            "Your execution records, rules, analytics, notebooks, and broker tools stay protected behind the same business account access check on web and mobile.",
-            "Tus registros de ejecución, reglas, analíticas, notebooks y herramientas de bróker quedan protegidas con la misma validación de cuenta empresarial en web y mobile."
+            "Your execution records, analytics, notebooks, AI tools, and broker connections stay protected behind the same business account security layer.",
+            "Tus registros de ejecución, analíticas, notebooks, herramientas de IA y conexiones de bróker quedan protegidas detrás de la misma capa de seguridad de cuenta empresarial."
           )}
         </Text>
       </View>
@@ -384,7 +384,7 @@ function PaymentRequiredScreen({
         </Text>
       </Pressable>
       <Pressable style={[styles.button, styles.secondaryButton]} onPress={openWebsite}>
-        <Text style={styles.secondaryText}>{t(language, "Open website", "Abrir website")}</Text>
+        <Text style={styles.secondaryText}>{t(language, "Open NeuroTrader", "Abrir NeuroTrader")}</Text>
       </Pressable>
       <Pressable style={[styles.button, styles.dangerButton]} onPress={onSignOut}>
         <Text style={styles.dangerText}>{t(language, "Sign out", "Cerrar sesion")}</Text>

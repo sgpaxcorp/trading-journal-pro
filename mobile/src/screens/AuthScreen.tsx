@@ -223,7 +223,7 @@ export function AuthScreen() {
                 {t(language, "Need a Trader Entrepreneur account?", "¿Necesitas una cuenta de Empresario Trader?")}
               </Text>
               <Pressable onPress={() => Linking.openURL(`${WEB_BASE}/signup`)}>
-                <Text style={styles.tertiaryLink}>{t(language, "Start your trading business on the web", "Comienza tu empresa de trading en la web")}</Text>
+                <Text style={styles.tertiaryLink}>{t(language, "Start your NeuroTrader business account", "Comienza tu cuenta empresarial en NeuroTrader")}</Text>
               </Pressable>
             </View>
           </>

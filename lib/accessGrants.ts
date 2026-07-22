@@ -175,8 +175,8 @@ export const ACCESS_GRANTS: AccessGrantDefinition[] = [
     group: "addons",
     label: { en: "Neuro Analysis", es: "Neuro Analysis" },
     description: {
-      en: "Company intelligence, projections, and virtual allocation simulation.",
-      es: "Inteligencia de compañías, proyecciones y simulación de allocation virtual.",
+      en: "Company intelligence, evidence checklist, market research, and 2-10 year valuation scenarios.",
+      es: "Inteligencia de compañías, checklist de evidencia, research de mercado y escenarios de valuation 2-10 años.",
     },
     primaryPath: "/neuro-analysis",
     paths: ["/neuro-analysis"],

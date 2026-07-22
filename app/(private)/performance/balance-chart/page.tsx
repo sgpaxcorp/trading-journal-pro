@@ -91,6 +91,34 @@ function listTradingDaysBetween(startIso: string, endIso: string): string[] {
   return out;
 }
 
+function resolveAverageTradingDaysPerWeek(value?: number | null): number {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return 5;
+  return Math.max(1, Math.min(5, Math.floor(n)));
+}
+
+function weekKeyFromIso(dateIso: string): string {
+  const d = new Date(`${dateIso}T00:00:00`);
+  if (!Number.isFinite(d.getTime())) return String(dateIso).slice(0, 10);
+  const dow = d.getDay();
+  const mondayOffset = dow === 0 ? -6 : 1 - dow;
+  d.setDate(d.getDate() + mondayOffset);
+  return isoDate(d);
+}
+
+function selectTradingDaysByWeeklyAverage(tradingDays: string[], averageTradingDaysPerWeek?: number | null): string[] {
+  const daysPerWeek = resolveAverageTradingDaysPerWeek(averageTradingDaysPerWeek);
+  if (daysPerWeek >= 5) return tradingDays;
+  const seenByWeek = new Map<string, number>();
+  return tradingDays.filter((dateIso) => {
+    const key = weekKeyFromIso(dateIso);
+    const count = seenByWeek.get(key) ?? 0;
+    if (count >= daysPerWeek) return false;
+    seenByWeek.set(key, count + 1);
+    return true;
+  });
+}
+
 function toNum(x: unknown, fb = 0): number {
   const n = Number(x);
   return Number.isFinite(n) ? n : fb;
@@ -144,6 +172,9 @@ type DbGrowthPlanRow = {
   max_daily_loss_percent: unknown;
   loss_days_per_week: unknown;
   trading_days: unknown;
+  plan_start_date?: string | null;
+  target_date?: string | null;
+  steps?: any;
 
   selected_plan: string | null;
 
@@ -164,6 +195,9 @@ type GrowthPlan = {
   maxDailyLossPercent: number;
   lossDaysPerWeek: number;
   tradingDays: number;
+  averageTradingDaysPerWeek: number;
+  planStartDate: string | null;
+  targetDate: string | null;
 
   selectedPlan: string | null;
 
@@ -178,6 +212,24 @@ type GrowthPlan = {
 function mapGrowthPlanRow(row: DbGrowthPlanRow): GrowthPlan {
   const createdAtIso = row.created_at || row.updated_at || new Date().toISOString();
   const updatedAtIso = row.updated_at || row.created_at || new Date().toISOString();
+  const businessAnalysis = row.steps?.business_analysis && typeof row.steps.business_analysis === "object"
+    ? row.steps.business_analysis
+    : null;
+  const averageTradingDaysPerWeek = Math.max(
+    1,
+    Math.min(
+      5,
+      Math.floor(
+        toNum(
+          businessAnalysis?.averageTradingDaysPerWeek ??
+            businessAnalysis?.operatingModel?.averageTradingDaysPerWeek ??
+            row.steps?._ui?.averageTradingDaysPerWeek ??
+            5,
+          5
+        )
+      )
+    )
+  );
 
   return {
     id: row.id,
@@ -187,8 +239,11 @@ function mapGrowthPlanRow(row: DbGrowthPlanRow): GrowthPlan {
     dailyTargetPct: toNum(row.daily_target_pct, 0),
     dailyGoalPercent: toNum(row.daily_goal_percent, 0),
     maxDailyLossPercent: toNum(row.max_daily_loss_percent, 0),
-    lossDaysPerWeek: Math.max(0, Math.min(5, Math.floor(toNum(row.loss_days_per_week, 0)))),
+    lossDaysPerWeek: Math.max(0, Math.min(averageTradingDaysPerWeek, Math.floor(toNum(row.loss_days_per_week, 0)))),
     tradingDays: Math.max(0, Math.floor(toNum(row.trading_days, 0))),
+    averageTradingDaysPerWeek,
+    planStartDate: row.plan_start_date ? String(row.plan_start_date).slice(0, 10) : null,
+    targetDate: row.target_date ? String(row.target_date).slice(0, 10) : null,
     selectedPlan: row.selected_plan ?? null,
     createdAtIso,
     updatedAtIso,
@@ -209,9 +264,10 @@ function dateIsoFromAny(s: any): string {
  * So we prefer `createdAt`, then fall back to `updatedAt`, then today.
  */
 function planStartIsoFromPlan(plan: GrowthPlan | null | undefined): string {
+  const explicit = dateIsoFromAny(plan?.planStartDate);
   const created = dateIsoFromAny(plan?.createdAtIso ?? plan?.createdAt);
   const updated = dateIsoFromAny(plan?.updatedAtIso ?? plan?.updatedAt);
-  return created || updated || isoDate(new Date());
+  return explicit || created || updated || isoDate(new Date());
 }
 
 function dailyTargetPct(plan: GrowthPlan | null): number {
@@ -294,7 +350,7 @@ export default function BalanceChartPage() {
       try {
         // Growth plan
         const SELECT_GROWTH_PLAN =
-          "id,user_id,starting_balance,target_balance,daily_target_pct,daily_goal_percent,max_daily_loss_percent,loss_days_per_week,trading_days,selected_plan,created_at,updated_at" as const;
+          "id,user_id,starting_balance,target_balance,daily_target_pct,daily_goal_percent,max_daily_loss_percent,loss_days_per_week,trading_days,plan_start_date,target_date,steps,selected_plan,created_at,updated_at" as const;
 
         const { data, error } = await supabaseBrowser
           .from("growth_plans")
@@ -450,7 +506,10 @@ export default function BalanceChartPage() {
     const rangeEndIso = [todayIso, lastSessionIso, lastCashIso].filter(Boolean).sort().pop() || todayIso;
 
     // Build trading-day schedule (Mon–Fri)
-    const allTradingDates = listTradingDaysBetween(planStartIso, rangeEndIso);
+    const allTradingDates = selectTradingDaysByWeeklyAverage(
+      listTradingDaysBetween(planStartIso, rangeEndIso),
+      plan?.averageTradingDaysPerWeek ?? 5
+    );
 
     // Respect plan.tradingDays if set, but do not lose cashflows that occur after the last trading day
     const effectiveTradingDays = plan?.tradingDays && plan.tradingDays > 0
@@ -472,6 +531,7 @@ export default function BalanceChartPage() {
 
     const pct = dailyTargetPct(plan);
     const lossDaysPerWeek = plan?.lossDaysPerWeek ?? 0;
+    const averageTradingDaysPerWeek = resolveAverageTradingDaysPerWeek(plan?.averageTradingDaysPerWeek ?? 5);
 
     const out: Array<{ date: string; actual: number; projected: number; dayPnl: number; cashflow: number }> = [];
 
@@ -499,7 +559,7 @@ export default function BalanceChartPage() {
       // Projected balance: apply daily target (and allow loss days)
       let projectedBalance = projBalance;
       if (pct > 0) {
-        const isLossDay = lossDaysPerWeek > 0 && (i % 5) < lossDaysPerWeek;
+        const isLossDay = lossDaysPerWeek > 0 && (i % averageTradingDaysPerWeek) < lossDaysPerWeek;
         const r = pct / 100;
         projectedBalance = projectedBalance * (1 + (isLossDay ? -r : r));
       }
@@ -772,8 +832,8 @@ export default function BalanceChartPage() {
                   <h2 className="text-base font-semibold">{L("Equity curve", "Curva de equity")}</h2>
                   <p className="text-xs text-slate-500 mt-1">
                     {L(
-                      "Trading days only (Mon–Fri). Cashflows are applied to both lines; weekend cashflows appear as an “as-of” point.",
-                      "Solo días de trading (Lun–Vie). Los cashflows se aplican a ambas líneas; los de fin de semana aparecen como punto “as-of”."
+                      "Projected line follows the plan's operating-day cadence. Cashflows are applied to both lines.",
+                      "La línea proyectada sigue la cadencia de días operativos del plan. Los cashflows se aplican a ambas líneas."
                     )}
                   </p>
                 </div>

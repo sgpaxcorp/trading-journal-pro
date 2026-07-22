@@ -64,6 +64,9 @@ export type GrowthPlanSteps = {
     selectedScenario?: Record<string, unknown> | null;
     scenarios?: Array<Record<string, unknown>>;
     realismReview?: Record<string, unknown>;
+    averageTradingDaysPerWeek?: number;
+    operatingModel?: Record<string, unknown>;
+    aiPlanAdvisor?: Record<string, unknown>;
     updatedAt?: string;
   };
   prepare?: {
@@ -146,7 +149,24 @@ export type GrowthPlan = {
   updatedAt?: string;
 };
 
+export type GrowthPlanHistoryEntry = {
+  id: string;
+  userId: string;
+  accountId?: string | null;
+  startedAt?: string | null;
+  endedAt?: string | null;
+  resetReason?: string | null;
+  snapshot: Record<string, unknown>;
+  createdAt?: string | null;
+};
+
+type GrowthPlanHistoryOptions = {
+  recordHistory?: boolean;
+  historyReason?: string;
+};
+
 const TABLE = "growth_plans";
+const HISTORY_TABLE = "growth_plan_history";
 const LOG = "[growthPlanSupabase]";
 
 function num(v: any, fallback = 0) {
@@ -379,6 +399,141 @@ function toDb(plan: GrowthPlan) {
   };
 }
 
+function selectedScenarioId(plan: GrowthPlan | null | undefined) {
+  return String((plan?.steps as any)?.business_analysis?.selectedScenarioId ?? "");
+}
+
+function averageTradingDaysPerWeek(plan: GrowthPlan | null | undefined) {
+  const raw =
+    (plan?.steps as any)?.business_analysis?.averageTradingDaysPerWeek ??
+    (plan?.steps as any)?.business_analysis?.operatingModel?.averageTradingDaysPerWeek;
+  const n = Number(raw);
+  return Number.isFinite(n) ? Math.max(1, Math.min(5, Math.floor(n))) : 5;
+}
+
+function plannedWithdrawalSummary(plan: GrowthPlan | null | undefined) {
+  const withdrawals = normalizePlannedWithdrawals(plan?.plannedWithdrawals ?? []);
+  return {
+    count: withdrawals.length,
+    total: withdrawals.reduce((sum, item) => sum + Math.max(0, Number(item.amount ?? 0)), 0),
+  };
+}
+
+function historySnapshot(plan: GrowthPlan) {
+  return {
+    startingBalance: plan.startingBalance,
+    targetBalance: plan.targetBalance,
+    planStartDate: plan.planStartDate ?? null,
+    targetDate: plan.targetDate ?? null,
+    tradingDays: plan.tradingDays,
+    averageTradingDaysPerWeek: averageTradingDaysPerWeek(plan),
+    lossDaysPerWeek: plan.lossDaysPerWeek ?? 0,
+    maxDailyLossPercent: plan.maxDailyLossPercent,
+    maxRiskPerTradePercent: plan.maxRiskPerTradePercent ?? null,
+    dailyGoalPercent: plan.dailyGoalPercent ?? plan.dailyTargetPct ?? null,
+    selectedScenarioId: selectedScenarioId(plan) || null,
+    plannedWithdrawals: plannedWithdrawalSummary(plan),
+    updatedAt: plan.updatedAt ?? null,
+  };
+}
+
+function valuesDiffer(a: unknown, b: unknown) {
+  if (typeof a === "number" || typeof b === "number") {
+    const an = Number(a);
+    const bn = Number(b);
+    if (!Number.isFinite(an) || !Number.isFinite(bn)) return String(a ?? "") !== String(b ?? "");
+    return Math.abs(an - bn) > 0.0001;
+  }
+  return JSON.stringify(a ?? null) !== JSON.stringify(b ?? null);
+}
+
+function summarizePlanChanges(before: GrowthPlan | null, after: GrowthPlan) {
+  if (!before) {
+    return [
+      {
+        field: "plan_created",
+        label: "Plan created",
+        before: null,
+        after: historySnapshot(after),
+      },
+    ];
+  }
+
+  const beforeSnapshot = historySnapshot(before);
+  const afterSnapshot = historySnapshot(after);
+  const labels: Record<string, string> = {
+    startingBalance: "Starting balance",
+    targetBalance: "Target balance",
+    planStartDate: "Start date",
+    targetDate: "Target date",
+    tradingDays: "Committed trading days",
+    averageTradingDaysPerWeek: "Average trading days/week",
+    lossDaysPerWeek: "Loss days/week",
+    maxDailyLossPercent: "Max daily loss",
+    maxRiskPerTradePercent: "Risk per trade",
+    dailyGoalPercent: "Required goal-day %",
+    selectedScenarioId: "Operating scenario",
+    plannedWithdrawals: "Planned withdrawals",
+  };
+
+  return Object.keys(labels)
+    .filter((field) => valuesDiffer((beforeSnapshot as any)[field], (afterSnapshot as any)[field]))
+    .map((field) => ({
+      field,
+      label: labels[field],
+      before: (beforeSnapshot as any)[field] ?? null,
+      after: (afterSnapshot as any)[field] ?? null,
+    }));
+}
+
+function normalizeHistoryRow(row: any): GrowthPlanHistoryEntry {
+  return {
+    id: String(row?.id ?? ""),
+    userId: String(row?.user_id ?? row?.userId ?? ""),
+    accountId: row?.account_id ?? row?.accountId ?? null,
+    startedAt: row?.started_at ?? row?.startedAt ?? null,
+    endedAt: row?.ended_at ?? row?.endedAt ?? null,
+    resetReason: row?.reset_reason ?? row?.resetReason ?? null,
+    snapshot:
+      row?.snapshot && typeof row.snapshot === "object"
+        ? (row.snapshot as Record<string, unknown>)
+        : {},
+    createdAt: row?.created_at ?? row?.createdAt ?? null,
+  };
+}
+
+async function recordGrowthPlanHistory(params: {
+  userId: string;
+  accountId?: string | null;
+  before: GrowthPlan | null;
+  after: GrowthPlan;
+  reason?: string;
+}) {
+  const changes = summarizePlanChanges(params.before, params.after);
+  if (!changes.length) return;
+
+  const snapshot = {
+    reason: params.reason ?? (params.before ? "plan_updated" : "plan_created"),
+    changedFields: changes.map((change) => change.label),
+    changes,
+    before: params.before ? historySnapshot(params.before) : null,
+    after: historySnapshot(params.after),
+  };
+
+  const { error } = await supabaseBrowser.from(HISTORY_TABLE).insert({
+    user_id: params.userId,
+    account_id: params.accountId ?? null,
+    started_at: params.after.planStartDate ?? params.before?.planStartDate ?? null,
+    ended_at: params.after.targetDate ?? params.before?.targetDate ?? null,
+    reset_reason: String(params.reason ?? (params.before ? "plan_updated" : "plan_created")),
+    snapshot,
+  });
+
+  if (error) {
+    console.warn(LOG, "recordGrowthPlanHistory warning", error);
+  }
+}
+
 export function computeAdjustedTarget(plan: GrowthPlan | null, cashflowNet: number) {
   if (!plan) return 0;
   const baseTarget = num(plan.targetBalance, 0);
@@ -442,7 +597,8 @@ export async function getGrowthPlanSupabaseByAccount(accountId?: string | null):
 /** Crea/actualiza (upsert) el Growth Plan del usuario */
 export async function upsertGrowthPlanSupabase(
   plan: Partial<GrowthPlan>,
-  accountId?: string | null
+  accountId?: string | null,
+  options?: GrowthPlanHistoryOptions
 ): Promise<GrowthPlan> {
   const userId = await getAuthedUserId();
   const resolvedAccountId = accountId ?? plan.accountId ?? null;
@@ -493,7 +649,42 @@ export async function upsertGrowthPlanSupabase(
     throw new Error(msg || "Growth plan upsert failed");
   }
 
-  return normalizePlan(data, userId);
+  const saved = normalizePlan(data, userId);
+
+  if (options?.recordHistory) {
+    await recordGrowthPlanHistory({
+      userId,
+      accountId: resolvedAccountId,
+      before: current,
+      after: saved,
+      reason: options.historyReason,
+    });
+  }
+
+  return saved;
+}
+
+export async function getGrowthPlanHistorySupabase(
+  accountId?: string | null,
+  limit = 12
+): Promise<GrowthPlanHistoryEntry[]> {
+  const userId = await getAuthedUserId();
+  let query = supabaseBrowser
+    .from(HISTORY_TABLE)
+    .select("*")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+
+  if (accountId) query = query.eq("account_id", accountId);
+
+  const { data, error } = await query;
+  if (error) {
+    console.warn(LOG, "getGrowthPlanHistorySupabase warning", error);
+    return [];
+  }
+
+  return (data ?? []).map(normalizeHistoryRow);
 }
 
 /** Borra el Growth Plan del usuario */

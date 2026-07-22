@@ -81,7 +81,7 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     "nav.smartTools.optionFlow.title": "Option Flow Intelligence",
     "nav.smartTools.optionFlow.desc": "Options flow reports, premarket plans, and outcome review for the business.",
     "nav.smartTools.neuroAnalysis.title": "Neuro Analysis",
-    "nav.smartTools.neuroAnalysis.desc": "Company intelligence, future projections, and virtual allocation simulation.",
+    "nav.smartTools.neuroAnalysis.desc": "Company intelligence, evidence checklist, market research, and 2-10 year valuation scenarios.",
 
     /* -----------------
        Performance dropdown items
@@ -229,7 +229,7 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     ------------------ */
     "footer.brand": "Neuro Trader",
     "footer.description":
-      "A Trading Business Platform for Trader Entrepreneurs who want to centralize their plan, execution, performance, protection, and AI coaching in one operating system.",
+      "NeuroTrader is the Trading Business Operating System for Trader Entrepreneurs. It connects the Trading Business Plan, execution records, risk controls, business performance, financial management, audits, and AI-guided accountability in one platform.",
     "footer.links.login": "Log In",
     "footer.links.staff": "Staff login",
     "footer.links.blog": "Blog",
@@ -240,7 +240,7 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     "footer.links.terms": "Terms & Conditions",
     "footer.links.about": "About Us",
     "footer.copyright":
-      "Built for Trader Entrepreneurs who want structure, risk control, and business clarity.",
+      "Build the trading business plan. Protect it with one operating loop.",
 
     // Older aliases (footer.link.*)
     "footer.link.login": "Log In",
@@ -334,7 +334,7 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     "nav.smartTools.optionFlow.title": "Option Flow Intelligence",
     "nav.smartTools.optionFlow.desc": "Reportes de options flow, planes premarket y revisión de resultados para el negocio.",
     "nav.smartTools.neuroAnalysis.title": "Neuro Analysis",
-    "nav.smartTools.neuroAnalysis.desc": "Inteligencia de compañías, proyecciones futuras y simulación de allocation virtual.",
+    "nav.smartTools.neuroAnalysis.desc": "Inteligencia de compañías, checklist de evidencia, research de mercado y escenarios de valuation 2-10 años.",
 
     /* -----------------
        Performance dropdown items
@@ -480,7 +480,7 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     ------------------ */
     "footer.brand": "Neuro Trader",
     "footer.description":
-      "Una Plataforma Empresarial de Trading para Empresarios Traders que quieren centralizar su plan, ejecución, rendimiento, protección y coaching IA en un solo sistema operativo.",
+      "NeuroTrader es el Sistema Operativo de Empresa de Trading para Empresarios Traders. Conecta el Plan de Empresa de Trading, registros de ejecución, controles de riesgo, rendimiento empresarial, gestión financiera, auditorías y accountability guiada por IA en una sola plataforma.",
     "footer.links.login": "Iniciar sesión",
     "footer.links.staff": "Staff login",
     "footer.links.blog": "Blog",
@@ -491,7 +491,7 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     "footer.links.terms": "Términos y condiciones",
     "footer.links.about": "Sobre nosotros",
     "footer.copyright":
-      "Creado para Empresarios Traders que buscan estructura, control de riesgo y claridad empresarial.",
+      "Construye el plan de empresa de trading. Protégelo con un solo ciclo operativo.",
 
     // Aliases
     "footer.link.login": "Iniciar sesión",

@@ -213,14 +213,14 @@ async function createAgentDecision(params: {
   const instructions =
     params.language === "es"
       ? [
-          "Eres el agente de servicio de NeuroTrader, la plataforma empresarial de trading para Empresarios Traders.",
+          "Eres el agente de servicio de NeuroTrader, el Sistema Operativo de Empresa de Trading para Empresarios Traders.",
           "Responde solo con información sustentada por la conversación y el contexto de ayuda provisto.",
           "Si la pregunta requiere revisar cuenta específica, pagos excepcionales, reembolso, bug técnico, activación manual, o algo no claramente cubierto por la documentación, NO inventes: marca canAnswer=false.",
           "Si sí puedes responder, da una respuesta corta, clara y útil en el mismo idioma del usuario.",
           "Devuelve JSON válido solamente con las claves: canAnswer, reply, rationale, suggestedCategory.",
         ].join(" ")
       : [
-          "You are the NeuroTrader service agent, the Trading Business Platform for Trader Entrepreneurs.",
+          "You are the NeuroTrader service agent, the Trading Business Operating System for Trader Entrepreneurs.",
           "Answer only with information supported by the ticket conversation and the provided help context.",
           "If the request needs account-specific investigation, refund exceptions, technical bug triage, manual activation, or anything not clearly supported by the docs, do NOT guess: set canAnswer=false.",
           "If you can answer, keep it short, clear, and useful in the user's language.",

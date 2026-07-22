@@ -396,7 +396,24 @@ export async function GET(req: NextRequest) {
       plan?.loss_day_per_week ??
       plan?.lossDaysPerWeek ??
       0;
-    const lossDaysPerWeek = Math.max(0, Math.min(5, Math.floor(toNum(lossDaysRaw, 0))));
+    const planSteps = plan?.steps && typeof plan.steps === "object" ? (plan.steps as Record<string, any>) : null;
+    const businessAnalysis =
+      planSteps?.business_analysis && typeof planSteps.business_analysis === "object"
+        ? (planSteps.business_analysis as Record<string, any>)
+        : null;
+    const averageTradingDaysRaw =
+      businessAnalysis?.averageTradingDaysPerWeek ??
+      businessAnalysis?.operatingModel?.averageTradingDaysPerWeek ??
+      planSteps?._ui?.averageTradingDaysPerWeek ??
+      5;
+    const averageTradingDaysPerWeek = Math.max(
+      1,
+      Math.min(5, Math.floor(toNum(averageTradingDaysRaw, 5)))
+    );
+    const lossDaysPerWeek = Math.max(
+      0,
+      Math.min(averageTradingDaysPerWeek, Math.floor(toNum(lossDaysRaw, 0)))
+    );
 
     const planStartIso = (() => {
       const explicit = String(plan?.plan_start_date ?? "");
@@ -491,6 +508,7 @@ export async function GET(req: NextRequest) {
         target: targetBalance,
         startIso: planStartIso,
         targetIso: targetDateIso,
+        averageTradingDaysPerWeek,
         lossDaysPerWeek,
         maxDailyLossPercent: toNum(plan?.max_daily_loss_percent ?? 0, 0),
         withdrawalSettings: plannedWithdrawalSettings,
@@ -512,7 +530,7 @@ export async function GET(req: NextRequest) {
         if (dayCash !== 0) projBalance += dayCash;
 
         if (isWeekday(d) && dailyTargetPct > 0) {
-          const isLossDay = lossDaysPerWeek > 0 && (tradingIdx % 5) < lossDaysPerWeek;
+          const isLossDay = lossDaysPerWeek > 0 && (tradingIdx % averageTradingDaysPerWeek) < lossDaysPerWeek;
           const r = dailyTargetPct / 100;
           projBalance = projBalance * (1 + (isLossDay ? -r : r));
           tradingIdx += 1;
@@ -540,6 +558,7 @@ export async function GET(req: NextRequest) {
         targetDate: String(plan?.target_date ?? plan?.targetDate ?? ""),
         planMode: String(plan?.plan_mode ?? plan?.planMode ?? ""),
         planPhases: plan?.plan_phases ?? plan?.planPhases ?? null,
+        averageTradingDaysPerWeek,
         lossDaysPerWeek,
         tradingDays: toNum(plan?.trading_days ?? 0, 0),
         maxDailyLossPercent: toNum(plan?.max_daily_loss_percent ?? 0, 0),

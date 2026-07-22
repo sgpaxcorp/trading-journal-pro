@@ -434,6 +434,7 @@ export function AICoachScreen({}: AICoachScreenProps) {
   const [loadingThreads, setLoadingThreads] = useState(true);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [sending, setSending] = useState(false);
+  const [typingFrame, setTypingFrame] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const [loadingContext, setLoadingContext] = useState(false);
   const [screenError, setScreenError] = useState<string | null>(null);
@@ -591,6 +592,24 @@ export function AICoachScreen({}: AICoachScreenProps) {
     };
   }, [activeThread?.id, fetchMessages, language]);
 
+  useEffect(() => {
+    if (!sending) {
+      setTypingFrame(0);
+      return;
+    }
+    const intervalId = setInterval(() => {
+      setTypingFrame((prev) => (prev + 1) % 3);
+    }, 280);
+    return () => clearInterval(intervalId);
+  }, [sending]);
+
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      listRef.current?.scrollToEnd({ animated: true });
+    }, 60);
+    return () => clearTimeout(timeoutId);
+  }, [messages, sending]);
+
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
@@ -652,6 +671,7 @@ export function AICoachScreen({}: AICoachScreenProps) {
     () => [...journalEntries].slice(Math.max(0, journalEntries.length - 25)).reverse().map(compactSessionForAi),
     [journalEntries]
   );
+  const canSend = input.trim().length > 0 && !sending;
 
   const planSnapshot = useMemo(() => {
     const plan = accountSeries?.plan;
@@ -962,13 +982,25 @@ export function AICoachScreen({}: AICoachScreenProps) {
             keyExtractor={(item) => item.id}
             renderItem={({ item }) => {
               const isUser = item.role === "user";
+              const roleLabel = isUser
+                ? t(language, "You", "Tú")
+                : t(language, "AI Coach", "Coach IA");
               return (
-                <View style={[styles.bubble, isUser ? styles.bubbleUser : styles.bubbleCoach]}>
-                  <Text style={styles.bubbleText}>{item.content}</Text>
-                  <Text style={styles.bubbleMeta}>{item.created_at.slice(11, 16)}</Text>
+                <View style={[styles.messageRow, isUser ? styles.messageRowUser : styles.messageRowCoach]}>
+                  <Text style={[styles.messageLabel, isUser ? styles.messageLabelUser : styles.messageLabelCoach]}>
+                    {roleLabel}
+                  </Text>
+                  <View style={[styles.bubble, isUser ? styles.bubbleUser : styles.bubbleCoach]}>
+                    <Text style={styles.bubbleText}>{item.content}</Text>
+                    <Text style={[styles.bubbleMeta, isUser ? styles.bubbleMetaUser : styles.bubbleMetaCoach]}>
+                      {item.created_at.slice(11, 16)}
+                    </Text>
+                  </View>
                 </View>
               );
             }}
+            contentContainerStyle={styles.chatListContent}
+            keyboardShouldPersistTaps="handled"
             ListEmptyComponent={
               <Text style={styles.emptyText}>
                 {t(
@@ -977,6 +1009,31 @@ export function AICoachScreen({}: AICoachScreenProps) {
                   "Pregunta al coach sobre tus trades, emociones o disciplina."
                 )}
               </Text>
+            }
+            ListFooterComponent={
+              sending ? (
+                <View style={[styles.messageRow, styles.messageRowCoach]}>
+                  <Text style={[styles.messageLabel, styles.messageLabelCoach]}>
+                    {t(language, "AI Coach", "Coach IA")}
+                  </Text>
+                  <View style={[styles.bubble, styles.bubbleCoach, styles.typingBubble]}>
+                    <Text style={styles.typingLabel}>
+                      {t(language, "Thinking through your execution…", "Pensando en tu ejecución…")}
+                    </Text>
+                    <View style={styles.typingDotsRow}>
+                      {[0, 1, 2].map((dot) => (
+                        <View
+                          key={dot}
+                          style={[
+                            styles.typingDot,
+                            typingFrame === dot && styles.typingDotActive,
+                          ]}
+                        />
+                      ))}
+                    </View>
+                  </View>
+                </View>
+              ) : null
             }
           />
         )}
@@ -992,8 +1049,19 @@ export function AICoachScreen({}: AICoachScreenProps) {
             onChangeText={setInput}
             multiline
           />
-          <Pressable style={[styles.sendButton, sending && styles.sendButtonDisabled]} onPress={handleSend}>
-            <Text style={styles.sendButtonText}>{sending ? "..." : t(language, "Send", "Enviar")}</Text>
+          <Pressable
+            style={[styles.sendButton, !canSend && styles.sendButtonDisabled]}
+            onPress={handleSend}
+            disabled={!canSend}
+          >
+            {sending ? (
+              <View style={styles.sendButtonLoading}>
+                <ActivityIndicator size="small" color={colors.onPrimary} />
+                <Text style={styles.sendButtonText}>{t(language, "Thinking", "Pensando")}</Text>
+              </View>
+            ) : (
+              <Text style={styles.sendButtonText}>{t(language, "Send", "Enviar")}</Text>
+            )}
           </Pressable>
         </View>
       </KeyboardAvoidingView>
@@ -1070,21 +1138,49 @@ const createStyles = (colors: ThemeColors) =>
       letterSpacing: 1.2,
       textTransform: "uppercase",
     },
+    chatListContent: {
+      paddingTop: 4,
+      paddingBottom: 8,
+      gap: 8,
+    },
+    messageRow: {
+      maxWidth: "90%",
+      gap: 4,
+      marginBottom: 2,
+    },
+    messageRowUser: {
+      alignSelf: "flex-end",
+      alignItems: "flex-end",
+    },
+    messageRowCoach: {
+      alignSelf: "flex-start",
+      alignItems: "flex-start",
+    },
+    messageLabel: {
+      fontSize: 10,
+      fontWeight: "700",
+      letterSpacing: 0.8,
+      textTransform: "uppercase",
+    },
+    messageLabelUser: {
+      color: colors.primary,
+    },
+    messageLabelCoach: {
+      color: colors.textMuted,
+    },
     bubble: {
       borderRadius: 12,
       paddingVertical: 8,
       paddingHorizontal: 10,
-      marginBottom: 6,
       maxWidth: "85%",
+      minWidth: 110,
     },
     bubbleUser: {
-      alignSelf: "flex-end",
       backgroundColor: colors.successSoft,
       borderWidth: 1,
       borderColor: colors.success,
     },
     bubbleCoach: {
-      alignSelf: "flex-start",
       backgroundColor: colors.card,
       borderWidth: 1,
       borderColor: colors.border,
@@ -1098,6 +1194,40 @@ const createStyles = (colors: ThemeColors) =>
       marginTop: 4,
       color: colors.textMuted,
       fontSize: 9,
+    },
+    bubbleMetaUser: {
+      textAlign: "right",
+    },
+    bubbleMetaCoach: {
+      textAlign: "left",
+    },
+    typingBubble: {
+      gap: 8,
+      paddingVertical: 10,
+      paddingHorizontal: 12,
+    },
+    typingLabel: {
+      color: colors.textMuted,
+      fontSize: 11,
+      lineHeight: 16,
+      fontWeight: "600",
+    },
+    typingDotsRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+    },
+    typingDot: {
+      width: 8,
+      height: 8,
+      borderRadius: 999,
+      backgroundColor: colors.textMuted,
+      opacity: 0.26,
+    },
+    typingDotActive: {
+      opacity: 1,
+      backgroundColor: colors.primary,
+      transform: [{ scale: 1.1 }],
     },
     emptyText: {
       color: colors.textMuted,
@@ -1135,6 +1265,11 @@ const createStyles = (colors: ThemeColors) =>
       color: colors.onPrimary,
       fontSize: 12,
       fontWeight: "700",
+    },
+    sendButtonLoading: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
     },
     loadingRow: {
       flexDirection: "row",

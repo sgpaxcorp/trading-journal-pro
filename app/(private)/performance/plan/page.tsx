@@ -58,6 +58,7 @@ type DbGrowthPlanRow = {
   max_daily_loss_percent: unknown;
   loss_days_per_week: unknown;
   trading_days: unknown;
+  steps?: any;
 
   selected_plan: string | null;
 
@@ -79,6 +80,7 @@ type GrowthPlan = {
   maxDailyLossPercent: number;
   lossDaysPerWeek: number;
   tradingDays: number;
+  averageTradingDaysPerWeek: number;
 
   selectedPlan: string | null;
 
@@ -154,7 +156,7 @@ async function fetchLatestGrowthPlan(userId: string, accountId?: string | null):
   // Avoid building the select string dynamically (e.g., array.join), otherwise strict TS may infer
   // the result as `GenericStringError` (TS2352).
   const SELECT_GROWTH_PLAN =
-    "id,user_id,starting_balance,target_balance,daily_target_pct,daily_goal_percent,max_daily_loss_percent,loss_days_per_week,trading_days,selected_plan,plan_start_date,created_at,updated_at" as const;
+    "id,user_id,starting_balance,target_balance,daily_target_pct,daily_goal_percent,max_daily_loss_percent,loss_days_per_week,trading_days,steps,selected_plan,plan_start_date,created_at,updated_at" as const;
 
   try {
     let q = supabaseBrowser
@@ -177,6 +179,26 @@ async function fetchLatestGrowthPlan(userId: string, accountId?: string | null):
 
     const createdAtIso = row.created_at || row.updated_at || new Date().toISOString();
     const updatedAtIso = row.updated_at || row.created_at || new Date().toISOString();
+    const businessAnalysis = row.steps?.business_analysis && typeof row.steps.business_analysis === "object"
+      ? row.steps.business_analysis
+      : null;
+    const averageTradingDaysPerWeek = Math.max(
+      1,
+      Math.min(
+        5,
+        clampInt(
+          toNum(
+            businessAnalysis?.averageTradingDaysPerWeek ??
+              businessAnalysis?.operatingModel?.averageTradingDaysPerWeek ??
+              row.steps?._ui?.averageTradingDaysPerWeek ??
+              5,
+            5
+          ),
+          1,
+          5
+        )
+      )
+    );
 
     return {
       id: row.id,
@@ -189,8 +211,9 @@ async function fetchLatestGrowthPlan(userId: string, accountId?: string | null):
       dailyGoalPercent: toNum(row.daily_goal_percent, 0),
 
       maxDailyLossPercent: toNum(row.max_daily_loss_percent, 0),
-      lossDaysPerWeek: Math.max(0, Math.min(5, clampInt(toNum(row.loss_days_per_week, 0), 0, 5))),
+      lossDaysPerWeek: Math.max(0, Math.min(averageTradingDaysPerWeek, clampInt(toNum(row.loss_days_per_week, 0), 0, averageTradingDaysPerWeek))),
       tradingDays: Math.max(0, clampInt(toNum(row.trading_days, 0), 0, 10000)),
+      averageTradingDaysPerWeek,
 
       selectedPlan: row.selected_plan ?? null,
 
@@ -645,6 +668,10 @@ export default function PlanPage() {
                   <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
                     <div className="text-[11px] text-slate-500">{L("Trading days", "Días de trading")}</div>
                     <div className="mt-1 text-slate-100 font-semibold">{plan.tradingDays ?? 0}</div>
+                  </div>
+                  <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
+                    <div className="text-[11px] text-slate-500">{L("Operating days/week", "Días operativos/sem")}</div>
+                    <div className="mt-1 text-slate-100 font-semibold">{plan.averageTradingDaysPerWeek ?? 5}</div>
                   </div>
                   <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
                     <div className="text-[11px] text-slate-500">{L("Loss days/week", "Días de pérdida/sem")}</div>

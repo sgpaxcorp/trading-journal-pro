@@ -11,12 +11,12 @@ const openai = new OpenAI({
 });
 
 const PLAN_CONTEXT = `
-Product: Neuro Trader, the Trading Business Platform for Trader Entrepreneurs.
+Product: NeuroTrader, the Trading Business Operating System for Trader Entrepreneurs.
 Core plan: $${PLAN_PRICES.core.monthly}/month or $${PLAN_PRICES.core.annual}/year. Best for Trader Entrepreneurs who want the operating foundation: Trading Business Plan, execution records, calendar, core KPIs, broker data imports, Business Milestones tied to the plan, Business Protection System with basic alarms and routine checks, 24/7 virtual support agent, ticket follow-up until resolved, iOS mobile app, and Android app coming soon. Includes 5 trading accounts.
 Advanced plan: $${PLAN_PRICES.advanced.monthly}/month or $${PLAN_PRICES.advanced.annual}/year. Best for Trader Entrepreneurs who want the full business intelligence layer: unlimited trading accounts, everything in Core, Business Notebook workspace, cashflow tracking, time-of-day and instrument breakdowns, risk metrics and streaks, Business P&L Office, broker data audit workbench, advanced Business Protection System, Business AI coaching/action plans, advanced PDF exports, priority 24/7 virtual support agent, priority ticket follow-up until resolved, iOS mobile app, and Android app coming soon.
 Broker Data Sync & Imports add-on: $${BROKER_SYNC_ADDON.prices.monthly}/month or $${BROKER_SYNC_ADDON.prices.annual}/year. The value is flexibility and better insight: users can bring real broker data through secure sync, direct broker statements, order history, and supported CSV/XLSX imports. Position this as turning raw broker activity into cleaner audits, sharper analytics, and more useful AI coaching. Do not make it sound like a fallback or limitation.
 Option Flow Intelligence: private beta, request access/admin enabled; do not sell it as a public paid add-on.
-Important positioning: the product helps Trader Entrepreneurs start, operate, track, and improve a trading business, reduce scattered tools, protect capital with rules, measure discipline, review performance, and build a repeatable process. It does not guarantee profits and should not give financial advice.
+Important positioning: the product connects the Trading Business Plan, execution records, risk controls, business performance, financial management, audits, and AI-guided accountability in one platform. It helps Trader Entrepreneurs build the trading business plan and protect it with one operating loop. It does not guarantee profits and should not give financial advice.
 `.trim();
 
 export async function POST(req: Request) {

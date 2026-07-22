@@ -46,6 +46,40 @@ function normalizeTicker(value: unknown) {
     .slice(0, 12);
 }
 
+function marketItemForTicker(marketData: unknown, ticker: string) {
+  const raw = marketData as any;
+  if (!raw || !ticker) return null;
+  if (raw?.items && typeof raw.items === "object") {
+    return raw.items[ticker] ?? raw.items[ticker.toUpperCase()] ?? null;
+  }
+  if (normalizeTicker(raw?.ticker) === ticker) return raw;
+  return null;
+}
+
+function buildEffectiveHoldings(payload: NeuroAnalysisRequest) {
+  const holdings = Array.isArray(payload?.holdings) ? payload.holdings : [];
+  if (holdings.length > 0) return holdings;
+
+  const ticker = normalizeTicker(payload?.focusTicker);
+  if (!ticker) return [];
+  const market = marketItemForTicker(payload?.marketData, ticker);
+  const price = Number(
+    market?.market?.regularMarketPrice ??
+      market?.market?.previousClose ??
+      0
+  );
+  const safePrice = Number.isFinite(price) && price > 0 ? price : 0;
+  return [
+    {
+      ticker,
+      shares: 1,
+      averageCost: safePrice,
+      currentPrice: safePrice,
+      researchOnly: true,
+    },
+  ];
+}
+
 function sanitizeClientFilings(
   filings: NonNullable<NeuroAnalysisRequest["uploadedFilings"]>
 ): FilingMetadata[] {
@@ -203,15 +237,21 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Missing OPENAI_API_KEY on server." }, { status: 500 });
     }
 
-    const payload = (await req.json()) as NeuroAnalysisRequest & {
+    const rawPayload = (await req.json()) as NeuroAnalysisRequest & {
       caseId?: string | null;
       caseTitle?: string | null;
       selectedAccountId?: string | null;
       brokerSnapshot?: unknown;
       readiness?: unknown;
     };
-    if (!Array.isArray(payload?.holdings) || payload.holdings.length === 0) {
-      return NextResponse.json({ error: "At least one holding is required." }, { status: 400 });
+    const effectiveHoldings = buildEffectiveHoldings(rawPayload);
+    const payload = {
+      ...rawPayload,
+      focusTicker: normalizeTicker(rawPayload.focusTicker || effectiveHoldings[0]?.ticker),
+      holdings: effectiveHoldings,
+    };
+    if (!payload.focusTicker || payload.holdings.length === 0) {
+      return NextResponse.json({ error: "A focus ticker is required." }, { status: 400 });
     }
 
     const quota = await checkNeuroQuota(authUser.userId, "analysis");

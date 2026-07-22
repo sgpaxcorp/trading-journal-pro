@@ -71,6 +71,13 @@ function clampInt(value: number, min = 0, max = Number.MAX_SAFE_INTEGER): number
   return Math.max(min, Math.min(max, Math.floor(Number.isFinite(value) ? value : 0)));
 }
 
+function resolveAverageTradingDaysPerWeek(value?: number | null): number {
+  if (value == null) return 5;
+  const n = Number(value);
+  if (!Number.isFinite(n)) return 5;
+  return clampInt(n, 1, 5);
+}
+
 function makeId(): string {
   try {
     return crypto.randomUUID();
@@ -84,6 +91,15 @@ function toYMD(d: Date): string {
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
+}
+
+function weekKeyFromIso(dateIso: string): string {
+  const d = new Date(`${dateIso}T00:00:00`);
+  if (!Number.isFinite(d.getTime())) return String(dateIso).slice(0, 10);
+  const dow = d.getDay();
+  const mondayOffset = dow === 0 ? -6 : 1 - dow;
+  d.setDate(d.getDate() + mondayOffset);
+  return toYMD(d);
 }
 
 function observedDate(date: Date): Date {
@@ -164,6 +180,34 @@ export function listTradingDaysBetween(startIso: string, endIso: string): string
 
 export function computeTradingDaysBetween(startIso: string, endIso: string): number {
   return listTradingDaysBetween(startIso, endIso).length;
+}
+
+export function selectTradingDaysByWeeklyAverage(
+  tradingDays: string[],
+  averageTradingDaysPerWeek?: number | null
+): string[] {
+  const daysPerWeek = resolveAverageTradingDaysPerWeek(averageTradingDaysPerWeek);
+  if (daysPerWeek >= 5) return tradingDays;
+
+  const seenByWeek = new Map<string, number>();
+  return tradingDays.filter((dateIso) => {
+    const key = weekKeyFromIso(dateIso);
+    const count = seenByWeek.get(key) ?? 0;
+    if (count >= daysPerWeek) return false;
+    seenByWeek.set(key, count + 1);
+    return true;
+  });
+}
+
+export function computeCommittedTradingDaysBetween(
+  startIso: string,
+  endIso: string,
+  averageTradingDaysPerWeek?: number | null
+): number {
+  return selectTradingDaysByWeeklyAverage(
+    listTradingDaysBetween(startIso, endIso),
+    averageTradingDaysPerWeek
+  ).length;
 }
 
 function normalizeFrequency(raw: unknown): WithdrawalFrequency {
@@ -342,19 +386,21 @@ function buildWithdrawalSchedule(
 function simulatePlanRows(params: {
   starting: number;
   tradingDays: string[];
+  averageTradingDaysPerWeek?: number | null;
   lossDaysPerWeek: number;
   lossPct: number;
   goalPctDecimal: number;
   withdrawalByDay: Map<number, number>;
 }) {
   const rows: ProjectionRow[] = [];
-  const perWeek = clampInt(params.lossDaysPerWeek, 0, 5);
+  const daysPerCycle = resolveAverageTradingDaysPerWeek(params.averageTradingDaysPerWeek);
+  const perWeek = clampInt(params.lossDaysPerWeek, 0, daysPerCycle);
   let balance = params.starting;
   let cumulativeWithdrawals = 0;
 
   for (let i = 0; i < params.tradingDays.length; i++) {
     const day = i + 1;
-    const dayInWeek = i % 5;
+    const dayInWeek = i % daysPerCycle;
     const isLoss = perWeek > 0 && dayInWeek < perWeek;
     const pctDecimal = isLoss ? -(params.lossPct / 100) : params.goalPctDecimal;
     const startBalance = balance;
@@ -386,6 +432,7 @@ function solveRequiredGoalPct(params: {
   starting: number;
   target: number;
   tradingDays: string[];
+  averageTradingDaysPerWeek?: number | null;
   lossDaysPerWeek: number;
   lossPct: number;
   withdrawalByDay: Map<number, number>;
@@ -396,6 +443,7 @@ function solveRequiredGoalPct(params: {
     const rows = simulatePlanRows({
       starting: params.starting,
       tradingDays: params.tradingDays,
+      averageTradingDaysPerWeek: params.averageTradingDaysPerWeek,
       lossDaysPerWeek: params.lossDaysPerWeek,
       lossPct: params.lossPct,
       goalPctDecimal,
@@ -421,9 +469,11 @@ function solveRequiredGoalPct(params: {
 
 function buildMilestonesFromRows(
   rows: ProjectionRow[],
-  tradingDays: string[]
+  tradingDays: string[],
+  averageTradingDaysPerWeek?: number | null
 ): CadenceTarget[] {
   if (!rows.length || !tradingDays.length) return [];
+  const daysPerCycle = resolveAverageTradingDaysPerWeek(averageTradingDaysPerWeek);
 
   const monthMap = new Map<string, number[]>();
   for (let i = 0; i < tradingDays.length; i++) {
@@ -446,10 +496,10 @@ function buildMilestonesFromRows(
     const monthEndBalance = endRow?.endBalance ?? monthStartBalance;
     const monthGoalProfit = indices.reduce((sum, idx) => sum + (rows[idx - 1]?.expectedUSD ?? 0), 0);
     const monthWithdrawal = indices.reduce((sum, idx) => sum + (rows[idx - 1]?.withdrawalUSD ?? 0), 0);
-    const weeksInMonth = Math.max(1, Math.ceil(indices.length / 5));
+    const weeksInMonth = Math.max(1, Math.ceil(indices.length / daysPerCycle));
 
     for (let w = 1; w <= weeksInMonth; w++) {
-      const weekEndIndex = Math.min(endIndex, startIndex + w * 5 - 1);
+      const weekEndIndex = Math.min(endIndex, startIndex + w * daysPerCycle - 1);
       const weekEndRow = rows[weekEndIndex - 1];
       milestones.push({
         targetEquity: Number((weekEndRow?.endBalance ?? monthEndBalance).toFixed(2)),
@@ -475,6 +525,7 @@ export function buildPlanProjection(params: {
   target: number;
   startIso: string;
   targetIso: string;
+  averageTradingDaysPerWeek?: number | null;
   lossDaysPerWeek: number;
   maxDailyLossPercent: number;
   withdrawalSettings?: PlannedWithdrawalSettings | null;
@@ -494,7 +545,11 @@ export function buildPlanProjection(params: {
     };
   }
 
-  const tradingDays = listTradingDaysBetween(params.startIso, params.targetIso);
+  const averageTradingDaysPerWeek = resolveAverageTradingDaysPerWeek(params.averageTradingDaysPerWeek);
+  const tradingDays = selectTradingDaysByWeeklyAverage(
+    listTradingDaysBetween(params.startIso, params.targetIso),
+    averageTradingDaysPerWeek
+  );
   if (!tradingDays.length) {
     return {
       rows: [],
@@ -519,6 +574,7 @@ export function buildPlanProjection(params: {
     starting: params.starting,
     target: params.target,
     tradingDays,
+    averageTradingDaysPerWeek,
     lossDaysPerWeek: params.lossDaysPerWeek,
     lossPct: Math.max(0, params.maxDailyLossPercent),
     withdrawalByDay: schedule.byDay,
@@ -527,6 +583,7 @@ export function buildPlanProjection(params: {
   const rows = simulatePlanRows({
     starting: params.starting,
     tradingDays,
+    averageTradingDaysPerWeek,
     lossDaysPerWeek: params.lossDaysPerWeek,
     lossPct: Math.max(0, params.maxDailyLossPercent),
     goalPctDecimal,
@@ -562,7 +619,11 @@ export function buildPlanProjection(params: {
       } satisfies PlannedWithdrawalEvent;
     });
 
-  const milestones = buildMilestonesFromRows(effectiveRows, effectiveTradingDays);
+  const milestones = buildMilestonesFromRows(
+    effectiveRows,
+    effectiveTradingDays,
+    averageTradingDaysPerWeek
+  );
 
   return {
     rows: effectiveRows,

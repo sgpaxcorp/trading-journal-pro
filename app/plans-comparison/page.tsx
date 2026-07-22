@@ -39,8 +39,8 @@ export default function PlansComparison() {
             </h1>
             <p className="text-[10px] md:text-xs text-emerald-400 mt-1 max-w-xl">
               {L(
-                "NeuroTrader: the Trading Business Platform for Trader Entrepreneurs, with structure, reporting, protection, and AI coaching in one operating system.",
-                "NeuroTrader: la Plataforma Empresarial de Trading para Empresarios Traders, con estructura, reportes, protección y AI coaching en un solo sistema operativo."
+                "NeuroTrader: the Trading Business Operating System for Trader Entrepreneurs, connecting planning, execution, risk control, performance, financial management, audits, and AI coaching in one platform.",
+                "NeuroTrader: el Sistema Operativo de Empresa de Trading para Empresarios Traders, conectando planificación, ejecución, control de riesgo, rendimiento, gestión financiera, auditorías y AI coaching en una sola plataforma."
               )}
             </p>
             <p className="text-[10px] md:text-xs text-slate-400 mt-1 max-w-xl">

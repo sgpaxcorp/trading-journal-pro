@@ -223,8 +223,8 @@ export function BrokerConnectScreen() {
       title={t(language, "Broker connections", "Conexión de bróker")}
       subtitle={t(
         language,
-        "Connect your broker on mobile. Statement uploads remain on the web.",
-        "Conecta tu bróker en móvil. El statement se sube en la web."
+        "Connect your broker and refresh synced accounts directly from mobile.",
+        "Conecta tu bróker y refresca las cuentas sincronizadas directamente desde móvil."
       )}
       refreshing={refreshing}
       onRefresh={() => loadAccounts(true)}

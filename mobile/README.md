@@ -1,4 +1,4 @@
-# Neuro Trader · Mobile (iPhone)
+# Neuro Trader · Mobile (iOS + Android)
 
 This is the mobile app workspace:
 
@@ -11,6 +11,7 @@ It does **not** modify or replace the web app.
 - Keep app source in `/mobile` (cross-platform).
 - Keep native folders generated (`/mobile/ios`, `/mobile/android`) and treat them as build artifacts.
 - Recreate native iOS from config with `npm run ios:prebuild`.
+- Recreate native Android from config with `npm run android:prebuild`.
 - Ship production builds from Release (embedded JS bundle), not from Metro.
 
 ## Run on iPhone (stable flow)
@@ -42,6 +43,7 @@ It does **not** modify or replace the web app.
 ## Production binary (no Metro required)
 
 - `npm run ios:release` (auto-increments build number)
+- `npm run android:release` (auto-increments build number/version code)
 - Full reset + reinstall on iPhone:
   - `npm run ios:clean-run`
 
@@ -71,6 +73,29 @@ The project includes a config plugin (`plugins/with-device-debug-bundling.js`) s
 
 For App Store/TestFlight distribution, build with Archive from `ios/NeuroTrader.xcworkspace` (Release), then upload in Xcode Organizer.
 
+## Android / Google Play Store
+
+The Android package id is:
+
+- `com.sgpax.neurotraderjournal`
+
+Recommended Google Play build:
+
+1. `cd /Users/SGPAX/Dev/trading-journal-pro/mobile`
+2. `npm run android:sync-native`
+3. `npm run android:store`
+
+`android:store` increments `expo.ios.buildNumber` and `expo.android.versionCode`, then creates a production Android App Bundle (`.aab`) through EAS using the `production` profile.
+
+To submit after the Play Console app and service account are connected:
+
+- `npm run android:submit`
+
+For iOS/TestFlight through EAS:
+
+- `npm run ios:store`
+- `npm run ios:submit`
+
 ## Automatic versioning
 
 - `npm run version:bump`
@@ -82,4 +107,4 @@ For App Store/TestFlight distribution, build with Archive from `ios/NeuroTrader.
   - bumps patch version (e.g. `1.0.3` -> `1.0.4`)
   - also increments `buildNumber` and `versionCode`
 
-`ios:release` already runs `version:bump` automatically before building.
+`ios:release`, `ios:store`, `android:release`, and `android:store` already run `version:bump` automatically before building.

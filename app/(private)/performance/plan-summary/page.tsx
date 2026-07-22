@@ -230,6 +230,16 @@ export default function PlanSummaryPage() {
 
   const targetDate = plan?.targetDate ?? null;
   const daysToTarget = planStartDate && targetDate ? daysBetween(planStartDate, targetDate) : 0;
+  const averageTradingDaysPerWeek = useMemo(() => {
+    const businessAnalysis = (plan?.steps as any)?.business_analysis;
+    const raw =
+      businessAnalysis?.averageTradingDaysPerWeek ??
+      businessAnalysis?.operatingModel?.averageTradingDaysPerWeek ??
+      (plan?.steps as any)?._ui?.averageTradingDaysPerWeek ??
+      5;
+    const n = Number(raw);
+    return Number.isFinite(n) ? Math.max(1, Math.min(5, Math.floor(n))) : 5;
+  }, [plan]);
   const daysRemaining = targetDate ? daysBetween(isoToday(), targetDate) : 0;
   const monthsRemaining = daysRemaining > 0 ? daysRemaining / 30.4 : 0;
   const monthlyTarget = monthsRemaining > 0 ? remainingToTarget / monthsRemaining : 0;
@@ -534,6 +544,10 @@ export default function PlanSummaryPage() {
                   <div className="flex justify-between gap-3">
                     <span className="text-slate-400">{L("Trading days", "Días de trading")}</span>
                     <span className="font-semibold">{plan.tradingDays ?? 0}</span>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <span className="text-slate-400">{L("Operating days/week", "Días operativos/sem")}</span>
+                    <span className="font-semibold">{averageTradingDaysPerWeek}</span>
                   </div>
                   <div className="flex justify-between gap-3">
                     <span className="text-slate-400">{L("Loss days/week", "Días pérdida/sem")}</span>

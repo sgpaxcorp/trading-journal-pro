@@ -1190,6 +1190,26 @@ function buildGrowthPlanOperatingBlock(body: AiCoachRequestBody): string {
     );
 
     const businessAnalysis = growthPlan?.businessAnalysis && typeof growthPlan.businessAnalysis === "object" ? growthPlan.businessAnalysis : null;
+    const operatingModel =
+      businessAnalysis?.operatingModel && typeof businessAnalysis.operatingModel === "object"
+        ? (businessAnalysis.operatingModel as Record<string, unknown>)
+        : null;
+    const averageTradingDaysPerWeek = Number(
+      businessAnalysis?.averageTradingDaysPerWeek ??
+        operatingModel?.averageTradingDaysPerWeek ??
+        NaN
+    );
+    if (Number.isFinite(averageTradingDaysPerWeek)) {
+      lines.push(
+        `Plan operating assumptions: averageTradingDaysPerWeek=${averageTradingDaysPerWeek}, committedTradingDays=${
+          Number.isFinite(Number(operatingModel?.committedTradingDays))
+            ? Number(operatingModel?.committedTradingDays)
+            : Number.isFinite(tradingDays)
+              ? tradingDays
+              : "—"
+        }, lossDaysPerWeek=${Number.isFinite(lossDaysPerWeek) ? lossDaysPerWeek : "—"}. When advising, do not assume a 5-day trading week unless the plan says 5.`
+      );
+    }
     const realismReview =
       businessAnalysis?.realismReview && typeof businessAnalysis.realismReview === "object"
         ? businessAnalysis.realismReview
@@ -1205,6 +1225,31 @@ function buildGrowthPlanOperatingBlock(body: AiCoachRequestBody): string {
       const estimatedCompletionDate = safeString((realismReview as any)?.estimatedCompletionDate || "");
       lines.push(
         `Plan realism review: verdict=${verdict || "—"}${policyBand ? `, policyBand=${policyBand}` : ""}, requiredGoalDay=${pct(requiredGoalPct)}, requiredDailyCompound=${pct(requiredCompoundDailyPct)}, operatingModelDailyGoal=${pct(scenarioDailyGoalPct)}, modelDeadlineBalance=${usd(scenarioProjectedBalance)}, deadlineGap=${usd(scenarioGapUsd)}${estimatedCompletionDate ? `, estimatedCompletion=${estimatedCompletionDate}` : ""}. Use this as deterministic plan feasibility context; do not invent a better outcome.`
+      );
+    }
+
+    const aiPlanAdvisor =
+      businessAnalysis?.aiPlanAdvisor && typeof businessAnalysis.aiPlanAdvisor === "object"
+        ? businessAnalysis.aiPlanAdvisor
+        : null;
+    const advisorPhases = safeArray<any>((aiPlanAdvisor as any)?.phases)
+      .map((phase) => ({
+        title: safeString(phase?.title || "Phase"),
+        targetEquity: Number(phase?.targetEquity),
+        targetDate: safeString(phase?.targetDate || ""),
+        dailyGoalPct: Number(phase?.dailyGoalPct),
+        guardrail: safeString(phase?.guardrail || ""),
+      }))
+      .filter((phase) => Number.isFinite(phase.targetEquity) && phase.targetEquity > 0)
+      .slice(0, 4);
+    if (advisorPhases.length) {
+      lines.push(
+        `AI plan advisor phases:\n${advisorPhases
+          .map(
+            (phase) =>
+              `- ${phase.title}: target=${usd(phase.targetEquity)}${phase.targetDate ? `, estDate=${phase.targetDate}` : ""}, goalDay=${pct(phase.dailyGoalPct)}${phase.guardrail ? `, guardrail=${clampText(phase.guardrail, 140)}` : ""}`
+          )
+          .join("\n")}\nUse these phases as coaching anchors. Do not tell the user to scale before the prior phase is complete and rule compliance is proven.`
       );
     }
 
@@ -1781,37 +1826,70 @@ async function callOpenAI(params: {
   const { apiKey, baseUrl, model, messages, maxTokens = 900, temperature = 0.55 } = params;
 
   const cleanedBaseUrl = String(baseUrl || "https://api.openai.com/v1").replace(/\/+$/, "");
+  const normalizedRequestedModel = safeString(model).trim();
+  const candidateModels = Array.from(
+    new Set(
+      [
+        normalizedRequestedModel,
+        "gpt-4o-mini",
+        "gpt-4o",
+      ].filter((value) => value.length > 0)
+    )
+  );
 
-  const res = await fetch(`${cleanedBaseUrl}/chat/completions`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model,
-      messages,
-      temperature,
-      max_tokens: maxTokens,
-    }),
-  });
+  let lastError: Error | null = null;
 
-  const data = await res.json().catch(() => ({}));
+  for (let index = 0; index < candidateModels.length; index += 1) {
+    const candidateModel = candidateModels[index]!;
+    const res = await fetch(`${cleanedBaseUrl}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: candidateModel,
+        messages,
+        temperature,
+        max_tokens: maxTokens,
+      }),
+    });
 
-  if (!res.ok) {
-    const msg =
+    const data = await res.json().catch(() => ({}));
+
+    if (res.ok) {
+      const text = safeString(data?.choices?.[0]?.message?.content).trim();
+      return {
+        text: text || "No response text received.",
+        model: safeString(data?.model) || candidateModel,
+        usage: data?.usage ?? null,
+      };
+    }
+
+    const message =
       safeString(data?.error?.message) ||
       safeString(data?.message) ||
       `OpenAI request failed (${res.status})`;
-    throw new Error(msg);
+    const lowered = message.toLowerCase();
+    const modelParam = safeString(data?.error?.param).toLowerCase();
+    const retryableModelIssue =
+      res.status >= 400 &&
+      res.status < 500 &&
+      (modelParam === "model" ||
+        /invalid model|unknown model|unsupported model|model .* not found|does not exist|not a valid model|wrong model/i.test(lowered));
+
+    lastError = new Error(message);
+    if (retryableModelIssue && index < candidateModels.length - 1) {
+      console.warn(
+        `[ai-coach] Model "${candidateModel}" failed (${message}). Retrying with fallback model "${candidateModels[index + 1]}".`
+      );
+      continue;
+    }
+
+    throw lastError;
   }
 
-  const text = safeString(data?.choices?.[0]?.message?.content).trim();
-  return {
-    text: text || "No response text received.",
-    model: safeString(data?.model) || model,
-    usage: data?.usage ?? null,
-  };
+  throw lastError ?? new Error("OpenAI request failed.");
 }
 
 function extractFirstJsonObject(raw: string): any | null {

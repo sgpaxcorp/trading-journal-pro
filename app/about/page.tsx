@@ -71,8 +71,8 @@ export default function AboutPage() {
               </p>
               <p>
                 {L(
-                  "That became Neuro Trader: a Trading Business Platform with planning, execution records, AI coaching, statistics, P&L tracking, protection systems, and notebooks working together. The goal was not only to measure money. The goal was to understand the operator behind every decision and turn each session into business intelligence.",
-                  "Así nació Neuro Trader: una Plataforma Empresarial de Trading con planificación, registros de ejecución, AI coaching, estadísticas, tracking de P&L, sistemas de protección y notebooks trabajando en conjunto. La meta no era solo medir dinero. La meta era entender al operador detrás de cada decisión y convertir cada sesión en inteligencia empresarial."
+                  "That became NeuroTrader: the Trading Business Operating System for Trader Entrepreneurs, connecting planning, execution records, risk controls, business performance, financial management, audits, and AI-guided accountability in one platform. Build the trading business plan. Protect it with one operating loop.",
+                  "Así nació NeuroTrader: el Sistema Operativo de Empresa de Trading para Empresarios Traders, conectando planificación, registros de ejecución, controles de riesgo, rendimiento empresarial, gestión financiera, auditorías y accountability guiada por IA en una sola plataforma. Construye el plan de empresa de trading. Protégelo con un solo ciclo operativo."
                 )}
               </p>
               <p>
@@ -91,14 +91,14 @@ export default function AboutPage() {
               </p>
               <h3 className="text-lg font-semibold mt-2">
                 {L(
-                  "Help Trader Entrepreneurs build, operate, and improve their trading business.",
-                  "Ayudar a Empresarios Traders a crear, operar y mejorar su empresa de trading."
+                  "Equip Trader Entrepreneurs to build, run, protect, and improve a measurable trading business.",
+                  "Equipar a Empresarios Traders para crear, operar, proteger y mejorar una empresa de trading medible."
                 )}
               </h3>
               <p className="mt-3 text-sm text-slate-300 leading-relaxed">
                 {L(
-                  "Neuro Trader exists so every Trader Entrepreneur can organize the business side of trading with clear plans, measurable performance, protected rules, and coaching that reflects what actually happened.",
-                  "Neuro Trader existe para que cada Empresario Trader pueda organizar el lado empresarial del trading con planes claros, rendimiento medible, reglas protegidas y coaching basado en lo que realmente pasó."
+                  "To equip Trader Entrepreneurs with the operating structure, risk governance, business intelligence, and accountability required to build, run, protect, and continuously improve a measurable trading business.",
+                  "Equipar a Empresarios Traders con la estructura operativa, gobernanza de riesgo, inteligencia empresarial y accountability necesarias para crear, operar, proteger y mejorar continuamente una empresa de trading medible."
                 )}
               </p>
             </div>
@@ -109,14 +109,14 @@ export default function AboutPage() {
               </p>
               <h3 className="text-lg font-semibold mt-2">
                 {L(
-                  "Become the global business platform for Trader Entrepreneurs.",
-                  "Convertirnos en la plataforma empresarial global para Empresarios Traders."
+                  "Make NeuroTrader the global operating system for disciplined trading businesses.",
+                  "Hacer de NeuroTrader el sistema operativo global para empresas de trading disciplinadas."
                 )}
               </h3>
               <p className="mt-3 text-sm text-slate-300 leading-relaxed">
                 {L(
-                  "Turn Neuro Trader into the platform traders worldwide use to create their Trading Business Plan, capture execution, understand real patterns, and improve the business with clarity.",
-                  "Convertir a Neuro Trader en la plataforma que traders en todo el mundo usan para crear su Plan de Empresa de Trading, capturar ejecución, entender patrones reales y mejorar el negocio con claridad."
+                  "To create a world where trading businesses are operated with the same rigor, transparency, financial control, and continuous-improvement discipline as any serious enterprise, and to make NeuroTrader the global operating system for that standard.",
+                  "Crear un mundo donde las empresas de trading se operen con el mismo rigor, transparencia, control financiero y disciplina de mejora continua que cualquier empresa seria, y convertir a NeuroTrader en el sistema operativo global para ese estándar."
                 )}
               </p>
             </div>
@@ -142,8 +142,8 @@ export default function AboutPage() {
             </div>
             <p className="text-sm text-slate-300 leading-relaxed max-w-3xl">
               {L(
-                "Neuro Trader is his commitment to help Trader Entrepreneurs build a repeatable operating process, reduce emotional noise, and measure what actually matters to the business.",
-                "Neuro Trader es su compromiso de ayudar a Empresarios Traders a crear un proceso operativo repetible, reducir el ruido emocional y medir lo que realmente importa para el negocio."
+                "NeuroTrader is his commitment to help Trader Entrepreneurs build the trading business plan, protect it with one operating loop, and measure what actually matters to the business.",
+                "NeuroTrader es su compromiso de ayudar a Empresarios Traders a construir el plan de empresa de trading, protegerlo con un solo ciclo operativo y medir lo que realmente importa para el negocio."
               )}
             </p>
           </div>

@@ -28,15 +28,19 @@ import {
   type GrowthPlanSteps,
   type GrowthPlanChecklistItem,
   type GrowthPlanStrategy,
+  type GrowthPlanHistoryEntry,
+  getGrowthPlanHistorySupabase,
   getGrowthPlanSupabaseByAccount,
   upsertGrowthPlanSupabase,
 } from "@/lib/growthPlanSupabase";
 import {
   buildPlanProjection,
+  computeCommittedTradingDaysBetween,
   computeTradingDaysBetween as computeProjectedTradingDaysBetween,
   inferWithdrawalSettingsFromEvents,
   normalizePlannedWithdrawals,
   normalizeWithdrawalSettings,
+  selectTradingDaysByWeeklyAverage,
   type PlannedWithdrawalEvent,
   type PlannedWithdrawalSettings,
   type WithdrawalFrequency,
@@ -326,6 +330,7 @@ async function generateAndDownloadPDF(
     startingBalance: number;
     targetBalance?: number;
     tradingDays: number;
+    averageTradingDaysPerWeek: number;
     maxDailyLossPercent: number;
     lossDaysPerWeek: number;
     requiredGoalPct: number;
@@ -398,8 +403,8 @@ async function generateAndDownloadPDF(
     const { goalDays, totalLossDays } = meta.explainRequired;
     chunks.push(
       L(
-        `Weekly pattern assumes ${meta.lossDaysPerWeek} loss day(s) per 5 trading days -> ${totalLossDays} loss day(s) and ${goalDays} goal-day(s).`,
-        `El patrón semanal asume ${meta.lossDaysPerWeek} día(s) de pérdida por cada 5 días de trading -> ${totalLossDays} día(s) de pérdida y ${goalDays} día(s) de meta.`
+        `Weekly pattern assumes ${meta.lossDaysPerWeek} loss day(s) inside ${meta.averageTradingDaysPerWeek} operating day(s) per week -> ${totalLossDays} loss day(s) and ${goalDays} goal-day(s).`,
+        `El patrón semanal asume ${meta.lossDaysPerWeek} día(s) de pérdida dentro de ${meta.averageTradingDaysPerWeek} día(s) operativo(s) por semana -> ${totalLossDays} día(s) de pérdida y ${goalDays} día(s) de meta.`
       )
     );
     if ((meta.explainRequired.totalPlannedWithdrawal ?? 0) > 0) {
@@ -440,6 +445,7 @@ async function generateAndDownloadPDF(
     [L("Starting balance", "Balance inicial"), currency(meta.startingBalance)],
     [L("Target balance", "Balance objetivo"), currency(meta.targetBalance || 0)],
     [L("Trading days", "Días de trading"), String(meta.tradingDays)],
+    [L("Operating days/week", "Días operativos/sem"), String(meta.averageTradingDaysPerWeek)],
     [L("Estimated daily goal (goal-days only)", "Meta diaria estimada (solo días de meta)"), `${meta.requiredGoalPct.toFixed(3)}%`],
     [L("Max daily loss (%)", "Pérdida diaria máxima (%)"), `${meta.maxDailyLossPercent}%`],
     [L("Loss days per week", "Días de pérdida por semana"), String(meta.lossDaysPerWeek)],
@@ -820,6 +826,27 @@ function computeTradingDaysBetween(startIso: string, endIso: string) {
   return listTradingDaysBetween(startIso, endIso).length;
 }
 
+function resolveAverageTradingDaysPerWeek(value: number | string | null | undefined) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return 5;
+  return clampInt(n, 1, 5);
+}
+
+function listCommittedTradingDaysFrom(
+  startIso: string,
+  count: number,
+  averageTradingDaysPerWeek: number
+): string[] {
+  const daysPerWeek = resolveAverageTradingDaysPerWeek(averageTradingDaysPerWeek);
+  if (count <= 0) return [];
+  const rawCount =
+    daysPerWeek >= 5
+      ? count
+      : Math.ceil((count * 5) / Math.max(1, daysPerWeek)) + 20;
+  const rawTradingDays = listTradingDaysFrom(startIso, Math.min(1800, Math.max(count, rawCount)));
+  return selectTradingDaysByWeeklyAverage(rawTradingDays, daysPerWeek).slice(0, count);
+}
+
 /* ================= Wizard ================= */
 type WizardStep = 0 | 1 | 2 | 3 | 4;
 
@@ -904,6 +931,22 @@ type PlanRealismReview = {
   tradingDays: number;
   estimatedCompletionDate: string | null;
   policyBand: "bankable" | "review" | "out_of_policy" | "incomplete";
+};
+
+type AiPlanAdvisorPhase = {
+  title: string;
+  targetEquity: number;
+  targetDate: string | null;
+  dailyGoalPct: number;
+  guardrail: string;
+};
+
+type AiPlanAdvisor = {
+  shouldSurface: boolean;
+  headline: string;
+  body: string;
+  recommendedCompletionDate: string | null;
+  phases: AiPlanAdvisorPhase[];
 };
 
 const EMPTY_BUSINESS_PROFILE: BusinessProfile = {
@@ -1060,13 +1103,26 @@ function simulateScenarioToTarget(params: {
   target: number;
   startIso: string;
   deadlineIso: string;
+  averageTradingDaysPerWeek?: number;
   scenario: BusinessScenario;
   plannedWithdrawals?: PlannedWithdrawal[];
 }) {
-  const { starting, target, startIso, deadlineIso, scenario, plannedWithdrawals = [] } = params;
-  const deadlineTradingDays = listTradingDaysBetween(startIso, deadlineIso);
+  const {
+    starting,
+    target,
+    startIso,
+    deadlineIso,
+    averageTradingDaysPerWeek = 5,
+    scenario,
+    plannedWithdrawals = [],
+  } = params;
+  const daysPerCycle = resolveAverageTradingDaysPerWeek(averageTradingDaysPerWeek);
+  const deadlineTradingDays = selectTradingDaysByWeeklyAverage(
+    listTradingDaysBetween(startIso, deadlineIso),
+    daysPerCycle
+  );
   const horizonDays = Math.max(deadlineTradingDays.length, 1);
-  const simulationDays = listTradingDaysFrom(startIso, Math.max(horizonDays, 1300));
+  const simulationDays = listCommittedTradingDaysFrom(startIso, Math.max(horizonDays, 1300), daysPerCycle);
   const withdrawalByDate = new Map<string, number>();
   for (const withdrawal of plannedWithdrawals) {
     const date = toDateOnlyStr(withdrawal.plannedDate);
@@ -1078,11 +1134,11 @@ function simulateScenarioToTarget(params: {
   let balance = Math.max(0, starting);
   let projectedAtDeadline = balance;
   let completionDate: string | null = balance >= target ? startIso : null;
-  const perWeekLossDays = clampInt(scenario.lossDaysPerWeek, 0, 5);
+  const perWeekLossDays = clampInt(scenario.lossDaysPerWeek, 0, daysPerCycle);
 
   for (let i = 0; i < simulationDays.length; i += 1) {
     const date = simulationDays[i];
-    const isLossDay = perWeekLossDays > 0 && i % 5 < perWeekLossDays;
+    const isLossDay = perWeekLossDays > 0 && i % daysPerCycle < perWeekLossDays;
     const pct = isLossDay ? -Math.max(0, scenario.maxDailyLossPct) : Math.max(0, scenario.dailyGoalPct);
     balance = Math.max(0, balance + balance * (pct / 100));
     balance = Math.max(0, balance - (withdrawalByDate.get(date) ?? 0));
@@ -1106,11 +1162,22 @@ function buildPlanRealismReview(params: {
   startIso: string;
   targetIso: string;
   tradingDays: number;
+  averageTradingDaysPerWeek: number;
   requiredGoalPct: number;
   scenario: BusinessScenario | null;
   plannedWithdrawals?: PlannedWithdrawal[];
 }): PlanRealismReview {
-  const { starting, target, startIso, targetIso, tradingDays, requiredGoalPct, scenario, plannedWithdrawals } = params;
+  const {
+    starting,
+    target,
+    startIso,
+    targetIso,
+    tradingDays,
+    averageTradingDaysPerWeek,
+    requiredGoalPct,
+    scenario,
+    plannedWithdrawals,
+  } = params;
   const targetMultiple = starting > 0 && target > 0 ? target / starting : 0;
   const requiredCompoundDailyPct =
     starting > 0 && target > 0 && tradingDays > 0
@@ -1139,6 +1206,7 @@ function buildPlanRealismReview(params: {
     target,
     startIso,
     deadlineIso: targetIso,
+    averageTradingDaysPerWeek,
     scenario,
     plannedWithdrawals,
   });
@@ -1189,6 +1257,134 @@ function buildPlanRealismReview(params: {
   };
 }
 
+function buildAiPlanAdvisor(params: {
+  starting: number;
+  target: number;
+  startIso: string;
+  averageTradingDaysPerWeek: number;
+  scenario: BusinessScenario | null;
+  plannedWithdrawals?: PlannedWithdrawal[];
+  isEs: boolean;
+}): AiPlanAdvisor {
+  const {
+    starting,
+    target,
+    startIso,
+    averageTradingDaysPerWeek,
+    scenario,
+    plannedWithdrawals,
+    isEs,
+  } = params;
+  const L = (en: string, es: string) => (isEs ? es : en);
+
+  if (!scenario || starting <= 0 || target <= 0 || target <= starting) {
+    return {
+      shouldSurface: false,
+      headline: "",
+      body: "",
+      recommendedCompletionDate: null,
+      phases: [],
+    };
+  }
+
+  const multiple = target / starting;
+  const rawTargets =
+    multiple >= 30
+      ? [starting * 10, starting * 30, target]
+      : multiple >= 10
+        ? [starting * 3, starting * 7, target]
+        : multiple >= 4
+          ? [starting * 2, starting * 3, target]
+          : [starting + (target - starting) * 0.5, target];
+
+  const phaseTargets = rawTargets
+    .map((value) => Number(Math.min(target, Math.max(starting, value)).toFixed(2)))
+    .filter((value, index, arr) => value > starting && arr.indexOf(value) === index);
+
+  let phaseStartIso = startIso;
+  let phaseStartBalance = starting;
+  const daysPerWeek = resolveAverageTradingDaysPerWeek(averageTradingDaysPerWeek);
+
+  const phases = phaseTargets.map((targetEquity, index) => {
+    const scaledScenario: BusinessScenario = {
+      ...scenario,
+      dailyGoalPct: Number((scenario.dailyGoalPct * (1 + index * 0.12)).toFixed(2)),
+      lossDaysPerWeek: clampInt(scenario.lossDaysPerWeek, 0, daysPerWeek),
+    };
+    const simulation = simulateScenarioToTarget({
+      starting: phaseStartBalance,
+      target: targetEquity,
+      startIso: phaseStartIso,
+      deadlineIso: addCalendarDays(phaseStartIso, 1200),
+      averageTradingDaysPerWeek: daysPerWeek,
+      scenario: scaledScenario,
+      plannedWithdrawals: index === phaseTargets.length - 1 ? plannedWithdrawals : [],
+    });
+    const targetDate = simulation.completionDate;
+    if (targetDate) {
+      phaseStartIso = addCalendarDays(targetDate, 1);
+      phaseStartBalance = targetEquity;
+    }
+
+    return {
+      title: L(`Phase ${index + 1}`, `Fase ${index + 1}`),
+      targetEquity,
+      targetDate,
+      dailyGoalPct: scaledScenario.dailyGoalPct,
+      guardrail:
+        index === 0
+          ? L(
+              "Do not scale until rule compliance and journal consistency are stable.",
+              "No escales hasta que el cumplimiento de reglas y el journal estén estables."
+            )
+          : index === phaseTargets.length - 1
+            ? L(
+                "Only push this phase after the prior checkpoint is proven with real execution.",
+                "Solo empuja esta fase después de probar el checkpoint anterior con ejecución real."
+              )
+            : L(
+                "Raise the pace only after the prior phase is complete and drawdown stayed inside policy.",
+                "Sube el ritmo solo después de completar la fase previa y mantener el drawdown dentro de política."
+              ),
+    };
+  });
+
+  const finalPhase = phases[phases.length - 1] ?? null;
+  return {
+    shouldSurface: phases.length > 0,
+    headline: L(
+      "AI plan advisor: keep the big target, trade it in phases.",
+      "Asesor IA del plan: mantén la meta grande, ejecútala por fases."
+    ),
+    body: L(
+      `Based on ${daysPerWeek} operating day(s) per week and the selected risk model, the smarter route is to earn the right to scale: checkpoint first, then increase pace only after the data supports it.`,
+      `Basado en ${daysPerWeek} día(s) operativos por semana y el modelo de riesgo seleccionado, la ruta más inteligente es ganarte el derecho a escalar: primero checkpoint, luego subir ritmo solo cuando la data lo sostenga.`
+    ),
+    recommendedCompletionDate: finalPhase?.targetDate ?? null,
+    phases,
+  };
+}
+
+function formatHistoryDate(value: string | null | undefined, lang: "en" | "es") {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return String(value).slice(0, 10);
+  return new Intl.DateTimeFormat(lang === "es" ? "es-PR" : "en-US", {
+    month: "short",
+    day: "2-digit",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
+}
+
+function historyReasonLabel(reason: string | null | undefined, L: (en: string, es: string) => string) {
+  if (reason === "plan_created") return L("Plan created", "Plan creado");
+  if (reason === "next_cycle_plan") return L("Next-cycle plan", "Plan próximo ciclo");
+  if (reason === "plan_updated") return L("Plan edited", "Plan editado");
+  return L("Plan change", "Cambio del plan");
+}
+
 export default function GrowthPlanPage() {
   const { user, loading } = useAuth();
   const { activeAccountId, loading: accountsLoading } = useTradingAccounts();
@@ -1204,6 +1400,7 @@ export default function GrowthPlanPage() {
   const [step, setStep] = useState<WizardStep>(0);
   const [error, setError] = useState("");
   const [hasExistingPlan, setHasExistingPlan] = useState(false);
+  const [planHistory, setPlanHistory] = useState<GrowthPlanHistoryEntry[]>([]);
 
   // Cashflows net since plan start (for correct $ conversions when editing an existing plan)
   const [cashflowNet, setCashflowNet] = useState(0);
@@ -1220,6 +1417,7 @@ export default function GrowthPlanPage() {
   const [guidedMode, setGuidedMode] = useState(true);
   const [maxDailyLossPercentStr, setMaxDailyLossPercentStr] = useState("");
   const [tradingDaysStr, setTradingDaysStr] = useState("");
+  const [averageTradingDaysPerWeekStr, setAverageTradingDaysPerWeekStr] = useState("5");
   const [lossDaysPerWeekStr, setLossDaysPerWeekStr] = useState("");
   const [plannedWithdrawalMode, setPlannedWithdrawalMode] = useState<PlannedWithdrawalMode>("undecided");
   const [plannedWithdrawalFrequency, setPlannedWithdrawalFrequency] = useState<WithdrawalFrequency>("monthly");
@@ -1249,7 +1447,9 @@ export default function GrowthPlanPage() {
   const targetBalance = toNum(targetBalanceStr, 0);
   const maxDailyLossPercent = toNum(maxDailyLossPercentStr, 0);
   const tradingDays = clampInt(toNum(tradingDaysStr, 0), 0);
-  const lossDaysPerWeek = clampInt(toNum(lossDaysPerWeekStr, 0), 0, 5);
+  const averageTradingDaysPerWeek = resolveAverageTradingDaysPerWeek(averageTradingDaysPerWeekStr);
+  const averageTradingDaysSet = averageTradingDaysPerWeekStr.trim().length > 0;
+  const lossDaysPerWeek = clampInt(toNum(lossDaysPerWeekStr, 0), 0, averageTradingDaysPerWeek);
   const plannedWithdrawalAmount = Math.max(0, toNum(plannedWithdrawalAmountStr, 0));
   const plannedWithdrawalStartPeriod = Math.max(1, clampInt(toNum(plannedWithdrawalStartPeriodStr, 1), 1));
   const riskPerTradePct = Math.max(0, toNum(riskPerTradePctStr, 0));
@@ -1355,10 +1555,28 @@ export default function GrowthPlanPage() {
     if (tradingDaysTouched) return;
     if (!planDatesOrdered) return;
     const startIso = effectivePlanStartDate;
-    const count = computeProjectedTradingDaysBetween(startIso, targetDateStr);
+    const count = computeCommittedTradingDaysBetween(
+      startIso,
+      targetDateStr,
+      averageTradingDaysPerWeek
+    );
     if (!Number.isFinite(count) || count <= 0) return;
     setTradingDaysStr(String(count));
-  }, [effectivePlanStartDate, planDatesOrdered, targetDateStr, tradingDaysTouched]);
+  }, [
+    averageTradingDaysPerWeek,
+    effectivePlanStartDate,
+    planDatesOrdered,
+    targetDateStr,
+    tradingDaysTouched,
+  ]);
+
+  useEffect(() => {
+    if (!lossDaysPerWeekStr.trim()) return;
+    const rawLossDays = clampInt(toNum(lossDaysPerWeekStr, 0), 0, 99);
+    if (rawLossDays > averageTradingDaysPerWeek) {
+      setLossDaysPerWeekStr(String(averageTradingDaysPerWeek));
+    }
+  }, [averageTradingDaysPerWeek, lossDaysPerWeekStr]);
 
   type GuidedTask = {
     id: string;
@@ -1404,6 +1622,7 @@ export default function GrowthPlanPage() {
         target: 0,
         startIso: effectivePlanStartDate,
         targetIso: targetDateStr || effectivePlanStartDate,
+        averageTradingDaysPerWeek,
         lossDaysPerWeek,
         maxDailyLossPercent: Math.max(0, maxDailyLossPercent),
         withdrawalSettings: plannedWithdrawalSettings,
@@ -1416,6 +1635,7 @@ export default function GrowthPlanPage() {
       target: Math.max(0, targetBalance),
       startIso: effectivePlanStartDate,
       targetIso: targetDateStr,
+      averageTradingDaysPerWeek,
       lossDaysPerWeek,
       maxDailyLossPercent: Math.max(0, maxDailyLossPercent),
       withdrawalSettings: plannedWithdrawalSettings,
@@ -1423,6 +1643,7 @@ export default function GrowthPlanPage() {
     });
   }, [
     lossDaysPerWeek,
+    averageTradingDaysPerWeek,
     maxDailyLossPercent,
     effectivePlanStartDate,
     plannedWithdrawalSettings,
@@ -1509,8 +1730,8 @@ export default function GrowthPlanPage() {
         },
         {
           id: "trading_days",
-          label: L("Set your trading days", "Define tus días de trading"),
-          done: tradingDays > 0,
+          label: L("Set average operating days and total trading days", "Define días operativos promedio y total de trading"),
+          done: averageTradingDaysSet && tradingDays > 0,
           anchor: "gp-trading-days",
         },
         {
@@ -1618,6 +1839,7 @@ export default function GrowthPlanPage() {
     planDatesOrdered,
     targetDateStr,
     tradingDays,
+    averageTradingDaysSet,
     maxDailyLossPercent,
     riskPerTradePct,
     lossDaysPerWeekStr,
@@ -1679,6 +1901,10 @@ export default function GrowthPlanPage() {
       setError(L("Set max daily loss first.", "Define la pérdida diaria máx primero."));
       return;
     }
+    if (!averageTradingDaysSet) {
+      setError(L("Set average operating days per week first.", "Define primero los días operativos promedio por semana."));
+      return;
+    }
     if (!lossDaysSet) {
       setError(L("Set loss days per week first.", "Define los días de pérdida por semana primero."));
       return;
@@ -1706,6 +1932,13 @@ export default function GrowthPlanPage() {
         if (existing) {
           setHasExistingPlan(true);
           setIsFollowOnDraft(false);
+          const existingBusinessAnalysis = (existing.steps as any)?.business_analysis;
+          const loadedAverageTradingDays = resolveAverageTradingDaysPerWeek(
+            existingBusinessAnalysis?.averageTradingDaysPerWeek ??
+              existingBusinessAnalysis?.operatingModel?.averageTradingDaysPerWeek ??
+              (existing.steps as any)?._ui?.averageTradingDaysPerWeek ??
+              5
+          );
 
           setStartingBalanceStr(String(existing.startingBalance ?? 5000));
           setTargetBalanceStr(String(existing.targetBalance ?? 60000));
@@ -1714,7 +1947,8 @@ export default function GrowthPlanPage() {
           );
           setMaxDailyLossPercentStr(String(existing.maxDailyLossPercent ?? 1));
           setTradingDaysStr(String(existing.tradingDays ?? 60));
-          setLossDaysPerWeekStr(String(existing.lossDaysPerWeek ?? 0));
+          setAverageTradingDaysPerWeekStr(String(loadedAverageTradingDays));
+          setLossDaysPerWeekStr(String(clampInt(Number(existing.lossDaysPerWeek ?? 0), 0, loadedAverageTradingDays)));
 
           setRiskPerTradePctStr(String(existing.maxRiskPerTradePercent ?? 2));
 
@@ -1722,7 +1956,6 @@ export default function GrowthPlanPage() {
 
           setStepsData(existing.steps ?? getDefaultSteps());
           setRules(existing.rules && existing.rules.length ? existing.rules : getDefaultSuggestedRules());
-          const existingBusinessAnalysis = (existing.steps as any)?.business_analysis;
           if (existingBusinessAnalysis && typeof existingBusinessAnalysis === "object") {
             const nextProfile = {
               ...EMPTY_BUSINESS_PROFILE,
@@ -1804,6 +2037,10 @@ export default function GrowthPlanPage() {
             setCashflowNet(0);
           }
 
+          const history = await getGrowthPlanHistorySupabase(activeAccountId);
+          if (!mounted) return;
+          setPlanHistory(history);
+
           setAutoPhasesGenerated(true);
         } else {
           // new plan
@@ -1814,6 +2051,7 @@ export default function GrowthPlanPage() {
           setTargetDateStr("");
           setMaxDailyLossPercentStr("");
           setTradingDaysStr("");
+          setAverageTradingDaysPerWeekStr("5");
           setTradingDaysTouched(false);
           setLossDaysPerWeekStr("");
           setRiskPerTradePctStr("");
@@ -1826,6 +2064,7 @@ export default function GrowthPlanPage() {
           setPlannedWithdrawalAmountStr("");
           setPlannedWithdrawalStartPeriodStr("1");
           setPlanPhases([]);
+          setPlanHistory([]);
           setAutoPhasesGenerated(false);
 
         }
@@ -2077,10 +2316,15 @@ export default function GrowthPlanPage() {
     if (!targetDateStr) return null;
     if (!planDatesOrdered) return null;
     const start = effectivePlanStartDate;
-    const count = computeProjectedTradingDaysBetween(start, targetDateStr);
+    const marketCount = computeProjectedTradingDaysBetween(start, targetDateStr);
+    const count = computeCommittedTradingDaysBetween(
+      start,
+      targetDateStr,
+      averageTradingDaysPerWeek
+    );
     if (!Number.isFinite(count) || count <= 0) return null;
-    return { start, count };
-  }, [effectivePlanStartDate, planDatesOrdered, targetDateStr]);
+    return { start, count, marketCount };
+  }, [averageTradingDaysPerWeek, effectivePlanStartDate, planDatesOrdered, targetDateStr]);
 
   const businessScenarioTradingDays = tradingDays > 0 ? tradingDays : (tradingDaysFromRange?.count ?? 60);
   const businessScenarios = useMemo(
@@ -2109,12 +2353,14 @@ export default function GrowthPlanPage() {
         startIso: effectivePlanStartDate,
         targetIso: targetDateStr,
         tradingDays: businessScenarioTradingDays,
+        averageTradingDaysPerWeek,
         requiredGoalPct,
         scenario: reviewScenario,
         plannedWithdrawals: generatedPlannedWithdrawals,
       }),
     [
       businessScenarioTradingDays,
+      averageTradingDaysPerWeek,
       effectivePlanStartDate,
       generatedPlannedWithdrawals,
       requiredGoalPct,
@@ -2123,6 +2369,45 @@ export default function GrowthPlanPage() {
       targetBalance,
       targetDateStr,
     ]
+  );
+
+  const aiPlanAdvisor = useMemo(
+    () =>
+      buildAiPlanAdvisor({
+        starting: startingBalance,
+        target: targetBalance,
+        startIso: effectivePlanStartDate,
+        averageTradingDaysPerWeek,
+        scenario: reviewScenario,
+        plannedWithdrawals: generatedPlannedWithdrawals,
+        isEs,
+      }),
+    [
+      averageTradingDaysPerWeek,
+      effectivePlanStartDate,
+      generatedPlannedWithdrawals,
+      isEs,
+      reviewScenario,
+      startingBalance,
+      targetBalance,
+    ]
+  );
+
+  const planHistoryItems = useMemo(
+    () =>
+      planHistory.map((entry) => {
+        const snapshot: any = entry.snapshot ?? {};
+        const changedFields = Array.isArray(snapshot.changedFields)
+          ? snapshot.changedFields.map((field: unknown) => String(field)).filter(Boolean)
+          : [];
+        return {
+          id: entry.id,
+          dateLabel: formatHistoryDate(entry.createdAt, lang),
+          reasonLabel: historyReasonLabel(String(snapshot.reason ?? entry.resetReason ?? ""), L),
+          changedFields,
+        };
+      }),
+    [L, lang, planHistory]
   );
 
   const autoCadenceUnit = L("Week", "Semana");
@@ -2136,6 +2421,7 @@ export default function GrowthPlanPage() {
         startingBalance,
         targetBalance,
         tradingDays,
+        averageTradingDaysPerWeek,
         maxDailyLossPercent,
         lossDaysPerWeek,
         requiredGoalPct,
@@ -2166,6 +2452,7 @@ export default function GrowthPlanPage() {
     !!planStartDate &&
     !!targetDateStr &&
     planDatesOrdered &&
+    averageTradingDaysSet &&
     maxDailyLossPercent > 0 &&
     lossDaysSet &&
     plannedWithdrawalConfigured;
@@ -2367,8 +2654,8 @@ export default function GrowthPlanPage() {
                     </p>
                     <p className="mt-1 max-w-4xl text-xs leading-5 text-slate-300">
                       {L(
-                        `To move from ${currency(startingBalance)} to ${currency(targetBalance)} by ${targetDateStr || "the target date"}, this plan needs about ${planRealismReview.requiredGoalPct.toFixed(2)}% on goal-days. The active operating model budgets ${planRealismReview.scenarioDailyGoalPct.toFixed(2)}%. At that pace, the projected deadline balance is ${currency(planRealismReview.scenarioProjectedBalance)}.`,
-                        `Para mover la cuenta de ${currency(startingBalance)} a ${currency(targetBalance)} para ${targetDateStr || "la fecha objetivo"}, el plan necesita aprox. ${planRealismReview.requiredGoalPct.toFixed(2)}% en días de meta. El modelo operativo activo presupone ${planRealismReview.scenarioDailyGoalPct.toFixed(2)}%. A ese ritmo, el balance proyectado en la fecha límite es ${currency(planRealismReview.scenarioProjectedBalance)}.`
+                        `To move from ${currency(startingBalance)} to ${currency(targetBalance)} by ${targetDateStr || "the target date"} with ${averageTradingDaysPerWeek} operating day(s) per week, this plan needs about ${planRealismReview.requiredGoalPct.toFixed(2)}% on goal-days. The active operating model budgets ${planRealismReview.scenarioDailyGoalPct.toFixed(2)}%. At that pace, the projected deadline balance is ${currency(planRealismReview.scenarioProjectedBalance)}.`,
+                        `Para mover la cuenta de ${currency(startingBalance)} a ${currency(targetBalance)} para ${targetDateStr || "la fecha objetivo"} con ${averageTradingDaysPerWeek} día(s) operativo(s) por semana, el plan necesita aprox. ${planRealismReview.requiredGoalPct.toFixed(2)}% en días de meta. El modelo operativo activo presupone ${planRealismReview.scenarioDailyGoalPct.toFixed(2)}%. A ese ritmo, el balance proyectado en la fecha límite es ${currency(planRealismReview.scenarioProjectedBalance)}.`
                       )}
                     </p>
                   </div>
@@ -2403,6 +2690,52 @@ export default function GrowthPlanPage() {
                       {L("Extend time, lower target, or fund the next phase.", "Extiende tiempo, baja meta o capitaliza la próxima fase.")}
                     </p>
                   </div>
+                </div>
+              </div>
+            ) : null}
+
+            {aiPlanAdvisor.shouldSurface ? (
+              <div className="mt-3 rounded-2xl border border-cyan-300/30 bg-cyan-300/10 p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="text-[11px] uppercase tracking-[0.24em] text-cyan-200">
+                      {L("AI plan advisor", "Asesor IA del plan")}
+                    </p>
+                    <p className="mt-1 text-sm font-semibold text-slate-100">
+                      {aiPlanAdvisor.headline}
+                    </p>
+                    <p className="mt-1 max-w-4xl text-xs leading-5 text-slate-300">
+                      {aiPlanAdvisor.body}
+                    </p>
+                  </div>
+                  <span className="rounded-full border border-cyan-300/30 bg-slate-950/70 px-3 py-1 text-[11px] font-semibold text-cyan-100">
+                    {aiPlanAdvisor.recommendedCompletionDate
+                      ? L(`Est. ${aiPlanAdvisor.recommendedCompletionDate}`, `Est. ${aiPlanAdvisor.recommendedCompletionDate}`)
+                      : L("Needs more data", "Necesita más data")}
+                  </span>
+                </div>
+                <div className="mt-3 grid gap-2 md:grid-cols-3">
+                  {aiPlanAdvisor.phases.map((phase) => (
+                    <div key={`${phase.title}-${phase.targetEquity}`} className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+                      <p className="text-[10px] uppercase tracking-[0.18em] text-cyan-200">
+                        {phase.title}
+                      </p>
+                      <p className="mt-1 text-base font-semibold text-slate-100">
+                        {currency(phase.targetEquity)}
+                      </p>
+                      <p className="text-[11px] text-slate-400">
+                        {L("Goal-day pace", "Ritmo en días de meta")}:{" "}
+                        <span className="text-slate-100">{phase.dailyGoalPct.toFixed(2)}%</span>
+                      </p>
+                      <p className="text-[11px] text-slate-400">
+                        {L("Est. date", "Fecha est.")}:{" "}
+                        <span className="text-slate-100">{phase.targetDate ?? "—"}</span>
+                      </p>
+                      <p className="mt-2 text-[11px] leading-5 text-slate-300">
+                        {phase.guardrail}
+                      </p>
+                    </div>
+                  ))}
                 </div>
               </div>
             ) : null}
@@ -2475,7 +2808,7 @@ export default function GrowthPlanPage() {
                         setSelectedScenarioId(scenario.id);
                         setRiskPerTradePctStr(String(scenario.riskPerTradePct));
                         setMaxDailyLossPercentStr(String(scenario.maxDailyLossPct));
-                        setLossDaysPerWeekStr(String(scenario.lossDaysPerWeek));
+                        setLossDaysPerWeekStr(String(clampInt(scenario.lossDaysPerWeek, 0, averageTradingDaysPerWeek)));
                         pushNeuroMessage(
                           L(
                             `${scenario.title} scenario selected. I adjusted risk per trade, max daily loss, and expected loss days to match that operating model.`,
@@ -2775,38 +3108,78 @@ export default function GrowthPlanPage() {
     {
       id: "trading_days",
       anchor: "gp-trading-days",
-      title: L("Trading days", "Días de trading"),
+      title: L("Operating schedule", "Calendario operativo"),
       description: L(
-        "We calculate this from start date to target date. You can edit it if needed.",
-        "Lo calculamos desde la fecha de inicio hasta la fecha meta. Puedes editarlo si hace falta."
+        "Tell the plan how many days you realistically operate each week. The total days stay editable.",
+        "Dile al plan cuántos días realmente operas por semana. El total de días sigue editable."
       ),
-      isComplete: tradingDays > 0,
+      isComplete: averageTradingDaysSet && tradingDays > 0,
       content: (
-        <div>
-          <label className="block mb-1 text-slate-300">
-            {L("Trading days you commit to follow this plan", "Días de trading que te comprometes a seguir")}
-          </label>
-          <input
-            id="gp-trading-days"
-            inputMode="numeric"
-            value={tradingDaysStr}
-            onFocus={() => fieldHelp("trading_days")}
-            onChange={(e) => {
-              setTradingDaysTouched(true);
-              setTradingDaysStr(onlyNum(e.target.value));
-            }}
-            onBlur={() => {
-              if (!tradingDaysStr.trim()) return;
-              setTradingDaysStr(String(clampInt(tradingDays, 0)));
-            }}
-            className={inputBase}
-            placeholder="0"
-          />
+        <div id="gp-trading-days" className="space-y-3">
+          <div className="grid gap-3 md:grid-cols-2">
+            <div>
+              <label className="block mb-1 text-slate-300">
+                {L("Average operating days per week", "Días operativos promedio por semana")}
+              </label>
+              <input
+                id="gp-average-trading-days"
+                inputMode="numeric"
+                value={averageTradingDaysPerWeekStr}
+                onFocus={() => fieldHelp("average_trading_days")}
+                onChange={(e) => {
+                  setAverageTradingDaysPerWeekStr(onlyNum(e.target.value));
+                  setTradingDaysTouched(false);
+                  setAutoPhasesGenerated(false);
+                }}
+                onBlur={() => {
+                  if (!averageTradingDaysPerWeekStr.trim()) {
+                    setAverageTradingDaysPerWeekStr("5");
+                    return;
+                  }
+                  setAverageTradingDaysPerWeekStr(String(averageTradingDaysPerWeek));
+                }}
+                className={inputBase}
+                placeholder="1..5"
+              />
+              <p className="text-slate-500 mt-1 text-xs">
+                {L(
+                  "Use 2, 3, 4, or 5. The AI plan advisor uses this to avoid unrealistic pacing.",
+                  "Usa 2, 3, 4 o 5. El asesor IA del plan usa esto para evitar un ritmo irreal."
+                )}
+              </p>
+            </div>
+            <div>
+              <label className="block mb-1 text-slate-300">
+                {L("Total committed trading days", "Total de días de trading comprometidos")}
+              </label>
+              <input
+                inputMode="numeric"
+                value={tradingDaysStr}
+                onFocus={() => fieldHelp("trading_days")}
+                onChange={(e) => {
+                  setTradingDaysTouched(true);
+                  setTradingDaysStr(onlyNum(e.target.value));
+                }}
+                onBlur={() => {
+                  if (!tradingDaysStr.trim()) return;
+                  setTradingDaysStr(String(clampInt(tradingDays, 0)));
+                }}
+                className={inputBase}
+                placeholder="0"
+              />
+              <p className="text-slate-500 mt-1 text-xs">
+                {L(
+                  "You can override this if your real calendar is different.",
+                  "Puedes editarlo si tu calendario real es diferente."
+                )}
+              </p>
+            </div>
+          </div>
           {tradingDaysFromRange ? (
             <p className="text-slate-500 mt-1 text-xs">
               {L(
-                `From start date (${tradingDaysFromRange.start}) to target: ${tradingDaysFromRange.count} trading days (NYSE holidays excluded).`,
-                `Desde la fecha de inicio (${tradingDaysFromRange.start}) hasta la meta: ${tradingDaysFromRange.count} días de trading (feriados NYSE excluidos).`
+                `From start date (${tradingDaysFromRange.start}) to target: ${tradingDaysFromRange.count} committed operating day(s) from ${tradingDaysFromRange.marketCount} market day(s). NYSE holidays are excluded.`,
+                `Desde la fecha de inicio (${tradingDaysFromRange.start}) hasta la meta: ${tradingDaysFromRange.count} día(s) operativo(s) comprometidos de ${tradingDaysFromRange.marketCount} día(s) de mercado. Feriados NYSE excluidos.`
               )}
             </p>
           ) : null}
@@ -2852,8 +3225,8 @@ export default function GrowthPlanPage() {
       anchor: "gp-loss-days",
       title: L("Loss days per week", "Días de pérdida por semana"),
       description: L(
-        "How many losing days you expect per 5 trading days.",
-        "Cuántos días de pérdida esperas por cada 5 días de trading."
+        "How many losing days you budget inside your selected operating week.",
+        "Cuántos días de pérdida presupuestas dentro de tu semana operativa."
       ),
       isComplete: lossDaysSet,
       content: (
@@ -2870,11 +3243,17 @@ export default function GrowthPlanPage() {
             }}
             onBlur={() => {
               if (!lossDaysPerWeekStr.trim()) return;
-              setLossDaysPerWeekStr(String(clampInt(lossDaysPerWeek, 0, 5)));
+              setLossDaysPerWeekStr(String(clampInt(lossDaysPerWeek, 0, averageTradingDaysPerWeek)));
             }}
             className={inputBase}
-            placeholder="0..5"
+            placeholder={`0..${averageTradingDaysPerWeek}`}
           />
+          <p className="text-slate-500 mt-1 text-xs">
+            {L(
+              `With ${averageTradingDaysPerWeek} operating day(s), loss days can be 0 to ${averageTradingDaysPerWeek}.`,
+              `Con ${averageTradingDaysPerWeek} día(s) operativo(s), los días de pérdida pueden ser de 0 a ${averageTradingDaysPerWeek}.`
+            )}
+          </p>
         </div>
       ),
     },
@@ -3055,8 +3434,8 @@ export default function GrowthPlanPage() {
                     "Tus metas se generan automáticamente cuando completas los datos requeridos."
                   )
                 : L(
-                    "Complete start date, target date, withdrawal choice, max daily loss, and loss days per week first.",
-                    "Completa fecha de inicio, fecha meta, elección de retiros, pérdida diaria máx y días de pérdida por semana primero."
+                    "Complete start date, target date, operating days, withdrawal choice, max daily loss, and loss days per week first.",
+                    "Completa fecha de inicio, fecha meta, días operativos, elección de retiros, pérdida diaria máx y días de pérdida por semana primero."
                   )}
             </p>
           ) : autoPhases.length === 0 ? (
@@ -3454,6 +3833,7 @@ export default function GrowthPlanPage() {
     !!targetDateStr &&
     planDatesOrdered &&
     tradingDays > 0 &&
+    averageTradingDaysSet &&
     maxDailyLossPercent > 0 &&
     riskPerTradePct > 0 &&
     lossDaysSet &&
@@ -3471,6 +3851,7 @@ export default function GrowthPlanPage() {
       !targetDateStr ||
       !planDatesOrdered ||
       tradingDays <= 0 ||
+      !averageTradingDaysSet ||
       maxDailyLossPercent <= 0 ||
       riskPerTradePct <= 0 ||
       !lossDaysSet ||
@@ -3516,6 +3897,7 @@ export default function GrowthPlanPage() {
 
     const dailyPctForSave = Math.max(0, requiredGoalPct);
     const nextPlannedWithdrawals = plannedWithdrawalMode === "scheduled" ? generatedPlannedWithdrawals : [];
+    const effectivePlanStart = planStartDate || isoToday();
     const autoPhasePayload =
       autoPhasesGenerated && autoPhases.length > 0
         ? autoPhases.map((phase, idx) => {
@@ -3544,10 +3926,25 @@ export default function GrowthPlanPage() {
 
     // persist assistant lang inside steps._ui.lang (Supabase only)
     const mergedSteps: any = { ...(stepsData as any) };
-    mergedSteps._ui = { ...(mergedSteps._ui ?? {}), autoPhaseCadence: "weekly" };
+    mergedSteps._ui = {
+      ...(mergedSteps._ui ?? {}),
+      autoPhaseCadence: "weekly",
+      averageTradingDaysPerWeek,
+    };
     mergedSteps.business_analysis = {
       profile: businessProfile,
       selectedScenarioId,
+      averageTradingDaysPerWeek,
+      operatingModel: {
+        planStartDate: effectivePlanStart,
+        targetDate: targetDateStr || null,
+        committedTradingDays: tradingDays,
+        averageTradingDaysPerWeek,
+        lossDaysPerWeek,
+        maxDailyLossPercent,
+        riskPerTradePct,
+        plannedWithdrawalMode,
+      },
       selectedScenario: selectedBusinessScenario
         ? {
             id: selectedBusinessScenario.id,
@@ -3586,10 +3983,16 @@ export default function GrowthPlanPage() {
         surfacedToUser: planRealismReview.shouldSurface,
         reviewedAt: new Date().toISOString(),
       },
+      aiPlanAdvisor: {
+        headline: aiPlanAdvisor.headline,
+        body: aiPlanAdvisor.body,
+        recommendedCompletionDate: aiPlanAdvisor.recommendedCompletionDate,
+        phases: aiPlanAdvisor.phases,
+        reviewedAt: new Date().toISOString(),
+      },
       updatedAt: new Date().toISOString(),
     };
 
-    const effectivePlanStart = planStartDate || isoToday();
     const payload: Partial<GrowthPlan> = {
       startingBalance,
       targetBalance,
@@ -3616,7 +4019,14 @@ export default function GrowthPlanPage() {
     try {
       setPlannedWithdrawals(nextPlannedWithdrawals);
       setPlanPhases(autoPhasePayload);
-      await upsertGrowthPlanSupabase(payload, activeAccountId);
+      await upsertGrowthPlanSupabase(payload, activeAccountId, {
+        recordHistory: true,
+        historyReason: isFollowOnDraft
+          ? "next_cycle_plan"
+          : hasExistingPlan
+            ? "plan_updated"
+            : "plan_created",
+      });
 
       let protectionSummary = "";
       if (user?.id) {
@@ -3800,6 +4210,48 @@ export default function GrowthPlanPage() {
             </p>
           ) : null}
         </div>
+
+        {hasExistingPlan ? (
+          <details className="rounded-2xl border border-slate-800 bg-slate-950/55 p-4">
+            <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-semibold text-slate-100">
+              <span>{L("Plan edit history", "Historial de ediciones del plan")}</span>
+              <span className="rounded-full border border-slate-700 px-2.5 py-1 text-[11px] font-medium text-slate-400">
+                {planHistoryItems.length
+                  ? L(`${planHistoryItems.length} saved change(s)`, `${planHistoryItems.length} cambio(s) guardado(s)`)
+                  : L("No saved edits yet", "Sin ediciones guardadas todavía")}
+              </span>
+            </summary>
+            <div className="mt-3 space-y-2">
+              {planHistoryItems.length ? (
+                planHistoryItems.slice(0, 6).map((item) => (
+                  <div key={item.id} className="rounded-xl border border-slate-800 bg-slate-900/50 p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-xs font-semibold text-slate-100">{item.reasonLabel}</p>
+                      <p className="text-[11px] text-slate-500">{item.dateLabel}</p>
+                    </div>
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {(item.changedFields.length ? item.changedFields : [L("Snapshot saved", "Snapshot guardado")]).map((field: string) => (
+                        <span
+                          key={field}
+                          className="rounded-full border border-cyan-300/20 bg-cyan-300/10 px-2 py-0.5 text-[10px] font-semibold text-cyan-100"
+                        >
+                          {field}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <p className="text-xs leading-5 text-slate-500">
+                  {L(
+                    "The next approved save will create the first audit snapshot for this account.",
+                    "El próximo guardado aprobado creará el primer snapshot auditado para esta cuenta."
+                  )}
+                </p>
+              )}
+            </div>
+          </details>
+        ) : null}
 
         {/* Guided Mode */}
         {guidedMode ? (

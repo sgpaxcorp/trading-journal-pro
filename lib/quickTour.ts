@@ -379,12 +379,12 @@ const BUILDERS: QuickTourBuilder[] = [
     build: (L) => ({
       title: L("Neuro Analysis", "Neuro Analysis"),
       summary: L(
-        "This workspace is for company intelligence, projections, and virtual allocation simulation.",
-        "Este workspace es para inteligencia de compañías, proyecciones y simulación virtual de allocation."
+        "This workspace is for company intelligence, evidence checklists, market research, and 2-10 year valuation scenarios.",
+        "Este workspace es para inteligencia de compañías, checklist de evidencia, research de mercado y escenarios de valuation 2-10 años."
       ),
       bullets: [
-        L("Use it to frame business quality, financial statements, valuation, risk, and portfolio fit.", "Úsalo para estructurar calidad del negocio, estados financieros, valuation, riesgo y encaje en portfolio."),
-        L("Future projections should be scenario based: bear, base, and bull.", "Las proyecciones futuras deben ser por escenarios: bear, base y bull."),
+        L("Use it to frame business quality, financial statements, valuation, risk, competition, and long-term investment timing.", "Úsalo para estructurar calidad del negocio, estados financieros, valuation, riesgo, competencia y timing de inversión a largo plazo."),
+        L("Future fair value is scenario based: bear, base, and bull from year 2 through year 10.", "El fair value futuro se modela por escenarios: bear, base y bull desde año 2 hasta año 10."),
         L("Outputs are analysis and simulation support, not guaranteed financial advice.", "Las salidas son apoyo de análisis y simulación, no consejo financiero garantizado."),
       ],
       steps: [
@@ -392,8 +392,8 @@ const BUILDERS: QuickTourBuilder[] = [
           id: "neuro-header",
           title: L("Research command center", "Centro de research"),
           body: L(
-            "Start with the company, capital, horizon, and assumptions before reviewing scenarios.",
-            "Empieza con la compañía, capital, horizonte y supuestos antes de revisar escenarios."
+            "Start with the company, horizon, documents, and assumptions before reviewing scenarios.",
+            "Empieza con la compañía, horizonte, documentos y supuestos antes de revisar escenarios."
           ),
           selector: "main h1",
         },

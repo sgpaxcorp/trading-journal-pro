@@ -5,6 +5,7 @@ import {
   ArrowDown,
   ArrowRight,
   BrainCircuit,
+  Compass,
   FileText,
   SquarePen,
   ShieldCheck,
@@ -73,21 +74,21 @@ function ProductPreview({
     return (
       <div className="h-48 rounded-md border border-white/10 bg-[#07101d] p-4">
         <div className="flex items-center justify-between text-[11px] text-slate-400">
-          <span>{L("Business AI coach", "Coach empresarial IA")}</span>
-          <span className="text-sky-300">{L("Objective business review", "Revisión empresarial objetiva")}</span>
+          <span>{L("AI plan advisor", "Asesor IA del plan")}</span>
+          <span className="text-sky-300">{L("Phased growth model", "Modelo de crecimiento por fases")}</span>
         </div>
         <div className="mt-4 space-y-2">
           <div className="max-w-[82%] rounded-md border border-white/10 bg-[#0b1828] px-3 py-2 text-xs text-slate-200">
-            {L("Why did I lose discipline after 2 PM?", "¿Por qué perdí disciplina después de las 2 PM?")}
+            {L("Can I reach $50K with 3 trading days/week?", "¿Puedo llegar a $50K con 3 días de trading/semana?")}
           </div>
           <div className="ml-auto max-w-[88%] rounded-md border border-emerald-300/25 bg-emerald-300/10 px-3 py-2 text-xs text-emerald-100">
             {L(
-              "Your late-session trades show lower win rate and higher emotional tags. Reduce size after target is reached.",
-              "Tus trades tarde muestran menor win rate y más tags emocionales. Baja size después de llegar a la meta."
+              "Keep the target, but earn the right to scale: $10K first, then $30K, then $50K after rule compliance is proven.",
+              "Mantén la meta, pero gánate el derecho a escalar: $10K primero, luego $30K y luego $50K cuando pruebes cumplimiento."
             )}
           </div>
           <div className="rounded-md border border-white/10 bg-[#0b1828] px-3 py-2 text-xs text-slate-300">
-            {L("Action: lock max trades per session to 3.", "Acción: limita trades por sesión a 3.")}
+            {L("Action: track phase progress against the plan every session.", "Acción: mide cada sesión contra la fase activa del plan.")}
           </div>
         </div>
       </div>
@@ -137,17 +138,17 @@ export default function Home() {
 
   const heroMetrics = [
     {
-      value: L("Business plan creation", "Creación del plan empresarial"),
+      value: L("AI-guided goal design", "Diseño de metas guiado por IA"),
       label: L(
-        "Build a measurable Trading Business Plan with target equity, deadline, max daily loss, risk per trade, daily goal, and checkpoints.",
-        "Crea un Plan de Empresa de Trading medible con equity objetivo, fecha límite, max loss diario, riesgo por trade, meta diaria y checkpoints."
+        "Turn a big trading objective into a phased plan with start date, target date, realistic operating days, loss-day assumptions, risk rails, and checkpoints.",
+        "Convierte una meta grande en un plan por fases con fecha de inicio, fecha meta, días operativos reales, días de pérdida, límites de riesgo y checkpoints."
       ),
     },
     {
-      value: L("AI business follow-up", "Seguimiento empresarial IA"),
+      value: L("AI accountability coach", "Coach IA de accountability"),
       label: L(
-        "Business AI Coach compares execution, rule adherence, risk utilization, and emotional drift against the plan.",
-        "El Coach Empresarial IA compara ejecución, cumplimiento de reglas, uso de riesgo y desvío emocional contra el plan."
+        "The coach compares execution, rule adherence, pacing, risk utilization, and emotional drift against the business plan.",
+        "El coach compara ejecución, cumplimiento de reglas, ritmo, uso de riesgo y desvío emocional contra el plan empresarial."
       ),
     },
     {
@@ -168,16 +169,16 @@ export default function Home() {
 
   const planFlowAnchor = {
     eyebrow: L("Trading Business Plan", "Plan de Empresa de Trading"),
-    title: L("Create the business plan once.", "Crea el plan empresarial una vez."),
+    title: L("Design the target. Earn the scale.", "Diseña la meta. Gánate la escala."),
     body: L(
-      "Set measurable targets, risk rails, and non-negotiable rules for your trading business. Then the rest of the product exists to protect that plan.",
-      "Define metas medibles, límites de riesgo y reglas no negociables para tu empresa de trading. Luego el resto del producto existe para proteger ese plan."
+      "NeuroTrader does more than let you write a goal. It helps you model whether the timeline is realistic, split the target into phases, and keep every session accountable to the plan.",
+      "NeuroTrader hace más que dejarte escribir una meta. Te ayuda a modelar si el timeline es realista, dividir el objetivo por fases y mantener cada sesión accountable al plan."
     ),
     rails: [
-      { label: L("Target equity", "Equity objetivo"), value: "$25,000" },
-      { label: L("Risk per trade", "Riesgo por trade"), value: "$40" },
-      { label: L("Daily max loss", "Max loss diario"), value: "$120" },
-      { label: L("Core rule", "Regla clave"), value: L("Wait for reclaim", "Esperar reclaim") },
+      { label: L("Target equity", "Equity objetivo"), value: "$50,000" },
+      { label: L("Phase 1", "Fase 1"), value: "$10,000" },
+      { label: L("Operating days", "Días operativos"), value: L("3/week", "3/semana") },
+      { label: L("Protection rule", "Regla de protección"), value: L("Stop at daily goal", "Salir en meta diaria") },
     ],
   };
 
@@ -214,34 +215,59 @@ export default function Home() {
     },
     {
       step: "03",
-      title: L("Business Performance Coach", "Coach de Rendimiento Empresarial"),
-      action: L("Interpret", "Interpreta"),
-      body: L("Expose drift and the next move.", "Destapa el drift y el próximo paso."),
-      signal: L("Insight", "Insight"),
+      title: L("AI Plan Advisor", "Asesor IA del Plan"),
+      action: L("Structure", "Estructura"),
+      body: L("Turn ambition into a phased, measurable plan.", "Convierte ambición en un plan medible por fases."),
+      signal: L("Plan", "Plan"),
       example: [
-        L("Rule held: risk stayed inside $40", "Regla cumplida: el riesgo se quedó dentro de $40"),
-        L("Drift found: fear showed up before target", "Drift detectado: apareció miedo antes del target"),
+        L("Phase 1: $10K before scaling", "Fase 1: $10K antes de escalar"),
+        L("3 operating days/week modeled", "3 días operativos/semana modelados"),
       ],
       coachRead: {
-        label: L("Coach read vs plan", "Lectura del coach vs plan"),
-        title: L("You respected the risk rule but cut the winner early.", "Respetaste la regla de riesgo pero cortaste la ganadora temprano."),
+        label: L("Advisor read vs target", "Lectura del asesor vs meta"),
+        title: L("The target is possible only if the plan earns scale in phases.", "La meta solo tiene sentido si el plan se gana la escala por fases."),
         body: L(
-          "The plan stayed intact on risk. The real leak was trust: you took profit before the setup fully paid.",
-          "El plan se mantuvo intacto en riesgo. La fuga real fue confianza: tomaste profit antes de que el setup pagara completo."
+          "The model keeps the dream alive without letting the trader skip the operating checkpoints that make the target bankable.",
+          "El modelo mantiene viva la meta sin permitir que el trader brinque los checkpoints operativos que la hacen bancable."
         ),
-        next: L("Next action: hold first partial until the planned trigger confirms.", "Próxima acción: aguanta el primer parcial hasta que confirme el trigger planeado."),
+        next: L("Next action: complete the current phase before increasing pace.", "Próxima acción: completa la fase actual antes de subir el ritmo."),
       },
       icon: BrainCircuit as LucideIcon,
       iconShell: "border-violet-300/30 bg-violet-400/12 text-violet-100",
       signalShell: "border-violet-300/20 bg-violet-400/10 text-violet-100/80",
       glow: "from-violet-400/28 via-violet-300/10 to-transparent",
     },
+    {
+      step: "04",
+      title: L("Business Progress Tracking", "Seguimiento del Progreso Empresarial"),
+      action: L("Track", "Mide"),
+      body: L("Keep the plan alive after every session.", "Mantiene vivo el plan después de cada sesión."),
+      signal: L("Progress", "Progreso"),
+      example: [
+        L("Pacing vs target updated", "Ritmo vs meta actualizado"),
+        L("Rule compliance checked", "Cumplimiento de reglas verificado"),
+      ],
+      coachRead: {
+        label: L("Progress read vs plan", "Lectura de progreso vs plan"),
+        title: L("The next decision starts with the plan, not the emotion.", "La próxima decisión empieza con el plan, no con la emoción."),
+        body: L(
+          "NeuroTrader connects rules, alarms, progress, and coaching so the business plan does not become a forgotten note.",
+          "NeuroTrader conecta reglas, alarmas, progreso y coaching para que el plan empresarial no se convierta en una nota olvidada."
+        ),
+        next: L("Next action: review phase progress before sizing the next session.", "Próxima acción: revisa el progreso de la fase antes de sizear la próxima sesión."),
+      },
+      icon: Compass as LucideIcon,
+      iconShell: "border-amber-300/30 bg-amber-400/12 text-amber-100",
+      signalShell: "border-amber-300/20 bg-amber-400/10 text-amber-100/80",
+      glow: "from-amber-400/28 via-amber-300/10 to-transparent",
+    },
   ];
 
   const workflowLoopSignals = [
     L("Facts", "Hechos"),
-    L("Context", "Contexto"),
-    L("Insight", "Insight"),
+    L("Plan", "Plan"),
+    L("Rules", "Reglas"),
+    L("Progress", "Progreso"),
   ];
 
   const productViews = [
@@ -259,8 +285,8 @@ export default function Home() {
       kind: "growth" as const,
     },
     {
-      title: L("Business AI Coach", "Coach Empresarial IA"),
-      body: L("Objective feedback from your actual trading behavior and business plan.", "Feedback objetivo basado en tu conducta real y tu plan empresarial."),
+      title: L("AI Plan Advisor", "Asesor IA del Plan"),
+      body: L("Phased goal design, realistic pacing, and accountability against the plan you approved.", "Diseño de metas por fases, ritmo realista y accountability contra el plan aprobado."),
       kind: "coach" as const,
     },
   ];
@@ -274,10 +300,10 @@ export default function Home() {
       ),
     },
     {
-      label: L("AI business accountability", "Accountability empresarial IA"),
+      label: L("AI plan accountability", "Accountability del plan con IA"),
       detail: L(
-        "Business AI Coach reviews whether your trades, behavior, and risk stayed aligned with the business plan.",
-        "El Coach Empresarial IA revisa si tus trades, conducta y riesgo se mantuvieron alineados al plan empresarial."
+        "The AI layer helps structure realistic milestones, then reviews whether trades, behavior, and risk stayed aligned with the approved plan.",
+        "La capa de IA ayuda a estructurar milestones realistas y luego revisa si trades, conducta y riesgo se mantuvieron alineados al plan aprobado."
       ),
     },
     {
@@ -407,7 +433,7 @@ export default function Home() {
                 draggable={false}
               />
               <p className="text-sm font-semibold text-emerald-300">
-              {L("Trading Business Platform for Trader Entrepreneurs", "Plataforma empresarial de trading para Empresarios Traders")}
+              {L("Trading Business Operating System for Trader Entrepreneurs", "Sistema Operativo de Empresa de Trading para Empresarios Traders")}
               </p>
             </div>
             <h1 className="text-5xl font-semibold leading-none text-white md:text-7xl">
@@ -415,8 +441,8 @@ export default function Home() {
             </h1>
             <p className="mt-6 max-w-2xl text-base leading-7 text-slate-200 md:text-lg">
               {L(
-                "NeuroTrader gives Trader Entrepreneurs the structure to build, operate, track, and improve a trading business from one platform.",
-                "NeuroTrader le da al Empresario Trader la estructura para crear, operar, medir y mejorar una empresa de trading desde una sola plataforma."
+                "NeuroTrader connects the Trading Business Plan, execution records, risk controls, business performance, financial management, audits, and AI-guided accountability in one platform. Build the trading business plan. Protect it with one operating loop.",
+                "NeuroTrader conecta el Plan de Empresa de Trading, registros de ejecución, controles de riesgo, rendimiento empresarial, gestión financiera, auditorías y accountability guiada por IA en una sola plataforma. Construye el plan de empresa de trading. Protégelo con un solo ciclo operativo."
               )}
             </p>
             <div className="mt-7 flex flex-wrap gap-3">
@@ -761,8 +787,8 @@ export default function Home() {
             </h2>
             <p className="mt-3 text-sm leading-6 text-slate-300 md:text-base">
               {L(
-                "NeuroTrader is built for the parts of a trading business that need structure: measurable goals, risk discipline, rule obedience, repetition, and honest review.",
-                "NeuroTrader está construido para las partes de una empresa de trading que necesitan estructura: metas medibles, disciplina de riesgo, obedecer reglas, repetición y revisión honesta."
+                "NeuroTrader is built for trading businesses that need operating rigor: measurable goals, risk governance, financial control, rule obedience, accountability, and continuous improvement.",
+                "NeuroTrader está construido para empresas de trading que necesitan rigor operativo: metas medibles, gobernanza de riesgo, control financiero, obediencia a reglas, accountability y mejora continua."
               )}
             </p>
             <div className="mt-6">

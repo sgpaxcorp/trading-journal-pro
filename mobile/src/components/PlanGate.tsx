@@ -46,8 +46,8 @@ export function PlanGate({
           <Text style={styles.note}>
             {t(
               language,
-              "Manage or upgrade your plan from the web platform.",
-              "Administra o mejora tu plan desde la plataforma web."
+              "This tool unlocks according to your active account access.",
+              "Esta herramienta se habilita según el acceso activo de tu cuenta."
             )}
           </Text>
         )}

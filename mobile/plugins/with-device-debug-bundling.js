@@ -77,6 +77,12 @@ const SCHEME_LAUNCH_DEBUG =
 const SCHEME_LAUNCH_RELEASE =
   '<LaunchAction\n      buildConfiguration = "Release"';
 const BUNDLE_PHASE_NAME = "Bundle React Native code and images";
+const EAS_ANDROID_SIGNING_HOOK = `// Allow EAS Build to inject Play Store signing credentials into release builds.
+def easBuildGradle = file("./eas-build.gradle")
+if (easBuildGradle.exists()) {
+    apply from: easBuildGradle
+}
+`;
 const BUNDLE_SCRIPT = `#!/bin/sh
 set -e
 
@@ -174,30 +180,41 @@ const removeDuplicateLibcxxFlag = (buildSettings) => {
   }
 };
 
+const cleanBuildSettingFlag = (value) =>
+  String(value || "")
+    .trim()
+    .replace(/,$/, "")
+    .replace(/^"+|"+$/g, "");
+
+const toBuildSettingFlagList = (existing, fallback = "$(inherited)") => {
+  const raw = Array.isArray(existing) ? existing.join(" ") : String(existing || fallback);
+  const parts = raw.match(/"[^"]*"|'[^']*'|[^\s,]+/g) || [];
+  return parts
+    .flatMap((part) => cleanBuildSettingFlag(part).split(/\s+/))
+    .map(cleanBuildSettingFlag)
+    .filter(Boolean);
+};
+
+const quoteBuildSettingFlag = (value) =>
+  `"${cleanBuildSettingFlag(value).replace(/"/g, '\\"')}"`;
+
+const withSingleInherited = (flags) => [
+  "$(inherited)",
+  ...flags.filter((flag) => unquote(flag) !== "$(inherited)"),
+];
+
 const appendBuildSettingFlags = (buildSettings, key, flagsToAdd) => {
-  const existing = buildSettings[key];
-  const flags = Array.isArray(existing)
-    ? [...existing]
-    : String(existing || "$(inherited)").split(/\s+/).filter(Boolean);
-  if (!flags.some((flag) => unquote(flag) === "$(inherited)")) {
-    flags.unshift("$(inherited)");
-  }
+  let flags = withSingleInherited(toBuildSettingFlagList(buildSettings[key]));
   for (const flag of flagsToAdd) {
     if (!flags.some((existingFlag) => unquote(existingFlag) === flag)) {
       flags.push(flag);
     }
   }
-  buildSettings[key] = flags;
+  buildSettings[key] = flags.map(quoteBuildSettingFlag);
 };
 
 const appendSwiftCompilerFlags = (buildSettings, xccFlagsToAdd) => {
-  const existing = buildSettings.OTHER_SWIFT_FLAGS;
-  const flags = Array.isArray(existing)
-    ? [...existing]
-    : String(existing || "$(inherited)").split(/\s+/).filter(Boolean);
-  if (!flags.some((flag) => unquote(flag) === "$(inherited)")) {
-    flags.unshift("$(inherited)");
-  }
+  let flags = withSingleInherited(toBuildSettingFlagList(buildSettings.OTHER_SWIFT_FLAGS));
   if (!flags.some((flag) => unquote(flag) === "-suppress-warnings")) {
     flags.push("-suppress-warnings");
   }
@@ -210,7 +227,24 @@ const appendSwiftCompilerFlags = (buildSettings, xccFlagsToAdd) => {
       flags.push("-Xcc", ccFlag);
     }
   }
-  buildSettings.OTHER_SWIFT_FLAGS = flags;
+  const compactedFlags = [];
+  const seenXccPairs = new Set();
+  for (let index = 0; index < flags.length; index += 1) {
+    const flag = unquote(flags[index]);
+    if (flag === "-Xcc" && index + 1 < flags.length) {
+      const ccFlag = unquote(flags[index + 1]);
+      const pairKey = `${flag}\0${ccFlag}`;
+      if (!seenXccPairs.has(pairKey)) {
+        compactedFlags.push(flag, ccFlag);
+        seenXccPairs.add(pairKey);
+      }
+      index += 1;
+      continue;
+    }
+    if (flag === "-suppress-warnings" && compactedFlags.includes(flag)) continue;
+    compactedFlags.push(flag);
+  }
+  buildSettings.OTHER_SWIFT_FLAGS = compactedFlags.map(quoteBuildSettingFlag);
 };
 
 const ensurePodfileIosBuildFixes = (podfile) => {
@@ -325,8 +359,14 @@ module.exports = function withDeviceDebugBundling(config) {
       buildConfig.buildSettings.IPHONEOS_DEPLOYMENT_TARGET = IOS_DEPLOYMENT_TARGET;
       removeDuplicateLibcxxFlag(buildConfig.buildSettings);
       buildConfig.buildSettings.CLANG_WARN_NULLABILITY_COMPLETENESS = "NO";
-      buildConfig.buildSettings.LIBTOOLFLAGS = "$(inherited) -no_warning_for_no_symbols";
-      buildConfig.buildSettings.OTHER_LIBTOOLFLAGS = "$(inherited) -no_warning_for_no_symbols";
+      buildConfig.buildSettings.LIBTOOLFLAGS = [
+        quoteBuildSettingFlag("$(inherited)"),
+        quoteBuildSettingFlag("-no_warning_for_no_symbols"),
+      ];
+      buildConfig.buildSettings.OTHER_LIBTOOLFLAGS = [
+        quoteBuildSettingFlag("$(inherited)"),
+        quoteBuildSettingFlag("-no_warning_for_no_symbols"),
+      ];
       appendBuildSettingFlags(buildConfig.buildSettings, "OTHER_CFLAGS", [
         "-Wno-nullability-completeness",
         "-Wno-nullability",
@@ -356,7 +396,7 @@ module.exports = function withDeviceDebugBundling(config) {
     return config;
   });
 
-  return withDangerousMod(config, [
+  config = withDangerousMod(config, [
     "ios",
     async (config) => {
       const iosRoot = config.modRequest.platformProjectRoot;
@@ -403,6 +443,25 @@ module.exports = function withDeviceDebugBundling(config) {
       };
       if (fs.existsSync(xcodeprojRoot)) {
         walk(xcodeprojRoot);
+      }
+
+      return config;
+    },
+  ]);
+
+  return withDangerousMod(config, [
+    "android",
+    async (config) => {
+      const androidRoot = config.modRequest.platformProjectRoot;
+      const buildGradlePath = path.join(androidRoot, "app", "build.gradle");
+      if (!fs.existsSync(buildGradlePath)) return config;
+
+      const buildGradle = fs.readFileSync(buildGradlePath, "utf8");
+      if (!buildGradle.includes("eas-build.gradle")) {
+        fs.writeFileSync(
+          buildGradlePath,
+          `${buildGradle.trimEnd()}\n\n${EAS_ANDROID_SIGNING_HOOK}`
+        );
       }
 
       return config;

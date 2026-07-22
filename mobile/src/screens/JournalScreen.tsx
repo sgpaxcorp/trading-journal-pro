@@ -32,8 +32,8 @@ export function JournalScreen({ onOpenModule }: JournalScreenProps) {
             t(language, "Daily business record", "Registro empresarial diario"),
             t(
               language,
-              "This mobile flow opens the same execution evidence model used by the web platform.",
-              "Este flujo móvil abre el mismo modelo de evidencia de ejecución que usa la plataforma web."
+              "This mobile flow opens the execution evidence model used to review the trading business with consistency.",
+              "Este flujo móvil abre el modelo de evidencia de ejecución usado para revisar la empresa de trading con consistencia."
             )
           )
         }

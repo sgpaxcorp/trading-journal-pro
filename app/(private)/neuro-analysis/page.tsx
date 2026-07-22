@@ -92,6 +92,9 @@ type MarketData = {
     fiftyTwoWeekLow?: number | null;
     regularMarketVolume?: number | null;
     previousClose?: number | null;
+    marketCap?: number | null;
+    trailingPE?: number | null;
+    forwardPE?: number | null;
   };
   annualFundamentals: Array<{
     year: number;
@@ -155,30 +158,45 @@ const LOCALE_TAG: Record<Lang, string> = {
 
 const PREMIUM_OUTPUTS = [
   {
-    title: "Capital verdict",
-    esTitle: "Veredicto de capital",
-    body: "Add, hold, trim, avoid, or watchlist with evidence, uncertainty, and position-size risk.",
-    esBody: "Añadir, mantener, reducir, evitar o watchlist con evidencia, incertidumbre y riesgo de tamaño.",
+    title: "Terminal-style profile",
+    esTitle: "Perfil tipo terminal",
+    body: "Company snapshot, business model, drivers, market position, and evidence checklist.",
+    esBody: "Snapshot de compañía, modelo de negocio, drivers, posición de mercado y checklist de evidencia.",
   },
   {
-    title: "Company intelligence",
-    esTitle: "Inteligencia de compañía",
-    body: "Business model, revenue drivers, competitive position, management, and key risks.",
-    esBody: "Modelo de negocio, drivers de ingresos, posición competitiva, management y riesgos clave.",
+    title: "Market and competition",
+    esTitle: "Mercado y competencia",
+    body: "Industry structure, demand, competitors, substitutes, cyclicality, and regulatory risk.",
+    esBody: "Estructura de industria, demanda, competidores, sustitutos, ciclos y riesgo regulatorio.",
   },
   {
-    title: "Future cash flows",
-    esTitle: "Future cash flows",
-    body: "Bear/base/bull projections with discount rate, sensitivity, and margin of safety.",
-    esBody: "Proyecciones bear/base/bull con tasa de descuento, sensibilidad y margen de seguridad.",
+    title: "2-10 year valuation",
+    esTitle: "Valuation 2-10 años",
+    body: "Bear/base/bull fair-value ladder with discount rate, terminal assumptions, and margin of safety.",
+    esBody: "Escalera de fair value bear/base/bull con tasa de descuento, supuestos terminales y margen de seguridad.",
   },
   {
-    title: "Portfolio allocation",
-    esTitle: "Allocation del portfolio",
-    body: "Concentration, drawdown exposure, expected return, and virtual allocation simulation.",
-    esBody: "Concentración, exposición, retorno esperado y simulación virtual de allocation.",
+    title: "Investment verdict",
+    esTitle: "Veredicto de inversión",
+    body: "Add now, wait, hold, reduce, avoid, or watchlist based on valuation and evidence strength.",
+    esBody: "Añadir ahora, esperar, mantener, reducir, evitar o watchlist según valuation y calidad de evidencia.",
   },
 ];
+
+function defaultResearchGoal(isEs: boolean) {
+  return isEs
+    ? "Analiza objetivamente la compañía como inversión a largo plazo: perfil del negocio, mercado, competencia, documentos necesarios, valoración hoy y fair value proyectado de 2 a 10 años. Dime si parece buena inversión ahora, si conviene esperar por mejor precio/evidencia, mantener, reducir o evitar."
+    : "Objectively analyze the company as a long-term investment: business profile, market, competition, required documents, valuation today, and projected fair value from years 2 through 10. Tell me whether it looks like a good investment now, whether it is better to wait for better price/evidence, hold, reduce, or avoid.";
+}
+
+function isLegacyResearchGoal(value: string) {
+  const text = value.trim().toLowerCase();
+  return (
+    (text.includes("capital") && text.includes("well allocated")) ||
+    (text.includes("capital") && text.includes("allocation")) ||
+    (text.includes("capital") && text.includes("asignado"))
+  );
+}
 
 function makeId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -355,6 +373,7 @@ function normalizeSavedHoldings(raw: any): Holding[] {
   const rows = Array.isArray(raw) ? raw : [];
   return rows
     .map((holding, index) => {
+      if (holding?.researchOnly) return null;
       const ticker = String(holding?.ticker ?? "")
         .toUpperCase()
         .replace(/[^A-Z0-9.-]/g, "")
@@ -426,11 +445,7 @@ export default function NeuroAnalysisPage() {
 
   const [holdings, setHoldings] = useState<Holding[]>([]);
   const [focusTicker, setFocusTicker] = useState("AAPL");
-  const [researchGoal, setResearchGoal] = useState(
-    isEs
-      ? "Evalúa objetivamente si mi capital está bien asignado y qué allocation tendría más sentido."
-      : "Objectively evaluate whether my capital is well allocated and what allocation would make more sense."
-  );
+  const [researchGoal, setResearchGoal] = useState(defaultResearchGoal(isEs));
   const [filings, setFilings] = useState<FilingUpload[]>([]);
   const [filingsLoading, setFilingsLoading] = useState(false);
   const [marketData, setMarketData] = useState<MarketData | null>(null);
@@ -463,12 +478,10 @@ export default function NeuroAnalysisPage() {
   const [activeWorkspaceTab, setActiveWorkspaceTab] = useState<WorkspaceTab>("research");
 
   useEffect(() => {
-    setResearchGoal(
-      isEs
-        ? "Evalúa objetivamente si mi capital está bien asignado y qué allocation tendría más sentido."
-        : "Objectively evaluate whether my capital is well allocated and what allocation would make more sense."
-    );
-  }, [isEs]);
+    if (isLegacyResearchGoal(researchGoal)) {
+      setResearchGoal(defaultResearchGoal(isEs));
+    }
+  }, [isEs, researchGoal]);
 
   const authToken = async () => {
     const { data } = await supabaseBrowser.auth.getSession();
@@ -518,6 +531,37 @@ export default function NeuroAnalysisPage() {
       largest,
     };
   }, [holdings]);
+  const researchHoldings = useMemo(() => {
+    if (portfolio.rows.length > 0) return portfolio.rows;
+    const ticker = focusTicker.trim().toUpperCase();
+    if (!ticker) return [];
+    const price =
+      toNumber(marketData?.market?.regularMarketPrice) ||
+      toNumber(marketData?.market?.previousClose) ||
+      toNumber(marketDataByTicker[ticker]?.market?.regularMarketPrice) ||
+      toNumber(marketDataByTicker[ticker]?.market?.previousClose);
+    return [
+      {
+        id: `research-${ticker}`,
+        ticker,
+        shares: 1,
+        averageCost: price,
+        currentPrice: price,
+        source: "manual" as const,
+        invested: price,
+        value: price,
+        pnl: 0,
+        pnlPct: 0,
+        weight: 1,
+      },
+    ];
+  }, [
+    focusTicker,
+    marketData?.market?.previousClose,
+    marketData?.market?.regularMarketPrice,
+    marketDataByTicker,
+    portfolio.rows,
+  ]);
 
   const indexedDocuments = filings.filter((filing) => Boolean(filing.vectorStoreId));
   const pendingDocuments = filings.filter((filing) => !filing.vectorStoreId);
@@ -573,11 +617,11 @@ export default function NeuroAnalysisPage() {
   );
   const readinessItems = [
     {
-      done: portfolio.rows.length > 0,
-      title: L("Capital inputs loaded", "Capital cargado"),
+      done: researchHoldings.length > 0,
+      title: L("Company selected", "Compañía seleccionada"),
       body: L(
-        "Use Portfolio Import to add positions manually or bring in a read-only portfolio.",
-        "Usa Portfolio Import para añadir posiciones manuales o traer un portfolio solo lectura."
+        "Pick the ticker you want Neuro to evaluate as a long-term investment.",
+        "Escoge el ticker que quieres que Neuro evalúe como inversión a largo plazo."
       ),
     },
     {
@@ -612,7 +656,7 @@ export default function NeuroAnalysisPage() {
       const title =
         caseTitle.trim() ||
         marketData?.company?.name ||
-        (portfolio.rows.length ? `${portfolio.rows[0].ticker} research` : "Research case");
+        (focusTicker ? `${focusTicker} research` : "Research case");
       const res = await authedFetch("/api/neuro-analysis/cases", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1070,8 +1114,8 @@ export default function NeuroAnalysisPage() {
     try {
       const token = await authToken();
       if (!token) throw new Error(L("Sign in to run Neuro Analysis.", "Inicia sesión para correr Neuro Analysis."));
-      if (!portfolio.rows.length) {
-        throw new Error(L("Add or import at least one position first.", "Añade o importa al menos una posición primero."));
+      if (!focusTicker.trim()) {
+        throw new Error(L("Choose a focus ticker first.", "Escoge un ticker foco primero."));
       }
 
       const uploadedFilings = (
@@ -1086,7 +1130,8 @@ export default function NeuroAnalysisPage() {
         },
         body: JSON.stringify({
           language: isEs ? "es" : "en",
-          holdings: portfolio.rows.map((holding) => ({
+          focusTicker,
+          holdings: researchHoldings.map((holding) => ({
             ticker: holding.ticker,
             shares: holding.shares,
             averageCost: holding.averageCost,
@@ -1096,7 +1141,7 @@ export default function NeuroAnalysisPage() {
           caseTitle:
             caseTitle.trim() ||
             marketData?.company?.name ||
-            (portfolio.rows.length ? `${portfolio.rows[0].ticker} research` : "Research case"),
+            (focusTicker ? `${focusTicker} research` : "Research case"),
           selectedAccountId: brokerAccountId || null,
           brokerSnapshot: {
             accounts: brokerAccounts,
@@ -1109,7 +1154,7 @@ export default function NeuroAnalysisPage() {
             documentReadiness: documentReadinessRows,
           },
           assumptions: {
-            horizonYears: 5,
+            horizonYears: 10,
             discountRatePct: 10,
             marginOfSafetyPct: 25,
             baseGrowthPct: null,
@@ -1188,8 +1233,8 @@ export default function NeuroAnalysisPage() {
               </h1>
               <p className="mt-2 max-w-4xl text-sm leading-6 text-slate-400">
                 {L(
-                  "Build an evidence-backed research case from capital inputs, market data, company documents, projections, and Neuro's verdict. Portfolio import now lives in its own workspace so this page stays focused on research.",
-                  "Construye un caso de research con capital, data de mercado, documentos de compañía, proyecciones y el veredicto de Neuro. La importación de portfolio vive en su propio workspace para que esta página se mantenga enfocada en research."
+                  "Build a terminal-style company research profile: evidence checklist, market and competitor intelligence, financial statement review, valuation today, 2-10 year fair-value scenarios, and a long-term investment verdict.",
+                  "Construye un perfil de compañía tipo terminal: checklist de evidencia, inteligencia de mercado y competencia, revisión financiera, valuation hoy, escenarios de fair value de 2 a 10 años y veredicto de inversión a largo plazo."
                 )}
               </p>
               <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center">
@@ -1202,7 +1247,7 @@ export default function NeuroAnalysisPage() {
                 <button
                   type="button"
                   onClick={() => void saveResearchCase()}
-                  disabled={caseSaving || portfolio.rows.length === 0}
+                  disabled={caseSaving || !focusTicker.trim()}
                   className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-700 bg-slate-950/60 px-3 py-2 text-xs font-semibold text-slate-200 hover:border-emerald-400 hover:text-emerald-200 disabled:opacity-50"
                 >
                   {caseSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
@@ -1212,9 +1257,8 @@ export default function NeuroAnalysisPage() {
               {caseStatus ? <p className="mt-2 text-xs text-emerald-300">{caseStatus}</p> : null}
             </div>
 
-            <div className="grid grid-cols-3 gap-2 text-sm xl:w-[520px]">
+            <div className="grid grid-cols-2 gap-2 text-sm xl:w-[360px]">
               <Readout label={L("Readiness", "Preparación")} value={`${readinessScore}%`} />
-              <Readout label={L("Research capital", "Capital research")} value={formatCurrency(portfolio.totalValue, localeTag)} />
               <Readout label={L("Focus", "Foco")} value={focusTicker || "-"} />
             </div>
           </div>
@@ -1229,13 +1273,13 @@ export default function NeuroAnalysisPage() {
               id: "research" as const,
               icon: Search,
               title: L("Research Desk", "Research Desk"),
-              body: L("Company intelligence, documents, market layer, and Neuro verdict.", "Inteligencia de compañía, documentos, mercado y veredicto Neuro."),
+              body: L("Company profile, evidence checklist, market intelligence, valuation, and investment verdict.", "Perfil de compañía, checklist de evidencia, inteligencia de mercado, valuation y veredicto de inversión."),
             },
             {
               id: "portfolio" as const,
               icon: WalletCards,
               title: L("Portfolio Import", "Portfolio Import"),
-              body: L("Connect a broker or enter positions manually as research inputs.", "Conecta broker o entra posiciones manuales como insumo de research."),
+              body: L("Optional: include real positions later without changing the company research flow.", "Opcional: incluye posiciones reales luego sin cambiar el flujo de research."),
             },
           ].map((tab) => {
             const Icon = tab.icon;
@@ -1454,12 +1498,12 @@ export default function NeuroAnalysisPage() {
                 <div>
                   <div className="flex items-center gap-2">
                     <Search className="h-4 w-4 text-sky-300" />
-                    <h2 className="text-base font-semibold">{L("Company Intelligence", "Inteligencia de compañía")}</h2>
+                    <h2 className="text-base font-semibold">{L("Company Intelligence Profile", "Perfil de inteligencia de compañía")}</h2>
                   </div>
                   <p className="mt-2 text-sm leading-6 text-slate-400">
                     {L(
-                      "Choose the company Neuro should analyze first. Market data loads automatically; company documents strengthen the verdict.",
-                      "Escoge la compañía que Neuro debe analizar primero. La data de mercado carga automática; los documentos fortalecen el veredicto."
+                      "Choose the company Neuro should research. Market data loads automatically; 10-K, 10-Q, and company documents turn the verdict from provisional into evidence-backed.",
+                      "Escoge la compañía que Neuro debe investigar. La data de mercado carga automática; 10-K, 10-Q y documentos de compañía convierten el veredicto de provisional a respaldado por evidencia."
                     )}
                   </p>
                 </div>
@@ -1508,12 +1552,12 @@ export default function NeuroAnalysisPage() {
             <div className="rounded-xl border border-sky-500/30 bg-sky-500/5 p-5">
               <div className="flex items-center gap-2">
                 <Sparkles className="h-4 w-4 text-sky-300" />
-                <h2 className="text-base font-semibold">{L("Neuro Run", "Neuro Run")}</h2>
+                <h2 className="text-base font-semibold">{L("Research Run", "Research Run")}</h2>
               </div>
               <p className="mt-2 text-sm leading-6 text-slate-300">
                 {L(
-                  "Neuro reads the selected capital inputs, current market layer, and company documents, then turns them into a research verdict.",
-                  "Neuro lee el capital seleccionado, la capa actual de mercado y los documentos de compañía, y lo convierte en un veredicto de research."
+                  "Neuro reads the focus company, market layer, and uploaded documents, then builds a research profile, valuation ladder, and long-term investment verdict.",
+                  "Neuro lee la compañía foco, la capa de mercado y documentos subidos, y crea un perfil de research, escalera de valuation y veredicto de inversión a largo plazo."
                 )}
               </p>
 
@@ -1536,22 +1580,12 @@ export default function NeuroAnalysisPage() {
               <button
                 type="button"
                 onClick={() => void runNeuroAgent()}
-                disabled={agentLoading || portfolio.rows.length === 0}
+                disabled={agentLoading || !focusTicker.trim()}
                 className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-sky-400 px-4 py-3 text-sm font-semibold text-slate-950 hover:bg-sky-300 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {agentLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-                {agentLoading ? L("Running research...", "Corriendo research...") : L("Run research analysis", "Correr research analysis")}
+                {agentLoading ? L("Running research...", "Corriendo research...") : L("Run company intelligence", "Correr inteligencia de compañía")}
               </button>
-              {portfolio.rows.length === 0 ? (
-                <button
-                  type="button"
-                  onClick={() => setActiveWorkspaceTab("portfolio")}
-                  className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-lg border border-slate-700 bg-slate-950/60 px-4 py-2 text-xs font-semibold text-slate-200 hover:border-emerald-400 hover:text-emerald-200"
-                >
-                  <WalletCards className="h-3.5 w-3.5" />
-                  {L("Open Portfolio Import", "Abrir Portfolio Import")}
-                </button>
-              ) : null}
               {agentError ? <p className="mt-3 text-xs text-rose-300">{agentError}</p> : null}
             </div>
 
@@ -1834,13 +1868,114 @@ export default function NeuroAnalysisPage() {
           </div>
         </section>
 
+        {activeWorkspaceTab === "research" && Array.isArray(engineSnapshot?.positions) && engineSnapshot.positions.length > 0 ? (
+          <section className="rounded-xl border border-sky-500/25 bg-slate-900/80 p-5">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="h-4 w-4 text-sky-300" />
+                <div>
+                  <h2 className="text-base font-semibold">{L("Company Valuation Model", "Modelo de valuation de compañía")}</h2>
+                  <p className="mt-1 text-sm leading-6 text-slate-400">
+                    {L(
+                      "A terminal-style fair-value ladder from year 2 through year 10. Values are model outputs, not promises.",
+                      "Una escalera de fair value tipo terminal desde año 2 hasta año 10. Los valores son salidas del modelo, no promesas."
+                    )}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-5 space-y-5">
+              {engineSnapshot.positions.map((position: any, index: number) => {
+                const profile = position?.valuationProfile ?? {};
+                const projectionYears = Array.isArray(profile?.projectionYears) ? profile.projectionYears : [];
+                const baseScenario = profile?.selectedHorizonScenarios?.base ?? position?.scenarios?.base ?? {};
+                const valuationStatus = String(position?.derived?.valuationStatus ?? "unknown").replace(/_/g, " ");
+                return (
+                  <div key={position?.ticker ?? `position-${index}`} className="rounded-xl border border-slate-800 bg-slate-950/35 p-4">
+                    <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                      <div>
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-sky-300">
+                          {L("Research profile", "Perfil de research")}
+                        </p>
+                        <h3 className="mt-2 text-lg font-semibold text-slate-50">
+                          {position?.company?.name || position?.ticker}
+                        </h3>
+                        <p className="mt-1 text-sm text-slate-500">
+                          {[position?.ticker, position?.company?.sector, position?.company?.industry]
+                            .filter(Boolean)
+                            .join(" / ")}
+                        </p>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 text-xs md:grid-cols-4 lg:min-w-[680px]">
+                        <Readout
+                          label={L("Market cap", "Market cap")}
+                          value={formatCompactCurrency(profile?.currentMarketCap, localeTag)}
+                        />
+                        <Readout
+                          label={L("Price today", "Precio hoy")}
+                          value={formatCurrency(profile?.currentPrice, localeTag)}
+                        />
+                        <Readout
+                          label={L("Base fair value", "Fair value base")}
+                          value={formatCompactCurrency(baseScenario?.intrinsicEquityValue, localeTag)}
+                          hint={formatPercent(baseScenario?.upsideToMarket, localeTag)}
+                        />
+                        <Readout
+                          label={L("Valuation status", "Estado valuation")}
+                          value={valuationStatus}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="mt-4 overflow-x-auto rounded-lg border border-slate-800">
+                      <table className="w-full min-w-[760px] text-left text-sm">
+                        <thead className="bg-slate-950/55 text-xs text-slate-500">
+                          <tr>
+                            <th className="px-3 py-2">{L("Year", "Año")}</th>
+                            <th className="px-3 py-2">{L("Bear value", "Valor bear")}</th>
+                            <th className="px-3 py-2">{L("Base value", "Valor base")}</th>
+                            <th className="px-3 py-2">{L("Bull value", "Valor bull")}</th>
+                            <th className="px-3 py-2">{L("Base upside", "Upside base")}</th>
+                            <th className="px-3 py-2">{L("Status", "Estado")}</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {projectionYears.length === 0 ? (
+                            <tr>
+                              <td colSpan={6} className="px-3 py-8 text-center text-sm text-slate-500">
+                                {L("Run company intelligence to generate the 2-10 year valuation ladder.", "Corre inteligencia de compañía para generar la escalera de valuation 2-10 años.")}
+                              </td>
+                            </tr>
+                          ) : (
+                            projectionYears.map((row: any) => (
+                              <tr key={`${position?.ticker}-${row.year}`} className="border-t border-slate-800">
+                                <td className="px-3 py-2 font-semibold text-slate-100">{row.year}</td>
+                                <td className="px-3 py-2 text-slate-300">{formatCompactCurrency(row?.bear?.intrinsicEquityValue, localeTag)}</td>
+                                <td className="px-3 py-2 text-slate-300">{formatCompactCurrency(row?.base?.intrinsicEquityValue, localeTag)}</td>
+                                <td className="px-3 py-2 text-slate-300">{formatCompactCurrency(row?.bull?.intrinsicEquityValue, localeTag)}</td>
+                                <td className="px-3 py-2 font-semibold text-emerald-300">{formatPercent(row?.base?.upsideToMarket, localeTag)}</td>
+                                <td className="px-3 py-2 text-slate-300">{String(row?.valuationStatus ?? "unknown").replace(/_/g, " ")}</td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        ) : null}
+
         {activeWorkspaceTab === "research" && engineSnapshot ? (
           <section className="rounded-xl border border-emerald-500/25 bg-slate-900/80 p-5">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex items-center gap-2">
                 <ShieldCheck className="h-4 w-4 text-emerald-300" />
                 <h2 className="text-base font-semibold">
-                  {L("Allocation Simulation", "Simulación de allocation")}
+                  {L("Investment Decision Simulation", "Simulación de decisión de inversión")}
                 </h2>
               </div>
               <div className="grid grid-cols-1 gap-2 text-xs sm:grid-cols-3 sm:min-w-[520px]">
@@ -1870,7 +2005,7 @@ export default function NeuroAnalysisPage() {
                     <th className="px-3 py-2">{L("Verdict", "Veredicto")}</th>
                     <th className="px-3 py-2">{L("Current weight", "Peso actual")}</th>
                     <th className="px-3 py-2">{L("Target weight", "Peso sugerido")}</th>
-                    <th className="px-3 py-2">{L("Capital delta", "Delta capital")}</th>
+                    <th className="px-3 py-2">{L("Position delta", "Delta posición")}</th>
                   </tr>
                 </thead>
                 <tbody>
