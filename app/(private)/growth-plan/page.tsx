@@ -2766,7 +2766,7 @@ export default function GrowthPlanPage() {
                       ) : null}
                     </div>
 
-                    <div className="mt-3 h-[120px]">
+                    <div className="mt-3 h-30">
                       <ResponsiveContainer width="100%" height="100%">
                         <LineChart data={scenario.chart} margin={{ top: 8, right: 10, left: 0, bottom: 0 }}>
                           <CartesianGrid stroke="#1e293b" strokeDasharray="3 3" />
