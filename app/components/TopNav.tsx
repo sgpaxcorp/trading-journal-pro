@@ -236,7 +236,7 @@ function HelpMenu({ theme, lang }: { theme: Theme; lang: Locale }) {
               disabled={!user?.id}
               className={`px-2 py-1 rounded-lg border transition ${linkClass}`}
             >
-              {L("Start quick tour", "Iniciar quick tour")}
+              {L("Start operating tour", "Iniciar tour operativo")}
             </button>
           </div>
         </div>

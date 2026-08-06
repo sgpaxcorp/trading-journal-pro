@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { supabaseBrowser } from "@/lib/supaBaseClient";
 
@@ -33,6 +33,16 @@ type Payload = {
   automations: Automation[];
   adminEmail: string;
   broadcastAudienceCount: number;
+  broadcastRecipients: BroadcastRecipient[];
+};
+
+type BroadcastRecipient = {
+  id: string;
+  email: string;
+  fullName: string;
+  plan: string | null;
+  subscriptionStatus: string | null;
+  createdAt: string | null;
 };
 
 function groupLabel(category: Automation["category"], L: (en: string, es: string) => string) {
@@ -60,6 +70,8 @@ export default function AdminEmailAutomations({ lang }: Props) {
   const [broadcastCtaUrl, setBroadcastCtaUrl] = useState("");
   const [broadcastFooter, setBroadcastFooter] = useState("");
   const [confirmText, setConfirmText] = useState("");
+  const [recipientQuery, setRecipientQuery] = useState("");
+  const [selectedRecipientIds, setSelectedRecipientIds] = useState<string[]>([]);
 
   async function load() {
     setLoading(true);
@@ -133,9 +145,54 @@ export default function AdminEmailAutomations({ lang }: Props) {
     }
   }
 
-  async function sendBroadcast(mode: "preview" | "all") {
+  const filteredRecipients = useMemo(() => {
+    const rows = data?.broadcastRecipients ?? [];
+    const query = recipientQuery.trim().toLowerCase();
+    if (!query) return rows;
+
+    return rows.filter((row) =>
+      [row.fullName, row.email, row.plan, row.subscriptionStatus]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase()
+        .includes(query)
+    );
+  }, [data?.broadcastRecipients, recipientQuery]);
+
+  const selectedRecipients = useMemo(() => {
+    const selected = new Set(selectedRecipientIds);
+    return (data?.broadcastRecipients ?? []).filter((row) => selected.has(row.id));
+  }, [data?.broadcastRecipients, selectedRecipientIds]);
+
+  function toggleRecipient(recipientId: string) {
+    setSelectedRecipientIds((current) =>
+      current.includes(recipientId)
+        ? current.filter((value) => value !== recipientId)
+        : [...current, recipientId]
+    );
+  }
+
+  function selectAllFilteredRecipients() {
+    setSelectedRecipientIds((current) => {
+      const next = new Set(current);
+      filteredRecipients.forEach((row) => next.add(row.id));
+      return Array.from(next);
+    });
+  }
+
+  function clearSelectedRecipients() {
+    setSelectedRecipientIds([]);
+  }
+
+  async function sendBroadcast(mode: "preview" | "selected" | "all") {
     setNotice(null);
-    setBusyKey(mode === "preview" ? "broadcast-preview" : "broadcast-all");
+    setBusyKey(
+      mode === "preview"
+        ? "broadcast-preview"
+        : mode === "selected"
+          ? "broadcast-selected"
+          : "broadcast-all"
+    );
     try {
       const { data: sessionData } = await supabaseBrowser.auth.getSession();
       const token = sessionData?.session?.access_token;
@@ -151,8 +208,14 @@ export default function AdminEmailAutomations({ lang }: Props) {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          action: mode === "preview" ? "broadcast_preview" : "broadcast_all",
+          action:
+            mode === "preview"
+              ? "broadcast_preview"
+              : mode === "selected"
+                ? "broadcast_selected"
+                : "broadcast_all",
           to: testRecipient,
+          recipientIds: selectedRecipientIds,
           templateKey: broadcastTemplateKey,
           subject: broadcastSubject,
           title: broadcastTitle,
@@ -185,6 +248,15 @@ export default function AdminEmailAutomations({ lang }: Props) {
           text: L(
             `Preview sent to ${testRecipient}.`,
             `Preview enviado a ${testRecipient}.`
+          ),
+        });
+      } else if (mode === "selected") {
+        const result = body?.result ?? {};
+        setNotice({
+          tone: "success",
+          text: L(
+            `Broadcast sent to ${result.sent ?? 0} selected users. Failed: ${result.failed ?? 0}.`,
+            `Broadcast enviado a ${result.sent ?? 0} usuarios seleccionados. Fallidos: ${result.failed ?? 0}.`
           ),
         });
       } else {
@@ -290,9 +362,9 @@ export default function AdminEmailAutomations({ lang }: Props) {
                 {L("Use a system template and write your own message", "Usa un template del sistema y redacta tu propio mensaje")}
               </h3>
               <p className="mt-1 text-xs leading-6 text-slate-400">
-                {L(
-                  "Choose the template style, write the copy you want, send yourself a preview, and only then send it to all users.",
-                  "Elige el estilo del template, redacta el copy que quieras, envíate un preview y solo después mándalo a todos los usuarios."
+              {L(
+                  "Choose the template style, write the copy you want, send yourself a preview, then send it either to selected users or to the entire audience.",
+                  "Elige el estilo del template, redacta el copy que quieras, envíate un preview y luego envíalo a usuarios seleccionados o a toda la audiencia."
                 )}
               </p>
             </div>
@@ -313,6 +385,93 @@ export default function AdminEmailAutomations({ lang }: Props) {
                   ))}
                 </select>
               </label>
+
+              <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4 space-y-3">
+                <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                  <div>
+                    <p className="text-xs font-semibold text-slate-100">
+                      {L("Choose specific users", "Escoger usuarios específicos")}
+                    </p>
+                    <p className="text-xs text-slate-400">
+                      {L(
+                        "Search the current platform users and select exactly who should receive this email.",
+                        "Busca los usuarios actuales de la plataforma y selecciona exactamente quién debe recibir este email."
+                      )}
+                    </p>
+                  </div>
+                  <span className="rounded-full border border-slate-700 bg-slate-950/80 px-3 py-1 text-xs font-semibold text-slate-200">
+                    {selectedRecipients.length} {L("selected", "seleccionados")}
+                  </span>
+                </div>
+
+                <label className="flex flex-col gap-2">
+                  <span className="text-xs text-slate-400">{L("Search users", "Buscar usuarios")}</span>
+                  <input
+                    value={recipientQuery}
+                    onChange={(e) => setRecipientQuery(e.target.value)}
+                    className="rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-slate-100 outline-none"
+                    placeholder={L("Search by name, email, or plan", "Busca por nombre, email o plan")}
+                  />
+                </label>
+
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={selectAllFilteredRecipients}
+                    disabled={!filteredRecipients.length}
+                    className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-xs font-semibold text-slate-200 disabled:opacity-50"
+                  >
+                    {L("Select visible", "Seleccionar visibles")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={clearSelectedRecipients}
+                    disabled={!selectedRecipients.length}
+                    className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-xs font-semibold text-slate-200 disabled:opacity-50"
+                  >
+                    {L("Clear selection", "Limpiar selección")}
+                  </button>
+                </div>
+
+                <div className="max-h-64 space-y-2 overflow-y-auto rounded-2xl border border-slate-800 bg-slate-950/60 p-3">
+                  {filteredRecipients.length ? (
+                    filteredRecipients.map((recipient) => {
+                      const active = selectedRecipientIds.includes(recipient.id);
+                      return (
+                        <button
+                          key={recipient.id}
+                          type="button"
+                          onClick={() => toggleRecipient(recipient.id)}
+                          className={`flex w-full items-start justify-between gap-3 rounded-2xl border px-3 py-3 text-left transition ${
+                            active
+                              ? "border-emerald-500/35 bg-emerald-500/10"
+                              : "border-slate-800 bg-slate-950/80 hover:border-slate-700"
+                          }`}
+                        >
+                          <div className="space-y-1">
+                            <p className="text-sm font-semibold text-slate-100">{recipient.fullName}</p>
+                            <p className="text-xs text-slate-400">{recipient.email}</p>
+                          </div>
+                          <div className="flex flex-col items-end gap-1">
+                            {recipient.plan ? (
+                              <span className="rounded-full border border-slate-700 bg-slate-900/80 px-2 py-1 text-[11px] text-slate-300">
+                                {recipient.plan}
+                              </span>
+                            ) : null}
+                            <span className={`rounded-full px-2 py-1 text-[11px] ${active ? "bg-emerald-500/20 text-emerald-200" : "bg-slate-900 text-slate-400"}`}>
+                              {active ? L("Selected", "Seleccionado") : L("Tap to add", "Toca para añadir")}
+                            </span>
+                          </div>
+                        </button>
+                      );
+                    })
+                  ) : (
+                    <p className="text-sm text-slate-400">
+                      {L("No users match this search.", "No hay usuarios que coincidan con esta búsqueda.")}
+                    </p>
+                  )}
+                </div>
+              </div>
 
               <label className="flex flex-col gap-2">
                 <span className="text-xs text-slate-400">{L("Subject", "Asunto")}</span>
@@ -389,7 +548,7 @@ export default function AdminEmailAutomations({ lang }: Props) {
               </label>
 
               <label className="flex flex-col gap-2">
-                <span className="text-xs text-slate-400">{L("Type SEND to confirm broadcast", "Escribe SEND para confirmar el broadcast")}</span>
+                <span className="text-xs text-slate-400">{L("Type SEND to confirm all-users broadcast", "Escribe SEND para confirmar el broadcast a todos")}</span>
                 <input
                   value={confirmText}
                   onChange={(e) => setConfirmText(e.target.value)}
@@ -409,6 +568,16 @@ export default function AdminEmailAutomations({ lang }: Props) {
                 {busyKey === "broadcast-preview"
                   ? L("Sending preview…", "Enviando preview…")
                   : L("Send preview with this template", "Enviar preview con este template")}
+              </button>
+              <button
+                type="button"
+                onClick={() => void sendBroadcast("selected")}
+                disabled={busyKey === "broadcast-selected" || !selectedRecipientIds.length}
+                className="rounded-xl border border-violet-500/35 bg-violet-500/10 px-4 py-3 text-sm font-semibold text-violet-200 disabled:opacity-50"
+              >
+                {busyKey === "broadcast-selected"
+                  ? L("Sending to selected users…", "Enviando a usuarios seleccionados…")
+                  : L("Send to selected users", "Enviar a usuarios seleccionados")}
               </button>
               <button
                 type="button"

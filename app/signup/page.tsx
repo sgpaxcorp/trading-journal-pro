@@ -31,12 +31,16 @@ export default async function SignUpPage({ searchParams }: SignUpPageProps) {
     .toUpperCase()
     .replace(/[^A-Z0-9_-]/g, "")
     .slice(0, 24);
+  const initialEmail = firstParam(params.email).trim().toLowerCase();
+  const initialVerify = firstParam(params.verify) === "1";
 
   return (
     <SignUpClient
       initialPlan={initialPlan}
       initialBillingCycle={initialBillingCycle}
       initialPartnerCode={initialPartnerCode}
+      initialEmail={initialEmail}
+      initialVerify={initialVerify}
     />
   );
 }

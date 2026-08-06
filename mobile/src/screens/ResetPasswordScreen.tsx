@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Image, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 
 import { useLanguage } from "../lib/LanguageContext";
+import { apiPost } from "../lib/api";
 import { t } from "../lib/i18n";
 import { passwordPolicyHint, validatePasswordPolicy } from "../lib/passwordPolicy";
 import { supabaseMobile } from "../lib/supabase";
@@ -67,6 +68,12 @@ export function ResetPasswordScreen({
       if (updateError) {
         setError(updateError.message);
         return;
+      }
+
+      try {
+        await apiPost("/api/auth/password-changed", { locale: language });
+      } catch (securityEmailError) {
+        console.error("[ResetPasswordScreen] Password changed email failed:", securityEmailError);
       }
 
       setMessage(

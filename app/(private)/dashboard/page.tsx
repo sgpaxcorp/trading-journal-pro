@@ -4047,7 +4047,10 @@ export default function DashboardPage() {
   const completedMilestones = businessMilestones.filter((item) => item.completed);
   const nextMilestones = businessMilestones.filter((item) => !item.completed).slice(0, 2);
   const renderBusinessMilestones = () => (
-    <section className="mb-6 rounded-2xl border border-emerald-500/25 bg-slate-900/85 p-4 shadow-[0_18px_70px_rgba(2,6,23,0.2)]">
+    <section
+      data-tour="dash-business-milestones"
+      className="mb-6 rounded-2xl border border-emerald-500/25 bg-slate-900/85 p-4 shadow-[0_18px_70px_rgba(2,6,23,0.2)]"
+    >
       <div className="grid gap-4 lg:grid-cols-[0.8fr_1.2fr] lg:items-center">
         <div>
           <p className="text-[11px] uppercase tracking-[0.24em] text-emerald-300">

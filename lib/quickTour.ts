@@ -37,52 +37,106 @@ const BUILDERS: QuickTourBuilder[] = [
     guideHref: "/help/dashboard-widgets",
     match: (path) => path.startsWith("/dashboard"),
     build: (L) => ({
-      title: L("Business Center", "Centro Empresarial"),
+      title: L("Trader Entrepreneur Business Center", "Centro Empresarial del Trader Entrepreneur"),
       summary: L(
-        "Use the Business Center to separate three realities: real account progress, business plan pacing, and what you actually did this week.",
-        "Usa el Centro Empresarial para separar tres realidades: progreso real de la cuenta, ritmo del plan empresarial y lo que de verdad hiciste esta semana."
+        "This is the first operating view of the business. Start here to see plan status, real account progress, execution quality, and the next action the business needs.",
+        "Esta es la primera vista operativa del negocio. Empieza aquí para ver estado del plan, progreso real de la cuenta, calidad de ejecución y la próxima acción que necesita la empresa."
       ),
       bullets: [
-        L("Account Progress answers how your equity is truly doing.", "Account Progress responde cómo va de verdad tu equity."),
-        L("Plan Progress answers whether you are ahead or behind the Trading Business Plan.", "Plan Progress responde si vas adelantado o atrasado contra el Plan de Empresa de Trading."),
-        L("Weekly Summary and the P&L Calendar keep realized performance separate from the plan.", "Weekly Summary y el calendario P&L separan el rendimiento realizado del plan."),
+        L("The Business Plan defines what should happen; the dashboard shows what is actually happening.", "El Plan Empresarial define lo que debe pasar; el dashboard muestra lo que realmente está pasando."),
+        L("Read progress, risk, execution records, and milestones as one operating loop.", "Lee progreso, riesgo, registros de ejecución e hitos como un solo ciclo operativo."),
+        L("Your first job after signup is to complete the plan, connect/import data, and let the dashboard become objective.", "Tu primer trabajo después del registro es completar el plan, conectar/importar data y dejar que el dashboard se vuelva objetivo."),
       ],
       steps: [
         {
-          id: "dashboard-account",
-          title: L("Account Progress", "Account Progress"),
+          id: "dashboard-brand",
+          title: L("Your operating system", "Tu sistema operativo"),
           body: L(
-            "This widget is about real equity. Use it to judge current balance, net account change, trading P&L, and cashflow-adjusted progress.",
-            "Este widget trata de equity real. Úsalo para juzgar balance actual, cambio neto de cuenta, trading P&L y progreso ajustado por cashflows."
+            "The brand link always brings you back to the Business Center. Treat this screen as the home base for running the trading business, not as a decorative dashboard.",
+            "El logo siempre te trae de vuelta al Centro Empresarial. Trata esta pantalla como la base para operar la empresa de trading, no como un dashboard decorativo."
+          ),
+          selector: '[data-tour="nav-brand"]',
+        },
+        {
+          id: "dashboard-plan-entry",
+          title: L("Build the business plan first", "Primero construye el plan empresarial"),
+          body: L(
+            "This is the first action for a new Trader Entrepreneur. Define capital, target, dates, risk limits, rules, and the operating commitment before judging results.",
+            "Esta es la primera acción para un Trader Entrepreneur nuevo. Define capital, meta, fechas, límites de riesgo, reglas y compromiso operativo antes de juzgar resultados."
+          ),
+          selector: '[data-tour="dash-edit-growth-plan"]',
+        },
+        {
+          id: "dashboard-milestones",
+          title: L("Business milestones", "Hitos empresariales"),
+          body: L(
+            "Milestones show whether the business has the minimum operating structure in place: plan, rules, analysis, risk controls, journal habits, review loop, and accountability.",
+            "Los hitos muestran si la empresa tiene la estructura operativa mínima: plan, reglas, análisis, controles de riesgo, hábito de journal, ciclo de revisión y accountability."
+          ),
+          selector: '[data-tour="dash-business-milestones"]',
+        },
+        {
+          id: "dashboard-account",
+          title: L("Real account progress", "Progreso real de la cuenta"),
+          body: L(
+            "This widget answers the money question objectively: current balance, net change, trading P&L, cashflows, and whether growth is coming from execution or deposits.",
+            "Este widget responde la pregunta del dinero objetivamente: balance actual, cambio neto, trading P&L, cashflows y si el crecimiento viene de ejecución o depósitos."
           ),
           selector: '[data-tour="dash-widget-progress"]',
         },
         {
           id: "dashboard-plan",
-          title: L("Plan Progress", "Plan Progress"),
+          title: L("Plan progress", "Progreso contra el plan"),
           body: L(
-            "This widget compares your live balance against checkpoint targets. Week, month, and quarter here are plan checkpoints, not realized P&L blocks.",
-            "Este widget compara tu balance vivo contra checkpoints del plan. Week, month y quarter aquí son checkpoints del plan, no bloques de P&L realizado."
+            "This compares the live account against the plan checkpoints. It tells you if the business is ahead, behind, or on pace without confusing projections with realized P&L.",
+            "Esto compara la cuenta viva contra los checkpoints del plan. Te dice si la empresa va adelantada, atrasada o en ritmo sin confundir proyecciones con P&L realizado."
           ),
           selector: '[data-tour="dash-widget-plan-progress"]',
         },
         {
           id: "dashboard-weekly",
-          title: L("Weekly Summary", "Weekly Summary"),
+          title: L("Weekly execution summary", "Resumen semanal de ejecución"),
           body: L(
-            "This is the real weekly execution view. Use it to confirm what you actually produced this week before you draw any conclusion.",
-            "Esta es la vista real de ejecución semanal. Úsala para confirmar qué produjiste realmente esta semana antes de sacar conclusiones."
+            "Use this to review the current operating week. Before changing strategy, verify sample size, rule adherence, risk behavior, and whether the week is actually complete.",
+            "Usa esto para revisar la semana operativa actual. Antes de cambiar estrategia, verifica muestra, cumplimiento de reglas, conducta de riesgo y si la semana realmente está completa."
           ),
           selector: '[data-tour="dash-widget-weekly"]',
         },
         {
           id: "dashboard-calendar",
-          title: L("P&L Calendar", "Calendario P&L"),
+          title: L("Daily P&L audit", "Auditoría diaria de P&L"),
           body: L(
-            "Use the calendar to audit the month day by day and jump directly into the execution record behind any result.",
-            "Usa el calendario para auditar el mes día a día y saltar directo al registro de ejecución detrás de cualquier resultado."
+            "The calendar turns the month into an audit trail. Use it to connect any result back to the execution record, not to celebrate or punish one isolated day.",
+            "El calendario convierte el mes en una pista de auditoría. Úsalo para conectar cualquier resultado con el registro de ejecución, no para celebrar o castigar un día aislado."
           ),
           selector: '[data-tour="dash-widget-calendar"]',
+        },
+        {
+          id: "dashboard-performance-nav",
+          title: L("Performance diagnostics", "Diagnóstico de performance"),
+          body: L(
+            "Performance is where the business diagnoses edge quality, risk behavior, statistics, balance history, plan variance, and coaching opportunities.",
+            "Performance es donde la empresa diagnostica calidad del edge, conducta de riesgo, estadísticas, historial de balance, variación contra el plan y oportunidades de coaching."
+          ),
+          selector: '[data-tour="nav-performance"]',
+        },
+        {
+          id: "dashboard-playbook-nav",
+          title: L("Playbook and evidence", "Playbook y evidencia"),
+          body: L(
+            "Notebook keeps repeatable standards. Back-Study validates decisions against chart evidence. Together they convert experience into operating knowledge.",
+            "Notebook guarda estándares repetibles. Back-Study valida decisiones contra evidencia del chart. Juntos convierten experiencia en conocimiento operativo."
+          ),
+          selector: '[data-tour="nav-notebook"]',
+        },
+        {
+          id: "dashboard-protection-nav",
+          title: L("Protect the business", "Protege la empresa"),
+          body: L(
+            "Rules and alarms convert the plan into guardrails. Use them for loss limits, routines, reminders, and the behavior checks that protect the account.",
+            "Reglas y alarmas convierten el plan en barandas. Úsalas para límites de pérdida, rutinas, recordatorios y chequeos de conducta que protegen la cuenta."
+          ),
+          selector: '[data-tour="nav-rules"]',
         },
       ],
     }),
@@ -92,66 +146,166 @@ const BUILDERS: QuickTourBuilder[] = [
     guideHref: "/help/growth-plan",
     match: (path) => path.startsWith("/growth-plan"),
     build: (L) => ({
-      title: L("Trading Business Plan", "Plan de Empresa de Trading"),
+      title: L("Trading Business Plan", "Plan Empresarial de Trading"),
       summary: L(
-        "This page is the source of truth for business pacing, risk, operating rules, and milestone math. The rest of Neuro Trader reads from what you define here.",
-        "Esta página es la fuente de verdad para ritmo empresarial, riesgo, reglas operativas y matemática de metas. El resto de Neuro Trader lee lo que defines aquí."
+        "This is the operating contract of the trading business. It defines capital, destination, pacing, risk governance, strategy rules, and the standards the rest of the platform audits.",
+        "Este es el contrato operativo de la empresa de trading. Define capital, destino, ritmo, gobierno de riesgo, reglas estratégicas y los estándares que el resto de la plataforma audita."
       ),
       bullets: [
-        L("Starting balance anchors every projection and reference return.", "El balance inicial ancla cada proyección y retorno de referencia."),
-        L("Start date and target date define the pacing window for the whole plan.", "La fecha de inicio y la fecha objetivo definen la ventana de ritmo de todo el plan."),
-        L("Trading days, plan mode, and phases determine how checkpoints are built.", "Los días de trading, el modo del plan y las fases determinan cómo se construyen los checkpoints."),
+        L("Complete this before expecting dashboards, analytics, or coaching to be meaningful.", "Complétalo antes de esperar que dashboards, analítica o coaching tengan significado."),
+        L("The plan should be measurable enough that the system can detect variance and risk drift.", "El plan debe ser tan medible que el sistema pueda detectar variación y desviación de riesgo."),
+        L("A Trader Entrepreneur does not only trade; they operate against a documented standard.", "Un Trader Entrepreneur no solo opera; ejecuta contra un estándar documentado."),
       ],
       steps: [
         {
-          id: "gp-start",
-          title: L("Starting balance", "Balance inicial"),
+          id: "gp-business-analysis",
+          title: L("Business analysis foundation", "Fundación de análisis empresarial"),
           body: L(
-            "Use the real balance you are trading from. It becomes the anchor for progress, return calculations, and checkpoint math.",
-            "Usa el balance real desde el que operas. Se convierte en el ancla del progreso, del retorno y de la matemática de checkpoints."
+            "Start by defining the business context: why this account exists, what problem the plan solves, and what operating standard you are committing to.",
+            "Empieza definiendo el contexto del negocio: por qué existe esta cuenta, qué problema resuelve el plan y a qué estándar operativo te comprometes."
+          ),
+          anchor: "gp-business-analysis",
+          selector: "#gp-business-analysis",
+        },
+        {
+          id: "gp-start",
+          title: L("Starting capital", "Capital inicial"),
+          body: L(
+            "Use the real capital assigned to this business. It anchors returns, drawdown limits, checkpoint math, and whether deposits or trading are driving growth.",
+            "Usa el capital real asignado a esta empresa. Ancla retornos, límites de drawdown, matemática de checkpoints y si el crecimiento viene de depósitos o trading."
           ),
           anchor: "gp-starting-balance",
           selector: "#gp-starting-balance",
         },
         {
           id: "gp-target",
-          title: L("Target balance", "Balance objetivo"),
+          title: L("Target capital", "Capital objetivo"),
           body: L(
-            "This is the final destination. Weekly and monthly targets are derived from the path toward this number.",
-            "Este es el destino final. Las metas semanales y mensuales se derivan de la ruta hacia este número."
+            "This is the destination the plan is trying to reach. Keep it ambitious enough to matter and realistic enough to govern decisions.",
+            "Este es el destino que el plan intenta alcanzar. Mantenlo suficientemente ambicioso para importar y suficientemente realista para gobernar decisiones."
           ),
           anchor: "gp-target-balance",
           selector: "#gp-target-balance",
         },
         {
           id: "gp-start-date",
-          title: L("Start date", "Fecha de inicio"),
+          title: L("Operating start date", "Fecha de inicio operativo"),
           body: L(
-            "The plan starts counting from here. Trading-day math, monthly pacing, and milestone timing all begin on this date.",
-            "El plan empieza a contar desde aquí. La matemática de días de trading, el ritmo mensual y el timing de metas arrancan en esta fecha."
+            "This date starts the measurement period. The system uses it to calculate pacing, plan variance, monthly progress, and the calendar rhythm.",
+            "Esta fecha inicia el periodo de medición. El sistema la usa para calcular ritmo, variación contra el plan, progreso mensual y cadencia del calendario."
           ),
           anchor: "gp-start-date",
           selector: "#gp-start-date",
         },
         {
+          id: "gp-target-date",
+          title: L("Target date", "Fecha objetivo"),
+          body: L(
+            "The target date defines the time constraint. It turns the goal from a wish into a required rate of progress.",
+            "La fecha objetivo define la restricción de tiempo. Convierte la meta de deseo a ritmo requerido de progreso."
+          ),
+          anchor: "gp-target-date",
+          selector: "#gp-target-date",
+        },
+        {
+          id: "gp-withdrawals",
+          title: L("Owner cashflows", "Cashflows del dueño"),
+          body: L(
+            "Planned withdrawals separate business performance from owner distributions. Use this so the dashboard does not mistake withdrawals for trading failure.",
+            "Los retiros planificados separan performance del negocio de distribuciones del dueño. Úsalo para que el dashboard no confunda retiros con fallo de trading."
+          ),
+          anchor: "gp-planned-withdrawals",
+          selector: "#gp-planned-withdrawals",
+        },
+        {
           id: "gp-mode",
           title: L("Plan mode and phases", "Modo del plan y fases"),
           body: L(
-            "Choose whether the system builds checkpoints automatically or from manual phases you control directly.",
-            "Elige si el sistema construye checkpoints automáticamente o desde fases manuales que controlas directamente."
+            "Choose automatic checkpoints or manual phases. Automatic is faster; phases give more control when your growth plan changes by stage.",
+            "Elige checkpoints automáticos o fases manuales. Automático es más rápido; las fases dan más control cuando tu crecimiento cambia por etapa."
           ),
           anchor: "gp-plan-mode",
           selector: "#gp-plan-mode",
         },
         {
           id: "gp-days",
-          title: L("Trading days", "Días de trading"),
+          title: L("Trading cadence", "Cadencia de trading"),
           body: L(
-            "Set only the days you are truly willing to trade. The calendar and pacing logic depend on this cadence.",
-            "Define solo los días que de verdad estás dispuesto a operar. El calendario y la lógica de pacing dependen de esa cadencia."
+            "Only select the days you can trade with discipline. The plan should measure the business you can actually operate, not the schedule you wish you had.",
+            "Selecciona solo los días que puedes operar con disciplina. El plan debe medir la empresa que realmente puedes operar, no el horario que quisieras tener."
           ),
           anchor: "gp-trading-days",
           selector: "#gp-trading-days",
+        },
+        {
+          id: "gp-daily-loss",
+          title: L("Daily loss limit", "Límite diario de pérdida"),
+          body: L(
+            "This is a business protection line. When it is reached, the day stops so one session cannot damage the operating plan.",
+            "Esta es una línea de protección empresarial. Cuando se alcanza, el día se detiene para que una sesión no dañe el plan operativo."
+          ),
+          anchor: "gp-max-daily-loss",
+          selector: "#gp-max-daily-loss",
+        },
+        {
+          id: "gp-risk-trade",
+          title: L("Risk per trade", "Riesgo por trade"),
+          body: L(
+            "Risk per trade connects setup quality to capital protection. It keeps individual decisions small enough for the business to survive variance.",
+            "El riesgo por trade conecta calidad de setup con protección de capital. Mantiene cada decisión lo bastante pequeña para que la empresa sobreviva la variación."
+          ),
+          anchor: "gp-risk-per-trade",
+          selector: "#gp-risk-per-trade",
+        },
+        {
+          id: "gp-required-goal",
+          title: L("Required pace", "Ritmo requerido"),
+          body: L(
+            "This section translates the target into required daily, weekly, and monthly progress. If the requirement is unrealistic, adjust the plan before forcing trades.",
+            "Esta sección traduce la meta a progreso requerido diario, semanal y mensual. Si el requisito no es realista, ajusta el plan antes de forzar trades."
+          ),
+          anchor: "gp-required-goal",
+          selector: "#gp-required-goal",
+        },
+        {
+          id: "gp-phase-builder",
+          title: L("Stage the business", "Divide la empresa por etapas"),
+          body: L(
+            "Phases let you run the account like a staged business plan: build consistency, increase size only after evidence, and protect capital during transitions.",
+            "Las fases te permiten operar la cuenta como un plan empresarial por etapas: construir consistencia, subir tamaño solo con evidencia y proteger capital en transiciones."
+          ),
+          anchor: "gp-phase-builder",
+          selector: "#gp-phase-builder",
+        },
+        {
+          id: "gp-system",
+          title: L("Trading system", "Sistema de trading"),
+          body: L(
+            "Document the setups, markets, session windows, entry logic, invalidation, and management standards. This is the business model for execution.",
+            "Documenta setups, mercados, ventanas de sesión, lógica de entrada, invalidación y estándares de manejo. Este es el modelo operativo de ejecución."
+          ),
+          anchor: "gp-trading-system",
+          selector: "#gp-trading-system",
+        },
+        {
+          id: "gp-rules",
+          title: L("Rules and accountability", "Reglas y accountability"),
+          body: L(
+            "Rules are non-negotiable controls. Write them clearly enough that a future audit can tell whether you operated the business or improvised.",
+            "Las reglas son controles no negociables. Escríbelas con suficiente claridad para que una auditoría futura sepa si operaste la empresa o improvisaste."
+          ),
+          anchor: "gp-rules",
+          selector: "#gp-rules",
+        },
+        {
+          id: "gp-commitment",
+          title: L("Operating commitment", "Compromiso operativo"),
+          body: L(
+            "The commitment turns the plan into a standard you agree to protect. Save only when the plan is clear enough to be audited by your own data.",
+            "El compromiso convierte el plan en un estándar que aceptas proteger. Guarda solo cuando el plan sea lo bastante claro para ser auditado por tu propia data."
+          ),
+          anchor: "gp-commitment",
+          selector: "#gp-commitment",
         },
       ],
     }),
@@ -163,60 +317,60 @@ const BUILDERS: QuickTourBuilder[] = [
     build: (L) => ({
       title: L("Execution Journal", "Registro de Ejecución"),
       summary: L(
-        "The Execution Journal is where the trading business records what actually happened. A complete day captures plan, live decisions, review, and Neuro Layer truth.",
-        "El Registro de Ejecución es donde la empresa de trading documenta lo que realmente pasó. Un día completo captura plan, decisiones en vivo, revisión y verdad del Neuro Layer."
+        "The journal is the legal record of the trading business. It captures the plan, execution decisions, emotional state, mistakes, and lessons behind every trading day.",
+        "El journal es el registro formal de la empresa de trading. Captura plan, decisiones de ejecución, estado emocional, errores y lecciones detrás de cada día operativo."
       ),
       bullets: [
-        L("Premarket defines bias, levels, setup, and risk before the session starts.", "Premarket define sesgo, niveles, setup y riesgo antes de que comience la sesión."),
-        L("Inside the trade records execution notes, management actions, and emotional state in real time.", "Inside the trade registra notas de ejecución, acciones de manejo y estado emocional en tiempo real."),
-        L("After-trade review and Neuro Layer turn the session into structured learning.", "La revisión post-trade y el Neuro Layer convierten la sesión en aprendizaje estructurado."),
+        L("Premarket creates the daily operating plan before emotion enters.", "Premarket crea el plan operativo diario antes de que entre la emoción."),
+        L("Inside the Trade records decision quality while the trade is alive.", "Inside the Trade registra calidad de decisión mientras el trade está vivo."),
+        L("After-trade review turns the session into a correction loop.", "El review post-trade convierte la sesión en un ciclo de corrección."),
       ],
       steps: [
         {
           id: "journal-header",
-          title: L("Session header", "Encabezado de la sesión"),
+          title: L("One day, one record", "Un día, un registro"),
           body: L(
-            "Use the date header to move between sessions and keep one clean record per trading day.",
-            "Usa el encabezado de fecha para moverte entre sesiones y mantener un registro limpio por día de trading."
+            "Use the date header to keep each session clean. A business cannot improve what it cannot locate and compare.",
+            "Usa el encabezado de fecha para mantener cada sesión limpia. Una empresa no puede mejorar lo que no puede localizar y comparar."
           ),
           selector: '[data-tour="journal-date-header"]',
         },
         {
           id: "journal-premarket",
-          title: L("Premarket Prep", "Premarket Prep"),
+          title: L("Premarket operating plan", "Plan operativo premarket"),
           body: L(
-            "Write the plan before execution: market bias, key levels, setup, and one rule you cannot break.",
-            "Escribe el plan antes de ejecutar: sesgo, niveles clave, setup y una regla que no puedes romper."
+            "Define bias, levels, setup, risk, and the one rule that protects the day. This is where you decide before pressure arrives.",
+            "Define sesgo, niveles, setup, riesgo y la regla que protege el día. Aquí decides antes de que llegue la presión."
           ),
           anchor: "journal-step-premarket",
           selector: '[data-tour="journal-step-premarket"]',
         },
         {
           id: "journal-inside",
-          title: L("Inside the Trade", "Dentro del trade"),
+          title: L("Live execution evidence", "Evidencia de ejecución en vivo"),
           body: L(
-            "Capture what changed while the trade was alive: management decisions, mistakes, and emotional drift.",
-            "Captura qué cambió mientras el trade estaba vivo: decisiones de manejo, errores y drift emocional."
+            "Record management actions, emotions, rule pressure, and deviations while they happen. This makes review honest instead of reconstructed from memory.",
+            "Registra manejo, emociones, presión contra reglas y desviaciones mientras ocurren. Esto hace el review honesto en vez de reconstruido por memoria."
           ),
           anchor: "journal-step-intrade",
           selector: '[data-tour="journal-step-intrade"]',
         },
         {
           id: "journal-after",
-          title: L("After-trade Analysis", "Análisis post-trade"),
+          title: L("Post-session audit", "Auditoría post-sesión"),
           body: L(
-            "This is where truth matters. Record what worked, what failed, and the exact correction for next time.",
-            "Aquí importa la verdad. Registra qué funcionó, qué falló y la corrección exacta para la próxima vez."
+            "Close the loop with what worked, what failed, and the exact correction for the next session. No correction means the business did not learn.",
+            "Cierra el ciclo con qué funcionó, qué falló y la corrección exacta para la próxima sesión. Sin corrección, la empresa no aprendió."
           ),
           anchor: "journal-step-after",
           selector: '[data-tour="journal-step-after"]',
         },
         {
           id: "journal-save",
-          title: L("Save and sync", "Guardar y sincronizar"),
+          title: L("Save the record", "Guardar el registro"),
           body: L(
-            "Save often. The rest of the platform can only analyze what has been stored as a real session.",
-            "Guarda con frecuencia. El resto de la plataforma solo puede analizar lo que fue almacenado como una sesión real."
+            "Save the session so analytics, coaching, reports, and accountability can read the same source of truth.",
+            "Guarda la sesión para que analítica, coaching, reportes y accountability lean la misma fuente de verdad."
           ),
           selector: '[data-tour="journal-save"]',
         },
@@ -228,32 +382,32 @@ const BUILDERS: QuickTourBuilder[] = [
     guideHref: "/help/analytics",
     match: (path) => startsWithAny(path, ["/performance/analytics-statistics", "/performance/balance-chart", "/performance/plan-summary"]),
     build: (L) => ({
-      title: L("Analytics & Performance", "Analítica y rendimiento"),
+      title: L("Business Performance Diagnostics", "Diagnóstico de Performance Empresarial"),
       summary: L(
-        "Analytics is where you validate whether your edge is real and whether your process is consistent enough to trust.",
-        "La Analítica es donde validas si tu edge es real y si tu proceso es lo suficientemente consistente como para confiar en él."
+        "Analytics turns trades and journal records into business intelligence. Use it to test whether the process is profitable, repeatable, and controlled.",
+        "Analytics convierte trades y registros de journal en inteligencia empresarial. Úsalo para probar si el proceso es rentable, repetible y controlado."
       ),
       bullets: [
-        L("Start with sample size and overview KPIs before interpreting advanced metrics.", "Empieza por tamaño de muestra y KPIs de overview antes de interpretar métricas avanzadas."),
-        L("Use Risk, Time, and Instruments to isolate where the edge actually lives.", "Usa Risk, Time e Instruments para aislar dónde vive realmente el edge."),
-        L("If charts look empty, verify imports and saved sessions in the selected date range.", "Si los charts salen vacíos, verifica importaciones y sesiones guardadas en el rango elegido."),
+        L("Start with sample size before trusting any conclusion.", "Empieza por tamaño de muestra antes de confiar en cualquier conclusión."),
+        L("Separate edge, execution, risk, timing, and instrument behavior.", "Separa edge, ejecución, riesgo, timing y comportamiento por instrumento."),
+        L("Use findings to update rules and the business plan, not to chase random changes.", "Usa hallazgos para actualizar reglas y el plan empresarial, no para perseguir cambios aleatorios."),
       ],
       steps: [
         {
           id: "analytics-header",
-          title: L("Analytics workspace", "Workspace de analítica"),
+          title: L("From results to diagnosis", "De resultados a diagnóstico"),
           body: L(
-            "Use this page to move from raw results to diagnosis: KPIs, distributions, time-of-day patterns, and deeper statistics.",
-            "Usa esta página para pasar de resultados crudos a diagnóstico: KPIs, distribuciones, patrones por horario y estadísticas profundas."
+            "Use this workspace after data has been imported or journaled. The goal is to understand what is driving the business results.",
+            "Usa este workspace después de importar o registrar data. La meta es entender qué está moviendo los resultados del negocio."
           ),
           selector: "main h1",
         },
         {
           id: "analytics-nav",
-          title: L("Performance navigation", "Navegación de performance"),
+          title: L("Performance menu", "Menú de performance"),
           body: L(
-            "Performance is not one report. Move across analytics, coaching, and business tracking depending on the question you need to answer.",
-            "Performance no es un solo reporte. Muévete entre analítica, coaching y seguimiento del negocio según la pregunta que necesites responder."
+            "Move between analytics, balance history, plan summaries, coaching, and business finance depending on the decision you need to make.",
+            "Muévete entre analítica, historial de balance, resúmenes del plan, coaching y finanzas del negocio según la decisión que necesites tomar."
           ),
           selector: '[data-tour="nav-performance"]',
         },
@@ -265,23 +419,23 @@ const BUILDERS: QuickTourBuilder[] = [
     guideHref: "/help/profit-loss-track",
     match: (path) => startsWithAny(path, ["/performance/profit-loss-track", "/performance/plan"]),
     build: (L) => ({
-      title: L("Profit & Loss Track", "Profit & Loss Track"),
+      title: L("Business Finance Control", "Control Financiero Empresarial"),
       summary: L(
-        "This page runs the business side of trading: budgets, subscriptions, vendors, renewals, and break-even math.",
-        "Esta página maneja el lado de negocio del trading: presupuestos, suscripciones, vendors, renovaciones y break-even."
+        "This area tracks the economics of the trading operation: costs, subscriptions, renewals, cash needs, and break-even pressure.",
+        "Esta área rastrea la economía de la operación de trading: costos, suscripciones, renovaciones, necesidades de efectivo y presión de break-even."
       ),
       bullets: [
-        L("Treat this as business control, not as a trading scorecard.", "Trátalo como control del negocio, no como scorecard de trading."),
-        L("Use it to see whether your trading operation is economically sustainable.", "Úsalo para ver si tu operación de trading es económicamente sostenible."),
-        L("Keep subscriptions and recurring costs clean so the break-even view stays honest.", "Mantén suscripciones y costos recurrentes limpios para que la vista de break-even sea honesta."),
+        L("Treat trading like a business with operating expenses, not only gross P&L.", "Trata el trading como negocio con gastos operativos, no solo P&L bruto."),
+        L("Use break-even to know what the account must produce before the business is sustainable.", "Usa break-even para saber qué debe producir la cuenta antes de que el negocio sea sostenible."),
+        L("Keep vendor and subscription costs current so decisions are grounded.", "Mantén costos de vendors y suscripciones actualizados para decidir con base real."),
       ],
       steps: [
         {
           id: "profit-header",
-          title: L("Business control", "Control del negocio"),
+          title: L("Operating economics", "Economía operativa"),
           body: L(
-            "This screen is about costs, burn, and break-even. It complements trading performance, but it does not replace it.",
-            "Esta pantalla trata de costos, burn y break-even. Complementa el rendimiento de trading, pero no lo reemplaza."
+            "This screen separates trading performance from business viability. A profitable trader still needs a controlled cost structure.",
+            "Esta pantalla separa performance de trading de viabilidad empresarial. Un trader rentable también necesita una estructura de costos controlada."
           ),
           selector: "main h1",
         },
@@ -293,23 +447,23 @@ const BUILDERS: QuickTourBuilder[] = [
     guideHref: "/help/ai-coaching",
     match: (path) => path.startsWith("/performance/ai-coaching"),
     build: (L) => ({
-      title: L("Business AI Coach", "Coach Empresarial IA"),
+      title: L("AI Accountability Coach", "Coach IA de Accountability"),
       summary: L(
-        "Business AI Coaching reads your execution records, trades, analytics, Neuro Layer context, and Trading Business Plan to turn patterns into next actions.",
-        "El Coach Empresarial IA lee tus registros de ejecución, trades, analítica, contexto Neuro y Plan de Empresa de Trading para convertir patrones en próximas acciones."
+        "The coach reads your plan, journal, trades, and analytics to identify behavior patterns and recommend the next operating correction.",
+        "El coach lee tu plan, journal, trades y analítica para identificar patrones de conducta y recomendar la próxima corrección operativa."
       ),
       bullets: [
-        L("Use a clean date range with enough sessions.", "Usa un rango limpio con suficientes sesiones."),
-        L("Ask specific questions about discipline, execution, risk, or performance.", "Haz preguntas específicas sobre disciplina, ejecución, riesgo o performance."),
-        L("Good Neuro Layer inputs make the business coach sharper and more personal.", "Buenos inputs del Neuro Layer hacen al coach empresarial más preciso y más personal."),
+        L("Ask about discipline, risk, execution, routine, or performance using a specific date range.", "Pregunta sobre disciplina, riesgo, ejecución, rutina o performance usando un rango específico."),
+        L("Better records create better coaching because the system can see the real pattern.", "Mejores registros crean mejor coaching porque el sistema puede ver el patrón real."),
+        L("Use coaching as accountability, not entertainment.", "Usa coaching como accountability, no como entretenimiento."),
       ],
       steps: [
         {
           id: "coach-header",
-          title: L("Coaching workspace", "Workspace de coaching"),
+          title: L("Pattern to correction", "De patrón a corrección"),
           body: L(
-            "Use coaching after you have real samples. The goal is not inspiration; it is a tighter feedback loop for the next sessions.",
-            "Usa coaching después de tener muestras reales. La meta no es inspiración; es un feedback loop más cerrado para las próximas sesiones."
+            "Use coaching when you want a clear diagnosis and one action to improve the next sessions. The value depends on the quality of your saved data.",
+            "Usa coaching cuando quieras un diagnóstico claro y una acción para mejorar las próximas sesiones. El valor depende de la calidad de tu data guardada."
           ),
           selector: "main h1",
         },
@@ -321,23 +475,23 @@ const BUILDERS: QuickTourBuilder[] = [
     guideHref: "/help/data-inputs",
     match: (path) => path.startsWith("/import"),
     build: (L) => ({
-      title: L("Imports", "Importaciones"),
+      title: L("Business Data Intake", "Entrada de Data Empresarial"),
       summary: L(
-        "Imports are the foundation of trustworthy analytics. Clean data first, interpretation second.",
-        "Las importaciones son la base de una analítica confiable. Primero datos limpios, después interpretación."
+        "Imports connect broker reality to the operating system. Clean inputs make dashboards, analytics, and coaching reliable.",
+        "Las importaciones conectan la realidad del broker con el sistema operativo. Inputs limpios hacen confiables dashboards, analítica y coaching."
       ),
       bullets: [
-        L("Use Broker Sync when supported. Use raw broker exports when you need CSV.", "Usa Broker Sync cuando esté soportado. Usa exportes crudos del broker cuando necesites CSV."),
-        L("Do not edit the file before importing.", "No edites el archivo antes de importarlo."),
-        L("Read Import History as batch quality control: imported, updated, duplicates, and audit-ready status.", "Lee el historial de importación como control de calidad del lote: importadas, actualizadas, duplicadas y estado audit-ready."),
+        L("Use broker sync when available; use broker exports when CSV is required.", "Usa broker sync cuando esté disponible; usa exportes del broker cuando haga falta CSV."),
+        L("Do not edit raw files before importing unless the system asks for a specific format.", "No edites archivos crudos antes de importar a menos que el sistema pida un formato específico."),
+        L("Review import history as quality control: imported, updated, skipped, and duplicate rows.", "Revisa el historial de importación como control de calidad: importadas, actualizadas, omitidas y duplicadas."),
       ],
       steps: [
         {
           id: "imports-header",
-          title: L("Data intake", "Entrada de datos"),
+          title: L("Data before opinion", "Data antes de opinión"),
           body: L(
-            "This page connects real broker activity to the rest of the platform. If imports are wrong, analytics and coaching will be distorted.",
-            "Esta página conecta la actividad real del broker con el resto de la plataforma. Si las importaciones están mal, la analítica y el coaching se distorsionan."
+            "This page is where the business feeds objective activity into the platform. If data is incomplete, every downstream insight becomes weaker.",
+            "Esta página es donde la empresa alimenta actividad objetiva a la plataforma. Si la data está incompleta, cada insight posterior se debilita."
           ),
           selector: "main h1",
         },
@@ -351,21 +505,21 @@ const BUILDERS: QuickTourBuilder[] = [
     build: (L) => ({
       title: L("Option Flow Intelligence", "Option Flow Intelligence"),
       summary: L(
-        "This workspace is for options flow reports, premarket context, and outcome review.",
-        "Este workspace es para reportes de options flow, contexto premarket y revisión de outcomes."
+        "This premium workspace analyzes options flow as a market intelligence input. It should sharpen your premarket thesis and outcome review without replacing your rules.",
+        "Este workspace premium analiza options flow como input de inteligencia de mercado. Debe afinar tu tesis premarket y review de outcomes sin reemplazar tus reglas."
       ),
       bullets: [
-        L("Upload flow reports cleanly and keep screenshot evidence focused.", "Sube reportes de flow limpios y mantén la evidencia visual enfocada."),
-        L("Use the output to strengthen the premarket plan, not to chase noise.", "Usa la salida para fortalecer el plan premarket, no para perseguir ruido."),
-        L("Push the plan into the Execution Journal if you want the thesis to stay inside the daily workflow.", "Envía el plan al Registro de Ejecución si quieres que la tesis quede dentro del flujo diario."),
+        L("Upload clean flow evidence and keep the question specific.", "Sube evidencia de flow limpia y mantén la pregunta específica."),
+        L("Use the result to support or reject a thesis before execution.", "Usa el resultado para apoyar o rechazar una tesis antes de ejecutar."),
+        L("Push useful conclusions into the journal so the idea becomes auditable.", "Lleva conclusiones útiles al journal para que la idea sea auditable."),
       ],
       steps: [
         {
           id: "flow-header",
-          title: L("Flow workspace", "Workspace de flow"),
+          title: L("Market intelligence layer", "Capa de inteligencia de mercado"),
           body: L(
-            "Think of this page as a premarket intelligence layer. It should sharpen your thesis before execution, not replace your process.",
-            "Piensa esta página como una capa de inteligencia premarket. Debe afinar tu tesis antes de ejecutar, no reemplazar tu proceso."
+            "Use this screen before or after execution. The business question is: did flow improve decision quality, or did it create noise?",
+            "Usa esta pantalla antes o después de ejecutar. La pregunta empresarial es: el flow mejoró la calidad de decisión o creó ruido?"
           ),
           selector: "main h1",
         },
@@ -374,26 +528,26 @@ const BUILDERS: QuickTourBuilder[] = [
   },
   {
     key: "neuro-analysis",
-    guideHref: "/neuro-analysis",
+    guideHref: "/help/neuro-layer",
     match: (path) => path.startsWith("/neuro-analysis"),
     build: (L) => ({
       title: L("Neuro Analysis", "Neuro Analysis"),
       summary: L(
-        "This workspace is for company intelligence, evidence checklists, market research, and 2-10 year valuation scenarios.",
-        "Este workspace es para inteligencia de compañías, checklist de evidencia, research de mercado y escenarios de valuation 2-10 años."
+        "This premium workspace is for company research, filings, historical data, portfolio evaluation, allocation simulation, and future scenario analysis.",
+        "Este workspace premium es para research de compañías, reportes, data histórica, evaluación de portfolio, simulación de allocation y escenarios futuros."
       ),
       bullets: [
-        L("Use it to frame business quality, financial statements, valuation, risk, competition, and long-term investment timing.", "Úsalo para estructurar calidad del negocio, estados financieros, valuation, riesgo, competencia y timing de inversión a largo plazo."),
-        L("Future fair value is scenario based: bear, base, and bull from year 2 through year 10.", "El fair value futuro se modela por escenarios: bear, base y bull desde año 2 hasta año 10."),
-        L("Outputs are analysis and simulation support, not guaranteed financial advice.", "Las salidas son apoyo de análisis y simulación, no consejo financiero garantizado."),
+        L("Start with ticker, holdings, cost basis, capital, horizon, and the latest company documents.", "Empieza con ticker, posiciones, costo promedio, capital, horizonte y los reportes más recientes de la compañía."),
+        L("The system should extract business quality, financial trends, cash flows, risks, valuation ranges, and future scenarios.", "El sistema debe extraer calidad del negocio, tendencias financieras, cash flows, riesgos, rangos de valoración y escenarios futuros."),
+        L("Use the output to compare allocation choices and simulate portfolio impact before committing money.", "Usa el output para comparar decisiones de allocation y simular impacto en portfolio antes de comprometer dinero."),
       ],
       steps: [
         {
           id: "neuro-header",
-          title: L("Research command center", "Centro de research"),
+          title: L("Company analysis command center", "Centro de análisis de compañías"),
           body: L(
-            "Start with the company, horizon, documents, and assumptions before reviewing scenarios.",
-            "Empieza con la compañía, horizonte, documentos y supuestos antes de revisar escenarios."
+            "This is where a user uploads company documents, connects portfolio context, and asks the platform to convert raw information into investment-grade analysis and scenarios.",
+            "Aquí el usuario sube reportes de compañía, conecta contexto de portfolio y pide a la plataforma convertir información cruda en análisis y escenarios de nivel premium."
           ),
           selector: "main h1",
         },
@@ -405,23 +559,23 @@ const BUILDERS: QuickTourBuilder[] = [
     guideHref: "/help/notebook",
     match: (path) => path.startsWith("/notebook"),
     build: (L) => ({
-      title: L("Notebook", "Notebook"),
+      title: L("Operating Playbook", "Playbook Operativo"),
       summary: L(
-        "Notebook is your playbook. Store what deserves to be repeated, not every random thought from a session.",
-        "Notebook es tu playbook. Guarda lo que merece repetirse, no cualquier pensamiento aleatorio de una sesión."
+        "Notebook is the memory of the business. Store rules, setups, screenshots, lessons, decisions, and standards that deserve to be repeated.",
+        "Notebook es la memoria de la empresa. Guarda reglas, setups, screenshots, lecciones, decisiones y estándares que merecen repetirse."
       ),
       bullets: [
-        L("Capture rules, setups, screenshots, and lessons worth keeping.", "Captura reglas, setups, screenshots y lecciones que valga la pena conservar."),
-        L("Prefer evidence-backed notes over vague motivation.", "Prefiere notas respaldadas por evidencia sobre motivación vaga."),
-        L("Use it to build repeatable decision standards.", "Úsalo para construir estándares de decisión repetibles."),
+        L("Keep evidence-backed notes instead of vague motivation.", "Guarda notas con evidencia en vez de motivación vaga."),
+        L("Turn repeated lessons into rules, checklists, or alarms.", "Convierte lecciones repetidas en reglas, checklists o alarmas."),
+        L("Use it to make the business smarter every month.", "Úsalo para hacer la empresa más inteligente cada mes."),
       ],
       steps: [
         {
           id: "notebook-header",
-          title: L("Playbook workspace", "Workspace del playbook"),
+          title: L("Institutional memory", "Memoria institucional"),
           body: L(
-            "Use Notebook as institutional memory. If something improves execution consistently, it belongs here.",
-            "Usa Notebook como memoria institucional. Si algo mejora la ejecución de forma consistente, pertenece aquí."
+            "Use Notebook for reusable knowledge. If it improves execution, risk control, or decision quality, it belongs in the playbook.",
+            "Usa Notebook para conocimiento reutilizable. Si mejora ejecución, control de riesgo o calidad de decisión, pertenece en el playbook."
           ),
           selector: "main h1",
         },
@@ -433,23 +587,23 @@ const BUILDERS: QuickTourBuilder[] = [
     guideHref: "/help/back-study",
     match: (path) => path.startsWith("/back-study"),
     build: (L) => ({
-      title: L("Back-Study", "Back-Study"),
+      title: L("Evidence-Based Back-Study", "Back-Study Basado en Evidencia"),
       summary: L(
-        "Back-Study is visual replay. Use it to validate entries, exits, timing, and setup quality with chart context.",
-        "Back-Study es replay visual. Úsalo para validar entradas, salidas, timing y calidad del setup con contexto gráfico."
+        "Back-Study validates decisions against chart evidence. It helps the business separate good process from lucky or emotional outcomes.",
+        "Back-Study valida decisiones contra evidencia del chart. Ayuda al negocio a separar buen proceso de resultados por suerte o emoción."
       ),
       bullets: [
-        L("Replay the trade, not your memory of the trade.", "Reproduce el trade, no tu recuerdo del trade."),
-        L("Audit whether the entry and exit matched the setup rules.", "Audita si la entrada y la salida coincidieron con las reglas del setup."),
-        L("Use it to refine repeatable execution details.", "Úsalo para afinar detalles de ejecución repetibles."),
+        L("Replay the chart, not your memory of the trade.", "Reproduce el chart, no tu recuerdo del trade."),
+        L("Audit entry, exit, timing, sizing, and rule adherence.", "Audita entrada, salida, timing, tamaño y cumplimiento de reglas."),
+        L("Convert observations into playbook updates.", "Convierte observaciones en updates al playbook."),
       ],
       steps: [
         {
           id: "backstudy-header",
-          title: L("Replay workspace", "Workspace de replay"),
+          title: L("Chart evidence review", "Review con evidencia del chart"),
           body: L(
-            "This screen is for evidence-based review. The goal is to validate decisions against the chart, not to romanticize hindsight.",
-            "Esta pantalla es para revisión basada en evidencia. La meta es validar decisiones contra el gráfico, no romantizar el hindsight."
+            "Use this workspace to test whether the setup and execution matched your standard. The point is correction, not hindsight storytelling.",
+            "Usa este workspace para probar si el setup y la ejecución coincidieron con tu estándar. El punto es corrección, no narrativas de hindsight."
           ),
           selector: "main h1",
         },
@@ -463,21 +617,21 @@ const BUILDERS: QuickTourBuilder[] = [
     build: (L) => ({
       title: L("Business Protection System", "Sistema de Protección Empresarial"),
       summary: L(
-        "This page turns your Trading Business Plan into protection. It exists to help you obey your risk and routine rules when emotion gets loud.",
-        "Esta página convierte tu Plan de Empresa de Trading en protección. Existe para ayudarte a obedecer tus reglas de riesgo y rutina cuando la emoción sube el volumen."
+        "Rules and alarms protect the business from avoidable damage. They turn the plan into reminders, limits, checks, and escalation points.",
+        "Reglas y alarmas protegen la empresa de daño evitable. Convierten el plan en recordatorios, límites, chequeos y puntos de escalación."
       ),
       bullets: [
-        L("Use routine checks for premarket, execution records, and closeout habits.", "Usa chequeos de rutina para premarket, registros de ejecución y cierre del día."),
-        L("Use critical alarms for hard safety signals only.", "Usa alarmas críticas solo para señales duras de seguridad."),
-        L("If a rule matters, protect it before you trust memory.", "Si una regla importa, protégela antes de confiar en la memoria."),
+        L("Use reminders for routine discipline: premarket, journal, review, and closeout.", "Usa recordatorios para disciplina de rutina: premarket, journal, review y cierre."),
+        L("Use critical alarms for risk limits and behavior you refuse to normalize.", "Usa alarmas críticas para límites de riesgo y conducta que no vas a normalizar."),
+        L("If a rule matters, automate its protection before the session starts.", "Si una regla importa, automatiza su protección antes de que empiece la sesión."),
       ],
       steps: [
         {
           id: "rules-header",
-          title: L("Discipline automation", "Automatización de disciplina"),
+          title: L("Governance in motion", "Gobernanza en movimiento"),
           body: L(
-            "Define rules that protect risk and routine. Good alarms reduce avoidable mistakes before they become costly behavior.",
-            "Define reglas que protejan riesgo y rutina. Buenas alarmas reducen errores evitables antes de que se conviertan en conducta costosa."
+            "This screen turns written rules into operational protection. Good controls keep one bad decision from becoming a business problem.",
+            "Esta pantalla convierte reglas escritas en protección operativa. Buenos controles evitan que una mala decisión se convierta en problema empresarial."
           ),
           selector: "main h1",
         },
@@ -489,23 +643,23 @@ const BUILDERS: QuickTourBuilder[] = [
     guideHref: "/help/forum",
     match: (path) => path.startsWith("/forum"),
     build: (L) => ({
-      title: L("Community Forum", "Foro de comunidad"),
+      title: L("Trader Entrepreneur Community", "Comunidad Trader Entrepreneur"),
       summary: L(
-        "The forum is for shared progress, feedback, and discussion. Use it to improve process, not to outsource conviction.",
-        "El foro es para progreso compartido, feedback y discusión. Úsalo para mejorar el proceso, no para tercerizar convicción."
+        "The community is for evidence-backed discussion, progress, lessons, and feedback. Use it to improve process without outsourcing conviction.",
+        "La comunidad es para discusión con evidencia, progreso, lecciones y feedback. Úsala para mejorar proceso sin tercerizar convicción."
       ),
       bullets: [
-        L("Share evidence, not just opinions.", "Comparte evidencia, no solo opiniones."),
-        L("Use community feedback to refine your playbook and execution review.", "Usa el feedback de la comunidad para afinar tu playbook y tu revisión de ejecución."),
-        L("Keep your own process as the primary source of truth.", "Mantén tu propio proceso como fuente principal de verdad."),
+        L("Share context, data, and what decision you are trying to improve.", "Comparte contexto, data y qué decisión estás tratando de mejorar."),
+        L("Use feedback to refine the business plan, playbook, and review process.", "Usa feedback para refinar el plan empresarial, playbook y proceso de review."),
+        L("Keep your documented process as the primary source of truth.", "Mantén tu proceso documentado como fuente principal de verdad."),
       ],
       steps: [
         {
           id: "forum-header",
-          title: L("Community workspace", "Workspace de comunidad"),
+          title: L("Community with context", "Comunidad con contexto"),
           body: L(
-            "Use this space to exchange ideas, lessons, and progress with context. Strong posts are specific, evidence-backed, and useful to others.",
-            "Usa este espacio para intercambiar ideas, lecciones y progreso con contexto. Las publicaciones fuertes son específicas, apoyadas en evidencia y útiles para otros."
+            "Strong posts explain the setup, evidence, decision, and lesson. The goal is better operators, not louder opinions.",
+            "Publicaciones fuertes explican setup, evidencia, decisión y lección. La meta es mejores operadores, no opiniones más ruidosas."
           ),
           selector: "main h1",
         },
@@ -517,23 +671,23 @@ const BUILDERS: QuickTourBuilder[] = [
     guideHref: "/help/settings",
     match: (path) => startsWithAny(path, ["/account", "/account/preferences", "/account/password"]),
     build: (L) => ({
-      title: L("Trader Entrepreneur Account", "Cuenta de Empresario Trader"),
+      title: L("Trader Entrepreneur Account", "Cuenta Trader Entrepreneur"),
       summary: L(
-        "This area controls your trader entrepreneur identity, language, theme, privacy, and account security settings.",
-        "Esta área controla tu identidad de empresario trader, idioma, tema, privacidad y ajustes de seguridad de la cuenta."
+        "This area controls identity, preferences, language, privacy, and account security. Treat it as operating maintenance.",
+        "Esta área controla identidad, preferencias, idioma, privacidad y seguridad de cuenta. Trátala como mantenimiento operativo."
       ),
       bullets: [
-        L("Keep your profile, business data, and security settings intentional.", "Mantén intencional tu perfil, data empresarial y seguridad."),
-        L("Use preferences to align the app with your workflow and language.", "Usa preferencias para alinear la app con tu flujo y tu idioma."),
-        L("Treat password and security updates as operational maintenance.", "Trata las actualizaciones de contraseña y seguridad como mantenimiento operativo."),
+        L("Keep profile and preferences aligned with how you work.", "Mantén perfil y preferencias alineadas con tu forma de trabajar."),
+        L("Protect access with clean password and security habits.", "Protege acceso con contraseña y hábitos de seguridad limpios."),
+        L("Use privacy and data controls intentionally.", "Usa controles de privacidad y data con intención."),
       ],
       steps: [
         {
           id: "account-header",
-          title: L("Settings workspace", "Workspace de ajustes"),
+          title: L("Identity and security layer", "Capa de identidad y seguridad"),
           body: L(
-            "This page manages the identity layer of the workspace: your profile, visibility, preferences, and protection settings.",
-            "Esta página maneja la capa de identidad del workspace: tu perfil, visibilidad, preferencias y ajustes de protección."
+            "This workspace protects the user layer of the business: who owns the records, how the app behaves, and how access is secured.",
+            "Este workspace protege la capa de usuario del negocio: quién posee los registros, cómo se comporta la app y cómo se asegura el acceso."
           ),
           selector: "main h1",
         },
@@ -545,23 +699,23 @@ const BUILDERS: QuickTourBuilder[] = [
     guideHref: "/help/billing",
     match: (path) => startsWithAny(path, ["/billing", "/pricing", "/confirmed"]),
     build: (L) => ({
-      title: L("Billing & Plans", "Billing y planes"),
+      title: L("Access and Billing Control", "Control de Acceso y Billing"),
       summary: L(
-        "This area controls access, plan type, and payment state. Web is the source of truth for subscription management.",
-        "Esta área controla acceso, tipo de plan y estado de pago. La web es la fuente de verdad para la gestión de suscripción."
+        "Billing controls plan access, add-ons, renewal status, invoices, and subscription management. It is the commercial gate into the operating system.",
+        "Billing controla acceso del plan, add-ons, renovación, facturas y gestión de suscripción. Es la puerta comercial al sistema operativo."
       ),
       bullets: [
-        L("Use this page to confirm plan scope and payment state.", "Usa esta página para confirmar el alcance del plan y el estado de pago."),
-        L("Subscription changes affect analytics, reports, and premium tools immediately after access sync.", "Los cambios de suscripción afectan analítica, reportes y herramientas premium apenas sincroniza el acceso."),
-        L("Mobile is not the place to create or manage subscriptions.", "Mobile no es el lugar para crear o administrar suscripciones."),
+        L("Choose the plan that matches the operating system level you need.", "Elige el plan que corresponda al nivel operativo que necesitas."),
+        L("After payment, access syncs through the subscription event and opens the workspace.", "Después del pago, el acceso sincroniza por el evento de suscripción y abre el workspace."),
+        L("Use billing management for renewals, invoices, and payment method changes.", "Usa billing management para renovaciones, facturas y cambios de método de pago."),
       ],
       steps: [
         {
           id: "billing-header",
-          title: L("Billing control", "Control de billing"),
+          title: L("Subscription gate", "Puerta de suscripción"),
           body: L(
-            "Manage access and plan state here. Keep billing clean so the app permissions match the product tier you expect.",
-            "Administra aquí el acceso y el estado del plan. Mantén billing limpio para que los permisos de la app coincidan con el tier que esperas."
+            "This screen determines what the account can access. Keep billing clean so the workspace matches the product tier the business paid for.",
+            "Esta pantalla determina a qué puede acceder la cuenta. Mantén billing limpio para que el workspace coincida con el tier pagado por la empresa."
           ),
           selector: "main h1",
         },
@@ -573,23 +727,23 @@ const BUILDERS: QuickTourBuilder[] = [
     guideHref: "/help",
     match: (path) => path.startsWith("/messages"),
     build: (L) => ({
-      title: L("Support Center", "Centro de soporte"),
+      title: L("Support and Escalation Center", "Centro de Soporte y Escalación"),
       summary: L(
-        "This is your support workspace: open tickets, send details, and let the 24/7 virtual agent answer or escalate.",
-        "Este es tu workspace de soporte: abre tickets, envía detalles y deja que el agente virtual 24/7 conteste o escale."
+        "Support keeps issues, billing questions, product feedback, and account help organized until resolution.",
+        "Soporte mantiene organizados problemas, preguntas de billing, feedback de producto y ayuda de cuenta hasta resolverlos."
       ),
       bullets: [
-        L("Use tickets for bugs, billing questions, feature ideas, and account help.", "Usa tickets para bugs, billing, ideas de mejora y ayuda de cuenta."),
-        L("The virtual agent replies immediately when it has an answer.", "El agente virtual contesta de inmediato cuando tiene respuesta."),
-        L("If the agent cannot solve it, the ticket stays open for human follow-up.", "Si el agente no puede resolverlo, el ticket queda abierto para seguimiento humano."),
+        L("Open tickets with enough context to reproduce or understand the issue.", "Abre tickets con suficiente contexto para reproducir o entender el problema."),
+        L("Use support for account, billing, bugs, and product improvement ideas.", "Usa soporte para cuenta, billing, bugs e ideas de mejora del producto."),
+        L("A clean ticket is faster to resolve than scattered messages.", "Un ticket limpio se resuelve más rápido que mensajes dispersos."),
       ],
       steps: [
         {
           id: "messages-header",
-          title: L("Support workspace", "Workspace de soporte"),
+          title: L("Keep support auditable", "Mantén soporte auditable"),
           body: L(
-            "Use this screen to keep platform conversations organized until each ticket is resolved.",
-            "Usa esta pantalla para mantener las conversaciones de la plataforma organizadas hasta que cada ticket se resuelva."
+            "Use this workspace when the business needs help. Keep each issue specific so it can be answered, tracked, or escalated cleanly.",
+            "Usa este workspace cuando la empresa necesita ayuda. Mantén cada asunto específico para que pueda contestarse, rastrearse o escalarse limpiamente."
           ),
           selector: "main h1",
         },
@@ -601,23 +755,23 @@ const BUILDERS: QuickTourBuilder[] = [
     guideHref: "/help",
     match: () => true,
     build: (L) => ({
-      title: L("Workspace guide", "Guía del workspace"),
+      title: L("Workspace Operating Guide", "Guía Operativa del Workspace"),
       summary: L(
-        "Every screen in Neuro Trader should reinforce the business loop: plan, protect, execute, record, review, improve.",
-        "Cada pantalla en Neuro Trader debe reforzar el ciclo empresarial: planificar, proteger, ejecutar, registrar, revisar, mejorar."
+        "Every screen supports the same business loop: plan, protect, execute, record, review, and improve.",
+        "Cada pantalla apoya el mismo ciclo empresarial: planificar, proteger, ejecutar, registrar, revisar y mejorar."
       ),
       bullets: [
-        L("Use the page title to confirm what this screen is responsible for.", "Usa el título de la página para confirmar de qué es responsable esta pantalla."),
-        L("Open the guide if you need the operating standard behind the workflow.", "Abre la guía si necesitas el estándar operativo detrás del flujo."),
-        L("Run the quick tour to see the main touchpoints on this page.", "Ejecuta el quick tour para ver los puntos principales de esta página."),
+        L("Identify the business decision this screen is designed to support.", "Identifica la decisión empresarial que esta pantalla está diseñada para apoyar."),
+        L("Use saved records and objective data before changing the process.", "Usa registros guardados y data objetiva antes de cambiar el proceso."),
+        L("Open the guide or run the tour whenever the workflow feels unclear.", "Abre la guía o corre el tour cuando el flujo no esté claro."),
       ],
       steps: [
         {
           id: "generic-header",
-          title: L("This screen", "Esta pantalla"),
+          title: L("This operating screen", "Esta pantalla operativa"),
           body: L(
-            "Start with the page title and the guide link. The goal is to understand how this screen supports your operating loop before you use it casually.",
-            "Empieza por el título de la página y el link a la guía. La meta es entender cómo esta pantalla apoya tu ciclo operativo antes de usarla de forma casual."
+            "Start with the page title and ask what part of the operating loop this screen protects. Then use it with a specific decision in mind.",
+            "Empieza por el título de la página y pregunta qué parte del ciclo operativo protege esta pantalla. Luego úsala con una decisión específica en mente."
           ),
           selector: "main h1",
         },

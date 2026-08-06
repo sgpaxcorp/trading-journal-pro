@@ -54,9 +54,9 @@ export default function PageIntro() {
   if (!visible) return null;
 
   return (
-    <div className="fixed right-6 top-[88px] z-[70] max-w-[380px] rounded-3xl border border-slate-800 bg-slate-950/95 p-5 text-slate-100 shadow-2xl shadow-emerald-500/10 backdrop-blur">
+    <div className="fixed left-4 right-4 top-[88px] z-[70] mx-auto max-w-[420px] rounded-3xl border border-slate-800 bg-slate-950/95 p-5 text-slate-100 shadow-2xl shadow-emerald-500/10 backdrop-blur md:left-auto md:right-6 md:mx-0">
       <p className="text-[11px] uppercase tracking-[0.28em] text-emerald-300/80">
-        {L("Quick tour", "Quick tour")}
+        {L("Operating tour", "Tour operativo")}
       </p>
       <h3 className="mt-2 text-xl font-semibold text-slate-50">{current.title}</h3>
       <p className="mt-3 text-sm leading-6 text-slate-300">{current.summary}</p>
@@ -85,7 +85,7 @@ export default function PageIntro() {
           }}
           className="rounded-xl bg-emerald-400 px-3 py-1.5 text-sm font-semibold text-slate-950 transition hover:bg-emerald-300"
         >
-          {L("Start quick tour", "Iniciar quick tour")}
+          {L("Start operating tour", "Iniciar tour operativo")}
         </button>
       </div>
 

@@ -55,6 +55,7 @@ export type InactivityReminderStage = 3 | 15 | 30;
 export type AutomatedEmailKey =
   | "email_confirmation"
   | "password_reset"
+  | "password_changed"
   | "account_recovery"
   | "welcome"
   | "inactivity_3_day"
@@ -81,6 +82,15 @@ export type AutomatedEmailPreview = {
 };
 
 export type AdminBroadcastTemplateKey = AutomatedEmailKey | "custom_broadcast";
+
+export type AdminBroadcastRecipient = {
+  id: string;
+  email: string;
+  fullName: string;
+  plan: string | null;
+  subscriptionStatus: string | null;
+  createdAt: string | null;
+};
 
 type AdminBroadcastArgs = {
   to: string;
@@ -614,7 +624,7 @@ async function sendEmailBase({ to, from, subject, text, html, attachments }: Sen
   }
 
   try {
-    await resend.emails.send({
+    const result = await resend.emails.send({
       from: from || FROM_EMAIL,
       to,
       subject,
@@ -622,6 +632,14 @@ async function sendEmailBase({ to, from, subject, text, html, attachments }: Sen
       html: html ?? "",
       attachments,
     });
+    if (result.error) {
+      const message =
+        result.error.message ||
+        result.error.name ||
+        "Resend rejected the email request.";
+      throw new Error(message);
+    }
+    return result.data;
   } catch (err) {
     console.error("[EMAIL] Error sending via Resend:", err);
     throw err;
@@ -712,6 +730,93 @@ function buildPasswordResetContent(args: {
     secondaryLabel: "Open sign in",
     secondaryUrl: resolveAppUrl("/signin"),
     footerNote: "If you didn’t request a password reset, no action is required.",
+  });
+
+  return { subject, text, html };
+}
+
+function buildPasswordChangedContent(args: {
+  email: string;
+  name?: string | null;
+  locale?: string | null;
+  resetUrl?: string | null;
+  signInUrl?: string | null;
+}) : EmailContent {
+  const safeName = args.name || "Trader Entrepreneur";
+  const locale = normalizeEmailLocale(args.locale);
+  const resetUrl = args.resetUrl || resolveAppUrl("/forgot-password");
+  const signInUrl = args.signInUrl || resolveAppUrl("/signin");
+
+  if (locale === "es") {
+    const subject = "Tu contraseña de NeuroTrader fue cambiada";
+    const text = [
+      `Hola ${safeName},`,
+      "",
+      "Este es un aviso de seguridad para confirmarte que la contraseña de tu cuenta de NeuroTrader fue cambiada correctamente.",
+      "Si hiciste este cambio, no necesitas hacer nada más.",
+      `Si no fuiste tú, protege la cuenta ahora mismo desde: ${resetUrl}`,
+      `También puedes volver a iniciar sesión aquí: ${signInUrl}`,
+      "",
+      "Equipo de NeuroTrader",
+    ].join("\n");
+
+    const html = buildNeuroTraderHtml({
+      title: "Cambio de contraseña confirmado",
+      eyebrow: "Autenticación",
+      preheader: "Tu contraseña fue actualizada. Revisa este aviso de seguridad.",
+      greeting: `Hola ${escapeHtml(safeName)},`,
+      highlight: "La contraseña de tu cuenta fue cambiada correctamente.",
+      paragraphs: [
+        "Este email confirma que la contraseña de tu cuenta de NeuroTrader fue actualizada.",
+        "Si hiciste este cambio, no necesitas tomar otra acción.",
+        "Si no reconoces este cambio, restablece tu contraseña inmediatamente y contáctanos para revisar la seguridad de la cuenta.",
+      ],
+      facts: [
+        { label: "Correo", value: escapeHtml(args.email) },
+        { label: "Evento", value: "Cambio de contraseña" },
+      ],
+      ctaLabel: "Proteger mi cuenta",
+      ctaUrl: resetUrl,
+      secondaryLabel: "Abrir sign in",
+      secondaryUrl: signInUrl,
+      footerNote: "Si no hiciste este cambio, responde este email o escribe a support@neurotrader-journal.com.",
+    });
+
+    return { subject, text, html };
+  }
+
+  const subject = "Your NeuroTrader password was changed";
+  const text = [
+    `Hi ${safeName},`,
+    "",
+    "This is a security confirmation that your NeuroTrader password was changed successfully.",
+    "If you made this change, no further action is required.",
+    `If you did not make this change, secure the account immediately here: ${resetUrl}`,
+    `You can also sign back in here: ${signInUrl}`,
+    "",
+    "NeuroTrader Team",
+  ].join("\n");
+
+  const html = buildNeuroTraderHtml({
+    title: "Password change confirmed",
+    eyebrow: "Authentication",
+    preheader: "Your password was updated. Review this security confirmation.",
+    greeting: `Hi ${escapeHtml(safeName)},`,
+    highlight: "Your account password was changed successfully.",
+    paragraphs: [
+      "This email confirms that the password on your NeuroTrader account was updated.",
+      "If you made this change, you're all set.",
+      "If you do not recognize this change, reset your password immediately and contact us so we can review account security with you.",
+    ],
+    facts: [
+      { label: "Email", value: escapeHtml(args.email) },
+      { label: "Event", value: "Password changed" },
+    ],
+    ctaLabel: "Secure my account",
+    ctaUrl: resetUrl,
+    secondaryLabel: "Open sign in",
+    secondaryUrl: signInUrl,
+    footerNote: "If this was not you, reply to this email or contact support@neurotrader-journal.com immediately.",
   });
 
   return { subject, text, html };
@@ -1409,6 +1514,40 @@ export function getEmailSenderStatus() {
   };
 }
 
+export async function getAdminBroadcastRecipients(): Promise<AdminBroadcastRecipient[]> {
+  const { data, error } = await supabaseAdmin
+    .from("profiles")
+    .select("id,email,first_name,last_name,plan,subscription_status,created_at")
+    .not("email", "is", null)
+    .order("created_at", { ascending: false });
+
+  if (error) throw error;
+
+  const seenEmails = new Set<string>();
+  const recipients: AdminBroadcastRecipient[] = [];
+
+  for (const row of data ?? []) {
+    const email = String((row as any)?.email ?? "").trim().toLowerCase();
+    if (!email || !email.includes("@") || seenEmails.has(email)) continue;
+
+    const firstName = String((row as any)?.first_name ?? "").trim();
+    const lastName = String((row as any)?.last_name ?? "").trim();
+    const fullName = [firstName, lastName].filter(Boolean).join(" ");
+
+    recipients.push({
+      id: String((row as any)?.id ?? email),
+      email,
+      fullName: fullName || email,
+      plan: ((row as any)?.plan as string | null) ?? null,
+      subscriptionStatus: ((row as any)?.subscription_status as string | null) ?? null,
+      createdAt: ((row as any)?.created_at as string | null) ?? null,
+    });
+    seenEmails.add(email);
+  }
+
+  return recipients;
+}
+
 function getBroadcastTemplateMeta(templateKey?: AdminBroadcastTemplateKey) {
   if (!templateKey || templateKey === "custom_broadcast") {
     return {
@@ -1530,6 +1669,21 @@ export function getAutomatedEmailCatalog(): AutomatedEmailPreview[] {
         email: "trader@example.com",
         name: "Steven",
         resetUrl: resolveAppUrl("/reset-password?preview=1"),
+      }),
+    },
+    {
+      key: "password_changed",
+      category: "Authentication",
+      name: "Password changed",
+      description: "Sent after a password is successfully changed from account settings or recovery flow.",
+      trigger: "Password updated successfully",
+      delivery: "Resend via post-update security endpoint",
+      from: AUTH_FROM_EMAIL,
+      preview: buildPasswordChangedContent({
+        email: "trader@example.com",
+        name: "Steven",
+        resetUrl: resolveAppUrl("/forgot-password"),
+        signInUrl: resolveAppUrl("/signin"),
       }),
     },
     {
@@ -1756,6 +1910,11 @@ export async function sendAutomatedEmailTest(args: {
         name: "Admin preview",
         resetUrl: resolveAppUrl("/reset-password?preview=1"),
       });
+    case "password_changed":
+      return sendPasswordChangedEmail({
+        email,
+        name: "Admin preview",
+      });
     case "account_recovery":
       return sendAccountRecoveryEmail({
         email,
@@ -1869,20 +2028,14 @@ export async function sendAdminBroadcastEmail(args: AdminBroadcastArgs) {
   });
 }
 
-export async function sendAdminBroadcastToAllUsers(
-  args: Omit<AdminBroadcastArgs, "to">
+export async function sendAdminBroadcastToRecipients(
+  args: Omit<AdminBroadcastArgs, "to">,
+  recipients: string[]
 ) {
-  const { data, error } = await supabaseAdmin
-    .from("profiles")
-    .select("email")
-    .not("email", "is", null);
-
-  if (error) throw error;
-
-  const recipients = Array.from(
+  const normalizedRecipients = Array.from(
     new Set(
-      (data ?? [])
-        .map((row: any) => String(row?.email ?? "").trim().toLowerCase())
+      recipients
+        .map((value) => String(value || "").trim().toLowerCase())
         .filter((email) => email && email.includes("@"))
     )
   );
@@ -1891,8 +2044,8 @@ export async function sendAdminBroadcastToAllUsers(
   const failed: string[] = [];
   const chunkSize = 20;
 
-  for (let index = 0; index < recipients.length; index += chunkSize) {
-    const chunk = recipients.slice(index, index + chunkSize);
+  for (let index = 0; index < normalizedRecipients.length; index += chunkSize) {
+    const chunk = normalizedRecipients.slice(index, index + chunkSize);
     const results = await Promise.allSettled(
       chunk.map((email) =>
         sendAdminBroadcastEmail({
@@ -1913,11 +2066,21 @@ export async function sendAdminBroadcastToAllUsers(
   }
 
   return {
-    total: recipients.length,
+    total: normalizedRecipients.length,
     sent,
     failed: failed.length,
     failedRecipients: failed.slice(0, 20),
   };
+}
+
+export async function sendAdminBroadcastToAllUsers(
+  args: Omit<AdminBroadcastArgs, "to">
+) {
+  const recipients = await getAdminBroadcastRecipients();
+  return sendAdminBroadcastToRecipients(
+    args,
+    recipients.map((recipient) => recipient.email)
+  );
 }
 
 export async function sendEmailConfirmationEmail(args: {
@@ -1936,6 +2099,25 @@ export async function sendPasswordResetEmail(args: {
   resetUrl: string;
 }) {
   const content = buildPasswordResetContent(args);
+  await sendEmailBase({ to: args.email, from: AUTH_FROM_EMAIL, ...content });
+}
+
+export async function sendPasswordChangedEmail(args: {
+  email: string;
+  name?: string | null;
+  userId?: string | null;
+  locale?: string | null;
+}) {
+  const resolvedLocale = await resolveEmailLocale({
+    userId: args.userId,
+    email: args.email,
+    fallback: args.locale,
+  });
+  const content = buildPasswordChangedContent({
+    email: args.email,
+    name: args.name,
+    locale: resolvedLocale,
+  });
   await sendEmailBase({ to: args.email, from: AUTH_FROM_EMAIL, ...content });
 }
 

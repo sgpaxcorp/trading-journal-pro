@@ -11,6 +11,7 @@ import { resolveLocale } from "@/lib/i18n";
 
 type SignInClientProps = {
   nextPath: string;
+  emailConfirmed?: boolean;
 };
 
 function safeInternalPath(maybePath: string | undefined | null) {
@@ -23,7 +24,7 @@ function safeInternalPath(maybePath: string | undefined | null) {
   return maybePath;
 }
 
-export default function SignInClient({ nextPath }: SignInClientProps) {
+export default function SignInClient({ nextPath, emailConfirmed = false }: SignInClientProps) {
   const router = useRouter();
   const { locale } = useAppSettings();
   const lang = resolveLocale(locale);
@@ -138,6 +139,15 @@ export default function SignInClient({ nextPath }: SignInClientProps) {
         <p className="text-xs text-slate-400 mb-4">
           {L("Enter your credentials to access your trading business workspace.", "Ingresa tus credenciales para acceder a tu espacio de empresa de trading.")}
         </p>
+
+        {emailConfirmed && (
+          <div className="mb-3 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-[11px] text-emerald-100">
+            {L(
+              "Email confirmed. Log in to continue your business plan and secure payment flow.",
+              "Email confirmado. Inicia sesión para continuar tu plan empresarial y el flujo de pago seguro."
+            )}
+          </div>
+        )}
 
         {error && (
           <div className="mb-3 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-[11px] text-red-200">

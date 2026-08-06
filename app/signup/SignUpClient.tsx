@@ -19,6 +19,8 @@ type SignUpClientProps = {
   initialPlan: PlanId;
   initialBillingCycle: BillingCycle;
   initialPartnerCode: string;
+  initialEmail?: string;
+  initialVerify?: boolean;
 };
 
 function Stepper({
@@ -66,6 +68,8 @@ export default function SignUpClient({
   initialPlan,
   initialBillingCycle,
   initialPartnerCode,
+  initialEmail = "",
+  initialVerify = false,
 }: SignUpClientProps) {
   const router = useRouter();
   const { locale } = useAppSettings();
@@ -73,17 +77,26 @@ export default function SignUpClient({
   const isEs = lang === "es";
   const L = (en: string, es: string) => (isEs ? es : en);
 
-  const [stepUi, setStepUi] = useState<StepUi>("form");
+  const [stepUi, setStepUi] = useState<StepUi>(initialVerify && initialEmail ? "verify" : "form");
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState(initialEmail);
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [passwordError, setPasswordError] = useState("");
-  const [submittedEmail, setSubmittedEmail] = useState("");
+  const [submittedEmail, setSubmittedEmail] = useState(initialVerify ? initialEmail : "");
   const [verificationCode, setVerificationCode] = useState("");
+  const [verificationNotice, setVerificationNotice] = useState(
+    initialVerify && initialEmail
+      ? L(
+          "Enter the verification code from your email to continue.",
+          "Ingresa el código de verificación de tu email para continuar."
+        )
+      : ""
+  );
+  const [verificationNoticeTone, setVerificationNoticeTone] = useState<"success" | "warning">("success");
   const [verifying, setVerifying] = useState(false);
   const [resending, setResending] = useState(false);
   const [canResend, setCanResend] = useState(true);
@@ -133,6 +146,23 @@ export default function SignUpClient({
 
       setSubmittedEmail(normalizedEmail);
       setVerificationCode("");
+      if (body?.emailDelivery === "failed") {
+        setVerificationNoticeTone("warning");
+        setVerificationNotice(
+          L(
+            "Your account was created, but the verification email could not be delivered. Use Resend code below or contact support if it still does not arrive.",
+            "Tu cuenta fue creada, pero el email de verificación no se pudo entregar. Usa Reenviar código abajo o contacta soporte si aún no llega."
+          )
+        );
+      } else {
+        setVerificationNoticeTone("success");
+        setVerificationNotice(
+          L(
+            "Verification code sent. Confirm your email before choosing your plan and paying.",
+            "Código de verificación enviado. Confirma tu email antes de escoger el plan y pagar."
+          )
+        );
+      }
       setStepUi("verify");
     } catch (err: any) {
       setError(err.message || L("Something went wrong.", "Algo salió mal."));
@@ -214,6 +244,13 @@ export default function SignUpClient({
       if (!res.ok) {
         throw new Error(body?.error || L("Could not resend the code.", "No se pudo reenviar el código."));
       }
+      setVerificationNoticeTone("success");
+      setVerificationNotice(
+        L(
+          "A new verification code was sent. Check Primary, Promotions, and Spam.",
+          "Se envió un nuevo código de verificación. Revisa Principal, Promociones y Spam."
+        )
+      );
       setCanResend(false);
       setTimeout(() => setCanResend(true), 30000);
     } catch (err: any) {
@@ -255,6 +292,18 @@ export default function SignUpClient({
               "Revisa spam/junk o promociones si no ves el email."
             )}
           </p>
+          {verificationNotice ? (
+            <div
+              className={[
+                "rounded-xl border px-3 py-2 text-[11px]",
+                verificationNoticeTone === "warning"
+                  ? "border-amber-400/40 bg-amber-500/10 text-amber-100"
+                  : "border-emerald-400/40 bg-emerald-500/10 text-emerald-100",
+              ].join(" ")}
+            >
+              {verificationNotice}
+            </div>
+          ) : null}
 
           <div className="space-y-3">
             <div>

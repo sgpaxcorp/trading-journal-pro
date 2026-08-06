@@ -26,6 +26,26 @@ export default function ResetPasswordClient() {
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
+  async function sendPasswordChangedSecurityEmail() {
+    const { data: sessionData } = await supabaseBrowser.auth.getSession();
+    const token = sessionData?.session?.access_token;
+    if (!token) return;
+
+    const res = await fetch("/api/auth/password-changed", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ locale: lang }),
+    });
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(String(body?.error ?? "Password change email failed."));
+    }
+  }
+
   useEffect(() => {
     if (previewMode) return;
     let cancelled = false;
@@ -89,6 +109,12 @@ export default function ResetPasswordClient() {
       if (updateError) {
         setError(updateError.message);
         return;
+      }
+
+      try {
+        await sendPasswordChangedSecurityEmail();
+      } catch (securityEmailError) {
+        console.error("[ResetPassword] Password changed email failed:", securityEmailError);
       }
       setMessage(L("Password updated successfully. Redirecting to sign in…", "Contraseña actualizada correctamente. Redirigiendo a sign in…"));
       setTimeout(() => router.replace("/signin"), 1200);

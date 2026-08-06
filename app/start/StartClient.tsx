@@ -58,6 +58,7 @@ export default function StartClient({ initialPlan }: StartClientProps) {
   const stepFromQuery = searchParams.get("step");
   const skipInfo = searchParams.get("skipInfo");
   const cameFromConfirmed = skipInfo === "1";
+  const emailFromQuery = String(searchParams.get("email") ?? "").trim().toLowerCase();
 
   const initialStep: Step =
     stepFromQuery === "3" || cameFromConfirmed
@@ -72,7 +73,7 @@ export default function StartClient({ initialPlan }: StartClientProps) {
 
   const [infoForm, setInfoForm] = useState({
     fullName: "",
-    email: "",
+    email: emailFromQuery,
     password: "",
   });
 
@@ -80,6 +81,15 @@ export default function StartClient({ initialPlan }: StartClientProps) {
   const [loadingCheckout, setLoadingCheckout] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [verificationCode, setVerificationCode] = useState("");
+  const [verificationNotice, setVerificationNotice] = useState(
+    initialStep === 2 && emailFromQuery
+      ? L(
+          "Enter the verification code from your email to continue.",
+          "Ingresa el código de verificación de tu email para continuar."
+        )
+      : ""
+  );
+  const [verificationNoticeTone, setVerificationNoticeTone] = useState<"success" | "warning">("success");
   const [verifying, setVerifying] = useState(false);
   const [resending, setResending] = useState(false);
   const [canResend, setCanResend] = useState(true);
@@ -185,6 +195,23 @@ export default function StartClient({ initialPlan }: StartClientProps) {
 
       setUser(newUser);
       setVerificationCode("");
+      if (body?.emailDelivery === "failed") {
+        setVerificationNoticeTone("warning");
+        setVerificationNotice(
+          L(
+            "Your account was created, but the verification email could not be delivered. Use Resend code below or contact support if it still does not arrive.",
+            "Tu cuenta fue creada, pero el email de verificación no se pudo entregar. Usa Reenviar código abajo o contacta soporte si aún no llega."
+          )
+        );
+      } else {
+        setVerificationNoticeTone("success");
+        setVerificationNotice(
+          L(
+            "Verification code sent. Confirm your email before choosing your plan and paying.",
+            "Código de verificación enviado. Confirma tu email antes de escoger el plan y pagar."
+          )
+        );
+      }
       setCurrentStep(2);
     } catch (err: any) {
       console.error("Error on sign up:", err);
@@ -265,6 +292,13 @@ export default function StartClient({ initialPlan }: StartClientProps) {
       if (!res.ok) {
         throw new Error(body?.error ?? L("Could not resend the code.", "No se pudo reenviar el código."));
       }
+      setVerificationNoticeTone("success");
+      setVerificationNotice(
+        L(
+          "A new verification code was sent. Check Primary, Promotions, and Spam.",
+          "Se envió un nuevo código de verificación. Revisa Principal, Promociones y Spam."
+        )
+      );
       setCanResend(false);
       setTimeout(() => setCanResend(true), 30000);
     } catch (err: any) {
@@ -451,6 +485,18 @@ export default function StartClient({ initialPlan }: StartClientProps) {
             {L("Verification email:", "Email de verificación:")}{" "}
             <span className="text-slate-50 font-semibold">{verificationEmail || L("Not available", "No disponible")}</span>
           </div>
+          {verificationNotice ? (
+            <div
+              className={classNames(
+                "mb-4 rounded-xl border px-3 py-2 text-[11px]",
+                verificationNoticeTone === "warning"
+                  ? "border-amber-400/40 bg-amber-500/10 text-amber-100"
+                  : "border-emerald-400/40 bg-emerald-500/10 text-emerald-100"
+              )}
+            >
+              {verificationNotice}
+            </div>
+          ) : null}
 
           <div className="space-y-3">
             <div>

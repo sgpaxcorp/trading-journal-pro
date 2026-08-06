@@ -50,6 +50,7 @@ type AuthContextValue = {
 };
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
+const AUTH_BOOTSTRAP_TIMEOUT_MS = 8000;
 
 /* ========================
    Helpers
@@ -90,6 +91,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // 1) Cargar sesión inicial
   useEffect(() => {
     let mounted = true;
+    let settled = false;
+    const timeoutId = setTimeout(() => {
+      if (!mounted || settled) return;
+      console.warn("Supabase session bootstrap timed out.");
+      setLoading(false);
+    }, AUTH_BOOTSTRAP_TIMEOUT_MS);
 
     async function init() {
       try {
@@ -104,6 +111,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const currentUser = data.session?.user ?? null;
         setUser(mapSupabaseUserToAppUser(currentUser));
       } finally {
+        settled = true;
+        clearTimeout(timeoutId);
         if (mounted) setLoading(false);
       }
     }
@@ -123,6 +132,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => {
       subscription.unsubscribe();
       mounted = false;
+      clearTimeout(timeoutId);
     };
   }, []);
 

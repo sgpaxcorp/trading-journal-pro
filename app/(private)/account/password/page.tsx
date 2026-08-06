@@ -25,6 +25,26 @@ export default function ChangePasswordPage() {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  async function sendPasswordChangedSecurityEmail() {
+    const { data: sessionData } = await supabaseBrowser.auth.getSession();
+    const token = sessionData?.session?.access_token;
+    if (!token) return;
+
+    const res = await fetch("/api/auth/password-changed", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ locale: lang }),
+    });
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(String(body?.error ?? "Password change email failed."));
+    }
+  }
+
   /* ---------- Auth guard ---------- */
   useEffect(() => {
     if (!loading && !user) {
@@ -91,6 +111,12 @@ export default function ChangePasswordPage() {
         console.error("[ChangePassword] Error updating password:", updateError);
         setError(updateError.message || L("We couldn't update your password.", "No pudimos actualizar tu contraseña."));
         return;
+      }
+
+      try {
+        await sendPasswordChangedSecurityEmail();
+      } catch (securityEmailError) {
+        console.error("[ChangePassword] Password changed email failed:", securityEmailError);
       }
 
       setMessage(L("Your password has been updated successfully.", "Tu contraseña se actualizó correctamente."));

@@ -17,6 +17,7 @@ type OtherScreenProps = {
   onOpenNotebook: () => void;
   onOpenJournalDate: () => void;
   onOpenBrokerConnect: () => void;
+  onOpenBusinessPlan: () => void;
   planAccess: MobilePlanAccess;
 };
 
@@ -28,6 +29,7 @@ export function OtherScreen({
   onOpenNotebook,
   onOpenJournalDate,
   onOpenBrokerConnect,
+  onOpenBusinessPlan,
   planAccess,
 }: OtherScreenProps) {
   const { language } = useLanguage();
@@ -178,32 +180,15 @@ export function OtherScreen({
 
           <ModuleTile
             eyebrow={t(language, "Business planning", "Planificación empresarial")}
-            title={t(language, "Business Plan Workflow", "Flujo de Plan Empresarial")}
+            title={t(language, "Create Business Plan", "Crear Plan Empresarial")}
             description={t(
               language,
-              "Use Dashboard, KPIs, Journal, and Notebook together to shape targets, system rules, and operating structure.",
-              "Usa Dashboard, KPIs, Journal y Notebook juntos para dar forma a metas, reglas del sistema y estructura operativa."
+              "Create or edit the target, dates, operating cadence, risk rails, strategy, and rule system directly from mobile.",
+              "Crea o edita la meta, fechas, cadencia operativa, límites de riesgo, estrategia y reglas directamente desde mobile."
             )}
-            badges={["App", "Planning"]}
-            iconName="trending-up-outline"
-            onPress={() =>
-              onOpenModule(
-                t(language, "Business Plan Workflow", "Flujo de Plan Empresarial"),
-                t(
-                  language,
-                  "The mobile app is your monitoring center: use the dashboard for progress, KPIs for truth, journal for evidence, notebook for structure, and AI Coach for reinforcement.",
-                  "El app móvil es tu centro de monitoreo: usa el dashboard para progreso, KPIs para verdad, journal para evidencia, notebook para estructura y el Coach IA para refuerzo."
-                ),
-                {
-                  badge: t(language, "App workflow", "Flujo del app"),
-                  detail: t(
-                    language,
-                    "This creates a clean business-planning loop for trader entrepreneurs: observe, journal, review, adjust, and execute again with more clarity.",
-                    "Esto crea un loop limpio de planificación empresarial para trader entrepreneurs: observa, documenta, revisa, ajusta y vuelve a ejecutar con más claridad."
-                  ),
-                }
-              )
-            }
+            badges={["App", "Core", "Planning"]}
+            iconName="map-outline"
+            onPress={onOpenBusinessPlan}
           />
           <ModuleTile
             eyebrow={t(language, "Consulting prep", "Preparación de consultoría")}

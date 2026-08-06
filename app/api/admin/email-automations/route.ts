@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdminActionSecret, requireAdminUser } from "@/lib/adminAuth";
+import { recordAdminAuditEvent } from "@/lib/adminAudit";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 import {
+  getAdminBroadcastRecipients,
   getAutomatedEmailCatalog,
   getEmailSenderStatus,
   sendAdminBroadcastEmail,
+  sendAdminBroadcastToRecipients,
   sendAdminBroadcastToAllUsers,
   sendAutomatedEmailTest,
   type AutomatedEmailKey,
@@ -16,16 +19,14 @@ export async function GET(req: NextRequest) {
     const admin = await requireAdminUser(req, { action: "email-automations:read", limit: 60, windowMs: 60_000 });
     if (!admin.ok) return admin.response;
 
-    const { count } = await supabaseAdmin
-      .from("profiles")
-      .select("id", { count: "exact", head: true })
-      .not("email", "is", null);
+    const recipients = await getAdminBroadcastRecipients();
 
     return NextResponse.json({
       sender: getEmailSenderStatus(),
       automations: getAutomatedEmailCatalog(),
       adminEmail: admin.user.email ?? "",
-      broadcastAudienceCount: count ?? 0,
+      broadcastAudienceCount: recipients.length,
+      broadcastRecipients: recipients,
     });
   } catch (err: any) {
     return NextResponse.json({ error: err?.message ?? "Unexpected error" }, { status: 500 });
@@ -69,7 +70,95 @@ export async function POST(req: NextRequest) {
         footerNote: String(body?.footerNote ?? "").trim() || null,
         locale: String(body?.locale ?? "").trim() || null,
       });
+      await recordAdminAuditEvent({
+        req,
+        adminUserId: admin.user.id,
+        adminEmail: admin.user.email,
+        action: "admin_email_broadcast_preview",
+        metadata: {
+          to,
+          templateKey,
+          subject,
+        },
+      });
       return NextResponse.json({ ok: true, mode: "preview" });
+    }
+
+    if (action === "broadcast_selected") {
+      const subject = String(body?.subject ?? "").trim();
+      const title = String(body?.title ?? "").trim();
+      const message = String(body?.message ?? "").trim();
+      const templateKey = String(body?.templateKey ?? "custom_broadcast") as AdminBroadcastTemplateKey;
+      const recipientIds = Array.from(
+        new Set(
+          (Array.isArray(body?.recipientIds) ? body.recipientIds : [])
+            .map((value: unknown) => String(value ?? "").trim())
+            .filter(Boolean)
+        )
+      );
+
+      if (!subject || !title || !message) {
+        return NextResponse.json(
+          { error: "Subject, title, and message are required." },
+          { status: 400 }
+        );
+      }
+
+      if (!recipientIds.length) {
+        return NextResponse.json(
+          { error: "Select at least one user before sending." },
+          { status: 400 }
+        );
+      }
+
+      const { data: selectedRows, error: selectedError } = await supabaseAdmin
+        .from("profiles")
+        .select("id,email")
+        .in("id", recipientIds)
+        .not("email", "is", null);
+
+      if (selectedError) throw selectedError;
+
+      const recipients = (selectedRows ?? [])
+        .map((row: any) => String(row?.email ?? "").trim().toLowerCase())
+        .filter((email) => email && email.includes("@"));
+
+      if (!recipients.length) {
+        return NextResponse.json(
+          { error: "No valid emails were found for the selected users." },
+          { status: 400 }
+        );
+      }
+
+      const result = await sendAdminBroadcastToRecipients(
+        {
+          templateKey,
+          subject,
+          title,
+          message,
+          highlight: String(body?.highlight ?? "").trim() || null,
+          ctaLabel: String(body?.ctaLabel ?? "").trim() || null,
+          ctaUrl: String(body?.ctaUrl ?? "").trim() || null,
+          footerNote: String(body?.footerNote ?? "").trim() || null,
+          locale: String(body?.locale ?? "").trim() || null,
+        },
+        recipients
+      );
+
+      await recordAdminAuditEvent({
+        req,
+        adminUserId: admin.user.id,
+        adminEmail: admin.user.email,
+        action: "admin_email_broadcast_selected",
+        metadata: {
+          templateKey,
+          subject,
+          requestedRecipients: recipientIds.length,
+          resolvedRecipients: recipients.length,
+          result,
+        },
+      });
+      return NextResponse.json({ ok: true, mode: "selected", result });
     }
 
     if (action === "broadcast_all") {
@@ -105,6 +194,17 @@ export async function POST(req: NextRequest) {
         footerNote: String(body?.footerNote ?? "").trim() || null,
         locale: String(body?.locale ?? "").trim() || null,
       });
+      await recordAdminAuditEvent({
+        req,
+        adminUserId: admin.user.id,
+        adminEmail: admin.user.email,
+        action: "admin_email_broadcast_all",
+        metadata: {
+          templateKey,
+          subject,
+          result,
+        },
+      });
       return NextResponse.json({ ok: true, mode: "all", result });
     }
 
@@ -115,6 +215,16 @@ export async function POST(req: NextRequest) {
     }
 
     await sendAutomatedEmailTest({ key, to });
+    await recordAdminAuditEvent({
+      req,
+      adminUserId: admin.user.id,
+      adminEmail: admin.user.email,
+      action: "admin_email_automation_test",
+      metadata: {
+        key,
+        to,
+      },
+    });
     return NextResponse.json({ ok: true, mode: "test_automation" });
   } catch (err: any) {
     console.error("[admin/email-automations] test send error:", err);

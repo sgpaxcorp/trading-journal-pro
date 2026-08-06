@@ -105,7 +105,11 @@ export async function POST(req: NextRequest) {
     }
 
     const origin = new URL(req.url).origin;
-    const continueUrl = source === "start" ? `${origin}/start?step=2` : `${origin}/signup?verify=1`;
+    const encodedEmail = encodeURIComponent(email);
+    const continueUrl =
+      source === "start"
+        ? `${origin}/start?step=2&email=${encodedEmail}`
+        : `${origin}/signup?verify=1&email=${encodedEmail}`;
 
     const { data, error } = await supabaseAdmin.auth.admin.generateLink({
       type: "signup",
@@ -153,12 +157,24 @@ export async function POST(req: NextRequest) {
       console.error("[auth/signup/resend] profile upsert error:", profileError);
     }
 
-    await sendEmailConfirmationEmail({
-      email,
-      name: firstName || fullName,
-      confirmationCode: data.properties.email_otp,
-      continueUrl,
-    });
+    try {
+      await sendEmailConfirmationEmail({
+        email,
+        name: firstName || fullName,
+        confirmationCode: data.properties.email_otp,
+        continueUrl,
+      });
+    } catch (mailErr: any) {
+      console.error("[auth/signup/resend] verification email send error:", mailErr);
+      return NextResponse.json(
+        {
+          error:
+            "We could not send the verification email right now. Please try again or contact support.",
+          code: "verification_email_send_failed",
+        },
+        { status: 502 }
+      );
+    }
 
     return NextResponse.json(GENERIC_RESEND_RESPONSE);
   } catch (err: any) {

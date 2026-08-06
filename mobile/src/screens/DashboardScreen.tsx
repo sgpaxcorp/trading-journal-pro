@@ -26,6 +26,7 @@ import { DARK_COLORS, type ThemeColors } from "../theme";
 type DashboardScreenProps = {
   onOpenModule: OpenModuleFn;
   onOpenJournalDate: (date: string) => void;
+  onOpenBusinessPlan: () => void;
 };
 
 const coachBrain = require("../../assets/neurotrader-logo-icon.png");
@@ -277,7 +278,6 @@ function GradientTitleText({ text, style }: { text: string; style: any }) {
   );
 }
 
-const WEB_GROWTH_PLAN_URL = "https://www.neurotrader-journal.com/growth-plan";
 const WEB_AI_COACH_URL = "https://www.neurotrader-journal.com/performance/ai-coaching";
 
 const NEW_YORK_TZ = "America/New_York";
@@ -953,7 +953,7 @@ function mergeChecklistBaseWithSaved(baseTexts: string[], saved: UiChecklistItem
   return merged;
 }
 
-export function DashboardScreen({ onOpenModule: _onOpenModule, onOpenJournalDate }: DashboardScreenProps) {
+export function DashboardScreen({ onOpenModule: _onOpenModule, onOpenJournalDate, onOpenBusinessPlan }: DashboardScreenProps) {
   const { language } = useLanguage();
   const { colors } = useTheme();
   const user = useSupabaseUser();
@@ -2123,7 +2123,7 @@ export function DashboardScreen({ onOpenModule: _onOpenModule, onOpenJournalDate
                     "No Trading Business Plan set yet. Create one to track the business target, operating cadence, and active checkpoints here.",
                     "Aún no tienes un Plan de Empresa de Trading. Crea uno para ver aquí la meta del negocio, cadencia operativa y checkpoints activos."
                   )}{" "}
-                  <Text style={styles.systemLink} onPress={() => Linking.openURL(WEB_GROWTH_PLAN_URL)}>
+                  <Text style={styles.systemLink} onPress={onOpenBusinessPlan}>
                     {t(language, "Open Trading Business Plan →", "Abrir Plan de Empresa de Trading →")}
                   </Text>
                 </Text>
@@ -2445,7 +2445,7 @@ export function DashboardScreen({ onOpenModule: _onOpenModule, onOpenJournalDate
                         "Add your Trading System steps in Trading Business Plan.",
                         "Agrega tus pasos del Sistema de Trading en el Plan de Empresa de Trading."
                       )}{" "}
-                      <Text style={styles.systemLink} onPress={() => Linking.openURL(WEB_GROWTH_PLAN_URL)}>
+                      <Text style={styles.systemLink} onPress={onOpenBusinessPlan}>
                         {t(language, "Edit Trading Business Plan", "Editar Plan de Empresa de Trading")}
                       </Text>
                     </Text>
@@ -2511,7 +2511,7 @@ export function DashboardScreen({ onOpenModule: _onOpenModule, onOpenJournalDate
                   ) : (
                     <Text style={styles.systemHint}>
                       {t(language, "Add your strategy and rules in Trading Business Plan.", "Agrega tu estrategia y reglas en Plan de Empresa de Trading.")}{" "}
-                      <Text style={styles.systemLink} onPress={() => Linking.openURL(WEB_GROWTH_PLAN_URL)}>
+                      <Text style={styles.systemLink} onPress={onOpenBusinessPlan}>
                         {t(language, "Edit Trading Business Plan", "Editar Plan de Empresa de Trading")}
                       </Text>
                     </Text>
@@ -2536,7 +2536,7 @@ export function DashboardScreen({ onOpenModule: _onOpenModule, onOpenJournalDate
                       "Add your Do/Don't rules in Trading Business Plan.",
                       "Agrega tus reglas Hacer/No hacer en Plan de Empresa de Trading."
                     )}{" "}
-                    <Text style={styles.systemLink} onPress={() => Linking.openURL(WEB_GROWTH_PLAN_URL)}>
+                    <Text style={styles.systemLink} onPress={onOpenBusinessPlan}>
                       {t(language, "Edit Trading Business Plan", "Editar Plan de Empresa de Trading")}
                     </Text>
                   </Text>
@@ -2587,7 +2587,7 @@ export function DashboardScreen({ onOpenModule: _onOpenModule, onOpenJournalDate
                   <Pressable style={styles.aiCoachButton} onPress={() => Linking.openURL(WEB_AI_COACH_URL)}>
                     <Text style={styles.aiCoachButtonText}>{t(language, "Open Business AI Coach", "Abrir Coach Empresarial IA")}</Text>
                   </Pressable>
-                  <Pressable style={styles.systemSecondaryButton} onPress={() => Linking.openURL(WEB_GROWTH_PLAN_URL)}>
+                  <Pressable style={styles.systemSecondaryButton} onPress={onOpenBusinessPlan}>
                     <Text style={styles.systemSecondaryButtonText}>{t(language, "Business Plan", "Plan Empresarial")}</Text>
                   </Pressable>
                 </View>

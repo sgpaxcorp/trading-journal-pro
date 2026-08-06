@@ -25,6 +25,7 @@ import { NotebookScreen } from "./src/screens/NotebookScreen";
 import { NotebookWorkspaceScreen } from "./src/screens/NotebookWorkspaceScreen";
 import { NotebookEditorScreen } from "./src/screens/NotebookEditorScreen";
 import { BrokerConnectScreen } from "./src/screens/BrokerConnectScreen";
+import { BusinessPlanScreen } from "./src/screens/BusinessPlanScreen";
 import { AuthScreen } from "./src/screens/AuthScreen";
 import { ResetPasswordScreen } from "./src/screens/ResetPasswordScreen";
 import { ThemeProvider, useTheme } from "./src/lib/ThemeContext";
@@ -73,6 +74,7 @@ type RootStackParamList = {
   NotebookWorkspace: { notebookId: string; title?: string };
   NotebookEditor: { kind: "page" | "free"; id: string; title?: string };
   BrokerConnect: undefined;
+  BusinessPlan: undefined;
 };
 
 const Tab = createBottomTabNavigator<MainTabParamList>();
@@ -170,6 +172,15 @@ function MainTabs() {
     navigation.navigate("BrokerConnect");
   }, [language, navigation, openModule, planAccess.hasBrokerSync, planAccess.loading]);
 
+  const openBusinessPlan = useCallback(() => {
+    const parent = navigation.getParent<NativeStackNavigationProp<RootStackParamList>>();
+    if (parent) {
+      parent.navigate("BusinessPlan");
+      return;
+    }
+    navigation.navigate("BusinessPlan");
+  }, [navigation]);
+
   return (
       <Tab.Navigator
         detachInactiveScreens
@@ -197,7 +208,13 @@ function MainTabs() {
         })}
       >
         <Tab.Screen name="Dashboard" options={{ title: t(language, "Center", "Centro") }}>
-          {() => <DashboardScreen onOpenModule={openModule} onOpenJournalDate={openJournalDate} />}
+          {() => (
+            <DashboardScreen
+              onOpenModule={openModule}
+              onOpenJournalDate={openJournalDate}
+              onOpenBusinessPlan={openBusinessPlan}
+            />
+          )}
         </Tab.Screen>
         <Tab.Screen name="Calendar" options={{ title: "P&L" }}>
           {() => <CalendarScreen onOpenModule={openModule} onOpenJournalDate={openJournalDate} />}
@@ -231,6 +248,7 @@ function MainTabs() {
               onOpenNotebook={openNotebook}
               onOpenJournalDate={openJournalDate}
               onOpenBrokerConnect={openBrokerConnect}
+              onOpenBusinessPlan={openBusinessPlan}
               planAccess={planAccess}
             />
           )}
@@ -695,6 +713,11 @@ function AppShell() {
             name="BrokerConnect"
             component={BrokerConnectScreen}
             options={{ title: "Broker connect" }}
+          />
+          <Stack.Screen
+            name="BusinessPlan"
+            component={BusinessPlanScreen}
+            options={{ title: "Trading Business Plan" }}
           />
         </Stack.Navigator>
       )}

@@ -14,6 +14,7 @@ export default async function SignInPage({
   const sp = await searchParams;
 
   const rawNext = Array.isArray(sp.next) ? sp.next[0] : sp.next;
+  const rawConfirmed = Array.isArray(sp.confirmed) ? sp.confirmed[0] : sp.confirmed;
 
   // solo permitimos rutas internas que empiecen con "/"
   const nextPath =
@@ -30,7 +31,7 @@ export default async function SignInPage({
         </main>
       }
     >
-      <SignInClient nextPath={nextPath} />
+      <SignInClient nextPath={nextPath} emailConfirmed={rawConfirmed === "1"} />
     </Suspense>
   );
 }

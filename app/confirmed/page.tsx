@@ -1,16 +1,23 @@
 // app/confirmed/page.tsx
 "use client";
 
+import { Suspense, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
 
-export default function ConfirmedPage() {
+function ConfirmedPageClient() {
+  const searchParams = useSearchParams();
   const { locale } = useAppSettings();
   const lang = resolveLocale(locale);
   const isEs = lang === "es";
   const L = (en: string, es: string) => (isEs ? es : en);
+  const sessionId = searchParams.get("session_id") ?? "";
+  const [resendingEmails, setResendingEmails] = useState(false);
+  const [resendNotice, setResendNotice] = useState("");
+  const [resendError, setResendError] = useState("");
   const fireworks = [
     { id: 1, x: "12%", y: "18%", size: 260, delay: 0.2, hue: "rgba(34,197,94,0.45)" },
     { id: 2, x: "78%", y: "22%", size: 240, delay: 0.6, hue: "rgba(56,189,248,0.45)" },
@@ -84,6 +91,46 @@ export default function ConfirmedPage() {
     ...baseCandles,
     createCandle(candleCount + 1, 1, 2.2, 2.4, 0.25 + candleCount * 0.14 + 0.2),
   ];
+
+  async function handleResendEmails() {
+    if (!sessionId || resendingEmails) return;
+    setResendingEmails(true);
+    setResendNotice("");
+    setResendError("");
+    try {
+      const res = await fetch("/api/stripe/resend-checkout-emails", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(
+          body?.error ||
+            L(
+              "We could not resend the emails right now.",
+              "No pudimos reenviar los emails ahora mismo."
+            )
+        );
+      }
+      setResendNotice(
+        L(
+          "Welcome, confirmation, and receipt emails were resent. Check Primary, Promotions, and Spam.",
+          "Se reenviaron los emails de bienvenida, confirmación y recibo. Revisa Principal, Promociones y Spam."
+        )
+      );
+    } catch (err: any) {
+      setResendError(
+        err?.message ||
+          L(
+            "We could not resend the emails right now.",
+            "No pudimos reenviar los emails ahora mismo."
+          )
+      );
+    } finally {
+      setResendingEmails(false);
+    }
+  }
 
   return (
     <main className="relative min-h-screen text-slate-50 flex items-center justify-center px-4">
@@ -209,8 +256,8 @@ export default function ConfirmedPage() {
           initial={false}
         >
           {L(
-            "Your Trader Entrepreneur account is live and your email is confirmed.",
-            "Tu cuenta de Empresario Trader está activa y tu email está confirmado."
+            "Your payment is confirmed. Your email was verified before checkout, and your business access is being activated.",
+            "Tu pago está confirmado. Tu email fue verificado antes del checkout y tu acceso empresarial se está activando."
           )}
         </motion.p>
 
@@ -226,6 +273,28 @@ export default function ConfirmedPage() {
 
         <motion.div
           className="mt-4 rounded-2xl border border-emerald-400/30 bg-emerald-500/5 p-4 text-[11px] md:text-xs text-slate-200"
+          initial={false}
+        >
+          <p className="text-emerald-200 font-semibold mb-3">
+            {L("Activation flow", "Flujo de activación")}
+          </p>
+          <div className="grid gap-2 md:grid-cols-2">
+            {[
+              L("Email verified before payment", "Email verificado antes del pago"),
+              L("Secure payment confirmed by Stripe", "Pago seguro confirmado por Stripe"),
+              L("Business access activated by webhook", "Acceso empresarial activado por webhook"),
+              L("Welcome, confirmation, and receipt emails sent", "Emails de bienvenida, confirmación y recibo enviados"),
+            ].map((item) => (
+              <div key={item} className="flex items-start gap-2 rounded-xl border border-white/10 bg-slate-950/40 px-3 py-2">
+                <span className="mt-0.5 text-emerald-300">✓</span>
+                <span>{item}</span>
+              </div>
+            ))}
+          </div>
+        </motion.div>
+
+        <motion.div
+          className="mt-4 rounded-2xl border border-slate-700 bg-slate-950/50 p-4 text-[11px] md:text-xs text-slate-300"
           initial={false}
         >
           <p className="text-emerald-200 font-semibold mb-1">
@@ -260,7 +329,29 @@ export default function ConfirmedPage() {
           >
             {L("Go to Business Center", "Ir al Centro Empresarial")}
           </Link>
+          {sessionId ? (
+            <button
+              type="button"
+              onClick={handleResendEmails}
+              disabled={resendingEmails}
+              className="inline-flex px-4 py-2.5 rounded-xl border border-slate-600 text-xs md:text-sm font-semibold text-slate-200 hover:border-emerald-300 hover:text-emerald-100 disabled:opacity-60"
+            >
+              {resendingEmails
+                ? L("Resending emails...", "Reenviando emails...")
+                : L("Resend welcome + receipt", "Reenviar bienvenida + recibo")}
+            </button>
+          ) : null}
         </motion.div>
+        {resendNotice ? (
+          <p className="mt-3 rounded-xl border border-emerald-400/40 bg-emerald-500/10 px-3 py-2 text-[11px] text-emerald-100">
+            {resendNotice}
+          </p>
+        ) : null}
+        {resendError ? (
+          <p className="mt-3 rounded-xl border border-red-400/40 bg-red-500/10 px-3 py-2 text-[11px] text-red-100">
+            {resendError}
+          </p>
+        ) : null}
 
         <motion.p
           className="mt-5 text-[10px] md:text-[11px] text-slate-500"
@@ -398,5 +489,23 @@ export default function ConfirmedPage() {
         }
       `}</style>
     </main>
+  );
+}
+
+function ConfirmedFallback() {
+  return (
+    <main className="relative min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center px-4">
+      <div className="rounded-2xl border border-emerald-500/30 bg-slate-900/90 px-6 py-4 text-center shadow-[0_0_60px_rgba(16,185,129,0.18)]">
+        <p className="text-sm font-semibold text-emerald-300">Loading confirmation...</p>
+      </div>
+    </main>
+  );
+}
+
+export default function ConfirmedPage() {
+  return (
+    <Suspense fallback={<ConfirmedFallback />}>
+      <ConfirmedPageClient />
+    </Suspense>
   );
 }

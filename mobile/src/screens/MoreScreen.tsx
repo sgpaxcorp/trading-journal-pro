@@ -36,6 +36,9 @@ export function SettingsScreen() {
   const [pushToken, setPushToken] = useState<string | null>(null);
   const [testNotifLoading, setTestNotifLoading] = useState(false);
   const [serverNotifLoading, setServerNotifLoading] = useState(false);
+  const [eraseEmail, setEraseEmail] = useState("");
+  const [eraseConfirmation, setEraseConfirmation] = useState("");
+  const [eraseLoading, setEraseLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const mountedRef = useRef(true);
 
@@ -210,6 +213,13 @@ export function SettingsScreen() {
 
       const { error } = await sb.auth.updateUser({ password });
       if (error) throw error;
+
+      try {
+        await apiPost("/api/auth/password-changed", { locale: language });
+      } catch (securityEmailError) {
+        console.error("[SettingsScreen] Password changed email failed:", securityEmailError);
+      }
+
       setCurrentPassword("");
       setPassword("");
       setPasswordConfirm("");
@@ -429,6 +439,86 @@ export function SettingsScreen() {
     }
   }
 
+  const canEraseAllData =
+    !eraseLoading &&
+    String(eraseEmail).trim().toLowerCase() === String(user?.email ?? "").trim().toLowerCase() &&
+    String(eraseConfirmation).trim().toUpperCase() === "ERASE ALL DATA";
+
+  function handleEraseAllData() {
+    if (!canEraseAllData) {
+      Alert.alert(
+        t(language, "Confirmation required", "Confirmación requerida"),
+        t(
+          language,
+          "Type your account email and ERASE ALL DATA exactly before continuing.",
+          "Escribe tu email de cuenta y ERASE ALL DATA exactamente antes de continuar."
+        )
+      );
+      return;
+    }
+
+    Alert.alert(
+      t(language, "Erase all platform data?", "¿Borrar toda la data de la plataforma?"),
+      t(
+        language,
+        "This will delete journals, trades, imports, broker connections, notebooks, AI chats, support tickets, alerts, milestones, analytics, and Business Plans. Your login, subscription, entitlements, and billing records stay active.",
+        "Esto borrará journals, trades, imports, conexiones de bróker, notebooks, chats IA, tickets, alertas, milestones, analíticas y Business Plans. Tu login, suscripción, accesos y facturación permanecen activos."
+      ),
+      [
+        { text: t(language, "Cancel", "Cancelar"), style: "cancel" },
+        {
+          text: t(language, "I understand", "Entiendo"),
+          style: "destructive",
+          onPress: () => {
+            Alert.alert(
+              t(language, "Final irreversible warning", "Advertencia final irreversible"),
+              t(
+                language,
+                "After this, the app starts from zero. This cannot be undone from the mobile app.",
+                "Después de esto, el app comienza desde cero. Esto no se puede deshacer desde el app mobile."
+              ),
+              [
+                { text: t(language, "Cancel", "Cancelar"), style: "cancel" },
+                {
+                  text: t(language, "Erase everything", "Borrar todo"),
+                  style: "destructive",
+                  onPress: async () => {
+                    setEraseLoading(true);
+                    try {
+                      await apiPost("/api/account/erase-data", {
+                        email: eraseEmail.trim().toLowerCase(),
+                        confirmation: "ERASE ALL DATA",
+                      });
+                      setEraseEmail("");
+                      setEraseConfirmation("");
+                      setPushToken(null);
+                      setNotificationEnabled(false);
+                      Alert.alert(
+                        t(language, "Data erased", "Data borrada"),
+                        t(
+                          language,
+                          "Your platform data was erased and a fresh trading account was created. Pull to refresh or reopen the Business Center to start from zero.",
+                          "Tu data de plataforma fue borrada y se creó una cuenta de trading limpia. Haz refresh o abre el Centro Empresarial para empezar desde cero."
+                        )
+                      );
+                    } catch (err: any) {
+                      Alert.alert(
+                        t(language, "Erase failed", "No se pudo borrar"),
+                        err?.message ?? "Error"
+                      );
+                    } finally {
+                      setEraseLoading(false);
+                    }
+                  },
+                },
+              ]
+            );
+          },
+        },
+      ]
+    );
+  }
+
 
   const styles = useMemo(() => createStyles(colors), [colors]);
   const handleRefresh = useCallback(async () => {
@@ -631,6 +721,46 @@ export function SettingsScreen() {
         </View>
       </View>
 
+      <View style={styles.dangerZone}>
+        <View style={styles.themeHeader}>
+          <Text style={styles.dangerTitle}>{t(language, "Danger zone", "Zona peligrosa")}</Text>
+          <Ionicons name="warning-outline" size={18} color={colors.dangerText} />
+        </View>
+        <Text style={styles.dangerHint}>
+          {t(
+            language,
+            "Erase all platform data only if you want to start completely fresh. This keeps your login and paid access, but removes your trading workspace data.",
+            "Borra toda la data de la plataforma solo si quieres comenzar completamente desde cero. Esto mantiene tu login y acceso pago, pero elimina la data de tu workspace de trading."
+          )}
+        </Text>
+        <TextInput
+          style={styles.input}
+          placeholder={t(language, "Type your account email", "Escribe tu email de cuenta")}
+          placeholderTextColor={colors.textMuted}
+          autoCapitalize="none"
+          keyboardType="email-address"
+          value={eraseEmail}
+          onChangeText={setEraseEmail}
+        />
+        <TextInput
+          style={styles.input}
+          placeholder="ERASE ALL DATA"
+          placeholderTextColor={colors.textMuted}
+          autoCapitalize="characters"
+          value={eraseConfirmation}
+          onChangeText={setEraseConfirmation}
+        />
+        <Pressable
+          style={[styles.eraseButton, !canEraseAllData && styles.saveButtonDisabled]}
+          onPress={handleEraseAllData}
+          disabled={!canEraseAllData}
+        >
+          <Text style={styles.eraseButtonText}>
+            {eraseLoading ? t(language, "Erasing…", "Borrando…") : t(language, "Erase all the data", "Borrar toda la data")}
+          </Text>
+        </Pressable>
+      </View>
+
       <Pressable style={styles.signOutButton} onPress={handleSignOut}>
         <Text style={styles.signOutText}>{t(language, "Sign out", "Cerrar sesión")}</Text>
       </Pressable>
@@ -746,6 +876,37 @@ const createStyles = (colors: ThemeColors) => {
       color: "#FEE2E2",
       fontSize: 12,
       fontWeight: "700",
+    },
+    dangerZone: {
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.dangerBorder,
+      backgroundColor: colors.dangerSoft,
+      padding: 12,
+      gap: 8,
+    },
+    dangerTitle: {
+      color: colors.dangerText,
+      fontSize: 14,
+      fontWeight: "800",
+    },
+    dangerHint: {
+      color: colors.textMuted,
+      fontSize: 12,
+      lineHeight: 18,
+    },
+    eraseButton: {
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: colors.dangerBorder,
+      backgroundColor: colors.danger,
+      alignItems: "center",
+      paddingVertical: 10,
+    },
+    eraseButtonText: {
+      color: "#FEE2E2",
+      fontSize: 12,
+      fontWeight: "800",
     },
     errorText: {
       color: colors.danger,

@@ -24,6 +24,7 @@ const DEFAULT_ORDER_RULES = [
   "Risk and invalidation defined.",
   "Entry, management, and exit recorded.",
 ];
+const IGNORABLE_DB_CODES = new Set(["42P01", "42703", "PGRST200", "PGRST204", "PGRST205"]);
 
 type GrowthPlanRow = Record<string, any>;
 
@@ -52,6 +53,23 @@ function cleanDate(value: unknown) {
 
 function isoToday() {
   return new Date().toISOString().slice(0, 10);
+}
+
+function isIgnorableDbError(error: any) {
+  const code = String(error?.code ?? "");
+  const message = String(error?.message ?? "").toLowerCase();
+  return (
+    IGNORABLE_DB_CODES.has(code) ||
+    message.includes("could not find the table") ||
+    (message.includes("column") && message.includes("does not exist"))
+  );
+}
+
+async function safeDeleteByUser(table: string, userId: string, accountId?: string | null) {
+  let query = supabaseAdmin.from(table).delete().eq("user_id", userId);
+  if (accountId) query = query.eq("account_id", accountId);
+  const { error } = await query;
+  if (error && !isIgnorableDbError(error)) throw error;
 }
 
 function splitRuleLines(value: unknown, fallback: string[]) {
@@ -273,6 +291,48 @@ async function recordHistory(params: {
   if (error) console.warn("[growth-plan/mobile] history warning:", error.message);
 }
 
+async function resetPlanData(userId: string, accountId: string, before: GrowthPlanRow | null) {
+  const { data: rules, error: rulesErr } = await supabaseAdmin
+    .from("ntj_alert_rules")
+    .select("id")
+    .eq("user_id", userId)
+    .in("key", ["growth_plan_max_loss", "growth_plan_daily_goal"]);
+  if (rulesErr && !isIgnorableDbError(rulesErr)) throw rulesErr;
+  if (!rulesErr) {
+    const ruleIds = (rules ?? []).map((row: any) => String(row?.id ?? "")).filter(Boolean);
+    if (ruleIds.length) {
+      const { error } = await supabaseAdmin.from("ntj_alert_events").delete().eq("user_id", userId).in("rule_id", ruleIds);
+      if (error && !isIgnorableDbError(error)) throw error;
+    }
+    const { error } = await supabaseAdmin
+      .from("ntj_alert_rules")
+      .delete()
+      .eq("user_id", userId)
+      .in("key", ["growth_plan_max_loss", "growth_plan_daily_goal"]);
+    if (error && !isIgnorableDbError(error)) throw error;
+  }
+  await safeDeleteByUser("business_milestones", userId, accountId);
+  await safeDeleteByUser("growth_plan_history", userId, accountId);
+  await safeDeleteByUser("growth_plans", userId, accountId);
+
+  if (before) {
+    const { error } = await supabaseAdmin.from("growth_plan_history").insert({
+      user_id: userId,
+      account_id: accountId,
+      started_at: cleanDate(before.plan_start_date) || null,
+      ended_at: cleanDate(before.target_date) || null,
+      reset_reason: "mobile_plan_reset",
+      snapshot: {
+        source: "mobile",
+        reason: "mobile_plan_reset",
+        before: summarize(before),
+        after: null,
+      },
+    });
+    if (error) console.warn("[growth-plan/mobile] reset history warning:", error.message);
+  }
+}
+
 export async function GET(req: NextRequest) {
   try {
     const access = await requirePlatformAccess(req);
@@ -310,6 +370,16 @@ export async function POST(req: NextRequest) {
     const body = await req.json().catch(() => ({}));
     const accountId = await resolveActiveAccountId(userId, cleanText(body?.accountId, 80) || null);
     const current = await getPlanRow(userId, accountId);
+    const action = cleanText(body?.action, 40).toLowerCase();
+
+    if (action === "reset") {
+      const confirmation = cleanText(body?.confirmation, 40).toUpperCase();
+      if (confirmation !== "RESET PLAN") {
+        return NextResponse.json({ error: "Reset confirmation phrase is required." }, { status: 400 });
+      }
+      await resetPlanData(userId, accountId, current);
+      return NextResponse.json({ ok: true, accountId, plan: null });
+    }
 
     const startingBalance = clampNumber(body?.startingBalance, 1, 100_000_000, 0);
     const targetBalance = clampNumber(body?.targetBalance, 1, 1_000_000_000, 0);

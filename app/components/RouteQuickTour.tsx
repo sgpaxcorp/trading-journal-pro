@@ -180,7 +180,7 @@ export default function RouteQuickTour({ enabled = true }: { enabled?: boolean }
         style={tooltipStyle as CSSProperties}
       >
         <p className="text-[11px] uppercase tracking-[0.28em] text-emerald-300/80">
-          {L("Quick tour", "Quick tour")}
+          {L("Operating tour", "Tour operativo")}
         </p>
         <h3 className="mt-2 text-xl font-semibold text-slate-50">{currentStep.title}</h3>
         <p className="mt-3 text-sm leading-6 text-slate-300">{currentStep.body}</p>

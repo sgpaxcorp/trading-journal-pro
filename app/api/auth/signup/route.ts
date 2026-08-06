@@ -69,7 +69,11 @@ export async function POST(req: NextRequest) {
     }
 
     const origin = new URL(req.url).origin;
-    const continueUrl = source === "start" ? `${origin}/start?step=2` : `${origin}/signup?verify=1`;
+    const encodedEmail = encodeURIComponent(email);
+    const continueUrl =
+      source === "start"
+        ? `${origin}/start?step=2&email=${encodedEmail}`
+        : `${origin}/signup?verify=1&email=${encodedEmail}`;
 
     const { data, error } = await supabaseAdmin.auth.admin.generateLink({
       type: "signup",
@@ -118,17 +122,28 @@ export async function POST(req: NextRequest) {
       console.error("[auth/signup] profile upsert error:", profileError);
     }
 
-    await sendEmailConfirmationEmail({
-      email,
-      name: firstName || fullName,
-      confirmationCode: data.properties.email_otp,
-      continueUrl,
-    });
+    let emailDelivery: "sent" | "failed" = "sent";
+    let emailWarning: string | null = null;
+    try {
+      await sendEmailConfirmationEmail({
+        email,
+        name: firstName || fullName,
+        confirmationCode: data.properties.email_otp,
+        continueUrl,
+      });
+    } catch (mailErr: any) {
+      emailDelivery = "failed";
+      emailWarning =
+        "Account created, but the verification email could not be delivered. Please use resend code or contact support.";
+      console.error("[auth/signup] verification email send error:", mailErr);
+    }
 
     return NextResponse.json({
       ok: true,
       userId,
       email,
+      emailDelivery,
+      warning: emailWarning,
     });
   } catch (err: any) {
     console.error("[auth/signup] error:", err);

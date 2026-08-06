@@ -8,6 +8,7 @@ import { isActiveProfileStatus, shouldAllowLocalProfileAccessFallback } from "@/
 import { fetchAccessStatus } from "@/lib/accessStatusClient";
 import { canAccessPrivatePath, firstAccessiblePrivatePath } from "@/lib/accessGrants";
 import RouteQuickTour from "@/app/components/RouteQuickTour";
+import PageIntro from "@/app/components/PageIntro";
 import GlobalAlertPopups from "@/app/components/GlobalAlertPopups";
 import GlobalAlertRuleEngine from "@/app/components/GlobalAlertRuleEngine";
 
@@ -23,19 +24,26 @@ const ALLOW_WITHOUT_ACTIVE_SUB = [
   "/confirmed",
   "/admin",
 ];
+const ALLOW_WITHOUT_SESSION = ["/confirmed"];
+const ACCESS_STATUS_TIMEOUT_MS = 8000;
+
+function pathMatches(pathname: string | null, paths: string[]) {
+  if (!pathname) return false;
+  return paths.some((path) => pathname === path || pathname.startsWith(`${path}/`));
+}
 
 function FullscreenStatus({
   title,
   message,
 }: {
   title: string;
-  message: string;
+  message?: string;
 }) {
   return (
     <div className="min-h-screen bg-slate-950 text-slate-50 flex flex-col items-center justify-center">
       <div className="px-6 py-4 rounded-xl border border-emerald-400/60 bg-slate-900/80 shadow-lg max-w-sm text-center">
-        <p className="text-sm font-semibold text-emerald-300 mb-1">{title}</p>
-        <p className="text-[11px] text-slate-300">{message}</p>
+        <p className="text-sm font-semibold text-emerald-300">{title}</p>
+        {message ? <p className="mt-1 text-[11px] text-slate-300">{message}</p> : null}
       </div>
     </div>
   );
@@ -53,6 +61,7 @@ export default function PrivateLayout({ children }: PrivateLayoutProps) {
     Array<{ entitlement_key: string; status: string; metadata?: Record<string, unknown> | null }>
   >([]);
   const allowLocalProfileFallback = shouldAllowLocalProfileAccessFallback();
+  const isSessionlessAllowedRoute = pathMatches(pathname, ALLOW_WITHOUT_SESSION);
 
   // Intentos de re-check para darle tiempo al webhook
   const [refreshAttempts, setRefreshAttempts] = useState(0);
@@ -60,10 +69,10 @@ export default function PrivateLayout({ children }: PrivateLayoutProps) {
 
   /* 1) Si no hay usuario y ya terminó de cargar → mandar a /signin */
   useEffect(() => {
-    if (!loading && !user) {
+    if (!loading && !user && !isSessionlessAllowedRoute) {
       router.replace("/signin");
     }
-  }, [loading, user, router]);
+  }, [isSessionlessAllowedRoute, loading, user, router]);
 
   useEffect(() => {
     setRefreshAttempts(0);
@@ -109,7 +118,7 @@ export default function PrivateLayout({ children }: PrivateLayoutProps) {
   const refreshAccessState = useCallback(async () => {
     if (!user) return null;
     try {
-      const access = await fetchAccessStatus();
+      const access = await fetchAccessStatus({ timeoutMs: ACCESS_STATUS_TIMEOUT_MS });
       if (access) {
         const status = String(access.profile?.subscriptionStatus ?? "").toLowerCase() || "pending";
         const canAccess = Boolean(access.hasAppAccess);
@@ -155,9 +164,7 @@ export default function PrivateLayout({ children }: PrivateLayoutProps) {
   useEffect(() => {
     if (loading || !user || !profileChecked) return;
 
-    const isOnAllowedRoute = ALLOW_WITHOUT_ACTIVE_SUB.some((p) =>
-      pathname.startsWith(p)
-    );
+    const isOnAllowedRoute = pathMatches(pathname, ALLOW_WITHOUT_ACTIVE_SUB);
 
     // Si la suscripción está activa → continuar
     if (hasAppAccess) return;
@@ -197,7 +204,7 @@ export default function PrivateLayout({ children }: PrivateLayoutProps) {
   useEffect(() => {
     if (loading || !user || !profileChecked || !hasAppAccess) return;
 
-    const isOnAllowedRoute = ALLOW_WITHOUT_ACTIVE_SUB.some((p) => pathname.startsWith(p));
+    const isOnAllowedRoute = pathMatches(pathname, ALLOW_WITHOUT_ACTIVE_SUB);
     if (isOnAllowedRoute) return;
 
     const fallbackAllowAll =
@@ -220,9 +227,7 @@ export default function PrivateLayout({ children }: PrivateLayoutProps) {
 
   const userId: string | null = user?.id ?? null;
   const isActive = hasAppAccess;
-  const isOnAllowedRoute = ALLOW_WITHOUT_ACTIVE_SUB.some((p) =>
-    pathname.startsWith(p)
-  );
+  const isOnAllowedRoute = pathMatches(pathname, ALLOW_WITHOUT_ACTIVE_SUB);
 
   const isVerifyingSubscription =
     !!userId &&
@@ -231,12 +236,13 @@ export default function PrivateLayout({ children }: PrivateLayoutProps) {
     !isOnAllowedRoute &&
     refreshAttempts < MAX_REFRESH_ATTEMPTS;
 
+  if (isSessionlessAllowedRoute) {
+    return <div className="ntj-fullwidth">{children}</div>;
+  }
+
   if (loading) {
     return (
-      <FullscreenStatus
-        title="Loading your workspace…"
-        message="We’re checking your session before opening private pages."
-      />
+      <FullscreenStatus title="Loading your workspace…" />
     );
   }
 
@@ -264,6 +270,7 @@ export default function PrivateLayout({ children }: PrivateLayoutProps) {
       <div className="ntj-fullwidth">{children}</div>
       {userId && isActive && profileChecked ? (
         <>
+          <PageIntro />
           <RouteQuickTour enabled />
         </>
       ) : null}

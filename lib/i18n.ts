@@ -141,7 +141,7 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     "help.point2": "Use the dashboard controls to focus the business signals you care about.",
     "help.point3": "Edit your Trading Business Plan to update targets and calculations.",
     "help.gettingStarted": "Getting started guide",
-    "help.dashboardTour": "Business Center tour",
+    "help.dashboardTour": "Business Center operating tour",
     "help.bullet.calendar": "Click on any day in the calendar to open that execution record.",
     "help.bullet.widgets": "Use the dashboard controls to focus the business signals you care about.",
     "help.bullet.plan": "Edit your Trading Business Plan to update targets and calculations.",
@@ -152,8 +152,8 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     "help.bullet2": "Use the dashboard controls to focus the business signals you care about.",
     "help.bullet3": "Edit your Trading Business Plan to update targets and calculations.",
     "help.link.gettingStarted": "Getting started guide",
-    "help.link.dashboardTour": "Business Center tour",
-    "help.link.activateTour": "Activate quick tour",
+    "help.link.dashboardTour": "Business Center operating tour",
+    "help.link.activateTour": "Activate operating tour",
 
     /* -----------------
        Account menu (TopNav avatar dropdown) - canonical
@@ -392,7 +392,7 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     "help.point2": "Usa los controles del dashboard para enfocar las señales empresariales que importan.",
     "help.point3": "Edita tu Plan de Empresa de Trading para actualizar cálculos.",
     "help.gettingStarted": "Guía de inicio",
-    "help.dashboardTour": "Tour del Centro Empresarial",
+    "help.dashboardTour": "Tour operativo del Centro Empresarial",
     "help.bullet.calendar": "Haz clic en un día del calendario para abrir ese registro de ejecución.",
     "help.bullet.widgets": "Usa los controles del dashboard para enfocar las señales empresariales que importan.",
     "help.bullet.plan": "Edita tu Plan de Empresa de Trading para actualizar cálculos.",
@@ -403,8 +403,8 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     "help.bullet2": "Usa los controles del dashboard para enfocar las señales empresariales que importan.",
     "help.bullet3": "Edita tu Plan de Empresa de Trading para actualizar cálculos.",
     "help.link.gettingStarted": "Guía de inicio",
-    "help.link.dashboardTour": "Tour del Centro Empresarial",
-    "help.link.activateTour": "Activar tour rápido",
+    "help.link.dashboardTour": "Tour operativo del Centro Empresarial",
+    "help.link.activateTour": "Activar tour operativo",
 
     /* -----------------
        Account menu
