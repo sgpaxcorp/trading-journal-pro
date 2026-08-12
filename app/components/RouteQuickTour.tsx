@@ -12,6 +12,7 @@ import {
   QUICK_TOUR_OPEN_EVENT,
   getQuickIntroSeenKey,
   getQuickTourContext,
+  getQuickTourGlobalSeenKey,
   getQuickTourSeenKey,
 } from "@/lib/quickTour";
 
@@ -43,6 +44,7 @@ export default function RouteQuickTour({ enabled = true }: { enabled?: boolean }
     if (!enabled || !user?.id || typeof window === "undefined") return;
 
     const onOpen = () => {
+      localStorage.setItem(getQuickTourGlobalSeenKey(user.id), "1");
       setStepIndex(0);
       setActive(true);
     };
@@ -111,6 +113,7 @@ export default function RouteQuickTour({ enabled = true }: { enabled?: boolean }
 
   const markSeenAndClose = () => {
     if (user?.id && typeof window !== "undefined") {
+      localStorage.setItem(getQuickTourGlobalSeenKey(user.id), "1");
       localStorage.setItem(getQuickTourSeenKey(user.id, context.key), "1");
       localStorage.setItem(getQuickIntroSeenKey(user.id, context.key), "1");
     }

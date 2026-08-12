@@ -26,6 +26,7 @@ type QuickTourBuilder = {
 
 export const QUICK_TOUR_OPEN_EVENT = "ntj_quick_tour_open";
 export const QUICK_TOUR_FORCE_KEY = "ntj_quick_tour_force";
+export const QUICK_TOUR_SEEN_VERSION = 1;
 
 function startsWithAny(path: string, prefixes: string[]) {
   return prefixes.some((prefix) => path.startsWith(prefix));
@@ -796,4 +797,8 @@ export function getQuickTourSeenKey(userId: string, key: string) {
 
 export function getQuickIntroSeenKey(userId: string, key: string) {
   return `ntj_intro_${userId}_${key}`;
+}
+
+export function getQuickTourGlobalSeenKey(userId: string) {
+  return `ntj_operating_tour_seen_${userId}_v${QUICK_TOUR_SEEN_VERSION}`;
 }

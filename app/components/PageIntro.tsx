@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 
 import { useAuth } from "@/context/AuthContext";
@@ -11,6 +11,7 @@ import {
   QUICK_TOUR_OPEN_EVENT,
   getQuickIntroSeenKey,
   getQuickTourContext,
+  getQuickTourGlobalSeenKey,
   getQuickTourSeenKey,
 } from "@/lib/quickTour";
 
@@ -25,31 +26,55 @@ export default function PageIntro() {
   const current = getQuickTourContext(pathname || "/dashboard", L);
 
   const [visible, setVisible] = useState(false);
+  const autoPresentedPathRef = useRef<string | null>(null);
+
+  const markOperatingTourSeen = () => {
+    if (!user?.id || typeof window === "undefined") return;
+    localStorage.setItem(getQuickTourGlobalSeenKey(user.id), "1");
+    localStorage.setItem(getQuickIntroSeenKey(user.id, current.key), "1");
+  };
 
   useEffect(() => {
     if (!user?.id || !pathname) return;
 
+    const globalSeenKey = getQuickTourGlobalSeenKey(user.id);
     const introKey = getQuickIntroSeenKey(user.id, current.key);
     const tourKey = getQuickTourSeenKey(user.id, current.key);
-    const introSeen = localStorage.getItem(introKey);
-    const tourSeen = localStorage.getItem(tourKey);
+    const legacyPrefix = `ntj_quick_tour_seen_${user.id}_`;
+    const legacyIntroPrefix = `ntj_intro_${user.id}_`;
+    const legacySeen = Object.keys(localStorage).some(
+      (key) =>
+        (key.startsWith(legacyPrefix) || key.startsWith(legacyIntroPrefix)) &&
+        localStorage.getItem(key) === "1"
+    );
+    const alreadySeen =
+      localStorage.getItem(globalSeenKey) === "1" ||
+      localStorage.getItem(introKey) === "1" ||
+      localStorage.getItem(tourKey) === "1" ||
+      legacySeen;
 
-    if (introSeen || tourSeen) {
-      setVisible(false);
+    if (alreadySeen) {
+      localStorage.setItem(globalSeenKey, "1");
+      if (autoPresentedPathRef.current !== pathname) setVisible(false);
       return;
     }
 
+    localStorage.setItem(globalSeenKey, "1");
+    autoPresentedPathRef.current = pathname;
     setVisible(true);
   }, [current.key, pathname, user?.id]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const onOpen = () => setVisible(false);
+    const onOpen = () => {
+      markOperatingTourSeen();
+      setVisible(false);
+    };
     window.addEventListener(QUICK_TOUR_OPEN_EVENT, onOpen as EventListener);
     return () => {
       window.removeEventListener(QUICK_TOUR_OPEN_EVENT, onOpen as EventListener);
     };
-  }, []);
+  }, [current.key, user?.id]);
 
   if (!visible) return null;
 
@@ -80,6 +105,7 @@ export default function PageIntro() {
         <button
           type="button"
           onClick={() => {
+            markOperatingTourSeen();
             window.dispatchEvent(new CustomEvent(QUICK_TOUR_OPEN_EVENT));
             setVisible(false);
           }}
@@ -93,8 +119,7 @@ export default function PageIntro() {
         <button
           type="button"
           onClick={() => {
-            if (!user?.id) return;
-            localStorage.setItem(getQuickIntroSeenKey(user.id, current.key), "1");
+            markOperatingTourSeen();
             setVisible(false);
           }}
           className="text-xs text-slate-400 transition hover:text-slate-200"
