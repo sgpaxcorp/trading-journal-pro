@@ -20,6 +20,7 @@
     "android:release": "npm run version:bump && expo run:android --variant release",
     "android:store": "npm run version:bump && npx eas-cli build --platform android --profile production",
     "android:submit": "npx eas-cli submit --platform android --profile production",
+    "audit:ci": "node ./scripts/audit-ci.mjs",
     "version:bump": "node ./scripts/bump-version.js",
     "version:bump:marketing": "node ./scripts/bump-version.js --marketing",
     "web": "expo start --web"
@@ -54,10 +55,14 @@
     "typescript": "~5.9.2"
   },
   "overrides": {
-    "brace-expansion": "2.1.2",
+    "brace-expansion": "2.1.4",
     "shell-quote": "1.10.0",
     "uuid": "11.1.1",
-    "postcss": "8.5.10",
+    "postcss": "8.5.26",
+    "nanoid": "3.3.18",
+    "undici": "6.28.0",
+    "js-yaml@^3": "3.15.1",
+    "js-yaml@^4": "4.3.1",
     "@babel/core": "7.29.7"
   },
   "private": true

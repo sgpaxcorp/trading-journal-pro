@@ -27,8 +27,8 @@ jobs:
       NEXT_PUBLIC_HCAPTCHA_SITE_KEY: ci_dummy
       CRON_SECRET: ci_dummy
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 20
           cache: npm
@@ -47,8 +47,8 @@ jobs:
       EXPO_PUBLIC_SUPABASE_ANON_KEY: ci_dummy_anon_key
       EXPO_PUBLIC_API_URL: http://localhost:3000
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 20
           cache: npm
@@ -57,5 +57,5 @@ jobs:
         working-directory: mobile
       - run: npx tsc --noEmit
         working-directory: mobile
-      - run: npm audit --omit=dev --audit-level=high
+      - run: npm run audit:ci
         working-directory: mobile
