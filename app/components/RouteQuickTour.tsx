@@ -18,7 +18,7 @@ import {
 
 export default function RouteQuickTour({ enabled = true }: { enabled?: boolean }) {
   const pathname = usePathname();
-  const { user } = useAuth() as any;
+  const { user } = useAuth();
   const { locale } = useAppSettings();
   const lang = resolveLocale(locale);
   const isEs = lang === "es";
@@ -34,10 +34,13 @@ export default function RouteQuickTour({ enabled = true }: { enabled?: boolean }
   const currentStep = context.steps[Math.min(stepIndex, Math.max(0, context.steps.length - 1))] ?? null;
 
   useEffect(() => {
-    setActive(false);
-    setStepIndex(0);
-    setTargetRect(null);
-    setMissingTarget(false);
+    const timeout = window.setTimeout(() => {
+      setActive(false);
+      setStepIndex(0);
+      setTargetRect(null);
+      setMissingTarget(false);
+    }, 0);
+    return () => window.clearTimeout(timeout);
   }, [pathname, context.key]);
 
   useEffect(() => {
@@ -78,9 +81,11 @@ export default function RouteQuickTour({ enabled = true }: { enabled?: boolean }
 
     const selector = currentStep.selector?.trim();
     if (!selector) {
-      setTargetRect(null);
-      setMissingTarget(false);
-      return;
+      const timeout = window.setTimeout(() => {
+        setTargetRect(null);
+        setMissingTarget(false);
+      }, 0);
+      return () => window.clearTimeout(timeout);
     }
 
     let frame = 0;
