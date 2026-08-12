@@ -21,8 +21,18 @@ type MobileGrowthPlan = {
   averageTradingDaysPerWeek?: number;
   lossDaysPerWeek?: number;
   tradingDays?: number;
+  tradingInstrument?: TradingInstrument;
+  runway?: {
+    amount?: number;
+    unit?: RunwayUnit;
+    calendarKey?: string;
+    calendarIsEstimate?: boolean;
+  };
   steps?: any;
 };
+
+type TradingInstrument = "stocks" | "options" | "futures" | "forex" | "crypto" | "other";
+type RunwayUnit = "days" | "weeks" | "months" | "years";
 
 type MobileGrowthPlanResponse = {
   accountId?: string | null;
@@ -52,7 +62,10 @@ const DEFAULT_ORDER_RULES = [
 ];
 
 function isoDate(date = new Date()) {
-  return date.toISOString().slice(0, 10);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 function addDaysIso(baseIso: string, days: number) {
@@ -61,9 +74,38 @@ function addDaysIso(baseIso: string, days: number) {
   return isoDate(base);
 }
 
+function addRunwayIso(baseIso: string, amount: number, unit: RunwayUnit) {
+  const base = /^\d{4}-\d{2}-\d{2}$/.test(baseIso) ? new Date(`${baseIso}T00:00:00`) : new Date();
+  const safeAmount = Math.max(1, Math.floor(Number.isFinite(amount) ? amount : 1));
+  if (unit === "days" || unit === "weeks") {
+    base.setDate(base.getDate() + safeAmount * (unit === "weeks" ? 7 : 1));
+    return isoDate(base);
+  }
+  const originalDay = base.getDate();
+  base.setDate(1);
+  base.setMonth(base.getMonth() + safeAmount * (unit === "years" ? 12 : 1));
+  const lastDay = new Date(base.getFullYear(), base.getMonth() + 1, 0).getDate();
+  base.setDate(Math.min(originalDay, lastDay));
+  return isoDate(base);
+}
+
 function parseAmount(value: string) {
   const n = Number(String(value).replace(/[$,\s]/g, ""));
   return Number.isFinite(n) ? n : 0;
+}
+
+function formatMoneyDraft(value: string) {
+  const cleaned = String(value ?? "").replace(/[^\d.]/g, "");
+  if (!cleaned) return "";
+  const [integerRaw = "", ...decimals] = cleaned.split(".");
+  const integer = integerRaw.replace(/^0+(?=\d)/, "") || "0";
+  const grouped = integer.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return decimals.length ? `${grouped}.${decimals.join("").slice(0, 2)}` : grouped;
+}
+
+function formatMoneyValue(value: string | number) {
+  const amount = typeof value === "number" ? value : parseAmount(value);
+  return amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 function parsePercent(value: string) {
@@ -114,6 +156,9 @@ export function BusinessPlanScreen() {
   const [targetBalance, setTargetBalance] = useState("");
   const [planStartDate, setPlanStartDate] = useState(today);
   const [targetDate, setTargetDate] = useState(addDaysIso(today, 365));
+  const [runwayAmount, setRunwayAmount] = useState("1");
+  const [runwayUnit, setRunwayUnit] = useState<RunwayUnit>("years");
+  const [tradingInstrument, setTradingInstrument] = useState<TradingInstrument>("stocks");
   const [averageTradingDaysPerWeek, setAverageTradingDaysPerWeek] = useState("5");
   const [lossDaysPerWeek, setLossDaysPerWeek] = useState("1");
   const [maxDailyLossPercent, setMaxDailyLossPercent] = useState("2");
@@ -131,6 +176,9 @@ export function BusinessPlanScreen() {
         setTargetBalance("");
         setPlanStartDate(today);
         setTargetDate(addDaysIso(today, 365));
+        setRunwayAmount("1");
+        setRunwayUnit("years");
+        setTradingInstrument("stocks");
         setAverageTradingDaysPerWeek("5");
         setLossDaysPerWeek("1");
         setMaxDailyLossPercent("2");
@@ -147,10 +195,13 @@ export function BusinessPlanScreen() {
       const firstStrategy = Array.isArray(steps?.strategy?.strategies) ? steps.strategy.strategies[0] : null;
       const system = steps?.execution_and_journal?.system ?? {};
 
-      setStartingBalance(plan.startingBalance ? String(plan.startingBalance) : "");
-      setTargetBalance(plan.targetBalance ? String(plan.targetBalance) : "");
+      setStartingBalance(plan.startingBalance ? formatMoneyValue(plan.startingBalance) : "");
+      setTargetBalance(plan.targetBalance ? formatMoneyValue(plan.targetBalance) : "");
       setPlanStartDate(plan.planStartDate || today);
       setTargetDate(plan.targetDate || addDaysIso(plan.planStartDate || today, 365));
+      setRunwayAmount(String(plan.runway?.amount || 1));
+      setRunwayUnit(plan.runway?.unit || "years");
+      setTradingInstrument(plan.tradingInstrument || "stocks");
       setAverageTradingDaysPerWeek(String(plan.averageTradingDaysPerWeek || 5));
       setLossDaysPerWeek(String(plan.lossDaysPerWeek ?? 1));
       setMaxDailyLossPercent(String(plan.maxDailyLossPercent || 2));
@@ -183,34 +234,54 @@ export function BusinessPlanScreen() {
     void loadPlan();
   }, [loadPlan]);
 
+  useEffect(() => {
+    setTargetDate(
+      addRunwayIso(
+        planStartDate,
+        Math.max(1, Math.floor(parsePercent(runwayAmount) || 1)),
+        runwayUnit
+      )
+    );
+  }, [planStartDate, runwayAmount, runwayUnit]);
+
   const preview = useMemo(() => {
     const start = parseAmount(startingBalance);
     const target = parseAmount(targetBalance);
     const calendarDays = Math.max(0, dateDiffDays(planStartDate, targetDate));
-    const operatingDays = Math.max(0, Math.round((calendarDays / 7) * Math.max(1, Math.min(5, parsePercent(averageTradingDaysPerWeek) || 5))));
+    const availableSessionsPerWeek = tradingInstrument === "crypto" ? 7 : 5;
+    const operatingDays = Math.max(
+      0,
+      Math.round(
+        (calendarDays / 7) *
+          Math.max(
+            1,
+            Math.min(availableSessionsPerWeek, parsePercent(averageTradingDaysPerWeek) || 5)
+          )
+      )
+    );
     const requiredPct =
       start > 0 && target > start && operatingDays > 0
         ? (Math.pow(target / start, 1 / operatingDays) - 1) * 100
         : 0;
     const gap = Math.max(0, target - start);
     const tone =
-      requiredPct > 3
-        ? t(language, "Aggressive", "Agresivo")
-        : requiredPct > 1
-          ? t(language, "Ambitious", "Ambicioso")
-          : t(language, "Measured", "Medible");
+      requiredPct > 1
+        ? t(language, "High mathematical pace", "Ritmo matemático alto")
+        : requiredPct > 0.5
+          ? t(language, "Elevated mathematical pace", "Ritmo matemático elevado")
+          : t(language, "Measured mathematical pace", "Ritmo matemático moderado");
     const advisor =
-      requiredPct > 3
+      requiredPct > 1
         ? t(
             language,
             "Consider extending time or breaking the goal into smaller phases before scaling size.",
             "Considera extender el tiempo o dividir la meta en fases más pequeñas antes de subir size."
           )
-        : requiredPct > 1
+        : requiredPct > 0.5
           ? t(
               language,
-              "This can work if the rules are protected and the checkpoint review stays consistent.",
-              "Puede funcionar si las reglas están protegidas y la revisión por checkpoint se mantiene consistente."
+              "Validate this pace against your real execution evidence before treating it as an operating expectation.",
+              "Valida este ritmo contra tu evidencia real de ejecución antes de tratarlo como una expectativa operativa."
             )
           : t(
               language,
@@ -219,7 +290,7 @@ export function BusinessPlanScreen() {
             );
 
     return { start, target, calendarDays, operatingDays, requiredPct, gap, tone, advisor };
-  }, [averageTradingDaysPerWeek, language, planStartDate, startingBalance, targetBalance, targetDate]);
+  }, [averageTradingDaysPerWeek, language, planStartDate, startingBalance, targetBalance, targetDate, tradingInstrument]);
 
   const canSave =
     preview.start > 0 &&
@@ -252,6 +323,9 @@ export function BusinessPlanScreen() {
         targetBalance: preview.target,
         planStartDate,
         targetDate,
+        runwayAmount: parsePercent(runwayAmount),
+        runwayUnit,
+        tradingInstrument,
         averageTradingDaysPerWeek: parsePercent(averageTradingDaysPerWeek),
         lossDaysPerWeek: parsePercent(lossDaysPerWeek),
         maxDailyLossPercent: parsePercent(maxDailyLossPercent),
@@ -311,6 +385,9 @@ export function BusinessPlanScreen() {
     strategyName,
     strategyNotes,
     targetDate,
+    runwayAmount,
+    runwayUnit,
+    tradingInstrument,
   ]);
 
   const resetPlan = useCallback(() => {
@@ -378,7 +455,12 @@ export function BusinessPlanScreen() {
     label: string,
     value: string,
     onChangeText: (value: string) => void,
-    options?: { placeholder?: string; multiline?: boolean; keyboardType?: "default" | "numeric" }
+    options?: {
+      placeholder?: string;
+      multiline?: boolean;
+      keyboardType?: "default" | "numeric";
+      onBlur?: () => void;
+    }
   ) => (
     <View style={styles.field}>
       <Text style={styles.label}>{label}</Text>
@@ -389,17 +471,11 @@ export function BusinessPlanScreen() {
         placeholderTextColor={colors.textMuted}
         keyboardType={options?.keyboardType ?? "default"}
         multiline={options?.multiline}
+        onBlur={options?.onBlur}
         textAlignVertical={options?.multiline ? "top" : "center"}
         style={[styles.input, options?.multiline && styles.inputMultiline]}
       />
     </View>
-  );
-
-  const renderDateChip = (label: string, value: string, onPress: () => void) => (
-    <Pressable style={styles.dateChip} onPress={onPress}>
-      <Text style={styles.dateChipText}>{label}</Text>
-      <Text style={styles.dateChipValue}>{value}</Text>
-    </Pressable>
   );
 
   return (
@@ -438,11 +514,11 @@ export function BusinessPlanScreen() {
                 <Text style={styles.previewValue}>{preview.tone}</Text>
               </View>
               <View style={styles.previewCell}>
-                <Text style={styles.previewLabel}>{t(language, "Approx. days", "Días aprox.")}</Text>
+                <Text style={styles.previewLabel}>{t(language, "Est. sessions", "Sesiones est.")}</Text>
                 <Text style={styles.previewValue}>{preview.operatingDays}</Text>
               </View>
               <View style={styles.previewCell}>
-                <Text style={styles.previewLabel}>{t(language, "Approx. goal/day", "Meta/día aprox.")}</Text>
+                <Text style={styles.previewLabel}>{t(language, "Perfect path/session", "Trayectoria perfecta/sesión")}</Text>
                 <Text style={styles.previewValue}>{preview.requiredPct.toFixed(2)}%</Text>
               </View>
               <View style={styles.previewCell}>
@@ -462,35 +538,87 @@ export function BusinessPlanScreen() {
           </View>
 
           <View style={styles.sectionCard}>
-            <Text style={styles.sectionTitle}>{t(language, "Target and dates", "Meta y fechas")}</Text>
+            <Text style={styles.sectionTitle}>{t(language, "Target and runway", "Meta y runway")}</Text>
             <View style={styles.twoCol}>
-              {renderField(t(language, "Starting balance", "Capital inicial"), startingBalance, setStartingBalance, {
+              {renderField(t(language, "Starting balance", "Capital inicial"), startingBalance, (value) => setStartingBalance(formatMoneyDraft(value)), {
                 keyboardType: "numeric",
-                placeholder: "5000",
+                placeholder: "5,000.00",
+                onBlur: () => {
+                  if (startingBalance) setStartingBalance(formatMoneyValue(startingBalance));
+                },
               })}
-              {renderField(t(language, "Target balance", "Meta de balance"), targetBalance, setTargetBalance, {
+              {renderField(t(language, "Target balance", "Meta de balance"), targetBalance, (value) => setTargetBalance(formatMoneyDraft(value)), {
                 keyboardType: "numeric",
-                placeholder: "50000",
+                placeholder: "50,000.00",
+                onBlur: () => {
+                  if (targetBalance) setTargetBalance(formatMoneyValue(targetBalance));
+                },
               })}
             </View>
             <View style={styles.twoCol}>
               {renderField(t(language, "Start date", "Fecha inicial"), planStartDate, setPlanStartDate, {
                 placeholder: "YYYY-MM-DD",
               })}
-              {renderField(t(language, "Target date", "Fecha meta"), targetDate, setTargetDate, {
-                placeholder: "YYYY-MM-DD",
+              {renderField(t(language, "Runway amount", "Cantidad del runway"), runwayAmount, setRunwayAmount, {
+                keyboardType: "numeric",
+                placeholder: "1",
               })}
             </View>
-            <View style={styles.dateChipRow}>
-              {renderDateChip(t(language, "Start today", "Inicio hoy"), today, () => setPlanStartDate(today))}
-              {renderDateChip("+90", addDaysIso(planStartDate, 90), () => setTargetDate(addDaysIso(planStartDate, 90)))}
-              {renderDateChip("+180", addDaysIso(planStartDate, 180), () => setTargetDate(addDaysIso(planStartDate, 180)))}
-              {renderDateChip("+365", addDaysIso(planStartDate, 365), () => setTargetDate(addDaysIso(planStartDate, 365)))}
+            <Text style={styles.label}>{t(language, "Runway unit", "Unidad del runway")}</Text>
+            <View style={styles.optionRow}>
+              {(["days", "weeks", "months", "years"] as RunwayUnit[]).map((unit) => (
+                <Pressable
+                  key={unit}
+                  style={[styles.optionChip, runwayUnit === unit && styles.optionChipActive]}
+                  onPress={() => setRunwayUnit(unit)}
+                >
+                  <Text style={[styles.optionChipText, runwayUnit === unit && styles.optionChipTextActive]}>
+                    {unit === "days"
+                      ? t(language, "Days", "Días")
+                      : unit === "weeks"
+                        ? t(language, "Weeks", "Semanas")
+                        : unit === "months"
+                          ? t(language, "Months", "Meses")
+                          : t(language, "Years", "Años")}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+            <View style={styles.calculatedDate}>
+              <Text style={styles.previewLabel}>{t(language, "Calculated target date", "Fecha objetivo calculada")}</Text>
+              <Text style={styles.previewValue}>{targetDate}</Text>
             </View>
           </View>
 
           <View style={styles.sectionCard}>
             <Text style={styles.sectionTitle}>{t(language, "Operating model", "Modelo operativo")}</Text>
+            <Text style={styles.label}>{t(language, "Primary instrument", "Instrumento principal")}</Text>
+            <View style={styles.optionRow}>
+              {(["stocks", "options", "futures", "forex", "crypto", "other"] as TradingInstrument[]).map((instrument) => (
+                <Pressable
+                  key={instrument}
+                  style={[styles.optionChip, tradingInstrument === instrument && styles.optionChipActive]}
+                  onPress={() => {
+                    setTradingInstrument(instrument);
+                    if (instrument !== "crypto" && parsePercent(averageTradingDaysPerWeek) > 5) {
+                      setAverageTradingDaysPerWeek("5");
+                    }
+                  }}
+                >
+                  <Text style={[styles.optionChipText, tradingInstrument === instrument && styles.optionChipTextActive]}>
+                    {instrument === "stocks"
+                      ? t(language, "Stocks", "Acciones")
+                      : instrument === "options"
+                        ? t(language, "Options", "Opciones")
+                        : instrument === "futures"
+                          ? t(language, "Futures", "Futuros")
+                          : instrument === "other"
+                            ? t(language, "Other", "Otro")
+                            : instrument.toUpperCase()}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
             <View style={styles.twoCol}>
               {renderField(t(language, "Trading days/week", "Días de trading/semana"), averageTradingDaysPerWeek, setAverageTradingDaysPerWeek, {
                 keyboardType: "numeric",
@@ -687,29 +815,38 @@ const createStyles = (colors: ThemeColors) =>
       lineHeight: 19,
       fontWeight: "600",
     },
-    dateChipRow: {
+    optionRow: {
       flexDirection: "row",
       flexWrap: "wrap",
       gap: 8,
     },
-    dateChip: {
+    optionChip: {
       borderRadius: 999,
       borderWidth: 1,
       borderColor: colors.border,
       backgroundColor: colors.card,
-      paddingHorizontal: 10,
-      paddingVertical: 7,
-      gap: 2,
+      paddingHorizontal: 12,
+      paddingVertical: 8,
     },
-    dateChipText: {
-      color: colors.textPrimary,
-      fontSize: 11,
-      fontWeight: "900",
+    optionChipActive: {
+      borderColor: colors.primary,
+      backgroundColor: colors.successSoft,
     },
-    dateChipValue: {
+    optionChipText: {
       color: colors.textMuted,
-      fontSize: 10,
-      fontWeight: "700",
+      fontSize: 11,
+      fontWeight: "800",
+    },
+    optionChipTextActive: {
+      color: colors.primary,
+    },
+    calculatedDate: {
+      borderRadius: 13,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.card,
+      padding: 12,
+      gap: 4,
     },
     errorText: {
       color: colors.danger,

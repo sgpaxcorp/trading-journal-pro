@@ -2,6 +2,14 @@ import { randomUUID } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 
 import { buildPlanProjection } from "@/lib/growthPlanProjection";
+import {
+  addTradingRunway,
+  computeTradingSessionsBetween,
+  getTradingCalendarProfile,
+  inferTradingRunway,
+  normalizeTradingInstrument,
+  normalizeTradingRunwayUnit,
+} from "@/lib/tradingCalendar";
 import { getClientIp, rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
 import { requirePlatformAccess } from "@/lib/serverPlatformAccess";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
@@ -280,20 +288,48 @@ function normalizePlan(row: GrowthPlanRow | null) {
     steps?._ui?.averageTradingDaysPerWeek ??
     row.average_trading_days_per_week ??
     5;
+  const tradingInstrument = normalizeTradingInstrument(
+    businessAnalysis?.operatingModel?.tradingInstrument ??
+      businessAnalysis?.operatingModel?.runway?.instrument ??
+      steps?._ui?.tradingInstrument ??
+      "stocks"
+  );
+  const tradingCalendarProfile = getTradingCalendarProfile(tradingInstrument);
+  const planStartDate = cleanDate(row.plan_start_date);
+  const targetDate = cleanDate(row.target_date);
+  const inferredRunway = inferTradingRunway(planStartDate, targetDate);
+  const runway = businessAnalysis?.operatingModel?.runway ?? {};
 
   return {
     accountId: row.account_id ?? null,
     startingBalance: num(row.starting_balance, 0),
     targetBalance: num(row.target_balance, 0),
-    targetDate: cleanDate(row.target_date),
-    planStartDate: cleanDate(row.plan_start_date),
+    targetDate,
+    planStartDate,
     dailyTargetPct: num(row.daily_target_pct ?? row.daily_goal_percent, 0),
     maxDailyLossPercent: num(row.max_daily_loss_percent, 0),
     maxRiskPerTradePercent: num(row.max_risk_per_trade_percent, 1),
     maxRiskPerTradeUsd: row.max_risk_per_trade_usd == null ? null : num(row.max_risk_per_trade_usd, 0),
-    averageTradingDaysPerWeek: clampInt(averageTradingDaysRaw, 1, 5, 5),
-    lossDaysPerWeek: clampInt(row.loss_days_per_week, 0, 5, 0),
+    averageTradingDaysPerWeek: clampInt(
+      averageTradingDaysRaw,
+      1,
+      tradingCalendarProfile.sessionsPerWeek,
+      5
+    ),
+    lossDaysPerWeek: clampInt(
+      row.loss_days_per_week,
+      0,
+      tradingCalendarProfile.sessionsPerWeek,
+      0
+    ),
     tradingDays: clampInt(row.trading_days, 0, 5000, 0),
+    tradingInstrument,
+    runway: {
+      amount: clampInt(runway?.amount ?? inferredRunway.amount, 1, 1200, 1),
+      unit: normalizeTradingRunwayUnit(runway?.unit ?? inferredRunway.unit),
+      calendarKey: tradingCalendarProfile.key,
+      calendarIsEstimate: tradingCalendarProfile.isEstimate,
+    },
     planPhases: Array.isArray(row.plan_phases) ? row.plan_phases : [],
     steps,
     updatedAt: row.updated_at ?? null,
@@ -523,8 +559,40 @@ export async function POST(req: NextRequest) {
     const startingBalance = clampNumber(body?.startingBalance, 1, 100_000_000, 0);
     const targetBalance = clampNumber(body?.targetBalance, 1, 1_000_000_000, 0);
     const planStartDate = cleanDate(body?.planStartDate) || isoToday();
-    const targetDate = cleanDate(body?.targetDate);
-    const averageTradingDaysPerWeek = clampInt(body?.averageTradingDaysPerWeek, 1, 5, 5);
+    const currentBusinessAnalysis =
+      current?.steps?.business_analysis && typeof current.steps.business_analysis === "object"
+        ? current.steps.business_analysis
+        : {};
+    const currentOperatingModel = currentBusinessAnalysis?.operatingModel ?? {};
+    const tradingInstrument = normalizeTradingInstrument(
+      body?.tradingInstrument ??
+        currentOperatingModel?.tradingInstrument ??
+        currentOperatingModel?.runway?.instrument ??
+        "stocks"
+    );
+    const tradingCalendarProfile = getTradingCalendarProfile(tradingInstrument);
+    const requestedTargetDate = cleanDate(body?.targetDate);
+    const inferredRunway = inferTradingRunway(planStartDate, requestedTargetDate);
+    const runwayAmount = clampInt(
+      body?.runwayAmount ??
+        (requestedTargetDate ? inferredRunway.amount : currentOperatingModel?.runway?.amount) ??
+        inferredRunway.amount,
+      1,
+      1200,
+      1
+    );
+    const runwayUnit = normalizeTradingRunwayUnit(
+      body?.runwayUnit ??
+        (requestedTargetDate ? inferredRunway.unit : currentOperatingModel?.runway?.unit) ??
+        inferredRunway.unit
+    );
+    const targetDate = requestedTargetDate || addTradingRunway(planStartDate, runwayAmount, runwayUnit);
+    const averageTradingDaysPerWeek = clampInt(
+      body?.averageTradingDaysPerWeek,
+      1,
+      tradingCalendarProfile.sessionsPerWeek,
+      5
+    );
     const lossDaysPerWeek = clampInt(body?.lossDaysPerWeek, 0, averageTradingDaysPerWeek, 0);
     const maxDailyLossPercent = clampNumber(body?.maxDailyLossPercent, 0, 25, 2);
     const maxRiskPerTradePercent = clampNumber(body?.maxRiskPerTradePercent, 0, 25, 1);
@@ -548,7 +616,13 @@ export async function POST(req: NextRequest) {
       maxDailyLossPercent,
       withdrawalSettings: current?.planned_withdrawal_settings ?? null,
       existingWithdrawals: Array.isArray(current?.planned_withdrawals) ? current?.planned_withdrawals : [],
+      tradingInstrument,
     });
+    const marketSessions = computeTradingSessionsBetween(
+      planStartDate,
+      targetDate,
+      tradingInstrument
+    );
 
     if (!projection.tradingDays.length) {
       return NextResponse.json({ error: "No operating trading days found for this plan window." }, { status: 400 });
@@ -560,13 +634,13 @@ export async function POST(req: NextRequest) {
     const dontRules = splitRuleLines(body?.dontRules, DEFAULT_DONT_RULES);
     const orderRules = splitRuleLines(body?.orderRules, DEFAULT_ORDER_RULES);
     const currentSteps = current?.steps && typeof current.steps === "object" ? current.steps : defaultSteps();
-    const currentBusinessAnalysis =
+    const synchronizedBusinessAnalysis =
       (currentSteps as any)?.business_analysis && typeof (currentSteps as any).business_analysis === "object"
         ? (currentSteps as any).business_analysis
-        : {};
-    const existingProfile = currentBusinessAnalysis?.profile;
+        : currentBusinessAnalysis;
+    const existingProfile = synchronizedBusinessAnalysis?.profile;
     const preserveProfile = hasBusinessAnalysisProfile(existingProfile);
-    const existingScenarioId = cleanText(currentBusinessAnalysis?.selectedScenarioId, 40);
+    const existingScenarioId = cleanText(synchronizedBusinessAnalysis?.selectedScenarioId, 40);
     const preserveScenarioId = ["conservative", "moderate", "aggressive"].includes(existingScenarioId);
     const requiredGoalPct = Number(projection.requiredGoalPct.toFixed(4));
     const targetMultiple = targetBalance / startingBalance;
@@ -591,20 +665,27 @@ export async function POST(req: NextRequest) {
       cumulativeWithdrawals: phase.cumulativeWithdrawals,
     }));
     const synchronizedScenarioId = preserveScenarioId ? existingScenarioId : "mobile-operating-plan";
+    const existingSelectedScenario = synchronizedBusinessAnalysis?.selectedScenario ?? {};
+    const operatingDailyGoalPct = clampNumber(
+      body?.operatingDailyGoalPct ?? existingSelectedScenario?.dailyGoalPct,
+      0.01,
+      25,
+      0.65
+    );
     const synchronizedScenario = {
       id: synchronizedScenarioId,
       title:
-        cleanText(currentBusinessAnalysis?.selectedScenario?.title, 120) ||
+        cleanText(synchronizedBusinessAnalysis?.selectedScenario?.title, 120) ||
         (preserveScenarioId ? existingScenarioId : "Mobile operating plan"),
-      dailyGoalPct: requiredGoalPct,
+      dailyGoalPct: operatingDailyGoalPct,
       maxDailyLossPct: maxDailyLossPercent,
       riskPerTradePct: maxRiskPerTradePercent,
       lossDaysPerWeek,
       projectedEndBalance: projection.completionBalance,
       recommended: true,
     };
-    const existingScenarios = Array.isArray(currentBusinessAnalysis?.scenarios)
-      ? currentBusinessAnalysis.scenarios
+    const existingScenarios = Array.isArray(synchronizedBusinessAnalysis?.scenarios)
+      ? synchronizedBusinessAnalysis.scenarios
       : [];
     const hasSynchronizedScenario = existingScenarios.some(
       (scenario: any) => cleanText(scenario?.id, 40) === synchronizedScenarioId
@@ -626,10 +707,11 @@ export async function POST(req: NextRequest) {
         ...(currentSteps as any)?._ui,
         autoPhaseCadence: "weekly",
         averageTradingDaysPerWeek,
+        tradingInstrument,
         source: "mobile",
       },
       business_analysis: {
-        ...currentBusinessAnalysis,
+        ...synchronizedBusinessAnalysis,
         profile: preserveProfile
           ? existingProfile
           : {
@@ -652,6 +734,17 @@ export async function POST(req: NextRequest) {
           lossDaysPerWeek,
           maxDailyLossPercent,
           riskPerTradePct: maxRiskPerTradePercent,
+          tradingInstrument,
+          runway: {
+            amount: runwayAmount,
+            unit: runwayUnit,
+            instrument: tradingInstrument,
+            calendarKey: tradingCalendarProfile.key,
+            calculatedTargetDate: targetDate,
+            marketSessions,
+            committedTradingDays: projection.tradingDays.length,
+            calendarIsEstimate: tradingCalendarProfile.isEstimate,
+          },
         },
         selectedScenario: synchronizedScenario,
         scenarios: synchronizedScenarios,

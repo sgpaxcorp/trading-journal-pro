@@ -163,8 +163,8 @@ const BUILDERS: QuickTourBuilder[] = [
           id: "gp-business-analysis",
           title: L("Business analysis foundation", "Fundación de análisis empresarial"),
           body: L(
-            "Start by defining the business context: why this account exists, what problem the plan solves, and what operating standard you are committing to.",
-            "Empieza definiendo el contexto del negocio: por qué existe esta cuenta, qué problema resuelve el plan y a qué estándar operativo te comprometes."
+            "Define capital, target, runway, primary instrument, and operating profile. The selected market calendar becomes the source for sessions and checkpoints.",
+            "Define capital, meta, runway, instrumento principal y perfil operativo. El calendario del mercado seleccionado se convierte en la fuente de sesiones y checkpoints."
           ),
           anchor: "gp-business-analysis",
           selector: "#gp-business-analysis",
@@ -183,8 +183,8 @@ const BUILDERS: QuickTourBuilder[] = [
           id: "gp-target",
           title: L("Target capital", "Capital objetivo"),
           body: L(
-            "This is the destination the plan is trying to reach. Keep it ambitious enough to matter and realistic enough to govern decisions.",
-            "Este es el destino que el plan intenta alcanzar. Mantenlo suficientemente ambicioso para importar y suficientemente realista para gobernar decisiones."
+            "This is the destination the plan is trying to reach. The review will test it against time, loss assumptions, the operating model, and execution evidence.",
+            "Este es el destino que el plan intenta alcanzar. La evaluación lo comparará con tiempo, supuestos de pérdida, modelo operativo y evidencia de ejecución."
           ),
           anchor: "gp-target-balance",
           selector: "#gp-target-balance",
@@ -203,8 +203,8 @@ const BUILDERS: QuickTourBuilder[] = [
           id: "gp-target-date",
           title: L("Target date", "Fecha objetivo"),
           body: L(
-            "The target date defines the time constraint. It turns the goal from a wish into a required rate of progress.",
-            "La fecha objetivo define la restricción de tiempo. Convierte la meta de deseo a ritmo requerido de progreso."
+            "Choose a runway in days, weeks, months, or years. The target date is calculated automatically from the start date and drives the required pace.",
+            "Escoge un runway en días, semanas, meses o años. La fecha objetivo se calcula automáticamente desde la fecha inicial y determina el ritmo requerido."
           ),
           anchor: "gp-target-date",
           selector: "#gp-target-date",
@@ -263,8 +263,8 @@ const BUILDERS: QuickTourBuilder[] = [
           id: "gp-required-goal",
           title: L("Required pace", "Ritmo requerido"),
           body: L(
-            "This section translates the target into required daily, weekly, and monthly progress. If the requirement is unrealistic, adjust the plan before forcing trades.",
-            "Esta sección traduce la meta a progreso requerido diario, semanal y mensual. Si el requisito no es realista, ajusta el plan antes de forzar trades."
+            "Compare the perfect-path session rate with the loss-adjusted goal-day rate, scenario coverage, and real execution evidence. Research AI explains the verified math but cannot change it or promise returns.",
+            "Compara el ritmo de trayectoria perfecta con el ritmo ajustado por pérdidas en días de meta, cobertura del escenario y evidencia real. Research AI explica la matemática verificada, pero no puede cambiarla ni prometer retornos."
           ),
           anchor: "gp-required-goal",
           selector: "#gp-required-goal",

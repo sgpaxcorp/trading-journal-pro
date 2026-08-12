@@ -197,7 +197,7 @@ export const PLAN_CATALOG: Record<
 
 export const PLAN_COMPARISON_ROWS: PlanComparisonRow[] = [
   { kind: "section", label: { en: "TRADING BUSINESS PLAN & FOLLOW-UP", es: "PLAN DE EMPRESA DE TRADING Y SEGUIMIENTO" } },
-  { kind: "feature", label: { en: "Trading Business Plan with realistic, measurable targets", es: "Plan de Empresa de Trading con metas realistas y medibles" }, core: true, advanced: true },
+  { kind: "feature", label: { en: "Trading Business Plan with evidence-based, measurable targets", es: "Plan de Empresa de Trading con metas medibles basadas en evidencia" }, core: true, advanced: true },
   { kind: "feature", label: { en: "AI coach follows your Trading Business Plan", es: "Coach IA da seguimiento a tu Plan de Empresa de Trading" }, core: false, advanced: true },
   { kind: "feature", label: { en: "AI action plans from real execution + trade data", es: "Planes de acción IA desde ejecución + trades reales" }, core: false, advanced: true },
   { kind: "feature", label: { en: "Mindset and rule-obedience coaching", es: "Coaching de mindset y obediencia a reglas" }, core: false, advanced: true },

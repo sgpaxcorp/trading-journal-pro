@@ -1,3 +1,9 @@
+import {
+  getTradingCalendarProfile,
+  listTradingSessionsBetween,
+  type TradingInstrument,
+} from "@/lib/tradingCalendar";
+
 export type WithdrawalFrequency = "monthly" | "quarterly" | "semiannual";
 
 export type PlannedWithdrawalStatus = "pending" | "taken" | "skipped";
@@ -71,11 +77,11 @@ function clampInt(value: number, min = 0, max = Number.MAX_SAFE_INTEGER): number
   return Math.max(min, Math.min(max, Math.floor(Number.isFinite(value) ? value : 0)));
 }
 
-function resolveAverageTradingDaysPerWeek(value?: number | null): number {
+function resolveAverageTradingDaysPerWeek(value?: number | null, maximum = 5): number {
   if (value == null) return 5;
   const n = Number(value);
   if (!Number.isFinite(n)) return 5;
-  return clampInt(n, 1, 5);
+  return clampInt(n, 1, maximum);
 }
 
 function makeId(): string {
@@ -102,92 +108,32 @@ function weekKeyFromIso(dateIso: string): string {
   return toYMD(d);
 }
 
-function observedDate(date: Date): Date {
-  const day = date.getDay();
-  if (day === 6) return new Date(date.getFullYear(), date.getMonth(), date.getDate() - 1);
-  if (day === 0) return new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1);
-  return date;
+export function listTradingDaysBetween(
+  startIso: string,
+  endIso: string,
+  tradingInstrument: TradingInstrument = "stocks"
+): string[] {
+  return listTradingSessionsBetween(startIso, endIso, tradingInstrument);
 }
 
-function getNthWeekdayOfMonth(year: number, month: number, weekday: number, n: number): Date {
-  const firstOfMonth = new Date(year, month, 1);
-  const firstWeekdayOffset = (7 + weekday - firstOfMonth.getDay()) % 7;
-  const day = 1 + firstWeekdayOffset + 7 * (n - 1);
-  return new Date(year, month, day);
-}
-
-function getLastWeekdayOfMonth(year: number, month: number, weekday: number): Date {
-  const lastOfMonth = new Date(year, month + 1, 0);
-  const offsetBack = (7 + lastOfMonth.getDay() - weekday) % 7;
-  const day = lastOfMonth.getDate() - offsetBack;
-  return new Date(year, month, day);
-}
-
-function getEasterDate(year: number): Date {
-  const a = year % 19;
-  const b = Math.floor(year / 100);
-  const c = year % 100;
-  const d = Math.floor(b / 4);
-  const e = b % 4;
-  const f = Math.floor((b + 8) / 25);
-  const g = Math.floor((b - f + 1) / 3);
-  const h = (19 * a + b - d - g + 15) % 30;
-  const i = Math.floor(c / 4);
-  const k = c % 4;
-  const l = (32 + 2 * e + 2 * i - h - k) % 7;
-  const m = Math.floor((a + 11 * h + 22 * l) / 451);
-  const month = Math.floor((h + l - 7 * m + 114) / 31);
-  const day = ((h + l - 7 * m + 114) % 31) + 1;
-  return new Date(year, month - 1, day);
-}
-
-function getUsMarketHolidayDates(year: number): string[] {
-  const holidays: string[] = [];
-  holidays.push(toYMD(observedDate(new Date(year, 0, 1))));
-  holidays.push(toYMD(getNthWeekdayOfMonth(year, 0, 1, 3)));
-  holidays.push(toYMD(getNthWeekdayOfMonth(year, 1, 1, 3)));
-  const easter = getEasterDate(year);
-  const goodFriday = new Date(easter.getFullYear(), easter.getMonth(), easter.getDate() - 2);
-  holidays.push(toYMD(goodFriday));
-  holidays.push(toYMD(getLastWeekdayOfMonth(year, 4, 1)));
-  holidays.push(toYMD(observedDate(new Date(year, 5, 19))));
-  holidays.push(toYMD(observedDate(new Date(year, 6, 4))));
-  holidays.push(toYMD(getNthWeekdayOfMonth(year, 8, 1, 1)));
-  holidays.push(toYMD(getNthWeekdayOfMonth(year, 10, 4, 4)));
-  holidays.push(toYMD(observedDate(new Date(year, 11, 25))));
-  return holidays;
-}
-
-export function listTradingDaysBetween(startIso: string, endIso: string): string[] {
-  const s = new Date(startIso);
-  const e = new Date(endIso);
-  if (!Number.isFinite(s.getTime()) || !Number.isFinite(e.getTime())) return [];
-  const start = s <= e ? s : e;
-  const end = s <= e ? e : s;
-  const years: number[] = [];
-  for (let y = start.getFullYear(); y <= end.getFullYear(); y++) years.push(y);
-  const holidaySet = new Set(years.flatMap(getUsMarketHolidayDates));
-
-  const days: string[] = [];
-  for (let d = new Date(start); d <= end; d = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1)) {
-    const ds = toYMD(d);
-    const dow = d.getDay();
-    const isTradingDay = dow !== 0 && dow !== 6 && !holidaySet.has(ds);
-    if (isTradingDay) days.push(ds);
-  }
-  return days;
-}
-
-export function computeTradingDaysBetween(startIso: string, endIso: string): number {
-  return listTradingDaysBetween(startIso, endIso).length;
+export function computeTradingDaysBetween(
+  startIso: string,
+  endIso: string,
+  tradingInstrument: TradingInstrument = "stocks"
+): number {
+  return listTradingDaysBetween(startIso, endIso, tradingInstrument).length;
 }
 
 export function selectTradingDaysByWeeklyAverage(
   tradingDays: string[],
-  averageTradingDaysPerWeek?: number | null
+  averageTradingDaysPerWeek?: number | null,
+  availableSessionsPerWeek = 5
 ): string[] {
-  const daysPerWeek = resolveAverageTradingDaysPerWeek(averageTradingDaysPerWeek);
-  if (daysPerWeek >= 5) return tradingDays;
+  const daysPerWeek = resolveAverageTradingDaysPerWeek(
+    averageTradingDaysPerWeek,
+    availableSessionsPerWeek
+  );
+  if (daysPerWeek >= availableSessionsPerWeek) return tradingDays;
 
   const seenByWeek = new Map<string, number>();
   return tradingDays.filter((dateIso) => {
@@ -202,11 +148,14 @@ export function selectTradingDaysByWeeklyAverage(
 export function computeCommittedTradingDaysBetween(
   startIso: string,
   endIso: string,
-  averageTradingDaysPerWeek?: number | null
+  averageTradingDaysPerWeek?: number | null,
+  tradingInstrument: TradingInstrument = "stocks"
 ): number {
+  const profile = getTradingCalendarProfile(tradingInstrument);
   return selectTradingDaysByWeeklyAverage(
-    listTradingDaysBetween(startIso, endIso),
-    averageTradingDaysPerWeek
+    listTradingDaysBetween(startIso, endIso, tradingInstrument),
+    averageTradingDaysPerWeek,
+    profile.sessionsPerWeek
   ).length;
 }
 
@@ -530,6 +479,7 @@ export function buildPlanProjection(params: {
   maxDailyLossPercent: number;
   withdrawalSettings?: PlannedWithdrawalSettings | null;
   existingWithdrawals?: PlannedWithdrawalEvent[] | null;
+  tradingInstrument?: TradingInstrument;
 }) : ProjectionResult {
   if (params.starting <= 0 || params.target <= 0) {
     return {
@@ -545,10 +495,16 @@ export function buildPlanProjection(params: {
     };
   }
 
-  const averageTradingDaysPerWeek = resolveAverageTradingDaysPerWeek(params.averageTradingDaysPerWeek);
+  const tradingInstrument = params.tradingInstrument ?? "stocks";
+  const sessionsPerWeek = getTradingCalendarProfile(tradingInstrument).sessionsPerWeek;
+  const averageTradingDaysPerWeek = resolveAverageTradingDaysPerWeek(
+    params.averageTradingDaysPerWeek,
+    sessionsPerWeek
+  );
   const tradingDays = selectTradingDaysByWeeklyAverage(
-    listTradingDaysBetween(params.startIso, params.targetIso),
-    averageTradingDaysPerWeek
+    listTradingDaysBetween(params.startIso, params.targetIso, tradingInstrument),
+    averageTradingDaysPerWeek,
+    sessionsPerWeek
   );
   if (!tradingDays.length) {
     return {
