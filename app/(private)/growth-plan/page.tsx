@@ -938,6 +938,9 @@ type AiPlanAdvisorPhase = {
   targetEquity: number;
   targetDate: string | null;
   dailyGoalPct: number;
+  tradingDays: number | null;
+  operatingWeeks: number | null;
+  estimatedMonths: number | null;
   guardrail: string;
 };
 
@@ -945,6 +948,14 @@ type AiPlanAdvisor = {
   shouldSurface: boolean;
   headline: string;
   body: string;
+  scenarioTitle: string;
+  recommendedDailyGoalPct: number;
+  maxDailyLossPct: number;
+  riskPerTradePct: number;
+  lossDaysPerWeek: number;
+  totalTradingDays: number | null;
+  totalOperatingWeeks: number | null;
+  totalEstimatedMonths: number | null;
   recommendedCompletionDate: string | null;
   phases: AiPlanAdvisorPhase[];
 };
@@ -1134,6 +1145,7 @@ function simulateScenarioToTarget(params: {
   let balance = Math.max(0, starting);
   let projectedAtDeadline = balance;
   let completionDate: string | null = balance >= target ? startIso : null;
+  let tradingDaysToTarget: number | null = balance >= target ? 0 : null;
   const perWeekLossDays = clampInt(scenario.lossDaysPerWeek, 0, daysPerCycle);
 
   for (let i = 0; i < simulationDays.length; i += 1) {
@@ -1146,6 +1158,7 @@ function simulateScenarioToTarget(params: {
     if (i === horizonDays - 1) projectedAtDeadline = balance;
     if (!completionDate && target > 0 && balance >= target) {
       completionDate = date;
+      tradingDaysToTarget = i + 1;
       if (i >= horizonDays - 1) break;
     }
   }
@@ -1153,6 +1166,7 @@ function simulateScenarioToTarget(params: {
   return {
     projectedAtDeadline: Number(projectedAtDeadline.toFixed(2)),
     completionDate,
+    tradingDaysToTarget,
   };
 }
 
@@ -1282,6 +1296,14 @@ function buildAiPlanAdvisor(params: {
       shouldSurface: false,
       headline: "",
       body: "",
+      scenarioTitle: "",
+      recommendedDailyGoalPct: 0,
+      maxDailyLossPct: 0,
+      riskPerTradePct: 0,
+      lossDaysPerWeek: 0,
+      totalTradingDays: null,
+      totalOperatingWeeks: null,
+      totalEstimatedMonths: null,
       recommendedCompletionDate: null,
       phases: [],
     };
@@ -1308,7 +1330,6 @@ function buildAiPlanAdvisor(params: {
   const phases = phaseTargets.map((targetEquity, index) => {
     const scaledScenario: BusinessScenario = {
       ...scenario,
-      dailyGoalPct: Number((scenario.dailyGoalPct * (1 + index * 0.12)).toFixed(2)),
       lossDaysPerWeek: clampInt(scenario.lossDaysPerWeek, 0, daysPerWeek),
     };
     const simulation = simulateScenarioToTarget({
@@ -1325,12 +1346,18 @@ function buildAiPlanAdvisor(params: {
       phaseStartIso = addCalendarDays(targetDate, 1);
       phaseStartBalance = targetEquity;
     }
+    const tradingDays = simulation.tradingDaysToTarget;
+    const operatingWeeks = tradingDays === null ? null : Math.max(1, Math.ceil(tradingDays / daysPerWeek));
+    const estimatedMonths = operatingWeeks === null ? null : Number((operatingWeeks / 4.345).toFixed(1));
 
     return {
       title: L(`Phase ${index + 1}`, `Fase ${index + 1}`),
       targetEquity,
       targetDate,
       dailyGoalPct: scaledScenario.dailyGoalPct,
+      tradingDays,
+      operatingWeeks,
+      estimatedMonths,
       guardrail:
         index === 0
           ? L(
@@ -1350,19 +1377,47 @@ function buildAiPlanAdvisor(params: {
   });
 
   const finalPhase = phases[phases.length - 1] ?? null;
+  const phasesComplete = phases.length > 0 && phases.every((phase) => phase.tradingDays !== null);
+  const totalTradingDays = phasesComplete
+    ? phases.reduce((sum, phase) => sum + (phase.tradingDays ?? 0), 0)
+    : null;
+  const totalOperatingWeeks =
+    totalTradingDays === null ? null : Math.max(1, Math.ceil(totalTradingDays / daysPerWeek));
+  const totalEstimatedMonths =
+    totalOperatingWeeks === null ? null : Number((totalOperatingWeeks / 4.345).toFixed(1));
+
   return {
     shouldSurface: phases.length > 0,
     headline: L(
-      "AI plan advisor: keep the big target, trade it in phases.",
-      "Asesor IA del plan: mantén la meta grande, ejecútala por fases."
+      `Recommended path: ${scenario.dailyGoalPct.toFixed(2)}% on goal-days, executed in phases.`,
+      `Ruta recomendada: ${scenario.dailyGoalPct.toFixed(2)}% en días de meta, ejecutada por fases.`
     ),
     body: L(
-      `Based on ${daysPerWeek} operating day(s) per week and the selected risk model, the smarter route is to earn the right to scale: checkpoint first, then increase pace only after the data supports it.`,
-      `Basado en ${daysPerWeek} día(s) operativos por semana y el modelo de riesgo seleccionado, la ruta más inteligente es ganarte el derecho a escalar: primero checkpoint, luego subir ritmo solo cuando la data lo sostenga.`
+      `This estimate uses ${daysPerWeek} operating day(s) per week, ${scenario.lossDaysPerWeek} planned loss day(s), a ${scenario.maxDailyLossPct.toFixed(2)}% daily-loss ceiling, and ${scenario.riskPerTradePct.toFixed(2)}% risk per trade. The percentage stays constant across phases so growth comes from compounding, not from increasing risk.`,
+      `Este estimado usa ${daysPerWeek} día(s) operativos por semana, ${scenario.lossDaysPerWeek} día(s) de pérdida planificados, un límite de pérdida diaria de ${scenario.maxDailyLossPct.toFixed(2)}% y ${scenario.riskPerTradePct.toFixed(2)}% de riesgo por trade. El porcentaje se mantiene constante entre fases para que el crecimiento venga del compounding, no de aumentar el riesgo.`
     ),
+    scenarioTitle: scenario.title,
+    recommendedDailyGoalPct: scenario.dailyGoalPct,
+    maxDailyLossPct: scenario.maxDailyLossPct,
+    riskPerTradePct: scenario.riskPerTradePct,
+    lossDaysPerWeek: scenario.lossDaysPerWeek,
+    totalTradingDays,
+    totalOperatingWeeks,
+    totalEstimatedMonths,
     recommendedCompletionDate: finalPhase?.targetDate ?? null,
     phases,
   };
+}
+
+function formatPlanDate(value: string | null | undefined, lang: "en" | "es") {
+  if (!value) return "—";
+  const date = new Date(`${value}T12:00:00`);
+  if (!Number.isFinite(date.getTime())) return value;
+  return new Intl.DateTimeFormat(lang === "es" ? "es-PR" : "en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }).format(date);
 }
 
 function formatHistoryDate(value: string | null | undefined, lang: "en" | "es") {
@@ -2342,8 +2397,11 @@ export default function GrowthPlanPage() {
     [businessScenarios, selectedScenarioId]
   );
   const reviewScenario = useMemo(
-    () => selectedBusinessScenario ?? businessScenarios.find((scenario) => scenario.recommended) ?? null,
-    [businessScenarios, selectedBusinessScenario]
+    () =>
+      isBusinessProfileComplete(businessProfile)
+        ? selectedBusinessScenario ?? businessScenarios.find((scenario) => scenario.recommended) ?? null
+        : null,
+    [businessProfile, businessScenarios, selectedBusinessScenario]
   );
   const planRealismReview = useMemo(
     () =>
@@ -2392,6 +2450,29 @@ export default function GrowthPlanPage() {
       targetBalance,
     ]
   );
+
+  const applyAiPlanRecommendation = () => {
+    if (!reviewScenario || !aiPlanAdvisor.shouldSurface) return;
+
+    setSelectedScenarioId(reviewScenario.id);
+    setRiskPerTradePctStr(String(reviewScenario.riskPerTradePct));
+    setMaxDailyLossPercentStr(String(reviewScenario.maxDailyLossPct));
+    setLossDaysPerWeekStr(
+      String(clampInt(reviewScenario.lossDaysPerWeek, 0, averageTradingDaysPerWeek))
+    );
+    if (aiPlanAdvisor.recommendedCompletionDate) {
+      setTargetDateStr(aiPlanAdvisor.recommendedCompletionDate);
+      setTradingDaysTouched(false);
+    }
+    setAutoPhasesGenerated(false);
+    setError("");
+    pushNeuroMessage(
+      L(
+        `AI recommendation applied: ${reviewScenario.title} model at ${reviewScenario.dailyGoalPct.toFixed(2)}% on goal-days, with an estimated completion date of ${formatPlanDate(aiPlanAdvisor.recommendedCompletionDate, lang)}.`,
+        `Recomendación IA aplicada: modelo ${reviewScenario.title} a ${reviewScenario.dailyGoalPct.toFixed(2)}% en días de meta, con fecha estimada de cumplimiento ${formatPlanDate(aiPlanAdvisor.recommendedCompletionDate, lang)}.`
+      )
+    );
+  };
 
   const planHistoryItems = useMemo(
     () =>
@@ -2741,11 +2822,12 @@ export default function GrowthPlanPage() {
             ) : null}
 
             {aiPlanAdvisor.shouldSurface ? (
-              <div className="mt-3 rounded-2xl border border-cyan-300/30 bg-cyan-300/10 p-4">
+              <div className="mt-3 overflow-hidden rounded-2xl border border-cyan-300/30 bg-[linear-gradient(135deg,rgba(8,47,73,0.38),rgba(2,6,23,0.94)_58%)] shadow-[0_20px_60px_rgba(0,0,0,0.24)]">
+                <div className="border-b border-cyan-300/15 p-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <p className="text-[11px] uppercase tracking-[0.24em] text-cyan-200">
-                      {L("AI plan advisor", "Asesor IA del plan")}
+                      {L("AI recommended operating path", "Ruta operativa recomendada por IA")}
                     </p>
                     <p className="mt-1 text-sm font-semibold text-slate-100">
                       {aiPlanAdvisor.headline}
@@ -2754,13 +2836,98 @@ export default function GrowthPlanPage() {
                       {aiPlanAdvisor.body}
                     </p>
                   </div>
-                  <span className="rounded-full border border-cyan-300/30 bg-slate-950/70 px-3 py-1 text-[11px] font-semibold text-cyan-100">
-                    {aiPlanAdvisor.recommendedCompletionDate
-                      ? L(`Est. ${aiPlanAdvisor.recommendedCompletionDate}`, `Est. ${aiPlanAdvisor.recommendedCompletionDate}`)
-                      : L("Needs more data", "Necesita más data")}
-                  </span>
+                  <div className="flex flex-wrap items-center justify-end gap-2">
+                    <span className="rounded-full border border-cyan-300/30 bg-slate-950/70 px-3 py-1 text-[11px] font-semibold text-cyan-100">
+                      {aiPlanAdvisor.recommendedCompletionDate
+                        ? L(
+                            `Est. completion ${formatPlanDate(aiPlanAdvisor.recommendedCompletionDate, lang)}`,
+                            `Cierre estimado ${formatPlanDate(aiPlanAdvisor.recommendedCompletionDate, lang)}`
+                          )
+                        : L("Needs more data", "Necesita más data")}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={applyAiPlanRecommendation}
+                      disabled={!aiPlanAdvisor.recommendedCompletionDate}
+                      className="rounded-full bg-cyan-300 px-3 py-1.5 text-[11px] font-bold text-slate-950 transition hover:bg-cyan-200 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
+                    >
+                      {L("Apply AI recommendation", "Aplicar recomendación IA")}
+                    </button>
+                  </div>
                 </div>
-                <div className="mt-3 grid gap-2 md:grid-cols-3">
+                <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                  <div className="rounded-xl border border-cyan-300/15 bg-slate-950/65 p-3">
+                    <p className="text-[10px] uppercase tracking-[0.18em] text-slate-500">
+                      {L("Recommended model", "Modelo recomendado")}
+                    </p>
+                    <p className="mt-1 text-base font-semibold text-cyan-100">
+                      {aiPlanAdvisor.scenarioTitle}
+                    </p>
+                    <p className="mt-1 text-[11px] text-slate-400">
+                      {aiPlanAdvisor.lossDaysPerWeek} {L("planned loss day(s) / week", "día(s) de pérdida planificados / semana")}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-cyan-300/15 bg-slate-950/65 p-3">
+                    <p className="text-[10px] uppercase tracking-[0.18em] text-slate-500">
+                      {L("Recommended percentages", "Porcentajes recomendados")}
+                    </p>
+                    <p className="mt-1 text-base font-semibold text-cyan-100">
+                      {aiPlanAdvisor.recommendedDailyGoalPct.toFixed(2)}% {L("goal-day", "día de meta")}
+                    </p>
+                    <p className="mt-1 text-[11px] text-slate-400">
+                      {aiPlanAdvisor.riskPerTradePct.toFixed(2)}% {L("risk/trade", "riesgo/trade")} · {aiPlanAdvisor.maxDailyLossPct.toFixed(2)}% {L("max/day", "máx./día")}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-cyan-300/15 bg-slate-950/65 p-3">
+                    <p className="text-[10px] uppercase tracking-[0.18em] text-slate-500">
+                      {L("Recommended period", "Período recomendado")}
+                    </p>
+                    <p className="mt-1 text-base font-semibold text-cyan-100">
+                      {aiPlanAdvisor.totalTradingDays === null
+                        ? "—"
+                        : L(
+                            `${aiPlanAdvisor.totalTradingDays} trading days`,
+                            `${aiPlanAdvisor.totalTradingDays} días de trading`
+                          )}
+                    </p>
+                    <p className="mt-1 text-[11px] text-slate-400">
+                      {aiPlanAdvisor.totalOperatingWeeks === null
+                        ? L("Outside projection range", "Fuera del rango de proyección")
+                        : L(
+                            `${aiPlanAdvisor.totalOperatingWeeks} weeks · about ${aiPlanAdvisor.totalEstimatedMonths} months`,
+                            `${aiPlanAdvisor.totalOperatingWeeks} semanas · aprox. ${aiPlanAdvisor.totalEstimatedMonths} meses`
+                          )}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-cyan-300/15 bg-slate-950/65 p-3">
+                    <p className="text-[10px] uppercase tracking-[0.18em] text-slate-500">
+                      {L("Recommended completion", "Cumplimiento recomendado")}
+                    </p>
+                    <p className="mt-1 text-base font-semibold text-cyan-100">
+                      {formatPlanDate(aiPlanAdvisor.recommendedCompletionDate, lang)}
+                    </p>
+                    <p className="mt-1 text-[11px] text-slate-400">
+                      {L("Calculated from the operating assumptions above", "Calculado con los supuestos operativos anteriores")}
+                    </p>
+                  </div>
+                </div>
+                <p className="mt-3 text-[10px] leading-4 text-slate-500">
+                  {L(
+                    "Planning projection only. It is not a promise of returns; actual completion depends on execution, losses, withdrawals, and market conditions.",
+                    "Proyección de planificación solamente. No es una promesa de rendimiento; el cumplimiento real depende de la ejecución, pérdidas, retiros y condiciones del mercado."
+                  )}
+                </p>
+                </div>
+                <div className="p-4">
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">
+                      {L("Recommended execution periods", "Períodos de ejecución recomendados")}
+                    </p>
+                    <span className="text-[10px] text-slate-500">
+                      {L("Percentage remains constant", "El porcentaje se mantiene constante")}
+                    </span>
+                  </div>
+                <div className="grid gap-2 md:grid-cols-3">
                   {aiPlanAdvisor.phases.map((phase) => (
                     <div key={`${phase.title}-${phase.targetEquity}`} className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
                       <p className="text-[10px] uppercase tracking-[0.18em] text-cyan-200">
@@ -2775,13 +2942,25 @@ export default function GrowthPlanPage() {
                       </p>
                       <p className="text-[11px] text-slate-400">
                         {L("Est. date", "Fecha est.")}:{" "}
-                        <span className="text-slate-100">{phase.targetDate ?? "—"}</span>
+                        <span className="text-slate-100">{formatPlanDate(phase.targetDate, lang)}</span>
+                      </p>
+                      <p className="text-[11px] text-slate-400">
+                        {L("Period", "Período")}:{" "}
+                        <span className="text-slate-100">
+                          {phase.tradingDays === null
+                            ? "—"
+                            : L(
+                                `${phase.tradingDays} days · ${phase.operatingWeeks} weeks · ~${phase.estimatedMonths} months`,
+                                `${phase.tradingDays} días · ${phase.operatingWeeks} semanas · ~${phase.estimatedMonths} meses`
+                              )}
+                        </span>
                       </p>
                       <p className="mt-2 text-[11px] leading-5 text-slate-300">
                         {phase.guardrail}
                       </p>
                     </div>
                   ))}
+                </div>
                 </div>
               </div>
             ) : null}
@@ -4032,6 +4211,14 @@ export default function GrowthPlanPage() {
       aiPlanAdvisor: {
         headline: aiPlanAdvisor.headline,
         body: aiPlanAdvisor.body,
+        scenarioTitle: aiPlanAdvisor.scenarioTitle,
+        recommendedDailyGoalPct: aiPlanAdvisor.recommendedDailyGoalPct,
+        maxDailyLossPct: aiPlanAdvisor.maxDailyLossPct,
+        riskPerTradePct: aiPlanAdvisor.riskPerTradePct,
+        lossDaysPerWeek: aiPlanAdvisor.lossDaysPerWeek,
+        totalTradingDays: aiPlanAdvisor.totalTradingDays,
+        totalOperatingWeeks: aiPlanAdvisor.totalOperatingWeeks,
+        totalEstimatedMonths: aiPlanAdvisor.totalEstimatedMonths,
         recommendedCompletionDate: aiPlanAdvisor.recommendedCompletionDate,
         phases: aiPlanAdvisor.phases,
         reviewedAt: new Date().toISOString(),

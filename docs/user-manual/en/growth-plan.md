@@ -14,15 +14,28 @@ Have three numbers ready:
 ## Plan Mode (Automatic)
 The plan is always automatic (date‑based). The system uses your target date to calculate trading days and pacing. This keeps the plan grounded in time, not fantasy.
 
+## AI Recommended Operating Path
+Complete the five Business Analysis inputs: risk profile, experience, income dependency, drawdown comfort, and trading style. The plan then presents an explicit operating recommendation based on your starting capital and business target.
+
+The recommendation shows:
+1. The operating scenario that best fits your profile.
+2. Goal-day %, risk per trade, maximum daily loss, and planned loss days per week.
+3. Estimated trading days, operating weeks, months, and completion date.
+4. Phase-by-phase capital targets, percentages, dates, and execution periods.
+
+Select **Apply AI recommendation** to place the recommended scenario, percentages, and realistic target date into the plan. The percentage remains constant through the phases so projected growth comes from compounding rather than automatically increasing risk.
+
+This is a planning projection, not a promise of returns. Actual timing changes with execution, losses, withdrawals, and market conditions.
+
 ## 1) Starting Balance
 What it is: your current broker account equity.  
 Why it matters: all risk and pacing are calculated from this number.  
-How to fill it: use the actual number you can trade today (not your goal).
+How to fill it: edit **Starting Capital** directly inside `Goal & Numbers → Business Analysis → Capital Policy Profile`. Use the actual number you can trade today (not your goal).
 
 ## 2) Target Balance
 What it is: the total equity you want to reach by the target date.  
 Why it matters: defines the growth requirement for the plan.  
-How to fill it: set a meaningful, realistic destination that motivates discipline.
+How to fill it: edit **Business Target** beside Starting Capital. Set a meaningful destination, then review the AI-recommended period before saving.
 
 ## 3) Target Date
 What it is: the deadline for your target balance.  

@@ -14,15 +14,28 @@ Ten listos estos tres números:
 ## Modo del plan (Automático)
 El plan es siempre automático (por fecha). El sistema usa tu fecha objetivo para calcular días de trading y ritmo. Esto mantiene el plan anclado a la realidad.
 
+## Ruta operativa recomendada por IA
+Completa los cinco inputs de Business Analysis: perfil de riesgo, experiencia, dependencia de ingresos, tolerancia al drawdown y estilo de trading. El plan presentará una recomendación operativa explícita basada en tu capital inicial y meta empresarial.
+
+La recomendación muestra:
+1. El escenario operativo más apropiado para tu perfil.
+2. Porcentaje en días de meta, riesgo por trade, pérdida diaria máxima y días de pérdida planificados por semana.
+3. Días de trading, semanas operativas, meses y fecha estimada de cumplimiento.
+4. Metas de capital, porcentajes, fechas y períodos de ejecución para cada fase.
+
+Selecciona **Aplicar recomendación IA** para colocar en el plan el escenario, los porcentajes y la fecha objetivo realista recomendados. El porcentaje se mantiene constante durante las fases para que el crecimiento proyectado venga del compounding y no de aumentar automáticamente el riesgo.
+
+Esto es una proyección de planificación, no una promesa de rendimiento. El tiempo real cambia según la ejecución, pérdidas, retiros y condiciones del mercado.
+
 ## 1) Balance inicial
 Qué es: tu equity actual en el broker.  
 Por qué importa: todo el riesgo y el ritmo se calculan desde aquí.  
-Cómo llenarlo: usa el número real con el que operarás hoy.
+Cómo llenarlo: edita **Capital inicial** directamente en `Meta y números → Análisis empresarial → Perfil de política de capital`. Usa el número real con el que operarás hoy.
 
 ## 2) Balance objetivo
 Qué es: el equity total que quieres alcanzar en la fecha objetivo.  
 Por qué importa: define el crecimiento requerido.  
-Cómo llenarlo: una meta significativa y alcanzable.
+Cómo llenarlo: edita **Meta empresarial** al lado de Capital inicial. Define una meta significativa y revisa el período recomendado por IA antes de guardar.
 
 ## 3) Fecha objetivo
 Qué es: la fecha límite de tu meta.  
