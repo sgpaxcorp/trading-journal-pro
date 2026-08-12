@@ -150,7 +150,12 @@ type NormalizedPhase = {
   id: string;
   title?: string | null;
   targetEquity: number;
-  targetDate?: string | null;
+  targetDate: string | null;
+  monthIndex?: number;
+  weekIndex?: number;
+  weeksInMonth?: number;
+  monthStartBalance?: number;
+  monthEndBalance?: number;
 };
 
 type PlanRow = {
@@ -615,6 +620,15 @@ function normalizePhases(raw: unknown): NormalizedPhase[] {
     title: item?.title ?? null,
     targetEquity: Math.max(0, Number(item?.targetEquity) || 0),
     targetDate: item?.targetDate ? String(item.targetDate).slice(0, 10) : null,
+    monthIndex: Number.isFinite(Number(item?.monthIndex)) ? Number(item.monthIndex) : undefined,
+    weekIndex: Number.isFinite(Number(item?.weekIndex)) ? Number(item.weekIndex) : undefined,
+    weeksInMonth: Number.isFinite(Number(item?.weeksInMonth)) ? Number(item.weeksInMonth) : undefined,
+    monthStartBalance: Number.isFinite(Number(item?.monthStartBalance))
+      ? Number(item.monthStartBalance)
+      : undefined,
+    monthEndBalance: Number.isFinite(Number(item?.monthEndBalance))
+      ? Number(item.monthEndBalance)
+      : undefined,
   }));
 }
 
@@ -1455,15 +1469,24 @@ export function DashboardScreen({ onOpenModule: _onOpenModule, onOpenJournalDate
     const targetIso = targetDateStr;
     if (!startIso || !targetIso || plan.startingBalance <= 0 || adjustedTargetBalance <= 0) return null;
 
-    const milestones = buildWeeklyMilestonesFromMonthlyGoals(
-      plan.startingBalance,
-      adjustedTargetBalance,
-      startIso,
-      targetIso,
-      Number(plan.lossDaysPerWeek ?? 0),
-      Number(plan.maxDailyLossPercent ?? 0),
-      Number(plan.averageTradingDaysPerWeek ?? 5)
+    const savedMilestones = normalizePhases(plan.planPhases).filter(
+      (phase) =>
+        phase.targetEquity > 0 &&
+        (phase.monthIndex ?? 0) > 0 &&
+        (phase.weekIndex ?? 0) > 0 &&
+        (phase.weeksInMonth ?? 0) > 0
     );
+    const milestones = savedMilestones.length
+      ? savedMilestones
+      : buildWeeklyMilestonesFromMonthlyGoals(
+          plan.startingBalance,
+          adjustedTargetBalance,
+          startIso,
+          targetIso,
+          Number(plan.lossDaysPerWeek ?? 0),
+          Number(plan.maxDailyLossPercent ?? 0),
+          Number(plan.averageTradingDaysPerWeek ?? 5)
+        );
     if (!milestones.length) return null;
 
     const todayStr = formatDateYYYYMMDD(new Date());

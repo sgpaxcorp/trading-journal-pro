@@ -27,6 +27,9 @@ Select **Apply AI recommendation** to place the recommended scenario, percentage
 
 This is a planning projection, not a promise of returns. Actual timing changes with execution, losses, withdrawals, and market conditions.
 
+## Platform synchronization
+After **Approve & Save**, the saved weekly phases become the official checkpoint source for both web and mobile. `Plan Progress` reads those same phases to calculate Week, Month, and Quarter checkpoints, while the Business Protection System receives the plan's daily-goal and maximum-loss limits. Editing the plan from mobile preserves the Business Analysis profile created on the web and regenerates the same official checkpoint schedule.
+
 ## 1) Starting Balance
 What it is: your current broker account equity.  
 Why it matters: all risk and pacing are calculated from this number.  

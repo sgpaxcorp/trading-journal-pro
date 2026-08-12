@@ -377,9 +377,18 @@ function normalizePhases(raw: any): Array<{
   id: string;
   title?: string | null;
   targetEquity: number;
-  targetDate?: string | null;
+  targetDate: string | null;
   status?: "pending" | "completed";
   completedAt?: string | null;
+  monthIndex?: number;
+  weekIndex?: number;
+  weeksInMonth?: number;
+  monthGoal?: number;
+  monthLabel?: string | null;
+  monthStartBalance?: number;
+  monthEndBalance?: number;
+  monthWithdrawal?: number;
+  cumulativeWithdrawals?: number;
 }> {
   const list = Array.isArray(raw) ? raw : [];
   return list.map((item) => ({
@@ -389,6 +398,23 @@ function normalizePhases(raw: any): Array<{
     targetDate: item.targetDate ? String(item.targetDate).slice(0, 10) : null,
     status: item.status ?? "pending",
     completedAt: item.completedAt ?? null,
+    monthIndex: Number.isFinite(Number(item.monthIndex)) ? Number(item.monthIndex) : undefined,
+    weekIndex: Number.isFinite(Number(item.weekIndex)) ? Number(item.weekIndex) : undefined,
+    weeksInMonth: Number.isFinite(Number(item.weeksInMonth)) ? Number(item.weeksInMonth) : undefined,
+    monthGoal: Number.isFinite(Number(item.monthGoal)) ? Number(item.monthGoal) : undefined,
+    monthLabel: item.monthLabel ? String(item.monthLabel) : null,
+    monthStartBalance: Number.isFinite(Number(item.monthStartBalance))
+      ? Number(item.monthStartBalance)
+      : undefined,
+    monthEndBalance: Number.isFinite(Number(item.monthEndBalance))
+      ? Number(item.monthEndBalance)
+      : undefined,
+    monthWithdrawal: Number.isFinite(Number(item.monthWithdrawal))
+      ? Number(item.monthWithdrawal)
+      : undefined,
+    cumulativeWithdrawals: Number.isFinite(Number(item.cumulativeWithdrawals))
+      ? Number(item.cumulativeWithdrawals)
+      : undefined,
   }));
 }
 
@@ -2287,15 +2313,26 @@ export default function DashboardPage() {
         5
     );
 
-    const milestones = buildWeeklyMilestonesFromMonthlyGoals(
-      starting,
-      target,
-      planStartStr,
-      targetDateStr,
-      lossDaysPerWeek,
-      maxDailyLossPercent,
-      averageTradingDaysPerWeek
+    const savedMilestones = normalizePhases(
+      (plan as any)?.planPhases ?? (plan as any)?.plan_phases
+    ).filter(
+      (phase) =>
+        phase.targetEquity > 0 &&
+        (phase.monthIndex ?? 0) > 0 &&
+        (phase.weekIndex ?? 0) > 0 &&
+        (phase.weeksInMonth ?? 0) > 0
     );
+    const milestones = savedMilestones.length
+      ? savedMilestones
+      : buildWeeklyMilestonesFromMonthlyGoals(
+          starting,
+          target,
+          planStartStr,
+          targetDateStr,
+          lossDaysPerWeek,
+          maxDailyLossPercent,
+          averageTradingDaysPerWeek
+        );
     if (!milestones.length) return null;
 
     const todayStr = formatDateYYYYMMDD(new Date());

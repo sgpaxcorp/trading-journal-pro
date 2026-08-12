@@ -130,6 +130,145 @@ function defaultSteps() {
   };
 }
 
+function hasBusinessAnalysisProfile(value: unknown) {
+  const profile = value && typeof value === "object" ? (value as Record<string, unknown>) : null;
+  return Boolean(
+    profile &&
+      cleanText(profile.riskProfile, 40) &&
+      cleanText(profile.experience, 40) &&
+      cleanText(profile.incomeDependency, 40) &&
+      cleanText(profile.drawdownComfort, 40) &&
+      cleanText(profile.tradingStyle, 40)
+  );
+}
+
+async function syncPlanProtectionRules(params: {
+  userId: string;
+  accountId: string;
+  startingBalance: number;
+  targetBalance: number;
+  planStartDate: string;
+  targetDate: string;
+  dailyGoalPercent: number;
+  maxLossPercent: number;
+}) {
+  const positive = (value: unknown) => {
+    const n = Number(value);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  };
+  const { data: existingRows, error: existingError } = await supabaseAdmin
+    .from("ntj_alert_rules")
+    .select("id,key")
+    .eq("user_id", params.userId)
+    .in("key", ["growth_plan_max_loss", "growth_plan_daily_goal"]);
+  if (existingError) throw existingError;
+
+  const commonConfig = {
+    source: "system",
+    origin: "growth_plan",
+    category: "growth_plan",
+    account_id: params.accountId,
+    starting_balance: positive(params.startingBalance),
+    target_balance: positive(params.targetBalance),
+    plan_start_date: params.planStartDate,
+    target_date: params.targetDate,
+    synced_at: new Date().toISOString(),
+  };
+  const maxLossPercent = positive(params.maxLossPercent);
+  const dailyGoalPercent = positive(params.dailyGoalPercent);
+  const desired = [
+    maxLossPercent > 0
+      ? {
+          key: "growth_plan_max_loss",
+          trigger_type: "MAX_LOSS",
+          title: "Trading Business Plan max loss guardrail",
+          message:
+            "Your Trading Business Plan max daily loss has been hit. Stop trading, protect capital, and record the decision before another entry.",
+          severity: "critical",
+          channels: ["popup", "inapp", "voice"],
+          config: {
+            ...commonConfig,
+            kind: "alarm",
+            protection_key: "growth_plan_max_loss",
+            max_loss: Number(((params.startingBalance * maxLossPercent) / 100).toFixed(2)),
+            max_loss_percent: maxLossPercent,
+          },
+        }
+      : null,
+    dailyGoalPercent > 0
+      ? {
+          key: "growth_plan_daily_goal",
+          trigger_type: "DAILY_GOAL",
+          title: "Trading Business Plan daily goal reached",
+          message:
+            "Your planned daily goal is reached. Protect the win, stop forcing trades, and record what worked.",
+          severity: "success",
+          channels: ["popup", "inapp"],
+          config: {
+            ...commonConfig,
+            kind: "alarm",
+            protection_key: "growth_plan_daily_goal",
+            daily_goal: Number(((params.startingBalance * dailyGoalPercent) / 100).toFixed(2)),
+            daily_goal_percent: dailyGoalPercent,
+          },
+        }
+      : null,
+  ].filter(Boolean) as Array<{
+    key: string;
+    trigger_type: string;
+    title: string;
+    message: string;
+    severity: string;
+    channels: string[];
+    config: Record<string, unknown>;
+  }>;
+
+  let created = 0;
+  let updated = 0;
+  let disabled = 0;
+  for (const rule of desired) {
+    const existing = (existingRows ?? []).find((row: any) => row?.key === rule.key);
+    const row = {
+      user_id: params.userId,
+      key: rule.key,
+      trigger_type: rule.trigger_type,
+      title: rule.title,
+      message: rule.message,
+      severity: rule.severity,
+      enabled: true,
+      channels: rule.channels,
+      config: rule.config,
+    };
+    if (existing?.id) {
+      const { error } = await supabaseAdmin
+        .from("ntj_alert_rules")
+        .update(row)
+        .eq("id", existing.id)
+        .eq("user_id", params.userId);
+      if (error) throw error;
+      updated += 1;
+    } else {
+      const { error } = await supabaseAdmin.from("ntj_alert_rules").insert(row);
+      if (error) throw error;
+      created += 1;
+    }
+  }
+
+  const desiredKeys = new Set(desired.map((rule) => rule.key));
+  const rulesToDisable = (existingRows ?? []).filter((row: any) => !desiredKeys.has(String(row?.key ?? "")));
+  for (const rule of rulesToDisable) {
+    const { error } = await supabaseAdmin
+      .from("ntj_alert_rules")
+      .update({ enabled: false })
+      .eq("id", rule.id)
+      .eq("user_id", params.userId);
+    if (error) throw error;
+    disabled += 1;
+  }
+
+  return { created, updated, disabled };
+}
+
 function normalizePlan(row: GrowthPlanRow | null) {
   if (!row) return null;
   const steps = row.steps && typeof row.steps === "object" ? row.steps : defaultSteps();
@@ -421,6 +560,14 @@ export async function POST(req: NextRequest) {
     const dontRules = splitRuleLines(body?.dontRules, DEFAULT_DONT_RULES);
     const orderRules = splitRuleLines(body?.orderRules, DEFAULT_ORDER_RULES);
     const currentSteps = current?.steps && typeof current.steps === "object" ? current.steps : defaultSteps();
+    const currentBusinessAnalysis =
+      (currentSteps as any)?.business_analysis && typeof (currentSteps as any).business_analysis === "object"
+        ? (currentSteps as any).business_analysis
+        : {};
+    const existingProfile = currentBusinessAnalysis?.profile;
+    const preserveProfile = hasBusinessAnalysisProfile(existingProfile);
+    const existingScenarioId = cleanText(currentBusinessAnalysis?.selectedScenarioId, 40);
+    const preserveScenarioId = ["conservative", "moderate", "aggressive"].includes(existingScenarioId);
     const requiredGoalPct = Number(projection.requiredGoalPct.toFixed(4));
     const targetMultiple = targetBalance / startingBalance;
     const nowIso = new Date().toISOString();
@@ -443,6 +590,35 @@ export async function POST(req: NextRequest) {
       monthWithdrawal: phase.monthWithdrawal,
       cumulativeWithdrawals: phase.cumulativeWithdrawals,
     }));
+    const synchronizedScenarioId = preserveScenarioId ? existingScenarioId : "mobile-operating-plan";
+    const synchronizedScenario = {
+      id: synchronizedScenarioId,
+      title:
+        cleanText(currentBusinessAnalysis?.selectedScenario?.title, 120) ||
+        (preserveScenarioId ? existingScenarioId : "Mobile operating plan"),
+      dailyGoalPct: requiredGoalPct,
+      maxDailyLossPct: maxDailyLossPercent,
+      riskPerTradePct: maxRiskPerTradePercent,
+      lossDaysPerWeek,
+      projectedEndBalance: projection.completionBalance,
+      recommended: true,
+    };
+    const existingScenarios = Array.isArray(currentBusinessAnalysis?.scenarios)
+      ? currentBusinessAnalysis.scenarios
+      : [];
+    const hasSynchronizedScenario = existingScenarios.some(
+      (scenario: any) => cleanText(scenario?.id, 40) === synchronizedScenarioId
+    );
+    const synchronizedScenarios = preserveScenarioId && existingScenarios.length
+      ? [
+          ...existingScenarios.map((scenario: any) =>
+            cleanText(scenario?.id, 40) === synchronizedScenarioId
+              ? { ...scenario, ...synchronizedScenario }
+              : scenario
+          ),
+          ...(hasSynchronizedScenario ? [] : [synchronizedScenario]),
+        ]
+      : [synchronizedScenario];
 
     const steps = {
       ...currentSteps,
@@ -453,14 +629,21 @@ export async function POST(req: NextRequest) {
         source: "mobile",
       },
       business_analysis: {
-        ...((currentSteps as any)?.business_analysis ?? {}),
-        profile: {
-          source: "mobile",
+        ...currentBusinessAnalysis,
+        profile: preserveProfile
+          ? existingProfile
+          : {
+              source: "mobile",
+              goal: `${startingBalance} to ${targetBalance}`,
+              strategy: strategyName,
+            },
+        selectedScenarioId: synchronizedScenarioId,
+        averageTradingDaysPerWeek,
+        mobileContext: {
           goal: `${startingBalance} to ${targetBalance}`,
           strategy: strategyName,
+          savedAt: nowIso,
         },
-        selectedScenarioId: "mobile-operating-plan",
-        averageTradingDaysPerWeek,
         operatingModel: {
           planStartDate,
           targetDate,
@@ -470,27 +653,8 @@ export async function POST(req: NextRequest) {
           maxDailyLossPercent,
           riskPerTradePct: maxRiskPerTradePercent,
         },
-        selectedScenario: {
-          id: "mobile-operating-plan",
-          title: "Mobile operating plan",
-          dailyGoalPct: requiredGoalPct,
-          maxDailyLossPct: maxDailyLossPercent,
-          riskPerTradePct: maxRiskPerTradePercent,
-          lossDaysPerWeek,
-          recommended: true,
-        },
-        scenarios: [
-          {
-            id: "mobile-operating-plan",
-            title: "Mobile operating plan",
-            dailyGoalPct: requiredGoalPct,
-            maxDailyLossPct: maxDailyLossPercent,
-            riskPerTradePct: maxRiskPerTradePercent,
-            lossDaysPerWeek,
-            projectedEndBalance: projection.completionBalance,
-            recommended: true,
-          },
-        ],
+        selectedScenario: synchronizedScenario,
+        scenarios: synchronizedScenarios,
         realismReview: {
           verdict: requiredGoalPct > 3 ? "aggressive" : requiredGoalPct > 1 ? "ambitious" : "measured",
           requiredGoalPct,
@@ -594,10 +758,27 @@ export async function POST(req: NextRequest) {
       reason: current ? "mobile_plan_updated" : "mobile_plan_created",
     });
 
+    let protectionSync: { created: number; updated: number; disabled: number } | null = null;
+    try {
+      protectionSync = await syncPlanProtectionRules({
+        userId,
+        accountId,
+        startingBalance,
+        targetBalance,
+        planStartDate,
+        targetDate,
+        dailyGoalPercent: requiredGoalPct,
+        maxLossPercent: maxDailyLossPercent,
+      });
+    } catch (protectionError) {
+      console.warn("[growth-plan/mobile] protection sync warning:", protectionError);
+    }
+
     return NextResponse.json({
       ok: true,
       accountId,
       plan: normalizePlan(data as GrowthPlanRow),
+      protectionSync,
       projection: {
         requiredGoalPct,
         tradingDays: projection.tradingDays.length,

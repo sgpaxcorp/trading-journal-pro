@@ -27,6 +27,9 @@ Selecciona **Aplicar recomendación IA** para colocar en el plan el escenario, l
 
 Esto es una proyección de planificación, no una promesa de rendimiento. El tiempo real cambia según la ejecución, pérdidas, retiros y condiciones del mercado.
 
+## Sincronización con la plataforma
+Después de **Aprobar y guardar**, las fases semanales guardadas se convierten en la fuente oficial de checkpoints para web y mobile. `Plan Progress` usa esas mismas fases para calcular los checkpoints de Semana, Mes y Trimestre, mientras el Sistema de Protección Empresarial recibe los límites de meta diaria y pérdida máxima del plan. Editar el plan desde mobile conserva el perfil de Business Analysis creado en web y regenera el mismo calendario oficial de checkpoints.
+
 ## 1) Balance inicial
 Qué es: tu equity actual en el broker.  
 Por qué importa: todo el riesgo y el ritmo se calculan desde aquí.  
