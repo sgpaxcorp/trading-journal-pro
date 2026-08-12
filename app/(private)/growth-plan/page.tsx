@@ -2498,20 +2498,60 @@ export default function GrowthPlanPage() {
             </div>
             <div className="mt-4 grid gap-2 md:grid-cols-3">
               <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-3">
-                <p className="text-[10px] uppercase tracking-[0.18em] text-slate-500">
+                <label
+                  htmlFor="gp-business-starting-balance"
+                  className="text-[10px] uppercase tracking-[0.18em] text-slate-500"
+                >
                   {L("Starting capital", "Capital inicial")}
-                </p>
-                <p className="mt-1 text-lg font-semibold text-slate-100">
-                  {startingBalance > 0 ? currency(startingBalance) : "—"}
-                </p>
+                </label>
+                <div className="mt-1 flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-950 px-3 transition focus-within:border-cyan-300 focus-within:ring-2 focus-within:ring-cyan-300/10">
+                  <span className="text-base font-semibold text-cyan-200">$</span>
+                  <input
+                    id="gp-business-starting-balance"
+                    inputMode="decimal"
+                    aria-label={L("Starting capital in USD", "Capital inicial en USD")}
+                    value={startingBalanceStr}
+                    onFocus={() => fieldHelp("starting_balance")}
+                    onChange={(event) => {
+                      setStartingBalanceStr(onlyNum(event.target.value));
+                      setAutoPhasesGenerated(false);
+                    }}
+                    onBlur={() => {
+                      if (!startingBalanceStr.trim()) return;
+                      setStartingBalanceStr(String(Math.max(0, startingBalance)));
+                    }}
+                    className="min-w-0 flex-1 bg-transparent py-2 text-lg font-semibold text-slate-100 outline-none placeholder:text-slate-700"
+                    placeholder="0.00"
+                  />
+                </div>
               </div>
               <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-3">
-                <p className="text-[10px] uppercase tracking-[0.18em] text-slate-500">
+                <label
+                  htmlFor="gp-business-target-balance"
+                  className="text-[10px] uppercase tracking-[0.18em] text-slate-500"
+                >
                   {L("Business target", "Meta empresarial")}
-                </p>
-                <p className="mt-1 text-lg font-semibold text-slate-100">
-                  {targetBalance > 0 ? currency(targetBalance) : "—"}
-                </p>
+                </label>
+                <div className="mt-1 flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-950 px-3 transition focus-within:border-cyan-300 focus-within:ring-2 focus-within:ring-cyan-300/10">
+                  <span className="text-base font-semibold text-cyan-200">$</span>
+                  <input
+                    id="gp-business-target-balance"
+                    inputMode="decimal"
+                    aria-label={L("Business target in USD", "Meta empresarial en USD")}
+                    value={targetBalanceStr}
+                    onFocus={() => fieldHelp("target_balance")}
+                    onChange={(event) => {
+                      setTargetBalanceStr(onlyNum(event.target.value));
+                      setAutoPhasesGenerated(false);
+                    }}
+                    onBlur={() => {
+                      if (!targetBalanceStr.trim()) return;
+                      setTargetBalanceStr(String(Math.max(0, targetBalance)));
+                    }}
+                    className="min-w-0 flex-1 bg-transparent py-2 text-lg font-semibold text-slate-100 outline-none placeholder:text-slate-700"
+                    placeholder="0.00"
+                  />
+                </div>
               </div>
               <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-3">
                 <p className="text-[10px] uppercase tracking-[0.18em] text-slate-500">
@@ -2524,6 +2564,12 @@ export default function GrowthPlanPage() {
                 </p>
               </div>
             </div>
+            <p className="mt-2 text-[11px] leading-5 text-slate-500">
+              {L(
+                "Edit the capital and target here. Your scenarios and checkpoints recalculate automatically; save the plan to make the changes permanent.",
+                "Edita aquí el capital y la meta. Los escenarios y checkpoints se recalculan automáticamente; guarda el plan para hacer permanentes los cambios."
+              )}
+            </p>
           </div>
 
           <div className="grid gap-3 xl:grid-cols-5">
