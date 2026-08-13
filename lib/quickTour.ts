@@ -211,20 +211,20 @@ const BUILDERS: QuickTourBuilder[] = [
         },
         {
           id: "gp-withdrawals",
-          title: L("Owner cashflows", "Cashflows del dueño"),
+          title: L("Capital flows", "Flujos de capital"),
           body: L(
-            "Planned withdrawals separate business performance from owner distributions. Use this so the dashboard does not mistake withdrawals for trading failure.",
-            "Los retiros planificados separan performance del negocio de distribuciones del dueño. Úsalo para que el dashboard no confunda retiros con fallo de trading."
+            "Define recurring contributions and withdrawals before the evaluation. They change account equity, but remain separate from trading return in every checkpoint.",
+            "Define aportaciones y retiros recurrentes antes de la evaluación. Cambian el equity, pero permanecen separados del rendimiento de trading en cada checkpoint."
           ),
           anchor: "gp-planned-withdrawals",
           selector: "#gp-planned-withdrawals",
         },
         {
           id: "gp-mode",
-          title: L("Plan mode and phases", "Modo del plan y fases"),
+          title: L("Adaptive checkpoint mode", "Modo adaptativo de checkpoints"),
           body: L(
-            "Choose automatic checkpoints or manual phases. Automatic is faster; phases give more control when your growth plan changes by stage.",
-            "Elige checkpoints automáticos o fases manuales. Automático es más rápido; las fases dan más control cuando tu crecimiento cambia por etapa."
+            "The plan automatically turns the accepted disciplined horizon into official checkpoints. An unsupported requested deadline cannot become the active operating schedule.",
+            "El plan convierte automáticamente el horizonte disciplinado aceptado en checkpoints oficiales. Un plazo solicitado no respaldado no puede convertirse en el calendario operativo activo."
           ),
           anchor: "gp-plan-mode",
           selector: "#gp-plan-mode",
@@ -261,20 +261,20 @@ const BUILDERS: QuickTourBuilder[] = [
         },
         {
           id: "gp-required-goal",
-          title: L("Required pace", "Ritmo requerido"),
+          title: L("Requested pace vs. operating pace", "Ritmo solicitado vs. ritmo operativo"),
           body: L(
-            "Compare the perfect-path session rate with the loss-adjusted goal-day rate, scenario coverage, and real execution evidence. Research AI explains the verified math but cannot change it or promise returns.",
-            "Compara el ritmo de trayectoria perfecta con el ritmo ajustado por pérdidas en días de meta, cobertura del escenario y evidencia real. Research AI explica la matemática verificada, pero no puede cambiarla ni prometer retornos."
+            "The requested rate is only a mathematical diagnostic. The adaptive model uses risk policy, expected losses, market sessions, withdrawals, and real execution evidence to recommend a defensible horizon. Research AI explains the verified math but cannot change it or promise returns.",
+            "El ritmo solicitado es solo un diagnóstico matemático. El modelo adaptativo usa política de riesgo, pérdidas esperadas, sesiones del mercado, retiros y evidencia real para recomendar un horizonte defendible. Research AI explica la matemática verificada, pero no puede cambiarla ni prometer retornos."
           ),
           anchor: "gp-required-goal",
           selector: "#gp-required-goal",
         },
         {
           id: "gp-phase-builder",
-          title: L("Stage the business", "Divide la empresa por etapas"),
+          title: L("Discipline roadmap", "Ruta de disciplina"),
           body: L(
-            "Phases let you run the account like a staged business plan: build consistency, increase size only after evidence, and protect capital during transitions.",
-            "Las fases te permiten operar la cuenta como un plan empresarial por etapas: construir consistencia, subir tamaño solo con evidencia y proteger capital en transiciones."
+            "Work toward the next monthly checkpoint while weekly checkpoints detect drift. Quarterly and annual targets preserve direction without making the trader chase the distant final number.",
+            "Trabaja hacia el próximo checkpoint mensual mientras los checkpoints semanales detectan desviación. Las metas trimestrales y anuales mantienen dirección sin hacer que el trader persiga la cifra final distante."
           ),
           anchor: "gp-phase-builder",
           selector: "#gp-phase-builder",

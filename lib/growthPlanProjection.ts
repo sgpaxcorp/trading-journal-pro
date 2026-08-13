@@ -15,6 +15,19 @@ export type PlannedWithdrawalSettings = {
   startPeriodIndex?: number | null;
 };
 
+export type PlannedDepositSettings = PlannedWithdrawalSettings;
+
+export type PlannedDepositEvent = {
+  id: string;
+  amount: number;
+  plannedDate: string | null;
+  periodIndex: number | null;
+  periodLabel: string | null;
+  frequency: WithdrawalFrequency | null;
+  projectedEquityBeforeDeposit: number;
+  projectedEquityAfterDeposit: number;
+};
+
 export type PlannedWithdrawalEvent = {
   id: string;
   amount: number;
@@ -37,8 +50,10 @@ export type ProjectionRow = {
   pct: number;
   startBalance: number;
   expectedUSD: number;
+  depositUSD: number;
   withdrawalUSD: number;
   endBalance: number;
+  cumulativeDeposits: number;
   cumulativeWithdrawals: number;
 };
 
@@ -53,6 +68,8 @@ export type CadenceTarget = {
   monthStartBalance?: number;
   monthEndBalance?: number;
   monthWithdrawal?: number;
+  monthDeposit?: number;
+  cumulativeDeposits?: number;
   cumulativeWithdrawals?: number;
 };
 
@@ -60,6 +77,7 @@ export type ProjectionResult = {
   rows: ProjectionRow[];
   requiredGoalPct: number;
   tradingDays: string[];
+  deposits: PlannedDepositEvent[];
   withdrawals: PlannedWithdrawalEvent[];
   milestones: CadenceTarget[];
   completionDate: string | null;
@@ -177,6 +195,8 @@ export function normalizeWithdrawalSettings(raw: unknown): PlannedWithdrawalSett
   };
 }
 
+export const normalizeDepositSettings = normalizeWithdrawalSettings;
+
 export function normalizePlannedWithdrawals(rows: unknown): PlannedWithdrawalEvent[] {
   const list = Array.isArray(rows) ? rows : [];
   return list.map((row: any) => ({
@@ -277,7 +297,7 @@ function buildPeriodBuckets(tradingDays: string[], frequency: WithdrawalFrequenc
   return buckets;
 }
 
-function buildWithdrawalSchedule(
+function buildCapitalFlowSchedule(
   tradingDays: string[],
   settings: PlannedWithdrawalSettings | null,
   existingEvents?: PlannedWithdrawalEvent[]
@@ -339,12 +359,14 @@ function simulatePlanRows(params: {
   lossDaysPerWeek: number;
   lossPct: number;
   goalPctDecimal: number;
+  depositByDay: Map<number, number>;
   withdrawalByDay: Map<number, number>;
 }) {
   const rows: ProjectionRow[] = [];
   const daysPerCycle = resolveAverageTradingDaysPerWeek(params.averageTradingDaysPerWeek);
   const perWeek = clampInt(params.lossDaysPerWeek, 0, daysPerCycle);
   let balance = params.starting;
+  let cumulativeDeposits = 0;
   let cumulativeWithdrawals = 0;
 
   for (let i = 0; i < params.tradingDays.length; i++) {
@@ -354,9 +376,11 @@ function simulatePlanRows(params: {
     const pctDecimal = isLoss ? -(params.lossPct / 100) : params.goalPctDecimal;
     const startBalance = balance;
     const expectedUSD = startBalance * pctDecimal;
-    const beforeWithdrawal = startBalance + expectedUSD;
+    const depositUSD = params.depositByDay.get(day) ?? 0;
+    const beforeWithdrawal = startBalance + expectedUSD + depositUSD;
     const withdrawalUSD = params.withdrawalByDay.get(day) ?? 0;
-    const endBalance = beforeWithdrawal - withdrawalUSD;
+    const endBalance = Math.max(0, beforeWithdrawal - withdrawalUSD);
+    cumulativeDeposits += depositUSD;
     cumulativeWithdrawals += withdrawalUSD;
 
     rows.push({
@@ -366,8 +390,10 @@ function simulatePlanRows(params: {
       pct: pctDecimal * 100,
       startBalance,
       expectedUSD,
+      depositUSD,
       withdrawalUSD,
       endBalance,
+      cumulativeDeposits,
       cumulativeWithdrawals,
     });
 
@@ -384,6 +410,7 @@ function solveRequiredGoalPct(params: {
   averageTradingDaysPerWeek?: number | null;
   lossDaysPerWeek: number;
   lossPct: number;
+  depositByDay: Map<number, number>;
   withdrawalByDay: Map<number, number>;
 }) {
   if (params.starting <= 0 || params.target <= 0 || params.tradingDays.length === 0) return 0;
@@ -396,6 +423,7 @@ function solveRequiredGoalPct(params: {
       lossDaysPerWeek: params.lossDaysPerWeek,
       lossPct: params.lossPct,
       goalPctDecimal,
+      depositByDay: params.depositByDay,
       withdrawalByDay: params.withdrawalByDay,
     });
     return rows[rows.length - 1]?.endBalance ?? params.starting;
@@ -444,6 +472,7 @@ function buildMilestonesFromRows(
     const monthStartBalance = startIndex > 1 ? rows[startIndex - 2]?.endBalance ?? rows[0].startBalance : rows[0].startBalance;
     const monthEndBalance = endRow?.endBalance ?? monthStartBalance;
     const monthGoalProfit = indices.reduce((sum, idx) => sum + (rows[idx - 1]?.expectedUSD ?? 0), 0);
+    const monthDeposit = indices.reduce((sum, idx) => sum + (rows[idx - 1]?.depositUSD ?? 0), 0);
     const monthWithdrawal = indices.reduce((sum, idx) => sum + (rows[idx - 1]?.withdrawalUSD ?? 0), 0);
     const weeksInMonth = Math.max(1, Math.ceil(indices.length / daysPerCycle));
 
@@ -460,7 +489,9 @@ function buildMilestonesFromRows(
         monthLabel: monthKey,
         monthStartBalance: Number(monthStartBalance.toFixed(2)),
         monthEndBalance: Number(monthEndBalance.toFixed(2)),
+        monthDeposit: Number(monthDeposit.toFixed(2)),
         monthWithdrawal: Number(monthWithdrawal.toFixed(2)),
+        cumulativeDeposits: Number((weekEndRow?.cumulativeDeposits ?? 0).toFixed(2)),
         cumulativeWithdrawals: Number((weekEndRow?.cumulativeWithdrawals ?? 0).toFixed(2)),
       });
     }
@@ -477,6 +508,8 @@ export function buildPlanProjection(params: {
   averageTradingDaysPerWeek?: number | null;
   lossDaysPerWeek: number;
   maxDailyLossPercent: number;
+  modeledLossDayPercent?: number | null;
+  depositSettings?: PlannedDepositSettings | null;
   withdrawalSettings?: PlannedWithdrawalSettings | null;
   existingWithdrawals?: PlannedWithdrawalEvent[] | null;
   tradingInstrument?: TradingInstrument;
@@ -486,6 +519,7 @@ export function buildPlanProjection(params: {
       rows: [],
       requiredGoalPct: 0,
       tradingDays: [],
+      deposits: [],
       withdrawals: [],
       milestones: [],
       completionDate: null,
@@ -511,6 +545,7 @@ export function buildPlanProjection(params: {
       rows: [],
       requiredGoalPct: 0,
       tradingDays: [],
+      deposits: [],
       withdrawals: [],
       milestones: [],
       completionDate: null,
@@ -520,10 +555,24 @@ export function buildPlanProjection(params: {
     };
   }
 
-  const schedule = buildWithdrawalSchedule(
+  const depositSchedule = buildCapitalFlowSchedule(
+    tradingDays,
+    params.depositSettings ?? null,
+    []
+  );
+  const withdrawalSchedule = buildCapitalFlowSchedule(
     tradingDays,
     params.withdrawalSettings ?? null,
     params.existingWithdrawals ?? []
+  );
+  const modeledLossDayPercent = Math.max(
+    0,
+    Math.min(
+      Math.max(0, params.maxDailyLossPercent),
+      params.modeledLossDayPercent == null
+        ? Math.max(0, params.maxDailyLossPercent)
+        : Math.max(0, toNum(params.modeledLossDayPercent, 0))
+    )
   );
 
   const goalPctDecimal = solveRequiredGoalPct({
@@ -532,8 +581,9 @@ export function buildPlanProjection(params: {
     tradingDays,
     averageTradingDaysPerWeek,
     lossDaysPerWeek: params.lossDaysPerWeek,
-    lossPct: Math.max(0, params.maxDailyLossPercent),
-    withdrawalByDay: schedule.byDay,
+    lossPct: modeledLossDayPercent,
+    depositByDay: depositSchedule.byDay,
+    withdrawalByDay: withdrawalSchedule.byDay,
   });
 
   const rows = simulatePlanRows({
@@ -541,9 +591,10 @@ export function buildPlanProjection(params: {
     tradingDays,
     averageTradingDaysPerWeek,
     lossDaysPerWeek: params.lossDaysPerWeek,
-    lossPct: Math.max(0, params.maxDailyLossPercent),
+    lossPct: modeledLossDayPercent,
     goalPctDecimal,
-    withdrawalByDay: schedule.byDay,
+    depositByDay: depositSchedule.byDay,
+    withdrawalByDay: withdrawalSchedule.byDay,
   });
 
   const firstTargetHitIndex = rows.findIndex((row) => row.endBalance >= params.target);
@@ -553,7 +604,25 @@ export function buildPlanProjection(params: {
   const effectiveTradingDays = tradingDays.slice(0, completionIndex + 1);
   const completionRow = effectiveRows[effectiveRows.length - 1] ?? null;
 
-  const withdrawals = schedule.events
+  const deposits = depositSchedule.events
+    .filter((event) => event.endDayIndex <= effectiveRows.length)
+    .map((event) => {
+      const row = effectiveRows[event.endDayIndex - 1];
+      const before = row ? row.endBalance - row.depositUSD + row.withdrawalUSD : 0;
+      const after = before + event.amount;
+      return {
+        id: event.id,
+        amount: event.amount,
+        plannedDate: event.plannedDate,
+        periodIndex: event.periodIndex,
+        periodLabel: event.periodLabel,
+        frequency: event.frequency,
+        projectedEquityBeforeDeposit: Number(before.toFixed(2)),
+        projectedEquityAfterDeposit: Number(after.toFixed(2)),
+      } satisfies PlannedDepositEvent;
+    });
+
+  const withdrawals = withdrawalSchedule.events
     .filter((event) => event.endDayIndex <= effectiveRows.length)
     .map((event) => {
       const row = effectiveRows[event.endDayIndex - 1];
@@ -585,6 +654,7 @@ export function buildPlanProjection(params: {
     rows: effectiveRows,
     requiredGoalPct: goalPctDecimal * 100,
     tradingDays: effectiveTradingDays,
+    deposits,
     withdrawals,
     milestones,
     completionDate: completionRow?.isoDate ?? null,

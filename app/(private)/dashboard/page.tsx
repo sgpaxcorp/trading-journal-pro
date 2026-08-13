@@ -387,7 +387,9 @@ function normalizePhases(raw: any): Array<{
   monthLabel?: string | null;
   monthStartBalance?: number;
   monthEndBalance?: number;
+  monthDeposit?: number;
   monthWithdrawal?: number;
+  cumulativeDeposits?: number;
   cumulativeWithdrawals?: number;
 }> {
   const list = Array.isArray(raw) ? raw : [];
@@ -409,8 +411,14 @@ function normalizePhases(raw: any): Array<{
     monthEndBalance: Number.isFinite(Number(item.monthEndBalance))
       ? Number(item.monthEndBalance)
       : undefined,
+    monthDeposit: Number.isFinite(Number(item.monthDeposit))
+      ? Number(item.monthDeposit)
+      : undefined,
     monthWithdrawal: Number.isFinite(Number(item.monthWithdrawal))
       ? Number(item.monthWithdrawal)
+      : undefined,
+    cumulativeDeposits: Number.isFinite(Number(item.cumulativeDeposits))
+      ? Number(item.cumulativeDeposits)
       : undefined,
     cumulativeWithdrawals: Number.isFinite(Number(item.cumulativeWithdrawals))
       ? Number(item.cumulativeWithdrawals)
@@ -2191,6 +2199,10 @@ export default function DashboardPage() {
     const cleaned = String(raw || "").toLowerCase();
     return ["weekly", "monthly", "quarterly", "biannual"].includes(cleaned) ? (cleaned as any) : "monthly";
   }, [plan]);
+  const adaptivePlanSummary = useMemo(() => {
+    const value = (plan as any)?.steps?.business_analysis?.adaptivePlan;
+    return value && typeof value === "object" ? value : null;
+  }, [plan]);
 
   const autoCadenceLabel =
     autoPhaseCadence === "weekly"
@@ -2959,6 +2971,44 @@ export default function DashboardPage() {
             </span>
             <span className={widgetDragHintClass}>⠿</span>
           </p>
+
+          {adaptivePlanSummary ? (
+            <div className="mt-3 rounded-xl border border-cyan-300/20 bg-cyan-300/5 p-3">
+              <p className="text-[11px] uppercase tracking-[0.2em] text-cyan-200">
+                {L("Adaptive plan guidance", "Guía adaptativa del plan")}
+              </p>
+              <p className="mt-1 text-[13px] font-semibold text-slate-100">
+                {adaptivePlanSummary.verdict === "not_supported"
+                  ? L(
+                      "The requested deadline is not supported by the active discipline model.",
+                      "El plazo solicitado no está respaldado por el modelo activo de disciplina."
+                    )
+                  : adaptivePlanSummary.verdict === "no_validated_edge"
+                    ? L(
+                        "Validate a positive edge before using a completion date.",
+                        "Valida una ventaja positiva antes de usar una fecha de cumplimiento."
+                      )
+                    : L(
+                        "This roadmap remains provisional while execution evidence develops.",
+                        "Esta ruta sigue provisional mientras se desarrolla la evidencia de ejecución."
+                      )}
+              </p>
+              <p className="mt-1 text-[11px] leading-5 text-slate-400">
+                {L("Projected by requested date:", "Proyectado para la fecha solicitada:")} {formatCurrency(Number(adaptivePlanSummary.requestedProjectedBalance ?? 0))}
+                {adaptivePlanSummary.recommendedCompletionDate
+                  ? ` · ${L("Recommended horizon:", "Horizonte recomendado:")} ${adaptivePlanSummary.recommendedCompletionDate}`
+                  : ""}
+                {adaptivePlanSummary.nextMilestone?.targetBalance
+                  ? ` · ${L("Next monthly checkpoint:", "Próximo checkpoint mensual:")} ${formatCurrency(Number(adaptivePlanSummary.nextMilestone.targetBalance))}`
+                  : ""}
+              </p>
+              <p className="mt-1 text-[11px] leading-5 text-slate-500">
+                {L("Trading growth:", "Crecimiento de trading:")} {formatCurrency(Number(adaptivePlanSummary.requestedTradingGrowthUsd ?? 0))}
+                {` · ${L("Contributions:", "Aportaciones:")} ${formatCurrency(Number(adaptivePlanSummary.requestedDepositsUsd ?? 0))}`}
+                {` · ${L("Withdrawals:", "Retiros:")} ${formatCurrency(Number(adaptivePlanSummary.requestedWithdrawalsUsd ?? 0))}`}
+              </p>
+            </div>
+          ) : null}
 
           {!plan ? (
             <p className="text-[14px] text-slate-500 mt-2">

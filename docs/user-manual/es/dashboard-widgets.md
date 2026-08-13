@@ -64,6 +64,9 @@ Compara tu balance actual contra la ruta del Growth Plan.
 
 Qué incluye:
 - fase actual
+- estado de viabilidad adaptativa y horizonte recomendado
+- balance proyectado para la fecha solicitada y cobertura del plazo
+- próximo checkpoint mensual de disciplina
 - `Checkpoint start`
 - `Balance now`
 - `Checkpoint target`
@@ -74,6 +77,8 @@ Qué responde:
 - `¿Voy adelantado o atrasado contra el plan?`
 
 Importante:
+- Si el plazo solicitado no estaba respaldado, los checkpoints activos siguen el horizonte disciplinado aceptado.
+- Un estado provisional significa que la ruta todavía requiere una muestra documentada de ejecución; no es una promesa de retornos.
 - `Week / Month / Quarter` aquí no significan “mi P&L realizado de esa semana o mes”.
 - Son checkpoints del plan.
 - El sistema compara:

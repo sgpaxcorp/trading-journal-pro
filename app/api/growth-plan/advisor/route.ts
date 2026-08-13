@@ -23,6 +23,23 @@ function textList(value: unknown) {
     : [];
 }
 
+function milestoneList(value: unknown, maxItems: number) {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, maxItems).map((item: any) => ({
+    cadence: text(item?.cadence, 20),
+    periodIndex: Math.max(0, Math.floor(finite(item?.periodIndex))),
+    targetDate: text(item?.targetDate, 20),
+    startBalanceUsd: finite(item?.startBalance),
+    targetBalanceUsd: finite(item?.targetBalance),
+    plannedChangeUsd: finite(item?.plannedChangeUsd),
+    plannedTradingChangeUsd: finite(item?.plannedTradingChangeUsd),
+    plannedDepositsUsd: finite(item?.plannedDepositsUsd),
+    plannedWithdrawalsUsd: finite(item?.plannedWithdrawalsUsd),
+    plannedReturnPct: finite(item?.plannedReturnPct),
+    sessionCount: Math.max(0, Math.floor(finite(item?.sessionCount))),
+  }));
+}
+
 function parseJson(value: string) {
   const cleaned = String(value ?? "")
     .trim()
@@ -108,6 +125,44 @@ export async function POST(req: NextRequest) {
       deadlineGapUsd: finite(body?.deadlineGapUsd),
       verdict: text(body?.verdict, 40),
       flags: textList(body?.flags),
+      adaptivePlan: {
+        verdict: text(body?.adaptivePlan?.verdict, 40),
+        isProvisional: Boolean(body?.adaptivePlan?.isProvisional),
+        requestedProjectedBalanceUsd: finite(body?.adaptivePlan?.requestedProjectedBalanceUsd),
+        requestedCoveragePct: finite(body?.adaptivePlan?.requestedCoveragePct),
+        requestedShortfallUsd: finite(body?.adaptivePlan?.requestedShortfallUsd),
+        requestedTradingGrowthUsd: finite(body?.adaptivePlan?.requestedTradingGrowthUsd),
+        requestedDepositsUsd: finite(body?.adaptivePlan?.requestedDepositsUsd),
+        requestedWithdrawalsUsd: finite(body?.adaptivePlan?.requestedWithdrawalsUsd),
+        requestedNetCashflowUsd: finite(body?.adaptivePlan?.requestedNetCashflowUsd),
+        declaredGoalDayPct: finite(body?.adaptivePlan?.declaredGoalDayPct),
+        declaredExpectedLossDayPct: finite(body?.adaptivePlan?.declaredExpectedLossDayPct),
+        policyGoalDayCapPct: finite(body?.adaptivePlan?.policyGoalDayCapPct),
+        policyExpectedLossDayFloorPct: finite(body?.adaptivePlan?.policyExpectedLossDayFloorPct),
+        recommendedGoalDayPct: finite(body?.adaptivePlan?.recommendedGoalDayPct),
+        expectedLossDayPct: finite(body?.adaptivePlan?.expectedLossDayPct),
+        maxDailyLossGuardrailPct: finite(body?.adaptivePlan?.maxDailyLossGuardrailPct),
+        modeledNetReturnPerSessionPct: finite(body?.adaptivePlan?.modeledNetReturnPerSessionPct),
+        modeledAnnualReturnPct: finite(body?.adaptivePlan?.modeledAnnualReturnPct),
+        recommendedCompletionDate: text(body?.adaptivePlan?.recommendedCompletionDate, 20),
+        recommendedTradingSessions: Math.max(
+          0,
+          Math.floor(finite(body?.adaptivePlan?.recommendedTradingSessions))
+        ),
+        recommendedCalendarMonths: Math.max(
+          0,
+          Math.floor(finite(body?.adaptivePlan?.recommendedCalendarMonths))
+        ),
+        qualificationRequired: Boolean(body?.adaptivePlan?.qualificationRequired),
+        qualificationMinimumSessions: Math.max(
+          0,
+          Math.floor(finite(body?.adaptivePlan?.qualificationMinimumSessions))
+        ),
+        flags: textList(body?.adaptivePlan?.flags),
+        nextMonthlyCheckpoints: milestoneList(body?.adaptivePlan?.nextMonthlyCheckpoints, 12),
+        quarterlyCheckpoints: milestoneList(body?.adaptivePlan?.quarterlyCheckpoints, 12),
+        annualCheckpoints: milestoneList(body?.adaptivePlan?.annualCheckpoints, 30),
+      },
       executionEvidence: {
         depth: text(body?.executionEvidence?.depth, 40),
         sessions: Math.max(0, Math.floor(finite(body?.executionEvidence?.sessions))),
@@ -115,6 +170,7 @@ export async function POST(req: NextRequest) {
         winRatePct: finite(body?.executionEvidence?.winRatePct),
         profitFactor: finite(body?.executionEvidence?.profitFactor),
         expectancyUsd: finite(body?.executionEvidence?.expectancyUsd),
+        avgNetPerSessionUsd: finite(body?.executionEvidence?.avgNetPerSessionUsd),
         maxDrawdownPct: finite(body?.executionEvidence?.maxDrawdownPct),
       },
     };
@@ -137,11 +193,16 @@ export async function POST(req: NextRequest) {
       "The deterministic snapshot is authoritative. Never recalculate, alter, or contradict its numbers.",
       "Distinguish perfect-path compounding from the return required only on modeled goal-days.",
       "Evaluate arithmetic feasibility, operating-model coverage, loss assumptions, execution evidence, and uncertainty separately.",
+      "Use the adaptive plan as the authoritative disciplined horizon when the requested deadline is unsupported.",
+      "When declared inputs exceed the policy cap or understate the policy loss floor, explain that they were evaluated but not used to accelerate the recommendation.",
+      "Explain that maxDailyLossGuardrailPct is a hard guardrail while expectedLossDayPct is the modeled average losing-day assumption.",
+      "Center the user on the next monthly checkpoint, then quarterly and annual checkpoints, rather than the final capital target.",
+      "If qualificationRequired is true, state that the horizon is provisional until the minimum execution sample is reached.",
       "Use the private research methodology corpus when available for principles such as compounding, risk-return tradeoffs, drawdown, diversification of assumptions, and limitations of historical evidence.",
       "Do not claim to be a registered investment adviser. Do not recommend securities, entries, exits, leverage, or position sizes. Do not guarantee or forecast returns.",
       "Do not call a high return target safe or realistic merely because the compound formula resolves.",
       "Respond in the requested locale and return JSON only with: headline, summary, observations[], actions[], limitations[], methodologyNote.",
-      "Keep actions focused on plan design: extend runway, phase capital objectives, reduce loss budget, validate an edge, or add capital only as an explicit user decision.",
+      "Keep actions focused on discipline: follow the next checkpoint, preserve the loss guardrail, validate the edge, review monthly, and extend the runway when required. Mention adding capital only as an explicit user decision, never as a requirement.",
     ].join("\n");
     const input = JSON.stringify({ locale, deterministicSnapshot }, null, 2);
 

@@ -50,7 +50,28 @@ type GrowthPlanStrategy = {
   timeframe?: string;
 };
 
+type AdaptiveDashboardMilestone = {
+  targetDate?: string | null;
+  targetBalance?: number | null;
+};
+
+type AdaptiveDashboardPlan = {
+  verdict?: "supported" | "stretch" | "not_supported" | "unvalidated" | "no_validated_edge" | "incomplete";
+  requestedProjectedBalance?: number | null;
+  requestedCoveragePct?: number | null;
+  requestedDepositsUsd?: number | null;
+  requestedWithdrawalsUsd?: number | null;
+  requestedTradingGrowthUsd?: number | null;
+  recommendedCompletionDate?: string | null;
+  qualificationRequired?: boolean;
+  qualificationMinimumSessions?: number | null;
+  nextMilestone?: AdaptiveDashboardMilestone | null;
+};
+
 type GrowthPlanSteps = {
+  business_analysis?: {
+    adaptivePlan?: AdaptiveDashboardPlan | null;
+  };
   strategy?: {
     title?: string;
     strategies?: GrowthPlanStrategy[];
@@ -1245,6 +1266,7 @@ export function DashboardScreen({ onOpenModule: _onOpenModule, onOpenJournalDate
   const plan = series?.plan ?? null;
   const adjustedTargetBalance = Number(plan?.adjustedTargetBalance ?? plan?.targetBalance ?? 0);
   const targetDateStr = toDateOnlyStr(plan?.targetDate);
+  const adaptivePlanSummary = plan?.steps?.business_analysis?.adaptivePlan ?? null;
 
   const weeklySummary = useMemo(() => {
     const today = new Date();
@@ -2252,6 +2274,64 @@ export function DashboardScreen({ onOpenModule: _onOpenModule, onOpenJournalDate
                           {t(language, " planned loss days/week", " días de pérdida planificados/semana")}
                         </Text>
                       </Text>
+                    </>
+                  ) : null}
+
+                  {adaptivePlanSummary ? (
+                    <>
+                      <View style={[styles.snapshotCard, styles.planSnapshotCard]}>
+                        <View style={styles.snapshotMain}>
+                          <Text style={styles.planPhaseLabel}>
+                            {t(language, "Discipline roadmap", "Ruta de disciplina")}
+                          </Text>
+                          <Text style={styles.planPhaseValue}>
+                            {adaptivePlanSummary.verdict === "not_supported"
+                              ? t(language, "Requested deadline is not supported", "El plazo solicitado no está respaldado")
+                              : adaptivePlanSummary.verdict === "no_validated_edge"
+                                ? t(language, "Validate a positive edge first", "Primero valida una ventaja positiva")
+                                : adaptivePlanSummary.verdict === "unvalidated"
+                                  ? t(language, "Provisional until execution is documented", "Provisional hasta documentar ejecución")
+                                  : adaptivePlanSummary.verdict === "stretch"
+                                    ? t(language, "The requested deadline is a stretch", "El plazo solicitado es exigente")
+                                    : t(language, "Operating pace aligned", "Ritmo operativo alineado")}
+                          </Text>
+                        </View>
+                        {adaptivePlanSummary.recommendedCompletionDate ? (
+                          <View style={styles.deadlinePill}>
+                            <Text style={styles.deadlineText}>
+                              {t(language, "Recommended", "Recomendado")} {adaptivePlanSummary.recommendedCompletionDate}
+                            </Text>
+                          </View>
+                        ) : null}
+                      </View>
+                      <Text style={styles.progressNote}>
+                        {t(language, "Projected by requested date:", "Proyectado para la fecha solicitada:")} {" "}
+                        <Text style={styles.snapshotHintStrong}>
+                          {formatCurrency(Number(adaptivePlanSummary.requestedProjectedBalance ?? 0))}
+                        </Text>
+                        {" · "}
+                        {t(language, "Coverage", "Cobertura")} {Number(adaptivePlanSummary.requestedCoveragePct ?? 0).toFixed(0)}%
+                        {adaptivePlanSummary.nextMilestone?.targetBalance ? (
+                          <Text>
+                            {" · "}{t(language, "Next month", "Próximo mes")} {formatCurrency(Number(adaptivePlanSummary.nextMilestone.targetBalance))}
+                            {adaptivePlanSummary.nextMilestone.targetDate ? ` (${adaptivePlanSummary.nextMilestone.targetDate})` : ""}
+                          </Text>
+                        ) : null}
+                      </Text>
+                      <Text style={styles.progressNote}>
+                        {t(language, "Trading growth", "Crecimiento de trading")} {formatCurrency(Number(adaptivePlanSummary.requestedTradingGrowthUsd ?? 0))}
+                        {" · "}{t(language, "Contributions", "Aportaciones")} {formatCurrency(Number(adaptivePlanSummary.requestedDepositsUsd ?? 0))}
+                        {" · "}{t(language, "Withdrawals", "Retiros")} {formatCurrency(Number(adaptivePlanSummary.requestedWithdrawalsUsd ?? 0))}
+                      </Text>
+                      {adaptivePlanSummary.qualificationRequired ? (
+                        <Text style={styles.progressNote}>
+                          {t(
+                            language,
+                            `Qualification requires at least ${adaptivePlanSummary.qualificationMinimumSessions ?? 30} documented sessions before this horizon is treated as validated.`,
+                            `La validación requiere al menos ${adaptivePlanSummary.qualificationMinimumSessions ?? 30} sesiones documentadas antes de tratar este horizonte como validado.`
+                          )}
+                        </Text>
+                      ) : null}
                     </>
                   ) : null}
 

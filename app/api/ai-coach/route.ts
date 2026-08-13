@@ -1210,6 +1210,44 @@ function buildGrowthPlanOperatingBlock(body: AiCoachRequestBody): string {
         }, lossDaysPerWeek=${Number.isFinite(lossDaysPerWeek) ? lossDaysPerWeek : "—"}. When advising, do not assume a 5-day trading week unless the plan says 5.`
       );
     }
+    const adaptivePlan =
+      businessAnalysis?.adaptivePlan && typeof businessAnalysis.adaptivePlan === "object"
+        ? businessAnalysis.adaptivePlan
+        : null;
+    if (adaptivePlan) {
+      const adaptiveVerdict = safeString((adaptivePlan as any)?.verdict || "");
+      const recommendedCompletionDate = safeString(
+        (adaptivePlan as any)?.recommendedCompletionDate || ""
+      );
+      const requestedProjectedBalance = Number((adaptivePlan as any)?.requestedProjectedBalance);
+      const requestedCoveragePct = Number((adaptivePlan as any)?.requestedCoveragePct);
+      const requestedTradingGrowthUsd = Number((adaptivePlan as any)?.requestedTradingGrowthUsd);
+      const requestedDepositsUsd = Number((adaptivePlan as any)?.requestedDepositsUsd);
+      const requestedWithdrawalsUsd = Number((adaptivePlan as any)?.requestedWithdrawalsUsd);
+      const recommendedGoalDayPct = Number((adaptivePlan as any)?.recommendedGoalDayPct);
+      const expectedLossDayPct = Number((adaptivePlan as any)?.expectedLossDayPct);
+      const maxDailyLossGuardrailPct = Number((adaptivePlan as any)?.maxDailyLossGuardrailPct);
+      const adaptiveFlags = Array.isArray((adaptivePlan as any)?.flags)
+        ? (adaptivePlan as any).flags.map((flag: unknown) => safeString(flag)).filter(Boolean)
+        : [];
+      const nextMilestone = (adaptivePlan as any)?.nextMilestone;
+      lines.push(
+        `Adaptive discipline plan: verdict=${adaptiveVerdict || "—"}, projectedByRequestedDate=${usd(requestedProjectedBalance)}, requestedCoverage=${pct(requestedCoveragePct)}, tradingGrowth=${usd(requestedTradingGrowthUsd)}, plannedContributions=${usd(requestedDepositsUsd)}, plannedWithdrawals=${usd(requestedWithdrawalsUsd)}, recommendedGoalDay=${pct(recommendedGoalDayPct)}, expectedLossDay=${pct(expectedLossDayPct)}, hardDailyLossGuardrail=${pct(maxDailyLossGuardrailPct)}${recommendedCompletionDate ? `, recommendedCompletion=${recommendedCompletionDate}` : ", recommendedCompletion=not defensible yet"}. Treat this adaptive plan as the authoritative pacing context and never describe contributions as trading profit.`
+      );
+      if (
+        adaptiveFlags.includes("declared_goal_above_operating_policy") ||
+        adaptiveFlags.includes("declared_loss_assumption_below_operating_policy")
+      ) {
+        lines.push(
+          "The user's declared return/loss assumptions were evaluated but capped by operating policy. Do not coach the user toward the more aggressive declared pace."
+        );
+      }
+      if (nextMilestone && Number((nextMilestone as any)?.targetBalance) > 0) {
+        lines.push(
+          `Immediate discipline checkpoint: month=${Number((nextMilestone as any)?.periodIndex) || 1}, target=${usd(Number((nextMilestone as any)?.targetBalance))}${safeString((nextMilestone as any)?.targetDate) ? `, by=${safeString((nextMilestone as any)?.targetDate)}` : ""}. Coach toward this checkpoint, not the final capital target.`
+        );
+      }
+    }
     const realismReview =
       businessAnalysis?.realismReview && typeof businessAnalysis.realismReview === "object"
         ? businessAnalysis.realismReview

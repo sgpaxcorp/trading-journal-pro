@@ -64,6 +64,9 @@ Compares your current balance against the Growth Plan path.
 
 What it includes:
 - current phase
+- adaptive feasibility status and recommended horizon
+- projected balance by the requested date and deadline coverage
+- next monthly discipline checkpoint
 - `Checkpoint start`
 - `Balance now`
 - `Checkpoint target`
@@ -74,6 +77,8 @@ What it answers:
 - `Am I ahead or behind the plan?`
 
 Important:
+- If the requested deadline was unsupported, active checkpoints follow the accepted disciplined horizon.
+- A provisional status means the route still requires a documented execution sample; it is not a promise of returns.
 - `Week / Month / Quarter` here do not mean realized P&L for that period.
 - They are plan checkpoints.
 - The system compares:

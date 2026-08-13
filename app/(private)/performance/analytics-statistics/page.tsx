@@ -39,8 +39,10 @@ import { listCashflows, signedCashflowAmount, type Cashflow } from "@/lib/cashfl
 import { buildCashflowAdjustedDailyReturns } from "@/lib/performanceReturns";
 import {
   buildPlanProjection,
+  normalizeDepositSettings,
   normalizePlannedWithdrawals,
   normalizeWithdrawalSettings,
+  type PlannedDepositSettings,
   type PlannedWithdrawalEvent,
   type PlannedWithdrawalSettings,
 } from "@/lib/growthPlanProjection";
@@ -1474,6 +1476,7 @@ export default function AnalyticsStatisticsPage() {
   const [planAverageTradingDaysPerWeek, setPlanAverageTradingDaysPerWeek] = useState<number>(5);
   const [planLossDaysPerWeek, setPlanLossDaysPerWeek] = useState<number>(0);
   const [planPlannedWithdrawals, setPlanPlannedWithdrawals] = useState<PlannedWithdrawalEvent[]>([]);
+  const [planPlannedDepositSettings, setPlanPlannedDepositSettings] = useState<PlannedDepositSettings | null>(null);
   const [planPlannedWithdrawalSettings, setPlanPlannedWithdrawalSettings] = useState<PlannedWithdrawalSettings | null>(null);
 
   const effectivePlanStart = useMemo(
@@ -1531,6 +1534,7 @@ export default function AnalyticsStatisticsPage() {
           setPlanAverageTradingDaysPerWeek(5);
           setPlanLossDaysPerWeek(0);
           setPlanPlannedWithdrawals([]);
+          setPlanPlannedDepositSettings(null);
           setPlanPlannedWithdrawalSettings(null);
           return;
         }
@@ -1569,7 +1573,13 @@ export default function AnalyticsStatisticsPage() {
         setPlanAverageTradingDaysPerWeek(averageTradingDaysPerWeek);
         setPlanLossDaysPerWeek(Math.max(0, Math.min(averageTradingDaysPerWeek, Math.floor(toNumberMaybe(row?.loss_days_per_week ?? 0)))));
         setPlanPlannedWithdrawals(normalizePlannedWithdrawals(row?.planned_withdrawals ?? []));
-        setPlanPlannedWithdrawalSettings(normalizeWithdrawalSettings(row?.planned_withdrawal_settings));
+        setPlanPlannedDepositSettings(
+          normalizeDepositSettings(businessAnalysis?.operatingModel?.plannedDepositSettings)
+        );
+        setPlanPlannedWithdrawalSettings(
+          normalizeWithdrawalSettings(businessAnalysis?.operatingModel?.plannedWithdrawalSettings) ??
+            normalizeWithdrawalSettings(row?.planned_withdrawal_settings)
+        );
       } catch (err) {
         console.error("[AnalyticsStatistics] growth_plans fetch exception:", err);
         setPlanStartingBalance(0);
@@ -1579,6 +1589,7 @@ export default function AnalyticsStatisticsPage() {
         setPlanAverageTradingDaysPerWeek(5);
         setPlanLossDaysPerWeek(0);
         setPlanPlannedWithdrawals([]);
+        setPlanPlannedDepositSettings(null);
         setPlanPlannedWithdrawalSettings(null);
       }
     }
@@ -2013,6 +2024,7 @@ export default function AnalyticsStatisticsPage() {
       averageTradingDaysPerWeek: planAverageTradingDaysPerWeek,
       lossDaysPerWeek: planLossDaysPerWeek,
       maxDailyLossPercent: planMaxDailyLossPct,
+      depositSettings: planPlannedDepositSettings,
       withdrawalSettings: planPlannedWithdrawalSettings,
       existingWithdrawals: planPlannedWithdrawals,
     });
@@ -2020,6 +2032,7 @@ export default function AnalyticsStatisticsPage() {
     planLossDaysPerWeek,
     planAverageTradingDaysPerWeek,
     planMaxDailyLossPct,
+    planPlannedDepositSettings,
     planPlannedWithdrawalSettings,
     planPlannedWithdrawals,
     planStartIso,
@@ -2042,6 +2055,7 @@ export default function AnalyticsStatisticsPage() {
         startBalance: number;
         targetBalance: number;
         tradingProfit: number;
+        deposit: number;
         withdrawal: number;
         weekIndex: number;
       }
@@ -2054,6 +2068,7 @@ export default function AnalyticsStatisticsPage() {
         startBalance: phase.monthStartBalance ?? planStartingBalance,
         targetBalance: phase.monthEndBalance ?? phase.targetEquity,
         tradingProfit: phase.monthGoal ?? 0,
+        deposit: phase.monthDeposit ?? 0,
         withdrawal: phase.monthWithdrawal ?? 0,
         weekIndex: phase.weekIndex ?? 0,
       };
@@ -2078,7 +2093,7 @@ export default function AnalyticsStatisticsPage() {
     const remaining = Math.max(0, monthTarget - currentEquity);
     const monthlyRate =
       currentMonth.startBalance > 0
-        ? (currentMonth.targetBalance + currentMonth.withdrawal - currentMonth.startBalance) / currentMonth.startBalance
+        ? (currentMonth.targetBalance + currentMonth.withdrawal - currentMonth.deposit - currentMonth.startBalance) / currentMonth.startBalance
         : null;
 
     return {
@@ -2088,6 +2103,7 @@ export default function AnalyticsStatisticsPage() {
       remaining,
       progress,
       monthlyRate,
+      monthDeposit: currentMonth.deposit,
       monthWithdrawal: currentMonth.withdrawal,
       monthTradingProfit: currentMonth.tradingProfit,
     };
@@ -2127,6 +2143,7 @@ export default function AnalyticsStatisticsPage() {
       currentMonthIndex: monthlyPlanTracker?.currentMonthIndex ?? null,
       totalMonths: monthlyPlanTracker?.totalMonths ?? null,
       monthlyRate: monthlyPlanTracker?.monthlyRate ?? null,
+      monthDeposit: monthlyPlanTracker?.monthDeposit ?? null,
       monthWithdrawal: monthlyPlanTracker?.monthWithdrawal ?? null,
       monthTradingProfit: monthlyPlanTracker?.monthTradingProfit ?? null,
     };
@@ -2690,6 +2707,12 @@ export default function AnalyticsStatisticsPage() {
                     <>
                       {" "}· {L("Trading profit this month target:", "Ganancia de trading meta del mes:")}{" "}
                       <span className="text-slate-200">{fmtUsd(planAnalyticsSummary.monthTradingProfit)}</span>
+                    </>
+                  ) : null}
+                  {planAnalyticsSummary.monthDeposit != null && planAnalyticsSummary.monthDeposit > 0 ? (
+                    <>
+                      {" "}· {L("Planned contributions this month:", "Aportaciones planificadas este mes:")}{" "}
+                      <span className="text-slate-200">{fmtUsd(planAnalyticsSummary.monthDeposit)}</span>
                     </>
                   ) : null}
                   {planAnalyticsSummary.monthWithdrawal != null && planAnalyticsSummary.monthWithdrawal > 0 ? (

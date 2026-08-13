@@ -135,7 +135,9 @@ export type GrowthPlan = {
     monthLabel?: string | null;
     monthStartBalance?: number;
     monthEndBalance?: number;
+    monthDeposit?: number;
     monthWithdrawal?: number;
+    cumulativeDeposits?: number;
     cumulativeWithdrawals?: number;
   }>;
 

@@ -2,11 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 import {
   buildPlanProjection,
+  normalizeDepositSettings,
   normalizePlannedWithdrawals,
   normalizeWithdrawalSettings,
 } from "@/lib/growthPlanProjection";
 import { getServerPlanForUser } from "@/lib/serverFeatureAccess";
 import { requirePlatformAccess } from "@/lib/serverPlatformAccess";
+import { isTradingSessionDate, normalizeTradingInstrument } from "@/lib/tradingCalendar";
 
 export const runtime = "nodejs";
 
@@ -57,6 +59,13 @@ function isoDate(d: Date): string {
 function parseISODate(s: string): Date {
   const [y, m, d] = s.split("-").map((x) => Number(x));
   return new Date(y, (m || 1) - 1, d || 1);
+}
+
+function operatingWeekKey(iso: string): string {
+  const date = parseISODate(iso);
+  const day = date.getDay();
+  date.setDate(date.getDate() + (day === 0 ? -6 : 1 - day));
+  return isoDate(date);
 }
 
 function looksLikeYYYYMMDD(s: string): boolean {
@@ -355,12 +364,6 @@ async function listJournalEntries(
   return (data ?? []) as any[];
 }
 
-function isWeekday(iso: string): boolean {
-  const d = parseISODate(iso);
-  const day = d.getDay();
-  return day !== 0 && day !== 6;
-}
-
 export async function GET(req: NextRequest) {
   try {
     const access = await requirePlatformAccess(req);
@@ -406,13 +409,29 @@ export async function GET(req: NextRequest) {
       businessAnalysis?.operatingModel?.averageTradingDaysPerWeek ??
       planSteps?._ui?.averageTradingDaysPerWeek ??
       5;
+    const tradingInstrument = normalizeTradingInstrument(
+      businessAnalysis?.operatingModel?.tradingInstrument ??
+        businessAnalysis?.operatingModel?.runway?.instrument ??
+        planSteps?._ui?.tradingInstrument ??
+        "stocks"
+    );
+    const availableSessionsPerWeek = tradingInstrument === "crypto" ? 7 : 5;
     const averageTradingDaysPerWeek = Math.max(
       1,
-      Math.min(5, Math.floor(toNum(averageTradingDaysRaw, 5)))
+      Math.min(availableSessionsPerWeek, Math.floor(toNum(averageTradingDaysRaw, 5)))
     );
     const lossDaysPerWeek = Math.max(
       0,
       Math.min(averageTradingDaysPerWeek, Math.floor(toNum(lossDaysRaw, 0)))
+    );
+    const expectedLossDayPct = Math.max(
+      0,
+      toNum(
+        businessAnalysis?.adaptivePlan?.expectedLossDayPct ??
+          businessAnalysis?.operatingModel?.expectedLossDayPct ??
+          dailyTargetPct,
+        dailyTargetPct
+      )
     );
 
     const planStartIso = (() => {
@@ -424,7 +443,11 @@ export async function GET(req: NextRequest) {
     })();
     const targetDateIso = String(plan?.target_date ?? plan?.targetDate ?? "").slice(0, 10);
     const plannedWithdrawals = normalizePlannedWithdrawals(plan?.planned_withdrawals ?? []);
+    const plannedDepositSettings = normalizeDepositSettings(
+      businessAnalysis?.operatingModel?.plannedDepositSettings
+    );
     const plannedWithdrawalSettings =
+      normalizeWithdrawalSettings(businessAnalysis?.operatingModel?.plannedWithdrawalSettings) ??
       normalizeWithdrawalSettings(plan?.planned_withdrawal_settings) ??
       (plannedWithdrawals.length
         ? {
@@ -511,8 +534,11 @@ export async function GET(req: NextRequest) {
         averageTradingDaysPerWeek,
         lossDaysPerWeek,
         maxDailyLossPercent: toNum(plan?.max_daily_loss_percent ?? 0, 0),
+        modeledLossDayPercent: expectedLossDayPct,
+        depositSettings: plannedDepositSettings,
         withdrawalSettings: plannedWithdrawalSettings,
         existingWithdrawals: plannedWithdrawals,
+        tradingInstrument,
       });
       const projectedByDate = new Map(projection.rows.map((row) => [row.isoDate, row.endBalance]));
       let lastValue = startingBalance;
@@ -525,15 +551,27 @@ export async function GET(req: NextRequest) {
     } else {
       let projBalance = startingBalance;
       let tradingIdx = 0;
+      let projectedWeekKey = "";
+      let projectedWeekSessions = 0;
       for (const d of dateList) {
         const dayCash = cashByDate[d] ?? 0;
         if (dayCash !== 0) projBalance += dayCash;
 
-        if (isWeekday(d) && dailyTargetPct > 0) {
+        const weekKey = operatingWeekKey(d);
+        if (weekKey !== projectedWeekKey) {
+          projectedWeekKey = weekKey;
+          projectedWeekSessions = 0;
+        }
+        if (
+          isTradingSessionDate(d, tradingInstrument) &&
+          projectedWeekSessions < averageTradingDaysPerWeek &&
+          dailyTargetPct > 0
+        ) {
           const isLossDay = lossDaysPerWeek > 0 && (tradingIdx % averageTradingDaysPerWeek) < lossDaysPerWeek;
-          const r = dailyTargetPct / 100;
+          const r = (isLossDay ? expectedLossDayPct : dailyTargetPct) / 100;
           projBalance = projBalance * (1 + (isLossDay ? -r : r));
           tradingIdx += 1;
+          projectedWeekSessions += 1;
         }
         projected.push({ date: d, value: Number(projBalance.toFixed(2)) });
       }
