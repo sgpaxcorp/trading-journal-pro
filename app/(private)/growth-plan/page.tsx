@@ -892,6 +892,17 @@ type BusinessProfile = {
   tradingStyle: "scalp" | "day" | "swing" | "";
 };
 
+type CapitalSource =
+  | "disposable_savings"
+  | "business_income"
+  | "retirement"
+  | "borrowed"
+  | "emergency_fund"
+  | "living_expenses"
+  | "";
+
+type AccountStructure = "cash" | "margin" | "leveraged_derivatives" | "";
+
 type BusinessScenarioId = "conservative" | "moderate" | "aggressive";
 
 type OperatingReturnMode = BusinessScenarioId | "manual" | "";
@@ -1510,8 +1521,12 @@ function buildAdaptivePlanAdvisor(params: {
   const headline =
     adaptivePlan.verdict === "not_supported"
       ? L(
-          `The requested deadline is not supported. The disciplined model points to about ${completionYears ?? "—"} years.`,
-          `El plazo solicitado no está respaldado. El modelo disciplinado apunta a aproximadamente ${completionYears ?? "—"} años.`
+          adaptivePlan.mathematicallyPossible
+            ? `The target is mathematically possible, but the selected operating model needs about ${completionYears ?? "—"} years instead of the requested deadline.`
+            : "The target cannot be resolved with the current mathematical inputs.",
+          adaptivePlan.mathematicallyPossible
+            ? `La meta es matemáticamente posible, pero el modelo operativo seleccionado necesita aproximadamente ${completionYears ?? "—"} años en vez del plazo solicitado.`
+            : "La meta no se puede resolver con los datos matemáticos actuales."
         )
       : adaptivePlan.verdict === "no_validated_edge"
         ? adaptivePlan.recommendedCompletionDate && adaptivePlan.flags.includes("planned_deposits_included")
@@ -1670,6 +1685,14 @@ export default function GrowthPlanPage() {
   const [businessProfile, setBusinessProfile] = useState<BusinessProfile>(EMPTY_BUSINESS_PROFILE);
   const [selectedScenarioId, setSelectedScenarioId] = useState<BusinessScenarioId | "">("");
   const [returnModelMode, setReturnModelMode] = useState<OperatingReturnMode>("");
+  const [capitalSource, setCapitalSource] = useState<CapitalSource>("");
+  const [emergencyFundMonthsStr, setEmergencyFundMonthsStr] = useState("");
+  const [monthlyEssentialExpensesStr, setMonthlyEssentialExpensesStr] = useState("");
+  const [liquidReservesOutsideTradingStr, setLiquidReservesOutsideTradingStr] = useState("");
+  const [estimatedCostPerSessionStr, setEstimatedCostPerSessionStr] = useState("");
+  const [estimatedTaxReservePctStr, setEstimatedTaxReservePctStr] = useState("");
+  const [accountStructure, setAccountStructure] = useState<AccountStructure>("");
+  const [maxLeverageMultipleStr, setMaxLeverageMultipleStr] = useState("1");
   const [performanceEvidence, setPerformanceEvidence] = useState<GrowthPlanEvidence | null>(null);
   const [performanceEvidenceLoading, setPerformanceEvidenceLoading] = useState(false);
   const [researchReview, setResearchReview] = useState<GrowthPlanResearchReview | null>(null);
@@ -1704,6 +1727,14 @@ export default function GrowthPlanPage() {
   const riskPerTradePct = Math.max(0, toNum(riskPerTradePctStr, 0));
   const goalDayReturnPct = Math.max(0, toNum(goalDayReturnPctStr, 0));
   const expectedLossDayPct = Math.max(0, toNum(expectedLossDayPctStr, 0));
+  const emergencyFundMonths = Math.max(0, toNum(emergencyFundMonthsStr, 0));
+  const monthlyEssentialExpensesUsd = Math.max(0, toNum(monthlyEssentialExpensesStr, 0));
+  const liquidReservesOutsideTradingUsd = Math.max(0, toNum(liquidReservesOutsideTradingStr, 0));
+  const estimatedCostPerSessionUsd = Math.max(0, toNum(estimatedCostPerSessionStr, 0));
+  const estimatedTaxReservePct = Math.max(0, Math.min(60, toNum(estimatedTaxReservePctStr, 0)));
+  const maxLeverageMultiple = accountStructure === "cash"
+    ? 1
+    : Math.max(1, toNum(maxLeverageMultipleStr, 1));
   const targetMultiple =
     startingBalance > 0 && targetBalance > 0 ? targetBalance / startingBalance : 0;
   const returnModelConfigured =
@@ -1770,6 +1801,16 @@ export default function GrowthPlanPage() {
     plannedDepositMode === "none" ||
     (plannedDepositMode === "scheduled" && plannedDepositAmount > 0);
   const capitalFlowAssumptionsComplete = plannedDepositConfigured && plannedWithdrawalConfigured;
+  const financialCapacityComplete = Boolean(
+    capitalSource &&
+      accountStructure &&
+      emergencyFundMonthsStr.trim() &&
+      monthlyEssentialExpensesStr.trim() &&
+      liquidReservesOutsideTradingStr.trim() &&
+      estimatedCostPerSessionStr.trim() &&
+      estimatedTaxReservePctStr.trim() &&
+      maxLeverageMultipleStr.trim()
+  );
   const operatingScheduleConfigured =
     averageTradingDaysSet &&
     averageTradingDaysPerWeek >= 1 &&
@@ -1782,7 +1823,8 @@ export default function GrowthPlanPage() {
     isBusinessProfileComplete(businessProfile) &&
     returnModelConfigured &&
     capitalFlowAssumptionsComplete &&
-    operatingScheduleConfigured;
+    operatingScheduleConfigured &&
+    financialCapacityComplete;
   const effectivePlanStartDate = planStartDate || isoToday();
   const planDatesOrdered =
     !effectivePlanStartDate || !targetDateStr || effectivePlanStartDate <= targetDateStr;
@@ -1991,6 +2033,7 @@ export default function GrowthPlanPage() {
         withdrawalSettings: plannedWithdrawalSettings,
         existingWithdrawals: plannedWithdrawals,
         tradingInstrument,
+        estimatedCostPerSessionUsd,
       });
     }
 
@@ -2008,6 +2051,7 @@ export default function GrowthPlanPage() {
       withdrawalSettings: plannedWithdrawalSettings,
       existingWithdrawals: plannedWithdrawals,
       tradingInstrument,
+      estimatedCostPerSessionUsd,
     });
   }, [
     activeProjectionPolicy,
@@ -2015,6 +2059,7 @@ export default function GrowthPlanPage() {
     averageTradingDaysPerWeek,
     maxDailyLossPercent,
     effectivePlanStartDate,
+    estimatedCostPerSessionUsd,
     plannedDepositSettings,
     plannedWithdrawalSettings,
     plannedWithdrawals,
@@ -2104,6 +2149,14 @@ export default function GrowthPlanPage() {
           label: L("Define deposits and withdrawals", "Define aportaciones y retiros"),
           done: capitalFlowAssumptionsComplete,
           anchor: "gp-planned-withdrawals",
+        },
+        {
+          id: "financial_capacity",
+          label: L("Complete financial-capacity and net-cost assumptions", "Completa capacidad financiera y supuestos de costos netos"),
+          done:
+            financialCapacityComplete &&
+            !["retirement", "borrowed", "emergency_fund", "living_expenses"].includes(capitalSource),
+          anchor: "gp-financial-capacity",
         },
         {
           id: "trading_days",
@@ -2234,6 +2287,8 @@ export default function GrowthPlanPage() {
     lossDaysPerWeekStr,
     autoPhasesGenerated,
     capitalFlowAssumptionsComplete,
+    financialCapacityComplete,
+    capitalSource,
     suggestedRows.length,
     tradingSystemCount,
     analysisStylesCount,
@@ -2384,6 +2439,43 @@ export default function GrowthPlanPage() {
                 ""
             )
           );
+          const storedCapacity = existingOperatingModel?.financialCapacity ?? {};
+          setCapitalSource(
+            ["disposable_savings", "business_income", "retirement", "borrowed", "emergency_fund", "living_expenses"].includes(
+              String(storedCapacity?.capitalSource ?? "")
+            )
+              ? (storedCapacity.capitalSource as CapitalSource)
+              : ""
+          );
+          setEmergencyFundMonthsStr(
+            storedCapacity?.emergencyFundMonths == null ? "" : String(storedCapacity.emergencyFundMonths)
+          );
+          setMonthlyEssentialExpensesStr(
+            storedCapacity?.monthlyEssentialExpensesUsd == null
+              ? ""
+              : formatMoneyInputValue(storedCapacity.monthlyEssentialExpensesUsd)
+          );
+          setLiquidReservesOutsideTradingStr(
+            storedCapacity?.liquidReservesOutsideTradingUsd == null
+              ? ""
+              : formatMoneyInputValue(storedCapacity.liquidReservesOutsideTradingUsd)
+          );
+          setEstimatedCostPerSessionStr(
+            existingOperatingModel?.estimatedCostPerSessionUsd == null
+              ? ""
+              : formatMoneyInputValue(existingOperatingModel.estimatedCostPerSessionUsd)
+          );
+          setEstimatedTaxReservePctStr(
+            existingOperatingModel?.estimatedTaxReservePct == null
+              ? ""
+              : String(existingOperatingModel.estimatedTaxReservePct)
+          );
+          setAccountStructure(
+            ["cash", "margin", "leveraged_derivatives"].includes(String(storedCapacity?.accountStructure ?? ""))
+              ? (storedCapacity.accountStructure as AccountStructure)
+              : ""
+          );
+          setMaxLeverageMultipleStr(String(storedCapacity?.maxLeverageMultiple ?? 1));
 
           setCommitted(false);
 
@@ -2525,6 +2617,14 @@ export default function GrowthPlanPage() {
           setGoalDayReturnPctStr("");
           setExpectedLossDayPctStr("");
           setReturnModelMode("");
+          setCapitalSource("");
+          setEmergencyFundMonthsStr("");
+          setMonthlyEssentialExpensesStr("");
+          setLiquidReservesOutsideTradingStr("");
+          setEstimatedCostPerSessionStr("");
+          setEstimatedTaxReservePctStr("");
+          setAccountStructure("");
+          setMaxLeverageMultipleStr("1");
           setLoadedStartingBalance(null);
           setCashflowNet(0);
           setPlanStartDate(newStartDate);
@@ -2928,13 +3028,35 @@ export default function GrowthPlanPage() {
       evidence: performanceEvidence,
       depositPlan: plannedDepositSettings,
       withdrawalPlan: plannedWithdrawalSettings,
+      comparisonPolicies: (["conservative", "moderate", "aggressive"] as const).map((id) => ({
+        ...getGrowthPlanOperatingPolicy(id, businessProfile),
+        lossDaysPerWeek,
+      })),
+      estimatedCostPerSessionUsd,
+      estimatedTaxReservePct,
+      financialCapacity: {
+        capitalSource: capitalSource || null,
+        emergencyFundMonths,
+        monthlyEssentialExpensesUsd,
+        liquidReservesOutsideTradingUsd,
+        accountStructure: accountStructure || null,
+        maxLeverageMultiple,
+      },
     });
   }, [
     averageTradingDaysPerWeek,
+    accountStructure,
     businessProfile,
+    capitalSource,
     effectivePlanStartDate,
+    emergencyFundMonths,
+    estimatedCostPerSessionUsd,
+    estimatedTaxReservePct,
     expectedLossDayPct,
     goalDayReturnPct,
+    liquidReservesOutsideTradingUsd,
+    maxLeverageMultiple,
+    monthlyEssentialExpensesUsd,
     performanceEvidence,
     plannedDepositSettings,
     plannedWithdrawalSettings,
@@ -3104,6 +3226,12 @@ export default function GrowthPlanPage() {
             requestedDepositsUsd: adaptiveGrowthPlan.requestedDepositsUsd,
             requestedWithdrawalsUsd: adaptiveGrowthPlan.requestedWithdrawalsUsd,
             requestedNetCashflowUsd: adaptiveGrowthPlan.requestedNetCashflowUsd,
+            requestedRequiredGoalDayPct: adaptiveGrowthPlan.requestedRequiredGoalDayPct,
+            targetAnnualizedReturnPct: adaptiveGrowthPlan.targetAnnualizedReturnPct,
+            mathematicallyPossible: adaptiveGrowthPlan.mathematicallyPossible,
+            requestedEstimatedCostsUsd: adaptiveGrowthPlan.requestedEstimatedCostsUsd,
+            requestedEstimatedTaxReserveUsd: adaptiveGrowthPlan.requestedEstimatedTaxReserveUsd,
+            requestedAfterTaxReserveBalance: adaptiveGrowthPlan.requestedAfterTaxReserveBalance,
             declaredGoalDayPct: adaptiveGrowthPlan.declaredGoalDayPct,
             declaredExpectedLossDayPct: adaptiveGrowthPlan.declaredExpectedLossDayPct,
             policyGoalDayCapPct: adaptiveGrowthPlan.policyGoalDayCapPct,
@@ -3118,10 +3246,23 @@ export default function GrowthPlanPage() {
             recommendedCalendarMonths: adaptiveGrowthPlan.recommendedCalendarMonths,
             qualificationRequired: adaptiveGrowthPlan.qualificationRequired,
             qualificationMinimumSessions: adaptiveGrowthPlan.qualificationMinimumSessions,
+            capacityStatus: adaptiveGrowthPlan.capacityStatus,
+            capacityFlags: adaptiveGrowthPlan.capacityFlags,
+            panoramas: adaptiveGrowthPlan.panoramas,
             flags: adaptiveGrowthPlan.flags,
             nextMonthlyCheckpoints: adaptiveGrowthPlan.monthlyMilestones.slice(0, 12),
             quarterlyCheckpoints: adaptiveGrowthPlan.quarterlyMilestones.slice(0, 12),
             annualCheckpoints: adaptiveGrowthPlan.annualMilestones,
+          },
+          financialCapacity: {
+            capitalSource,
+            emergencyFundMonths,
+            monthlyEssentialExpensesUsd,
+            liquidReservesOutsideTradingUsd,
+            accountStructure,
+            maxLeverageMultiple,
+            estimatedCostPerSessionUsd,
+            estimatedTaxReservePct,
           },
           executionEvidence: {
             depth: planRealismReview.evidenceDepth,
@@ -3651,6 +3792,116 @@ export default function GrowthPlanPage() {
                   </div>
                 ) : null}
 
+                <div id="gp-financial-capacity" className="rounded-2xl border border-sky-300/15 bg-slate-950/55 p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="text-[10px] uppercase tracking-[0.2em] text-sky-200">
+                        {L("Financial capacity & net assumptions", "Capacidad financiera y supuestos netos")}
+                      </p>
+                      <p className="mt-1 max-w-3xl text-[11px] leading-5 text-slate-500">
+                        {L(
+                          "This protects essential capital and converts gross plan math into a more complete operating estimate. It is not tax or investment advice.",
+                          "Esto protege el capital esencial y convierte la matemática bruta en un estimado operativo más completo. No es asesoría contributiva ni de inversión."
+                        )}
+                      </p>
+                    </div>
+                    <span className={`rounded-full border px-2.5 py-1 text-[10px] font-semibold ${
+                      adaptiveGrowthPlan.capacityStatus === "protected"
+                        ? "border-emerald-300/30 bg-emerald-300/10 text-emerald-200"
+                        : adaptiveGrowthPlan.capacityStatus === "blocked"
+                          ? "border-red-300/30 bg-red-300/10 text-red-200"
+                          : "border-amber-300/30 bg-amber-300/10 text-amber-200"
+                    }`}>
+                      {adaptiveGrowthPlan.capacityStatus === "protected"
+                        ? L("Capital protected", "Capital protegido")
+                        : adaptiveGrowthPlan.capacityStatus === "blocked"
+                          ? L("Restricted source", "Fuente restringida")
+                          : adaptiveGrowthPlan.capacityStatus === "warning"
+                            ? L("Review reserves", "Revisar reservas")
+                            : L("Complete capacity", "Completa capacidad")}
+                    </span>
+                  </div>
+
+                  <div className="mt-3">
+                    <p className="text-[10px] uppercase tracking-[0.16em] text-slate-500">
+                      {L("Trading capital source", "Fuente del capital de trading")}
+                    </p>
+                    <div className="mt-2 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                      {([
+                        ["disposable_savings", L("Disposable savings", "Ahorros disponibles")],
+                        ["business_income", L("Business income", "Ingresos del negocio")],
+                        ["retirement", L("Retirement funds", "Fondos de retiro")],
+                        ["borrowed", L("Borrowed money", "Dinero prestado")],
+                        ["emergency_fund", L("Emergency fund", "Fondo de emergencia")],
+                        ["living_expenses", L("Living-expense money", "Dinero para gastos de vida")],
+                      ] as Array<[CapitalSource, string]>).map(([value, label]) => (
+                        <button
+                          key={value}
+                          type="button"
+                          onClick={() => setCapitalSource(value)}
+                          className={`rounded-lg border px-3 py-2 text-left text-[11px] transition ${
+                            capitalSource === value
+                              ? "border-sky-300 bg-sky-300/10 text-sky-100"
+                              : "border-slate-800 text-slate-400 hover:border-slate-600"
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                    <label className="text-[11px] text-slate-400">
+                      {L("Emergency fund (months)", "Fondo de emergencia (meses)")}
+                      <input className={`${inputBase} mt-1`} inputMode="decimal" value={emergencyFundMonthsStr} onChange={(event) => setEmergencyFundMonthsStr(event.target.value)} placeholder="6" />
+                    </label>
+                    <label className="text-[11px] text-slate-400">
+                      {L("Essential expenses / month", "Gastos esenciales / mes")}
+                      <input className={`${inputBase} mt-1`} inputMode="decimal" value={monthlyEssentialExpensesStr} onChange={(event) => setMonthlyEssentialExpensesStr(formatMoneyInputDraft(event.target.value))} onBlur={() => monthlyEssentialExpensesStr && setMonthlyEssentialExpensesStr(formatMoneyInputValue(monthlyEssentialExpensesStr))} placeholder="2,500.00" />
+                    </label>
+                    <label className="text-[11px] text-slate-400">
+                      {L("Liquid reserves outside trading", "Reservas líquidas fuera de trading")}
+                      <input className={`${inputBase} mt-1`} inputMode="decimal" value={liquidReservesOutsideTradingStr} onChange={(event) => setLiquidReservesOutsideTradingStr(formatMoneyInputDraft(event.target.value))} onBlur={() => liquidReservesOutsideTradingStr && setLiquidReservesOutsideTradingStr(formatMoneyInputValue(liquidReservesOutsideTradingStr))} placeholder="15,000.00" />
+                    </label>
+                    <label className="text-[11px] text-slate-400">
+                      {L("Estimated cost / session", "Costo estimado / sesión")}
+                      <input className={`${inputBase} mt-1`} inputMode="decimal" value={estimatedCostPerSessionStr} onChange={(event) => setEstimatedCostPerSessionStr(formatMoneyInputDraft(event.target.value))} onBlur={() => estimatedCostPerSessionStr && setEstimatedCostPerSessionStr(formatMoneyInputValue(estimatedCostPerSessionStr))} placeholder="1.00" />
+                    </label>
+                    <label className="text-[11px] text-slate-400">
+                      {L("Tax reserve on net profit %", "Reserva contributiva sobre ganancia %")}
+                      <input className={`${inputBase} mt-1`} inputMode="decimal" value={estimatedTaxReservePctStr} onChange={(event) => setEstimatedTaxReservePctStr(event.target.value)} placeholder="25" />
+                    </label>
+                    <label className="text-[11px] text-slate-400">
+                      {L("Account structure", "Estructura de cuenta")}
+                      <select className={`${inputBase} mt-1`} value={accountStructure} onChange={(event) => {
+                        const value = event.target.value as AccountStructure;
+                        setAccountStructure(value);
+                        if (value === "cash") setMaxLeverageMultipleStr("1");
+                      }}>
+                        <option value="">{L("Select", "Selecciona")}</option>
+                        <option value="cash">Cash</option>
+                        <option value="margin">Margin</option>
+                        <option value="leveraged_derivatives">{L("Leveraged derivatives", "Derivados apalancados")}</option>
+                      </select>
+                    </label>
+                    <label className="text-[11px] text-slate-400">
+                      {L("Maximum leverage multiple", "Múltiplo máximo de apalancamiento")}
+                      <input className={`${inputBase} mt-1 ${accountStructure === "cash" ? "cursor-not-allowed opacity-70" : ""}`} inputMode="decimal" value={maxLeverageMultipleStr} readOnly={accountStructure === "cash"} onChange={(event) => setMaxLeverageMultipleStr(event.target.value)} placeholder="1" />
+                    </label>
+                  </div>
+
+                  {adaptiveGrowthPlan.capacityFlags.length ? (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {adaptiveGrowthPlan.capacityFlags.map((flag) => (
+                        <span key={flag} className="rounded-full border border-amber-300/20 bg-amber-300/5 px-2.5 py-1 text-[10px] text-amber-100">
+                          {flag.replaceAll("_", " ")}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+
                 <div className="grid gap-3 xl:grid-cols-2">
                   {([
                     {
@@ -3802,7 +4053,7 @@ export default function GrowthPlanPage() {
                   </div>
                   <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
                     <p className="text-[10px] uppercase tracking-[0.18em] text-slate-500">
-                      {L("Perfect path/session", "Ruta perfecta/sesión")}
+                      {L("Required every session", "Requerido cada sesión")}
                     </p>
                     <p className="mt-1 text-base font-semibold text-slate-100">
                       {planRealismReview.requiredCompoundDailyPct.toFixed(2)}%
@@ -3844,6 +4095,129 @@ export default function GrowthPlanPage() {
                             `${planRealismReview.evidenceSessions} sesiones`
                           )}
                     </p>
+                  </div>
+                </div>
+                <div className="mt-2 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                  <div className="rounded-xl border border-cyan-300/20 bg-slate-950/55 p-3">
+                    <p className="text-[10px] uppercase tracking-[0.18em] text-cyan-200">
+                      {L("Mathematical goal-day required", "Día-meta matemático requerido")}
+                    </p>
+                    <p className="mt-1 text-lg font-semibold text-slate-100">
+                      {adaptiveGrowthPlan.requestedRequiredGoalDayPct.toFixed(3)}%
+                    </p>
+                    <p className="mt-1 text-[10px] leading-4 text-slate-500">
+                      {L(
+                        `Uses ${adaptiveGrowthPlan.declaredExpectedLossDayPct.toFixed(2)}% on ${adaptiveGrowthPlan.lossDaysPerWeek} modeled loss day(s) per week.`,
+                        `Usa ${adaptiveGrowthPlan.declaredExpectedLossDayPct.toFixed(2)}% en ${adaptiveGrowthPlan.lossDaysPerWeek} día(s) de pérdida modelados por semana.`
+                      )}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-cyan-300/20 bg-slate-950/55 p-3">
+                    <p className="text-[10px] uppercase tracking-[0.18em] text-cyan-200">
+                      {L("Target annualized math", "Matemática anualizada de la meta")}
+                    </p>
+                    <p className="mt-1 text-lg font-semibold text-slate-100">
+                      {adaptiveGrowthPlan.targetAnnualizedReturnPct == null
+                        ? "—"
+                        : `${adaptiveGrowthPlan.targetAnnualizedReturnPct.toFixed(1)}%`}
+                    </p>
+                    <p className="mt-1 text-[10px] leading-4 text-slate-500">
+                      {L("Arithmetic requirement, not a forecast or safe return.", "Requisito aritmético, no pronóstico ni retorno seguro.")}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-cyan-300/20 bg-slate-950/55 p-3">
+                    <p className="text-[10px] uppercase tracking-[0.18em] text-cyan-200">
+                      {L("Estimated trading costs", "Costos estimados de trading")}
+                    </p>
+                    <p className="mt-1 text-lg font-semibold text-slate-100">
+                      {currency(adaptiveGrowthPlan.requestedEstimatedCostsUsd)}
+                    </p>
+                    <p className="mt-1 text-[10px] leading-4 text-slate-500">
+                      {L("Configure costs below; zero is an incomplete estimate.", "Configura los costos abajo; cero es un estimado incompleto.")}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-cyan-300/20 bg-slate-950/55 p-3">
+                    <p className="text-[10px] uppercase tracking-[0.18em] text-cyan-200">
+                      {L("After tax reserve", "Luego de reserva contributiva")}
+                    </p>
+                    <p className="mt-1 text-lg font-semibold text-slate-100">
+                      {currency(adaptiveGrowthPlan.requestedAfterTaxReserveBalance)}
+                    </p>
+                    <p className="mt-1 text-[10px] leading-4 text-slate-500">
+                      {L("Planning reserve only; verify with a tax professional.", "Solo reserva de planificación; verifica con un profesional contributivo.")}
+                    </p>
+                  </div>
+                </div>
+                <div className="mt-3 overflow-hidden rounded-xl border border-slate-800 bg-slate-950/45">
+                  <div className="border-b border-slate-800 px-3 py-2">
+                    <p className="text-[10px] uppercase tracking-[0.2em] text-slate-400">
+                      {L("Internal scenario laboratory", "Laboratorio interno de escenarios")}
+                    </p>
+                    <p className="mt-1 text-[10px] leading-4 text-slate-500">
+                      {L(
+                        "P10, median, P90, and target probability use 400 seeded paths with the selected win/loss frequency. They are sensitivity ranges, not forecasts.",
+                        "P10, mediana, P90 y probabilidad de meta usan 400 rutas con semilla y la frecuencia seleccionada de ganancias/pérdidas. Son rangos de sensibilidad, no pronósticos."
+                      )}
+                    </p>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="min-w-[1180px] w-full text-left text-[11px]">
+                      <thead className="text-slate-500">
+                        <tr className="border-b border-slate-800">
+                          <th className="px-3 py-2 font-medium">{L("Scenario", "Escenario")}</th>
+                          <th className="px-3 py-2 font-medium">{L("Goal / loss day", "Meta / día pérdida")}</th>
+                          <th className="px-3 py-2 font-medium">{L("Annual math", "Matemática anual")}</th>
+                          <th className="px-3 py-2 font-medium">{L("Projected", "Proyectado")}</th>
+                          <th className="px-3 py-2 font-medium">P10 / P50 / P90</th>
+                          <th className="px-3 py-2 font-medium">{L("Target probability", "Probabilidad de meta")}</th>
+                          <th className="px-3 py-2 font-medium">{L("Median max DD", "DD máximo mediano")}</th>
+                          <th className="px-3 py-2 font-medium">{L("Risk of losing 50%", "Riesgo de perder 50%")}</th>
+                          <th className="px-3 py-2 font-medium">{L("Completion", "Cumplimiento")}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {adaptiveGrowthPlan.panoramas.map((panorama) => {
+                          const title =
+                            panorama.id === "declared"
+                              ? L("Your declared inputs", "Tus datos declarados")
+                              : panorama.id === "mathematical"
+                                ? L("Exact target math", "Matemática exacta de meta")
+                                : panorama.id === "conservative"
+                                  ? L("Conservative", "Conservador")
+                                  : panorama.id === "moderate"
+                                    ? L("Moderate", "Moderado")
+                                    : L("Aggressive", "Agresivo");
+                          return (
+                            <tr key={panorama.id} className="border-b border-slate-900 last:border-b-0">
+                              <td className="px-3 py-2 font-semibold text-slate-200">
+                                {title}
+                                <span className="ml-2 text-[9px] uppercase tracking-[0.12em] text-slate-500">
+                                  {panorama.riskBand.replace("_", " ")}
+                                </span>
+                              </td>
+                              <td className="px-3 py-2 text-slate-300">
+                                +{panorama.goalDayReturnPct.toFixed(3)}% / -{panorama.expectedLossDayPct.toFixed(2)}%
+                              </td>
+                              <td className="px-3 py-2 text-slate-300">{panorama.modeledAnnualReturnPct.toFixed(1)}%</td>
+                              <td className="px-3 py-2 text-slate-200">{currency(panorama.projectedBalance)}</td>
+                              <td className="px-3 py-2 text-slate-400">
+                                {currency(panorama.probability.p10Balance)} / {currency(panorama.probability.medianBalance)} / {currency(panorama.probability.p90Balance)}
+                              </td>
+                              <td className="px-3 py-2 font-semibold text-cyan-100">
+                                {panorama.probability.probabilityTargetPct.toFixed(1)}%
+                              </td>
+                              <td className="px-3 py-2 text-slate-300">
+                                {panorama.probability.medianMaxDrawdownPct.toFixed(1)}%
+                              </td>
+                              <td className="px-3 py-2 text-slate-300">
+                                {panorama.probability.probabilityCapitalHalfPct.toFixed(1)}%
+                              </td>
+                              <td className="px-3 py-2 text-slate-300">{formatPlanDate(panorama.completionDate, lang)}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
                   </div>
                 </div>
                 <div className="mt-2 grid gap-2 sm:grid-cols-3">
@@ -5388,7 +5762,8 @@ export default function GrowthPlanPage() {
     lossDaysSet &&
     capitalFlowAssumptionsComplete &&
     autoPhasesGenerated &&
-    businessAnalysisComplete;
+    businessAnalysisComplete &&
+    adaptiveGrowthPlan.capacityStatus !== "blocked";
 
   const handleApproveAndSave = async () => {
     setError("");
@@ -5409,6 +5784,15 @@ export default function GrowthPlanPage() {
       !businessAnalysisComplete
     ) {
       setError(L("Please complete all required fields first.", "Completa todos los campos requeridos primero."));
+      return;
+    }
+    if (adaptiveGrowthPlan.capacityStatus === "blocked") {
+      setError(
+        L(
+          "This plan cannot be activated with retirement, borrowed, emergency, or living-expense capital. Select disposable business capital first.",
+          "Este plan no se puede activar con capital de retiro, prestado, de emergencia o destinado a gastos de vida. Selecciona primero capital empresarial disponible."
+        )
+      );
       return;
     }
     if (!planDatesOrdered) {
@@ -5514,6 +5898,18 @@ export default function GrowthPlanPage() {
         goalDayReturnPct: adaptiveGrowthPlan.recommendedGoalDayPct,
         expectedLossDayPct: adaptiveGrowthPlan.expectedLossDayPct,
         returnModelMode,
+        estimatedCostPerSessionUsd,
+        estimatedTaxReservePct,
+        financialCapacity: {
+          capitalSource,
+          emergencyFundMonths,
+          monthlyEssentialExpensesUsd,
+          liquidReservesOutsideTradingUsd,
+          accountStructure,
+          maxLeverageMultiple,
+          status: adaptiveGrowthPlan.capacityStatus,
+          flags: adaptiveGrowthPlan.capacityFlags,
+        },
         plannedDepositMode,
         plannedDepositSettings,
         plannedWithdrawalMode,

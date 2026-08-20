@@ -14,6 +14,9 @@ Have these inputs ready:
 5. The return model you want to evaluate: conservative, moderate, aggressive, or manual.
 6. Expected trading days and losing days per week, including the typical losing-day percentage.
 7. Any recurring capital contributions or withdrawals, including amount, frequency, and starting period.
+8. The source of the starting capital, emergency-fund coverage, essential monthly expenses, and liquid reserves kept outside trading.
+9. Account structure and maximum leverage: cash, margin, or leveraged derivatives.
+10. Estimated cost per trading session and a tax-reserve percentage for positive trading growth.
 
 ## Plan Mode (Automatic)
 The plan is always automatic and runway-based. The system calculates the target date from the start date and selected runway, then applies the selected instrument calendar to calculate available market sessions, committed trading days, pacing, and checkpoints.
@@ -29,12 +32,27 @@ The adaptive engine evaluates:
 3. Goal-day return, expected losing-day result, hard daily-loss limit, and risk per trade.
 4. Planned contributions and withdrawals. These are modeled as capital flows, never as trading return.
 5. Recorded execution evidence: sessions, trades, average net result per session, profit factor, expectancy, and drawdown.
+6. Financial capacity: capital source, emergency reserves, essential expenses, account structure, and leverage.
+7. Trading friction and planning reserves: estimated per-session costs and a user-declared tax reserve.
 
 It then reports the capital projected by the requested date, deadline coverage, any shortfall, and a disciplined estimated completion date. If the requested deadline is unsupported, select **Use recommended runway** before activating the plan. Official web and mobile checkpoints will use the accepted disciplined horizon, not the unsupported deadline.
 
 If documented performance does not show a positive edge, the engine withholds a completion date supported by trading gains. The correct next phase is evidence qualification and process improvement, not a larger return assumption. If scheduled contributions alone can fund the target, the platform may show that funding horizon, but trading growth remains at 0% and the plan remains in qualification.
 
 The deterministic roadmap searches up to a 50-year planning horizon. A target outside that boundary cannot be activated as an official checkpoint schedule.
+
+## Scenario laboratory
+The plan compares five views without mixing their purpose:
+1. **Your declared inputs** show exactly what the percentages you entered would produce, even when that combination has negative expectancy.
+2. **Conservative, Moderate, and Aggressive** show policy-controlled operating cases using the same schedule, costs, capital flows, and target.
+3. **Exact target math** solves the goal-day return required to touch the requested target while preserving the declared losing-day frequency and loss assumption.
+
+Each view shows deterministic projected balance, annualized math, P10/median/P90 sensitivity balances, target-hit sensitivity, median maximum drawdown, and sensitivity to losing at least 50% of starting capital. The seeded paths are planning stress tests, not forecasts, guarantees, or individualized investment advice. A target can be mathematically possible while remaining speculative, outside the selected policy, or unsupported by execution evidence.
+
+## Financial capacity guardrails
+The plan can be evaluated with any declared capital source, but it cannot be activated with borrowed money, retirement funds, emergency funds, or money required for living expenses. Reserves below three months and leverage above 2x are surfaced as warnings. These rules protect the operating plan from confusing essential capital with risk capital.
+
+Trading costs reduce every modeled session. The tax reserve is applied only to positive modeled trading growth and is shown separately; it is a planning estimate that must be confirmed with a qualified tax professional.
 
 ## Model-Recommended Operating Path
 Complete the five Business Analysis inputs: risk profile, experience, income dependency, drawdown comfort, and trading style. The plan then presents an explicit operating recommendation based on your starting capital and business target.
@@ -58,6 +76,8 @@ The evaluation remains hidden until the operating assumptions are complete. Choo
 4. Hard daily-loss stop and risk per trade.
 5. Whether contributions will be added, with cadence and amount.
 6. Whether withdrawals will be taken, with cadence and amount.
+7. Financial capacity, capital source, account structure, and leverage.
+8. Per-session costs and tax-reserve percentage.
 
 Policy modes populate their operating assumptions automatically. Manual mode accepts the user's percentages, but the adaptive engine still evaluates them against profile guardrails and documented execution. It will not approve a faster pace merely because a larger percentage was typed.
 
@@ -76,7 +96,7 @@ A declared goal-day percentage cannot raise the recommendation above the selecte
 Select **Run deep review** to ask Research AI to explain the verified calculation with the private CFA-informed research methodology. The deterministic engine remains authoritative. AI adds context, limitations, and disciplined actions; it cannot change the numbers, promise returns, provide individualized investment advice, or recommend buying or selling a security.
 
 ## Platform synchronization
-On mobile, use **Evaluate plan before saving** to review the horizon, trading growth, contributions, and withdrawals without changing the active plan. After **Approve & Save**, the saved phases become the official checkpoint source for web, mobile, dashboard, Business Protection System, and AI Coach. `Plan Progress` reads the active weekly checkpoint while the adaptive roadmap preserves monthly, quarterly, and annual targets. Mobile automatically activates the disciplined horizon when its first save finds that the requested deadline is unsupported.
+On mobile, use **Evaluate plan before saving** to review the same five scenarios, capacity guardrails, costs, tax reserve, horizon, trading growth, contributions, and withdrawals without changing the active plan. After **Approve & Save**, the saved phases become the official checkpoint source for web, mobile, dashboard, Business Protection System, and AI Coach. `Plan Progress` reads the active weekly checkpoint while the adaptive roadmap preserves monthly, quarterly, and annual targets. Mobile automatically activates the disciplined horizon when its first save finds that the requested deadline is unsupported.
 
 ## 1) Starting Balance
 What it is: your current broker account equity.  

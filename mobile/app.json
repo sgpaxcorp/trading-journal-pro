@@ -65,7 +65,13 @@
     },
     "plugins": [
       "expo-secure-store",
-      "expo-notifications",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#00BFA6"
+        }
+      ],
       "./plugins/with-device-debug-bundling",
       "expo-font"
     ],

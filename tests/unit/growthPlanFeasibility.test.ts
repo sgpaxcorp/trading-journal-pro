@@ -78,6 +78,44 @@ describe("buildGrowthPlanFeasibility", () => {
 });
 
 describe("buildAdaptiveGrowthPlan", () => {
+  it("separates mathematical possibility from an internally losing declared scenario", () => {
+    const comparisonPolicies = (["conservative", "moderate", "aggressive"] as const).map((id) =>
+      getGrowthPlanOperatingPolicy(id)
+    );
+    const result = buildAdaptiveGrowthPlan({
+      starting: 1_000,
+      target: 50_000,
+      startIso: "2026-06-01",
+      requestedTargetIso: "2031-06-01",
+      tradingInstrument: "stocks",
+      averageTradingDaysPerWeek: 5,
+      policy: getGrowthPlanOperatingPolicy("moderate"),
+      comparisonPolicies,
+      declaredGoalDayPct: 0.2,
+      declaredExpectedLossDayPct: 1,
+    });
+
+    const declared = result.panoramas.find((item) => item.id === "declared");
+    const mathematical = result.panoramas.find((item) => item.id === "mathematical");
+
+    expect(result.mathematicallyPossible).toBe(true);
+    expect(result.targetAnnualizedReturnPct).toBeGreaterThan(100);
+    expect(result.requestedRequiredGoalDayPct).toBeGreaterThan(0.3);
+    expect(result.requestedRequiredGoalDayPct).toBeLessThan(1);
+    expect(result.expectedLossDayPct).toBe(0.35);
+    expect(result.recommendedCompletionDate).toBeTruthy();
+    expect(result.recommendedCompletionDate! > "2031-06-01").toBe(true);
+    expect(declared?.modeledAnnualReturnPct).toBeLessThan(0);
+    expect(declared?.projectedBalance).toBeLessThan(1_000);
+    expect(mathematical?.reachesRequestedDeadline).toBe(true);
+    expect(mathematical?.projectedBalance).toBeGreaterThanOrEqual(50_000);
+    expect(mathematical?.riskBand).toBe("extreme");
+    expect(mathematical?.probability.probabilityTargetPct).toBeGreaterThan(20);
+    expect(mathematical?.probability.probabilityCapitalHalfPct).toBeGreaterThanOrEqual(0);
+    expect(result.flags).toContain("declared_loss_assumption_above_operating_policy");
+    expect(result.flags).toContain("target_requires_extreme_annualized_return");
+  });
+
   it("treats 1,000 to 10,000 in one year as a request, not an approved pace", () => {
     const result = buildAdaptiveGrowthPlan({
       starting: 1_000,
@@ -295,5 +333,68 @@ describe("buildAdaptiveGrowthPlan", () => {
     expect(result.requestedDepositsUsd).toBeGreaterThan(0);
     expect(result.recommendedCompletionDate).toBeTruthy();
     expect(result.monthlyMilestones.some((item) => item.plannedDepositsUsd > 0)).toBe(true);
+  });
+
+  it("includes trading friction, tax reserve, and protected financial capacity", () => {
+    const common = {
+      starting: 10_000,
+      target: 20_000,
+      startIso: "2026-01-02",
+      requestedTargetIso: "2028-01-02",
+      tradingInstrument: "stocks" as const,
+      averageTradingDaysPerWeek: 5,
+      policy: getGrowthPlanOperatingPolicy("moderate"),
+    };
+    const withoutFriction = buildAdaptiveGrowthPlan(common);
+    const withFriction = buildAdaptiveGrowthPlan({
+      ...common,
+      estimatedCostPerSessionUsd: 2,
+      estimatedTaxReservePct: 25,
+      financialCapacity: {
+        capitalSource: "disposable_savings",
+        emergencyFundMonths: 6,
+        monthlyEssentialExpensesUsd: 3_000,
+        liquidReservesOutsideTradingUsd: 20_000,
+        accountStructure: "cash",
+        maxLeverageMultiple: 1,
+      },
+    });
+
+    expect(withFriction.requestedEstimatedCostsUsd).toBeGreaterThan(0);
+    expect(withFriction.requestedProjectedBalance).toBeLessThan(withoutFriction.requestedProjectedBalance);
+    expect(withFriction.requestedEstimatedTaxReserveUsd).toBeGreaterThan(0);
+    expect(withFriction.requestedAfterTaxReserveBalance).toBeLessThan(withFriction.requestedProjectedBalance);
+    expect(withFriction.capacityStatus).toBe("protected");
+  });
+
+  it("blocks essential or borrowed capital and derives negative edge from win/loss evidence", () => {
+    const result = buildAdaptiveGrowthPlan({
+      starting: 10_000,
+      target: 20_000,
+      startIso: "2026-01-02",
+      requestedTargetIso: "2028-01-02",
+      tradingInstrument: "stocks",
+      averageTradingDaysPerWeek: 5,
+      policy: getGrowthPlanOperatingPolicy("moderate"),
+      evidence: {
+        totalSessions: 120,
+        winRate: 40,
+        avgWin: 100,
+        avgLoss: 100,
+      },
+      financialCapacity: {
+        capitalSource: "borrowed",
+        emergencyFundMonths: 1,
+        monthlyEssentialExpensesUsd: 3_000,
+        liquidReservesOutsideTradingUsd: 1_000,
+        accountStructure: "margin",
+        maxLeverageMultiple: 3,
+      },
+    });
+
+    expect(result.verdict).toBe("no_validated_edge");
+    expect(result.capacityStatus).toBe("blocked");
+    expect(result.capacityFlags).toContain("restricted_capital_source");
+    expect(result.capacityFlags).toContain("leverage_above_two_times");
   });
 });

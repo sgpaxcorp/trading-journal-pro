@@ -12,6 +12,7 @@ import {
 import {
   buildAdaptiveGrowthPlan,
   getGrowthPlanOperatingPolicy,
+  type GrowthPlanFinancialCapacity,
   type GrowthPlanScenarioId,
 } from "@/lib/growthPlanFeasibility";
 import {
@@ -350,6 +351,7 @@ function normalizePlan(row: GrowthPlanRow | null) {
     businessAnalysis?.operatingModel?.returnModelMode ?? businessAnalysis?.selectedScenarioId,
     40
   );
+  const storedFinancialCapacity = businessAnalysis?.operatingModel?.financialCapacity ?? null;
 
   return {
     accountId: row.account_id ?? null,
@@ -377,6 +379,14 @@ function normalizePlan(row: GrowthPlanRow | null) {
     returnModelMode: ["conservative", "moderate", "aggressive", "manual"].includes(storedReturnMode)
       ? storedReturnMode
       : "moderate",
+    estimatedCostPerSessionUsd: Math.max(0, num(businessAnalysis?.operatingModel?.estimatedCostPerSessionUsd, 0)),
+    estimatedTaxReservePct: clampNumber(
+      businessAnalysis?.operatingModel?.estimatedTaxReservePct,
+      0,
+      60,
+      0
+    ),
+    financialCapacity: storedFinancialCapacity,
     plannedDepositSettings: depositSettings,
     plannedWithdrawalSettings: withdrawalSettings,
     tradingInstrument,
@@ -732,6 +742,55 @@ export async function POST(req: NextRequest) {
       riskPerTradePct: maxRiskPerTradePercent,
       lossDaysPerWeek,
     };
+    const capacityInput =
+      body?.financialCapacity && typeof body.financialCapacity === "object"
+        ? body.financialCapacity
+        : currentOperatingModel?.financialCapacity ?? {};
+    const capitalSource = cleanText(capacityInput?.capitalSource, 40);
+    const accountStructure = cleanText(capacityInput?.accountStructure, 40);
+    const financialCapacity: GrowthPlanFinancialCapacity = {
+      capitalSource: [
+        "disposable_savings",
+        "business_income",
+        "retirement",
+        "borrowed",
+        "emergency_fund",
+        "living_expenses",
+      ].includes(capitalSource)
+        ? (capitalSource as NonNullable<GrowthPlanFinancialCapacity["capitalSource"]>)
+        : null,
+      emergencyFundMonths:
+        capacityInput?.emergencyFundMonths == null
+          ? null
+          : clampNumber(capacityInput.emergencyFundMonths, 0, 120, 0),
+      monthlyEssentialExpensesUsd:
+        capacityInput?.monthlyEssentialExpensesUsd == null
+          ? null
+          : clampNumber(capacityInput.monthlyEssentialExpensesUsd, 0, 10_000_000, 0),
+      liquidReservesOutsideTradingUsd:
+        capacityInput?.liquidReservesOutsideTradingUsd == null
+          ? null
+          : clampNumber(capacityInput.liquidReservesOutsideTradingUsd, 0, 1_000_000_000, 0),
+      accountStructure: ["cash", "margin", "leveraged_derivatives"].includes(accountStructure)
+        ? (accountStructure as NonNullable<GrowthPlanFinancialCapacity["accountStructure"]>)
+        : null,
+      maxLeverageMultiple:
+        capacityInput?.maxLeverageMultiple == null
+          ? null
+          : clampNumber(capacityInput.maxLeverageMultiple, 1, 100, 1),
+    };
+    const estimatedCostPerSessionUsd = clampNumber(
+      body?.estimatedCostPerSessionUsd ?? currentOperatingModel?.estimatedCostPerSessionUsd,
+      0,
+      100_000,
+      0
+    );
+    const estimatedTaxReservePct = clampNumber(
+      body?.estimatedTaxReservePct ?? currentOperatingModel?.estimatedTaxReservePct,
+      0,
+      60,
+      0
+    );
 
     if (startingBalance <= 0) return NextResponse.json({ error: "Starting balance is required." }, { status: 400 });
     if (targetBalance <= startingBalance) {
@@ -779,7 +838,26 @@ export async function POST(req: NextRequest) {
       evidence: currentBusinessAnalysis?.executionEvidence ?? null,
       depositPlan: plannedDepositSettings,
       withdrawalPlan: plannedWithdrawalSettings,
+      comparisonPolicies: (["conservative", "moderate", "aggressive"] as const).map((id) => ({
+        ...getGrowthPlanOperatingPolicy(id, currentProfile),
+        lossDaysPerWeek,
+      })),
+      estimatedCostPerSessionUsd,
+      estimatedTaxReservePct,
+      financialCapacity,
     });
+    if (action !== "preview" && adaptivePlan.capacityStatus === "incomplete") {
+      return NextResponse.json(
+        { error: "Complete financial capacity, account structure, costs, and tax-reserve assumptions before saving." },
+        { status: 400 }
+      );
+    }
+    if (action !== "preview" && adaptivePlan.capacityStatus === "blocked") {
+      return NextResponse.json(
+        { error: "Retirement, borrowed, emergency, and living-expense capital cannot fund an active Trading Business Plan." },
+        { status: 422 }
+      );
+    }
     if (
       action !== "preview" &&
       adaptivePlan.verdict === "not_supported" &&
@@ -819,6 +897,7 @@ export async function POST(req: NextRequest) {
       withdrawalSettings: plannedWithdrawalSettings,
       existingWithdrawals: Array.isArray(current?.planned_withdrawals) ? current?.planned_withdrawals : [],
       tradingInstrument,
+      estimatedCostPerSessionUsd,
     });
 
     if (!projection.tradingDays.length) {
@@ -947,6 +1026,13 @@ export async function POST(req: NextRequest) {
           riskPerTradePct: maxRiskPerTradePercent,
           expectedLossDayPct: adaptivePlan.expectedLossDayPct,
           returnModelMode,
+          estimatedCostPerSessionUsd,
+          estimatedTaxReservePct,
+          financialCapacity: {
+            ...financialCapacity,
+            status: adaptivePlan.capacityStatus,
+            flags: adaptivePlan.capacityFlags,
+          },
           plannedDepositMode: plannedDepositSettings?.enabled ? "scheduled" : "none",
           plannedDepositSettings,
           plannedWithdrawalMode: plannedWithdrawalSettings?.enabled ? "scheduled" : "none",

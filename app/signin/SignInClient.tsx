@@ -14,6 +14,10 @@ type SignInClientProps = {
   emailConfirmed?: boolean;
 };
 
+const SIGN_IN_TIMEOUT_MS = 15000;
+const ADMIN_CHECK_TIMEOUT_MS = 8000;
+const POST_SIGN_IN_NAV_FALLBACK_MS = 1800;
+
 function safeInternalPath(maybePath: string | undefined | null) {
   if (!maybePath) return "/dashboard";
   if (typeof maybePath !== "string") return "/dashboard";
@@ -22,6 +26,23 @@ function safeInternalPath(maybePath: string | undefined | null) {
   // Evita esquemas raros tipo //evil.com
   if (maybePath.startsWith("//")) return "/dashboard";
   return maybePath;
+}
+
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  timeoutMessage: string
+): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(timeoutMessage)), timeoutMs);
+  });
+
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
 }
 
 export default function SignInClient({ nextPath, emailConfirmed = false }: SignInClientProps) {
@@ -39,6 +60,7 @@ export default function SignInClient({ nextPath, emailConfirmed = false }: SignI
   const [password, setPassword] = useState("");
 
   const [loading, setLoading] = useState(false);
+  const [redirecting, setRedirecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [checkingExistingAdmin, setCheckingExistingAdmin] = useState(
     wantsAdminDestination
@@ -56,12 +78,19 @@ export default function SignInClient({ nextPath, emailConfirmed = false }: SignI
       setCheckingExistingAdmin(true);
 
       try {
-        const adminStatus = await getAdminStatus();
+        const adminStatus = await withTimeout(
+          getAdminStatus(),
+          ADMIN_CHECK_TIMEOUT_MS,
+          L(
+            "Staff access check timed out.",
+            "La verificación de acceso del staff tardó demasiado."
+          )
+        );
         if (cancelled) return;
 
         if (adminStatus.isAdmin) {
-          router.refresh();
           router.replace(safeNext);
+          router.refresh();
           return;
         }
       } catch (err) {
@@ -82,37 +111,59 @@ export default function SignInClient({ nextPath, emailConfirmed = false }: SignI
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
-    if (loading) return;
+    if (loading || redirecting) return;
 
     setError(null);
 
     const cleanEmail = email.trim().toLowerCase();
+    let navigationStarted = false;
 
     try {
       setLoading(true);
 
-      const { error } = await supabase.auth.signInWithPassword({
-        email: cleanEmail,
-        password,
-      });
+      const { error } = await withTimeout(
+        supabase.auth.signInWithPassword({
+          email: cleanEmail,
+          password,
+        }),
+        SIGN_IN_TIMEOUT_MS,
+        L(
+          "Sign in is taking longer than expected. Check your connection and try again.",
+          "El inicio de sesión está tardando más de lo esperado. Verifica tu conexión e inténtalo de nuevo."
+        )
+      );
 
       if (error) {
         setError(error.message);
         return;
       }
 
+      navigationStarted = true;
+      setRedirecting(true);
+
       // Importantísimo en App Router:
       // fuerza a que Server Components lean la nueva sesión (cookies).
+      router.replace(safeNext);
       router.refresh();
 
-      router.replace(safeNext);
+      window.setTimeout(() => {
+        const currentPath = window.location.pathname + window.location.search;
+        if (currentPath !== safeNext) {
+          window.location.assign(safeNext);
+        }
+      }, POST_SIGN_IN_NAV_FALLBACK_MS);
     } catch (err: any) {
       console.error("Error on sign in:", err);
       setError(err?.message ?? L("Something went wrong. Please try again.", "Algo salió mal. Intenta de nuevo."));
     } finally {
-      setLoading(false);
+      if (!navigationStarted) {
+        setLoading(false);
+        setRedirecting(false);
+      }
     }
   }
+
+  const isBusy = loading || redirecting;
 
   if (checkingExistingAdmin) {
     return (
@@ -157,8 +208,9 @@ export default function SignInClient({ nextPath, emailConfirmed = false }: SignI
 
         <form onSubmit={handleSubmit} className="space-y-3 text-xs">
           <div>
-            <label className="block mb-1 text-slate-300">{L("Email", "Correo")}</label>
+            <label htmlFor="signin-email" className="block mb-1 text-slate-300">{L("Email", "Correo")}</label>
             <input
+              id="signin-email"
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
@@ -171,8 +223,9 @@ export default function SignInClient({ nextPath, emailConfirmed = false }: SignI
           </div>
 
           <div>
-            <label className="block mb-1 text-slate-300">{L("Password", "Contraseña")}</label>
+            <label htmlFor="signin-password" className="block mb-1 text-slate-300">{L("Password", "Contraseña")}</label>
             <input
+              id="signin-password"
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
@@ -185,10 +238,14 @@ export default function SignInClient({ nextPath, emailConfirmed = false }: SignI
 
           <button
             type="submit"
-            disabled={loading}
+            disabled={isBusy}
             className="mt-2 w-full py-2.5 rounded-xl bg-emerald-400 text-slate-950 text-xs font-semibold hover:bg-emerald-300 disabled:opacity-60 disabled:cursor-not-allowed"
           >
-            {loading ? L("Signing in...", "Iniciando...") : L("Log in", "Ingresar")}
+            {redirecting
+              ? L("Opening workspace...", "Abriendo workspace...")
+              : loading
+              ? L("Signing in...", "Iniciando...")
+              : L("Log in", "Ingresar")}
           </button>
         </form>
 

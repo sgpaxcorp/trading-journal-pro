@@ -40,6 +40,30 @@ function milestoneList(value: unknown, maxItems: number) {
   }));
 }
 
+function panoramaList(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 5).map((item: any) => ({
+    id: text(item?.id, 30),
+    goalDayReturnPct: finite(item?.goalDayReturnPct),
+    expectedLossDayPct: finite(item?.expectedLossDayPct),
+    modeledAnnualReturnPct: finite(item?.modeledAnnualReturnPct),
+    projectedBalanceUsd: finite(item?.projectedBalance),
+    afterTaxReserveBalanceUsd: finite(item?.afterTaxReserveBalance),
+    completionDate: text(item?.completionDate, 20),
+    reachesRequestedDeadline: Boolean(item?.reachesRequestedDeadline),
+    riskBand: text(item?.riskBand, 30),
+    sensitivity: {
+      simulations: Math.max(0, Math.floor(finite(item?.probability?.simulations))),
+      probabilityTargetPct: finite(item?.probability?.probabilityTargetPct),
+      probabilityCapitalHalfPct: finite(item?.probability?.probabilityCapitalHalfPct),
+      p10BalanceUsd: finite(item?.probability?.p10Balance),
+      medianBalanceUsd: finite(item?.probability?.medianBalance),
+      p90BalanceUsd: finite(item?.probability?.p90Balance),
+      medianMaxDrawdownPct: finite(item?.probability?.medianMaxDrawdownPct),
+    },
+  }));
+}
+
 function parseJson(value: string) {
   const cleaned = String(value ?? "")
     .trim()
@@ -135,6 +159,12 @@ export async function POST(req: NextRequest) {
         requestedDepositsUsd: finite(body?.adaptivePlan?.requestedDepositsUsd),
         requestedWithdrawalsUsd: finite(body?.adaptivePlan?.requestedWithdrawalsUsd),
         requestedNetCashflowUsd: finite(body?.adaptivePlan?.requestedNetCashflowUsd),
+        requestedRequiredGoalDayPct: finite(body?.adaptivePlan?.requestedRequiredGoalDayPct),
+        targetAnnualizedReturnPct: finite(body?.adaptivePlan?.targetAnnualizedReturnPct),
+        mathematicallyPossible: Boolean(body?.adaptivePlan?.mathematicallyPossible),
+        requestedEstimatedCostsUsd: finite(body?.adaptivePlan?.requestedEstimatedCostsUsd),
+        requestedEstimatedTaxReserveUsd: finite(body?.adaptivePlan?.requestedEstimatedTaxReserveUsd),
+        requestedAfterTaxReserveBalanceUsd: finite(body?.adaptivePlan?.requestedAfterTaxReserveBalance),
         declaredGoalDayPct: finite(body?.adaptivePlan?.declaredGoalDayPct),
         declaredExpectedLossDayPct: finite(body?.adaptivePlan?.declaredExpectedLossDayPct),
         policyGoalDayCapPct: finite(body?.adaptivePlan?.policyGoalDayCapPct),
@@ -158,10 +188,23 @@ export async function POST(req: NextRequest) {
           0,
           Math.floor(finite(body?.adaptivePlan?.qualificationMinimumSessions))
         ),
+        capacityStatus: text(body?.adaptivePlan?.capacityStatus, 30),
+        capacityFlags: textList(body?.adaptivePlan?.capacityFlags),
+        panoramas: panoramaList(body?.adaptivePlan?.panoramas),
         flags: textList(body?.adaptivePlan?.flags),
         nextMonthlyCheckpoints: milestoneList(body?.adaptivePlan?.nextMonthlyCheckpoints, 12),
         quarterlyCheckpoints: milestoneList(body?.adaptivePlan?.quarterlyCheckpoints, 12),
         annualCheckpoints: milestoneList(body?.adaptivePlan?.annualCheckpoints, 30),
+      },
+      financialCapacity: {
+        capitalSource: text(body?.financialCapacity?.capitalSource, 40),
+        emergencyFundMonths: finite(body?.financialCapacity?.emergencyFundMonths),
+        monthlyEssentialExpensesUsd: finite(body?.financialCapacity?.monthlyEssentialExpensesUsd),
+        liquidReservesOutsideTradingUsd: finite(body?.financialCapacity?.liquidReservesOutsideTradingUsd),
+        accountStructure: text(body?.financialCapacity?.accountStructure, 40),
+        maxLeverageMultiple: finite(body?.financialCapacity?.maxLeverageMultiple),
+        estimatedCostPerSessionUsd: finite(body?.financialCapacity?.estimatedCostPerSessionUsd),
+        estimatedTaxReservePct: finite(body?.financialCapacity?.estimatedTaxReservePct),
       },
       executionEvidence: {
         depth: text(body?.executionEvidence?.depth, 40),
@@ -193,6 +236,9 @@ export async function POST(req: NextRequest) {
       "The deterministic snapshot is authoritative. Never recalculate, alter, or contradict its numbers.",
       "Distinguish perfect-path compounding from the return required only on modeled goal-days.",
       "Evaluate arithmetic feasibility, operating-model coverage, loss assumptions, execution evidence, and uncertainty separately.",
+      "Use the five panoramas to distinguish the user's declared case, conservative/moderate/aggressive policy cases, and exact target arithmetic.",
+      "A mathematically possible target can still be speculative or unsupported by the selected policy; explain both facts without calling the target impossible.",
+      "Discuss transaction-cost drag, tax-reserve planning, emergency reserves, capital source, leverage, drawdown sensitivity, and 50%-capital-loss sensitivity when present.",
       "Use the adaptive plan as the authoritative disciplined horizon when the requested deadline is unsupported.",
       "When declared inputs exceed the policy cap or understate the policy loss floor, explain that they were evaluated but not used to accelerate the recommendation.",
       "Explain that maxDailyLossGuardrailPct is a hard guardrail while expectedLossDayPct is the modeled average losing-day assumption.",

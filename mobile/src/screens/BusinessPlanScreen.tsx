@@ -23,6 +23,9 @@ type MobileGrowthPlan = {
   tradingDays?: number;
   tradingInstrument?: TradingInstrument;
   returnModelMode?: ReturnModelMode;
+  estimatedCostPerSessionUsd?: number;
+  estimatedTaxReservePct?: number;
+  financialCapacity?: FinancialCapacity | null;
   plannedDepositSettings?: CapitalFlowSettings | null;
   plannedWithdrawalSettings?: CapitalFlowSettings | null;
   runway?: {
@@ -45,6 +48,23 @@ type CapitalFlowSettings = {
   frequency?: CapitalFlowFrequency;
   amount?: number;
   startPeriodIndex?: number | null;
+};
+type CapitalSource =
+  | "disposable_savings"
+  | "business_income"
+  | "retirement"
+  | "borrowed"
+  | "emergency_fund"
+  | "living_expenses"
+  | "";
+type AccountStructure = "cash" | "margin" | "leveraged_derivatives" | "";
+type FinancialCapacity = {
+  capitalSource?: CapitalSource | null;
+  emergencyFundMonths?: number | null;
+  monthlyEssentialExpensesUsd?: number | null;
+  liquidReservesOutsideTradingUsd?: number | null;
+  accountStructure?: AccountStructure | null;
+  maxLeverageMultiple?: number | null;
 };
 
 type AdaptiveMilestone = {
@@ -86,6 +106,30 @@ type AdaptivePlan = {
   quarterlyMilestones?: AdaptiveMilestone[];
   annualMilestones?: AdaptiveMilestone[];
   flags?: string[];
+  requestedRequiredGoalDayPct?: number;
+  targetAnnualizedReturnPct?: number | null;
+  mathematicallyPossible?: boolean;
+  requestedEstimatedCostsUsd?: number;
+  requestedAfterTaxReserveBalance?: number;
+  capacityStatus?: "incomplete" | "protected" | "warning" | "blocked";
+  capacityFlags?: string[];
+  panoramas?: Array<{
+    id?: "declared" | "conservative" | "moderate" | "aggressive" | "mathematical";
+    goalDayReturnPct?: number;
+    expectedLossDayPct?: number;
+    modeledAnnualReturnPct?: number;
+    projectedBalance?: number;
+    completionDate?: string | null;
+    riskBand?: string;
+    probability?: {
+      probabilityTargetPct?: number;
+      probabilityCapitalHalfPct?: number;
+      p10Balance?: number;
+      medianBalance?: number;
+      p90Balance?: number;
+      medianMaxDrawdownPct?: number;
+    };
+  }>;
 };
 
 type MobileGrowthPlanResponse = {
@@ -280,6 +324,14 @@ export function BusinessPlanScreen() {
   const [expectedLossDayPct, setExpectedLossDayPct] = useState("0.35");
   const [returnModelMode, setReturnModelMode] = useState<ReturnModelMode>("");
   const [policyScenarioId, setPolicyScenarioId] = useState<Exclude<ReturnModelMode, "manual" | "">>("moderate");
+  const [capitalSource, setCapitalSource] = useState<CapitalSource>("");
+  const [emergencyFundMonths, setEmergencyFundMonths] = useState("");
+  const [monthlyEssentialExpenses, setMonthlyEssentialExpenses] = useState("");
+  const [liquidReservesOutsideTrading, setLiquidReservesOutsideTrading] = useState("");
+  const [estimatedCostPerSession, setEstimatedCostPerSession] = useState("");
+  const [estimatedTaxReservePct, setEstimatedTaxReservePct] = useState("");
+  const [accountStructure, setAccountStructure] = useState<AccountStructure>("");
+  const [maxLeverageMultiple, setMaxLeverageMultiple] = useState("1");
   const [plannedDepositMode, setPlannedDepositMode] = useState<CapitalFlowMode>("undecided");
   const [plannedDepositFrequency, setPlannedDepositFrequency] = useState<CapitalFlowFrequency>("monthly");
   const [plannedDepositAmount, setPlannedDepositAmount] = useState("");
@@ -314,6 +366,14 @@ export function BusinessPlanScreen() {
         setExpectedLossDayPct("0.35");
         setReturnModelMode("");
         setPolicyScenarioId("moderate");
+        setCapitalSource("");
+        setEmergencyFundMonths("");
+        setMonthlyEssentialExpenses("");
+        setLiquidReservesOutsideTrading("");
+        setEstimatedCostPerSession("");
+        setEstimatedTaxReservePct("");
+        setAccountStructure("");
+        setMaxLeverageMultiple("1");
         setPlannedDepositMode("undecided");
         setPlannedDepositFrequency("monthly");
         setPlannedDepositAmount("");
@@ -373,6 +433,25 @@ export function BusinessPlanScreen() {
           ? storedScenarioId
           : "moderate"
       );
+      const capacity = plan.financialCapacity ?? steps?.business_analysis?.operatingModel?.financialCapacity ?? {};
+      setCapitalSource((capacity?.capitalSource as CapitalSource) || "");
+      setEmergencyFundMonths(capacity?.emergencyFundMonths == null ? "" : String(capacity.emergencyFundMonths));
+      setMonthlyEssentialExpenses(
+        capacity?.monthlyEssentialExpensesUsd == null ? "" : formatMoneyValue(capacity.monthlyEssentialExpensesUsd)
+      );
+      setLiquidReservesOutsideTrading(
+        capacity?.liquidReservesOutsideTradingUsd == null
+          ? ""
+          : formatMoneyValue(capacity.liquidReservesOutsideTradingUsd)
+      );
+      setEstimatedCostPerSession(
+        plan.estimatedCostPerSessionUsd == null ? "" : formatMoneyValue(plan.estimatedCostPerSessionUsd)
+      );
+      setEstimatedTaxReservePct(
+        plan.estimatedTaxReservePct == null ? "" : String(plan.estimatedTaxReservePct)
+      );
+      setAccountStructure((capacity?.accountStructure as AccountStructure) || "");
+      setMaxLeverageMultiple(String(capacity?.maxLeverageMultiple ?? 1));
       const depositSettings = plan.plannedDepositSettings;
       setPlannedDepositMode(depositSettings ? (depositSettings.enabled ? "scheduled" : "none") : "undecided");
       setPlannedDepositFrequency(depositSettings?.frequency ?? "monthly");
@@ -476,8 +555,12 @@ export function BusinessPlanScreen() {
     if (adaptivePlan.verdict === "not_supported") {
       return t(
         language,
-        "The requested deadline is not supported by this disciplined model.",
-        "El plazo solicitado no está respaldado por este modelo disciplinado."
+        adaptivePlan.mathematicallyPossible
+          ? "The target is mathematically possible, but the selected disciplined model needs more time."
+          : "The requested deadline is outside the current planning range.",
+        adaptivePlan.mathematicallyPossible
+          ? "La meta es matemáticamente posible, pero el modelo disciplinado seleccionado necesita más tiempo."
+          : "El plazo solicitado está fuera del rango actual de planificación."
       );
     }
     if (adaptivePlan.verdict === "no_validated_edge") {
@@ -559,6 +642,19 @@ export function BusinessPlanScreen() {
       (plannedDepositMode === "scheduled" && parseAmount(plannedDepositAmount) > 0)) &&
     (plannedWithdrawalMode === "none" ||
       (plannedWithdrawalMode === "scheduled" && parseAmount(plannedWithdrawalAmount) > 0));
+  const financialCapacityComplete = Boolean(
+    capitalSource &&
+      accountStructure &&
+      emergencyFundMonths.trim() &&
+      monthlyEssentialExpenses.trim() &&
+      liquidReservesOutsideTrading.trim() &&
+      estimatedCostPerSession.trim() &&
+      estimatedTaxReservePct.trim() &&
+      maxLeverageMultiple.trim()
+  );
+  const restrictedCapitalSource = ["retirement", "borrowed", "emergency_fund", "living_expenses"].includes(
+    capitalSource
+  );
 
   const maximumOperatingDays = tradingInstrument === "crypto" ? 7 : 5;
   const operatingDays = Math.floor(parsePercent(averageTradingDaysPerWeek));
@@ -579,7 +675,8 @@ export function BusinessPlanScreen() {
     parsePercent(maxRiskPerTradePercent) > 0 &&
     parsePercent(expectedLossDayPct) <= parsePercent(maxDailyLossPercent) &&
     Boolean(returnModelMode) &&
-    capitalFlowAssumptionsComplete;
+    capitalFlowAssumptionsComplete &&
+    financialCapacityComplete;
 
   const planRequestPayload = useMemo(
     () => ({
@@ -599,6 +696,16 @@ export function BusinessPlanScreen() {
       policyScenarioId,
       operatingDailyGoalPct: parsePercent(operatingGoalDayPct),
       expectedLossDayPct: parsePercent(expectedLossDayPct),
+      estimatedCostPerSessionUsd: parseAmount(estimatedCostPerSession),
+      estimatedTaxReservePct: parsePercent(estimatedTaxReservePct),
+      financialCapacity: {
+        capitalSource,
+        emergencyFundMonths: parsePercent(emergencyFundMonths),
+        monthlyEssentialExpensesUsd: parseAmount(monthlyEssentialExpenses),
+        liquidReservesOutsideTradingUsd: parseAmount(liquidReservesOutsideTrading),
+        accountStructure,
+        maxLeverageMultiple: parsePercent(maxLeverageMultiple),
+      },
       plannedDepositMode,
       plannedDepositFrequency,
       plannedDepositAmount: parseAmount(plannedDepositAmount),
@@ -619,9 +726,17 @@ export function BusinessPlanScreen() {
       doRules,
       dontRules,
       expectedLossDayPct,
+      accountStructure,
+      capitalSource,
+      emergencyFundMonths,
+      estimatedCostPerSession,
+      estimatedTaxReservePct,
+      liquidReservesOutsideTrading,
       lossDaysPerWeek,
       maxDailyLossPercent,
       maxRiskPerTradePercent,
+      maxLeverageMultiple,
+      monthlyEssentialExpenses,
       operatingGoalDayPct,
       orderRules,
       planStartDate,
@@ -661,6 +776,7 @@ export function BusinessPlanScreen() {
   const canEvaluate = formInputsComplete && !saving && !previewing && !resetting;
   const canSave =
     formInputsComplete &&
+    !restrictedCapitalSource &&
     !saving &&
     !previewing &&
     !resetting;
@@ -670,8 +786,8 @@ export function BusinessPlanScreen() {
       setError(
         t(
           language,
-          "Complete the return model, trading and losing days, risk limits, contributions, and withdrawals before evaluating.",
-          "Completa el modelo de retorno, días de trading y pérdida, límites de riesgo, aportaciones y retiros antes de evaluar."
+          "Complete the return model, financial capacity, costs, tax reserve, trading schedule, contributions, and withdrawals before evaluating.",
+          "Completa el modelo de retorno, capacidad financiera, costos, reserva contributiva, calendario de trading, aportaciones y retiros antes de evaluar."
         )
       );
       return;
@@ -707,8 +823,8 @@ export function BusinessPlanScreen() {
       setError(
         t(
           language,
-          "Complete the capital goal, return model, operating schedule, contributions, and withdrawals before saving.",
-          "Completa la meta de capital, modelo de retorno, calendario operativo, aportaciones y retiros antes de guardar."
+          "Complete the capital goal, financial capacity, operating schedule, costs, contributions, and withdrawals. Restricted capital cannot activate a plan.",
+          "Completa la meta de capital, capacidad financiera, calendario operativo, costos, aportaciones y retiros. El capital restringido no puede activar un plan."
         )
       );
       return;
@@ -946,6 +1062,28 @@ export function BusinessPlanScreen() {
               </Text>
               <View style={styles.previewGrid}>
                 <View style={styles.previewCell}>
+                  <Text style={styles.previewLabel}>{t(language, "Required goal-day math", "Matemática día-meta requerida")}</Text>
+                  <Text style={styles.previewValue}>{Number(adaptivePlan.requestedRequiredGoalDayPct ?? 0).toFixed(3)}%</Text>
+                </View>
+                <View style={styles.previewCell}>
+                  <Text style={styles.previewLabel}>{t(language, "Annual target math", "Matemática anual de la meta")}</Text>
+                  <Text style={styles.previewValue}>
+                    {adaptivePlan.targetAnnualizedReturnPct == null
+                      ? "—"
+                      : `${Number(adaptivePlan.targetAnnualizedReturnPct).toFixed(1)}%`}
+                  </Text>
+                </View>
+                <View style={styles.previewCell}>
+                  <Text style={styles.previewLabel}>{t(language, "Estimated costs", "Costos estimados")}</Text>
+                  <Text style={styles.previewValue}>{formatCompactCurrency(Number(adaptivePlan.requestedEstimatedCostsUsd ?? 0))}</Text>
+                </View>
+                <View style={styles.previewCell}>
+                  <Text style={styles.previewLabel}>{t(language, "After tax reserve", "Luego de reserva contributiva")}</Text>
+                  <Text style={styles.previewValue}>{formatCompactCurrency(Number(adaptivePlan.requestedAfterTaxReserveBalance ?? 0))}</Text>
+                </View>
+              </View>
+              <View style={styles.previewGrid}>
+                <View style={styles.previewCell}>
                   <Text style={styles.previewLabel}>{t(language, "Deadline coverage", "Cobertura del plazo")}</Text>
                   <Text style={styles.previewValue}>{Number(adaptivePlan.requestedCoveragePct ?? 0).toFixed(0)}%</Text>
                 </View>
@@ -974,6 +1112,61 @@ export function BusinessPlanScreen() {
                   <Text style={styles.previewValue}>{formatCompactCurrency(Number(adaptivePlan.requestedWithdrawalsUsd ?? 0))}</Text>
                 </View>
               </View>
+              {adaptivePlan.panoramas?.length ? (
+                <View style={styles.scenarioLab}>
+                  <Text style={styles.flowTitle}>{t(language, "Scenario laboratory", "Laboratorio de escenarios")}</Text>
+                  <Text style={styles.muted}>
+                    {t(
+                      language,
+                      "P10, median, P90, target probability, and drawdown use seeded sensitivity paths. They are not forecasts or promises.",
+                      "P10, mediana, P90, probabilidad de meta y drawdown usan rutas de sensibilidad con semilla. No son pronósticos ni promesas."
+                    )}
+                  </Text>
+                  {adaptivePlan.panoramas.map((panorama) => {
+                    const title = panorama.id === "declared"
+                      ? t(language, "Your declared inputs", "Tus datos declarados")
+                      : panorama.id === "mathematical"
+                        ? t(language, "Exact target math", "Matemática exacta de meta")
+                        : panorama.id === "conservative"
+                          ? t(language, "Conservative", "Conservador")
+                          : panorama.id === "moderate"
+                            ? t(language, "Moderate", "Moderado")
+                            : t(language, "Aggressive", "Agresivo");
+                    return (
+                      <View key={panorama.id ?? title} style={styles.scenarioCard}>
+                        <View style={styles.scenarioHeader}>
+                          <Text style={styles.scenarioTitle}>{title}</Text>
+                          <Text style={styles.scenarioRisk}>{String(panorama.riskBand ?? "—").replaceAll("_", " ")}</Text>
+                        </View>
+                        <Text style={styles.savedHint}>
+                          +{Number(panorama.goalDayReturnPct ?? 0).toFixed(3)}% / -{Number(panorama.expectedLossDayPct ?? 0).toFixed(2)}%
+                          {" · "}{t(language, "annual math", "matemática anual")} {Number(panorama.modeledAnnualReturnPct ?? 0).toFixed(1)}%
+                        </Text>
+                        <View style={styles.scenarioMetrics}>
+                          <View style={styles.scenarioMetric}>
+                            <Text style={styles.previewLabel}>P10 / P50 / P90</Text>
+                            <Text style={styles.scenarioMetricValue}>
+                              {formatCompactCurrency(Number(panorama.probability?.p10Balance ?? 0))} / {formatCompactCurrency(Number(panorama.probability?.medianBalance ?? 0))} / {formatCompactCurrency(Number(panorama.probability?.p90Balance ?? 0))}
+                            </Text>
+                          </View>
+                          <View style={styles.scenarioMetric}>
+                            <Text style={styles.previewLabel}>{t(language, "Target chance", "Probabilidad de meta")}</Text>
+                            <Text style={styles.scenarioMetricValue}>{Number(panorama.probability?.probabilityTargetPct ?? 0).toFixed(1)}%</Text>
+                          </View>
+                          <View style={styles.scenarioMetric}>
+                            <Text style={styles.previewLabel}>{t(language, "Median max drawdown", "Drawdown máximo mediano")}</Text>
+                            <Text style={styles.scenarioMetricValue}>{Number(panorama.probability?.medianMaxDrawdownPct ?? 0).toFixed(1)}%</Text>
+                          </View>
+                          <View style={styles.scenarioMetric}>
+                            <Text style={styles.previewLabel}>{t(language, "50% capital-loss risk", "Riesgo de perder 50%")}</Text>
+                            <Text style={styles.scenarioMetricValue}>{Number(panorama.probability?.probabilityCapitalHalfPct ?? 0).toFixed(1)}%</Text>
+                          </View>
+                        </View>
+                      </View>
+                    );
+                  })}
+                </View>
+              ) : null}
               {adaptivePlan.nextMilestone ? (
                 <View style={styles.calculatedDate}>
                   <Text style={styles.previewLabel}>{t(language, "Next monthly checkpoint", "Próximo checkpoint mensual")}</Text>
@@ -1193,6 +1386,103 @@ export function BusinessPlanScreen() {
                 language,
                 "Expected loss-day is the planning average. Max daily loss remains the hard stop.",
                 "La pérdida esperada por día es el promedio de planificación. La pérdida diaria máxima sigue siendo el stop duro."
+              )}
+            </Text>
+          </View>
+
+          <View style={styles.sectionCard}>
+            <Text style={styles.sectionTitle}>{t(language, "Financial capacity and friction", "Capacidad financiera y fricción")}</Text>
+            <Text style={styles.muted}>
+              {t(
+                language,
+                "Separate risk capital from essential reserves. Costs and a tax reserve are included in the plan math.",
+                "Separa el capital de riesgo de las reservas esenciales. Los costos y una reserva contributiva se incluyen en la matemática del plan."
+              )}
+            </Text>
+            <Text style={styles.label}>{t(language, "Source of starting capital", "Origen del capital inicial")}</Text>
+            <View style={styles.optionRow}>
+              {([
+                ["disposable_savings", t(language, "Disposable savings", "Ahorros disponibles")],
+                ["business_income", t(language, "Business income", "Ingreso de negocio")],
+                ["retirement", t(language, "Retirement", "Retiro")],
+                ["borrowed", t(language, "Borrowed", "Prestado")],
+                ["emergency_fund", t(language, "Emergency fund", "Fondo de emergencia")],
+                ["living_expenses", t(language, "Living expenses", "Gastos de vida")],
+              ] as Array<[CapitalSource, string]>).map(([value, label]) => (
+                <Pressable
+                  key={value}
+                  style={[styles.optionChip, capitalSource === value && styles.optionChipActive]}
+                  onPress={() => setCapitalSource(value)}
+                >
+                  <Text style={[styles.optionChipText, capitalSource === value && styles.optionChipTextActive]}>{label}</Text>
+                </Pressable>
+              ))}
+            </View>
+            {restrictedCapitalSource ? (
+              <Text style={styles.capacityBlocked}>
+                {t(
+                  language,
+                  "This source can be evaluated, but it cannot activate a Trading Business Plan.",
+                  "Este origen se puede evaluar, pero no puede activar un Plan de Empresa de Trading."
+                )}
+              </Text>
+            ) : null}
+            <View style={styles.twoCol}>
+              {renderField(t(language, "Emergency reserve (months)", "Reserva de emergencia (meses)"), emergencyFundMonths, setEmergencyFundMonths, {
+                keyboardType: "numeric",
+                placeholder: "6",
+              })}
+              {renderField(t(language, "Monthly essential expenses", "Gastos esenciales mensuales"), monthlyEssentialExpenses, (value) => setMonthlyEssentialExpenses(formatMoneyDraft(value)), {
+                keyboardType: "numeric",
+                placeholder: "3,000.00",
+                onBlur: () => monthlyEssentialExpenses && setMonthlyEssentialExpenses(formatMoneyValue(monthlyEssentialExpenses)),
+              })}
+            </View>
+            {renderField(t(language, "Liquid reserves outside trading", "Reservas líquidas fuera de trading"), liquidReservesOutsideTrading, (value) => setLiquidReservesOutsideTrading(formatMoneyDraft(value)), {
+              keyboardType: "numeric",
+              placeholder: "18,000.00",
+              onBlur: () => liquidReservesOutsideTrading && setLiquidReservesOutsideTrading(formatMoneyValue(liquidReservesOutsideTrading)),
+            })}
+            <Text style={styles.label}>{t(language, "Account structure", "Estructura de cuenta")}</Text>
+            <View style={styles.optionRow}>
+              {([
+                ["cash", t(language, "Cash", "Cash")],
+                ["margin", t(language, "Margin", "Margen")],
+                ["leveraged_derivatives", t(language, "Leveraged derivatives", "Derivados apalancados")],
+              ] as Array<[AccountStructure, string]>).map(([value, label]) => (
+                <Pressable
+                  key={value}
+                  style={[styles.optionChip, accountStructure === value && styles.optionChipActive]}
+                  onPress={() => {
+                    setAccountStructure(value);
+                    if (value === "cash") setMaxLeverageMultiple("1");
+                  }}
+                >
+                  <Text style={[styles.optionChipText, accountStructure === value && styles.optionChipTextActive]}>{label}</Text>
+                </Pressable>
+              ))}
+            </View>
+            <View style={styles.twoCol}>
+              {renderField(t(language, "Maximum leverage", "Apalancamiento máximo"), maxLeverageMultiple, setMaxLeverageMultiple, {
+                keyboardType: "numeric",
+                placeholder: "1",
+                editable: accountStructure !== "cash",
+              })}
+              {renderField(t(language, "Cost per session", "Costo por sesión"), estimatedCostPerSession, (value) => setEstimatedCostPerSession(formatMoneyDraft(value)), {
+                keyboardType: "numeric",
+                placeholder: "2.00",
+                onBlur: () => estimatedCostPerSession && setEstimatedCostPerSession(formatMoneyValue(estimatedCostPerSession)),
+              })}
+            </View>
+            {renderField(t(language, "Tax reserve on positive trading growth %", "Reserva contributiva sobre crecimiento positivo %"), estimatedTaxReservePct, setEstimatedTaxReservePct, {
+              keyboardType: "numeric",
+              placeholder: "25",
+            })}
+            <Text style={styles.savedHint}>
+              {t(
+                language,
+                "Tax reserve is a planning assumption only. Confirm the applicable rate with a qualified tax professional.",
+                "La reserva contributiva es solo un supuesto de planificación. Confirma la tasa aplicable con un profesional contributivo cualificado."
               )}
             </Text>
           </View>
@@ -1532,6 +1822,71 @@ const createStyles = (colors: ThemeColors) =>
       color: colors.textPrimary,
       fontSize: 14,
       fontWeight: "900",
+    },
+    scenarioLab: {
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.card,
+      padding: 12,
+      gap: 10,
+    },
+    scenarioCard: {
+      borderRadius: 13,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+      padding: 11,
+      gap: 7,
+    },
+    scenarioHeader: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: 8,
+    },
+    scenarioTitle: {
+      flex: 1,
+      color: colors.textPrimary,
+      fontSize: 13,
+      fontWeight: "900",
+    },
+    scenarioRisk: {
+      color: colors.primary,
+      fontSize: 9,
+      fontWeight: "900",
+      letterSpacing: 0.8,
+      textTransform: "uppercase",
+    },
+    scenarioMetrics: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: 7,
+    },
+    scenarioMetric: {
+      minWidth: "47%",
+      flexGrow: 1,
+      borderRadius: 10,
+      backgroundColor: colors.card,
+      padding: 8,
+      gap: 3,
+    },
+    scenarioMetricValue: {
+      color: colors.textPrimary,
+      fontSize: 11,
+      lineHeight: 16,
+      fontWeight: "800",
+    },
+    capacityBlocked: {
+      borderRadius: 11,
+      borderWidth: 1,
+      borderColor: colors.dangerBorder,
+      backgroundColor: colors.dangerSoft,
+      color: colors.dangerText,
+      padding: 10,
+      fontSize: 11,
+      lineHeight: 17,
+      fontWeight: "800",
     },
     optionRow: {
       flexDirection: "row",
