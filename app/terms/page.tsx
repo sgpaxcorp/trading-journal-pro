@@ -8,7 +8,7 @@ import PublicHomeLogoLink from "@/app/components/PublicHomeLogoLink";
 const CONTENT = {
   en: {
     title: "Terms of Service",
-    updated: "Effective Date: January 17, 2026",
+    updated: "Effective Date: August 24, 2026",
     intro:
       "These Terms of Service (\"Terms\") govern your access to and use of the Neuro Trader website, applications, and related services (collectively, the \"Service\") provided by SG PAX CORP. (\"Neuro Trader\", \"NTJ\", \"we\", \"us\", or \"our\").",
     important:
@@ -63,6 +63,11 @@ const CONTENT = {
         title: "6. Trading Risk Disclosure",
         body:
           "Trading and investing involve substantial risk and are not suitable for all individuals. Past performance is not indicative of future results. You are solely responsible for determining whether any trading strategy, instrument, or approach is appropriate for you.",
+      },
+      {
+        title: "6.1 Trading Business Plan Projections and Discipline",
+        body:
+          "The Trading Business Plan is an educational business-planning and discipline tool. Its projections, target-compound paths, conditional hit rates, scenario comparisons, checkpoints, statistical simulations, and AI explanations are based on the data and assumptions you provide. They are conditional planning outputs, not forecasts, guarantees of profit, promises that a target will be reached, or individualized investment, trading, legal, tax, or accounting advice. Actual results may differ materially because of execution, market conditions, liquidity, volatility, slippage, commissions and fees, leverage, deposits, withdrawals, taxes, outages, and incomplete or inaccurate data. Activating a plan is a commitment to a disciplined operating process, risk controls, accurate records, and regular projected-versus-actual review; it is not a commitment to produce or pursue a promised return. You remain solely responsible for independent decisions, risk limits, compliance with broker and market rules, and consultation with appropriately licensed professionals when needed.",
       },
       {
         title: "7. User Conduct",
@@ -133,7 +138,7 @@ const CONTENT = {
   },
   es: {
     title: "Términos de Servicio",
-    updated: "Fecha de vigencia: 17 de enero de 2026",
+    updated: "Fecha de vigencia: 24 de agosto de 2026",
     intro:
       "Estos Términos de Servicio (los \"Términos\") rigen tu acceso y uso del sitio web, las aplicaciones y los servicios relacionados de Neuro Trader (colectivamente, el \"Servicio\") provistos por SG PAX CORP. (\"Neuro Trader\", \"NTJ\", \"nosotros\", \"nos\" o \"nuestro\").",
     important:
@@ -188,6 +193,11 @@ const CONTENT = {
         title: "6. Divulgación de riesgo de trading",
         body:
           "El trading y la inversión implican riesgo sustancial y no son adecuados para todos. El rendimiento pasado no es indicativo de resultados futuros. Eres responsable de determinar si una estrategia, instrumento o enfoque es apropiado para ti.",
+      },
+      {
+        title: "6.1 Proyecciones y disciplina del Plan de Empresa de Trading",
+        body:
+          "El Plan de Empresa de Trading es una herramienta educativa de planificación empresarial y disciplina. Sus proyecciones, trayectorias compuestas de metas, tasas condicionales de llegada, comparaciones de escenarios, checkpoints, simulaciones estadísticas y explicaciones de IA se basan en los datos y supuestos que proporcionas. Son resultados condicionales de planificación, no pronósticos, garantías de ganancias, promesas de alcanzar una meta ni asesoría individualizada de inversión, trading, legal, contributiva o contable. Los resultados reales pueden diferir sustancialmente por ejecución, condiciones de mercado, liquidez, volatilidad, slippage, comisiones y costos, apalancamiento, aportaciones, retiros, contribuciones, interrupciones y datos incompletos o inexactos. Activar un plan es comprometerse con un proceso operativo disciplinado, controles de riesgo, registros precisos y revisión periódica de proyectado versus real; no es comprometerse a producir o perseguir un retorno prometido. Sigues siendo responsable de las decisiones independientes, límites de riesgo, cumplimiento de las reglas del broker y del mercado, y consulta con profesionales debidamente autorizados cuando sea necesario.",
       },
       {
         title: "7. Conducta del usuario",

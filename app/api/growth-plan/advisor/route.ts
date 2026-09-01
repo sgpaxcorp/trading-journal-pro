@@ -47,7 +47,9 @@ function panoramaList(value: unknown) {
     goalDayReturnPct: finite(item?.goalDayReturnPct),
     expectedLossDayPct: finite(item?.expectedLossDayPct),
     modeledAnnualReturnPct: finite(item?.modeledAnnualReturnPct),
+    grossProjectedBalanceUsd: finite(item?.grossProjectedBalance),
     projectedBalanceUsd: finite(item?.projectedBalance),
+    costDragUsd: finite(item?.costDragUsd),
     afterTaxReserveBalanceUsd: finite(item?.afterTaxReserveBalance),
     completionDate: text(item?.completionDate, 20),
     reachesRequestedDeadline: Boolean(item?.reachesRequestedDeadline),
@@ -162,6 +164,15 @@ export async function POST(req: NextRequest) {
         requestedRequiredGoalDayPct: finite(body?.adaptivePlan?.requestedRequiredGoalDayPct),
         targetAnnualizedReturnPct: finite(body?.adaptivePlan?.targetAnnualizedReturnPct),
         mathematicallyPossible: Boolean(body?.adaptivePlan?.mathematicallyPossible),
+        targetProjectionGoalDayPct: finite(body?.adaptivePlan?.targetProjectionGoalDayPct),
+        targetProjectionBalanceUsd: finite(body?.adaptivePlan?.targetProjectionBalanceUsd),
+        targetProjectionCoveragePct: finite(body?.adaptivePlan?.targetProjectionCoveragePct),
+        targetProjectionTradingGrowthUsd: finite(body?.adaptivePlan?.targetProjectionTradingGrowthUsd),
+        targetProjectionEstimatedCostsUsd: finite(body?.adaptivePlan?.targetProjectionEstimatedCostsUsd),
+        requestedGrossProjectedBalanceUsd: finite(body?.adaptivePlan?.requestedGrossProjectedBalanceUsd),
+        requestedGrossTradingGrowthUsd: finite(body?.adaptivePlan?.requestedGrossTradingGrowthUsd),
+        requestedCostDragUsd: finite(body?.adaptivePlan?.requestedCostDragUsd),
+        costsConsumePercentageEdge: Boolean(body?.adaptivePlan?.costsConsumePercentageEdge),
         requestedEstimatedCostsUsd: finite(body?.adaptivePlan?.requestedEstimatedCostsUsd),
         requestedEstimatedTaxReserveUsd: finite(body?.adaptivePlan?.requestedEstimatedTaxReserveUsd),
         requestedAfterTaxReserveBalanceUsd: finite(body?.adaptivePlan?.requestedAfterTaxReserveBalance),
@@ -173,6 +184,8 @@ export async function POST(req: NextRequest) {
         expectedLossDayPct: finite(body?.adaptivePlan?.expectedLossDayPct),
         maxDailyLossGuardrailPct: finite(body?.adaptivePlan?.maxDailyLossGuardrailPct),
         modeledNetReturnPerSessionPct: finite(body?.adaptivePlan?.modeledNetReturnPerSessionPct),
+        modeledWeeklyReturnPct: finite(body?.adaptivePlan?.modeledWeeklyReturnPct),
+        modeledAnnualCycles: finite(body?.adaptivePlan?.modeledAnnualCycles),
         modeledAnnualReturnPct: finite(body?.adaptivePlan?.modeledAnnualReturnPct),
         recommendedCompletionDate: text(body?.adaptivePlan?.recommendedCompletionDate, 20),
         recommendedTradingSessions: Math.max(
@@ -190,17 +203,38 @@ export async function POST(req: NextRequest) {
         ),
         capacityStatus: text(body?.adaptivePlan?.capacityStatus, 30),
         capacityFlags: textList(body?.adaptivePlan?.capacityFlags),
+        selectedPlanId: text(body?.adaptivePlan?.selectedPlanId, 30),
+        statisticalValidation: {
+          assessment: text(body?.adaptivePlan?.statisticalValidation?.assessment, 30),
+          deterministicReachesTarget: Boolean(
+            body?.adaptivePlan?.statisticalValidation?.deterministicReachesTarget
+          ),
+          deterministicProjectedBalance: finite(
+            body?.adaptivePlan?.statisticalValidation?.deterministicProjectedBalance
+          ),
+          probabilityTargetPct: finite(
+            body?.adaptivePlan?.statisticalValidation?.probability?.probabilityTargetPct
+          ),
+          probabilityCapitalHalfPct: finite(
+            body?.adaptivePlan?.statisticalValidation?.probability?.probabilityCapitalHalfPct
+          ),
+          p10Balance: finite(body?.adaptivePlan?.statisticalValidation?.probability?.p10Balance),
+          medianBalance: finite(body?.adaptivePlan?.statisticalValidation?.probability?.medianBalance),
+          p90Balance: finite(body?.adaptivePlan?.statisticalValidation?.probability?.p90Balance),
+          medianMaxDrawdownPct: finite(
+            body?.adaptivePlan?.statisticalValidation?.probability?.medianMaxDrawdownPct
+          ),
+        },
         panoramas: panoramaList(body?.adaptivePlan?.panoramas),
         flags: textList(body?.adaptivePlan?.flags),
+        nextWeeklyCheckpoints: milestoneList(body?.adaptivePlan?.nextWeeklyCheckpoints, 12),
         nextMonthlyCheckpoints: milestoneList(body?.adaptivePlan?.nextMonthlyCheckpoints, 12),
         quarterlyCheckpoints: milestoneList(body?.adaptivePlan?.quarterlyCheckpoints, 12),
+        semiannualCheckpoints: milestoneList(body?.adaptivePlan?.semiannualCheckpoints, 30),
         annualCheckpoints: milestoneList(body?.adaptivePlan?.annualCheckpoints, 30),
       },
       financialCapacity: {
-        capitalSource: text(body?.financialCapacity?.capitalSource, 40),
-        emergencyFundMonths: finite(body?.financialCapacity?.emergencyFundMonths),
-        monthlyEssentialExpensesUsd: finite(body?.financialCapacity?.monthlyEssentialExpensesUsd),
-        liquidReservesOutsideTradingUsd: finite(body?.financialCapacity?.liquidReservesOutsideTradingUsd),
+        capitalSource: "business_income",
         accountStructure: text(body?.financialCapacity?.accountStructure, 40),
         maxLeverageMultiple: finite(body?.financialCapacity?.maxLeverageMultiple),
         estimatedCostPerSessionUsd: finite(body?.financialCapacity?.estimatedCostPerSessionUsd),
@@ -235,10 +269,12 @@ export async function POST(req: NextRequest) {
       "You are an educational trading-business risk planning analyst.",
       "The deterministic snapshot is authoritative. Never recalculate, alter, or contradict its numbers.",
       "Distinguish perfect-path compounding from the return required only on modeled goal-days.",
+      "Distinguish the gross percentage-compound projection from the net projection after fixed session costs. If costsConsumePercentageEdge is true, say explicitly that fixed costs, not the win/loss compounding formula, caused the net balance to be exhausted.",
       "Evaluate arithmetic feasibility, operating-model coverage, loss assumptions, execution evidence, and uncertainty separately.",
       "Use the five panoramas to distinguish the user's declared case, conservative/moderate/aggressive policy cases, and exact target arithmetic.",
+      "Treat probabilityTargetPct only as a conditional seeded-model hit rate under the entered win/loss percentages and frequency. Never describe it as an empirical or real-world probability of success.",
       "A mathematically possible target can still be speculative or unsupported by the selected policy; explain both facts without calling the target impossible.",
-      "Discuss transaction-cost drag, tax-reserve planning, emergency reserves, capital source, leverage, drawdown sensitivity, and 50%-capital-loss sensitivity when present.",
+      "Discuss transaction-cost drag, tax-reserve planning, business cash flows, leverage, drawdown sensitivity, and 50%-capital-loss sensitivity when present.",
       "Use the adaptive plan as the authoritative disciplined horizon when the requested deadline is unsupported.",
       "When declared inputs exceed the policy cap or understate the policy loss floor, explain that they were evaluated but not used to accelerate the recommendation.",
       "Explain that maxDailyLossGuardrailPct is a hard guardrail while expectedLossDayPct is the modeled average losing-day assumption.",

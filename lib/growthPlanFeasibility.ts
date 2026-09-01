@@ -29,6 +29,7 @@ export type GrowthPlanFeasibilityVerdict =
 export type GrowthPlanEvidenceDepth = "none" | "limited" | "developing" | "established";
 
 export type GrowthPlanScenarioId = "conservative" | "moderate" | "aggressive";
+export type GrowthPlanSelectedPlanId = GrowthPlanScenarioId | "manual";
 
 export type GrowthPlanOperatingPolicy = {
   id: GrowthPlanScenarioId;
@@ -48,7 +49,7 @@ export type AdaptivePlanVerdict =
   | "incomplete";
 
 export type AdaptivePlanMilestone = {
-  cadence: "monthly" | "quarterly" | "annual";
+  cadence: "weekly" | "monthly" | "quarterly" | "semiannual" | "annual";
   periodIndex: number;
   startDate: string;
   targetDate: string;
@@ -83,13 +84,23 @@ export type GrowthPlanProbabilityRange = {
   medianMaxDrawdownPct: number;
 };
 
+export type GrowthPlanStatisticalValidation = {
+  selectedPlanId: GrowthPlanSelectedPlanId;
+  assessment: "supported" | "conditional" | "not_supported" | "incomplete";
+  deterministicReachesTarget: boolean;
+  deterministicProjectedBalance: number;
+  probability: GrowthPlanProbabilityRange;
+};
+
 export type GrowthPlanPanorama = {
   id: "declared" | "conservative" | "moderate" | "aggressive" | "mathematical";
   goalDayReturnPct: number;
   expectedLossDayPct: number;
   modeledNetReturnPerSessionPct: number;
   modeledAnnualReturnPct: number;
+  grossProjectedBalance: number;
   projectedBalance: number;
+  costDragUsd: number;
   afterTaxReserveBalance: number;
   coveragePct: number;
   completionDate: string | null;
@@ -99,22 +110,13 @@ export type GrowthPlanPanorama = {
 };
 
 export type GrowthPlanFinancialCapacity = {
-  capitalSource?:
-    | "disposable_savings"
-    | "business_income"
-    | "retirement"
-    | "borrowed"
-    | "emergency_fund"
-    | "living_expenses"
-    | null;
-  emergencyFundMonths?: number | null;
-  monthlyEssentialExpensesUsd?: number | null;
-  liquidReservesOutsideTradingUsd?: number | null;
+  capitalSource?: "business_income" | null;
   accountStructure?: "cash" | "margin" | "leveraged_derivatives" | null;
   maxLeverageMultiple?: number | null;
 };
 
 export type AdaptiveGrowthPlan = {
+  selectedPlanId: GrowthPlanSelectedPlanId;
   verdict: AdaptivePlanVerdict;
   confidence: GrowthPlanEvidenceDepth;
   isProvisional: boolean;
@@ -124,6 +126,15 @@ export type AdaptiveGrowthPlan = {
   requestedRequiredGoalDayPct: number;
   targetAnnualizedReturnPct: number | null;
   mathematicallyPossible: boolean;
+  targetProjectionGoalDayPct: number;
+  targetProjectionBalance: number;
+  targetProjectionCoveragePct: number;
+  targetProjectionTradingGrowthUsd: number;
+  targetProjectionEstimatedCostsUsd: number;
+  requestedGrossProjectedBalance: number;
+  requestedGrossTradingGrowthUsd: number;
+  requestedCostDragUsd: number;
+  costsConsumePercentageEdge: boolean;
   requestedProjectedBalance: number;
   requestedAfterTaxReserveBalance: number;
   requestedCoveragePct: number;
@@ -145,6 +156,8 @@ export type AdaptiveGrowthPlan = {
   lossDaysPerWeek: number;
   operatingDaysPerWeek: number;
   modeledNetReturnPerSessionPct: number;
+  modeledWeeklyReturnPct: number;
+  modeledAnnualCycles: number;
   modeledAnnualReturnPct: number;
   recommendedCompletionDate: string | null;
   recommendedTradingSessions: number | null;
@@ -155,10 +168,13 @@ export type AdaptiveGrowthPlan = {
   qualificationRequired: boolean;
   qualificationMinimumSessions: number;
   nextMilestone: AdaptivePlanMilestone | null;
+  weeklyMilestones: AdaptivePlanMilestone[];
   monthlyMilestones: AdaptivePlanMilestone[];
   quarterlyMilestones: AdaptivePlanMilestone[];
+  semiannualMilestones: AdaptivePlanMilestone[];
   annualMilestones: AdaptivePlanMilestone[];
   panoramas: GrowthPlanPanorama[];
+  statisticalValidation: GrowthPlanStatisticalValidation;
   capacityStatus: "incomplete" | "protected" | "warning" | "blocked";
   capacityFlags: string[];
   flags: string[];
@@ -343,8 +359,10 @@ function cycleFactor(params: {
   );
 }
 
-function annualizedReturnPct(factor: number) {
-  return Number(((Math.pow(Math.max(0, factor), 52) - 1) * 100).toFixed(2));
+function annualizedReturnPct(factor: number, cyclesPerYear: number) {
+  return Number(
+    ((Math.pow(Math.max(0, factor), Math.max(0, cyclesPerYear)) - 1) * 100).toFixed(2)
+  );
 }
 
 function riskBandForAnnualizedReturn(value: number): GrowthPlanRiskBand {
@@ -487,8 +505,15 @@ function requiredGoalDayPct(params: {
   if (params.starting <= 0 || params.target <= params.starting || !params.sessions.length) return 0;
   const project = (goalDayPct: number) =>
     simulateOperatingPath({
-      ...params,
+      starting: params.starting,
+      sessions: params.sessions,
+      daysPerWeek: params.daysPerWeek,
+      lossDaysPerWeek: params.lossDaysPerWeek,
+      lossDayPct: params.lossDayPct,
       goalDayPct,
+      depositPlan: params.depositPlan,
+      withdrawalPlan: params.withdrawalPlan,
+      costPerSessionUsd: params.costPerSessionUsd,
     }).balance;
   if (project(0) >= params.target) return 0;
   let low = 0;
@@ -629,20 +654,18 @@ function requiredUniformSessionPct(params: {
 }
 
 function buildMilestones(rows: SimulatedSession[]): {
+  weekly: AdaptivePlanMilestone[];
   monthly: AdaptivePlanMilestone[];
   quarterly: AdaptivePlanMilestone[];
+  semiannual: AdaptivePlanMilestone[];
   annual: AdaptivePlanMilestone[];
 } {
-  if (!rows.length) return { monthly: [], quarterly: [], annual: [] };
-  const monthGroups = new Map<string, SimulatedSession[]>();
-  for (const row of rows) {
-    const key = row.date.slice(0, 7);
-    const group = monthGroups.get(key) ?? [];
-    group.push(row);
-    monthGroups.set(key, group);
-  }
-
-  const monthly = Array.from(monthGroups.values()).map((group, index) => {
+  if (!rows.length) return { weekly: [], monthly: [], quarterly: [], semiannual: [], annual: [] };
+  const toMilestone = (
+    group: SimulatedSession[],
+    cadence: AdaptivePlanMilestone["cadence"],
+    periodIndex: number
+  ): AdaptivePlanMilestone => {
     const first = group[0];
     const last = group[group.length - 1];
     const change = last.endBalance - first.startBalance;
@@ -650,22 +673,44 @@ function buildMilestones(rows: SimulatedSession[]): {
     const withdrawals = group.reduce((sum, row) => sum + row.withdrawalUsd, 0);
     const tradingChange = change - deposits + withdrawals;
     return {
-      cadence: "monthly" as const,
-      periodIndex: index + 1,
+      cadence,
+      periodIndex,
       startDate: first.date,
       targetDate: last.date,
       startBalance: first.startBalance,
       targetBalance: last.endBalance,
       plannedChangeUsd: Number(change.toFixed(2)),
-      plannedReturnPct: first.startBalance > 0 ? Number(((tradingChange / first.startBalance) * 100).toFixed(3)) : 0,
+      plannedReturnPct:
+        first.startBalance > 0 ? Number(((tradingChange / first.startBalance) * 100).toFixed(3)) : 0,
       plannedTradingChangeUsd: Number(tradingChange.toFixed(2)),
       plannedDepositsUsd: Number(deposits.toFixed(2)),
       plannedWithdrawalsUsd: Number(withdrawals.toFixed(2)),
       sessionCount: group.length,
     };
-  });
+  };
 
-  const aggregate = (size: number, cadence: "quarterly" | "annual") => {
+  const weekGroups = new Map<string, SimulatedSession[]>();
+  const monthGroups = new Map<string, SimulatedSession[]>();
+  for (const row of rows) {
+    const weeklyKey = weekKey(row.date);
+    const weeklyGroup = weekGroups.get(weeklyKey) ?? [];
+    weeklyGroup.push(row);
+    weekGroups.set(weeklyKey, weeklyGroup);
+
+    const monthlyKey = row.date.slice(0, 7);
+    const monthlyGroup = monthGroups.get(monthlyKey) ?? [];
+    monthlyGroup.push(row);
+    monthGroups.set(monthlyKey, monthlyGroup);
+  }
+
+  const weekly = Array.from(weekGroups.values()).map((group, index) =>
+    toMilestone(group, "weekly", index + 1)
+  );
+  const monthly = Array.from(monthGroups.values()).map((group, index) =>
+    toMilestone(group, "monthly", index + 1)
+  );
+
+  const aggregate = (size: number, cadence: "quarterly" | "semiannual" | "annual") => {
     const output: AdaptivePlanMilestone[] = [];
     for (let index = 0; index < monthly.length; index += size) {
       const group = monthly.slice(index, index + size);
@@ -696,7 +741,13 @@ function buildMilestones(rows: SimulatedSession[]): {
     return output;
   };
 
-  return { monthly, quarterly: aggregate(3, "quarterly"), annual: aggregate(12, "annual") };
+  return {
+    weekly,
+    monthly,
+    quarterly: aggregate(3, "quarterly"),
+    semiannual: aggregate(6, "semiannual"),
+    annual: aggregate(12, "annual"),
+  };
 }
 
 function resolveEvidenceSessionReturnPct(
@@ -734,6 +785,7 @@ export function buildAdaptiveGrowthPlan(input: {
   tradingInstrument: TradingInstrument;
   averageTradingDaysPerWeek: number;
   policy: GrowthPlanOperatingPolicy;
+  selectedPlanId?: GrowthPlanSelectedPlanId;
   declaredGoalDayPct?: number | null;
   declaredExpectedLossDayPct?: number | null;
   evidence?: GrowthPlanEvidence | null;
@@ -753,6 +805,8 @@ export function buildAdaptiveGrowthPlan(input: {
     Math.min(profile.sessionsPerWeek, Math.floor(finite(input.averageTradingDaysPerWeek, profile.sessionsPerWeek)))
   );
   const policy = input.policy;
+  const selectedPlanId = input.selectedPlanId ?? policy.id;
+  const manualPlanSelected = selectedPlanId === "manual";
   const estimatedCostPerSessionUsd = Math.max(0, finite(input.estimatedCostPerSessionUsd));
   const estimatedTaxReservePct = Math.max(0, Math.min(60, finite(input.estimatedTaxReservePct)));
   const declaredGoalDayPct = Math.max(
@@ -763,11 +817,14 @@ export function buildAdaptiveGrowthPlan(input: {
     0,
     finite(input.declaredExpectedLossDayPct, policy.expectedLossDayPct)
   );
-  // Declared assumptions are evaluated as their own panorama. The disciplined
-  // recommendation stays on the profile policy so one mistaken input cannot make
-  // the model claim that the capital objective itself is impossible.
-  const policyGoalDayPct = Math.min(policy.goalDayReturnPct, declaredGoalDayPct || policy.goalDayReturnPct);
-  const modeledExpectedLossDayPct = Math.min(policy.maxDailyLossPct, policy.expectedLossDayPct);
+  // A manual plan is modeled exactly as declared. Preset plans retain their
+  // policy caps so changing a display input cannot silently accelerate them.
+  const policyGoalDayPct = manualPlanSelected
+    ? declaredGoalDayPct
+    : Math.min(policy.goalDayReturnPct, declaredGoalDayPct || policy.goalDayReturnPct);
+  const modeledExpectedLossDayPct = manualPlanSelected
+    ? Math.min(policy.maxDailyLossPct, declaredExpectedLossDayPct)
+    : Math.min(policy.maxDailyLossPct, policy.expectedLossDayPct);
   const declaredModeledLossDayPct = Math.min(
     policy.maxDailyLossPct,
     Math.max(0, declaredExpectedLossDayPct || policy.expectedLossDayPct)
@@ -776,6 +833,15 @@ export function buildAdaptiveGrowthPlan(input: {
     listTradingSessionsBetween(input.startIso, input.requestedTargetIso, input.tradingInstrument),
     daysPerWeek
   );
+  const oneYearSessions = committedSessions(
+    listTradingSessionsBetween(
+      input.startIso,
+      addTradingRunway(input.startIso, 1, "years"),
+      input.tradingInstrument
+    ),
+    daysPerWeek
+  );
+  const modeledAnnualCycles = oneYearSessions.length / daysPerWeek;
   const valid = starting > 0 && target > starting && requestedSessions.length > 0;
   const evidenceSessions = Math.max(0, Math.floor(finite(input.evidence?.totalSessions)));
   const depth = evidenceDepth(evidenceSessions);
@@ -824,7 +890,7 @@ export function buildAdaptiveGrowthPlan(input: {
     lossDayPct: modeledExpectedLossDayPct,
   });
   const modeledNetReturnPerSessionPct = equivalentSessionReturnPct(recommendedCycleFactor, daysPerWeek);
-  const modeledAnnualReturnPct = annualizedReturnPct(recommendedCycleFactor);
+  const modeledAnnualReturnPct = annualizedReturnPct(recommendedCycleFactor, modeledAnnualCycles);
   const requestedRequiredAllSessionPct = valid
     ? requiredUniformSessionPct({
         starting,
@@ -848,6 +914,28 @@ export function buildAdaptiveGrowthPlan(input: {
         costPerSessionUsd: estimatedCostPerSessionUsd,
       })
     : 0;
+  const targetProjectionSimulation = simulateOperatingPath({
+    starting,
+    sessions: requestedSessions,
+    daysPerWeek,
+    lossDaysPerWeek: policy.lossDaysPerWeek,
+    goalDayPct: Number.isFinite(requestedRequiredGoalDayPct) ? requestedRequiredGoalDayPct : 0,
+    lossDayPct: declaredModeledLossDayPct,
+    depositPlan: input.depositPlan,
+    withdrawalPlan: input.withdrawalPlan,
+    costPerSessionUsd: estimatedCostPerSessionUsd,
+  });
+  const targetProjectionCoveragePct = valid
+    ? Math.min(100, (targetProjectionSimulation.balance / target) * 100)
+    : 0;
+  const targetProjectionTradingGrowthUsd = Number(
+    (
+      targetProjectionSimulation.balance -
+      starting -
+      targetProjectionSimulation.totalDeposits +
+      targetProjectionSimulation.totalWithdrawals
+    ).toFixed(2)
+  );
   const requestedSimulation = simulateOperatingPath({
     starting,
     sessions: requestedSessions,
@@ -859,7 +947,26 @@ export function buildAdaptiveGrowthPlan(input: {
     withdrawalPlan: input.withdrawalPlan,
     costPerSessionUsd: estimatedCostPerSessionUsd,
   });
+  const requestedGrossSimulation = simulateOperatingPath({
+    starting,
+    sessions: requestedSessions,
+    daysPerWeek,
+    lossDaysPerWeek: policy.lossDaysPerWeek,
+    goalDayPct: recommendedGoalDayPct,
+    lossDayPct: positiveEdge === false ? 0 : modeledExpectedLossDayPct,
+    depositPlan: input.depositPlan,
+    withdrawalPlan: input.withdrawalPlan,
+    costPerSessionUsd: 0,
+  });
   const requestedCoveragePct = valid ? Math.min(100, (requestedSimulation.balance / target) * 100) : 0;
+  const requestedGrossTradingGrowthUsd = Number(
+    (
+      requestedGrossSimulation.balance -
+      starting -
+      requestedGrossSimulation.totalDeposits +
+      requestedGrossSimulation.totalWithdrawals
+    ).toFixed(2)
+  );
   const requestedTradingGrowthUsd = Number(
     (
       requestedSimulation.balance -
@@ -905,7 +1012,16 @@ export function buildAdaptiveGrowthPlan(input: {
   const recommendedCalendarMonths = horizonSimulation.completionDate
     ? Math.max(1, monthsBetweenDates(input.startIso, horizonSimulation.completionDate))
     : null;
-  const milestones = buildMilestones(horizonSimulation.rows);
+  // Checkpoints represent the user's target compound path. The selected
+  // operating scenario remains a separate baseline and may legitimately
+  // finish below target or at zero after costs.
+  const milestoneRows =
+    valid && Number.isFinite(requestedRequiredGoalDayPct)
+      ? targetProjectionSimulation.rows
+      : completionIndex >= 0
+        ? horizonSimulation.rows.slice(0, completionIndex + 1)
+        : requestedSimulation.rows;
+  const milestones = buildMilestones(milestoneRows);
   const panoramaPolicies = new Map<GrowthPlanScenarioId, GrowthPlanOperatingPolicy>();
   for (const comparisonPolicy of input.comparisonPolicies ?? [policy]) {
     panoramaPolicies.set(comparisonPolicy.id, comparisonPolicy);
@@ -931,10 +1047,20 @@ export function buildAdaptiveGrowthPlan(input: {
       lossDaysPerWeek: params.lossDaysPerWeek,
       goalDayPct: params.goalDayPct,
       lossDayPct: params.lossDayPct,
-      target,
       depositPlan: input.depositPlan,
       withdrawalPlan: input.withdrawalPlan,
       costPerSessionUsd: estimatedCostPerSessionUsd,
+    });
+    const grossRequested = simulateOperatingPath({
+      starting,
+      sessions: requestedSessions,
+      daysPerWeek,
+      lossDaysPerWeek: params.lossDaysPerWeek,
+      goalDayPct: params.goalDayPct,
+      lossDayPct: params.lossDayPct,
+      depositPlan: input.depositPlan,
+      withdrawalPlan: input.withdrawalPlan,
+      costPerSessionUsd: 0,
     });
     const tradingGrowth = requested.balance - starting - requested.totalDeposits + requested.totalWithdrawals;
     const taxReserve = Math.max(0, tradingGrowth) * (estimatedTaxReservePct / 100);
@@ -951,14 +1077,16 @@ export function buildAdaptiveGrowthPlan(input: {
       withdrawalPlan: input.withdrawalPlan,
       costPerSessionUsd: estimatedCostPerSessionUsd,
     });
-    const annualized = annualizedReturnPct(factor);
+    const annualized = annualizedReturnPct(factor, modeledAnnualCycles);
     return {
       id: params.id,
       goalDayReturnPct: Number(params.goalDayPct.toFixed(4)),
       expectedLossDayPct: Number(params.lossDayPct.toFixed(4)),
       modeledNetReturnPerSessionPct: Number(equivalentSessionReturnPct(factor, daysPerWeek).toFixed(4)),
       modeledAnnualReturnPct: annualized,
+      grossProjectedBalance: grossRequested.balance,
       projectedBalance: requested.balance,
+      costDragUsd: Number(Math.max(0, grossRequested.balance - requested.balance).toFixed(2)),
       afterTaxReserveBalance: Number(afterTaxReserveBalance.toFixed(2)),
       coveragePct: valid ? Number(Math.min(100, (requested.balance / target) * 100).toFixed(2)) : 0,
       completionDate: horizon.completionDate,
@@ -1008,41 +1136,36 @@ export function buildAdaptiveGrowthPlan(input: {
       })
     );
   }
+  const selectedPanoramaId: GrowthPlanPanorama["id"] =
+    selectedPlanId === "manual" ? "declared" : selectedPlanId;
+  const selectedPanorama = panoramas.find((item) => item.id === selectedPanoramaId) ?? panoramas[0];
+  const statisticalAssessment: GrowthPlanStatisticalValidation["assessment"] = !valid
+    ? "incomplete"
+    : !selectedPanorama.reachesRequestedDeadline &&
+        selectedPanorama.probability.probabilityTargetPct < 35
+      ? "not_supported"
+      : depth === "established" &&
+          selectedPanorama.reachesRequestedDeadline &&
+          selectedPanorama.probability.probabilityTargetPct >= 60
+        ? "supported"
+        : "conditional";
   const qualificationRequired = depth === "none" || depth === "limited" || positiveEdge !== true;
   const capacity = input.financialCapacity;
   const capacityFlags: string[] = [];
   const capacityComplete = Boolean(
-    capacity?.capitalSource &&
+    capacity?.capitalSource === "business_income" &&
       capacity?.accountStructure &&
-      capacity?.emergencyFundMonths != null &&
-      capacity?.monthlyEssentialExpensesUsd != null &&
-      capacity?.liquidReservesOutsideTradingUsd != null &&
       capacity?.maxLeverageMultiple != null
   );
-  if (!capacityComplete) capacityFlags.push("financial_capacity_incomplete");
-  if (["retirement", "borrowed", "emergency_fund", "living_expenses"].includes(String(capacity?.capitalSource))) {
-    capacityFlags.push("restricted_capital_source");
-  }
-  if (capacityComplete && finite(capacity?.emergencyFundMonths) < 3) {
-    capacityFlags.push("emergency_reserve_below_three_months");
-  }
-  if (
-    capacityComplete &&
-    finite(capacity?.monthlyEssentialExpensesUsd) > 0 &&
-    finite(capacity?.liquidReservesOutsideTradingUsd) < finite(capacity?.monthlyEssentialExpensesUsd) * 3
-  ) {
-    capacityFlags.push("liquid_reserve_below_three_months");
-  }
+  if (!capacityComplete) capacityFlags.push("business_capital_setup_incomplete");
   if (capacity?.accountStructure !== "cash" && finite(capacity?.maxLeverageMultiple, 1) > 2) {
     capacityFlags.push("leverage_above_two_times");
   }
   const capacityStatus: AdaptiveGrowthPlan["capacityStatus"] = !capacityComplete
     ? "incomplete"
-    : capacityFlags.includes("restricted_capital_source")
-      ? "blocked"
-      : capacityFlags.length
-        ? "warning"
-        : "protected";
+    : capacityFlags.length
+      ? "warning"
+      : "protected";
   const flags: string[] = [];
   if (target / Math.max(1, starting) >= 10) flags.push("large_capital_multiple");
   if (requestedCoveragePct < 80) flags.push("requested_runway_materially_short");
@@ -1065,8 +1188,18 @@ export function buildAdaptiveGrowthPlan(input: {
   } else if (targetAnnualizedReturnPct != null && targetAnnualizedReturnPct > 60) {
     flags.push("target_requires_speculative_annualized_return");
   }
+  if (modeledAnnualReturnPct > 100) {
+    flags.push("selected_model_requires_extreme_annualized_return");
+  } else if (modeledAnnualReturnPct > 60) {
+    flags.push("selected_model_requires_speculative_annualized_return");
+  }
   if (estimatedCostPerSessionUsd <= 0) flags.push("trading_costs_not_estimated");
   if (estimatedTaxReservePct <= 0) flags.push("tax_reserve_not_estimated");
+  const costsConsumePercentageEdge =
+    estimatedCostPerSessionUsd > 0 &&
+    requestedGrossTradingGrowthUsd > 0 &&
+    requestedTradingGrowthUsd <= 0;
+  if (costsConsumePercentageEdge) flags.push("fixed_costs_overwhelm_positive_percentage_edge");
   if (!horizonSimulation.completionDate && positiveEdge !== false) flags.push("outside_50_year_model_horizon");
   if (evidenceAdjustmentApplied) flags.push("pace_reduced_to_execution_evidence");
   if (input.withdrawalPlan?.enabled && finite(input.withdrawalPlan.amount) > 0) {
@@ -1084,6 +1217,7 @@ export function buildAdaptiveGrowthPlan(input: {
   else if (depth === "none" || depth === "limited") verdict = "unvalidated";
 
   return {
+    selectedPlanId,
     verdict,
     confidence: depth,
     isProvisional: depth === "none" || depth === "limited",
@@ -1095,6 +1229,19 @@ export function buildAdaptiveGrowthPlan(input: {
       : 0,
     targetAnnualizedReturnPct,
     mathematicallyPossible: valid && Number.isFinite(requestedRequiredGoalDayPct),
+    targetProjectionGoalDayPct: Number.isFinite(requestedRequiredGoalDayPct)
+      ? Number(requestedRequiredGoalDayPct.toFixed(4))
+      : 0,
+    targetProjectionBalance: targetProjectionSimulation.balance,
+    targetProjectionCoveragePct,
+    targetProjectionTradingGrowthUsd,
+    targetProjectionEstimatedCostsUsd: targetProjectionSimulation.totalCosts,
+    requestedGrossProjectedBalance: requestedGrossSimulation.balance,
+    requestedGrossTradingGrowthUsd,
+    requestedCostDragUsd: Number(
+      Math.max(0, requestedGrossSimulation.balance - requestedSimulation.balance).toFixed(2)
+    ),
+    costsConsumePercentageEdge,
     requestedProjectedBalance: requestedSimulation.balance,
     requestedAfterTaxReserveBalance,
     requestedCoveragePct,
@@ -1125,6 +1272,8 @@ export function buildAdaptiveGrowthPlan(input: {
     lossDaysPerWeek: policy.lossDaysPerWeek,
     operatingDaysPerWeek: daysPerWeek,
     modeledNetReturnPerSessionPct: Number(modeledNetReturnPerSessionPct.toFixed(4)),
+    modeledWeeklyReturnPct: Number(((recommendedCycleFactor - 1) * 100).toFixed(4)),
+    modeledAnnualCycles: Number(modeledAnnualCycles.toFixed(2)),
     modeledAnnualReturnPct: Number(modeledAnnualReturnPct.toFixed(2)),
     recommendedCompletionDate: horizonSimulation.completionDate,
     recommendedTradingSessions,
@@ -1136,11 +1285,20 @@ export function buildAdaptiveGrowthPlan(input: {
     evidenceAdjustmentApplied,
     qualificationRequired,
     qualificationMinimumSessions: depth === "established" ? 100 : depth === "developing" ? 100 : 30,
-    nextMilestone: milestones.monthly[0] ?? null,
+    nextMilestone: milestones.weekly[0] ?? milestones.monthly[0] ?? null,
+    weeklyMilestones: milestones.weekly,
     monthlyMilestones: milestones.monthly,
     quarterlyMilestones: milestones.quarterly,
+    semiannualMilestones: milestones.semiannual,
     annualMilestones: milestones.annual,
     panoramas,
+    statisticalValidation: {
+      selectedPlanId,
+      assessment: statisticalAssessment,
+      deterministicReachesTarget: selectedPanorama.reachesRequestedDeadline,
+      deterministicProjectedBalance: selectedPanorama.projectedBalance,
+      probability: selectedPanorama.probability,
+    },
     capacityStatus,
     capacityFlags,
     flags,

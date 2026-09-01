@@ -14,9 +14,9 @@ Ten listos estos datos:
 5. El modelo de retorno que quieres evaluar: conservador, moderado, agresivo o manual.
 6. Días de trading y días perdedores esperados por semana, incluyendo el porcentaje típico de un día perdedor.
 7. Aportaciones o retiros recurrentes, incluyendo monto, frecuencia y período inicial.
-8. El origen del capital inicial, cobertura del fondo de emergencia, gastos esenciales mensuales y reservas líquidas fuera de trading.
-9. Estructura de cuenta y apalancamiento máximo: cash, margen o derivados apalancados.
-10. Costo estimado por sesión y porcentaje de reserva contributiva para crecimiento positivo de trading.
+8. Estructura de cuenta y apalancamiento máximo: cash, margen o derivados apalancados.
+9. Costo estimado por sesión y porcentaje de reserva contributiva para crecimiento positivo de trading.
+10. El plan operativo final que vas a seguir, incluyendo **Mi plan manual** cuando aplique.
 
 ## Modo del plan (Automático)
 El plan es siempre automático y basado en runway. El sistema calcula la fecha objetivo desde la fecha inicial y el runway seleccionado; luego aplica el calendario del instrumento para calcular sesiones disponibles, días comprometidos, ritmo y checkpoints.
@@ -32,14 +32,14 @@ El motor adaptativo evalúa:
 3. Retorno en día-meta, resultado esperado en día perdedor, límite duro de pérdida diaria y riesgo por trade.
 4. Aportaciones y retiros planificados. Se modelan como flujos de capital, nunca como rendimiento de trading.
 5. Evidencia real de ejecución: sesiones, trades, resultado neto promedio por sesión, profit factor, expectativa y drawdown.
-6. Capacidad financiera: origen del capital, reservas de emergencia, gastos esenciales, estructura de cuenta y apalancamiento.
+6. Configuración de capital empresarial: estructura de cuenta, apalancamiento, aportaciones, retiros y costos operativos.
 7. Fricción y reservas de planificación: costos estimados por sesión y reserva contributiva declarada por el usuario.
 
-Luego presenta el capital proyectado para la fecha solicitada, cobertura del plazo, déficit y una fecha disciplinada estimada de cumplimiento. Si el plazo solicitado no está respaldado, selecciona **Usar runway recomendado** antes de activar el plan. Los checkpoints oficiales de web y mobile usarán el horizonte disciplinado aceptado, no el plazo no respaldado.
+Luego separa cuatro valores que nunca deben mezclarse: la **proyección compuesta objetivo** requerida para alcanzar el capital y la fecha solicitados, la **proyección bruta de los porcentajes seleccionados** después de componer días de meta y días perdedores, la **proyección operativa neta** después de costos fijos por sesión, y el **balance real de la cuenta** proveniente de la misma serie que usa el Dashboard. Si el crecimiento bruto es positivo pero la proyección neta cae a cero, la plataforma identifica el impacto de costos fijos como la causa; nunca lo presenta como una falla de la fórmula compuesta ni reescribe los checkpoints de la meta.
 
 Si la ejecución documentada no demuestra una ventaja positiva, el motor no asigna una fecha respaldada por ganancias de trading. La próxima fase correcta es validar evidencia y mejorar el proceso, no aumentar el supuesto de retorno. Si las aportaciones programadas por sí solas pueden alcanzar la meta, la plataforma puede mostrar ese horizonte de fondeo, pero mantiene el crecimiento de trading en 0% y el plan en calificación.
 
-La ruta determinística evalúa hasta un horizonte de planificación de 50 años. Una meta fuera de ese límite no puede activarse como calendario oficial de checkpoints.
+El modelo operativo evalúa hasta un horizonte de 50 años para buscar una fecha de cumplimiento defendible. Independientemente, la proyección compuesta objetivo siempre construye las metas semanales, mensuales, trimestrales, semestrales y anuales solicitadas cuando el retorno requerido puede resolverse matemáticamente.
 
 ## Laboratorio de escenarios
 El plan compara cinco vistas sin mezclar sus propósitos:
@@ -47,12 +47,12 @@ El plan compara cinco vistas sin mezclar sus propósitos:
 2. **Conservador, Moderado y Agresivo** presentan casos operativos controlados por política usando el mismo calendario, costos, flujos de capital y objetivo.
 3. **Matemática exacta de meta** calcula el retorno de día-meta necesario para tocar el objetivo solicitado manteniendo la frecuencia y el supuesto declarado de días perdedores.
 
-Cada vista muestra balance determinístico proyectado, matemática anualizada, balances de sensibilidad P10/mediana/P90, sensibilidad de alcanzar la meta, drawdown máximo mediano y sensibilidad de perder al menos 50% del capital inicial. Las rutas con semilla son pruebas de estrés para planificación, no pronósticos, garantías ni asesoría de inversión individualizada. Una meta puede ser matemáticamente posible y aun ser especulativa, estar fuera de la política seleccionada o no estar respaldada por evidencia de ejecución.
+Cada vista muestra balance determinístico proyectado, matemática anualizada, balances de sensibilidad P10/mediana/P90, una **tasa condicional de llegada**, drawdown máximo mediano y sensibilidad de perder al menos 50% del capital inicial. La tasa condicional supone que continúan los porcentajes y la frecuencia de ganancias/pérdidas ingresados; no es una probabilidad empírica de éxito real. Las rutas con semilla son pruebas de estrés para planificación, no pronósticos, garantías ni asesoría de inversión individualizada. Una meta puede ser matemáticamente posible y aun ser especulativa, estar fuera de la política seleccionada o no estar respaldada por evidencia de ejecución.
 
-## Guardrails de capacidad financiera
-El plan puede evaluar cualquier origen de capital declarado, pero no puede activarse con dinero prestado, fondos de retiro, fondo de emergencia o dinero requerido para gastos de vida. Reservas menores de tres meses y apalancamiento mayor de 2x se presentan como advertencias. Estas reglas evitan confundir capital esencial con capital de riesgo.
+## Guardrails de capital empresarial
+El Growth Plan siempre clasifica la cuenta como **capital operativo del negocio de trading** y su origen como **ingreso del negocio**. No solicita fondos de emergencia, gastos de vida, fondos de retiro ni otra información de finanzas personales. La estructura de cuenta y el apalancamiento siguen siendo obligatorios porque cambian el riesgo operativo; un apalancamiento mayor de 2x se presenta como advertencia.
 
-Los costos de trading reducen cada sesión modelada. La reserva contributiva se aplica únicamente al crecimiento positivo modelado de trading y se presenta por separado; es un estimado de planificación que debe confirmarse con un profesional contributivo cualificado.
+Los costos de trading reducen cada sesión modelada. La interfaz presenta el balance compuesto porcentual bruto, el balance neto de costos fijos por sesión y la diferencia acumulada entre ambos. La reserva contributiva se aplica únicamente al crecimiento neto positivo modelado de trading y se presenta por separado; es un estimado de planificación que debe confirmarse con un profesional contributivo cualificado.
 
 ## Ruta operativa recomendada por el modelo
 Completa los cinco inputs de Business Analysis: perfil de riesgo, experiencia, dependencia de ingresos, tolerancia al drawdown y estilo de trading. El plan presentará una recomendación operativa explícita basada en tu capital inicial y meta empresarial.
@@ -61,10 +61,10 @@ La recomendación muestra:
 1. El escenario operativo más apropiado para tu perfil.
 2. Porcentaje en días de meta, riesgo por trade, pérdida diaria máxima y días de pérdida planificados por semana.
 3. Días de trading, semanas operativas, meses y fecha estimada de cumplimiento.
-4. Metas mensuales, trimestrales y anuales con fechas y períodos de ejecución.
+4. Metas compuestas semanales, mensuales, trimestrales, semestrales y anuales con fechas, más el balance real y la variación cuando vence cada checkpoint.
 5. Supuestos modelados de retorno semanal, mensual y anual antes de evaluar el plan.
 
-Selecciona **Aplicar recomendación operativa** para usar el escenario elegido por el modelo. Si el plazo solicitado no está respaldado, usa **Usar runway recomendado** para recalcular los checkpoints oficiales. El porcentaje se mantiene constante durante las fases para que el crecimiento proyectado venga del compounding y no de aumentar automáticamente el riesgo.
+Selecciona **Aplicar recomendación operativa** para usar el escenario elegido por el modelo. Si produce una fecha defendible posterior, **Usar runway operativo** permite cambiar explícitamente el período solicitado. La proyección objetivo nunca se reemplaza silenciosamente con una línea base operativa débil.
 
 Esto es una proyección de planificación, no una promesa de rendimiento. El tiempo real cambia según la ejecución, pérdidas, retiros y condiciones del mercado.
 
@@ -76,10 +76,11 @@ La evaluación permanece oculta hasta completar los supuestos operativos. Escoge
 4. Stop duro de pérdida diaria y riesgo por trade.
 5. Si añadirás aportaciones, con frecuencia y monto.
 6. Si retirarás capital, con frecuencia y monto.
-7. Capacidad financiera, origen del capital, estructura de cuenta y apalancamiento.
+7. Estructura de la cuenta empresarial y apalancamiento máximo.
 8. Costos por sesión y porcentaje de reserva contributiva.
+9. El plan operativo final seleccionado para ejecución.
 
-Los modos de política completan automáticamente sus supuestos. El modo manual acepta los porcentajes del usuario, pero el motor adaptativo todavía los evalúa contra los guardrails del perfil y la ejecución documentada. Escribir un porcentaje mayor no hace que el sistema apruebe un ritmo más rápido.
+Los modos de política completan automáticamente sus supuestos. El modo manual acepta los porcentajes del usuario y exige seleccionar explícitamente **Mi plan manual** antes de evaluar o guardar. La trayectoria determinística compuesta y la sensibilidad P10/P50/P90 usan el mismo calendario, días perdedores, aportaciones, retiros y costos. La ruta basada en evidencia todavía puede clasificar el plan como provisional o no respaldado; escribir un porcentaje nunca garantiza rendimiento.
 
 Cada ruta separa **crecimiento de trading**, **aportaciones**, **retiros** y **cambio neto del balance**. Una aportación puede ayudar a alcanzar la meta de capital, pero nunca se presenta como ganancia de trading.
 
@@ -90,13 +91,24 @@ La evaluación separa métricas que no deben confundirse:
 3. **Ritmo operativo disciplinado**: retorno de día-meta y pérdida esperada en día perdedor que usa la proyección adaptativa según el perfil.
 4. **Evidencia de ejecución**: cantidad de sesiones/trades registrados más win rate, profit factor, expectativa y drawdown disponibles.
 5. **Flujos de capital**: aportaciones y retiros planificados que cambian el equity sin cambiar el rendimiento de trading.
+6. **Proyección operativa bruta versus neta**: primero se componen multiplicativamente los porcentajes de días-meta y días perdedores; luego se descuentan los costos fijos en dólares y se reportan como impacto de costos. Por ejemplo, cuatro días de `+2.5%` y uno de `-2%` producen aproximadamente `+8.17%` en la semana modelada antes de costos fijos. La matemática anualizada usa la cantidad de ciclos comprometidos disponibles en un año del calendario del instrumento seleccionado, para no tratar los feriados del NYSE como sesiones adicionales.
 
-Un porcentaje declarado de día-meta no puede elevar la recomendación sobre la política seleccionada, y un supuesto optimista de pérdidas no puede mejorar el modelo sin evidencia. La evidencia establecida puede reducir el ritmo recomendado; nunca aumenta automáticamente el riesgo.
+Las políticas predefinidas no permiten que un porcentaje declarado de día-meta eleve su recomendación operativa ni que un supuesto optimista de pérdidas mejore el modelo. Un plan manual seleccionado compone exactamente los porcentajes ingresados, pero una matemática anualizada extrema se identifica como escenario condicional y permanece provisional hasta que la evidencia de ejecución la respalde. La evidencia establecida puede reducir el ritmo modelado; nunca aumenta automáticamente el riesgo.
 
 Selecciona **Hacer evaluación profunda** para que Research AI explique el cálculo verificado con la metodología privada de investigación informada por CFA. El motor determinístico mantiene la autoridad. La IA añade contexto, limitaciones y acciones disciplinadas; no puede cambiar los números, prometer retornos, ofrecer asesoría de inversión individualizada ni recomendar comprar o vender un valor.
 
+## Divulgación obligatoria antes de activar
+El Plan de Empresa de Trading es una herramienta educativa de planificación empresarial y disciplina. Sus proyecciones, trayectorias compuestas de metas, tasas condicionales de llegada, checkpoints, simulaciones y explicaciones de IA dependen de los datos y supuestos ingresados por el usuario. No son pronósticos, garantías de ganancias ni asesoría individualizada de inversión, trading, legal, contributiva o contable.
+
+Antes de activar o actualizar un plan, el usuario debe:
+1. Evaluar el borrador actual.
+2. Revisar la comparación de proyectado versus real, supuestos operativos, costos, flujos de capital y límites de riesgo.
+3. Aceptar la divulgación vigente del Plan de Empresa de Trading.
+
+Cambiar cualquier input del borrador en mobile invalida la evaluación y aceptación anteriores. La plataforma guarda la versión de la divulgación, fecha de aceptación, propósito y origen junto al registro de Business Analysis. Aceptar significa comprometerse con el proceso disciplinado, controles de riesgo, registros precisos y revisión periódica; nunca significa comprometerse con un retorno prometido.
+
 ## Sincronización con la plataforma
-En mobile, usa **Evaluar plan antes de guardar** para revisar los mismos cinco escenarios, guardrails de capacidad, costos, reserva contributiva, horizonte, crecimiento de trading, aportaciones y retiros sin modificar el plan activo. Después de **Aprobar y guardar**, las fases guardadas se convierten en la fuente oficial para web, mobile, dashboard, Sistema de Protección Empresarial y AI Coach. `Plan Progress` lee el checkpoint semanal activo mientras la ruta adaptativa conserva metas mensuales, trimestrales y anuales. En su primer guardado, mobile activa automáticamente el horizonte disciplinado si encuentra que el plazo solicitado no está respaldado.
+En mobile, usa **Evaluar plan antes de guardar** para revisar los mismos cinco escenarios, validación estadística compuesta, configuración de capital empresarial, costos, reserva contributiva, horizonte, crecimiento de trading, aportaciones y retiros sin modificar el plan activo. Después de **Aprobar y guardar**, las fases guardadas se convierten en la fuente oficial para web, mobile, dashboard, Sistema de Protección Empresarial y AI Coach. `Plan Progress` lee el checkpoint semanal activo mientras la ruta adaptativa conserva metas semanales, mensuales, trimestrales, semestrales y anuales. Mobile nunca cambia silenciosamente una fecha no respaldada; el usuario debe aplicar explícitamente el runway operativo o revisar los supuestos antes de guardar.
 
 ## 1) Balance inicial
 Qué es: tu equity actual en el broker.  
@@ -139,15 +151,15 @@ Por qué importa: mantiene el sizing consistente y protege el plan.
 Cómo llenarlo: un número que realmente seguirás.
 
 ## 9) % de trayectoria perfecta y ritmo requerido por la solicitud
-Estos valores describen lo que exigen matemáticamente la meta y el plazo solicitados. No se convierten en la meta diaria guardada. Compáralos con la recomendación adaptativa, capital proyectado, cobertura del plazo y horizonte recomendado.
+Estos valores describen lo que exigen matemáticamente la meta y el plazo solicitados. Definen la proyección de checkpoints objetivo, pero no se convierten silenciosamente en el supuesto de retorno operativo seleccionado. Compáralos con la línea base operativa, balance real, variación y evidencia antes de aprobar el plan.
 
 ## 10) Cadencia y metas
-Qué es: checkpoints semanales de ejecución dentro de metas mensuales, trimestrales y anuales de capital.
+Qué es: checkpoints semanales de la trayectoria compuesta objetivo dentro de metas mensuales, trimestrales, semestrales y anuales. Cada checkpoint vencido compara meta proyectada, balance real de la cuenta en esa fecha y variación en dólares.
 Por qué importa: mueve la atención desde la cifra final distante hacia el próximo período medible del proceso.
 Cómo usarlo:
 1. Ejecuta contra el **próximo checkpoint mensual**.
 2. Usa el checkpoint semanal para detectar desviaciones temprano.
-3. Revisa metas trimestrales y anuales sin aumentar riesgo para recuperar atraso.
+3. Revisa metas trimestrales, semestrales y anuales sin aumentar riesgo para recuperar atraso.
 
 Nota importante:
 - En el Dashboard, `Account Progress` y `Plan Progress` no significan lo mismo.

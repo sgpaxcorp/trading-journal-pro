@@ -74,6 +74,8 @@ import { syncGrowthPlanProtectionRules } from "@/lib/alertsSupabase";
 import { useTradingAccounts } from "@/hooks/useTradingAccounts";
 
 /* ================= Helpers ================= */
+const GROWTH_PLAN_DISCLOSURE_VERSION = "growth-plan-discipline-v1";
+
 const toNum = (s: string, fb = 0) => {
   const v = Number(String(s ?? "").replace(/[$,\s]/g, ""));
   return Number.isFinite(v) ? v : fb;
@@ -476,8 +478,8 @@ async function generateAndDownloadPDF(
   doc.setFontSize(10);
   doc.setTextColor("#64748b");
   const disclaimer = L(
-    "Projection only. This is not investment advice.",
-    "Solo proyección. Esto no es recomendación de inversión."
+    "Trading Business Plan projection for educational business-planning and discipline purposes only. Conditional scenarios are based on user inputs and are not forecasts, guarantees of profit, or individualized investment, trading, legal, tax, or accounting advice. Actual results may differ due to execution, market conditions, liquidity, slippage, fees, leverage, deposits, and withdrawals.",
+    "Proyección del Plan de Empresa de Trading únicamente para planificación educativa del negocio y disciplina. Los escenarios condicionales se basan en los inputs del usuario y no son pronósticos, garantías de ganancias ni asesoría individualizada de inversión, trading, legal, contributiva o contable. Los resultados reales pueden diferir por ejecución, condiciones de mercado, liquidez, slippage, costos, apalancamiento, aportaciones y retiros."
   );
   const disclaimerWrapped = doc.splitTextToSize(disclaimer, 612 - M * 2);
   doc.text(disclaimerWrapped, M, y);
@@ -892,20 +894,10 @@ type BusinessProfile = {
   tradingStyle: "scalp" | "day" | "swing" | "";
 };
 
-type CapitalSource =
-  | "disposable_savings"
-  | "business_income"
-  | "retirement"
-  | "borrowed"
-  | "emergency_fund"
-  | "living_expenses"
-  | "";
-
-type AccountStructure = "cash" | "margin" | "leveraged_derivatives" | "";
-
 type BusinessScenarioId = "conservative" | "moderate" | "aggressive";
 
 type OperatingReturnMode = BusinessScenarioId | "manual" | "";
+type FinalPlanId = Exclude<OperatingReturnMode, "">;
 
 type BusinessScenario = {
   id: BusinessScenarioId;
@@ -978,18 +970,34 @@ type AiPlanAdvisor = {
   confidence: AdaptiveGrowthPlan["confidence"];
   isProvisional: boolean;
   requestedTargetDate: string | null;
+  targetProjectionGoalDayPct: number;
+  targetProjectionBalance: number;
+  targetProjectionCoveragePct: number;
+  requestedGrossProjectedBalance: number;
+  requestedGrossTradingGrowthUsd: number;
+  requestedCostDragUsd: number;
+  costsConsumePercentageEdge: boolean;
   requestedProjectedBalance: number;
   requestedCoveragePct: number;
   requestedShortfallUsd: number;
   expectedLossDayPct: number;
   modeledNetReturnPerSessionPct: number;
+  modeledWeeklyReturnPct: number;
+  modeledAnnualCycles: number;
   modeledAnnualReturnPct: number;
   qualificationRequired: boolean;
   qualificationMinimumSessions: number;
   nextMilestone: AdaptivePlanMilestone | null;
+  weeklyMilestones: AdaptivePlanMilestone[];
   monthlyMilestones: AdaptivePlanMilestone[];
   quarterlyMilestones: AdaptivePlanMilestone[];
+  semiannualMilestones: AdaptivePlanMilestone[];
   annualMilestones: AdaptivePlanMilestone[];
+};
+
+type BalanceSeriesPoint = {
+  date: string;
+  value: number;
 };
 
 type GrowthPlanResearchReview = {
@@ -1500,7 +1508,6 @@ function buildAdaptivePlanAdvisor(params: {
   const { adaptivePlan, scenario, isEs } = params;
   const L = (en: string, es: string) => (isEs ? es : en);
   const completionMonths = adaptivePlan.recommendedCalendarMonths;
-  const completionYears = adaptivePlan.recommendedCalendarYears;
   const phases = adaptivePlan.quarterlyMilestones.slice(0, 6).map((milestone, index) => ({
     title: L(`Quarter ${index + 1}`, `Trimestre ${index + 1}`),
     targetEquity: milestone.targetBalance,
@@ -1522,10 +1529,10 @@ function buildAdaptivePlanAdvisor(params: {
     adaptivePlan.verdict === "not_supported"
       ? L(
           adaptivePlan.mathematicallyPossible
-            ? `The target is mathematically possible, but the selected operating model needs about ${completionYears ?? "—"} years instead of the requested deadline.`
+            ? `The target path is mathematically defined at ${adaptivePlan.targetProjectionGoalDayPct.toFixed(3)}% on goal-days. The selected operating model does not support that pace yet.`
             : "The target cannot be resolved with the current mathematical inputs.",
           adaptivePlan.mathematicallyPossible
-            ? `La meta es matemáticamente posible, pero el modelo operativo seleccionado necesita aproximadamente ${completionYears ?? "—"} años en vez del plazo solicitado.`
+            ? `La trayectoria hacia la meta está matemáticamente definida en ${adaptivePlan.targetProjectionGoalDayPct.toFixed(3)}% durante los días de meta. El modelo operativo seleccionado todavía no respalda ese ritmo.`
             : "La meta no se puede resolver con los datos matemáticos actuales."
         )
       : adaptivePlan.verdict === "no_validated_edge"
@@ -1557,10 +1564,13 @@ function buildAdaptivePlanAdvisor(params: {
     shouldSurface: adaptivePlan.verdict !== "incomplete" && Boolean(scenario),
     headline,
     body: L(
-      `The recommendation compounds a ${adaptivePlan.recommendedGoalDayPct.toFixed(2)}% goal-day pace against an expected ${adaptivePlan.expectedLossDayPct.toFixed(2)}% losing day, while keeping the ${adaptivePlan.maxDailyLossGuardrailPct.toFixed(2)}% daily-loss ceiling as a guardrail rather than treating it as the expected loss. The trader works toward the next checkpoint, not the final number every day.`,
-      `La recomendación compone un ritmo de ${adaptivePlan.recommendedGoalDayPct.toFixed(2)}% en días de meta contra una pérdida esperada de ${adaptivePlan.expectedLossDayPct.toFixed(2)}% en días perdedores, manteniendo el límite diario de ${adaptivePlan.maxDailyLossGuardrailPct.toFixed(2)}% como guardrail y no como pérdida esperada. El trader trabaja hacia el próximo checkpoint, no hacia la cifra final todos los días.`
+      `Projected goals now follow the exact compound path to the requested capital and date. The selected operating baseline remains separate at ${adaptivePlan.recommendedGoalDayPct.toFixed(2)}% on goal-days against an expected ${adaptivePlan.expectedLossDayPct.toFixed(2)}% losing day, so actual execution can be measured without rewriting the goal.`,
+      `Las metas proyectadas ahora siguen la trayectoria compuesta exacta hacia el capital y la fecha solicitados. La línea base operativa seleccionada permanece separada en ${adaptivePlan.recommendedGoalDayPct.toFixed(2)}% durante días de meta contra una pérdida esperada de ${adaptivePlan.expectedLossDayPct.toFixed(2)}% en días perdedores, para medir la ejecución real sin reescribir la meta.`
     ),
-    scenarioTitle: scenario?.title ?? "",
+    scenarioTitle:
+      adaptivePlan.selectedPlanId === "manual"
+        ? L("Manual operating plan", "Plan operativo manual")
+        : scenario?.title ?? "",
     recommendedDailyGoalPct: adaptivePlan.recommendedGoalDayPct,
     maxDailyLossPct: adaptivePlan.maxDailyLossGuardrailPct,
     riskPerTradePct: adaptivePlan.riskPerTradePct,
@@ -1580,17 +1590,28 @@ function buildAdaptivePlanAdvisor(params: {
     confidence: adaptivePlan.confidence,
     isProvisional: adaptivePlan.isProvisional,
     requestedTargetDate: adaptivePlan.requestedTargetDate,
+    targetProjectionGoalDayPct: adaptivePlan.targetProjectionGoalDayPct,
+    targetProjectionBalance: adaptivePlan.targetProjectionBalance,
+    targetProjectionCoveragePct: adaptivePlan.targetProjectionCoveragePct,
+    requestedGrossProjectedBalance: adaptivePlan.requestedGrossProjectedBalance,
+    requestedGrossTradingGrowthUsd: adaptivePlan.requestedGrossTradingGrowthUsd,
+    requestedCostDragUsd: adaptivePlan.requestedCostDragUsd,
+    costsConsumePercentageEdge: adaptivePlan.costsConsumePercentageEdge,
     requestedProjectedBalance: adaptivePlan.requestedProjectedBalance,
     requestedCoveragePct: adaptivePlan.requestedCoveragePct,
     requestedShortfallUsd: adaptivePlan.requestedShortfallUsd,
     expectedLossDayPct: adaptivePlan.expectedLossDayPct,
     modeledNetReturnPerSessionPct: adaptivePlan.modeledNetReturnPerSessionPct,
+    modeledWeeklyReturnPct: adaptivePlan.modeledWeeklyReturnPct,
+    modeledAnnualCycles: adaptivePlan.modeledAnnualCycles,
     modeledAnnualReturnPct: adaptivePlan.modeledAnnualReturnPct,
     qualificationRequired: adaptivePlan.qualificationRequired,
     qualificationMinimumSessions: adaptivePlan.qualificationMinimumSessions,
     nextMilestone: adaptivePlan.nextMilestone,
+    weeklyMilestones: adaptivePlan.weeklyMilestones,
     monthlyMilestones: adaptivePlan.monthlyMilestones,
     quarterlyMilestones: adaptivePlan.quarterlyMilestones,
+    semiannualMilestones: adaptivePlan.semiannualMilestones,
     annualMilestones: adaptivePlan.annualMilestones,
   };
 }
@@ -1604,6 +1625,19 @@ function formatPlanDate(value: string | null | undefined, lang: "en" | "es") {
     day: "numeric",
     year: "numeric",
   }).format(date);
+}
+
+function actualBalanceAtCheckpoint(
+  series: BalanceSeriesPoint[],
+  checkpointDate: string,
+  todayIso: string
+): BalanceSeriesPoint | null {
+  if (!checkpointDate || checkpointDate > todayIso) return null;
+  for (let index = series.length - 1; index >= 0; index -= 1) {
+    const point = series[index];
+    if (point.date <= checkpointDate) return point;
+  }
+  return null;
 }
 
 function formatHistoryDate(value: string | null | undefined, lang: "en" | "es") {
@@ -1647,6 +1681,7 @@ export default function GrowthPlanPage() {
   const [cashflowNet, setCashflowNet] = useState(0);
   const [loadedStartingBalance, setLoadedStartingBalance] = useState<number | null>(null);
   const [liveCurrentBalance, setLiveCurrentBalance] = useState<number | null>(null);
+  const [liveBalanceSeries, setLiveBalanceSeries] = useState<BalanceSeriesPoint[]>([]);
   const [isFollowOnDraft, setIsFollowOnDraft] = useState(false);
 
   // Strings for inputs
@@ -1685,14 +1720,7 @@ export default function GrowthPlanPage() {
   const [businessProfile, setBusinessProfile] = useState<BusinessProfile>(EMPTY_BUSINESS_PROFILE);
   const [selectedScenarioId, setSelectedScenarioId] = useState<BusinessScenarioId | "">("");
   const [returnModelMode, setReturnModelMode] = useState<OperatingReturnMode>("");
-  const [capitalSource, setCapitalSource] = useState<CapitalSource>("");
-  const [emergencyFundMonthsStr, setEmergencyFundMonthsStr] = useState("");
-  const [monthlyEssentialExpensesStr, setMonthlyEssentialExpensesStr] = useState("");
-  const [liquidReservesOutsideTradingStr, setLiquidReservesOutsideTradingStr] = useState("");
-  const [estimatedCostPerSessionStr, setEstimatedCostPerSessionStr] = useState("");
-  const [estimatedTaxReservePctStr, setEstimatedTaxReservePctStr] = useState("");
-  const [accountStructure, setAccountStructure] = useState<AccountStructure>("");
-  const [maxLeverageMultipleStr, setMaxLeverageMultipleStr] = useState("1");
+  const [selectedPlanId, setSelectedPlanId] = useState<FinalPlanId | "">("");
   const [performanceEvidence, setPerformanceEvidence] = useState<GrowthPlanEvidence | null>(null);
   const [performanceEvidenceLoading, setPerformanceEvidenceLoading] = useState(false);
   const [researchReview, setResearchReview] = useState<GrowthPlanResearchReview | null>(null);
@@ -1701,6 +1729,7 @@ export default function GrowthPlanPage() {
 
   // Commit
   const [committed, setCommitted] = useState(false);
+  const [committedDraftKey, setCommittedDraftKey] = useState<string | null>(null);
 
   // Steps + rules
   const [stepsData, setStepsData] = useState<GrowthPlanSteps>(() => getDefaultSteps());
@@ -1727,18 +1756,15 @@ export default function GrowthPlanPage() {
   const riskPerTradePct = Math.max(0, toNum(riskPerTradePctStr, 0));
   const goalDayReturnPct = Math.max(0, toNum(goalDayReturnPctStr, 0));
   const expectedLossDayPct = Math.max(0, toNum(expectedLossDayPctStr, 0));
-  const emergencyFundMonths = Math.max(0, toNum(emergencyFundMonthsStr, 0));
-  const monthlyEssentialExpensesUsd = Math.max(0, toNum(monthlyEssentialExpensesStr, 0));
-  const liquidReservesOutsideTradingUsd = Math.max(0, toNum(liquidReservesOutsideTradingStr, 0));
-  const estimatedCostPerSessionUsd = Math.max(0, toNum(estimatedCostPerSessionStr, 0));
-  const estimatedTaxReservePct = Math.max(0, Math.min(60, toNum(estimatedTaxReservePctStr, 0)));
-  const maxLeverageMultiple = accountStructure === "cash"
-    ? 1
-    : Math.max(1, toNum(maxLeverageMultipleStr, 1));
+  const estimatedCostPerSessionUsd = 0;
+  const estimatedTaxReservePct = 0;
+  const accountStructure = "cash" as const;
+  const maxLeverageMultiple = 1;
   const targetMultiple =
     startingBalance > 0 && targetBalance > 0 ? targetBalance / startingBalance : 0;
   const returnModelConfigured =
     !!returnModelMode &&
+    !!selectedPlanId &&
     !!selectedScenarioId &&
     goalDayReturnPct > 0 &&
     expectedLossDayPct > 0 &&
@@ -1801,16 +1827,6 @@ export default function GrowthPlanPage() {
     plannedDepositMode === "none" ||
     (plannedDepositMode === "scheduled" && plannedDepositAmount > 0);
   const capitalFlowAssumptionsComplete = plannedDepositConfigured && plannedWithdrawalConfigured;
-  const financialCapacityComplete = Boolean(
-    capitalSource &&
-      accountStructure &&
-      emergencyFundMonthsStr.trim() &&
-      monthlyEssentialExpensesStr.trim() &&
-      liquidReservesOutsideTradingStr.trim() &&
-      estimatedCostPerSessionStr.trim() &&
-      estimatedTaxReservePctStr.trim() &&
-      maxLeverageMultipleStr.trim()
-  );
   const operatingScheduleConfigured =
     averageTradingDaysSet &&
     averageTradingDaysPerWeek >= 1 &&
@@ -1823,11 +1839,62 @@ export default function GrowthPlanPage() {
     isBusinessProfileComplete(businessProfile) &&
     returnModelConfigured &&
     capitalFlowAssumptionsComplete &&
-    operatingScheduleConfigured &&
-    financialCapacityComplete;
+    operatingScheduleConfigured;
   const effectivePlanStartDate = planStartDate || isoToday();
   const planDatesOrdered =
     !effectivePlanStartDate || !targetDateStr || effectivePlanStartDate <= targetDateStr;
+  const disclosureDraftKey = useMemo(
+    () =>
+      JSON.stringify({
+        startingBalanceStr,
+        targetBalanceStr,
+        planStartDate,
+        targetDateStr,
+        runwayAmountStr,
+        runwayUnit,
+        tradingInstrument,
+        tradingDaysStr,
+        averageTradingDaysPerWeekStr,
+        lossDaysPerWeekStr,
+        maxDailyLossPercentStr,
+        riskPerTradePctStr,
+        goalDayReturnPctStr,
+        expectedLossDayPctStr,
+        businessProfile,
+        selectedScenarioId,
+        returnModelMode,
+        selectedPlanId,
+        plannedDepositSettings,
+        plannedWithdrawalSettings,
+        stepsData,
+        rules,
+      }),
+    [
+      averageTradingDaysPerWeekStr,
+      businessProfile,
+      expectedLossDayPctStr,
+      goalDayReturnPctStr,
+      lossDaysPerWeekStr,
+      maxDailyLossPercentStr,
+      planStartDate,
+      plannedDepositSettings,
+      plannedWithdrawalSettings,
+      returnModelMode,
+      riskPerTradePctStr,
+      rules,
+      runwayAmountStr,
+      runwayUnit,
+      selectedPlanId,
+      selectedScenarioId,
+      startingBalanceStr,
+      stepsData,
+      targetBalanceStr,
+      targetDateStr,
+      tradingDaysStr,
+      tradingInstrument,
+    ]
+  );
+  const disclosureAcceptedForDraft = committed && committedDraftKey === disclosureDraftKey;
 
   const baseBalanceForDollars = useMemo(() => {
     // If editing an existing plan AND the user hasn't changed the starting balance from what we loaded,
@@ -1843,7 +1910,10 @@ export default function GrowthPlanPage() {
 
     const loadLiveBalance = async () => {
       if (loading || !user || accountsLoading || !activeAccountId) {
-        if (alive) setLiveCurrentBalance(null);
+        if (alive) {
+          setLiveCurrentBalance(null);
+          setLiveBalanceSeries([]);
+        }
         return;
       }
 
@@ -1851,7 +1921,10 @@ export default function GrowthPlanPage() {
         const { data: sessionData } = await supabaseBrowser.auth.getSession();
         const token = sessionData?.session?.access_token;
         if (!token) {
-          if (alive) setLiveCurrentBalance(null);
+          if (alive) {
+            setLiveCurrentBalance(null);
+            setLiveBalanceSeries([]);
+          }
           return;
         }
 
@@ -1859,24 +1932,38 @@ export default function GrowthPlanPage() {
           headers: { Authorization: `Bearer ${token}` },
         });
         if (!res.ok) {
-          if (alive) setLiveCurrentBalance(null);
+          if (alive) {
+            setLiveCurrentBalance(null);
+            setLiveBalanceSeries([]);
+          }
           return;
         }
 
         const body = (await res.json().catch(() => ({}))) as {
-          series?: Array<{ value?: number | string | null }>;
+          series?: Array<{ date?: string | null; value?: number | string | null }>;
+          totals?: { currentBalance?: number | string | null };
         };
-        const series = Array.isArray(body?.series) ? body.series : [];
-        const latest = series
-          .map((point) => Number(point?.value))
-          .filter((value: number) => Number.isFinite(value))
-          .slice(-1)[0];
+        const series = (Array.isArray(body?.series) ? body.series : [])
+          .map((point) => ({
+            date: String(point?.date ?? "").slice(0, 10),
+            value: Number(point?.value),
+          }))
+          .filter((point) => /^\d{4}-\d{2}-\d{2}$/.test(point.date) && Number.isFinite(point.value))
+          .sort((a, b) => a.date.localeCompare(b.date));
+        const totalsBalance = Number(body?.totals?.currentBalance);
+        const latest = Number.isFinite(totalsBalance)
+          ? totalsBalance
+          : series[series.length - 1]?.value;
 
         if (alive) {
           setLiveCurrentBalance(Number.isFinite(latest) ? latest : null);
+          setLiveBalanceSeries(series);
         }
       } catch {
-        if (alive) setLiveCurrentBalance(null);
+        if (alive) {
+          setLiveCurrentBalance(null);
+          setLiveBalanceSeries([]);
+        }
       }
     };
 
@@ -2010,11 +2097,16 @@ export default function GrowthPlanPage() {
         goalDayReturnPct: goalDayReturnPct > 0 ? goalDayReturnPct : base.goalDayReturnPct,
         expectedLossDayPct:
           expectedLossDayPct > 0
-            ? Math.min(base.maxDailyLossPct, Math.max(base.expectedLossDayPct, expectedLossDayPct))
+            ? Math.min(
+                base.maxDailyLossPct,
+                returnModelMode === "manual"
+                  ? expectedLossDayPct
+                  : Math.max(base.expectedLossDayPct, expectedLossDayPct)
+              )
             : base.expectedLossDayPct,
       };
     },
-    [businessProfile, expectedLossDayPct, goalDayReturnPct, selectedScenarioId]
+    [businessProfile, expectedLossDayPct, goalDayReturnPct, returnModelMode, selectedScenarioId]
   );
 
   const projection = useMemo(() => {
@@ -2151,14 +2243,6 @@ export default function GrowthPlanPage() {
           anchor: "gp-planned-withdrawals",
         },
         {
-          id: "financial_capacity",
-          label: L("Complete financial-capacity and net-cost assumptions", "Completa capacidad financiera y supuestos de costos netos"),
-          done:
-            financialCapacityComplete &&
-            !["retirement", "borrowed", "emergency_fund", "living_expenses"].includes(capitalSource),
-          anchor: "gp-financial-capacity",
-        },
-        {
           id: "trading_days",
           label: L("Set average operating days and total trading days", "Define días operativos promedio y total de trading"),
           done: averageTradingDaysSet && tradingDays > 0,
@@ -2268,7 +2352,7 @@ export default function GrowthPlanPage() {
         {
           id: "commitment",
           label: L("Confirm your commitment", "Confirma tu compromiso"),
-          done: committed,
+          done: disclosureAcceptedForDraft,
           anchor: "gp-commitment",
         },
       ],
@@ -2287,8 +2371,6 @@ export default function GrowthPlanPage() {
     lossDaysPerWeekStr,
     autoPhasesGenerated,
     capitalFlowAssumptionsComplete,
-    financialCapacityComplete,
-    capitalSource,
     suggestedRows.length,
     tradingSystemCount,
     analysisStylesCount,
@@ -2298,7 +2380,7 @@ export default function GrowthPlanPage() {
     systemDontCount,
     strategyCount,
     nonNegotiableCount,
-    committed,
+    disclosureAcceptedForDraft,
     businessAnalysisComplete,
   ]);
 
@@ -2439,45 +2521,8 @@ export default function GrowthPlanPage() {
                 ""
             )
           );
-          const storedCapacity = existingOperatingModel?.financialCapacity ?? {};
-          setCapitalSource(
-            ["disposable_savings", "business_income", "retirement", "borrowed", "emergency_fund", "living_expenses"].includes(
-              String(storedCapacity?.capitalSource ?? "")
-            )
-              ? (storedCapacity.capitalSource as CapitalSource)
-              : ""
-          );
-          setEmergencyFundMonthsStr(
-            storedCapacity?.emergencyFundMonths == null ? "" : String(storedCapacity.emergencyFundMonths)
-          );
-          setMonthlyEssentialExpensesStr(
-            storedCapacity?.monthlyEssentialExpensesUsd == null
-              ? ""
-              : formatMoneyInputValue(storedCapacity.monthlyEssentialExpensesUsd)
-          );
-          setLiquidReservesOutsideTradingStr(
-            storedCapacity?.liquidReservesOutsideTradingUsd == null
-              ? ""
-              : formatMoneyInputValue(storedCapacity.liquidReservesOutsideTradingUsd)
-          );
-          setEstimatedCostPerSessionStr(
-            existingOperatingModel?.estimatedCostPerSessionUsd == null
-              ? ""
-              : formatMoneyInputValue(existingOperatingModel.estimatedCostPerSessionUsd)
-          );
-          setEstimatedTaxReservePctStr(
-            existingOperatingModel?.estimatedTaxReservePct == null
-              ? ""
-              : String(existingOperatingModel.estimatedTaxReservePct)
-          );
-          setAccountStructure(
-            ["cash", "margin", "leveraged_derivatives"].includes(String(storedCapacity?.accountStructure ?? ""))
-              ? (storedCapacity.accountStructure as AccountStructure)
-              : ""
-          );
-          setMaxLeverageMultipleStr(String(storedCapacity?.maxLeverageMultiple ?? 1));
-
           setCommitted(false);
+          setCommittedDraftKey(null);
 
           setStepsData(existing.steps ?? getDefaultSteps());
           setRules(existing.rules && existing.rules.length ? existing.rules : getDefaultSuggestedRules());
@@ -2501,6 +2546,14 @@ export default function GrowthPlanPage() {
             setReturnModelMode(
               ["conservative", "moderate", "aggressive", "manual"].includes(storedReturnMode)
                 ? (storedReturnMode as OperatingReturnMode)
+                : ""
+            );
+            const storedSelectedPlanId = String(
+              existingOperatingModel?.selectedPlanId ?? storedReturnMode
+            );
+            setSelectedPlanId(
+              ["conservative", "moderate", "aggressive", "manual"].includes(storedSelectedPlanId)
+                ? (storedSelectedPlanId as FinalPlanId)
                 : ""
             );
             const storedResearchReview = existingBusinessAnalysis.researchReview;
@@ -2617,14 +2670,7 @@ export default function GrowthPlanPage() {
           setGoalDayReturnPctStr("");
           setExpectedLossDayPctStr("");
           setReturnModelMode("");
-          setCapitalSource("");
-          setEmergencyFundMonthsStr("");
-          setMonthlyEssentialExpensesStr("");
-          setLiquidReservesOutsideTradingStr("");
-          setEstimatedCostPerSessionStr("");
-          setEstimatedTaxReservePctStr("");
-          setAccountStructure("");
-          setMaxLeverageMultipleStr("1");
+          setSelectedPlanId("");
           setLoadedStartingBalance(null);
           setCashflowNet(0);
           setPlanStartDate(newStartDate);
@@ -2866,6 +2912,7 @@ export default function GrowthPlanPage() {
       setAutoPhasesGenerated(false);
       setRiskPerTradePctStr(nextRiskPct.toFixed(2));
       setCommitted(false);
+      setCommittedDraftKey(null);
       setIsFollowOnDraft(true);
       setError("");
       setStep(0);
@@ -2947,7 +2994,9 @@ export default function GrowthPlanPage() {
           expectedLossDayPct > 0
             ? Math.min(
                 base.maxDailyLossPct,
-                Math.max(base.expectedLossDayPct, expectedLossDayPct)
+                returnModelMode === "manual"
+                  ? expectedLossDayPct
+                  : Math.max(base.expectedLossDayPct, expectedLossDayPct)
               )
             : base.expectedLossDayPct,
         maxDailyLossPct: maxDailyLossPercent > 0 ? maxDailyLossPercent : base.maxDailyLossPct,
@@ -2963,6 +3012,7 @@ export default function GrowthPlanPage() {
       lossDaysPerWeek,
       maxDailyLossPercent,
       riskPerTradePct,
+      returnModelMode,
       selectedBusinessScenario,
     ]
   );
@@ -3023,6 +3073,7 @@ export default function GrowthPlanPage() {
       tradingInstrument,
       averageTradingDaysPerWeek,
       policy,
+      selectedPlanId: selectedPlanId || policy.id,
       declaredGoalDayPct: reviewScenario?.dailyGoalPct ?? goalDayReturnPct,
       declaredExpectedLossDayPct: reviewScenario?.expectedLossDayPct ?? expectedLossDayPct,
       evidence: performanceEvidence,
@@ -3035,10 +3086,7 @@ export default function GrowthPlanPage() {
       estimatedCostPerSessionUsd,
       estimatedTaxReservePct,
       financialCapacity: {
-        capitalSource: capitalSource || null,
-        emergencyFundMonths,
-        monthlyEssentialExpensesUsd,
-        liquidReservesOutsideTradingUsd,
+        capitalSource: "business_income",
         accountStructure: accountStructure || null,
         maxLeverageMultiple,
       },
@@ -3047,20 +3095,17 @@ export default function GrowthPlanPage() {
     averageTradingDaysPerWeek,
     accountStructure,
     businessProfile,
-    capitalSource,
     effectivePlanStartDate,
-    emergencyFundMonths,
     estimatedCostPerSessionUsd,
     estimatedTaxReservePct,
     expectedLossDayPct,
     goalDayReturnPct,
-    liquidReservesOutsideTradingUsd,
     maxLeverageMultiple,
-    monthlyEssentialExpensesUsd,
     performanceEvidence,
     plannedDepositSettings,
     plannedWithdrawalSettings,
     reviewScenario,
+    selectedPlanId,
     startingBalance,
     targetBalance,
     targetDateStr,
@@ -3075,16 +3120,23 @@ export default function GrowthPlanPage() {
       Math.pow(1 + Math.max(0, goalDayReturnPct) / 100, modeledGoalDays) *
       Math.pow(1 - Math.min(99, Math.max(0, expectedLossDayPct)) / 100, modeledLossDays);
     const weeklyPct = (weeklyFactor - 1) * 100;
+    const annualCycles = Math.max(1, adaptiveGrowthPlan.modeledAnnualCycles);
     return {
       weeklyPct,
-      monthlyPct: (Math.pow(weeklyFactor, 52 / 12) - 1) * 100,
-      annualPct: (Math.pow(weeklyFactor, 52) - 1) * 100,
+      monthlyPct: (Math.pow(weeklyFactor, annualCycles / 12) - 1) * 100,
+      annualPct: (Math.pow(weeklyFactor, annualCycles) - 1) * 100,
       modeledGoalDays,
       modeledLossDays,
     };
-  }, [averageTradingDaysPerWeek, expectedLossDayPct, goalDayReturnPct, lossDaysPerWeek]);
+  }, [
+    adaptiveGrowthPlan.modeledAnnualCycles,
+    averageTradingDaysPerWeek,
+    expectedLossDayPct,
+    goalDayReturnPct,
+    lossDaysPerWeek,
+  ]);
 
-  const selectReturnModel = (mode: Exclude<OperatingReturnMode, "">) => {
+  const selectReturnModel = (mode: Exclude<OperatingReturnMode, "">, finalize = false) => {
     const fallbackScenario: BusinessScenarioId =
       selectedScenarioId ||
       (businessProfile.riskProfile
@@ -3094,6 +3146,7 @@ export default function GrowthPlanPage() {
     const policy = getGrowthPlanOperatingPolicy(scenarioId, businessProfile);
     setSelectedScenarioId(scenarioId);
     setReturnModelMode(mode);
+    setSelectedPlanId(finalize ? mode : "");
 
     if (mode !== "manual" || goalDayReturnPct <= 0) {
       setGoalDayReturnPctStr(String(policy.goalDayReturnPct));
@@ -3118,6 +3171,7 @@ export default function GrowthPlanPage() {
     if (!returnModelMode || returnModelMode === "manual") return;
     const policy = getGrowthPlanOperatingPolicy(returnModelMode, businessProfile);
     setSelectedScenarioId(returnModelMode);
+    setSelectedPlanId((current) => (current === returnModelMode ? current : ""));
     setGoalDayReturnPctStr(String(policy.goalDayReturnPct));
     setExpectedLossDayPctStr(String(policy.expectedLossDayPct));
     setMaxDailyLossPercentStr(String(policy.maxDailyLossPct));
@@ -3140,12 +3194,25 @@ export default function GrowthPlanPage() {
       reviewScenario,
     ]
   );
+  const activeProjectedCheckpoint = useMemo(() => {
+    const today = isoToday();
+    const milestones = aiPlanAdvisor.weeklyMilestones;
+    return milestones.find((milestone) => milestone.targetDate >= today) ?? milestones[milestones.length - 1] ?? null;
+  }, [aiPlanAdvisor.weeklyMilestones]);
 
   const applyAiPlanRecommendation = () => {
     if (!reviewScenario || !aiPlanAdvisor.shouldSurface) return;
+    if (
+      !aiPlanAdvisor.recommendedCompletionDate ||
+      !aiPlanAdvisor.requestedTargetDate ||
+      aiPlanAdvisor.recommendedCompletionDate <= aiPlanAdvisor.requestedTargetDate
+    ) {
+      return;
+    }
 
     setSelectedScenarioId(reviewScenario.id);
     setReturnModelMode(reviewScenario.id);
+    setSelectedPlanId(reviewScenario.id);
     setGoalDayReturnPctStr(String(aiPlanAdvisor.recommendedDailyGoalPct));
     setExpectedLossDayPctStr(String(aiPlanAdvisor.expectedLossDayPct));
     setRiskPerTradePctStr(String(reviewScenario.riskPerTradePct));
@@ -3229,6 +3296,15 @@ export default function GrowthPlanPage() {
             requestedRequiredGoalDayPct: adaptiveGrowthPlan.requestedRequiredGoalDayPct,
             targetAnnualizedReturnPct: adaptiveGrowthPlan.targetAnnualizedReturnPct,
             mathematicallyPossible: adaptiveGrowthPlan.mathematicallyPossible,
+            targetProjectionGoalDayPct: adaptiveGrowthPlan.targetProjectionGoalDayPct,
+            targetProjectionBalanceUsd: adaptiveGrowthPlan.targetProjectionBalance,
+            targetProjectionCoveragePct: adaptiveGrowthPlan.targetProjectionCoveragePct,
+            targetProjectionTradingGrowthUsd: adaptiveGrowthPlan.targetProjectionTradingGrowthUsd,
+            targetProjectionEstimatedCostsUsd: adaptiveGrowthPlan.targetProjectionEstimatedCostsUsd,
+            requestedGrossProjectedBalanceUsd: adaptiveGrowthPlan.requestedGrossProjectedBalance,
+            requestedGrossTradingGrowthUsd: adaptiveGrowthPlan.requestedGrossTradingGrowthUsd,
+            requestedCostDragUsd: adaptiveGrowthPlan.requestedCostDragUsd,
+            costsConsumePercentageEdge: adaptiveGrowthPlan.costsConsumePercentageEdge,
             requestedEstimatedCostsUsd: adaptiveGrowthPlan.requestedEstimatedCostsUsd,
             requestedEstimatedTaxReserveUsd: adaptiveGrowthPlan.requestedEstimatedTaxReserveUsd,
             requestedAfterTaxReserveBalance: adaptiveGrowthPlan.requestedAfterTaxReserveBalance,
@@ -3240,6 +3316,8 @@ export default function GrowthPlanPage() {
             expectedLossDayPct: adaptiveGrowthPlan.expectedLossDayPct,
             maxDailyLossGuardrailPct: adaptiveGrowthPlan.maxDailyLossGuardrailPct,
             modeledNetReturnPerSessionPct: adaptiveGrowthPlan.modeledNetReturnPerSessionPct,
+            modeledWeeklyReturnPct: adaptiveGrowthPlan.modeledWeeklyReturnPct,
+            modeledAnnualCycles: adaptiveGrowthPlan.modeledAnnualCycles,
             modeledAnnualReturnPct: adaptiveGrowthPlan.modeledAnnualReturnPct,
             recommendedCompletionDate: adaptiveGrowthPlan.recommendedCompletionDate,
             recommendedTradingSessions: adaptiveGrowthPlan.recommendedTradingSessions,
@@ -3249,16 +3327,17 @@ export default function GrowthPlanPage() {
             capacityStatus: adaptiveGrowthPlan.capacityStatus,
             capacityFlags: adaptiveGrowthPlan.capacityFlags,
             panoramas: adaptiveGrowthPlan.panoramas,
+            selectedPlanId: adaptiveGrowthPlan.selectedPlanId,
+            statisticalValidation: adaptiveGrowthPlan.statisticalValidation,
             flags: adaptiveGrowthPlan.flags,
+            nextWeeklyCheckpoints: adaptiveGrowthPlan.weeklyMilestones.slice(0, 12),
             nextMonthlyCheckpoints: adaptiveGrowthPlan.monthlyMilestones.slice(0, 12),
             quarterlyCheckpoints: adaptiveGrowthPlan.quarterlyMilestones.slice(0, 12),
+            semiannualCheckpoints: adaptiveGrowthPlan.semiannualMilestones,
             annualCheckpoints: adaptiveGrowthPlan.annualMilestones,
           },
           financialCapacity: {
-            capitalSource,
-            emergencyFundMonths,
-            monthlyEssentialExpensesUsd,
-            liquidReservesOutsideTradingUsd,
+            capitalSource: "business_income",
             accountStructure,
             maxLeverageMultiple,
             estimatedCostPerSessionUsd,
@@ -3735,7 +3814,10 @@ export default function GrowthPlanPage() {
                       inputMode="decimal"
                       value={goalDayReturnPctStr}
                       readOnly={!!returnModelMode && returnModelMode !== "manual"}
-                      onChange={(event) => setGoalDayReturnPctStr(event.target.value)}
+                      onChange={(event) => {
+                        setSelectedPlanId("");
+                        setGoalDayReturnPctStr(event.target.value);
+                      }}
                       placeholder="0.20"
                     />
                   </label>
@@ -3746,7 +3828,10 @@ export default function GrowthPlanPage() {
                       inputMode="decimal"
                       value={expectedLossDayPctStr}
                       readOnly={!!returnModelMode && returnModelMode !== "manual"}
-                      onChange={(event) => setExpectedLossDayPctStr(event.target.value)}
+                      onChange={(event) => {
+                        setSelectedPlanId("");
+                        setExpectedLossDayPctStr(event.target.value);
+                      }}
                       placeholder="0.35"
                     />
                   </label>
@@ -3791,116 +3876,6 @@ export default function GrowthPlanPage() {
                     ))}
                   </div>
                 ) : null}
-
-                <div id="gp-financial-capacity" className="rounded-2xl border border-sky-300/15 bg-slate-950/55 p-4">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <p className="text-[10px] uppercase tracking-[0.2em] text-sky-200">
-                        {L("Financial capacity & net assumptions", "Capacidad financiera y supuestos netos")}
-                      </p>
-                      <p className="mt-1 max-w-3xl text-[11px] leading-5 text-slate-500">
-                        {L(
-                          "This protects essential capital and converts gross plan math into a more complete operating estimate. It is not tax or investment advice.",
-                          "Esto protege el capital esencial y convierte la matemática bruta en un estimado operativo más completo. No es asesoría contributiva ni de inversión."
-                        )}
-                      </p>
-                    </div>
-                    <span className={`rounded-full border px-2.5 py-1 text-[10px] font-semibold ${
-                      adaptiveGrowthPlan.capacityStatus === "protected"
-                        ? "border-emerald-300/30 bg-emerald-300/10 text-emerald-200"
-                        : adaptiveGrowthPlan.capacityStatus === "blocked"
-                          ? "border-red-300/30 bg-red-300/10 text-red-200"
-                          : "border-amber-300/30 bg-amber-300/10 text-amber-200"
-                    }`}>
-                      {adaptiveGrowthPlan.capacityStatus === "protected"
-                        ? L("Capital protected", "Capital protegido")
-                        : adaptiveGrowthPlan.capacityStatus === "blocked"
-                          ? L("Restricted source", "Fuente restringida")
-                          : adaptiveGrowthPlan.capacityStatus === "warning"
-                            ? L("Review reserves", "Revisar reservas")
-                            : L("Complete capacity", "Completa capacidad")}
-                    </span>
-                  </div>
-
-                  <div className="mt-3">
-                    <p className="text-[10px] uppercase tracking-[0.16em] text-slate-500">
-                      {L("Trading capital source", "Fuente del capital de trading")}
-                    </p>
-                    <div className="mt-2 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-                      {([
-                        ["disposable_savings", L("Disposable savings", "Ahorros disponibles")],
-                        ["business_income", L("Business income", "Ingresos del negocio")],
-                        ["retirement", L("Retirement funds", "Fondos de retiro")],
-                        ["borrowed", L("Borrowed money", "Dinero prestado")],
-                        ["emergency_fund", L("Emergency fund", "Fondo de emergencia")],
-                        ["living_expenses", L("Living-expense money", "Dinero para gastos de vida")],
-                      ] as Array<[CapitalSource, string]>).map(([value, label]) => (
-                        <button
-                          key={value}
-                          type="button"
-                          onClick={() => setCapitalSource(value)}
-                          className={`rounded-lg border px-3 py-2 text-left text-[11px] transition ${
-                            capitalSource === value
-                              ? "border-sky-300 bg-sky-300/10 text-sky-100"
-                              : "border-slate-800 text-slate-400 hover:border-slate-600"
-                          }`}
-                        >
-                          {label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                    <label className="text-[11px] text-slate-400">
-                      {L("Emergency fund (months)", "Fondo de emergencia (meses)")}
-                      <input className={`${inputBase} mt-1`} inputMode="decimal" value={emergencyFundMonthsStr} onChange={(event) => setEmergencyFundMonthsStr(event.target.value)} placeholder="6" />
-                    </label>
-                    <label className="text-[11px] text-slate-400">
-                      {L("Essential expenses / month", "Gastos esenciales / mes")}
-                      <input className={`${inputBase} mt-1`} inputMode="decimal" value={monthlyEssentialExpensesStr} onChange={(event) => setMonthlyEssentialExpensesStr(formatMoneyInputDraft(event.target.value))} onBlur={() => monthlyEssentialExpensesStr && setMonthlyEssentialExpensesStr(formatMoneyInputValue(monthlyEssentialExpensesStr))} placeholder="2,500.00" />
-                    </label>
-                    <label className="text-[11px] text-slate-400">
-                      {L("Liquid reserves outside trading", "Reservas líquidas fuera de trading")}
-                      <input className={`${inputBase} mt-1`} inputMode="decimal" value={liquidReservesOutsideTradingStr} onChange={(event) => setLiquidReservesOutsideTradingStr(formatMoneyInputDraft(event.target.value))} onBlur={() => liquidReservesOutsideTradingStr && setLiquidReservesOutsideTradingStr(formatMoneyInputValue(liquidReservesOutsideTradingStr))} placeholder="15,000.00" />
-                    </label>
-                    <label className="text-[11px] text-slate-400">
-                      {L("Estimated cost / session", "Costo estimado / sesión")}
-                      <input className={`${inputBase} mt-1`} inputMode="decimal" value={estimatedCostPerSessionStr} onChange={(event) => setEstimatedCostPerSessionStr(formatMoneyInputDraft(event.target.value))} onBlur={() => estimatedCostPerSessionStr && setEstimatedCostPerSessionStr(formatMoneyInputValue(estimatedCostPerSessionStr))} placeholder="1.00" />
-                    </label>
-                    <label className="text-[11px] text-slate-400">
-                      {L("Tax reserve on net profit %", "Reserva contributiva sobre ganancia %")}
-                      <input className={`${inputBase} mt-1`} inputMode="decimal" value={estimatedTaxReservePctStr} onChange={(event) => setEstimatedTaxReservePctStr(event.target.value)} placeholder="25" />
-                    </label>
-                    <label className="text-[11px] text-slate-400">
-                      {L("Account structure", "Estructura de cuenta")}
-                      <select className={`${inputBase} mt-1`} value={accountStructure} onChange={(event) => {
-                        const value = event.target.value as AccountStructure;
-                        setAccountStructure(value);
-                        if (value === "cash") setMaxLeverageMultipleStr("1");
-                      }}>
-                        <option value="">{L("Select", "Selecciona")}</option>
-                        <option value="cash">Cash</option>
-                        <option value="margin">Margin</option>
-                        <option value="leveraged_derivatives">{L("Leveraged derivatives", "Derivados apalancados")}</option>
-                      </select>
-                    </label>
-                    <label className="text-[11px] text-slate-400">
-                      {L("Maximum leverage multiple", "Múltiplo máximo de apalancamiento")}
-                      <input className={`${inputBase} mt-1 ${accountStructure === "cash" ? "cursor-not-allowed opacity-70" : ""}`} inputMode="decimal" value={maxLeverageMultipleStr} readOnly={accountStructure === "cash"} onChange={(event) => setMaxLeverageMultipleStr(event.target.value)} placeholder="1" />
-                    </label>
-                  </div>
-
-                  {adaptiveGrowthPlan.capacityFlags.length ? (
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      {adaptiveGrowthPlan.capacityFlags.map((flag) => (
-                        <span key={flag} className="rounded-full border border-amber-300/20 bg-amber-300/5 px-2.5 py-1 text-[10px] text-amber-100">
-                          {flag.replaceAll("_", " ")}
-                        </span>
-                      ))}
-                    </div>
-                  ) : null}
-                </div>
 
                 <div className="grid gap-3 xl:grid-cols-2">
                   {([
@@ -4025,8 +4000,8 @@ export default function GrowthPlanPage() {
                     </p>
                     <p className="mt-1 max-w-4xl text-xs leading-5 text-slate-300">
                       {L(
-                        `At the selected discipline and risk assumptions, the model projects ${currency(aiPlanAdvisor.requestedProjectedBalance)} by the requested date ${formatPlanDate(aiPlanAdvisor.requestedTargetDate, lang)}. The recommended horizon is ${formatPlanDate(aiPlanAdvisor.recommendedCompletionDate, lang)}, not because the final target changes, but because the plan refuses to force the pace.`,
-                        `Con los supuestos seleccionados de disciplina y riesgo, el modelo proyecta ${currency(aiPlanAdvisor.requestedProjectedBalance)} para la fecha solicitada ${formatPlanDate(aiPlanAdvisor.requestedTargetDate, lang)}. El horizonte recomendado es ${formatPlanDate(aiPlanAdvisor.recommendedCompletionDate, lang)}, no porque cambie la meta final, sino porque el plan se niega a forzar el ritmo.`
+                        `The selected win/loss percentages compound to ${currency(aiPlanAdvisor.requestedGrossProjectedBalance)} before fixed session costs and ${currency(aiPlanAdvisor.requestedProjectedBalance)} after those costs by ${formatPlanDate(aiPlanAdvisor.requestedTargetDate, lang)}. The recommended horizon is ${formatPlanDate(aiPlanAdvisor.recommendedCompletionDate, lang)}.`,
+                        `Los porcentajes seleccionados de ganancias y pérdidas se componen hasta ${currency(aiPlanAdvisor.requestedGrossProjectedBalance)} antes de costos fijos por sesión y ${currency(aiPlanAdvisor.requestedProjectedBalance)} después de esos costos para ${formatPlanDate(aiPlanAdvisor.requestedTargetDate, lang)}. El horizonte recomendado es ${formatPlanDate(aiPlanAdvisor.recommendedCompletionDate, lang)}.`
                       )}
                     </p>
                   </div>
@@ -4061,18 +4036,24 @@ export default function GrowthPlanPage() {
                   </div>
                   <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
                     <p className="text-[10px] uppercase tracking-[0.18em] text-slate-500">
-                      {L("By requested date", "Para fecha solicitada")}
+                      {L("Gross percentage compound", "Compuesto porcentual bruto")}
                     </p>
                     <p className="mt-1 text-base font-semibold text-slate-100">
-                      {currency(aiPlanAdvisor.requestedProjectedBalance)}
+                      {currency(aiPlanAdvisor.requestedGrossProjectedBalance)}
+                    </p>
+                    <p className="mt-1 text-[10px] text-slate-500">
+                      {aiPlanAdvisor.modeledWeeklyReturnPct.toFixed(2)}% {L("modeled week", "semana modelada")}
                     </p>
                   </div>
                   <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
                     <p className="text-[10px] uppercase tracking-[0.18em] text-slate-500">
-                      {L("Deadline coverage", "Cobertura del plazo")}
+                      {L("Net after fixed costs", "Neto después de costos fijos")}
                     </p>
                     <p className="mt-1 text-base font-semibold text-slate-100">
-                      {aiPlanAdvisor.requestedCoveragePct.toFixed(0)}%
+                      {currency(aiPlanAdvisor.requestedProjectedBalance)}
+                    </p>
+                    <p className="mt-1 text-[10px] text-slate-500">
+                      {L("Cost drag", "Impacto de costos")} {currency(aiPlanAdvisor.requestedCostDragUsd)} · {aiPlanAdvisor.requestedCoveragePct.toFixed(0)}%
                     </p>
                   </div>
                   <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
@@ -4097,6 +4078,14 @@ export default function GrowthPlanPage() {
                     </p>
                   </div>
                 </div>
+                {aiPlanAdvisor.costsConsumePercentageEdge ? (
+                  <p className="mt-3 rounded-xl border border-amber-300/30 bg-amber-300/10 px-3 py-2 text-[11px] leading-5 text-amber-100">
+                    {L(
+                      `The win/loss percentages produce a positive ${aiPlanAdvisor.modeledWeeklyReturnPct.toFixed(2)}% modeled week before fixed costs. The ${currency(estimatedCostPerSessionUsd)} per-session input consumes that edge in the net projection. Verify the cost input: the zero balance comes from cost drag, not from the compound-return formula.`,
+                      `Los porcentajes de ganancias y pérdidas producen una semana modelada positiva de ${aiPlanAdvisor.modeledWeeklyReturnPct.toFixed(2)}% antes de costos fijos. El costo de ${currency(estimatedCostPerSessionUsd)} por sesión consume esa ventaja en la proyección neta. Verifica ese costo: el balance en cero proviene del impacto de costos, no de la fórmula de interés compuesto.`
+                    )}
+                  </p>
+                ) : null}
                 <div className="mt-2 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
                   <div className="rounded-xl border border-cyan-300/20 bg-slate-950/55 p-3">
                     <p className="text-[10px] uppercase tracking-[0.18em] text-cyan-200">
@@ -4155,8 +4144,8 @@ export default function GrowthPlanPage() {
                     </p>
                     <p className="mt-1 text-[10px] leading-4 text-slate-500">
                       {L(
-                        "P10, median, P90, and target probability use 400 seeded paths with the selected win/loss frequency. They are sensitivity ranges, not forecasts.",
-                        "P10, mediana, P90 y probabilidad de meta usan 400 rutas con semilla y la frecuencia seleccionada de ganancias/pérdidas. Son rangos de sensibilidad, no pronósticos."
+                        "P10, median, P90, and the conditional hit rate use 400 seeded paths assuming the entered win/loss frequency and percentages continue. They are sensitivity ranges, not empirical probabilities or forecasts.",
+                        "P10, mediana, P90 y la tasa condicional de llegada usan 400 rutas con semilla suponiendo que continúan la frecuencia y los porcentajes ingresados. Son rangos de sensibilidad, no probabilidades empíricas ni pronósticos."
                       )}
                     </p>
                   </div>
@@ -4167,9 +4156,9 @@ export default function GrowthPlanPage() {
                           <th className="px-3 py-2 font-medium">{L("Scenario", "Escenario")}</th>
                           <th className="px-3 py-2 font-medium">{L("Goal / loss day", "Meta / día pérdida")}</th>
                           <th className="px-3 py-2 font-medium">{L("Annual math", "Matemática anual")}</th>
-                          <th className="px-3 py-2 font-medium">{L("Projected", "Proyectado")}</th>
+                          <th className="px-3 py-2 font-medium">{L("Gross / net after costs", "Bruto / neto después de costos")}</th>
                           <th className="px-3 py-2 font-medium">P10 / P50 / P90</th>
-                          <th className="px-3 py-2 font-medium">{L("Target probability", "Probabilidad de meta")}</th>
+                          <th className="px-3 py-2 font-medium">{L("Conditional hit rate", "Tasa condicional de llegada")}</th>
                           <th className="px-3 py-2 font-medium">{L("Median max DD", "DD máximo mediano")}</th>
                           <th className="px-3 py-2 font-medium">{L("Risk of losing 50%", "Riesgo de perder 50%")}</th>
                           <th className="px-3 py-2 font-medium">{L("Completion", "Cumplimiento")}</th>
@@ -4199,7 +4188,12 @@ export default function GrowthPlanPage() {
                                 +{panorama.goalDayReturnPct.toFixed(3)}% / -{panorama.expectedLossDayPct.toFixed(2)}%
                               </td>
                               <td className="px-3 py-2 text-slate-300">{panorama.modeledAnnualReturnPct.toFixed(1)}%</td>
-                              <td className="px-3 py-2 text-slate-200">{currency(panorama.projectedBalance)}</td>
+                              <td className="px-3 py-2 text-slate-200">
+                                <p className="font-semibold">{currency(panorama.grossProjectedBalance)}</p>
+                                <p className="mt-1 text-[10px] text-slate-500">
+                                  {L("Net", "Neto")} {currency(panorama.projectedBalance)} · {L("drag", "impacto")} {currency(panorama.costDragUsd)}
+                                </p>
+                              </td>
                               <td className="px-3 py-2 text-slate-400">
                                 {currency(panorama.probability.p10Balance)} / {currency(panorama.probability.medianBalance)} / {currency(panorama.probability.p90Balance)}
                               </td>
@@ -4220,10 +4214,15 @@ export default function GrowthPlanPage() {
                     </table>
                   </div>
                 </div>
-                <div className="mt-2 grid gap-2 sm:grid-cols-3">
+                <div className="mt-2 grid gap-2 sm:grid-cols-4">
                   <div className="rounded-xl border border-emerald-300/15 bg-slate-950/45 p-3">
-                    <p className="text-[10px] uppercase tracking-[0.18em] text-slate-500">{L("Trading growth", "Crecimiento de trading")}</p>
+                    <p className="text-[10px] uppercase tracking-[0.18em] text-slate-500">{L("Gross percentage growth", "Crecimiento porcentual bruto")}</p>
+                    <p className="mt-1 text-sm font-semibold text-emerald-200">{currency(adaptiveGrowthPlan.requestedGrossTradingGrowthUsd)}</p>
+                  </div>
+                  <div className="rounded-xl border border-emerald-300/15 bg-slate-950/45 p-3">
+                    <p className="text-[10px] uppercase tracking-[0.18em] text-slate-500">{L("Net trading growth", "Crecimiento neto de trading")}</p>
                     <p className="mt-1 text-sm font-semibold text-emerald-200">{currency(adaptiveGrowthPlan.requestedTradingGrowthUsd)}</p>
+                    <p className="mt-1 text-[10px] text-slate-500">{L("Cost drag", "Impacto de costos")} {currency(adaptiveGrowthPlan.requestedCostDragUsd)}</p>
                   </div>
                   <div className="rounded-xl border border-cyan-300/15 bg-slate-950/45 p-3">
                     <p className="text-[10px] uppercase tracking-[0.18em] text-slate-500">{L("Contributions", "Aportaciones")}</p>
@@ -4236,16 +4235,29 @@ export default function GrowthPlanPage() {
                 </div>
                 <p className="mt-3 text-[11px] leading-5 text-slate-400">
                   {L(
-                    `Operating assumptions: ${aiPlanAdvisor.recommendedDailyGoalPct.toFixed(2)}% on modeled goal-days, ${aiPlanAdvisor.expectedLossDayPct.toFixed(2)}% expected on modeled losing days, ${aiPlanAdvisor.maxDailyLossPct.toFixed(2)}% hard daily-loss guardrail, and ${aiPlanAdvisor.riskPerTradePct.toFixed(2)}% risk per trade. The modeled annual rate is ${aiPlanAdvisor.modeledAnnualReturnPct.toFixed(1)}%; it is a planning assumption, not a forecast or promise.`,
-                    `Supuestos operativos: ${aiPlanAdvisor.recommendedDailyGoalPct.toFixed(2)}% en días de meta modelados, ${aiPlanAdvisor.expectedLossDayPct.toFixed(2)}% esperado en días perdedores modelados, ${aiPlanAdvisor.maxDailyLossPct.toFixed(2)}% como límite duro diario y ${aiPlanAdvisor.riskPerTradePct.toFixed(2)}% de riesgo por trade. La tasa anual modelada es ${aiPlanAdvisor.modeledAnnualReturnPct.toFixed(1)}%; es un supuesto de planificación, no un pronóstico ni una promesa.`
+                    `Operating assumptions: ${aiPlanAdvisor.recommendedDailyGoalPct.toFixed(2)}% on modeled goal-days, ${aiPlanAdvisor.expectedLossDayPct.toFixed(2)}% expected on modeled losing days, ${aiPlanAdvisor.maxDailyLossPct.toFixed(2)}% hard daily-loss guardrail, and ${aiPlanAdvisor.riskPerTradePct.toFixed(2)}% risk per trade. The modeled annual rate is ${aiPlanAdvisor.modeledAnnualReturnPct.toFixed(1)}% across ${aiPlanAdvisor.modeledAnnualCycles.toFixed(1)} instrument-calendar cycles; it is a planning assumption, not a forecast or promise.`,
+                    `Supuestos operativos: ${aiPlanAdvisor.recommendedDailyGoalPct.toFixed(2)}% en días de meta modelados, ${aiPlanAdvisor.expectedLossDayPct.toFixed(2)}% esperado en días perdedores modelados, ${aiPlanAdvisor.maxDailyLossPct.toFixed(2)}% como límite duro diario y ${aiPlanAdvisor.riskPerTradePct.toFixed(2)}% de riesgo por trade. La tasa anual modelada es ${aiPlanAdvisor.modeledAnnualReturnPct.toFixed(1)}% a través de ${aiPlanAdvisor.modeledAnnualCycles.toFixed(1)} ciclos del calendario del instrumento; es un supuesto de planificación, no un pronóstico ni una promesa.`
                   )}
                 </p>
                 {adaptiveGrowthPlan.flags.includes("declared_goal_above_operating_policy") ||
                 adaptiveGrowthPlan.flags.includes("declared_loss_assumption_below_operating_policy") ? (
                   <p className="mt-2 rounded-xl border border-cyan-300/20 bg-cyan-300/5 px-3 py-2 text-[11px] leading-5 text-cyan-100">
+                    {selectedPlanId === "manual"
+                      ? L(
+                          "Your manual percentages are compounded exactly in the deterministic and statistical validation. Because they sit outside a preset policy, the result is flagged for risk and execution-evidence review.",
+                          "Tus porcentajes manuales se componen exactamente en la validación determinística y estadística. Como están fuera de una política predefinida, el resultado se marca para revisión de riesgo y evidencia de ejecución."
+                        )
+                      : L(
+                          `Your declared assumptions were evaluated, but the selected preset keeps its ${adaptiveGrowthPlan.policyGoalDayCapPct.toFixed(2)}% goal-day cap and ${adaptiveGrowthPlan.policyExpectedLossDayFloorPct.toFixed(2)}% modeled loss-day floor.`,
+                          `Tus supuestos declarados fueron evaluados, pero el plan predefinido mantiene su límite de ${adaptiveGrowthPlan.policyGoalDayCapPct.toFixed(2)}% en día-meta y su piso de ${adaptiveGrowthPlan.policyExpectedLossDayFloorPct.toFixed(2)}% en día perdedor.`
+                        )}
+                  </p>
+                ) : null}
+                {adaptiveGrowthPlan.flags.includes("selected_model_requires_extreme_annualized_return") ? (
+                  <p className="mt-2 rounded-xl border border-red-400/25 bg-red-400/5 px-3 py-2 text-[11px] leading-5 text-red-100">
                     {L(
-                      `Your declared assumptions were evaluated, but they were not used to accelerate the recommendation. The disciplined policy caps the goal-day model at ${adaptiveGrowthPlan.policyGoalDayCapPct.toFixed(2)}% and keeps modeled losing days at no less than ${adaptiveGrowthPlan.policyExpectedLossDayFloorPct.toFixed(2)}% until execution evidence supports a revision.`,
-                      `Tus supuestos declarados fueron evaluados, pero no se usaron para acelerar la recomendación. La política disciplinada limita el modelo de día-meta a ${adaptiveGrowthPlan.policyGoalDayCapPct.toFixed(2)}% y mantiene los días perdedores modelados en no menos de ${adaptiveGrowthPlan.policyExpectedLossDayFloorPct.toFixed(2)}% hasta que la evidencia de ejecución respalde una revisión.`
+                      `The selected percentages imply ${aiPlanAdvisor.modeledAnnualReturnPct.toFixed(1)}% annual compounding if they repeat without deterioration. The arithmetic is valid, but this is an extreme conditional scenario, not a realistic expected return. Validate it with documented execution before using it for operating decisions.`,
+                      `Los porcentajes seleccionados implican ${aiPlanAdvisor.modeledAnnualReturnPct.toFixed(1)}% de composición anual si se repiten sin deterioro. La aritmética es válida, pero este es un escenario condicional extremo, no un retorno esperado realista. Valídalo con ejecución documentada antes de usarlo para decisiones operativas.`
                     )}
                   </p>
                 ) : null}
@@ -4354,27 +4366,25 @@ export default function GrowthPlanPage() {
                   </div>
                   <div className="flex flex-wrap items-center justify-end gap-2">
                     <span className="rounded-full border border-cyan-300/30 bg-slate-950/70 px-3 py-1 text-[11px] font-semibold text-cyan-100">
-                      {aiPlanAdvisor.recommendedCompletionDate
-                        ? L(
-                            `Est. completion ${formatPlanDate(aiPlanAdvisor.recommendedCompletionDate, lang)}`,
-                            `Cierre estimado ${formatPlanDate(aiPlanAdvisor.recommendedCompletionDate, lang)}`
-                          )
-                        : L("Needs more data", "Necesita más data")}
+                      {L("Target projection", "Proyección objetivo")} · {formatPlanDate(aiPlanAdvisor.requestedTargetDate, lang)}
                     </span>
-                    <button
-                      type="button"
-                      onClick={applyAiPlanRecommendation}
-                      disabled={!aiPlanAdvisor.recommendedCompletionDate}
-                      className="rounded-full bg-cyan-300 px-3 py-1.5 text-[11px] font-bold text-slate-950 transition hover:bg-cyan-200 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
-                    >
-                      {L("Use recommended runway", "Usar runway recomendado")}
-                    </button>
+                    {aiPlanAdvisor.recommendedCompletionDate &&
+                    aiPlanAdvisor.requestedTargetDate &&
+                    aiPlanAdvisor.recommendedCompletionDate > aiPlanAdvisor.requestedTargetDate ? (
+                      <button
+                        type="button"
+                        onClick={applyAiPlanRecommendation}
+                        className="rounded-full bg-cyan-300 px-3 py-1.5 text-[11px] font-bold text-slate-950 transition hover:bg-cyan-200"
+                      >
+                        {L("Use operating runway", "Usar runway operativo")}
+                      </button>
+                    ) : null}
                   </div>
                 </div>
-                <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
                   <div className="rounded-xl border border-cyan-300/15 bg-slate-950/65 p-3">
                     <p className="text-[10px] uppercase tracking-[0.18em] text-slate-500">
-                      {L("Recommended model", "Modelo recomendado")}
+                      {L("Selected model", "Modelo seleccionado")}
                     </p>
                     <p className="mt-1 text-base font-semibold text-cyan-100">
                       {aiPlanAdvisor.scenarioTitle}
@@ -4385,66 +4395,86 @@ export default function GrowthPlanPage() {
                   </div>
                   <div className="rounded-xl border border-cyan-300/15 bg-slate-950/65 p-3">
                     <p className="text-[10px] uppercase tracking-[0.18em] text-slate-500">
-                      {L("Operating assumptions", "Supuestos operativos")}
+                      {L("Target compound pace", "Ritmo compuesto objetivo")}
                     </p>
                     <p className="mt-1 text-base font-semibold text-cyan-100">
-                      {aiPlanAdvisor.recommendedDailyGoalPct.toFixed(2)}% {L("goal-day", "día de meta")}
+                      {aiPlanAdvisor.targetProjectionGoalDayPct.toFixed(3)}% {L("goal-day", "día de meta")}
                     </p>
                     <p className="mt-1 text-[11px] text-slate-400">
-                      {aiPlanAdvisor.expectedLossDayPct.toFixed(2)}% {L("expected loss-day", "pérdida esperada/día")} · {aiPlanAdvisor.riskPerTradePct.toFixed(2)}% {L("risk/trade", "riesgo/trade")}
+                      {L("Exact math required to reach the requested target", "Matemática exacta requerida para llegar a la meta")}
                     </p>
                   </div>
                   <div className="rounded-xl border border-cyan-300/15 bg-slate-950/65 p-3">
                     <p className="text-[10px] uppercase tracking-[0.18em] text-slate-500">
-                      {L("Recommended period", "Período recomendado")}
+                      {L("Target projection", "Proyección objetivo")}
                     </p>
                     <p className="mt-1 text-base font-semibold text-cyan-100">
-                      {aiPlanAdvisor.totalTradingDays === null
-                        ? "—"
-                        : L(
-                            `${aiPlanAdvisor.totalTradingDays} trading days`,
-                            `${aiPlanAdvisor.totalTradingDays} días de trading`
-                          )}
+                      {currency(aiPlanAdvisor.targetProjectionBalance)}
                     </p>
                     <p className="mt-1 text-[11px] text-slate-400">
-                      {aiPlanAdvisor.totalOperatingWeeks === null
-                        ? L("Outside projection range", "Fuera del rango de proyección")
-                        : L(
-                            `${aiPlanAdvisor.totalEstimatedMonths} months · about ${adaptiveGrowthPlan.recommendedCalendarYears} years`,
-                            `${aiPlanAdvisor.totalEstimatedMonths} meses · aprox. ${adaptiveGrowthPlan.recommendedCalendarYears} años`
-                          )}
+                      {aiPlanAdvisor.targetProjectionCoveragePct.toFixed(0)}% {L("of requested capital by", "del capital solicitado para")} {formatPlanDate(aiPlanAdvisor.requestedTargetDate, lang)}
                     </p>
                   </div>
                   <div className="rounded-xl border border-cyan-300/15 bg-slate-950/65 p-3">
                     <p className="text-[10px] uppercase tracking-[0.18em] text-slate-500">
-                      {L("Recommended completion", "Cumplimiento recomendado")}
+                      {L("Gross vs net operation", "Operación bruta vs neta")}
                     </p>
                     <p className="mt-1 text-base font-semibold text-cyan-100">
-                      {formatPlanDate(aiPlanAdvisor.recommendedCompletionDate, lang)}
+                      {currency(aiPlanAdvisor.requestedGrossProjectedBalance)}
                     </p>
                     <p className="mt-1 text-[11px] text-slate-400">
-                      {L("Calculated from the operating assumptions above", "Calculado con los supuestos operativos anteriores")}
+                      {L("Net after costs", "Neto después de costos")} {currency(aiPlanAdvisor.requestedProjectedBalance)} · {L("drag", "impacto")} {currency(aiPlanAdvisor.requestedCostDragUsd)}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-emerald-300/20 bg-emerald-300/[0.04] p-3">
+                    <p className="text-[10px] uppercase tracking-[0.18em] text-slate-500">
+                      {L("Actual vs next goal", "Real vs próxima meta")}
+                    </p>
+                    <p className="mt-1 text-base font-semibold text-emerald-200">
+                      {liveCurrentBalance == null ? "—" : currency(liveCurrentBalance)}
+                    </p>
+                    <p className="mt-1 text-[11px] text-slate-400">
+                      {activeProjectedCheckpoint && liveCurrentBalance != null
+                        ? L(
+                            `${currency(Math.abs(liveCurrentBalance - activeProjectedCheckpoint.targetBalance))} ${liveCurrentBalance >= activeProjectedCheckpoint.targetBalance ? "ahead" : "remaining"} to ${formatPlanDate(activeProjectedCheckpoint.targetDate, lang)}`,
+                            `${currency(Math.abs(liveCurrentBalance - activeProjectedCheckpoint.targetBalance))} ${liveCurrentBalance >= activeProjectedCheckpoint.targetBalance ? "adelantado" : "restante"} para ${formatPlanDate(activeProjectedCheckpoint.targetDate, lang)}`
+                          )
+                        : L("Waiting for account data", "Esperando datos de la cuenta")}
                     </p>
                   </div>
                 </div>
+                {aiPlanAdvisor.costsConsumePercentageEdge ? (
+                  <p className="mt-3 rounded-xl border border-amber-300/30 bg-amber-300/10 px-3 py-2 text-[11px] leading-5 text-amber-100">
+                    {L(
+                      `The selected percentages compound positively at ${aiPlanAdvisor.modeledWeeklyReturnPct.toFixed(2)}% per modeled week. The net projection reaches zero only because the fixed session-cost input is larger than the account can absorb.`,
+                      `Los porcentajes seleccionados se componen positivamente a ${aiPlanAdvisor.modeledWeeklyReturnPct.toFixed(2)}% por semana modelada. La proyección neta llega a cero únicamente porque el costo fijo por sesión es mayor de lo que la cuenta puede absorber.`
+                    )}
+                  </p>
+                ) : null}
                 <p className="mt-3 text-[10px] leading-4 text-slate-500">
                   {L(
-                    "Planning projection only. It is not a promise of returns; actual completion depends on execution, losses, withdrawals, and market conditions.",
-                    "Proyección de planificación solamente. No es una promesa de rendimiento; el cumplimiento real depende de la ejecución, pérdidas, retiros y condiciones del mercado."
+                    "The target projection is the mathematical plan, not a return promise. The operating baseline tests the selected assumptions after costs, and actual balance comes from the account series used by the dashboard.",
+                    "La proyección objetivo es el plan matemático, no una promesa de rendimiento. La línea base operativa prueba los supuestos seleccionados después de costos y el balance real proviene de la misma serie de cuenta que usa el dashboard."
                   )}
                 </p>
                 </div>
                 <div className="p-4">
                   <div className="mb-3 flex items-center justify-between gap-3">
                     <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">
-                      {L("Psychological checkpoint ladder", "Escalera psicológica de checkpoints")}
+                      {L("Projected goals vs actual", "Metas proyectadas vs real")}
                     </p>
                     <span className="text-[10px] text-slate-500">
-                      {L("Focus on the next checkpoint, not the final number", "Enfócate en el próximo checkpoint, no en la cifra final")}
+                      {L("Actual balance locks when each checkpoint is due", "El balance real se fija cuando vence cada checkpoint")}
                     </span>
                   </div>
-                  <div className="grid gap-3 xl:grid-cols-3">
+                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
                     {[
+                      {
+                        key: "weekly",
+                        title: L("Weekly targets", "Metas semanales"),
+                        items: aiPlanAdvisor.weeklyMilestones.slice(0, 6),
+                        unit: L("Week", "Semana"),
+                      },
                       {
                         key: "monthly",
                         title: L("Monthly targets", "Metas mensuales"),
@@ -4458,6 +4488,12 @@ export default function GrowthPlanPage() {
                         unit: L("Quarter", "Trimestre"),
                       },
                       {
+                        key: "semiannual",
+                        title: L("Six-month targets", "Metas semestrales"),
+                        items: aiPlanAdvisor.semiannualMilestones.slice(0, 10),
+                        unit: L("Half-year", "Semestre"),
+                      },
+                      {
                         key: "annual",
                         title: L("Annual targets", "Metas anuales"),
                         items: aiPlanAdvisor.annualMilestones.slice(0, 10),
@@ -4468,7 +4504,14 @@ export default function GrowthPlanPage() {
                         <p className="text-[10px] uppercase tracking-[0.18em] text-cyan-200">{section.title}</p>
                         <div className="mt-2 space-y-2">
                           {section.items.length ? (
-                            section.items.map((milestone) => (
+                            section.items.map((milestone) => {
+                              const actual = actualBalanceAtCheckpoint(
+                                liveBalanceSeries,
+                                milestone.targetDate,
+                                isoToday()
+                              );
+                              const variance = actual ? actual.value - milestone.targetBalance : null;
+                              return (
                               <div
                                 key={`${section.key}-${milestone.periodIndex}-${milestone.targetDate}`}
                                 className="rounded-xl border border-slate-800/80 bg-slate-900/60 px-3 py-2"
@@ -4481,9 +4524,34 @@ export default function GrowthPlanPage() {
                                     {formatPlanDate(milestone.targetDate, lang)}
                                   </span>
                                 </div>
-                                <p className="mt-1 text-sm font-semibold text-slate-100">
+                                <p className="mt-1 text-[9px] uppercase tracking-[0.16em] text-slate-500">
+                                  {L("Projected target", "Meta proyectada")}
+                                </p>
+                                <p className="text-sm font-semibold text-slate-100">
                                   {currency(milestone.targetBalance)}
                                 </p>
+                                {actual && variance != null ? (
+                                  <div className="mt-2 grid grid-cols-2 gap-2 border-t border-slate-800/80 pt-2">
+                                    <div>
+                                      <p className="text-[9px] uppercase tracking-[0.14em] text-slate-500">
+                                        {L("Actual", "Real")}
+                                      </p>
+                                      <p className="text-xs font-semibold text-slate-200">{currency(actual.value)}</p>
+                                    </div>
+                                    <div>
+                                      <p className="text-[9px] uppercase tracking-[0.14em] text-slate-500">
+                                        {L("Variance", "Variación")}
+                                      </p>
+                                      <p className={`text-xs font-semibold ${variance >= 0 ? "text-emerald-300" : "text-amber-300"}`}>
+                                        {variance >= 0 ? "+" : "-"}{currency(Math.abs(variance))}
+                                      </p>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <p className="mt-2 border-t border-slate-800/80 pt-2 text-[10px] text-slate-500">
+                                    {L("Upcoming · actual pending", "Próximo · real pendiente")}
+                                  </p>
+                                )}
                                 <p className="text-[10px] text-slate-500">
                                   {L("Trading", "Trading")} {currency(milestone.plannedTradingChangeUsd)} · {milestone.plannedReturnPct.toFixed(2)}% · {milestone.sessionCount} {L("sessions", "sesiones")}
                                 </p>
@@ -4493,7 +4561,8 @@ export default function GrowthPlanPage() {
                                   </p>
                                 ) : null}
                               </div>
-                            ))
+                              );
+                            })
                           ) : (
                             <p className="text-xs text-slate-500">
                               {L("No defensible checkpoint yet.", "Todavía no hay un checkpoint defendible.")}
@@ -4509,7 +4578,7 @@ export default function GrowthPlanPage() {
 
             <div className="mt-3 grid gap-3 xl:grid-cols-3">
               {businessScenarios.map((scenario) => {
-                const selected = returnModelMode === scenario.id;
+                const selected = selectedPlanId === scenario.id;
                 return (
                   <div
                     key={scenario.id}
@@ -4572,7 +4641,7 @@ export default function GrowthPlanPage() {
                       type="button"
                       disabled={!isBusinessProfileComplete(businessProfile)}
                       onClick={() => {
-                        selectReturnModel(scenario.id);
+                        selectReturnModel(scenario.id, true);
                         setGoalDayReturnPctStr(String(scenario.dailyGoalPct));
                         setExpectedLossDayPctStr(String(scenario.expectedLossDayPct));
                         setRiskPerTradePctStr(String(scenario.riskPerTradePct));
@@ -4596,7 +4665,118 @@ export default function GrowthPlanPage() {
                   </div>
                 );
               })}
+              {returnModelMode === "manual" ? (
+                <div className={`rounded-2xl border p-4 transition shadow-[0_18px_45px_rgba(0,0,0,0.18)] ${
+                  selectedPlanId === "manual"
+                    ? "border-cyan-300 bg-cyan-300/10"
+                    : "border-slate-700 bg-slate-950/65"
+                }`}>
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-base font-semibold text-slate-100">
+                        {L("My manual operating plan", "Mi plan operativo manual")}
+                      </p>
+                      <p className="mt-1 text-xs leading-5 text-slate-400">
+                        {L(
+                          "Uses exactly your goal-day, losing-day, risk, schedule, contribution, and withdrawal assumptions.",
+                          "Usa exactamente tus supuestos de día-meta, día perdedor, riesgo, calendario, aportaciones y retiros."
+                        )}
+                      </p>
+                    </div>
+                    <span className="rounded-full border border-sky-300/30 bg-sky-300/10 px-2 py-1 text-[10px] font-semibold text-sky-100">
+                      {L("Custom", "Personalizado")}
+                    </span>
+                  </div>
+                  <div className="mt-4 grid grid-cols-2 gap-2 text-[11px]">
+                    <div className="rounded-lg border border-slate-800 bg-slate-950/50 p-2">
+                      <p className="text-slate-500">{L("Goal-day model", "Modelo día-meta")}</p>
+                      <p className="font-semibold text-emerald-300">{goalDayReturnPct.toFixed(2)}%</p>
+                    </div>
+                    <div className="rounded-lg border border-slate-800 bg-slate-950/50 p-2">
+                      <p className="text-slate-500">{L("Expected loss-day", "Pérdida esperada/día")}</p>
+                      <p className="font-semibold text-emerald-300">{expectedLossDayPct.toFixed(2)}%</p>
+                    </div>
+                    <div className="rounded-lg border border-slate-800 bg-slate-950/50 p-2">
+                      <p className="text-slate-500">{L("Modeled week", "Semana modelada")}</p>
+                      <p className="font-semibold text-emerald-300">{declaredReturnSummary.weeklyPct.toFixed(2)}%</p>
+                    </div>
+                    <div className="rounded-lg border border-slate-800 bg-slate-950/50 p-2">
+                      <p className="text-slate-500">{L("Modeled year", "Año modelado")}</p>
+                      <p className="font-semibold text-emerald-300">{declaredReturnSummary.annualPct.toFixed(2)}%</p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={!isBusinessProfileComplete(businessProfile) || !goalDayReturnPct || !expectedLossDayPct}
+                    onClick={() => setSelectedPlanId("manual")}
+                    className={`mt-3 w-full rounded-xl px-3 py-2 text-sm font-semibold transition ${
+                      selectedPlanId === "manual"
+                        ? "bg-emerald-400 text-slate-950"
+                        : "border border-emerald-400 text-emerald-300 hover:bg-emerald-400/10 disabled:border-slate-800 disabled:text-slate-600"
+                    }`}
+                  >
+                    {selectedPlanId === "manual"
+                      ? L("Selected plan", "Plan seleccionado")
+                      : L("Use my manual plan", "Usar mi plan manual")}
+                  </button>
+                </div>
+              ) : null}
             </div>
+
+            {selectedPlanId ? (
+              <div className="mt-3 rounded-2xl border border-cyan-300/20 bg-[linear-gradient(135deg,rgba(8,47,73,0.28),rgba(2,6,23,0.9))] p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="text-[10px] uppercase tracking-[0.22em] text-cyan-200">
+                      {L("Compound statistical validation", "Validación estadística compuesta")}
+                    </p>
+                    <p className="mt-1 text-sm font-semibold text-slate-100">
+                      {L(
+                        `The selected ${selectedPlanId} plan is tested under the same operating and cash-flow assumptions.`,
+                        `El plan ${selectedPlanId} seleccionado se prueba bajo los mismos supuestos operativos y de flujo de efectivo.`
+                      )}
+                    </p>
+                  </div>
+                  <span className={`rounded-full border px-3 py-1 text-[11px] font-semibold ${
+                    adaptiveGrowthPlan.statisticalValidation.assessment === "supported"
+                      ? "border-emerald-300/30 bg-emerald-300/10 text-emerald-200"
+                      : adaptiveGrowthPlan.statisticalValidation.assessment === "conditional"
+                        ? "border-amber-300/30 bg-amber-300/10 text-amber-200"
+                        : "border-red-300/30 bg-red-300/10 text-red-200"
+                  }`}>
+                    {adaptiveGrowthPlan.statisticalValidation.assessment.replaceAll("_", " ")}
+                  </span>
+                </div>
+                <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-6">
+                  {[
+                    [L("Deterministic", "Determinístico"), currency(adaptiveGrowthPlan.statisticalValidation.deterministicProjectedBalance)],
+                    [L("Conditional hit rate", "Tasa condicional de llegada"), `${adaptiveGrowthPlan.statisticalValidation.probability.probabilityTargetPct.toFixed(1)}%`],
+                    ["P10", currency(adaptiveGrowthPlan.statisticalValidation.probability.p10Balance)],
+                    ["P50", currency(adaptiveGrowthPlan.statisticalValidation.probability.medianBalance)],
+                    ["P90", currency(adaptiveGrowthPlan.statisticalValidation.probability.p90Balance)],
+                    [L("Median drawdown", "Drawdown mediano"), `${adaptiveGrowthPlan.statisticalValidation.probability.medianMaxDrawdownPct.toFixed(2)}%`],
+                  ].map(([label, value]) => (
+                    <div key={String(label)} className="rounded-xl border border-slate-800 bg-slate-950/55 p-3">
+                      <p className="text-[10px] uppercase tracking-[0.14em] text-slate-500">{label}</p>
+                      <p className="mt-1 text-sm font-semibold text-slate-100">{value}</p>
+                    </div>
+                  ))}
+                </div>
+                <p className="mt-3 text-[11px] leading-5 text-slate-500">
+                  {L(
+                    `${adaptiveGrowthPlan.statisticalValidation.probability.simulations} seeded paths compound the selected win/loss-day assumptions. This is a planning stress test, not a return guarantee.`,
+                    `${adaptiveGrowthPlan.statisticalValidation.probability.simulations} trayectorias reproducibles componen los supuestos seleccionados de días ganadores y perdedores. Es una prueba de planificación, no una garantía de rendimiento.`
+                  )}
+                </p>
+              </div>
+            ) : (
+              <p className="mt-3 rounded-xl border border-amber-300/20 bg-amber-300/5 p-3 text-xs text-amber-100">
+                {L(
+                  "Choose the final operating plan you will follow before continuing.",
+                  "Escoge el plan operativo final que vas a seguir antes de continuar."
+                )}
+              </p>
+            )}
           </div>
         </div>
       ),
@@ -5066,6 +5246,7 @@ export default function GrowthPlanPage() {
             value={goalDayReturnPctStr}
             onChange={(event) => {
               setReturnModelMode("manual");
+              setSelectedPlanId("");
               setGoalDayReturnPctStr(onlyNum(event.target.value));
               setAutoPhasesGenerated(false);
             }}
@@ -5105,6 +5286,7 @@ export default function GrowthPlanPage() {
             value={expectedLossDayPctStr}
             onChange={(event) => {
               setReturnModelMode("manual");
+              setSelectedPlanId("");
               setExpectedLossDayPctStr(onlyNum(event.target.value));
               setAutoPhasesGenerated(false);
             }}
@@ -5749,7 +5931,7 @@ export default function GrowthPlanPage() {
 
   const approveEnabled =
     step === 4 &&
-    committed &&
+    disclosureAcceptedForDraft &&
     startingBalance > 0 &&
     targetBalance > 0 &&
     !!planStartDate &&
@@ -5786,15 +5968,6 @@ export default function GrowthPlanPage() {
       setError(L("Please complete all required fields first.", "Completa todos los campos requeridos primero."));
       return;
     }
-    if (adaptiveGrowthPlan.capacityStatus === "blocked") {
-      setError(
-        L(
-          "This plan cannot be activated with retirement, borrowed, emergency, or living-expense capital. Select disposable business capital first.",
-          "Este plan no se puede activar con capital de retiro, prestado, de emergencia o destinado a gastos de vida. Selecciona primero capital empresarial disponible."
-        )
-      );
-      return;
-    }
     if (!planDatesOrdered) {
       setError(
         L(
@@ -5808,8 +5981,8 @@ export default function GrowthPlanPage() {
       setError(
         adaptiveGrowthPlan.recommendedCompletionDate
           ? L(
-              `The requested deadline is not supported. Use the recommended runway (${formatPlanDate(adaptiveGrowthPlan.recommendedCompletionDate, lang)}) before activating checkpoints.`,
-              `El plazo solicitado no está respaldado. Usa el runway recomendado (${formatPlanDate(adaptiveGrowthPlan.recommendedCompletionDate, lang)}) antes de activar los checkpoints.`
+              `The requested deadline is not supported. Use the operating runway (${formatPlanDate(adaptiveGrowthPlan.recommendedCompletionDate, lang)}) before activating checkpoints.`,
+              `El plazo solicitado no está respaldado. Usa el runway operativo (${formatPlanDate(adaptiveGrowthPlan.recommendedCompletionDate, lang)}) antes de activar los checkpoints.`
             )
           : L(
               "The target is outside the disciplined 50-year planning horizon. Reduce the target, add capital, or validate a stronger edge before activating checkpoints.",
@@ -5819,8 +5992,13 @@ export default function GrowthPlanPage() {
       scrollToAnchor("gp-phase-builder");
       return;
     }
-    if (!committed) {
-      setError(L("Please confirm your commitment before saving.", "Confirma tu compromiso antes de guardar."));
+    if (!disclosureAcceptedForDraft) {
+      setError(
+        L(
+          "Accept the Trading Business Plan disclosure for the current draft before saving.",
+          "Acepta la divulgación del Plan de Empresa de Trading para el borrador actual antes de guardar."
+        )
+      );
       return;
     }
 
@@ -5887,6 +6065,12 @@ export default function GrowthPlanPage() {
       profile: businessProfile,
       selectedScenarioId,
       averageTradingDaysPerWeek,
+      disclosure: {
+        version: GROWTH_PLAN_DISCLOSURE_VERSION,
+        acceptedAt: new Date().toISOString(),
+        purpose: "trading_business_discipline",
+        source: "web",
+      },
       operatingModel: {
         planStartDate: effectivePlanStart,
         targetDate: targetDateStr || null,
@@ -5898,13 +6082,11 @@ export default function GrowthPlanPage() {
         goalDayReturnPct: adaptiveGrowthPlan.recommendedGoalDayPct,
         expectedLossDayPct: adaptiveGrowthPlan.expectedLossDayPct,
         returnModelMode,
+        selectedPlanId,
         estimatedCostPerSessionUsd,
         estimatedTaxReservePct,
         financialCapacity: {
-          capitalSource,
-          emergencyFundMonths,
-          monthlyEssentialExpensesUsd,
-          liquidReservesOutsideTradingUsd,
+          capitalSource: "business_income",
           accountStructure,
           maxLeverageMultiple,
           status: adaptiveGrowthPlan.capacityStatus,
@@ -5997,17 +6179,28 @@ export default function GrowthPlanPage() {
         confidence: aiPlanAdvisor.confidence,
         isProvisional: aiPlanAdvisor.isProvisional,
         requestedTargetDate: aiPlanAdvisor.requestedTargetDate,
+        targetProjectionGoalDayPct: aiPlanAdvisor.targetProjectionGoalDayPct,
+        targetProjectionBalance: aiPlanAdvisor.targetProjectionBalance,
+        targetProjectionCoveragePct: aiPlanAdvisor.targetProjectionCoveragePct,
+        requestedGrossProjectedBalance: aiPlanAdvisor.requestedGrossProjectedBalance,
+        requestedGrossTradingGrowthUsd: aiPlanAdvisor.requestedGrossTradingGrowthUsd,
+        requestedCostDragUsd: aiPlanAdvisor.requestedCostDragUsd,
+        costsConsumePercentageEdge: aiPlanAdvisor.costsConsumePercentageEdge,
         requestedProjectedBalance: aiPlanAdvisor.requestedProjectedBalance,
         requestedCoveragePct: aiPlanAdvisor.requestedCoveragePct,
         requestedShortfallUsd: aiPlanAdvisor.requestedShortfallUsd,
         expectedLossDayPct: aiPlanAdvisor.expectedLossDayPct,
         modeledNetReturnPerSessionPct: aiPlanAdvisor.modeledNetReturnPerSessionPct,
+        modeledWeeklyReturnPct: aiPlanAdvisor.modeledWeeklyReturnPct,
+        modeledAnnualCycles: aiPlanAdvisor.modeledAnnualCycles,
         modeledAnnualReturnPct: aiPlanAdvisor.modeledAnnualReturnPct,
         qualificationRequired: aiPlanAdvisor.qualificationRequired,
         qualificationMinimumSessions: aiPlanAdvisor.qualificationMinimumSessions,
         nextMilestone: aiPlanAdvisor.nextMilestone,
+        weeklyMilestones: aiPlanAdvisor.weeklyMilestones,
         monthlyMilestones: aiPlanAdvisor.monthlyMilestones,
         quarterlyMilestones: aiPlanAdvisor.quarterlyMilestones,
+        semiannualMilestones: aiPlanAdvisor.semiannualMilestones,
         annualMilestones: aiPlanAdvisor.annualMilestones,
         reviewedAt: new Date().toISOString(),
       },
@@ -6939,32 +7132,54 @@ export default function GrowthPlanPage() {
               />
             </div>
 
-            <label id="gp-commitment" className="flex items-start gap-2 text-slate-300 cursor-pointer mt-2">
-              <input
-                type="checkbox"
-                checked={committed}
-                onChange={(e) => {
-                  setCommitted(e.target.checked);
-                  setError("");
-                  fieldHelp("commitment");
-                  if (e.target.checked) {
-                    pushNeuroMessage(
-                      L(
-                        "Commitment confirmed ✅. Next step is to Approve & Save your Trading Business Plan.",
-                        "Compromiso confirmado ✅. El siguiente paso es aprobar y guardar tu Plan de Empresa de Trading."
-                      )
-                    );
-                                      }
-                }}
-                className="mt-0.5 h-4 w-4 rounded border-slate-500 bg-slate-900 accent-emerald-400"
-              />
-              <span>
+            <section
+              id="gp-commitment"
+              className="rounded-2xl border border-cyan-400/30 bg-cyan-400/5 p-4"
+              aria-labelledby="gp-disclosure-title"
+            >
+              <p
+                id="gp-disclosure-title"
+                className="text-[11px] font-semibold uppercase tracking-[0.2em] text-cyan-200"
+              >
+                {L("Trading Business Plan Disclosure", "Divulgación del Plan de Empresa de Trading")}
+              </p>
+              <p className="mt-2 text-sm leading-6 text-slate-300">
                 {L(
-                  "I understand this is a commitment to process, not a guarantee of profits. I agree to follow this plan with discipline.",
-                  "Entiendo que esto es un compromiso con el proceso, no una garantía de ganancias. Acepto seguir este plan con disciplina."
+                  "This tool organizes a trading business process. Projections, conditional hit rates, checkpoints, and AI explanations are educational planning outputs based on the data and assumptions you provide. They are not forecasts, guarantees of profit, or individualized investment, trading, legal, tax, or accounting advice. Actual results may differ because of execution, market conditions, liquidity, slippage, fees, leverage, deposits, and withdrawals. You remain responsible for risk limits, accurate records, independent decisions, and regular projected-versus-actual review.",
+                  "Esta herramienta organiza el proceso de un negocio de trading. Las proyecciones, tasas condicionales de llegada, checkpoints y explicaciones de IA son resultados educativos de planificación basados en los datos y supuestos que proporcionas. No son pronósticos, garantías de ganancias ni asesoría individualizada de inversión, trading, legal, contributiva o contable. Los resultados reales pueden diferir por ejecución, condiciones de mercado, liquidez, slippage, costos, apalancamiento, aportaciones y retiros. Sigues siendo responsable de los límites de riesgo, registros precisos, decisiones independientes y revisión periódica de proyectado versus real."
                 )}
-              </span>
-            </label>
+              </p>
+              <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-xl border border-slate-700 bg-slate-950/60 p-3 text-sm text-slate-200">
+                <input
+                  type="checkbox"
+                  checked={disclosureAcceptedForDraft}
+                  onChange={(e) => {
+                    setCommitted(e.target.checked);
+                    setCommittedDraftKey(e.target.checked ? disclosureDraftKey : null);
+                    setError("");
+                    fieldHelp("commitment");
+                    if (e.target.checked) {
+                      pushNeuroMessage(
+                        L(
+                          "Disclosure accepted. The commitment is to disciplined execution and review, not to a promised return.",
+                          "Divulgación aceptada. El compromiso es con ejecución disciplinada y revisión, no con un retorno prometido."
+                        )
+                      );
+                    }
+                  }}
+                  className="mt-0.5 h-4 w-4 rounded border-slate-500 bg-slate-900 accent-emerald-400"
+                />
+                <span>
+                  {L(
+                    "I understand and accept this disclosure. I am committing to disciplined process, risk controls, accurate records, and regular review, not to a promised return.",
+                    "Entiendo y acepto esta divulgación. Me comprometo con un proceso disciplinado, controles de riesgo, registros precisos y revisión periódica, no con un retorno prometido."
+                  )}{" "}
+                  <Link href="/terms" className="font-semibold text-cyan-200 underline underline-offset-2">
+                    {L("Terms of Service", "Términos de Servicio")}
+                  </Link>
+                </span>
+              </label>
+            </section>
 
             {error && <p className="text-red-400">{error}</p>}
 

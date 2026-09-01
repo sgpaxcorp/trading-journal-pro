@@ -9,6 +9,8 @@ import { t } from "../lib/i18n";
 import { useTheme } from "../lib/ThemeContext";
 import type { ThemeColors } from "../theme";
 
+const GROWTH_PLAN_DISCLOSURE_VERSION = "growth-plan-discipline-v1";
+
 type MobileGrowthPlan = {
   accountId?: string | null;
   startingBalance?: number;
@@ -23,6 +25,7 @@ type MobileGrowthPlan = {
   tradingDays?: number;
   tradingInstrument?: TradingInstrument;
   returnModelMode?: ReturnModelMode;
+  selectedPlanId?: FinalPlanId;
   estimatedCostPerSessionUsd?: number;
   estimatedTaxReservePct?: number;
   financialCapacity?: FinancialCapacity | null;
@@ -41,6 +44,7 @@ type MobileGrowthPlan = {
 type TradingInstrument = "stocks" | "options" | "futures" | "forex" | "crypto" | "other";
 type RunwayUnit = "days" | "weeks" | "months" | "years";
 type ReturnModelMode = "conservative" | "moderate" | "aggressive" | "manual" | "";
+type FinalPlanId = Exclude<ReturnModelMode, "">;
 type CapitalFlowMode = "undecided" | "none" | "scheduled";
 type CapitalFlowFrequency = "monthly" | "quarterly" | "semiannual";
 type CapitalFlowSettings = {
@@ -49,20 +53,9 @@ type CapitalFlowSettings = {
   amount?: number;
   startPeriodIndex?: number | null;
 };
-type CapitalSource =
-  | "disposable_savings"
-  | "business_income"
-  | "retirement"
-  | "borrowed"
-  | "emergency_fund"
-  | "living_expenses"
-  | "";
 type AccountStructure = "cash" | "margin" | "leveraged_derivatives" | "";
 type FinancialCapacity = {
-  capitalSource?: CapitalSource | null;
-  emergencyFundMonths?: number | null;
-  monthlyEssentialExpensesUsd?: number | null;
-  liquidReservesOutsideTradingUsd?: number | null;
+  capitalSource?: "business_income" | null;
   accountStructure?: AccountStructure | null;
   maxLeverageMultiple?: number | null;
 };
@@ -82,6 +75,11 @@ type AdaptiveMilestone = {
 type AdaptivePlan = {
   verdict?: "supported" | "stretch" | "not_supported" | "unvalidated" | "no_validated_edge" | "incomplete";
   isProvisional?: boolean;
+  requestedTargetDate?: string | null;
+  requestedGrossProjectedBalance?: number;
+  requestedGrossTradingGrowthUsd?: number;
+  requestedCostDragUsd?: number;
+  costsConsumePercentageEdge?: boolean;
   requestedProjectedBalance?: number;
   requestedCoveragePct?: number;
   requestedShortfallUsd?: number;
@@ -94,6 +92,8 @@ type AdaptivePlan = {
   recommendedGoalDayPct?: number;
   expectedLossDayPct?: number;
   maxDailyLossGuardrailPct?: number;
+  modeledWeeklyReturnPct?: number;
+  modeledAnnualCycles?: number;
   modeledAnnualReturnPct?: number;
   recommendedCompletionDate?: string | null;
   recommendedTradingSessions?: number | null;
@@ -102,13 +102,19 @@ type AdaptivePlan = {
   qualificationRequired?: boolean;
   qualificationMinimumSessions?: number;
   nextMilestone?: AdaptiveMilestone | null;
+  weeklyMilestones?: AdaptiveMilestone[];
   monthlyMilestones?: AdaptiveMilestone[];
   quarterlyMilestones?: AdaptiveMilestone[];
+  semiannualMilestones?: AdaptiveMilestone[];
   annualMilestones?: AdaptiveMilestone[];
   flags?: string[];
   requestedRequiredGoalDayPct?: number;
   targetAnnualizedReturnPct?: number | null;
   mathematicallyPossible?: boolean;
+  targetProjectionGoalDayPct?: number;
+  targetProjectionBalance?: number;
+  targetProjectionCoveragePct?: number;
+  targetProjectionTradingGrowthUsd?: number;
   requestedEstimatedCostsUsd?: number;
   requestedAfterTaxReserveBalance?: number;
   capacityStatus?: "incomplete" | "protected" | "warning" | "blocked";
@@ -118,7 +124,9 @@ type AdaptivePlan = {
     goalDayReturnPct?: number;
     expectedLossDayPct?: number;
     modeledAnnualReturnPct?: number;
+    grossProjectedBalance?: number;
     projectedBalance?: number;
+    costDragUsd?: number;
     completionDate?: string | null;
     riskBand?: string;
     probability?: {
@@ -130,6 +138,21 @@ type AdaptivePlan = {
       medianMaxDrawdownPct?: number;
     };
   }>;
+  statisticalValidation?: {
+    selectedPlanId?: FinalPlanId;
+    assessment?: "supported" | "conditional" | "not_supported" | "incomplete";
+    deterministicReachesTarget?: boolean;
+    deterministicProjectedBalance?: number;
+    probability?: {
+      simulations?: number;
+      probabilityTargetPct?: number;
+      probabilityCapitalHalfPct?: number;
+      p10Balance?: number;
+      medianBalance?: number;
+      p90Balance?: number;
+      medianMaxDrawdownPct?: number;
+    };
+  };
 };
 
 type MobileGrowthPlanResponse = {
@@ -307,6 +330,7 @@ export function BusinessPlanScreen() {
   const [adaptivePlan, setAdaptivePlan] = useState<AdaptivePlan | null>(null);
   const [activeAdaptivePlan, setActiveAdaptivePlan] = useState<AdaptivePlan | null>(null);
   const [evaluatedDraftKey, setEvaluatedDraftKey] = useState<string | null>(null);
+  const [acceptedDisclosureKey, setAcceptedDisclosureKey] = useState<string | null>(null);
   const [businessProfile, setBusinessProfile] = useState<Record<string, unknown> | null>(null);
 
   const [startingBalance, setStartingBalance] = useState("");
@@ -323,11 +347,8 @@ export function BusinessPlanScreen() {
   const [operatingGoalDayPct, setOperatingGoalDayPct] = useState("0.20");
   const [expectedLossDayPct, setExpectedLossDayPct] = useState("0.35");
   const [returnModelMode, setReturnModelMode] = useState<ReturnModelMode>("");
+  const [selectedPlanId, setSelectedPlanId] = useState<FinalPlanId | "">("");
   const [policyScenarioId, setPolicyScenarioId] = useState<Exclude<ReturnModelMode, "manual" | "">>("moderate");
-  const [capitalSource, setCapitalSource] = useState<CapitalSource>("");
-  const [emergencyFundMonths, setEmergencyFundMonths] = useState("");
-  const [monthlyEssentialExpenses, setMonthlyEssentialExpenses] = useState("");
-  const [liquidReservesOutsideTrading, setLiquidReservesOutsideTrading] = useState("");
   const [estimatedCostPerSession, setEstimatedCostPerSession] = useState("");
   const [estimatedTaxReservePct, setEstimatedTaxReservePct] = useState("");
   const [accountStructure, setAccountStructure] = useState<AccountStructure>("");
@@ -365,11 +386,8 @@ export function BusinessPlanScreen() {
         setOperatingGoalDayPct("0.20");
         setExpectedLossDayPct("0.35");
         setReturnModelMode("");
+        setSelectedPlanId("");
         setPolicyScenarioId("moderate");
-        setCapitalSource("");
-        setEmergencyFundMonths("");
-        setMonthlyEssentialExpenses("");
-        setLiquidReservesOutsideTrading("");
         setEstimatedCostPerSession("");
         setEstimatedTaxReservePct("");
         setAccountStructure("");
@@ -427,6 +445,8 @@ export function BusinessPlanScreen() {
       );
       const storedReturnMode = plan.returnModelMode || "moderate";
       setReturnModelMode(storedReturnMode);
+      const storedSelectedPlanId = plan.selectedPlanId || storedReturnMode;
+      setSelectedPlanId(storedSelectedPlanId || "");
       const storedScenarioId = String(steps?.business_analysis?.selectedScenarioId ?? "moderate");
       setPolicyScenarioId(
         storedScenarioId === "conservative" || storedScenarioId === "aggressive"
@@ -434,16 +454,6 @@ export function BusinessPlanScreen() {
           : "moderate"
       );
       const capacity = plan.financialCapacity ?? steps?.business_analysis?.operatingModel?.financialCapacity ?? {};
-      setCapitalSource((capacity?.capitalSource as CapitalSource) || "");
-      setEmergencyFundMonths(capacity?.emergencyFundMonths == null ? "" : String(capacity.emergencyFundMonths));
-      setMonthlyEssentialExpenses(
-        capacity?.monthlyEssentialExpensesUsd == null ? "" : formatMoneyValue(capacity.monthlyEssentialExpensesUsd)
-      );
-      setLiquidReservesOutsideTrading(
-        capacity?.liquidReservesOutsideTradingUsd == null
-          ? ""
-          : formatMoneyValue(capacity.liquidReservesOutsideTradingUsd)
-      );
       setEstimatedCostPerSession(
         plan.estimatedCostPerSessionUsd == null ? "" : formatMoneyValue(plan.estimatedCostPerSessionUsd)
       );
@@ -480,6 +490,7 @@ export function BusinessPlanScreen() {
       hydrateForm(response.plan);
       setActiveAdaptivePlan(response.plan?.adaptivePlan ?? null);
       setEvaluatedDraftKey(null);
+      setAcceptedDisclosureKey(null);
       setLastProjection(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to load Business Plan.");
@@ -596,7 +607,8 @@ export function BusinessPlanScreen() {
 
   const useRecommendedRunway = useCallback(() => {
     const completionDate = adaptivePlan?.recommendedCompletionDate;
-    if (!completionDate) return;
+    const requestedDate = adaptivePlan?.requestedTargetDate || targetDate;
+    if (!completionDate || !requestedDate || completionDate <= requestedDate) return;
     const recommended = inferRunway(planStartDate, completionDate);
     setRunwayAmount(String(recommended.amount));
     setRunwayUnit(recommended.unit);
@@ -607,10 +619,11 @@ export function BusinessPlanScreen() {
         "Runway recomendado cargado. Guarda el Plan Empresarial para activar los nuevos checkpoints."
       )
     );
-  }, [adaptivePlan?.recommendedCompletionDate, language, planStartDate]);
+  }, [adaptivePlan?.recommendedCompletionDate, adaptivePlan?.requestedTargetDate, language, planStartDate, targetDate]);
 
   const selectReturnModel = useCallback((mode: Exclude<ReturnModelMode, "">) => {
     setReturnModelMode(mode);
+    setSelectedPlanId("");
     if (mode === "manual") return;
     const policy = getReturnModel(mode, businessProfile);
     setPolicyScenarioId(mode);
@@ -628,14 +641,28 @@ export function BusinessPlanScreen() {
     const weeklyFactor =
       Math.pow(1 + Math.max(0, parsePercent(operatingGoalDayPct)) / 100, goalDays) *
       Math.pow(1 - Math.min(99, Math.max(0, parsePercent(expectedLossDayPct))) / 100, losingDays);
+    const fallbackAnnualCycles =
+      tradingInstrument === "crypto"
+        ? 365 / 7
+        : tradingInstrument === "stocks" || tradingInstrument === "options"
+          ? 252 / 5
+          : 52;
+    const annualCycles = Math.max(1, Number(adaptivePlan?.modeledAnnualCycles ?? fallbackAnnualCycles));
     return {
       weekly: (weeklyFactor - 1) * 100,
-      monthly: (Math.pow(weeklyFactor, 52 / 12) - 1) * 100,
-      annual: (Math.pow(weeklyFactor, 52) - 1) * 100,
+      monthly: (Math.pow(weeklyFactor, annualCycles / 12) - 1) * 100,
+      annual: (Math.pow(weeklyFactor, annualCycles) - 1) * 100,
       goalDays,
       losingDays,
     };
-  }, [averageTradingDaysPerWeek, expectedLossDayPct, lossDaysPerWeek, operatingGoalDayPct]);
+  }, [
+    adaptivePlan?.modeledAnnualCycles,
+    averageTradingDaysPerWeek,
+    expectedLossDayPct,
+    lossDaysPerWeek,
+    operatingGoalDayPct,
+    tradingInstrument,
+  ]);
 
   const capitalFlowAssumptionsComplete =
     (plannedDepositMode === "none" ||
@@ -643,17 +670,10 @@ export function BusinessPlanScreen() {
     (plannedWithdrawalMode === "none" ||
       (plannedWithdrawalMode === "scheduled" && parseAmount(plannedWithdrawalAmount) > 0));
   const financialCapacityComplete = Boolean(
-    capitalSource &&
-      accountStructure &&
-      emergencyFundMonths.trim() &&
-      monthlyEssentialExpenses.trim() &&
-      liquidReservesOutsideTrading.trim() &&
+    accountStructure &&
       estimatedCostPerSession.trim() &&
       estimatedTaxReservePct.trim() &&
       maxLeverageMultiple.trim()
-  );
-  const restrictedCapitalSource = ["retirement", "borrowed", "emergency_fund", "living_expenses"].includes(
-    capitalSource
   );
 
   const maximumOperatingDays = tradingInstrument === "crypto" ? 7 : 5;
@@ -675,6 +695,7 @@ export function BusinessPlanScreen() {
     parsePercent(maxRiskPerTradePercent) > 0 &&
     parsePercent(expectedLossDayPct) <= parsePercent(maxDailyLossPercent) &&
     Boolean(returnModelMode) &&
+    Boolean(selectedPlanId) &&
     capitalFlowAssumptionsComplete &&
     financialCapacityComplete;
 
@@ -693,16 +714,14 @@ export function BusinessPlanScreen() {
       maxDailyLossPercent: parsePercent(maxDailyLossPercent),
       maxRiskPerTradePercent: parsePercent(maxRiskPerTradePercent),
       returnModelMode,
+      selectedPlanId,
       policyScenarioId,
       operatingDailyGoalPct: parsePercent(operatingGoalDayPct),
       expectedLossDayPct: parsePercent(expectedLossDayPct),
       estimatedCostPerSessionUsd: parseAmount(estimatedCostPerSession),
       estimatedTaxReservePct: parsePercent(estimatedTaxReservePct),
       financialCapacity: {
-        capitalSource,
-        emergencyFundMonths: parsePercent(emergencyFundMonths),
-        monthlyEssentialExpensesUsd: parseAmount(monthlyEssentialExpenses),
-        liquidReservesOutsideTradingUsd: parseAmount(liquidReservesOutsideTrading),
+        capitalSource: "business_income",
         accountStructure,
         maxLeverageMultiple: parsePercent(maxLeverageMultiple),
       },
@@ -727,16 +746,12 @@ export function BusinessPlanScreen() {
       dontRules,
       expectedLossDayPct,
       accountStructure,
-      capitalSource,
-      emergencyFundMonths,
       estimatedCostPerSession,
       estimatedTaxReservePct,
-      liquidReservesOutsideTrading,
       lossDaysPerWeek,
       maxDailyLossPercent,
       maxRiskPerTradePercent,
       maxLeverageMultiple,
-      monthlyEssentialExpenses,
       operatingGoalDayPct,
       orderRules,
       planStartDate,
@@ -752,6 +767,7 @@ export function BusinessPlanScreen() {
       preview.start,
       preview.target,
       returnModelMode,
+      selectedPlanId,
       runwayAmount,
       runwayUnit,
       strategyName,
@@ -770,13 +786,17 @@ export function BusinessPlanScreen() {
     setLastProjection(null);
     setAdaptivePlan(activeAdaptivePlan);
     setEvaluatedDraftKey(null);
+    setAcceptedDisclosureKey(null);
     setSavedMessage(null);
   }, [activeAdaptivePlan, draftEvaluationKey, evaluatedDraftKey]);
 
+  const draftIsEvaluated = evaluatedDraftKey === draftEvaluationKey && Boolean(adaptivePlan);
+  const disclosureAccepted = acceptedDisclosureKey === draftEvaluationKey;
   const canEvaluate = formInputsComplete && !saving && !previewing && !resetting;
   const canSave =
     formInputsComplete &&
-    !restrictedCapitalSource &&
+    draftIsEvaluated &&
+    disclosureAccepted &&
     !saving &&
     !previewing &&
     !resetting;
@@ -786,8 +806,8 @@ export function BusinessPlanScreen() {
       setError(
         t(
           language,
-          "Complete the return model, financial capacity, costs, tax reserve, trading schedule, contributions, and withdrawals before evaluating.",
-          "Completa el modelo de retorno, capacidad financiera, costos, reserva contributiva, calendario de trading, aportaciones y retiros antes de evaluar."
+          "Complete the final operating plan, business account structure, costs, tax reserve, trading schedule, contributions, and withdrawals before evaluating.",
+          "Completa el plan operativo final, estructura de cuenta empresarial, costos, reserva contributiva, calendario de trading, aportaciones y retiros antes de evaluar."
         )
       );
       return;
@@ -819,22 +839,50 @@ export function BusinessPlanScreen() {
   }, [draftEvaluationKey, formInputsComplete, language, planRequestPayload]);
 
   const savePlan = useCallback(async () => {
-    if (!canSave) {
+    if (!formInputsComplete) {
       setError(
         t(
           language,
-          "Complete the capital goal, financial capacity, operating schedule, costs, contributions, and withdrawals. Restricted capital cannot activate a plan.",
-          "Completa la meta de capital, capacidad financiera, calendario operativo, costos, aportaciones y retiros. El capital restringido no puede activar un plan."
+          "Complete the capital goal, final operating plan, business account structure, operating schedule, costs, contributions, and withdrawals.",
+          "Completa la meta de capital, plan operativo final, estructura de cuenta empresarial, calendario operativo, costos, aportaciones y retiros."
         )
       );
       return;
     }
+    if (!draftIsEvaluated) {
+      setError(
+        t(
+          language,
+          "Evaluate the current draft before saving. Any input change requires a new discipline check.",
+          "Evalúa el borrador actual antes de guardar. Cualquier cambio de input requiere una nueva evaluación de disciplina."
+        )
+      );
+      return;
+    }
+    if (!disclosureAccepted) {
+      setError(
+        t(
+          language,
+          "Accept the Trading Business Plan disclosure before saving.",
+          "Acepta la divulgación del Plan de Empresa de Trading antes de guardar."
+        )
+      );
+      return;
+    }
+    if (saving || previewing || resetting) return;
 
     setSaving(true);
     setError(null);
     setSavedMessage(null);
     try {
-      const response = await apiPost<MobileGrowthPlanResponse>("/api/growth-plan/mobile", planRequestPayload);
+      const response = await apiPost<MobileGrowthPlanResponse>("/api/growth-plan/mobile", {
+        ...planRequestPayload,
+        disclosure: {
+          version: GROWTH_PLAN_DISCLOSURE_VERSION,
+          acceptedAt: new Date().toISOString(),
+          purpose: "trading_business_discipline",
+        },
+      });
       setAccountId(response.accountId ?? accountId);
       const activatedRecommendedRunway =
         Boolean(response.plan?.targetDate) && response.plan?.targetDate !== targetDate;
@@ -844,6 +892,7 @@ export function BusinessPlanScreen() {
       setAdaptivePlan(savedAdaptivePlan);
       setActiveAdaptivePlan(savedAdaptivePlan);
       setEvaluatedDraftKey(draftEvaluationKey);
+      setAcceptedDisclosureKey(draftEvaluationKey);
       setSavedMessage(
         activatedRecommendedRunway
           ? t(
@@ -884,11 +933,16 @@ export function BusinessPlanScreen() {
     }
   }, [
     accountId,
-    canSave,
+    disclosureAccepted,
     draftEvaluationKey,
+    draftIsEvaluated,
+    formInputsComplete,
     hydrateForm,
     language,
     planRequestPayload,
+    previewing,
+    resetting,
+    saving,
     targetDate,
   ]);
 
@@ -932,6 +986,7 @@ export function BusinessPlanScreen() {
                       hydrateForm(null);
                       setActiveAdaptivePlan(null);
                       setEvaluatedDraftKey(null);
+                      setAcceptedDisclosureKey(null);
                       setLastProjection(null);
                       setSavedMessage(
                         t(
@@ -1056,14 +1111,14 @@ export function BusinessPlanScreen() {
               <Text style={styles.muted}>
                 {t(
                   language,
-                  `At the selected operating pace, the model projects ${formatCompactCurrency(Number(adaptivePlan.requestedProjectedBalance ?? 0))} by the requested date.`,
-                  `Al ritmo operativo seleccionado, el modelo proyecta ${formatCompactCurrency(Number(adaptivePlan.requestedProjectedBalance ?? 0))} para la fecha solicitada.`
+                  `Target path: ${formatCompactCurrency(Number(adaptivePlan.targetProjectionBalance ?? 0))}. Selected percentages compound to ${formatCompactCurrency(Number(adaptivePlan.requestedGrossProjectedBalance ?? 0))} gross and ${formatCompactCurrency(Number(adaptivePlan.requestedProjectedBalance ?? 0))} net after fixed costs.`,
+                  `Trayectoria objetivo: ${formatCompactCurrency(Number(adaptivePlan.targetProjectionBalance ?? 0))}. Los porcentajes seleccionados se componen hasta ${formatCompactCurrency(Number(adaptivePlan.requestedGrossProjectedBalance ?? 0))} bruto y ${formatCompactCurrency(Number(adaptivePlan.requestedProjectedBalance ?? 0))} neto después de costos fijos.`
                 )}
               </Text>
               <View style={styles.previewGrid}>
                 <View style={styles.previewCell}>
-                  <Text style={styles.previewLabel}>{t(language, "Required goal-day math", "Matemática día-meta requerida")}</Text>
-                  <Text style={styles.previewValue}>{Number(adaptivePlan.requestedRequiredGoalDayPct ?? 0).toFixed(3)}%</Text>
+                  <Text style={styles.previewLabel}>{t(language, "Target compound pace", "Ritmo compuesto objetivo")}</Text>
+                  <Text style={styles.previewValue}>{Number(adaptivePlan.targetProjectionGoalDayPct ?? adaptivePlan.requestedRequiredGoalDayPct ?? 0).toFixed(3)}%</Text>
                 </View>
                 <View style={styles.previewCell}>
                   <Text style={styles.previewLabel}>{t(language, "Annual target math", "Matemática anual de la meta")}</Text>
@@ -1100,8 +1155,16 @@ export function BusinessPlanScreen() {
                   <Text style={styles.previewValue}>{Number(adaptivePlan.expectedLossDayPct ?? 0).toFixed(2)}%</Text>
                 </View>
                 <View style={styles.previewCell}>
-                  <Text style={styles.previewLabel}>{t(language, "Trading growth", "Crecimiento de trading")}</Text>
+                  <Text style={styles.previewLabel}>{t(language, "Gross percentage growth", "Crecimiento porcentual bruto")}</Text>
+                  <Text style={styles.previewValue}>{formatCompactCurrency(Number(adaptivePlan.requestedGrossTradingGrowthUsd ?? 0))}</Text>
+                </View>
+                <View style={styles.previewCell}>
+                  <Text style={styles.previewLabel}>{t(language, "Net trading growth", "Crecimiento neto de trading")}</Text>
                   <Text style={styles.previewValue}>{formatCompactCurrency(Number(adaptivePlan.requestedTradingGrowthUsd ?? 0))}</Text>
+                </View>
+                <View style={styles.previewCell}>
+                  <Text style={styles.previewLabel}>{t(language, "Cost drag", "Impacto de costos")}</Text>
+                  <Text style={styles.previewValue}>{formatCompactCurrency(Number(adaptivePlan.requestedCostDragUsd ?? 0))}</Text>
                 </View>
                 <View style={styles.previewCell}>
                   <Text style={styles.previewLabel}>{t(language, "Contributions", "Aportaciones")}</Text>
@@ -1118,8 +1181,8 @@ export function BusinessPlanScreen() {
                   <Text style={styles.muted}>
                     {t(
                       language,
-                      "P10, median, P90, target probability, and drawdown use seeded sensitivity paths. They are not forecasts or promises.",
-                      "P10, mediana, P90, probabilidad de meta y drawdown usan rutas de sensibilidad con semilla. No son pronósticos ni promesas."
+                      "P10, median, P90, the conditional hit rate, and drawdown assume the entered win/loss percentages and frequency continue. They are sensitivity ranges, not empirical probabilities or forecasts.",
+                      "P10, mediana, P90, la tasa condicional de llegada y el drawdown suponen que continúan los porcentajes y la frecuencia ingresados. Son rangos de sensibilidad, no probabilidades empíricas ni pronósticos."
                     )}
                   </Text>
                   {adaptivePlan.panoramas.map((panorama) => {
@@ -1142,6 +1205,11 @@ export function BusinessPlanScreen() {
                           +{Number(panorama.goalDayReturnPct ?? 0).toFixed(3)}% / -{Number(panorama.expectedLossDayPct ?? 0).toFixed(2)}%
                           {" · "}{t(language, "annual math", "matemática anual")} {Number(panorama.modeledAnnualReturnPct ?? 0).toFixed(1)}%
                         </Text>
+                        <Text style={styles.savedHint}>
+                          {t(language, "Gross", "Bruto")} {formatCompactCurrency(Number(panorama.grossProjectedBalance ?? 0))}
+                          {" · "}{t(language, "net after costs", "neto después de costos")} {formatCompactCurrency(Number(panorama.projectedBalance ?? 0))}
+                          {" · "}{t(language, "cost drag", "impacto de costos")} {formatCompactCurrency(Number(panorama.costDragUsd ?? 0))}
+                        </Text>
                         <View style={styles.scenarioMetrics}>
                           <View style={styles.scenarioMetric}>
                             <Text style={styles.previewLabel}>P10 / P50 / P90</Text>
@@ -1150,7 +1218,7 @@ export function BusinessPlanScreen() {
                             </Text>
                           </View>
                           <View style={styles.scenarioMetric}>
-                            <Text style={styles.previewLabel}>{t(language, "Target chance", "Probabilidad de meta")}</Text>
+                            <Text style={styles.previewLabel}>{t(language, "Conditional hit rate", "Tasa condicional de llegada")}</Text>
                             <Text style={styles.scenarioMetricValue}>{Number(panorama.probability?.probabilityTargetPct ?? 0).toFixed(1)}%</Text>
                           </View>
                           <View style={styles.scenarioMetric}>
@@ -1167,9 +1235,18 @@ export function BusinessPlanScreen() {
                   })}
                 </View>
               ) : null}
+              {adaptivePlan.costsConsumePercentageEdge ? (
+                <Text style={styles.savedHint}>
+                  {t(
+                    language,
+                    `The selected win/loss percentages produce a positive ${Number(adaptivePlan.modeledWeeklyReturnPct ?? 0).toFixed(2)}% modeled week. The net balance is exhausted by fixed session costs, not by the compound-return formula.`,
+                    `Los porcentajes seleccionados de ganancias y pérdidas producen una semana modelada positiva de ${Number(adaptivePlan.modeledWeeklyReturnPct ?? 0).toFixed(2)}%. El balance neto se agota por los costos fijos por sesión, no por la fórmula de interés compuesto.`
+                  )}
+                </Text>
+              ) : null}
               {adaptivePlan.nextMilestone ? (
                 <View style={styles.calculatedDate}>
-                  <Text style={styles.previewLabel}>{t(language, "Next monthly checkpoint", "Próximo checkpoint mensual")}</Text>
+                  <Text style={styles.previewLabel}>{t(language, "Next weekly checkpoint", "Próximo checkpoint semanal")}</Text>
                   <Text style={styles.previewValue}>
                     {formatCompactCurrency(Number(adaptivePlan.nextMilestone.targetBalance ?? 0))} · {adaptivePlan.nextMilestone.targetDate || "—"}
                   </Text>
@@ -1184,17 +1261,33 @@ export function BusinessPlanScreen() {
                   )}
                 </Text>
               ) : null}
+              {adaptivePlan.flags?.includes("selected_model_requires_extreme_annualized_return") ? (
+                <Text style={styles.capacityBlocked}>
+                  {t(
+                    language,
+                    `The selected percentages imply ${Number(adaptivePlan.modeledAnnualReturnPct ?? 0).toFixed(1)}% annual compounding if they repeat without deterioration. The math is valid, but this is an extreme conditional scenario, not a realistic expected return.`,
+                    `Los porcentajes seleccionados implican ${Number(adaptivePlan.modeledAnnualReturnPct ?? 0).toFixed(1)}% de composición anual si se repiten sin deterioro. La matemática es válida, pero este es un escenario condicional extremo, no un retorno esperado realista.`
+                  )}
+                </Text>
+              ) : null}
               {adaptivePlan.flags?.includes("declared_goal_above_operating_policy") ||
               adaptivePlan.flags?.includes("declared_loss_assumption_below_operating_policy") ? (
                 <Text style={styles.savedHint}>
                   {t(
                     language,
-                    `The declared assumptions were evaluated without accelerating the recommendation. Policy cap: ${Number(adaptivePlan.policyGoalDayCapPct ?? 0).toFixed(2)}% goal-day; loss-day floor: ${Number(adaptivePlan.policyExpectedLossDayFloorPct ?? 0).toFixed(2)}%.`,
-                    `Los supuestos declarados se evaluaron sin acelerar la recomendación. Tope de política: ${Number(adaptivePlan.policyGoalDayCapPct ?? 0).toFixed(2)}% en día-meta; piso de pérdida: ${Number(adaptivePlan.policyExpectedLossDayFloorPct ?? 0).toFixed(2)}%.`
+                    adaptivePlan.statisticalValidation?.selectedPlanId === "manual"
+                      ? "The manual percentages are compounded exactly in deterministic and statistical validation, then flagged against risk and execution evidence."
+                      : `The selected preset keeps its ${Number(adaptivePlan.policyGoalDayCapPct ?? 0).toFixed(2)}% goal-day cap and ${Number(adaptivePlan.policyExpectedLossDayFloorPct ?? 0).toFixed(2)}% modeled loss-day floor.`,
+                    adaptivePlan.statisticalValidation?.selectedPlanId === "manual"
+                      ? "Los porcentajes manuales se componen exactamente en la validación determinística y estadística, y luego se contrastan con el riesgo y la evidencia de ejecución."
+                      : `El plan predefinido mantiene su límite de ${Number(adaptivePlan.policyGoalDayCapPct ?? 0).toFixed(2)}% en día-meta y su piso de ${Number(adaptivePlan.policyExpectedLossDayFloorPct ?? 0).toFixed(2)}% en día perdedor.`
                   )}
                 </Text>
               ) : null}
-              {adaptivePlan.recommendedCompletionDate && adaptivePlan.verdict !== "supported" ? (
+              {adaptivePlan.recommendedCompletionDate &&
+              (adaptivePlan.requestedTargetDate || targetDate) &&
+              adaptivePlan.recommendedCompletionDate > (adaptivePlan.requestedTargetDate || targetDate) &&
+              adaptivePlan.verdict !== "supported" ? (
                 <Pressable style={[styles.button, styles.primaryButton]} onPress={useRecommendedRunway}>
                   <Text style={styles.primaryButtonText}>
                     {t(language, "Use recommended runway", "Usar runway recomendado")}
@@ -1350,6 +1443,7 @@ export function BusinessPlanScreen() {
             <View style={styles.twoCol}>
               {renderField(t(language, "Goal-day model %", "Modelo día-meta %"), operatingGoalDayPct, (value) => {
                 setReturnModelMode("manual");
+                setSelectedPlanId("");
                 setOperatingGoalDayPct(value);
               }, {
                 keyboardType: "numeric",
@@ -1358,6 +1452,7 @@ export function BusinessPlanScreen() {
               })}
               {renderField(t(language, "Expected loss-day %", "Pérdida esperada/día %"), expectedLossDayPct, (value) => {
                 setReturnModelMode("manual");
+                setSelectedPlanId("");
                 setExpectedLossDayPct(value);
               }, {
                 keyboardType: "numeric",
@@ -1388,61 +1483,53 @@ export function BusinessPlanScreen() {
                 "La pérdida esperada por día es el promedio de planificación. La pérdida diaria máxima sigue siendo el stop duro."
               )}
             </Text>
-          </View>
-
-          <View style={styles.sectionCard}>
-            <Text style={styles.sectionTitle}>{t(language, "Financial capacity and friction", "Capacidad financiera y fricción")}</Text>
-            <Text style={styles.muted}>
-              {t(
-                language,
-                "Separate risk capital from essential reserves. Costs and a tax reserve are included in the plan math.",
-                "Separa el capital de riesgo de las reservas esenciales. Los costos y una reserva contributiva se incluyen en la matemática del plan."
-              )}
-            </Text>
-            <Text style={styles.label}>{t(language, "Source of starting capital", "Origen del capital inicial")}</Text>
+            <Text style={styles.label}>{t(language, "Final plan to follow", "Plan final que vas a seguir")}</Text>
             <View style={styles.optionRow}>
-              {([
-                ["disposable_savings", t(language, "Disposable savings", "Ahorros disponibles")],
-                ["business_income", t(language, "Business income", "Ingreso de negocio")],
-                ["retirement", t(language, "Retirement", "Retiro")],
-                ["borrowed", t(language, "Borrowed", "Prestado")],
-                ["emergency_fund", t(language, "Emergency fund", "Fondo de emergencia")],
-                ["living_expenses", t(language, "Living expenses", "Gastos de vida")],
-              ] as Array<[CapitalSource, string]>).map(([value, label]) => (
+              {(["conservative", "moderate", "aggressive", "manual"] as FinalPlanId[]).map((mode) => (
                 <Pressable
-                  key={value}
-                  style={[styles.optionChip, capitalSource === value && styles.optionChipActive]}
-                  onPress={() => setCapitalSource(value)}
+                  key={`final-${mode}`}
+                  style={[styles.optionChip, selectedPlanId === mode && styles.optionChipActive]}
+                  onPress={() => {
+                    selectReturnModel(mode);
+                    setSelectedPlanId(mode);
+                  }}
                 >
-                  <Text style={[styles.optionChipText, capitalSource === value && styles.optionChipTextActive]}>{label}</Text>
+                  <Text style={[styles.optionChipText, selectedPlanId === mode && styles.optionChipTextActive]}>
+                    {mode === "conservative"
+                      ? t(language, "Conservative", "Conservador")
+                      : mode === "moderate"
+                        ? t(language, "Moderate", "Moderado")
+                        : mode === "aggressive"
+                          ? t(language, "Aggressive", "Agresivo")
+                          : t(language, "My manual plan", "Mi plan manual")}
+                  </Text>
                 </Pressable>
               ))}
             </View>
-            {restrictedCapitalSource ? (
+            {!selectedPlanId ? (
               <Text style={styles.capacityBlocked}>
                 {t(
                   language,
-                  "This source can be evaluated, but it cannot activate a Trading Business Plan.",
-                  "Este origen se puede evaluar, pero no puede activar un Plan de Empresa de Trading."
+                  "Select the final operating plan before evaluating or saving.",
+                  "Selecciona el plan operativo final antes de evaluar o guardar."
                 )}
               </Text>
             ) : null}
-            <View style={styles.twoCol}>
-              {renderField(t(language, "Emergency reserve (months)", "Reserva de emergencia (meses)"), emergencyFundMonths, setEmergencyFundMonths, {
-                keyboardType: "numeric",
-                placeholder: "6",
-              })}
-              {renderField(t(language, "Monthly essential expenses", "Gastos esenciales mensuales"), monthlyEssentialExpenses, (value) => setMonthlyEssentialExpenses(formatMoneyDraft(value)), {
-                keyboardType: "numeric",
-                placeholder: "3,000.00",
-                onBlur: () => monthlyEssentialExpenses && setMonthlyEssentialExpenses(formatMoneyValue(monthlyEssentialExpenses)),
-              })}
+          </View>
+
+          <View style={styles.sectionCard}>
+            <Text style={styles.sectionTitle}>{t(language, "Business capital and friction", "Capital empresarial y fricción")}</Text>
+            <Text style={styles.muted}>
+              {t(
+                language,
+                "The model treats capital, contributions, withdrawals, costs, and tax reserves strictly as trading-business cash flows.",
+                "El modelo trata el capital, las aportaciones, los retiros, los costos y las reservas contributivas estrictamente como flujos del negocio de trading."
+              )}
+            </Text>
+            <View style={styles.calculatedDate}>
+              <Text style={styles.previewLabel}>{t(language, "Capital classification", "Clasificación del capital")}</Text>
+              <Text style={styles.previewValue}>{t(language, "Trading business operating capital", "Capital operativo del negocio de trading")}</Text>
             </View>
-            {renderField(t(language, "Liquid reserves outside trading", "Reservas líquidas fuera de trading"), liquidReservesOutsideTrading, (value) => setLiquidReservesOutsideTrading(formatMoneyDraft(value)), {
-              keyboardType: "numeric",
-              placeholder: "18,000.00",
-              onBlur: () => liquidReservesOutsideTrading && setLiquidReservesOutsideTrading(formatMoneyValue(liquidReservesOutsideTrading)),
-            })}
             <Text style={styles.label}>{t(language, "Account structure", "Estructura de cuenta")}</Text>
             <View style={styles.optionRow}>
               {([
@@ -1629,6 +1716,56 @@ export function BusinessPlanScreen() {
                 : t(language, "Evaluate plan before saving", "Evaluar plan antes de guardar")}
             </Text>
           </Pressable>
+
+          <View style={styles.disclosureCard}>
+            <Text style={styles.disclosureTitle}>
+              {t(language, "TRADING BUSINESS PLAN DISCLOSURE", "DIVULGACIÓN DEL PLAN DE EMPRESA DE TRADING")}
+            </Text>
+            <Text style={styles.disclosureText}>
+              {t(
+                language,
+                "This tool organizes a trading business process. Projections, conditional hit rates, checkpoints, and AI explanations are educational planning outputs based on the data and assumptions you provide. They are not forecasts, guarantees of profit, or individualized investment, trading, legal, tax, or accounting advice. Actual results may differ because of execution, market conditions, liquidity, slippage, fees, leverage, deposits, and withdrawals. You remain responsible for risk limits, accurate records, independent decisions, and regular projected-versus-actual review.",
+                "Esta herramienta organiza el proceso de un negocio de trading. Las proyecciones, tasas condicionales de llegada, checkpoints y explicaciones de IA son resultados educativos de planificación basados en los datos y supuestos que proporcionas. No son pronósticos, garantías de ganancias ni asesoría individualizada de inversión, trading, legal, contributiva o contable. Los resultados reales pueden diferir por ejecución, condiciones de mercado, liquidez, slippage, costos, apalancamiento, aportaciones y retiros. Sigues siendo responsable de los límites de riesgo, registros precisos, decisiones independientes y revisión periódica de proyectado versus real."
+              )}
+            </Text>
+            <Pressable
+              accessibilityRole="checkbox"
+              accessibilityState={{ checked: disclosureAccepted, disabled: !draftIsEvaluated }}
+              disabled={!draftIsEvaluated}
+              onPress={() => {
+                setAcceptedDisclosureKey(disclosureAccepted ? null : draftEvaluationKey);
+                setError(null);
+              }}
+              style={[styles.disclosureAcceptRow, !draftIsEvaluated && styles.disclosureAcceptDisabled]}
+            >
+              <View
+                style={[
+                  styles.disclosureCheckbox,
+                  disclosureAccepted && styles.disclosureCheckboxActive,
+                ]}
+              >
+                <Text style={styles.disclosureCheck}>{disclosureAccepted ? "✓" : ""}</Text>
+              </View>
+              <View style={styles.disclosureAcceptCopy}>
+                <Text style={styles.disclosureAcceptText}>
+                  {t(
+                    language,
+                    "I understand and accept this disclosure. I am committing to disciplined process, risk controls, accurate records, and regular review, not to a promised return.",
+                    "Entiendo y acepto esta divulgación. Me comprometo con un proceso disciplinado, controles de riesgo, registros precisos y revisión periódica, no con un retorno prometido."
+                  )}
+                </Text>
+                {!draftIsEvaluated ? (
+                  <Text style={styles.disclosureHint}>
+                    {t(
+                      language,
+                      "Evaluate the current draft to enable acceptance.",
+                      "Evalúa el borrador actual para habilitar la aceptación."
+                    )}
+                  </Text>
+                ) : null}
+              </View>
+            </Pressable>
+          </View>
 
           <View style={styles.actionRow}>
             <Pressable style={[styles.button, styles.secondaryButton]} onPress={() => navigation.navigate("Tabs", { screen: "Dashboard" })}>
@@ -1966,6 +2103,75 @@ const createStyles = (colors: ThemeColors) =>
       fontSize: 14,
       fontWeight: "900",
       marginTop: 3,
+    },
+    disclosureCard: {
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: colors.info,
+      backgroundColor: colors.infoSoft,
+      padding: 14,
+      gap: 10,
+    },
+    disclosureTitle: {
+      color: colors.info,
+      fontSize: 10,
+      lineHeight: 14,
+      fontWeight: "900",
+      letterSpacing: 1.4,
+    },
+    disclosureText: {
+      color: colors.textMuted,
+      fontSize: 12,
+      lineHeight: 18,
+    },
+    disclosureAcceptRow: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+      gap: 10,
+      borderRadius: 13,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+      padding: 12,
+    },
+    disclosureAcceptDisabled: {
+      opacity: 0.55,
+    },
+    disclosureCheckbox: {
+      width: 22,
+      height: 22,
+      borderRadius: 6,
+      borderWidth: 1,
+      borderColor: colors.textMuted,
+      alignItems: "center",
+      justifyContent: "center",
+      marginTop: 1,
+    },
+    disclosureCheckboxActive: {
+      borderColor: colors.primary,
+      backgroundColor: colors.primary,
+    },
+    disclosureCheck: {
+      color: colors.onPrimary,
+      fontSize: 14,
+      lineHeight: 17,
+      fontWeight: "900",
+    },
+    disclosureAcceptCopy: {
+      flex: 1,
+      gap: 5,
+    },
+    disclosureAcceptText: {
+      color: colors.textPrimary,
+      fontSize: 12,
+      lineHeight: 18,
+      fontWeight: "700",
+    },
+    disclosureHint: {
+      color: colors.warning,
+      fontSize: 11,
+      lineHeight: 16,
+      fontWeight: "800",
     },
     button: {
       flex: 1,

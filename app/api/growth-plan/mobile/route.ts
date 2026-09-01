@@ -30,6 +30,7 @@ import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 export const runtime = "nodejs";
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const GROWTH_PLAN_DISCLOSURE_VERSION = "growth-plan-discipline-v1";
 const DEFAULT_DO_RULES = [
   "Confirm plan permission before the first trade.",
   "Define risk before entry.",
@@ -352,6 +353,10 @@ function normalizePlan(row: GrowthPlanRow | null) {
     40
   );
   const storedFinancialCapacity = businessAnalysis?.operatingModel?.financialCapacity ?? null;
+  const storedSelectedPlanId = cleanText(
+    businessAnalysis?.operatingModel?.selectedPlanId ?? storedReturnMode,
+    40
+  );
 
   return {
     accountId: row.account_id ?? null,
@@ -379,6 +384,9 @@ function normalizePlan(row: GrowthPlanRow | null) {
     returnModelMode: ["conservative", "moderate", "aggressive", "manual"].includes(storedReturnMode)
       ? storedReturnMode
       : "moderate",
+    selectedPlanId: ["conservative", "moderate", "aggressive", "manual"].includes(storedSelectedPlanId)
+      ? storedSelectedPlanId
+      : "moderate",
     estimatedCostPerSessionUsd: Math.max(0, num(businessAnalysis?.operatingModel?.estimatedCostPerSessionUsd, 0)),
     estimatedTaxReservePct: clampNumber(
       businessAnalysis?.operatingModel?.estimatedTaxReservePct,
@@ -386,7 +394,11 @@ function normalizePlan(row: GrowthPlanRow | null) {
       60,
       0
     ),
-    financialCapacity: storedFinancialCapacity,
+    financialCapacity: {
+      capitalSource: "business_income",
+      accountStructure: storedFinancialCapacity?.accountStructure ?? null,
+      maxLeverageMultiple: storedFinancialCapacity?.maxLeverageMultiple ?? null,
+    },
     plannedDepositSettings: depositSettings,
     plannedWithdrawalSettings: withdrawalSettings,
     tradingInstrument,
@@ -626,6 +638,23 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true, accountId, plan: null });
     }
 
+    const disclosure = body?.disclosure && typeof body.disclosure === "object" ? body.disclosure : {};
+    const disclosureVersion = cleanText(disclosure?.version, 80);
+    const disclosureAcceptedAt = cleanText(disclosure?.acceptedAt, 80);
+    const disclosureAcceptedAtMs = Date.parse(disclosureAcceptedAt);
+    if (
+      action !== "preview" &&
+      (disclosureVersion !== GROWTH_PLAN_DISCLOSURE_VERSION || !Number.isFinite(disclosureAcceptedAtMs))
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "Evaluate the current draft and accept the Trading Business Plan disclosure before saving.",
+        },
+        { status: 400 }
+      );
+    }
+
     const startingBalance = clampNumber(body?.startingBalance, 1, 100_000_000, 0);
     const targetBalance = clampNumber(body?.targetBalance, 1, 1_000_000_000, 0);
     const planStartDate = cleanDate(body?.planStartDate) || isoToday();
@@ -681,6 +710,22 @@ export async function POST(req: NextRequest) {
     )
       ? requestedReturnMode
       : "moderate";
+    const requestedSelectedPlanId = cleanText(
+      body?.selectedPlanId ?? currentOperatingModel?.selectedPlanId ?? returnModelMode,
+      40
+    );
+    if (!["conservative", "moderate", "aggressive", "manual"].includes(requestedSelectedPlanId)) {
+      return NextResponse.json(
+        { error: "Choose the final operating plan before saving." },
+        { status: 400 }
+      );
+    }
+    if (requestedSelectedPlanId !== returnModelMode) {
+      return NextResponse.json(
+        { error: "The selected plan must match the return model being evaluated." },
+        { status: 400 }
+      );
+    }
     const existingScenarioId = cleanText(
       body?.policyScenarioId ?? currentBusinessAnalysis?.selectedScenarioId,
       40
@@ -746,31 +791,9 @@ export async function POST(req: NextRequest) {
       body?.financialCapacity && typeof body.financialCapacity === "object"
         ? body.financialCapacity
         : currentOperatingModel?.financialCapacity ?? {};
-    const capitalSource = cleanText(capacityInput?.capitalSource, 40);
     const accountStructure = cleanText(capacityInput?.accountStructure, 40);
     const financialCapacity: GrowthPlanFinancialCapacity = {
-      capitalSource: [
-        "disposable_savings",
-        "business_income",
-        "retirement",
-        "borrowed",
-        "emergency_fund",
-        "living_expenses",
-      ].includes(capitalSource)
-        ? (capitalSource as NonNullable<GrowthPlanFinancialCapacity["capitalSource"]>)
-        : null,
-      emergencyFundMonths:
-        capacityInput?.emergencyFundMonths == null
-          ? null
-          : clampNumber(capacityInput.emergencyFundMonths, 0, 120, 0),
-      monthlyEssentialExpensesUsd:
-        capacityInput?.monthlyEssentialExpensesUsd == null
-          ? null
-          : clampNumber(capacityInput.monthlyEssentialExpensesUsd, 0, 10_000_000, 0),
-      liquidReservesOutsideTradingUsd:
-        capacityInput?.liquidReservesOutsideTradingUsd == null
-          ? null
-          : clampNumber(capacityInput.liquidReservesOutsideTradingUsd, 0, 1_000_000_000, 0),
+      capitalSource: "business_income",
       accountStructure: ["cash", "margin", "leveraged_derivatives"].includes(accountStructure)
         ? (accountStructure as NonNullable<GrowthPlanFinancialCapacity["accountStructure"]>)
         : null,
@@ -833,6 +856,7 @@ export async function POST(req: NextRequest) {
       tradingInstrument,
       averageTradingDaysPerWeek,
       policy: operatingPolicy,
+      selectedPlanId: requestedSelectedPlanId as "conservative" | "moderate" | "aggressive" | "manual",
       declaredGoalDayPct,
       declaredExpectedLossDayPct,
       evidence: currentBusinessAnalysis?.executionEvidence ?? null,
@@ -848,36 +872,25 @@ export async function POST(req: NextRequest) {
     });
     if (action !== "preview" && adaptivePlan.capacityStatus === "incomplete") {
       return NextResponse.json(
-        { error: "Complete financial capacity, account structure, costs, and tax-reserve assumptions before saving." },
+        { error: "Complete the business account structure, leverage, costs, and tax-reserve assumptions before saving." },
         { status: 400 }
-      );
-    }
-    if (action !== "preview" && adaptivePlan.capacityStatus === "blocked") {
-      return NextResponse.json(
-        { error: "Retirement, borrowed, emergency, and living-expense capital cannot fund an active Trading Business Plan." },
-        { status: 422 }
       );
     }
     if (
       action !== "preview" &&
-      adaptivePlan.verdict === "not_supported" &&
-      !adaptivePlan.recommendedCompletionDate
+      adaptivePlan.verdict === "not_supported"
     ) {
       return NextResponse.json(
         {
-          error:
-            "This target is outside the disciplined 50-year planning horizon. Reduce the target, add capital, or validate stronger execution evidence.",
+          error: adaptivePlan.recommendedCompletionDate
+            ? `The requested deadline is not supported by the selected operating model. Review and explicitly use the operating runway ending ${adaptivePlan.recommendedCompletionDate}, or revise the plan.`
+            : "This target is outside the disciplined 50-year operating horizon. Revise the return model, target, funding, or execution evidence before saving.",
           adaptivePlan,
         },
         { status: 422 }
       );
     }
-    const effectiveTargetDate =
-      adaptivePlan.verdict === "not_supported" &&
-      adaptivePlan.recommendedCompletionDate &&
-      adaptivePlan.recommendedCompletionDate > targetDate
-        ? adaptivePlan.recommendedCompletionDate
-        : targetDate;
+    const effectiveTargetDate = targetDate;
     const effectiveRunway = inferTradingRunway(planStartDate, effectiveTargetDate);
     const marketSessions = computeTradingSessionsBetween(
       planStartDate,
@@ -963,7 +976,9 @@ export async function POST(req: NextRequest) {
     const synchronizedScenario = {
       id: synchronizedScenarioId,
       title:
-        (synchronizedExistingScenarioId === synchronizedScenarioId
+        requestedSelectedPlanId === "manual"
+          ? "Manual operating plan"
+          : (synchronizedExistingScenarioId === synchronizedScenarioId
           ? cleanText(synchronizedBusinessAnalysis?.selectedScenario?.title, 120)
           : "") || policyId,
       dailyGoalPct: operatingDailyGoalPct,
@@ -1011,6 +1026,12 @@ export async function POST(req: NextRequest) {
             },
         selectedScenarioId: synchronizedScenarioId,
         averageTradingDaysPerWeek,
+        disclosure: {
+          version: disclosureVersion,
+          acceptedAt: disclosureAcceptedAt,
+          purpose: "trading_business_discipline",
+          source: "mobile",
+        },
         mobileContext: {
           goal: `${startingBalance} to ${targetBalance}`,
           strategy: strategyName,
@@ -1026,6 +1047,7 @@ export async function POST(req: NextRequest) {
           riskPerTradePct: maxRiskPerTradePercent,
           expectedLossDayPct: adaptivePlan.expectedLossDayPct,
           returnModelMode,
+          selectedPlanId: requestedSelectedPlanId,
           estimatedCostPerSessionUsd,
           estimatedTaxReservePct,
           financialCapacity: {
@@ -1058,6 +1080,16 @@ export async function POST(req: NextRequest) {
           targetMultiple,
           tradingDays: projection.tradingDays.length,
           requestedProjectedBalance: adaptivePlan.requestedProjectedBalance,
+          requestedGrossProjectedBalance: adaptivePlan.requestedGrossProjectedBalance,
+          requestedGrossTradingGrowthUsd: adaptivePlan.requestedGrossTradingGrowthUsd,
+          requestedCostDragUsd: adaptivePlan.requestedCostDragUsd,
+          costsConsumePercentageEdge: adaptivePlan.costsConsumePercentageEdge,
+          modeledWeeklyReturnPct: adaptivePlan.modeledWeeklyReturnPct,
+          modeledAnnualCycles: adaptivePlan.modeledAnnualCycles,
+          targetProjectionGoalDayPct: adaptivePlan.targetProjectionGoalDayPct,
+          targetProjectionBalance: adaptivePlan.targetProjectionBalance,
+          targetProjectionCoveragePct: adaptivePlan.targetProjectionCoveragePct,
+          targetProjectionTradingGrowthUsd: adaptivePlan.targetProjectionTradingGrowthUsd,
           requestedCoveragePct: adaptivePlan.requestedCoveragePct,
           requestedDepositsUsd: adaptivePlan.requestedDepositsUsd,
           requestedWithdrawalsUsd: adaptivePlan.requestedWithdrawalsUsd,
@@ -1079,8 +1111,11 @@ export async function POST(req: NextRequest) {
           body:
             "Mobile created the operating structure. The coach can now compare execution against the target, cadence, risk rails, and active checkpoints.",
           recommendedCompletionDate: adaptivePlan.recommendedCompletionDate,
+          statisticalValidation: adaptivePlan.statisticalValidation,
+          weeklyMilestones: adaptivePlan.weeklyMilestones,
           monthlyMilestones: adaptivePlan.monthlyMilestones,
           quarterlyMilestones: adaptivePlan.quarterlyMilestones,
+          semiannualMilestones: adaptivePlan.semiannualMilestones,
           annualMilestones: adaptivePlan.annualMilestones,
           reviewedAt: nowIso,
         },
