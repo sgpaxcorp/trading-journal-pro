@@ -205,12 +205,16 @@ type CadenceProgressPeriod = {
 
 type CadenceProgressSummary = {
   quarterIndex: number;
+  semiannualIndex: number;
+  annualIndex: number;
   monthIndex: number;
   weekIndex: number;
   weeksInMonth: number;
   week: CadenceProgressPeriod;
   month: CadenceProgressPeriod;
   quarter: CadenceProgressPeriod;
+  semiannual: CadenceProgressPeriod;
+  annual: CadenceProgressPeriod;
 };
 
 type AccountProgressMetrics = {
@@ -240,7 +244,7 @@ type PlanProgressCard = {
   progress: number;
   overallTargetBalance: number;
   periods: Array<{
-    key: "week" | "month" | "quarter";
+    key: "week" | "month" | "quarter" | "semiannual" | "annual";
     title: string;
     data: CadenceProgressPeriod;
   }>;
@@ -1518,13 +1522,23 @@ export function DashboardScreen({ onOpenModule: _onOpenModule, onOpenJournalDate
     const weekIndex = current.weekIndex ?? 1;
     const weeksInMonth = current.weeksInMonth ?? 1;
     const quarterIndex = Math.ceil(monthIndex / 3);
+    const semiannualIndex = Math.ceil(monthIndex / 6);
+    const annualIndex = Math.ceil(monthIndex / 12);
 
     const monthMilestones = milestones.filter((milestone) => (milestone.monthIndex ?? 1) === monthIndex);
     const quarterMilestones = milestones.filter((milestone) => {
       const index = milestone.monthIndex ?? 1;
       return index >= (quarterIndex - 1) * 3 + 1 && index <= quarterIndex * 3;
     });
-    if (!monthMilestones.length || !quarterMilestones.length) return null;
+    const semiannualMilestones = milestones.filter((milestone) => {
+      const index = milestone.monthIndex ?? 1;
+      return index >= (semiannualIndex - 1) * 6 + 1 && index <= semiannualIndex * 6;
+    });
+    const annualMilestones = milestones.filter((milestone) => {
+      const index = milestone.monthIndex ?? 1;
+      return index >= (annualIndex - 1) * 12 + 1 && index <= annualIndex * 12;
+    });
+    if (!monthMilestones.length || !quarterMilestones.length || !semiannualMilestones.length || !annualMilestones.length) return null;
 
     const buildPeriod = (
       startBalance: number,
@@ -1548,9 +1562,21 @@ export function DashboardScreen({ onOpenModule: _onOpenModule, onOpenJournalDate
       quarterMilestones[quarterMilestones.length - 1]?.monthEndBalance ??
       quarterMilestones[quarterMilestones.length - 1]?.targetEquity ??
       adjustedTargetBalance;
+    const semiannualStartBalance = semiannualMilestones[0]?.monthStartBalance ?? plan.startingBalance;
+    const semiannualTargetBalance =
+      semiannualMilestones[semiannualMilestones.length - 1]?.monthEndBalance ??
+      semiannualMilestones[semiannualMilestones.length - 1]?.targetEquity ??
+      adjustedTargetBalance;
+    const annualStartBalance = annualMilestones[0]?.monthStartBalance ?? plan.startingBalance;
+    const annualTargetBalance =
+      annualMilestones[annualMilestones.length - 1]?.monthEndBalance ??
+      annualMilestones[annualMilestones.length - 1]?.targetEquity ??
+      adjustedTargetBalance;
 
     return {
       quarterIndex,
+      semiannualIndex,
+      annualIndex,
       monthIndex,
       weekIndex,
       weeksInMonth,
@@ -1564,6 +1590,16 @@ export function DashboardScreen({ onOpenModule: _onOpenModule, onOpenJournalDate
         quarterStartBalance,
         quarterTargetBalance,
         quarterMilestones[quarterMilestones.length - 1]?.targetDate ?? null
+      ),
+      semiannual: buildPeriod(
+        semiannualStartBalance,
+        semiannualTargetBalance,
+        semiannualMilestones[semiannualMilestones.length - 1]?.targetDate ?? null
+      ),
+      annual: buildPeriod(
+        annualStartBalance,
+        annualTargetBalance,
+        annualMilestones[annualMilestones.length - 1]?.targetDate ?? null
       ),
     };
   }, [adjustedTargetBalance, currentBalance, plan, targetDateStr]);
@@ -1589,6 +1625,8 @@ export function DashboardScreen({ onOpenModule: _onOpenModule, onOpenJournalDate
           { key: "week", title: t(language, "Week checkpoint", "Checkpoint semanal"), data: cadenceProgress.week },
           { key: "month", title: t(language, "Month checkpoint", "Checkpoint mensual"), data: cadenceProgress.month },
           { key: "quarter", title: t(language, "Quarter checkpoint", "Checkpoint trimestral"), data: cadenceProgress.quarter },
+          { key: "semiannual", title: t(language, "Semiannual checkpoint", "Checkpoint semestral"), data: cadenceProgress.semiannual },
+          { key: "annual", title: t(language, "Annual checkpoint", "Checkpoint anual"), data: cadenceProgress.annual },
         ],
       };
     }
@@ -2313,7 +2351,7 @@ export function DashboardScreen({ onOpenModule: _onOpenModule, onOpenJournalDate
                         {t(language, "Coverage", "Cobertura")} {Number(adaptivePlanSummary.requestedCoveragePct ?? 0).toFixed(0)}%
                         {adaptivePlanSummary.nextMilestone?.targetBalance ? (
                           <Text>
-                            {" · "}{t(language, "Next month", "Próximo mes")} {formatCurrency(Number(adaptivePlanSummary.nextMilestone.targetBalance))}
+                            {" · "}{t(language, "Next weekly checkpoint", "Próximo checkpoint semanal")} {formatCurrency(Number(adaptivePlanSummary.nextMilestone.targetBalance))}
                             {adaptivePlanSummary.nextMilestone.targetDate ? ` (${adaptivePlanSummary.nextMilestone.targetDate})` : ""}
                           </Text>
                         ) : null}

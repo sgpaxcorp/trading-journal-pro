@@ -535,6 +535,8 @@ export async function GET(req: NextRequest) {
         lossDaysPerWeek,
         maxDailyLossPercent: toNum(plan?.max_daily_loss_percent ?? 0, 0),
         modeledLossDayPercent: expectedLossDayPct,
+        goalDayReturnPercent: dailyTargetPct,
+        stopAtTarget: false,
         depositSettings: plannedDepositSettings,
         withdrawalSettings: plannedWithdrawalSettings,
         existingWithdrawals: plannedWithdrawals,

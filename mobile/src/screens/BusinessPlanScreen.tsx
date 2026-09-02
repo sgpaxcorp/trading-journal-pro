@@ -21,6 +21,7 @@ type MobileGrowthPlan = {
   maxDailyLossPercent?: number;
   maxRiskPerTradePercent?: number;
   averageTradingDaysPerWeek?: number;
+  winningDaysPerWeek?: number;
   lossDaysPerWeek?: number;
   tradingDays?: number;
   tradingInstrument?: TradingInstrument;
@@ -168,9 +169,9 @@ type MobileGrowthPlanResponse = {
 };
 
 const RETURN_MODELS = {
-  conservative: { goal: 0.12, loss: 0.25, maxLoss: 0.75, risk: 0.25, lossDays: 1 },
-  moderate: { goal: 0.2, loss: 0.35, maxLoss: 1, risk: 0.5, lossDays: 1 },
-  aggressive: { goal: 0.3, loss: 0.5, maxLoss: 1.5, risk: 0.75, lossDays: 1 },
+  conservative: { goal: 1, loss: 1, maxLoss: 1, risk: 0.25, lossDays: 1 },
+  moderate: { goal: 2, loss: 2, maxLoss: 2, risk: 0.5, lossDays: 1 },
+  aggressive: { goal: 4, loss: 4, maxLoss: 4, risk: 1, lossDays: 1 },
 } as const;
 
 function getReturnModel(
@@ -178,32 +179,25 @@ function getReturnModel(
   profile?: Record<string, unknown> | null
 ) {
   const base = RETURN_MODELS[mode];
-  let paceFactor = 1;
   let riskFactor = 1;
   if (profile?.experience === "new") {
-    paceFactor *= 0.75;
     riskFactor *= 0.75;
   } else if (profile?.experience === "developing") {
-    paceFactor *= 0.9;
     riskFactor *= 0.9;
   }
   if (profile?.incomeDependency === "high") {
-    paceFactor *= 0.8;
     riskFactor *= 0.75;
   }
   if (profile?.drawdownComfort === "low") {
-    paceFactor *= 0.82;
     riskFactor *= 0.8;
   }
   if (profile?.riskProfile === "conservative") {
-    paceFactor *= 0.9;
     riskFactor *= 0.9;
   }
-  const maxLoss = Number(Math.max(0.5, base.maxLoss * riskFactor).toFixed(2));
   return {
-    goal: Number(Math.max(0.08, base.goal * paceFactor).toFixed(3)),
-    loss: Number(Math.min(maxLoss * 0.65, Math.max(0.12, base.loss * riskFactor)).toFixed(3)),
-    maxLoss,
+    goal: base.goal,
+    loss: base.loss,
+    maxLoss: base.maxLoss,
     risk: Number(Math.max(0.1, base.risk * riskFactor).toFixed(3)),
     lossDays: base.lossDays,
   };
@@ -341,23 +335,20 @@ export function BusinessPlanScreen() {
   const [runwayUnit, setRunwayUnit] = useState<RunwayUnit>("years");
   const [tradingInstrument, setTradingInstrument] = useState<TradingInstrument>("stocks");
   const [averageTradingDaysPerWeek, setAverageTradingDaysPerWeek] = useState("5");
+  const [winningDaysPerWeek, setWinningDaysPerWeek] = useState("4");
   const [lossDaysPerWeek, setLossDaysPerWeek] = useState("1");
   const [maxDailyLossPercent, setMaxDailyLossPercent] = useState("2");
   const [maxRiskPerTradePercent, setMaxRiskPerTradePercent] = useState("1");
-  const [operatingGoalDayPct, setOperatingGoalDayPct] = useState("0.20");
-  const [expectedLossDayPct, setExpectedLossDayPct] = useState("0.35");
+  const [operatingGoalDayPct, setOperatingGoalDayPct] = useState("2");
+  const [expectedLossDayPct, setExpectedLossDayPct] = useState("2");
   const [returnModelMode, setReturnModelMode] = useState<ReturnModelMode>("");
   const [selectedPlanId, setSelectedPlanId] = useState<FinalPlanId | "">("");
   const [policyScenarioId, setPolicyScenarioId] = useState<Exclude<ReturnModelMode, "manual" | "">>("moderate");
-  const [estimatedCostPerSession, setEstimatedCostPerSession] = useState("");
-  const [estimatedTaxReservePct, setEstimatedTaxReservePct] = useState("");
-  const [accountStructure, setAccountStructure] = useState<AccountStructure>("");
-  const [maxLeverageMultiple, setMaxLeverageMultiple] = useState("1");
-  const [plannedDepositMode, setPlannedDepositMode] = useState<CapitalFlowMode>("undecided");
+  const [plannedDepositMode, setPlannedDepositMode] = useState<CapitalFlowMode>("none");
   const [plannedDepositFrequency, setPlannedDepositFrequency] = useState<CapitalFlowFrequency>("monthly");
   const [plannedDepositAmount, setPlannedDepositAmount] = useState("");
   const [plannedDepositStartPeriod, setPlannedDepositStartPeriod] = useState("1");
-  const [plannedWithdrawalMode, setPlannedWithdrawalMode] = useState<CapitalFlowMode>("undecided");
+  const [plannedWithdrawalMode, setPlannedWithdrawalMode] = useState<CapitalFlowMode>("none");
   const [plannedWithdrawalFrequency, setPlannedWithdrawalFrequency] = useState<CapitalFlowFrequency>("monthly");
   const [plannedWithdrawalAmount, setPlannedWithdrawalAmount] = useState("");
   const [plannedWithdrawalStartPeriod, setPlannedWithdrawalStartPeriod] = useState("1");
@@ -380,23 +371,20 @@ export function BusinessPlanScreen() {
         setRunwayUnit("years");
         setTradingInstrument("stocks");
         setAverageTradingDaysPerWeek("5");
+        setWinningDaysPerWeek("4");
         setLossDaysPerWeek("1");
         setMaxDailyLossPercent("2");
         setMaxRiskPerTradePercent("1");
-        setOperatingGoalDayPct("0.20");
-        setExpectedLossDayPct("0.35");
+        setOperatingGoalDayPct("2");
+        setExpectedLossDayPct("2");
         setReturnModelMode("");
         setSelectedPlanId("");
         setPolicyScenarioId("moderate");
-        setEstimatedCostPerSession("");
-        setEstimatedTaxReservePct("");
-        setAccountStructure("");
-        setMaxLeverageMultiple("1");
-        setPlannedDepositMode("undecided");
+        setPlannedDepositMode("none");
         setPlannedDepositFrequency("monthly");
         setPlannedDepositAmount("");
         setPlannedDepositStartPeriod("1");
-        setPlannedWithdrawalMode("undecided");
+        setPlannedWithdrawalMode("none");
         setPlannedWithdrawalFrequency("monthly");
         setPlannedWithdrawalAmount("");
         setPlannedWithdrawalStartPeriod("1");
@@ -426,21 +414,29 @@ export function BusinessPlanScreen() {
       setRunwayUnit(plan.runway?.unit || "years");
       setTradingInstrument(plan.tradingInstrument || "stocks");
       setAverageTradingDaysPerWeek(String(plan.averageTradingDaysPerWeek || 5));
-      setLossDaysPerWeek(String(plan.lossDaysPerWeek ?? 1));
+      const hydratedLossDays = Number(plan.lossDaysPerWeek ?? 1);
+      setLossDaysPerWeek(String(hydratedLossDays));
+      setWinningDaysPerWeek(
+        String(
+          plan.winningDaysPerWeek ??
+            steps?.business_analysis?.operatingModel?.winningDaysPerWeek ??
+            Math.max(0, Number(plan.averageTradingDaysPerWeek || 5) - hydratedLossDays)
+        )
+      );
       setMaxDailyLossPercent(String(plan.maxDailyLossPercent || 2));
       setMaxRiskPerTradePercent(String(plan.maxRiskPerTradePercent || 1));
       setOperatingGoalDayPct(
         String(
           plan.adaptivePlan?.recommendedGoalDayPct ??
             steps?.business_analysis?.selectedScenario?.dailyGoalPct ??
-            0.2
+            2
         )
       );
       setExpectedLossDayPct(
         String(
           plan.adaptivePlan?.expectedLossDayPct ??
             steps?.business_analysis?.selectedScenario?.expectedLossDayPct ??
-            0.35
+            2
         )
       );
       const storedReturnMode = plan.returnModelMode || "moderate";
@@ -453,15 +449,6 @@ export function BusinessPlanScreen() {
           ? storedScenarioId
           : "moderate"
       );
-      const capacity = plan.financialCapacity ?? steps?.business_analysis?.operatingModel?.financialCapacity ?? {};
-      setEstimatedCostPerSession(
-        plan.estimatedCostPerSessionUsd == null ? "" : formatMoneyValue(plan.estimatedCostPerSessionUsd)
-      );
-      setEstimatedTaxReservePct(
-        plan.estimatedTaxReservePct == null ? "" : String(plan.estimatedTaxReservePct)
-      );
-      setAccountStructure((capacity?.accountStructure as AccountStructure) || "");
-      setMaxLeverageMultiple(String(capacity?.maxLeverageMultiple ?? 1));
       const depositSettings = plan.plannedDepositSettings;
       setPlannedDepositMode(depositSettings ? (depositSettings.enabled ? "scheduled" : "none") : "undecided");
       setPlannedDepositFrequency(depositSettings?.frequency ?? "monthly");
@@ -631,7 +618,6 @@ export function BusinessPlanScreen() {
     setExpectedLossDayPct(policy.loss.toFixed(2));
     setMaxDailyLossPercent(policy.maxLoss.toFixed(2));
     setMaxRiskPerTradePercent(policy.risk.toFixed(2));
-    setLossDaysPerWeek(String(policy.lossDays));
   }, [businessProfile]);
 
   const declaredReturnSummary = useMemo(() => {
@@ -669,15 +655,9 @@ export function BusinessPlanScreen() {
       (plannedDepositMode === "scheduled" && parseAmount(plannedDepositAmount) > 0)) &&
     (plannedWithdrawalMode === "none" ||
       (plannedWithdrawalMode === "scheduled" && parseAmount(plannedWithdrawalAmount) > 0));
-  const financialCapacityComplete = Boolean(
-    accountStructure &&
-      estimatedCostPerSession.trim() &&
-      estimatedTaxReservePct.trim() &&
-      maxLeverageMultiple.trim()
-  );
-
   const maximumOperatingDays = tradingInstrument === "crypto" ? 7 : 5;
   const operatingDays = Math.floor(parsePercent(averageTradingDaysPerWeek));
+  const plannedWinningDays = Math.floor(parsePercent(winningDaysPerWeek));
   const plannedLossDays = Math.floor(parsePercent(lossDaysPerWeek));
   const formInputsComplete =
     preview.start > 0 &&
@@ -689,6 +669,8 @@ export function BusinessPlanScreen() {
     operatingDays <= maximumOperatingDays &&
     plannedLossDays >= 0 &&
     plannedLossDays < operatingDays &&
+    plannedWinningDays > 0 &&
+    plannedWinningDays + plannedLossDays === operatingDays &&
     parsePercent(operatingGoalDayPct) > 0 &&
     parsePercent(expectedLossDayPct) > 0 &&
     parsePercent(maxDailyLossPercent) > 0 &&
@@ -696,8 +678,7 @@ export function BusinessPlanScreen() {
     parsePercent(expectedLossDayPct) <= parsePercent(maxDailyLossPercent) &&
     Boolean(returnModelMode) &&
     Boolean(selectedPlanId) &&
-    capitalFlowAssumptionsComplete &&
-    financialCapacityComplete;
+    capitalFlowAssumptionsComplete;
 
   const planRequestPayload = useMemo(
     () => ({
@@ -710,6 +691,7 @@ export function BusinessPlanScreen() {
       runwayUnit,
       tradingInstrument,
       averageTradingDaysPerWeek: parsePercent(averageTradingDaysPerWeek),
+      winningDaysPerWeek: parsePercent(winningDaysPerWeek),
       lossDaysPerWeek: parsePercent(lossDaysPerWeek),
       maxDailyLossPercent: parsePercent(maxDailyLossPercent),
       maxRiskPerTradePercent: parsePercent(maxRiskPerTradePercent),
@@ -718,12 +700,12 @@ export function BusinessPlanScreen() {
       policyScenarioId,
       operatingDailyGoalPct: parsePercent(operatingGoalDayPct),
       expectedLossDayPct: parsePercent(expectedLossDayPct),
-      estimatedCostPerSessionUsd: parseAmount(estimatedCostPerSession),
-      estimatedTaxReservePct: parsePercent(estimatedTaxReservePct),
+      estimatedCostPerSessionUsd: 0,
+      estimatedTaxReservePct: 0,
       financialCapacity: {
         capitalSource: "business_income",
-        accountStructure,
-        maxLeverageMultiple: parsePercent(maxLeverageMultiple),
+        accountStructure: "cash",
+        maxLeverageMultiple: 1,
       },
       plannedDepositMode,
       plannedDepositFrequency,
@@ -742,16 +724,13 @@ export function BusinessPlanScreen() {
     [
       accountId,
       averageTradingDaysPerWeek,
+      winningDaysPerWeek,
       doRules,
       dontRules,
       expectedLossDayPct,
-      accountStructure,
-      estimatedCostPerSession,
-      estimatedTaxReservePct,
       lossDaysPerWeek,
       maxDailyLossPercent,
       maxRiskPerTradePercent,
-      maxLeverageMultiple,
       operatingGoalDayPct,
       orderRules,
       planStartDate,
@@ -806,8 +785,8 @@ export function BusinessPlanScreen() {
       setError(
         t(
           language,
-          "Complete the final operating plan, business account structure, costs, tax reserve, trading schedule, contributions, and withdrawals before evaluating.",
-          "Completa el plan operativo final, estructura de cuenta empresarial, costos, reserva contributiva, calendario de trading, aportaciones y retiros antes de evaluar."
+          "Complete the final operating plan, trading schedule, contributions, and withdrawals before evaluating.",
+          "Completa el plan operativo final, calendario de trading, aportaciones y retiros antes de evaluar."
         )
       );
       return;
@@ -843,8 +822,8 @@ export function BusinessPlanScreen() {
       setError(
         t(
           language,
-          "Complete the capital goal, final operating plan, business account structure, operating schedule, costs, contributions, and withdrawals.",
-          "Completa la meta de capital, plan operativo final, estructura de cuenta empresarial, calendario operativo, costos, aportaciones y retiros."
+          "Complete the capital goal, final operating plan, operating schedule, contributions, and withdrawals.",
+          "Completa la meta de capital, plan operativo final, calendario operativo, aportaciones y retiros."
         )
       );
       return;
@@ -1425,12 +1404,16 @@ export function BusinessPlanScreen() {
                 keyboardType: "numeric",
                 placeholder: "5",
               })}
+              {renderField(t(language, "Expected winning days", "Días ganadores esperados"), winningDaysPerWeek, setWinningDaysPerWeek, {
+                keyboardType: "numeric",
+                placeholder: "4",
+              })}
+            </View>
+            <View style={styles.twoCol}>
               {renderField(t(language, "Planned loss days/week", "Días pérdida/semana"), lossDaysPerWeek, setLossDaysPerWeek, {
                 keyboardType: "numeric",
                 placeholder: "1",
               })}
-            </View>
-            <View style={styles.twoCol}>
               {renderField(t(language, "Max daily loss %", "Max pérdida diaria %"), maxDailyLossPercent, setMaxDailyLossPercent, {
                 keyboardType: "numeric",
                 placeholder: "2",
@@ -1515,63 +1498,6 @@ export function BusinessPlanScreen() {
                 )}
               </Text>
             ) : null}
-          </View>
-
-          <View style={styles.sectionCard}>
-            <Text style={styles.sectionTitle}>{t(language, "Business capital and friction", "Capital empresarial y fricción")}</Text>
-            <Text style={styles.muted}>
-              {t(
-                language,
-                "The model treats capital, contributions, withdrawals, costs, and tax reserves strictly as trading-business cash flows.",
-                "El modelo trata el capital, las aportaciones, los retiros, los costos y las reservas contributivas estrictamente como flujos del negocio de trading."
-              )}
-            </Text>
-            <View style={styles.calculatedDate}>
-              <Text style={styles.previewLabel}>{t(language, "Capital classification", "Clasificación del capital")}</Text>
-              <Text style={styles.previewValue}>{t(language, "Trading business operating capital", "Capital operativo del negocio de trading")}</Text>
-            </View>
-            <Text style={styles.label}>{t(language, "Account structure", "Estructura de cuenta")}</Text>
-            <View style={styles.optionRow}>
-              {([
-                ["cash", t(language, "Cash", "Cash")],
-                ["margin", t(language, "Margin", "Margen")],
-                ["leveraged_derivatives", t(language, "Leveraged derivatives", "Derivados apalancados")],
-              ] as Array<[AccountStructure, string]>).map(([value, label]) => (
-                <Pressable
-                  key={value}
-                  style={[styles.optionChip, accountStructure === value && styles.optionChipActive]}
-                  onPress={() => {
-                    setAccountStructure(value);
-                    if (value === "cash") setMaxLeverageMultiple("1");
-                  }}
-                >
-                  <Text style={[styles.optionChipText, accountStructure === value && styles.optionChipTextActive]}>{label}</Text>
-                </Pressable>
-              ))}
-            </View>
-            <View style={styles.twoCol}>
-              {renderField(t(language, "Maximum leverage", "Apalancamiento máximo"), maxLeverageMultiple, setMaxLeverageMultiple, {
-                keyboardType: "numeric",
-                placeholder: "1",
-                editable: accountStructure !== "cash",
-              })}
-              {renderField(t(language, "Cost per session", "Costo por sesión"), estimatedCostPerSession, (value) => setEstimatedCostPerSession(formatMoneyDraft(value)), {
-                keyboardType: "numeric",
-                placeholder: "2.00",
-                onBlur: () => estimatedCostPerSession && setEstimatedCostPerSession(formatMoneyValue(estimatedCostPerSession)),
-              })}
-            </View>
-            {renderField(t(language, "Tax reserve on positive trading growth %", "Reserva contributiva sobre crecimiento positivo %"), estimatedTaxReservePct, setEstimatedTaxReservePct, {
-              keyboardType: "numeric",
-              placeholder: "25",
-            })}
-            <Text style={styles.savedHint}>
-              {t(
-                language,
-                "Tax reserve is a planning assumption only. Confirm the applicable rate with a qualified tax professional.",
-                "La reserva contributiva es solo un supuesto de planificación. Confirma la tasa aplicable con un profesional contributivo cualificado."
-              )}
-            </Text>
           </View>
 
           <View style={styles.sectionCard}>

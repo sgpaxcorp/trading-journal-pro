@@ -254,26 +254,26 @@ function evidenceDepth(sessions: number): GrowthPlanEvidenceDepth {
 const BASE_OPERATING_POLICIES: Record<GrowthPlanScenarioId, GrowthPlanOperatingPolicy> = {
   conservative: {
     id: "conservative",
-    goalDayReturnPct: 0.12,
-    expectedLossDayPct: 0.25,
-    maxDailyLossPct: 0.75,
+    goalDayReturnPct: 1,
+    expectedLossDayPct: 1,
+    maxDailyLossPct: 1,
     riskPerTradePct: 0.25,
     lossDaysPerWeek: 1,
   },
   moderate: {
     id: "moderate",
-    goalDayReturnPct: 0.2,
-    expectedLossDayPct: 0.35,
-    maxDailyLossPct: 1,
+    goalDayReturnPct: 2,
+    expectedLossDayPct: 2,
+    maxDailyLossPct: 2,
     riskPerTradePct: 0.5,
     lossDaysPerWeek: 1,
   },
   aggressive: {
     id: "aggressive",
-    goalDayReturnPct: 0.3,
-    expectedLossDayPct: 0.5,
-    maxDailyLossPct: 1.5,
-    riskPerTradePct: 0.75,
+    goalDayReturnPct: 4,
+    expectedLossDayPct: 4,
+    maxDailyLossPct: 4,
+    riskPerTradePct: 1,
     lossDaysPerWeek: 1,
   },
 };
@@ -288,37 +288,28 @@ export function getGrowthPlanOperatingPolicy(
   } | null
 ): GrowthPlanOperatingPolicy {
   const base = BASE_OPERATING_POLICIES[scenarioId] ?? BASE_OPERATING_POLICIES.moderate;
-  let paceFactor = 1;
   let riskFactor = 1;
 
   if (profile?.experience === "new") {
-    paceFactor *= 0.75;
     riskFactor *= 0.75;
   } else if (profile?.experience === "developing") {
-    paceFactor *= 0.9;
     riskFactor *= 0.9;
   }
   if (profile?.incomeDependency === "high") {
-    paceFactor *= 0.8;
     riskFactor *= 0.75;
   }
   if (profile?.drawdownComfort === "low") {
-    paceFactor *= 0.82;
     riskFactor *= 0.8;
   }
   if (profile?.riskProfile === "conservative") {
-    paceFactor *= 0.9;
     riskFactor *= 0.9;
   }
 
-  const maxDailyLossPct = Number(Math.max(0.5, base.maxDailyLossPct * riskFactor).toFixed(2));
+  // The product bands are contractual forecast assumptions: ±1%, ±2%, and ±4%.
+  // Profile evidence may tighten per-trade risk, but it must not silently change
+  // the selected daily gain/loss band.
   return {
     ...base,
-    goalDayReturnPct: Number(Math.max(0.08, base.goalDayReturnPct * paceFactor).toFixed(3)),
-    expectedLossDayPct: Number(
-      Math.min(maxDailyLossPct * 0.65, Math.max(0.12, base.expectedLossDayPct * riskFactor)).toFixed(3)
-    ),
-    maxDailyLossPct,
     riskPerTradePct: Number(Math.max(0.1, base.riskPerTradePct * riskFactor).toFixed(3)),
   };
 }
@@ -375,20 +366,6 @@ function riskBandForAnnualizedReturn(value: number): GrowthPlanRiskBand {
 function equivalentSessionReturnPct(factor: number, daysPerWeek: number) {
   if (!Number.isFinite(factor) || factor <= 0 || daysPerWeek <= 0) return 0;
   return (Math.pow(factor, 1 / daysPerWeek) - 1) * 100;
-}
-
-function goalDayPctForNetSession(params: {
-  netSessionPct: number;
-  daysPerWeek: number;
-  lossDaysPerWeek: number;
-  lossDayPct: number;
-}) {
-  const lossDays = Math.max(0, Math.min(params.daysPerWeek - 1, Math.floor(params.lossDaysPerWeek)));
-  const goalDays = Math.max(1, params.daysPerWeek - lossDays);
-  const cycleTarget = Math.pow(1 + Math.max(-0.99, params.netSessionPct / 100), params.daysPerWeek);
-  const lossFactor = Math.pow(1 - Math.min(99, Math.max(0, params.lossDayPct)) / 100, lossDays);
-  if (cycleTarget <= 0 || lossFactor <= 0) return 0;
-  return Math.max(0, (Math.pow(cycleTarget / lossFactor, 1 / goalDays) - 1) * 100);
 }
 
 function monthsBetweenDates(startIso: string, endIso: string): number {
@@ -501,6 +478,7 @@ function requiredGoalDayPct(params: {
   depositPlan?: AdaptiveDepositPlan | null;
   withdrawalPlan?: AdaptiveWithdrawalPlan | null;
   costPerSessionUsd?: number;
+  symmetricLossPct?: boolean;
 }) {
   if (params.starting <= 0 || params.target <= params.starting || !params.sessions.length) return 0;
   const project = (goalDayPct: number) =>
@@ -509,7 +487,7 @@ function requiredGoalDayPct(params: {
       sessions: params.sessions,
       daysPerWeek: params.daysPerWeek,
       lossDaysPerWeek: params.lossDaysPerWeek,
-      lossDayPct: params.lossDayPct,
+      lossDayPct: params.symmetricLossPct ? goalDayPct : params.lossDayPct,
       goalDayPct,
       depositPlan: params.depositPlan,
       withdrawalPlan: params.withdrawalPlan,
@@ -796,6 +774,7 @@ export function buildAdaptiveGrowthPlan(input: {
   estimatedTaxReservePct?: number | null;
   financialCapacity?: GrowthPlanFinancialCapacity | null;
   maxProjectionYears?: number;
+  solveSymmetricReturnPercent?: boolean;
 }): AdaptiveGrowthPlan {
   const starting = Math.max(0, finite(input.starting));
   const target = Math.max(0, finite(input.target));
@@ -852,37 +831,10 @@ export function buildAdaptiveGrowthPlan(input: {
       ? null
       : (profitFactor == null || profitFactor > 1) &&
         (evidenceNetReturnPerSessionPct == null || evidenceNetReturnPerSessionPct > 0);
-  const evidenceWeight = depth === "established" ? 0.75 : depth === "developing" ? 0.5 : 0;
-  const policyCycleFactor = cycleFactor({
-    daysPerWeek,
-    lossDaysPerWeek: policy.lossDaysPerWeek,
-    goalDayPct: policyGoalDayPct,
-    lossDayPct: modeledExpectedLossDayPct,
-  });
-  const policyNetSessionPct = equivalentSessionReturnPct(policyCycleFactor, daysPerWeek);
-  const historicalDrawdownPct = Math.max(0, finite(input.evidence?.maxDrawdownPct));
-  const drawdownAdjustment =
-    historicalDrawdownPct > 20 ? 0.65 : historicalDrawdownPct > 10 ? 0.82 : 1;
-  const drawdownAdjustedPolicyNetPct = policyNetSessionPct * drawdownAdjustment;
-  const evidenceAdjustedNetPct =
-    evidenceWeight > 0 && evidenceNetReturnPerSessionPct != null && evidenceNetReturnPerSessionPct > 0
-      ? Math.min(drawdownAdjustedPolicyNetPct, evidenceNetReturnPerSessionPct * evidenceWeight)
-      : drawdownAdjustedPolicyNetPct;
-  const evidenceAdjustmentApplied = evidenceAdjustedNetPct + 1e-9 < policyNetSessionPct;
-  const recommendedGoalDayPct =
-    positiveEdge === false
-      ? 0
-      : evidenceAdjustmentApplied
-        ? Math.min(
-            policyGoalDayPct,
-            goalDayPctForNetSession({
-              netSessionPct: evidenceAdjustedNetPct,
-              daysPerWeek,
-              lossDaysPerWeek: policy.lossDaysPerWeek,
-              lossDayPct: modeledExpectedLossDayPct,
-            })
-          )
-        : policyGoalDayPct;
+  const evidenceAdjustmentApplied = false;
+  // The selected mode is the immutable budget baseline. Execution evidence
+  // changes confidence and coaching, but never rewrites the user's forecast.
+  const recommendedGoalDayPct = policyGoalDayPct;
   const recommendedCycleFactor = cycleFactor({
     daysPerWeek,
     lossDaysPerWeek: policy.lossDaysPerWeek,
@@ -912,6 +864,7 @@ export function buildAdaptiveGrowthPlan(input: {
         depositPlan: input.depositPlan,
         withdrawalPlan: input.withdrawalPlan,
         costPerSessionUsd: estimatedCostPerSessionUsd,
+        symmetricLossPct: input.solveSymmetricReturnPercent,
       })
     : 0;
   const targetProjectionSimulation = simulateOperatingPath({
@@ -920,7 +873,9 @@ export function buildAdaptiveGrowthPlan(input: {
     daysPerWeek,
     lossDaysPerWeek: policy.lossDaysPerWeek,
     goalDayPct: Number.isFinite(requestedRequiredGoalDayPct) ? requestedRequiredGoalDayPct : 0,
-    lossDayPct: declaredModeledLossDayPct,
+    lossDayPct: input.solveSymmetricReturnPercent
+      ? requestedRequiredGoalDayPct
+      : declaredModeledLossDayPct,
     depositPlan: input.depositPlan,
     withdrawalPlan: input.withdrawalPlan,
     costPerSessionUsd: estimatedCostPerSessionUsd,
@@ -942,7 +897,7 @@ export function buildAdaptiveGrowthPlan(input: {
     daysPerWeek,
     lossDaysPerWeek: policy.lossDaysPerWeek,
     goalDayPct: recommendedGoalDayPct,
-    lossDayPct: positiveEdge === false ? 0 : modeledExpectedLossDayPct,
+    lossDayPct: modeledExpectedLossDayPct,
     depositPlan: input.depositPlan,
     withdrawalPlan: input.withdrawalPlan,
     costPerSessionUsd: estimatedCostPerSessionUsd,
@@ -953,7 +908,7 @@ export function buildAdaptiveGrowthPlan(input: {
     daysPerWeek,
     lossDaysPerWeek: policy.lossDaysPerWeek,
     goalDayPct: recommendedGoalDayPct,
-    lossDayPct: positiveEdge === false ? 0 : modeledExpectedLossDayPct,
+    lossDayPct: modeledExpectedLossDayPct,
     depositPlan: input.depositPlan,
     withdrawalPlan: input.withdrawalPlan,
     costPerSessionUsd: 0,
@@ -997,9 +952,9 @@ export function buildAdaptiveGrowthPlan(input: {
     starting,
     sessions: horizonSessions,
     daysPerWeek,
-    lossDaysPerWeek: positiveEdge === false ? 0 : policy.lossDaysPerWeek,
-    goalDayPct: positiveEdge === false ? 0 : recommendedGoalDayPct,
-    lossDayPct: positiveEdge === false ? 0 : modeledExpectedLossDayPct,
+    lossDaysPerWeek: policy.lossDaysPerWeek,
+    goalDayPct: recommendedGoalDayPct,
+    lossDayPct: modeledExpectedLossDayPct,
     target,
     depositPlan: input.depositPlan,
     withdrawalPlan: input.withdrawalPlan,
@@ -1012,15 +967,12 @@ export function buildAdaptiveGrowthPlan(input: {
   const recommendedCalendarMonths = horizonSimulation.completionDate
     ? Math.max(1, monthsBetweenDates(input.startIso, horizonSimulation.completionDate))
     : null;
-  // Checkpoints represent the user's target compound path. The selected
-  // operating scenario remains a separate baseline and may legitimately
-  // finish below target or at zero after costs.
+  // Checkpoints follow the operating mode the user selected. The exact target
+  // path remains available separately for comparison and coaching.
   const milestoneRows =
-    valid && Number.isFinite(requestedRequiredGoalDayPct)
-      ? targetProjectionSimulation.rows
-      : completionIndex >= 0
-        ? horizonSimulation.rows.slice(0, completionIndex + 1)
-        : requestedSimulation.rows;
+    completionIndex >= 0
+      ? horizonSimulation.rows.slice(0, completionIndex + 1)
+      : requestedSimulation.rows;
   const milestones = buildMilestones(milestoneRows);
   const panoramaPolicies = new Map<GrowthPlanScenarioId, GrowthPlanOperatingPolicy>();
   for (const comparisonPolicy of input.comparisonPolicies ?? [policy]) {
@@ -1131,7 +1083,9 @@ export function buildAdaptiveGrowthPlan(input: {
       buildPanorama({
         id: "mathematical",
         goalDayPct: requestedRequiredGoalDayPct,
-        lossDayPct: declaredModeledLossDayPct,
+        lossDayPct: input.solveSymmetricReturnPercent
+          ? requestedRequiredGoalDayPct
+          : declaredModeledLossDayPct,
         lossDaysPerWeek: policy.lossDaysPerWeek,
       })
     );

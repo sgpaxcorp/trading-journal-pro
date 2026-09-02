@@ -20,7 +20,14 @@ type GoalAchievementBody = {
 };
 
 function isGoalScope(value: unknown): value is GoalScope {
-  return value === "day" || value === "week" || value === "month" || value === "quarter";
+  return (
+    value === "day" ||
+    value === "week" ||
+    value === "month" ||
+    value === "quarter" ||
+    value === "semiannual" ||
+    value === "annual"
+  );
 }
 
 export async function POST(req: Request) {

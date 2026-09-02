@@ -1,6 +1,6 @@
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 
-export type GoalScope = "day" | "week" | "month" | "quarter";
+export type GoalScope = "day" | "week" | "month" | "quarter" | "semiannual" | "annual";
 
 type PushTokenRow = {
   expo_push_token: string;
@@ -41,6 +41,8 @@ const SYSTEM_RULES: Record<GoalScope, { key: string; triggerType: string }> = {
   week: { key: "weekly_goal_achieved_system", triggerType: "weekly_goal" },
   month: { key: "monthly_goal_achieved_system", triggerType: "monthly_goal" },
   quarter: { key: "quarterly_goal_achieved_system", triggerType: "quarterly_goal" },
+  semiannual: { key: "semiannual_goal_achieved_system", triggerType: "semiannual_goal" },
+  annual: { key: "annual_goal_achieved_system", triggerType: "annual_goal" },
 };
 
 function isExpoPushToken(token: string) {
@@ -76,14 +78,22 @@ function buildDefaultCopy(params: NotifyGoalAchievementParams, locale: "en" | "e
           ? "semanal"
           : params.goalScope === "month"
             ? "mensual"
-            : "trimestral"
+            : params.goalScope === "quarter"
+              ? "trimestral"
+              : params.goalScope === "semiannual"
+                ? "semestral"
+                : "anual"
       : params.goalScope === "day"
         ? "daily"
         : params.goalScope === "week"
           ? "weekly"
           : params.goalScope === "month"
             ? "monthly"
-            : "quarter";
+            : params.goalScope === "quarter"
+              ? "quarterly"
+              : params.goalScope === "semiannual"
+                ? "semiannual"
+                : "annual";
 
   const title =
     locale === "es"

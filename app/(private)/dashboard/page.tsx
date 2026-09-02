@@ -546,12 +546,16 @@ type CadenceProgressPeriod = {
 
 type CadenceProgressSummary = {
   quarterIndex: number;
+  semiannualIndex: number;
+  annualIndex: number;
   monthIndex: number;
   weekIndex: number;
   weeksInMonth: number;
   week: CadenceProgressPeriod;
   month: CadenceProgressPeriod;
   quarter: CadenceProgressPeriod;
+  semiannual: CadenceProgressPeriod;
+  annual: CadenceProgressPeriod;
 };
 
 function computeRequiredGoalPct(
@@ -1873,7 +1877,7 @@ export default function DashboardPage() {
   }, [user, plan, sessionDateStr, dailyCalcs, activeAccountId]);
 
   const notifyGoalAchievementClient = useCallback(async (payload: {
-    goalScope: "day" | "week" | "month" | "quarter";
+    goalScope: "day" | "week" | "month" | "quarter" | "semiannual" | "annual";
     periodKey: string;
     accountId?: string | null;
     goalAmount?: number;
@@ -2354,14 +2358,24 @@ export default function DashboardPage() {
     const weekIndex = current.weekIndex ?? 1;
     const weeksInMonth = current.weeksInMonth ?? 1;
     const quarterIndex = Math.ceil(monthIndex / 3);
+    const semiannualIndex = Math.ceil(monthIndex / 6);
+    const annualIndex = Math.ceil(monthIndex / 12);
 
     const monthMilestones = milestones.filter((m) => (m.monthIndex ?? 1) === monthIndex);
     const quarterMilestones = milestones.filter((m) => {
       const idx = m.monthIndex ?? 1;
       return idx >= (quarterIndex - 1) * 3 + 1 && idx <= quarterIndex * 3;
     });
+    const semiannualMilestones = milestones.filter((m) => {
+      const idx = m.monthIndex ?? 1;
+      return idx >= (semiannualIndex - 1) * 6 + 1 && idx <= semiannualIndex * 6;
+    });
+    const annualMilestones = milestones.filter((m) => {
+      const idx = m.monthIndex ?? 1;
+      return idx >= (annualIndex - 1) * 12 + 1 && idx <= annualIndex * 12;
+    });
 
-    if (!monthMilestones.length || !quarterMilestones.length) return null;
+    if (!monthMilestones.length || !quarterMilestones.length || !semiannualMilestones.length || !annualMilestones.length) return null;
 
     const buildPeriod = (
       startBalance: number,
@@ -2392,9 +2406,21 @@ export default function DashboardPage() {
       quarterMilestones[quarterMilestones.length - 1]?.monthEndBalance ??
       quarterMilestones[quarterMilestones.length - 1]?.targetEquity ??
       target;
+    const semiannualStartBalance = semiannualMilestones[0]?.monthStartBalance ?? starting;
+    const semiannualTargetBalance =
+      semiannualMilestones[semiannualMilestones.length - 1]?.monthEndBalance ??
+      semiannualMilestones[semiannualMilestones.length - 1]?.targetEquity ??
+      target;
+    const annualStartBalance = annualMilestones[0]?.monthStartBalance ?? starting;
+    const annualTargetBalance =
+      annualMilestones[annualMilestones.length - 1]?.monthEndBalance ??
+      annualMilestones[annualMilestones.length - 1]?.targetEquity ??
+      target;
 
     return {
       quarterIndex,
+      semiannualIndex,
+      annualIndex,
       monthIndex,
       weekIndex,
       weeksInMonth,
@@ -2408,6 +2434,16 @@ export default function DashboardPage() {
         quarterStartBalance,
         quarterTargetBalance,
         quarterMilestones[quarterMilestones.length - 1]?.targetDate ?? null
+      ),
+      semiannual: buildPeriod(
+        semiannualStartBalance,
+        semiannualTargetBalance,
+        semiannualMilestones[semiannualMilestones.length - 1]?.targetDate ?? null
+      ),
+      annual: buildPeriod(
+        annualStartBalance,
+        annualTargetBalance,
+        annualMilestones[annualMilestones.length - 1]?.targetDate ?? null
       ),
     };
   }, [plan, planStartStr, targetDateStr, starting, target, currentBalance]);
@@ -2448,6 +2484,26 @@ export default function DashboardPage() {
           source: "dashboard",
           quarter_index: cadenceProgress.quarterIndex,
           target_date: cadenceProgress.quarter.targetDate ?? null,
+        },
+      },
+      {
+        goalScope: "semiannual" as const,
+        periodKey: `h${cadenceProgress.semiannualIndex}:${cadenceProgress.semiannual.targetDate ?? "na"}`,
+        data: cadenceProgress.semiannual,
+        metadata: {
+          source: "dashboard",
+          semiannual_index: cadenceProgress.semiannualIndex,
+          target_date: cadenceProgress.semiannual.targetDate ?? null,
+        },
+      },
+      {
+        goalScope: "annual" as const,
+        periodKey: `y${cadenceProgress.annualIndex}:${cadenceProgress.annual.targetDate ?? "na"}`,
+        data: cadenceProgress.annual,
+        metadata: {
+          source: "dashboard",
+          annual_index: cadenceProgress.annualIndex,
+          target_date: cadenceProgress.annual.targetDate ?? null,
         },
       },
     ];
@@ -3073,6 +3129,8 @@ export default function DashboardPage() {
                 { key: "week", title: L("Week checkpoint", "Checkpoint semanal"), data: cadenceProgress.week },
                 { key: "month", title: L("Month checkpoint", "Checkpoint mensual"), data: cadenceProgress.month },
                 { key: "quarter", title: L("Quarter checkpoint", "Checkpoint trimestral"), data: cadenceProgress.quarter },
+                { key: "semiannual", title: L("Semiannual checkpoint", "Checkpoint semestral"), data: cadenceProgress.semiannual },
+                { key: "annual", title: L("Annual checkpoint", "Checkpoint anual"), data: cadenceProgress.annual },
               ].map((period) => {
                 const checkpointGap = currentBalance - period.data.targetBalance;
                 const checkpointProgress = Math.max(0, Math.min(100, period.data.progress * 100));

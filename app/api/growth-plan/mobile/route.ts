@@ -374,6 +374,16 @@ function normalizePlan(row: GrowthPlanRow | null) {
       tradingCalendarProfile.sessionsPerWeek,
       5
     ),
+    winningDaysPerWeek: clampInt(
+      businessAnalysis?.operatingModel?.winningDaysPerWeek ??
+        Math.max(
+          0,
+          Number(averageTradingDaysRaw ?? 5) - Number(row.loss_days_per_week ?? 0)
+        ),
+      0,
+      tradingCalendarProfile.sessionsPerWeek,
+      4
+    ),
     lossDaysPerWeek: clampInt(
       row.loss_days_per_week,
       0,
@@ -693,8 +703,14 @@ export async function POST(req: NextRequest) {
       5
     );
     const lossDaysPerWeek = clampInt(body?.lossDaysPerWeek, 0, averageTradingDaysPerWeek, 0);
-    const maxDailyLossPercent = clampNumber(body?.maxDailyLossPercent, 0, 25, 2);
-    const maxRiskPerTradePercent = clampNumber(body?.maxRiskPerTradePercent, 0, 25, 1);
+    const winningDaysPerWeek = clampInt(
+      body?.winningDaysPerWeek,
+      0,
+      averageTradingDaysPerWeek,
+      Math.max(0, averageTradingDaysPerWeek - lossDaysPerWeek)
+    );
+    const requestedMaxDailyLossPercent = clampNumber(body?.maxDailyLossPercent, 0, 25, 2);
+    const requestedMaxRiskPerTradePercent = clampNumber(body?.maxRiskPerTradePercent, 0, 25, 1);
     const requestedReturnMode = cleanText(
       body?.returnModelMode ?? currentOperatingModel?.returnModelMode ?? currentBusinessAnalysis?.selectedScenarioId,
       40
@@ -740,13 +756,17 @@ export async function POST(req: NextRequest) {
         ? currentBusinessAnalysis.profile
         : null;
     const basePolicy = getGrowthPlanOperatingPolicy(policyId, currentProfile);
+    const maxDailyLossPercent =
+      returnModelMode === "manual" ? requestedMaxDailyLossPercent : basePolicy.maxDailyLossPct;
+    const maxRiskPerTradePercent =
+      returnModelMode === "manual" ? requestedMaxRiskPerTradePercent : basePolicy.riskPerTradePct;
     const existingSelectedScenario = currentBusinessAnalysis?.selectedScenario ?? {};
     const declaredGoalDayPct =
       returnModelMode === "manual"
         ? clampNumber(
             body?.operatingDailyGoalPct ?? existingSelectedScenario?.dailyGoalPct,
             0.01,
-            5,
+            25,
             basePolicy.goalDayReturnPct
           )
         : basePolicy.goalDayReturnPct;
@@ -758,7 +778,7 @@ export async function POST(req: NextRequest) {
             Math.max(0.01, maxDailyLossPercent),
             Math.min(basePolicy.expectedLossDayPct, Math.max(0.01, maxDailyLossPercent))
           )
-        : Math.min(basePolicy.expectedLossDayPct, Math.max(0.01, maxDailyLossPercent));
+        : basePolicy.expectedLossDayPct;
     const existingDepositSettings = normalizeDepositSettings(
       currentOperatingModel?.plannedDepositSettings
     );
@@ -782,7 +802,7 @@ export async function POST(req: NextRequest) {
     const operatingPolicy = {
       id: policyId,
       goalDayReturnPct: basePolicy.goalDayReturnPct,
-      expectedLossDayPct: Math.min(basePolicy.expectedLossDayPct, Math.max(0.01, maxDailyLossPercent)),
+      expectedLossDayPct: basePolicy.expectedLossDayPct,
       maxDailyLossPct: maxDailyLossPercent,
       riskPerTradePct: maxRiskPerTradePercent,
       lossDaysPerWeek,
@@ -796,10 +816,10 @@ export async function POST(req: NextRequest) {
       capitalSource: "business_income",
       accountStructure: ["cash", "margin", "leveraged_derivatives"].includes(accountStructure)
         ? (accountStructure as NonNullable<GrowthPlanFinancialCapacity["accountStructure"]>)
-        : null,
+        : "cash",
       maxLeverageMultiple:
         capacityInput?.maxLeverageMultiple == null
-          ? null
+          ? 1
           : clampNumber(capacityInput.maxLeverageMultiple, 1, 100, 1),
     };
     const estimatedCostPerSessionUsd = clampNumber(
@@ -826,6 +846,12 @@ export async function POST(req: NextRequest) {
     if (lossDaysPerWeek >= averageTradingDaysPerWeek) {
       return NextResponse.json(
         { error: "Planned losing days must be lower than trading days per week." },
+        { status: 400 }
+      );
+    }
+    if (winningDaysPerWeek <= 0 || winningDaysPerWeek + lossDaysPerWeek !== averageTradingDaysPerWeek) {
+      return NextResponse.json(
+        { error: "Winning and losing days must equal trading days per week." },
         { status: 400 }
       );
     }
@@ -870,27 +896,10 @@ export async function POST(req: NextRequest) {
       estimatedTaxReservePct,
       financialCapacity,
     });
-    if (action !== "preview" && adaptivePlan.capacityStatus === "incomplete") {
-      return NextResponse.json(
-        { error: "Complete the business account structure, leverage, costs, and tax-reserve assumptions before saving." },
-        { status: 400 }
-      );
-    }
-    if (
-      action !== "preview" &&
-      adaptivePlan.verdict === "not_supported"
-    ) {
-      return NextResponse.json(
-        {
-          error: adaptivePlan.recommendedCompletionDate
-            ? `The requested deadline is not supported by the selected operating model. Review and explicitly use the operating runway ending ${adaptivePlan.recommendedCompletionDate}, or revise the plan.`
-            : "This target is outside the disciplined 50-year operating horizon. Revise the return model, target, funding, or execution evidence before saving.",
-          adaptivePlan,
-        },
-        { status: 422 }
-      );
-    }
-    const effectiveTargetDate = targetDate;
+    const effectiveTargetDate =
+      adaptivePlan.recommendedCompletionDate && adaptivePlan.recommendedCompletionDate > targetDate
+        ? adaptivePlan.recommendedCompletionDate
+        : targetDate;
     const effectiveRunway = inferTradingRunway(planStartDate, effectiveTargetDate);
     const marketSessions = computeTradingSessionsBetween(
       planStartDate,
@@ -906,6 +915,8 @@ export async function POST(req: NextRequest) {
       lossDaysPerWeek,
       maxDailyLossPercent,
       modeledLossDayPercent: adaptivePlan.expectedLossDayPct,
+      goalDayReturnPercent: adaptivePlan.recommendedGoalDayPct,
+      stopAtTarget: true,
       depositSettings: plannedDepositSettings,
       withdrawalSettings: plannedWithdrawalSettings,
       existingWithdrawals: Array.isArray(current?.planned_withdrawals) ? current?.planned_withdrawals : [],
@@ -915,6 +926,15 @@ export async function POST(req: NextRequest) {
 
     if (!projection.tradingDays.length) {
       return NextResponse.json({ error: "No operating trading days found for this plan window." }, { status: 400 });
+    }
+    if (action !== "preview" && !projection.targetReached) {
+      return NextResponse.json(
+        {
+          error: "The selected mode does not reach the business target inside the mathematical horizon. Adjust the mode, percentages, capital, or deadline before saving.",
+          adaptivePlan,
+        },
+        { status: 422 }
+      );
     }
     if (action === "preview") {
       return NextResponse.json({
@@ -949,8 +969,7 @@ export async function POST(req: NextRequest) {
     const requiredGoalPct = Number(projection.requiredGoalPct.toFixed(4));
     const targetMultiple = targetBalance / startingBalance;
     const nowIso = new Date().toISOString();
-    const qualificationOnly = adaptivePlan.verdict === "no_validated_edge";
-    const planPhases = qualificationOnly ? [] : projection.milestones.map((phase, idx) => ({
+    const planPhases = projection.milestones.map((phase, idx) => ({
       id: randomUUID(),
       title:
         phase.weekIndex && phase.monthIndex
@@ -1042,6 +1061,7 @@ export async function POST(req: NextRequest) {
           targetDate: effectiveTargetDate,
           committedTradingDays: projection.tradingDays.length,
           averageTradingDaysPerWeek,
+          winningDaysPerWeek,
           lossDaysPerWeek,
           maxDailyLossPercent,
           riskPerTradePct: maxRiskPerTradePercent,
@@ -1070,6 +1090,38 @@ export async function POST(req: NextRequest) {
             committedTradingDays: projection.tradingDays.length,
             calendarIsEstimate: tradingCalendarProfile.isEstimate,
           },
+        },
+        forecastSnapshot: {
+          modelVersion: 3,
+          generatedAt: nowIso,
+          requestedTargetDate: targetDate,
+          forecastTargetDate: effectiveTargetDate,
+          selectedPlanId: requestedSelectedPlanId,
+          startingBalance,
+          targetBalance,
+          requiredGoalDayPct: requiredGoalPct,
+          requestedRequiredGoalDayPct: adaptivePlan.requestedRequiredGoalDayPct,
+          operatingDaysPerWeek: averageTradingDaysPerWeek,
+          winningDaysPerWeek,
+          losingDaysPerWeek: lossDaysPerWeek,
+          selectedAssumptions: {
+            id: requestedSelectedPlanId,
+            goalDayPct: adaptivePlan.recommendedGoalDayPct,
+            lossDayPct: adaptivePlan.expectedLossDayPct,
+            maxDailyLossPct: maxDailyLossPercent,
+            riskPerTradePct: maxRiskPerTradePercent,
+          },
+          completionDate: projection.completionDate,
+          targetReached: projection.targetReached,
+          sessionCount: projection.rows.length,
+          milestones: {
+            weekly: adaptivePlan.weeklyMilestones,
+            monthly: adaptivePlan.monthlyMilestones,
+            quarterly: adaptivePlan.quarterlyMilestones,
+            semiannual: adaptivePlan.semiannualMilestones,
+            annual: adaptivePlan.annualMilestones,
+          },
+          scenarios: adaptivePlan.panoramas,
         },
         selectedScenario: synchronizedScenario,
         scenarios: synchronizedScenarios,
@@ -1164,7 +1216,7 @@ export async function POST(req: NextRequest) {
       target_balance: Number(targetBalance.toFixed(2)),
       target_date: effectiveTargetDate,
       plan_style: "balanced",
-      plan_mode: qualificationOnly ? "manual" : "auto",
+      plan_mode: "auto",
       target_multiple: Number(targetMultiple.toFixed(6)),
       plan_start_date: planStartDate,
       planned_withdrawal_settings: plannedWithdrawalSettings,
@@ -1180,7 +1232,7 @@ export async function POST(req: NextRequest) {
       steps,
       rules: Array.isArray(current?.rules) && current.rules.length ? current.rules : [],
       selected_plan: "suggested",
-      version: 2,
+      version: 3,
       updated_at: nowIso,
     };
 

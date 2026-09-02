@@ -77,6 +77,7 @@ export type CadenceTarget = {
 export type ProjectionResult = {
   rows: ProjectionRow[];
   requiredGoalPct: number;
+  modeledGoalPct: number;
   tradingDays: string[];
   deposits: PlannedDepositEvent[];
   withdrawals: PlannedWithdrawalEvent[];
@@ -420,6 +421,7 @@ function solveRequiredGoalPct(params: {
   depositByDay: Map<number, number>;
   withdrawalByDay: Map<number, number>;
   costPerSessionUsd?: number;
+  symmetricLossPct?: boolean;
 }) {
   if (params.starting <= 0 || params.target <= 0 || params.tradingDays.length === 0) return 0;
 
@@ -429,7 +431,7 @@ function solveRequiredGoalPct(params: {
       tradingDays: params.tradingDays,
       averageTradingDaysPerWeek: params.averageTradingDaysPerWeek,
       lossDaysPerWeek: params.lossDaysPerWeek,
-      lossPct: params.lossPct,
+      lossPct: params.symmetricLossPct ? goalPctDecimal * 100 : params.lossPct,
       goalPctDecimal,
       depositByDay: params.depositByDay,
       withdrawalByDay: params.withdrawalByDay,
@@ -526,11 +528,18 @@ export function buildPlanProjection(params: {
   existingWithdrawals?: PlannedWithdrawalEvent[] | null;
   tradingInstrument?: TradingInstrument;
   estimatedCostPerSessionUsd?: number | null;
+  /** When supplied, simulate this selected goal-day percentage instead of forcing the target. */
+  goalDayReturnPercent?: number | null;
+  /** Solve one balanced percentage that is applied as +p% on wins and -p% on losses. */
+  solveSymmetricReturnPercent?: boolean;
+  /** Keep every row through the requested deadline even when the target is reached early. */
+  stopAtTarget?: boolean;
 }) : ProjectionResult {
   if (params.starting <= 0 || params.target <= 0) {
     return {
       rows: [],
       requiredGoalPct: 0,
+      modeledGoalPct: 0,
       tradingDays: [],
       deposits: [],
       withdrawals: [],
@@ -557,6 +566,7 @@ export function buildPlanProjection(params: {
     return {
       rows: [],
       requiredGoalPct: 0,
+      modeledGoalPct: 0,
       tradingDays: [],
       deposits: [],
       withdrawals: [],
@@ -588,7 +598,7 @@ export function buildPlanProjection(params: {
     )
   );
 
-  const goalPctDecimal = solveRequiredGoalPct({
+  const requiredGoalPctDecimal = solveRequiredGoalPct({
     starting: params.starting,
     target: params.target,
     tradingDays,
@@ -598,14 +608,24 @@ export function buildPlanProjection(params: {
     depositByDay: depositSchedule.byDay,
     withdrawalByDay: withdrawalSchedule.byDay,
     costPerSessionUsd: params.estimatedCostPerSessionUsd ?? 0,
+    symmetricLossPct: params.solveSymmetricReturnPercent,
   });
+  const selectedGoalPct =
+    params.goalDayReturnPercent == null
+      ? requiredGoalPctDecimal * 100
+      : Math.max(0, toNum(params.goalDayReturnPercent, 0));
+  const goalPctDecimal = selectedGoalPct / 100;
+  const selectedLossDayPercent =
+    params.solveSymmetricReturnPercent && params.goalDayReturnPercent == null
+      ? selectedGoalPct
+      : modeledLossDayPercent;
 
   const rows = simulatePlanRows({
     starting: params.starting,
     tradingDays,
     averageTradingDaysPerWeek,
     lossDaysPerWeek: params.lossDaysPerWeek,
-    lossPct: modeledLossDayPercent,
+    lossPct: selectedLossDayPercent,
     goalPctDecimal,
     depositByDay: depositSchedule.byDay,
     withdrawalByDay: withdrawalSchedule.byDay,
@@ -614,10 +634,12 @@ export function buildPlanProjection(params: {
 
   const firstTargetHitIndex = rows.findIndex((row) => row.endBalance >= params.target);
   const targetReached = firstTargetHitIndex >= 0;
+  const shouldStopAtTarget = params.stopAtTarget !== false;
   const completionIndex = targetReached ? firstTargetHitIndex : rows.length - 1;
-  const effectiveRows = rows.slice(0, completionIndex + 1);
-  const effectiveTradingDays = tradingDays.slice(0, completionIndex + 1);
-  const completionRow = effectiveRows[effectiveRows.length - 1] ?? null;
+  const effectiveRows = shouldStopAtTarget && targetReached ? rows.slice(0, completionIndex + 1) : rows;
+  const effectiveTradingDays =
+    shouldStopAtTarget && targetReached ? tradingDays.slice(0, completionIndex + 1) : tradingDays;
+  const completionRow = targetReached ? rows[firstTargetHitIndex] ?? null : null;
 
   const deposits = depositSchedule.events
     .filter((event) => event.endDayIndex <= effectiveRows.length)
@@ -667,13 +689,18 @@ export function buildPlanProjection(params: {
 
   return {
     rows: effectiveRows,
-    requiredGoalPct: goalPctDecimal * 100,
+    requiredGoalPct: requiredGoalPctDecimal * 100,
+    modeledGoalPct: selectedGoalPct,
     tradingDays: effectiveTradingDays,
     deposits,
     withdrawals,
     milestones,
     completionDate: completionRow?.isoDate ?? null,
-    completionBalance: completionRow ? Number(completionRow.endBalance.toFixed(2)) : null,
+    completionBalance: completionRow
+      ? Number(completionRow.endBalance.toFixed(2))
+      : effectiveRows.length
+        ? Number(effectiveRows[effectiveRows.length - 1].endBalance.toFixed(2))
+        : null,
     targetReached,
     completedEarly: targetReached && completionIndex < rows.length - 1,
   };

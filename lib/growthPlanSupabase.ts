@@ -66,6 +66,7 @@ export type GrowthPlanSteps = {
     realismReview?: Record<string, unknown>;
     averageTradingDaysPerWeek?: number;
     operatingModel?: Record<string, unknown>;
+    forecastSnapshot?: Record<string, unknown>;
     aiPlanAdvisor?: Record<string, unknown>;
     updatedAt?: string;
   };
