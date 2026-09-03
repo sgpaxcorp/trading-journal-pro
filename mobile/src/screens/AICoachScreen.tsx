@@ -709,7 +709,17 @@ export function AICoachScreen({}: AICoachScreenProps) {
   }, [accountSeries, journalEntries]);
 
   async function handleSend() {
-    if (!input.trim() || sending || !supabaseMobile) return;
+    if (!input.trim() || sending) return;
+    if (!supabaseMobile) {
+      setScreenError(
+        t(
+          language,
+          "The secure session service is not configured on this build.",
+          "El servicio de sesión segura no está configurado en esta versión."
+        )
+      );
+      return;
+    }
     const sb = supabaseMobile;
     const userId = user?.id ?? (await sb.auth.getUser()).data.user?.id ?? null;
     if (!userId) {
@@ -852,13 +862,14 @@ export function AICoachScreen({}: AICoachScreenProps) {
           askFollowupQuestion: true,
           shortSegments: true,
           strictEvidenceMode: Boolean(coachSnapshot || analyticsSnapshot || recentSessions.length),
+          fastResponse: true,
         },
         coachingFocus: {
           useAnalyticsSummary: true,
           useRelevantSessions: relevantSessions.length > 0,
           useBusinessMilestones: true,
         },
-      });
+      }, { timeoutMs: 75_000 });
 
       const coachText = res?.text || t(language, "No response from coach.", "Sin respuesta del coach.");
       let coachMessage: CoachMessage | null = null;
@@ -896,24 +907,27 @@ export function AICoachScreen({}: AICoachScreenProps) {
         },
       ]);
     } catch (err: any) {
+      const errorMessage =
+        typeof err?.message === "string" && /took too long|timed out/i.test(err.message)
+          ? t(
+              language,
+              "The coach took too long to respond. Check your connection and try again.",
+              "El coach tardó demasiado en responder. Verifica tu conexión e intenta otra vez."
+            )
+          : err?.message && typeof err.message === "string"
+            ? err.message
+            : t(language, "There was an error talking to the AI coach.", "Hubo un error con el coach AI.");
       setMessages((prev) => [
         ...prev,
         {
           id: `error-${Date.now()}`,
           thread_id: thread?.id ?? "ephemeral",
           role: "coach",
-          content:
-            err?.message && typeof err.message === "string"
-              ? err.message
-              : t(language, "There was an error talking to the AI coach.", "Hubo un error con el coach AI."),
+          content: errorMessage,
           created_at: new Date().toISOString(),
         },
       ]);
-      setScreenError(
-        err?.message && typeof err.message === "string"
-          ? err.message
-          : t(language, "There was an error talking to the AI coach.", "Hubo un error con el coach AI.")
-      );
+      setScreenError(errorMessage);
     } finally {
       setSending(false);
       setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 50);

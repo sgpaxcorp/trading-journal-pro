@@ -2,33 +2,24 @@ import { describe, expect, it } from "vitest";
 
 import {
   BUSINESS_MILESTONE_DEFINITIONS,
-  getMissingBusinessAnalysisProfileFields,
-  hasCompleteBusinessAnalysisProfile,
+  hasCompleteBusinessOperatingAnalysis,
 } from "../../lib/businessMilestones";
 
 describe("business milestone guidance", () => {
-  it("requires all five business-analysis answers", () => {
-    const partial = {
-      riskProfile: "moderate",
-      experience: "developing",
-    };
-
-    expect(hasCompleteBusinessAnalysisProfile(partial)).toBe(false);
-    expect(getMissingBusinessAnalysisProfileFields(partial)).toEqual([
-      "incomeDependency",
-      "drawdownComfort",
-      "tradingStyle",
-    ]);
-  });
-
-  it("accepts a profile only when every required answer is present", () => {
+  it("requires a selected model and complete operating assumptions", () => {
+    expect(hasCompleteBusinessOperatingAnalysis({ selectedScenarioId: "moderate" })).toBe(false);
     expect(
-      hasCompleteBusinessAnalysisProfile({
-        riskProfile: "moderate",
-        experience: "developing",
-        incomeDependency: "low",
-        drawdownComfort: "medium",
-        tradingStyle: "day",
+      hasCompleteBusinessOperatingAnalysis({
+        selectedScenarioId: "moderate",
+        operatingModel: {
+          selectedPlanId: "moderate",
+          averageTradingDaysPerWeek: 5,
+          lossDaysPerWeek: 1,
+          goalDayReturnPct: 0.2,
+          expectedLossDayPct: 0.35,
+          maxDailyLossPercent: 1,
+          riskPerTradePct: 0.5,
+        },
       })
     ).toBe(true);
   });

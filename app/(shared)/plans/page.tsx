@@ -7,6 +7,11 @@ import { useAuth } from "@/context/AuthContext";
 import type { PlanId } from "@/lib/types";
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
+import {
+  CURRENT_PRIVACY_VERSION,
+  CURRENT_TERMS_VERSION,
+  FREE_TRIAL_DAYS,
+} from "@/lib/legalConsent";
 import { supabaseBrowser } from "@/lib/supaBaseClient";
 import { catalogText, PLAN_CATALOG, planPriceLabel } from "@/lib/planCatalog";
 
@@ -21,6 +26,7 @@ export default function PlansPage() {
   const [selectedPlan, setSelectedPlan] = useState<PlanId>("advanced");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [checkoutLegalAccepted, setCheckoutLegalAccepted] = useState(false);
 
   // Si no está logueado, mandarlo a login
   useEffect(() => {
@@ -37,6 +43,14 @@ export default function PlansPage() {
       if (!user) {
         router.replace("/signin?redirect=/plans");
         return;
+      }
+      if (!checkoutLegalAccepted) {
+        throw new Error(
+          L(
+            "Please confirm the trial, automatic renewal, no-refund, and educational-use terms before continuing to secure payment.",
+            "Confirma los términos de trial, renovación automática, no reembolso y uso educativo antes de continuar al pago seguro."
+          )
+        );
       }
 
       const { data: sessionData } = await supabaseBrowser.auth.getSession();
@@ -56,6 +70,9 @@ export default function PlansPage() {
         body: JSON.stringify({
           planId: selectedPlan,
           billingCycle: "monthly",
+          legalAccepted: true,
+          termsVersion: CURRENT_TERMS_VERSION,
+          privacyVersion: CURRENT_PRIVACY_VERSION,
         }),
       });
 
@@ -88,8 +105,8 @@ export default function PlansPage() {
         </h1>
         <p className="text-xs text-slate-400 mb-4">
           {L(
-            "Select the business plan that fits how you want to operate your trading business. You'll be redirected to secure Stripe payment.",
-            "Selecciona el plan empresarial que encaja con cómo quieres operar tu empresa de trading. Serás redirigido al pago seguro de Stripe."
+            `Select the business plan that fits how you want to operate your trading business. Eligible new accounts start with a ${FREE_TRIAL_DAYS}-day free trial, then renew automatically unless canceled before the trial ends.`,
+            `Selecciona el plan empresarial que encaja con cómo quieres operar tu empresa de trading. Cuentas nuevas elegibles comienzan con ${FREE_TRIAL_DAYS} días gratis y luego renuevan automáticamente salvo que se cancele antes de terminar el trial.`
           )}
         </p>
 
@@ -160,6 +177,29 @@ export default function PlansPage() {
           <p className="text-[10px] text-red-400 mb-2">{error}</p>
         )}
 
+        <label className="mb-4 flex items-start gap-3 rounded-xl border border-amber-400/30 bg-amber-400/10 px-3 py-3 text-[10px] leading-relaxed text-amber-100/90">
+          <input
+            type="checkbox"
+            checked={checkoutLegalAccepted}
+            onChange={(event) => setCheckoutLegalAccepted(event.target.checked)}
+            className="mt-0.5 h-4 w-4 rounded border-amber-300 bg-slate-950 text-emerald-400 accent-emerald-400"
+            required
+          />
+          <span>
+            {L(
+              `I accept the current Terms & Conditions and Privacy Policy. I understand the ${FREE_TRIAL_DAYS}-day trial, automatic renewal, prepaid no-refund policy, educational-only use, and no-guaranteed-results disclosure.`,
+              `Acepto los Términos y Condiciones y la Política de Privacidad vigentes. Entiendo el trial de ${FREE_TRIAL_DAYS} días, la renovación automática, la política prepago sin reembolso, el uso educativo y la divulgación de resultados no garantizados.`
+            )}{" "}
+            <a href="/terms" target="_blank" rel="noreferrer" className="font-semibold text-emerald-300 underline underline-offset-2">
+              {L("Terms", "Términos")}
+            </a>
+            {" / "}
+            <a href="/privacy" target="_blank" rel="noreferrer" className="font-semibold text-emerald-300 underline underline-offset-2">
+              {L("Privacy", "Privacidad")}
+            </a>
+          </span>
+        </label>
+
         <div className="flex flex-col md:flex-row items-center justify-between gap-3 mt-2">
           <p className="text-[10px] text-slate-500">
             {L(
@@ -169,7 +209,7 @@ export default function PlansPage() {
           </p>
           <button
             type="button"
-            disabled={loading}
+            disabled={loading || !checkoutLegalAccepted}
             onClick={handleCheckout}
             className="px-5 py-2.5 rounded-xl bg-emerald-400 text-slate-950 text-xs font-semibold hover:bg-emerald-300 transition shadow-lg shadow-emerald-500/20 disabled:opacity-60"
           >

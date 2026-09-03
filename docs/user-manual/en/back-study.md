@@ -23,7 +23,7 @@ Back-Study is no longer just a chart replay page. It is a trade review workspace
 4. Replay charts for underlying and, when available, the contract used.
 5. For `Advanced`, execution-audit summary filtered to the selected trade window when entry/exit times are available.
 6. For `Advanced`, trade sequence from broker events.
-7. For `Advanced`, process review and deterministic insights.
+7. For `Advanced`, process review and observations calculated from the available data.
 8. For `Advanced`, raw execution evidence.
 
 ### How it works
@@ -44,7 +44,7 @@ If both disagree, trust the broker audit first.
 In `Trade review`, the audit uses the selected trade window with a buffer around entry and exit. The replay chart can be viewed in local time or market time, but the broker audit window is calculated in market/source time so the execution evidence stays consistent. `Audit workbench` remains the broader full-day instrument audit.
 
 ## Audit workbench mode
-Use `Audit workbench` when you want a broader deterministic analysis by date and instrument, outside the selected replay flow.
+Use `Audit workbench` when you want a broader review by date and instrument outside the selected replay.
 
 This mode is useful when:
 1. You want to inspect all broker events for a date.

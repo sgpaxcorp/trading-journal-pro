@@ -3,6 +3,7 @@ import OpenAI from "openai";
 import { getOptionFlowBetaApiPayload, hasOptionFlowBetaAccess, resolveOptionFlowLang } from "@/lib/optionFlowBeta";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 import { getClientIp, rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
+import { recordAiUsage } from "@/lib/aiUsageServer";
 
 export const runtime = "nodejs";
 
@@ -305,7 +306,9 @@ function aggregateRows(rows: ReturnType<typeof normalizeFlowRow>[]) {
 async function extractRowsFromScreenshots(
   screenshotDataUrls: string[],
   provider?: string,
-  lang: "en" | "es" = "en"
+  lang: "en" | "es" = "en",
+  userId?: string,
+  requestId?: string | null
 ): Promise<Record<string, any>[]> {
   if (!screenshotDataUrls.length) return [];
   const isEs = lang === "es";
@@ -329,6 +332,16 @@ If a field is missing, set it to null. Max 120 rows.`;
     messages: [{ role: "system", content: systemPrompt }, { role: "user", content }],
     response_format: { type: "json_object" },
     temperature: 0,
+  });
+
+  await recordAiUsage({
+    userId,
+    requestId,
+    feature: "option_flow",
+    category: "market_intelligence",
+    operation: "screenshot_extraction",
+    model: completion.model || VISION_MODEL,
+    usage: completion.usage,
   });
 
   const raw = completion.choices[0]?.message?.content ?? "";
@@ -896,7 +909,13 @@ Return only valid JSON with this shape:
       recentOutcomes = [];
     }
 
-    const ocrRows = await extractRowsFromScreenshots(safeScreenshots, provider, lang);
+    const ocrRows = await extractRowsFromScreenshots(
+      safeScreenshots,
+      provider,
+      lang,
+      userId,
+      req.headers.get("x-request-id")
+    );
     const mergedRawRows = [...trimmedRows, ...ocrRows];
     let normalizedRows = dedupeRows(mergedRawRows.map((row) => normalizeFlowRow(row)));
     if (underlying) {
@@ -997,6 +1016,16 @@ Return only valid JSON with this shape:
       ],
       response_format: { type: "json_object" },
       temperature: 0,
+    });
+
+    await recordAiUsage({
+      userId,
+      requestId: req.headers.get("x-request-id"),
+      feature: "option_flow",
+      category: "market_intelligence",
+      operation: hasScreens ? "flow_analysis_with_vision" : "flow_analysis",
+      model: completion.model || modelToUse,
+      usage: completion.usage,
     });
 
     const raw = completion.choices[0]?.message?.content ?? "";

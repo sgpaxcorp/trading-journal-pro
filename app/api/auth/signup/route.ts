@@ -3,6 +3,12 @@ import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 import { sendEmailConfirmationEmail } from "@/lib/email";
 import { validatePasswordPolicyEn } from "@/lib/passwordPolicy";
 import { getClientIp, rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
+import {
+  CURRENT_PRIVACY_VERSION,
+  CURRENT_TERMS_VERSION,
+  isCurrentLegalAcceptancePayload,
+} from "@/lib/legalConsent";
+import { recordLegalAcceptance } from "@/lib/serverLegalAcceptance";
 
 export const runtime = "nodejs";
 
@@ -16,6 +22,9 @@ type Body = {
   address?: string;
   plan?: string;
   source?: "signup" | "start";
+  legalAccepted?: boolean;
+  termsVersion?: string;
+  privacyVersion?: string;
 };
 
 function splitFullName(fullName: string) {
@@ -66,6 +75,16 @@ export async function POST(req: NextRequest) {
     const passwordError = validatePasswordPolicyEn(password);
     if (passwordError) {
       return NextResponse.json({ error: passwordError }, { status: 400 });
+    }
+    if (!isCurrentLegalAcceptancePayload(body)) {
+      return NextResponse.json(
+        {
+          error: "You must accept the current Terms & Conditions and Privacy Policy to create an account.",
+          termsVersion: CURRENT_TERMS_VERSION,
+          privacyVersion: CURRENT_PRIVACY_VERSION,
+        },
+        { status: 400 }
+      );
     }
 
     const origin = new URL(req.url).origin;
@@ -120,6 +139,20 @@ export async function POST(req: NextRequest) {
 
     if (profileError) {
       console.error("[auth/signup] profile upsert error:", profileError);
+    }
+
+    try {
+      await recordLegalAcceptance({
+        userId,
+        source,
+        req,
+        metadata: {
+          plan,
+          signupSource: source,
+        },
+      });
+    } catch (legalErr) {
+      console.error("[auth/signup] legal acceptance record error:", legalErr);
     }
 
     let emailDelivery: "sent" | "failed" = "sent";

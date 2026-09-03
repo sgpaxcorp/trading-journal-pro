@@ -4,6 +4,11 @@
 
 AI Coaching turns your journal and analytics into actionable feedback. It works best after you have a meaningful sample of sessions.
 
+## AI Coaching and Neuro Guide
+Use **Neuro Guide** when you need a quick manual explanation, want to understand the current page, or need a concise reading of your latest KPIs.
+
+Use **AI Coaching** when you want to analyze patterns, compare your plan with execution, review trading psychology, and produce an action plan. AI Coaching uses broader context and is designed for analysis conversations rather than simple navigation questions.
+
 ## What AI Coaching reads
 AI Coaching reads connected context, not only your chat.
 
@@ -59,3 +64,9 @@ This makes the coaching more personal and more precise.
 - Revisit coaching weekly to track whether changes improved results.
 - Keep Neuro Layer chips honest. The coach depends on good inputs.
 - Check the dashboard after a coaching session. The latest `Action Plan` now appears there as an operating reminder.
+
+## Answer limits
+- Quality depends on an up-to-date Journal, imports, and Growth Plan.
+- A projection is not a promise of performance.
+- AI Coaching does not place trades or tell you what security to buy or sell.
+- When the evidence is insufficient, use the response to identify what information must be completed before drawing a conclusion.

@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { ReactNode } from "react";
+import Link from "next/link";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -81,6 +81,7 @@ function splitDoc(content: string): { intro: string; sections: DocSection[] } {
 export default function HelpDoc({ source }: HelpDocProps) {
   const content = loadDoc(source);
   const { intro, sections } = splitDoc(content);
+  const isEs = source.includes("/es/");
 
   const markdownComponents: Components = {
     h1: ({ children }: any) => (
@@ -193,6 +194,23 @@ export default function HelpDoc({ source }: HelpDocProps) {
           ))}
         </div>
       ) : null}
+
+      <section className="mt-6 rounded-2xl border border-cyan-300/20 bg-gradient-to-r from-cyan-400/[0.08] via-sky-400/[0.04] to-emerald-400/[0.08] p-4">
+        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-200">
+          {isEs ? "¿Necesitas una explicación más clara?" : "Need a clearer explanation?"}
+        </p>
+        <p className="mt-2 text-sm leading-relaxed text-slate-300">
+          {isEs
+            ? "Abre Guía Neuro con el botón flotante del cerebro y pregunta por el manual, la página actual o tu desempeño más reciente disponible."
+            : "Open Neuro Guide with the floating brain button. Ask about this manual, the page you are viewing, or your latest available performance."}
+        </p>
+        <Link
+          href="/help/assistant"
+          className="mt-3 inline-flex rounded-full border border-cyan-300/30 px-3 py-1.5 text-xs font-semibold text-cyan-100 transition hover:border-emerald-300/50 hover:text-emerald-100"
+        >
+          {isEs ? "Manual de Guía Neuro" : "Neuro Guide manual"}
+        </Link>
+      </section>
     </article>
   );
 }

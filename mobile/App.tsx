@@ -19,7 +19,7 @@ import { CalendarScreen } from "./src/screens/CalendarScreen";
 import { AnalyticsScreen } from "./src/screens/AnalyticsScreen";
 import { AICoachScreen } from "./src/screens/AICoachScreen";
 import { SettingsScreen } from "./src/screens/MoreScreen";
-import { OtherScreen } from "./src/screens/OtherScreen";
+import { BusinessProgressScreen } from "./src/screens/BusinessProgressScreen";
 import { JournalDateScreen } from "./src/screens/JournalDateScreen";
 import { NotebookScreen } from "./src/screens/NotebookScreen";
 import { NotebookWorkspaceScreen } from "./src/screens/NotebookWorkspaceScreen";
@@ -59,7 +59,7 @@ type MainTabParamList = {
   Calendar: undefined;
   Analytics: undefined;
   AICoach: undefined;
-  Other: undefined;
+  BusinessProgress: undefined;
 };
 
 type RootStackParamList = {
@@ -97,7 +97,7 @@ function MainTabs() {
       Calendar: t(language, "P&L Calendar", "Calendario P&L"),
       Analytics: t(language, "Business KPIs", "KPIs Empresariales"),
       AICoach: t(language, "Business Coach", "Coach Empresarial"),
-      Other: t(language, "Workspace", "Workspace"),
+      BusinessProgress: t(language, "Business Progress", "Progreso del negocio"),
     }),
     [language]
   );
@@ -130,48 +130,6 @@ function MainTabs() {
     navigation.navigate("JournalDate", date ? { date } : undefined);
   }, [navigation]);
 
-  const openNotebook = useCallback(() => {
-    if (!planAccess.loading && !planAccess.hasNotebook) {
-      openModule(
-        t(language, "Business Notebook · Advanced", "Notebook Empresarial · Advanced"),
-        t(
-          language,
-          "Business notebooks, sections, pages, ink, and research notes are included in Advanced.",
-          "Notebooks empresariales, secciones, páginas, ink y notas de research están incluidas en Advanced."
-        ),
-        { badge: "Advanced" }
-      );
-      return;
-    }
-    const parent = navigation.getParent<NativeStackNavigationProp<RootStackParamList>>();
-    if (parent) {
-      parent.navigate("Notebook");
-      return;
-    }
-    navigation.navigate("Notebook");
-  }, [language, navigation, openModule, planAccess.hasNotebook, planAccess.loading]);
-
-  const openBrokerConnect = useCallback(() => {
-    if (!planAccess.loading && !planAccess.hasBrokerSync) {
-      openModule(
-        t(language, "Broker Sync · Add-on", "Broker Sync · Add-on"),
-        t(
-          language,
-          "Broker connection and automatic sync require the Broker Sync add-on.",
-          "La conexión de bróker y sincronización automática requieren el add-on Broker Sync."
-        ),
-        { badge: t(language, "Add-on", "Add-on") }
-      );
-      return;
-    }
-    const parent = navigation.getParent<NativeStackNavigationProp<RootStackParamList>>();
-    if (parent) {
-      parent.navigate("BrokerConnect");
-      return;
-    }
-    navigation.navigate("BrokerConnect");
-  }, [language, navigation, openModule, planAccess.hasBrokerSync, planAccess.loading]);
-
   const openBusinessPlan = useCallback(() => {
     const parent = navigation.getParent<NativeStackNavigationProp<RootStackParamList>>();
     if (parent) {
@@ -193,6 +151,17 @@ function MainTabs() {
           headerTitle: () => (
             <Text style={[styles.headerText, { color: colors.textPrimary }]}>{tabTitles[route.name]}</Text>
           ),
+          headerRight: () => (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={t(language, "Open app settings", "Abrir ajustes de la app")}
+              hitSlop={10}
+              onPress={openSettings}
+              style={styles.settingsButton}
+            >
+              <Ionicons name="settings-outline" size={22} color={colors.textPrimary} />
+            </Pressable>
+          ),
           tabBarStyle: { backgroundColor: colors.surface, borderTopColor: colors.border },
           tabBarActiveTintColor: colors.primary,
           tabBarInactiveTintColor: colors.textMuted,
@@ -203,7 +172,7 @@ function MainTabs() {
             if (route.name === "Calendar") return <Ionicons name="calendar-outline" size={size} color={color} />;
             if (route.name === "Analytics") return <Ionicons name="stats-chart-outline" size={size} color={color} />;
             if (route.name === "AICoach") return <Ionicons name="sparkles-outline" size={size} color={color} />;
-            return <Ionicons name="grid-outline" size={size} color={color} />;
+            return <Ionicons name="trending-up-outline" size={size} color={color} />;
           },
         })}
       >
@@ -240,18 +209,8 @@ function MainTabs() {
             )
           }
         </Tab.Screen>
-        <Tab.Screen name="Other" options={{ title: tabTitles.Other }}>
-          {() => (
-            <OtherScreen
-              onOpenModule={openModule}
-              onOpenSettings={openSettings}
-              onOpenNotebook={openNotebook}
-              onOpenJournalDate={openJournalDate}
-              onOpenBrokerConnect={openBrokerConnect}
-              onOpenBusinessPlan={openBusinessPlan}
-              planAccess={planAccess}
-            />
-          )}
+        <Tab.Screen name="BusinessProgress" options={{ title: t(language, "Progress", "Progreso") }}>
+          {() => <BusinessProgressScreen onOpenBusinessPlan={openBusinessPlan} />}
         </Tab.Screen>
       </Tab.Navigator>
   );
@@ -687,7 +646,7 @@ function AppShell() {
           <Stack.Screen
             name="Settings"
             component={SettingsScreen}
-            options={{ title: "Settings" }}
+            options={{ title: t(language, "Settings", "Ajustes") }}
           />
           <Stack.Screen
             name="JournalDate"
@@ -741,5 +700,12 @@ const styles = StyleSheet.create({
   headerText: {
     fontSize: 16,
     fontWeight: "700",
+  },
+  settingsButton: {
+    width: 42,
+    height: 42,
+    marginRight: 6,
+    alignItems: "center",
+    justifyContent: "center",
   },
 });

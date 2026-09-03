@@ -7,8 +7,18 @@ import { useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
 import { useAuth } from "@/context/AuthContext";
 import type { PlanId } from "@/lib/types";
+import { isActiveProfileStatus } from "@/lib/accessControl";
 import { useAppSettings } from "@/lib/appSettings";
+import {
+  areBrokerConnectionsEnabledFromEnv,
+  brokerConnectionsUnavailableMessage,
+} from "@/lib/brokerConnections";
 import { resolveLocale } from "@/lib/i18n";
+import {
+  CURRENT_PRIVACY_VERSION,
+  CURRENT_TERMS_VERSION,
+  FREE_TRIAL_DAYS,
+} from "@/lib/legalConsent";
 import { supabaseBrowser } from "@/lib/supaBaseClient";
 import { listMyEntitlements } from "@/lib/entitlementsSupabase";
 import {
@@ -33,6 +43,8 @@ type SubscriptionInfo = {
   cancel_at_period_end: boolean;
   current_period_start: string | null;
   current_period_end: string | null;
+  trial_start: string | null;
+  trial_end: string | null;
   price_id: string | null;
   interval: string | null;
   billing_cycle: "monthly" | "annual" | null;
@@ -47,6 +59,8 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
   const lang = resolveLocale(locale);
   const isEs = lang === "es";
   const L = (en: string, es: string) => (isEs ? es : en);
+  const brokerConnectionsEnabled = areBrokerConnectionsEnabledFromEnv();
+  const brokerUnavailableMessage = brokerConnectionsUnavailableMessage(lang);
 
   const [selectedPlan, setSelectedPlan] = useState<PlanId>(initialPlan);
   const [loading, setLoading] = useState(false);
@@ -70,6 +84,7 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
   const [autoRenewEnabled, setAutoRenewEnabled] = useState(true);
   const [renewalLoading, setRenewalLoading] = useState(false);
   const [renewalNotice, setRenewalNotice] = useState<string | null>(null);
+  const [checkoutLegalAccepted, setCheckoutLegalAccepted] = useState(false);
 
   const priceFor = (planId: PlanId) =>
     planMonthlyPrice(planId, billingCycle);
@@ -206,10 +221,23 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
 
   async function handleCheckout() {
     if (authLoading) return;
+    if (!brokerConnectionsEnabled && brokerAddonSelected) {
+      setError(brokerUnavailableMessage);
+      return;
+    }
 
     if (!user) {
       setError(L("You need to sign in before starting secure payment.", "Debes iniciar sesión antes de iniciar el pago seguro."));
       // Si quisieras redirect: router.push(`/signin?redirect=/billing?plan=${selectedPlan}`);
+      return;
+    }
+    if (!checkoutLegalAccepted) {
+      setError(
+        L(
+          "Please confirm the trial, automatic renewal, no-refund, and educational-use terms before continuing to secure payment.",
+          "Confirma los términos de trial, renovación automática, no reembolso y uso educativo antes de continuar al pago seguro."
+        )
+      );
       return;
     }
 
@@ -234,9 +262,12 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
         body: JSON.stringify({
           planId: selectedPlan,
           addonOptionFlow: false,
-          addonBrokerSync: !hasActivePlan && brokerAddonSelected,
+          addonBrokerSync: brokerConnectionsEnabled && !hasActivePlan && brokerAddonSelected,
           billingCycle,
           partnerCode: partnerCode || undefined,
+          legalAccepted: true,
+          termsVersion: CURRENT_TERMS_VERSION,
+          privacyVersion: CURRENT_PRIVACY_VERSION,
         }),
       });
 
@@ -259,8 +290,21 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
 
   async function handleAddonCheckout(addonKey: "broker_sync") {
     if (authLoading) return;
+    if (!brokerConnectionsEnabled) {
+      setError(brokerUnavailableMessage);
+      return;
+    }
     if (!user) {
       setError(L("You need to sign in before starting secure payment.", "Debes iniciar sesión antes de iniciar el pago seguro."));
+      return;
+    }
+    if (!checkoutLegalAccepted) {
+      setError(
+        L(
+          "Please confirm the trial, automatic renewal, no-refund, and educational-use terms before continuing to secure payment.",
+          "Confirma los términos de trial, renovación automática, no reembolso y uso educativo antes de continuar al pago seguro."
+        )
+      );
       return;
     }
 
@@ -282,7 +326,13 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ addonKey, billingCycle }),
+        body: JSON.stringify({
+          addonKey,
+          billingCycle,
+          legalAccepted: true,
+          termsVersion: CURRENT_TERMS_VERSION,
+          privacyVersion: CURRENT_PRIVACY_VERSION,
+        }),
       });
 
       const data = await res.json();
@@ -334,7 +384,7 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
   }
 
   const isButtonDisabled = loading || authLoading;
-  const hasActivePlan = currentPlan !== "none" && currentStatus === "active";
+  const hasActivePlan = currentPlan !== "none" && isActiveProfileStatus(currentStatus);
   const isCurrentSelection = hasActivePlan && selectedPlan === currentPlan;
   const currentPlanLabel =
     currentPlan === "advanced"
@@ -456,6 +506,36 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
               )}
             </div>
           </div>
+
+          <div className="mb-6 rounded-2xl border border-amber-400/25 bg-amber-400/10 px-4 py-3 text-[10px] leading-relaxed text-amber-100/90">
+            {L(
+              `Eligible new accounts start with a ${FREE_TRIAL_DAYS}-day free trial. After the trial, the selected plan renews automatically unless canceled before the trial ends. Successful paid charges are prepaid, final, and non-refundable except where required by law. NeuroTrader is educational only and does not provide financial advice or guarantee trading, income, projection, AI coaching, or capital results.`,
+              `Cuentas nuevas elegibles comienzan con un trial gratis de ${FREE_TRIAL_DAYS} días. Después del trial, el plan seleccionado renueva automáticamente salvo que se cancele antes de terminar el trial. Los cargos pagados exitosos son prepagados, finales y no reembolsables salvo que la ley exija lo contrario. NeuroTrader es educativo solamente y no provee asesoría financiera ni garantiza resultados de trading, ingresos, proyecciones, AI coaching o capital.`
+            )}
+          </div>
+
+          <label className="mb-8 flex items-start gap-3 rounded-2xl border border-slate-700 bg-slate-900/70 px-4 py-3 text-[10px] leading-relaxed text-slate-300">
+            <input
+              type="checkbox"
+              checked={checkoutLegalAccepted}
+              onChange={(event) => setCheckoutLegalAccepted(event.target.checked)}
+              className="mt-0.5 h-4 w-4 rounded border-slate-600 bg-slate-950 text-emerald-400 accent-emerald-400"
+              required
+            />
+            <span>
+              {L(
+                `I accept the current Terms & Conditions and Privacy Policy. I understand the ${FREE_TRIAL_DAYS}-day trial, automatic renewal, prepaid no-refund policy, educational-only use, and no-guaranteed-results disclosure.`,
+                `Acepto los Términos y Condiciones y la Política de Privacidad vigentes. Entiendo el trial de ${FREE_TRIAL_DAYS} días, la renovación automática, la política prepago sin reembolso, el uso educativo y la divulgación de resultados no garantizados.`
+              )}{" "}
+              <a href="/terms" target="_blank" rel="noreferrer" className="font-semibold text-emerald-300 underline underline-offset-2">
+                {L("Terms", "Términos")}
+              </a>
+              {" / "}
+              <a href="/privacy" target="_blank" rel="noreferrer" className="font-semibold text-emerald-300 underline underline-offset-2">
+                {L("Privacy", "Privacidad")}
+              </a>
+            </span>
+          </label>
 
           {/* Plans */}
           <div className="grid grid-cols-1 md:grid-cols-[1.02fr,0.98fr] gap-4 md:gap-6">
@@ -640,6 +720,8 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
               <span className="rounded-full border border-slate-700 bg-slate-950/70 px-3 py-1 text-[11px] text-slate-300">
                 {addonLoading
                   ? L("Checking…", "Verificando…")
+                  : !brokerConnectionsEnabled
+                  ? L("Coming soon", "Proximamente")
                   : brokerAddonActive
                   ? L("Active", "Activo")
                   : L("Optional", "Opcional")}
@@ -649,14 +731,23 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
             <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
               <div>
                 <p className="text-sm font-semibold text-slate-100">
-                  ${brokerSyncPrice(billingCycle).toFixed(2)}
+                  {brokerConnectionsEnabled
+                    ? `$${brokerSyncPrice(billingCycle).toFixed(2)}`
+                    : L("Coming soon", "Proximamente")}
                 </p>
                 <p className="text-[11px] text-slate-400">
-                  {billingCycle === "annual"
+                  {!brokerConnectionsEnabled
+                    ? L("Provider approval pending", "Aprobacion de proveedor pendiente")
+                    : billingCycle === "annual"
                     ? L("Annual add-on", "Add-on anual")
                     : L("Monthly add-on", "Add-on mensual")}
                 </p>
-                {!hasActivePlan ? (
+                {!brokerConnectionsEnabled ? (
+                  <p className="mt-1 text-[11px] text-amber-200">
+                    {brokerUnavailableMessage}
+                  </p>
+                ) : null}
+                {!hasActivePlan && brokerConnectionsEnabled ? (
                   <p className="mt-1 text-[11px] text-slate-500">
                     {L(
                       "Add it now and it will be included in the secure Stripe payment below.",
@@ -671,13 +762,16 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
                   <button
                     type="button"
                     onClick={() => setBrokerAddonSelected((prev) => !prev)}
-                    className={`rounded-xl px-4 py-2 text-xs font-semibold transition ${
+                    disabled={!brokerConnectionsEnabled}
+                    className={`rounded-xl px-4 py-2 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${
                       brokerAddonSelected
                         ? "bg-emerald-400 text-slate-950 hover:bg-emerald-300"
                         : "border border-slate-700 text-slate-200 hover:border-emerald-400"
                     }`}
                   >
-                    {brokerAddonSelected
+                    {!brokerConnectionsEnabled
+                      ? L("Coming soon", "Proximamente")
+                      : brokerAddonSelected
                       ? L("Remove Broker Sync", "Quitar Broker Sync")
                       : L("Add Broker Sync", "Agregar Broker Sync")}
                   </button>
@@ -685,10 +779,12 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
                   <button
                     type="button"
                     onClick={() => handleAddonCheckout("broker_sync")}
-                    disabled={isButtonDisabled || brokerAddonActive}
+                    disabled={isButtonDisabled || brokerAddonActive || !brokerConnectionsEnabled || !checkoutLegalAccepted}
                     className="rounded-xl bg-emerald-400 px-4 py-2 text-xs font-semibold text-slate-950 hover:bg-emerald-300 disabled:opacity-60 disabled:cursor-not-allowed"
                   >
-                    {brokerAddonActive
+                    {!brokerConnectionsEnabled
+                      ? L("Coming soon", "Proximamente")
+                      : brokerAddonActive
                       ? L("Already active", "Ya activo")
                       : L("Add Broker Sync", "Agregar Broker Sync")}
                   </button>
@@ -744,12 +840,18 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
                       <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500">
                         {subscriptionInfo.cancel_at_period_end
                           ? L("Access until", "Acceso hasta")
+                          : subscriptionInfo.status === "trialing"
+                          ? L("Trial ends", "Trial termina")
                           : L("Next renewal", "Próxima renovación")}
                       </p>
-                      <p className="mt-1 text-slate-100">{formatDate(subscriptionInfo.current_period_end)}</p>
+                      <p className="mt-1 text-slate-100">
+                        {formatDate(subscriptionInfo.status === "trialing" ? subscriptionInfo.trial_end : subscriptionInfo.current_period_end)}
+                      </p>
                       <p className="mt-1 text-[11px] text-slate-500">
                         {subscriptionInfo.cancel_at_period_end
                           ? L("Auto‑renew is off", "La auto‑renovación está apagada")
+                          : subscriptionInfo.status === "trialing"
+                          ? L("Auto-renew starts after trial", "La auto-renovación empieza después del trial")
                           : L("Auto‑renew is on", "La auto‑renovación está activa")}
                       </p>
                     </div>
@@ -775,8 +877,12 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
                       <p className="mt-2 text-[11px] text-slate-400">
                         {autoRenewEnabled
                           ? L(
-                              "Your business access renews automatically on the next billing date unless you turn it off.",
-                              "Tu acceso empresarial se renueva automáticamente en la próxima fecha de cobro a menos que lo apagues."
+                              subscriptionInfo.status === "trialing"
+                                ? "Your business access is in trial. It renews automatically after the trial unless you turn auto-renew off before it ends."
+                                : "Your business access renews automatically on the next billing date unless you turn it off.",
+                              subscriptionInfo.status === "trialing"
+                                ? "Tu acceso empresarial está en trial. Renueva automáticamente después del trial salvo que apagues la auto-renovación antes de que termine."
+                                : "Tu acceso empresarial se renueva automáticamente en la próxima fecha de cobro a menos que lo apagues."
                             )
                           : L(
                               "No future charge is scheduled. Your access still remains active through the date shown above.",
@@ -873,13 +979,19 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
                   "Serás redirigido a Stripe para activar o actualizar tu acceso empresarial a NeuroTrader."
                 )}
               </p>
+              <p className="mt-3 rounded-xl border border-amber-400/25 bg-amber-400/10 px-3 py-2 text-[10px] leading-relaxed text-amber-100/90">
+                {L(
+                  `Educational platform only. Eligible first-time accounts may receive a ${FREE_TRIAL_DAYS}-day trial, then automatic renewal begins unless canceled before the trial ends. AI coaching, projections, simulations, analytics, and reports do not provide financial advice or guarantee results. Paid charges are prepaid, final, and non-refundable except where required by law or explicitly stated by NTJ in writing.`,
+                  `Plataforma educativa solamente. Cuentas nuevas elegibles pueden recibir un trial de ${FREE_TRIAL_DAYS} días, luego comienza la renovación automática salvo que se cancele antes de terminar el trial. El AI coaching, proyecciones, simulaciones, analítica y reportes no proveen asesoría financiera ni garantizan resultados. Los cargos pagados son prepagados, finales y no reembolsables salvo que la ley exija lo contrario o NTJ lo indique explícitamente por escrito.`
+                )}
+              </p>
             </div>
 
             <div className="flex flex-col md:flex-row md:items-center gap-3">
               <button
                 type="button"
                 onClick={handleCheckout}
-                disabled={isButtonDisabled || (hasActivePlan && isCurrentSelection)}
+                disabled={isButtonDisabled || !checkoutLegalAccepted || (hasActivePlan && isCurrentSelection)}
                 className="w-full md:w-auto min-w-[180px] px-6 py-2.5 rounded-xl bg-emerald-400 text-slate-950 text-xs md:text-sm font-semibold hover:bg-emerald-300 disabled:opacity-60 disabled:cursor-not-allowed transition whitespace-nowrap text-center leading-none"
               >
                 <span>
@@ -887,7 +999,7 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
                     ? isCurrentSelection
                       ? L("Current plan selected", "Plan actual seleccionado")
                       : `${L("Continue with", "Continuar con")} ${selectedPlan === "core" ? L("Core", "Core") : L("Advanced", "Advanced")}`
-                    : L("Secure payment with Stripe", "Pago seguro con Stripe")}
+                    : L(`Start ${FREE_TRIAL_DAYS}-day trial`, `Comenzar trial de ${FREE_TRIAL_DAYS} días`)}
                 </span>
                 {(loading || authLoading) && (
                   <span className="ml-2 inline-flex h-3 w-3 animate-spin rounded-full border-2 border-slate-950 border-t-transparent" />

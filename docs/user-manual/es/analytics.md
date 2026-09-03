@@ -33,7 +33,7 @@ Resultados por símbolo/producto.
 Métricas a nivel trade y patrones.
 
 **Statistics**  
-Métricas avanzadas (Sharpe, Sortino, profit factor, etc.).
+Detalle de medidas de rentabilidad, riesgo, actividad y consistencia. Abre la explicación de cada medida antes de usarla para tomar una decisión.
 
 ## Balance chart
 Muestra la curva de equity. Úsala para validar consistencia y fases de drawdown.
@@ -42,7 +42,7 @@ Muestra la curva de equity. Úsala para validar consistencia y fases de drawdown
 1. Empieza con Overview y confirma tamaño de muestra.
 2. Revisa Risk para validar disciplina.
 3. Usa Time + Instruments para aislar tu edge.
-4. Usa Statistics solo cuando confías en la data.
+4. Usa Statistics cuando la muestra sea suficiente y hayas leído la definición de cada medida.
 
 ## Tips
 - Analiza con rangos limpios de fechas.

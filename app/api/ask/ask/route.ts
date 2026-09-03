@@ -5,6 +5,7 @@ import {
   BROKER_SYNC_ADDON,
   PLAN_PRICES,
 } from "@/lib/planCatalog";
+import { recordAiUsage } from "@/lib/aiUsageServer";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -98,6 +99,16 @@ Sales behavior:
     const answer =
       completion.choices[0]?.message?.content?.trim() ||
       "Lo siento, no pude generar una respuesta.";
+
+    await recordAiUsage({
+      userId: authUser?.userId ?? null,
+      requestId: req.headers.get("x-request-id"),
+      feature: "sales_assistant",
+      category: "sales",
+      operation: "plan_question",
+      model: completion.model || "gpt-4o-mini",
+      usage: completion.usage,
+    });
 
     return new Response(JSON.stringify({ answer }), {
       status: 200,

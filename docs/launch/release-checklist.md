@@ -24,6 +24,8 @@ Use this before every production release.
 - `HCAPTCHA_SECRET_KEY` is set before public signup/contact traffic.
 - `STRIPE_SECRET_KEY`, price IDs, and `STRIPE_WEBHOOK_SECRET` are production values.
 - `OPENAI_API_KEY` is scoped to this product and monitored for cost spikes.
+- `OPENAI_ADMIN_KEY` is server-only and restricted to the Admin cost reconciliation panel; never expose it with a `NEXT_PUBLIC_` prefix.
+- `OPENAI_PROJECT_ID` is set when the OpenAI organization also serves other products, so Admin reports only NeuroTrader costs.
 - `BROKER_SECRET_ENCRYPTION_KEY` is set before onboarding real broker connections.
 - `ADMIN_ACTION_SECRET` is set if destructive admin actions should require step-up verification.
 - Public bypass flags are off:

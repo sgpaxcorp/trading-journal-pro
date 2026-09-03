@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { exchangeWebullCode, saveWebullTokens, formatWebullError } from "@/lib/webullClient";
 import { getBrokerOAuthConnection } from "@/lib/brokerOAuthStorage";
-import { requireBrokerSyncAddon } from "@/lib/serverFeatureAccess";
+import { requireBrokerSyncAccess } from "@/lib/serverFeatureAccess";
+import { BROKER_CONNECTIONS_DISABLED_CODE } from "@/lib/brokerConnections";
 
 export const runtime = "nodejs";
 
@@ -33,14 +34,11 @@ export async function GET(req: Request) {
   }
 
   try {
-    const brokerSyncFree =
-      process.env.BROKER_SYNC_FREE === "true" || process.env.NEXT_PUBLIC_BROKER_SYNC_FREE === "true";
-    if (!brokerSyncFree) {
-      const brokerGate = await requireBrokerSyncAddon(userId);
-      if (brokerGate) {
-        res.headers.set("Location", `${url.origin}/import?webull=error&reason=broker_sync_required`);
-        return res;
-      }
+    const brokerGate = await requireBrokerSyncAccess(userId);
+    if (brokerGate) {
+      const reason = brokerGate.status === 503 ? BROKER_CONNECTIONS_DISABLED_CODE : "broker_sync_required";
+      res.headers.set("Location", `${url.origin}/import?webull=error&reason=${reason}`);
+      return res;
     }
 
     const existing = await getBrokerOAuthConnection(userId, "webull");

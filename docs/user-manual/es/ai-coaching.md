@@ -4,6 +4,11 @@
 
 AI Coaching convierte tu journal y analítica en feedback accionable. Funciona mejor con un número suficiente de sesiones.
 
+## Diferencia entre AI Coaching y Guía Neuro
+Usa **Guía Neuro** cuando necesites una explicación rápida del manual, quieras entender la página actual o desees una lectura breve de tus KPIs más recientes.
+
+Usa **AI Coaching** cuando quieras analizar patrones, comparar tu plan con tu ejecución, revisar psicología de trading y producir un plan de acción. AI Coaching utiliza un contexto más amplio y por eso está diseñado para conversaciones de análisis, no para preguntas sencillas de navegación.
+
 ## Qué lee AI Coaching
 AI Coaching lee contexto conectado, no solo el chat.
 
@@ -59,3 +64,9 @@ Eso hace que el coaching sea más personal y más preciso.
 - Revisa el coaching semanalmente para medir impacto.
 - Mantén honestos los chips del Neuro Layer. El coach depende de buenos inputs.
 - Revisa el dashboard después de una sesión de coaching. El último `Action Plan` aparece también allí como recordatorio operativo.
+
+## Límites de la respuesta
+- La calidad depende de que el Journal, las importaciones y el Growth Plan estén actualizados.
+- Una proyección no es una promesa de rendimiento.
+- AI Coaching no ejecuta operaciones ni indica qué instrumento comprar o vender.
+- Si faltan datos suficientes, usa la respuesta para identificar qué información debes completar antes de sacar conclusiones.

@@ -55,10 +55,10 @@ The Growth Plan always classifies the account as **trading business operating ca
 Trading costs reduce every modeled session. The interface shows the gross percentage-compound balance, the balance net of fixed session costs, and the accumulated difference between them. The tax reserve is applied only to positive modeled net trading growth and is shown separately; it is a planning estimate that must be confirmed with a qualified tax professional.
 
 ## Model-Recommended Operating Path
-Complete the five Business Analysis inputs: risk profile, experience, income dependency, drawdown comfort, and trading style. The plan then presents an explicit operating recommendation based on your starting capital and business target.
+Complete the capital, timeline, trading schedule, return, risk, cost, and cash-flow assumptions. The plan then presents an explicit operating recommendation based on those business inputs and available execution evidence.
 
 The recommendation shows:
-1. The operating scenario that best fits your profile.
+1. The lowest standard operating scenario that can support the requested pace, or the selected manual model.
 2. Goal-day %, risk per trade, maximum daily loss, and planned loss days per week.
 3. Estimated trading days, operating weeks, months, and completion date.
 4. Weekly, monthly, quarterly, six-month, and annual target-compound goals with dates, plus actual balance and variance once each checkpoint is due.
@@ -88,7 +88,7 @@ Every roadmap separates **trading growth**, **contributions**, **withdrawals**, 
 The review separates metrics that must not be confused:
 1. **Perfect-path return per session**: the mathematical compound rate if every committed session were positive, with declared contributions and withdrawals still applied separately.
 2. **Requested required return**: the mathematical pace needed to reach the requested target on the requested date. This is a diagnostic, not an approved operating target.
-3. **Disciplined operating pace**: the profile-based goal-day return and expected losing-day result used by the adaptive projection.
+3. **Disciplined operating pace**: the selected policy or manual goal-day return and expected losing-day result used by the adaptive projection.
 4. **Execution evidence**: the number of recorded sessions/trades plus available win rate, profit factor, expectancy, and drawdown evidence.
 5. **Capital flows**: planned contributions and withdrawals that change equity without changing trading performance.
 6. **Gross versus net operating projection**: goal-day and loss-day percentages are compounded multiplicatively first; fixed dollar costs are then deducted and reported as cost drag. For example, four `+2.5%` days and one `-2%` day produce approximately `+8.17%` for the modeled week before fixed costs. Annualized math uses the number of committed cycles available in the selected instrument's one-year calendar, so NYSE holidays are not treated as extra trading sessions.
@@ -138,7 +138,7 @@ How to fill it: choose a percentage you can follow under stress.
 This is a hard guardrail, not the loss assumed on every modeled losing day.
 
 ## 6) Goal-Day Model and Expected Loss-Day
-**Goal-day model** is the disciplined return assumption for modeled positive sessions. **Expected loss-day** is the planning result for a typical modeled losing session. The platform evaluates your declared values against the profile-based policy; it does not let a more aggressive input accelerate the recommendation.
+**Goal-day model** is the disciplined return assumption for modeled positive sessions. **Expected loss-day** is the planning result for a typical modeled losing session. The platform evaluates manual values against the selected standard policy guardrails; it does not let an unselected aggressive input accelerate the recommendation.
 
 ## 7) Loss Days per Week
 What it is: the number of losing days you expect per 5 trading days.  

@@ -48,6 +48,12 @@ function mapSubscription(sub: Stripe.Subscription | any) {
     current_period_end: (sub as any)?.current_period_end
       ? new Date((sub as any).current_period_end * 1000).toISOString()
       : null,
+    trial_start: (sub as any)?.trial_start
+      ? new Date((sub as any).trial_start * 1000).toISOString()
+      : null,
+    trial_end: (sub as any)?.trial_end
+      ? new Date((sub as any).trial_end * 1000).toISOString()
+      : null,
     price_id: priceId,
     interval,
     billing_cycle: billingCycle,

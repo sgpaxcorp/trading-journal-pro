@@ -7,9 +7,8 @@ export const STANDARD_GROWTH_PLAN_SCENARIOS = [
 export type StandardGrowthPlanScenarioId =
   (typeof STANDARD_GROWTH_PLAN_SCENARIOS)[number];
 
-type ScenarioFit = {
+type StandardScenario = {
   id: StandardGrowthPlanScenarioId;
-  fitScore: number;
 };
 
 type DeadlinePanorama = {
@@ -22,7 +21,6 @@ type DeadlinePanorama = {
 export type IdealDeadlineOption = {
   scenarioId: StandardGrowthPlanScenarioId;
   completionDate: string;
-  fitScore: number;
 };
 
 /**
@@ -62,7 +60,7 @@ export function meetsGrowthPlanDeadlineApproximately(params: {
 }
 
 export function selectIdealDeadlineOption(params: {
-  scenarios: ScenarioFit[];
+  scenarios: StandardScenario[];
   panoramas: DeadlinePanorama[];
   targetBalance: number;
   toleranceUsd?: number;
@@ -91,9 +89,9 @@ export function selectIdealDeadlineOption(params: {
     return null;
   }
 
-  const riskOrder = new Map<StandardGrowthPlanScenarioId, number>([
-    ["conservative", 0],
-    ["moderate", 1],
+  const balancedOrder = new Map<StandardGrowthPlanScenarioId, number>([
+    ["moderate", 0],
+    ["conservative", 1],
     ["aggressive", 2],
   ]);
 
@@ -106,21 +104,21 @@ export function selectIdealDeadlineOption(params: {
       (
         candidate
       ): candidate is {
-        scenario: ScenarioFit;
+        scenario: StandardScenario;
         panorama: DeadlinePanorama & { completionDate: string };
       } => Boolean(candidate.panorama?.completionDate)
     )
     .sort((a, b) => {
-      if (b.scenario.fitScore !== a.scenario.fitScore) {
-        return b.scenario.fitScore - a.scenario.fitScore;
+      const modelPreference =
+        (balancedOrder.get(a.scenario.id) ?? 99) -
+        (balancedOrder.get(b.scenario.id) ?? 99);
+      if (modelPreference !== 0) {
+        return modelPreference;
       }
       if (a.panorama.completionDate !== b.panorama.completionDate) {
         return a.panorama.completionDate.localeCompare(b.panorama.completionDate);
       }
-      return (
-        (riskOrder.get(a.scenario.id) ?? 99) -
-        (riskOrder.get(b.scenario.id) ?? 99)
-      );
+      return 0;
     });
 
   const best = candidates[0];
@@ -128,7 +126,6 @@ export function selectIdealDeadlineOption(params: {
     ? {
         scenarioId: best.scenario.id,
         completionDate: best.panorama.completionDate,
-        fitScore: best.scenario.fitScore,
       }
     : null;
 }

@@ -63,17 +63,43 @@ export async function apiGet<T>(path: string): Promise<T> {
   }
 }
 
-export async function apiPost<T>(path: string, body: Record<string, unknown>): Promise<T> {
+type ApiPostOptions = {
+  timeoutMs?: number;
+};
+
+export async function apiPost<T>(
+  path: string,
+  body: Record<string, unknown>,
+  options: ApiPostOptions = {}
+): Promise<T> {
   const token = await getAccessToken();
   const url = `${API_BASE_URL}${path.startsWith("/") ? path : `/${path}`}`;
-  const res = await fetch(url, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      authorization: token ? `Bearer ${token}` : "",
-    },
-    body: JSON.stringify(body),
-  });
+  const timeoutMs = Math.max(1_000, options.timeoutMs ?? 45_000);
+  const controller = new AbortController();
+  let timedOut = false;
+  const timeoutId = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: token ? `Bearer ${token}` : "",
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (timedOut) {
+      throw new Error("The request took too long. Please try again.");
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
   const contentType = res.headers.get("content-type") || "";
   if (!res.ok) {
     if (contentType.includes("text/html")) {

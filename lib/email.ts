@@ -1188,7 +1188,7 @@ function buildSubscriptionConfirmationContent(args: {
     greeting: `Hi ${escapeHtml(safeName)},`,
     highlight: `Your <strong>${escapeHtml(planLabel)}</strong> business access is now active${billingLabel ? ` on a <strong>${escapeHtml(billingLabel.toLowerCase())}</strong> cycle` : ""}.`,
     paragraphs: [
-      "Your secure payment finished successfully and your business access is now active inside NeuroTrader.",
+      "Your secure checkout finished successfully and your business access is now active inside NeuroTrader.",
       "From here, you can open your Business Center, review Business Billing, and start operating your trading business without waiting on Stripe-hosted emails.",
     ],
     facts: [

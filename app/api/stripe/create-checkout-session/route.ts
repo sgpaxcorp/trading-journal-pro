@@ -4,6 +4,8 @@ import Stripe from "stripe";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 import { getClientIp, rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
 import { BROKER_SYNC_ADDON, PLAN_PRICES } from "@/lib/planCatalog";
+import { FREE_TRIAL_DAYS, isCurrentLegalAcceptancePayload } from "@/lib/legalConsent";
+import { recordLegalAcceptance } from "@/lib/serverLegalAcceptance";
 import {
   isMissingStripePriceError,
   resolveStripePriceId,
@@ -189,6 +191,13 @@ export async function POST(req: NextRequest) {
     const addonBrokerSync = Boolean(body.addonBrokerSync);
     const partnerCode = normalizePartnerCode(body.partnerCode);
 
+    if (!isCurrentLegalAcceptancePayload(body)) {
+      return NextResponse.json(
+        { error: "You must accept the current Terms & Conditions and Privacy Policy before checkout." },
+        { status: 400 }
+      );
+    }
+
     if (!planId) {
       return NextResponse.json({ error: "Missing planId" }, { status: 400 });
     }
@@ -202,6 +211,26 @@ export async function POST(req: NextRequest) {
     const finalBillingCycle = billingCycle ?? "monthly";
 
     const origin = resolveAppUrl(req);
+
+    try {
+      await recordLegalAcceptance({
+        userId,
+        source: "checkout",
+        req,
+        metadata: {
+          planId,
+          billingCycle: finalBillingCycle,
+          addonBrokerSync,
+          disclosureVersion: body.disclosureVersion ?? "",
+        },
+      });
+    } catch (legalErr) {
+      console.error("[CHECKOUT] Could not record legal acceptance:", legalErr);
+      return NextResponse.json(
+        { error: "Could not record Terms & Conditions acceptance. Please try again." },
+        { status: 500 }
+      );
+    }
 
     let partnerUserId: string | null = null;
     if (partnerCode) {
@@ -231,7 +260,7 @@ export async function POST(req: NextRequest) {
     // 1) Try profile stripe_customer_id
     const { data: profile } = await supabaseAdmin
       .from("profiles")
-      .select("stripe_customer_id")
+      .select("stripe_customer_id, stripe_subscription_id, subscription_status")
       .eq("id", userId)
       .maybeSingle();
 
@@ -254,6 +283,21 @@ export async function POST(req: NextRequest) {
         },
       });
       customerId = created.id;
+    }
+
+    const profileSubscriptionId = String((profile as any)?.stripe_subscription_id ?? "").trim();
+    const profileStatus = String((profile as any)?.subscription_status ?? "").trim().toLowerCase();
+    let hasPriorStripeSubscription = Boolean(profileSubscriptionId);
+
+    if (customerId && !hasPriorStripeSubscription) {
+      const priorSubscriptions = await stripe.subscriptions.list({
+        customer: customerId,
+        status: "all",
+        limit: 20,
+      });
+      hasPriorStripeSubscription = priorSubscriptions.data.some(
+        (subscription) => subscription.status !== "incomplete_expired"
+      );
     }
 
     // =====================================================
@@ -347,12 +391,48 @@ export async function POST(req: NextRequest) {
       });
     }
 
+    const shouldApplyTrial =
+      !promoDiscountInfo?.isTesterAllAccess &&
+      !promoDiscountInfo?.isFree &&
+      !hasPriorStripeSubscription &&
+      !["active", "trialing", "paid", "past_due", "unpaid"].includes(profileStatus);
+
+    const subscriptionData: Stripe.Checkout.SessionCreateParams.SubscriptionData = {
+      metadata: {
+        supabaseUserId: userId,
+        planId: effectivePlanId,
+        requestedPlanId: planId,
+        billingCycle: finalBillingCycle,
+        couponCode,
+        couponId: promoDiscountInfo?.couponId ?? "",
+        promotionCodeId: promoDiscountInfo?.promotionCodeId ?? "",
+        addonOptionFlow: "false",
+        addonBrokerSync: effectiveAddonBrokerSync ? "true" : "false",
+        testerAllAccess:
+          promoDiscountInfo?.isTesterAllAccess ? "true" : "false",
+        partnerCode: partnerCode || "",
+        partnerUserId: partnerUserId ?? "",
+        trialApplied: shouldApplyTrial ? "true" : "false",
+        trialDays: shouldApplyTrial ? String(FREE_TRIAL_DAYS) : "0",
+      },
+    };
+
+    if (shouldApplyTrial) {
+      subscriptionData.trial_period_days = FREE_TRIAL_DAYS;
+      subscriptionData.trial_settings = {
+        end_behavior: {
+          missing_payment_method: "cancel",
+        },
+      };
+    }
+
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
       customer: customerId, // ✅ usamos solo customer
       line_items: lineItems,
       discounts,
       allow_promotion_codes: true,
+      payment_method_collection: shouldApplyTrial ? "always" : "if_required",
       success_url: `${origin}/confirmed?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${origin}/pricing`,
       metadata: {
@@ -369,24 +449,10 @@ export async function POST(req: NextRequest) {
           promoDiscountInfo?.isTesterAllAccess ? "true" : "false",
         partnerCode: partnerCode || "",
         partnerUserId: partnerUserId ?? "",
+        trialApplied: shouldApplyTrial ? "true" : "false",
+        trialDays: shouldApplyTrial ? String(FREE_TRIAL_DAYS) : "0",
       },
-      subscription_data: {
-        metadata: {
-          supabaseUserId: userId,
-          planId: effectivePlanId,
-          requestedPlanId: planId,
-          billingCycle: finalBillingCycle,
-          couponCode,
-          couponId: promoDiscountInfo?.couponId ?? "",
-          promotionCodeId: promoDiscountInfo?.promotionCodeId ?? "",
-          addonOptionFlow: "false",
-          addonBrokerSync: effectiveAddonBrokerSync ? "true" : "false",
-          testerAllAccess:
-            promoDiscountInfo?.isTesterAllAccess ? "true" : "false",
-          partnerCode: partnerCode || "",
-          partnerUserId: partnerUserId ?? "",
-        },
-      },
+      subscription_data: subscriptionData,
     });
 
     if (!session.url) {

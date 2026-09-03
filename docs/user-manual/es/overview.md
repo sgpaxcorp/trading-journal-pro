@@ -39,6 +39,9 @@ Controla el lado de negocio del trading: suscripciones, educación, vendors, pre
 **AI Coaching**  
 Convierte Journal, Neuro Layer, Growth Plan, analítica y contexto de ejecución en feedback y acciones.
 
+**Guía Neuro**
+Es el chat de ayuda rápida que aparece en la parte inferior de tu espacio privado. Explica el manual, la página actual y un resumen de tus propios resultados cuando la pregunta lo requiere.
+
 **Imports (Broker Sync o CSV)**  
 Trae trades reales al sistema. Sin datos limpios, la analítica se distorsiona.
 
@@ -65,4 +68,7 @@ P: ¿Por dónde empiezo?
 R: Getting Started → Growth Plan → Journal → Dashboard → Analítica.
 
 P: ¿Dónde encuentro ayuda dentro de la app?  
-R: Usa el Help menu o pregunta a Neuro y abre el link que te entrega.
+R: Abre el Centro de Ayuda o usa el botón flotante del cerebro para preguntarle a Guía Neuro. El asistente te mostrará las fuentes del manual relacionadas con su respuesta.
+
+P: ¿Guía Neuro y AI Coaching son lo mismo?
+R: No. Guía Neuro ofrece orientación rápida. AI Coaching realiza una revisión más profunda de tus patrones y te ayuda a convertir la evidencia en un plan de acción.

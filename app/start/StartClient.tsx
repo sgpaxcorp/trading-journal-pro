@@ -8,6 +8,11 @@ import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
 import { isActiveProfileStatus, shouldAllowLocalProfileAccessFallback } from "@/lib/accessControl";
 import { fetchAccessStatus } from "@/lib/accessStatusClient";
+import {
+  CURRENT_PRIVACY_VERSION,
+  CURRENT_TERMS_VERSION,
+  FREE_TRIAL_DAYS,
+} from "@/lib/legalConsent";
 import { passwordPolicyHint, validatePasswordPolicy } from "@/lib/passwordPolicy";
 import {
   ADVANCED_UNLOCKS,
@@ -93,6 +98,8 @@ export default function StartClient({ initialPlan }: StartClientProps) {
   const [verifying, setVerifying] = useState(false);
   const [resending, setResending] = useState(false);
   const [canResend, setCanResend] = useState(true);
+  const [accountLegalAccepted, setAccountLegalAccepted] = useState(false);
+  const [checkoutLegalAccepted, setCheckoutLegalAccepted] = useState(false);
   const allowLocalProfileFallback = shouldAllowLocalProfileAccessFallback();
 
   // Detectar si ya hay usuario logueado
@@ -161,6 +168,15 @@ export default function StartClient({ initialPlan }: StartClientProps) {
       setError(L("Please enter a valid email and password.", "Ingresa un email y contraseña válidos."));
       return;
     }
+    if (!accountLegalAccepted) {
+      setError(
+        L(
+          "Please accept the Terms & Conditions and Privacy Policy to create your account.",
+          "Acepta los Términos y Condiciones y la Política de Privacidad para crear tu cuenta."
+        )
+      );
+      return;
+    }
     const passwordError = validatePasswordPolicy(infoForm.password, L);
     if (passwordError) {
       setError(passwordError);
@@ -179,6 +195,9 @@ export default function StartClient({ initialPlan }: StartClientProps) {
           fullName: infoForm.fullName,
           plan: selectedPlan,
           source: "start",
+          legalAccepted: true,
+          termsVersion: CURRENT_TERMS_VERSION,
+          privacyVersion: CURRENT_PRIVACY_VERSION,
         }),
       });
       const body = await res.json().catch(() => ({}));
@@ -328,6 +347,15 @@ export default function StartClient({ initialPlan }: StartClientProps) {
       setCurrentStep(1);
       return;
     }
+    if (!checkoutLegalAccepted) {
+      setError(
+        L(
+          "Please confirm the trial, automatic renewal, no-refund, and educational-use terms before continuing to secure payment.",
+          "Confirma los términos de trial, renovación automática, no reembolso y uso educativo antes de continuar al pago seguro."
+        )
+      );
+      return;
+    }
 
     try {
       setLoadingCheckout(true);
@@ -349,6 +377,9 @@ export default function StartClient({ initialPlan }: StartClientProps) {
         body: JSON.stringify({
           planId: selectedPlan,
           billingCycle: billingCycleFromQuery,
+          legalAccepted: true,
+          termsVersion: CURRENT_TERMS_VERSION,
+          privacyVersion: CURRENT_PRIVACY_VERSION,
         }),
       });
 
@@ -447,16 +478,33 @@ export default function StartClient({ initialPlan }: StartClientProps) {
               <p className="mt-1 text-[10px] text-slate-500">{passwordPolicyHint(L)}</p>
             </div>
 
-            <div className="flex items-center justify-between pt-2">
-              <p className="text-[10px] text-slate-500">
-                {L(
-              "By continuing, you agree to our terms and privacy policy for your trading business workspace.",
-              "Al continuar, aceptas nuestros términos y política de privacidad para tu espacio de empresa de trading."
-                )}
-              </p>
+            <div className="flex flex-col gap-3 pt-2 md:flex-row md:items-center md:justify-between">
+              <label className="flex flex-1 items-start gap-3 rounded-xl border border-slate-700 bg-slate-950/70 px-3 py-3 text-[10px] leading-relaxed text-slate-300">
+                <input
+                  type="checkbox"
+                  checked={accountLegalAccepted}
+                  onChange={(event) => setAccountLegalAccepted(event.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-slate-600 bg-slate-950 text-emerald-400 accent-emerald-400"
+                  required
+                />
+                <span>
+                  {L("I accept the ", "Acepto los ")}
+                  <a href="/terms" target="_blank" rel="noreferrer" className="font-semibold text-emerald-300 underline underline-offset-2">
+                    {L("Terms & Conditions", "Términos y Condiciones")}
+                  </a>
+                  {L(" and ", " y la ")}
+                  <a href="/privacy" target="_blank" rel="noreferrer" className="font-semibold text-emerald-300 underline underline-offset-2">
+                    {L("Privacy Policy", "Política de Privacidad")}
+                  </a>
+                  {L(
+                    ", and understand the platform is educational only and does not guarantee trading, income, AI coaching, projection, or capital results.",
+                    ", y entiendo que la plataforma es solo educativa y no garantiza resultados de trading, ingresos, AI coaching, proyecciones o capital."
+                  )}
+                </span>
+              </label>
               <button
                 type="submit"
-                disabled={loadingInfo}
+                disabled={loadingInfo || !accountLegalAccepted}
                 className="inline-flex px-5 py-2 rounded-xl bg-emerald-400 text-slate-950 text-xs font-semibold hover:bg-emerald-300 disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 {loadingInfo ? L("Creating...", "Creando...") : L("Continue", "Continuar")}
@@ -685,11 +733,27 @@ export default function StartClient({ initialPlan }: StartClientProps) {
             </p>
             <p className="mt-2 text-[11px] text-slate-400">
               {L(
-                "Payment processing is handled securely by Stripe. Your branded NeuroTrader receipt will arrive by email.",
-                "El procesamiento del pago lo maneja Stripe de forma segura. Tu recibo branded de NeuroTrader llegará por email."
+                `Eligible new accounts start with a ${FREE_TRIAL_DAYS}-day free trial. After the trial, the selected plan renews automatically until canceled. Successful charges are prepaid and non-refundable except where required by law.`,
+                `Cuentas nuevas elegibles comienzan con ${FREE_TRIAL_DAYS} días gratis. Después del trial, el plan seleccionado renueva automáticamente hasta que se cancele. Los cargos exitosos son prepagados y no reembolsables salvo que la ley exija lo contrario.`
               )}
             </p>
           </div>
+
+          <label className="mb-4 flex items-start gap-3 rounded-xl border border-amber-400/30 bg-amber-400/10 px-3 py-3 text-[10px] leading-relaxed text-amber-100/90">
+            <input
+              type="checkbox"
+              checked={checkoutLegalAccepted}
+              onChange={(event) => setCheckoutLegalAccepted(event.target.checked)}
+              className="mt-0.5 h-4 w-4 rounded border-amber-300 bg-slate-950 text-emerald-400 accent-emerald-400"
+              required
+            />
+            <span>
+              {L(
+                `I understand this starts a ${FREE_TRIAL_DAYS}-day free trial if eligible, then charges automatically unless canceled before the trial ends. Paid subscription periods are prepaid, canceling stops future renewals, and access continues until the paid period ends. No financial advice or guaranteed results are provided.`,
+                `Entiendo que esto comienza un trial gratis de ${FREE_TRIAL_DAYS} días si soy elegible, luego cobra automáticamente salvo que cancele antes de terminar el trial. Los periodos pagados son prepagados, cancelar detiene renovaciones futuras y el acceso continúa hasta que termine el periodo pagado. No se provee asesoría financiera ni resultados garantizados.`
+              )}
+            </span>
+          </label>
 
           <div className="flex items-center justify-between">
             <button
@@ -702,7 +766,7 @@ export default function StartClient({ initialPlan }: StartClientProps) {
             <button
               type="button"
               onClick={handleCheckout}
-              disabled={loadingCheckout}
+              disabled={loadingCheckout || !checkoutLegalAccepted}
               className="inline-flex px-5 py-2 rounded-xl bg-emerald-400 text-slate-950 text-xs font-semibold hover:bg-emerald-300 disabled:opacity-60 disabled:cursor-not-allowed"
             >
               {loadingCheckout ? L("Redirecting...", "Redirigiendo...") : L("Continue to Stripe", "Continuar a Stripe")}

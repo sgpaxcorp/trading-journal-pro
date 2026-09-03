@@ -16,7 +16,7 @@ The Community is a private space for logged‑in traders to ask questions, share
 4. Describe context, what happened, and what you expected.
 
 ## Replies
-Open a thread and reply directly. Replies support Markdown (lists, links, tables). Keep responses short and actionable.
+Open a thread and reply directly. The editor lets you organize the response with lists, links, and tables. Keep responses short and actionable.
 
 ## Best practices
 - Share evidence (screenshots or steps) when reporting an issue.

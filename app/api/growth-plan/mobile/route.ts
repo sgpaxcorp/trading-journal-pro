@@ -183,18 +183,6 @@ function defaultSteps() {
   };
 }
 
-function hasBusinessAnalysisProfile(value: unknown) {
-  const profile = value && typeof value === "object" ? (value as Record<string, unknown>) : null;
-  return Boolean(
-    profile &&
-      cleanText(profile.riskProfile, 40) &&
-      cleanText(profile.experience, 40) &&
-      cleanText(profile.incomeDependency, 40) &&
-      cleanText(profile.drawdownComfort, 40) &&
-      cleanText(profile.tradingStyle, 40)
-  );
-}
-
 async function syncPlanProtectionRules(params: {
   userId: string;
   accountId: string;
@@ -779,11 +767,7 @@ export async function POST(req: NextRequest) {
     )
       ? ((returnModelMode === "manual" ? existingScenarioId : returnModelMode) as GrowthPlanScenarioId)
       : "moderate";
-    const currentProfile =
-      currentBusinessAnalysis?.profile && typeof currentBusinessAnalysis.profile === "object"
-        ? currentBusinessAnalysis.profile
-        : null;
-    const basePolicy = getGrowthPlanOperatingPolicy(policyId, currentProfile);
+    const basePolicy = getGrowthPlanOperatingPolicy(policyId);
     const maxDailyLossPercent =
       returnModelMode === "manual" ? requestedMaxDailyLossPercent : basePolicy.maxDailyLossPct;
     const maxRiskPerTradePercent =
@@ -917,7 +901,7 @@ export async function POST(req: NextRequest) {
       depositPlan: plannedDepositSettings,
       withdrawalPlan: plannedWithdrawalSettings,
       comparisonPolicies: (["conservative", "moderate", "aggressive"] as const).map((id) => ({
-        ...getGrowthPlanOperatingPolicy(id, currentProfile),
+        ...getGrowthPlanOperatingPolicy(id),
         lossDaysPerWeek,
       })),
       estimatedCostPerSessionUsd,
@@ -988,8 +972,6 @@ export async function POST(req: NextRequest) {
       (currentSteps as any)?.business_analysis && typeof (currentSteps as any).business_analysis === "object"
         ? (currentSteps as any).business_analysis
         : currentBusinessAnalysis;
-    const existingProfile = synchronizedBusinessAnalysis?.profile;
-    const preserveProfile = hasBusinessAnalysisProfile(existingProfile);
     const synchronizedExistingScenarioId = cleanText(synchronizedBusinessAnalysis?.selectedScenarioId, 40);
     const preserveScenarioId = ["conservative", "moderate", "aggressive"].includes(
       synchronizedExistingScenarioId
@@ -1052,6 +1034,10 @@ export async function POST(req: NextRequest) {
           ...(hasSynchronizedScenario ? [] : [synchronizedScenario]),
         ]
       : [synchronizedScenario];
+    const synchronizedBusinessAnalysisWithoutProfile = {
+      ...synchronizedBusinessAnalysis,
+    };
+    delete synchronizedBusinessAnalysisWithoutProfile.profile;
 
     const steps = {
       ...currentSteps,
@@ -1063,14 +1049,7 @@ export async function POST(req: NextRequest) {
         source: "mobile",
       },
       business_analysis: {
-        ...synchronizedBusinessAnalysis,
-        profile: preserveProfile
-          ? existingProfile
-          : {
-              source: "mobile",
-              goal: `${startingBalance} to ${targetBalance}`,
-              strategy: strategyName,
-            },
+        ...synchronizedBusinessAnalysisWithoutProfile,
         selectedScenarioId: synchronizedScenarioId,
         averageTradingDaysPerWeek,
         disclosure: {

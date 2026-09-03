@@ -8,6 +8,7 @@ import {
 } from "@/lib/growthPlanAiReview";
 import { getClientIp, rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
 import { requirePlatformAccess } from "@/lib/serverPlatformAccess";
+import { countResponseFileSearchCalls, recordAiUsage } from "@/lib/aiUsageServer";
 
 export const runtime = "nodejs";
 
@@ -321,13 +322,6 @@ export async function POST(req: NextRequest) {
         estimatedCostPerSessionUsd: finite(body?.financialCapacity?.estimatedCostPerSessionUsd),
         estimatedTaxReservePct: finite(body?.financialCapacity?.estimatedTaxReservePct),
       },
-      businessProfile: {
-        riskProfile: text(body?.businessProfile?.riskProfile, 30),
-        experience: text(body?.businessProfile?.experience, 30),
-        incomeDependency: text(body?.businessProfile?.incomeDependency, 30),
-        drawdownComfort: text(body?.businessProfile?.drawdownComfort, 30),
-        tradingStyle: text(body?.businessProfile?.tradingStyle, 30),
-      },
       executionEvidence: {
         depth: text(body?.executionEvidence?.depth, 40),
         sessions: Math.max(0, Math.floor(finite(body?.executionEvidence?.sessions))),
@@ -392,6 +386,18 @@ export async function POST(req: NextRequest) {
           tools.length > 0 &&
           Array.isArray((response as any)?.output) &&
           (response as any).output.some((item: any) => item?.type === "file_search_call");
+        await recordAiUsage({
+          userId: access.context.userId,
+          requestId: req.headers.get("x-request-id"),
+          feature: "growth_plan",
+          category: "advanced",
+          operation: "research_review",
+          model: String((response as any)?.model || model),
+          usage: (response as any)?.usage,
+          apiKind: "responses",
+          fileSearchCalls: countResponseFileSearchCalls(response),
+          metadata: { usedResearchCorpus },
+        });
         return NextResponse.json({
           review: normalizeReview(
             parsed,

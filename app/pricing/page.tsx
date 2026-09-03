@@ -6,13 +6,17 @@ import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supaBaseClient";
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
+import {
+  CURRENT_PRIVACY_VERSION,
+  CURRENT_TERMS_VERSION,
+  FREE_TRIAL_DAYS,
+} from "@/lib/legalConsent";
 import { PlanComparisonTable } from "@/app/components/PlanComparisonTable";
 import {
   ADVANCED_UNLOCKS,
   ADVANCED_UPGRADE_PILLARS,
   BROKER_SYNC_ADDON,
   advancedUpgradePriceLabel,
-  brokerSyncPrice,
   catalogText,
   PLAN_CATALOG,
   planMonthlyPrice,
@@ -36,6 +40,7 @@ export default function PricingPage() {
   const [error, setError] = useState<string | null>(null);
   const [billingCycle, setBillingCycle] = useState<"monthly" | "annual">("monthly");
   const [partnerCode, setPartnerCode] = useState("");
+  const [checkoutLegalAccepted, setCheckoutLegalAccepted] = useState(false);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -89,6 +94,15 @@ export default function PricingPage() {
       router.push(`/signup?${q.toString()}`);
       return;
     }
+    if (!checkoutLegalAccepted) {
+      setError(
+        L(
+          "Please confirm the trial, automatic renewal, no-refund, and educational-use terms before continuing to secure payment.",
+          "Confirma los términos de trial, renovación automática, no reembolso y uso educativo antes de continuar al pago seguro."
+        )
+      );
+      return;
+    }
 
     try {
       setLoadingPlan(planId);
@@ -111,6 +125,9 @@ export default function PricingPage() {
           planId,
           billingCycle,
           partnerCode: partnerCode || undefined,
+          legalAccepted: true,
+          termsVersion: CURRENT_TERMS_VERSION,
+          privacyVersion: CURRENT_PRIVACY_VERSION,
         }),
       });
 
@@ -213,6 +230,38 @@ export default function PricingPage() {
           )}
         </div>
 
+        <div className="w-full max-w-5xl mb-5 rounded-2xl border border-amber-400/25 bg-amber-400/10 px-4 py-3 text-[10px] leading-relaxed text-amber-100/90">
+          {L(
+            `Eligible new accounts start with a ${FREE_TRIAL_DAYS}-day free trial, then the selected plan renews automatically unless canceled before the trial ends. NeuroTrader is educational only and does not provide financial advice, execute trades, or guarantee profits, income, capital growth, AI coaching outcomes, projections, or trading results. Successful paid charges are prepaid, final, and non-refundable except where required by law or explicitly stated by NTJ in writing.`,
+            `Cuentas nuevas elegibles comienzan con un trial gratis de ${FREE_TRIAL_DAYS} días, luego el plan seleccionado renueva automáticamente salvo que se cancele antes de terminar el trial. NeuroTrader es educativo solamente y no provee asesoría financiera, no ejecuta trades ni garantiza ganancias, ingresos, crecimiento de capital, resultados del AI coaching, proyecciones o resultados de trading. Los cargos pagados exitosos son prepagados, finales y no reembolsables salvo que la ley exija lo contrario o NTJ lo indique explícitamente por escrito.`
+          )}
+        </div>
+
+        {user ? (
+          <label className="w-full max-w-5xl mb-5 flex items-start gap-3 rounded-2xl border border-slate-700 bg-slate-950/80 px-4 py-3 text-[10px] leading-relaxed text-slate-300">
+            <input
+              type="checkbox"
+              checked={checkoutLegalAccepted}
+              onChange={(event) => setCheckoutLegalAccepted(event.target.checked)}
+              className="mt-0.5 h-4 w-4 rounded border-slate-600 bg-slate-950 text-emerald-400 accent-emerald-400"
+              required
+            />
+            <span>
+              {L(
+                `I accept the current Terms & Conditions and Privacy Policy. I understand the ${FREE_TRIAL_DAYS}-day trial, automatic renewal, prepaid no-refund policy, educational-only use, and no-guaranteed-results disclosure.`,
+                `Acepto los Términos y Condiciones y la Política de Privacidad vigentes. Entiendo el trial de ${FREE_TRIAL_DAYS} días, la renovación automática, la política prepago sin reembolso, el uso educativo y la divulgación de resultados no garantizados.`
+              )}{" "}
+              <Link href="/terms" target="_blank" rel="noreferrer" className="font-semibold text-emerald-300 underline underline-offset-2">
+                {L("Terms", "Términos")}
+              </Link>
+              {" / "}
+              <Link href="/privacy" target="_blank" rel="noreferrer" className="font-semibold text-emerald-300 underline underline-offset-2">
+                {L("Privacy", "Privacidad")}
+              </Link>
+            </span>
+          </label>
+        ) : null}
+
         {/* Error message (if any) */}
         {error && (
           <div className="w-full max-w-5xl mb-4 text-[10px] md:text-xs text-red-400">
@@ -261,10 +310,10 @@ export default function PricingPage() {
               </ul>
               <button
                 onClick={() => handleStart("core")}
-                disabled={loadingPlan !== null}
+                disabled={loadingPlan !== null || Boolean(user && !checkoutLegalAccepted)}
                 className="mt-5 w-full py-2 rounded-xl bg-emerald-400 text-slate-950 text-xs font-semibold hover:bg-emerald-300 transition disabled:opacity-60 disabled:cursor-not-allowed"
               >
-                <span>{L("Start Core Business", "Comenzar Core Empresarial")}</span>
+                <span>{L(`Start ${FREE_TRIAL_DAYS}-day trial`, `Comenzar trial de ${FREE_TRIAL_DAYS} días`)}</span>
                 {loadingPlan === "core" && (
                   <span className="ml-2 inline-flex h-3 w-3 animate-spin rounded-full border-2 border-slate-950 border-t-transparent" />
                 )}
@@ -344,10 +393,10 @@ export default function PricingPage() {
                 </ul>
                 <button
                   onClick={() => handleStart("advanced")}
-                  disabled={loadingPlan !== null}
+                  disabled={loadingPlan !== null || Boolean(user && !checkoutLegalAccepted)}
                   className="mt-5 w-full py-2 rounded-xl bg-emerald-400 text-slate-950 text-xs font-semibold hover:bg-emerald-300 transition disabled:opacity-60 disabled:cursor-not-allowed"
                 >
-                  <span>{L("Start Advanced Business", "Comenzar Advanced Empresarial")}</span>
+                  <span>{L(`Start ${FREE_TRIAL_DAYS}-day trial`, `Comenzar trial de ${FREE_TRIAL_DAYS} días`)}</span>
                   {loadingPlan === "advanced" && (
                     <span className="ml-2 inline-flex h-3 w-3 animate-spin rounded-full border-2 border-slate-950 border-t-transparent" />
                   )}
@@ -425,25 +474,20 @@ export default function PricingPage() {
               <div className="flex items-center gap-3">
                 <div className="rounded-xl border border-emerald-400/40 bg-emerald-500/10 px-4 py-2 text-center">
                   <div className="text-emerald-300 text-[10px] uppercase tracking-[0.15em]">
-                    {billingCycle === "monthly" ? L("Monthly", "Mensual") : L("Annual", "Anual")}
+                    {L("Coming soon", "Proximamente")}
                   </div>
-                  <div className="text-emerald-200 text-2xl font-semibold leading-none">
-                    ${
-                      billingCycle === "monthly"
-                        ? brokerSyncPrice("monthly").toFixed(2)
-                        : brokerSyncPrice("annual").toFixed(2)
-                    }
+                  <div className="text-emerald-200 text-lg font-semibold leading-tight">
+                    {L("Provider approval pending", "Aprobacion de proveedor pendiente")}
                   </div>
                   <div className="text-[9px] text-slate-400">
-                    {billingCycle === "monthly"
-                      ? L("per month", "por mes")
-                      : L("per year", "por año")}
+                    {L("Manual imports remain available", "Imports manuales disponibles")}
                   </div>
                 </div>
                 <div className="text-[9px] text-slate-500">
-                  {billingCycle === "annual"
-                    ? L("Billed annually", "Facturado anual")
-                    : L("Billed monthly", "Facturado mensual")}
+                  {L(
+                    "Planned pricing can be enabled after approvals.",
+                    "El precio planificado se puede habilitar luego de aprobaciones."
+                  )}
                 </div>
               </div>
             </div>

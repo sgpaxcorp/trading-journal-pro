@@ -11,6 +11,8 @@ import RouteQuickTour from "@/app/components/RouteQuickTour";
 import PageIntro from "@/app/components/PageIntro";
 import GlobalAlertPopups from "@/app/components/GlobalAlertPopups";
 import GlobalAlertRuleEngine from "@/app/components/GlobalAlertRuleEngine";
+import LegalAcceptanceGate from "@/app/components/LegalAcceptanceGate";
+import NeuroGuideAssistant from "@/app/components/NeuroGuideAssistant";
 
 type PrivateLayoutProps = {
   children: React.ReactNode;
@@ -285,10 +287,12 @@ export default function PrivateLayout({ children }: PrivateLayoutProps) {
   return (
     <>
       <div className="ntj-fullwidth">{children}</div>
+      <LegalAcceptanceGate enabled={Boolean(userId && isActive && profileChecked)} />
       {userId && isActive && profileChecked ? (
         <>
           <PageIntro />
           <RouteQuickTour enabled />
+          <NeuroGuideAssistant accessVerified />
         </>
       ) : null}
 

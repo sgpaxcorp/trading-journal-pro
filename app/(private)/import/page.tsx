@@ -6,6 +6,10 @@ import { supabase } from "@/lib/supaBaseClient";
 import { useRouter } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { useAppSettings } from "@/lib/appSettings";
+import {
+  areBrokerConnectionsEnabledFromEnv,
+  brokerConnectionsUnavailableMessage,
+} from "@/lib/brokerConnections";
 import { resolveLocale } from "@/lib/i18n";
 
 type BrokerId =
@@ -179,6 +183,8 @@ export default function ImportPage() {
   const isEs = lang === "es";
   const L = (en: string, es: string) => (isEs ? es : en);
   const localeTag = isEs ? "es-ES" : "en-US";
+  const brokerConnectionsEnabled = areBrokerConnectionsEnabledFromEnv();
+  const brokerUnavailableMessage = brokerConnectionsUnavailableMessage(lang);
 
   const [broker, setBroker] = useState<BrokerId>("thinkorswim");
   const [comment, setComment] = useState<string>("");
@@ -394,6 +400,9 @@ export default function ImportPage() {
   }
 
   async function callSnaptrade(path: string, opts?: RequestInit) {
+    if (!brokerConnectionsEnabled) {
+      throw new Error(brokerUnavailableMessage);
+    }
     const token = await getToken();
     if (!token) {
       throw new Error(L("Unauthorized. Please log out and log in again.", "No autorizado. Cierra sesión e inicia de nuevo."));
@@ -417,6 +426,9 @@ export default function ImportPage() {
   }
 
   async function callWebull(path: string, opts?: RequestInit) {
+    if (!brokerConnectionsEnabled) {
+      throw new Error(brokerUnavailableMessage);
+    }
     const token = await getToken();
     if (!token) {
       throw new Error(L("Unauthorized. Please log out and log in again.", "No autorizado. Cierra sesión e inicia de nuevo."));
@@ -928,6 +940,11 @@ export default function ImportPage() {
     if (params.get("snaptrade") === "connected") {
       setActiveImportTab("broker");
       setBrokerSyncProvider("snaptrade");
+      if (!brokerConnectionsEnabled) {
+        setSnaptradeError(brokerUnavailableMessage);
+        window.history.replaceState({}, "", "/import");
+        return;
+      }
       onSnaptradeLoadAccounts();
       setSnaptradeStatus(
         L("Connection completed. Loading accounts...", "Conexión completada. Cargando cuentas...")
@@ -937,6 +954,11 @@ export default function ImportPage() {
     if (params.get("webull") === "connected") {
       setActiveImportTab("broker");
       setBrokerSyncProvider("webull");
+      if (!brokerConnectionsEnabled) {
+        setWebullError(brokerUnavailableMessage);
+        window.history.replaceState({}, "", "/import");
+        return;
+      }
       onWebullLoadAccounts();
       setWebullStatus(
         L("Connection completed. Loading accounts...", "Conexión completada. Cargando cuentas...")
@@ -948,7 +970,9 @@ export default function ImportPage() {
       setBrokerSyncProvider("webull");
       const reason = params.get("reason");
       setWebullError(
-        reason
+        reason === "broker_connections_disabled"
+          ? brokerUnavailableMessage
+          : reason
           ? L(`Webull connection failed: ${reason}`, `Falló la conexión a Webull: ${reason}`)
           : L("Webull connection failed.", "Falló la conexión a Webull.")
       );
@@ -1167,6 +1191,8 @@ export default function ImportPage() {
             <div className="ml-auto text-[11px] text-slate-400">
               {activeImportTab === "csv"
                 ? L("Upload broker exports (CSV/XLSX).", "Sube exportaciones del bróker (CSV/XLSX).")
+                : !brokerConnectionsEnabled
+                  ? L("Direct broker sync pending provider approval.", "Sync directo pendiente de aprobacion de proveedor.")
                 : brokerSyncProvider === "webull"
                   ? L("Connect and sync via Webull OAuth.", "Conecta y sincroniza via Webull OAuth.")
                   : L("Connect and sync via SnapTrade.", "Conecta y sincroniza con SnapTrade.")}
@@ -1492,13 +1518,30 @@ export default function ImportPage() {
                   Webull (OAuth)
                 </button>
                 <div className="ml-auto text-[11px] text-slate-400">
-                  {brokerSyncProvider === "webull"
+                  {!brokerConnectionsEnabled
+                    ? L("Direct broker sync pending provider approval.", "Sync directo pendiente de aprobacion de proveedor.")
+                    : brokerSyncProvider === "webull"
                     ? L("Direct OAuth connection (Webull).", "Conexión OAuth directa (Webull).")
                     : L("Connect via SnapTrade (beta).", "Conexión via SnapTrade (beta).")}
                 </div>
               </div>
 
-              {brokerSyncProvider === "snaptrade" ? (
+              {!brokerConnectionsEnabled ? (
+                <section className="rounded-2xl border border-amber-400/30 bg-amber-400/10 p-6 shadow-2xl">
+                  <div className="text-xs font-semibold text-amber-100">
+                    {L("Direct broker sync is coming soon", "El sync directo del broker llega pronto")}
+                  </div>
+                  <p className="mt-2 max-w-3xl text-[11px] leading-relaxed text-amber-100/85">
+                    {brokerUnavailableMessage}
+                  </p>
+                  <p className="mt-2 max-w-3xl text-[11px] leading-relaxed text-slate-300">
+                    {L(
+                      "This keeps SnapTrade/Webull connections closed while vendor approvals are completed. You can still upload broker statements, order history, CSV, and XLSX files in the CSV Import tab.",
+                      "Esto mantiene cerradas las conexiones SnapTrade/Webull mientras se completan aprobaciones de proveedores. Aun puedes subir statements, order history, CSV y XLSX en el tab Importar CSV."
+                    )}
+                  </p>
+                </section>
+              ) : brokerSyncProvider === "snaptrade" ? (
                 <section className="rounded-2xl border border-slate-800 bg-slate-900/60 p-6 shadow-2xl">
                   <div className="flex flex-wrap items-center justify-between gap-4">
                     <div>

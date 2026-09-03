@@ -559,6 +559,20 @@ export async function POST(req: NextRequest) {
         const subAddonKey =
           subscription?.metadata?.addonKey as string | undefined;
         const subPriceId = subscription?.items?.data?.[0]?.price?.id ?? null;
+        const subscriptionStatus = subscription?.status ?? "active";
+        const trialStartedAt = subscription?.trial_start
+          ? new Date(subscription.trial_start * 1000).toISOString()
+          : null;
+        const trialEndedAt = subscription?.trial_end
+          ? new Date(subscription.trial_end * 1000).toISOString()
+          : null;
+        const subscriptionProfileUpdate: Record<string, unknown> = {
+          stripe_customer_id: customerId ?? null,
+          stripe_subscription_id: subscriptionId ?? null,
+          subscription_status: subscriptionStatus,
+        };
+        if (trialStartedAt) subscriptionProfileUpdate.trial_started_at = trialStartedAt;
+        if (trialEndedAt) subscriptionProfileUpdate.trial_ended_at = trialEndedAt;
         const subAddonOptionFlow = isTruthy(subscription?.metadata?.addonOptionFlow);
         const subAddonBrokerSync = isTruthy(subscription?.metadata?.addonBrokerSync);
         const includesOptionFlowAddon =
@@ -617,23 +631,14 @@ export async function POST(req: NextRequest) {
 
               const priceId = subToInspect.items.data[0]?.price?.id;
               console.log("[WEBHOOK] priceId fallback (no userId):", priceId);
-
-              if (priceId === process.env.STRIPE_PRICE_ADVANCED_MONTHLY) {
-                planId = "advanced";
-              } else if (
-                priceId === process.env.STRIPE_PRICE_CORE_MONTHLY
-              ) {
-                planId = "core";
-              }
+              planId = resolvePlanIdFromPriceId(priceId) ?? planId;
             }
 
             const { error: profileError } = await supabaseAdmin
               .from("profiles")
               .update({
+                ...subscriptionProfileUpdate,
                 plan: planId,
-                stripe_customer_id: customerId ?? null,
-                stripe_subscription_id: subscriptionId ?? null,
-                subscription_status: "active",
               })
               .eq("email", email.toLowerCase());
 
@@ -654,7 +659,7 @@ export async function POST(req: NextRequest) {
                 await upsertEntitlement({
                   userId: resolvedUserId,
                   entitlementKey: PLATFORM_ACCESS_ENTITLEMENT,
-                  status: "active",
+                  status: subscriptionStatus,
                   stripeCustomerId: customerId,
                   stripeSubscriptionId: subscriptionId ?? null,
                   stripePriceId: subPriceId,
@@ -671,7 +676,7 @@ export async function POST(req: NextRequest) {
                     await upsertEntitlement({
                       userId: resolvedUserId,
                       entitlementKey: "option_flow",
-                      status: "active",
+                      status: subscriptionStatus,
                       stripeCustomerId: customerId,
                       stripeSubscriptionId: subscriptionId ?? null,
                       stripePriceId: resolveAddonPriceId(subscription, "option_flow"),
@@ -681,7 +686,7 @@ export async function POST(req: NextRequest) {
                     await upsertEntitlement({
                       userId: resolvedUserId,
                       entitlementKey: "broker_sync",
-                      status: "active",
+                      status: subscriptionStatus,
                       stripeCustomerId: customerId,
                       stripeSubscriptionId: subscriptionId ?? null,
                       stripePriceId: resolveAddonPriceId(subscription, "broker_sync"),
@@ -746,14 +751,7 @@ export async function POST(req: NextRequest) {
 
           const priceId = subToInspect?.items.data[0]?.price?.id;
           console.log("[WEBHOOK] priceId fallback:", priceId);
-
-          if (priceId === process.env.STRIPE_PRICE_ADVANCED_MONTHLY) {
-            planId = "advanced";
-          } else if (
-            priceId === process.env.STRIPE_PRICE_CORE_MONTHLY
-          ) {
-            planId = "core";
-          }
+          planId = resolvePlanIdFromPriceId(priceId) ?? planId;
         }
 
         console.log("[WEBHOOK] Resolving user + plan:", {
@@ -767,10 +765,8 @@ export async function POST(req: NextRequest) {
         const { error: profileError } = await supabaseAdmin
           .from("profiles")
           .update({
+            ...subscriptionProfileUpdate,
             plan: planId,
-            stripe_customer_id: customerId ?? null,
-            stripe_subscription_id: subscriptionId ?? null,
-            subscription_status: "active",
           })
           .eq("id", userId);
 
@@ -791,7 +787,7 @@ export async function POST(req: NextRequest) {
           await supabaseAdmin.auth.admin.updateUserById(userId, {
             user_metadata: {
               plan: planId,
-              subscriptionStatus: "active",
+              subscriptionStatus,
             },
           });
 
@@ -810,7 +806,7 @@ export async function POST(req: NextRequest) {
         await upsertEntitlement({
           userId,
           entitlementKey: PLATFORM_ACCESS_ENTITLEMENT,
-          status: "active",
+          status: subscriptionStatus,
           stripeCustomerId: customerId,
           stripeSubscriptionId: subscriptionId ?? null,
           stripePriceId: subPriceId,
@@ -867,7 +863,7 @@ export async function POST(req: NextRequest) {
               await upsertEntitlement({
                 userId: resolvedUserId,
                 entitlementKey: "option_flow",
-                status: "active",
+                status: subscriptionStatus,
                 stripeCustomerId: customerId,
                 stripeSubscriptionId: subscription.id,
                 stripePriceId: resolveAddonPriceId(subscription, "option_flow"),
@@ -877,7 +873,7 @@ export async function POST(req: NextRequest) {
               await upsertEntitlement({
                 userId: resolvedUserId,
                 entitlementKey: "broker_sync",
-                status: "active",
+                status: subscriptionStatus,
                 stripeCustomerId: customerId,
                 stripeSubscriptionId: subscription.id,
                 stripePriceId: resolveAddonPriceId(subscription, "broker_sync"),
@@ -887,7 +883,7 @@ export async function POST(req: NextRequest) {
         }
 
         console.log(
-          `[WEBHOOK] Subscription active for user ${userId} with plan ${planId}.`
+          `[WEBHOOK] Subscription ${subscriptionStatus} for user ${userId} with plan ${planId}.`
         );
         break;
       }
@@ -952,6 +948,12 @@ export async function POST(req: NextRequest) {
             .from("profiles")
             .update({
               subscription_status: status,
+              trial_started_at: subscription.trial_start
+                ? new Date(subscription.trial_start * 1000).toISOString()
+                : null,
+              trial_ended_at: subscription.trial_end
+                ? new Date(subscription.trial_end * 1000).toISOString()
+                : null,
             })
             .eq("id", userId);
 

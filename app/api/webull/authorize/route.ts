@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import crypto from "crypto";
 import { buildWebullAuthUrl } from "@/lib/webullClient";
-import { requireBrokerSyncAddon } from "@/lib/serverFeatureAccess";
+import { requireBrokerSyncAccess } from "@/lib/serverFeatureAccess";
 import { requirePlatformAccess } from "@/lib/serverPlatformAccess";
 import { rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
 
@@ -29,13 +29,8 @@ export async function POST(req: Request) {
         }
       );
     }
-
-    const brokerSyncFree =
-      process.env.BROKER_SYNC_FREE === "true" || process.env.NEXT_PUBLIC_BROKER_SYNC_FREE === "true";
-    if (!brokerSyncFree) {
-      const brokerGate = await requireBrokerSyncAddon(auth.userId);
-      if (brokerGate) return brokerGate;
-    }
+    const brokerGate = await requireBrokerSyncAccess(auth.userId);
+    if (brokerGate) return brokerGate;
 
     const state = crypto.randomBytes(12).toString("hex");
     const scope = process.env.WEBULL_SCOPE?.trim() || undefined;

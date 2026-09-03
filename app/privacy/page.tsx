@@ -19,11 +19,12 @@ const CONTENT = {
         title: "2. Information We Collect",
         bullets: [
           "Account Information: name, email address, login credentials (stored in hashed form where applicable), and subscription status.",
+          "Legal Acceptance Records: Terms and Privacy Policy versions accepted, acceptance timestamps, checkout disclosures, IP address, user agent, and related audit metadata.",
           "Trading Business Data: execution records, trade records, fills, timestamps, instrument details, commissions/fees, screenshots, notes, tags, plans, and related analytics inputs.",
-          "Integration Data: information you authorize us to import from third-party platforms (for example, broker/platform trade history).",
-          "Usage Data: log data and analytics about how you use the Service (e.g., pages viewed, features used, device/browser information, IP address).",
+          "Integration Data: information you authorize us to import from third-party platforms, including broker/platform statements, trade history, order history, account identifiers, balances, holdings, positions, transactions, fees, commissions, timestamps, and related metadata when those integrations are enabled.",
+          "Usage, Device, and Mobile Data: log data and analytics about how you use the Service (e.g., pages viewed, features used, device/browser information, app version, operating system, IP address, crash/debug data, and push-notification tokens if notifications are enabled).",
           "Support Communications: messages and attachments you send to our support team.",
-          "Payment Information: billing details processed by our payment processor (we typically do not store full card numbers).",
+          "Payment Information: billing details, trial status, renewal status, cancellation status, receipt details, and subscription metadata processed by Stripe or another payment processor (we typically do not store full card numbers).",
         ],
       },
       {
@@ -40,18 +41,39 @@ const CONTENT = {
       {
         title: "4. Business AI Coaching and Automated Processing",
         body:
-          "If you use Business AI Coaching features, NTJ may process your trading business data, execution records, notes, plans, and related context to generate summaries, insights, and suggestions. Business AI Coaching outputs depend on the data you provide or import. You are responsible for ensuring your inputs are accurate and complete. Business AI Coaching may produce inaccurate, incomplete, or misleading output. You should independently evaluate any Business AI Coaching output before relying on it.",
+          "If you use Business AI Coaching features, NTJ may process your trading business data, execution records, notes, plans, screenshots, imported broker data, analytics, and related context through OpenAI or other AI service providers to generate educational summaries, insights, simulations, and suggestions. Business AI Coaching outputs depend on the data you provide or import. You are responsible for ensuring your inputs are accurate and complete. Business AI Coaching may produce inaccurate, incomplete, outdated, or misleading output. You should independently evaluate any Business AI Coaching output before relying on it.",
+      },
+      {
+        title: "4.1 Educational and Non-Advisory Use",
+        body:
+          "Analytics, projections, simulations, Business AI Coaching, Neuro Analysis, Option Flow Intelligence, dashboards, reports, and similar outputs are provided for educational, journaling, research, simulation, and business-accountability purposes only. They are not financial, investment, trading, legal, tax, or accounting advice; they do not recommend that you buy, sell, hold, or trade any instrument; and they do not guarantee profits, income, capital growth, improved trading performance, or any specific result.",
       },
       {
         title: "5. How We Share Information",
         bullets: [
           "We do not sell your personal information.",
-          "Service Providers: with vendors who help us operate the Service (e.g., hosting, analytics, customer support, payment processing) under contractual obligations.",
+          "Service Providers: with vendors who help us operate the Service under contractual obligations, including hosting, database, authentication, storage, payment processing, AI processing, email, support, security, app distribution, monitoring, and analytics providers.",
           "Integrations You Enable: with third-party platforms when you choose to connect them (data flows may occur between NTJ and the third party based on your authorization).",
           "Legal and Safety: to comply with law, court orders, or requests by public authorities, or to protect the rights, safety, and security of NTJ, our users, or others.",
           "Business Transfers: in connection with a merger, acquisition, financing, reorganization, bankruptcy, or sale of assets (subject to applicable law).",
           "Public Sharing Features (Optional): if you choose to share trades, summaries, or other content publicly, that content may be visible to others based on your settings.",
         ],
+      },
+      {
+        title: "5.1 Current Service Providers and API Accounts",
+        bullets: [
+          "Supabase may be used for authentication, database, storage, and backend services.",
+          "Vercel may be used for hosting, serverless functions, deployment, and operational logs.",
+          "Stripe may be used for subscriptions, checkout, billing, invoices, taxes, and payment-related customer records.",
+          "OpenAI or other AI providers may be used to generate AI-assisted coaching, summaries, analysis, and support responses based on the data you submit or authorize.",
+          "Expo, Apple, and Google may be used for mobile app builds, app distribution, push notifications, device services, and store operations.",
+          "Email, security, analytics, support, and abuse-prevention providers such as Resend, hCaptcha, and similar vendors may process limited data needed to operate those features.",
+        ],
+      },
+      {
+        title: "5.2 Broker Integrations; Currently Disabled Until Approval",
+        body:
+          "Direct broker integrations, including SnapTrade and Webull, are currently intended to remain disabled until provider approvals and production readiness are complete. If you later enable a broker connection, NTJ and its service providers may exchange data with that broker or broker-connectivity provider based on your authorization. This may include account identifiers, balances, holdings, positions, orders, activities, transactions, fills, fees, commissions, timestamps, OAuth tokens or authorization metadata, and sync logs. Broker connections are intended for importing, synchronizing, displaying, auditing, and analyzing your trading data; NTJ does not use them to place trades, withdraw funds, or custody assets. You may disconnect supported integrations where the Service provides that option or contact support for deletion requests.",
       },
       {
         title: "6. Cookies and Analytics",
@@ -71,7 +93,7 @@ const CONTENT = {
       {
         title: "9. Your Choices and Rights",
         body:
-          "Depending on your location, you may have rights to access, correct, delete, or export certain information, and to object to or restrict certain processing. You may also opt out of non-essential marketing communications. To request action, contact us at support@neurotrader-journal.com.",
+          "Depending on your location, you may have rights to access, correct, delete, or export certain information, and to object to or restrict certain processing. You may also opt out of non-essential marketing communications, disconnect supported integrations, and request deletion of imported broker data or account data where required by law. To request action, contact us at support@neurotrader-journal.com.",
       },
       {
         title: "10. International Transfers",
@@ -86,7 +108,7 @@ const CONTENT = {
       {
         title: "12. Changes to This Privacy Policy",
         body:
-          "We may update this Privacy Policy from time to time. The updated version will be effective when posted or otherwise made available to you. Your continued use of the Service after an update constitutes acceptance of the updated Privacy Policy.",
+          "We may update this Privacy Policy from time to time. The updated version will be effective when posted or otherwise made available to you. For material changes, we may require you to check an acceptance box before continuing to use private features or completing checkout.",
       },
       {
         title: "13. Contact",
@@ -108,11 +130,12 @@ const CONTENT = {
         title: "2. Información que recopilamos",
         bullets: [
           "Información de cuenta: nombre, correo electrónico, credenciales de inicio de sesión (almacenadas en forma cifrada cuando corresponda) y estado de suscripción.",
+          "Registros de aceptación legal: versiones aceptadas de Términos y Política de Privacidad, timestamps de aceptación, divulgaciones de checkout, dirección IP, user agent y metadata de auditoría relacionada.",
           "Datos de la empresa de trading: registros de ejecución, operaciones, fills, timestamps, detalles del instrumento, comisiones/tarifas, screenshots, notas, etiquetas, planes y entradas relacionadas con analítica.",
-          "Datos de integraciones: información que autorizas a importar desde plataformas de terceros (por ejemplo, historial de trading del broker/plataforma).",
-          "Datos de uso: logs y analítica sobre cómo usas el Servicio (páginas vistas, funciones utilizadas, información del dispositivo/navegador, dirección IP).",
+          "Datos de integraciones: información que autorizas a importar desde plataformas de terceros, incluyendo statements de broker/plataforma, historial de trades, historial de órdenes, identificadores de cuenta, balances, holdings, posiciones, transacciones, fees, comisiones, timestamps y metadata relacionada cuando esas integraciones estén habilitadas.",
+          "Datos de uso, dispositivo y móvil: logs y analítica sobre cómo usas el Servicio (páginas vistas, funciones utilizadas, información del dispositivo/navegador, versión de la app, sistema operativo, dirección IP, datos de fallos/depuración y tokens de notificaciones push si las notificaciones están habilitadas).",
           "Comunicaciones de soporte: mensajes y adjuntos enviados a nuestro equipo de soporte.",
-          "Información de pagos: datos de facturación procesados por nuestro proveedor de pagos (normalmente no almacenamos números completos de tarjeta).",
+          "Información de pagos: datos de facturación, estado de trial, renovación, cancelación, detalles de recibos y metadata de suscripción procesados por Stripe u otro proveedor de pagos (normalmente no almacenamos números completos de tarjeta).",
         ],
       },
       {
@@ -129,18 +152,39 @@ const CONTENT = {
       {
         title: "4. Business AI Coaching y procesamiento automatizado",
         body:
-          "Si usas funciones de Business AI Coaching, NTJ puede procesar tus datos de empresa de trading, registros de ejecución, notas, planes y contexto relacionado para generar resúmenes, insights y sugerencias. Las salidas del Business AI Coaching dependen de la data que proveas o importes. Eres responsable de asegurar que tus inputs sean precisos y completos. El Business AI Coaching puede generar resultados inexactos, incompletos o engañosos. Debes evaluar cualquier salida antes de tomar decisiones.",
+          "Si usas funciones de Business AI Coaching, NTJ puede procesar tus datos de empresa de trading, registros de ejecución, notas, planes, screenshots, data importada del broker, analítica y contexto relacionado mediante OpenAI u otros proveedores de IA para generar resúmenes, insights, simulaciones y sugerencias educativas. Las salidas del Business AI Coaching dependen de la data que proveas o importes. Eres responsable de asegurar que tus inputs sean precisos y completos. El Business AI Coaching puede generar resultados inexactos, incompletos, desactualizados o engañosos. Debes evaluar cualquier salida antes de tomar decisiones.",
+      },
+      {
+        title: "4.1 Uso educativo y no asesoría",
+        body:
+          "La analítica, proyecciones, simulaciones, Business AI Coaching, Neuro Analysis, Option Flow Intelligence, dashboards, reportes y salidas similares se ofrecen únicamente con fines educativos, de journaling, investigación, simulación y accountability empresarial. No constituyen asesoría financiera, de inversión, trading, legal, contributiva ni contable; no recomiendan comprar, vender, mantener u operar ningún instrumento; y no garantizan ganancias, ingresos, crecimiento de capital, mejora en rendimiento de trading ni ningún resultado específico.",
       },
       {
         title: "5. Cómo compartimos la información",
         bullets: [
           "No vendemos tu información personal.",
-          "Proveedores de servicio: con terceros que nos ayudan a operar el Servicio (hosting, analítica, soporte, procesamiento de pagos) bajo acuerdos contractuales.",
+          "Proveedores de servicio: con terceros que nos ayudan a operar el Servicio bajo acuerdos contractuales, incluyendo hosting, base de datos, autenticación, almacenamiento, procesamiento de pagos, procesamiento de IA, email, soporte, seguridad, distribución de apps, monitoreo y analítica.",
           "Integraciones que habilitas: con plataformas de terceros cuando decides conectarlas (el flujo de datos se basa en tu autorización).",
           "Legal y seguridad: para cumplir con la ley, órdenes judiciales o solicitudes de autoridades, o para proteger los derechos, seguridad y protección de NTJ, nuestros usuarios u otros.",
           "Transferencias de negocio: en conexión con una fusión, adquisición, financiamiento, reorganización, bancarrota o venta de activos (sujeto a la ley aplicable).",
           "Funciones públicas (opcionales): si eliges compartir trades, resúmenes u otro contenido públicamente, dicho contenido puede ser visible según tu configuración.",
         ],
+      },
+      {
+        title: "5.1 Proveedores actuales y cuentas API",
+        bullets: [
+          "Supabase puede usarse para autenticación, base de datos, almacenamiento y servicios backend.",
+          "Vercel puede usarse para hosting, funciones serverless, despliegue y logs operativos.",
+          "Stripe puede usarse para suscripciones, checkout, facturación, invoices, taxes y registros de cliente relacionados con pagos.",
+          "OpenAI u otros proveedores de IA pueden usarse para generar coaching con IA, resúmenes, análisis y respuestas de soporte basadas en los datos que envías o autorizas.",
+          "Expo, Apple y Google pueden usarse para builds móviles, distribución de apps, notificaciones push, servicios de dispositivo y operaciones de tiendas.",
+          "Proveedores de email, seguridad, analítica, soporte y prevención de abuso como Resend, hCaptcha y proveedores similares pueden procesar datos limitados necesarios para operar esas funciones.",
+        ],
+      },
+      {
+        title: "5.2 Integraciones de broker; actualmente deshabilitadas hasta aprobación",
+        body:
+          "Las integraciones directas de broker, incluyendo SnapTrade y Webull, están pensadas para permanecer deshabilitadas hasta completar aprobaciones de proveedores y preparación de producción. Si luego habilitas una conexión de broker, NTJ y sus proveedores de servicio pueden intercambiar datos con ese broker o proveedor de conexión según tu autorización. Esto puede incluir identificadores de cuenta, balances, holdings, posiciones, órdenes, actividades, transacciones, fills, fees, comisiones, timestamps, tokens OAuth o metadata de autorización, y logs de sincronización. Las conexiones de broker están diseñadas para importar, sincronizar, mostrar, auditar y analizar tu data de trading; NTJ no las usa para colocar trades, retirar fondos ni custodiar activos. Puedes desconectar integraciones soportadas cuando el Servicio provea esa opción o contactar soporte para solicitudes de eliminación.",
       },
       {
         title: "6. Cookies y analítica",
@@ -160,7 +204,7 @@ const CONTENT = {
       {
         title: "9. Tus opciones y derechos",
         body:
-          "Dependiendo de tu ubicación, puedes tener derechos para acceder, corregir, eliminar o exportar cierta información, y para objetar o restringir ciertos tratamientos. También puedes darte de baja de comunicaciones de marketing no esenciales. Para solicitar acciones, contáctanos en support@neurotrader-journal.com.",
+          "Dependiendo de tu ubicación, puedes tener derechos para acceder, corregir, eliminar o exportar cierta información, y para objetar o restringir ciertos tratamientos. También puedes darte de baja de comunicaciones de marketing no esenciales, desconectar integraciones soportadas y solicitar eliminación de data importada del broker o data de cuenta cuando la ley lo requiera. Para solicitar acciones, contáctanos en support@neurotrader-journal.com.",
       },
       {
         title: "10. Transferencias internacionales",
@@ -175,7 +219,7 @@ const CONTENT = {
       {
         title: "12. Cambios a esta política",
         body:
-          "Podemos actualizar esta Política de Privacidad. La versión actualizada será efectiva cuando se publique o se haga disponible. El uso continuo del Servicio tras una actualización constituye aceptación de la política actualizada.",
+          "Podemos actualizar esta Política de Privacidad. La versión actualizada será efectiva cuando se publique o se haga disponible. Para cambios materiales, podemos requerir que marques una casilla de aceptación antes de continuar usando funciones privadas o completar checkout.",
       },
       {
         title: "13. Contacto",
@@ -212,8 +256,8 @@ export default function PrivacyPolicyPage() {
             </h1>
             <p className="text-sm text-slate-400 mt-2">
               {isEs
-                ? "Última actualización: 7 de febrero de 2026."
-                : "Last updated: February 7, 2026."}
+                ? "Última actualización: 3 de septiembre de 2026."
+                : "Last updated: September 3, 2026."}
             </p>
           </div>
 

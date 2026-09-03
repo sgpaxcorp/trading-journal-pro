@@ -33,7 +33,7 @@ Results by symbol/product — where your edge actually exists.
 Trade‑level metrics and patterns.
 
 **Statistics**  
-Advanced metrics (Sharpe, Sortino, profit factor, etc.).
+Detailed profitability, risk, activity, and consistency measurements. Open each explanation before using a measurement to make a decision.
 
 ## Balance chart
 The balance chart shows your equity curve over time. Use it to confirm consistency and identify drawdown phases.
@@ -42,7 +42,7 @@ The balance chart shows your equity curve over time. Use it to confirm consisten
 1. Start with Overview → confirm sample size.
 2. Use Risk to validate discipline.
 3. Use Time + Instruments to isolate your edge.
-4. Use Statistics for deeper validation (only after you trust the data).
+4. Use Statistics when the sample is meaningful and you have read each measurement's explanation.
 
 ## Tips
 - Always filter by a clean date range.

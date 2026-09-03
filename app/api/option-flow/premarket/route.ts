@@ -4,6 +4,7 @@ import { getOptionFlowBetaApiPayload, resolveOptionFlowLang } from "@/lib/option
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 import { getClientIp, rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
 import { isSmartToolsOwner } from "@/lib/smartToolsAccess";
+import { recordAiUsage } from "@/lib/aiUsageServer";
 
 export const runtime = "nodejs";
 
@@ -108,6 +109,16 @@ Keep it structured with headings and bullet points.
     });
 
     const planHtml = completion.choices[0]?.message?.content ?? "";
+
+    await recordAiUsage({
+      userId,
+      requestId: req.headers.get("x-request-id"),
+      feature: "option_flow",
+      category: "market_intelligence",
+      operation: "premarket_plan",
+      model: completion.model || DEFAULT_MODEL,
+      usage: completion.usage,
+    });
 
     if (uploadId) {
       try {

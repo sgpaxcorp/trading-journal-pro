@@ -256,8 +256,8 @@ function ConfirmedPageClient() {
           initial={false}
         >
           {L(
-            "Your payment is confirmed. Your email was verified before checkout, and your business access is being activated.",
-            "Tu pago está confirmado. Tu email fue verificado antes del checkout y tu acceso empresarial se está activando."
+            "Your checkout is confirmed. Your email was verified before checkout, and your business access is being activated.",
+            "Tu checkout está confirmado. Tu email fue verificado antes del checkout y tu acceso empresarial se está activando."
           )}
         </motion.p>
 
@@ -280,10 +280,10 @@ function ConfirmedPageClient() {
           </p>
           <div className="grid gap-2 md:grid-cols-2">
             {[
-              L("Email verified before payment", "Email verificado antes del pago"),
-              L("Secure payment confirmed by Stripe", "Pago seguro confirmado por Stripe"),
+              L("Email verified before checkout", "Email verificado antes del checkout"),
+              L("Secure checkout confirmed", "Checkout seguro confirmado"),
               L("Business access activated by webhook", "Acceso empresarial activado por webhook"),
-              L("Welcome, confirmation, and receipt emails sent", "Emails de bienvenida, confirmación y recibo enviados"),
+              L("Welcome and subscription emails queued", "Emails de bienvenida y suscripción en cola"),
             ].map((item) => (
               <div key={item} className="flex items-start gap-2 rounded-xl border border-white/10 bg-slate-950/40 px-3 py-2">
                 <span className="mt-0.5 text-emerald-300">✓</span>

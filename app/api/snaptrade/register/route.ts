@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { ensureSnaptradeUser, getSnaptradeUser } from "@/lib/snaptradeStorage";
 import { formatSnaptradeError } from "@/lib/snaptradeClient";
 import { rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
-import { requireBrokerSyncAddon } from "@/lib/serverFeatureAccess";
+import { requireBrokerSyncAccess } from "@/lib/serverFeatureAccess";
 import { requirePlatformAccess } from "@/lib/serverPlatformAccess";
 
 export const runtime = "nodejs";
@@ -23,13 +23,8 @@ export async function POST(req: Request) {
         { status: 429, headers: { "Retry-After": String(retryAfter), ...rateLimitHeaders(limiter) } }
       );
     }
-
-    const brokerSyncFree =
-      process.env.BROKER_SYNC_FREE === "true" || process.env.NEXT_PUBLIC_BROKER_SYNC_FREE === "true";
-    if (!brokerSyncFree) {
-      const brokerGate = await requireBrokerSyncAddon(auth.userId);
-      if (brokerGate) return brokerGate;
-    }
+    const brokerGate = await requireBrokerSyncAccess(auth.userId);
+    if (brokerGate) return brokerGate;
 
     const existing = await getSnaptradeUser(auth.userId);
     if (existing?.snaptrade_user_secret) {

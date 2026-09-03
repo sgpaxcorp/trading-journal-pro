@@ -55,10 +55,10 @@ El Growth Plan siempre clasifica la cuenta como **capital operativo del negocio 
 Los costos de trading reducen cada sesión modelada. La interfaz presenta el balance compuesto porcentual bruto, el balance neto de costos fijos por sesión y la diferencia acumulada entre ambos. La reserva contributiva se aplica únicamente al crecimiento neto positivo modelado de trading y se presenta por separado; es un estimado de planificación que debe confirmarse con un profesional contributivo cualificado.
 
 ## Ruta operativa recomendada por el modelo
-Completa los cinco inputs de Business Analysis: perfil de riesgo, experiencia, dependencia de ingresos, tolerancia al drawdown y estilo de trading. El plan presentará una recomendación operativa explícita basada en tu capital inicial y meta empresarial.
+Completa los supuestos de capital, plazo, calendario de trading, retorno, riesgo, costos y flujos de capital. El plan presentará una recomendación operativa explícita basada en esos datos del negocio y la evidencia de ejecución disponible.
 
 La recomendación muestra:
-1. El escenario operativo más apropiado para tu perfil.
+1. El escenario operativo estándar más bajo que puede respaldar el ritmo solicitado, o el modelo manual seleccionado.
 2. Porcentaje en días de meta, riesgo por trade, pérdida diaria máxima y días de pérdida planificados por semana.
 3. Días de trading, semanas operativas, meses y fecha estimada de cumplimiento.
 4. Metas compuestas semanales, mensuales, trimestrales, semestrales y anuales con fechas, más el balance real y la variación cuando vence cada checkpoint.
@@ -88,7 +88,7 @@ Cada ruta separa **crecimiento de trading**, **aportaciones**, **retiros** y **c
 La evaluación separa métricas que no deben confundirse:
 1. **Retorno por sesión en trayectoria perfecta**: tasa compuesta matemática si todas las sesiones comprometidas fueran positivas, aplicando por separado las aportaciones y retiros declarados.
 2. **Retorno requerido por la solicitud**: ritmo matemático necesario para alcanzar la meta en la fecha solicitada. Es un diagnóstico, no una meta operativa aprobada.
-3. **Ritmo operativo disciplinado**: retorno de día-meta y pérdida esperada en día perdedor que usa la proyección adaptativa según el perfil.
+3. **Ritmo operativo disciplinado**: retorno de día-meta y pérdida esperada en día perdedor de la política o modelo manual seleccionado.
 4. **Evidencia de ejecución**: cantidad de sesiones/trades registrados más win rate, profit factor, expectativa y drawdown disponibles.
 5. **Flujos de capital**: aportaciones y retiros planificados que cambian el equity sin cambiar el rendimiento de trading.
 6. **Proyección operativa bruta versus neta**: primero se componen multiplicativamente los porcentajes de días-meta y días perdedores; luego se descuentan los costos fijos en dólares y se reportan como impacto de costos. Por ejemplo, cuatro días de `+2.5%` y uno de `-2%` producen aproximadamente `+8.17%` en la semana modelada antes de costos fijos. La matemática anualizada usa la cantidad de ciclos comprometidos disponibles en un año del calendario del instrumento seleccionado, para no tratar los feriados del NYSE como sesiones adicionales.
@@ -138,7 +138,7 @@ Cómo llenarlo: un % realista que puedas respetar bajo presión.
 Es un guardrail duro, no la pérdida asumida para cada día perdedor modelado.
 
 ## 6) Modelo de día-meta y pérdida esperada
-**Modelo de día-meta** es el supuesto disciplinado para sesiones positivas modeladas. **Pérdida esperada** es el resultado de planificación para una sesión perdedora típica. La plataforma evalúa tus valores declarados contra la política del perfil y no permite que un input más agresivo acelere la recomendación.
+**Modelo de día-meta** es el supuesto disciplinado para sesiones positivas modeladas. **Pérdida esperada** es el resultado de planificación para una sesión perdedora típica. La plataforma evalúa los valores manuales contra los guardrails de la política estándar seleccionada y no permite que un input agresivo no seleccionado acelere la recomendación.
 
 ## 7) Días de pérdida por semana
 Qué es: cuántos días negativos esperas por cada 5 días de trading.  

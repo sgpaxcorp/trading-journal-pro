@@ -3,7 +3,7 @@ import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 import { getSnaptradeUser } from "@/lib/snaptradeStorage";
 import { formatSnaptradeError, snaptradeGetActivities } from "@/lib/snaptradeClient";
 import { createHash } from "crypto";
-import { requireBrokerSyncAddon } from "@/lib/serverFeatureAccess";
+import { requireBrokerSyncAccess } from "@/lib/serverFeatureAccess";
 import { requirePlatformAccess } from "@/lib/serverPlatformAccess";
 
 export const runtime = "nodejs";
@@ -52,12 +52,8 @@ export async function POST(req: NextRequest) {
   if (!access.ok) return access.response;
 
   const userId = access.context.userId;
-  const brokerSyncFree =
-    process.env.BROKER_SYNC_FREE === "true" || process.env.NEXT_PUBLIC_BROKER_SYNC_FREE === "true";
-  if (!brokerSyncFree) {
-    const brokerGate = await requireBrokerSyncAddon(userId);
-    if (brokerGate) return brokerGate;
-  }
+  const brokerGate = await requireBrokerSyncAccess(userId);
+  if (brokerGate) return brokerGate;
 
   const body = await req.json().catch(() => ({} as any));
   const accountId = String(body?.accountId ?? "").trim();

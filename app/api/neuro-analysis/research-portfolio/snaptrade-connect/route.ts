@@ -3,6 +3,8 @@ import { NextResponse } from "next/server";
 import { getAuthUser } from "@/lib/authServer";
 import { formatSnaptradeError, snaptradeLogin } from "@/lib/snaptradeClient";
 import { ensureNeuroAnalysisSnaptradeUser } from "@/lib/snaptradeStorage";
+import { brokerConnectionsDisabledResponse } from "@/lib/serverFeatureAccess";
+import { areBrokerConnectionsEnabledFromEnv } from "@/lib/brokerConnections";
 import { requireSmartToolsOwner } from "@/lib/smartToolsAccess";
 
 export const runtime = "nodejs";
@@ -16,6 +18,10 @@ export async function POST(req: Request) {
 
     const smartToolsGate = await requireSmartToolsOwner(authUser);
     if (smartToolsGate) return smartToolsGate;
+
+    if (!areBrokerConnectionsEnabledFromEnv()) {
+      return brokerConnectionsDisabledResponse();
+    }
 
     const body = await req.json().catch(() => ({} as any));
     const row = await ensureNeuroAnalysisSnaptradeUser(authUser.userId);

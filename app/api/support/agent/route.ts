@@ -1,6 +1,3 @@
-import fs from "node:fs";
-import path from "node:path";
-
 import OpenAI from "openai";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -8,6 +5,8 @@ import { getAuthUser } from "@/lib/authServer";
 import { isAdminAccount } from "@/lib/adminAuth";
 import { getClientIp, rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
+import { buildUserManualContext } from "@/lib/userManualServer";
+import { recordAiUsage } from "@/lib/aiUsageServer";
 
 export const runtime = "nodejs";
 
@@ -15,7 +14,6 @@ const openai = process.env.OPENAI_API_KEY
   ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
   : null;
 
-const DOCS_ROOT = path.resolve(process.cwd(), "docs", "user-manual");
 const DEFAULT_MODEL = process.env.SUPPORT_AGENT_MODEL || "gpt-4.1-mini";
 
 type SupportTicketRow = {
@@ -59,103 +57,13 @@ function fallbackReply(language: "es" | "en") {
   return "Thanks for reaching out. We are reviewing your case and a team member will reply within 24 to 48 hours.";
 }
 
-function safeDocPath(relativePath: string) {
-  const fullPath = path.join(DOCS_ROOT, relativePath);
-  if (!fullPath.startsWith(DOCS_ROOT)) {
-    throw new Error("Invalid support doc path.");
-  }
-  return fullPath;
-}
-
-function loadDocSnippet(relativePath: string, maxChars = 4000) {
-  try {
-    const filePath = safeDocPath(relativePath);
-    const content = fs.readFileSync(filePath, "utf8").trim();
-    return content.slice(0, maxChars);
-  } catch {
-    return "";
-  }
-}
-
-const DOC_CATALOG = [
-  {
-    key: "overview",
-    fileEn: "en/overview.md",
-    fileEs: "es/overview.md",
-    keywords: ["overview", "workspace", "platform", "dashboard", "general", "features", "benefits"],
-  },
-  {
-    key: "getting_started",
-    fileEn: "en/getting-started.md",
-    fileEs: "es/getting-started.md",
-    keywords: ["signup", "verify", "account", "login", "mobile", "start", "setup", "create account", "verification"],
-  },
-  {
-    key: "billing",
-    fileEn: "en/billing.md",
-    fileEs: "es/billing.md",
-    keywords: ["billing", "plan", "subscription", "renew", "renewal", "cancel", "payment", "invoice", "receipt", "checkout", "stripe", "broker sync", "option flow", "facturacion", "suscripcion", "pago", "cancelacion", "renovacion"],
-  },
-  {
-    key: "journal",
-    fileEn: "en/journal.md",
-    fileEs: "es/journal.md",
-    keywords: ["journal", "session", "premarket", "post-trade", "entry", "exit", "trades", "journalear", "sesion"],
-  },
-  {
-    key: "analytics",
-    fileEn: "en/analytics.md",
-    fileEs: "es/analytics.md",
-    keywords: ["analytics", "kpi", "metrics", "reports", "performance", "analitica", "reporte"],
-  },
-  {
-    key: "rules_alarms",
-    fileEn: "en/rules-alarms.md",
-    fileEs: "es/rules-alarms.md",
-    keywords: ["alarm", "alert", "reminder", "rule", "notific", "alarma", "recordatorio"],
-  },
-  {
-    key: "data_inputs",
-    fileEn: "en/data-inputs.md",
-    fileEs: "es/data-inputs.md",
-    keywords: ["import", "csv", "broker", "snaptrade", "webull", "tradovate", "data", "importacion"],
-  },
-  {
-    key: "ai_coaching",
-    fileEn: "en/ai-coaching.md",
-    fileEs: "es/ai-coaching.md",
-    keywords: ["ai", "coach", "coaching", "assistant", "ia", "coach"],
-  },
-];
-
 function buildSupportContext(language: "es" | "en", queryText: string) {
-  const lower = queryText.toLowerCase();
-  const ranked = DOC_CATALOG
-    .map((doc) => {
-      const score = doc.keywords.reduce(
-        (sum, keyword) => sum + (lower.includes(keyword.toLowerCase()) ? 1 : 0),
-        0
-      );
-      return { ...doc, score };
-    })
-    .sort((a, b) => b.score - a.score);
-
-  const selected = ranked
-    .filter((doc) => doc.score > 0)
-    .slice(0, 3);
-
-  if (!selected.length) {
-    selected.push(...ranked.filter((doc) => ["overview", "getting_started", "billing"].includes(doc.key)).slice(0, 3));
-  }
-
-  return selected
-    .map((doc) => {
-      const file = language === "es" ? doc.fileEs : doc.fileEn;
-      const content = loadDocSnippet(file);
-      return content ? `### ${doc.key}\n${content}` : "";
-    })
-    .filter(Boolean)
-    .join("\n\n");
+  return buildUserManualContext({
+    locale: language,
+    question: queryText,
+    maxChars: 12000,
+    maxChunks: 6,
+  }).context;
 }
 
 function buildConversationSummary(ticket: SupportTicketRow, messages: SupportMessageRow[]) {
@@ -195,6 +103,9 @@ async function createAgentDecision(params: {
   ticket: SupportTicketRow;
   messages: SupportMessageRow[];
   language: "es" | "en";
+  userId?: string | null;
+  requestId?: string | null;
+  dryRun?: boolean;
 }) {
   if (!openai) {
     return {
@@ -241,6 +152,17 @@ async function createAgentDecision(params: {
         content: `Help context:\n${context}\n\nTicket conversation:\n${conversation}`,
       },
     ],
+  });
+
+  await recordAiUsage({
+    userId: params.userId ?? null,
+    requestId: params.requestId,
+    feature: "support_agent",
+    category: "support",
+    operation: params.dryRun ? "admin_preview" : "ticket_reply",
+    model: completion.model || DEFAULT_MODEL,
+    usage: completion.usage,
+    metadata: { ticketId: params.ticket.id },
   });
 
   const parsed = tryParseDecision(completion.choices[0]?.message?.content);
@@ -351,6 +273,9 @@ export async function POST(req: NextRequest) {
       ticket: ticket as SupportTicketRow,
       messages: thread,
       language,
+      userId: (ticket as SupportTicketRow).user_id,
+      requestId: req.headers.get("x-request-id"),
+      dryRun,
     });
 
     const finalReply =

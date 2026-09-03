@@ -8,6 +8,8 @@ import {
   snaptradeListAccounts,
 } from "@/lib/snaptradeClient";
 import { getNeuroAnalysisSnaptradeUser } from "@/lib/snaptradeStorage";
+import { brokerConnectionsDisabledResponse } from "@/lib/serverFeatureAccess";
+import { areBrokerConnectionsEnabledFromEnv } from "@/lib/brokerConnections";
 import { requireSmartToolsOwner } from "@/lib/smartToolsAccess";
 
 export const runtime = "nodejs";
@@ -21,6 +23,10 @@ export async function GET(req: Request) {
 
     const smartToolsGate = await requireSmartToolsOwner(authUser);
     if (smartToolsGate) return smartToolsGate;
+
+    if (!areBrokerConnectionsEnabledFromEnv()) {
+      return brokerConnectionsDisabledResponse();
+    }
 
     const row = await getNeuroAnalysisSnaptradeUser(authUser.userId);
     if (!row) {

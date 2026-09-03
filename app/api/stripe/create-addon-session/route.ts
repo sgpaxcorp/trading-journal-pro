@@ -4,6 +4,8 @@ import Stripe from "stripe";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 import { getClientIp, rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
 import { BROKER_SYNC_ADDON } from "@/lib/planCatalog";
+import { isCurrentLegalAcceptancePayload } from "@/lib/legalConsent";
+import { recordLegalAcceptance } from "@/lib/serverLegalAcceptance";
 import {
   isMissingStripePriceError,
   resolveStripePriceId,
@@ -69,6 +71,13 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
+    if (!isCurrentLegalAcceptancePayload(body)) {
+      return NextResponse.json(
+        { error: "You must accept the current Terms & Conditions and Privacy Policy before checkout." },
+        { status: 400 }
+      );
+    }
+
     const addonKey = (body.addonKey as string | undefined) || DEFAULT_ADDON_KEY;
     const addonCfg = ADDON_CONFIG[addonKey];
     if (!addonCfg) {
@@ -92,6 +101,25 @@ export async function POST(req: NextRequest) {
     }
 
     const origin = resolveAppUrl(req);
+
+    try {
+      await recordLegalAcceptance({
+        userId,
+        source: "addon_checkout",
+        req,
+        metadata: {
+          addonKey,
+          billingCycle,
+          disclosureVersion: body.disclosureVersion ?? "",
+        },
+      });
+    } catch (legalErr) {
+      console.error("[ADDON CHECKOUT] Could not record legal acceptance:", legalErr);
+      return NextResponse.json(
+        { error: "Could not record Terms & Conditions acceptance. Please try again." },
+        { status: 500 }
+      );
+    }
 
     // Ensure customer exists
     let customerId: string | undefined;

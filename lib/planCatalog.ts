@@ -24,27 +24,27 @@ export type PlanComparisonRow =
     };
 
 export const PLAN_PRICES: Record<PlanId, Record<BillingCycle, number>> = {
-  core: { monthly: 15.99, annual: 159.9 },
-  advanced: { monthly: 26.99, annual: 269.9 },
+  core: { monthly: 19.99, annual: 199.9 },
+  advanced: { monthly: 39.99, annual: 399.9 },
 };
 
 export const BROKER_SYNC_ADDON = {
   key: "broker_sync",
-  name: "Broker Data Sync & Imports",
+  name: "Broker Data Sync & Imports (Coming Soon)",
   prices: { monthly: 5, annual: 50 },
   description: {
-    en: "Bring your real broker data into Neuro Trader with secure sync, statement imports, order history, and supported CSV/XLSX files.",
-    es: "Trae la data real de tu bróker a Neuro Trader con sync seguro, imports de statements, order history y archivos CSV/XLSX soportados.",
+    en: "Manual broker statement, order-history, CSV, and XLSX imports are available now. Direct broker sync through SnapTrade/Webull is being prepared for provider approval.",
+    es: "Los imports manuales de statements, order history, CSV y XLSX del broker estan disponibles ahora. El sync directo via SnapTrade/Webull esta en preparacion para aprobacion de proveedores.",
   },
   dataQualityNote: {
-    en: "Richer broker history gives the platform sharper audits: fills, entry/exit timestamps, fees, commissions, and order events become cleaner analytics and more useful AI coaching.",
-    es: "Mientras más completo sea el historial del bróker, más poderosa se vuelve la auditoría: fills, horarios de entrada/salida, fees, comisiones y eventos de órdenes se convierten en mejor analítica y AI coaching más útil.",
+    en: "When direct broker sync is enabled, richer broker history can improve audits: fills, entry/exit timestamps, fees, commissions, and order events become cleaner analytics and more useful AI coaching.",
+    es: "Cuando se habilite el sync directo del broker, un historial mas completo puede mejorar la auditoria: fills, horarios de entrada/salida, fees, comisiones y eventos de ordenes se convierten en mejor analitica y AI coaching mas util.",
   },
   supportedBrokers: {
     en:
-      "Supported brokers (US): Alpaca, Alpaca Paper, Chase, E*Trade, Empower, Fidelity, Moomoo, Public, Robinhood, Schwab, Schwab OAuth, tastytrade, TD Direct Investing, TradeStation, TradeStation Paper, Tradier, Vanguard US, Webull US, Webull US OAuth, Wells Fargo. International: Interactive Brokers, Coinbase (crypto).",
+      "Planned direct-sync coverage includes SnapTrade-supported brokers and Webull OAuth after provider approval. Manual CSV/XLSX imports remain available for supported broker exports.",
     es:
-      "Brokers soportados (US): Alpaca, Alpaca Paper, Chase, E*Trade, Empower, Fidelity, Moomoo, Public, Robinhood, Schwab, Schwab OAuth, tastytrade, TD Direct Investing, TradeStation, TradeStation Paper, Tradier, Vanguard US, Webull US, Webull US OAuth, Wells Fargo. Internacionales: Interactive Brokers, Coinbase (crypto).",
+      "La cobertura planificada de sync directo incluye brokers soportados por SnapTrade y Webull OAuth luego de aprobacion de proveedores. Los imports manuales CSV/XLSX siguen disponibles para exports soportados.",
   },
 } as const;
 
@@ -148,8 +148,8 @@ export const PLAN_CATALOG: Record<
     shortName: { en: "Advanced", es: "Advanced" },
     badge: { en: "Most popular", es: "Más popular" },
     description: {
-      en: "For about $11 more than Core, Advanced unlocks the full trading business system: AI coaching, deep statistics, P&L, cashflow, audit tools, and reports.",
-      es: "Por cerca de $11 más que Core, Advanced desbloquea el sistema completo de empresa de trading: AI coaching, estadística profunda, P&L, cashflow, auditoría y reportes.",
+      en: "Advanced unlocks the full trading business system: AI coaching, deep statistics, P&L, cashflow, audit tools, and reports.",
+      es: "Advanced desbloquea el sistema completo de empresa de trading: AI coaching, estadística profunda, P&L, cashflow, auditoría y reportes.",
     },
     comparisonDescription: {
       en: "The full operating system: AI plan follow-up, deep statistics, business reporting, audit, and priority support.",
@@ -189,8 +189,8 @@ export const PLAN_CATALOG: Record<
       { en: "Android app coming soon", es: "Aplicación Android próximamente" },
     ],
     startDescription: {
-      en: "For about $11 more/month, unlock AI coaching, advanced statistics, business P&L, cashflow, audit tools, and reports.",
-      es: "Por cerca de $11 más/mes, desbloquea AI coaching, estadística avanzada, P&L, cashflow, auditoría y reportes.",
+      en: "Unlock AI coaching, advanced statistics, business P&L, cashflow, audit tools, and reports.",
+      es: "Desbloquea AI coaching, estadística avanzada, P&L, cashflow, auditoría y reportes.",
     },
   },
 };
@@ -238,7 +238,7 @@ export const PLAN_COMPARISON_ROWS: PlanComparisonRow[] = [
   { kind: "feature", label: { en: "CSV/XLSX broker files", es: "Archivos CSV/XLSX del bróker" }, core: true, advanced: true },
   { kind: "feature", label: { en: "Richer broker data improves AI precision", es: "Más data del bróker mejora la precisión del AI" }, core: { en: "Execution context", es: "Contexto de ejecución" }, advanced: { en: "Audit + AI coaching", es: "Auditoría + AI coaching" } },
   { kind: "feature", label: { en: "Broker data audit workbench", es: "Audit workbench de data del bróker" }, core: false, advanced: true },
-  { kind: "feature", label: { en: "Broker Data Sync & Imports add-on", es: "Add-on Broker Data Sync & Imports" }, core: { en: "Available add-on", es: "Add-on disponible" }, advanced: { en: "Available add-on", es: "Add-on disponible" } },
+  { kind: "feature", label: { en: "Direct broker sync add-on", es: "Add-on de sync directo del broker" }, core: { en: "Coming soon", es: "Proximamente" }, advanced: { en: "Coming soon", es: "Proximamente" } },
 
   { kind: "section", label: { en: "BUSINESS CENTER & TRADER ENTREPRENEUR ACCOUNT", es: "CENTRO EMPRESARIAL Y CUENTA DE EMPRESARIO TRADER" } },
   { kind: "feature", label: { en: "Trading accounts", es: "Cuentas de trading" }, core: { en: "5", es: "5" }, advanced: { en: "Unlimited", es: "Ilimitadas" } },

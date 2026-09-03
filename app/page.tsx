@@ -914,11 +914,11 @@ export default function Home() {
               <div>
                 <h3 className="text-lg font-semibold text-white">{BROKER_SYNC_ADDON.name}</h3>
                 <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-300">
-                  {t(BROKER_SYNC_ADDON.description)} {L("Optional add-on during secure payment.", "Add-on opcional durante el pago seguro.")}
+                  {t(BROKER_SYNC_ADDON.description)} {L("Direct broker sync will open after provider approval.", "El sync directo del broker abrira luego de aprobacion de proveedores.")}
                 </p>
               </div>
               <p className="text-lg font-semibold text-emerald-300">
-                $5.00 {L("/ month", "/ mes")}
+                {L("Coming soon", "Proximamente")}
               </p>
             </div>
           </div>
@@ -936,8 +936,8 @@ export default function Home() {
             </h2>
             <p className="mt-3 text-sm leading-6 text-slate-300 md:text-base">
               {L(
-                "Neuro Trader gives users flexible data paths: secure broker sync, account statements, order history, and supported CSV/XLSX imports. The result is a cleaner execution record, stronger audit trail, sharper analytics, and AI coaching based on what actually happened.",
-                "Neuro Trader le da al usuario rutas flexibles para traer su data: sync seguro del bróker, account statements, order history e imports CSV/XLSX soportados. El resultado es un récord de ejecución más limpio, una auditoría más fuerte, mejor analítica y AI coaching basado en lo que realmente pasó."
+                "Neuro Trader gives users flexible data paths: account statements, order history, supported CSV/XLSX imports, and planned secure broker sync after provider approval. The result is a cleaner execution record, stronger audit trail, sharper analytics, and AI coaching based on what actually happened.",
+                "Neuro Trader le da al usuario rutas flexibles para traer su data: account statements, order history, imports CSV/XLSX soportados y sync seguro planificado luego de aprobacion de proveedores. El resultado es un record de ejecucion mas limpio, una auditoria mas fuerte, mejor analitica y AI coaching basado en lo que realmente paso."
               )}
             </p>
             <Link href="/plans-comparison" className="mt-6 inline-flex rounded-md border border-white/20 px-4 py-2 text-sm font-semibold text-white hover:border-emerald-300">
@@ -952,7 +952,7 @@ export default function Home() {
             <p className="mt-3 text-sm leading-6 text-emerald-100/80">{t(BROKER_SYNC_ADDON.dataQualityNote)}</p>
             <div className="mt-5 flex flex-wrap gap-2">
               {[
-                "Secure sync",
+                "Planned secure sync",
                 "Broker statements",
                 "Order history",
                 "Entry/exit timestamps",

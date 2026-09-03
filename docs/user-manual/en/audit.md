@@ -4,7 +4,7 @@
 - Left navigation → Back‑Study → Audit.
 
 ## What this audit does
-This audit uses **broker order history** (not AI) to compute objective, rule-based checks about how orders were placed and managed.
+This audit uses **broker order history** to show objective checks about how orders were placed and managed. These checks come from the imported order events rather than an AI interpretation.
 
 It focuses on:
 - Whether OCO orders were used
@@ -22,12 +22,12 @@ If you want the AI Coach to give you high‑quality feedback, **run Audit first*
 ## What you must provide
 You must import a **Thinkorswim “Account Order History”** export using the existing Import page.
 
-This import creates an append-only ledger of order events. The audit is computed from those events.
+The platform keeps the imported order events and calculates the audit from them.
 
 ## How to run the audit
 1. Go to **Back‑Studying → Audit** (tab).
 2. Select a **date**.
-3. Optionally enter a **symbol** or **instrument key**.
+3. Optionally enter a **symbol** or the complete option identifier shown by the platform.
 4. Run the audit to view metrics and evidence.
 
 ## Best practice: Audit → AI Coaching
@@ -36,23 +36,10 @@ After running Audit:
 - Share the audit summary or screenshot so the coach can interpret it.
 - If you ask “what would have happened,” the coach will only use **real data** and may ask you to verify contract prices.
 
-## Notes on instrument keys
-For options, the key format is:
-```
-UNDERLYING|YYYY-MM-DD|C|STRIKE
-```
-Example:
-```
-SPX|2026-02-13|C|7000
-```
-For stocks or futures, the key is the symbol itself.
+## How to identify the instrument
+For stocks or futures, enter the symbol. For options, select or enter the underlying symbol, expiration date, Call or Put, and strike price as shown on the page. For example: SPX, February 13, 2026, Call, strike 7000.
 
 ## Limitations
 - **Timezone:** the import assumes a source timezone (default: America/New_York). Wrong timezone means incorrect timestamps.
-- **Broker differences:** only Thinkorswim order history is supported in MVP.
+- **Broker differences:** the page currently supports Thinkorswim order history.
 - **Missing data:** if the export omits stop/replace details, the audit cannot infer them.
-
-## Roadmap (planned)
-- Overlay audit markers on back-study charts
-- Support IBKR / Tradovate / NinjaTrader order history
-- Optional AI explanations (after deterministic checks)

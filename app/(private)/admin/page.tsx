@@ -7,6 +7,7 @@ import AccessGrantManager from "@/app/(private)/admin/AccessGrantManager";
 import AdminEmailAutomations from "@/app/(private)/admin/AdminEmailAutomations";
 import AdminSupportInbox from "@/app/(private)/admin/AdminSupportInbox";
 import AdminUsersManager from "@/app/(private)/admin/AdminUsersManager";
+import AiCostControlPanel from "@/app/(private)/admin/AiCostControlPanel";
 import { useAuth } from "@/context/AuthContext";
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
@@ -39,7 +40,7 @@ type Metrics = {
   conversionRate: number;
 };
 
-type AdminTab = "overview" | "growth" | "usage" | "emails" | "users" | "inbox";
+type AdminTab = "overview" | "growth" | "usage" | "ai-costs" | "emails" | "users" | "inbox";
 type UsersSubview = "directory" | "access";
 
 function Sparkline({
@@ -317,6 +318,11 @@ export default function AdminDashboardPage() {
         description: L("Sessions, events, and top pages.", "Sesiones, eventos y páginas más usadas."),
       },
       {
+        key: "ai-costs" as const,
+        label: L("AI Costs", "Costos IA"),
+        description: L("OpenAI invoice, tokens, and unit economics.", "Factura OpenAI, tokens y economía por usuario."),
+      },
+      {
         key: "emails" as const,
         label: L("Emails", "Emails"),
         description: L("Automations, previews, and Resend delivery.", "Automatizaciones, previews y Resend."),
@@ -410,7 +416,7 @@ export default function AdminDashboardPage() {
             </div>
           </div>
 
-          <div className="mt-6 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-6">
+          <div className="mt-6 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-7">
             {adminTabs.map((tab) => (
               <TabButton
                 key={tab.key}
@@ -688,6 +694,8 @@ export default function AdminDashboardPage() {
             </div>
           </div>
         )}
+
+        {activeTab === "ai-costs" && <AiCostControlPanel lang={lang} />}
 
         {activeTab === "emails" && (
           <div className="space-y-6">

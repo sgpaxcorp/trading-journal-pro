@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { ensureSnaptradeUser } from "@/lib/snaptradeStorage";
 import { formatSnaptradeError, snaptradeLogin } from "@/lib/snaptradeClient";
-import { requireBrokerSyncAddon } from "@/lib/serverFeatureAccess";
+import { requireBrokerSyncAccess } from "@/lib/serverFeatureAccess";
 import { requirePlatformAccess } from "@/lib/serverPlatformAccess";
 import { rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
 
@@ -64,13 +64,8 @@ export async function POST(req: Request) {
         }
       );
     }
-
-    const brokerSyncFree =
-      process.env.BROKER_SYNC_FREE === "true" || process.env.NEXT_PUBLIC_BROKER_SYNC_FREE === "true";
-    if (!brokerSyncFree) {
-      const brokerGate = await requireBrokerSyncAddon(auth.userId);
-      if (brokerGate) return brokerGate;
-    }
+    const brokerGate = await requireBrokerSyncAccess(auth.userId);
+    if (brokerGate) return brokerGate;
 
     const body = await req.json().catch(() => ({} as any));
     const row = await ensureSnaptradeUser(auth.userId);

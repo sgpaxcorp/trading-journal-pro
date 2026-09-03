@@ -7,22 +7,22 @@ import PublicHomeLogoLink from "@/app/components/PublicHomeLogoLink";
 
 const CONTENT = {
   en: {
-    title: "Terms of Service",
-    updated: "Effective Date: August 24, 2026",
+    title: "Terms & Conditions",
+    updated: "Effective Date: September 3, 2026",
     intro:
       "These Terms of Service (\"Terms\") govern your access to and use of the Neuro Trader website, applications, and related services (collectively, the \"Service\") provided by SG PAX CORP. (\"Neuro Trader\", \"NTJ\", \"we\", \"us\", or \"our\").",
     important:
-      "IMPORTANT: NTJ is a trading business organization, analytics, and educational/coaching platform. NTJ is not a broker-dealer, investment adviser, commodity trading advisor, or financial planner. Nothing in the Service is intended to be (or should be construed as) investment, trading, legal, tax, or accounting advice.",
+      "IMPORTANT: NTJ is a trading business organization, analytics, simulation, and educational/coaching platform. NTJ is not a broker-dealer, investment adviser, commodity trading advisor, financial planner, law firm, tax adviser, or accounting firm. Nothing in the Service is intended to be (or should be construed as) investment, trading, legal, tax, accounting, or other professional advice. NTJ does not guarantee profits, income, capital growth, improved trading performance, or any specific financial result.",
     sections: [
       {
         title: "1. Acceptance of Terms",
         body:
-          "BY ACCESSING OR USING THE SERVICE, YOU AGREE TO BE BOUND BY THESE TERMS. IF YOU DO NOT AGREE, DO NOT ACCESS OR USE THE SERVICE. We may update these Terms from time to time. The updated Terms will be effective when posted or when otherwise made available to you. Your continued use of the Service after an update constitutes acceptance of the updated Terms.",
+          "BY ACCESSING OR USING THE SERVICE, CREATING AN ACCOUNT, CHECKING AN ACCEPTANCE BOX, OR COMPLETING CHECKOUT, YOU AGREE TO BE BOUND BY THESE TERMS. IF YOU DO NOT AGREE, DO NOT ACCESS OR USE THE SERVICE. We may update these Terms from time to time. For material updates, we may require you to affirmatively accept the updated Terms and/or Privacy Policy before continuing to use private features or completing a new checkout.",
       },
       {
         title: "2. Description of the Service",
         body:
-          "The Service may include features such as execution records, trading business plans, trade analytics, performance metrics, tagging and notes, screenshots and attachments, dashboards, integrations with third-party platforms, community or sharing features (if enabled), and AI-assisted coaching and insights. We may add, remove, or modify features at any time. You are responsible for obtaining and maintaining all devices, software, and internet access necessary to use the Service.",
+          "The Service may include features such as execution records, trading business plans, trade analytics, performance metrics, tagging and notes, screenshots and attachments, dashboards, integrations with third-party platforms, community or sharing features (if enabled), Neuro Analysis, Option Flow Intelligence, and AI-assisted coaching and insights. The Service is designed for educational learning, journaling, analysis, simulation, operational accountability, and business-performance review. It is not designed to execute trades for you or replace independent judgment or licensed professional advice. We may add, remove, or modify features at any time. You are responsible for obtaining and maintaining all devices, software, and internet access necessary to use the Service.",
       },
       {
         title: "3. Eligibility and Account Registration",
@@ -35,14 +35,19 @@ const CONTENT = {
           "The accuracy and usefulness of execution records, analytics, metrics, and Business AI Coaching outputs depend on the quality and completeness of the data you provide and/or authorize NTJ to import through integrations. You are solely responsible for: (1) entering, uploading, or importing your trading data correctly and completely; (2) reviewing imported data for accuracy (including fills, commissions, fees, timestamps, and instrument details); (3) confirming that your broker, prop firm, or third-party platform data is accurate and reflects your official records; and (4) understanding how your broker/platform calculates metrics (e.g., realized vs. unrealized PnL, net vs. gross PnL). You acknowledge that third-party integrations may be unavailable, delayed, incomplete, or inaccurate due to third-party systems, permissions, API changes, outages, or other causes outside our control.",
       },
       {
+        title: "4.1 Rights to Third-Party Data and Connected Accounts",
+        body:
+          "You represent and warrant that you have all rights, permissions, consents, and authority necessary to enter, upload, import, display, transmit, or authorize NTJ to access any third-party content or data you provide through the Service. This includes broker or platform statements, trade history, order history, account data, screenshots, reports, attachments, market or news materials, and any content that belongs to another person, company, broker, exchange, data provider, prop firm, platform, or service. If you connect a third-party account, you authorize NTJ and its service providers to access and process the requested data solely to provide the Service. You must comply with all applicable third-party terms and may not upload, import, or share data or content that you are not permitted to use.",
+      },
+      {
         title: "5. Business AI Coaching and AI-Assisted Insights",
         body:
-          "The Service may provide AI-assisted coaching, pattern detection, summaries, recommendations, trade reviews, risk/mindset prompts, and other automated insights (\"Business AI Coaching\"). Business AI Coaching is provided for informational and educational purposes only.",
+          "The Service may provide AI-assisted coaching, pattern detection, summaries, evaluations, simulations, trade reviews, risk/mindset prompts, and other automated insights (\"Business AI Coaching\"). Business AI Coaching is provided for informational, educational, journaling, simulation, and accountability purposes only. It is not a promise that your trading plan will work or that your behavior, profitability, income, account balance, or capital will improve.",
       },
       {
         title: "5.1 AI May Be Inaccurate or Incomplete",
         body:
-          "Business AI Coaching outputs are generated by automated systems and may contain errors, omissions, hallucinations, incorrect assumptions, or outdated information. We do not guarantee the accuracy, completeness, reliability, or usefulness of any Business AI Coaching output.",
+          "Business AI Coaching outputs are generated by automated systems and may contain errors, omissions, hallucinations, incorrect assumptions, outdated information, or analysis that does not fit your circumstances. We do not guarantee the accuracy, completeness, reliability, consistency, usefulness, or availability of any Business AI Coaching output.",
       },
       {
         title: "5.2 AI Relies on Your Data and Context",
@@ -52,7 +57,7 @@ const CONTENT = {
       {
         title: "5.3 No Financial Advice; You Must Independently Evaluate",
         body:
-          "Business AI Coaching is not investment advice, trading advice, or a recommendation to buy or sell any security, derivative, futures contract, forex pair, cryptocurrency, or any other instrument. Any actions you take based on Business AI Coaching are taken at your sole discretion and risk. You must independently evaluate any suggestion, recommendation, or analysis and decide whether to act.",
+          "Business AI Coaching, Neuro Analysis, Option Flow Intelligence, dashboards, reports, analytics, simulations, projections, alerts, and educational materials are not investment advice, trading advice, financial planning, portfolio management, or a recommendation to buy, sell, hold, allocate capital to, avoid, or trade any security, derivative, option, futures contract, forex pair, cryptocurrency, or any other instrument. Any actions you take after using the Service are taken at your sole discretion and risk. You must independently evaluate any suggestion, recommendation, scenario, simulation, projection, or analysis and decide whether to act.",
       },
       {
         title: "5.4 Assumption of Risk",
@@ -60,9 +65,14 @@ const CONTENT = {
           "You assume all risks associated with relying on or using Business AI Coaching, including the risk of trading losses, missed opportunities, or adverse outcomes. NTJ disclaims all liability for decisions made based on Business AI Coaching.",
       },
       {
+        title: "5.5 No Guaranteed Outcomes",
+        body:
+          "NTJ does not guarantee that the Service, Business AI Coaching, Neuro Analysis, Option Flow Intelligence, any trading business plan, any projection, any simulation, any alert, or any report will increase income, maximize capital, protect capital, prevent losses, improve discipline, improve performance, identify profitable trades, or produce any financial, trading, educational, or business result. Any examples, scenarios, targets, projections, or simulated returns are hypothetical and educational only.",
+      },
+      {
         title: "6. Trading Risk Disclosure",
         body:
-          "Trading and investing involve substantial risk and are not suitable for all individuals. Past performance is not indicative of future results. You are solely responsible for determining whether any trading strategy, instrument, or approach is appropriate for you.",
+          "Trading and investing involve substantial risk and are not suitable for all individuals. You can lose some or all of your capital, and losses may exceed deposits when leverage, options, futures, margin, or similar products are used. Past performance, back-tested results, hypothetical examples, simulated results, screenshots, community results, or platform analytics are not indicative of future results. You are solely responsible for determining whether any trading strategy, instrument, product, risk level, or approach is appropriate for you.",
       },
       {
         title: "6.1 Trading Business Plan Projections and Discipline",
@@ -82,12 +92,22 @@ const CONTENT = {
       {
         title: "9. Subscriptions, Billing, and Cancellations",
         body:
-          "Certain features may require a paid subscription. Subscription fees are billed in advance on a recurring basis (e.g., monthly or annually) unless otherwise stated at checkout. You authorize us (and our payment processor) to charge your selected payment method. You may cancel your subscription at any time. Cancellation stops future renewals; you will retain access through the end of the current billing period unless otherwise required by law or stated in your plan details. Refunds: Except where required by law or explicitly stated in writing by NTJ, subscription fees are non-refundable. You are responsible for canceling your subscription before renewal to avoid additional charges.",
+          "Certain features may require a paid subscription, paid add-on, or other paid access. Eligible first-time accounts may receive a five (5) day free trial if shown at checkout. By starting a trial, entering a payment method, and checking the checkout acceptance box, you authorize us and our payment processor to automatically charge the selected plan after the trial ends unless you cancel before the trial ends. Trial eligibility is not guaranteed, is generally limited to one trial per user/customer/payment method, and may be denied or revoked for abuse. Fees are billed in advance on a recurring prepaid basis (monthly or annually) unless otherwise stated at checkout. You may cancel your subscription at any time. Cancellation stops future renewals; your access remains available through the end of the current paid period and is suspended after that period ends unless renewed. Refunds: All purchases are final after successful payment. Except where required by law or explicitly stated in writing by NTJ, subscription fees, add-on fees, trial-conversion charges, renewal charges, annual payments, partial billing periods, unused access, downgrades, cancellations after renewal, and purchases made by mistake are non-refundable. You are responsible for canceling before a trial converts or before a renewal occurs to avoid additional charges.",
       },
       {
         title: "10. Third-Party Services and Links",
         body:
-          "The Service may integrate with or link to third-party services (such as brokers, platforms, charting tools, analytics, or storage providers). Third-party services are not under our control. We do not endorse and are not responsible for third-party services, including their availability, accuracy, security, terms, or privacy practices.",
+          "The Service may integrate with, rely on, or link to third-party services, including hosting, database, authentication, storage, payment processing, AI processing, email, security, app distribution, analytics, broker, market-data, charting, and support providers. These may include NTJ-controlled provider accounts such as Stripe, Supabase, Vercel, OpenAI or other AI providers, Expo, Apple, Google, Resend, hCaptcha, and similar vendors, and, if enabled in the future, broker connectivity providers such as SnapTrade or Webull. Third-party services are not under our control. We do not endorse and are not responsible for third-party services, including their availability, accuracy, security, terms, or privacy practices.",
+      },
+      {
+        title: "10.1 Broker Integrations; SnapTrade and Webull",
+        body:
+          "Direct broker sync, including SnapTrade and Webull integrations, may be disabled, limited, in beta, or subject to provider approval before public availability. While direct broker sync is disabled, you should use manual broker statement, order-history, CSV, or XLSX imports where available. If direct broker sync is enabled, broker connections are intended to be read-only unless we clearly disclose otherwise. NTJ does not place trades, route orders, withdraw funds, custody assets, manage brokerage accounts, or guarantee that broker data will be complete, current, or accurate. You authorize NTJ and its service providers to request, receive, store, process, and display broker data needed for the Service, which may include account identifiers, account profile data, balances, holdings, positions, orders, activities, transactions, fills, fees, commissions, timestamps, and related metadata. You are responsible for maintaining your broker relationship and complying with your broker's terms.",
+      },
+      {
+        title: "10.2 Third-Party Names, Logos, and Trademarks",
+        body:
+          "Third-party names, logos, broker names, platform names, trademarks, screenshots, statements, and other materials are owned by their respective owners. Any references in the Service are for identification, compatibility, data-import, or descriptive purposes only and do not imply sponsorship, endorsement, partnership, or affiliation unless expressly stated in writing. You may not use the Service to copy, upload, display, or distribute third-party content, logos, data, or marks unless you have the necessary rights or are otherwise legally permitted to do so.",
       },
       {
         title: "11. Intellectual Property",
@@ -97,7 +117,7 @@ const CONTENT = {
       {
         title: "12. Disclaimers",
         body:
-          "THE SERVICE (INCLUDING BUSINESS AI COACHING) IS PROVIDED ON AN \"AS IS\" AND \"AS AVAILABLE\" BASIS. TO THE MAXIMUM EXTENT PERMITTED BY LAW, NTJ DISCLAIMS ALL WARRANTIES, EXPRESS OR IMPLIED, INCLUDING IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, NON-INFRINGEMENT, AND ANY WARRANTIES ARISING OUT OF COURSE OF DEALING OR USAGE OF TRADE. WE DO NOT WARRANT THAT THE SERVICE WILL BE UNINTERRUPTED, ERROR-FREE, SECURE, OR THAT ANY DATA OR RESULTS (INCLUDING METRICS, PNL, OR BUSINESS AI COACHING OUTPUTS) WILL BE ACCURATE OR RELIABLE.",
+          "THE SERVICE (INCLUDING BUSINESS AI COACHING, NEURO ANALYSIS, OPTION FLOW INTELLIGENCE, ANALYTICS, PROJECTIONS, SIMULATIONS, REPORTS, AND ALERTS) IS PROVIDED ON AN \"AS IS\" AND \"AS AVAILABLE\" BASIS. TO THE MAXIMUM EXTENT PERMITTED BY LAW, NTJ DISCLAIMS ALL WARRANTIES, EXPRESS OR IMPLIED, INCLUDING IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, NON-INFRINGEMENT, AND ANY WARRANTIES ARISING OUT OF COURSE OF DEALING OR USAGE OF TRADE. WE DO NOT WARRANT THAT THE SERVICE WILL BE UNINTERRUPTED, ERROR-FREE, SECURE, OR THAT ANY DATA, RESULTS, METRICS, PNL, AI OUTPUTS, PROJECTIONS, SIMULATIONS, OR REPORTS WILL BE ACCURATE, RELIABLE, COMPLETE, CONSISTENT, OR SUITABLE FOR YOUR PURPOSES.",
       },
       {
         title: "13. Limitation of Liability",
@@ -137,22 +157,22 @@ const CONTENT = {
     ],
   },
   es: {
-    title: "Términos de Servicio",
-    updated: "Fecha de vigencia: 24 de agosto de 2026",
+    title: "Términos y Condiciones",
+    updated: "Fecha de vigencia: 3 de septiembre de 2026",
     intro:
       "Estos Términos de Servicio (los \"Términos\") rigen tu acceso y uso del sitio web, las aplicaciones y los servicios relacionados de Neuro Trader (colectivamente, el \"Servicio\") provistos por SG PAX CORP. (\"Neuro Trader\", \"NTJ\", \"nosotros\", \"nos\" o \"nuestro\").",
     important:
-      "IMPORTANTE: NTJ es una plataforma de organización empresarial de trading, analítica y educación/coaching. NTJ no es broker-dealer, asesor de inversiones, asesor de trading de commodities ni planificador financiero. Nada en el Servicio pretende ser (ni debe interpretarse como) asesoría de inversión, trading, legal, fiscal o contable.",
+      "IMPORTANTE: NTJ es una plataforma de organización empresarial de trading, analítica, simulación y educación/coaching. NTJ no es broker-dealer, asesor de inversiones, asesor de trading de commodities, planificador financiero, bufete de abogados, asesor contributivo ni firma contable. Nada en el Servicio pretende ser (ni debe interpretarse como) asesoría de inversión, trading, legal, contributiva, contable u otra asesoría profesional. NTJ no garantiza ganancias, ingresos, crecimiento de capital, mejora de rendimiento de trading ni ningún resultado financiero específico.",
     sections: [
       {
         title: "1. Aceptación de los Términos",
         body:
-          "AL ACCEDER O UTILIZAR EL SERVICIO, ACEPTAS QUEDAR VINCULADO POR ESTOS TÉRMINOS. SI NO ESTÁS DE ACUERDO, NO ACCEDAS NI UTILICES EL SERVICIO. Podemos actualizar estos Términos periódicamente. Los Términos actualizados serán efectivos cuando se publiquen o se pongan a tu disposición. El uso continuado del Servicio después de una actualización constituye aceptación de los Términos actualizados.",
+          "AL ACCEDER O UTILIZAR EL SERVICIO, CREAR UNA CUENTA, MARCAR UNA CASILLA DE ACEPTACIÓN O COMPLETAR CHECKOUT, ACEPTAS QUEDAR VINCULADO POR ESTOS TÉRMINOS. SI NO ESTÁS DE ACUERDO, NO ACCEDAS NI UTILICES EL SERVICIO. Podemos actualizar estos Términos periódicamente. Para cambios materiales, podemos requerir que aceptes afirmativamente los Términos y/o la Política de Privacidad actualizados antes de continuar usando funciones privadas o completar un nuevo checkout.",
       },
       {
         title: "2. Descripción del Servicio",
         body:
-          "El Servicio puede incluir funciones como registros de ejecución, planes de empresa de trading, analítica de trading, métricas de rendimiento, etiquetas y notas, screenshots y adjuntos, dashboards, integraciones con plataformas de terceros, funciones comunitarias o de compartición (si están habilitadas), y coaching e insights con IA. Podemos añadir, eliminar o modificar funciones en cualquier momento. Eres responsable de obtener y mantener todos los dispositivos, software y acceso a internet necesarios para usar el Servicio.",
+          "El Servicio puede incluir funciones como registros de ejecución, planes de empresa de trading, analítica de trading, métricas de rendimiento, etiquetas y notas, screenshots y adjuntos, dashboards, integraciones con plataformas de terceros, funciones comunitarias o de compartición (si están habilitadas), Neuro Analysis, Option Flow Intelligence, y coaching e insights con IA. El Servicio está diseñado para aprendizaje educativo, journaling, análisis, simulación, accountability operativo y revisión de rendimiento empresarial. No está diseñado para ejecutar operaciones por ti ni para reemplazar tu juicio independiente o asesoría profesional autorizada. Podemos añadir, eliminar o modificar funciones en cualquier momento. Eres responsable de obtener y mantener todos los dispositivos, software y acceso a internet necesarios para usar el Servicio.",
       },
       {
         title: "3. Elegibilidad y registro de cuenta",
@@ -165,14 +185,19 @@ const CONTENT = {
           "La precisión y utilidad de los registros de ejecución, analítica, métricas y outputs del Business AI Coaching dependen de la calidad y completitud de los datos que proporcionas y/o autorizas a NTJ a importar mediante integraciones. Eres exclusivamente responsable de: (1) ingresar, subir o importar tu data de trading de forma correcta y completa; (2) revisar la data importada para asegurar exactitud (fills, comisiones, fees, timestamps, detalles del instrumento); (3) confirmar que la data de tu broker, prop firm o plataforma es precisa y coincide con tus registros oficiales; y (4) entender cómo tu broker/plataforma calcula métricas (por ejemplo, PnL realizado vs. no realizado, PnL neto vs. bruto). Reconoces que las integraciones de terceros pueden estar no disponibles, retrasadas, incompletas o inexactas por causas fuera de nuestro control.",
       },
       {
+        title: "4.1 Derechos sobre datos de terceros y cuentas conectadas",
+        body:
+          "Declaras y garantizas que tienes todos los derechos, permisos, consentimientos y autoridad necesarios para ingresar, subir, importar, mostrar, transmitir o autorizar a NTJ a acceder cualquier contenido o dato de terceros que proporciones mediante el Servicio. Esto incluye statements de broker o plataforma, historial de trades, historial de órdenes, datos de cuenta, screenshots, reportes, adjuntos, materiales de mercado o noticias, y cualquier contenido que pertenezca a otra persona, compañía, broker, exchange, proveedor de datos, prop firm, plataforma o servicio. Si conectas una cuenta de terceros, autorizas a NTJ y a sus proveedores de servicio a acceder y procesar los datos solicitados únicamente para proveer el Servicio. Debes cumplir con los términos aplicables de cada tercero y no puedes subir, importar ni compartir datos o contenido que no estés autorizado a usar.",
+      },
+      {
         title: "5. Business AI Coaching e insights asistidos por IA",
         body:
-          "El Servicio puede proporcionar coaching con IA, detección de patrones, resúmenes, recomendaciones, revisiones de trades, prompts de riesgo/mindset y otros insights automatizados (\"Business AI Coaching\"). Business AI Coaching se brinda con fines informativos y educativos.",
+          "El Servicio puede proporcionar coaching con IA, detección de patrones, resúmenes, evaluaciones, simulaciones, revisiones de trades, prompts de riesgo/mindset y otros insights automatizados (\"Business AI Coaching\"). Business AI Coaching se brinda únicamente con fines informativos, educativos, de journaling, simulación y accountability. No es una promesa de que tu plan de trading funcionará ni de que mejorará tu conducta, rentabilidad, ingreso, balance de cuenta o capital.",
       },
       {
         title: "5.1 La IA puede ser inexacta o incompleta",
         body:
-          "Los outputs del Business AI Coaching son generados por sistemas automáticos y pueden contener errores, omisiones, alucinaciones, supuestos incorrectos o información desactualizada. No garantizamos la exactitud, completitud o utilidad de los outputs.",
+          "Los outputs del Business AI Coaching son generados por sistemas automáticos y pueden contener errores, omisiones, alucinaciones, supuestos incorrectos, información desactualizada o análisis que no se ajuste a tus circunstancias. No garantizamos la exactitud, completitud, confiabilidad, consistencia, utilidad ni disponibilidad de ningún output del Business AI Coaching.",
       },
       {
         title: "5.2 La IA depende de tus datos y contexto",
@@ -182,7 +207,7 @@ const CONTENT = {
       {
         title: "5.3 Sin asesoría financiera; debes evaluar por tu cuenta",
         body:
-          "Business AI Coaching no es asesoría de inversión ni recomendación para comprar o vender ningún instrumento. Cualquier acción basada en Business AI Coaching es bajo tu propio criterio y riesgo. Debes evaluar de forma independiente cualquier sugerencia, recomendación o análisis antes de actuar.",
+          "Business AI Coaching, Neuro Analysis, Option Flow Intelligence, dashboards, reportes, analítica, simulaciones, proyecciones, alertas y materiales educativos no son asesoría de inversión, asesoría de trading, planificación financiera, manejo de portafolio ni recomendación para comprar, vender, mantener, asignar capital, evitar u operar ningún valor, derivado, opción, contrato de futuros, par de forex, criptomoneda u otro instrumento. Cualquier acción que tomes después de usar el Servicio es bajo tu propio criterio y riesgo. Debes evaluar de forma independiente cualquier sugerencia, recomendación, escenario, simulación, proyección o análisis antes de actuar.",
       },
       {
         title: "5.4 Asunción de riesgo",
@@ -190,9 +215,14 @@ const CONTENT = {
           "Asumes todos los riesgos asociados a usar o confiar en Business AI Coaching, incluyendo pérdidas, oportunidades perdidas o resultados adversos. NTJ no asume responsabilidad por decisiones tomadas con base en Business AI Coaching.",
       },
       {
+        title: "5.5 Sin resultados garantizados",
+        body:
+          "NTJ no garantiza que el Servicio, Business AI Coaching, Neuro Analysis, Option Flow Intelligence, cualquier Plan de Empresa de Trading, proyección, simulación, alerta o reporte aumente ingresos, maximice capital, proteja capital, prevenga pérdidas, mejore disciplina, mejore rendimiento, identifique trades rentables o produzca algún resultado financiero, de trading, educativo o empresarial. Cualquier ejemplo, escenario, meta, proyección o retorno simulado es hipotético y educativo.",
+      },
+      {
         title: "6. Divulgación de riesgo de trading",
         body:
-          "El trading y la inversión implican riesgo sustancial y no son adecuados para todos. El rendimiento pasado no es indicativo de resultados futuros. Eres responsable de determinar si una estrategia, instrumento o enfoque es apropiado para ti.",
+          "El trading y la inversión implican riesgo sustancial y no son adecuados para todos. Puedes perder parte o la totalidad de tu capital, y las pérdidas pueden exceder los depósitos cuando se usa apalancamiento, opciones, futuros, margen o productos similares. El rendimiento pasado, resultados de back-testing, ejemplos hipotéticos, resultados simulados, screenshots, resultados de comunidad o analítica de la plataforma no son indicativos de resultados futuros. Eres el único responsable de determinar si una estrategia, instrumento, producto, nivel de riesgo o enfoque es apropiado para ti.",
       },
       {
         title: "6.1 Proyecciones y disciplina del Plan de Empresa de Trading",
@@ -212,12 +242,22 @@ const CONTENT = {
       {
         title: "9. Suscripciones, facturación y cancelaciones",
         body:
-          "Ciertas funciones requieren suscripción de pago. Las tarifas se facturan por adelantado de forma recurrente (mensual o anual) salvo indicación contraria en el checkout. Nos autorizas (y a nuestro procesador) a cobrar el método de pago seleccionado. Puedes cancelar en cualquier momento; la cancelación detiene renovaciones futuras y conservas acceso hasta el final del periodo pagado. Reembolsos: salvo que la ley exija lo contrario o NTJ lo indique por escrito, las tarifas no son reembolsables.",
+          "Ciertas funciones pueden requerir una suscripción de pago, add-on de pago u otro acceso pagado. Cuentas nuevas elegibles pueden recibir un trial gratis de cinco (5) días si se muestra en checkout. Al comenzar un trial, ingresar un método de pago y marcar la casilla de aceptación en checkout, nos autorizas a nosotros y a nuestro procesador de pagos a cobrar automáticamente el plan seleccionado cuando termine el trial, salvo que canceles antes de que termine. La elegibilidad del trial no está garantizada, generalmente se limita a un trial por usuario/cliente/método de pago, y puede denegarse o revocarse por abuso. Las tarifas se facturan por adelantado de forma recurrente y prepagada (mensual o anual) salvo indicación contraria en checkout. Puedes cancelar en cualquier momento; la cancelación detiene renovaciones futuras, tu acceso permanece disponible hasta el final del periodo pagado actual y se suspende al terminar ese periodo salvo que se renueve. Reembolsos: toda compra es final después de un pago exitoso. Salvo que la ley exija lo contrario o NTJ lo indique explícitamente por escrito, las tarifas de suscripción, add-ons, cargos de conversión de trial, renovaciones, pagos anuales, periodos parciales, acceso no usado, downgrades, cancelaciones después de renovación y compras realizadas por error no son reembolsables. Eres responsable de cancelar antes de que un trial se convierta o antes de una renovación para evitar cargos adicionales.",
       },
       {
         title: "10. Servicios y enlaces de terceros",
         body:
-          "El Servicio puede integrarse o enlazar con servicios de terceros. Estos servicios no están bajo nuestro control. No los respaldamos ni somos responsables de su disponibilidad, exactitud, seguridad, términos o prácticas de privacidad.",
+          "El Servicio puede integrarse, depender o enlazar con servicios de terceros, incluyendo proveedores de hosting, base de datos, autenticación, almacenamiento, procesamiento de pagos, procesamiento de IA, email, seguridad, distribución de apps, analítica, brokers, data de mercado, gráficas y soporte. Estos pueden incluir cuentas de proveedores controladas por NTJ como Stripe, Supabase, Vercel, OpenAI u otros proveedores de IA, Expo, Apple, Google, Resend, hCaptcha y proveedores similares, y, si se habilitan en el futuro, proveedores de conexión de broker como SnapTrade o Webull. Los servicios de terceros no están bajo nuestro control. No los respaldamos ni somos responsables de su disponibilidad, exactitud, seguridad, términos o prácticas de privacidad.",
+      },
+      {
+        title: "10.1 Integraciones de broker; SnapTrade y Webull",
+        body:
+          "El sync directo de broker, incluyendo integraciones con SnapTrade y Webull, puede estar deshabilitado, limitado, en beta o sujeto a aprobación de proveedores antes de estar disponible públicamente. Mientras el sync directo esté deshabilitado, debes usar imports manuales de statements de broker, historial de órdenes, CSV o XLSX cuando estén disponibles. Si el sync directo se habilita, las conexiones de broker están diseñadas para ser solo lectura salvo que indiquemos claramente lo contrario. NTJ no coloca trades, enruta órdenes, retira fondos, custodia activos, administra cuentas de corretaje ni garantiza que la data del broker sea completa, actual o precisa. Autorizas a NTJ y a sus proveedores de servicio a solicitar, recibir, almacenar, procesar y mostrar la data de broker necesaria para el Servicio, que puede incluir identificadores de cuenta, datos de perfil de cuenta, balances, holdings, posiciones, órdenes, actividades, transacciones, fills, fees, comisiones, timestamps y metadata relacionada. Eres responsable de mantener tu relación con el broker y cumplir con sus términos.",
+      },
+      {
+        title: "10.2 Nombres, logos y marcas de terceros",
+        body:
+          "Los nombres, logos, nombres de brokers, nombres de plataformas, marcas, screenshots, statements y otros materiales de terceros pertenecen a sus respectivos dueños. Cualquier referencia en el Servicio es solo para identificación, compatibilidad, importación de datos o fines descriptivos, y no implica auspicio, endoso, alianza o afiliación salvo que se indique expresamente por escrito. No puedes usar el Servicio para copiar, subir, mostrar o distribuir contenido, logos, datos o marcas de terceros salvo que tengas los derechos necesarios o estés legalmente autorizado a hacerlo.",
       },
       {
         title: "11. Propiedad intelectual",
@@ -227,7 +267,7 @@ const CONTENT = {
       {
         title: "12. Renuncias",
         body:
-          "EL SERVICIO (INCLUYENDO BUSINESS AI COACHING) SE OFRECE \"TAL CUAL\" Y \"SEGÚN DISPONIBILIDAD\". EN LA MÁXIMA MEDIDA PERMITIDA POR LA LEY, NTJ RENUNCIA A TODAS LAS GARANTÍAS, EXPRESAS O IMPLÍCITAS, INCLUYENDO GARANTÍAS IMPLÍCITAS DE COMERCIABILIDAD, IDONEIDAD PARA UN PROPÓSITO PARTICULAR, NO INFRACCIÓN Y CUALQUIER GARANTÍA DERIVADA DEL CURSO DE NEGOCIOS O USO COMERCIAL. NO GARANTIZAMOS QUE EL SERVICIO SEA ININTERRUMPIDO, LIBRE DE ERRORES, SEGURO, NI QUE CUALQUIER DATO O RESULTADO (MÉTRICAS, PNL O OUTPUTS DE IA) SEA PRECISO O CONFIABLE.",
+          "EL SERVICIO (INCLUYENDO BUSINESS AI COACHING, NEURO ANALYSIS, OPTION FLOW INTELLIGENCE, ANALÍTICA, PROYECCIONES, SIMULACIONES, REPORTES Y ALERTAS) SE OFRECE \"TAL CUAL\" Y \"SEGÚN DISPONIBILIDAD\". EN LA MÁXIMA MEDIDA PERMITIDA POR LA LEY, NTJ RENUNCIA A TODAS LAS GARANTÍAS, EXPRESAS O IMPLÍCITAS, INCLUYENDO GARANTÍAS IMPLÍCITAS DE COMERCIABILIDAD, IDONEIDAD PARA UN PROPÓSITO PARTICULAR, NO INFRACCIÓN Y CUALQUIER GARANTÍA DERIVADA DEL CURSO DE NEGOCIOS O USO COMERCIAL. NO GARANTIZAMOS QUE EL SERVICIO SEA ININTERRUMPIDO, LIBRE DE ERRORES, SEGURO, NI QUE CUALQUIER DATO, RESULTADO, MÉTRICA, PNL, OUTPUT DE IA, PROYECCIÓN, SIMULACIÓN O REPORTE SEA PRECISO, CONFIABLE, COMPLETO, CONSISTENTE O ADECUADO PARA TUS PROPÓSITOS.",
       },
       {
         title: "13. Limitación de responsabilidad",

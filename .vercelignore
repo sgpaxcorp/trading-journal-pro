@@ -1,6 +1,6 @@
 # Ignore mobile app for web deployments
-mobile
-mobile/**
+/mobile
+/mobile/**
 
 # Optional large dirs
 node_modules

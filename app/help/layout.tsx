@@ -1,5 +1,6 @@
 import Link from "next/link";
 import TopNav from "@/app/components/TopNav";
+import NeuroGuideAssistant from "@/app/components/NeuroGuideAssistant";
 import { getHelpLocale } from "./_lib/locale";
 
 const NAV_GROUPS = (lang: "en" | "es") => {
@@ -10,6 +11,7 @@ const NAV_GROUPS = (lang: "en" | "es") => {
       items: [
         { href: "/help", label: isEs ? "Resumen" : "Overview" },
         { href: "/help/getting-started", label: isEs ? "Guia de inicio" : "Getting Started" },
+        { href: "/help/assistant", label: isEs ? "Guía Neuro" : "Neuro Guide" },
         { href: "/help/growth-plan", label: isEs ? "Plan de Empresa de Trading" : "Trading Business Plan" },
       ],
     },
@@ -115,6 +117,7 @@ export default async function HelpLayout({ children }: { children: React.ReactNo
           </main>
         </div>
       </div>
+      <NeuroGuideAssistant />
     </div>
   );
 }

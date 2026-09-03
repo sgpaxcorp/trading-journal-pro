@@ -174,33 +174,8 @@ const RETURN_MODELS = {
   aggressive: { goal: 4, loss: 4, maxLoss: 4, risk: 1, lossDays: 1 },
 } as const;
 
-function getReturnModel(
-  mode: keyof typeof RETURN_MODELS,
-  profile?: Record<string, unknown> | null
-) {
-  const base = RETURN_MODELS[mode];
-  let riskFactor = 1;
-  if (profile?.experience === "new") {
-    riskFactor *= 0.75;
-  } else if (profile?.experience === "developing") {
-    riskFactor *= 0.9;
-  }
-  if (profile?.incomeDependency === "high") {
-    riskFactor *= 0.75;
-  }
-  if (profile?.drawdownComfort === "low") {
-    riskFactor *= 0.8;
-  }
-  if (profile?.riskProfile === "conservative") {
-    riskFactor *= 0.9;
-  }
-  return {
-    goal: base.goal,
-    loss: base.loss,
-    maxLoss: base.maxLoss,
-    risk: Number(Math.max(0.1, base.risk * riskFactor).toFixed(3)),
-    lossDays: base.lossDays,
-  };
+function getReturnModel(mode: keyof typeof RETURN_MODELS) {
+  return RETURN_MODELS[mode];
 }
 
 const DEFAULT_DO_RULES = [
@@ -325,7 +300,6 @@ export function BusinessPlanScreen() {
   const [activeAdaptivePlan, setActiveAdaptivePlan] = useState<AdaptivePlan | null>(null);
   const [evaluatedDraftKey, setEvaluatedDraftKey] = useState<string | null>(null);
   const [acceptedDisclosureKey, setAcceptedDisclosureKey] = useState<string | null>(null);
-  const [businessProfile, setBusinessProfile] = useState<Record<string, unknown> | null>(null);
 
   const [startingBalance, setStartingBalance] = useState("");
   const [targetBalance, setTargetBalance] = useState("");
@@ -362,7 +336,6 @@ export function BusinessPlanScreen() {
     (plan: MobileGrowthPlan | null | undefined) => {
       if (!plan) {
         setAdaptivePlan(null);
-        setBusinessProfile(null);
         setStartingBalance("");
         setTargetBalance("");
         setPlanStartDate(today);
@@ -400,12 +373,6 @@ export function BusinessPlanScreen() {
       const firstStrategy = Array.isArray(steps?.strategy?.strategies) ? steps.strategy.strategies[0] : null;
       const system = steps?.execution_and_journal?.system ?? {};
       setAdaptivePlan(plan.adaptivePlan ?? null);
-      setBusinessProfile(
-        steps?.business_analysis?.profile && typeof steps.business_analysis.profile === "object"
-          ? steps.business_analysis.profile
-          : null
-      );
-
       setStartingBalance(plan.startingBalance ? formatMoneyValue(plan.startingBalance) : "");
       setTargetBalance(plan.targetBalance ? formatMoneyValue(plan.targetBalance) : "");
       setPlanStartDate(plan.planStartDate || today);
@@ -612,13 +579,13 @@ export function BusinessPlanScreen() {
     setReturnModelMode(mode);
     setSelectedPlanId("");
     if (mode === "manual") return;
-    const policy = getReturnModel(mode, businessProfile);
+    const policy = getReturnModel(mode);
     setPolicyScenarioId(mode);
     setOperatingGoalDayPct(policy.goal.toFixed(2));
     setExpectedLossDayPct(policy.loss.toFixed(2));
     setMaxDailyLossPercent(policy.maxLoss.toFixed(2));
     setMaxRiskPerTradePercent(policy.risk.toFixed(2));
-  }, [businessProfile]);
+  }, []);
 
   const declaredReturnSummary = useMemo(() => {
     const days = Math.max(1, Math.floor(parsePercent(averageTradingDaysPerWeek) || 1));
@@ -1334,7 +1301,7 @@ export function BusinessPlanScreen() {
             <Text style={styles.label}>{t(language, "Return model", "Modelo de retorno")}</Text>
             <View style={styles.optionRow}>
               {(["conservative", "moderate", "aggressive", "manual"] as const).map((mode) => {
-                const model = mode === "manual" ? null : getReturnModel(mode, businessProfile);
+                const model = mode === "manual" ? null : getReturnModel(mode);
                 return (
                   <Pressable
                     key={mode}
@@ -1363,8 +1330,8 @@ export function BusinessPlanScreen() {
               {returnModelMode && returnModelMode !== "manual"
                 ? t(
                     language,
-                    `${getReturnModel(returnModelMode, businessProfile).goal.toFixed(2)}% goal-day · ${getReturnModel(returnModelMode, businessProfile).loss.toFixed(2)}% expected losing-day`,
-                    `${getReturnModel(returnModelMode, businessProfile).goal.toFixed(2)}% día-meta · ${getReturnModel(returnModelMode, businessProfile).loss.toFixed(2)}% día perdedor esperado`
+                    `${getReturnModel(returnModelMode).goal.toFixed(2)}% goal-day · ${getReturnModel(returnModelMode).loss.toFixed(2)}% expected losing-day`,
+                    `${getReturnModel(returnModelMode).goal.toFixed(2)}% día-meta · ${getReturnModel(returnModelMode).loss.toFixed(2)}% día perdedor esperado`
                   )
                 : t(
                     language,

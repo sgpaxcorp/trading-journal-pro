@@ -1018,6 +1018,7 @@ export function DashboardScreen({ onOpenModule: _onOpenModule, onOpenJournalDate
   const isWideProgressLayout = width >= 980;
   const isWideTopRow = width >= 920;
   const isCompactTopCards = width < 700;
+  const showEmbeddedBusinessProgress = useMemo(() => false, []);
   const todayStr = useMemo(() => formatDateYYYYMMDD(new Date()), []);
   const coachDayKey = useMemo(() => {
     const parts = getNewYorkDayParts(coachNow);
@@ -2196,6 +2197,7 @@ export function DashboardScreen({ onOpenModule: _onOpenModule, onOpenJournalDate
 
             </View>
 
+            {showEmbeddedBusinessProgress ? (
             <View style={[styles.progressCard, !isWideProgressLayout && styles.progressCardFull]}>
               <GradientTitleText text={t(language, "Business Progress", "Progreso del negocio")} style={styles.progressTitle} />
 
@@ -2479,6 +2481,7 @@ export function DashboardScreen({ onOpenModule: _onOpenModule, onOpenJournalDate
                 </>
               )}
             </View>
+            ) : null}
           </View>
 
           <View style={styles.summaryRow}>

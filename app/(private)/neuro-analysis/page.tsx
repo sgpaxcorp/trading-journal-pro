@@ -39,6 +39,10 @@ import {
 
 import TopNav from "@/app/components/TopNav";
 import { useAppSettings } from "@/lib/appSettings";
+import {
+  areBrokerConnectionsEnabledFromEnv,
+  brokerConnectionsUnavailableMessage,
+} from "@/lib/brokerConnections";
 import { resolveLocale } from "@/lib/i18n";
 import { supabaseBrowser } from "@/lib/supaBaseClient";
 
@@ -442,6 +446,8 @@ export default function NeuroAnalysisPage() {
   const isEs = lang === "es";
   const localeTag = LOCALE_TAG[lang];
   const L = (en: string, es: string) => (isEs ? es : en);
+  const brokerConnectionsEnabled = areBrokerConnectionsEnabledFromEnv();
+  const brokerUnavailableMessage = brokerConnectionsUnavailableMessage(lang);
 
   const [holdings, setHoldings] = useState<Holding[]>([]);
   const [focusTicker, setFocusTicker] = useState("AAPL");
@@ -869,6 +875,11 @@ export default function NeuroAnalysisPage() {
     const params = new URLSearchParams(window.location.search);
     if (params.get("portfolio") === "connected") {
       setActiveWorkspaceTab("portfolio");
+      if (!brokerConnectionsEnabled) {
+        setBrokerError(brokerUnavailableMessage);
+        window.history.replaceState({}, "", window.location.pathname);
+        return;
+      }
       void loadResearchPortfolio(false);
       window.history.replaceState({}, "", window.location.pathname);
     }
@@ -944,6 +955,10 @@ export default function NeuroAnalysisPage() {
   }
 
   async function connectResearchPortfolio() {
+    if (!brokerConnectionsEnabled) {
+      setBrokerError(brokerUnavailableMessage);
+      return;
+    }
     try {
       setBrokerError("");
       setBrokerStatus("");
@@ -981,6 +996,10 @@ export default function NeuroAnalysisPage() {
   }
 
   async function loadResearchPortfolio(importHoldings = true) {
+    if (!brokerConnectionsEnabled) {
+      setBrokerError(brokerUnavailableMessage);
+      return;
+    }
     try {
       setBrokerError("");
       setBrokerStatus("");
@@ -1322,25 +1341,32 @@ export default function NeuroAnalysisPage() {
                   </div>
                   <p className="mt-2 text-sm leading-6 text-slate-400">
                     {L(
-                      "Connect a broker read-only or maintain manual positions here. These positions feed Neuro Research, but this workspace stays separate from the research report itself.",
-                      "Conecta un broker solo lectura o mantén posiciones manuales aquí. Estas posiciones alimentan Neuro Research, pero este workspace queda separado del reporte de research."
+                      "Maintain manual positions here, or connect a read-only broker after provider approvals are complete. These positions feed Neuro Research, but this workspace stays separate from the research report itself.",
+                      "Mantén posiciones manuales aquí, o conecta un broker solo lectura cuando terminen las aprobaciones de proveedores. Estas posiciones alimentan Neuro Research, pero este workspace queda separado del reporte de research."
                     )}
                   </p>
+                  {!brokerConnectionsEnabled ? (
+                    <p className="mt-2 rounded-lg border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-xs leading-5 text-amber-100">
+                      {brokerUnavailableMessage}
+                    </p>
+                  ) : null}
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <button
                     type="button"
                     onClick={() => void connectResearchPortfolio()}
-                    disabled={brokerConnecting}
+                    disabled={brokerConnecting || !brokerConnectionsEnabled}
                     className="inline-flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-950/60 px-3 py-2 text-xs font-semibold text-slate-200 hover:border-sky-400 disabled:opacity-60"
                   >
                     {brokerConnecting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Link2 className="h-3.5 w-3.5" />}
-                    {L("Connect broker", "Conectar broker")}
+                    {brokerConnectionsEnabled
+                      ? L("Connect broker", "Conectar broker")
+                      : L("Coming soon", "Proximamente")}
                   </button>
                   <button
                     type="button"
                     onClick={() => void loadResearchPortfolio(true)}
-                    disabled={brokerLoading}
+                    disabled={brokerLoading || !brokerConnectionsEnabled}
                     className="inline-flex items-center gap-2 rounded-lg bg-emerald-400 px-3 py-2 text-xs font-semibold text-slate-950 hover:bg-emerald-300 disabled:opacity-60"
                   >
                     {brokerLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Cloud className="h-3.5 w-3.5" />}

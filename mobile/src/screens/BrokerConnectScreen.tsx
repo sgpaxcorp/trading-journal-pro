@@ -4,6 +4,10 @@ import { Linking, Pressable, StyleSheet, Text, TextInput, View } from "react-nat
 import { ScreenScaffold } from "../components/ScreenScaffold";
 import { PlanGate } from "../components/PlanGate";
 import { apiGet, apiPost } from "../lib/api";
+import {
+  areBrokerConnectionsEnabledFromEnv,
+  brokerConnectionsUnavailableMessage,
+} from "../lib/brokerConnections";
 import { useLanguage } from "../lib/LanguageContext";
 import { t } from "../lib/i18n";
 import { useTheme } from "../lib/ThemeContext";
@@ -43,6 +47,8 @@ export function BrokerConnectScreen() {
   const styles = useMemo(() => createStyles(colors), [colors]);
   const user = useSupabaseUser();
   const planAccess = usePlanAccess();
+  const brokerConnectionsEnabled = areBrokerConnectionsEnabledFromEnv();
+  const brokerUnavailableMessage = brokerConnectionsUnavailableMessage(language);
 
   const [broker, setBroker] = useState("");
   const [accounts, setAccounts] = useState<SnaptradeAccount[]>([]);
@@ -55,13 +61,20 @@ export function BrokerConnectScreen() {
   const [refreshing, setRefreshing] = useState(false);
 
   const loadActiveAccount = useCallback(async () => {
+    if (!brokerConnectionsEnabled) return;
     if (!planAccess.hasBrokerSync) return;
     if (!user?.id) return;
     const id = await resolveActiveAccountId(user.id);
     setActiveAccountId(id);
-  }, [planAccess.hasBrokerSync, user?.id]);
+  }, [brokerConnectionsEnabled, planAccess.hasBrokerSync, user?.id]);
 
   const loadAccounts = useCallback(async (isRefresh = false) => {
+    if (!brokerConnectionsEnabled) {
+      setLoading(false);
+      setRefreshing(false);
+      setStatus(brokerUnavailableMessage);
+      return;
+    }
     if (!planAccess.hasBrokerSync) {
       setLoading(false);
       setRefreshing(false);
@@ -103,15 +116,20 @@ export function BrokerConnectScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [language, planAccess.hasBrokerSync, selectedAccountId]);
+  }, [brokerConnectionsEnabled, brokerUnavailableMessage, language, planAccess.hasBrokerSync, selectedAccountId]);
 
   useEffect(() => {
+    if (!brokerConnectionsEnabled) return;
     if (!planAccess.hasBrokerSync) return;
     loadActiveAccount();
     loadAccounts();
-  }, [loadActiveAccount, loadAccounts, planAccess.hasBrokerSync]);
+  }, [brokerConnectionsEnabled, loadActiveAccount, loadAccounts, planAccess.hasBrokerSync]);
 
   const handleConnect = useCallback(async () => {
+    if (!brokerConnectionsEnabled) {
+      setError(brokerUnavailableMessage);
+      return;
+    }
     if (!planAccess.hasBrokerSync) return;
     try {
       setConnecting(true);
@@ -151,9 +169,13 @@ export function BrokerConnectScreen() {
     } finally {
       setConnecting(false);
     }
-  }, [broker, language, planAccess.hasBrokerSync]);
+  }, [broker, brokerConnectionsEnabled, brokerUnavailableMessage, language, planAccess.hasBrokerSync]);
 
   const handleReset = useCallback(async () => {
+    if (!brokerConnectionsEnabled) {
+      setError(brokerUnavailableMessage);
+      return;
+    }
     if (!planAccess.hasBrokerSync) return;
     try {
       setError(null);
@@ -171,7 +193,7 @@ export function BrokerConnectScreen() {
     } catch (err: any) {
       setError(err?.message ?? "SnapTrade error");
     }
-  }, [language, planAccess.hasBrokerSync]);
+  }, [brokerConnectionsEnabled, brokerUnavailableMessage, language, planAccess.hasBrokerSync]);
 
   const handleSetActive = useCallback(async () => {
     if (!supabaseMobile || !user?.id || !selectedAccountId) return;
@@ -193,6 +215,26 @@ export function BrokerConnectScreen() {
       setError(err?.message ?? "Failed to update active account.");
     }
   }, [selectedAccountId, user?.id, language]);
+
+  if (!brokerConnectionsEnabled) {
+    return (
+      <ScreenScaffold
+        title={t(language, "Broker connections", "Conexión de bróker")}
+        subtitle={t(
+          language,
+          "Direct broker sync is being prepared for provider approval.",
+          "La sincronización directa de bróker se está preparando para aprobación de proveedores."
+        )}
+      >
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>
+            {t(language, "Pending provider approval", "Aprobación de proveedor pendiente")}
+          </Text>
+          <Text style={styles.sectionHint}>{brokerUnavailableMessage}</Text>
+        </View>
+      </ScreenScaffold>
+    );
+  }
 
   if (!planAccess.hasBrokerSync) {
     return (

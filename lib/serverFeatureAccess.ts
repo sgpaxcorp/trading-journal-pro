@@ -1,6 +1,12 @@
 import { NextResponse } from "next/server";
 
 import { isActiveEntitlementStatus, PLATFORM_ACCESS_ENTITLEMENT } from "@/lib/accessControl";
+import {
+  BROKER_CONNECTIONS_DISABLED_CODE,
+  areBrokerConnectionsEnabledFromEnv,
+  brokerConnectionsUnavailableMessage,
+  isEnabledEnvValue,
+} from "@/lib/brokerConnections";
 import { planFromEntitlements, planFromProfile, type AppPlan } from "@/lib/planAccess";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 
@@ -85,6 +91,30 @@ export async function requireBrokerSyncAddon(userId: string) {
     required: "broker_sync",
     message: "Broker Sync add-on is required for this feature.",
   });
+}
+
+export function brokerConnectionsDisabledResponse() {
+  return NextResponse.json(
+    {
+      error: brokerConnectionsUnavailableMessage("en"),
+      code: BROKER_CONNECTIONS_DISABLED_CODE,
+      required: "broker_sync",
+    },
+    { status: 503 }
+  );
+}
+
+export async function requireBrokerSyncAccess(userId: string) {
+  if (!areBrokerConnectionsEnabledFromEnv()) {
+    return brokerConnectionsDisabledResponse();
+  }
+
+  const brokerSyncFree =
+    isEnabledEnvValue(process.env.BROKER_SYNC_FREE) ||
+    isEnabledEnvValue(process.env.NEXT_PUBLIC_BROKER_SYNC_FREE);
+  if (brokerSyncFree) return null;
+
+  return requireBrokerSyncAddon(userId);
 }
 
 export async function requirePlatformAccess(userId: string) {

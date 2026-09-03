@@ -4,6 +4,7 @@ import OpenAI from "openai";
 import { getAuthUser } from "@/lib/authServer";
 import { rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
 import { requireAdvancedPlan } from "@/lib/serverFeatureAccess";
+import { recordAiUsage } from "@/lib/aiUsageServer";
 
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -130,6 +131,16 @@ Respond in the user's language (${isEs ? "Spanish" : "English"}).
     });
 
     const answer = completion.choices[0]?.message?.content ?? "";
+
+    await recordAiUsage({
+      userId: authUser.userId,
+      requestId: req.headers.get("x-request-id"),
+      feature: "business_notebook",
+      category: "advanced",
+      operation: "notebook_question",
+      model: completion.model || "gpt-4o-mini",
+      usage: completion.usage,
+    });
 
     return NextResponse.json({ answer });
   } catch (err) {

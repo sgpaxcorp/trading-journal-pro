@@ -16,7 +16,7 @@ La comunidad es un espacio privado para usuarios logueados donde puedes hacer pr
 4. Explica contexto, qué pasó y qué esperabas.
 
 ## Respuestas
-Abre un hilo y responde directamente. Las respuestas soportan Markdown (listas, links, tablas).
+Abre un hilo y responde directamente. El editor permite organizar la respuesta con listas, enlaces y tablas.
 
 ## Mejores prácticas
 - Comparte evidencia cuando reportes un problema.

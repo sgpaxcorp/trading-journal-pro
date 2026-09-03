@@ -8,6 +8,7 @@ import Link from "next/link";
 import type { PlanId } from "@/lib/types";
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
+import { CURRENT_PRIVACY_VERSION, CURRENT_TERMS_VERSION } from "@/lib/legalConsent";
 import { passwordPolicyHint, validatePasswordPolicy } from "@/lib/passwordPolicy";
 import { supabaseBrowser } from "@/lib/supaBaseClient";
 
@@ -100,6 +101,7 @@ export default function SignUpClient({
   const [verifying, setVerifying] = useState(false);
   const [resending, setResending] = useState(false);
   const [canResend, setCanResend] = useState(true);
+  const [legalAccepted, setLegalAccepted] = useState(false);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -109,6 +111,16 @@ export default function SignUpClient({
 
     try {
       const normalizedEmail = email.trim().toLowerCase();
+      if (!legalAccepted) {
+        setError(
+          L(
+            "Please accept the Terms & Conditions and Privacy Policy to continue.",
+            "Acepta los Términos y Condiciones y la Política de Privacidad para continuar."
+          )
+        );
+        setLoading(false);
+        return;
+      }
       const pwError = validatePasswordPolicy(password, L);
       if (pwError) {
         setPasswordError(pwError);
@@ -128,6 +140,9 @@ export default function SignUpClient({
           address: "",
           plan: initialPlan,
           source: "signup",
+          legalAccepted: true,
+          termsVersion: CURRENT_TERMS_VERSION,
+          privacyVersion: CURRENT_PRIVACY_VERSION,
         }),
       });
       const body = await res.json().catch(() => ({}));
@@ -444,11 +459,35 @@ export default function SignUpClient({
             {passwordError ? <p className="mt-1 text-[10px] text-red-400">{passwordError}</p> : null}
           </div>
 
+          <label className="flex items-start gap-3 rounded-xl border border-slate-700 bg-slate-950/70 px-3 py-3 text-[10px] leading-relaxed text-slate-300">
+            <input
+              type="checkbox"
+              checked={legalAccepted}
+              onChange={(e) => setLegalAccepted(e.target.checked)}
+              className="mt-0.5 h-4 w-4 rounded border-slate-600 bg-slate-950 text-emerald-400 accent-emerald-400"
+              required
+            />
+            <span>
+              {L("I accept the ", "Acepto los ")}
+              <Link href="/terms" target="_blank" rel="noreferrer" className="font-semibold text-emerald-300 underline underline-offset-2">
+                {L("Terms & Conditions", "Términos y Condiciones")}
+              </Link>
+              {L(" and ", " y la ")}
+              <Link href="/privacy" target="_blank" rel="noreferrer" className="font-semibold text-emerald-300 underline underline-offset-2">
+                {L("Privacy Policy", "Política de Privacidad")}
+              </Link>
+              {L(
+                ", and understand NeuroTrader is an educational platform. AI coaching, analytics, simulations, and projections do not provide financial advice or guarantee results.",
+                ", y entiendo que NeuroTrader es una plataforma educativa. El AI coaching, la analítica, simulaciones y proyecciones no proveen asesoría financiera ni garantizan resultados."
+              )}
+            </span>
+          </label>
+
           {error ? <p className="text-[10px] text-red-400">{error}</p> : null}
 
           <button
             type="submit"
-            disabled={loading}
+            disabled={loading || !legalAccepted}
             className="mt-2 w-full rounded-xl bg-emerald-400 px-4 py-2.5 text-xs font-semibold text-slate-950 shadow-lg shadow-emerald-500/20 transition hover:bg-emerald-300 disabled:opacity-60"
           >
             {loading

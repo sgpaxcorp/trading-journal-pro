@@ -5,6 +5,7 @@ import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 import { getAuthUser } from "@/lib/authServer";
 import { getClientIp, rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
 import { isSmartToolsOwner } from "@/lib/smartToolsAccess";
+import { recordAiUsage } from "@/lib/aiUsageServer";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -160,6 +161,15 @@ Return valid JSON with this shape:
     });
 
     const raw = completion.choices[0]?.message?.content ?? "{}";
+    await recordAiUsage({
+      userId: auth.userId,
+      requestId: req.headers.get("x-request-id"),
+      feature: "option_flow",
+      category: "market_intelligence",
+      operation: chartDataUrl ? "outcome_review_with_vision" : "outcome_review",
+      model: completion.model || (chartDataUrl ? VISION_MODEL : DEFAULT_MODEL),
+      usage: completion.usage,
+    });
     let postMortem: any = null;
     try {
       postMortem = JSON.parse(raw);

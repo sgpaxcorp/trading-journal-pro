@@ -7,9 +7,9 @@ import {
 } from "../../lib/growthPlanIdealScenario";
 
 const scenarios = [
-  { id: "conservative" as const, fitScore: 65 },
-  { id: "moderate" as const, fitScore: 92 },
-  { id: "aggressive" as const, fitScore: 55 },
+  { id: "conservative" as const },
+  { id: "moderate" as const },
+  { id: "aggressive" as const },
 ];
 
 describe("ideal growth-plan deadline option", () => {
@@ -47,7 +47,7 @@ describe("ideal growth-plan deadline option", () => {
     ).toBeNull();
   });
 
-  it("offers the best profile-fit mode with its attainable date when all three miss", () => {
+  it("offers the balanced standard mode with its attainable date when all three miss", () => {
     expect(
       selectIdealDeadlineOption({
         scenarios,
@@ -61,7 +61,6 @@ describe("ideal growth-plan deadline option", () => {
     ).toEqual({
       scenarioId: "moderate",
       completionDate: "2028-01-10",
-      fitScore: 92,
     });
   });
 });

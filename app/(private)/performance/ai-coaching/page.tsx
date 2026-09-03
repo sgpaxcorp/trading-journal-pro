@@ -153,7 +153,7 @@ type CoachMode =
   | "execution-truth"
   | "psychology-patterns";
 
-type CoachRangePreset = "plan" | "last30" | "last90" | "all";
+type CoachRangePreset = "today" | "last7" | "plan" | "last30" | "last90" | "all";
 type CoachConversationLanguage = "auto" | "es" | "en";
 
 type CoachPromptTemplate = {
@@ -525,78 +525,86 @@ function getSmartPromptGroups(isEs: boolean): {
     return {
       primary: [
         {
-          id: "checkpoint-rescue",
-          label: "Rescatar el checkpoint",
+          id: "analyze-my-day",
+          label: "Analiza mi día",
           prompt:
-            "Analiza mis registros de ejecución y mi Plan de Empresa de Trading para decirme qué amenaza más mi próximo checkpoint. Quiero el patrón principal, la evidencia real y la acción concreta para la próxima sesión.",
+            "Analiza mi día de trading. Dime qué hice bien, qué hice mal, si respeté mi plan y cuál es la acción concreta que debo corregir en la próxima sesión.",
+          mode: "execution-truth",
+          range: "today",
+        },
+        {
+          id: "weekly-summary",
+          label: "Resumen de la semana",
+          prompt:
+            "Hazme un resumen de mi semana de trading. Quiero saber qué mejoró, qué se deterioró, cuál fue el patrón principal y qué debo proteger la próxima semana.",
+          mode: "weekly-review",
+          range: "last7",
+        },
+        {
+          id: "evaluate-my-plan",
+          label: "Evalúa mi plan",
+          prompt:
+            "Evalúa mi Plan de Empresa de Trading con la data disponible. Dime si es realista, qué parte está más débil y qué debo ajustar primero.",
           mode: "plan-rescue",
           range: "plan",
         },
         {
-          id: "costly-behavior",
-          label: "Conducta más costosa",
+          id: "tomorrow-plan",
+          label: "Qué debo hacer mañana",
           prompt:
-            "Tomando los últimos 30 días, ¿cuál es la conducta que más me está costando probabilidad de cumplir mi Plan de Empresa de Trading? Dímelo con evidencia y una regla operativa concreta.",
-          mode: "plan-rescue",
-          range: "last30",
-        },
-        {
-          id: "risk-vs-plan",
-          label: "Riesgo vs plan",
-          prompt:
-            "Compara mi ejecución reciente con los risk rails de mi Plan de Empresa de Trading. Quiero saber dónde estoy filtrando edge en size, pérdida diaria, frecuencia o disciplina.",
-          mode: "risk-discipline",
-          range: "last30",
-        },
-        {
-          id: "tomorrow-protection",
-          label: "Plan para mañana",
-          prompt:
-            "Usando mis sesiones recientes, dime qué debe proteger mi plan de trading de mañana para evitar repetir mis errores más costosos.",
+            "Con lo que ves en mi plan y mis sesiones recientes, dime qué debo hacer mañana: foco principal, riesgo máximo, error a evitar y una regla no negociable.",
           mode: "weekly-review",
           range: "last30",
         },
         {
-          id: "rule-swap",
-          label: "Regla para añadir y quitar",
+          id: "risk-check",
+          label: "Revisa mi riesgo",
           prompt:
-            "Si fueras mi performance coach, ¿qué regla exacta agregarías hoy a mi sistema y qué regla quitarías o endurecerías para mejorar mi cumplimiento del plan?",
-          mode: "plan-rescue",
-          range: "last90",
+            "Revisa mi riesgo contra mi plan. Dime si estoy arriesgando demasiado, si mi pérdida diaria está controlada y qué ajuste debo hacer para proteger la cuenta.",
+          mode: "risk-discipline",
+          range: "last30",
         },
       ],
       neuro: [
         {
-          id: "execution-truth-gap",
-          label: "Verdad de ejecución",
+          id: "discipline-review",
+          label: "Revisa mi disciplina",
           prompt:
-            "Usa execution truth sobre mis sesiones recientes y dime dónde más se separó mi plan de mi comportamiento real.",
+            "Revisa mi disciplina de ejecución. Dime dónde mi comportamiento se separó de mi plan y qué hábito está afectando más mi consistencia.",
           mode: "execution-truth",
           range: "last30",
         },
         {
-          id: "emotion-drift",
-          label: "Patrón emocional",
+          id: "mistake-review",
+          label: "Analiza mis errores",
           prompt:
-            "Lee el drift emocional en mis registros de ejecución y dime qué patrón psicológico aparece antes de mis peores decisiones.",
-          mode: "psychology-patterns",
-          range: "last90",
+            "Analiza mis errores recientes. Identifica el error más repetido, cuánto afecta mi plan y qué regla práctica debo usar para reducirlo.",
+          mode: "execution-truth",
+          range: "last30",
         },
         {
           id: "red-day-diagnosis",
-          label: "Diagnóstico de días rojos",
+          label: "Diagnostica mis días rojos",
           prompt:
-            "Audita mis sesiones perdedoras y dime si el problema dominante es entradas, salidas, size, manejo o estado mental.",
+            "Diagnostica mis días rojos. Dime si el problema dominante está en entradas, salidas, size, manejo del trade, sobreoperar o estado mental.",
           mode: "execution-truth",
           range: "last90",
         },
         {
-          id: "premarket-focus",
-          label: "Foco pre-market",
+          id: "emotional-pattern",
+          label: "Detecta mi patrón emocional",
           prompt:
-            "Sintetiza mis registros de ejecución, mi capa Neuro y mis resultados en un foco concreto de pre-market para mañana.",
+            "Detecta mi patrón emocional dominante. Dime qué emoción o sesgo aparece antes de mis peores decisiones y cómo debo interrumpirlo.",
           mode: "psychology-patterns",
           range: "last30",
+        },
+        {
+          id: "rule-to-add",
+          label: "Qué regla debo añadir",
+          prompt:
+            "Dime qué regla exacta debo añadir a mi sistema operativo de trading para mejorar mi cumplimiento del plan desde la próxima sesión.",
+          mode: "plan-rescue",
+          range: "last90",
         },
       ],
     };
@@ -605,78 +613,86 @@ function getSmartPromptGroups(isEs: boolean): {
   return {
     primary: [
       {
-        id: "checkpoint-rescue",
-        label: "Rescue the checkpoint",
+        id: "analyze-my-day",
+        label: "Analyze my day",
         prompt:
-          "Analyze my execution records and Trading Business Plan to tell me what is threatening my next checkpoint most. I want the main pattern, real evidence, and the one action I should take next session.",
+          "Analyze my trading day. Tell me what I did well, what I did wrong, whether I respected my plan, and the one concrete action I should correct next session.",
+        mode: "execution-truth",
+        range: "today",
+      },
+      {
+        id: "weekly-summary",
+        label: "Weekly summary",
+        prompt:
+          "Give me a summary of my trading week. I want to know what improved, what slipped, the main pattern, and what I should protect next week.",
+        mode: "weekly-review",
+        range: "last7",
+      },
+      {
+        id: "evaluate-my-plan",
+        label: "Evaluate my plan",
+        prompt:
+          "Evaluate my Trading Business Plan with the available data. Tell me if it is realistic, which part is weakest, and what I should adjust first.",
         mode: "plan-rescue",
         range: "plan",
       },
       {
-        id: "costly-behavior",
-        label: "Most expensive behavior",
+        id: "tomorrow-plan",
+        label: "What should I do tomorrow",
         prompt:
-          "Using the last 30 days, what behavior is costing me the most probability of hitting my Trading Business Plan? Show me the evidence and turn it into one concrete operating rule.",
-        mode: "plan-rescue",
-        range: "last30",
-      },
-      {
-        id: "risk-vs-plan",
-        label: "Risk vs plan",
-        prompt:
-          "Compare my recent execution with the risk rails in my Trading Business Plan. I want to know where I am leaking edge in size, daily loss discipline, frequency, or rule adherence.",
-        mode: "risk-discipline",
-        range: "last30",
-      },
-      {
-        id: "tomorrow-protection",
-        label: "Tomorrow protection plan",
-        prompt:
-          "Use my recent sessions to tell me what tomorrow's trading plan needs to protect me from so I stop repeating my most expensive mistakes.",
+          "Based on my plan and recent sessions, tell me what I should do tomorrow: main focus, max risk, mistake to avoid, and one non-negotiable rule.",
         mode: "weekly-review",
         range: "last30",
       },
       {
-        id: "rule-swap",
-        label: "Rule to add and remove",
+        id: "risk-check",
+        label: "Review my risk",
         prompt:
-          "If you were my performance coach, what exact rule would you add to my system today and what rule would you remove or tighten to improve plan adherence?",
-        mode: "plan-rescue",
-        range: "last90",
+          "Review my risk against my plan. Tell me if I am risking too much, whether my daily loss is controlled, and what adjustment protects the account.",
+        mode: "risk-discipline",
+        range: "last30",
       },
     ],
     neuro: [
       {
-        id: "execution-truth-gap",
-        label: "Execution truth",
+        id: "discipline-review",
+        label: "Review my discipline",
         prompt:
-          "Use execution truth across my recent sessions and tell me where my plan and my real behavior diverged the most.",
+          "Review my execution discipline. Tell me where my behavior separated from my plan and which habit is affecting my consistency most.",
         mode: "execution-truth",
         range: "last30",
       },
       {
-        id: "emotion-drift",
-        label: "Emotional drift pattern",
+        id: "mistake-review",
+        label: "Analyze my mistakes",
         prompt:
-          "Read the emotional drift in my execution records and tell me which psychological pattern appears before my worst decisions.",
-        mode: "psychology-patterns",
-        range: "last90",
+          "Analyze my recent mistakes. Identify the most repeated mistake, how it affects my plan, and the practical rule I should use to reduce it.",
+        mode: "execution-truth",
+        range: "last30",
       },
       {
         id: "red-day-diagnosis",
-        label: "Red-day diagnosis",
+        label: "Diagnose my red days",
         prompt:
-          "Audit my losing sessions and tell me whether the dominant problem is entries, exits, sizing, management, or state of mind.",
+          "Diagnose my red days. Tell me if the dominant problem is entries, exits, sizing, trade management, overtrading, or state of mind.",
         mode: "execution-truth",
         range: "last90",
       },
       {
-        id: "premarket-focus",
-        label: "Pre-market focus",
+        id: "emotional-pattern",
+        label: "Detect my emotional pattern",
         prompt:
-          "Synthesize my execution records, Neuro layer, and results into one concrete pre-market focus for tomorrow.",
+          "Detect my dominant emotional pattern. Tell me what emotion or bias appears before my worst decisions and how I should interrupt it.",
         mode: "psychology-patterns",
         range: "last30",
+      },
+      {
+        id: "rule-to-add",
+        label: "What rule should I add",
+        prompt:
+          "Tell me the exact rule I should add to my trading operating system to improve plan adherence starting next session.",
+        mode: "plan-rescue",
+        range: "last90",
       },
     ],
   };
@@ -1751,12 +1767,16 @@ function AiCoachingPageInner() {
     () =>
       isEs
         ? [
+            { value: "today", label: "Hoy" },
+            { value: "last7", label: "Últimos 7 días" },
             { value: "plan", label: "Desde el plan" },
             { value: "last30", label: "Últimos 30 días" },
             { value: "last90", label: "Últimos 90 días" },
             { value: "all", label: "Todo el registro de ejecución" },
           ]
         : [
+            { value: "today", label: "Today" },
+            { value: "last7", label: "Last 7 days" },
             { value: "plan", label: "Since plan start" },
             { value: "last30", label: "Last 30 days" },
             { value: "last90", label: "Last 90 days" },
@@ -2015,11 +2035,11 @@ function AiCoachingPageInner() {
     const normalize = (value?: string | null) => String(value || "").trim();
     const summary = normalize(plan.summary);
     const sections = [
-      { label: L("What I see", "Lo que veo"), value: normalize(plan.whatISee) || summary },
-      { label: L("What is drifting", "Lo que se está desviando"), value: normalize(plan.whatIsDrifting) || normalize(plan.ruleToRemove) },
-      { label: L("What to protect", "Lo que debes proteger"), value: normalize(plan.whatToProtect) || normalize(plan.checkpointFocus) },
+      { label: L("What I notice", "Lo que noto"), value: normalize(plan.whatISee) || summary },
+      { label: L("Where it is slipping", "Dónde se está escapando"), value: normalize(plan.whatIsDrifting) || normalize(plan.ruleToRemove) },
+      { label: L("What to protect", "Qué proteger"), value: normalize(plan.whatToProtect) || normalize(plan.checkpointFocus) },
       {
-        label: L("What changes next session", "Qué cambia la próxima sesión"),
+        label: L("Next session", "Próxima sesión"),
         value: normalize(plan.whatChangesNextSession) || normalize(plan.nextAction),
       },
     ].filter((row) => row.value);
@@ -2034,7 +2054,7 @@ function AiCoachingPageInner() {
     return (
       <div className="mt-3 rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-3 text-[12px] text-slate-100">
         <p className="text-[10px] uppercase tracking-[0.18em] text-emerald-300">
-          {L("Action plan", "Plan de acción")}
+          {L("Coach takeaways", "Lectura del coach")}
         </p>
         {summary ? <p className="mt-2 text-slate-200">{summary}</p> : null}
         {filteredSections.length ? (
@@ -2875,6 +2895,26 @@ function AiCoachingPageInner() {
     const latestIso = dated[dated.length - 1] || isoDate(new Date());
     const endIso = latestIso || isoDate(new Date());
 
+    if (coachRangePreset === "today") {
+      const todayIso = isoDate(new Date());
+      return {
+        preset: coachRangePreset,
+        startIso: todayIso,
+        endIso: todayIso,
+        label: isEs ? "Hoy" : "Today",
+      };
+    }
+
+    if (coachRangePreset === "last7") {
+      const todayIso = isoDate(new Date());
+      return {
+        preset: coachRangePreset,
+        startIso: addDaysIso(todayIso, -6),
+        endIso: todayIso,
+        label: isEs ? "Últimos 7 días calendario" : "Last 7 calendar days",
+      };
+    }
+
     if (coachRangePreset === "plan") {
       return {
         preset: coachRangePreset,
@@ -3416,12 +3456,18 @@ function AiCoachingPageInner() {
 
   async function handleAskCoach() {
     if (coachState.loading) return;
-    if (!activeThread || !coachUserProfile?.id) return;
-
-    // Hard requirements: must have at least some platform data
-    if (!snapshot || !fullSnapshot) return;
-
     if (!question.trim() && !screenshotFile) return;
+
+    if (!activeThread || !coachUserProfile?.id) {
+      setCoachState({
+        loading: false,
+        error: L(
+          "Your coach workspace is still opening. Try again in a moment.",
+          "Tu workspace del coach todavía está abriendo. Intenta nuevamente en un momento."
+        ),
+      });
+      return;
+    }
 
     try {
       const finalQuestion = question.trim();
@@ -3600,7 +3646,7 @@ function AiCoachingPageInner() {
           // Style hints
           stylePreset: {
             mode: "conversational-trading-coach",
-            askFollowupQuestion: true,
+            askFollowupQuestion: false,
             shortSegments: true,
             strictEvidenceMode: true,
           },
@@ -3720,13 +3766,9 @@ function AiCoachingPageInner() {
                 ),
               };
 
-  const isDisabled =
-    dataLoading ||
-    coachState.loading ||
-    !activeThread ||
-    !snapshot ||
-    !fullSnapshot ||
-    (!question.trim() && !screenshotFile);
+  const isComposerEmpty = !question.trim() && !screenshotFile;
+  const isCoachWorkspaceReady = Boolean(activeThread && coachUserProfile?.id);
+  const isDisabled = coachState.loading || !isCoachWorkspaceReady || isComposerEmpty;
 
   if (authLoading || !user) {
     return (
@@ -4127,10 +4169,10 @@ function AiCoachingPageInner() {
                 <div className="rounded-2xl border border-slate-800 bg-slate-950/50 p-3">
                   <div className="mb-2 flex items-center justify-between gap-3">
                     <p className="text-[11px] uppercase tracking-[0.16em] text-slate-400">
-                      {L("Business prompt library", "Biblioteca de prompts empresariales")}
+                      {L("Quick analysis prompts", "Análisis rápidos")}
                     </p>
                     <p className="text-[10px] text-slate-500">
-                      {L("Selecting one loads lens + range + question.", "Al seleccionar uno carga lente + rango + pregunta.")}
+                      {L("Pick one and the coach prepares the question.", "Escoge uno y el coach prepara la pregunta.")}
                     </p>
                   </div>
 
@@ -4140,16 +4182,16 @@ function AiCoachingPageInner() {
                     className="w-full rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400/40"
                   >
                     <option value="">
-                      {L("Choose a smart prompt...", "Elige un prompt inteligente...")}
+                      {L("What do you want to analyze?", "¿Qué quieres analizar?")}
                     </option>
-                    <optgroup label={L("Trading Business Plan plays", "Prompts del Plan de Empresa de Trading")}>
+                    <optgroup label={L("Business review", "Revisión del negocio")}>
                       {promptGroups.primary.map((template) => (
                         <option key={template.id} value={template.id}>
                           {template.label}
                         </option>
                       ))}
                     </optgroup>
-                    <optgroup label={L("Neuro + execution plays", "Prompts Neuro + ejecución")}>
+                    <optgroup label={L("Discipline and execution", "Disciplina y ejecución")}>
                       {promptGroups.neuro.map((template) => (
                         <option key={template.id} value={template.id}>
                           {template.label}
@@ -4189,8 +4231,8 @@ function AiCoachingPageInner() {
                     className="flex-1 min-h-[60px] max-h-[140px] rounded-xl border border-slate-700 bg-slate-950/60 px-3 py-2 text-sm outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400/40"
                     placeholder={
                       coachUiIsEs
-                        ? "Pregunta al coach sobre tus últimas operaciones, emociones, retos o disciplina del plan..."
-                        : "Ask your coach about your last trades, emotions, business rules, or plan adherence..."
+                        ? "Escribe tu pregunta o usa un análisis rápido: analiza mi día, resumen de la semana, revisa mi riesgo..."
+                        : "Write a question or choose a quick analysis: analyze my day, weekly summary, review my risk..."
                     }
                     value={question}
                     onChange={(e) => setQuestion(e.target.value)}
@@ -4236,7 +4278,7 @@ function AiCoachingPageInner() {
                         : "bg-emerald-500 hover:bg-emerald-400 text-slate-900"
                     }`}
                   >
-                    {coachState.loading ? L("Coaching...", "Analizando...") : L("Send to AI coach", "Enviar al coach AI")}
+                    {coachState.loading ? L("Analyzing...", "Analizando...") : L("Analyze with AI Coach", "Analizar con AI Coach")}
                   </button>
                 </div>
               </div>
@@ -4255,7 +4297,7 @@ function AiCoachingPageInner() {
             {latestCoachArtifacts && (
               <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
                 <p className="text-[11px] uppercase tracking-[0.16em] text-slate-400">
-                  {L("Latest coach output", "Último output del coach")}
+                  {L("Latest coach read", "Última lectura del coach")}
                 </p>
                 {renderActionPlan(latestCoachArtifacts.meta?.actionPlan)}
                 {renderAutoAudit(latestCoachArtifacts.meta?.autoAudit)}

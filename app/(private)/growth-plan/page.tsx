@@ -74,7 +74,6 @@ import {
 import { listCashflows, signedCashflowAmount } from "@/lib/cashflowsSupabase";
 import { syncGrowthPlanProtectionRules } from "@/lib/alertsSupabase";
 import { useTradingAccounts } from "@/hooks/useTradingAccounts";
-import { hasCompleteBusinessAnalysisProfile } from "@/lib/businessMilestones";
 import {
   growthPlanDeadlineShortfallUsd,
   growthPlanDeadlineToleranceUsd,
@@ -895,14 +894,6 @@ type PlanPhase = {
   cumulativeWithdrawals?: number;
 };
 
-type BusinessProfile = {
-  riskProfile: "conservative" | "moderate" | "aggressive" | "";
-  experience: "new" | "developing" | "experienced" | "";
-  incomeDependency: "low" | "medium" | "high" | "";
-  drawdownComfort: "low" | "medium" | "high" | "";
-  tradingStyle: "scalp" | "day" | "swing" | "";
-};
-
 type BusinessScenarioId = "conservative" | "moderate" | "aggressive";
 
 type OperatingReturnMode = BusinessScenarioId | "manual" | "";
@@ -919,7 +910,6 @@ type BusinessScenario = {
   lossDaysPerWeek: number;
   projectedEndBalance: number;
   chart: Array<{ label: string; value: number }>;
-  fitScore: number;
   recommended: boolean;
 };
 
@@ -1029,35 +1019,6 @@ type GrowthPlanResearchReview = {
   generatedAt: string;
 };
 
-const EMPTY_BUSINESS_PROFILE: BusinessProfile = {
-  riskProfile: "",
-  experience: "",
-  incomeDependency: "",
-  drawdownComfort: "",
-  tradingStyle: "",
-};
-
-function isBusinessProfileComplete(profile: BusinessProfile) {
-  return hasCompleteBusinessAnalysisProfile(profile);
-}
-
-function profileFitScore(profile: BusinessProfile, scenarioId: BusinessScenarioId) {
-  let score = 60;
-  if (profile.riskProfile === scenarioId) score += 18;
-  if (profile.experience === "experienced" && scenarioId === "aggressive") score += 8;
-  if (profile.experience === "new" && scenarioId === "conservative") score += 10;
-  if (profile.incomeDependency === "high" && scenarioId === "conservative") score += 12;
-  if (profile.incomeDependency === "low" && scenarioId === "aggressive") score += 6;
-  if (profile.drawdownComfort === "low" && scenarioId === "conservative") score += 12;
-  if (profile.drawdownComfort === "high" && scenarioId === "aggressive") score += 8;
-  if (profile.tradingStyle === "scalp" && scenarioId === "aggressive") score -= 4;
-  if (profile.tradingStyle === "swing" && scenarioId === "conservative") score += 4;
-  if (profile.incomeDependency === "high" && scenarioId === "aggressive") score -= 18;
-  if (profile.drawdownComfort === "low" && scenarioId === "aggressive") score -= 22;
-  if (profile.experience === "new" && scenarioId === "aggressive") score -= 20;
-  return Math.max(5, Math.min(99, score));
-}
-
 function buildScenarioChart(
   starting: number,
   tradingDays: number,
@@ -1086,16 +1047,14 @@ function buildScenarioChart(
 }
 
 function buildBusinessScenarios(params: {
-  profile: BusinessProfile;
   startingBalance: number;
   tradingDays: number;
   averageTradingDaysPerWeek: number;
   isEs: boolean;
 }) {
-  const { profile, startingBalance, tradingDays, averageTradingDaysPerWeek, isEs } = params;
+  const { startingBalance, tradingDays, averageTradingDaysPerWeek, isEs } = params;
   const scored = (["conservative", "moderate", "aggressive"] as BusinessScenarioId[]).map((id) => {
-    const policy = getGrowthPlanOperatingPolicy(id, profile);
-    const fitScore = profileFitScore(profile, id);
+    const policy = getGrowthPlanOperatingPolicy(id);
     const dailyGoalPct = policy.goalDayReturnPct;
     const riskPerTradePct = policy.riskPerTradePct;
     const maxDailyLossPct = policy.maxDailyLossPct;
@@ -1141,13 +1100,11 @@ function buildBusinessScenarios(params: {
       lossDaysPerWeek: policy.lossDaysPerWeek,
       projectedEndBalance,
       chart,
-      fitScore,
       recommended: false,
     } satisfies BusinessScenario;
   });
 
-  const best = scored.reduce((winner, item) => (item.fitScore > winner.fitScore ? item : winner), scored[0]);
-  return scored.map((item) => ({ ...item, recommended: item.id === best.id }));
+  return scored.map((item) => ({ ...item, recommended: item.id === "moderate" }));
 }
 
 function simulateScenarioToTarget(params: {
@@ -1729,7 +1686,6 @@ export default function GrowthPlanPage() {
   const [riskPerTradePctStr, setRiskPerTradePctStr] = useState("");
   const [goalDayReturnPctStr, setGoalDayReturnPctStr] = useState("");
   const [expectedLossDayPctStr, setExpectedLossDayPctStr] = useState("");
-  const [businessProfile, setBusinessProfile] = useState<BusinessProfile>(EMPTY_BUSINESS_PROFILE);
   const [selectedScenarioId, setSelectedScenarioId] = useState<BusinessScenarioId | "">("");
   const [returnModelMode, setReturnModelMode] = useState<OperatingReturnMode>("");
   const [selectedPlanId, setSelectedPlanId] = useState<FinalPlanId | "">("");
@@ -1864,9 +1820,7 @@ export default function GrowthPlanPage() {
     lossDaysPerWeek < averageTradingDaysPerWeek &&
     maxDailyLossPercent > 0 &&
     riskPerTradePct > 0;
-  const businessProfileComplete = isBusinessProfileComplete(businessProfile);
   const businessAnalysisComplete =
-    businessProfileComplete &&
     returnModelConfigured &&
     capitalFlowAssumptionsComplete &&
     operatingScheduleConfigured &&
@@ -1892,7 +1846,6 @@ export default function GrowthPlanPage() {
         riskPerTradePctStr,
         goalDayReturnPctStr,
         expectedLossDayPctStr,
-        businessProfile,
         selectedScenarioId,
         returnModelMode,
         selectedPlanId,
@@ -1904,7 +1857,6 @@ export default function GrowthPlanPage() {
     [
       averageTradingDaysPerWeekStr,
       winningDaysPerWeekStr,
-      businessProfile,
       expectedLossDayPctStr,
       goalDayReturnPctStr,
       lossDaysPerWeekStr,
@@ -2130,7 +2082,7 @@ export default function GrowthPlanPage() {
   const activeProjectionPolicy = useMemo(
     () => {
       if (!selectedScenarioId) return null;
-      const base = getGrowthPlanOperatingPolicy(selectedScenarioId, businessProfile);
+      const base = getGrowthPlanOperatingPolicy(selectedScenarioId);
       return {
         ...base,
         goalDayReturnPct: goalDayReturnPct > 0 ? goalDayReturnPct : base.goalDayReturnPct,
@@ -2145,7 +2097,7 @@ export default function GrowthPlanPage() {
             : base.expectedLossDayPct,
       };
     },
-    [businessProfile, expectedLossDayPct, goalDayReturnPct, returnModelMode, selectedScenarioId]
+    [expectedLossDayPct, goalDayReturnPct, returnModelMode, selectedScenarioId]
   );
 
   const projection = useMemo(() => {
@@ -2275,10 +2227,10 @@ export default function GrowthPlanPage() {
         {
           id: "forecast_analysis",
           label: L(
-            "Complete the AI context and mathematical analysis",
-            "Completa el contexto para la IA y el análisis matemático"
+            "Review the mathematical analysis",
+            "Revisa el análisis matemático"
           ),
-          done: businessProfileComplete && requiredGoalReady,
+          done: requiredGoalReady,
           anchor: "gp-forecast-analysis",
         },
         {
@@ -2384,7 +2336,6 @@ export default function GrowthPlanPage() {
     strategyCount,
     nonNegotiableCount,
     disclosureAcceptedForDraft,
-    businessProfileComplete,
     businessAnalysisComplete,
     returnModelConfigured,
     selectedPlanId,
@@ -2556,13 +2507,6 @@ export default function GrowthPlanPage() {
           setResearchReview(null);
           setResearchReviewError("");
           if (existingBusinessAnalysis && typeof existingBusinessAnalysis === "object") {
-            const nextProfile = {
-              ...EMPTY_BUSINESS_PROFILE,
-              ...(existingBusinessAnalysis.profile && typeof existingBusinessAnalysis.profile === "object"
-                ? existingBusinessAnalysis.profile
-                : {}),
-            } as BusinessProfile;
-            setBusinessProfile(nextProfile);
             const nextScenarioId = String(existingBusinessAnalysis.selectedScenarioId ?? "");
             if (["conservative", "moderate", "aggressive"].includes(nextScenarioId)) {
               setSelectedScenarioId(nextScenarioId as BusinessScenarioId);
@@ -2594,7 +2538,6 @@ export default function GrowthPlanPage() {
               setResearchReview(null);
             }
           } else {
-            setBusinessProfile(EMPTY_BUSINESS_PROFILE);
             setReturnModelMode(isLegacyForecast ? "manual" : "");
             setSelectedPlanId(isLegacyForecast ? "manual" : "");
             setResearchReview(null);
@@ -2709,7 +2652,6 @@ export default function GrowthPlanPage() {
           setReturnModelMode("");
           setSelectedPlanId("");
           setSelectedScenarioId("");
-          setBusinessProfile(EMPTY_BUSINESS_PROFILE);
           setStep0Stage(0);
           setLoadedStartingBalance(null);
           setCashflowNet(0);
@@ -2961,8 +2903,8 @@ export default function GrowthPlanPage() {
       pushNeuroMessage(
         riskMode === "same"
           ? L(
-              "Next-cycle draft ready. We kept the same risk profile and rolled the plan forward from your live balance.",
-              "El borrador del próximo ciclo está listo. Mantuvimos el mismo perfil de riesgo y reiniciamos el plan desde tu balance real."
+              "Next-cycle draft ready. We kept the same risk settings and rolled the plan forward from your live balance.",
+              "El borrador del próximo ciclo está listo. Mantuvimos los mismos ajustes de riesgo y reiniciamos el plan desde tu balance real."
             )
           : riskMode === "lower"
             ? L(
@@ -3009,13 +2951,12 @@ export default function GrowthPlanPage() {
   const businessScenarios = useMemo(
     () =>
       buildBusinessScenarios({
-        profile: businessProfile,
         startingBalance: startingBalance > 0 ? startingBalance : 5000,
         tradingDays: businessScenarioTradingDays,
         averageTradingDaysPerWeek,
         isEs,
       }),
-    [averageTradingDaysPerWeek, businessProfile, businessScenarioTradingDays, isEs, startingBalance]
+    [averageTradingDaysPerWeek, businessScenarioTradingDays, isEs, startingBalance]
   );
   const selectedBusinessScenario = useMemo(
     () => businessScenarios.find((scenario) => scenario.id === selectedScenarioId) ?? null,
@@ -3044,7 +2985,6 @@ export default function GrowthPlanPage() {
       };
     },
     [
-      businessProfile,
       businessScenarios,
       expectedLossDayPct,
       goalDayReturnPct,
@@ -3095,7 +3035,7 @@ export default function GrowthPlanPage() {
 
   const adaptiveGrowthPlan = useMemo(() => {
     const scenarioId = reviewScenario?.id ?? "moderate";
-    const basePolicy = getGrowthPlanOperatingPolicy(scenarioId, businessProfile);
+    const basePolicy = getGrowthPlanOperatingPolicy(scenarioId);
     const policy = reviewScenario
       ? {
           ...basePolicy,
@@ -3119,7 +3059,7 @@ export default function GrowthPlanPage() {
       depositPlan: plannedDepositSettings,
       withdrawalPlan: plannedWithdrawalSettings,
       comparisonPolicies: (["conservative", "moderate", "aggressive"] as const).map((id) => ({
-        ...getGrowthPlanOperatingPolicy(id, businessProfile),
+        ...getGrowthPlanOperatingPolicy(id),
         lossDaysPerWeek,
       })),
       estimatedCostPerSessionUsd,
@@ -3134,7 +3074,6 @@ export default function GrowthPlanPage() {
   }, [
     averageTradingDaysPerWeek,
     accountStructure,
-    businessProfile,
     effectivePlanStartDate,
     estimatedCostPerSessionUsd,
     estimatedTaxReservePct,
@@ -3182,20 +3121,16 @@ export default function GrowthPlanPage() {
   );
   const idealDeadlineOption = useMemo(
     () =>
-      businessProfileComplete
-        ? selectIdealDeadlineOption({
-            scenarios: businessScenarios.map((scenario) => ({
-              id: scenario.id,
-              fitScore: scenario.fitScore,
-            })),
-            panoramas: adaptiveGrowthPlan.panoramas,
-            targetBalance,
-            toleranceUsd: deadlineToleranceUsd,
-          })
-        : null,
+      selectIdealDeadlineOption({
+        scenarios: businessScenarios.map((scenario) => ({
+          id: scenario.id,
+        })),
+        panoramas: adaptiveGrowthPlan.panoramas,
+        targetBalance,
+        toleranceUsd: deadlineToleranceUsd,
+      }),
     [
       adaptiveGrowthPlan.panoramas,
-      businessProfileComplete,
       businessScenarios,
       deadlineToleranceUsd,
       targetBalance,
@@ -3229,7 +3164,7 @@ export default function GrowthPlanPage() {
         riskPerTradePct,
       };
     }
-    const policy = getGrowthPlanOperatingPolicy(selectedPlanId, businessProfile);
+    const policy = getGrowthPlanOperatingPolicy(selectedPlanId);
     return {
       id: selectedPlanId,
       goalDayPct: policy.goalDayReturnPct,
@@ -3238,7 +3173,6 @@ export default function GrowthPlanPage() {
       riskPerTradePct: policy.riskPerTradePct,
     };
   }, [
-    businessProfile,
     expectedLossDayPct,
     goalDayReturnPct,
     maxDailyLossPercent,
@@ -3275,7 +3209,6 @@ export default function GrowthPlanPage() {
       evidenceUpdatedAt: performanceEvidence?.updatedAtIso ?? null,
       plannedDepositSettings,
       plannedWithdrawalSettings,
-      businessProfile,
     });
   }, [
     averageTradingDaysPerWeek,
@@ -3285,7 +3218,6 @@ export default function GrowthPlanPage() {
     planRealismReview.evidenceTrades,
     plannedDepositSettings,
     plannedWithdrawalSettings,
-    businessProfile,
     selectedForecastAssumptions,
     selectedForecastPanorama,
     selectedPlanId,
@@ -3367,13 +3299,9 @@ export default function GrowthPlanPage() {
   }, [effectivePlanStartDate, selectedForecastProjection?.rows, startingBalance, targetBalance]);
 
   const selectReturnModel = (mode: Exclude<OperatingReturnMode, "">, finalize = false) => {
-    const fallbackScenario: BusinessScenarioId =
-      selectedScenarioId ||
-      (businessProfile.riskProfile
-        ? businessProfile.riskProfile
-        : "moderate");
+    const fallbackScenario: BusinessScenarioId = selectedScenarioId || "moderate";
     const scenarioId = mode === "manual" ? fallbackScenario : mode;
-    const policy = getGrowthPlanOperatingPolicy(scenarioId, businessProfile);
+    const policy = getGrowthPlanOperatingPolicy(scenarioId);
     setSelectedScenarioId(scenarioId);
     setReturnModelMode(mode);
     setSelectedPlanId(finalize ? mode : "");
@@ -3398,14 +3326,14 @@ export default function GrowthPlanPage() {
 
   useEffect(() => {
     if (!returnModelMode || returnModelMode === "manual") return;
-    const policy = getGrowthPlanOperatingPolicy(returnModelMode, businessProfile);
+    const policy = getGrowthPlanOperatingPolicy(returnModelMode);
     setSelectedScenarioId(returnModelMode);
     setSelectedPlanId((current) => (current === returnModelMode ? current : ""));
     setGoalDayReturnPctStr(String(policy.goalDayReturnPct));
     setExpectedLossDayPctStr(String(policy.expectedLossDayPct));
     setMaxDailyLossPercentStr(String(policy.maxDailyLossPct));
     setRiskPerTradePctStr(String(policy.riskPerTradePct));
-  }, [businessProfile, returnModelMode]);
+  }, [returnModelMode]);
 
   const aiPlanAdvisor = useMemo(
     () =>
@@ -3487,8 +3415,8 @@ export default function GrowthPlanPage() {
     setError("");
     pushNeuroMessage(
       L(
-        `Ideal profile-fit plan applied: ${scenario.title} with the attainable mathematical date ${formatPlanDate(idealDeadlineOption.completionDate, lang)}.`,
-        `Plan ideal por compatibilidad aplicado: ${scenario.title} con la fecha matemática alcanzable ${formatPlanDate(idealDeadlineOption.completionDate, lang)}.`
+        `Balanced standard plan applied: ${scenario.title} with the attainable mathematical date ${formatPlanDate(idealDeadlineOption.completionDate, lang)}.`,
+        `Plan estándar balanceado aplicado: ${scenario.title} con la fecha matemática alcanzable ${formatPlanDate(idealDeadlineOption.completionDate, lang)}.`
       )
     );
   };
@@ -3642,7 +3570,6 @@ export default function GrowthPlanPage() {
             estimatedCostPerSessionUsd,
             estimatedTaxReservePct,
           },
-          businessProfile,
           executionEvidence: {
             depth: planRealismReview.evidenceDepth,
             sessions: planRealismReview.evidenceSessions,
@@ -3964,84 +3891,6 @@ export default function GrowthPlanPage() {
             </p>
           </div>
 
-          <div className="grid gap-3 xl:grid-cols-5">
-            {[
-              {
-                key: "riskProfile",
-                label: L("Risk profile", "Perfil de riesgo"),
-                options: [
-                  ["conservative", L("Conservative", "Conservador")],
-                  ["moderate", L("Moderate", "Moderado")],
-                  ["aggressive", L("Aggressive", "Agresivo")],
-                ],
-              },
-              {
-                key: "experience",
-                label: L("Experience", "Experiencia"),
-                options: [
-                  ["new", L("New", "Nuevo")],
-                  ["developing", L("Developing", "En desarrollo")],
-                  ["experienced", L("Experienced", "Experimentado")],
-                ],
-              },
-              {
-                key: "incomeDependency",
-                label: L("Income dependency", "Dependencia de ingresos"),
-                options: [
-                  ["low", L("Low", "Baja")],
-                  ["medium", L("Medium", "Media")],
-                  ["high", L("High", "Alta")],
-                ],
-              },
-              {
-                key: "drawdownComfort",
-                label: L("Drawdown comfort", "Tolerancia al drawdown"),
-                options: [
-                  ["low", L("Low", "Baja")],
-                  ["medium", L("Medium", "Media")],
-                  ["high", L("High", "Alta")],
-                ],
-              },
-              {
-                key: "tradingStyle",
-                label: L("Trading style", "Estilo de trading"),
-                options: [
-                  ["scalp", L("Scalp", "Scalp")],
-                  ["day", L("Day trade", "Day trade")],
-                  ["swing", L("Swing", "Swing")],
-                ],
-              },
-            ].map((field) => (
-              <div key={field.key} className="rounded-2xl border border-slate-800 bg-slate-950/70 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
-                <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">{field.label}</p>
-                <div className="mt-2 flex flex-col gap-1.5">
-                  {field.options.map(([value, label]) => {
-                    const active = (businessProfile as any)[field.key] === value;
-                    return (
-                      <button
-                        key={value}
-                        type="button"
-                        onClick={() =>
-                          setBusinessProfile((prev) => ({
-                            ...prev,
-                            [field.key]: value,
-                          }))
-                        }
-                        className={`rounded-lg border px-2 py-1.5 text-left text-xs transition ${
-                          active
-                            ? "border-cyan-300 bg-cyan-300/10 text-cyan-100 shadow-[0_0_0_1px_rgba(103,232,249,0.08)]"
-                            : "border-slate-800 text-slate-300 hover:border-slate-600 hover:bg-slate-900/70"
-                        }`}
-                      >
-                        {label}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            ))}
-          </div>
-
           <div>
             <div className="flex flex-wrap items-end justify-between gap-3">
               <div>
@@ -4055,11 +3904,6 @@ export default function GrowthPlanPage() {
                   )}
                 </p>
               </div>
-              {!isBusinessProfileComplete(businessProfile) ? (
-                <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-[11px] text-amber-200">
-                  {L("Complete questions first", "Completa las preguntas primero")}
-                </span>
-              ) : null}
             </div>
 
             <div className="mt-4 overflow-hidden rounded-2xl border border-cyan-300/20 bg-[linear-gradient(145deg,rgba(8,18,38,0.96),rgba(4,12,28,0.98))] shadow-[0_18px_50px_rgba(2,8,23,0.28)]">
@@ -4097,8 +3941,7 @@ export default function GrowthPlanPage() {
                     {(["conservative", "moderate", "aggressive", "manual"] as const).map((mode) => {
                       const active = returnModelMode === mode;
                       const policy = getGrowthPlanOperatingPolicy(
-                        mode === "manual" ? selectedScenarioId || "moderate" : mode,
-                        businessProfile
+                        mode === "manual" ? selectedScenarioId || "moderate" : mode
                       );
                       const policyLossDays = Math.min(
                         Math.max(0, averageTradingDaysPerWeek - 1),
@@ -4985,7 +4828,6 @@ export default function GrowthPlanPage() {
 
                     <button
                       type="button"
-                      disabled={!isBusinessProfileComplete(businessProfile)}
                       onClick={() => {
                         selectReturnModel(scenario.id, true);
                         setGoalDayReturnPctStr(String(scenario.dailyGoalPct));
@@ -5053,7 +4895,7 @@ export default function GrowthPlanPage() {
                   </div>
                   <button
                     type="button"
-                    disabled={!isBusinessProfileComplete(businessProfile) || !goalDayReturnPct || !expectedLossDayPct}
+                    disabled={!goalDayReturnPct || !expectedLossDayPct}
                     onClick={() => setSelectedPlanId("manual")}
                     className={`mt-3 w-full rounded-xl px-3 py-2 text-sm font-semibold transition ${
                       selectedPlanId === "manual"
@@ -6406,127 +6248,14 @@ export default function GrowthPlanPage() {
       anchor: "gp-forecast-analysis",
       title: L("6. AI mathematical analysis", "6. Análisis matemático con IA"),
       description: L(
-        "First give AI the five operating-context answers; then the math calculates the required pace and AI explains the lowest standard mode that can meet it.",
-        "Primero dale a la IA las cinco respuestas de contexto operativo; luego la matemática calcula el ritmo requerido y la IA explica el modo estándar más bajo que puede cumplirlo."
+        "The deterministic engine calculates the required pace and compares it with every standard and manual operating model.",
+        "El motor determinístico calcula el ritmo requerido y lo compara con cada modelo operativo estándar y manual."
       ),
       isComplete:
-        businessProfileComplete &&
         requiredGoalPct > 0 &&
         adaptiveGrowthPlan.panoramas.length > 0,
       content: (
         <div id="gp-forecast-analysis" className="space-y-4">
-          <div id="gp-business-profile" className="rounded-2xl border border-violet-300/25 bg-violet-300/5 p-4">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <p className="text-[10px] uppercase tracking-[0.2em] text-violet-200">
-                  {L("Required AI context", "Contexto requerido para la IA")}
-                </p>
-                <p className="mt-1 text-sm font-semibold text-slate-100">
-                  {L(
-                    "Answer these five questions so the recommendation fits your situation.",
-                    "Contesta estas cinco preguntas para que la recomendación corresponda a tu situación."
-                  )}
-                </p>
-                <p className="mt-1 text-xs leading-5 text-slate-400">
-                  {L(
-                    "They change the risk-fit analysis and the explanation, but never rewrite the deterministic forecast math.",
-                    "Estas respuestas cambian el análisis de compatibilidad de riesgo y la explicación, pero nunca reescriben la matemática determinística del forecast."
-                  )}
-                </p>
-              </div>
-              <span className={`rounded-full border px-3 py-1 text-[11px] font-semibold ${businessProfileComplete ? "border-emerald-300/30 bg-emerald-300/10 text-emerald-200" : "border-amber-300/30 bg-amber-300/10 text-amber-200"}`}>
-                {Object.values(businessProfile).filter(Boolean).length}/5 {L("answered", "contestadas")}
-              </span>
-            </div>
-
-            <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-              {[
-                {
-                  key: "riskProfile",
-                  label: L("Risk profile", "Perfil de riesgo"),
-                  options: [
-                    ["conservative", L("Conservative", "Conservador")],
-                    ["moderate", L("Moderate", "Moderado")],
-                    ["aggressive", L("Aggressive", "Agresivo")],
-                  ],
-                },
-                {
-                  key: "experience",
-                  label: L("Experience", "Experiencia"),
-                  options: [
-                    ["new", L("New", "Nuevo")],
-                    ["developing", L("Developing", "En desarrollo")],
-                    ["experienced", L("Experienced", "Experimentado")],
-                  ],
-                },
-                {
-                  key: "incomeDependency",
-                  label: L("Income dependency", "Dependencia de ingresos"),
-                  options: [
-                    ["low", L("Low", "Baja")],
-                    ["medium", L("Medium", "Media")],
-                    ["high", L("High", "Alta")],
-                  ],
-                },
-                {
-                  key: "drawdownComfort",
-                  label: L("Drawdown comfort", "Tolerancia al drawdown"),
-                  options: [
-                    ["low", L("Low", "Baja")],
-                    ["medium", L("Medium", "Media")],
-                    ["high", L("High", "Alta")],
-                  ],
-                },
-                {
-                  key: "tradingStyle",
-                  label: L("Trading style", "Estilo de trading"),
-                  options: [
-                    ["scalp", "Scalp"],
-                    ["day", "Day trade"],
-                    ["swing", "Swing"],
-                  ],
-                },
-              ].map((field) => (
-                <fieldset key={field.key} className="rounded-xl border border-slate-800 bg-slate-950/65 p-3">
-                  <legend className="px-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">
-                    {field.label}
-                  </legend>
-                  <div className="mt-1 space-y-1.5">
-                    {field.options.map(([value, label]) => {
-                      const active = businessProfile[field.key as keyof BusinessProfile] === value;
-                      return (
-                        <button
-                          key={value}
-                          type="button"
-                          aria-pressed={active}
-                          onClick={() => {
-                            setBusinessProfile((current) => ({
-                              ...current,
-                              [field.key]: value,
-                            }));
-                            setSelectedPlanId("");
-                            setAutoPhasesGenerated(false);
-                          }}
-                          className={`w-full rounded-lg border px-2 py-1.5 text-left text-xs transition ${active ? "border-violet-300 bg-violet-300/10 text-violet-100" : "border-slate-800 text-slate-300 hover:border-slate-600"}`}
-                        >
-                          {label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </fieldset>
-              ))}
-            </div>
-
-            {!businessProfileComplete ? (
-              <p className="mt-3 text-xs font-medium text-amber-200">
-                {L(
-                  "All five answers are required before continuing to scenario selection.",
-                  "Las cinco respuestas son requeridas antes de continuar a la selección de escenario."
-                )}
-              </p>
-            ) : null}
-          </div>
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
             <div className="rounded-2xl border border-cyan-300/30 bg-cyan-300/5 p-4">
               <p className="text-[10px] uppercase tracking-[0.18em] text-cyan-200">{L("Mathematical gain / loss", "Ganancia / pérdida matemática")}</p>
@@ -6592,7 +6321,7 @@ export default function GrowthPlanPage() {
         <div id="gp-scenario-selection" className="space-y-4">
           <div className={`grid gap-3 md:grid-cols-3 ${idealDeadlineOption ? "xl:grid-cols-4" : ""}`}>
             {(["conservative", "moderate", "aggressive"] as BusinessScenarioId[]).map((id) => {
-              const policy = getGrowthPlanOperatingPolicy(id, businessProfile);
+              const policy = getGrowthPlanOperatingPolicy(id);
               const panorama = adaptiveGrowthPlan.panoramas.find((item) => item.id === id);
               const active = selectedPlanId === id;
               const recommended = aiRecommendedPlanId === id;
@@ -6649,10 +6378,7 @@ export default function GrowthPlanPage() {
               const scenario = businessScenarios.find(
                 (item) => item.id === idealDeadlineOption.scenarioId
               );
-              const policy = getGrowthPlanOperatingPolicy(
-                idealDeadlineOption.scenarioId,
-                businessProfile
-              );
+              const policy = getGrowthPlanOperatingPolicy(idealDeadlineOption.scenarioId);
               if (!scenario) return null;
               return (
                 <button
@@ -6682,7 +6408,7 @@ export default function GrowthPlanPage() {
                       {L("Attainable estimated date", "Fecha estimada alcanzable")}: <span className="font-semibold text-violet-100">{formatPlanDate(idealDeadlineOption.completionDate, lang)}</span>
                     </p>
                     <p>
-                      {L("Profile compatibility", "Compatibilidad con tu perfil")}: <span className="text-slate-100">{idealDeadlineOption.fitScore}%</span>
+                      {L("Standard operating model", "Modelo operativo estándar")}: <span className="text-slate-100">{scenario.title}</span>
                     </p>
                   </div>
                   <span className="mt-3 inline-flex rounded-lg bg-violet-200 px-3 py-1.5 text-xs font-semibold text-slate-950">
@@ -7211,7 +6937,6 @@ export default function GrowthPlanPage() {
       tradingInstrument,
     };
     mergedSteps.business_analysis = {
-      profile: businessProfile,
       selectedScenarioId,
       averageTradingDaysPerWeek,
       disclosure: {
@@ -7296,7 +7021,6 @@ export default function GrowthPlanPage() {
             maxDailyLossPct: reviewScenario.maxDailyLossPct,
             riskPerTradePct: reviewScenario.riskPerTradePct,
             lossDaysPerWeek: reviewScenario.lossDaysPerWeek,
-            fitScore: reviewScenario.fitScore,
             recommended: reviewScenario.recommended,
           }
         : null,
@@ -7308,7 +7032,6 @@ export default function GrowthPlanPage() {
         maxDailyLossPct: scenario.maxDailyLossPct,
         riskPerTradePct: scenario.riskPerTradePct,
         lossDaysPerWeek: scenario.lossDaysPerWeek,
-        fitScore: scenario.fitScore,
         recommended: scenario.recommended,
         projectedEndBalance: scenario.projectedEndBalance,
       })),

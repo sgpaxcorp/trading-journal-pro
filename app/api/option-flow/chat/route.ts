@@ -4,6 +4,7 @@ import { getOptionFlowBetaApiPayload, resolveOptionFlowLang } from "@/lib/option
 import { getAuthUser } from "@/lib/authServer";
 import { getClientIp, rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
 import { isSmartToolsOwner } from "@/lib/smartToolsAccess";
+import { recordAiUsage } from "@/lib/aiUsageServer";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -153,6 +154,16 @@ ${extraGuidance}
     });
 
     const reply = completion.choices[0]?.message?.content?.trim() || "";
+
+    await recordAiUsage({
+      userId: auth.userId,
+      requestId: req.headers.get("x-request-id"),
+      feature: "option_flow",
+      category: "market_intelligence",
+      operation: "follow_up_chat",
+      model: completion.model || DEFAULT_MODEL,
+      usage: completion.usage,
+    });
 
     return NextResponse.json(
       { reply },

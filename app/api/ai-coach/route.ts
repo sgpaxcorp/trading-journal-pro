@@ -13,6 +13,8 @@ import { rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
 import { auditOrderEvents } from "@/lib/audit/auditEngine";
 import type { NormalizedOrderEvent } from "@/lib/brokers/types";
 import { requireAdvancedPlan } from "@/lib/serverFeatureAccess";
+import { after } from "next/server";
+import { recordAiUsage } from "@/lib/aiUsageServer";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -1011,6 +1013,20 @@ function flattenTextValue(value: any, maxItems = 12): string[] {
   return [];
 }
 
+function buildTopCounts(values: string[], limit = 6): string {
+  const counts = new Map<string, number>();
+  values
+    .map((value) => safeString(value).trim().toLowerCase())
+    .filter(Boolean)
+    .forEach((value) => counts.set(value, (counts.get(value) || 0) + 1));
+
+  return Array.from(counts.entries())
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, limit)
+    .map(([label, count]) => `${label}=${count}`)
+    .join(", ");
+}
+
 function pct(n: any): string {
   const value = Number(n);
   return Number.isFinite(value) ? `${value.toFixed(2)}%` : "—";
@@ -1042,123 +1058,101 @@ function resolveCoachDirectiveBlock(body: AiCoachRequestBody, lang: "es" | "en")
   return lines.join("\n");
 }
 
+function buildDataCoverageBlock(body: AiCoachRequestBody): string {
+  const fullJournalEntries = safeArray<any>(body?.fullSnapshot?.journalEntries).length;
+  const recentSessions = safeArray<any>(body?.recentSessions).length;
+  const relevantSessions = safeArray<any>(body?.relevantSessions).length;
+  const kpis = safeArray<any>(body?.kpiResults).length;
+  const comparisons = safeArray<any>(body?.periodComparisons).length;
+  const cashflows = Number(body?.cashflowsSummary?.count);
+
+  return [
+    "Data coverage supplied:",
+    `plan=${body?.growthPlan || body?.planSnapshot ? "yes" : "no"}`,
+    `analytics=${body?.analyticsSummary || body?.analyticsSnapshot ? "yes" : "no"}`,
+    `kpis=${kpis}`,
+    `periodComparisons=${comparisons}`,
+    `recentSessions=${recentSessions}`,
+    `relevantSessions=${relevantSessions}`,
+    `fullJournalEntries=${fullJournalEntries}`,
+    `cashflowRows=${Number.isFinite(cashflows) ? cashflows : 0}`,
+    "Use all supplied blocks before deciding; do not rely only on the latest chat message or memory.",
+  ].join(" ");
+}
+
+function buildObjectiveEvaluationProtocol(lang: "es" | "en"): string {
+  if (lang === "es") {
+    return [
+      "Protocolo obligatorio de evaluación objetiva:",
+      "- Antes de responder, revisa silenciosamente todo el contexto disponible y reconcilia conflictos.",
+      "- Jerarquía de evidencia: 1) Plan de Empresa de Trading, objetivos, reglas y risk rails; 2) ejecución real, journal, trades y auditoría de órdenes; 3) métricas, KPIs, comparaciones y snapshots; 4) historial completo y patrones recurrentes; 5) screenshot/back-study; 6) memoria del coach. Si hay conflicto, el dato operativo más reciente y verificable pesa más que memoria o conversación.",
+      "- El veredicto se decide por evidencia, no por intención del usuario: En plan si cumple el plan y los risk rails; En riesgo si hay deterioro, desviación o evidencia incompleta pero suficiente para alerta; Fuera de plan si hay ruptura clara de reglas, riesgo o pacing; Data insuficiente si faltan datos críticos; Acción requerida si hay un cambio concreto que debe hacerse antes de seguir.",
+      "- Toda evaluación debe incluir veredicto, evidencia principal, lectura objetiva y próxima acción, pero sin convertirlo en una plantilla visible. No des motivación genérica como sustituto de evaluación.",
+      "- Si el usuario pide resumen, análisis, evaluación, diagnóstico o recomendación, aplica este protocolo aunque no lo mencione explícitamente.",
+    ].join("\n");
+  }
+
+  return [
+    "Required objective evaluation protocol:",
+    "- Before answering, silently review all available context and reconcile conflicts.",
+    "- Evidence hierarchy: 1) Trading Business Plan, objectives, rules, and risk rails; 2) actual execution, journal, trades, and order audit; 3) metrics, KPIs, comparisons, and snapshots; 4) full-history record and recurring patterns; 5) screenshot/back-study; 6) coach memory. If data conflicts, the most recent verifiable operating record outweighs memory or conversation.",
+    "- Verdict is evidence-led, not intention-led: On plan if the plan and risk rails are being respected; At risk if there is deterioration, drift, or incomplete but alert-worthy evidence; Off plan if rules, risk, or pacing are clearly broken; Insufficient data if critical inputs are missing; Action required if a specific change must happen before continuing.",
+    "- Every evaluation must include verdict, main evidence, objective read, and next action, but without turning it into a visible template. Do not use generic motivation as a substitute for evaluation.",
+    "- If the user asks for a summary, analysis, evaluation, diagnosis, or recommendation, apply this protocol even if they do not explicitly request it.",
+  ].join("\n");
+}
+
 function buildLensStructureGuide(mode: string, lang: "es" | "en", strictEvidenceMode: boolean): string {
   const lens = safeString(mode).trim().toLowerCase();
   const introEs = strictEvidenceMode
-    ? "Estructura obligatoria. No uses un bloque separado de Conclusión."
-    : "Estructura preferida. Evita un bloque separado de Conclusión salvo que sea indispensable.";
+    ? "Estructura interna obligatoria, pero no la hagas sonar como plantilla visible."
+    : "Estructura interna preferida, sin sonar como plantilla visible.";
   const introEn = strictEvidenceMode
-    ? "Required structure. Do not use a separate Conclusion block."
-    : "Preferred structure. Avoid a separate Conclusion block unless it is indispensable.";
+    ? "Required internal structure, but do not make it sound like a visible template."
+    : "Preferred internal structure, without sounding like a visible template.";
 
   if (lang === "es") {
-    if (lens === "weekly-review") {
-      return [
-        introEs,
-        "Usa headings cortos y solo en español:",
-        "1) Qué mejoró (1-2 líneas).",
-        "2) Qué se deterioró (2-4 bullets con hechos).",
-        "3) Qué importa la próxima semana (1-3 bullets de lectura del coach).",
-        "4) Plan para la próxima sesión (next action, rule to add, rule to remove, checkpoint focus).",
-        "5) Pregunta de seguimiento solo si falta información crítica o si mejora materialmente el plan de la próxima sesión.",
-      ].join("\n");
-    }
-    if (lens === "risk-discipline") {
-      return [
-        introEs,
-        "Usa headings cortos y solo en español:",
-        "1) Estado de risk rails (1-2 líneas: on track / at risk / violation).",
-        "2) Evidencia (2-4 bullets; solo hechos y 1-3 números relevantes).",
-        "3) Lectura del coach (1-3 bullets; cuál rail se rompió y por qué).",
-        "4) Fix para la próxima sesión (next action, rule to add, rule to remove, checkpoint focus).",
-        "5) Pregunta de seguimiento solo si hace falta para afinar el fix.",
-      ].join("\n");
-    }
-    if (lens === "execution-truth") {
-      return [
-        introEs,
-        "Usa headings cortos y solo en español:",
-        "1) Verdad de ejecución (1-2 líneas sobre si el comportamiento coincidió o no con el plan).",
-        "2) Evidencia (2-4 bullets; hechos cronológicos, entradas/salidas/manejo).",
-        "3) Lectura del coach (1-3 bullets; qué patrón operativo domina).",
-        "4) Fix para la próxima sesión (next action, rule to add, rule to remove, checkpoint focus).",
-        "5) Pregunta de seguimiento solo si falta una pieza crítica del trade.",
-      ].join("\n");
-    }
-    if (lens === "psychology-patterns") {
-      return [
-        introEs,
-        "Usa headings cortos y solo en español:",
-        "1) Patrón dominante (1-2 líneas).",
-        "2) Evidencia (2-4 bullets; emociones, drift, decisiones).",
-        "3) Lectura del coach (1-3 bullets; disparador y costo del patrón).",
-        "4) Intervención para la próxima sesión (next action, rule to add, rule to remove, checkpoint focus).",
-        "5) Pregunta de seguimiento solo si ayuda a validar el disparador principal.",
-      ].join("\n");
-    }
+    const lensNudge =
+      lens === "weekly-review"
+        ? "Para revisión semanal, habla como cierre de semana: qué mejoró, qué se deterioró, qué patrón manda y qué se protege la próxima semana."
+        : lens === "risk-discipline"
+          ? "Para disciplina de riesgo, sé firme: di si el riesgo está controlado, en deterioro o violado, y cuál rail necesita ajuste inmediato."
+          : lens === "execution-truth"
+            ? "Para verdad de ejecución, narra lo que pasó contra el plan: entrada, manejo, salida, reentrada, stop, size y disciplina."
+            : lens === "psychology-patterns"
+              ? "Para patrones psicológicos, identifica el disparador dominante, el costo operativo y la interrupción concreta para la próxima sesión."
+              : "Para evaluación del plan, ubica estado vs checkpoint, bloqueo principal y la acción de mayor impacto.";
+
     return [
       introEs,
-      "Usa headings cortos y solo en español:",
-      "1) Estado vs plan (1-2 líneas: on track / at risk / off pace frente al checkpoint).",
-      "2) Evidencia (2-4 bullets; solo hechos y 1-3 números relevantes).",
-      "3) Lectura del coach (1-3 bullets; patrón principal y por qué reduce la probabilidad de cumplir el plan).",
-      "4) Plan para la próxima sesión (next action, rule to add, rule to remove, checkpoint focus).",
-      "5) Pregunta de seguimiento solo si falta info crítica o si una sola pregunta mejora materialmente el plan de mañana.",
+      "Orden mental fijo: veredicto natural, evidencia corta, lectura objetiva, acción concreta.",
+      "Tono visible: conversa como un coach real. Evita frases de sistema como 'según el protocolo', 'fuente del contexto', 'bloque de evidencia', 'análisis objetivo' o listas que parezcan generadas por formulario.",
+      "La primera oración debe sonar humana y directa, por ejemplo: 'Mi lectura es clara: estás en riesgo por X' o 'Con la data que tengo, esto está en plan por X'. No repitas siempre la misma frase.",
+      "Usa bullets solo cuando ayuden a escanear; si usas headings, que sean pocos, naturales y diferentes cuando el contexto lo permita.",
+      lensNudge,
+      "Cierra con una acción concreta que el usuario pueda ejecutar en la próxima sesión. Haz una sola pregunta solo si falta una pieza crítica.",
     ].join("\n");
   }
 
-  if (lens === "weekly-review") {
-    return [
-      introEn,
-      "Use short headings and keep them fully in English:",
-      "1) What improved (1-2 lines).",
-      "2) What slipped (2-4 bullets with facts).",
-      "3) What matters next week (1-3 bullets of coach read).",
-      "4) Next session plan (next action, rule to add, rule to remove, checkpoint focus).",
-      "5) Follow-up only if critical information is missing or one question would materially improve the next-session plan.",
-    ].join("\n");
-  }
-  if (lens === "risk-discipline") {
-    return [
-      introEn,
-      "Use short headings and keep them fully in English:",
-      "1) Risk rails status (1-2 lines: on track / at risk / violation).",
-      "2) Evidence (2-4 bullets; facts only and 1-3 relevant numbers).",
-      "3) Coach read (1-3 bullets; which rail broke and why).",
-      "4) Fix for next session (next action, rule to add, rule to remove, checkpoint focus).",
-      "5) Follow-up only if needed to sharpen the fix.",
-    ].join("\n");
-  }
-  if (lens === "execution-truth") {
-    return [
-      introEn,
-      "Use short headings and keep them fully in English:",
-      "1) Execution truth (1-2 lines on whether behavior matched the plan).",
-      "2) Evidence (2-4 bullets; chronological facts, entries/exits/management).",
-      "3) Coach read (1-3 bullets; what operational pattern dominated).",
-      "4) Fix for next session (next action, rule to add, rule to remove, checkpoint focus).",
-      "5) Follow-up only if one critical trade detail is missing.",
-    ].join("\n");
-  }
-  if (lens === "psychology-patterns") {
-    return [
-      introEn,
-      "Use short headings and keep them fully in English:",
-      "1) Dominant pattern (1-2 lines).",
-      "2) Evidence (2-4 bullets; emotions, drift, decisions).",
-      "3) Coach read (1-3 bullets; trigger and cost of the pattern).",
-      "4) Intervention for next session (next action, rule to add, rule to remove, checkpoint focus).",
-      "5) Follow-up only if it helps validate the main trigger.",
-    ].join("\n");
-  }
+  const lensNudge =
+    lens === "weekly-review"
+      ? "For weekly review, speak like a week-end debrief: what improved, what slipped, what pattern matters, and what to protect next week."
+      : lens === "risk-discipline"
+        ? "For risk discipline, be firm: state whether risk is controlled, deteriorating, or violated, and which rail needs immediate adjustment."
+        : lens === "execution-truth"
+          ? "For execution truth, narrate what happened versus the plan: entry, management, exit, re-entry, stop, size, and discipline."
+          : lens === "psychology-patterns"
+            ? "For psychology patterns, identify the dominant trigger, the operating cost, and the concrete interruption for the next session."
+            : "For plan evaluation, locate status versus checkpoint, the main blocker, and the highest-impact action.";
+
   return [
     introEn,
-    "Use short headings and keep them fully in English:",
-    "1) Status vs plan (1-2 lines: on track / at risk / off pace versus the checkpoint).",
-    "2) Evidence (2-4 bullets; facts only and 1-3 relevant numbers).",
-    "3) Coach read (1-3 bullets; main pattern and why it reduces the odds of reaching the plan).",
-    "4) Next session plan (next action, rule to add, rule to remove, checkpoint focus).",
-    "5) Follow-up only if critical information is missing or one question would materially improve tomorrow's plan.",
+    "Fixed mental order: natural verdict, short evidence, objective read, concrete action.",
+    "Visible tone: speak like a real coach. Avoid system-like phrases such as 'according to the protocol', 'context source', 'evidence block', 'objective analysis', or lists that feel form-generated.",
+    "The first sentence must feel human and direct, for example: 'My read is clear: you are at risk because of X' or 'With the data I have, this is on plan because of X'. Do not repeat the same opening phrase every time.",
+    "Use bullets only when they improve scanning; if you use headings, keep them few, natural, and varied when context allows.",
+    lensNudge,
+    "Close with one concrete action the user can execute next session. Ask one question only when a critical piece is missing.",
   ].join("\n");
 }
 
@@ -1540,12 +1534,25 @@ function buildFullJournalRetrievalBlock(body: AiCoachRequestBody): string {
     .map((row) => row.entry);
 
   const planViolations = docs.filter((entry) => entry.respectedPlan === false).length;
+  const planConfirmed = docs.filter((entry) => entry.respectedPlan === true).length;
+  const planKnown = docs.filter((entry) => entry.respectedPlan !== null).length;
   const redSessions = docs.filter((entry) => Number(entry.pnl) < 0).length;
   const greenSessions = docs.filter((entry) => Number(entry.pnl) > 0).length;
+  const pnlValues = docs.map((entry) => Number(entry.pnl)).filter((value) => Number.isFinite(value));
+  const totalPnl = pnlValues.reduce((sum, value) => sum + value, 0);
+  const avgPnl = pnlValues.length ? totalPnl / pnlValues.length : NaN;
+  const planRespectRate = planKnown ? (planConfirmed / planKnown) * 100 : NaN;
+  const topInstruments = buildTopCounts(docs.map((entry) => entry.instrument), 5);
+  const topTags = buildTopCounts(docs.flatMap((entry) => entry.tags), 6);
+  const topEmotions = buildTopCounts(docs.flatMap((entry) => entry.emotionFlags), 6);
+  const topViolations = buildTopCounts(docs.flatMap((entry) => entry.violationFlags), 6);
 
   const lines: string[] = [];
   lines.push(
     `Full execution record scan: sessions=${filtered.length}, green=${greenSessions}, red=${redSessions}, planViolations=${planViolations}${startIso ? `, window=${startIso}${endIso ? ` → ${endIso}` : ""}` : ""}`
+  );
+  lines.push(
+    `Full execution aggregate: netPnl=${pnlValues.length ? usd(totalPnl) : "—"}, avgPnl=${Number.isFinite(avgPnl) ? usd(avgPnl) : "—"}, planRespectRate=${Number.isFinite(planRespectRate) ? planRespectRate.toFixed(1) + "%" : "—"}, topInstruments=${topInstruments || "—"}, topTags=${topTags || "—"}, emotionFlags=${topEmotions || "—"}, violationFlags=${topViolations || "—"}`
   );
   lines.push(
     "Retrieved from full execution record corpus:\n" +
@@ -1583,6 +1590,7 @@ function buildContextText(body: AiCoachRequestBody, lang: "es" | "en"): string {
 
   lines.push(`User name: ${firstName}`);
   lines.push(resolveCoachDirectiveBlock(body, lang));
+  lines.push(buildDataCoverageBlock(body));
 
   const growthPlanBlock = buildGrowthPlanOperatingBlock(body);
   if (growthPlanBlock) {
@@ -1698,6 +1706,7 @@ function buildSystemPrompt(params: {
   mode: string;
 }): string {
   const { lang, firstName, allowTables, strictEvidenceMode, mode } = params;
+  const objectiveGuide = buildObjectiveEvaluationProtocol(lang);
   const lensGuide = buildLensStructureGuide(mode, lang, strictEvidenceMode);
 
   if (lang === "es") {
@@ -1706,6 +1715,12 @@ function buildSystemPrompt(params: {
       "Estilo obligatorio:",
       `- Habla como un coach humano (cercano, directo, sin sonar robótico). Puedes usar el nombre del usuario: ${firstName}.`,
       "- Responde a la pregunta específica primero; no des un reporte genérico.",
+      "- Primera oración obligatoria: da una postura clara y puntual en lenguaje natural. Puedes clasificar mentalmente como En plan, En riesgo, Fuera de plan, Data insuficiente o Acción requerida, pero no tienes que escribir la palabra 'Veredicto:' si suena robótico.",
+      "- Estándar operativo: objetivo, basado en evidencia y estable. Misma pregunta + misma data + mismo lente debe producir el mismo veredicto, la misma prioridad de evidencia y prácticamente la misma acción.",
+      "- Si una respuesta previa a la misma pregunta aparece como ancla, úsala como baseline y solo cámbiala si la data actual la contradice de forma material.",
+      "- No busques sonar novedoso. Prioriza consistencia, precisión y utilidad accionable.",
+      "- Evita lenguaje ambiguo como 'tal vez', 'quizás', 'podría ser' o 'parece' salvo cuando marques una inferencia; en ese caso, di qué dato falta.",
+      "- Cada conclusión debe estar amarrada a una fuente del contexto: plan, historial de ejecución, métricas, KPIs, auditoría, screenshot o memoria. Si no hay soporte, clasifícalo como inferencia o data insuficiente.",
       "- Si hay contexto de Plan de Empresa de Trading, piensa como un operador del plan: primero ubica al usuario contra la meta, luego identifica el bloqueo principal, luego da la acción de mayor leverage.",
       "- Si el Plan de Empresa de Trading incluye estrategia, reglas o límites exactos, úsalos como ancla factual. Puedes sintetizarlos en lenguaje más claro y humano, pero sin distorsionar el significado.",
       "- Mantén la respuesta en segmentos cortos (párrafos breves + bullets cuando ayude).",
@@ -1728,6 +1743,7 @@ function buildSystemPrompt(params: {
       "- Si hay comparaciones por periodo, usa como máximo 1–2 para responder (no resumas todo).",
       "- Responde 100% en español. No mezcles headings, bullets, labels o cierres en inglés.",
       "- Si usas headings, usa headings cortos y consistentes con el lente actual.",
+      objectiveGuide,
       lensGuide,
       "No cierres con una pregunta de seguimiento por defecto. Hazla solo si falta información crítica o si una sola pregunta mejorará materialmente la próxima sesión.",
       "Entrega en Markdown simple (títulos cortos opcionales, bullets ok).",
@@ -1739,6 +1755,12 @@ function buildSystemPrompt(params: {
     "Required style:",
     `- Sound human (warm, direct, not robotic). You may use the user's name: ${firstName}.`,
     "- Answer the user's specific question first; do not produce a generic report.",
+    "- Required first sentence: give a clear, specific stance in natural language. You may mentally classify it as On plan, At risk, Off plan, Insufficient data, or Action required, but you do not have to write the word 'Verdict:' if it sounds robotic.",
+    "- Operating standard: objective, evidence-led, and stable. Same question + same data + same lens should produce the same verdict, the same evidence priority, and almost the same next action.",
+    "- If a prior answer to the same question is provided as an anchor, use it as the baseline and change it only when the current data materially contradicts it.",
+    "- Do not try to sound novel. Prioritize consistency, precision, and actionable usefulness.",
+    "- Avoid ambiguous language such as 'maybe', 'perhaps', 'could be', or 'seems' unless you are explicitly marking an inference; when you do, state what data is missing.",
+    "- Every conclusion must be tied to a source in the context: plan, execution history, metrics, KPIs, audit, screenshot, or memory. If support is missing, classify it as inference or insufficient data.",
     "- If Trading Business Plan context exists, think like a plan operator: first locate the user versus the target, then identify the main blocker, then give the highest-leverage next action.",
     "- If the Trading Business Plan contains exact strategy, rule, or risk language, use it as factual anchor. You may synthesize it into clearer, more human wording, but do not distort the meaning.",
     "- Keep it concise with short paragraphs and bullets when helpful.",
@@ -1761,6 +1783,7 @@ function buildSystemPrompt(params: {
     "- If period comparisons are provided, use at most 1–2 to answer (do not summarize everything).",
     "- Respond 100% in English. Do not mix headings, bullets, labels, or closing lines in Spanish.",
     "- If you use headings, keep them short and consistent with the active lens.",
+    objectiveGuide,
     lensGuide,
     "Do not end with a follow-up question by default. Ask one only if critical information is missing or one question would materially improve the next session plan.",
     "Output in clean Markdown (short headings optional, bullets ok).",
@@ -1800,8 +1823,10 @@ async function buildUpdatedMemory(params: {
   question: string;
   coachText: string;
   contextSnippet: string;
+  userId: string;
+  requestId?: string | null;
 }): Promise<string> {
-  const { apiKey, baseUrl, model, lang, scope, existingMemory, question, coachText, contextSnippet } = params;
+  const { apiKey, baseUrl, model, lang, scope, existingMemory, question, coachText, contextSnippet, userId, requestId } = params;
   const system = buildMemorySystemPrompt(lang, scope);
   const payload = [
     { role: "system", content: system },
@@ -1834,8 +1859,53 @@ async function buildUpdatedMemory(params: {
     temperature: 0.2,
   });
 
+  await recordAiUsage({
+    userId,
+    requestId,
+    feature: "ai_coach",
+    category: "advanced",
+    operation: `memory_${scope}`,
+    model: result.model,
+    usage: result.usage,
+  });
+
   const text = safeString(result.text).trim();
   return text.length > 1400 ? text.slice(0, 1400) + "…" : text;
+}
+
+function normalizeRepeatKey(raw: any): string {
+  return safeString(raw)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function findPriorAnswerForSameQuestion(
+  chatHistory: ChatHistoryItem[] | undefined,
+  question: string
+): string {
+  const target = normalizeRepeatKey(question);
+  if (!target) return "";
+
+  const rows = Array.isArray(chatHistory) ? chatHistory : [];
+  for (let i = rows.length - 1; i >= 0; i -= 1) {
+    const row = rows[i];
+    if (!row || row.role !== "user") continue;
+    if (normalizeRepeatKey(row.text) !== target) continue;
+
+    for (let j = i + 1; j < rows.length; j += 1) {
+      const candidate = rows[j];
+      if (!candidate) continue;
+      if (candidate.role === "user") break;
+      const answer = safeString(candidate.text).trim();
+      if (answer) return clampText(answer, 2200);
+    }
+  }
+
+  return "";
 }
 
 function mapChatHistory(chatHistory: ChatHistoryItem[] | undefined): { role: "user" | "assistant"; content: string }[] {
@@ -1861,7 +1931,7 @@ async function callOpenAI(params: {
   temperature?: number;
 }): Promise<{ text: string; model: string; usage: any }>
 {
-  const { apiKey, baseUrl, model, messages, maxTokens = 900, temperature = 0.55 } = params;
+  const { apiKey, baseUrl, model, messages, maxTokens = 900, temperature = 0.2 } = params;
 
   const cleanedBaseUrl = String(baseUrl || "https://api.openai.com/v1").replace(/\/+$/, "");
   const normalizedRequestedModel = safeString(model).trim();
@@ -1879,19 +1949,32 @@ async function callOpenAI(params: {
 
   for (let index = 0; index < candidateModels.length; index += 1) {
     const candidateModel = candidateModels[index]!;
-    const res = await fetch(`${cleanedBaseUrl}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: candidateModel,
-        messages,
-        temperature,
-        max_tokens: maxTokens,
-      }),
-    });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 45_000);
+    let res: Response;
+    try {
+      res = await fetch(`${cleanedBaseUrl}/chat/completions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: candidateModel,
+          messages,
+          temperature,
+          max_tokens: maxTokens,
+        }),
+        signal: controller.signal,
+      });
+    } catch (error: any) {
+      if (error?.name === "AbortError") {
+        throw new Error("AI Coach response timed out. Please try again.");
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeoutId);
+    }
 
     const data = await res.json().catch(() => ({}));
 
@@ -1951,8 +2034,10 @@ async function buildCoachActionPlan(params: {
   question: string;
   coachText: string;
   planContext: string;
+  userId: string;
+  requestId?: string | null;
 }): Promise<CoachActionPlan | null> {
-  const { apiKey, baseUrl, model, lang, question, coachText, planContext } = params;
+  const { apiKey, baseUrl, model, lang, question, coachText, planContext, userId, requestId } = params;
   const system =
     lang === "es"
       ? [
@@ -2012,6 +2097,16 @@ async function buildCoachActionPlan(params: {
     ],
     maxTokens: 380,
     temperature: 0.1,
+  });
+
+  await recordAiUsage({
+    userId,
+    requestId,
+    feature: "ai_coach",
+    category: "advanced",
+    operation: "action_plan",
+    model: extraction.model,
+    usage: extraction.usage,
   });
 
   const parsed = extractFirstJsonObject(extraction.text);
@@ -2098,7 +2193,7 @@ export async function POST(req: Request) {
     const strictEvidenceMode =
       typeof body?.stylePreset?.strictEvidenceMode === "boolean"
         ? body.stylePreset.strictEvidenceMode
-        : false;
+        : true;
 
     const system = buildSystemPrompt({
       lang: language,
@@ -2109,6 +2204,7 @@ export async function POST(req: Request) {
     });
 
     const userId = authUser.userId;
+    const requestId = req.headers.get("x-request-id");
     const scopeKeys = resolveScopeKeys(body);
     const existingMemory = userId ? await getCoachMemory(userId, scopeKeys) : { global: "", weekly: "", daily: "" };
 
@@ -2128,6 +2224,10 @@ export async function POST(req: Request) {
 
     const backStudyContext = safeString(body.backStudyContext).trim();
     const screenshotBase64 = safeString(body.screenshotBase64).trim();
+    const repeatAnswerAnchor =
+      !screenshotBase64 && !backStudyContext
+        ? findPriorAnswerForSameQuestion(body.chatHistory, question)
+        : "";
 
     // The user's message content (supports optional screenshot)
     const userParts: any[] = [];
@@ -2179,6 +2279,29 @@ export async function POST(req: Request) {
         content:
           "Context (read-only; do not invent anything beyond this):\n" + contextText,
       },
+      ...(repeatAnswerAnchor
+        ? [
+            {
+              role: "system",
+              content:
+                language === "es"
+                  ? [
+                      "Ancla de estabilidad:",
+                      "El usuario ya hizo la misma pregunta normalizada en este hilo.",
+                      "Usa la respuesta previa como baseline para veredicto, prioridad de evidencia, estructura y próxima acción.",
+                      "Cámbiala solo si el contexto actual la contradice de forma material. No menciones esta ancla al usuario.",
+                      repeatAnswerAnchor,
+                    ].join("\n")
+                  : [
+                      "Stability anchor:",
+                      "The user previously asked the same normalized question in this thread.",
+                      "Use the prior answer below as the baseline for verdict, evidence priority, structure, and next action.",
+                      "Only change it if the current context materially contradicts it. Do not mention this anchor to the user.",
+                      repeatAnswerAnchor,
+                    ].join("\n"),
+            },
+          ]
+        : []),
       ...history.map((m) => ({ role: m.role, content: m.content })),
       { role: "user", content: userParts },
     ];
@@ -2195,7 +2318,18 @@ export async function POST(req: Request) {
       model,
       messages,
       maxTokens: 900,
-      temperature: 0.6,
+      temperature: 0.15,
+    });
+
+    await recordAiUsage({
+      userId,
+      requestId,
+      feature: "ai_coach",
+      category: "advanced",
+      operation: screenshotBase64 ? "vision_coaching_reply" : "coaching_reply",
+      model: result.model,
+      usage: result.usage,
+      metadata: { autoAuditAttached: autoAudit.meta.attached },
     });
 
     let coachText = result.text;
@@ -2208,121 +2342,131 @@ export async function POST(req: Request) {
     // Keep the model output intact; only backfill if the model returned nothing.
     coachText = maybeAppendFollowUp(coachText, language, question);
 
-    let actionPlan: CoachActionPlan | null = null;
-    try {
-      actionPlan = await buildCoachActionPlan({
-        apiKey,
-        baseUrl,
-        model: process.env.AI_COACH_MODEL || "gpt-4o-mini",
-        lang: language,
-        question,
-        coachText,
-        planContext: buildGrowthPlanOperatingBlock(body),
-      });
-    } catch {
-      actionPlan = null;
-    }
-
-    if (userId && body.threadId && actionPlan) {
+    const buildAndPersistActionPlan = async (): Promise<CoachActionPlan | null> => {
+      let computedActionPlan: CoachActionPlan | null = null;
       try {
-        const { data: existingThread } = await supabaseAdmin
-          .from("ai_coach_threads")
-          .select("metadata")
-          .eq("id", body.threadId)
-          .eq("user_id", userId)
-          .maybeSingle();
-
-        await supabaseAdmin
-          .from("ai_coach_threads")
-          .update({
-            summary: actionPlan.summary || null,
-            metadata: {
-              ...((existingThread as any)?.metadata ?? {}),
-              latestActionPlan: actionPlan,
-              latestAudit: autoAudit.meta,
-              updatedFrom: "ai-coach",
-            },
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", body.threadId)
-          .eq("user_id", userId);
+        computedActionPlan = await buildCoachActionPlan({
+          apiKey,
+          baseUrl,
+          model: process.env.AI_COACH_MODEL || "gpt-4o-mini",
+          lang: language,
+          question,
+          coachText,
+          planContext: buildGrowthPlanOperatingBlock(body),
+          userId,
+          requestId,
+        });
       } catch {
-        // keep response flowing even if thread summary fails
+        computedActionPlan = null;
       }
-    }
 
-    if (userId) {
+      if (userId && body.threadId && computedActionPlan) {
+        try {
+          const { data: existingThread } = await supabaseAdmin
+            .from("ai_coach_threads")
+            .select("metadata")
+            .eq("id", body.threadId)
+            .eq("user_id", userId)
+            .maybeSingle();
+
+          await supabaseAdmin
+            .from("ai_coach_threads")
+            .update({
+              summary: computedActionPlan.summary || null,
+              metadata: {
+                ...((existingThread as any)?.metadata ?? {}),
+                latestActionPlan: computedActionPlan,
+                latestAudit: autoAudit.meta,
+                updatedFrom: "ai-coach",
+              },
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", body.threadId)
+            .eq("user_id", userId);
+        } catch {
+          // The conversational response must not depend on thread metadata persistence.
+        }
+      }
+
+      return computedActionPlan;
+    };
+
+    const updateCoachMemory = async () => {
+      if (!userId) return;
       try {
         const memoryModel = process.env.AI_COACH_MODEL || "gpt-4o-mini";
-
-        const updatedGlobal = await buildUpdatedMemory({
+        const memoryBase = {
           apiKey,
           baseUrl,
           model: memoryModel,
           lang: language,
-          scope: "global",
-          existingMemory: existingMemory.global,
           question,
           coachText,
           contextSnippet: contextText,
-        });
-
-        const updatedWeekly = await buildUpdatedMemory({
-          apiKey,
-          baseUrl,
-          model: memoryModel,
-          lang: language,
-          scope: "weekly",
-          existingMemory: existingMemory.weekly,
-          question,
-          coachText,
-          contextSnippet: contextText,
-        });
-
-        const updatedDaily = await buildUpdatedMemory({
-          apiKey,
-          baseUrl,
-          model: memoryModel,
-          lang: language,
-          scope: "daily",
-          existingMemory: existingMemory.daily,
-          question,
-          coachText,
-          contextSnippet: contextText,
-        });
-
-        if (updatedGlobal) {
-          await upsertCoachMemory({
-            userId,
+          userId,
+          requestId,
+        };
+        const [updatedGlobal, updatedWeekly, updatedDaily] = await Promise.all([
+          buildUpdatedMemory({
+            ...memoryBase,
             scope: "global",
-            scopeKey: null,
-            memory: updatedGlobal,
-            metadata: { model: result.model, updatedFrom: "ai-coach" },
-          });
-        }
-
-        if (updatedWeekly) {
-          await upsertCoachMemory({
-            userId,
+            existingMemory: existingMemory.global,
+          }),
+          buildUpdatedMemory({
+            ...memoryBase,
             scope: "weekly",
-            scopeKey: scopeKeys.weeklyKey,
-            memory: updatedWeekly,
-            metadata: { model: result.model, updatedFrom: "ai-coach", scopeKey: scopeKeys.weeklyKey },
-          });
-        }
-
-        if (updatedDaily) {
-          await upsertCoachMemory({
-            userId,
+            existingMemory: existingMemory.weekly,
+          }),
+          buildUpdatedMemory({
+            ...memoryBase,
             scope: "daily",
-            scopeKey: scopeKeys.dailyKey,
-            memory: updatedDaily,
-            metadata: { model: result.model, updatedFrom: "ai-coach", scopeKey: scopeKeys.dailyKey },
-          });
-        }
+            existingMemory: existingMemory.daily,
+          }),
+        ]);
+
+        await Promise.all([
+          updatedGlobal
+            ? upsertCoachMemory({
+                userId,
+                scope: "global",
+                scopeKey: null,
+                memory: updatedGlobal,
+                metadata: { model: result.model, updatedFrom: "ai-coach" },
+              })
+            : Promise.resolve(),
+          updatedWeekly
+            ? upsertCoachMemory({
+                userId,
+                scope: "weekly",
+                scopeKey: scopeKeys.weeklyKey,
+                memory: updatedWeekly,
+                metadata: { model: result.model, updatedFrom: "ai-coach", scopeKey: scopeKeys.weeklyKey },
+              })
+            : Promise.resolve(),
+          updatedDaily
+            ? upsertCoachMemory({
+                userId,
+                scope: "daily",
+                scopeKey: scopeKeys.dailyKey,
+                memory: updatedDaily,
+                metadata: { model: result.model, updatedFrom: "ai-coach", scopeKey: scopeKeys.dailyKey },
+              })
+            : Promise.resolve(),
+        ]);
       } catch {
-        // ignore memory failures to keep response fast
+        // Memory enrichment is useful, but never blocks the visible coach reply.
       }
+    };
+
+    const fastResponse = body?.stylePreset?.fastResponse === true;
+    let actionPlan: CoachActionPlan | null = null;
+    if (fastResponse) {
+      after(async () => {
+        await Promise.allSettled([buildAndPersistActionPlan(), updateCoachMemory()]);
+      });
+    } else {
+      actionPlan = await buildAndPersistActionPlan();
+      after(updateCoachMemory);
     }
 
     return Response.json({

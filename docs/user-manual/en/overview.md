@@ -39,6 +39,9 @@ Runs the business side of trading: subscriptions, education, vendors, budgets, r
 **AI Coaching**  
 Turns Journal data, Neuro Layer, Growth Plan, analytics, and execution context into feedback and action items.
 
+**Neuro Guide**
+The quick-help chat available at the bottom of your private workspace. It explains the manual, the current page, and a concise summary of your own results when the question requires it.
+
 **Imports (Broker Sync or CSV)**  
 Brings real trades into the system. Without clean data, analytics are inaccurate.
 
@@ -65,4 +68,7 @@ Q: Where should I start?
 A: Getting Started → Growth Plan → Journal → Dashboard → Analytics.
 
 Q: Where do I find help inside the app?  
-A: Use the Help menu or ask Neuro and open the link provided.
+A: Open the Help Center or use the floating brain button to ask Neuro Guide. The assistant shows the related manual sources below its answer.
+
+Q: Are Neuro Guide and AI Coaching the same?
+A: No. Neuro Guide provides quick orientation. AI Coaching performs a deeper review of your patterns and helps turn evidence into an action plan.

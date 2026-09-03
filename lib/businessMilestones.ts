@@ -59,20 +59,20 @@ export const BUSINESS_MILESTONE_DEFINITIONS: BusinessMilestoneDefinition[] = [
   {
     key: "business_analysis_completed",
     title: {
-      en: "Business Analysis completed",
-      es: "Análisis empresarial completado",
+      en: "Operating analysis completed",
+      es: "Análisis operativo completado",
     },
     description: {
-      en: "Risk profile, experience, dependency, style, and drawdown comfort were captured.",
-      es: "Se capturó perfil de riesgo, experiencia, dependencia, estilo y tolerancia al drawdown.",
+      en: "The schedule, return model, loss assumptions, and risk limits were captured.",
+      es: "Se capturaron el calendario, modelo de retorno, supuestos de pérdida y límites de riesgo.",
     },
     completionHint: {
-      en: "Answer all five AI-context questions: risk profile, experience, income dependency, drawdown comfort, and trading style; then save the plan.",
-      es: "Contesta las cinco preguntas de contexto para la IA: perfil de riesgo, experiencia, dependencia de ingresos, tolerancia al drawdown y estilo de trading; luego guarda el plan.",
+      en: "Complete the operating assumptions, choose a standard or manual model, and save the plan.",
+      es: "Completa los supuestos operativos, escoge un modelo estándar o manual y guarda el plan.",
     },
     action: {
       href: "/growth-plan#gp-forecast-analysis",
-      label: { en: "Complete the 5 answers", es: "Completar las 5 respuestas" },
+      label: { en: "Review operating analysis", es: "Revisar análisis operativo" },
     },
   },
   {
@@ -172,29 +172,38 @@ export const BUSINESS_MILESTONE_DEFINITIONS: BusinessMilestoneDefinition[] = [
   },
 ];
 
-export const BUSINESS_ANALYSIS_PROFILE_FIELD_KEYS = [
-  "riskProfile",
-  "experience",
-  "incomeDependency",
-  "drawdownComfort",
-  "tradingStyle",
-] as const;
+export function hasCompleteBusinessOperatingAnalysis(value: unknown) {
+  const asRecord = (entry: unknown): Record<string, unknown> =>
+    entry && typeof entry === "object" ? (entry as Record<string, unknown>) : {};
+  const analysis = asRecord(value);
+  if (!Object.keys(analysis).length) return false;
+  const operatingModel = asRecord(analysis.operatingModel);
+  const selectedScenario = asRecord(analysis.selectedScenario);
+  const selectedPlanId = String(
+    operatingModel.selectedPlanId ??
+      operatingModel.returnModelMode ??
+      analysis.selectedScenarioId ??
+      selectedScenario.id ??
+      ""
+  ).trim();
+  const positive = (entry: unknown) => {
+    const number = Number(entry);
+    return Number.isFinite(number) && number > 0;
+  };
+  const nonNegative = (entry: unknown) => {
+    const number = Number(entry);
+    return Number.isFinite(number) && number >= 0;
+  };
 
-export type BusinessAnalysisProfileFieldKey =
-  (typeof BUSINESS_ANALYSIS_PROFILE_FIELD_KEYS)[number];
-
-export function getMissingBusinessAnalysisProfileFields(
-  value: unknown
-): BusinessAnalysisProfileFieldKey[] {
-  const profile =
-    value && typeof value === "object" ? (value as Record<string, unknown>) : {};
-  return BUSINESS_ANALYSIS_PROFILE_FIELD_KEYS.filter(
-    (key) => !String(profile[key] ?? "").trim()
+  return Boolean(
+    selectedPlanId &&
+      positive(operatingModel.averageTradingDaysPerWeek ?? analysis.averageTradingDaysPerWeek) &&
+      nonNegative(operatingModel.lossDaysPerWeek ?? selectedScenario.lossDaysPerWeek) &&
+      positive(operatingModel.goalDayReturnPct ?? selectedScenario.dailyGoalPct) &&
+      positive(operatingModel.expectedLossDayPct ?? selectedScenario.expectedLossDayPct) &&
+      positive(operatingModel.maxDailyLossPercent ?? selectedScenario.maxDailyLossPct) &&
+      positive(operatingModel.riskPerTradePct ?? selectedScenario.riskPerTradePct)
   );
-}
-
-export function hasCompleteBusinessAnalysisProfile(value: unknown) {
-  return getMissingBusinessAnalysisProfileFields(value).length === 0;
 }
 
 export function getMilestoneDefinition(key: string) {

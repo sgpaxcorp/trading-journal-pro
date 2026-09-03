@@ -17,6 +17,7 @@ import {
 import { rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
 import { requireSmartToolsOwner } from "@/lib/smartToolsAccess";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
+import { countResponseFileSearchCalls, recordAiUsage } from "@/lib/aiUsageServer";
 
 export const runtime = "nodejs";
 
@@ -382,6 +383,21 @@ export async function POST(req: Request) {
         reportId: savedReport?.id ?? null,
         vectorStoreCount: vectorStoreIds.length,
         holdings: payloadWithLibrary.holdings.length,
+      },
+    });
+    await recordAiUsage({
+      userId: authUser.userId,
+      requestId: req.headers.get("x-request-id"),
+      feature: "neuro_analysis",
+      category: "market_intelligence",
+      operation: "portfolio_research",
+      model: String((response as any)?.model || MODEL),
+      usage: (response as any)?.usage,
+      apiKind: "responses",
+      fileSearchCalls: countResponseFileSearchCalls(response),
+      metadata: {
+        responseId: response.id,
+        vectorStoreCount: vectorStoreIds.length,
       },
     });
 
