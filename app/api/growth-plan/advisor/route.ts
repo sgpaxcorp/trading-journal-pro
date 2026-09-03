@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
 
+import {
+  buildGrowthPlanReviewInstructions,
+  GROWTH_PLAN_REVIEW_TEXT_FORMAT,
+  growthPlanModelCandidates,
+} from "@/lib/growthPlanAiReview";
 import { getClientIp, rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
 import { requirePlatformAccess } from "@/lib/serverPlatformAccess";
 
@@ -81,10 +86,24 @@ function parseJson(value: string) {
   }
 }
 
-function normalizeReview(raw: any, model: string, usedResearchCorpus: boolean) {
+function normalizeReview(
+  raw: any,
+  model: string,
+  usedResearchCorpus: boolean,
+  selectedScenario: { id: string; title: string },
+  verdict: string
+) {
   return {
+    selectedScenarioId: selectedScenario.id,
+    selectedScenarioTitle: selectedScenario.title,
+    verdict,
     headline: text(raw?.headline, 180),
     summary: text(raw?.summary, 1200),
+    scenarioAnalysis: text(raw?.scenarioAnalysis, 1200),
+    deadlineAnalysis: text(raw?.deadlineAnalysis, 1200),
+    riskAnalysis: text(raw?.riskAnalysis, 1200),
+    evidenceAnalysis: text(raw?.evidenceAnalysis, 1200),
+    comparison: text(raw?.comparison, 1200),
     observations: textList(raw?.observations),
     actions: textList(raw?.actions),
     limitations: textList(raw?.limitations),
@@ -93,21 +112,6 @@ function normalizeReview(raw: any, model: string, usedResearchCorpus: boolean) {
     usedResearchCorpus,
     generatedAt: new Date().toISOString(),
   };
-}
-
-function modelCandidates() {
-  return Array.from(
-    new Set(
-      [
-        process.env.OPENAI_GROWTH_PLAN_MODEL,
-        process.env.OPENAI_NEURO_ANALYSIS_MODEL,
-        process.env.AI_COACH_MODEL,
-        "gpt-4o-mini",
-      ]
-        .map((value) => String(value ?? "").trim())
-        .filter(Boolean)
-    )
-  );
 }
 
 export async function POST(req: NextRequest) {
@@ -132,8 +136,29 @@ export async function POST(req: NextRequest) {
 
     const body = await req.json().catch(() => ({}));
     const locale = body?.locale === "es" ? "es" : "en";
+    const startingCapitalUsd = finite(body?.startingCapitalUsd);
+    const selectedScenarioId = text(
+      body?.adaptivePlan?.selectedPlanId ?? body?.selectedScenario?.id,
+      30
+    );
+    const selectedScenarioTitle = text(body?.selectedScenario?.title, 100) || selectedScenarioId;
+    const selectedGoalDayPct = finite(
+      body?.adaptivePlan?.recommendedGoalDayPct ?? body?.selectedScenario?.goalDayReturnPct
+    );
+    const selectedExpectedLossDayPct = finite(
+      body?.adaptivePlan?.expectedLossDayPct ?? body?.selectedScenario?.expectedLossDayPct
+    );
+    const selectedMaxDailyLossPct = finite(
+      body?.adaptivePlan?.maxDailyLossGuardrailPct ??
+        body?.selectedScenario?.maxDailyLossGuardrailPct
+    );
+    const selectedRiskPerTradePct = finite(
+      body?.adaptivePlan?.riskPerTradePct ?? body?.selectedScenario?.riskPerTradePct
+    );
+    const usdAtStartingCapital = (percentage: number) =>
+      Number(((startingCapitalUsd * percentage) / 100).toFixed(2));
     const deterministicSnapshot = {
-      startingCapitalUsd: finite(body?.startingCapitalUsd),
+      startingCapitalUsd,
       targetCapitalUsd: finite(body?.targetCapitalUsd),
       targetDate: text(body?.targetDate, 20),
       tradingInstrument: text(body?.tradingInstrument, 40),
@@ -151,6 +176,56 @@ export async function POST(req: NextRequest) {
       deadlineGapUsd: finite(body?.deadlineGapUsd),
       verdict: text(body?.verdict, 40),
       flags: textList(body?.flags),
+      selectedScenario: {
+        id: selectedScenarioId,
+        title: selectedScenarioTitle,
+        isManual: selectedScenarioId === "manual",
+        goalDayReturnPct: selectedGoalDayPct,
+        expectedLossDayPct: selectedExpectedLossDayPct,
+        maxDailyLossGuardrailPct: selectedMaxDailyLossPct,
+        riskPerTradePct: selectedRiskPerTradePct,
+        operatingDaysPerWeek: Math.max(
+          0,
+          Math.floor(finite(body?.adaptivePlan?.operatingDaysPerWeek))
+        ),
+        goalDaysPerWeek: Math.max(
+          0,
+          Math.floor(finite(body?.selectedScenario?.goalDaysPerWeek))
+        ),
+        lossDaysPerWeek: Math.max(
+          0,
+          Math.floor(
+            finite(
+              body?.adaptivePlan?.lossDaysPerWeek ?? body?.selectedScenario?.lossDaysPerWeek
+            )
+          )
+        ),
+        goalDayGainUsdAtStartingCapital: usdAtStartingCapital(selectedGoalDayPct),
+        expectedLossDayUsdAtStartingCapital: usdAtStartingCapital(
+          selectedExpectedLossDayPct
+        ),
+        maxDailyLossUsdAtStartingCapital: usdAtStartingCapital(selectedMaxDailyLossPct),
+        riskPerTradeUsdAtStartingCapital: usdAtStartingCapital(selectedRiskPerTradePct),
+        projectedBalanceAtDeadlineUsd: finite(
+          body?.selectedScenario?.projectedBalanceAtDeadlineUsd
+        ),
+        coverageAtDeadlinePct: finite(body?.selectedScenario?.coverageAtDeadlinePct),
+        shortfallAtDeadlineUsd: finite(body?.selectedScenario?.shortfallAtDeadlineUsd),
+        completionDate: text(body?.selectedScenario?.completionDate, 20),
+        reachesRequestedDeadline: Boolean(body?.selectedScenario?.reachesRequestedDeadline),
+        sensitivity: {
+          probabilityTargetPct: finite(body?.selectedScenario?.sensitivity?.probabilityTargetPct),
+          probabilityCapitalHalfPct: finite(
+            body?.selectedScenario?.sensitivity?.probabilityCapitalHalfPct
+          ),
+          p10BalanceUsd: finite(body?.selectedScenario?.sensitivity?.p10BalanceUsd),
+          medianBalanceUsd: finite(body?.selectedScenario?.sensitivity?.medianBalanceUsd),
+          p90BalanceUsd: finite(body?.selectedScenario?.sensitivity?.p90BalanceUsd),
+          medianMaxDrawdownPct: finite(
+            body?.selectedScenario?.sensitivity?.medianMaxDrawdownPct
+          ),
+        },
+      },
       adaptivePlan: {
         verdict: text(body?.adaptivePlan?.verdict, 40),
         isProvisional: Boolean(body?.adaptivePlan?.isProvisional),
@@ -183,6 +258,12 @@ export async function POST(req: NextRequest) {
         recommendedGoalDayPct: finite(body?.adaptivePlan?.recommendedGoalDayPct),
         expectedLossDayPct: finite(body?.adaptivePlan?.expectedLossDayPct),
         maxDailyLossGuardrailPct: finite(body?.adaptivePlan?.maxDailyLossGuardrailPct),
+        riskPerTradePct: finite(body?.adaptivePlan?.riskPerTradePct),
+        lossDaysPerWeek: Math.max(0, Math.floor(finite(body?.adaptivePlan?.lossDaysPerWeek))),
+        operatingDaysPerWeek: Math.max(
+          0,
+          Math.floor(finite(body?.adaptivePlan?.operatingDaysPerWeek))
+        ),
         modeledNetReturnPerSessionPct: finite(body?.adaptivePlan?.modeledNetReturnPerSessionPct),
         modeledWeeklyReturnPct: finite(body?.adaptivePlan?.modeledWeeklyReturnPct),
         modeledAnnualCycles: finite(body?.adaptivePlan?.modeledAnnualCycles),
@@ -240,6 +321,13 @@ export async function POST(req: NextRequest) {
         estimatedCostPerSessionUsd: finite(body?.financialCapacity?.estimatedCostPerSessionUsd),
         estimatedTaxReservePct: finite(body?.financialCapacity?.estimatedTaxReservePct),
       },
+      businessProfile: {
+        riskProfile: text(body?.businessProfile?.riskProfile, 30),
+        experience: text(body?.businessProfile?.experience, 30),
+        incomeDependency: text(body?.businessProfile?.incomeDependency, 30),
+        drawdownComfort: text(body?.businessProfile?.drawdownComfort, 30),
+        tradingStyle: text(body?.businessProfile?.tradingStyle, 30),
+      },
       executionEvidence: {
         depth: text(body?.executionEvidence?.depth, 40),
         sessions: Math.max(0, Math.floor(finite(body?.executionEvidence?.sessions))),
@@ -255,9 +343,13 @@ export async function POST(req: NextRequest) {
     if (
       deterministicSnapshot.startingCapitalUsd <= 0 ||
       deterministicSnapshot.targetCapitalUsd <= deterministicSnapshot.startingCapitalUsd ||
-      deterministicSnapshot.committedTradingDays <= 0
+      deterministicSnapshot.committedTradingDays <= 0 ||
+      !deterministicSnapshot.selectedScenario.id
     ) {
-      return NextResponse.json({ error: "Complete the plan inputs before requesting a review." }, { status: 400 });
+      return NextResponse.json(
+        { error: "Choose an operating scenario and complete the plan before requesting a review." },
+        { status: 400 }
+      );
     }
 
     const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -265,40 +357,22 @@ export async function POST(req: NextRequest) {
     const tools = vectorStoreId
       ? [{ type: "file_search" as const, vector_store_ids: [vectorStoreId], max_num_results: 10 }]
       : [];
-    const instructions = [
-      "You are an educational trading-business risk planning analyst.",
-      "The deterministic snapshot is authoritative. Never recalculate, alter, or contradict its numbers.",
-      "Distinguish perfect-path compounding from the return required only on modeled goal-days.",
-      "Distinguish the gross percentage-compound projection from the net projection after fixed session costs. If costsConsumePercentageEdge is true, say explicitly that fixed costs, not the win/loss compounding formula, caused the net balance to be exhausted.",
-      "Evaluate arithmetic feasibility, operating-model coverage, loss assumptions, execution evidence, and uncertainty separately.",
-      "Use the panoramas to compare the user's declared case, the fixed conservative ±1%, moderate ±2%, aggressive ±4% modes, and exact target arithmetic.",
-      "Recommend the lowest fixed mode that reaches the requested deadline. If none does, explain the exact mathematical percentage and the later completion dates without silently changing the user's inputs.",
-      "A manual mode uses exactly the gain-day and loss-day percentages chosen by the user. Analyze it as a conditional budget scenario and never replace it with a preset.",
-      "Treat probabilityTargetPct only as a conditional seeded-model hit rate under the entered win/loss percentages and frequency. Never describe it as an empirical or real-world probability of success.",
-      "A mathematically possible target can still be speculative or unsupported by the selected policy; explain both facts without calling the target impossible.",
-      "Discuss transaction-cost drag, tax-reserve planning, business cash flows, leverage, drawdown sensitivity, and 50%-capital-loss sensitivity when present.",
-      "Treat the selected operating mode as an immutable budget baseline. Execution evidence changes confidence and coaching, not the saved forecast assumptions.",
-      "Explain that maxDailyLossGuardrailPct is a hard guardrail while expectedLossDayPct is the modeled average losing-day assumption.",
-      "Center the user on the next monthly checkpoint, then quarterly and annual checkpoints, rather than the final capital target.",
-      "If qualificationRequired is true, state that the horizon is provisional until the minimum execution sample is reached.",
-      "Use the private research methodology corpus when available for principles such as compounding, risk-return tradeoffs, drawdown, diversification of assumptions, and limitations of historical evidence.",
-      "Do not claim to be a registered investment adviser. Do not recommend securities, entries, exits, leverage, or position sizes. Do not guarantee or forecast returns.",
-      "Do not call a high return target safe or realistic merely because the compound formula resolves.",
-      "Respond in the requested locale and return JSON only with: headline, summary, observations[], actions[], limitations[], methodologyNote.",
-      "Keep actions focused on discipline: follow the next checkpoint, preserve the loss guardrail, validate the edge, review monthly, and extend the runway when required. Mention adding capital only as an explicit user decision, never as a requirement.",
-    ].join("\n");
+    const instructions = buildGrowthPlanReviewInstructions();
     const input = JSON.stringify({ locale, deterministicSnapshot }, null, 2);
 
     let lastError: unknown = null;
-    for (const model of modelCandidates()) {
+    for (const model of growthPlanModelCandidates()) {
       try {
+        const isGpt56 = model.startsWith("gpt-5.6");
         const response = await client.responses.create({
           model,
           instructions,
           input,
           tools,
           include: tools.length ? ["file_search_call.results"] : undefined,
-          max_output_tokens: 1800,
+          text: { format: GROWTH_PLAN_REVIEW_TEXT_FORMAT },
+          reasoning: isGpt56 ? { effort: "medium" } : undefined,
+          max_output_tokens: isGpt56 ? 3500 : 1800,
           metadata: {
             feature: "growth_plan_research_review",
             user_id: access.context.userId,
@@ -319,7 +393,13 @@ export async function POST(req: NextRequest) {
           Array.isArray((response as any)?.output) &&
           (response as any).output.some((item: any) => item?.type === "file_search_call");
         return NextResponse.json({
-          review: normalizeReview(parsed, model, usedResearchCorpus),
+          review: normalizeReview(
+            parsed,
+            model,
+            usedResearchCorpus,
+            deterministicSnapshot.selectedScenario,
+            deterministicSnapshot.adaptivePlan.verdict
+          ),
         });
       } catch (error: any) {
         lastError = error;

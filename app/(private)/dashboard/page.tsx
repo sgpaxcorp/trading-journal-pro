@@ -4252,6 +4252,15 @@ export default function DashboardPage() {
               <p className="mt-1 text-xs font-semibold text-slate-100">
                 {nextMilestones[0].title[lang]}
               </p>
+              <p className="mt-1 text-[11px] leading-relaxed text-slate-400">
+                {nextMilestones[0].completionHint[lang]}
+              </p>
+              <Link
+                href={nextMilestones[0].action.href}
+                className="mt-2 inline-flex rounded-lg border border-cyan-300/35 bg-cyan-300/10 px-3 py-1.5 text-[11px] font-semibold text-cyan-100 transition hover:border-cyan-200 hover:bg-cyan-300/15"
+              >
+                {nextMilestones[0].action.label[lang]} →
+              </Link>
             </div>
           ) : null}
         </div>

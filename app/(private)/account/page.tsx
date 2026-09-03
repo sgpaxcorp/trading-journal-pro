@@ -6,6 +6,7 @@ import {
   type FormEvent,
   type ChangeEvent,
 } from "react";
+import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
 import TopNav from "@/app/components/TopNav";
 import { useAuth } from "@/context/AuthContext";
@@ -650,6 +651,22 @@ export default function AccountPage() {
                       <p className="mt-0.5 text-[11px] text-slate-500">
                         {milestone.description[lang]}
                       </p>
+                      {!milestone.completed ? (
+                        <>
+                          <p className="mt-2 text-[11px] leading-5 text-slate-300">
+                            <span className="font-semibold text-amber-200">
+                              {L("To complete it:", "Para completarlo:")}
+                            </span>{" "}
+                            {milestone.completionHint[lang]}
+                          </p>
+                          <Link
+                            href={milestone.action.href}
+                            className="mt-2 inline-flex rounded-lg border border-cyan-300/30 bg-cyan-300/10 px-2.5 py-1 text-[11px] font-semibold text-cyan-100 transition hover:border-cyan-200"
+                          >
+                            {milestone.action.label[lang]} →
+                          </Link>
+                        </>
+                      ) : null}
                     </div>
                   </div>
                 </div>

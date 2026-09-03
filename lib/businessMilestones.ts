@@ -17,6 +17,17 @@ export type BusinessMilestoneDefinition = {
     en: string;
     es: string;
   };
+  completionHint: {
+    en: string;
+    es: string;
+  };
+  action: {
+    href: string;
+    label: {
+      en: string;
+      es: string;
+    };
+  };
 };
 
 export type BusinessMilestoneProgress = BusinessMilestoneDefinition & {
@@ -36,6 +47,14 @@ export const BUSINESS_MILESTONE_DEFINITIONS: BusinessMilestoneDefinition[] = [
       en: "The business now has a written operating plan instead of scattered intentions.",
       es: "La empresa ya tiene un plan operativo escrito en vez de intenciones sueltas.",
     },
+    completionHint: {
+      en: "Complete the eight capital-plan steps and save the plan.",
+      es: "Completa los ocho pasos del plan de capital y guarda el plan.",
+    },
+    action: {
+      href: "/growth-plan#gp-starting-balance",
+      label: { en: "Open Growth Plan", es: "Abrir Growth Plan" },
+    },
   },
   {
     key: "business_analysis_completed",
@@ -46,6 +65,14 @@ export const BUSINESS_MILESTONE_DEFINITIONS: BusinessMilestoneDefinition[] = [
     description: {
       en: "Risk profile, experience, dependency, style, and drawdown comfort were captured.",
       es: "Se capturó perfil de riesgo, experiencia, dependencia, estilo y tolerancia al drawdown.",
+    },
+    completionHint: {
+      en: "Answer all five AI-context questions: risk profile, experience, income dependency, drawdown comfort, and trading style; then save the plan.",
+      es: "Contesta las cinco preguntas de contexto para la IA: perfil de riesgo, experiencia, dependencia de ingresos, tolerancia al drawdown y estilo de trading; luego guarda el plan.",
+    },
+    action: {
+      href: "/growth-plan#gp-forecast-analysis",
+      label: { en: "Complete the 5 answers", es: "Completar las 5 respuestas" },
     },
   },
   {
@@ -58,6 +85,14 @@ export const BUSINESS_MILESTONE_DEFINITIONS: BusinessMilestoneDefinition[] = [
       en: "The plan has a chosen conservative, moderate, or aggressive operating model.",
       es: "El plan tiene un modelo operativo conservador, moderado o agresivo seleccionado.",
     },
+    completionHint: {
+      en: "Choose a standard or manual operating mode in step 7 and save the plan.",
+      es: "Escoge un modo operativo estándar o manual en el paso 7 y guarda el plan.",
+    },
+    action: {
+      href: "/growth-plan#gp-scenario-selection",
+      label: { en: "Choose operating mode", es: "Escoger modo operativo" },
+    },
   },
   {
     key: "business_rules_defined",
@@ -68,6 +103,14 @@ export const BUSINESS_MILESTONE_DEFINITIONS: BusinessMilestoneDefinition[] = [
     description: {
       en: "Non-negotiable rules are documented so execution can be audited.",
       es: "Las reglas no negociables están documentadas para auditar la ejecución.",
+    },
+    completionHint: {
+      en: "Add at least one non-negotiable rule or one active Do/Don't rule, then save the plan.",
+      es: "Agrega al menos una regla no negociable o una regla activa de Hacer/No hacer y guarda el plan.",
+    },
+    action: {
+      href: "/growth-plan#gp-rules",
+      label: { en: "Define business rules", es: "Definir reglas empresariales" },
     },
   },
   {
@@ -80,6 +123,14 @@ export const BUSINESS_MILESTONE_DEFINITIONS: BusinessMilestoneDefinition[] = [
       en: "Daily loss, daily goal, and risk-per-trade limits are measurable.",
       es: "Max loss diario, meta diaria y riesgo por trade son medibles.",
     },
+    completionHint: {
+      en: "Set a daily gain goal, hard daily stop, and risk per trade above 0%, then save the plan.",
+      es: "Define una meta diaria, un stop diario duro y un riesgo por trade mayores de 0%; luego guarda el plan.",
+    },
+    action: {
+      href: "/growth-plan#gp-scenario-selection",
+      label: { en: "Set risk limits", es: "Definir límites de riesgo" },
+    },
   },
   {
     key: "business_protection_enabled",
@@ -90,6 +141,14 @@ export const BUSINESS_MILESTONE_DEFINITIONS: BusinessMilestoneDefinition[] = [
     description: {
       en: "Plan-based alarms are active to protect the business rules.",
       es: "Las alarmas basadas en el plan están activas para proteger las reglas empresariales.",
+    },
+    completionHint: {
+      en: "Save the plan and verify that the daily-goal and maximum-loss alarms are enabled.",
+      es: "Guarda el plan y verifica que las alarmas de meta diaria y pérdida máxima estén activas.",
+    },
+    action: {
+      href: "/rules-alarms/alarms",
+      label: { en: "Review protection alarms", es: "Revisar alarmas de protección" },
     },
   },
   {
@@ -102,8 +161,41 @@ export const BUSINESS_MILESTONE_DEFINITIONS: BusinessMilestoneDefinition[] = [
       en: "The business now has evidence to review, not just memory.",
       es: "La empresa ya tiene evidencia para revisar, no solo memoria.",
     },
+    completionHint: {
+      en: "Open today's session and save the first journal entry for this account.",
+      es: "Abre la sesión de hoy y guarda la primera entrada del journal para esta cuenta.",
+    },
+    action: {
+      href: "/dashboard",
+      label: { en: "Open session calendar", es: "Abrir calendario de sesiones" },
+    },
   },
 ];
+
+export const BUSINESS_ANALYSIS_PROFILE_FIELD_KEYS = [
+  "riskProfile",
+  "experience",
+  "incomeDependency",
+  "drawdownComfort",
+  "tradingStyle",
+] as const;
+
+export type BusinessAnalysisProfileFieldKey =
+  (typeof BUSINESS_ANALYSIS_PROFILE_FIELD_KEYS)[number];
+
+export function getMissingBusinessAnalysisProfileFields(
+  value: unknown
+): BusinessAnalysisProfileFieldKey[] {
+  const profile =
+    value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  return BUSINESS_ANALYSIS_PROFILE_FIELD_KEYS.filter(
+    (key) => !String(profile[key] ?? "").trim()
+  );
+}
+
+export function hasCompleteBusinessAnalysisProfile(value: unknown) {
+  return getMissingBusinessAnalysisProfileFields(value).length === 0;
+}
 
 export function getMilestoneDefinition(key: string) {
   return BUSINESS_MILESTONE_DEFINITIONS.find((item) => item.key === key);

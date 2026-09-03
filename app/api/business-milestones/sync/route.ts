@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import {
   BUSINESS_MILESTONE_DEFINITIONS,
   buildBusinessMilestoneMessage,
+  hasCompleteBusinessAnalysisProfile,
   type BusinessMilestoneKey,
   type BusinessMilestoneProgress,
 } from "@/lib/businessMilestones";
@@ -168,7 +169,7 @@ function deriveMilestones(plan: any, journalCount: number, protectionCount: numb
   const profile = businessAnalysis?.profile && typeof businessAnalysis.profile === "object" ? businessAnalysis.profile : null;
   const selectedScenarioId = text(businessAnalysis?.selectedScenarioId ?? businessAnalysis?.selectedScenario?.id);
 
-  if (profile && Object.values(profile).some((value) => text(value))) {
+  if (hasCompleteBusinessAnalysisProfile(profile)) {
     completed.set("business_analysis_completed", {
       planId: plan.id,
       profile,
@@ -263,6 +264,10 @@ async function handler(req: Request) {
       storageAvailable = false;
     } else {
       storedRows = Array.isArray(existing.data) ? existing.data : [];
+      storedRows = storedRows.filter((row) => {
+        if (text(row?.milestone_key) !== "business_analysis_completed") return true;
+        return hasCompleteBusinessAnalysisProfile(row?.metadata?.profile);
+      });
     }
 
     const existingKeys = new Set(storedRows.map((row) => text(row?.milestone_key)));

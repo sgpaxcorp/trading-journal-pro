@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   addTradingRunway,
+  clampTradingRunwayAmount,
   getNyseFullClosureDates,
+  getTradingRunwayLimit,
   inferTradingRunway,
   listTradingSessionsBetween,
 } from "../../lib/tradingCalendar";
@@ -45,5 +47,15 @@ describe("trading calendar", () => {
     expect(addTradingRunway("2026-01-31", 1, "months")).toBe("2026-02-28");
     expect(addTradingRunway("2026-08-12", 1, "years")).toBe("2027-08-12");
     expect(inferTradingRunway("2026-08-12", "2027-08-12")).toEqual({ amount: 1, unit: "years" });
+  });
+
+  it("caps accidental runway values at the 50-year mathematical horizon", () => {
+    expect(getTradingRunwayLimit("years")).toBe(50);
+    expect(clampTradingRunwayAmount(600, "years")).toBe(50);
+    expect(addTradingRunway("2026-09-07", 600, "years")).toBe("2076-09-07");
+    expect(inferTradingRunway("2026-09-07", "2626-09-07")).toEqual({
+      amount: getTradingRunwayLimit("days"),
+      unit: "days",
+    });
   });
 });

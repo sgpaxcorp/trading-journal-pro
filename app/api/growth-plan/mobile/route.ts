@@ -17,8 +17,10 @@ import {
 } from "@/lib/growthPlanFeasibility";
 import {
   addTradingRunway,
+  clampTradingRunwayAmount,
   computeTradingSessionsBetween,
   getTradingCalendarProfile,
+  MAX_TRADING_RUNWAY_YEARS,
   inferTradingRunway,
   normalizeTradingInstrument,
   normalizeTradingRunwayUnit,
@@ -342,6 +344,20 @@ function normalizePlan(row: GrowthPlanRow | null) {
   const targetDate = cleanDate(row.target_date);
   const inferredRunway = inferTradingRunway(planStartDate, targetDate);
   const runway = businessAnalysis?.operatingModel?.runway ?? {};
+  const runwayUnit = normalizeTradingRunwayUnit(runway?.unit ?? inferredRunway.unit);
+  const runwayAmount = clampTradingRunwayAmount(
+    num(runway?.amount ?? inferredRunway.amount, 1),
+    runwayUnit
+  );
+  const maximumTargetDate = addTradingRunway(
+    planStartDate,
+    MAX_TRADING_RUNWAY_YEARS,
+    "years"
+  );
+  const safeTargetDate =
+    targetDate && maximumTargetDate && targetDate <= maximumTargetDate
+      ? targetDate
+      : addTradingRunway(planStartDate, runwayAmount, runwayUnit);
   const depositSettings = normalizeDepositSettings(
     businessAnalysis?.operatingModel?.plannedDepositSettings
   );
@@ -362,7 +378,7 @@ function normalizePlan(row: GrowthPlanRow | null) {
     accountId: row.account_id ?? null,
     startingBalance: num(row.starting_balance, 0),
     targetBalance: num(row.target_balance, 0),
-    targetDate,
+    targetDate: safeTargetDate,
     planStartDate,
     dailyTargetPct: num(row.daily_target_pct ?? row.daily_goal_percent, 0),
     maxDailyLossPercent: num(row.max_daily_loss_percent, 0),
@@ -413,8 +429,8 @@ function normalizePlan(row: GrowthPlanRow | null) {
     plannedWithdrawalSettings: withdrawalSettings,
     tradingInstrument,
     runway: {
-      amount: clampInt(runway?.amount ?? inferredRunway.amount, 1, 1200, 1),
-      unit: normalizeTradingRunwayUnit(runway?.unit ?? inferredRunway.unit),
+      amount: runwayAmount,
+      unit: runwayUnit,
       calendarKey: tradingCalendarProfile.key,
       calendarIsEstimate: tradingCalendarProfile.isEstimate,
     },
@@ -682,19 +698,31 @@ export async function POST(req: NextRequest) {
     const tradingCalendarProfile = getTradingCalendarProfile(tradingInstrument);
     const requestedTargetDate = cleanDate(body?.targetDate);
     const inferredRunway = inferTradingRunway(planStartDate, requestedTargetDate);
-    const runwayAmount = clampInt(
-      body?.runwayAmount ??
-        (requestedTargetDate ? inferredRunway.amount : currentOperatingModel?.runway?.amount) ??
-        inferredRunway.amount,
-      1,
-      1200,
-      1
-    );
     const runwayUnit = normalizeTradingRunwayUnit(
       body?.runwayUnit ??
         (requestedTargetDate ? inferredRunway.unit : currentOperatingModel?.runway?.unit) ??
         inferredRunway.unit
     );
+    const runwayAmount = clampTradingRunwayAmount(
+      num(
+        body?.runwayAmount ??
+          (requestedTargetDate ? inferredRunway.amount : currentOperatingModel?.runway?.amount) ??
+          inferredRunway.amount,
+        1
+      ),
+      runwayUnit
+    );
+    const maximumTargetDate = addTradingRunway(
+      planStartDate,
+      MAX_TRADING_RUNWAY_YEARS,
+      "years"
+    );
+    if (requestedTargetDate && requestedTargetDate > maximumTargetDate) {
+      return NextResponse.json(
+        { error: `The growth-plan deadline cannot exceed ${MAX_TRADING_RUNWAY_YEARS} years.` },
+        { status: 400 }
+      );
+    }
     const targetDate = requestedTargetDate || addTradingRunway(planStartDate, runwayAmount, runwayUnit);
     const averageTradingDaysPerWeek = clampInt(
       body?.averageTradingDaysPerWeek,

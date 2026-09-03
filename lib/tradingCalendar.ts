@@ -13,6 +13,24 @@ export const TRADING_RUNWAY_UNITS = ["days", "weeks", "months", "years"] as cons
 
 export type TradingRunwayUnit = (typeof TRADING_RUNWAY_UNITS)[number];
 
+export const MAX_TRADING_RUNWAY_YEARS = 50;
+
+const MAX_TRADING_RUNWAY_BY_UNIT: Record<TradingRunwayUnit, number> = {
+  days: 18_262,
+  weeks: 2_608,
+  months: MAX_TRADING_RUNWAY_YEARS * 12,
+  years: MAX_TRADING_RUNWAY_YEARS,
+};
+
+export function getTradingRunwayLimit(unit: TradingRunwayUnit): number {
+  return MAX_TRADING_RUNWAY_BY_UNIT[unit];
+}
+
+export function clampTradingRunwayAmount(amount: number, unit: TradingRunwayUnit): number {
+  const normalizedAmount = Math.floor(Number.isFinite(amount) ? amount : 1);
+  return Math.max(1, Math.min(getTradingRunwayLimit(unit), normalizedAmount));
+}
+
 export type TradingCalendarProfile = {
   key: "nyse" | "cboe" | "cme_estimate" | "fx_weekday" | "crypto_24_7" | "weekday";
   sessionsPerWeek: 5 | 7;
@@ -211,7 +229,7 @@ export function addTradingRunway(
 ): string {
   const start = parseIsoDate(startIso);
   if (!start) return startIso;
-  const normalizedAmount = Math.max(1, Math.floor(Number.isFinite(amount) ? amount : 1));
+  const normalizedAmount = clampTradingRunwayAmount(amount, unit);
 
   if (unit === "days" || unit === "weeks") {
     start.setDate(start.getDate() + normalizedAmount * (unit === "weeks" ? 7 : 1));
@@ -235,16 +253,16 @@ export function inferTradingRunway(startIso: string, targetIso: string): {
   const target = parseIsoDate(targetIso);
   if (!start || !target || target <= start) return { amount: 1, unit: "years" };
 
-  for (let amount = 1; amount <= 20; amount += 1) {
+  for (let amount = 1; amount <= getTradingRunwayLimit("years"); amount += 1) {
     if (addTradingRunway(startIso, amount, "years") === targetIso) return { amount, unit: "years" };
   }
-  for (let amount = 1; amount <= 240; amount += 1) {
+  for (let amount = 1; amount <= getTradingRunwayLimit("months"); amount += 1) {
     if (addTradingRunway(startIso, amount, "months") === targetIso) return { amount, unit: "months" };
   }
-  for (let amount = 1; amount <= 1040; amount += 1) {
+  for (let amount = 1; amount <= getTradingRunwayLimit("weeks"); amount += 1) {
     if (addTradingRunway(startIso, amount, "weeks") === targetIso) return { amount, unit: "weeks" };
   }
 
   const days = Math.max(1, Math.round((target.getTime() - start.getTime()) / 86_400_000));
-  return { amount: days, unit: "days" };
+  return { amount: clampTradingRunwayAmount(days, "days"), unit: "days" };
 }

@@ -50,7 +50,9 @@ import {
 } from "@/lib/growthPlanProjection";
 import {
   addTradingRunway,
+  clampTradingRunwayAmount,
   getTradingCalendarProfile,
+  getTradingRunwayLimit,
   inferTradingRunway,
   listTradingSessionsBetween,
   listTradingSessionsFrom,
@@ -72,6 +74,13 @@ import {
 import { listCashflows, signedCashflowAmount } from "@/lib/cashflowsSupabase";
 import { syncGrowthPlanProtectionRules } from "@/lib/alertsSupabase";
 import { useTradingAccounts } from "@/hooks/useTradingAccounts";
+import { hasCompleteBusinessAnalysisProfile } from "@/lib/businessMilestones";
+import {
+  growthPlanDeadlineShortfallUsd,
+  growthPlanDeadlineToleranceUsd,
+  meetsGrowthPlanDeadlineApproximately,
+  selectIdealDeadlineOption,
+} from "@/lib/growthPlanIdealScenario";
 
 /* ================= Helpers ================= */
 const GROWTH_PLAN_DISCLOSURE_VERSION = "growth-plan-discipline-v1";
@@ -1001,8 +1010,16 @@ type BalanceSeriesPoint = {
 };
 
 type GrowthPlanResearchReview = {
+  selectedScenarioId?: string;
+  selectedScenarioTitle?: string;
+  verdict?: string;
   headline: string;
   summary: string;
+  scenarioAnalysis?: string;
+  deadlineAnalysis?: string;
+  riskAnalysis?: string;
+  evidenceAnalysis?: string;
+  comparison?: string;
   observations: string[];
   actions: string[];
   limitations: string[];
@@ -1021,13 +1038,7 @@ const EMPTY_BUSINESS_PROFILE: BusinessProfile = {
 };
 
 function isBusinessProfileComplete(profile: BusinessProfile) {
-  return Boolean(
-    profile.riskProfile &&
-      profile.experience &&
-      profile.incomeDependency &&
-      profile.drawdownComfort &&
-      profile.tradingStyle
-  );
+  return hasCompleteBusinessAnalysisProfile(profile);
 }
 
 function profileFitScore(profile: BusinessProfile, scenarioId: BusinessScenarioId) {
@@ -1728,6 +1739,8 @@ export default function GrowthPlanPage() {
   const [researchReviewLoading, setResearchReviewLoading] = useState(false);
   const [researchReviewError, setResearchReviewError] = useState("");
   const lastAutoReviewKeyRef = useRef("");
+  const currentResearchReviewKeyRef = useRef("");
+  const researchReviewRequestIdRef = useRef(0);
   const [visibleForecastRows, setVisibleForecastRows] = useState(60);
 
   // Commit
@@ -1745,7 +1758,10 @@ export default function GrowthPlanPage() {
   const maxDailyLossPercent = toNum(maxDailyLossPercentStr, 0);
   const tradingDays = clampInt(toNum(tradingDaysStr, 0), 0);
   const tradingCalendarProfile = getTradingCalendarProfile(tradingInstrument);
-  const runwayAmount = Math.max(1, clampInt(toNum(runwayAmountStr, 1), 1, 1200));
+  const runwayLimit = getTradingRunwayLimit(runwayUnit);
+  const rawRunwayAmount = Math.max(1, clampInt(toNum(runwayAmountStr, 1), 1));
+  const runwayAmount = clampTradingRunwayAmount(rawRunwayAmount, runwayUnit);
+  const runwayAmountExceedsLimit = rawRunwayAmount > runwayLimit;
   const averageTradingDaysPerWeek = resolveAverageTradingDaysPerWeek(
     averageTradingDaysPerWeekStr,
     tradingCalendarProfile.sessionsPerWeek
@@ -1848,7 +1864,9 @@ export default function GrowthPlanPage() {
     lossDaysPerWeek < averageTradingDaysPerWeek &&
     maxDailyLossPercent > 0 &&
     riskPerTradePct > 0;
+  const businessProfileComplete = isBusinessProfileComplete(businessProfile);
   const businessAnalysisComplete =
+    businessProfileComplete &&
     returnModelConfigured &&
     capitalFlowAssumptionsComplete &&
     operatingScheduleConfigured &&
@@ -2256,8 +2274,11 @@ export default function GrowthPlanPage() {
         },
         {
           id: "forecast_analysis",
-          label: L("Review the mathematical analysis", "Revisa el análisis matemático"),
-          done: requiredGoalReady,
+          label: L(
+            "Complete the AI context and mathematical analysis",
+            "Completa el contexto para la IA y el análisis matemático"
+          ),
+          done: businessProfileComplete && requiredGoalReady,
           anchor: "gp-forecast-analysis",
         },
         {
@@ -2363,6 +2384,7 @@ export default function GrowthPlanPage() {
     strategyCount,
     nonNegotiableCount,
     disclosureAcceptedForDraft,
+    businessProfileComplete,
     businessAnalysisComplete,
     returnModelConfigured,
     selectedPlanId,
@@ -2478,22 +2500,20 @@ export default function GrowthPlanPage() {
               ""
           ).slice(0, 10);
           const inferredRunway = inferTradingRunway(loadedStartDate, loadedTargetDate);
-          const loadedRunwayAmount = Math.max(
-            1,
-            clampInt(
-              toNum(String(existingOperatingModel?.runway?.amount ?? inferredRunway.amount), 1),
-              1,
-              1200
-            )
-          );
           const loadedRunwayUnit = normalizeTradingRunwayUnit(
             existingOperatingModel?.runway?.unit ?? inferredRunway.unit
+          );
+          const loadedRunwayAmount = clampTradingRunwayAmount(
+            toNum(String(existingOperatingModel?.runway?.amount ?? inferredRunway.amount), 1),
+            loadedRunwayUnit
           );
 
           setStartingBalanceStr(formatMoneyInputValue(existing.startingBalance ?? 5000));
           setTargetBalanceStr(formatMoneyInputValue(existing.targetBalance ?? 60000));
           setPlanStartDate(loadedStartDate);
-          setTargetDateStr(loadedTargetDate || addTradingRunway(loadedStartDate, loadedRunwayAmount, loadedRunwayUnit));
+          setTargetDateStr(
+            addTradingRunway(loadedStartDate, loadedRunwayAmount, loadedRunwayUnit)
+          );
           setTradingInstrument(loadedInstrument);
           setRunwayAmountStr(String(loadedRunwayAmount));
           setRunwayUnit(loadedRunwayUnit);
@@ -3156,15 +3176,47 @@ export default function GrowthPlanPage() {
     lossDaysPerWeek,
   ]);
 
+  const deadlineToleranceUsd = useMemo(
+    () => growthPlanDeadlineToleranceUsd(targetBalance),
+    [targetBalance]
+  );
+  const idealDeadlineOption = useMemo(
+    () =>
+      businessProfileComplete
+        ? selectIdealDeadlineOption({
+            scenarios: businessScenarios.map((scenario) => ({
+              id: scenario.id,
+              fitScore: scenario.fitScore,
+            })),
+            panoramas: adaptiveGrowthPlan.panoramas,
+            targetBalance,
+            toleranceUsd: deadlineToleranceUsd,
+          })
+        : null,
+    [
+      adaptiveGrowthPlan.panoramas,
+      businessProfileComplete,
+      businessScenarios,
+      deadlineToleranceUsd,
+      targetBalance,
+    ]
+  );
+
   const aiRecommendedPlanId = useMemo<BusinessScenarioId | "mathematical">(() => {
     const ordered: BusinessScenarioId[] = ["conservative", "moderate", "aggressive"];
     const firstSupported = ordered.find((id) =>
       adaptiveGrowthPlan.panoramas.some(
-        (panorama) => panorama.id === id && panorama.reachesRequestedDeadline
+        (panorama) =>
+          panorama.id === id &&
+          meetsGrowthPlanDeadlineApproximately({
+            panorama,
+            targetBalance,
+            toleranceUsd: deadlineToleranceUsd,
+          })
       )
     );
     return firstSupported ?? "mathematical";
-  }, [adaptiveGrowthPlan.panoramas]);
+  }, [adaptiveGrowthPlan.panoramas, deadlineToleranceUsd, targetBalance]);
 
   const selectedForecastAssumptions = useMemo(() => {
     if (!selectedPlanId) return null;
@@ -3199,6 +3251,51 @@ export default function GrowthPlanPage() {
     const panoramaId = selectedForecastAssumptions.id === "manual" ? "declared" : selectedForecastAssumptions.id;
     return adaptiveGrowthPlan.panoramas.find((panorama) => panorama.id === panoramaId) ?? null;
   }, [adaptiveGrowthPlan.panoramas, selectedForecastAssumptions]);
+
+  const researchReviewInputKey = useMemo(() => {
+    if (!selectedPlanId || !selectedForecastAssumptions || !selectedForecastPanorama) return "";
+    return JSON.stringify({
+      selectedPlanId,
+      startingBalance,
+      targetBalance,
+      targetDateStr,
+      tradingInstrument,
+      averageTradingDaysPerWeek,
+      winningDaysPerWeek,
+      lossDaysPerWeek,
+      goalDayPct: selectedForecastAssumptions.goalDayPct,
+      lossDayPct: selectedForecastAssumptions.lossDayPct,
+      maxDailyLossPct: selectedForecastAssumptions.maxDailyLossPct,
+      riskPerTradePct: selectedForecastAssumptions.riskPerTradePct,
+      projectedBalance: selectedForecastPanorama.projectedBalance,
+      completionDate: selectedForecastPanorama.completionDate,
+      conditionalHitRate: selectedForecastPanorama.probability.probabilityTargetPct,
+      evidenceSessions: planRealismReview.evidenceSessions,
+      evidenceTrades: planRealismReview.evidenceTrades,
+      evidenceUpdatedAt: performanceEvidence?.updatedAtIso ?? null,
+      plannedDepositSettings,
+      plannedWithdrawalSettings,
+      businessProfile,
+    });
+  }, [
+    averageTradingDaysPerWeek,
+    lossDaysPerWeek,
+    performanceEvidence?.updatedAtIso,
+    planRealismReview.evidenceSessions,
+    planRealismReview.evidenceTrades,
+    plannedDepositSettings,
+    plannedWithdrawalSettings,
+    businessProfile,
+    selectedForecastAssumptions,
+    selectedForecastPanorama,
+    selectedPlanId,
+    startingBalance,
+    targetBalance,
+    targetDateStr,
+    tradingInstrument,
+    winningDaysPerWeek,
+  ]);
+  currentResearchReviewKeyRef.current = researchReviewInputKey;
 
   const effectiveForecastTargetDate =
     selectedForecastPanorama?.completionDate &&
@@ -3280,6 +3377,10 @@ export default function GrowthPlanPage() {
     setSelectedScenarioId(scenarioId);
     setReturnModelMode(mode);
     setSelectedPlanId(finalize ? mode : "");
+    lastAutoReviewKeyRef.current = "";
+    researchReviewRequestIdRef.current += 1;
+    setResearchReview(null);
+    setResearchReviewError("");
 
     if (mode !== "manual" || goalDayReturnPct <= 0) {
       setGoalDayReturnPctStr(String(policy.goalDayReturnPct));
@@ -3365,19 +3466,57 @@ export default function GrowthPlanPage() {
     );
   };
 
+  const applyIdealDeadlineOption = () => {
+    if (!idealDeadlineOption) return;
+    const scenario = businessScenarios.find(
+      (item) => item.id === idealDeadlineOption.scenarioId
+    );
+    if (!scenario) return;
+
+    selectReturnModel(scenario.id, true);
+    const runway = inferTradingRunway(
+      effectivePlanStartDate,
+      idealDeadlineOption.completionDate
+    );
+    setRunwayAmountStr(String(runway.amount));
+    setRunwayUnit(runway.unit);
+    setTargetDateStr(idealDeadlineOption.completionDate);
+    setTradingDaysTouched(false);
+    setAutoPhasesGenerated(true);
+    setVisibleForecastRows(60);
+    setError("");
+    pushNeuroMessage(
+      L(
+        `Ideal profile-fit plan applied: ${scenario.title} with the attainable mathematical date ${formatPlanDate(idealDeadlineOption.completionDate, lang)}.`,
+        `Plan ideal por compatibilidad aplicado: ${scenario.title} con la fecha matemática alcanzable ${formatPlanDate(idealDeadlineOption.completionDate, lang)}.`
+      )
+    );
+  };
+
   const runResearchPlanReview = async () => {
-    if (!planRealismReview.shouldSurface || !reviewScenario) {
+    if (
+      !planRealismReview.shouldSurface ||
+      !reviewScenario ||
+      !selectedPlanId ||
+      !selectedForecastAssumptions ||
+      !selectedForecastPanorama ||
+      !researchReviewInputKey
+    ) {
       setResearchReviewError(
         L(
-          "Complete the capital, runway, risk profile, and operating scenario first.",
-          "Completa primero el capital, runway, perfil de riesgo y escenario operativo."
+          "Choose an operating scenario before requesting its AI review.",
+          "Escoge un escenario operativo antes de solicitar su evaluación con IA."
         )
       );
       return;
     }
 
+    const requestKey = researchReviewInputKey;
+    const requestId = researchReviewRequestIdRef.current + 1;
+    researchReviewRequestIdRef.current = requestId;
     setResearchReviewLoading(true);
     setResearchReviewError("");
+    setResearchReview(null);
     try {
       const { data: sessionData } = await supabaseBrowser.auth.getSession();
       const token = sessionData?.session?.access_token;
@@ -3408,6 +3547,38 @@ export default function GrowthPlanPage() {
           deadlineGapUsd: planRealismReview.scenarioGapUsd,
           verdict: planRealismReview.verdict,
           flags: planRealismReview.flags,
+          selectedScenario: {
+            id: selectedPlanId,
+            title: aiPlanAdvisor.scenarioTitle,
+            goalDayReturnPct: selectedForecastAssumptions.goalDayPct,
+            expectedLossDayPct: selectedForecastAssumptions.lossDayPct,
+            maxDailyLossGuardrailPct: selectedForecastAssumptions.maxDailyLossPct,
+            riskPerTradePct: selectedForecastAssumptions.riskPerTradePct,
+            goalDaysPerWeek: Math.max(0, averageTradingDaysPerWeek - lossDaysPerWeek),
+            lossDaysPerWeek,
+            projectedBalanceAtDeadlineUsd: selectedForecastPanorama.projectedBalance,
+            coverageAtDeadlinePct:
+              targetBalance > 0
+                ? Math.min(100, (selectedForecastPanorama.projectedBalance / targetBalance) * 100)
+                : 0,
+            shortfallAtDeadlineUsd: Math.max(
+              0,
+              targetBalance - selectedForecastPanorama.projectedBalance
+            ),
+            completionDate: selectedForecastPanorama.completionDate,
+            reachesRequestedDeadline: selectedForecastPanorama.reachesRequestedDeadline,
+            sensitivity: {
+              probabilityTargetPct:
+                selectedForecastPanorama.probability.probabilityTargetPct,
+              probabilityCapitalHalfPct:
+                selectedForecastPanorama.probability.probabilityCapitalHalfPct,
+              p10BalanceUsd: selectedForecastPanorama.probability.p10Balance,
+              medianBalanceUsd: selectedForecastPanorama.probability.medianBalance,
+              p90BalanceUsd: selectedForecastPanorama.probability.p90Balance,
+              medianMaxDrawdownPct:
+                selectedForecastPanorama.probability.medianMaxDrawdownPct,
+            },
+          },
           adaptivePlan: {
             verdict: adaptiveGrowthPlan.verdict,
             isProvisional: adaptiveGrowthPlan.isProvisional,
@@ -3440,6 +3611,9 @@ export default function GrowthPlanPage() {
             recommendedGoalDayPct: adaptiveGrowthPlan.recommendedGoalDayPct,
             expectedLossDayPct: adaptiveGrowthPlan.expectedLossDayPct,
             maxDailyLossGuardrailPct: adaptiveGrowthPlan.maxDailyLossGuardrailPct,
+            riskPerTradePct: adaptiveGrowthPlan.riskPerTradePct,
+            lossDaysPerWeek: adaptiveGrowthPlan.lossDaysPerWeek,
+            operatingDaysPerWeek: adaptiveGrowthPlan.operatingDaysPerWeek,
             modeledNetReturnPerSessionPct: adaptiveGrowthPlan.modeledNetReturnPerSessionPct,
             modeledWeeklyReturnPct: adaptiveGrowthPlan.modeledWeeklyReturnPct,
             modeledAnnualCycles: adaptiveGrowthPlan.modeledAnnualCycles,
@@ -3468,6 +3642,7 @@ export default function GrowthPlanPage() {
             estimatedCostPerSessionUsd,
             estimatedTaxReservePct,
           },
+          businessProfile,
           executionEvidence: {
             depth: planRealismReview.evidenceDepth,
             sessions: planRealismReview.evidenceSessions,
@@ -3487,46 +3662,44 @@ export default function GrowthPlanPage() {
       if (!response.ok || !body.review) {
         throw new Error(body.error || L("The review could not be generated.", "No se pudo generar la evaluación."));
       }
+      if (
+        researchReviewRequestIdRef.current !== requestId ||
+        currentResearchReviewKeyRef.current !== requestKey
+      ) {
+        return;
+      }
       setResearchReview(body.review);
     } catch (reviewError: any) {
+      if (
+        researchReviewRequestIdRef.current !== requestId ||
+        currentResearchReviewKeyRef.current !== requestKey
+      ) {
+        return;
+      }
       setResearchReviewError(
         String(reviewError?.message || L("The review could not be generated.", "No se pudo generar la evaluación."))
       );
     } finally {
-      setResearchReviewLoading(false);
+      if (researchReviewRequestIdRef.current === requestId) {
+        setResearchReviewLoading(false);
+      }
     }
   };
 
   useEffect(() => {
-    if (step !== 0 || step0Stage !== 5 || researchReviewLoading) return;
-    if (!planRealismReview.shouldSurface || !reviewScenario) return;
-    const reviewKey = JSON.stringify({
-      startingBalance,
-      targetBalance,
-      targetDateStr,
-      tradingInstrument,
-      averageTradingDaysPerWeek,
-      winningDaysPerWeek,
-      lossDaysPerWeek,
-      requiredGoalPct: Number(requiredGoalPct.toFixed(4)),
-    });
-    if (lastAutoReviewKeyRef.current === reviewKey) return;
-    lastAutoReviewKeyRef.current = reviewKey;
+    if (step !== 0 || step0Stage !== 7 || researchReviewLoading) return;
+    if (!planRealismReview.shouldSurface || !reviewScenario || !selectedPlanId) return;
+    if (!researchReviewInputKey || lastAutoReviewKeyRef.current === researchReviewInputKey) return;
+    lastAutoReviewKeyRef.current = researchReviewInputKey;
     void runResearchPlanReview();
   }, [
-    averageTradingDaysPerWeek,
-    lossDaysPerWeek,
     planRealismReview.shouldSurface,
-    requiredGoalPct,
     researchReviewLoading,
+    researchReviewInputKey,
     reviewScenario,
-    startingBalance,
+    selectedPlanId,
     step,
     step0Stage,
-    targetBalance,
-    targetDateStr,
-    tradingInstrument,
-    winningDaysPerWeek,
   ]);
 
   const planHistoryItems = useMemo(
@@ -3698,20 +3871,28 @@ export default function GrowthPlanPage() {
                 </label>
                 <div className="mt-1 grid grid-cols-[minmax(0,0.7fr)_minmax(0,1.3fr)] gap-2">
                   <input
+                    type="number"
                     inputMode="numeric"
+                    min={1}
+                    max={runwayLimit}
                     value={runwayAmountStr}
                     onChange={(event) => {
-                      setRunwayAmountStr(event.target.value.replace(/\D/g, "").slice(0, 4));
+                      setRunwayAmountStr(event.target.value.replace(/\D/g, "").slice(0, 5));
                       setAutoPhasesGenerated(false);
                     }}
                     onBlur={() => setRunwayAmountStr(String(runwayAmount))}
+                    aria-invalid={runwayAmountExceedsLimit}
                     className="min-w-0 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-lg font-semibold text-slate-100 outline-none focus:border-cyan-300"
                     aria-label={L("Runway amount", "Cantidad del runway")}
                   />
                   <select
                     value={runwayUnit}
                     onChange={(event) => {
-                      setRunwayUnit(normalizeTradingRunwayUnit(event.target.value));
+                      const nextUnit = normalizeTradingRunwayUnit(event.target.value);
+                      setRunwayUnit(nextUnit);
+                      setRunwayAmountStr((current) =>
+                        String(clampTradingRunwayAmount(toNum(current, 1), nextUnit))
+                      );
                       setAutoPhasesGenerated(false);
                     }}
                     className="min-w-0 rounded-lg border border-slate-700 bg-slate-950 px-2 py-2 text-sm font-semibold text-slate-100 outline-none focus:border-cyan-300"
@@ -3722,6 +3903,14 @@ export default function GrowthPlanPage() {
                     <option value="years">{L("Years", "Años")}</option>
                   </select>
                 </div>
+                {runwayAmountExceedsLimit ? (
+                  <p className="mt-2 text-[11px] text-amber-300">
+                    {L(
+                      `Maximum for this unit is ${runwayLimit}. The safe limit is being used for the forecast.`,
+                      `El máximo para esta unidad es ${runwayLimit}. El forecast está usando el límite seguro.`
+                    )}
+                  </p>
+                ) : null}
                 <p className="mt-2 text-[11px] text-slate-500">
                   {targetDateStr || "—"} · {businessScenarioTradingDays || 0} {L("committed days", "días comprometidos")}
                 </p>
@@ -6081,19 +6270,28 @@ export default function GrowthPlanPage() {
             {L("Time to reach the target", "Tiempo para alcanzar la meta")}
             <div className="mt-1 grid grid-cols-[0.8fr_1.2fr] gap-2">
               <input
+                type="number"
                 inputMode="numeric"
+                min={1}
+                max={runwayLimit}
                 value={runwayAmountStr}
                 onChange={(event) => {
-                  setRunwayAmountStr(event.target.value.replace(/\D/g, "").slice(0, 4));
+                  setRunwayAmountStr(event.target.value.replace(/\D/g, "").slice(0, 5));
                   setSelectedPlanId("");
                   setTradingDaysTouched(false);
                 }}
+                onBlur={() => setRunwayAmountStr(String(runwayAmount))}
+                aria-invalid={runwayAmountExceedsLimit}
                 className={inputBase}
               />
               <select
                 value={runwayUnit}
                 onChange={(event) => {
-                  setRunwayUnit(normalizeTradingRunwayUnit(event.target.value));
+                  const nextUnit = normalizeTradingRunwayUnit(event.target.value);
+                  setRunwayUnit(nextUnit);
+                  setRunwayAmountStr((current) =>
+                    String(clampTradingRunwayAmount(toNum(current, 1), nextUnit))
+                  );
                   setSelectedPlanId("");
                   setTradingDaysTouched(false);
                 }}
@@ -6105,6 +6303,14 @@ export default function GrowthPlanPage() {
                 <option value="years">{L("Years", "Años")}</option>
               </select>
             </div>
+            {runwayAmountExceedsLimit ? (
+              <p className="mt-2 text-xs text-amber-300">
+                {L(
+                  `Maximum for this unit is ${runwayLimit}. The safe limit is being used for the forecast.`,
+                  `El máximo para esta unidad es ${runwayLimit}. El forecast está usando el límite seguro.`
+                )}
+              </p>
+            ) : null}
           </label>
           <div className="rounded-xl border border-cyan-300/20 bg-cyan-300/5 p-3">
             <p className="text-[10px] uppercase tracking-[0.18em] text-cyan-200">{L("Calculated deadline", "Fecha calculada")}</p>
@@ -6200,12 +6406,127 @@ export default function GrowthPlanPage() {
       anchor: "gp-forecast-analysis",
       title: L("6. AI mathematical analysis", "6. Análisis matemático con IA"),
       description: L(
-        "The math calculates the required pace; AI explains the lowest standard mode that can meet it.",
-        "La matemática calcula el ritmo requerido; la IA explica el modo estándar más bajo que puede cumplirlo."
+        "First give AI the five operating-context answers; then the math calculates the required pace and AI explains the lowest standard mode that can meet it.",
+        "Primero dale a la IA las cinco respuestas de contexto operativo; luego la matemática calcula el ritmo requerido y la IA explica el modo estándar más bajo que puede cumplirlo."
       ),
-      isComplete: requiredGoalPct > 0 && adaptiveGrowthPlan.panoramas.length > 0,
+      isComplete:
+        businessProfileComplete &&
+        requiredGoalPct > 0 &&
+        adaptiveGrowthPlan.panoramas.length > 0,
       content: (
         <div id="gp-forecast-analysis" className="space-y-4">
+          <div id="gp-business-profile" className="rounded-2xl border border-violet-300/25 bg-violet-300/5 p-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="text-[10px] uppercase tracking-[0.2em] text-violet-200">
+                  {L("Required AI context", "Contexto requerido para la IA")}
+                </p>
+                <p className="mt-1 text-sm font-semibold text-slate-100">
+                  {L(
+                    "Answer these five questions so the recommendation fits your situation.",
+                    "Contesta estas cinco preguntas para que la recomendación corresponda a tu situación."
+                  )}
+                </p>
+                <p className="mt-1 text-xs leading-5 text-slate-400">
+                  {L(
+                    "They change the risk-fit analysis and the explanation, but never rewrite the deterministic forecast math.",
+                    "Estas respuestas cambian el análisis de compatibilidad de riesgo y la explicación, pero nunca reescriben la matemática determinística del forecast."
+                  )}
+                </p>
+              </div>
+              <span className={`rounded-full border px-3 py-1 text-[11px] font-semibold ${businessProfileComplete ? "border-emerald-300/30 bg-emerald-300/10 text-emerald-200" : "border-amber-300/30 bg-amber-300/10 text-amber-200"}`}>
+                {Object.values(businessProfile).filter(Boolean).length}/5 {L("answered", "contestadas")}
+              </span>
+            </div>
+
+            <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+              {[
+                {
+                  key: "riskProfile",
+                  label: L("Risk profile", "Perfil de riesgo"),
+                  options: [
+                    ["conservative", L("Conservative", "Conservador")],
+                    ["moderate", L("Moderate", "Moderado")],
+                    ["aggressive", L("Aggressive", "Agresivo")],
+                  ],
+                },
+                {
+                  key: "experience",
+                  label: L("Experience", "Experiencia"),
+                  options: [
+                    ["new", L("New", "Nuevo")],
+                    ["developing", L("Developing", "En desarrollo")],
+                    ["experienced", L("Experienced", "Experimentado")],
+                  ],
+                },
+                {
+                  key: "incomeDependency",
+                  label: L("Income dependency", "Dependencia de ingresos"),
+                  options: [
+                    ["low", L("Low", "Baja")],
+                    ["medium", L("Medium", "Media")],
+                    ["high", L("High", "Alta")],
+                  ],
+                },
+                {
+                  key: "drawdownComfort",
+                  label: L("Drawdown comfort", "Tolerancia al drawdown"),
+                  options: [
+                    ["low", L("Low", "Baja")],
+                    ["medium", L("Medium", "Media")],
+                    ["high", L("High", "Alta")],
+                  ],
+                },
+                {
+                  key: "tradingStyle",
+                  label: L("Trading style", "Estilo de trading"),
+                  options: [
+                    ["scalp", "Scalp"],
+                    ["day", "Day trade"],
+                    ["swing", "Swing"],
+                  ],
+                },
+              ].map((field) => (
+                <fieldset key={field.key} className="rounded-xl border border-slate-800 bg-slate-950/65 p-3">
+                  <legend className="px-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+                    {field.label}
+                  </legend>
+                  <div className="mt-1 space-y-1.5">
+                    {field.options.map(([value, label]) => {
+                      const active = businessProfile[field.key as keyof BusinessProfile] === value;
+                      return (
+                        <button
+                          key={value}
+                          type="button"
+                          aria-pressed={active}
+                          onClick={() => {
+                            setBusinessProfile((current) => ({
+                              ...current,
+                              [field.key]: value,
+                            }));
+                            setSelectedPlanId("");
+                            setAutoPhasesGenerated(false);
+                          }}
+                          className={`w-full rounded-lg border px-2 py-1.5 text-left text-xs transition ${active ? "border-violet-300 bg-violet-300/10 text-violet-100" : "border-slate-800 text-slate-300 hover:border-slate-600"}`}
+                        >
+                          {label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </fieldset>
+              ))}
+            </div>
+
+            {!businessProfileComplete ? (
+              <p className="mt-3 text-xs font-medium text-amber-200">
+                {L(
+                  "All five answers are required before continuing to scenario selection.",
+                  "Las cinco respuestas son requeridas antes de continuar a la selección de escenario."
+                )}
+              </p>
+            ) : null}
+          </div>
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
             <div className="rounded-2xl border border-cyan-300/30 bg-cyan-300/5 p-4">
               <p className="text-[10px] uppercase tracking-[0.18em] text-cyan-200">{L("Mathematical gain / loss", "Ganancia / pérdida matemática")}</p>
@@ -6233,8 +6554,8 @@ export default function GrowthPlanPage() {
                     "Ningún modo estándar alcanza la meta en el plazo solicitado. Usa un porcentaje manual, extiende la fecha o cambia los supuestos de capital."
                   )
                 : L(
-                    `The lowest standard mode that meets the requested deadline is ${aiRecommendedPlanId}.`,
-                    `El modo estándar más bajo que cumple la fecha solicitada es ${aiRecommendedPlanId}.`
+                    `The lowest standard mode that meets the requested deadline or its planning tolerance is ${aiRecommendedPlanId}.`,
+                    `El modo estándar más bajo que cumple la fecha solicitada o su tolerancia de planificación es ${aiRecommendedPlanId}.`
                   )}
             </p>
             <p className="mt-2 text-xs leading-5 text-slate-400">
@@ -6245,30 +6566,15 @@ export default function GrowthPlanPage() {
             </p>
           </div>
           <div className="rounded-2xl border border-violet-300/20 bg-violet-300/5 p-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-violet-200">
-                {L("Business AI explanation", "Explicación de Business AI")}
-              </p>
-              {researchReviewLoading ? <span className="text-xs text-violet-200">{L("Analyzing…", "Analizando…")}</span> : null}
-            </div>
-            {researchReview ? (
-              <div className="mt-3 space-y-2">
-                <p className="font-semibold text-slate-100">{researchReview.headline}</p>
-                <p className="text-sm leading-6 text-slate-300">{researchReview.summary}</p>
-                {researchReview.actions.length ? (
-                  <ul className="space-y-1 text-xs leading-5 text-slate-400">
-                    {researchReview.actions.slice(0, 3).map((action) => <li key={action}>• {action}</li>)}
-                  </ul>
-                ) : null}
-              </div>
-            ) : researchReviewError ? (
-              <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-                <p className="text-xs text-amber-200">{researchReviewError}</p>
-                <button type="button" onClick={() => { lastAutoReviewKeyRef.current = ""; void runResearchPlanReview(); }} className="rounded-full border border-violet-300/30 px-3 py-1 text-xs text-violet-100">{L("Retry AI", "Reintentar IA")}</button>
-              </div>
-            ) : (
-              <p className="mt-3 text-xs text-slate-400">{L("The deterministic forecast is ready. AI is preparing the explanation.", "El forecast determinístico está listo. La IA está preparando la explicación.")}</p>
-            )}
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-violet-200">
+              {L("Next: select the scenario", "Próximo: escoge el escenario")}
+            </p>
+            <p className="mt-2 text-sm leading-6 text-slate-300">
+              {L(
+                "Choose the operating mode in step 7. In step 8, Business AI will analyze that exact selection using its percentages, dollar impact, deadline, risk, and execution evidence.",
+                "Escoge el modo operativo en el paso 7. En el paso 8, Business AI analizará exactamente esa selección usando sus porcentajes, impacto en dólares, plazo, riesgo y evidencia de ejecución."
+              )}
+            </p>
           </div>
         </div>
       ),
@@ -6284,12 +6590,21 @@ export default function GrowthPlanPage() {
       isComplete: returnModelConfigured,
       content: (
         <div id="gp-scenario-selection" className="space-y-4">
-          <div className="grid gap-3 md:grid-cols-3">
+          <div className={`grid gap-3 md:grid-cols-3 ${idealDeadlineOption ? "xl:grid-cols-4" : ""}`}>
             {(["conservative", "moderate", "aggressive"] as BusinessScenarioId[]).map((id) => {
               const policy = getGrowthPlanOperatingPolicy(id, businessProfile);
               const panorama = adaptiveGrowthPlan.panoramas.find((item) => item.id === id);
               const active = selectedPlanId === id;
               const recommended = aiRecommendedPlanId === id;
+              const shortfallUsd = growthPlanDeadlineShortfallUsd(
+                panorama?.projectedBalance ?? 0,
+                targetBalance
+              );
+              const approximatelyMeets = meetsGrowthPlanDeadlineApproximately({
+                panorama,
+                targetBalance,
+                toleranceUsd: deadlineToleranceUsd,
+              });
               return (
                 <button
                   key={id}
@@ -6310,14 +6625,79 @@ export default function GrowthPlanPage() {
                     +{currency((baseBalanceForDollars * policy.goalDayReturnPct) / 100)} / -{currency((baseBalanceForDollars * policy.expectedLossDayPct) / 100)}
                   </p>
                   <div className="mt-3 border-t border-slate-800 pt-3 text-xs leading-5 text-slate-400">
-                    <p>{L("At deadline", "En la fecha")}: <span className="text-slate-100">{currency(panorama?.projectedBalance ?? startingBalance)}</span></p>
-                    <p>{L("Completion", "Cumplimiento")}: <span className="text-slate-100">{panorama?.completionDate ? formatPlanDate(panorama.completionDate, lang) : L("Not reached", "No alcanzada")}</span></p>
+                    <p>{L("Projected balance on", "Balance proyectado al")} {formatPlanDate(targetDateStr, lang)}: <span className="text-slate-100">{currency(panorama?.projectedBalance ?? startingBalance)}</span></p>
+                    <p>{L("Estimated target date", "Fecha estimada de meta")}: <span className="text-slate-100">{panorama?.completionDate ? formatPlanDate(panorama.completionDate, lang) : L("Not reached", "No alcanzada")}</span></p>
+                    <p className={approximatelyMeets ? "text-emerald-300" : "text-rose-300"}>
+                      {panorama?.reachesRequestedDeadline
+                        ? L("Meets the requested date exactly", "Cumple exactamente la fecha solicitada")
+                        : approximatelyMeets
+                          ? L(
+                              `Approximately on plan · ${currency(shortfallUsd)} below target`,
+                              `Aproximadamente en plan · ${currency(shortfallUsd)} por debajo de la meta`
+                            )
+                          : L(
+                              `Misses by ${currency(shortfallUsd)}`,
+                              `No cumple por ${currency(shortfallUsd)}`
+                            )}
+                    </p>
                     <p>{L("Conditional year", "Año condicional")}: <span className="text-amber-200">{Number(panorama?.modeledAnnualReturnPct ?? 0).toFixed(1)}%</span></p>
                   </div>
                 </button>
               );
             })}
+            {idealDeadlineOption ? (() => {
+              const scenario = businessScenarios.find(
+                (item) => item.id === idealDeadlineOption.scenarioId
+              );
+              const policy = getGrowthPlanOperatingPolicy(
+                idealDeadlineOption.scenarioId,
+                businessProfile
+              );
+              if (!scenario) return null;
+              return (
+                <button
+                  type="button"
+                  onClick={applyIdealDeadlineOption}
+                  className="rounded-2xl border border-violet-300/55 bg-violet-300/10 p-4 text-left transition hover:border-violet-200 hover:bg-violet-300/15"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-semibold text-violet-100">
+                      {L("Ideal plan", "Plan ideal")}
+                    </span>
+                    <span className="rounded-full bg-violet-300/15 px-2 py-1 text-[10px] font-semibold text-violet-100">
+                      AI · {scenario.title}
+                    </span>
+                  </div>
+                  <p className="mt-3 text-xl font-semibold text-violet-200">
+                    +{policy.goalDayReturnPct}% / -{policy.expectedLossDayPct}%
+                  </p>
+                  <p className="mt-1 text-xs text-slate-400">
+                    +{currency((baseBalanceForDollars * policy.goalDayReturnPct) / 100)} / -{currency((baseBalanceForDollars * policy.expectedLossDayPct) / 100)}
+                  </p>
+                  <div className="mt-3 border-t border-violet-300/20 pt-3 text-xs leading-5 text-slate-300">
+                    <p>
+                      {L("Requested date", "Fecha solicitada")}: <span className="text-rose-200">{formatPlanDate(targetDateStr, lang)} · {L("not met", "no cumple")}</span>
+                    </p>
+                    <p>
+                      {L("Attainable estimated date", "Fecha estimada alcanzable")}: <span className="font-semibold text-violet-100">{formatPlanDate(idealDeadlineOption.completionDate, lang)}</span>
+                    </p>
+                    <p>
+                      {L("Profile compatibility", "Compatibilidad con tu perfil")}: <span className="text-slate-100">{idealDeadlineOption.fitScore}%</span>
+                    </p>
+                  </div>
+                  <span className="mt-3 inline-flex rounded-lg bg-violet-200 px-3 py-1.5 text-xs font-semibold text-slate-950">
+                    {L("Use this realistic date", "Usar esta fecha realista")}
+                  </span>
+                </button>
+              );
+            })() : null}
           </div>
+          <p className="text-[11px] leading-5 text-slate-500">
+            {L(
+              `Approximate deadline tolerance: up to ${currency(deadlineToleranceUsd)} below the target. This only classifies the comparison; the saved target and forecast math remain exact.`,
+              `Tolerancia aproximada para la fecha: hasta ${currency(deadlineToleranceUsd)} por debajo de la meta. Esto solo clasifica la comparación; la meta guardada y la matemática del forecast permanecen exactas.`
+            )}
+          </p>
           <div className={`rounded-2xl border p-4 ${selectedPlanId === "manual" ? "border-sky-300 bg-sky-300/10" : "border-slate-700 bg-slate-950/70"}`}>
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
@@ -6391,6 +6771,80 @@ export default function GrowthPlanPage() {
             <div className="rounded-xl border border-slate-700 bg-slate-950/70 p-3"><p className="text-[10px] uppercase text-slate-500">{L("Gain / loss", "Ganancia / pérdida")}</p><p className="mt-1 font-semibold text-slate-100">+{selectedForecastAssumptions.goalDayPct}% / -{selectedForecastAssumptions.lossDayPct}%</p><p className="text-xs text-slate-500">+{currency((baseBalanceForDollars * selectedForecastAssumptions.goalDayPct) / 100)} / -{currency((baseBalanceForDollars * selectedForecastAssumptions.lossDayPct) / 100)}</p></div>
             <div className="rounded-xl border border-slate-700 bg-slate-950/70 p-3"><p className="text-[10px] uppercase text-slate-500">{L("Requested date", "Fecha solicitada")}</p><p className="mt-1 font-semibold text-slate-100">{formatPlanDate(targetDateStr, lang)}</p></div>
             <div className="rounded-xl border border-slate-700 bg-slate-950/70 p-3"><p className="text-[10px] uppercase text-slate-500">{L("Forecast completion", "Cumplimiento estimado")}</p><p className="mt-1 font-semibold text-cyan-200">{selectedForecastProjection.completionDate ? formatPlanDate(selectedForecastProjection.completionDate, lang) : L("Not reached", "No alcanzada")}</p></div>
+          </div>
+          <div className="overflow-hidden rounded-2xl border border-violet-300/25 bg-violet-300/5">
+            <div className="flex flex-wrap items-start justify-between gap-3 border-b border-violet-300/10 p-4">
+              <div>
+                <p className="text-[11px] uppercase tracking-[0.2em] text-violet-200">
+                  {L("AI review of your selected scenario", "Evaluación IA del escenario seleccionado")}
+                </p>
+                <p className="mt-1 text-sm font-semibold capitalize text-slate-100">
+                  {researchReview?.selectedScenarioTitle || selectedForecastAssumptions.id}
+                </p>
+              </div>
+              {researchReviewLoading ? (
+                <span className="text-xs text-violet-200">{L("Analyzing exact selection…", "Analizando la selección exacta…")}</span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    lastAutoReviewKeyRef.current = "";
+                    void runResearchPlanReview();
+                  }}
+                  className="rounded-full border border-violet-300/30 px-3 py-1 text-xs text-violet-100"
+                >
+                  {researchReview ? L("Refresh analysis", "Actualizar análisis") : L("Analyze selection", "Analizar selección")}
+                </button>
+              )}
+            </div>
+            {researchReview ? (
+              <div className="space-y-4 p-4">
+                <div>
+                  <p className="font-semibold text-slate-100">{researchReview.headline}</p>
+                  <p className="mt-1 text-sm leading-6 text-slate-300">{researchReview.summary}</p>
+                </div>
+                <div className="grid gap-3 md:grid-cols-2">
+                  {[
+                    [L("Selected-scenario math", "Matemática del escenario"), researchReview.scenarioAnalysis],
+                    [L("Deadline test", "Prueba del plazo"), researchReview.deadlineAnalysis],
+                    [L("Risk budget", "Presupuesto de riesgo"), researchReview.riskAnalysis],
+                    [L("Execution evidence", "Evidencia de ejecución"), researchReview.evidenceAnalysis],
+                  ].map(([label, value]) =>
+                    value ? (
+                      <div key={label} className="rounded-xl border border-slate-800 bg-slate-950/55 p-3">
+                        <p className="text-[10px] uppercase tracking-[0.16em] text-slate-500">{label}</p>
+                        <p className="mt-2 text-xs leading-5 text-slate-300">{value}</p>
+                      </div>
+                    ) : null
+                  )}
+                </div>
+                {researchReview.comparison ? (
+                  <div className="rounded-xl border border-cyan-300/15 bg-cyan-300/5 p-3">
+                    <p className="text-[10px] uppercase tracking-[0.16em] text-cyan-200">{L("Context versus other modes", "Contexto frente a otros modos")}</p>
+                    <p className="mt-2 text-xs leading-5 text-slate-300">{researchReview.comparison}</p>
+                  </div>
+                ) : null}
+                {researchReview.actions.length ? (
+                  <div>
+                    <p className="text-[10px] uppercase tracking-[0.16em] text-emerald-200">{L("Operating actions", "Acciones operativas")}</p>
+                    <ol className="mt-2 space-y-2 text-xs leading-5 text-slate-300">
+                      {researchReview.actions.slice(0, 4).map((action, index) => (
+                        <li key={`${index}-${action}`}><span className="mr-2 text-emerald-300">{index + 1}.</span>{action}</li>
+                      ))}
+                    </ol>
+                  </div>
+                ) : null}
+              </div>
+            ) : researchReviewError ? (
+              <p className="p-4 text-xs text-amber-200">{researchReviewError}</p>
+            ) : (
+              <p className="p-4 text-xs text-slate-400">
+                {L(
+                  "The deterministic forecast is ready. AI will now explain this selected scenario without changing its numbers.",
+                  "El forecast determinístico está listo. La IA ahora explicará este escenario seleccionado sin cambiar sus números."
+                )}
+              </p>
+            )}
           </div>
           {!selectedForecastProjection.targetReached ? (
             <div className="rounded-xl border border-rose-300/30 bg-rose-300/10 p-3 text-sm text-rose-100">{L("This selection does not reach the target inside the mathematical horizon. Go back and adjust the mode or assumptions.", "Esta selección no alcanza la meta dentro del horizonte matemático. Regresa y ajusta el modo o los supuestos.")}</div>
@@ -6469,12 +6923,21 @@ export default function GrowthPlanPage() {
     return acc;
   }, {});
 
+  const guidedAnchorStep = STEP_ORDER.reduce<Record<string, WizardStep>>((acc, wizardStep) => {
+    for (const task of guidedTasksByStep[wizardStep] ?? []) {
+      if (task.anchor) acc[task.anchor] = wizardStep;
+    }
+    return acc;
+  }, {});
+
   const scrollToAnchor = useCallback((anchor?: string) => {
     if (!anchor) return;
     const stageIndex = step0AnchorIndex[anchor];
     if (typeof stageIndex === "number") {
       setStep(0);
       setStep0Stage(stageIndex);
+    } else if (typeof guidedAnchorStep[anchor] === "number") {
+      setStep(guidedAnchorStep[anchor]);
     }
     window.setTimeout(() => {
       const el = document.getElementById(anchor);
@@ -6482,7 +6945,7 @@ export default function GrowthPlanPage() {
       el.scrollIntoView({ behavior: "smooth", block: "center" });
       (el as any)?.focus?.();
     }, 80);
-  }, [step0AnchorIndex]);
+  }, [guidedAnchorStep, step0AnchorIndex]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
