@@ -24,8 +24,45 @@ import {
   catalogText,
   planPriceLabel,
 } from "@/lib/planCatalog";
+import { WAITLIST_CAMPAIGN } from "@/lib/waitlistCampaign";
 
 type ProductPreviewKind = "dashboard" | "growth" | "coach";
+
+function LaunchTicker({
+  message,
+}: {
+  message: string;
+}) {
+  const tickerItems = Array.from({ length: 4 }, (_, index) => index);
+  const tickerGroup = (group: "primary" | "secondary") => (
+    <div className="flex shrink-0 items-center gap-8 px-4" aria-hidden={group === "secondary"}>
+      {tickerItems.map((item) => (
+        <span key={`${group}-${item}`} className="inline-flex items-center gap-3">
+          <span className="h-1.5 w-1.5 rounded-full bg-emerald-300 shadow-[0_0_18px_rgba(52,211,153,0.8)]" />
+          {message}
+          <span className="text-emerald-300">Join the 60-day launch waitlist</span>
+        </span>
+      ))}
+    </div>
+  );
+
+  return (
+    <Link
+      href="/waitlist"
+      className="group mb-8 block w-full overflow-hidden rounded-lg border border-amber-300/35 bg-[#140f05]/88 shadow-[0_18px_46px_rgba(0,0,0,0.28)] backdrop-blur"
+      aria-label={message}
+    >
+      <div className="relative flex h-12 items-center overflow-hidden">
+        <div className="pointer-events-none absolute inset-y-0 left-0 z-10 w-16 bg-gradient-to-r from-[#140f05] to-transparent" />
+        <div className="pointer-events-none absolute inset-y-0 right-0 z-10 w-16 bg-gradient-to-l from-[#140f05] to-transparent" />
+        <div className="nt-launch-ticker flex min-w-max items-center whitespace-nowrap text-[11px] font-semibold uppercase tracking-[0.22em] text-amber-100">
+          {tickerGroup("primary")}
+          {tickerGroup("secondary")}
+        </div>
+      </div>
+    </Link>
+  );
+}
 
 function ProductPreview({
   kind,
@@ -424,6 +461,12 @@ export default function Home() {
         </div>
 
         <div className="relative z-10 mx-auto flex min-h-[calc(86svh-7rem)] w-full max-w-7xl flex-col justify-center px-4 pb-10 md:px-8">
+          <LaunchTicker
+            message={L(
+              `${WAITLIST_CAMPAIGN.discountPercent}% off annual for the first ${WAITLIST_CAMPAIGN.discountLimit} waitlist members`,
+              `${WAITLIST_CAMPAIGN.discountPercent}% de descuento anual para los primeros ${WAITLIST_CAMPAIGN.discountLimit} en la lista`
+            )}
+          />
           <div className="max-w-3xl">
             <div className="mb-5 flex flex-col items-start gap-3">
               <img
@@ -448,6 +491,9 @@ export default function Home() {
             <div className="mt-7 flex flex-wrap gap-3">
               <Link href="/signup" className="rounded-md bg-emerald-400 px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-emerald-300">
                 {L("Start Your Trading Business", "Comienza Tu Empresa de Trading")}
+              </Link>
+              <Link href="/waitlist" className="rounded-md border border-amber-300/40 px-5 py-3 text-sm font-semibold text-amber-100 hover:border-amber-200">
+                {L("Join 60-day waitlist", "Unirme a la lista de 60 días")}
               </Link>
               <Link href="/plans-comparison" className="rounded-md border border-white/25 px-5 py-3 text-sm font-semibold text-white hover:border-emerald-300">
                 {L("Compare Business Plans", "Comparar Planes Empresariales")}

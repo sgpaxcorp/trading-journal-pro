@@ -197,6 +197,11 @@ export default function ImportPage() {
   const [importing, setImporting] = useState(false);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [journalImportContext, setJournalImportContext] = useState<{
+    date: string;
+    accountId: string;
+    returnTo: string;
+  } | null>(null);
 
   const [history, setHistory] = useState<ImportHistoryItem[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -937,6 +942,18 @@ export default function ImportPage() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
+    const date = String(params.get("date") ?? "").trim();
+    const accountId = String(params.get("accountId") ?? "").trim();
+    const requestedReturn = String(params.get("returnTo") ?? "").trim();
+    const expectedReturn = date ? `/journal/${date}` : "";
+    if (/^\d{4}-\d{2}-\d{2}$/.test(date) && accountId && requestedReturn === expectedReturn) {
+      setJournalImportContext({ date, accountId, returnTo: requestedReturn });
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
     if (params.get("snaptrade") === "connected") {
       setActiveImportTab("broker");
       setBrokerSyncProvider("snaptrade");
@@ -1051,6 +1068,9 @@ export default function ImportPage() {
       form.append("broker", broker);
       form.append("comment", comment.trim());
       form.append("file", file);
+      if (journalImportContext?.accountId) {
+        form.append("accountId", journalImportContext.accountId);
+      }
       if (broker === "thinkorswim") {
         form.append("sourceTz", sourceTz);
       }
@@ -1099,6 +1119,76 @@ export default function ImportPage() {
             ? `Historial de órdenes: ${orderEvents ?? 0} nuevas, ${orderDupes ?? 0} duplicadas`
             : `Order history: ${orderEvents ?? 0} new, ${orderDupes ?? 0} duplicates`
         );
+      }
+
+      const statement = data?.statement as
+        | {
+            dates?: string[];
+            fills?: number;
+            closedTrades?: number;
+            grossPnl?: number;
+            commissions?: number;
+            fees?: number;
+            netPnl?: number;
+            reportedGrossPnl?: number | null;
+            reconciled?: boolean | null;
+          }
+        | undefined;
+      if (statement) {
+        parts.push(
+          isEs
+            ? `Reconciliación: ${statement.fills ?? 0} fills / ${statement.closedTrades ?? 0} trades cerrados • bruto ${formatMoney(statement.grossPnl)} • comisiones ${formatMoney(statement.commissions)} • fees ${formatMoney(statement.fees)} • neto ${formatMoney(statement.netPnl)}`
+            : `Reconciliation: ${statement.fills ?? 0} fills / ${statement.closedTrades ?? 0} closed trades • gross ${formatMoney(statement.grossPnl)} • commissions ${formatMoney(statement.commissions)} • fees ${formatMoney(statement.fees)} • net ${formatMoney(statement.netPnl)}`
+        );
+        if (statement.reconciled === false) {
+          parts.push(
+            L(
+              "Warning: calculated gross P&L does not match the broker's reported P/L Day.",
+              "Advertencia: el P&L bruto calculado no coincide con el P/L Day reportado por el bróker."
+            )
+          );
+        }
+      }
+
+      if (journalImportContext) {
+        const statementDates = Array.isArray(statement?.dates) ? statement!.dates! : [];
+        if (statementDates.length && !statementDates.includes(journalImportContext.date)) {
+          parts.push(
+            L(
+              `The file contains ${statementDates.join(", ")}; journal ${journalImportContext.date} was not synchronized.`,
+              `El archivo contiene ${statementDates.join(", ")}; no se sincronizó el journal ${journalImportContext.date}.`
+            )
+          );
+        } else {
+          const syncRes = await fetch("/api/journal/sync", {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              date: journalImportContext.date,
+              accountId: journalImportContext.accountId,
+            }),
+          });
+          const syncData = await syncRes.json().catch(() => ({} as any));
+          if (syncRes.ok && Number(syncData?.trades_found ?? 0) > 0) {
+            parts.push(
+              isEs
+                ? `Journal sincronizado: ${syncData.trades_found} fills • P&L neto ${formatMoney(syncData.pnl_net)}`
+                : `Journal synced: ${syncData.trades_found} fills • net P&L ${formatMoney(syncData.pnl_net)}`
+            );
+          } else {
+            parts.push(
+              syncData?.error
+                ? `${L("Journal sync failed", "Falló la sincronización del journal")}: ${syncData.error}`
+                : L(
+                    "The import completed, but no fills matched this journal date and account.",
+                    "El import terminó, pero ningún fill coincidió con la fecha y cuenta de este journal."
+                  )
+            );
+          }
+        }
       }
 
       setStatusMsg(
@@ -1336,8 +1426,17 @@ export default function ImportPage() {
                 ) : null}
 
                 {statusMsg ? (
-                  <div className="rounded-xl border border-emerald-400/30 bg-emerald-400/10 px-3 py-2 text-xs text-emerald-100">
-                    {statusMsg}
+                  <div className="rounded-xl border border-emerald-400/30 bg-emerald-400/10 px-3 py-3 text-xs text-emerald-100">
+                    <div>{statusMsg}</div>
+                    {journalImportContext ? (
+                      <button
+                        type="button"
+                        onClick={() => router.push(journalImportContext.returnTo)}
+                        className="mt-3 rounded-lg bg-emerald-300 px-3 py-2 font-semibold text-slate-950 hover:bg-emerald-200"
+                      >
+                        {L("Return to synchronized journal", "Volver al journal sincronizado")}
+                      </button>
+                    ) : null}
                   </div>
                 ) : null}
 

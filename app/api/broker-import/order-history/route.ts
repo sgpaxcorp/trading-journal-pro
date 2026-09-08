@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 import { auditOrderEvents } from "@/lib/audit/auditEngine";
-import { parseTosOrderHistory } from "@/lib/brokers/tos/parseTosOrderHistory";
+import {
+  parseTosOrderHistory,
+  TOS_ORDER_HISTORY_PARSER_VERSION,
+} from "@/lib/brokers/tos/parseTosOrderHistory";
 import type { NormalizedOrderEvent } from "@/lib/brokers/types";
 import { createHash } from "crypto";
 import { requireAdvancedPlan } from "@/lib/serverFeatureAccess";
@@ -211,6 +214,31 @@ function buildExecutionDiscipline(audit: any) {
           : "Not enough broker evidence to determine OCO usage.",
     },
     {
+      label: "Automatic OCO bracket protection",
+      status: audit?.automatic_bracket_protection === true ? "pass" : "fail",
+      reason:
+        audit?.automatic_bracket_protection === true
+          ? "The broker history links a stop and target through OCO immediately after entry."
+          : audit?.protective_bracket_used === true
+            ? "An OCO bracket was detected, but its protective stop was not immediate."
+            : "No entry-triggered OCO stop-and-target bracket was detected.",
+    },
+    {
+      label: "Stop restored after removal",
+      status:
+        audit?.stop_removed_without_replacement === true
+          ? "fail"
+          : Number(audit?.stop_cancel_count ?? 0) > 0
+            ? "pass"
+            : "unknown",
+      reason:
+        audit?.stop_removed_without_replacement === true
+          ? "At least one canceled protective stop was not restored while the position remained open."
+          : Number(audit?.stop_cancel_count ?? 0) > 0
+            ? `Canceled stops were followed by ${Number(audit?.stop_reprotected_count ?? 0)} replacement(s); the remaining cancellations ended with the trade exit.`
+            : "No protective-stop removal was detected.",
+    },
+    {
       label: "Manual market exit discipline",
       status:
         audit?.manual_market_exit === true
@@ -240,8 +268,14 @@ function buildExecutionDiscipline(audit: any) {
       stop_present: audit?.stop_present ?? null,
       oco_used: audit?.oco_used ?? null,
       stop_mod_count: audit?.stop_mod_count ?? 0,
+      stop_cancel_count: audit?.stop_cancel_count ?? 0,
+      stop_reprotected_count: audit?.stop_reprotected_count ?? 0,
+      stop_removed_without_replacement: audit?.stop_removed_without_replacement ?? false,
+      max_time_without_stop_sec: audit?.max_time_without_stop_sec ?? null,
       cancel_count: audit?.cancel_count ?? 0,
       replace_count: audit?.replace_count ?? 0,
+      protective_bracket_used: audit?.protective_bracket_used ?? false,
+      automatic_bracket_protection: audit?.automatic_bracket_protection ?? false,
       manual_market_exit: audit?.manual_market_exit ?? null,
       stop_market_filled: audit?.stop_market_filled ?? null,
       time_to_first_stop_sec: audit?.time_to_first_stop_sec ?? null,
@@ -341,6 +375,7 @@ export async function GET(req: NextRequest) {
       .from("growth_plans")
       .select("rules, steps, max_daily_loss_percent, starting_balance, max_risk_per_trade_percent, max_risk_per_trade_usd")
       .eq("user_id", userId)
+      .eq("account_id", accountId)
       .order("updated_at", { ascending: false })
       .limit(1);
 
@@ -604,6 +639,7 @@ export async function POST(req: NextRequest) {
           rows_found: parsed.stats.rows_found,
           rows_parsed: parsed.stats.rows_parsed,
           events_saved: parsed.events.length,
+          parser_version: TOS_ORDER_HISTORY_PARSER_VERSION,
           warnings: parsed.warnings.slice(0, 12),
         },
       })
@@ -705,6 +741,7 @@ export async function POST(req: NextRequest) {
           rows_parsed: parsed.stats.rows_parsed,
           events_saved: toInsert.length,
           events_skipped: duplicatesCount,
+          parser_version: TOS_ORDER_HISTORY_PARSER_VERSION,
           warnings: parsed.warnings.slice(0, 12),
         },
       })

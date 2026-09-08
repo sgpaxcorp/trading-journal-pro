@@ -1045,27 +1045,8 @@ export async function evaluateAlertRulesForUser(userId: string, opts?: { db?: Db
     if (ins1.error) {
       const ins2 = await db.from("ntj_alert_events").insert(minimalRow);
       if (ins2.error) {
-        const minimalRowNoDate: any = {
-          user_id: userId,
-          rule_id: rule.id,
-          status: "active",
-          triggered_at: nowISO,
-          payload: minimalRow.payload,
-        };
-        const ins3 = await db.from("ntj_alert_events").insert(minimalRowNoDate);
-        if (ins3.error) {
-          const minimalRowBare: any = {
-            user_id: userId,
-            rule_id: rule.id,
-            status: "active",
-            payload: minimalRow.payload,
-          };
-          const ins4 = await db.from("ntj_alert_events").insert(minimalRowBare);
-          if (ins4.error) {
-            console.error("[alertRuleEngineServer] insert event failed", ins4.error);
-            continue;
-          }
-        }
+        console.error("[alertRuleEngineServer] insert event failed", ins2.error);
+        continue;
       }
     }
     created += 1;

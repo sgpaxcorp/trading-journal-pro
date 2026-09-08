@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { StatusBar } from "expo-status-bar";
 import {
   NavigationContainer,
   createNavigationContainerRef,
+  type NavigatorScreenParams,
   useNavigation,
 } from "@react-navigation/native";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
@@ -11,7 +12,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { enableFreeze, enableScreens } from "react-native-screens";
 import type { Session } from "@supabase/supabase-js";
-import { ActivityIndicator, InteractionManager, Linking, Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, InteractionManager, Linking, Platform, Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import * as Notifications from "expo-notifications";
 
 import { DashboardScreen } from "./src/screens/DashboardScreen";
@@ -64,7 +65,7 @@ type MainTabParamList = {
 
 type RootStackParamList = {
   Auth: undefined;
-  Tabs: undefined;
+  Tabs: NavigatorScreenParams<MainTabParamList> | undefined;
   PaymentRequired: undefined;
   ResetPassword: undefined;
   Module: ModuleRouteParams;
@@ -80,8 +81,6 @@ type RootStackParamList = {
 const Tab = createBottomTabNavigator<MainTabParamList>();
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const navigationRef = createNavigationContainerRef<RootStackParamList>();
-const WEB_BASE = "https://www.neurotrader-journal.com";
-
 type AccessStatusResponse = {
   hasAppAccess?: boolean;
 };
@@ -90,7 +89,9 @@ function MainTabs() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { colors } = useTheme();
   const { language } = useLanguage();
+  const { width } = useWindowDimensions();
   const planAccess = usePlanAccess();
+  const useTabletNavigation = Platform.OS === "ios" ? Platform.isPad : width >= 768;
   const tabTitles = useMemo(
     () => ({
       Dashboard: t(language, "Business Center", "Centro Empresarial"),
@@ -139,6 +140,15 @@ function MainTabs() {
     navigation.navigate("BusinessPlan");
   }, [navigation]);
 
+  const openNotebook = useCallback(() => {
+    const parent = navigation.getParent<NativeStackNavigationProp<RootStackParamList>>();
+    if (parent) {
+      parent.navigate("Notebook");
+      return;
+    }
+    navigation.navigate("Notebook");
+  }, [navigation]);
+
   return (
       <Tab.Navigator
         detachInactiveScreens
@@ -163,6 +173,10 @@ function MainTabs() {
             </Pressable>
           ),
           tabBarStyle: { backgroundColor: colors.surface, borderTopColor: colors.border },
+          tabBarPosition: useTabletNavigation ? "left" : "bottom",
+          tabBarVariant: useTabletNavigation ? "material" : "uikit",
+          tabBarLabelPosition: useTabletNavigation ? "beside-icon" : "below-icon",
+          tabBarItemStyle: useTabletNavigation ? { minHeight: 58 } : undefined,
           tabBarActiveTintColor: colors.primary,
           tabBarInactiveTintColor: colors.textMuted,
           tabBarLabelStyle: { fontSize: 11, fontWeight: "600" },
@@ -179,9 +193,10 @@ function MainTabs() {
         <Tab.Screen name="Dashboard" options={{ title: t(language, "Center", "Centro") }}>
           {() => (
             <DashboardScreen
-              onOpenModule={openModule}
               onOpenJournalDate={openJournalDate}
               onOpenBusinessPlan={openBusinessPlan}
+              onOpenNotebook={openNotebook}
+              onOpenAICoach={() => navigation.navigate("Tabs", { screen: "AICoach" })}
             />
           )}
         </Tab.Screen>
@@ -295,11 +310,6 @@ function PaymentRequiredScreen({
         primaryButton: {
           backgroundColor: colors.primary,
         },
-        secondaryButton: {
-          borderWidth: StyleSheet.hairlineWidth,
-          borderColor: colors.border,
-          backgroundColor: "transparent",
-        },
         dangerButton: {
           backgroundColor: "transparent",
         },
@@ -307,11 +317,6 @@ function PaymentRequiredScreen({
           color: "#00130f",
           fontSize: 14,
           fontWeight: "900",
-        },
-        secondaryText: {
-          color: colors.textPrimary,
-          fontSize: 14,
-          fontWeight: "800",
         },
         dangerText: {
           color: colors.textMuted,
@@ -321,10 +326,6 @@ function PaymentRequiredScreen({
       }),
     [colors]
   );
-
-  const openWebsite = useCallback(() => {
-    void Linking.openURL(WEB_BASE);
-  }, []);
 
   return (
     <View style={styles.screen}>
@@ -360,9 +361,6 @@ function PaymentRequiredScreen({
           {checking ? t(language, "Checking...", "Verificando...") : t(language, "Check access", "Verificar acceso")}
         </Text>
       </Pressable>
-      <Pressable style={[styles.button, styles.secondaryButton]} onPress={openWebsite}>
-        <Text style={styles.secondaryText}>{t(language, "Open NeuroTrader", "Abrir NeuroTrader")}</Text>
-      </Pressable>
       <Pressable style={[styles.button, styles.dangerButton]} onPress={onSignOut}>
         <Text style={styles.dangerText}>{t(language, "Sign out", "Cerrar sesion")}</Text>
       </Pressable>
@@ -380,6 +378,7 @@ function AppShell() {
   const [recoverySessionReady, setRecoverySessionReady] = useState(false);
   const [recoveryError, setRecoveryError] = useState<string | null>(null);
   const [shouldOpenResetScreen, setShouldOpenResetScreen] = useState(false);
+  const lastNotificationResponseId = useRef<string | null>(null);
   const { colors, mode: themeMode } = useTheme();
   const { language } = useLanguage();
   const loadingStyles = useMemo(
@@ -408,11 +407,18 @@ function AppShell() {
 
     let active = true;
 
-    supabaseMobile.auth.getSession().then(({ data }) => {
-      if (!active) return;
-      setSession(data.session ?? null);
-      setAuthReady(true);
-    });
+    supabaseMobile.auth
+      .getSession()
+      .then(({ data }) => {
+        if (active) setSession(data.session ?? null);
+      })
+      .catch((error) => {
+        console.warn("[mobile] unable to restore the authentication session:", error);
+        if (active) setSession(null);
+      })
+      .finally(() => {
+        if (active) setAuthReady(true);
+      });
 
     const {
       data: { subscription },
@@ -545,6 +551,33 @@ function AppShell() {
     navigationRef.navigate("ResetPassword");
     setShouldOpenResetScreen(false);
   }, [navReady, shouldOpenResetScreen]);
+
+  useEffect(() => {
+    if (!navReady || !session?.user?.id || !hasAppAccess || !navigationRef.isReady()) return;
+
+    const openNotification = (response: Notifications.NotificationResponse | null) => {
+      if (!response || !navigationRef.isReady()) return;
+      const responseId = response.notification.request.identifier;
+      if (lastNotificationResponseId.current === responseId) return;
+      lastNotificationResponseId.current = responseId;
+
+      const data = response.notification.request.content.data ?? {};
+      const screen = String(data.screen ?? "Dashboard");
+      if (screen === "AICoach") {
+        navigationRef.navigate("Tabs", { screen: "AICoach" });
+      } else if (screen === "Calendar") {
+        navigationRef.navigate("Tabs", { screen: "Calendar" });
+      } else if (screen === "JournalDate" && typeof data.date === "string") {
+        navigationRef.navigate("JournalDate", { date: data.date });
+      } else {
+        navigationRef.navigate("Tabs", { screen: "Dashboard" });
+      }
+    };
+
+    void Notifications.getLastNotificationResponseAsync().then(openNotification).catch(() => null);
+    const subscription = Notifications.addNotificationResponseReceivedListener(openNotification);
+    return () => subscription.remove();
+  }, [hasAppAccess, navReady, session?.user?.id]);
 
   const shouldShowMainTabs = !hasSupabaseConfig || (Boolean(session) && hasAppAccess);
   const shouldShowPaymentRequired = hasSupabaseConfig && Boolean(session) && accessReady && !hasAppAccess;

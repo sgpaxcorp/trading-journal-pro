@@ -32,6 +32,7 @@ export type GrowthPlanAnalysisStyle =
   | "other";
 
 export type GrowthPlanStrategy = {
+  id?: string;
   name: string;
   setup?: string;
   entryRules?: string;

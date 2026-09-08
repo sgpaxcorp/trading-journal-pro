@@ -2,6 +2,16 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAdminActionSecret, requireAdminUser } from "@/lib/adminAuth";
 import { recordAdminAuditEvent } from "@/lib/adminAudit";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
+import { WAITLIST_CAMPAIGN } from "@/lib/waitlistCampaign";
+import {
+  dispatchWaitlistLaunch,
+  getWaitlistLaunchOverview,
+} from "@/lib/waitlistLaunchDelivery";
+import {
+  buildWaitlistLaunchDiscountEmail,
+  getWaitlistLaunchEmailStatus,
+  sendWaitlistLaunchDiscountEmail,
+} from "@/lib/waitlistLaunchEmail";
 import {
   getAdminBroadcastRecipients,
   getAutomatedEmailCatalog,
@@ -14,12 +24,18 @@ import {
   type AdminBroadcastTemplateKey,
 } from "@/lib/email";
 
+export const maxDuration = 300;
+
 export async function GET(req: NextRequest) {
   try {
     const admin = await requireAdminUser(req, { action: "email-automations:read", limit: 60, windowMs: 60_000 });
     if (!admin.ok) return admin.response;
 
-    const recipients = await getAdminBroadcastRecipients();
+    const [recipients, waitlistOverview] = await Promise.all([
+      getAdminBroadcastRecipients(),
+      getWaitlistLaunchOverview(),
+    ]);
+    const waitlistStatus = getWaitlistLaunchEmailStatus();
 
     return NextResponse.json({
       sender: getEmailSenderStatus(),
@@ -27,6 +43,23 @@ export async function GET(req: NextRequest) {
       adminEmail: admin.user.email ?? "",
       broadcastAudienceCount: recipients.length,
       broadcastRecipients: recipients,
+      waitlistLaunch: {
+        name: "Launch discount delivery",
+        description: `Sends the ${WAITLIST_CAMPAIGN.discountPercent}% annual offer to the first ${WAITLIST_CAMPAIGN.discountLimit} eligible waitlist members.`,
+        launchDateIso: waitlistStatus.launchDateIso,
+        launchDateLabel: waitlistStatus.launchDateLabel,
+        from: waitlistStatus.from,
+        discountUrl: waitlistStatus.discountUrl,
+        promoCode: waitlistStatus.promoCode,
+        promotionConfigured: waitlistStatus.promotionConfigured,
+        resendConfigured: waitlistStatus.configured,
+        preview: buildWaitlistLaunchDiscountEmail({
+          email: admin.user.email || "admin@example.com",
+          name: "Trader Entrepreneur",
+          position: 1,
+        }),
+        overview: waitlistOverview,
+      },
     });
   } catch (err: any) {
     return NextResponse.json({ error: err?.message ?? "Unexpected error" }, { status: 500 });
@@ -40,6 +73,67 @@ export async function POST(req: NextRequest) {
 
     const body = await req.json().catch(() => ({}));
     const action = String(body?.action ?? "test_automation");
+
+    if (action === "waitlist_launch_test_email") {
+      const to = String(body?.to ?? admin.user.email ?? "").trim().toLowerCase();
+      if (!to || !to.includes("@")) {
+        return NextResponse.json({ error: "A valid test recipient is required." }, { status: 400 });
+      }
+
+      await sendWaitlistLaunchDiscountEmail({
+        email: to,
+        name: "Trader Entrepreneur",
+        position: 1,
+      });
+      await recordAdminAuditEvent({
+        req,
+        adminUserId: admin.user.id,
+        adminEmail: admin.user.email,
+        action: "admin_waitlist_launch_test_email",
+        metadata: { to },
+      });
+      return NextResponse.json({ ok: true, mode: "waitlist_launch_test_email" });
+    }
+
+    if (action === "waitlist_launch_send" || action === "waitlist_launch_retry") {
+      const stepUpResponse = requireAdminActionSecret(req, body);
+      if (stepUpResponse) return stepUpResponse;
+
+      const isRetry = action === "waitlist_launch_retry";
+      const expectedConfirmation = isRetry ? "RETRY FAILED" : "SEND LAUNCH";
+      const confirmation = String(body?.confirmText ?? "").trim().toUpperCase();
+      if (confirmation !== expectedConfirmation) {
+        return NextResponse.json(
+          { error: `Type ${expectedConfirmation} to confirm this delivery.` },
+          { status: 400 }
+        );
+      }
+
+      if (Date.now() < new Date(WAITLIST_CAMPAIGN.launchDateIso).getTime()) {
+        return NextResponse.json(
+          {
+            error: "Launch delivery is locked until the scheduled launch time.",
+            launchDateIso: WAITLIST_CAMPAIGN.launchDateIso,
+          },
+          { status: 425 }
+        );
+      }
+
+      const result = await dispatchWaitlistLaunch({ mode: isRetry ? "failed" : "pending" });
+      await recordAdminAuditEvent({
+        req,
+        adminUserId: admin.user.id,
+        adminEmail: admin.user.email,
+        action: isRetry ? "admin_waitlist_launch_retry" : "admin_waitlist_launch_send",
+        metadata: result,
+      });
+      return NextResponse.json({
+        ok: true,
+        mode: isRetry ? "waitlist_launch_retry" : "waitlist_launch_send",
+        result,
+        overview: await getWaitlistLaunchOverview(),
+      });
+    }
 
     if (action === "broadcast_preview") {
       const to = String(body?.to ?? admin.user.email ?? "").trim().toLowerCase();

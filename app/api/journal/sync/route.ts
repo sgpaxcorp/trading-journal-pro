@@ -119,7 +119,37 @@ type UiTradeRow = {
   time: string;
   dte?: number | null;
   expiry?: string | null;
+  playbookStrategyAssignment?: unknown;
 };
+
+function tradeRowSignature(raw: any): string {
+  return [
+    String(raw?.symbol ?? "").trim().toUpperCase(),
+    String(raw?.kind ?? "").trim().toLowerCase(),
+    String(raw?.side ?? "").trim().toLowerCase(),
+    String(raw?.time ?? "").trim().toUpperCase(),
+    String(raw?.price ?? "").trim(),
+    String(raw?.quantity ?? "").trim(),
+  ].join("|");
+}
+
+function restoreStrategyAssignments(rows: UiTradeRow[], previousRows: unknown): UiTradeRow[] {
+  if (!Array.isArray(previousRows) || previousRows.length === 0) return rows;
+  const queues = new Map<string, any[]>();
+  previousRows.forEach((row) => {
+    const key = tradeRowSignature(row);
+    queues.set(key, [...(queues.get(key) ?? []), row]);
+  });
+  return rows.map((row) => {
+    const key = tradeRowSignature(row);
+    const queue = queues.get(key) ?? [];
+    const previous = queue.shift();
+    queues.set(key, queue);
+    return previous?.playbookStrategyAssignment
+      ? { ...row, playbookStrategyAssignment: previous.playbookStrategyAssignment }
+      : row;
+  });
+}
 
 /* ---------------- normalize ---------------- */
 
@@ -256,8 +286,34 @@ export async function POST(req: NextRequest) {
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
     if (!trades || trades.length === 0) {
+      const recentQuery = applyAccountFilter(
+        supabaseAdmin
+          .from("trades")
+          .select("executed_at")
+          .eq("user_id", userId)
+          .order("executed_at", { ascending: false })
+          .limit(100)
+      );
+      const [{ data: recentTrades }, { count: otherAccountCount }] = await Promise.all([
+        recentQuery,
+        supabaseAdmin
+          .from("trades")
+          .select("id", { count: "exact", head: true })
+          .eq("user_id", userId)
+          .gte("executed_at", startISO)
+          .lt("executed_at", endISO)
+          .neq("account_id", accountId ?? "00000000-0000-0000-0000-000000000000"),
+      ]);
+      const availableDates = Array.from(
+        new Set(
+          (recentTrades ?? [])
+            .map((trade: any) => String(trade?.executed_at ?? "").slice(0, 10))
+            .filter((value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value))
+        )
+      ).slice(0, 8);
       return NextResponse.json({
         date,
+        account_id: accountId ?? null,
         trades_found: 0,
         entries: [],
         exits: [],
@@ -265,6 +321,8 @@ export async function POST(req: NextRequest) {
         pnl_net: 0,
         commissions: 0,
         fees: 0,
+        available_import_dates: availableDates,
+        same_date_other_account_count: otherAccountCount ?? 0,
         message: "No trades found for this date",
       });
     }
@@ -282,10 +340,14 @@ export async function POST(req: NextRequest) {
     let premarket = "";
     let live = "";
     let post = "";
+    let existingNotesPayload: Record<string, unknown> = {};
 
     if (existing?.notes) {
       try {
         const parsed = JSON.parse(existing.notes);
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          existingNotesPayload = parsed as Record<string, unknown>;
+        }
         premarket = parsed?.premarket ?? "";
         live = parsed?.live ?? "";
         post = parsed?.post ?? "";
@@ -500,11 +562,16 @@ export async function POST(req: NextRequest) {
     }
 
     /* ---------- write notes (keep the same shape the UI uses) ---------- */
+    const entriesWithStrategy = restoreStrategyAssignments(
+      entries,
+      existingNotesPayload.entries
+    );
     const notes = JSON.stringify({
+      ...existingNotesPayload,
       premarket,
       live,
       post,
-      entries,
+      entries: entriesWithStrategy,
       exits,
       costs: {
         commissions: totalCommissions,
@@ -520,7 +587,7 @@ export async function POST(req: NextRequest) {
     /* ---------- upsert journal_entries ---------- */
     // ✅ IMPORTANT: store NET PnL in journal_entries.pnl so analytics & summaries match the broker.
     // Gross is still preserved in notes.pnl.gross for display if you want it.
-    await supabaseAdmin
+    const { error: journalEntryError } = await supabaseAdmin
       .from("journal_entries")
       .upsert(
         {
@@ -538,6 +605,9 @@ export async function POST(req: NextRequest) {
         },
         { onConflict: "user_id,date,account_id" }
       );
+    if (journalEntryError) {
+      return NextResponse.json({ error: journalEntryError.message }, { status: 500 });
+    }
 
     return NextResponse.json({
       date,

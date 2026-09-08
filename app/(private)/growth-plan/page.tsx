@@ -6737,7 +6737,13 @@ export default function GrowthPlanPage() {
   function updateStrategies(strategies: GrowthPlanStrategy[]) {
     setStepsData((prev) => ({
       ...prev,
-      strategy: { ...(prev.strategy ?? {}), strategies },
+      strategy: {
+        ...(prev.strategy ?? {}),
+        strategies: strategies.map((strategy) => ({
+          ...strategy,
+          id: strategy.id || crypto.randomUUID(),
+        })),
+      },
     }));
   }
 
@@ -8000,6 +8006,7 @@ export default function GrowthPlanPage() {
                 onClick={() => {
                   const arr = [...(stepsData.strategy?.strategies ?? [])];
                   arr.unshift({
+                    id: crypto.randomUUID(),
                     name: L("New Strategy", "Nueva estrategia"),
                     setup: "",
                     entryRules: "",

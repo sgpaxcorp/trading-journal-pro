@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { CalendarClock, MailCheck, RefreshCw, Send } from "lucide-react";
 
 import { supabaseBrowser } from "@/lib/supaBaseClient";
 
@@ -34,6 +35,38 @@ type Payload = {
   adminEmail: string;
   broadcastAudienceCount: number;
   broadcastRecipients: BroadcastRecipient[];
+  waitlistLaunch: WaitlistLaunch;
+};
+
+type WaitlistLaunchOverview = {
+  storageReady: boolean;
+  error: string | null;
+  total: number;
+  eligible: number;
+  pending: number;
+  emailSent: number;
+  pushSent: number;
+  inappSent: number;
+  failed: number;
+  unavailable: number;
+};
+
+type WaitlistLaunch = {
+  name: string;
+  description: string;
+  launchDateIso: string;
+  launchDateLabel: { en: string; es: string };
+  from: string;
+  discountUrl: string;
+  promoCode: string;
+  promotionConfigured: boolean;
+  resendConfigured: boolean;
+  preview: {
+    subject: string;
+    text: string;
+    html: string;
+  };
+  overview: WaitlistLaunchOverview;
 };
 
 type BroadcastRecipient = {
@@ -61,6 +94,8 @@ export default function AdminEmailAutomations({ lang }: Props) {
   const [notice, setNotice] = useState<{ tone: "success" | "error"; text: string } | null>(null);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [testRecipient, setTestRecipient] = useState("");
+  const [waitlistTestRecipient, setWaitlistTestRecipient] = useState("");
+  const [waitlistConfirmText, setWaitlistConfirmText] = useState("");
   const [broadcastTemplateKey, setBroadcastTemplateKey] = useState("custom_broadcast");
   const [broadcastSubject, setBroadcastSubject] = useState("");
   const [broadcastTitle, setBroadcastTitle] = useState("");
@@ -97,8 +132,108 @@ export default function AdminEmailAutomations({ lang }: Props) {
       }
       setData(body as Payload);
       setTestRecipient(String((body as Payload)?.adminEmail ?? ""));
+      setWaitlistTestRecipient(String((body as Payload)?.adminEmail ?? ""));
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function sendWaitlistTestEmail() {
+    setNotice(null);
+    setBusyKey("waitlist-launch-test");
+    try {
+      const { data: sessionData } = await supabaseBrowser.auth.getSession();
+      const token = sessionData?.session?.access_token;
+      if (!token) {
+        setNotice({ tone: "error", text: L("Admin session missing.", "Falta la sesión de admin.") });
+        return;
+      }
+
+      const res = await fetch("/api/admin/email-automations", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "waitlist_launch_test_email",
+          to: waitlistTestRecipient,
+        }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setNotice({
+          tone: "error",
+          text: String(body?.error ?? L("Could not send the test email.", "No se pudo enviar el email de prueba.")),
+        });
+        return;
+      }
+      setNotice({
+        tone: "success",
+        text: L(
+          `Launch email test sent to ${waitlistTestRecipient}. No waitlist records were changed.`,
+          `Prueba del email de lanzamiento enviada a ${waitlistTestRecipient}. No se modificó ningún registro de la waitlist.`
+        ),
+      });
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
+  async function runWaitlistLaunch(mode: "send" | "retry") {
+    setNotice(null);
+    const busy = mode === "send" ? "waitlist-launch-send" : "waitlist-launch-retry";
+    setBusyKey(busy);
+    try {
+      const { data: sessionData } = await supabaseBrowser.auth.getSession();
+      const token = sessionData?.session?.access_token;
+      if (!token) {
+        setNotice({ tone: "error", text: L("Admin session missing.", "Falta la sesión de admin.") });
+        return;
+      }
+
+      const res = await fetch("/api/admin/email-automations", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action: mode === "send" ? "waitlist_launch_send" : "waitlist_launch_retry",
+          confirmText: waitlistConfirmText,
+        }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setNotice({
+          tone: "error",
+          text: String(body?.error ?? L("Launch delivery failed.", "Falló el envío del lanzamiento.")),
+        });
+        return;
+      }
+
+      setData((current) =>
+        current && body?.overview
+          ? {
+              ...current,
+              waitlistLaunch: {
+                ...current.waitlistLaunch,
+                overview: body.overview as WaitlistLaunchOverview,
+              },
+            }
+          : current
+      );
+      setWaitlistConfirmText("");
+      const result = body?.result ?? {};
+      setNotice({
+        tone: "success",
+        text: L(
+          `Delivery completed. Email: ${result.emailSent ?? 0}, push: ${result.pushSent ?? 0}, platform messages: ${result.inappSent ?? 0}, failed: ${result.failed ?? 0}.`,
+          `Entrega completada. Email: ${result.emailSent ?? 0}, push: ${result.pushSent ?? 0}, mensajes en plataforma: ${result.inappSent ?? 0}, fallidos: ${result.failed ?? 0}.`
+        ),
+      });
+    } finally {
+      setBusyKey(null);
     }
   }
 
@@ -275,6 +410,12 @@ export default function AdminEmailAutomations({ lang }: Props) {
     }
   }
 
+  const waitlistLaunch = data?.waitlistLaunch ?? null;
+  const waitlistOverview = waitlistLaunch?.overview ?? null;
+  const launchIsDue = waitlistLaunch
+    ? Date.now() >= new Date(waitlistLaunch.launchDateIso).getTime()
+    : false;
+
   return (
     <section className="rounded-3xl border border-slate-800 bg-slate-900/60 p-6 md:p-7 space-y-6">
       <div className="flex flex-col gap-2">
@@ -289,6 +430,207 @@ export default function AdminEmailAutomations({ lang }: Props) {
           )}
         </p>
       </div>
+
+      {waitlistLaunch ? (
+        <div className="overflow-hidden rounded-2xl border border-emerald-500/25 bg-slate-950/55">
+          <div className="border-b border-slate-800 px-5 py-5 md:px-6">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div className="flex items-start gap-3">
+                <div className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-300">
+                  <MailCheck className="h-5 w-5" aria-hidden="true" />
+                </div>
+                <div>
+                  <p className="text-[11px] uppercase tracking-[0.24em] text-emerald-300">
+                    {L("Launch campaign", "Campaña de lanzamiento")}
+                  </p>
+                  <h3 className="mt-1 text-lg font-semibold text-slate-100">
+                    {L("Annual discount delivery", "Entrega del descuento anual")}
+                  </h3>
+                  <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-400">
+                    {L(
+                      "The first 500 eligible members receive the same offer by email, mobile push, and a message inside the platform.",
+                      "Los primeros 500 miembros elegibles reciben la misma oferta por email, push móvil y un mensaje dentro de la plataforma."
+                    )}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                <span className="inline-flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-slate-200">
+                  <CalendarClock className="h-4 w-4 text-sky-300" aria-hidden="true" />
+                  {isEs ? waitlistLaunch.launchDateLabel.es : waitlistLaunch.launchDateLabel.en}
+                </span>
+                <span className={`rounded-lg border px-3 py-2 font-semibold ${launchIsDue ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200" : "border-amber-500/30 bg-amber-500/10 text-amber-200"}`}>
+                  {launchIsDue ? L("Ready to launch", "Listo para lanzar") : L("Locked until launch", "Cerrado hasta el lanzamiento")}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-px bg-slate-800 sm:grid-cols-4 xl:grid-cols-8">
+            {[
+              [L("Registered", "Registrados"), waitlistOverview?.total ?? 0],
+              [L("Eligible", "Elegibles"), waitlistOverview?.eligible ?? 0],
+              [L("Pending channels", "Canales pendientes"), waitlistOverview?.pending ?? 0],
+              [L("Email sent", "Email enviados"), waitlistOverview?.emailSent ?? 0],
+              [L("Push sent", "Push enviados"), waitlistOverview?.pushSent ?? 0],
+              [L("Platform messages", "Mensajes en plataforma"), waitlistOverview?.inappSent ?? 0],
+              [L("Failed", "Fallidos"), waitlistOverview?.failed ?? 0],
+              [L("Unavailable", "No disponibles"), waitlistOverview?.unavailable ?? 0],
+            ].map(([label, value]) => (
+              <div key={String(label)} className="min-h-20 bg-slate-950/95 px-4 py-4">
+                <p className="text-[11px] text-slate-500">{label}</p>
+                <p className="mt-1 text-xl font-semibold text-slate-100">{value}</p>
+              </div>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-1 xl:grid-cols-[0.82fr_1.18fr]">
+            <div className="space-y-5 border-b border-slate-800 p-5 md:p-6 xl:border-b-0 xl:border-r">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div className="border-b border-slate-800 pb-3 sm:border-b-0 sm:border-r sm:pb-0 sm:pr-3">
+                  <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Resend</p>
+                  <p className={`mt-1 text-sm font-semibold ${waitlistLaunch.resendConfigured ? "text-emerald-300" : "text-amber-300"}`}>
+                    {waitlistLaunch.resendConfigured ? L("Ready", "Listo") : L("Configuration required", "Requiere configuración")}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Promo code</p>
+                  <p className={`mt-1 break-all text-sm font-semibold ${waitlistLaunch.promotionConfigured ? "text-emerald-300" : "text-amber-300"}`}>
+                    {waitlistLaunch.promoCode || L("Not configured", "No configurado")}
+                  </p>
+                </div>
+              </div>
+
+              {!waitlistOverview?.storageReady ? (
+                <div className="rounded-lg border border-amber-500/25 bg-amber-500/10 px-4 py-3 text-xs leading-5 text-amber-200">
+                  {L(
+                    "The preview is available, but the waitlist database migration must be applied before launch delivery.",
+                    "El preview está disponible, pero la migración de la base de datos de waitlist debe aplicarse antes del envío."
+                  )}
+                </div>
+              ) : null}
+
+              <div className="space-y-3 border-t border-slate-800 pt-5">
+                <div>
+                  <p className="text-sm font-semibold text-slate-100">
+                    {L("Send an email test", "Enviar un email de prueba")}
+                  </p>
+                  <p className="mt-1 text-xs leading-5 text-slate-400">
+                    {L(
+                      "This sends only one preview and does not change waitlist delivery records.",
+                      "Esto envía solamente un preview y no cambia los registros de entrega de la waitlist."
+                    )}
+                  </p>
+                </div>
+                <label className="flex flex-col gap-2">
+                  <span className="text-xs text-slate-400">{L("Test email", "Email de prueba")}</span>
+                  <input
+                    type="email"
+                    value={waitlistTestRecipient}
+                    onChange={(event) => setWaitlistTestRecipient(event.target.value)}
+                    className="rounded-lg border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-slate-100 outline-none focus:border-emerald-500/60"
+                    placeholder="you@example.com"
+                  />
+                </label>
+                <button
+                  type="button"
+                  onClick={() => void sendWaitlistTestEmail()}
+                  disabled={busyKey === "waitlist-launch-test" || !waitlistTestRecipient || !waitlistLaunch.resendConfigured}
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-emerald-500/35 bg-emerald-500/10 px-4 py-3 text-sm font-semibold text-emerald-200 transition hover:bg-emerald-500/15 disabled:cursor-not-allowed disabled:opacity-45"
+                >
+                  <Send className="h-4 w-4" aria-hidden="true" />
+                  {busyKey === "waitlist-launch-test" ? L("Sending test...", "Enviando prueba...") : L("Send test email", "Enviar email de prueba")}
+                </button>
+              </div>
+
+              <div className="space-y-3 border-t border-slate-800 pt-5">
+                <div>
+                  <p className="text-sm font-semibold text-slate-100">
+                    {L("Launch controls", "Controles de lanzamiento")}
+                  </p>
+                  <p className="mt-1 text-xs leading-5 text-slate-400">
+                    {L(
+                      "Manual delivery is unlocked at launch time. The scheduled process remains active as a backup.",
+                      "El envío manual se habilita a la hora del lanzamiento. El proceso programado permanece activo como respaldo."
+                    )}
+                  </p>
+                </div>
+                <label className="flex flex-col gap-2">
+                  <span className="text-xs text-slate-400">
+                    {L("Type SEND LAUNCH or RETRY FAILED", "Escribe SEND LAUNCH o RETRY FAILED")}
+                  </span>
+                  <input
+                    value={waitlistConfirmText}
+                    onChange={(event) => setWaitlistConfirmText(event.target.value)}
+                    className="rounded-lg border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-slate-100 outline-none focus:border-sky-500/60"
+                    placeholder="SEND LAUNCH"
+                  />
+                </label>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  <button
+                    type="button"
+                    onClick={() => void runWaitlistLaunch("send")}
+                    disabled={
+                      busyKey === "waitlist-launch-send" ||
+                      !launchIsDue ||
+                      !waitlistOverview?.storageReady ||
+                      !waitlistLaunch.resendConfigured ||
+                      !waitlistLaunch.promotionConfigured ||
+                      waitlistConfirmText.trim().toUpperCase() !== "SEND LAUNCH"
+                    }
+                    className="inline-flex items-center justify-center gap-2 rounded-lg border border-sky-500/35 bg-sky-500/10 px-4 py-3 text-sm font-semibold text-sky-200 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    <Send className="h-4 w-4" aria-hidden="true" />
+                    {L("Send launch", "Enviar lanzamiento")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void runWaitlistLaunch("retry")}
+                    disabled={
+                      busyKey === "waitlist-launch-retry" ||
+                      !launchIsDue ||
+                      !waitlistOverview?.failed ||
+                      waitlistConfirmText.trim().toUpperCase() !== "RETRY FAILED"
+                    }
+                    className="inline-flex items-center justify-center gap-2 rounded-lg border border-amber-500/35 bg-amber-500/10 px-4 py-3 text-sm font-semibold text-amber-200 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    <RefreshCw className="h-4 w-4" aria-hidden="true" />
+                    {L("Retry failed", "Reintentar fallidos")}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-3 p-5 md:p-6">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+                <div>
+                  <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">
+                    {L("Exact email preview", "Preview exacto del email")}
+                  </p>
+                  <p className="mt-1 text-sm font-semibold text-slate-100">{waitlistLaunch.preview.subject}</p>
+                </div>
+                <p className="max-w-xs break-all text-xs text-slate-500">{waitlistLaunch.from}</p>
+              </div>
+              <div className="overflow-hidden rounded-lg border border-slate-700 bg-white">
+                <iframe
+                  title={L("Waitlist launch email preview", "Preview del email de lanzamiento")}
+                  srcDoc={waitlistLaunch.preview.html}
+                  sandbox=""
+                  referrerPolicy="no-referrer"
+                  className="h-[560px] w-full"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {notice ? (
+        <div className={`rounded-lg border px-4 py-3 text-sm ${notice.tone === "success" ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200" : "border-red-500/30 bg-red-500/10 text-red-200"}`}>
+          {notice.text}
+        </div>
+      ) : null}
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-[0.9fr_1.1fr]">
         <div className="rounded-2xl border border-slate-800 bg-slate-950/50 p-5 space-y-4">
@@ -601,11 +943,6 @@ export default function AdminEmailAutomations({ lang }: Props) {
             </p>
           </div>
 
-          {notice ? (
-            <div className={`rounded-2xl border px-4 py-3 text-sm ${notice.tone === "success" ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200" : "border-red-500/30 bg-red-500/10 text-red-200"}`}>
-              {notice.text}
-            </div>
-          ) : null}
         </div>
 
         <div className="rounded-2xl border border-slate-800 bg-slate-950/40 p-5">

@@ -2,7 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
+  InputAccessoryView,
+  Keyboard,
   KeyboardAvoidingView,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -26,6 +29,7 @@ type AICoachScreenProps = {
 };
 
 const ACCOUNT_SERIES_CONTEXT_PATH = "/api/account/series?seriesDays=365";
+const COACH_INPUT_ACCESSORY_ID = "coach-input-accessory";
 
 type CoachThread = {
   id: string;
@@ -641,6 +645,7 @@ export function AICoachScreen({}: AICoachScreenProps) {
   }, [activeThread, createNewThread, fetchMessages, fetchThreads, language, loadCoachContext]);
 
   async function handleNewThread() {
+    Keyboard.dismiss();
     try {
       setScreenError(null);
       const created = await createNewThread();
@@ -710,6 +715,7 @@ export function AICoachScreen({}: AICoachScreenProps) {
 
   async function handleSend() {
     if (!input.trim() || sending) return;
+    Keyboard.dismiss();
     if (!supabaseMobile) {
       setScreenError(
         t(
@@ -964,7 +970,10 @@ export function AICoachScreen({}: AICoachScreenProps) {
             return (
               <Pressable
                 key={thread.id}
-                onPress={() => setActiveThread(thread)}
+                onPress={() => {
+                  Keyboard.dismiss();
+                  setActiveThread(thread);
+                }}
                 style={[styles.threadCard, isActive && styles.threadCardActive]}
               >
                 <Text style={styles.threadTitle}>{thread.title || "Business AI Coaching"}</Text>
@@ -1014,7 +1023,9 @@ export function AICoachScreen({}: AICoachScreenProps) {
               );
             }}
             contentContainerStyle={styles.chatListContent}
+            keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
             keyboardShouldPersistTaps="handled"
+            onScrollBeginDrag={Keyboard.dismiss}
             ListEmptyComponent={
               <Text style={styles.emptyText}>
                 {t(
@@ -1053,7 +1064,7 @@ export function AICoachScreen({}: AICoachScreenProps) {
         )}
       </View>
 
-      <KeyboardAvoidingView behavior="padding">
+      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined}>
         <View style={styles.inputRow}>
           <TextInput
             style={styles.input}
@@ -1062,6 +1073,7 @@ export function AICoachScreen({}: AICoachScreenProps) {
             value={input}
             onChangeText={setInput}
             multiline
+            inputAccessoryViewID={Platform.OS === "ios" ? COACH_INPUT_ACCESSORY_ID : undefined}
           />
           <Pressable
             style={[styles.sendButton, !canSend && styles.sendButtonDisabled]}
@@ -1079,6 +1091,21 @@ export function AICoachScreen({}: AICoachScreenProps) {
           </Pressable>
         </View>
       </KeyboardAvoidingView>
+      {Platform.OS === "ios" ? (
+        <InputAccessoryView nativeID={COACH_INPUT_ACCESSORY_ID} backgroundColor={colors.surface}>
+          <View style={styles.keyboardAccessory}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={t(language, "Hide keyboard", "Ocultar teclado")}
+              hitSlop={8}
+              onPress={Keyboard.dismiss}
+              style={styles.keyboardDoneButton}
+            >
+              <Text style={styles.keyboardDoneText}>{t(language, "Done", "Listo")}</Text>
+            </Pressable>
+          </View>
+        </InputAccessoryView>
+      ) : null}
     </ScreenScaffold>
   );
 }
@@ -1252,6 +1279,31 @@ const createStyles = (colors: ThemeColors) =>
       flexDirection: "row",
       alignItems: "flex-end",
       gap: 8,
+    },
+    keyboardAccessory: {
+      minHeight: 44,
+      paddingHorizontal: 16,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "flex-end",
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: colors.border,
+      backgroundColor: colors.surface,
+    },
+    keyboardDoneButton: {
+      minWidth: 64,
+      minHeight: 36,
+      alignItems: "center",
+      justifyContent: "center",
+      borderRadius: 10,
+      backgroundColor: colors.successSoft,
+      borderWidth: 1,
+      borderColor: colors.primary,
+    },
+    keyboardDoneText: {
+      color: colors.primary,
+      fontSize: 13,
+      fontWeight: "800",
     },
     input: {
       flex: 1,

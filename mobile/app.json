@@ -6,12 +6,12 @@
     "version": "1.0.0",
     "orientation": "default",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "dark",
     "newArchEnabled": false,
     "splash": {
       "image": "./assets/neurotrader-logo-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#020B26"
     },
     "ios": {
       "supportsTablet": true,
@@ -69,7 +69,9 @@
         "expo-notifications",
         {
           "icon": "./assets/notification-icon.png",
-          "color": "#00BFA6"
+          "color": "#00BFA6",
+          "mode": "production",
+          "enableBackgroundRemoteNotifications": true
         }
       ],
       "./plugins/with-device-debug-bundling",

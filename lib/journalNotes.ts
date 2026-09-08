@@ -20,6 +20,7 @@ export type StoredTradeRow = {
   price: number;
   quantity: number;
   time: string;
+  playbookStrategyAssignment?: unknown;
 };
 
 

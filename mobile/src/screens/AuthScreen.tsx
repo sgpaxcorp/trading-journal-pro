@@ -2,14 +2,16 @@ import { useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Image,
-  Linking,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
+  useWindowDimensions,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { apiPost } from "../lib/api";
 import { MOBILE_PASSWORD_RESET_REDIRECT_URL } from "../lib/authRecovery";
@@ -21,7 +23,6 @@ import { useTheme } from "../lib/ThemeContext";
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const logo = require("../../assets/apple-touch-icon.png");
-const WEB_BASE = "https://www.neurotrader-journal.com";
 
 type AuthMode = "signin" | "forgotPassword" | "recoverAccount";
 
@@ -41,7 +42,10 @@ function getReadableApiError(error: unknown, fallback: string) {
 export function AuthScreen() {
   const { language } = useLanguage();
   const { colors } = useTheme();
+  const { width } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   const styles = useMemo(() => createStyles(colors), [colors]);
+  const isTablet = Platform.OS === "ios" ? Platform.isPad : width >= 768;
   const [mode, setMode] = useState<AuthMode>("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -149,8 +153,8 @@ export function AuthScreen() {
     mode === "signin"
       ? t(
           language,
-          "Sign in with your Trader Entrepreneur account to access your trading business workspace.",
-          "Inicia sesión con tu cuenta de Empresario Trader para acceder a tu espacio de empresa de trading."
+          "Sign in with your Trader Entrepreneur account to access your Trading Business Center.",
+          "Inicia sesión con tu cuenta de Empresario Trader para acceder a tu Trading Business Center."
         )
       : mode === "forgotPassword"
         ? t(
@@ -167,18 +171,46 @@ export function AuthScreen() {
   return (
     <ScrollView
       style={styles.root}
-      contentContainerStyle={styles.content}
+      contentContainerStyle={[
+        styles.content,
+        { paddingTop: Math.max(insets.top + 12, 24), paddingBottom: Math.max(insets.bottom + 16, 28) },
+        isTablet && styles.contentTablet,
+      ]}
       keyboardShouldPersistTaps="handled"
       bounces={false}
     >
-      <View style={styles.logoWrap}>
-        {/* eslint-disable-next-line jsx-a11y/alt-text */}
-        <Image source={logo} style={styles.logo} resizeMode="contain" />
-      </View>
-      <View style={styles.card}>
-        <Text style={styles.kicker}>Neuro Trader</Text>
-        <Text style={styles.title}>{title}</Text>
-        <Text style={styles.subtitle}>{subtitle}</Text>
+      <View style={[styles.authShell, isTablet && styles.authShellTablet]}>
+        <View style={[styles.hero, isTablet && styles.heroTablet]}>
+          {/* eslint-disable-next-line jsx-a11y/alt-text */}
+          <Image source={logo} style={[styles.logo, isTablet && styles.logoTablet]} resizeMode="contain" />
+          <Text style={styles.heroEyebrow}>
+            {t(language, "Trading Business Center", "Trading Business Center")}
+          </Text>
+          <Text style={[styles.heroTitle, isTablet && styles.heroTitleTablet]}>
+            {t(
+              language,
+              "Run your trading business like a trading entrepreneur.",
+              "Dirige tu negocio de trading como un empresario del trading."
+            )}
+          </Text>
+          <Text style={styles.heroBody}>
+            {t(
+              language,
+              "Monitor performance, review your KPIs, follow your operating plan, document execution, and consult your Business AI Coach inside one secure business center.",
+              "Monitorea resultados, revisa tus KPIs, sigue tu plan operativo, documenta la ejecución y consulta a tu Coach Empresarial IA dentro de un centro empresarial seguro."
+            )}
+          </Text>
+          <View style={styles.heroPoints}>
+            <Text style={styles.heroPoint}>• {t(language, "Business performance and risk control", "Rendimiento empresarial y control de riesgo")}</Text>
+            <Text style={styles.heroPoint}>• {t(language, "Operating plan and milestone tracking", "Plan operativo y seguimiento de milestones")}</Text>
+            <Text style={styles.heroPoint}>• {t(language, "AI coaching and decision memory", "Coaching con IA y memoria de decisiones")}</Text>
+          </View>
+        </View>
+
+        <View style={[styles.card, isTablet && styles.cardTablet]}>
+          <Text style={styles.kicker}>{t(language, "Secure business access", "Acceso empresarial seguro")}</Text>
+          <Text style={styles.title}>{title}</Text>
+          <Text style={styles.subtitle}>{subtitle}</Text>
 
         {mode === "signin" ? (
           <>
@@ -188,6 +220,9 @@ export function AuthScreen() {
               keyboardType="email-address"
               autoCapitalize="none"
               autoCorrect={false}
+              autoComplete="email"
+              textContentType="username"
+              returnKeyType="next"
               placeholder={t(language, "Email", "Correo")}
               placeholderTextColor={colors.textMuted}
               style={styles.input}
@@ -196,6 +231,10 @@ export function AuthScreen() {
               value={password}
               onChangeText={setPassword}
               secureTextEntry
+              autoComplete="current-password"
+              textContentType="password"
+              returnKeyType="done"
+              onSubmitEditing={handleSubmit}
               placeholder={t(language, "Password", "Contraseña")}
               placeholderTextColor={colors.textMuted}
               style={styles.input}
@@ -218,14 +257,13 @@ export function AuthScreen() {
               </Pressable>
             </View>
 
-            <View style={styles.tertiaryRow}>
-              <Text style={styles.helperText}>
-                {t(language, "Need a Trader Entrepreneur account?", "¿Necesitas una cuenta de Empresario Trader?")}
-              </Text>
-              <Pressable onPress={() => Linking.openURL(`${WEB_BASE}/signup`)}>
-                <Text style={styles.tertiaryLink}>{t(language, "Start your NeuroTrader business account", "Comienza tu cuenta empresarial en NeuroTrader")}</Text>
-              </Pressable>
-            </View>
+            <Text style={styles.accountNote}>
+              {t(
+                language,
+                "Use your existing NeuroTrader account. This app is the secure mobile companion for account holders.",
+                "Usa tu cuenta existente de NeuroTrader. Esta app es el centro móvil seguro para quienes ya tienen acceso."
+              )}
+            </Text>
           </>
         ) : (
           <>
@@ -235,6 +273,10 @@ export function AuthScreen() {
               keyboardType="email-address"
               autoCapitalize="none"
               autoCorrect={false}
+              autoComplete="email"
+              textContentType="emailAddress"
+              returnKeyType="send"
+              onSubmitEditing={() => handleRecoveryRequest(mode === "forgotPassword" ? "password" : "account")}
               placeholder={t(language, "Email linked to the account", "Email vinculado a la cuenta")}
               placeholderTextColor={colors.textMuted}
               style={styles.input}
@@ -283,6 +325,7 @@ export function AuthScreen() {
 
         {message ? <Text style={styles.successText}>{message}</Text> : null}
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
+        </View>
       </View>
     </ScrollView>
   );
@@ -296,27 +339,99 @@ const createStyles = (colors: ThemeColors) =>
     },
     content: {
       padding: 16,
-      paddingTop: 12,
-      paddingBottom: 28,
-      justifyContent: "flex-start",
+      paddingVertical: 24,
+      flexGrow: 1,
+      justifyContent: "center",
     },
-    card: {
-      borderRadius: 16,
+    contentTablet: {
+      paddingHorizontal: 32,
+      paddingVertical: 40,
+    },
+    authShell: {
+      width: "100%",
+      maxWidth: 1120,
+      alignSelf: "center",
+      overflow: "hidden",
+      borderRadius: 26,
       borderWidth: 1,
       borderColor: colors.border,
-      backgroundColor: colors.card,
-      padding: 16,
+      backgroundColor: colors.surface,
+    },
+    authShellTablet: {
+      flexDirection: "row",
+      alignItems: "stretch",
+    },
+    hero: {
+      backgroundColor: colors.surface,
+      padding: 20,
       gap: 10,
     },
-    logoWrap: {
-      alignItems: "center",
+    heroTablet: {
+      flex: 1.15,
+      minHeight: 520,
       justifyContent: "center",
-      marginBottom: 6,
+      padding: 36,
+    },
+    heroEyebrow: {
+      color: colors.primary,
+      fontSize: 11,
+      fontWeight: "900",
+      letterSpacing: 1.5,
+      textTransform: "uppercase",
+    },
+    heroTitle: {
+      color: colors.textPrimary,
+      fontSize: 27,
+      lineHeight: 33,
+      fontWeight: "900",
+      maxWidth: 520,
+    },
+    heroTitleTablet: {
+      fontSize: 34,
+      lineHeight: 41,
+    },
+    heroBody: {
+      color: colors.textMuted,
+      fontSize: 14,
+      lineHeight: 21,
+      maxWidth: 560,
+    },
+    heroPoints: {
+      gap: 7,
+      marginTop: 4,
+    },
+    heroPoint: {
+      color: colors.textPrimary,
+      fontSize: 12,
+      lineHeight: 18,
+      fontWeight: "700",
+    },
+    card: {
+      backgroundColor: colors.surface,
+      borderTopWidth: 1,
+      borderTopColor: colors.border,
+      padding: 20,
+      gap: 10,
+    },
+    cardTablet: {
+      flex: 0.85,
+      alignSelf: "stretch",
+      justifyContent: "center",
+      borderTopWidth: 0,
+      borderLeftWidth: 1,
+      borderLeftColor: colors.border,
+      padding: 32,
     },
     logo: {
-      width: 350,
-      height: 350,
-      borderRadius: 36,
+      width: 88,
+      height: 88,
+      borderRadius: 22,
+      marginBottom: 2,
+    },
+    logoTablet: {
+      width: 124,
+      height: 124,
+      borderRadius: 30,
     },
     kicker: {
       color: colors.primary,
@@ -340,7 +455,7 @@ const createStyles = (colors: ThemeColors) =>
       borderRadius: 10,
       borderWidth: 1,
       borderColor: colors.border,
-      backgroundColor: colors.surface,
+      backgroundColor: colors.background,
       color: colors.textPrimary,
       paddingHorizontal: 12,
       paddingVertical: 10,
@@ -365,27 +480,16 @@ const createStyles = (colors: ThemeColors) =>
       gap: 10,
       marginTop: 4,
     },
-    tertiaryRow: {
-      flexDirection: "row",
-      flexWrap: "wrap",
-      alignItems: "center",
-      gap: 6,
-      marginTop: 2,
-    },
-    helperText: {
-      color: colors.textMuted,
-      fontSize: 12,
-    },
     secondaryLink: {
       color: colors.primary,
       fontSize: 12,
       fontWeight: "600",
     },
-    tertiaryLink: {
-      color: colors.textPrimary,
+    accountNote: {
+      color: colors.textMuted,
       fontSize: 12,
-      fontWeight: "600",
-      textDecorationLine: "underline",
+      lineHeight: 17,
+      marginTop: 2,
     },
     infoCard: {
       borderRadius: 12,

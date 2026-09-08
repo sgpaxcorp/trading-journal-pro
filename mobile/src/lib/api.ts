@@ -6,7 +6,9 @@ const EXTRA_API_URL =
   Constants.expoConfig?.extra?.EXPO_PUBLIC_API_URL ||
   Constants.expoConfig?.extra?.apiUrl ||
   "";
-const API_BASE_URL = (process.env.EXPO_PUBLIC_API_URL || EXTRA_API_URL || DEFAULT_API_URL).replace(/\/+$/, "");
+const API_BASE_URL = String(process.env.EXPO_PUBLIC_API_URL || EXTRA_API_URL || DEFAULT_API_URL)
+  .trim()
+  .replace(/\/+$/, "");
 const inFlightGets = new Map<string, Promise<unknown>>();
 
 async function getAccessToken() {

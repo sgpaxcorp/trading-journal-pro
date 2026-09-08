@@ -2,7 +2,7 @@
   "crons": [
     {
       "path": "/api/notifications/send-daily",
-      "schedule": "30 8 * * 1-5"
+      "schedule": "*/30 * * * 1-5"
     },
     {
       "path": "/api/notifications/send-daily-motivation",
@@ -31,6 +31,10 @@
     {
       "path": "/api/lifecycle/inactivity",
       "schedule": "0 15 * * *"
+    },
+    {
+      "path": "/api/waitlist/send-launch-discounts",
+      "schedule": "0 4 * * *"
     }
   ]
 }

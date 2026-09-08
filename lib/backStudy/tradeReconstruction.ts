@@ -17,6 +17,7 @@ export type BackStudyTradeRow = {
   instrumentKey?: string | null;
   right?: string | null;
   strike?: number | null;
+  playbookStrategyAssignment?: unknown;
 };
 
 export type BackStudySessionWithTrades = {
@@ -47,6 +48,8 @@ export type BackStudyTradeView = {
   instrumentKey: string | null;
   instrumentKeySource: "row" | "symbol" | "row_fields" | null;
   instrumentKeyAmbiguous: boolean;
+  playbookStrategyAssignment?: unknown;
+  mixedPlaybookStrategies: boolean;
 };
 
 type ParsedOptionSymbol = {
@@ -164,6 +167,8 @@ export function normalizeBackStudyTradeRows(rows: unknown[]): BackStudyTradeRow[
       instrumentKey: r.instrumentKey ?? r.instrument_key ?? null,
       right,
       strike,
+      playbookStrategyAssignment:
+        r.playbookStrategyAssignment ?? r.playbook_strategy_assignment ?? null,
     };
   });
 }
@@ -316,6 +321,16 @@ function buildTradeViewFromLegs(
     .filter(Boolean);
   const sourceKey = sourceRowIds.length ? sourceRowIds.join(":") : `${entryTime}-${exitTime}`;
   const id = `${session.date}-${symbol}-${kind}-${sequence}-${sourceKey}`;
+  const strategyAssignments = entSorted
+    .map((row) => row.playbookStrategyAssignment)
+    .filter(Boolean);
+  const strategyIds = Array.from(
+    new Set(
+      strategyAssignments
+        .map((assignment: any) => String(assignment?.strategyId ?? assignment?.snapshot?.id ?? "").trim())
+        .filter(Boolean)
+    )
+  );
 
   return {
     id,
@@ -334,6 +349,8 @@ function buildTradeViewFromLegs(
     entries: entSorted,
     exits: exSorted,
     sourceRowIds,
+    playbookStrategyAssignment: strategyAssignments[0] ?? null,
+    mixedPlaybookStrategies: strategyIds.length > 1,
     ...instrument,
   };
 }

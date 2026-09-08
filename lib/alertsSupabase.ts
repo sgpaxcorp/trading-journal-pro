@@ -862,12 +862,12 @@ export async function fireTestEventFromRule(
       triggered_at: now.toISOString(),
     };
 
-    // Keep test events isolated from live events. We intentionally avoid the
-    // (user_id, rule_id, date) upsert path so a manual test never overwrites a
-    // real production event for the same rule/day.
+    // Insert test events independently so a manual test never overwrites a
+    // live event. The database requires every event to have a date.
     const baseRow = {
       user_id: userId,
       rule_id: ruleId,
+      date,
       status: "active",
       triggered_at: now.toISOString(),
       dismissed_until: null,
@@ -891,7 +891,14 @@ export async function fireTestEventFromRule(
     if (error) {
       const fallback = await supabaseBrowser
         .from("ntj_alert_events")
-        .insert({ ...baseRow, date: null })
+        .insert({
+          user_id: userId,
+          rule_id: ruleId,
+          date,
+          status: "active",
+          triggered_at: now.toISOString(),
+          payload: nextPayload,
+        })
         .select("id")
         .single();
       data = fallback.data;

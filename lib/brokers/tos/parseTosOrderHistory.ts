@@ -1,5 +1,7 @@
 import type { NormalizedOrderEvent, ParseResult, ParserOptions } from "@/lib/brokers/types";
 
+export const TOS_ORDER_HISTORY_PARSER_VERSION = 2;
+
 const MONTH_CODES = "FGHJKMNQUVXZ";
 
 function normalizeCell(v: unknown): string {
@@ -68,6 +70,28 @@ function normalizeExpiry(raw: string): string | null {
     let yy = Number(m1[3]);
     if (yy < 100) yy = 2000 + yy;
     return `${yy}-${String(mm).padStart(2, "0")}-${String(dd).padStart(2, "0")}`;
+  }
+  const monthMap: Record<string, number> = {
+    JAN: 1,
+    FEB: 2,
+    MAR: 3,
+    APR: 4,
+    MAY: 5,
+    JUN: 6,
+    JUL: 7,
+    AUG: 8,
+    SEP: 9,
+    OCT: 10,
+    NOV: 11,
+    DEC: 12,
+  };
+  const m2 = s.toUpperCase().match(/^(\d{1,2})\s+([A-Z]{3})\s+(\d{2,4})$/);
+  if (m2) {
+    const month = monthMap[m2[2]];
+    if (!month) return null;
+    let year = Number(m2[3]);
+    if (year < 100) year += 2000;
+    return `${year}-${String(month).padStart(2, "0")}-${m2[1].padStart(2, "0")}`;
   }
   return null;
 }
@@ -244,6 +268,12 @@ function detectHeader(rows: string[][]): HeaderMatch | null {
     const price = findHeaderIndex(header, ["PRICE", "LIMIT"]);
 
     if (timePlaced >= 0 && side >= 0 && qty >= 0 && posEffect >= 0 && symbol >= 0 && status >= 0) {
+      const tif = findHeaderIndex(header, ["TIF", "TIME IN FORCE"]);
+      let orderType = findHeaderIndex(header, ["ORDER TYPE", "ORDER", "ORD TYPE", /ORDER\s*TYPE/]);
+      // Schwab currently leaves this header cell blank even though its rows
+      // contain LMT/MKT. In that format it sits immediately before TIF.
+      if (orderType < 0 && tif > price + 1) orderType = tif - 1;
+      if (orderType < 0 && status > price + 1) orderType = status - 2;
       return {
         headerRowIdx: i,
         cols: {
@@ -258,8 +288,8 @@ function detectHeader(rows: string[][]): HeaderMatch | null {
           strike: findHeaderIndex(header, ["STRIKE"]),
           type: findHeaderIndex(header, ["TYPE", "RIGHT", "CALL/PUT"]),
           price,
-          orderType: findHeaderIndex(header, ["ORDER TYPE", "ORDER", "ORD TYPE", /ORDER\s*TYPE/]),
-          tif: findHeaderIndex(header, ["TIF", "TIME IN FORCE"]),
+          orderType,
+          tif,
           status,
         },
       };
@@ -284,7 +314,12 @@ export function parseTosOrderHistoryFromRows(rows: string[][], opts: ParserOptio
   }
 
   const events: NormalizedOrderEvent[] = [];
-  const dataRows = rows.slice(header.headerRowIdx + 1);
+  const allDataRows = rows.slice(header.headerRowIdx + 1);
+  const nextSection = allDataRows.findIndex((row) => {
+    const first = normalizeCell(row[0]).toUpperCase();
+    return first === "ACCOUNT TRADE HISTORY" || first === "PROFITS AND LOSSES" || first === "ACCOUNT SUMMARY";
+  });
+  const dataRows = nextSection >= 0 ? allDataRows.slice(0, nextSection) : allDataRows;
 
   let lastEvent: NormalizedOrderEvent | null = null;
   let lastRawNotes: string[] = [];
@@ -317,7 +352,11 @@ export function parseTosOrderHistoryFromRows(rows: string[][], opts: ParserOptio
       if (reMatch) lastEvent.replace_id = reMatch[1];
 
       const stopMatch = noteLine.match(/(\d+(?:\.\d+)?)\s*STP/i);
-      if (stopMatch) lastEvent.stop_price = parseNumber(stopMatch[1]);
+      if (stopMatch) {
+        lastEvent.stop_price = parseNumber(stopMatch[1]);
+        const currentType = String(lastEvent.order_type ?? "").toUpperCase();
+        lastEvent.order_type = currentType === "MKT" ? "STP MKT" : currentType || "STP";
+      }
 
       lastRawNotes.push(noteLine);
       if (lastEvent.raw) {
@@ -372,7 +411,7 @@ export function parseTosOrderHistoryFromRows(rows: string[][], opts: ParserOptio
       stop_price: orderType === "STP" ? priceVal : null,
       oco_id: null,
       replace_id: null,
-      raw: { row: r },
+      raw: { row: r, row_index: rowIndex },
     };
 
     lastEvent = event;

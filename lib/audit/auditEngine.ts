@@ -22,6 +22,14 @@ export type AuditEvidence = {
     limit_price: number | null;
     stop_price: number | null;
   }>;
+  protection_gaps: Array<{
+    instrument_key: string;
+    removed_at: string;
+    restored_at: string | null;
+    duration_sec: number | null;
+    restored: boolean;
+    ended_with_trade_exit: boolean;
+  }>;
 };
 
 export type AuditMetrics = {
@@ -30,8 +38,14 @@ export type AuditMetrics = {
   oco_used: boolean;
   stop_present: boolean;
   stop_mod_count: number;
+  stop_cancel_count: number;
+  stop_reprotected_count: number;
+  stop_removed_without_replacement: boolean;
+  max_time_without_stop_sec: number | null;
   cancel_count: number;
   replace_count: number;
+  protective_bracket_used: boolean;
+  automatic_bracket_protection: boolean;
   market_exit_used: boolean;
   manual_market_exit: boolean;
   stop_market_filled: boolean;
@@ -65,11 +79,103 @@ function toMs(ts: string): number {
   return Number.isFinite(t) ? t : 0;
 }
 
+function isStopEvent(event: NormalizedOrderEvent): boolean {
+  const orderType = String(event.order_type || "").toUpperCase();
+  return (
+    String(event.pos_effect || "").toUpperCase() === "TO_CLOSE" &&
+    (event.stop_price != null || orderType.includes("STP") || String(event.status || "").toUpperCase().includes("STOP"))
+  );
+}
+
+function isCanceledEvent(event: NormalizedOrderEvent): boolean {
+  return event.event_type === "ORDER_CANCELED" || String(event.status || "").toUpperCase().includes("CANCEL");
+}
+
+function protectionLifecycle(events: NormalizedOrderEvent[]) {
+  const ordered = [...events].sort((a, b) => toMs(a.ts_utc) - toMs(b.ts_utc));
+  const gaps: AuditEvidence["protection_gaps"] = [];
+  let protectiveBracketUsed = false;
+  let automaticBracketProtection = false;
+
+  const byInstrument = new Map<string, NormalizedOrderEvent[]>();
+  for (const event of ordered) {
+    const key = String(event.instrument_key || event.symbol || "UNKNOWN");
+    const list = byInstrument.get(key) ?? [];
+    list.push(event);
+    byInstrument.set(key, list);
+  }
+
+  for (const [instrumentKey, instrumentEvents] of byInstrument) {
+    const entryFills = instrumentEvents.filter(
+      (event) => event.event_type === "ORDER_FILLED" && String(event.pos_effect || "").toUpperCase() === "TO_OPEN"
+    );
+
+    for (const entry of entryFills) {
+      const entryMs = toMs(entry.ts_utc);
+      const exit = instrumentEvents.find(
+        (event) =>
+          toMs(event.ts_utc) >= entryMs &&
+          event.event_type === "ORDER_FILLED" &&
+          String(event.pos_effect || "").toUpperCase() === "TO_CLOSE"
+      );
+      const exitMs = exit ? toMs(exit.ts_utc) : Number.POSITIVE_INFINITY;
+      const windowEvents = instrumentEvents.filter((event) => {
+        const ts = toMs(event.ts_utc);
+        return ts >= entryMs && ts <= exitMs;
+      });
+      const stops = windowEvents.filter(isStopEvent);
+      const limits = windowEvents.filter(
+        (event) =>
+          String(event.pos_effect || "").toUpperCase() === "TO_CLOSE" &&
+          String(event.order_type || "").toUpperCase().includes("LMT")
+      );
+      const stopOcoIds = new Set(stops.map((event) => event.oco_id).filter((id): id is string => !!id));
+      const explicitBracket = limits.some((event) => !!event.oco_id && stopOcoIds.has(event.oco_id));
+      protectiveBracketUsed = protectiveBracketUsed || explicitBracket;
+
+      const firstStop = stops[0];
+      if (explicitBracket && firstStop) {
+        // A protective child arriving essentially with the entry is evidence of
+        // an entry-triggered OCO bracket rather than a later manual stop.
+        automaticBracketProtection =
+          automaticBracketProtection || Math.max(0, toMs(firstStop.ts_utc) - entryMs) <= 10_000;
+      }
+
+      for (const stop of stops.filter(isCanceledEvent)) {
+        const removedMs = toMs(stop.ts_utc);
+        const nextStop = stops.find((candidate) => toMs(candidate.ts_utc) > removedMs);
+        const restored = !!nextStop && toMs(nextStop.ts_utc) <= exitMs;
+        const endedWithTradeExit = !restored && Number.isFinite(exitMs);
+        const endMs = restored ? toMs(nextStop!.ts_utc) : NaN;
+        gaps.push({
+          instrument_key: instrumentKey,
+          removed_at: stop.ts_utc,
+          restored_at: restored ? nextStop!.ts_utc : null,
+          duration_sec: Number.isFinite(endMs) ? Math.max(0, Math.round((endMs - removedMs) / 1000)) : null,
+          restored,
+          ended_with_trade_exit: endedWithTradeExit,
+        });
+      }
+    }
+  }
+
+  const durations = gaps.map((gap) => gap.duration_sec).filter((seconds): seconds is number => seconds != null);
+  return {
+    gaps,
+    stopCancelCount: gaps.length,
+    stopReprotectedCount: gaps.filter((gap) => gap.restored).length,
+    stopRemovedWithoutReplacement: gaps.some((gap) => !gap.restored && !gap.ended_with_trade_exit),
+    maxTimeWithoutStopSec: durations.length ? Math.max(...durations) : null,
+    protectiveBracketUsed,
+    automaticBracketProtection,
+  };
+}
+
 export function auditOrderEvents(events: NormalizedOrderEvent[]): AuditMetrics {
   const ordered = [...events].sort((a, b) => toMs(a.ts_utc) - toMs(b.ts_utc));
   const trades = buildTradeSequences(ordered);
 
-  const stopEvents = ordered.filter((e) => e.stop_price != null);
+  const stopEvents = ordered.filter(isStopEvent);
   const cancelEvents = ordered.filter(
     (e) => e.event_type === "ORDER_CANCELED" || String(e.status || "").toUpperCase().includes("CANCEL")
   );
@@ -77,9 +183,9 @@ export function auditOrderEvents(events: NormalizedOrderEvent[]): AuditMetrics {
     (e) => e.event_type === "ORDER_REPLACED" || !!e.replace_id
   );
   const fillEvents = ordered.filter((e) => e.event_type === "ORDER_FILLED");
+  const protection = protectionLifecycle(ordered);
 
   const entryFill = fillEvents.find((e) => String(e.pos_effect || "").toUpperCase() === "TO_OPEN");
-  let timeToFirstStop: number | null = null;
   const entryMs = entryFill ? toMs(entryFill.ts_utc) : null;
   const stopCloseEvents = stopEvents.filter(
     (e) => String(e.pos_effect || "").toUpperCase() === "TO_CLOSE"
@@ -90,27 +196,11 @@ export function auditOrderEvents(events: NormalizedOrderEvent[]): AuditMetrics {
       : stopCloseEvents;
   const stopCloseWithOco = stopCloseAfterEntry.filter((e) => !!e.oco_id);
   const stopCloseRelevant = stopCloseWithOco.length ? stopCloseWithOco : stopCloseAfterEntry;
-
-  let stopModCount = 0;
-  let lastStop: number | null = null;
-  for (const e of stopCloseRelevant) {
-    const price = e.stop_price ?? null;
-    if (price == null) continue;
-    if (lastStop == null) {
-      lastStop = price;
-      continue;
-    }
-    if (Math.abs(price - lastStop) > 1e-9) {
-      stopModCount += 1;
-      lastStop = price;
-    }
-  }
-
-  if (entryMs != null && stopCloseRelevant.length) {
-    const firstStop = stopCloseRelevant[0];
-    const diff = Math.max(0, toMs(firstStop.ts_utc) - entryMs);
-    timeToFirstStop = Math.round(diff / 1000);
-  }
+  const stopModCount = trades.reduce((sum, trade) => sum + trade.stop_mod_count, 0);
+  const stopTimingValues = trades
+    .map((trade) => trade.time_to_first_stop_sec)
+    .filter((seconds): seconds is number => seconds != null);
+  const timeToFirstStop = stopTimingValues.length ? Math.max(...stopTimingValues) : null;
 
   const closeFills = fillEvents.filter(
     (e) => String(e.pos_effect || "").toUpperCase() === "TO_CLOSE"
@@ -160,6 +250,19 @@ export function auditOrderEvents(events: NormalizedOrderEvent[]): AuditMetrics {
   if (timeToFirstStop != null) {
     insights.push(`First TO_CLOSE stop placed ${timeToFirstStop}s after entry.`);
   }
+  if (protection.stopCancelCount > 0) {
+    insights.push(
+      `Protective stop removed ${protection.stopCancelCount} time(s); restored ${protection.stopReprotectedCount} time(s).`
+    );
+  }
+  if (protection.maxTimeWithoutStopSec != null) {
+    insights.push(`Longest inferred stop-replacement interval: ${protection.maxTimeWithoutStopSec}s.`);
+  }
+  if (protection.automaticBracketProtection) {
+    insights.push("Entry-triggered OCO stop-and-target bracket detected.");
+  } else if (protection.protectiveBracketUsed) {
+    insights.push("Protective OCO bracket detected after entry.");
+  }
 
   const summary = insights.slice(0, 3).join(" ");
 
@@ -169,8 +272,14 @@ export function auditOrderEvents(events: NormalizedOrderEvent[]): AuditMetrics {
     oco_used: ocoUsed(ordered),
     stop_present: stopCloseEvents.length > 0,
     stop_mod_count: stopModCount,
+    stop_cancel_count: protection.stopCancelCount,
+    stop_reprotected_count: protection.stopReprotectedCount,
+    stop_removed_without_replacement: protection.stopRemovedWithoutReplacement,
+    max_time_without_stop_sec: protection.maxTimeWithoutStopSec,
     cancel_count: cancelEvents.length,
     replace_count: replaceEvents.length,
+    protective_bracket_used: protection.protectiveBracketUsed,
+    automatic_bracket_protection: protection.automaticBracketProtection,
     market_exit_used: marketExitUsed,
     manual_market_exit: manualMarketExit,
     stop_market_filled: stopMarketFilled,
@@ -199,6 +308,7 @@ export function auditOrderEvents(events: NormalizedOrderEvent[]): AuditMetrics {
         limit_price: e.limit_price ?? null,
         stop_price: e.stop_price ?? null,
       })),
+      protection_gaps: protection.gaps,
     },
   };
 }

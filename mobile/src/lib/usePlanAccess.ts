@@ -115,7 +115,7 @@ export function usePlanAccess(): MobilePlanAccess {
       hasOptionFlow: hasGrant("option_flow"),
       hasNeuroAnalysis: hasGrant("neuro_analysis"),
       hasNotebook: hasGrant("page_notebook") || hasAdvancedPlan,
-      hasBackStudy: hasGrant("page_back_study") || hasCorePlan,
+      hasBackStudy: hasGrant("page_back_study") || hasAdvancedPlan,
       hasRulesAlarms: hasGrant("page_rules_alarms") || hasCorePlan,
       hasForum: hasGrant("page_forum"),
       hasOrderAudit: hasGrant("page_order_audit") || hasAdvancedPlan,

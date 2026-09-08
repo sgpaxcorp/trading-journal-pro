@@ -51,7 +51,7 @@ The project includes a config plugin (`plugins/with-device-debug-bundling.js`) s
 
 ## Current app flow
 
-- First screen is native auth (`Sign in` / `Create account`).
+- First screen is native sign-in for existing NeuroTrader accounts. Account creation and billing stay outside the mobile app.
 - Tabs after login:
   - Home
   - Calendar

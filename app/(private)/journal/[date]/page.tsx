@@ -45,6 +45,16 @@ import {
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
 import {
+  getGrowthPlanSupabaseByAccount,
+  type GrowthPlan,
+} from "@/lib/growthPlanSupabase";
+import {
+  createStrategySnapshot,
+  normalizeStrategyAssignment,
+  type StrategyReviewAssignment,
+  type StrategySnapshot,
+} from "@/lib/strategyReview";
+import {
   DEFAULT_NEURO_LAYER,
   NEURO_AFTER_EXIT_REASON_OPTIONS,
   NEURO_AFTER_TAKE_AGAIN_OPTIONS,
@@ -475,6 +485,7 @@ type EntryTradeRow = {
   time: string;
   dte?: number | null;
   expiry?: string | null; // YYYY-MM-DD
+  playbookStrategyAssignment?: StrategyReviewAssignment | null;
 };
 
 type ExitTradeRow = {
@@ -516,7 +527,38 @@ function entryRowToStored(r: EntryTradeRow): StoredTradeRow {
     dte: (r as any).dte ?? undefined,
     emotions: (r as any).emotions ?? undefined,
     strategyChecklist: (r as any).strategyChecklist ?? undefined,
+    playbookStrategyAssignment: r.playbookStrategyAssignment ?? undefined,
   } as any;
+}
+
+function tradeRowSignature(raw: any): string {
+  return [
+    String(raw?.symbol ?? "").trim().toUpperCase(),
+    String(raw?.kind ?? "").trim().toLowerCase(),
+    String(raw?.side ?? "").trim().toLowerCase(),
+    String(raw?.time ?? "").trim().toUpperCase(),
+    String(raw?.price ?? "").trim(),
+    String(raw?.quantity ?? "").trim(),
+  ].join("|");
+}
+
+function restoreEntryStrategyAssignments(
+  rows: EntryTradeRow[],
+  noteRows: any[]
+): EntryTradeRow[] {
+  const queues = new Map<string, any[]>();
+  noteRows.forEach((row) => {
+    const key = tradeRowSignature(row);
+    queues.set(key, [...(queues.get(key) ?? []), row]);
+  });
+  return rows.map((row) => {
+    const key = tradeRowSignature(row);
+    const queue = queues.get(key) ?? [];
+    const noteRow = queue.shift();
+    queues.set(key, queue);
+    const assignment = normalizeStrategyAssignment(noteRow?.playbookStrategyAssignment);
+    return assignment ? { ...row, playbookStrategyAssignment: assignment } : row;
+  });
 }
 
 function exitRowToStored(r: ExitTradeRow): StoredTradeRow {
@@ -1041,6 +1083,8 @@ export default function DailyJournalPage() {
   // Preserve extra keys that already exist in journal_entries.notes (e.g., broker sync metadata: costs/pnl/synced_at).
   // This prevents the UI 'Save' action from accidentally wiping sync metadata.
   const [notesExtra, setNotesExtra] = useState<Record<string, any>>({});
+  const [strategyPlan, setStrategyPlan] = useState<GrowthPlan | null>(null);
+  const [strategyPlanError, setStrategyPlanError] = useState<string | null>(null);
   const [neuroLayer, setNeuroLayer] = useState<NeuroLayer>(DEFAULT_NEURO_LAYER);
   const [newNeuroCustomTag, setNewNeuroCustomTag] = useState("");
   const [neuroOptionPresets, setNeuroOptionPresets] = useState<NeuroOptionPresets>(
@@ -1122,6 +1166,79 @@ export default function DailyJournalPage() {
     setNewExitTrade((p) => (p.time ? p : { ...p, time: nowTimeLabel() }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (authLoading || accountsLoading || !userId || !activeAccountId) return;
+    let active = true;
+    setStrategyPlanError(null);
+    void getGrowthPlanSupabaseByAccount(activeAccountId)
+      .then((plan) => {
+        if (active) setStrategyPlan(plan);
+      })
+      .catch((error) => {
+        console.warn("[journal] strategy playbook load failed:", error);
+        if (active) {
+          setStrategyPlan(null);
+          setStrategyPlanError(
+            L("Could not load your playbook strategies.", "No se pudieron cargar tus estrategias del playbook.")
+          );
+        }
+      });
+    return () => {
+      active = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authLoading, accountsLoading, userId, activeAccountId]);
+
+  const playbookStrategies = useMemo<StrategySnapshot[]>(() => {
+    const strategies = strategyPlan?.steps?.strategy?.strategies ?? [];
+    return strategies
+      .filter((strategy) => String(strategy?.name ?? "").trim())
+      .map((strategy, index) =>
+        createStrategySnapshot(strategy, {
+          index,
+          capturedAt: strategyPlan?.updatedAt || new Date().toISOString(),
+          planVersion: strategyPlan?.version ?? null,
+          planUpdatedAt: strategyPlan?.updatedAt ?? null,
+        })
+      );
+  }, [strategyPlan]);
+
+  const plannedStrategyAssignment = useMemo(
+    () => normalizeStrategyAssignment(notesExtra?.strategy_review?.planned_strategy),
+    [notesExtra]
+  );
+
+  const setPlannedStrategy = (strategyId: string) => {
+    const snapshot = playbookStrategies.find((item) => item.id === strategyId) ?? null;
+    const now = new Date().toISOString();
+    setNotesExtra((current) => {
+      const strategyReview =
+        current.strategy_review && typeof current.strategy_review === "object"
+          ? current.strategy_review
+          : {};
+      if (!snapshot) {
+        const { planned_strategy: _removed, ...remainingStrategyReview } = strategyReview;
+        return { ...current, strategy_review: remainingStrategyReview };
+      }
+      const assignment: StrategyReviewAssignment = {
+        strategyId: snapshot.id,
+        snapshot,
+        assignedAt: now,
+        assignmentTiming: entryTrades.length === 0 ? "pre_trade" : "retrospective",
+        assessments: {},
+      };
+      return {
+        ...current,
+        strategy_review: {
+          ...strategyReview,
+          version: 1,
+          planned_strategy: assignment,
+          updated_at: now,
+        },
+      };
+    });
+  };
 
   /* =========================================================
      Wizard + UI presets (no widgets)
@@ -1591,7 +1708,7 @@ export default function DailyJournalPage() {
             expiry: (r as any).expiry ?? null,
           }));
 
-          setEntryTrades(normEntry);
+          setEntryTrades(restoreEntryStrategyAssignments(normEntry, fallbackEntries ?? []));
           setExitTrades(normExit);
         } else {
           // Fallback to legacy notes payload
@@ -1669,6 +1786,7 @@ export default function DailyJournalPage() {
         expiry: expiryStr,
         premiumSide: normalizePremiumSide(finalKind, newEntryTrade.premiumSide),
         optionStrategy: normalizeStrategy(newEntryTrade.optionStrategy),
+        playbookStrategyAssignment: plannedStrategyAssignment ?? null,
       },
     ]);
 
@@ -2294,7 +2412,13 @@ export default function DailyJournalPage() {
   const IMPORT_PATH = "/import";
 
   const handleGoToImport = () => {
-    router.push(IMPORT_PATH);
+    const query = new URLSearchParams();
+    if (dateParam) {
+      query.set("date", dateParam);
+      query.set("returnTo", `/journal/${dateParam}`);
+    }
+    if (activeAccountId) query.set("accountId", activeAccountId);
+    router.push(`${IMPORT_PATH}?${query.toString()}`);
   };
 
   const handleSyncFromImport = async () => {
@@ -2336,6 +2460,34 @@ export default function DailyJournalPage() {
       const found = json?.trades_found ?? 0;
       const entriesCount = json?.entries_count ?? 0;
       const exitsCount = json?.exits_count ?? 0;
+
+      if (found === 0) {
+        const availableDates = Array.isArray(json?.available_import_dates)
+          ? json.available_import_dates.filter((value: unknown) => typeof value === "string")
+          : [];
+        const otherAccountCount = Number(json?.same_date_other_account_count ?? 0);
+        const details = [
+          availableDates.length
+            ? L(
+                `Imported dates available in this account: ${availableDates.join(", ")}.`,
+                `Fechas importadas disponibles en esta cuenta: ${availableDates.join(", ")}.`
+              )
+            : L("This account has no imported fills yet.", "Esta cuenta todavía no tiene fills importados."),
+          otherAccountCount > 0
+            ? L(
+                `${otherAccountCount} fill(s) for this date exist in another account.`,
+                `${otherAccountCount} fill(s) de esta fecha existen en otra cuenta.`
+              )
+            : "",
+        ].filter(Boolean);
+        setMsg(
+          L(
+            `No fills matched ${dateParam} and the selected account.`,
+            `Ningún fill coincidió con ${dateParam} y la cuenta seleccionada.`
+          ) + ` ${details.join(" ")}`
+        );
+        return;
+      }
 
       setMsg(
         L(
@@ -2379,7 +2531,15 @@ export default function DailyJournalPage() {
         expiry: (r as any).expiry ?? null,
       }));
 
-      setEntryTrades(normEntry);
+      const freshNoteEntries = (() => {
+        try {
+          const raw = typeof freshEntry?.notes === "string" ? JSON.parse(freshEntry.notes) : null;
+          return Array.isArray(raw?.entries) ? raw.entries : [];
+        } catch {
+          return [];
+        }
+      })();
+      setEntryTrades(restoreEntryStrategyAssignments(normEntry, freshNoteEntries));
       setExitTrades(normExit);
 
       const freshPnlNum =
@@ -2795,6 +2955,64 @@ export default function DailyJournalPage() {
                   "Fija las condiciones que deben existir antes del primer trade."
                 )}
               >
+                <div className="rounded-xl border border-cyan-400/25 bg-cyan-500/5 p-3">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div>
+                      <p className="text-sm font-semibold text-cyan-100">
+                        {L("Playbook strategy to execute", "Estrategia del playbook a ejecutar")}
+                      </p>
+                      <p className="mt-1 text-[11px] leading-relaxed text-slate-400">
+                        {L(
+                          "Declare the intended strategy before entry. Strategy Review will use this saved version instead of guessing from the result.",
+                          "Declara la estrategia antes de entrar. Strategy Review usará esta versión guardada en vez de adivinar por el resultado."
+                        )}
+                      </p>
+                    </div>
+                    {plannedStrategyAssignment ? (
+                      <span
+                        className={`rounded-full border px-2 py-1 text-[10px] font-semibold ${
+                          plannedStrategyAssignment.assignmentTiming === "pre_trade"
+                            ? "border-emerald-400/30 bg-emerald-500/10 text-emerald-200"
+                            : "border-amber-400/30 bg-amber-500/10 text-amber-200"
+                        }`}
+                      >
+                        {plannedStrategyAssignment.assignmentTiming === "pre_trade"
+                          ? L("DECLARED PRE-TRADE", "DECLARADA PRE-TRADE")
+                          : L("RETROSPECTIVE", "RETROSPECTIVA")}
+                      </span>
+                    ) : null}
+                  </div>
+                  {strategyPlanError ? (
+                    <p className="mt-3 text-xs text-rose-200">{strategyPlanError}</p>
+                  ) : playbookStrategies.length ? (
+                    <select
+                      value={plannedStrategyAssignment?.strategyId ?? ""}
+                      onChange={(event) => setPlannedStrategy(event.target.value)}
+                      className="mt-3 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-cyan-400"
+                    >
+                      <option value="">
+                        {L("Select planned strategy…", "Selecciona la estrategia planificada…")}
+                      </option>
+                      {playbookStrategies.map((strategy) => (
+                        <option key={strategy.id} value={strategy.id}>
+                          {strategy.name}{strategy.timeframe ? ` · ${strategy.timeframe}` : ""}
+                        </option>
+                      ))}
+                      {plannedStrategyAssignment && !playbookStrategies.some((strategy) => strategy.id === plannedStrategyAssignment.strategyId) ? (
+                        <option value={plannedStrategyAssignment.strategyId}>
+                          {plannedStrategyAssignment.snapshot.name} · {L("saved version", "versión guardada")}
+                        </option>
+                      ) : null}
+                    </select>
+                  ) : (
+                    <p className="mt-3 text-xs text-amber-200">
+                      {L("No playbook strategies found.", "No hay estrategias en el playbook.")} {" "}
+                      <Link href="/growth-plan" className="font-semibold underline underline-offset-2">
+                        {L("Create one in Strategy & Rules.", "Crea una en Estrategia y reglas.")}
+                      </Link>
+                    </p>
+                  )}
+                </div>
                 <NeuroChipGroup
                   title={L("Thesis", "Tesis")}
                   options={neuroOptionPresets.premarket_thesis}
@@ -3079,6 +3297,55 @@ export default function DailyJournalPage() {
                         <p className="text-[12px] text-slate-500">
                           {strategyLabel(t.kind, t.optionStrategy, lang)}
                         </p>
+                        <label className="mt-2 block">
+                          <span className="text-[10px] uppercase tracking-[0.14em] text-cyan-400">
+                            {L("Business playbook", "Playbook empresarial")}
+                          </span>
+                          <select
+                            value={t.playbookStrategyAssignment?.strategyId ?? ""}
+                            onChange={(event) => {
+                              const snapshot = playbookStrategies.find(
+                                (strategy) => strategy.id === event.target.value
+                              );
+                              setEntryTrades((current) =>
+                                current.map((row) =>
+                                  row.id === t.id
+                                    ? {
+                                        ...row,
+                                        playbookStrategyAssignment: snapshot
+                                          ? {
+                                              strategyId: snapshot.id,
+                                              snapshot,
+                                              assignedAt: new Date().toISOString(),
+                                              assignmentTiming: "retrospective",
+                                              assessments: {},
+                                            }
+                                          : null,
+                                      }
+                                    : row
+                                )
+                              );
+                            }}
+                            className="mt-1 w-full max-w-xs rounded-lg border border-slate-700 bg-slate-950 px-2 py-1.5 text-[11px] text-slate-200 outline-none focus:border-cyan-400"
+                          >
+                            <option value="">{L("Not assigned", "Sin asignar")}</option>
+                            {playbookStrategies.map((strategy) => (
+                              <option key={strategy.id} value={strategy.id}>{strategy.name}</option>
+                            ))}
+                            {t.playbookStrategyAssignment && !playbookStrategies.some((strategy) => strategy.id === t.playbookStrategyAssignment?.strategyId) ? (
+                              <option value={t.playbookStrategyAssignment.strategyId}>
+                                {t.playbookStrategyAssignment.snapshot.name} · {L("saved", "guardada")}
+                              </option>
+                            ) : null}
+                          </select>
+                          {t.playbookStrategyAssignment ? (
+                            <span className="mt-1 block text-[10px] text-slate-500">
+                              {t.playbookStrategyAssignment.assignmentTiming === "pre_trade"
+                                ? L("Inherited from the pre-trade plan", "Heredada del plan pre-trade")
+                                : L("Assigned after entry", "Asignada después de la entrada")}
+                            </span>
+                          ) : null}
+                        </label>
                       </div>
                       <button
                         type="button"

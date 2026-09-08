@@ -161,4 +161,60 @@ describe("auditOrderEvents", () => {
     expect(audit.trades[0].exit_ts).toBe("2026-02-13T14:10:00Z");
     expect(audit.trades[1].manual_market_exit).toBe(true);
   });
+
+  it("audits automatic OCO protection and time without a stop after removal", () => {
+    const protectedTrade: NormalizedOrderEvent[] = [
+      {
+        ...events[0],
+        ts_utc: "2026-02-13T14:00:00Z",
+        oco_id: "BRACKET-1",
+      },
+      {
+        ...events[1],
+        ts_utc: "2026-02-13T14:00:02Z",
+        order_type: "LMT",
+        limit_price: 6.5,
+        stop_price: null,
+        oco_id: "BRACKET-1",
+      },
+      {
+        ...events[1],
+        ts_utc: "2026-02-13T14:00:03Z",
+        stop_price: 5,
+        oco_id: "BRACKET-1",
+      },
+      {
+        ...events[3],
+        ts_utc: "2026-02-13T14:05:00Z",
+        stop_price: 5,
+        oco_id: "BRACKET-1",
+      },
+      {
+        ...events[1],
+        ts_utc: "2026-02-13T14:05:30Z",
+        stop_price: 5.2,
+        oco_id: "BRACKET-1",
+      },
+      {
+        ...events[4],
+        ts_utc: "2026-02-13T14:10:00Z",
+        order_type: "LMT",
+        limit_price: 6.5,
+        stop_price: null,
+        oco_id: "BRACKET-1",
+      },
+    ];
+
+    const audit = auditOrderEvents(protectedTrade);
+
+    expect(audit.protective_bracket_used).toBe(true);
+    expect(audit.automatic_bracket_protection).toBe(true);
+    expect(audit.stop_cancel_count).toBe(1);
+    expect(audit.stop_reprotected_count).toBe(1);
+    expect(audit.stop_removed_without_replacement).toBe(false);
+    expect(audit.max_time_without_stop_sec).toBe(30);
+    expect(audit.evidence.protection_gaps).toEqual([
+      expect.objectContaining({ duration_sec: 30, restored: true }),
+    ]);
+  });
 });

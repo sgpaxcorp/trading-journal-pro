@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  PLAN_COMPARISON_ROWS,
   PLAN_PRICES,
   advancedUpgradePriceLabel,
   planBilledAmount,
@@ -26,5 +27,13 @@ describe("plan catalog pricing", () => {
     expect(advancedUpgradePriceLabel("es", "annual")).toBe(
       "+$16.67 más / mes facturado anual"
     );
+  });
+
+  it("keeps back-study exclusive to Advanced", () => {
+    const backStudy = PLAN_COMPARISON_ROWS.find(
+      (row) => row.kind === "feature" && row.label.en.includes("back-study workspace")
+    );
+
+    expect(backStudy).toMatchObject({ core: false, advanced: true });
   });
 });

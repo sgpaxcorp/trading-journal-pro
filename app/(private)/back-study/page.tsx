@@ -14,9 +14,23 @@ import { resolveLocale } from "@/lib/i18n";
 import { supabaseBrowser } from "@/lib/supaBaseClient";
 
 import type { JournalEntry } from "@/lib/journalLocal";
-import { getAllJournalEntries } from "@/lib/journalSupabase";
+import { getAllJournalEntries, saveJournalEntry } from "@/lib/journalSupabase";
 import { getJournalTradesForDates } from "@/lib/journalTradesSupabase";
 import type { TradesPayload } from "@/lib/journalNotes";
+import {
+  getGrowthPlanSupabaseByAccount,
+  type GrowthPlan,
+} from "@/lib/growthPlanSupabase";
+import {
+  buildStrategyReview,
+  createStrategySnapshot,
+  normalizeStrategyAssignment,
+  strategyTradeKey,
+  type StrategyCriterionAssessment,
+  type StrategyReviewAssignment,
+  type StrategyReviewResult,
+  type StrategySnapshot,
+} from "@/lib/strategyReview";
 
 import { type InstrumentType } from "@/lib/journalNotes";
 import {
@@ -334,11 +348,72 @@ function parseNotesTrades(notesRaw: unknown): {
   }
 }
 
-function buildAuditHandoffPayload(trade: TradeView, auditResult: AuditResponse | null) {
-  if (!auditResult) return null;
-  const metrics = auditResult.audit ?? {};
-  const processReview = auditResult.process_review ?? auditResult.plan_compliance ?? null;
-  const executionDiscipline = auditResult.execution_discipline ?? null;
+function parseJournalNotesObject(notesRaw: unknown): Record<string, any> {
+  if (typeof notesRaw !== "string" || !notesRaw.trim()) return {};
+  try {
+    const parsed = JSON.parse(notesRaw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return { premarket: String(notesRaw) };
+  }
+}
+
+function getSavedStrategyAssignment(
+  notesRaw: unknown,
+  tradeKey: string,
+  tradeAssignmentRaw?: unknown
+): StrategyReviewAssignment | null {
+  const notes = parseJournalNotesObject(notesRaw);
+  const raw = notes?.strategy_review?.assignments?.[tradeKey];
+  return (
+    normalizeStrategyAssignment(raw) ||
+    normalizeStrategyAssignment(tradeAssignmentRaw) ||
+    normalizeStrategyAssignment(notes?.strategy_review?.planned_strategy)
+  );
+}
+
+function mergeBackStudyRowsWithNotes(
+  databaseRows: EntryTradeRow[],
+  noteRows: EntryTradeRow[]
+): EntryTradeRow[] {
+  if (!databaseRows.length) return noteRows;
+  if (!noteRows.length) return databaseRows;
+  const signature = (row: EntryTradeRow) =>
+    [
+      String(row.symbol ?? "").trim().toUpperCase(),
+      String(row.kind ?? "").trim().toLowerCase(),
+      String(row.side ?? "").trim().toLowerCase(),
+      String(row.time ?? "").trim().toUpperCase(),
+      String(row.price ?? "").trim(),
+      String(row.quantity ?? "").trim(),
+    ].join("|");
+  const queues = new Map<string, EntryTradeRow[]>();
+  noteRows.forEach((row) => {
+    const key = signature(row);
+    queues.set(key, [...(queues.get(key) ?? []), row]);
+  });
+  return databaseRows.map((row) => {
+    const key = signature(row);
+    const queue = queues.get(key) ?? [];
+    const noteRow = queue.shift();
+    queues.set(key, queue);
+    return noteRow?.playbookStrategyAssignment
+      ? { ...row, playbookStrategyAssignment: noteRow.playbookStrategyAssignment }
+      : row;
+  });
+}
+
+function buildAuditHandoffPayload(
+  trade: TradeView,
+  auditResult: AuditResponse | null,
+  strategyContext?: {
+    assignment: StrategyReviewAssignment | null;
+    review: StrategyReviewResult | null;
+  }
+) {
+  const metrics = auditResult?.audit ?? {};
+  const processReview = auditResult?.process_review ?? auditResult?.plan_compliance ?? null;
+  const executionDiscipline = auditResult?.execution_discipline ?? null;
 
   return {
     generatedAt: new Date().toISOString(),
@@ -384,9 +459,9 @@ function buildAuditHandoffPayload(trade: TradeView, auditResult: AuditResponse |
         expiry: row.expiry ?? null,
       })),
     },
-    eventWindow: auditResult.event_window ?? null,
+    eventWindow: auditResult?.event_window ?? null,
     audit: {
-      brokerEventsCount: Array.isArray(auditResult.events) ? auditResult.events.length : 0,
+      brokerEventsCount: Array.isArray(auditResult?.events) ? auditResult.events.length : 0,
       summary: metrics.summary ?? null,
       insights: Array.isArray(metrics.insights) ? metrics.insights.slice(0, 8) : [],
       ocoUsed: metrics.oco_used ?? null,
@@ -427,6 +502,17 @@ function buildAuditHandoffPayload(trade: TradeView, auditResult: AuditResponse |
           score: executionDiscipline.score,
           metrics: executionDiscipline.metrics,
           checks: Array.isArray(executionDiscipline.checks) ? executionDiscipline.checks.slice(0, 8) : [],
+        }
+      : null,
+    strategyReview: strategyContext
+      ? {
+          assignment: strategyContext.assignment,
+          score: strategyContext.review?.score ?? null,
+          evidenceCoverage: strategyContext.review?.evidenceCoverage ?? 0,
+          passed: strategyContext.review?.passed ?? 0,
+          failed: strategyContext.review?.failed ?? 0,
+          unverified: strategyContext.review?.unverified ?? 0,
+          criteria: strategyContext.review?.criteria ?? [],
         }
       : null,
   };
@@ -949,6 +1035,8 @@ function BackStudyPageInner() {
   const [entriesError, setEntriesError] = useState<string | null>(null);
   const [entries, setEntries] = useState<JournalEntry[]>([]);
   const [journalTradesMap, setJournalTradesMap] = useState<Record<string, TradesPayload>>({});
+  const [growthPlan, setGrowthPlan] = useState<GrowthPlan | null>(null);
+  const [growthPlanError, setGrowthPlanError] = useState<string | null>(null);
 
   // Redirect if not logged in
   useEffect(() => {
@@ -1011,16 +1099,41 @@ function BackStudyPageInner() {
     };
   }, [loading, user, accountsLoading, activeAccountId, isAuditTab]);
 
+  useEffect(() => {
+    if (isAuditTab || loading || accountsLoading || !user || !activeAccountId) return;
+    let active = true;
+    setGrowthPlanError(null);
+    void getGrowthPlanSupabaseByAccount(activeAccountId)
+      .then((value) => {
+        if (active) setGrowthPlan(value);
+      })
+      .catch((error) => {
+        console.warn("[Back-Study] Could not load strategy playbook:", error);
+        if (active) {
+          setGrowthPlan(null);
+          setGrowthPlanError(
+            L("Could not load the Trading Business Plan strategies.", "No se pudieron cargar las estrategias del Plan de Empresa de Trading.")
+          );
+        }
+      });
+    return () => {
+      active = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAuditTab, loading, accountsLoading, user?.id, activeAccountId]);
+
   const sessions: SessionWithTrades[] = useMemo(() => {
     return entries.map((s) => {
       const dateKey = String((s as any)?.date || "").slice(0, 10);
       const fromDb = journalTradesMap[dateKey] ?? {};
       const fromNotes = parseNotesTrades(s.notes);
 
-      const entRaw = (fromDb.entries && fromDb.entries.length ? fromDb.entries : fromNotes.entries) || [];
-      const exRaw = (fromDb.exits && fromDb.exits.length ? fromDb.exits : fromNotes.exits) || [];
-      const ent = normalizeTradeRows(entRaw);
-      const ex = normalizeTradeRows(exRaw);
+      const dbEntries = normalizeTradeRows(fromDb.entries ?? []);
+      const dbExits = normalizeTradeRows(fromDb.exits ?? []);
+      const noteEntries = normalizeTradeRows(fromNotes.entries ?? []);
+      const noteExits = normalizeTradeRows(fromNotes.exits ?? []);
+      const ent = mergeBackStudyRowsWithNotes(dbEntries, noteEntries);
+      const ex = mergeBackStudyRowsWithNotes(dbExits, noteExits);
 
       return {
         ...s,
@@ -1071,6 +1184,56 @@ function BackStudyPageInner() {
 
   const tradesForDate = trades.filter((t) => t.date === selectedDate);
   const selectedTrade = trades.find((t) => t.id === selectedTradeId) || null;
+  const selectedSession = selectedTrade
+    ? sessions.find((session) => String(session.date).slice(0, 10) === selectedTrade.date) ?? null
+    : null;
+
+  const playbookSnapshots = useMemo<StrategySnapshot[]>(() => {
+    const strategies = growthPlan?.steps?.strategy?.strategies ?? [];
+    return strategies
+      .filter((strategy) => String(strategy?.name ?? "").trim())
+      .map((strategy, index) =>
+        createStrategySnapshot(strategy, {
+          index,
+          capturedAt: growthPlan?.updatedAt || new Date().toISOString(),
+          planVersion: growthPlan?.version ?? null,
+          planUpdatedAt: growthPlan?.updatedAt ?? null,
+        })
+      );
+  }, [growthPlan]);
+
+  const selectedStrategyTradeKey = selectedTrade ? strategyTradeKey(selectedTrade) : "";
+  const savedStrategyAssignment = useMemo(
+    () =>
+      selectedSession && selectedStrategyTradeKey
+        ? getSavedStrategyAssignment(
+            selectedSession.notes,
+            selectedStrategyTradeKey,
+            selectedTrade?.playbookStrategyAssignment
+          )
+        : null,
+    [selectedSession, selectedStrategyTradeKey]
+  );
+  const [selectedStrategyId, setSelectedStrategyId] = useState("");
+  const [strategyAssessments, setStrategyAssessments] = useState<
+    Record<string, StrategyCriterionAssessment>
+  >({});
+  const [strategySaving, setStrategySaving] = useState(false);
+  const [strategySaveMessage, setStrategySaveMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    setSelectedStrategyId(savedStrategyAssignment?.strategyId ?? "");
+    setStrategyAssessments(savedStrategyAssignment?.assessments ?? {});
+    setStrategySaveMessage(null);
+  }, [selectedStrategyTradeKey, savedStrategyAssignment?.assignedAt]);
+
+  const selectedStrategySnapshot = useMemo(() => {
+    if (!selectedStrategyId) return null;
+    if (savedStrategyAssignment?.strategyId === selectedStrategyId) {
+      return savedStrategyAssignment.snapshot;
+    }
+    return playbookSnapshots.find((strategy) => strategy.id === selectedStrategyId) ?? null;
+  }, [selectedStrategyId, savedStrategyAssignment, playbookSnapshots]);
 
   const entryPoints = useMemo(() => {
     if (!selectedTrade) return [];
@@ -1351,8 +1514,20 @@ function BackStudyPageInner() {
     if (selectedTrade.instrumentKey) params.set("instrumentKey", selectedTrade.instrumentKey);
     if (selectedTrade.instrumentKeyAmbiguous) params.set("instrumentAmbiguous", "1");
 
-    const auditHandoff = buildAuditHandoffPayload(selectedTrade, auditResult);
-    if (auditHandoff && typeof window !== "undefined") {
+    const auditHandoff = buildAuditHandoffPayload(selectedTrade, auditResult, {
+      assignment:
+        selectedStrategySnapshot
+          ? {
+              strategyId: selectedStrategySnapshot.id,
+              snapshot: selectedStrategySnapshot,
+              assignedAt: savedStrategyAssignment?.assignedAt ?? new Date().toISOString(),
+              assignmentTiming: savedStrategyAssignment?.assignmentTiming ?? "retrospective",
+              assessments: strategyAssessments,
+            }
+          : null,
+      review: strategyReviewResult,
+    });
+    if (typeof window !== "undefined") {
       const handoffKey = `${BACK_STUDY_AUDIT_HANDOFF_PREFIX}:${selectedTrade.id}`;
       try {
         window.sessionStorage.setItem(handoffKey, JSON.stringify(auditHandoff));
@@ -1396,6 +1571,16 @@ function BackStudyPageInner() {
         exits: selectedTrade.exits,
       },
       audit: auditResult,
+      strategyReview: strategyReviewResult,
+      strategyAssignment: selectedStrategySnapshot
+        ? {
+            strategyId: selectedStrategySnapshot.id,
+            snapshot: selectedStrategySnapshot,
+            assignedAt: savedStrategyAssignment?.assignedAt ?? null,
+            assignmentTiming: savedStrategyAssignment?.assignmentTiming ?? "retrospective",
+            assessments: strategyAssessments,
+          }
+        : null,
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
     const url = window.URL.createObjectURL(blob);
@@ -1432,6 +1617,122 @@ function BackStudyPageInner() {
   const auditInsights = auditMetrics?.insights ?? [];
   const auditEvidence = auditMetrics?.evidence ?? null;
   const auditEventWindow = auditResult?.event_window ?? null;
+  const selectedJournalNotes = useMemo(
+    () => parseJournalNotesObject(selectedSession?.notes),
+    [selectedSession?.notes]
+  );
+  const strategyReviewResult = useMemo<StrategyReviewResult | null>(() => {
+    if (!selectedTrade || !selectedStrategySnapshot) return null;
+    const neuroLayer = selectedJournalNotes?.neuro_layer ?? selectedJournalNotes?.neuroLayer ?? {};
+    const checklists = selectedJournalNotes?.checklists ?? {};
+    return buildStrategyReview({
+      strategy: selectedStrategySnapshot,
+      assessments: strategyAssessments,
+      locale: isEs ? "es" : "en",
+      evidence: {
+        symbol: selectedTrade.underlyingSymbol || selectedTrade.symbol,
+        kind: selectedTrade.kind,
+        respectedPlan:
+          typeof selectedSession?.respectedPlan === "boolean" ? selectedSession.respectedPlan : null,
+        stopPresent: typeof auditMetrics?.stop_present === "boolean" ? auditMetrics.stop_present : null,
+        ocoUsed: typeof auditMetrics?.oco_used === "boolean" ? auditMetrics.oco_used : null,
+        manualMarketExit:
+          typeof auditMetrics?.manual_market_exit === "boolean" ? auditMetrics.manual_market_exit : null,
+        timeToFirstStopSec: auditMetrics?.time_to_first_stop_sec ?? null,
+        stopModificationCount: auditMetrics?.stop_mod_count ?? null,
+        journalStrategyChecks: Array.isArray(checklists?.strategy) ? checklists.strategy : [],
+        premarketThesis: Array.isArray(neuroLayer?.premarket?.thesis)
+          ? neuroLayer.premarket.thesis
+          : [],
+        premarketConfirmation: Array.isArray(neuroLayer?.premarket?.confirmation)
+          ? neuroLayer.premarket.confirmation
+          : [],
+        premarketInvalidation: Array.isArray(neuroLayer?.premarket?.invalidation)
+          ? neuroLayer.premarket.invalidation
+          : [],
+      },
+    });
+  }, [
+    selectedTrade,
+    selectedStrategySnapshot,
+    strategyAssessments,
+    selectedJournalNotes,
+    selectedSession?.respectedPlan,
+    auditMetrics,
+  ]);
+
+  const saveStrategyReview = async () => {
+    if (
+      !user?.id ||
+      !activeAccountId ||
+      !selectedSession ||
+      !selectedStrategyTradeKey ||
+      !selectedStrategySnapshot
+    ) {
+      setStrategySaveMessage(
+        L("Select a playbook strategy first.", "Selecciona primero una estrategia del playbook.")
+      );
+      return;
+    }
+    setStrategySaving(true);
+    setStrategySaveMessage(null);
+    try {
+      const notes = parseJournalNotesObject(selectedSession.notes);
+      const previousRoot =
+        notes.strategy_review && typeof notes.strategy_review === "object"
+          ? notes.strategy_review
+          : {};
+      const previousAssignments =
+        previousRoot.assignments && typeof previousRoot.assignments === "object"
+          ? previousRoot.assignments
+          : {};
+      const now = new Date().toISOString();
+      const previous = getSavedStrategyAssignment(selectedSession.notes, selectedStrategyTradeKey);
+      const assignment: StrategyReviewAssignment = {
+        strategyId: selectedStrategySnapshot.id,
+        snapshot: selectedStrategySnapshot,
+        assignedAt:
+          previous?.strategyId === selectedStrategySnapshot.id ? previous.assignedAt : now,
+        assignmentTiming:
+          previous?.strategyId === selectedStrategySnapshot.id
+            ? previous.assignmentTiming
+            : "retrospective",
+        assessments: strategyAssessments,
+      };
+      const nextNotes = {
+        ...notes,
+        strategy_review: {
+          ...previousRoot,
+          version: 1,
+          assignments: {
+            ...previousAssignments,
+            [selectedStrategyTradeKey]: assignment,
+          },
+          updated_at: now,
+        },
+      };
+      const nextEntry: JournalEntry = {
+        ...selectedSession,
+        notes: JSON.stringify(nextNotes),
+      };
+      await saveJournalEntry(user.id, nextEntry, activeAccountId);
+      setEntries((current) =>
+        current.map((entry) =>
+          String(entry.date).slice(0, 10) === selectedTrade?.date
+            ? { ...entry, notes: nextEntry.notes }
+            : entry
+        )
+      );
+      setStrategySaveMessage(L("Strategy comparison saved.", "Comparación de estrategia guardada."));
+    } catch (error: any) {
+      console.error("[Back-Study] Could not save strategy review:", error);
+      setStrategySaveMessage(
+        error?.message || L("Could not save the strategy comparison.", "No se pudo guardar la comparación de estrategia.")
+      );
+    } finally {
+      setStrategySaving(false);
+    }
+  };
   const auditChartPoints = useMemo(() => {
     if (!auditEvidence) return [];
     const points: Array<{
@@ -1861,6 +2162,309 @@ function BackStudyPageInner() {
                     </div>
                     </form>
                   </section>
+
+                  {selectedTrade && (
+                    <section className="rounded-2xl border border-cyan-400/25 bg-slate-900/80 p-4 shadow-[0_0_28px_rgba(34,211,238,0.08)] md:p-5">
+                      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                        <div className="max-w-2xl">
+                          <p className="text-[11px] uppercase tracking-[0.22em] text-cyan-300">
+                            {L("Strategy comparison contract", "Contrato de comparación estratégica")}
+                          </p>
+                          <h2 className="mt-2 text-xl font-semibold text-slate-100">
+                            {L(
+                              "Tell the system which playbook strategy this trade was meant to execute",
+                              "Indica cuál estrategia del playbook se suponía que ejecutara este trade"
+                            )}
+                          </h2>
+                          <p className="mt-2 text-sm leading-relaxed text-slate-400">
+                            {L(
+                              "The platform does not infer intent from P&L. It compares a saved strategy snapshot against broker evidence, journal evidence, and your explicit review.",
+                              "La plataforma no infiere la intención por el P&L. Compara un snapshot guardado de la estrategia contra evidencia del broker, evidencia del journal y tu revisión explícita."
+                            )}
+                          </p>
+                        </div>
+                        <div className="flex flex-wrap gap-2 text-[11px]">
+                          {[L("1 · Select baseline", "1 · Selecciona base"), L("2 · Verify evidence", "2 · Verifica evidencia"), L("3 · Save verdict", "3 · Guarda veredicto")].map((item) => (
+                            <span key={item} className="rounded-full border border-slate-700 bg-slate-950/70 px-3 py-1.5 text-slate-300">
+                              {item}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+
+                      {growthPlanError ? (
+                        <p className="mt-4 rounded-xl border border-rose-400/25 bg-rose-500/10 px-3 py-2 text-sm text-rose-200">
+                          {growthPlanError}
+                        </p>
+                      ) : playbookSnapshots.length === 0 ? (
+                        <div className="mt-4 rounded-2xl border border-amber-400/25 bg-amber-500/10 p-4">
+                          <p className="text-sm font-semibold text-amber-100">
+                            {L("There is no strategy baseline to compare yet.", "Todavía no existe una estrategia base para comparar.")}
+                          </p>
+                          <p className="mt-1 text-sm text-amber-100/75">
+                            {L(
+                              "Create at least one setup with entry, exit, management, and invalidation rules in the Trading Business Plan.",
+                              "Crea al menos un setup con reglas de entrada, salida, manejo e invalidación en el Plan de Empresa de Trading."
+                            )}
+                          </p>
+                          <Link
+                            href="/growth-plan"
+                            className="mt-3 inline-flex rounded-xl border border-amber-300/40 px-3 py-2 text-xs font-semibold text-amber-100 transition hover:bg-amber-300/10"
+                          >
+                            {L("Open Strategy & Rules", "Abrir Estrategia y reglas")}
+                          </Link>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="mt-5 grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
+                            <label className="block">
+                              <span className="text-xs font-semibold text-slate-300">
+                                {L("Expected playbook strategy", "Estrategia esperada del playbook")}
+                              </span>
+                              <select
+                                value={selectedStrategyId}
+                                onChange={(event) => {
+                                  const nextId = event.target.value;
+                                  setSelectedStrategyId(nextId);
+                                  setStrategyAssessments(
+                                    nextId === savedStrategyAssignment?.strategyId
+                                      ? savedStrategyAssignment?.assessments ?? {}
+                                      : {}
+                                  );
+                                  setStrategySaveMessage(null);
+                                }}
+                                className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-slate-100 outline-none focus:border-cyan-400"
+                              >
+                                <option value="">
+                                  {L("Select the strategy this trade intended to execute…", "Selecciona la estrategia que este trade intentaba ejecutar…")}
+                                </option>
+                                {playbookSnapshots.map((strategy) => (
+                                  <option key={strategy.id} value={strategy.id}>
+                                    {strategy.name}{strategy.timeframe ? ` · ${strategy.timeframe}` : ""}
+                                  </option>
+                                ))}
+                                {savedStrategyAssignment && !playbookSnapshots.some((item) => item.id === savedStrategyAssignment.strategyId) ? (
+                                  <option value={savedStrategyAssignment.strategyId}>
+                                    {savedStrategyAssignment.snapshot.name} · {L("saved historical version", "versión histórica guardada")}
+                                  </option>
+                                ) : null}
+                              </select>
+                            </label>
+                            <button
+                              type="button"
+                              onClick={() => void saveStrategyReview()}
+                              disabled={!selectedStrategySnapshot || strategySaving}
+                              className="rounded-xl bg-cyan-400 px-4 py-2.5 text-sm font-semibold text-slate-950 transition hover:bg-cyan-300 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              {strategySaving
+                                ? L("Saving…", "Guardando…")
+                                : savedStrategyAssignment?.strategyId === selectedStrategyId
+                                  ? L("Save review", "Guardar revisión")
+                                  : L("Lock baseline & save", "Fijar base y guardar")}
+                            </button>
+                          </div>
+
+                          {strategySaveMessage ? (
+                            <p className="mt-2 text-xs text-cyan-200">{strategySaveMessage}</p>
+                          ) : null}
+                          {selectedTrade.mixedPlaybookStrategies ? (
+                            <p className="mt-3 rounded-xl border border-amber-400/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
+                              {L(
+                                "This reconstructed trade contains entry fills assigned to different playbook strategies. Confirm the correct baseline before saving the review.",
+                                "Este trade reconstruido contiene fills de entrada asignados a estrategias distintas. Confirma la base correcta antes de guardar la revisión."
+                              )}
+                            </p>
+                          ) : null}
+
+                          {selectedStrategySnapshot ? (
+                            <>
+                              <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+                                {[
+                                  [L("Setup / context", "Setup / contexto"), selectedStrategySnapshot.setup],
+                                  [L("Entry", "Entrada"), selectedStrategySnapshot.entryRules],
+                                  [L("Risk / exit", "Riesgo / salida"), selectedStrategySnapshot.exitRules],
+                                  [L("Management", "Manejo"), selectedStrategySnapshot.managementRules],
+                                  [L("Invalidation", "Invalidación"), selectedStrategySnapshot.invalidation],
+                                ].map(([label, value]) => (
+                                  <div key={label} className="rounded-xl border border-slate-800 bg-slate-950/65 p-3">
+                                    <p className="text-[10px] uppercase tracking-[0.16em] text-slate-500">{label}</p>
+                                    <p className="mt-2 text-xs leading-relaxed text-slate-200">
+                                      {value || L("Not defined", "No definido")}
+                                    </p>
+                                  </div>
+                                ))}
+                              </div>
+
+                              {savedStrategyAssignment?.strategyId === selectedStrategyId ? (
+                                <p className="mt-3 text-xs text-slate-500">
+                                  {savedStrategyAssignment.assignmentTiming === "pre_trade"
+                                    ? L("This strategy was declared before the trade.", "Esta estrategia fue declarada antes del trade.")
+                                    : L(
+                                        "This baseline was assigned during review, so it is labeled retrospective and not treated as pre-trade proof.",
+                                        "Esta base fue asignada durante la revisión, por eso queda marcada como retrospectiva y no cuenta como evidencia pre-trade."
+                                      )}
+                                </p>
+                              ) : null}
+
+                              {strategyReviewResult ? (
+                                <div className="mt-5">
+                                  <div className="grid gap-3 sm:grid-cols-4">
+                                    <ReviewMetricCard
+                                      label={L("Strategy adherence", "Adherencia estratégica")}
+                                      value={strategyReviewResult.score == null ? L("Not scorable", "No evaluable") : `${strategyReviewResult.score}%`}
+                                      tone={strategyReviewResult.score != null && strategyReviewResult.score < 70 ? "rose" : "emerald"}
+                                    />
+                                    <ReviewMetricCard
+                                      label={L("Evidence coverage", "Cobertura de evidencia")}
+                                      value={`${strategyReviewResult.evidenceCoverage}%`}
+                                      tone="sky"
+                                    />
+                                    <ReviewMetricCard
+                                      label={L("Met / missed", "Cumplidas / falladas")}
+                                      value={`${strategyReviewResult.passed} / ${strategyReviewResult.failed}`}
+                                      tone="default"
+                                    />
+                                    <ReviewMetricCard
+                                      label={L("Unverified", "Sin verificar")}
+                                      value={String(strategyReviewResult.unverified)}
+                                      tone="default"
+                                    />
+                                  </div>
+
+                                  <div className="mt-4 overflow-x-auto rounded-2xl border border-slate-800">
+                                    <table className="min-w-[900px] w-full text-left text-xs">
+                                      <thead className="bg-slate-950/90 text-slate-400">
+                                        <tr>
+                                          <th className="px-3 py-3 font-semibold">{L("Phase", "Fase")}</th>
+                                          <th className="px-3 py-3 font-semibold">{L("Expected", "Esperado")}</th>
+                                          <th className="px-3 py-3 font-semibold">{L("Actual evidence", "Evidencia real")}</th>
+                                          <th className="px-3 py-3 font-semibold">{L("Verdict", "Veredicto")}</th>
+                                          <th className="px-3 py-3 font-semibold">{L("Source", "Fuente")}</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody className="divide-y divide-slate-800 bg-slate-950/45">
+                                        {strategyReviewResult.criteria.map((criterion) => (
+                                          <tr key={criterion.id} className="align-top">
+                                            <td className="px-3 py-3 uppercase tracking-[0.12em] text-slate-500">
+                                              {criterion.phase === "eligibility"
+                                                ? L("Eligibility", "Elegibilidad")
+                                                : criterion.phase === "setup"
+                                                  ? L("Setup", "Setup")
+                                                  : criterion.phase === "entry"
+                                                    ? L("Entry", "Entrada")
+                                                    : criterion.phase === "risk"
+                                                      ? L("Risk", "Riesgo")
+                                                      : criterion.phase === "management"
+                                                        ? L("Management", "Manejo")
+                                                        : L("Exit", "Salida")}
+                                            </td>
+                                            <td className="max-w-xs px-3 py-3 text-slate-200">{criterion.expected}</td>
+                                            <td className="max-w-xs px-3 py-3 text-slate-400">
+                                              {criterion.actual}
+                                              <p className="mt-1 text-[10px] text-slate-600">{criterion.reason}</p>
+                                            </td>
+                                            <td className="px-3 py-3">
+                                              {criterion.automatic ? (
+                                                <span
+                                                  className={`inline-flex rounded-full border px-2 py-1 font-semibold ${
+                                                    criterion.status === "pass"
+                                                      ? "border-emerald-400/30 bg-emerald-500/10 text-emerald-200"
+                                                      : criterion.status === "fail"
+                                                        ? "border-rose-400/30 bg-rose-500/10 text-rose-200"
+                                                        : "border-slate-600 bg-slate-800/60 text-slate-300"
+                                                  }`}
+                                                >
+                                                  {criterion.status === "pass"
+                                                    ? L("MET", "CUMPLE")
+                                                    : criterion.status === "fail"
+                                                      ? L("MISSED", "FALLÓ")
+                                                      : L("UNVERIFIED", "SIN VERIFICAR")}
+                                                </span>
+                                              ) : (
+                                                <div className="min-w-52 space-y-2">
+                                                  <div className="flex flex-wrap gap-1.5">
+                                                    {(["pass", "fail", "unverified"] as const).map((status) => {
+                                                      const active = criterion.status === status;
+                                                      return (
+                                                        <button
+                                                          key={status}
+                                                          type="button"
+                                                          onClick={() => {
+                                                            setStrategyAssessments((current) => ({
+                                                              ...current,
+                                                              [criterion.id]: {
+                                                                ...current[criterion.id],
+                                                                status,
+                                                                updatedAt: new Date().toISOString(),
+                                                              },
+                                                            }));
+                                                            setStrategySaveMessage(null);
+                                                          }}
+                                                          className={`rounded-full border px-2 py-1 text-[10px] font-semibold transition ${
+                                                            active
+                                                              ? status === "pass"
+                                                                ? "border-emerald-300 bg-emerald-400 text-slate-950"
+                                                                : status === "fail"
+                                                                  ? "border-rose-300 bg-rose-400 text-slate-950"
+                                                                  : "border-slate-400 bg-slate-500 text-white"
+                                                              : "border-slate-700 text-slate-400 hover:border-slate-500"
+                                                          }`}
+                                                        >
+                                                          {status === "pass"
+                                                            ? L("Met", "Cumple")
+                                                            : status === "fail"
+                                                              ? L("Missed", "Falló")
+                                                              : L("No evidence", "Sin evidencia")}
+                                                        </button>
+                                                      );
+                                                    })}
+                                                  </div>
+                                                  <input
+                                                    value={strategyAssessments[criterion.id]?.note ?? ""}
+                                                    onChange={(event) => {
+                                                      const note = event.target.value;
+                                                      setStrategyAssessments((current) => ({
+                                                        ...current,
+                                                        [criterion.id]: {
+                                                          status: current[criterion.id]?.status ?? "unverified",
+                                                          note,
+                                                          updatedAt: new Date().toISOString(),
+                                                        },
+                                                      }));
+                                                      setStrategySaveMessage(null);
+                                                    }}
+                                                    placeholder={L("Evidence or review note…", "Evidencia o nota de revisión…")}
+                                                    className="w-full rounded-lg border border-slate-800 bg-slate-950 px-2 py-1.5 text-[10px] text-slate-200 outline-none placeholder:text-slate-600 focus:border-cyan-400"
+                                                  />
+                                                </div>
+                                              )}
+                                            </td>
+                                            <td className="px-3 py-3 text-slate-400">
+                                              {criterion.source === "broker"
+                                                ? L("Broker audit", "Audit del broker")
+                                                : criterion.source === "trader"
+                                                  ? L("Trader review", "Revisión del trader")
+                                                  : L("System", "Sistema")}
+                                            </td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                  <p className="mt-3 text-xs leading-relaxed text-slate-500">
+                                    {L(
+                                      "The adherence score uses only verified criteria. Evidence coverage shows how much of the strategy could actually be proven, so unknowns never become invented passes or failures.",
+                                      "El score de adherencia usa solo criterios verificados. La cobertura indica cuánto se pudo probar realmente, para que lo desconocido nunca se convierta en cumplimientos o fallas inventadas."
+                                    )}
+                                  </p>
+                                </div>
+                              ) : null}
+                            </>
+                          ) : null}
+                        </>
+                      )}
+                    </section>
+                  )}
 
                   {selectedTrade && (
                     <section className="grid gap-4 xl:grid-cols-4">

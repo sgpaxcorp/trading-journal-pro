@@ -159,8 +159,14 @@ export default function OrderHistoryAuditPanel({
           stop_present: boolean | null;
           oco_used: boolean | null;
           stop_mod_count: number;
+          stop_cancel_count: number;
+          stop_reprotected_count: number;
+          stop_removed_without_replacement: boolean;
+          max_time_without_stop_sec: number | null;
           cancel_count: number;
           replace_count: number;
+          protective_bracket_used: boolean;
+          automatic_bracket_protection: boolean;
           manual_market_exit: boolean | null;
           stop_market_filled: boolean | null;
           time_to_first_stop_sec: number | null;
@@ -279,8 +285,32 @@ export default function OrderHistoryAuditPanel({
                   value={executionDiscipline?.score != null ? `${executionDiscipline.score}%` : "—"}
                 />
                 <MetricCard label={L("OCO used", "OCO usado")} value={metrics.oco_used ? "Yes" : "No"} />
+                <MetricCard
+                  label={L("Protective OCO bracket", "Bracket OCO protector")}
+                  value={metrics.protective_bracket_used ? L("Yes", "Sí") : L("No", "No")}
+                />
+                <MetricCard
+                  label={L("Automatic with entry", "Automático con la entrada")}
+                  value={metrics.automatic_bracket_protection ? L("Yes", "Sí") : L("No", "No")}
+                />
                 <MetricCard label={L("Stop present", "Stop presente")} value={metrics.stop_present ? "Yes" : "No"} />
                 <MetricCard label={L("Stop changes", "Cambios de stop")} value={String(metrics.stop_mod_count ?? 0)} />
+                <MetricCard
+                  label={L("Stop removals", "Stops removidos")}
+                  value={String(metrics.stop_cancel_count ?? 0)}
+                />
+                <MetricCard
+                  label={L("Stops restored", "Stops repuestos")}
+                  value={String(metrics.stop_reprotected_count ?? 0)}
+                />
+                <MetricCard
+                  label={L("Removed without replacement", "Removido sin reponer")}
+                  value={metrics.stop_removed_without_replacement ? L("Yes", "Sí") : L("No", "No")}
+                />
+                <MetricCard
+                  label={L("Longest inferred replacement interval", "Mayor intervalo inferido de reposición")}
+                  value={formatSeconds(metrics.max_time_without_stop_sec ?? null, isEs)}
+                />
                 <MetricCard label={L("Cancel count", "Cancelaciones")} value={String(metrics.cancel_count ?? 0)} />
                 <MetricCard label={L("Replace count", "Reemplazos")} value={String(metrics.replace_count ?? 0)} />
                 <MetricCard
@@ -502,7 +532,7 @@ export default function OrderHistoryAuditPanel({
         </div>
 
         {evidence && (
-          <div className="mt-6 grid gap-4 lg:grid-cols-3">
+          <div className="mt-6 grid gap-4 lg:grid-cols-2 xl:grid-cols-4">
             <div className="rounded-3xl border border-slate-800 bg-slate-950/70 p-4">
               <p className="text-[11px] uppercase tracking-[0.18em] text-slate-400">
                 {L("Stop events", "Eventos de stop")}
@@ -572,6 +602,34 @@ export default function OrderHistoryAuditPanel({
                       </div>
                       <div>
                         {L("Order", "Orden")}: {f.order_type ?? "—"}
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="text-slate-500">{L("None", "Ninguno")}</div>
+                )}
+              </div>
+            </div>
+
+            <div className="rounded-3xl border border-slate-800 bg-slate-950/70 p-4">
+              <p className="text-[11px] uppercase tracking-[0.18em] text-slate-400">
+                {L("Inferred gaps without stop", "Intervalos inferidos sin stop")}
+              </p>
+              <div className="mt-3 space-y-2 text-xs text-slate-200 max-h-64 overflow-y-auto">
+                {evidence.protection_gaps?.length ? (
+                  evidence.protection_gaps.map((gap: any, idx: number) => (
+                    <div
+                      key={idx}
+                      className="rounded-xl border border-slate-800/80 bg-slate-950/80 px-2 py-2"
+                    >
+                      <div className="break-all">{gap.instrument_key}</div>
+                      <div>
+                        {gap.removed_at} → {gap.restored_at ?? (gap.ended_with_trade_exit
+                          ? L("trade exit", "salida del trade")
+                          : L("not restored", "sin reponer"))}
+                      </div>
+                      <div>
+                        {L("Duration", "Duración")}: {formatSeconds(gap.duration_sec ?? null, isEs)}
                       </div>
                     </div>
                   ))

@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Ionicons } from "@expo/vector-icons";
 import {
   ActivityIndicator,
   Image,
-  Linking,
   Pressable,
   StyleSheet,
   Text,
@@ -16,7 +16,6 @@ import { ScreenScaffold } from "../components/ScreenScaffold";
 import { apiGet, apiPost } from "../lib/api";
 import { useLanguage } from "../lib/LanguageContext";
 import { t } from "../lib/i18n";
-import type { OpenModuleFn } from "../lib/moduleNavigation";
 import { parseNotes, type StoredTradeRow, type TradesPayload } from "../lib/journalNotes";
 import { supabaseMobile } from "../lib/supabase";
 import { useSupabaseUser } from "../lib/useSupabaseUser";
@@ -24,9 +23,10 @@ import { useTheme } from "../lib/ThemeContext";
 import { DARK_COLORS, type ThemeColors } from "../theme";
 
 type DashboardScreenProps = {
-  onOpenModule: OpenModuleFn;
   onOpenJournalDate: (date: string) => void;
   onOpenBusinessPlan: () => void;
+  onOpenNotebook: () => void;
+  onOpenAICoach: () => void;
 };
 
 const coachBrain = require("../../assets/neurotrader-logo-icon.png");
@@ -308,7 +308,6 @@ function GradientTitleText({ text, style }: { text: string; style: any }) {
   );
 }
 
-const WEB_AI_COACH_URL = "https://www.neurotrader-journal.com/performance/ai-coaching";
 
 const NEW_YORK_TZ = "America/New_York";
 
@@ -992,7 +991,7 @@ function mergeChecklistBaseWithSaved(baseTexts: string[], saved: UiChecklistItem
   return merged;
 }
 
-export function DashboardScreen({ onOpenModule: _onOpenModule, onOpenJournalDate, onOpenBusinessPlan }: DashboardScreenProps) {
+export function DashboardScreen({ onOpenJournalDate, onOpenBusinessPlan, onOpenNotebook, onOpenAICoach }: DashboardScreenProps) {
   const { language } = useLanguage();
   const { colors } = useTheme();
   const user = useSupabaseUser();
@@ -2109,6 +2108,48 @@ export function DashboardScreen({ onOpenModule: _onOpenModule, onOpenJournalDate
             </View>
           </View>
 
+          <View style={styles.quickActions}>
+            {[
+              {
+                key: "journal",
+                icon: "document-text-outline" as const,
+                label: t(language, "Today's journal", "Journal de hoy"),
+                onPress: () => onOpenJournalDate(todayStr),
+              },
+              {
+                key: "notebook",
+                icon: "library-outline" as const,
+                label: t(language, "Notebooks", "Notebooks"),
+                onPress: onOpenNotebook,
+              },
+              {
+                key: "plan",
+                icon: "map-outline" as const,
+                label: t(language, "Business Plan", "Plan Empresarial"),
+                onPress: onOpenBusinessPlan,
+              },
+              {
+                key: "coach",
+                icon: "sparkles-outline" as const,
+                label: t(language, "AI Coach", "Coach IA"),
+                onPress: onOpenAICoach,
+              },
+            ].map((action) => (
+              <Pressable
+                key={action.key}
+                accessibilityRole="button"
+                onPress={action.onPress}
+                style={styles.quickAction}
+              >
+                <View style={styles.quickActionIcon}>
+                  <Ionicons name={action.icon} size={18} color={colors.primary} />
+                </View>
+                <Text style={styles.quickActionText}>{action.label}</Text>
+                <Ionicons name="chevron-forward" size={15} color={colors.textMuted} />
+              </Pressable>
+            ))}
+          </View>
+
           <View style={[styles.progressRow, !isWideProgressLayout && styles.progressRowStack]}>
             <View style={[styles.progressColumn, !isWideProgressLayout && styles.progressColumnFull]}>
               <View style={styles.progressCard}>
@@ -2728,7 +2769,7 @@ export function DashboardScreen({ onOpenModule: _onOpenModule, onOpenJournalDate
                 ) : null}
 
                 <View style={styles.systemActionRow}>
-                  <Pressable style={styles.aiCoachButton} onPress={() => Linking.openURL(WEB_AI_COACH_URL)}>
+                  <Pressable style={styles.aiCoachButton} onPress={onOpenAICoach}>
                     <Text style={styles.aiCoachButtonText}>{t(language, "Open Business AI Coach", "Abrir Coach Empresarial IA")}</Text>
                   </Pressable>
                   <Pressable style={styles.systemSecondaryButton} onPress={onOpenBusinessPlan}>
@@ -3652,6 +3693,40 @@ const createStyles = (colors: ThemeColors) => {
       color: colors.textMuted,
       fontSize: 12,
       lineHeight: 18,
+    },
+    quickActions: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: 8,
+    },
+    quickAction: {
+      flexGrow: 1,
+      flexBasis: 155,
+      minHeight: 54,
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+      paddingHorizontal: 11,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 9,
+    },
+    quickActionIcon: {
+      width: 32,
+      height: 32,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.card,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    quickActionText: {
+      flex: 1,
+      color: colors.textPrimary,
+      fontSize: 12,
+      fontWeight: "800",
     },
     planPhaseLabel: {
       color: colors.textMuted,

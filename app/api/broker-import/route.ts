@@ -6,7 +6,9 @@ import { createHash } from "crypto";
 import {
   detectTosOrderHistoryFromRows,
   parseTosOrderHistoryFromRows,
+  TOS_ORDER_HISTORY_PARSER_VERSION,
 } from "@/lib/brokers/tos/parseTosOrderHistory";
+import { parseTosStatementRows } from "@/lib/brokers/tos/parseTosStatement";
 import type { NormalizedOrderEvent } from "@/lib/brokers/types";
 import { requirePlatformAccess } from "@/lib/serverPlatformAccess";
 import { getClientIp, rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
@@ -498,7 +500,7 @@ export async function POST(req: NextRequest) {
   if (!access.ok) return access.response;
 
   const userId = access.context.userId;
-  const activeAccountId = await resolveActiveAccountId(userId);
+  const defaultAccountId = await resolveActiveAccountId(userId);
   const limiter = await rateLimit(`broker-import:${userId}:${getClientIp(req)}`, {
     limit: 8,
     windowMs: 10 * 60_000,
@@ -514,6 +516,21 @@ export async function POST(req: NextRequest) {
     get: (name: string) => FormDataEntryValue | null;
   };
   const getFormValue = (name: string) => form.get(name);
+
+  const requestedAccountId = String(getFormValue("accountId") ?? "").trim();
+  let activeAccountId = defaultAccountId;
+  if (requestedAccountId) {
+    const { data: requestedAccount, error: accountError } = await supabaseAdmin
+      .from("trading_accounts")
+      .select("id")
+      .eq("id", requestedAccountId)
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (accountError || !requestedAccount) {
+      return NextResponse.json({ error: "The selected trading account was not found." }, { status: 404 });
+    }
+    activeAccountId = requestedAccountId;
+  }
 
   const brokerRaw = String(getFormValue("broker") ?? "").trim().toLowerCase();
   const broker: Broker = brokerRaw === "tradovate" ? "tradovate" : "thinkorswim";
@@ -614,15 +631,18 @@ export async function POST(req: NextRequest) {
         const fileHash = createHash("sha256").update(fileBuffer).digest("hex");
         const { data: existingDup } = await supabaseAdmin
           .from("broker_imports")
-          .select("id")
+          .select("id, meta")
           .eq("user_id", userId)
           .eq("account_id", accountId)
           .eq("broker", "thinkorswim")
           .eq("import_type", "order_history")
           .eq("file_hash", fileHash)
+          .order("created_at", { ascending: false })
           .limit(1);
         const duplicateImportId = existingDup?.[0]?.id ?? null;
         const isDuplicateFile = Boolean(duplicateImportId);
+        const existingParserVersion = Number((existingDup?.[0] as any)?.meta?.parser_version ?? 0);
+        const reparsingOlderVersion = isDuplicateFile && existingParserVersion < TOS_ORDER_HISTORY_PARSER_VERSION;
 
         const { data: importRow, error: importErr } = await supabaseAdmin
           .from("broker_imports")
@@ -638,6 +658,7 @@ export async function POST(req: NextRequest) {
               rows_found: parsed.stats.rows_found,
               rows_parsed: parsed.stats.rows_parsed,
               events_saved: 0,
+              parser_version: TOS_ORDER_HISTORY_PARSER_VERSION,
               warnings: parsed.warnings.slice(0, 12),
               duplicate_of: duplicateImportId,
             },
@@ -696,7 +717,7 @@ export async function POST(req: NextRequest) {
         let eventsSaved = 0;
         let duplicatesCount = 0;
 
-        if (!isDuplicateFile) {
+        if (!isDuplicateFile || reparsingOlderVersion) {
           const uniqueMap = new Map<string, any>();
           let duplicatesInFile = 0;
           for (const row of eventsWithHash) {
@@ -735,6 +756,34 @@ export async function POST(req: NextRequest) {
             if (error) throw new Error(error.message ?? "Failed to insert order events");
           }
           eventsSaved = toInsert.length;
+
+          if (reparsingOlderVersion && duplicateImportId) {
+            const toMove = uniqueRows.filter((row) => existingHashSet.has(String(row.event_hash)));
+            await parallelLimit(toMove, 12, async (row) => {
+              const { error } = await supabaseAdmin
+                .from("broker_order_events")
+                .update(row)
+                .eq("user_id", userId)
+                .eq("account_id", accountId)
+                .eq("broker", "thinkorswim")
+                .eq("event_hash", row.event_hash);
+              if (error) throw new Error(error.message ?? "Failed to refresh an existing order event");
+            });
+
+            // New-version rows now exist (and unchanged hashes were moved to the
+            // new import), so only stale parser output remains under the old id.
+            const { error: deleteOldEventsError } = await supabaseAdmin
+              .from("broker_order_events")
+              .delete()
+              .eq("user_id", userId)
+              .eq("account_id", accountId)
+              .eq("import_id", duplicateImportId);
+            if (deleteOldEventsError) {
+              throw new Error(deleteOldEventsError.message ?? "Failed to remove stale parsed order events");
+            }
+            eventsSaved = uniqueRows.length;
+            duplicatesCount = duplicatesInFile;
+          }
         } else {
           duplicatesCount = parsed.events.length;
           eventsSaved = 0;
@@ -748,6 +797,8 @@ export async function POST(req: NextRequest) {
               rows_parsed: parsed.stats.rows_parsed,
               events_saved: eventsSaved,
               events_skipped: duplicatesCount,
+              parser_version: TOS_ORDER_HISTORY_PARSER_VERSION,
+              reparsed_older_version: reparsingOlderVersion,
               warnings: parsed.warnings.slice(0, 12),
               duplicate_of: duplicateImportId,
             },
@@ -927,8 +978,8 @@ export async function POST(req: NextRequest) {
     /* ============================================================
        THINKORSWIM BRANCH (your existing logic)
     ============================================================ */
-    const detected = findHeaderRowThinkorswim(rows);
-    if (!detected) {
+    const parsedStatement = parseTosStatementRows(rows);
+    if (parsedStatement.headerRow == null) {
       if (orderHistorySummary) {
         const durationMs = Date.now() - startedAt;
         await supabaseAdmin
@@ -967,44 +1018,30 @@ export async function POST(req: NextRequest) {
       throw new Error("Could not detect statement headers in this file.");
     }
 
-    const { headerRowIdx, cols } = detected;
-    const dataRows = rows.slice(headerRowIdx + 1);
-
     // Build ledger rows + trade rows
     const txnRowsAll: any[] = [];
     const tradeRowsAll: any[] = [];
     const tradeOccurrenceByKey = new Map<string, number>();
+    const fillBySourceRow = new Map(parsedStatement.fills.map((fill) => [fill.sourceRow, fill]));
 
-    for (const r of dataRows) {
-      const dateCell = safeStr(r[cols.date]);
-      if (!/^\d{1,2}\/\d{1,2}\/\d{2}$/.test(dateCell)) continue;
-
-      const txnType = safeStr(r[cols.type]).toUpperCase();
-      const description = safeStr(r[cols.desc]);
-      const executed_at = parseDateTime(r[cols.date], r[cols.time]);
-
-      const misc_fees_raw = cols.miscFees >= 0 ? parseNumber(r[cols.miscFees]) : null;
-      const commissions_fees_raw =
-        cols.commFees >= 0 ? parseNumber(r[cols.commFees]) : null;
-
-      // store costs as positive
-      const misc_fees = misc_fees_raw == null ? null : Math.abs(misc_fees_raw);
-      const commissions_fees =
-        commissions_fees_raw == null ? null : Math.abs(commissions_fees_raw);
-
-      const amount = parseNumber(r[cols.amount]);
-      const balance = cols.balance >= 0 ? parseNumber(r[cols.balance]) : null;
-
-      const ref_num_raw = cols.ref >= 0 ? r[cols.ref] : null;
-      const ref_num_norm = normalizeRefNum(ref_num_raw);
-      const ref_num = ref_num_norm ? ref_num_norm : null;
+    for (const transaction of parsedStatement.transactions) {
+      const r = transaction.sourceRow;
+      const dateCell = transaction.date;
+      const txnType = transaction.type;
+      const description = transaction.description;
+      const executed_at = transaction.executedAt;
+      const misc_fees = transaction.miscFees;
+      const commissions_fees = transaction.commissions;
+      const amount = transaction.amount;
+      const balance = transaction.balance;
+      const ref_num = transaction.refNum;
 
       const row_hash = sha256(
         [
           broker,
           userId,
           dateCell,
-          safeStr(r[cols.time]),
+          transaction.time,
           ref_num ?? "",
           txnType,
           description.slice(0, 240),
@@ -1024,22 +1061,19 @@ export async function POST(req: NextRequest) {
         balance: Number.isFinite(balance) ? balance : null,
         executed_at,
         row_hash,
-        raw: { row: r, detectedHeadersAtRow: headerRowIdx },
+        raw: { row: r, detectedHeadersAtRow: parsedStatement.headerRow },
         import_batch_id: batchId,
       });
 
-      if (txnType === "TRD") {
-        const side = normalizeSideFromDesc(description);
-        const qty = parseQtyFromDesc(description);
-        const price = parsePriceFromDesc(description);
-
-        if (!side || !qty || price == null || !Number.isFinite(price)) continue;
-
-        const opt = parseOptionFromDesc(description);
-        const instrument_type = opt ? "option" : "stock";
-        const symbol = opt?.underlying ??
-          (description.toUpperCase().match(/\b[A-Z]{1,6}\b/)?.[0] ?? "UNKNOWN");
-        const contract_code = opt?.contract_code ?? symbol;
+      const fill = fillBySourceRow.get(r);
+      if (fill) {
+        const side = fill.side;
+        const qty = fill.qty;
+        const price = fill.price;
+        const opt = fill.option;
+        const instrument_type = fill.instrumentType;
+        const symbol = fill.symbol;
+        const contract_code = fill.contractCode;
 
         const baseTradeHash = ref_num
           ? sha256([userId, broker, "REF", ref_num].join("|"))
@@ -1270,6 +1304,7 @@ export async function POST(req: NextRequest) {
             broker,
             warning: `Import done but failed to finalize batch: ${updErr.message}`,
             message: `Statement trades — ${tradeInserted} new, ${tradeUpdated} updated, ${statementDuplicates} duplicates skipped.`,
+            statement: parsedStatement.summary,
           },
           { status: 200 }
         );
@@ -1284,6 +1319,8 @@ export async function POST(req: NextRequest) {
           updated: tradeUpdated,
           duplicates: statementDuplicates,
           orderHistory: orderHistorySummary ?? undefined,
+          statement: parsedStatement.summary,
+          warnings: parsedStatement.warnings,
           message:
             `Statement trades — ${tradeInserted} new, ${tradeUpdated} updated, ` +
             `${statementDuplicates} duplicates skipped. Ledger: ${ledgerInserted} new, ${ledgerUpdated} updated, ${ledgerDuplicates} duplicates skipped.`,

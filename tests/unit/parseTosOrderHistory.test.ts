@@ -23,4 +23,28 @@ describe("parseTosOrderHistory", () => {
     const second = result.events[1];
     expect(second.event_type).toBe("ORDER_CANCELED");
   });
+
+  it("parses the current Schwab blank order-type header and named option expiry", () => {
+    const currentExport = `Account Order History
+Notes,,Time Placed,Spread,Side,Qty,Pos Effect,Symbol,Exp,Strike,Type,PRICE,,TIF,Status
+,,9/8/26 10:14:31,SINGLE,SELL,-1,TO CLOSE,SPY,8 SEP 26,769,PUT,2.70,LMT,DAY,FILLED
+,,9/8/26 10:14:26,SINGLE,SELL,-1,TO CLOSE,SPY,8 SEP 26,769,PUT,~,MKT,DAY,CANCELED
+,,,,,,,,,,,2.34,STP,STD,
+,,9/8/26 10:13:31,SINGLE,BUY,+1,TO OPEN,SPY,8 SEP 26,769,PUT,2.50,LMT,DAY,FILLED
+
+Account Trade History
+,Exec Time,Spread,Side,Qty,Pos Effect,Symbol,Exp,Strike,Type,Price,Net Price,Order Type
+,9/8/26 10:14:31,SINGLE,SELL,-1,TO CLOSE,SPY,8 SEP 26,769,PUT,2.71,2.71,LMT`;
+
+    const result = parseTosOrderHistory(currentExport, { sourceTz: "America/New_York" });
+
+    expect(result.events).toHaveLength(3);
+    expect(result.events.every((event) => event.instrument_key === "SPY|2026-09-08|P|769")).toBe(true);
+    expect(result.events.every((event) => event.asset_kind === "option")).toBe(true);
+    expect(result.events[0].order_type).toBe("LMT");
+    expect(result.events[1].order_type).toBe("STP MKT");
+    expect(result.events[1].stop_price).toBe(2.34);
+    expect(result.events[2].order_type).toBe("LMT");
+    expect(result.warnings).toEqual([]);
+  });
 });

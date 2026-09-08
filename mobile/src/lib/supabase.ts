@@ -13,24 +13,41 @@ const secureStoreOptions: SecureStore.SecureStoreOptions = {
 
 const storageAdapter = {
   async getItem(key: string) {
-    const secureValue = await SecureStore.getItemAsync(key, secureStoreOptions);
-    if (secureValue != null) {
-      return secureValue;
+    try {
+      const secureValue = await SecureStore.getItemAsync(key, secureStoreOptions);
+      if (secureValue != null) {
+        return secureValue;
+      }
+    } catch {
+      // Keep authentication usable if Keychain is temporarily unavailable.
+      return AsyncStorage.getItem(key);
     }
 
     // One-time silent migration from the legacy AsyncStorage session store.
     const legacyValue = await AsyncStorage.getItem(key);
     if (legacyValue != null) {
-      await SecureStore.setItemAsync(key, legacyValue, secureStoreOptions);
-      await AsyncStorage.removeItem(key);
+      try {
+        await SecureStore.setItemAsync(key, legacyValue, secureStoreOptions);
+        await AsyncStorage.removeItem(key);
+      } catch {
+        // Retain the legacy value until Keychain is available again.
+      }
     }
     return legacyValue;
   },
-  setItem: (key: string, value: string) =>
-    SecureStore.setItemAsync(key, value, secureStoreOptions),
+  async setItem(key: string, value: string) {
+    try {
+      await SecureStore.setItemAsync(key, value, secureStoreOptions);
+      await AsyncStorage.removeItem(key);
+    } catch {
+      await AsyncStorage.setItem(key, value);
+    }
+  },
   async removeItem(key: string) {
-    await SecureStore.deleteItemAsync(key, secureStoreOptions);
-    await AsyncStorage.removeItem(key);
+    await Promise.allSettled([
+      SecureStore.deleteItemAsync(key, secureStoreOptions),
+      AsyncStorage.removeItem(key),
+    ]);
   },
 };
 

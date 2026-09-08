@@ -1,6 +1,11 @@
 const fs = require("fs");
 const path = require("path");
-const { withDangerousMod, withXcodeProject } = require("@expo/config-plugins");
+const {
+  withDangerousMod,
+  withEntitlementsPlist,
+  withInfoPlist,
+  withXcodeProject,
+} = require("@expo/config-plugins");
 
 const IOS_DEPLOYMENT_TARGET = "16.0";
 const USER_SCRIPT_SANDBOXING_YES = "ENABLE_USER_SCRIPT_SANDBOXING = YES;";
@@ -355,6 +360,8 @@ module.exports = function withDeviceDebugBundling(config) {
     for (const key of Object.keys(buildConfigs)) {
       const buildConfig = buildConfigs[key];
       if (typeof buildConfig !== "object" || !buildConfig.buildSettings) continue;
+      buildConfig.buildSettings.CURRENT_PROJECT_VERSION = String(config.ios?.buildNumber || "1");
+      buildConfig.buildSettings.MARKETING_VERSION = String(config.version || "1.0.0");
       buildConfig.buildSettings.ENABLE_USER_SCRIPT_SANDBOXING = "NO";
       buildConfig.buildSettings.IPHONEOS_DEPLOYMENT_TARGET = IOS_DEPLOYMENT_TARGET;
       removeDuplicateLibcxxFlag(buildConfig.buildSettings);
@@ -448,6 +455,24 @@ module.exports = function withDeviceDebugBundling(config) {
       return config;
     },
   ]);
+
+  config = withEntitlementsPlist(config, (config) => {
+    // Mobile billing stays outside the app; never preserve a stale Apple Pay capability.
+    delete config.modResults["com.apple.developer.in-app-payments"];
+    config.modResults["aps-environment"] = "production";
+    return config;
+  });
+
+  config = withInfoPlist(config, (config) => {
+    const urlTypes = Array.isArray(config.modResults.CFBundleURLTypes)
+      ? config.modResults.CFBundleURLTypes
+      : [];
+    for (const urlType of urlTypes) {
+      if (!Array.isArray(urlType.CFBundleURLSchemes)) continue;
+      urlType.CFBundleURLSchemes = [...new Set(urlType.CFBundleURLSchemes)];
+    }
+    return config;
+  });
 
   return withDangerousMod(config, [
     "android",

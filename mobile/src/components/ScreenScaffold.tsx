@@ -75,6 +75,8 @@ export function ScreenScaffold({
         { paddingHorizontal: contentPadding },
       ]}
       alwaysBounceVertical
+      keyboardDismissMode="interactive"
+      keyboardShouldPersistTaps="handled"
       refreshControl={
         <RefreshControl
           refreshing={activeRefreshing}
