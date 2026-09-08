@@ -9,6 +9,11 @@ import {
 import { getServerPlanForUser } from "@/lib/serverFeatureAccess";
 import { requirePlatformAccess } from "@/lib/serverPlatformAccess";
 import { isTradingSessionDate, normalizeTradingInstrument } from "@/lib/tradingCalendar";
+import {
+  advanceActualAccountBalance,
+  endingBalanceFromJournalNotes,
+  resolveAccountSeriesRange,
+} from "@/lib/accountBalanceSnapshot";
 
 export const runtime = "nodejs";
 
@@ -323,7 +328,7 @@ async function listJournalEntries(
 ) {
   let q = supabaseAdmin
     .from("journal_entries")
-    .select("date, pnl")
+    .select("date, pnl, notes")
     .eq("user_id", userId)
     .order("date", { ascending: true });
   if (accountId) q = q.eq("account_id", accountId);
@@ -335,7 +340,7 @@ async function listJournalEntries(
   if (error && accountId && isMissingColumnError(error, "account_id")) {
     const retry = await supabaseAdmin
       .from("journal_entries")
-      .select("date, pnl")
+      .select("date, pnl, notes")
       .eq("user_id", userId)
       .order("date", { ascending: true });
     data = retry.data as any[] | null;
@@ -348,7 +353,7 @@ async function listJournalEntries(
     try {
       let altQ = supabaseAdmin
         .from("journal_entries")
-        .select("date, pnl")
+        .select("date, pnl, notes")
         .eq("user_id", email)
         .order("date", { ascending: true });
       if (accountId) altQ = altQ.eq("account_id", accountId);
@@ -362,6 +367,50 @@ async function listJournalEntries(
   }
 
   return (data ?? []) as any[];
+}
+
+async function latestImportedEndingBalance(
+  userId: string,
+  accountId?: string | null
+): Promise<{ date: string; balance: number } | null> {
+  let tradeQuery = supabaseAdmin
+    .from("trades")
+    .select("import_batch_id,executed_at")
+    .eq("user_id", userId)
+    .not("import_batch_id", "is", null)
+    .order("executed_at", { ascending: false })
+    .limit(100);
+  tradeQuery = accountId
+    ? tradeQuery.eq("account_id", accountId)
+    : tradeQuery.is("account_id", null);
+
+  const { data: tradeRows, error: tradeError } = await tradeQuery;
+  if (tradeError || !tradeRows?.length) return null;
+
+  const importBatchIds = Array.from(
+    new Set(
+      tradeRows
+        .map((row: any) => String(row?.import_batch_id ?? "").trim())
+        .filter(Boolean)
+    )
+  );
+  if (!importBatchIds.length) return null;
+
+  const { data: balanceRows, error: balanceError } = await supabaseAdmin
+    .from("broker_transactions")
+    .select("balance,executed_at")
+    .eq("user_id", userId)
+    .in("import_batch_id", importBatchIds)
+    .not("balance", "is", null)
+    .order("executed_at", { ascending: false })
+    .limit(1);
+  if (balanceError || !balanceRows?.length) return null;
+
+  const row = balanceRows[0] as any;
+  const date = String(row?.executed_at ?? "").slice(0, 10);
+  const balance = Number(row?.balance);
+  if (!looksLikeYYYYMMDD(date) || !Number.isFinite(balance)) return null;
+  return { date, balance: Number(balance.toFixed(2)) };
 }
 
 export async function GET(req: NextRequest) {
@@ -460,8 +509,10 @@ export async function GET(req: NextRequest) {
 
     const journalRows = await listJournalEntries(userId, email, accountId, fromDate, toDate);
     const cashflows = await listCashflowsForUser(userId, email, accountId, fromDate, toDate);
+    const latestImportedBalance = await latestImportedEndingBalance(userId, accountId);
 
     const pnlByDate: Record<string, number> = {};
+    const endingBalanceByDate: Record<string, number> = {};
     let minDate = "";
     let maxDate = "";
 
@@ -470,6 +521,8 @@ export async function GET(req: NextRequest) {
       if (!looksLikeYYYYMMDD(d)) continue;
       const pnl = toNum(r?.pnl ?? 0, 0);
       pnlByDate[d] = (pnlByDate[d] ?? 0) + pnl;
+      const endingBalance = endingBalanceFromJournalNotes(r?.notes, d);
+      if (endingBalance != null) endingBalanceByDate[d] = endingBalance;
       if (!minDate || d < minDate) minDate = d;
       if (!maxDate || d > maxDate) maxDate = d;
     }
@@ -484,19 +537,33 @@ export async function GET(req: NextRequest) {
       if (!maxDate || d > maxDate) maxDate = d;
     }
 
-    const todayIso = isoDate(new Date());
-    if (toDate) {
-      maxDate = toDate;
-    } else if (!maxDate || maxDate < todayIso) {
-      maxDate = todayIso;
+    if (
+      latestImportedBalance &&
+      (!fromDate || latestImportedBalance.date >= fromDate) &&
+      (!toDate || latestImportedBalance.date <= toDate)
+    ) {
+      endingBalanceByDate[latestImportedBalance.date] = latestImportedBalance.balance;
+      if (!minDate || latestImportedBalance.date < minDate) minDate = latestImportedBalance.date;
+      if (!maxDate || latestImportedBalance.date > maxDate) maxDate = latestImportedBalance.date;
     }
 
-    const startIso = fromDate || planStartIso || minDate || todayIso;
+    const todayIso = isoDate(new Date());
+    const seriesRange = resolveAccountSeriesRange({
+      requestedFromDate: fromDate,
+      requestedToDate: toDate,
+      planStartIso,
+      earliestActivityIso: minDate,
+      latestActivityIso: maxDate,
+      todayIso,
+    });
+    const startIso = seriesRange.startIso;
+    maxDate = seriesRange.endIso;
     const dateList = listDatesBetween(startIso, maxDate);
 
     // Build actual series
     let cumPnl = 0;
     let cumCash = 0;
+    let actualBalance = startingBalance;
     const series: SeriesPoint[] = [];
     const tradingSeries: SeriesPoint[] = [];
     const daily: SeriesPoint[] = [];
@@ -507,7 +574,13 @@ export async function GET(req: NextRequest) {
       const dayCash = cashByDate[d] ?? 0;
       cumPnl += dayPnl;
       cumCash += dayCash;
-      const value = startingBalance + cumPnl + cumCash;
+      actualBalance = advanceActualAccountBalance({
+        currentBalance: actualBalance,
+        tradingPnl: dayPnl,
+        cashflow: dayCash,
+        endingBalance: endingBalanceByDate[d],
+      });
+      const value = actualBalance;
       const tradingValue = startingBalance + cumPnl;
       series.push({ date: d, value: Number(value.toFixed(2)) });
       tradingSeries.push({ date: d, value: Number(tradingValue.toFixed(2)) });
@@ -581,10 +654,22 @@ export async function GET(req: NextRequest) {
 
     const totalTradingPnl = cumPnl;
     const totalCashflowNet = cumCash;
+    const tradingPnlSincePlan = Object.entries(pnlByDate).reduce(
+      (sum, [date, pnl]) => sum + (!planStartIso || date >= planStartIso ? pnl : 0),
+      0
+    );
+    const cashflowNetSincePlan = Object.entries(cashByDate).reduce(
+      (sum, [date, amount]) => sum + (!planStartIso || date >= planStartIso ? amount : 0),
+      0
+    );
     const userPlan = await getServerPlanForUser(userId);
     const canSeeCashflow = userPlan === "advanced";
     const visibleCashflowNet = canSeeCashflow ? totalCashflowNet : 0;
-    const visibleCurrentBalance = startingBalance + totalTradingPnl + visibleCashflowNet;
+    const calculatedCurrentBalance = startingBalance + totalTradingPnl + visibleCashflowNet;
+    const visibleCurrentBalance =
+      canSeeCashflow && series.length
+        ? series[series.length - 1]!.value
+        : calculatedCurrentBalance;
     const trimPoints = (points: SeriesPoint[]) => (seriesDays > 0 ? points.slice(-seriesDays) : points);
 
     return NextResponse.json({
@@ -595,6 +680,8 @@ export async function GET(req: NextRequest) {
         dailyTargetPct,
         planStartIso: planStartIso || startIso,
         seriesStartIso: startIso,
+        hasPrePlanActivity: seriesRange.hasPrePlanActivity,
+        earliestActivityIso: seriesRange.earliestActivityIso,
         targetDate: String(plan?.target_date ?? plan?.targetDate ?? ""),
         planMode: String(plan?.plan_mode ?? plan?.planMode ?? ""),
         planPhases: plan?.plan_phases ?? plan?.planPhases ?? null,
@@ -606,8 +693,14 @@ export async function GET(req: NextRequest) {
       },
       totals: {
         tradingPnl: Number(totalTradingPnl.toFixed(2)),
+        tradingPnlSincePlan: Number(tradingPnlSincePlan.toFixed(2)),
         cashflowNet: Number(visibleCashflowNet.toFixed(2)),
+        cashflowNetSincePlan: Number((canSeeCashflow ? cashflowNetSincePlan : 0).toFixed(2)),
         currentBalance: Number(visibleCurrentBalance.toFixed(2)),
+        endingBalanceSource:
+          canSeeCashflow && Object.keys(endingBalanceByDate).length
+            ? "broker_statement"
+            : "calculated",
       },
       series: trimPoints(canSeeCashflow ? series : tradingSeries),
       projected: trimPoints(projected),

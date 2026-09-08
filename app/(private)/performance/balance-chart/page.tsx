@@ -333,7 +333,15 @@ export default function BalanceChartPage() {
     cashflow?: Array<{ date: string; value: number }>;
     daily?: Array<{ date: string; value: number }>;
     totals: { tradingPnl: number; cashflowNet: number; currentBalance: number };
-    plan: { startingBalance: number; targetBalance: number; dailyTargetPct: number; planStartIso: string };
+    plan: {
+      startingBalance: number;
+      targetBalance: number;
+      dailyTargetPct: number;
+      planStartIso: string;
+      seriesStartIso?: string;
+      hasPrePlanActivity?: boolean;
+      earliestActivityIso?: string | null;
+    };
   } | null>(null);
 
   const fmtCurrency = (n: number) => currency(n, localeTag);
@@ -441,6 +449,7 @@ export default function BalanceChartPage() {
     let alive = true;
     async function loadSeries() {
       if (loading || accountsLoading || !activeAccountId) return;
+      setServerSeries(null);
       try {
         const { data: sessionData } = await supabaseBrowser.auth.getSession();
         const token = sessionData?.session?.access_token;
@@ -448,6 +457,7 @@ export default function BalanceChartPage() {
 
         const res = await fetch(`/api/account/series?accountId=${encodeURIComponent(activeAccountId)}`, {
           headers: { Authorization: `Bearer ${token}` },
+          cache: "no-store",
         });
         if (!res.ok) return;
         const body = await res.json();
@@ -457,12 +467,13 @@ export default function BalanceChartPage() {
             series: body.series,
             projected: Array.isArray(body?.projected) ? body.projected : [],
             cashflow: Array.isArray(body?.cashflow) ? body.cashflow : [],
+            daily: Array.isArray(body?.daily) ? body.daily : [],
             totals: body?.totals ?? { tradingPnl: 0, cashflowNet: 0, currentBalance: 0 },
             plan: body?.plan ?? { startingBalance: 0, targetBalance: 0, dailyTargetPct: 0, planStartIso: "" },
           });
         }
       } catch {
-        // ignore
+        if (alive) setServerSeries(null);
       }
     }
     loadSeries();
@@ -677,7 +688,7 @@ export default function BalanceChartPage() {
         date: p.date,
         actual: Number(p.value ?? 0),
         projected: Number(projectedSeries[idx]?.value ?? projectedSeries[projectedSeries.length - 1]?.value ?? p.value ?? 0),
-        dayPnl: Number(pnlByDate[p.date] ?? 0),
+        dayPnl: Number(dailyMap[p.date] ?? pnlByDate[p.date] ?? 0),
         cashflow: Number(cashflowByDate[p.date] ?? 0),
       }));
 
@@ -701,6 +712,7 @@ export default function BalanceChartPage() {
         diffPct: Number(serverDiffPct.toFixed(2)),
         totalTradingPnl: Number(serverSeries.totals.tradingPnl ?? outObj.totalTradingPnl ?? 0),
         totalCashflowNet: Number(serverSeries.totals.cashflowNet ?? outObj.totalCashflowNet ?? 0),
+        tradingDays: Object.keys(dailyMap).length,
         cashflowByDate,
       };
     }
@@ -775,6 +787,30 @@ export default function BalanceChartPage() {
           </div>
         ) : (
           <>
+            {serverSeries?.plan?.hasPrePlanActivity && serverSeries.plan.earliestActivityIso ? (
+              <section className="mb-6 rounded-2xl border border-amber-400/40 bg-amber-500/10 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="text-[11px] uppercase tracking-[0.2em] text-amber-200">
+                      {L("Account data starts before this plan", "Hay datos de cuenta anteriores a este plan")}
+                    </p>
+                    <p className="mt-1 text-sm text-slate-200">
+                      {L(
+                        `Your account has activity from ${serverSeries.plan.earliestActivityIso}, while this plan starts on ${serverSeries.plan.planStartIso}. We included the activity in your real balance; plan pace and milestones still begin on the configured date.`,
+                        `Tu cuenta tiene actividad desde ${serverSeries.plan.earliestActivityIso}, pero este plan comienza el ${serverSeries.plan.planStartIso}. Incluimos la actividad en tu balance real; el ritmo y los milestones del plan aún comienzan en la fecha configurada.`
+                      )}
+                    </p>
+                  </div>
+                  <Link
+                    href="/growth-plan#gp-timeline"
+                    className="rounded-lg border border-amber-300/60 px-3 py-1.5 text-xs font-semibold text-amber-100 hover:border-amber-200"
+                  >
+                    {L("Review plan start date", "Revisar fecha de inicio")}
+                  </Link>
+                </div>
+              </section>
+            ) : null}
+
             {/* KPI row */}
             <section className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
               <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">

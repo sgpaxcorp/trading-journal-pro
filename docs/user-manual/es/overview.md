@@ -45,7 +45,7 @@ Es el chat de ayuda rápida que aparece en la parte inferior de tu espacio priva
 **Imports (Broker Sync o CSV)**  
 Trae trades reales al sistema. Sin datos limpios, la analítica se distorsiona.
 
-**Option Flow Intelligence (beta privada)**  
+**Option Flows Analysis (beta privada)**
 Espacio en beta privada para probar reportes de flujo y planes premarket antes del lanzamiento público.
 
 **Notebook**  

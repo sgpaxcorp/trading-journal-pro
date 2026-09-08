@@ -2201,7 +2201,7 @@ export default function OptionFlowPage() {
     };
 
     const logo = await loadLogoData();
-    const headerTitle = isEs ? "Option Flow Intelligence - Reporte" : "Option Flow Intelligence - Report";
+    const headerTitle = isEs ? "Option Flows Analysis - Reporte" : "Option Flows Analysis - Report";
     const generatedLine = `${isEs ? "Generado" : "Generated"}: ${new Date().toLocaleString(localeTag)}`;
 
     doc.setFontSize(16);
@@ -2773,10 +2773,10 @@ export default function OptionFlowPage() {
       payload.meta?.tradeIntent ? payload.meta.tradeIntent.toUpperCase() : null,
     ].filter(Boolean);
     const title = titleParts.length
-      ? `Option Flow ${titleParts.join(" · ")}`
+      ? `Option Flows Analysis · ${titleParts.join(" · ")}`
       : isEs
-      ? "Option Flow Reporte"
-      : "Option Flow Report";
+      ? "Reporte de Option Flows Analysis"
+      : "Option Flows Analysis Report";
     const { data, error } = await supabaseBrowser
       .from("option_flow_archives")
       .insert({
@@ -2897,7 +2897,7 @@ export default function OptionFlowPage() {
     appendMessage(
       {
         role: "assistant",
-        title: isEs ? "Inteligencia de Flujo de Opciones" : "Option Flow Intelligence",
+        title: "Option Flows Analysis",
         body: isEs
           ? "¿Cómo quieres analizar el flujo de órdenes? Puedes pegar screenshots o subir un CSV/XLSX (máx 12MB)."
           : "How do you want to analyze the order flow? Paste screenshots or upload a CSV/XLSX (max 12MB).",
@@ -3689,7 +3689,7 @@ export default function OptionFlowPage() {
     >
       <div className="flex items-center justify-between mb-2">
         <h2 className="text-sm font-semibold">
-          {isEs ? "Chat de Option Flow" : "Option Flow Chat"}
+          {isEs ? "Chat de Option Flows Analysis" : "Option Flows Analysis Chat"}
         </h2>
         <button
           type="button"
@@ -4089,7 +4089,7 @@ export default function OptionFlowPage() {
                 className="rounded-2xl border border-slate-800 bg-slate-950/50 p-3"
               >
                 <p className="text-[12px] font-semibold text-slate-100">
-                  {session.title || (isEs ? "Chat Option Flow" : "Option Flow Chat")}
+                  {session.title || (isEs ? "Chat de Option Flows Analysis" : "Option Flows Analysis Chat")}
                 </p>
                 <p className="text-[11px] text-slate-500">
                   {new Date(session.created_at).toLocaleString(localeTag)}
@@ -4130,7 +4130,7 @@ export default function OptionFlowPage() {
             {archives.map((archive) => (
               <div key={archive.id} className="rounded-2xl border border-slate-800 bg-slate-950/50 p-3">
                 <p className="text-[12px] font-semibold text-slate-100">
-                  {archive.title || (isEs ? "Option Flow Reporte" : "Option Flow Report")}
+                  {archive.title || (isEs ? "Reporte de Option Flows Analysis" : "Option Flows Analysis Report")}
                 </p>
                 <p className="text-[11px] text-slate-500">
                   {new Date(archive.created_at).toLocaleString(localeTag)}
@@ -4244,7 +4244,7 @@ export default function OptionFlowPage() {
               <div className="flex items-center justify-between mb-4">
                 <div>
                   <p className="text-[10px] uppercase tracking-[0.35em] text-emerald-300">
-                    {isEs ? "Inteligencia de Flujo de Opciones" : "Option Flow Intelligence"}
+                    Option Flows Analysis
                   </p>
                   <h2 className="text-2xl font-semibold mt-2">
                     {isEs ? "Modo enfoque" : "Focus mode"}
@@ -4265,10 +4265,10 @@ export default function OptionFlowPage() {
         <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <p className="text-[11px] uppercase tracking-[0.35em] text-emerald-300">
-              {isEs ? "Inteligencia de Flujo de Opciones" : "Option Flow Intelligence"}
+              Option Flows Analysis
             </p>
             <h1 className="text-xl sm:text-2xl font-semibold mt-2">
-              {isEs ? "Inteligencia de Flujo de Opciones" : "Option Flow Intelligence"}
+              Option Flows Analysis
             </h1>
             <p className="text-[12px] sm:text-[13px] text-slate-400 mt-2 max-w-3xl">
               {isEs

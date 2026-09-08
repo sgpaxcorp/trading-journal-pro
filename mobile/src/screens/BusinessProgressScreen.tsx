@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useFocusEffect } from "@react-navigation/native";
 import { ActivityIndicator, Pressable, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 
 import { ScreenScaffold } from "../components/ScreenScaffold";
@@ -16,6 +17,9 @@ type GrowthPlanSummary = {
   targetBalance?: number;
   adjustedTargetBalance?: number;
   planStartIso?: string | null;
+  seriesStartIso?: string | null;
+  hasPrePlanActivity?: boolean;
+  earliestActivityIso?: string | null;
   targetDate?: string | null;
   planMode?: string | null;
   planPhases?: unknown;
@@ -28,6 +32,8 @@ type AccountSeriesResponse = {
   plan?: GrowthPlanSummary | null;
   totals?: {
     currentBalance?: number | null;
+    tradingPnlSincePlan?: number | null;
+    cashflowNetSincePlan?: number | null;
   } | null;
 };
 
@@ -295,6 +301,10 @@ function buildProgressModel(response: AccountSeriesResponse, language: "en" | "e
 
   const fallbackStart = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 12);
   const startDate = parseDate(plan.planStartIso) ?? fallbackStart;
+  const planPerformanceBalance =
+    startBalance +
+    Number(response.totals?.tradingPnlSincePlan ?? 0) +
+    Number(response.totals?.cashflowNetSincePlan ?? 0);
   let targetDate = parseDate(plan.targetDate);
   if (!targetDate || targetDate <= startDate) targetDate = addDays(startDate, 365);
   const todayDate = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 12);
@@ -306,7 +316,7 @@ function buildProgressModel(response: AccountSeriesResponse, language: "en" | "e
   const activePhase =
     structured.find((phase) => String(phase.targetDate) >= toIso(activeDate)) ??
     structured[structured.length - 1] ??
-    phases.find((phase) => phase.targetEquity > currentBalance) ??
+    phases.find((phase) => phase.targetEquity > planPerformanceBalance) ??
     phases[phases.length - 1] ??
     null;
 
@@ -333,8 +343,8 @@ function buildProgressModel(response: AccountSeriesResponse, language: "en" | "e
     }
 
     const requiredMove = Math.max(0, projectedTarget - projectedStart);
-    const actualMove = currentBalance - projectedStart;
-    const progress = requiredMove > 0 ? Math.max(0, Math.min(1.5, actualMove / requiredMove)) : currentBalance >= projectedTarget ? 1 : 0;
+    const actualMove = planPerformanceBalance - projectedStart;
+    const progress = requiredMove > 0 ? Math.max(0, Math.min(1.5, actualMove / requiredMove)) : planPerformanceBalance >= projectedTarget ? 1 : 0;
     const prefix =
       key === "week"
         ? t(language, "Week of", "Semana del")
@@ -356,12 +366,12 @@ function buildProgressModel(response: AccountSeriesResponse, language: "en" | "e
       progress,
       actualMove,
       requiredMove,
-      gap: currentBalance - projectedTarget,
+      gap: planPerformanceBalance - projectedTarget,
     };
   });
 
   const goalAmount = Math.max(0, targetBalance - startBalance);
-  const builtAmount = currentBalance - startBalance;
+  const builtAmount = planPerformanceBalance - startBalance;
   const deadlineDays = Math.ceil((targetDate.getTime() - todayDate.getTime()) / DAY_MS);
   const activeCheckpoint = activePhase
     ? activePhase.title ||
@@ -398,13 +408,17 @@ export function BusinessProgressScreen({ onOpenBusinessPlan }: BusinessProgressS
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const focusedOnceRef = useRef(false);
 
   const load = useCallback(async (refresh = false) => {
     try {
       if (refresh) setRefreshing(true);
       else setLoading(true);
       setError(null);
-      setResponse(await apiGet<AccountSeriesResponse>(ACCOUNT_SERIES_PATH));
+      const requestPath = refresh
+        ? `${ACCOUNT_SERIES_PATH}&mobileRefresh=${Date.now()}`
+        : ACCOUNT_SERIES_PATH;
+      setResponse(await apiGet<AccountSeriesResponse>(requestPath));
     } catch (err: any) {
       setError(err?.message ?? t(language, "Could not load business progress.", "No se pudo cargar el progreso del negocio."));
     } finally {
@@ -416,6 +430,16 @@ export function BusinessProgressScreen({ onOpenBusinessPlan }: BusinessProgressS
   useEffect(() => {
     void load(false);
   }, [load]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!focusedOnceRef.current) {
+        focusedOnceRef.current = true;
+        return;
+      }
+      void load(true);
+    }, [load])
+  );
 
   const locale = language === "es" ? "es" : "en";
   const model = useMemo(() => (response ? buildProgressModel(response, locale) : null), [locale, response]);
@@ -466,6 +490,26 @@ export function BusinessProgressScreen({ onOpenBusinessPlan }: BusinessProgressS
         </View>
       ) : (
         <>
+          {response?.plan?.hasPrePlanActivity && response.plan.earliestActivityIso ? (
+            <View style={styles.dateWarningCard}>
+              <Text style={styles.warningEyebrow}>
+                {t(language, "Plan date needs review", "Revisa la fecha del plan")}
+              </Text>
+              <Text style={styles.warningBody}>
+                {t(
+                  language,
+                  `Your account has activity from ${response.plan.earliestActivityIso}, but this plan starts on ${response.plan.planStartIso ?? "—"}. Your real balance includes the activity; plan milestones still use the configured start date.`,
+                  `Tu cuenta tiene actividad desde ${response.plan.earliestActivityIso}, pero este plan comienza el ${response.plan.planStartIso ?? "—"}. Tu balance real incluye la actividad; los milestones aún usan la fecha configurada.`
+                )}
+              </Text>
+              <Pressable style={styles.warningButton} onPress={onOpenBusinessPlan}>
+                <Text style={styles.warningButtonText}>
+                  {t(language, "Keep or change start date", "Mantener o cambiar fecha")}
+                </Text>
+              </Pressable>
+            </View>
+          ) : null}
+
           <View style={styles.heroCard}>
             <View style={styles.heroHeader}>
               <View style={styles.flexOne}>
@@ -625,6 +669,41 @@ const createStyles = (colors: ThemeColors, width: number) => {
       color: colors.dangerText,
       fontSize: 13,
       lineHeight: 19,
+    },
+    dateWarningCard: {
+      borderRadius: 18,
+      borderWidth: 1,
+      borderColor: colors.warning,
+      backgroundColor: colors.warningSoft,
+      padding: 16,
+      gap: 8,
+    },
+    warningEyebrow: {
+      color: colors.warning,
+      fontSize: 10,
+      fontWeight: "900",
+      letterSpacing: 1.4,
+      textTransform: "uppercase",
+    },
+    warningBody: {
+      color: colors.textPrimary,
+      fontSize: 13,
+      lineHeight: 19,
+    },
+    warningButton: {
+      minHeight: 40,
+      borderRadius: 11,
+      borderWidth: 1,
+      borderColor: colors.warning,
+      paddingHorizontal: 13,
+      alignItems: "center",
+      justifyContent: "center",
+      alignSelf: "flex-start",
+    },
+    warningButtonText: {
+      color: colors.warning,
+      fontSize: 12,
+      fontWeight: "900",
     },
     button: {
       minHeight: 44,

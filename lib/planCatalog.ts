@@ -254,7 +254,7 @@ export const PLAN_COMPARISON_ROWS: PlanComparisonRow[] = [
   { kind: "feature", label: { en: "Android mobile app", es: "Aplicación móvil Android" }, core: { en: "Coming soon", es: "Próximamente" }, advanced: { en: "Coming soon", es: "Próximamente" } },
 
   { kind: "section", tone: "addon", label: { en: "PRIVATE BETA & OPTIONAL MODULES", es: "BETA PRIVADA Y MÓDULOS OPCIONALES" } },
-  { kind: "feature", label: { en: "Option Flow Intelligence private beta", es: "Beta privada de Option Flow Intelligence" }, core: { en: "Request access", es: "Solicitar acceso" }, advanced: { en: "Request access", es: "Solicitar acceso" } },
+  { kind: "feature", label: { en: "Option Flows Analysis private beta", es: "Beta privada de Option Flows Analysis" }, core: { en: "Request access", es: "Solicitar acceso" }, advanced: { en: "Request access", es: "Solicitar acceso" } },
 ];
 
 export function catalogText(value: LocalizedText, lang: CatalogLocale) {

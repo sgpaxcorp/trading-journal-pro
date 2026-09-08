@@ -54,6 +54,7 @@ import {
   type StrategyReviewAssignment,
   type StrategySnapshot,
 } from "@/lib/strategyReview";
+import { normalizeJournalSyncDates } from "@/lib/journalSync";
 import {
   DEFAULT_NEURO_LAYER,
   NEURO_AFTER_EXIT_REASON_OPTIONS,
@@ -1114,6 +1115,7 @@ export default function DailyJournalPage() {
 
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState("");
+  const [syncAvailableDates, setSyncAvailableDates] = useState<string[]>([]);
   const [journalNeuroMemory, setJournalNeuroMemory] = useState<NeuroMemory | null>(null);
   const [autoSaveState, setAutoSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const autoSaveReadyRef = useRef(false);
@@ -2429,6 +2431,7 @@ export default function DailyJournalPage() {
 
     setSyncing(true);
     setMsg("");
+    setSyncAvailableDates([]);
 
     try {
       const {
@@ -2441,16 +2444,20 @@ export default function DailyJournalPage() {
         return;
       }
 
-      const res = await fetch("/api/journal/sync", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          authorization: `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify({ date: dateParam, accountId: activeAccountId }),
-      });
+      const requestSync = async (syncDate: string) => {
+        const response = await fetch("/api/journal/sync", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            authorization: `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({ date: syncDate, accountId: activeAccountId }),
+        });
+        const payload = await response.json().catch(() => ({}));
+        return { response, payload };
+      };
 
-      const json = await res.json().catch(() => ({}));
+      const { response: res, payload: json } = await requestSync(dateParam);
 
       if (!res.ok) {
         setMsg(json?.error ? `${L("Sync error:", "Error de sync:")} ${json.error}` : L("Sync error.", "Error de sync."));
@@ -2462,15 +2469,15 @@ export default function DailyJournalPage() {
       const exitsCount = json?.exits_count ?? 0;
 
       if (found === 0) {
-        const availableDates = Array.isArray(json?.available_import_dates)
-          ? json.available_import_dates.filter((value: unknown) => typeof value === "string")
-          : [];
+        const availableDates = normalizeJournalSyncDates(json?.available_import_dates);
         const otherAccountCount = Number(json?.same_date_other_account_count ?? 0);
+
+        setSyncAvailableDates(availableDates);
         const details = [
           availableDates.length
             ? L(
-                `Imported dates available in this account: ${availableDates.join(", ")}.`,
-                `Fechas importadas disponibles en esta cuenta: ${availableDates.join(", ")}.`
+                `The selected journal was not modified. Open the correct journal below, then use Sync there: ${availableDates.join(", ")}.`,
+                `El journal seleccionado no fue modificado. Abre abajo el journal correcto y luego usa Sincronizar allí: ${availableDates.join(", ")}.`
               )
             : L("This account has no imported fills yet.", "Esta cuenta todavía no tiene fills importados."),
           otherAccountCount > 0
@@ -2582,6 +2589,11 @@ export default function DailyJournalPage() {
     } finally {
       setSyncing(false);
     }
+  };
+
+  const handleOpenAvailableDate = (journalDate: string) => {
+    setSyncAvailableDates([]);
+    router.push(`/journal/${journalDate}`);
   };
 
   /* =========================================================
@@ -4397,6 +4409,31 @@ export default function DailyJournalPage() {
               </button>
             </div>
           </div>
+
+          {msg ? (
+            <div
+              role="status"
+              aria-live="polite"
+              className="mt-2 rounded-xl border border-sky-400/30 bg-sky-400/10 px-3 py-2.5 text-xs text-sky-100 shadow-[0_10px_24px_rgba(2,6,23,0.28)]"
+            >
+              <div>{msg}</div>
+              {syncAvailableDates.length ? (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {syncAvailableDates.map((syncDate) => (
+                    <button
+                      key={syncDate}
+                      type="button"
+                      onClick={() => handleOpenAvailableDate(syncDate)}
+                      disabled={syncing}
+                      className="rounded-lg border border-sky-300/40 bg-slate-950/60 px-3 py-1.5 font-semibold text-sky-100 hover:border-sky-200 hover:bg-sky-400/10 disabled:opacity-50"
+                    >
+                      {L("Open journal", "Abrir journal")} {syncDate}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
 
           <div className="mt-3 flex justify-end">
             <div className="relative w-full xl:w-auto rounded-2xl border border-emerald-400/25 bg-slate-950/80 px-3.5 py-3 shadow-[0_0_32px_rgba(16,185,129,0.18)]">

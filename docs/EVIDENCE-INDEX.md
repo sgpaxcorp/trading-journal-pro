@@ -15,7 +15,7 @@
 
 ## Workflows
 - Dashboard + Journal (texto de ayuda) -> `lib/i18n.ts`
-- Option Flow Intelligence -> `app/(private)/option-flow/page.tsx`
+- Option Flows Analysis -> `app/(private)/option-flow/page.tsx`
 - Importacion de brokers -> `app/(private)/import/page.tsx`
 - Billing -> `app/billing/*`
 - Forum -> `app/(private)/forum/community-feed/*`

@@ -357,8 +357,26 @@ export async function GET(req: NextRequest) {
 
     if (snapErr) throw snapErr;
 
+    let sessionsCache: SessionRow[] | null = null;
+    const ensureSessions = async () => {
+      if (sessionsCache) return sessionsCache;
+      sessionsCache = await fetchSessions(userId, email, accountId);
+      return sessionsCache;
+    };
+
     const force = searchParams.get("force") === "1";
     const payloadMetaMethod = (snap as any)?.payload?.meta?.tradeCountMethod;
+    const currentSessions = await ensureSessions();
+    const currentSessionPnl = currentSessions.reduce((sum, session) => sum + Number(session.pnl ?? 0), 0);
+    const currentRangeEnd = currentSessions.length
+      ? String(currentSessions[currentSessions.length - 1]?.date ?? "").slice(0, 10)
+      : "";
+    const snapshotIsStale = Boolean(
+      snap &&
+        (Number(snap.sessions_count ?? 0) !== currentSessions.length ||
+          Math.abs(Number(snap.total_pnl ?? 0) - currentSessionPnl) >= 0.005 ||
+          String(snap.range_end ?? "").slice(0, 10) !== currentRangeEnd)
+    );
     const missingCritical =
       !snap ||
       snap.sessions_count == null ||
@@ -368,15 +386,8 @@ export async function GET(req: NextRequest) {
       (snap.sessions_count === 0 && snap.trades_count === 0 && snap.total_pnl === 0) ||
       payloadMetaMethod !== "round_trip_grouped";
 
-    let sessionsCache: SessionRow[] | null = null;
-    const ensureSessions = async () => {
-      if (sessionsCache) return sessionsCache;
-      sessionsCache = await fetchSessions(userId, email, accountId);
-      return sessionsCache;
-    };
-
-    if (!snap || missingCritical || force) {
-      const sessions = await ensureSessions();
+    if (!snap || missingCritical || snapshotIsStale || force) {
+      const sessions = currentSessions;
       if (!sessions.length) {
         return NextResponse.json({ snapshot: null, topEdges: [] });
       }

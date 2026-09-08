@@ -11,6 +11,7 @@ import {
   brokerConnectionsUnavailableMessage,
 } from "@/lib/brokerConnections";
 import { resolveLocale } from "@/lib/i18n";
+import { canSyncJournalDate, normalizeJournalSyncDates } from "@/lib/journalSync";
 
 type BrokerId =
   | "thinkorswim"
@@ -197,6 +198,7 @@ export default function ImportPage() {
   const [importing, setImporting] = useState(false);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [synchronizedJournalDate, setSynchronizedJournalDate] = useState<string | null>(null);
   const [journalImportContext, setJournalImportContext] = useState<{
     date: string;
     accountId: string;
@@ -1042,6 +1044,7 @@ export default function ImportPage() {
   async function onImport() {
     setErrorMsg(null);
     setStatusMsg(null);
+    setSynchronizedJournalDate(null);
 
     if (!file) {
     setErrorMsg(L("Please choose a file to import.", "Elige un archivo para importar."));
@@ -1151,12 +1154,17 @@ export default function ImportPage() {
       }
 
       if (journalImportContext) {
-        const statementDates = Array.isArray(statement?.dates) ? statement!.dates! : [];
-        if (statementDates.length && !statementDates.includes(journalImportContext.date)) {
+        const statementDates = normalizeJournalSyncDates(statement?.dates);
+        const dateMatchesJournal = canSyncJournalDate(
+          journalImportContext.date,
+          statementDates
+        );
+
+        if (!dateMatchesJournal) {
           parts.push(
             L(
-              `The file contains ${statementDates.join(", ")}; journal ${journalImportContext.date} was not synchronized.`,
-              `El archivo contiene ${statementDates.join(", ")}; no se sincronizó el journal ${journalImportContext.date}.`
+              `Date mismatch: this file contains ${statementDates.join(", ")}. Journal ${journalImportContext.date} was not modified.`,
+              `La fecha no coincide: este archivo contiene ${statementDates.join(", ")}. El journal ${journalImportContext.date} no fue modificado.`
             )
           );
         } else {
@@ -1173,10 +1181,13 @@ export default function ImportPage() {
           });
           const syncData = await syncRes.json().catch(() => ({} as any));
           if (syncRes.ok && Number(syncData?.trades_found ?? 0) > 0) {
+            setSynchronizedJournalDate(journalImportContext.date);
+            const endingBalance =
+              syncData?.ending_balance == null ? null : Number(syncData.ending_balance);
             parts.push(
               isEs
-                ? `Journal sincronizado: ${syncData.trades_found} fills • P&L neto ${formatMoney(syncData.pnl_net)}`
-                : `Journal synced: ${syncData.trades_found} fills • net P&L ${formatMoney(syncData.pnl_net)}`
+                ? `Journal sincronizado: ${syncData.trades_found} fills • P&L neto ${formatMoney(syncData.pnl_net)}${endingBalance != null && Number.isFinite(endingBalance) ? ` • balance final ${formatMoney(endingBalance)}` : ""}`
+                : `Journal synced: ${syncData.trades_found} fills • net P&L ${formatMoney(syncData.pnl_net)}${endingBalance != null && Number.isFinite(endingBalance) ? ` • ending balance ${formatMoney(endingBalance)}` : ""}`
             );
           } else {
             parts.push(
@@ -1428,13 +1439,13 @@ export default function ImportPage() {
                 {statusMsg ? (
                   <div className="rounded-xl border border-emerald-400/30 bg-emerald-400/10 px-3 py-3 text-xs text-emerald-100">
                     <div>{statusMsg}</div>
-                    {journalImportContext ? (
+                    {journalImportContext && synchronizedJournalDate ? (
                       <button
                         type="button"
-                        onClick={() => router.push(journalImportContext.returnTo)}
+                        onClick={() => router.push(`/journal/${synchronizedJournalDate}`)}
                         className="mt-3 rounded-lg bg-emerald-300 px-3 py-2 font-semibold text-slate-950 hover:bg-emerald-200"
                       >
-                        {L("Return to synchronized journal", "Volver al journal sincronizado")}
+                        {L("Open synchronized journal", "Abrir journal sincronizado")} · {synchronizedJournalDate}
                       </button>
                     ) : null}
                   </div>

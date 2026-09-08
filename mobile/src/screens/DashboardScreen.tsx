@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useFocusEffect } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
 import {
   ActivityIndicator,
@@ -93,6 +94,9 @@ type GrowthPlanSummary = {
   adjustedTargetBalance?: number;
   dailyTargetPct?: number;
   planStartIso?: string;
+  seriesStartIso?: string;
+  hasPrePlanActivity?: boolean;
+  earliestActivityIso?: string | null;
   targetDate?: string;
   planMode?: string;
   planPhases?: unknown;
@@ -105,7 +109,13 @@ type GrowthPlanSummary = {
 
 type AccountSeriesResponse = {
   plan?: GrowthPlanSummary;
-  totals: { tradingPnl: number; cashflowNet: number; currentBalance: number };
+  totals: {
+    tradingPnl: number;
+    tradingPnlSincePlan?: number;
+    cashflowNet: number;
+    cashflowNetSincePlan?: number;
+    currentBalance: number;
+  };
   daily: SeriesPoint[];
   series?: SeriesPoint[];
 };
@@ -1013,6 +1023,7 @@ export function DashboardScreen({ onOpenJournalDate, onOpenBusinessPlan, onOpenN
   const [coachNow, setCoachNow] = useState(() => new Date());
   const lastChecklistPayloadRef = useRef("");
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dashboardFocusedOnceRef = useRef(false);
 
   const isWideProgressLayout = width >= 980;
   const isWideTopRow = width >= 920;
@@ -1667,7 +1678,11 @@ export function DashboardScreen({ onOpenJournalDate, onOpenBusinessPlan, onOpenN
     const startBalance = Number(plan.startingBalance ?? 0);
     const targetBalance = adjustedTargetBalance;
     const goalAmount = Math.max(0, targetBalance - startBalance);
-    const gainedAmount = currentBalance - startBalance;
+    const planPerformanceBalance =
+      startBalance +
+      Number(series?.totals?.tradingPnlSincePlan ?? 0) +
+      Number(series?.totals?.cashflowNetSincePlan ?? 0);
+    const gainedAmount = planPerformanceBalance - startBalance;
     const remainingAmount = Math.max(0, targetBalance - currentBalance);
     const overallProgress =
       goalAmount > 0 ? Math.max(0, Math.min(1.25, gainedAmount / goalAmount)) : currentBalance >= targetBalance ? 1 : 0;
@@ -1694,7 +1709,7 @@ export function DashboardScreen({ onOpenJournalDate, onOpenBusinessPlan, onOpenN
       targetDate: targetDateStr,
       daysRemaining,
     };
-  }, [adjustedTargetBalance, currentBalance, plan, targetDateStr, todayStr]);
+  }, [adjustedTargetBalance, currentBalance, plan, series, targetDateStr, todayStr]);
 
   const daySummaryDates = useMemo(
     () =>
@@ -1750,7 +1765,7 @@ export function DashboardScreen({ onOpenJournalDate, onOpenBusinessPlan, onOpenN
 
   const formatPercent = (value: number, digits = 1) => `${(Number.isFinite(value) ? value : 0).toFixed(digits)}%`;
 
-  async function handleRefresh() {
+  const handleRefresh = useCallback(async () => {
     setError(null);
     setRefreshing(true);
     try {
@@ -1759,10 +1774,13 @@ export function DashboardScreen({ onOpenJournalDate, onOpenBusinessPlan, onOpenN
       const from = new Date(today);
       from.setDate(today.getDate() - 45);
       const fromDate = from.toISOString().slice(0, 10);
+      const refreshKey = Date.now();
 
       const [seriesRes, journalRes] = await Promise.all([
-        apiGet<AccountSeriesResponse>(ACCOUNT_SERIES_PATH),
-        apiGet<JournalListResponse>(`/api/journal/list?fromDate=${fromDate}&toDate=${toDate}`),
+        apiGet<AccountSeriesResponse>(`${ACCOUNT_SERIES_PATH}&mobileRefresh=${refreshKey}`),
+        apiGet<JournalListResponse>(
+          `/api/journal/list?fromDate=${fromDate}&toDate=${toDate}&mobileRefresh=${refreshKey}`
+        ),
       ]);
 
       setSeries(seriesRes ?? null);
@@ -1775,16 +1793,27 @@ export function DashboardScreen({ onOpenJournalDate, onOpenBusinessPlan, onOpenN
         .sort();
 
       const todayStr = today.toISOString().slice(0, 10);
-      if (!selectedDate || !availableDates.includes(selectedDate)) {
-        if (availableDates.includes(todayStr)) setSelectedDate(todayStr);
-        else setSelectedDate(availableDates[availableDates.length - 1] ?? null);
-      }
+      setSelectedDate((current) => {
+        if (current && availableDates.includes(current)) return current;
+        if (availableDates.includes(todayStr)) return todayStr;
+        return availableDates[availableDates.length - 1] ?? null;
+      });
     } catch (err: any) {
       setError(err?.message ?? "Failed to refresh.");
     } finally {
       setRefreshing(false);
     }
-  }
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!dashboardFocusedOnceRef.current) {
+        dashboardFocusedOnceRef.current = true;
+        return;
+      }
+      void handleRefresh();
+    }, [handleRefresh])
+  );
 
   async function saveChecklist(items: UiChecklistItem[]) {
     const payload = JSON.stringify({ date: todayStr, items });
@@ -2053,6 +2082,28 @@ export function DashboardScreen({ onOpenJournalDate, onOpenBusinessPlan, onOpenN
         </View>
       ) : (
         <>
+          {plan?.hasPrePlanActivity && plan.earliestActivityIso ? (
+            <View style={styles.planDateWarning}>
+              <View style={styles.planDateWarningCopy}>
+                <Text style={styles.planDateWarningTitle}>
+                  {t(language, "Plan date needs review", "Revisa la fecha del plan")}
+                </Text>
+                <Text style={styles.planDateWarningBody}>
+                  {t(
+                    language,
+                    `Account activity starts ${plan.earliestActivityIso}; the business plan starts ${plan.planStartIso ?? "—"}. The real balance is consolidated, while plan milestones keep their configured date.`,
+                    `La actividad de la cuenta comienza el ${plan.earliestActivityIso}; el plan empresarial comienza el ${plan.planStartIso ?? "—"}. El balance real está consolidado, mientras los milestones conservan la fecha configurada.`
+                  )}
+                </Text>
+              </View>
+              <Pressable style={styles.planDateWarningButton} onPress={onOpenBusinessPlan}>
+                <Text style={styles.planDateWarningButtonText}>
+                  {t(language, "Review date", "Revisar fecha")}
+                </Text>
+              </Pressable>
+            </View>
+          ) : null}
+
           <View style={[styles.topInsightRow, !isWideTopRow && styles.topInsightRowStack]}>
             <View style={[styles.panelCard, styles.coachBannerCard, isCompactTopCards && styles.coachBannerCardCompact]}>
               <Image source={coachBrain} resizeMode="contain" style={styles.coachBrainA} />
@@ -2888,6 +2939,50 @@ const createStyles = (colors: ThemeColors) => {
       textTransform: "uppercase",
       letterSpacing: 1.2,
       fontWeight: "700",
+    },
+    planDateWarning: {
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: colors.warning,
+      backgroundColor: colors.warningSoft,
+      padding: 14,
+      gap: 12,
+      flexDirection: "row",
+      flexWrap: "wrap",
+      alignItems: "center",
+      justifyContent: "space-between",
+    },
+    planDateWarningCopy: {
+      flex: 1,
+      minWidth: 230,
+      gap: 4,
+    },
+    planDateWarningTitle: {
+      color: colors.warning,
+      fontSize: 11,
+      fontWeight: "900",
+      textTransform: "uppercase",
+      letterSpacing: 1,
+    },
+    planDateWarningBody: {
+      color: colors.textPrimary,
+      fontSize: 12,
+      lineHeight: 18,
+      fontWeight: "600",
+    },
+    planDateWarningButton: {
+      minHeight: 38,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: colors.warning,
+      paddingHorizontal: 12,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    planDateWarningButtonText: {
+      color: colors.warning,
+      fontSize: 11,
+      fontWeight: "900",
     },
     coachHeaderRow: {
       flexDirection: "row",

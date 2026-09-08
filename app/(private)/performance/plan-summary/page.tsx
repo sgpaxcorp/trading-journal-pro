@@ -10,6 +10,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useTradingAccounts } from "@/hooks/useTradingAccounts";
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
+import { supabaseBrowser } from "@/lib/supaBaseClient";
 
 import { getAllJournalEntries } from "@/lib/journalSupabase";
 import type { JournalEntry } from "@/lib/journalLocal";
@@ -33,6 +34,24 @@ import {
 } from "@/lib/growthPlanProjection";
 
 type PlannedWithdrawal = NonNullable<GrowthPlan["plannedWithdrawals"]>[number];
+
+type AccountSeriesSummary = {
+  plan?: {
+    planStartIso?: string | null;
+    seriesStartIso?: string | null;
+    hasPrePlanActivity?: boolean;
+    earliestActivityIso?: string | null;
+  } | null;
+  totals?: {
+    tradingPnl?: number | null;
+    tradingPnlSincePlan?: number | null;
+    cashflowNet?: number | null;
+    cashflowNetSincePlan?: number | null;
+    currentBalance?: number | null;
+    endingBalanceSource?: string | null;
+  } | null;
+  projected?: Array<{ date: string; value: number }>;
+};
 
 function toNum(x: unknown, fb = 0): number {
   const n = Number(x);
@@ -101,6 +120,7 @@ export default function PlanSummaryPage() {
   const [plan, setPlan] = useState<GrowthPlan | null>(null);
   const [entries, setEntries] = useState<JournalEntry[]>([]);
   const [cashflows, setCashflows] = useState<Cashflow[]>([]);
+  const [accountSeries, setAccountSeries] = useState<AccountSeriesSummary | null>(null);
   const [loadingData, setLoadingData] = useState(true);
   const [actionId, setActionId] = useState<string | null>(null);
   const [error, setError] = useState("");
@@ -114,16 +134,29 @@ export default function PlanSummaryPage() {
     setLoadingData(true);
     setError("");
     try {
-      const [planRes, entriesRes, cashflowRes] = await Promise.all([
+      const seriesPromise = (async () => {
+        const { data: sessionData } = await supabaseBrowser.auth.getSession();
+        const token = sessionData?.session?.access_token;
+        if (!token) return null;
+        const response = await fetch(`/api/account/series?accountId=${encodeURIComponent(activeAccountId)}`, {
+          headers: { Authorization: `Bearer ${token}` },
+          cache: "no-store",
+        });
+        return response.ok ? ((await response.json()) as AccountSeriesSummary) : null;
+      })();
+      const [planRes, entriesRes, cashflowRes, seriesRes] = await Promise.all([
         getGrowthPlanSupabaseByAccount(activeAccountId),
         getAllJournalEntries(journalUserId, activeAccountId),
         planUserId ? listCashflows(planUserId, { accountId: activeAccountId }) : Promise.resolve([]),
+        seriesPromise,
       ]);
       setPlan(planRes);
       setEntries(entriesRes ?? []);
       setCashflows(cashflowRes ?? []);
+      setAccountSeries(seriesRes);
     } catch (err) {
       console.error("[PlanSummary] load error:", err);
+      setAccountSeries(null);
       setError(L("Could not load your plan summary.", "No pudimos cargar tu resumen del plan."));
     } finally {
       setLoadingData(false);
@@ -150,17 +183,35 @@ export default function PlanSummaryPage() {
       .filter((e) => e.date >= planStartDate)
       .reduce((acc, e) => acc + toNum((e as any).pnl, 0), 0);
   }, [entries, planStartDate]);
+  const planTradingPnl = useMemo(() => {
+    const raw = accountSeries?.totals?.tradingPnlSincePlan;
+    const value = Number(raw);
+    return raw != null && Number.isFinite(value) ? value : totalTradingPnl;
+  }, [accountSeries, totalTradingPnl]);
 
   const cashflowNet = useMemo(() => {
     return (cashflows ?? []).reduce((acc, cf) => acc + signedCashflowAmount(cf), 0);
   }, [cashflows]);
 
+  const trackedTradingPnl = useMemo(() => {
+    const rawAuthoritative = accountSeries?.totals?.tradingPnl;
+    const authoritative = Number(rawAuthoritative);
+    if (rawAuthoritative != null && Number.isFinite(authoritative)) return authoritative;
+    return (entries ?? []).reduce((acc, entry) => acc + toNum((entry as any)?.pnl, 0), 0);
+  }, [accountSeries, entries]);
+
   const tradingEquity = useMemo(() => {
     const starting = plan?.startingBalance ?? 0;
-    return starting + totalTradingPnl;
-  }, [plan, totalTradingPnl]);
+    return starting + trackedTradingPnl;
+  }, [plan, trackedTradingPnl]);
 
-  const accountEquity = useMemo(() => tradingEquity + cashflowNet, [tradingEquity, cashflowNet]);
+  const accountEquity = useMemo(() => {
+    const rawAuthoritative = accountSeries?.totals?.currentBalance;
+    const authoritative = Number(rawAuthoritative);
+    return rawAuthoritative != null && Number.isFinite(authoritative)
+      ? authoritative
+      : tradingEquity + cashflowNet;
+  }, [accountSeries, tradingEquity, cashflowNet]);
   const targetEquity = useMemo(() => Math.max(0, toNum(plan?.targetBalance, 0)), [plan]);
   const withdrawals = useMemo(() => normalizePlannedWithdrawals(plan?.plannedWithdrawals), [plan]);
   const totalPlannedWithdrawal = useMemo(() => getTotalPlannedWithdrawalAmount(withdrawals), [withdrawals]);
@@ -171,9 +222,10 @@ export default function PlanSummaryPage() {
   );
 
   const progressPct = useMemo(() => {
-    if (!targetEquity || targetEquity <= 0) return 0;
-    return Math.max(0, Math.min(1.25, accountEquity / targetEquity));
-  }, [accountEquity, targetEquity]);
+    const plannedGrowth = targetEquity - toNum(plan?.startingBalance, 0);
+    if (plannedGrowth <= 0) return 0;
+    return Math.max(0, Math.min(1.25, planTradingPnl / plannedGrowth));
+  }, [plan, planTradingPnl, targetEquity]);
 
   const remainingToTarget = useMemo(() => {
     if (!targetEquity) return 0;
@@ -244,6 +296,56 @@ export default function PlanSummaryPage() {
   const monthsRemaining = daysRemaining > 0 ? daysRemaining / 30.4 : 0;
   const monthlyTarget = monthsRemaining > 0 ? remainingToTarget / monthsRemaining : 0;
   const weeklyTarget = daysRemaining > 0 ? remainingToTarget / (daysRemaining / 7) : 0;
+  const hasPrePlanActivity = Boolean(accountSeries?.plan?.hasPrePlanActivity);
+  const earliestActivityIso = String(accountSeries?.plan?.earliestActivityIso ?? "").slice(0, 10);
+  const latestProjectedBalance = useMemo(() => {
+    const rows = accountSeries?.projected ?? [];
+    return rows.length ? toNum(rows[rows.length - 1]?.value, 0) : 0;
+  }, [accountSeries]);
+  const projectionGap = latestProjectedBalance ? accountEquity - latestProjectedBalance : 0;
+  const businessAnalysis = (plan?.steps as any)?.business_analysis ?? {};
+  const operatingModel = businessAnalysis?.operatingModel ?? {};
+  const lossDaysPerWeek = Math.max(0, toNum(plan?.lossDaysPerWeek, 0));
+  const winningDaysPerWeek = Math.max(
+    0,
+    Math.min(
+      averageTradingDaysPerWeek,
+      toNum(operatingModel?.winningDaysPerWeek, averageTradingDaysPerWeek - lossDaysPerWeek)
+    )
+  );
+  const modeledLossDayPct = Math.max(
+    0,
+    toNum(operatingModel?.expectedLossDayPct ?? businessAnalysis?.adaptivePlan?.expectedLossDayPct, plan?.maxDailyLossPercent ?? 0)
+  );
+  const expectedWeeklyPct =
+    ((1 + Math.max(0, dailyGoalPct) / 100) ** winningDaysPerWeek *
+      (1 - Math.min(99.99, modeledLossDayPct) / 100) ** lossDaysPerWeek -
+      1) *
+    100;
+  const expectedWeeklyUsd = accountEquity * (expectedWeeklyPct / 100);
+  const maxRiskPerTradeUsd =
+    toNum(plan?.maxRiskPerTradeUSD, 0) || accountEquity * (toNum(plan?.maxRiskPerTradePercent, 0) / 100);
+  const requiredGrowth = Math.max(0, targetEquity - accountEquity);
+  const requiredGrowthPct = accountEquity > 0 ? (requiredGrowth / accountEquity) * 100 : 0;
+  const strategies = Array.isArray((plan?.steps as any)?.strategy?.strategies)
+    ? (plan?.steps as any).strategy.strategies
+    : [];
+  const prepareChecklist = Array.isArray((plan?.steps as any)?.prepare?.checklist)
+    ? (plan?.steps as any).prepare.checklist
+    : [];
+  const executionSystem = (plan?.steps as any)?.execution_and_journal?.system ?? null;
+  const activeRules = Array.isArray(plan?.rules)
+    ? plan.rules.filter((rule) => rule?.isActive !== false)
+    : [];
+  const readinessChecks = [
+    Boolean(businessAnalysis && Object.keys(businessAnalysis).length),
+    strategies.length > 0,
+    Boolean(executionSystem),
+    activeRules.length > 0 || prepareChecklist.some((item: any) => item?.isActive !== false),
+    Boolean(planStartDate && targetDate && (plan?.maxDailyLossPercent ?? 0) > 0),
+  ];
+  const readinessCompleted = readinessChecks.filter(Boolean).length;
+  const readinessPct = (readinessCompleted / readinessChecks.length) * 100;
 
   const reachedPending = useMemo(() => {
     return withdrawals.find(
@@ -378,6 +480,30 @@ export default function PlanSummaryPage() {
           </div>
         ) : (
           <>
+            {hasPrePlanActivity && earliestActivityIso ? (
+              <section className="rounded-2xl border border-amber-400/40 bg-amber-500/10 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="text-[11px] uppercase tracking-[0.2em] text-amber-200">
+                      {L("Plan date needs review", "Revisa la fecha del plan")}
+                    </p>
+                    <p className="mt-1 text-sm text-slate-200">
+                      {L(
+                        `Your account has activity from ${earliestActivityIso}, but the plan starts on ${planStartDate}. The real account balance includes that activity; plan performance and milestones begin on ${planStartDate}.`,
+                        `Tu cuenta tiene actividad desde ${earliestActivityIso}, pero el plan comienza el ${planStartDate}. El balance real incluye esa actividad; el desempeño y los milestones del plan comienzan el ${planStartDate}.`
+                      )}
+                    </p>
+                  </div>
+                  <Link
+                    href="/growth-plan#gp-timeline"
+                    className="rounded-lg border border-amber-300/60 px-3 py-1.5 text-xs font-semibold text-amber-100 hover:border-amber-200"
+                  >
+                    {L("Keep or change start date", "Mantener o cambiar fecha")}
+                  </Link>
+                </div>
+              </section>
+            ) : null}
+
             {reachedPending ? (
               <section className="rounded-2xl border border-amber-400/40 bg-amber-500/10 p-4">
                 <div className="flex flex-wrap items-center justify-between gap-3">
@@ -484,17 +610,22 @@ export default function PlanSummaryPage() {
                   {currency(accountEquity, localeTag)}
                 </div>
                 <div className="mt-1 text-xs text-slate-400">
-                  {L("Trading P&L:", "P&L trading:")}{" "}
-                  <span className={totalTradingPnl >= 0 ? "text-emerald-300" : "text-sky-300"}>
-                    {totalTradingPnl >= 0 ? "+" : "-"}
-                    {currency(Math.abs(totalTradingPnl), localeTag)}
+                  {L("Tracked P&L:", "P&L registrado:")}{" "}
+                  <span className={trackedTradingPnl >= 0 ? "text-emerald-300" : "text-sky-300"}>
+                    {trackedTradingPnl >= 0 ? "+" : "-"}
+                    {currency(Math.abs(trackedTradingPnl), localeTag)}
                   </span>
                 </div>
+                {hasPrePlanActivity ? (
+                  <div className="mt-1 text-xs text-slate-500">
+                    {L("Since plan start:", "Desde inicio del plan:")} {currency(planTradingPnl, localeTag)}
+                  </div>
+                ) : null}
               </div>
 
               <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
                 <div className="text-[11px] text-slate-500 tracking-widest uppercase">
-                  {L("Progress", "Progreso")}
+                  {L("Plan progress", "Progreso del plan")}
                 </div>
                 <div className="mt-1 text-2xl font-semibold">{(progressPct * 100).toFixed(1)}%</div>
                 <div className="mt-2 h-2 w-full rounded-full bg-slate-800">
@@ -504,8 +635,11 @@ export default function PlanSummaryPage() {
                   />
                 </div>
                 <div className="mt-2 text-xs text-slate-500">
-                  {L("Remaining:", "Restante:")}{" "}
+                  {L("Account gap to target:", "Diferencia de cuenta a la meta:")}{" "}
                   <span className="text-slate-200">{currency(remainingToTarget, localeTag)}</span>
+                </div>
+                <div className="mt-1 text-xs text-slate-500">
+                  {L("Plan P&L since start:", "P&L del plan desde inicio:")} {currency(planTradingPnl, localeTag)}
                 </div>
                 {takenPlannedWithdrawal > 0 ? (
                   <div className="mt-1 text-xs text-slate-500">
@@ -592,7 +726,8 @@ export default function PlanSummaryPage() {
                   <div className="flex justify-between gap-3">
                     <span className="text-slate-400">{L("Risk per trade", "Riesgo por trade")}</span>
                     <span className="font-semibold">
-                      {(plan.maxRiskPerTradePercent ?? 0).toFixed(2)}%
+                      {currency(maxRiskPerTradeUsd, localeTag)}{" "}
+                      <span className="text-slate-500">({(plan.maxRiskPerTradePercent ?? 0).toFixed(2)}%)</span>
                     </span>
                   </div>
                 </div>
@@ -623,6 +758,100 @@ export default function PlanSummaryPage() {
                       {daysRemaining > 0 ? currency(weeklyTarget, localeTag) : "—"}
                     </span>
                   </div>
+                </div>
+              </div>
+            </section>
+
+            <section className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+              <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
+                <div className="text-[11px] text-slate-500 tracking-widest uppercase">
+                  {L("Financial forecast", "Forecast financiero")}
+                </div>
+                <div className="mt-3 space-y-2 text-sm text-slate-200">
+                  <div className="flex justify-between gap-3">
+                    <span className="text-slate-400">{L("Capital still required", "Capital por alcanzar")}</span>
+                    <span className="font-semibold">{currency(requiredGrowth, localeTag)}</span>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <span className="text-slate-400">{L("Required growth", "Crecimiento requerido")}</span>
+                    <span className="font-semibold">{requiredGrowthPct.toFixed(1)}%</span>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <span className="text-slate-400">{L("Projected now", "Proyectado al día")}</span>
+                    <span className="font-semibold">
+                      {latestProjectedBalance ? currency(latestProjectedBalance, localeTag) : "—"}
+                    </span>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <span className="text-slate-400">{L("Actual vs projection", "Real vs proyección")}</span>
+                    <span className={projectionGap >= 0 ? "font-semibold text-emerald-300" : "font-semibold text-rose-300"}>
+                      {latestProjectedBalance ? `${projectionGap >= 0 ? "+" : "-"}${currency(Math.abs(projectionGap), localeTag)}` : "—"}
+                    </span>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <span className="text-slate-400">{L("Net cashflow", "Cashflow neto")}</span>
+                    <span className="font-semibold">{currency(toNum(accountSeries?.totals?.cashflowNet, cashflowNet), localeTag)}</span>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <span className="text-slate-400">{L("Balance source", "Fuente del balance")}</span>
+                    <span className="font-semibold">
+                      {accountSeries?.totals?.endingBalanceSource === "broker_statement"
+                        ? L("Broker statement", "Estado de cuenta del broker")
+                        : L("Calculated", "Calculado")}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
+                <div className="text-[11px] text-slate-500 tracking-widest uppercase">
+                  {L("Weekly operating model", "Modelo operativo semanal")}
+                </div>
+                <div className="mt-3 space-y-2 text-sm text-slate-200">
+                  <div className="flex justify-between gap-3">
+                    <span className="text-slate-400">{L("Expected winning days", "Días ganadores esperados")}</span>
+                    <span className="font-semibold">{winningDaysPerWeek}</span>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <span className="text-slate-400">{L("Expected losing days", "Días perdedores esperados")}</span>
+                    <span className="font-semibold">{lossDaysPerWeek}</span>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <span className="text-slate-400">{L("Modeled loss day", "Pérdida modelada por día")}</span>
+                    <span className="font-semibold">-{modeledLossDayPct.toFixed(2)}%</span>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <span className="text-slate-400">{L("Expected compounded week", "Semana compuesta esperada")}</span>
+                    <span className={expectedWeeklyPct >= 0 ? "font-semibold text-emerald-300" : "font-semibold text-rose-300"}>
+                      {expectedWeeklyPct >= 0 ? "+" : ""}{expectedWeeklyPct.toFixed(2)}% · {currency(expectedWeeklyUsd, localeTag)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-[11px] text-slate-500 tracking-widest uppercase">
+                    {L("Operating-system readiness", "Preparación del sistema operativo")}
+                  </div>
+                  <span className="text-sm font-semibold text-emerald-300">{readinessCompleted}/5</span>
+                </div>
+                <div className="mt-3 h-2 w-full rounded-full bg-slate-800">
+                  <div className="h-2 rounded-full bg-emerald-400" style={{ width: `${readinessPct}%` }} />
+                </div>
+                <div className="mt-3 space-y-2 text-sm text-slate-300">
+                  {[
+                    [readinessChecks[0], L("Business analysis", "Análisis del negocio")],
+                    [readinessChecks[1], L("Defined strategy", "Estrategia definida")],
+                    [readinessChecks[2], L("Execution system", "Sistema de ejecución")],
+                    [readinessChecks[3], L("Rules and checklist", "Reglas y checklist")],
+                    [readinessChecks[4], L("Timeline and risk limits", "Calendario y límites de riesgo")],
+                  ].map(([done, label]) => (
+                    <div key={String(label)} className="flex items-center justify-between gap-3">
+                      <span>{String(label)}</span>
+                      <span className={done ? "text-emerald-300" : "text-amber-300"}>{done ? "✓" : L("Missing", "Falta")}</span>
+                    </div>
+                  ))}
                 </div>
               </div>
             </section>

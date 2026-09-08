@@ -15,7 +15,7 @@ Billing se gestiona en la web. La app móvil no crea cuentas, no cambia suscripc
 7. Abrir el historial de pagos.
 
 ## Estado de Option Flow
-`Option Flow Intelligence` está actualmente en beta privada. No está disponible para compra ni activación directa desde Billing.
+`Option Flows Analysis` está actualmente en beta privada. No está disponible para compra ni activación directa desde Billing.
 
 ## Cancelación de suscripción
 ### Dónde cancelar

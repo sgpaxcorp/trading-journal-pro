@@ -505,7 +505,7 @@ const BUILDERS: QuickTourBuilder[] = [
     guideHref: "/help/option-flow",
     match: (path) => path.startsWith("/option-flow"),
     build: (L) => ({
-      title: L("Option Flow Intelligence", "Option Flow Intelligence"),
+      title: L("Option Flows Analysis", "Option Flows Analysis"),
       summary: L(
         "This premium workspace analyzes options flow as a market intelligence input. It should sharpen your premarket thesis and outcome review without replacing your rules.",
         "Este workspace premium analiza options flow como input de inteligencia de mercado. Debe afinar tu tesis premarket y review de outcomes sin reemplazar tus reglas."

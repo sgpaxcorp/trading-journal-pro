@@ -126,7 +126,7 @@ const MANUAL_DOCUMENTS: ManualDocument[] = [
   },
   {
     slug: "option-flow",
-    titles: { en: "Option Flow Intelligence", es: "Option Flow Intelligence" },
+    titles: { en: "Option Flows Analysis", es: "Option Flows Analysis" },
     keywords: ["option flow", "options", "calls", "puts", "flow", "opciones", "flujo"],
     routes: ["/option-flow"],
   },

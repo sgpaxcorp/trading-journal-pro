@@ -45,7 +45,7 @@ The quick-help chat available at the bottom of your private workspace. It explai
 **Imports (Broker Sync or CSV)**  
 Brings real trades into the system. Without clean data, analytics are inaccurate.
 
-**Option Flow Intelligence (private beta)**  
+**Option Flows Analysis (private beta)**
 Private beta workspace for testing flow reports and premarket plans before public release.
 
 **Notebook**  

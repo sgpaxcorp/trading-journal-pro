@@ -22,7 +22,7 @@ const CONTENT = {
       {
         title: "2. Description of the Service",
         body:
-          "The Service may include features such as execution records, trading business plans, trade analytics, performance metrics, tagging and notes, screenshots and attachments, dashboards, integrations with third-party platforms, community or sharing features (if enabled), Neuro Analysis, Option Flow Intelligence, and AI-assisted coaching and insights. The Service is designed for educational learning, journaling, analysis, simulation, operational accountability, and business-performance review. It is not designed to execute trades for you or replace independent judgment or licensed professional advice. We may add, remove, or modify features at any time. You are responsible for obtaining and maintaining all devices, software, and internet access necessary to use the Service.",
+          "The Service may include features such as execution records, trading business plans, trade analytics, performance metrics, tagging and notes, screenshots and attachments, dashboards, integrations with third-party platforms, community or sharing features (if enabled), Neuro Analysis, Option Flows Analysis, and AI-assisted coaching and insights. The Service is designed for educational learning, journaling, analysis, simulation, operational accountability, and business-performance review. It is not designed to execute trades for you or replace independent judgment or licensed professional advice. We may add, remove, or modify features at any time. You are responsible for obtaining and maintaining all devices, software, and internet access necessary to use the Service.",
       },
       {
         title: "3. Eligibility and Account Registration",
@@ -57,7 +57,7 @@ const CONTENT = {
       {
         title: "5.3 No Financial Advice; You Must Independently Evaluate",
         body:
-          "Business AI Coaching, Neuro Analysis, Option Flow Intelligence, dashboards, reports, analytics, simulations, projections, alerts, and educational materials are not investment advice, trading advice, financial planning, portfolio management, or a recommendation to buy, sell, hold, allocate capital to, avoid, or trade any security, derivative, option, futures contract, forex pair, cryptocurrency, or any other instrument. Any actions you take after using the Service are taken at your sole discretion and risk. You must independently evaluate any suggestion, recommendation, scenario, simulation, projection, or analysis and decide whether to act.",
+          "Business AI Coaching, Neuro Analysis, Option Flows Analysis, dashboards, reports, analytics, simulations, projections, alerts, and educational materials are not investment advice, trading advice, financial planning, portfolio management, or a recommendation to buy, sell, hold, allocate capital to, avoid, or trade any security, derivative, option, futures contract, forex pair, cryptocurrency, or any other instrument. Any actions you take after using the Service are taken at your sole discretion and risk. You must independently evaluate any suggestion, recommendation, scenario, simulation, projection, or analysis and decide whether to act.",
       },
       {
         title: "5.4 Assumption of Risk",
@@ -67,7 +67,7 @@ const CONTENT = {
       {
         title: "5.5 No Guaranteed Outcomes",
         body:
-          "NTJ does not guarantee that the Service, Business AI Coaching, Neuro Analysis, Option Flow Intelligence, any trading business plan, any projection, any simulation, any alert, or any report will increase income, maximize capital, protect capital, prevent losses, improve discipline, improve performance, identify profitable trades, or produce any financial, trading, educational, or business result. Any examples, scenarios, targets, projections, or simulated returns are hypothetical and educational only.",
+          "NTJ does not guarantee that the Service, Business AI Coaching, Neuro Analysis, Option Flows Analysis, any trading business plan, any projection, any simulation, any alert, or any report will increase income, maximize capital, protect capital, prevent losses, improve discipline, improve performance, identify profitable trades, or produce any financial, trading, educational, or business result. Any examples, scenarios, targets, projections, or simulated returns are hypothetical and educational only.",
       },
       {
         title: "6. Trading Risk Disclosure",
@@ -122,7 +122,7 @@ const CONTENT = {
       {
         title: "12. Disclaimers",
         body:
-          "THE SERVICE (INCLUDING BUSINESS AI COACHING, NEURO ANALYSIS, OPTION FLOW INTELLIGENCE, ANALYTICS, PROJECTIONS, SIMULATIONS, REPORTS, AND ALERTS) IS PROVIDED ON AN \"AS IS\" AND \"AS AVAILABLE\" BASIS. TO THE MAXIMUM EXTENT PERMITTED BY LAW, NTJ DISCLAIMS ALL WARRANTIES, EXPRESS OR IMPLIED, INCLUDING IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, NON-INFRINGEMENT, AND ANY WARRANTIES ARISING OUT OF COURSE OF DEALING OR USAGE OF TRADE. WE DO NOT WARRANT THAT THE SERVICE WILL BE UNINTERRUPTED, ERROR-FREE, SECURE, OR THAT ANY DATA, RESULTS, METRICS, PNL, AI OUTPUTS, PROJECTIONS, SIMULATIONS, OR REPORTS WILL BE ACCURATE, RELIABLE, COMPLETE, CONSISTENT, OR SUITABLE FOR YOUR PURPOSES.",
+          "THE SERVICE (INCLUDING BUSINESS AI COACHING, NEURO ANALYSIS, OPTION FLOWS ANALYSIS, ANALYTICS, PROJECTIONS, SIMULATIONS, REPORTS, AND ALERTS) IS PROVIDED ON AN \"AS IS\" AND \"AS AVAILABLE\" BASIS. TO THE MAXIMUM EXTENT PERMITTED BY LAW, NTJ DISCLAIMS ALL WARRANTIES, EXPRESS OR IMPLIED, INCLUDING IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, NON-INFRINGEMENT, AND ANY WARRANTIES ARISING OUT OF COURSE OF DEALING OR USAGE OF TRADE. WE DO NOT WARRANT THAT THE SERVICE WILL BE UNINTERRUPTED, ERROR-FREE, SECURE, OR THAT ANY DATA, RESULTS, METRICS, PNL, AI OUTPUTS, PROJECTIONS, SIMULATIONS, OR REPORTS WILL BE ACCURATE, RELIABLE, COMPLETE, CONSISTENT, OR SUITABLE FOR YOUR PURPOSES.",
       },
       {
         title: "13. Limitation of Liability",
@@ -177,7 +177,7 @@ const CONTENT = {
       {
         title: "2. Descripción del Servicio",
         body:
-          "El Servicio puede incluir funciones como registros de ejecución, planes de empresa de trading, analítica de trading, métricas de rendimiento, etiquetas y notas, screenshots y adjuntos, dashboards, integraciones con plataformas de terceros, funciones comunitarias o de compartición (si están habilitadas), Neuro Analysis, Option Flow Intelligence, y coaching e insights con IA. El Servicio está diseñado para aprendizaje educativo, journaling, análisis, simulación, accountability operativo y revisión de rendimiento empresarial. No está diseñado para ejecutar operaciones por ti ni para reemplazar tu juicio independiente o asesoría profesional autorizada. Podemos añadir, eliminar o modificar funciones en cualquier momento. Eres responsable de obtener y mantener todos los dispositivos, software y acceso a internet necesarios para usar el Servicio.",
+          "El Servicio puede incluir funciones como registros de ejecución, planes de empresa de trading, analítica de trading, métricas de rendimiento, etiquetas y notas, screenshots y adjuntos, dashboards, integraciones con plataformas de terceros, funciones comunitarias o de compartición (si están habilitadas), Neuro Analysis, Option Flows Analysis, y coaching e insights con IA. El Servicio está diseñado para aprendizaje educativo, journaling, análisis, simulación, accountability operativo y revisión de rendimiento empresarial. No está diseñado para ejecutar operaciones por ti ni para reemplazar tu juicio independiente o asesoría profesional autorizada. Podemos añadir, eliminar o modificar funciones en cualquier momento. Eres responsable de obtener y mantener todos los dispositivos, software y acceso a internet necesarios para usar el Servicio.",
       },
       {
         title: "3. Elegibilidad y registro de cuenta",
@@ -212,7 +212,7 @@ const CONTENT = {
       {
         title: "5.3 Sin asesoría financiera; debes evaluar por tu cuenta",
         body:
-          "Business AI Coaching, Neuro Analysis, Option Flow Intelligence, dashboards, reportes, analítica, simulaciones, proyecciones, alertas y materiales educativos no son asesoría de inversión, asesoría de trading, planificación financiera, manejo de portafolio ni recomendación para comprar, vender, mantener, asignar capital, evitar u operar ningún valor, derivado, opción, contrato de futuros, par de forex, criptomoneda u otro instrumento. Cualquier acción que tomes después de usar el Servicio es bajo tu propio criterio y riesgo. Debes evaluar de forma independiente cualquier sugerencia, recomendación, escenario, simulación, proyección o análisis antes de actuar.",
+          "Business AI Coaching, Neuro Analysis, Option Flows Analysis, dashboards, reportes, analítica, simulaciones, proyecciones, alertas y materiales educativos no son asesoría de inversión, asesoría de trading, planificación financiera, manejo de portafolio ni recomendación para comprar, vender, mantener, asignar capital, evitar u operar ningún valor, derivado, opción, contrato de futuros, par de forex, criptomoneda u otro instrumento. Cualquier acción que tomes después de usar el Servicio es bajo tu propio criterio y riesgo. Debes evaluar de forma independiente cualquier sugerencia, recomendación, escenario, simulación, proyección o análisis antes de actuar.",
       },
       {
         title: "5.4 Asunción de riesgo",
@@ -222,7 +222,7 @@ const CONTENT = {
       {
         title: "5.5 Sin resultados garantizados",
         body:
-          "NTJ no garantiza que el Servicio, Business AI Coaching, Neuro Analysis, Option Flow Intelligence, cualquier Plan de Empresa de Trading, proyección, simulación, alerta o reporte aumente ingresos, maximice capital, proteja capital, prevenga pérdidas, mejore disciplina, mejore rendimiento, identifique trades rentables o produzca algún resultado financiero, de trading, educativo o empresarial. Cualquier ejemplo, escenario, meta, proyección o retorno simulado es hipotético y educativo.",
+          "NTJ no garantiza que el Servicio, Business AI Coaching, Neuro Analysis, Option Flows Analysis, cualquier Plan de Empresa de Trading, proyección, simulación, alerta o reporte aumente ingresos, maximice capital, proteja capital, prevenga pérdidas, mejore disciplina, mejore rendimiento, identifique trades rentables o produzca algún resultado financiero, de trading, educativo o empresarial. Cualquier ejemplo, escenario, meta, proyección o retorno simulado es hipotético y educativo.",
       },
       {
         title: "6. Divulgación de riesgo de trading",
@@ -277,7 +277,7 @@ const CONTENT = {
       {
         title: "12. Renuncias",
         body:
-          "EL SERVICIO (INCLUYENDO BUSINESS AI COACHING, NEURO ANALYSIS, OPTION FLOW INTELLIGENCE, ANALÍTICA, PROYECCIONES, SIMULACIONES, REPORTES Y ALERTAS) SE OFRECE \"TAL CUAL\" Y \"SEGÚN DISPONIBILIDAD\". EN LA MÁXIMA MEDIDA PERMITIDA POR LA LEY, NTJ RENUNCIA A TODAS LAS GARANTÍAS, EXPRESAS O IMPLÍCITAS, INCLUYENDO GARANTÍAS IMPLÍCITAS DE COMERCIABILIDAD, IDONEIDAD PARA UN PROPÓSITO PARTICULAR, NO INFRACCIÓN Y CUALQUIER GARANTÍA DERIVADA DEL CURSO DE NEGOCIOS O USO COMERCIAL. NO GARANTIZAMOS QUE EL SERVICIO SEA ININTERRUMPIDO, LIBRE DE ERRORES, SEGURO, NI QUE CUALQUIER DATO, RESULTADO, MÉTRICA, PNL, OUTPUT DE IA, PROYECCIÓN, SIMULACIÓN O REPORTE SEA PRECISO, CONFIABLE, COMPLETO, CONSISTENTE O ADECUADO PARA TUS PROPÓSITOS.",
+          "EL SERVICIO (INCLUYENDO BUSINESS AI COACHING, NEURO ANALYSIS, OPTION FLOWS ANALYSIS, ANALÍTICA, PROYECCIONES, SIMULACIONES, REPORTES Y ALERTAS) SE OFRECE \"TAL CUAL\" Y \"SEGÚN DISPONIBILIDAD\". EN LA MÁXIMA MEDIDA PERMITIDA POR LA LEY, NTJ RENUNCIA A TODAS LAS GARANTÍAS, EXPRESAS O IMPLÍCITAS, INCLUYENDO GARANTÍAS IMPLÍCITAS DE COMERCIABILIDAD, IDONEIDAD PARA UN PROPÓSITO PARTICULAR, NO INFRACCIÓN Y CUALQUIER GARANTÍA DERIVADA DEL CURSO DE NEGOCIOS O USO COMERCIAL. NO GARANTIZAMOS QUE EL SERVICIO SEA ININTERRUMPIDO, LIBRE DE ERRORES, SEGURO, NI QUE CUALQUIER DATO, RESULTADO, MÉTRICA, PNL, OUTPUT DE IA, PROYECCIÓN, SIMULACIÓN O REPORTE SEA PRECISO, CONFIABLE, COMPLETO, CONSISTENTE O ADECUADO PARA TUS PROPÓSITOS.",
       },
       {
         title: "13. Limitación de responsabilidad",

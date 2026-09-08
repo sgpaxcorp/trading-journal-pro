@@ -1,4 +1,4 @@
-# Option Flow Intelligence
+# Option Flows Analysis
 ## Access
 - Left navigation → Option Flow.
 

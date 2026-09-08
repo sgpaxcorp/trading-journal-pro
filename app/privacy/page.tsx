@@ -46,7 +46,7 @@ const CONTENT = {
       {
         title: "4.1 Educational and Non-Advisory Use",
         body:
-          "Analytics, projections, simulations, Business AI Coaching, Neuro Analysis, Option Flow Intelligence, dashboards, reports, and similar outputs are provided for educational, journaling, research, simulation, and business-accountability purposes only. They are not financial, investment, trading, legal, tax, or accounting advice; they do not recommend that you buy, sell, hold, or trade any instrument; and they do not guarantee profits, income, capital growth, improved trading performance, or any specific result.",
+          "Analytics, projections, simulations, Business AI Coaching, Neuro Analysis, Option Flows Analysis, dashboards, reports, and similar outputs are provided for educational, journaling, research, simulation, and business-accountability purposes only. They are not financial, investment, trading, legal, tax, or accounting advice; they do not recommend that you buy, sell, hold, or trade any instrument; and they do not guarantee profits, income, capital growth, improved trading performance, or any specific result.",
       },
       {
         title: "5. How We Share Information",
@@ -157,7 +157,7 @@ const CONTENT = {
       {
         title: "4.1 Uso educativo y no asesoría",
         body:
-          "La analítica, proyecciones, simulaciones, Business AI Coaching, Neuro Analysis, Option Flow Intelligence, dashboards, reportes y salidas similares se ofrecen únicamente con fines educativos, de journaling, investigación, simulación y accountability empresarial. No constituyen asesoría financiera, de inversión, trading, legal, contributiva ni contable; no recomiendan comprar, vender, mantener u operar ningún instrumento; y no garantizan ganancias, ingresos, crecimiento de capital, mejora en rendimiento de trading ni ningún resultado específico.",
+          "La analítica, proyecciones, simulaciones, Business AI Coaching, Neuro Analysis, Option Flows Analysis, dashboards, reportes y salidas similares se ofrecen únicamente con fines educativos, de journaling, investigación, simulación y accountability empresarial. No constituyen asesoría financiera, de inversión, trading, legal, contributiva ni contable; no recomiendan comprar, vender, mantener u operar ningún instrumento; y no garantizan ganancias, ingresos, crecimiento de capital, mejora en rendimiento de trading ni ningún resultado específico.",
       },
       {
         title: "5. Cómo compartimos la información",

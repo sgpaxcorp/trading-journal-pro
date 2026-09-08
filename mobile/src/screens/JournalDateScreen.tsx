@@ -64,6 +64,11 @@ type NotesPayload = {
   exits?: any[];
   costs?: { commissions?: number; fees?: number };
   pnl?: { gross?: number; net?: number };
+  account_balance?: {
+    endingBalance?: number;
+    asOfDate?: string;
+    source?: string;
+  };
   mindset?: MindsetRatings;
   checklists?: ChecklistSnapshot;
   after_review?: AfterTradeReview;
@@ -466,7 +471,13 @@ export function JournalDateScreen() {
   const [exitPrice, setExitPrice] = useState("");
   const [emotion, setEmotion] = useState("");
   const [respectedPlan, setRespectedPlan] = useState<boolean | null>(null);
-  const [summary, setSummary] = useState<{ net?: number; gross?: number; commissions?: number; fees?: number }>({});
+  const [summary, setSummary] = useState<{
+    net?: number;
+    gross?: number;
+    commissions?: number;
+    fees?: number;
+    endingBalance?: number;
+  }>({});
   const [trades, setTrades] = useState<JournalTradeRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -586,6 +597,9 @@ export function JournalDateScreen() {
       gross: parsed.pnl?.gross,
       commissions: parsed.costs?.commissions,
       fees: parsed.costs?.fees,
+      endingBalance: Number.isFinite(Number(parsed.account_balance?.endingBalance))
+        ? Number(parsed.account_balance?.endingBalance)
+        : undefined,
     });
     if (Array.isArray(tradeRows) && tradeRows.length > 0) {
       setTrades(tradeRows);
@@ -845,6 +859,14 @@ export function JournalDateScreen() {
           <View style={styles.summaryItem}>
             <Text style={styles.summaryLabel}>{t(language, "Fees", "Fees")}</Text>
             <Text style={styles.summaryValue}>{summary.fees ?? "—"}</Text>
+          </View>
+        </View>
+        <View style={styles.summaryRow}>
+          <View style={styles.summaryItem}>
+            <Text style={styles.summaryLabel}>{t(language, "Ending balance", "Balance final")}</Text>
+            <Text style={styles.summaryValue}>
+              {summary.endingBalance == null ? "—" : `$${summary.endingBalance.toFixed(2)}`}
+            </Text>
           </View>
         </View>
       </View>

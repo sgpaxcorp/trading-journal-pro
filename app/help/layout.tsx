@@ -36,8 +36,8 @@ const NAV_GROUPS = (lang: "en" | "es") => {
       items: [
         { href: "/help/data-inputs", label: isEs ? "Datos e importaciones" : "Data Inputs & Imports" },
         { href: "/help/profit-loss-track", label: "Profit & Loss Track" },
-        { href: "/help/option-flow", label: isEs ? "Option Flow" : "Option Flow" },
-        { href: "/help/reports", label: isEs ? "Reportes Option Flow" : "Option Flow Reports" },
+        { href: "/help/option-flow", label: "Option Flows Analysis" },
+        { href: "/help/reports", label: isEs ? "Reportes de Option Flows Analysis" : "Option Flows Analysis Reports" },
         { href: "/help/post-mortem", label: isEs ? "Post‑mortem" : "Post‑mortem" },
       ],
     },

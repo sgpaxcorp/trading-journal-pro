@@ -162,10 +162,10 @@ export const ACCESS_GRANTS: AccessGrantDefinition[] = [
   {
     key: "option_flow",
     group: "addons",
-    label: { en: "Option Flow", es: "Option Flow" },
+    label: { en: "Option Flows Analysis", es: "Option Flows Analysis" },
     description: {
-      en: "Option Flow workspace and outcomes.",
-      es: "Workspace de Option Flow y outcomes.",
+      en: "Option Flows Analysis workspace and outcomes.",
+      es: "Workspace y resultados de Option Flows Analysis.",
     },
     primaryPath: "/option-flow",
     paths: ["/option-flow"],

@@ -186,6 +186,7 @@ type PlanSnapshot = {
 
   // Trading performance (since plan start)
   tradingPnlSincePlan: number;
+  trackedTradingPnl: number;
   currentBalance: number;
 
   // Progress excluding deposits/withdrawals
@@ -197,12 +198,19 @@ type PlanSnapshot = {
   flatsSincePlan: number;
 
   planStartDate: string | null;
+  accountDataStartDate: string | null;
+  hasPrePlanActivity: boolean;
 };
 
 type AccountSeriesTotals = {
   tradingPnl: number;
+  tradingPnlSincePlan?: number;
   cashflowNet: number;
+  cashflowNetSincePlan?: number;
   currentBalance: number;
+  seriesStartIso?: string | null;
+  earliestActivityIso?: string | null;
+  hasPrePlanActivity?: boolean;
 };
 
 type AnalyticsSummary = {
@@ -2837,8 +2845,13 @@ function AiCoachingPageInner() {
               if (totals) {
                 setAccountSeriesTotals({
                   tradingPnl: toNum(totals.tradingPnl, 0),
+                  tradingPnlSincePlan: toNum(totals.tradingPnlSincePlan, toNum(totals.tradingPnl, 0)),
                   cashflowNet: toNum(totals.cashflowNet, 0),
+                  cashflowNetSincePlan: toNum(totals.cashflowNetSincePlan, toNum(totals.cashflowNet, 0)),
                   currentBalance: toNum(totals.currentBalance, 0),
+                  seriesStartIso: body?.plan?.seriesStartIso ?? null,
+                  earliestActivityIso: body?.plan?.earliestActivityIso ?? null,
+                  hasPrePlanActivity: Boolean(body?.plan?.hasPrePlanActivity),
                 });
               } else {
                 setAccountSeriesTotals(null);
@@ -3069,8 +3082,8 @@ function AiCoachingPageInner() {
     const netCashflowsFromRows = (cashflows || []).reduce((sum, cf) => sum + signedCashflowAmount(cf), 0);
 
     // Prefer account-series totals so this card matches Balance Chart exactly.
-    const tradingPnlSincePlan = accountSeriesTotals?.tradingPnl ?? tradingPnlFromEntries;
-    const netCashflows = accountSeriesTotals?.cashflowNet ?? netCashflowsFromRows;
+    const tradingPnlSincePlan = accountSeriesTotals?.tradingPnlSincePlan ?? tradingPnlFromEntries;
+    const netCashflows = accountSeriesTotals?.cashflowNetSincePlan ?? netCashflowsFromRows;
 
     const baselineProfitTarget = targetBalance - startingBalance;
 
@@ -3080,10 +3093,7 @@ function AiCoachingPageInner() {
 
     const currentBalance = accountSeriesTotals?.currentBalance ?? (effectiveStartingBalance + tradingPnlSincePlan);
 
-    const progressPct =
-      baselineProfitTarget > 0
-        ? ((currentBalance - effectiveStartingBalance) / baselineProfitTarget) * 100
-        : 0;
+    const progressPct = baselineProfitTarget > 0 ? (tradingPnlSincePlan / baselineProfitTarget) * 100 : 0;
 
     const wins = filtered.filter((e: any) => sessionNetPnl(e) > 0).length;
     const losses = filtered.filter((e: any) => sessionNetPnl(e) < 0).length;
@@ -3099,6 +3109,7 @@ function AiCoachingPageInner() {
       effectiveTargetBalance,
 
       tradingPnlSincePlan,
+      trackedTradingPnl: accountSeriesTotals?.tradingPnl ?? tradingPnlFromEntries,
       currentBalance,
 
       progressPct,
@@ -3109,6 +3120,9 @@ function AiCoachingPageInner() {
       flatsSincePlan: flats,
 
       planStartDate,
+      accountDataStartDate:
+        accountSeriesTotals?.earliestActivityIso ?? accountSeriesTotals?.seriesStartIso ?? null,
+      hasPrePlanActivity: Boolean(accountSeriesTotals?.hasPrePlanActivity),
     };
   }, [growthPlan, entries, cashflows, planStartIso, accountSeriesTotals]);
 
@@ -4236,6 +4250,11 @@ function AiCoachingPageInner() {
                     }
                     value={question}
                     onChange={(e) => setQuestion(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key !== "Enter" || e.shiftKey || e.nativeEvent.isComposing) return;
+                      e.preventDefault();
+                      if (!isDisabled) void handleAskCoach();
+                    }}
                   />
                   <div className="w-32 flex flex-col items-center gap-2">
                     <label className="w-full text-[11px] text-center rounded-xl border border-dashed border-slate-700 bg-slate-950/60 px-2 py-2 cursor-pointer hover:border-emerald-400 hover:text-emerald-200">
@@ -4278,7 +4297,7 @@ function AiCoachingPageInner() {
                         : "bg-emerald-500 hover:bg-emerald-400 text-slate-900"
                     }`}
                   >
-                    {coachState.loading ? L("Analyzing...", "Analizando...") : L("Analyze with AI Coach", "Analizar con AI Coach")}
+                    {coachState.loading ? L("Sending...", "Enviando...") : "Send"}
                   </button>
                 </div>
               </div>

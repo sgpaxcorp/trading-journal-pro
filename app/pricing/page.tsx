@@ -424,7 +424,7 @@ export default function PricingPage() {
                   {L("Private beta", "Beta privada")}
                 </p>
                 <h3 className="text-sm font-semibold text-slate-50">
-                  {L("Option Flow Intelligence", "Option Flow Intelligence")}
+                  {L("Option Flows Analysis", "Option Flows Analysis")}
                 </h3>
                 <p className="text-[10px] text-slate-300 mt-1">
                   {L(

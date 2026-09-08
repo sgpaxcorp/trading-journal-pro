@@ -15,7 +15,7 @@ Billing is managed in the web app. The mobile app does not create accounts, chan
 7. Open billing history.
 
 ## Option Flow status
-`Option Flow Intelligence` is currently in private beta. It is not available for purchase or direct activation from Billing.
+`Option Flows Analysis` is currently in private beta. It is not available for purchase or direct activation from Billing.
 
 ## Subscription cancellation
 ### Where to cancel

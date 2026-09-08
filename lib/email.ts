@@ -2153,9 +2153,9 @@ export async function sendSubscriptionReceiptEmail(user: AppUser, plan: PlanId) 
 
 export async function sendBetaRequestEmail(args: { name: string; email: string }) {
   const { name, email } = args;
-  const subject = `Option Flow beta access request - ${email}`;
+  const subject = `Option Flows Analysis beta access request - ${email}`;
   const text = [
-    "New NeuroTrader Option Flow beta access request:",
+    "New NeuroTrader Option Flows Analysis beta access request:",
     "",
     `Name: ${name}`,
     `Email: ${email}`,

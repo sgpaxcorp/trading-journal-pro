@@ -78,7 +78,7 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     /* -----------------
        Smart Tools dropdown items
     ------------------ */
-    "nav.smartTools.optionFlow.title": "Option Flow Intelligence",
+    "nav.smartTools.optionFlow.title": "Option Flows Analysis",
     "nav.smartTools.optionFlow.desc": "Options flow reports, premarket plans, and outcome review for the business.",
     "nav.smartTools.neuroAnalysis.title": "Neuro Analysis",
     "nav.smartTools.neuroAnalysis.desc": "Company intelligence, evidence checklist, market research, and 2-10 year valuation scenarios.",
@@ -331,7 +331,7 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     /* -----------------
        Smart Tools dropdown items
     ------------------ */
-    "nav.smartTools.optionFlow.title": "Option Flow Intelligence",
+    "nav.smartTools.optionFlow.title": "Option Flows Analysis",
     "nav.smartTools.optionFlow.desc": "Reportes de options flow, planes premarket y revisión de resultados para el negocio.",
     "nav.smartTools.neuroAnalysis.title": "Neuro Analysis",
     "nav.smartTools.neuroAnalysis.desc": "Inteligencia de compañías, checklist de evidencia, research de mercado y escenarios de valuation 2-10 años.",

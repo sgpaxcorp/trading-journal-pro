@@ -54,6 +54,37 @@ function calcDTE(tradeDate: string, expiry: string | null): number | null {
   return Number.isFinite(diff) ? diff : null;
 }
 
+async function resolveStatementEndingBalance(params: {
+  userId: string;
+  trades: any[];
+  startISO: string;
+  endISO: string;
+}): Promise<number | null> {
+  const importBatchIds = Array.from(
+    new Set(
+      params.trades
+        .map((trade) => String(trade?.import_batch_id ?? "").trim())
+        .filter(Boolean)
+    )
+  );
+  if (!importBatchIds.length) return null;
+
+  const { data, error } = await supabaseAdmin
+    .from("broker_transactions")
+    .select("balance,executed_at")
+    .eq("user_id", params.userId)
+    .in("import_batch_id", importBatchIds)
+    .not("balance", "is", null)
+    .gte("executed_at", params.startISO)
+    .lt("executed_at", params.endISO)
+    .order("executed_at", { ascending: false })
+    .limit(1);
+
+  if (error || !data?.length) return null;
+  const balance = Number((data[0] as any)?.balance);
+  return Number.isFinite(balance) ? Number(balance.toFixed(2)) : null;
+}
+
 /* ---------------- multipliers ---------------- */
 
 const FUT_MONTH_CODES = "FGHJKMNQUVXZ";
@@ -272,7 +303,8 @@ export async function POST(req: NextRequest) {
         side,
         executed_at,
         commissions,
-        fees
+        fees,
+        import_batch_id
       `
       )
       .eq("user_id", userId)
@@ -326,6 +358,13 @@ export async function POST(req: NextRequest) {
         message: "No trades found for this date",
       });
     }
+
+    const statementEndingBalance = await resolveStatementEndingBalance({
+      userId,
+      trades: trades as any[],
+      startISO,
+      endISO,
+    });
 
     /* ---------- preserve textual notes ---------- */
     const existingNotesQuery = applyAccountFilter(
@@ -581,6 +620,15 @@ export async function POST(req: NextRequest) {
         gross: pnlGross,
         net: pnlNet,
       },
+      ...(statementEndingBalance != null
+        ? {
+            account_balance: {
+              endingBalance: statementEndingBalance,
+              asOfDate: date,
+              source: "broker_statement",
+            },
+          }
+        : {}),
       synced_at: new Date().toISOString(),
     });
 
@@ -621,6 +669,7 @@ export async function POST(req: NextRequest) {
       pnl_net: pnlNet,
       commissions: totalCommissions,
       fees: totalFees,
+      ending_balance: statementEndingBalance,
       entries,
       exits,
       message: "Journal synced successfully (fills-level + futures multipliers).",

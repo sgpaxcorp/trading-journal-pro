@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useFocusEffect } from "@react-navigation/native";
 import {
   ActivityIndicator,
   FlatList,
@@ -74,6 +75,9 @@ type AccountSeriesResponse = {
     adjustedTargetBalance?: number;
     dailyTargetPct?: number;
     planStartIso?: string;
+    seriesStartIso?: string;
+    hasPrePlanActivity?: boolean;
+    earliestActivityIso?: string | null;
     targetDate?: string;
     maxDailyLossPercent?: number;
     steps?: {
@@ -105,7 +109,9 @@ type AccountSeriesResponse = {
   } | null;
   totals?: {
     tradingPnl?: number;
+    tradingPnlSincePlan?: number;
     cashflowNet?: number;
+    cashflowNetSincePlan?: number;
     currentBalance?: number;
   } | null;
 };
@@ -446,6 +452,7 @@ export function AICoachScreen({}: AICoachScreenProps) {
   const [accountSeries, setAccountSeries] = useState<AccountSeriesResponse | null>(null);
   const [analyticsSnapshot, setAnalyticsSnapshot] = useState<AnalyticsSnapshot | null>(null);
   const listRef = useRef<FlatList<CoachMessage>>(null);
+  const focusedOnceRef = useRef(false);
 
   const createNewThread = useCallback(async () => {
     if (!supabaseMobile || !user?.id) return null;
@@ -512,11 +519,16 @@ export function AICoachScreen({}: AICoachScreenProps) {
 
       const [seriesRes, analyticsRes] = await Promise.all([
         apiGet<AccountSeriesResponse>(ACCOUNT_SERIES_CONTEXT_PATH),
-        apiGet<AnalyticsSnapshotResponse>("/api/analytics/snapshot"),
+        apiGet<AnalyticsSnapshotResponse>(`/api/analytics/snapshot?mobileRefresh=${Date.now()}`),
       ]);
 
+      const seriesStartIso = String(seriesRes?.plan?.seriesStartIso ?? "").slice(0, 10);
       const planStartIso = String(seriesRes?.plan?.planStartIso ?? "").slice(0, 10);
-      const fromDate = looksLikeYYYYMMDD(planStartIso) ? planStartIso : fallbackFromIso;
+      const fromDate = looksLikeYYYYMMDD(seriesStartIso)
+        ? seriesStartIso
+        : looksLikeYYYYMMDD(planStartIso)
+          ? planStartIso
+          : fallbackFromIso;
       const journalRes = await apiGet<JournalListResponse>(`/api/journal/list?fromDate=${fromDate}&toDate=${toDate}`);
 
       const entries = [...(journalRes?.entries ?? [])].sort((a, b) =>
@@ -567,6 +579,16 @@ export function AICoachScreen({}: AICoachScreenProps) {
   useEffect(() => {
     void loadCoachContext();
   }, [loadCoachContext]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!focusedOnceRef.current) {
+        focusedOnceRef.current = true;
+        return;
+      }
+      void loadCoachContext();
+    }, [loadCoachContext])
+  );
 
   useEffect(() => {
     if (!activeThread?.id) return;
@@ -685,8 +707,16 @@ export function AICoachScreen({}: AICoachScreenProps) {
 
     const startingBalance = toNum(plan.startingBalance, 0);
     const targetBalance = toNum(plan.adjustedTargetBalance ?? plan.targetBalance, 0);
-    const netCashflows = toNum(totals.cashflowNet, 0);
-    const tradingPnlSincePlan = toNum(totals.tradingPnl, 0);
+    const netCashflows = toNum(totals.cashflowNetSincePlan ?? totals.cashflowNet, 0);
+    const trackedTradingPnl = toNum(totals.tradingPnl, 0);
+    const planStartIso = String(plan.planStartIso ?? "").slice(0, 10);
+    const planEntries = looksLikeYYYYMMDD(planStartIso)
+      ? journalEntries.filter((entry) => String(entry?.date ?? "").slice(0, 10) >= planStartIso)
+      : journalEntries;
+    const tradingPnlSincePlan =
+      totals.tradingPnlSincePlan != null
+        ? toNum(totals.tradingPnlSincePlan, 0)
+        : planEntries.reduce((sum, entry) => sum + toNum(entry?.pnl, 0), 0);
     const currentBalance = toNum(totals.currentBalance, 0);
     const baselineProfitTarget = targetBalance - startingBalance;
     const effectiveStartingBalance = startingBalance + netCashflows;
@@ -699,17 +729,21 @@ export function AICoachScreen({}: AICoachScreenProps) {
       netCashflows,
       effectiveStartingBalance,
       effectiveTargetBalance,
+      trackedTradingPnl,
       tradingPnlSincePlan,
       currentBalance,
       progressPct:
         baselineProfitTarget > 0
-          ? ((currentBalance - effectiveStartingBalance) / baselineProfitTarget) * 100
+          ? (tradingPnlSincePlan / baselineProfitTarget) * 100
           : 0,
-      sessionsSincePlan: journalEntries.length,
-      winsSincePlan: journalEntries.filter((entry) => toNum(entry?.pnl, 0) > 0).length,
-      lossesSincePlan: journalEntries.filter((entry) => toNum(entry?.pnl, 0) < 0).length,
-      flatsSincePlan: journalEntries.filter((entry) => toNum(entry?.pnl, 0) === 0).length,
+      sessionsTracked: journalEntries.length,
+      sessionsSincePlan: planEntries.length,
+      winsSincePlan: planEntries.filter((entry) => toNum(entry?.pnl, 0) > 0).length,
+      lossesSincePlan: planEntries.filter((entry) => toNum(entry?.pnl, 0) < 0).length,
+      flatsSincePlan: planEntries.filter((entry) => toNum(entry?.pnl, 0) === 0).length,
       planStartDate: plan.planStartIso ?? null,
+      accountDataStartDate: plan.earliestActivityIso ?? plan.seriesStartIso ?? null,
+      hasPrePlanActivity: Boolean(plan.hasPrePlanActivity),
     };
   }, [accountSeries, journalEntries]);
 

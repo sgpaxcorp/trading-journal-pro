@@ -1370,6 +1370,18 @@ function buildGrowthPlanOperatingBlock(body: AiCoachRequestBody): string {
     lines.push(
       `Plan position now: start=${usd(start)}, target=${usd(target)}, current=${usd(current)}, progress=${Number.isFinite(progress) ? progress.toFixed(1) + "%" : "—"}, sessionsSincePlan=${Number.isFinite(sessionsSincePlan) ? sessionsSincePlan : "—"}`
     );
+    if (planSnapshot?.hasPrePlanActivity) {
+      lines.push(
+        `Account/plan timing: tracked account activity begins ${safeString(planSnapshot?.accountDataStartDate) || "before the plan"}, while the plan begins ${safeString(planSnapshot?.planStartDate) || "later"}. Current balance includes all tracked activity, but plan progress and sessionsSincePlan exclude pre-plan activity. Explain this distinction whenever it affects the answer.`
+      );
+    }
+    const trackedPnl = Number(planSnapshot?.trackedTradingPnl);
+    const planPnl = Number(planSnapshot?.tradingPnlSincePlan);
+    if (Number.isFinite(trackedPnl) || Number.isFinite(planPnl)) {
+      lines.push(
+        `P&L scope: tracked=${Number.isFinite(trackedPnl) ? usd(trackedPnl) : "—"}, sincePlan=${Number.isFinite(planPnl) ? usd(planPnl) : "—"}.`
+      );
+    }
   }
 
   const phases = safeArray<any>(growthPlan?.planPhases)
