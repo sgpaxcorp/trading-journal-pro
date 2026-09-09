@@ -75,6 +75,10 @@ import { listCashflows, signedCashflowAmount } from "@/lib/cashflowsSupabase";
 import { syncGrowthPlanProtectionRules } from "@/lib/alertsSupabase";
 import { useTradingAccounts } from "@/hooks/useTradingAccounts";
 import {
+  calculateFundedAccountMetrics,
+  getFundedProfileMissingFields,
+} from "@/lib/fundedAccounts";
+import {
   growthPlanDeadlineShortfallUsd,
   growthPlanDeadlineToleranceUsd,
   meetsGrowthPlanDeadlineApproximately,
@@ -1630,7 +1634,7 @@ function historyReasonLabel(reason: string | null | undefined, L: (en: string, e
 
 export default function GrowthPlanPage() {
   const { user, loading } = useAuth();
-  const { activeAccountId, loading: accountsLoading } = useTradingAccounts();
+  const { accounts, activeAccountId, loading: accountsLoading } = useTradingAccounts();
   const router = useRouter();
   const { locale } = useAppSettings();
   const lang = resolveLocale(locale) as GrowthPlanLocale;
@@ -1639,6 +1643,14 @@ export default function GrowthPlanPage() {
   const stepTitles = isEs ? STEP_TITLES_ES : STEP_TITLES_EN;
   const inputBase =
     "w-full rounded-lg bg-slate-950 border border-slate-700 text-slate-100 focus:border-emerald-400 outline-none px-2.5 py-1.5 text-sm";
+  const activeTradingAccount =
+    accounts.find((account) => account.id === activeAccountId) ?? null;
+  const isFundedAccount = activeTradingAccount?.account_type === "funded";
+  const fundedProfile = isFundedAccount
+    ? activeTradingAccount?.funded_profile ?? null
+    : null;
+  const fundedProfileMissingFields = getFundedProfileMissingFields(fundedProfile);
+  const fundedProfileConfigured = !isFundedAccount || fundedProfileMissingFields.length === 0;
 
   const [step, setStep] = useState<WizardStep>(0);
   const [error, setError] = useState("");
@@ -1707,6 +1719,8 @@ export default function GrowthPlanPage() {
   const [stepsData, setStepsData] = useState<GrowthPlanSteps>(() => getDefaultSteps());
   const [rules, setRules] = useState<GrowthPlanRule[]>(() => getDefaultSuggestedRules());
   const [newRuleText, setNewRuleText] = useState("");
+
+  const fundedMetrics = calculateFundedAccountMetrics(fundedProfile);
 
   // normalized numbers
   const startingBalance = toNum(startingBalanceStr, 0);
@@ -2631,27 +2645,57 @@ export default function GrowthPlanPage() {
           setRunwayHydrated(true);
         } else {
           // new plan
+          const fundedDefaults = calculateFundedAccountMetrics(fundedProfile);
+          const fundedPolicy = getGrowthPlanOperatingPolicy("conservative");
           setHasExistingPlan(false);
           setIsFollowOnDraft(false);
-          setStartingBalanceStr("");
-          setTargetBalanceStr("");
+          setStartingBalanceStr(
+            fundedDefaults ? formatMoneyInputValue(fundedDefaults.currentEquity) : ""
+          );
+          setTargetBalanceStr(
+            fundedDefaults ? formatMoneyInputValue(fundedDefaults.targetBalance) : ""
+          );
           const newStartDate = isoToday();
-          setTargetDateStr(addTradingRunway(newStartDate, 1, "years"));
+          const fundedRunway = fundedProfile?.evaluationDeadline
+            ? inferTradingRunway(newStartDate, fundedProfile.evaluationDeadline)
+            : null;
+          const nextRunwayAmount = fundedRunway?.amount ?? 1;
+          const nextRunwayUnit = fundedRunway?.unit ?? "years";
+          setTargetDateStr(addTradingRunway(newStartDate, nextRunwayAmount, nextRunwayUnit));
           setTradingInstrument("stocks");
-          setRunwayAmountStr("1");
-          setRunwayUnit("years");
-          setMaxDailyLossPercentStr("");
+          setRunwayAmountStr(String(nextRunwayAmount));
+          setRunwayUnit(nextRunwayUnit);
+          setMaxDailyLossPercentStr(
+            fundedDefaults
+              ? String(Number(fundedDefaults.operatingDailyStopPercent.toFixed(4)))
+              : ""
+          );
           setTradingDaysStr("");
           setAverageTradingDaysPerWeekStr("5");
           setWinningDaysPerWeekStr("4");
           setTradingDaysTouched(false);
           setLossDaysPerWeekStr("");
-          setRiskPerTradePctStr("");
-          setGoalDayReturnPctStr("");
-          setExpectedLossDayPctStr("");
-          setReturnModelMode("");
-          setSelectedPlanId("");
-          setSelectedScenarioId("");
+          setRiskPerTradePctStr(
+            fundedDefaults
+              ? String(Number(fundedDefaults.recommendedRiskPerTradePercent.toFixed(4)))
+              : ""
+          );
+          setGoalDayReturnPctStr(fundedDefaults ? String(fundedPolicy.goalDayReturnPct) : "");
+          setExpectedLossDayPctStr(
+            fundedDefaults
+              ? String(
+                  Number(
+                    Math.min(
+                      fundedPolicy.expectedLossDayPct,
+                      Math.max(0.01, fundedDefaults.operatingDailyStopPercent * 0.6)
+                    ).toFixed(4)
+                  )
+                )
+              : ""
+          );
+          setReturnModelMode(fundedDefaults ? "conservative" : "");
+          setSelectedPlanId(fundedDefaults ? "conservative" : "");
+          setSelectedScenarioId(fundedDefaults ? "conservative" : "");
           setStep0Stage(0);
           setLoadedStartingBalance(null);
           setCashflowNet(0);
@@ -2682,7 +2726,7 @@ export default function GrowthPlanPage() {
     return () => {
       mounted = false;
     };
-  }, [loading, user, accountsLoading, activeAccountId]);
+  }, [loading, user, accountsLoading, activeAccountId, fundedProfile]);
 
   // risk coaching (throttled)
   const lastRiskNudgeRef = useRef<number>(0);
@@ -3314,13 +3358,25 @@ export default function GrowthPlanPage() {
       setGoalDayReturnPctStr(String(policy.goalDayReturnPct));
     }
     if (mode !== "manual" || expectedLossDayPct <= 0) {
-      setExpectedLossDayPctStr(String(policy.expectedLossDayPct));
+      const lossDay = fundedMetrics?.configured
+        ? Math.min(
+            policy.expectedLossDayPct,
+            Math.max(0.0001, fundedMetrics.operatingDailyStopPercent * 0.6)
+          )
+        : policy.expectedLossDayPct;
+      setExpectedLossDayPctStr(String(Number(lossDay.toFixed(4))));
     }
     if (mode !== "manual" || maxDailyLossPercent <= 0) {
-      setMaxDailyLossPercentStr(String(policy.maxDailyLossPct));
+      const dailyStop = fundedMetrics?.configured
+        ? Math.min(policy.maxDailyLossPct, fundedMetrics.operatingDailyStopPercent)
+        : policy.maxDailyLossPct;
+      setMaxDailyLossPercentStr(String(Number(dailyStop.toFixed(4))));
     }
     if (mode !== "manual" || riskPerTradePct <= 0) {
-      setRiskPerTradePctStr(String(policy.riskPerTradePct));
+      const tradeRisk = fundedMetrics?.configured
+        ? Math.min(policy.riskPerTradePct, fundedMetrics.recommendedRiskPerTradePercent)
+        : policy.riskPerTradePct;
+      setRiskPerTradePctStr(String(Number(tradeRisk.toFixed(4))));
     }
   };
 
@@ -3330,10 +3386,49 @@ export default function GrowthPlanPage() {
     setSelectedScenarioId(returnModelMode);
     setSelectedPlanId((current) => (current === returnModelMode ? current : ""));
     setGoalDayReturnPctStr(String(policy.goalDayReturnPct));
-    setExpectedLossDayPctStr(String(policy.expectedLossDayPct));
-    setMaxDailyLossPercentStr(String(policy.maxDailyLossPct));
-    setRiskPerTradePctStr(String(policy.riskPerTradePct));
-  }, [returnModelMode]);
+    const dailyStop = fundedMetrics?.configured
+      ? Math.min(policy.maxDailyLossPct, fundedMetrics.operatingDailyStopPercent)
+      : policy.maxDailyLossPct;
+    const tradeRisk = fundedMetrics?.configured
+      ? Math.min(policy.riskPerTradePct, fundedMetrics.recommendedRiskPerTradePercent)
+      : policy.riskPerTradePct;
+    const lossDay = fundedMetrics?.configured
+      ? Math.min(policy.expectedLossDayPct, Math.max(0.0001, dailyStop * 0.6))
+      : policy.expectedLossDayPct;
+    setExpectedLossDayPctStr(String(Number(lossDay.toFixed(4))));
+    setMaxDailyLossPercentStr(String(Number(dailyStop.toFixed(4))));
+    setRiskPerTradePctStr(String(Number(tradeRisk.toFixed(4))));
+  }, [
+    fundedMetrics?.configured,
+    fundedMetrics?.operatingDailyStopPercent,
+    fundedMetrics?.recommendedRiskPerTradePercent,
+    returnModelMode,
+  ]);
+
+  useEffect(() => {
+    if (!isFundedAccount || !fundedMetrics?.configured) return;
+    const dailyCap = fundedMetrics.operatingDailyStopPercent;
+    const riskCap = fundedMetrics.recommendedRiskPerTradePercent;
+    if (maxDailyLossPercent <= 0 || maxDailyLossPercent > dailyCap) {
+      setMaxDailyLossPercentStr(String(Number(dailyCap.toFixed(4))));
+    }
+    if (riskPerTradePct <= 0 || riskPerTradePct > riskCap) {
+      setRiskPerTradePctStr(String(Number(riskCap.toFixed(4))));
+    }
+    if (expectedLossDayPct > dailyCap) {
+      setExpectedLossDayPctStr(String(Number(Math.max(0.0001, dailyCap * 0.6).toFixed(4))));
+    }
+    if (plannedDepositMode !== "none") setPlannedDepositMode("none");
+  }, [
+    expectedLossDayPct,
+    fundedMetrics?.configured,
+    fundedMetrics?.operatingDailyStopPercent,
+    fundedMetrics?.recommendedRiskPerTradePercent,
+    isFundedAccount,
+    maxDailyLossPercent,
+    plannedDepositMode,
+    riskPerTradePct,
+  ]);
 
   const aiPlanAdvisor = useMemo(
     () =>
@@ -5972,16 +6067,24 @@ export default function GrowthPlanPage() {
     {
       id: "starting_balance",
       anchor: "gp-starting-balance",
-      title: L("1. Starting capital", "1. Capital inicial"),
+      title: isFundedAccount
+        ? L("1. Current funded equity", "1. Equity funded actual")
+        : L("1. Starting capital", "1. Capital inicial"),
       description: L(
-        "How much trading capital will this business plan start with?",
-        "¿Con cuánto capital de trading comenzará este plan empresarial?"
+        isFundedAccount
+          ? "Imported from the confirmed funded-account profile."
+          : "How much trading capital will this business plan start with?",
+        isFundedAccount
+          ? "Se importa del perfil confirmado de la cuenta funded."
+          : "¿Con cuánto capital de trading comenzará este plan empresarial?"
       ),
       isComplete: startingBalance > 0,
       content: (
         <div className="mx-auto max-w-xl rounded-2xl border border-cyan-300/20 bg-slate-950/70 p-5">
           <label htmlFor="gp-starting-balance" className="text-xs uppercase tracking-[0.18em] text-slate-400">
-            {L("Starting capital in USD", "Capital inicial en USD")}
+            {isFundedAccount
+              ? L("Current funded equity in USD", "Equity funded actual en USD")
+              : L("Starting capital in USD", "Capital inicial en USD")}
           </label>
           <div className="mt-3 flex items-center rounded-xl border border-slate-700 bg-slate-950 px-4 focus-within:border-cyan-300">
             <span className="text-xl font-semibold text-cyan-200">$</span>
@@ -5989,6 +6092,7 @@ export default function GrowthPlanPage() {
               id="gp-starting-balance"
               inputMode="decimal"
               value={startingBalanceStr}
+              readOnly={isFundedAccount}
               onChange={(event) => {
                 setStartingBalanceStr(formatMoneyInputDraft(event.target.value));
                 setSelectedPlanId("");
@@ -5997,14 +6101,18 @@ export default function GrowthPlanPage() {
               onBlur={() => {
                 if (startingBalanceStr.trim()) setStartingBalanceStr(formatMoneyInputValue(startingBalance));
               }}
-              className="min-w-0 flex-1 bg-transparent px-3 py-3 text-2xl font-semibold text-slate-100 outline-none"
+              className={`min-w-0 flex-1 bg-transparent px-3 py-3 text-2xl font-semibold text-slate-100 outline-none ${isFundedAccount ? "cursor-not-allowed" : ""}`}
               placeholder="10,000.00"
             />
           </div>
           <p className="mt-3 text-xs leading-5 text-slate-500">
             {L(
-              "Every percentage in the forecast will also be translated into dollars from the active balance.",
-              "Cada porcentaje del forecast también se traducirá a dólares usando el balance activo."
+              isFundedAccount
+                ? "The nominal account size is not treated as personal capital. Risk is calculated from the remaining drawdown buffer."
+                : "Every percentage in the forecast will also be translated into dollars from the active balance.",
+              isFundedAccount
+                ? "El tamaño nominal no se trata como capital personal. El riesgo se calcula desde el colchón de drawdown disponible."
+                : "Cada porcentaje del forecast también se traducirá a dólares usando el balance activo."
             )}
           </p>
         </div>
@@ -6013,16 +6121,24 @@ export default function GrowthPlanPage() {
     {
       id: "target_balance",
       anchor: "gp-target-balance",
-      title: L("2. Business target", "2. Meta empresarial"),
+      title: isFundedAccount
+        ? L("2. Program target", "2. Meta del programa")
+        : L("2. Business target", "2. Meta empresarial"),
       description: L(
-        "Define the account balance the business should reach.",
-        "Define el balance que la empresa de trading debe alcanzar."
+        isFundedAccount
+          ? "Calculated from the current stage and confirmed profit target."
+          : "Define the account balance the business should reach.",
+        isFundedAccount
+          ? "Se calcula desde la etapa actual y la meta de ganancia confirmada."
+          : "Define el balance que la empresa de trading debe alcanzar."
       ),
       isComplete: targetBalance > startingBalance,
       content: (
         <div className="mx-auto max-w-xl rounded-2xl border border-emerald-300/20 bg-slate-950/70 p-5">
           <label htmlFor="gp-target-balance" className="text-xs uppercase tracking-[0.18em] text-slate-400">
-            {L("Target balance in USD", "Balance objetivo en USD")}
+            {isFundedAccount
+              ? L("Required program balance", "Balance requerido por el programa")
+              : L("Target balance in USD", "Balance objetivo en USD")}
           </label>
           <div className="mt-3 flex items-center rounded-xl border border-slate-700 bg-slate-950 px-4 focus-within:border-emerald-300">
             <span className="text-xl font-semibold text-emerald-200">$</span>
@@ -6030,6 +6146,7 @@ export default function GrowthPlanPage() {
               id="gp-target-balance"
               inputMode="decimal"
               value={targetBalanceStr}
+              readOnly={isFundedAccount}
               onChange={(event) => {
                 setTargetBalanceStr(formatMoneyInputDraft(event.target.value));
                 setSelectedPlanId("");
@@ -6038,7 +6155,7 @@ export default function GrowthPlanPage() {
               onBlur={() => {
                 if (targetBalanceStr.trim()) setTargetBalanceStr(formatMoneyInputValue(targetBalance));
               }}
-              className="min-w-0 flex-1 bg-transparent px-3 py-3 text-2xl font-semibold text-slate-100 outline-none"
+              className={`min-w-0 flex-1 bg-transparent px-3 py-3 text-2xl font-semibold text-slate-100 outline-none ${isFundedAccount ? "cursor-not-allowed" : ""}`}
               placeholder="25,000.00"
             />
           </div>
@@ -6237,8 +6354,12 @@ export default function GrowthPlanPage() {
       anchor: "gp-planned-withdrawals",
       title: L("5. Contributions and withdrawals", "5. Aportaciones y retiros"),
       description: L(
-        "Optional cashflows stay separate from trading performance.",
-        "Los cashflows opcionales se mantienen separados del rendimiento de trading."
+        isFundedAccount
+          ? "Personal contributions are disabled. Planned payouts remain separate from account performance."
+          : "Optional cashflows stay separate from trading performance.",
+        isFundedAccount
+          ? "Las aportaciones personales están deshabilitadas. Los payouts planificados permanecen separados del rendimiento."
+          : "Los cashflows opcionales se mantienen separados del rendimiento de trading."
       ),
       isComplete: capitalFlowAssumptionsComplete,
       content: capitalFlowStage?.content ?? null,
@@ -6457,11 +6578,11 @@ export default function GrowthPlanPage() {
                 <span className="mt-1 block text-slate-500">-{currency((baseBalanceForDollars * expectedLossDayPct) / 100)}</span>
               </label>
               <label className="text-xs text-slate-300">{L("Hard daily stop %", "Stop diario duro %")}
-                <input value={maxDailyLossPercentStr} inputMode="decimal" onChange={(event) => { setReturnModelMode("manual"); setSelectedPlanId(""); setMaxDailyLossPercentStr(onlyNum(event.target.value)); }} className={`${inputBase} mt-1`} />
+                <input value={maxDailyLossPercentStr} inputMode="decimal" readOnly={isFundedAccount} onChange={(event) => { setReturnModelMode("manual"); setSelectedPlanId(""); setMaxDailyLossPercentStr(onlyNum(event.target.value)); }} className={`${inputBase} mt-1 ${isFundedAccount ? "cursor-not-allowed opacity-80" : ""}`} />
                 <span className="mt-1 block text-slate-500">-{currency((baseBalanceForDollars * maxDailyLossPercent) / 100)}</span>
               </label>
               <label className="text-xs text-slate-300">{L("Risk per trade %", "Riesgo por trade %")}
-                <input value={riskPerTradePctStr} inputMode="decimal" onChange={(event) => { setReturnModelMode("manual"); setSelectedPlanId(""); setRiskPerTradePctStr(onlyNum(event.target.value)); }} className={`${inputBase} mt-1`} />
+                <input value={riskPerTradePctStr} inputMode="decimal" readOnly={isFundedAccount} onChange={(event) => { setReturnModelMode("manual"); setSelectedPlanId(""); setRiskPerTradePctStr(onlyNum(event.target.value)); }} className={`${inputBase} mt-1 ${isFundedAccount ? "cursor-not-allowed opacity-80" : ""}`} />
                 <span className="mt-1 block text-slate-500">{currency(riskUsd)}</span>
               </label>
             </div>
@@ -6952,6 +7073,30 @@ export default function GrowthPlanPage() {
         source: "web",
       },
       operatingModel: {
+        accountType: isFundedAccount ? "funded" : "personal",
+        fundedAccount: isFundedAccount && fundedProfile && fundedMetrics
+          ? {
+              stage: fundedProfile.stage,
+              firmName: fundedProfile.firmName,
+              programName: fundedProfile.programName,
+              nominalAccountSize: fundedProfile.nominalAccountSize,
+              currentEquity: fundedMetrics.currentEquity,
+              profitTarget: fundedProfile.profitTarget,
+              targetBalance: fundedMetrics.targetBalance,
+              dailyLossLimit: fundedProfile.dailyLossLimit,
+              maxDrawdown: fundedProfile.maxDrawdown,
+              drawdownType: fundedProfile.drawdownType,
+              breachFloor: fundedMetrics.breachFloor,
+              remainingDrawdown: fundedMetrics.remainingDrawdown,
+              operatingDailyStop: fundedMetrics.operatingDailyStop,
+              recommendedRiskPerTrade: fundedMetrics.recommendedRiskPerTrade,
+              minimumTradingDays: fundedProfile.minimumTradingDays,
+              evaluationDeadline: fundedProfile.evaluationDeadline,
+              consistencyRulePercent: fundedProfile.consistencyRulePercent,
+              rulesVersion: fundedProfile.rulesVersion,
+              rulesConfirmedAt: fundedProfile.rulesConfirmedAt,
+            }
+          : null,
         planStartDate: effectivePlanStart,
         targetDate: effectiveForecastTargetDate || targetDateStr || null,
         requestedTargetDate: targetDateStr || null,
@@ -7285,6 +7430,98 @@ export default function GrowthPlanPage() {
     );
   }
 
+  if (accountsLoading) {
+    return (
+      <main className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center">
+        <p className="text-base text-slate-400">{L("Loading account…", "Cargando cuenta…")}</p>
+      </main>
+    );
+  }
+
+  if (isFundedAccount && !fundedProfileConfigured) {
+    return (
+      <>
+        <TopNav />
+        <main className="min-h-screen bg-slate-950 px-6 py-16 text-slate-50">
+          <div className="mx-auto max-w-2xl border border-amber-300/30 bg-slate-900 p-6">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-amber-200">
+              {L("Funded account setup required", "Configuración funded requerida")}
+            </p>
+            <h1 className="mt-2 text-2xl font-semibold">
+              {L("Confirm the firm's rules before building this plan", "Confirma las reglas de la firma antes de construir este plan")}
+            </h1>
+            <p className="mt-3 text-sm leading-6 text-slate-300">
+              {L(
+                "NeuroTrader will not estimate breach limits. Complete the account size, current equity, profit target, daily loss, maximum drawdown, and rule confirmation first.",
+                "NeuroTrader no estimará límites de incumplimiento. Completa primero el tamaño de cuenta, equity actual, meta de ganancia, pérdida diaria, drawdown máximo y la confirmación de reglas."
+              )}
+            </p>
+            <Link
+              href="/account#trading-accounts"
+              className="mt-5 inline-flex rounded-lg bg-emerald-400 px-4 py-2 text-sm font-semibold text-slate-950"
+            >
+              {L("Complete funded setup", "Completar configuración funded")}
+            </Link>
+          </div>
+        </main>
+      </>
+    );
+  }
+
+  if (isFundedAccount && fundedMetrics?.status === "stop") {
+    return (
+      <>
+        <TopNav />
+        <main className="min-h-screen bg-slate-950 px-6 py-16 text-slate-50">
+          <div className="mx-auto max-w-2xl border border-rose-400/40 bg-slate-900 p-6">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-rose-200">
+              {L("Trading blocked", "Trading bloqueado")}
+            </p>
+            <h1 className="mt-2 text-2xl font-semibold">
+              {L("The account has no remaining drawdown room", "La cuenta no tiene margen de drawdown disponible")}
+            </h1>
+            <p className="mt-3 text-sm leading-6 text-slate-300">
+              {L(
+                "NeuroTrader will not activate a plan above the program breach floor. Review the official account status and update its records before continuing.",
+                "NeuroTrader no activará un plan por encima del nivel de incumplimiento del programa. Revisa el estado oficial de la cuenta y actualiza sus registros antes de continuar."
+              )}
+            </p>
+            <Link href="/account#trading-accounts" className="mt-5 inline-flex rounded-lg bg-rose-300 px-4 py-2 text-sm font-semibold text-slate-950">
+              {L("Review account status", "Revisar estado de cuenta")}
+            </Link>
+          </div>
+        </main>
+      </>
+    );
+  }
+
+  if (isFundedAccount && fundedMetrics && fundedMetrics.remainingProfitTarget <= 0) {
+    return (
+      <>
+        <TopNav />
+        <main className="min-h-screen bg-slate-950 px-6 py-16 text-slate-50">
+          <div className="mx-auto max-w-2xl border border-emerald-300/30 bg-slate-900 p-6">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-emerald-200">
+              {L("Stage target complete", "Meta de etapa completada")}
+            </p>
+            <h1 className="mt-2 text-2xl font-semibold">
+              {L("Define the next stage before creating another plan", "Define la próxima etapa antes de crear otro plan")}
+            </h1>
+            <p className="mt-3 text-sm leading-6 text-slate-300">
+              {L(
+                "Update the evaluation, verification, or payout cycle and reconfirm the official rules. This keeps the next target fixed and auditable.",
+                "Actualiza la evaluación, verificación o ciclo de payout y vuelve a confirmar las reglas oficiales. Así la próxima meta permanece fija y auditable."
+              )}
+            </p>
+            <Link href="/account#trading-accounts" className="mt-5 inline-flex rounded-lg bg-emerald-400 px-4 py-2 text-sm font-semibold text-slate-950">
+              {L("Update funded stage", "Actualizar etapa funded")}
+            </Link>
+          </div>
+        </main>
+      </>
+    );
+  }
+
   return (
     <>
       <TopNav />
@@ -7321,6 +7558,38 @@ export default function GrowthPlanPage() {
               "El Coach Empresarial IA usará esto para guiarte según tu ejecución real."
             )}
           </p>
+
+          {isFundedAccount && fundedProfile && fundedMetrics ? (
+            <div className="mt-4 border-y border-cyan-300/20 bg-cyan-300/5 py-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="rounded-full border border-cyan-300/30 bg-cyan-300/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-cyan-100">
+                      Funded · {fundedProfile.stage}
+                    </span>
+                    <span className="text-xs text-slate-400">
+                      {fundedProfile.firmName}{fundedProfile.programName ? ` · ${fundedProfile.programName}` : ""}
+                    </span>
+                  </div>
+                  <p className="mt-2 text-sm text-slate-200">
+                    {L(
+                      "This plan protects the drawdown buffer first and then pursues the program target.",
+                      "Este plan protege primero el colchón de drawdown y luego persigue la meta del programa."
+                    )}
+                  </p>
+                </div>
+                <Link href="/account#trading-accounts" className="text-xs font-semibold text-cyan-200 hover:text-cyan-100">
+                  {L("Review official rules", "Revisar reglas oficiales")}
+                </Link>
+              </div>
+              <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <div><p className="text-[10px] uppercase text-slate-500">{L("Nominal size", "Tamaño nominal")}</p><p className="mt-1 font-semibold text-slate-100">{currency(fundedMetrics.nominalAccountSize)}</p></div>
+                <div><p className="text-[10px] uppercase text-slate-500">{L("Drawdown buffer", "Colchón de drawdown")}</p><p className="mt-1 font-semibold text-cyan-100">{currency(fundedMetrics.remainingDrawdown)}</p></div>
+                <div><p className="text-[10px] uppercase text-slate-500">{L("Operating daily stop", "Stop diario operativo")}</p><p className="mt-1 font-semibold text-amber-100">{currency(fundedMetrics.operatingDailyStop)}</p></div>
+                <div><p className="text-[10px] uppercase text-slate-500">{L("Operating risk/trade", "Riesgo operativo/trade")}</p><p className="mt-1 font-semibold text-emerald-100">{currency(fundedMetrics.recommendedRiskPerTrade)}</p></div>
+              </div>
+            </div>
+          ) : null}
 
           {cashflowNet !== 0 && loadedStartingBalance !== null && Math.abs(startingBalance - loadedStartingBalance) < 0.01 ? (
             <p className="text-[12px] text-slate-500">

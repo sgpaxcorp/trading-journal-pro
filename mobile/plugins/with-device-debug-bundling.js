@@ -82,6 +82,43 @@ const SCHEME_LAUNCH_DEBUG =
 const SCHEME_LAUNCH_RELEASE =
   '<LaunchAction\n      buildConfiguration = "Release"';
 const BUNDLE_PHASE_NAME = "Bundle React Native code and images";
+const HERMES_DSYM_PHASE_NAME = "Generate Hermes dSYM for Archive";
+const HERMES_DSYM_INPUT =
+  "$(PODS_XCFRAMEWORKS_BUILD_DIR)/hermes-engine/Pre-built/hermes.framework/hermes";
+const HERMES_DSYM_OUTPUT = "$(DWARF_DSYM_FOLDER_PATH)/hermes.framework.dSYM";
+const HERMES_DSYM_SCRIPT = `#!/bin/sh
+set -e
+
+# Vendored Hermes frameworks are not compiled by the app target, so Xcode does
+# not automatically place their dSYM in the archive. App Store Connect expects
+# a dSYM whose UUID matches the embedded framework.
+if [ "$CONFIGURATION" != "Release" ]; then
+  exit 0
+fi
+
+HERMES_BINARY="$PODS_XCFRAMEWORKS_BUILD_DIR/hermes-engine/Pre-built/hermes.framework/hermes"
+if [ ! -f "$HERMES_BINARY" ]; then
+  HERMES_BINARY="$TARGET_BUILD_DIR/$FRAMEWORKS_FOLDER_PATH/hermes.framework/hermes"
+fi
+
+if [ ! -f "$HERMES_BINARY" ]; then
+  echo "error: Hermes binary was not found; cannot create the archive dSYM."
+  exit 1
+fi
+
+HERMES_DSYM="$DWARF_DSYM_FOLDER_PATH/hermes.framework.dSYM"
+/usr/bin/xcrun dsymutil "$HERMES_BINARY" -o "$HERMES_DSYM"
+
+HERMES_UUID=$(/usr/bin/xcrun dwarfdump --uuid "$HERMES_BINARY" | /usr/bin/awk '{print $2}' | /usr/bin/sort -u | /usr/bin/tr '\\n' ' ')
+DSYM_UUID=$(/usr/bin/xcrun dwarfdump --uuid "$HERMES_DSYM" | /usr/bin/awk '{print $2}' | /usr/bin/sort -u | /usr/bin/tr '\\n' ' ')
+
+if [ -z "$HERMES_UUID" ] || [ "$HERMES_UUID" != "$DSYM_UUID" ]; then
+  echo "error: Hermes dSYM UUID mismatch. Binary=$HERMES_UUID dSYM=$DSYM_UUID"
+  exit 1
+fi
+
+echo "Hermes dSYM ready: $HERMES_UUID"
+`;
 const EAS_ANDROID_SIGNING_HOOK = `// Allow EAS Build to inject Play Store signing credentials into release builds.
 def easBuildGradle = file("./eas-build.gradle")
 if (easBuildGradle.exists()) {
@@ -391,12 +428,37 @@ module.exports = function withDeviceDebugBundling(config) {
 
     const shellPhases =
       xcodeProject.hash?.project?.objects?.PBXShellScriptBuildPhase || {};
+    let hasHermesDsymPhase = false;
     for (const [phaseId, phase] of Object.entries(shellPhases)) {
       if (phaseId.endsWith("_comment")) continue;
       if (!phase || typeof phase !== "object") continue;
-      if (unquote(phase.name) !== BUNDLE_PHASE_NAME) continue;
-      phase.shellScript = toPbxQuotedScript(
-        BUNDLE_SCRIPT.endsWith("\n") ? BUNDLE_SCRIPT : `${BUNDLE_SCRIPT}\n`
+      const phaseName = unquote(phase.name);
+      if (phaseName === BUNDLE_PHASE_NAME) {
+        phase.shellScript = toPbxQuotedScript(
+          BUNDLE_SCRIPT.endsWith("\n") ? BUNDLE_SCRIPT : `${BUNDLE_SCRIPT}\n`
+        );
+      }
+      if (phaseName === HERMES_DSYM_PHASE_NAME) {
+        hasHermesDsymPhase = true;
+        phase.shellPath = "/bin/sh";
+        phase.shellScript = toPbxQuotedScript(HERMES_DSYM_SCRIPT);
+        phase.inputPaths = [`"${HERMES_DSYM_INPUT}"`];
+        phase.outputPaths = [`"${HERMES_DSYM_OUTPUT}"`];
+      }
+    }
+
+    if (!hasHermesDsymPhase) {
+      xcodeProject.addBuildPhase(
+        [],
+        "PBXShellScriptBuildPhase",
+        HERMES_DSYM_PHASE_NAME,
+        xcodeProject.getFirstTarget().uuid,
+        {
+          shellPath: "/bin/sh",
+          shellScript: HERMES_DSYM_SCRIPT,
+          inputPaths: [`"${HERMES_DSYM_INPUT}"`],
+          outputPaths: [`"${HERMES_DSYM_OUTPUT}"`],
+        }
       );
     }
 

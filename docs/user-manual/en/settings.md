@@ -5,6 +5,9 @@
 
 These settings control your interface, security, and notifications.
 
+## Trading accounts
+Each trading account is classified as **Personal** or **Funded**. Personal accounts use trader-owned capital. Create one separate Funded account for every prop-firm credential, using a unique account name plus the exact firm, program or category, nominal size, and current stage. Its confirmed rule profile also covers current equity, target, daily-loss limit, drawdown, payout terms, and trading restrictions. Accounts from the same firm and program remain independent. The selected type and identity follow the account into the Business Plan, Dashboard, protection alarms, AI Coach, and mobile app. After executions exist, the type is locked to preserve historical meaning; create a separate account instead of relabeling its history.
+
 Platform split:
 1. Web handles access setup, plan selection, and billing.
 2. Mobile settings focus on profile, security, notifications, language, appearance, and sign in/sign out for existing users.

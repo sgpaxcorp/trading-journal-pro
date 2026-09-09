@@ -14,7 +14,15 @@ import { supabaseBrowser } from "@/lib/supaBaseClient";
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
 import type { BusinessMilestoneProgress } from "@/lib/businessMilestones";
-import { useTradingAccounts } from "@/hooks/useTradingAccounts";
+import { useTradingAccounts, type TradingAccount } from "@/hooks/useTradingAccounts";
+import FundedAccountFields from "@/app/components/FundedAccountFields";
+import {
+  calculateFundedAccountMetrics,
+  defaultFundedAccountProfile,
+  getFundedProfileMissingFields,
+  type FundedAccountProfile,
+  type TradingAccountType,
+} from "@/lib/fundedAccounts";
 
 type ProfileState = {
   firstName: string;
@@ -50,6 +58,7 @@ export default function AccountPage() {
     accounts,
     activeAccountId,
     createAccount,
+    updateAccount,
     setActiveAccount,
     deleteAccount,
     loading: accountsLoading,
@@ -57,6 +66,18 @@ export default function AccountPage() {
   } = useTradingAccounts();
   const [newAccountName, setNewAccountName] = useState("");
   const [newAccountBroker, setNewAccountBroker] = useState("");
+  const [newAccountType, setNewAccountType] = useState<TradingAccountType>("personal");
+  const [newFundedProfile, setNewFundedProfile] = useState<FundedAccountProfile>(() =>
+    defaultFundedAccountProfile()
+  );
+  const [editingAccountId, setEditingAccountId] = useState<string | null>(null);
+  const [editAccountName, setEditAccountName] = useState("");
+  const [editAccountBroker, setEditAccountBroker] = useState("");
+  const [editAccountType, setEditAccountType] = useState<TradingAccountType>("personal");
+  const [editFundedProfile, setEditFundedProfile] = useState<FundedAccountProfile>(() =>
+    defaultFundedAccountProfile()
+  );
+  const [updatingAccount, setUpdatingAccount] = useState(false);
   const [creatingAccount, setCreatingAccount] = useState(false);
   const [accountMessage, setAccountMessage] = useState<string | null>(null);
 
@@ -339,6 +360,12 @@ export default function AccountPage() {
   /* ---------- Helpers UI ---------- */
   const isCurrent = (href: string) => pathname === href;
   const activeAccount = accounts.find((a) => a.id === activeAccountId) ?? accounts[0] ?? null;
+  const currency = (value: number) =>
+    new Intl.NumberFormat(isEs ? "es-PR" : "en-US", {
+      style: "currency",
+      currency: "USD",
+      maximumFractionDigits: 2,
+    }).format(value || 0);
 
   async function handleCreateAccount(e: FormEvent) {
     e.preventDefault();
@@ -347,14 +374,50 @@ export default function AccountPage() {
     setCreatingAccount(true);
     setAccountMessage(null);
     try {
-      await createAccount(name, newAccountBroker.trim() || undefined);
+      await createAccount(name, newAccountBroker.trim() || undefined, {
+        accountType: newAccountType,
+        fundedProfile: newAccountType === "funded" ? newFundedProfile : null,
+      });
       setNewAccountName("");
       setNewAccountBroker("");
+      setNewAccountType("personal");
+      setNewFundedProfile(defaultFundedAccountProfile());
       setAccountMessage(L("Trading account created.", "Cuenta creada."));
     } catch (err: any) {
       setAccountMessage(err?.message || L("Failed to create account.", "No se pudo crear la cuenta."));
     } finally {
       setCreatingAccount(false);
+    }
+  }
+
+  function beginAccountEdit(account: TradingAccount) {
+    setEditingAccountId(account.id);
+    setEditAccountName(account.name);
+    setEditAccountBroker(account.broker ?? "");
+    setEditAccountType(account.account_type ?? "personal");
+    setEditFundedProfile(account.funded_profile ?? defaultFundedAccountProfile());
+    setAccountMessage(null);
+  }
+
+  async function handleUpdateAccount(e: FormEvent) {
+    e.preventDefault();
+    if (!editingAccountId || !editAccountName.trim()) return;
+    setUpdatingAccount(true);
+    setAccountMessage(null);
+    try {
+      await updateAccount({
+        accountId: editingAccountId,
+        name: editAccountName.trim(),
+        broker: editAccountBroker.trim() || undefined,
+        accountType: editAccountType,
+        fundedProfile: editAccountType === "funded" ? editFundedProfile : null,
+      });
+      setEditingAccountId(null);
+      setAccountMessage(L("Trading account updated.", "Cuenta actualizada."));
+    } catch (err: any) {
+      setAccountMessage(err?.message || L("Failed to update account.", "No se pudo actualizar la cuenta."));
+    } finally {
+      setUpdatingAccount(false);
     }
   }
 
@@ -676,19 +739,19 @@ export default function AccountPage() {
         </div>
 
         {/* Trading accounts */}
-        <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5 space-y-4">
+        <section id="trading-accounts" className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5 space-y-4">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <p className="text-[11px] uppercase tracking-[0.25em] text-emerald-400">
                 {L("Trading business accounts", "Cuentas de empresa de trading")}
               </p>
               <h2 className="text-lg font-semibold text-slate-100">
-                {L("Broker-specific business books", "Libros empresariales por bróker")}
+                {L("Account operating books", "Libros operativos por cuenta")}
               </h2>
               <p className="text-xs text-slate-400 mt-1 max-w-2xl">
                 {L(
-                  "Each trading account keeps its own execution records, analytics, and cashflows. Switch accounts from the top nav.",
-                  "Cada cuenta mantiene sus propios registros de ejecución, analíticas y cashflows. Cambia de cuenta desde la barra superior."
+                  "Every account is Personal or Funded and keeps its own plan, execution records, analytics, protection rules, and cashflows.",
+                  "Cada cuenta es Personal o Funded y mantiene su propio plan, registros de ejecución, analíticas, reglas de protección y cashflows."
                 )}
               </p>
             </div>
@@ -714,36 +777,87 @@ export default function AccountPage() {
                     {L("No trading accounts yet.", "Todavía no hay cuentas de trading.")}
                   </div>
                 )}
-                {accounts.map((acc) => (
-                  <div
-                    key={acc.id}
-                    className={`rounded-xl border p-4 text-xs ${
-                      acc.id === activeAccountId
-                        ? "border-emerald-500/60 bg-emerald-500/10"
-                        : "border-slate-800 bg-slate-950/60"
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm font-semibold text-slate-100">{acc.name}</p>
-                        <p className="text-[11px] text-slate-400">
-                          {acc.broker ? acc.broker : L("Broker not set", "Broker no definido")}
-                        </p>
-                      </div>
-                      {acc.id === activeAccountId ? (
-                        <span className="rounded-full border border-emerald-500/40 bg-emerald-500/15 px-2 py-0.5 text-[10px] text-emerald-200">
-                          {L("Active", "Activa")}
-                        </span>
-                      ) : (
-                        <div className="flex items-center gap-2">
+                {accounts.map((acc) => {
+                  const isFunded = acc.account_type === "funded";
+                  const fundedMetrics = calculateFundedAccountMetrics(acc.funded_profile ?? null);
+                  const isEditing = editingAccountId === acc.id;
+                  return (
+                    <div
+                      key={acc.id}
+                      className={`rounded-xl border p-4 text-xs ${
+                        acc.id === activeAccountId
+                          ? "border-emerald-500/60 bg-emerald-500/10"
+                          : "border-slate-800 bg-slate-950/60"
+                      } ${isEditing ? "md:col-span-2" : ""}`}
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="text-sm font-semibold text-slate-100">{acc.name}</p>
+                            <span className={`rounded-full border px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.12em] ${
+                              isFunded
+                                ? "border-cyan-300/30 bg-cyan-300/10 text-cyan-100"
+                                : "border-slate-600 bg-slate-800/70 text-slate-300"
+                            }`}>
+                              {isFunded ? "Funded" : L("Personal", "Personal")}
+                            </span>
+                            {isFunded && acc.funded_profile ? (
+                              <span className="rounded-full border border-amber-300/30 bg-amber-300/10 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-amber-100">
+                                {acc.funded_profile.stage}
+                              </span>
+                            ) : null}
+                            {isFunded && fundedMetrics ? (
+                              <span className={`rounded-full border px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.12em] ${
+                                fundedMetrics.status === "stop"
+                                  ? "border-rose-300/40 bg-rose-300/10 text-rose-100"
+                                  : fundedMetrics.status === "reduce_risk"
+                                    ? "border-amber-300/40 bg-amber-300/10 text-amber-100"
+                                    : fundedMetrics.status === "safe"
+                                      ? "border-emerald-300/30 bg-emerald-300/10 text-emerald-100"
+                                      : "border-slate-600 bg-slate-800 text-slate-300"
+                              }`}>
+                                {fundedMetrics.status === "stop"
+                                  ? L("Stop", "Detener")
+                                  : fundedMetrics.status === "reduce_risk"
+                                    ? L("Reduce risk", "Reducir riesgo")
+                                    : fundedMetrics.status === "safe"
+                                      ? L("Within limits", "Dentro de límites")
+                                      : L("Incomplete", "Incompleta")}
+                              </span>
+                            ) : null}
+                          </div>
+                          <p className="mt-1 text-[11px] text-slate-400">
+                            {acc.broker ? acc.broker : L("Broker not set", "Broker no definido")}
+                            {isFunded && acc.funded_profile?.firmName
+                              ? ` · ${acc.funded_profile.firmName}`
+                              : ""}
+                            {isFunded && acc.funded_profile?.programName
+                              ? ` · ${acc.funded_profile.programName}`
+                              : ""}
+                          </p>
+                        </div>
+                        <div className="flex flex-wrap items-center justify-end gap-2">
+                          {acc.id === activeAccountId ? (
+                            <span className="rounded-full border border-emerald-500/40 bg-emerald-500/15 px-2 py-0.5 text-[10px] text-emerald-200">
+                              {L("Active", "Activa")}
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => setActiveAccount(acc.id)}
+                              className="rounded-full border border-slate-700 px-3 py-1 text-[10px] text-slate-200 transition hover:border-emerald-400 hover:text-emerald-200"
+                            >
+                              {L("Set active", "Activar")}
+                            </button>
+                          )}
                           <button
                             type="button"
-                            onClick={() => setActiveAccount(acc.id)}
-                            className="rounded-full border border-slate-700 px-3 py-1 text-[10px] text-slate-200 hover:border-emerald-400 hover:text-emerald-200 transition"
+                            onClick={() => isEditing ? setEditingAccountId(null) : beginAccountEdit(acc)}
+                            className="rounded-full border border-cyan-400/40 px-3 py-1 text-[10px] text-cyan-100 transition hover:border-cyan-300"
                           >
-                            {L("Set active", "Activar")}
+                            {isEditing ? L("Close", "Cerrar") : L("Manage", "Administrar")}
                           </button>
-                          {accounts.length > 1 && (
+                          {acc.id !== activeAccountId && accounts.length > 1 ? (
                             <button
                               type="button"
                               onClick={async () => {
@@ -763,20 +877,83 @@ export default function AccountPage() {
                                   );
                                 }
                               }}
-                              className="rounded-full border border-rose-500/50 px-3 py-1 text-[10px] text-rose-200 hover:border-rose-400 transition"
+                              className="rounded-full border border-rose-500/50 px-3 py-1 text-[10px] text-rose-200 transition hover:border-rose-400"
                             >
                               {L("Delete", "Eliminar")}
                             </button>
-                          )}
+                          ) : null}
                         </div>
-                      )}
+                      </div>
+
+                      {isFunded && fundedMetrics ? (
+                        <div className="mt-3 grid grid-cols-2 gap-2 border-t border-slate-800 pt-3 sm:grid-cols-5">
+                          <div><p className="text-[9px] uppercase text-slate-500">{L("Nominal", "Nominal")}</p><p className="mt-1 font-semibold text-slate-100">{currency(fundedMetrics.nominalAccountSize)}</p></div>
+                          <div><p className="text-[9px] uppercase text-slate-500">{L("Target remaining", "Meta restante")}</p><p className="mt-1 font-semibold text-slate-100">{currency(fundedMetrics.remainingProfitTarget)}</p></div>
+                          <div><p className="text-[9px] uppercase text-slate-500">{L("Risk buffer", "Colchón de riesgo")}</p><p className="mt-1 font-semibold text-cyan-100">{currency(fundedMetrics.remainingDrawdown)}</p></div>
+                          <div><p className="text-[9px] uppercase text-slate-500">{L("Operating stop", "Stop operativo")}</p><p className="mt-1 font-semibold text-amber-100">{currency(fundedMetrics.operatingDailyStop)}</p></div>
+                          <div><p className="text-[9px] uppercase text-slate-500">{L("Risk per trade", "Riesgo por trade")}</p><p className="mt-1 font-semibold text-emerald-100">{currency(fundedMetrics.recommendedRiskPerTrade)}</p></div>
+                        </div>
+                      ) : null}
+
+                      {isEditing ? (
+                        <form onSubmit={handleUpdateAccount} className="mt-4 border-t border-slate-800 pt-4">
+                          <div className="grid gap-3 md:grid-cols-2">
+                            <label className="text-[11px] text-slate-400">
+                              {L("Account name", "Nombre de cuenta")}
+                              <input value={editAccountName} onChange={(event) => setEditAccountName(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-slate-100 outline-none focus:border-emerald-400" />
+                            </label>
+                            <label className="text-[11px] text-slate-400">
+                              {L("Broker", "Bróker")}
+                              <input value={editAccountBroker} onChange={(event) => setEditAccountBroker(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-slate-100 outline-none focus:border-emerald-400" />
+                            </label>
+                          </div>
+                          <div className="mt-3">
+                            <p className="text-[11px] text-slate-400">{L("Account type", "Tipo de cuenta")}</p>
+                            <div className="mt-1 inline-flex rounded-lg border border-slate-700 bg-slate-950 p-1">
+                              {(["personal", "funded"] as TradingAccountType[]).map((type) => (
+                                <button key={type} type="button" onClick={() => setEditAccountType(type)} className={`rounded-md px-3 py-1.5 text-xs font-semibold transition ${editAccountType === type ? "bg-emerald-400 text-slate-950" : "text-slate-300"}`}>
+                                  {type === "personal" ? L("Personal", "Personal") : "Funded"}
+                                </button>
+                              ))}
+                            </div>
+                            <p className="mt-1 text-[10px] text-slate-500">
+                              {L("The type locks after the account has execution records.", "El tipo se bloquea cuando la cuenta ya tiene registros de ejecución.")}
+                            </p>
+                          </div>
+                          {editAccountType === "funded" ? (
+                            <FundedAccountFields profile={editFundedProfile} onChange={setEditFundedProfile} lang={lang} idPrefix={`edit-${acc.id}`} />
+                          ) : null}
+                          <div className="mt-4 flex flex-wrap gap-2">
+                            <button type="submit" disabled={updatingAccount || !editAccountName.trim() || (editAccountType === "funded" && getFundedProfileMissingFields(editFundedProfile).length > 0)} className="rounded-lg bg-emerald-400 px-4 py-2 text-xs font-semibold text-slate-950 disabled:opacity-50">
+                              {updatingAccount ? L("Saving…", "Guardando…") : L("Save account", "Guardar cuenta")}
+                            </button>
+                            <button type="button" onClick={() => setEditingAccountId(null)} className="rounded-lg border border-slate-700 px-4 py-2 text-xs text-slate-300">
+                              {L("Cancel", "Cancelar")}
+                            </button>
+                            {editAccountType === "funded" && getFundedProfileMissingFields(editFundedProfile).length > 0 ? (
+                              <p className="self-center text-[10px] text-amber-200">{L("Complete and confirm the funded rules before saving.", "Completa y confirma las reglas de fondeo antes de guardar.")}</p>
+                            ) : null}
+                          </div>
+                        </form>
+                      ) : null}
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
 
-              <form onSubmit={handleCreateAccount} className="mt-4 grid gap-3 md:grid-cols-[1.2fr_1fr_auto]">
-                <div>
+              <form onSubmit={handleCreateAccount} className="mt-5 border-t border-slate-800 pt-4">
+                <div className="mb-3">
+                  <p className="text-xs font-semibold text-slate-100">{L("Add an operating account", "Agregar una cuenta operativa")}</p>
+                  <div className="mt-2 inline-flex rounded-lg border border-slate-700 bg-slate-950 p-1">
+                    {(["personal", "funded"] as TradingAccountType[]).map((type) => (
+                      <button key={type} type="button" onClick={() => setNewAccountType(type)} className={`rounded-md px-4 py-1.5 text-xs font-semibold transition ${newAccountType === type ? "bg-emerald-400 text-slate-950" : "text-slate-300"}`}>
+                        {type === "personal" ? L("Personal", "Personal") : "Funded"}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div>
                   <label className="block text-[11px] text-slate-400 mb-1">
                     {L("Account name", "Nombre de cuenta")}
                   </label>
@@ -784,10 +961,14 @@ export default function AccountPage() {
                     value={newAccountName}
                     onChange={(e) => setNewAccountName(e.target.value)}
                     className="w-full rounded-md bg-slate-950 border border-slate-700 px-3 py-2 text-xs text-slate-100 outline-none focus:border-emerald-400"
-                    placeholder={L("e.g. Interactive Brokers", "ej. Interactive Brokers")}
+                    placeholder={
+                      newAccountType === "funded"
+                        ? L("e.g. 50K Express #2", "ej. 50K Express #2")
+                        : L("e.g. Interactive Brokers", "ej. Interactive Brokers")
+                    }
                   />
-                </div>
-                <div>
+                  </div>
+                  <div>
                   <label className="block text-[11px] text-slate-400 mb-1">
                     {L("Broker (optional)", "Broker (opcional)")}
                   </label>
@@ -797,15 +978,30 @@ export default function AccountPage() {
                     className="w-full rounded-md bg-slate-950 border border-slate-700 px-3 py-2 text-xs text-slate-100 outline-none focus:border-emerald-400"
                     placeholder={L("e.g. IBKR, Tradovate", "ej. IBKR, Tradovate")}
                   />
+                  </div>
                 </div>
-                <div className="flex items-end">
+                {newAccountType === "funded" ? (
+                  <>
+                    <p className="mt-3 text-[10px] leading-5 text-cyan-100">
+                      {L(
+                        "Use a unique account name so accounts from the same firm, program, and nominal size remain separate.",
+                        "Usa un nombre único para mantener separadas las cuentas de la misma firma, programa y tamaño nominal."
+                      )}
+                    </p>
+                    <FundedAccountFields profile={newFundedProfile} onChange={setNewFundedProfile} lang={lang} idPrefix="new-funded" />
+                  </>
+                ) : null}
+                <div className="mt-4 flex items-center gap-3">
                   <button
                     type="submit"
-                    disabled={creatingAccount || !newAccountName.trim()}
-                    className="w-full rounded-xl bg-emerald-400 text-slate-950 px-4 py-2 text-xs font-semibold hover:bg-emerald-300 transition disabled:opacity-60"
+                    disabled={creatingAccount || !newAccountName.trim() || (newAccountType === "funded" && getFundedProfileMissingFields(newFundedProfile).length > 0)}
+                    className="rounded-xl bg-emerald-400 text-slate-950 px-4 py-2 text-xs font-semibold hover:bg-emerald-300 transition disabled:opacity-60"
                   >
                     {creatingAccount ? L("Creating…", "Creando…") : L("Add account", "Agregar cuenta")}
                   </button>
+                  {newAccountType === "funded" && getFundedProfileMissingFields(newFundedProfile).length > 0 ? (
+                    <p className="text-[10px] text-amber-200">{L("Complete and confirm the funded rules.", "Completa y confirma las reglas de fondeo.")}</p>
+                  ) : null}
                 </div>
               </form>
 

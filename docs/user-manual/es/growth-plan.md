@@ -5,10 +5,17 @@
 
 El Growth Plan es el centro de control de la plataforma. Define tu ritmo, límites de riesgo y fecha objetivo. Todos los widgets de progreso se calculan a partir de este plan.
 
+## Tipo de cuenta: Personal o Funded
+Cada cuenta de trading debe tener un tipo operativo antes de crear su plan:
+1. **Personal** significa que el operador es dueño del capital. El balance inicial, la meta, aportaciones, retiros, apalancamiento y política interna de riesgo se configuran en el plan.
+2. **Funded** significa que la cuenta está gobernada por reglas externas del programa. Configura en Account la firma y el programa, etapa actual, tamaño nominal, equity actual, profit target, límite oficial de pérdida diaria, drawdown máximo y método, fecha límite, días mínimos, regla de consistencia, límite de posiciones, términos de payout y restricciones de holding.
+
+El perfil Funded debe estar completo y confirmado explícitamente antes de evaluar su Plan Empresarial. El equity actual y la meta de la etapa se convierten en inputs de solo lectura. NeuroTrader calcula un stop diario interno más estricto y un límite de riesgo por trade desde el drawdown restante; el tamaño nominal nunca se trata como capital de riesgo propiedad del trader. Las aportaciones personales se deshabilitan y los retiros se presentan como payouts. Cuando cambien las reglas de la firma, actualiza y vuelve a confirmar el perfil antes de continuar.
+
 ## Antes de comenzar
 Ten listos estos datos:
-1. Tu balance real hoy.
-2. Tu balance objetivo (equity total, no solo ganancia).
+1. Tu balance real hoy, o el equity actual mostrado por el programa fondeado.
+2. Tu balance objetivo (equity total, no solo ganancia), o la meta de la etapa fondeada activa.
 3. El runway que quieres evaluar (días, semanas, meses o años).
 4. El instrumento principal que operas: acciones/ETFs, opciones listadas, futuros, forex, crypto u otro mercado.
 5. El modelo de retorno que quieres evaluar: conservador, moderado, agresivo o manual.

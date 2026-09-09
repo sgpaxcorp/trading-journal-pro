@@ -163,8 +163,8 @@ const BUILDERS: QuickTourBuilder[] = [
           id: "gp-business-analysis",
           title: L("Business analysis foundation", "Fundación de análisis empresarial"),
           body: L(
-            "Define capital, target, runway, primary instrument, and operating profile. The selected market calendar becomes the source for sessions and checkpoints.",
-            "Define capital, meta, runway, instrumento principal y perfil operativo. El calendario del mercado seleccionado se convierte en la fuente de sesiones y checkpoints."
+            "The active account is either Personal or Funded. Personal accounts use your capital and cash-flow policy; Funded accounts inherit the confirmed firm stage, target, drawdown, payout, and trading restrictions before the plan is evaluated.",
+            "La cuenta activa es Personal o Funded. Las cuentas personales usan tu capital y política de flujos; las fondeadas heredan etapa, meta, drawdown, payout y restricciones confirmadas de la firma antes de evaluar el plan."
           ),
           anchor: "gp-business-analysis",
           selector: "#gp-business-analysis",
@@ -173,8 +173,8 @@ const BUILDERS: QuickTourBuilder[] = [
           id: "gp-start",
           title: L("Starting capital", "Capital inicial"),
           body: L(
-            "Use the real capital assigned to this business. It anchors returns, drawdown limits, checkpoint math, and whether deposits or trading are driving growth.",
-            "Usa el capital real asignado a esta empresa. Ancla retornos, límites de drawdown, matemática de checkpoints y si el crecimiento viene de depósitos o trading."
+            "For Personal accounts, use the real capital assigned to the business. For Funded accounts, current equity is supplied by the confirmed account rules and cannot be replaced by the nominal buying-power figure.",
+            "En cuentas personales, usa el capital real asignado al negocio. En cuentas fondeadas, el equity actual viene de las reglas confirmadas y no puede sustituirse por la cifra nominal de buying power."
           ),
           anchor: "gp-starting-balance",
           selector: "#gp-starting-balance",
@@ -183,8 +183,8 @@ const BUILDERS: QuickTourBuilder[] = [
           id: "gp-target",
           title: L("Target capital", "Capital objetivo"),
           body: L(
-            "This is the destination the plan is trying to reach. The review will test it against time, loss assumptions, the operating model, and execution evidence.",
-            "Este es el destino que el plan intenta alcanzar. La evaluación lo comparará con tiempo, supuestos de pérdida, modelo operativo y evidencia de ejecución."
+            "Personal targets are chosen by the operator. Funded targets come from the active evaluation, verification, or payout stage so the plan cannot quietly invent a different objective.",
+            "Las metas personales las define el operador. Las metas fondeadas vienen de la etapa activa de evaluación, verificación o payout para que el plan no invente silenciosamente otro objetivo."
           ),
           anchor: "gp-target-balance",
           selector: "#gp-target-balance",
@@ -213,8 +213,8 @@ const BUILDERS: QuickTourBuilder[] = [
           id: "gp-withdrawals",
           title: L("Capital flows", "Flujos de capital"),
           body: L(
-            "Define recurring contributions and withdrawals before the evaluation. They change account equity, but remain separate from trading return in every checkpoint.",
-            "Define aportaciones y retiros recurrentes antes de la evaluación. Cambian el equity, pero permanecen separados del rendimiento de trading en cada checkpoint."
+            "Personal accounts can model contributions and withdrawals. Funded accounts disable personal contributions and track planned payouts separately from trading performance.",
+            "Las cuentas personales pueden modelar aportaciones y retiros. Las cuentas fondeadas deshabilitan aportaciones personales y separan los payouts planificados del rendimiento de trading."
           ),
           anchor: "gp-planned-withdrawals",
           selector: "#gp-planned-withdrawals",
@@ -243,8 +243,8 @@ const BUILDERS: QuickTourBuilder[] = [
           id: "gp-daily-loss",
           title: L("Daily loss limit", "Límite diario de pérdida"),
           body: L(
-            "This is a business protection line. When it is reached, the day stops so one session cannot damage the operating plan.",
-            "Esta es una línea de protección empresarial. Cuando se alcanza, el día se detiene para que una sesión no dañe el plan operativo."
+            "This is the hard business protection line. On Funded accounts, NeuroTrader calculates a stricter internal stop below the firm's official breach limit and does not let the plan exceed it.",
+            "Esta es la línea dura de protección. En cuentas fondeadas, NeuroTrader calcula un stop interno más estricto que el límite oficial de incumplimiento y no permite que el plan lo exceda."
           ),
           anchor: "gp-max-daily-loss",
           selector: "#gp-max-daily-loss",
@@ -253,8 +253,8 @@ const BUILDERS: QuickTourBuilder[] = [
           id: "gp-risk-trade",
           title: L("Risk per trade", "Riesgo por trade"),
           body: L(
-            "Risk per trade connects setup quality to capital protection. It keeps individual decisions small enough for the business to survive variance.",
-            "El riesgo por trade conecta calidad de setup con protección de capital. Mantiene cada decisión lo bastante pequeña para que la empresa sobreviva la variación."
+            "Risk per trade keeps each decision small enough to survive variance. For Funded accounts it is calculated from remaining drawdown and the internal daily stop, not from nominal account size.",
+            "El riesgo por trade mantiene cada decisión lo bastante pequeña para sobrevivir variación. En cuentas fondeadas se calcula desde el drawdown restante y el stop diario interno, no desde el tamaño nominal."
           ),
           anchor: "gp-risk-per-trade",
           selector: "#gp-risk-per-trade",
@@ -675,15 +675,25 @@ const BUILDERS: QuickTourBuilder[] = [
     build: (L) => ({
       title: L("Trader Entrepreneur Account", "Cuenta Trader Entrepreneur"),
       summary: L(
-        "This area controls identity, preferences, language, privacy, and account security. Treat it as operating maintenance.",
-        "Esta área controla identidad, preferencias, idioma, privacidad y seguridad de cuenta. Trátala como mantenimiento operativo."
+        "This area controls identity, preferences, trading-account structure, language, privacy, and security. Treat it as operating maintenance.",
+        "Esta área controla identidad, preferencias, estructura de cuentas de trading, idioma, privacidad y seguridad. Trátala como mantenimiento operativo."
       ),
       bullets: [
         L("Keep profile and preferences aligned with how you work.", "Mantén perfil y preferencias alineadas con tu forma de trabajar."),
         L("Protect access with clean password and security habits.", "Protege acceso con contraseña y hábitos de seguridad limpios."),
         L("Use privacy and data controls intentionally.", "Usa controles de privacidad y data con intención."),
+        L("Classify every trading account as Personal or Funded before building its plan.", "Clasifica cada cuenta de trading como Personal o Funded antes de crear su plan."),
       ],
       steps: [
+        {
+          id: "account-trading-accounts",
+          title: L("Account operating structure", "Estructura operativa de la cuenta"),
+          body: L(
+            "Create each prop-firm credential as a separate account with a unique name. A Funded account requires its firm, exact program or category, stage, nominal size, current equity, targets, drawdown method, loss limits, payout terms, and trading restrictions. Confirm those rules before using the Business Plan.",
+            "Crea cada credencial de prop firm como una cuenta separada con un nombre único. Una cuenta fondeada requiere firma, programa o categoría exacta, etapa, tamaño nominal, equity actual, metas, método de drawdown, límites de pérdida, términos de payout y restricciones. Confirma esas reglas antes de usar el Plan Empresarial."
+          ),
+          selector: "#trading-accounts",
+        },
         {
           id: "account-header",
           title: L("Identity and security layer", "Capa de identidad y seguridad"),

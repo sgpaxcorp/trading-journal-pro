@@ -862,8 +862,8 @@ export async function fireTestEventFromRule(
       triggered_at: now.toISOString(),
     };
 
-    // Insert test events independently so a manual test never overwrites a
-    // live event. The database requires every event to have a date.
+    // The schema allows one event per rule and date. Re-running a manual test
+    // must reactivate that event instead of surfacing a duplicate-key error.
     const baseRow = {
       user_id: userId,
       rule_id: ruleId,
@@ -881,7 +881,7 @@ export async function fireTestEventFromRule(
     {
       const res = await supabaseBrowser
         .from("ntj_alert_events")
-        .insert(baseRow)
+        .upsert(baseRow, { onConflict: "user_id,rule_id,date" })
         .select("id")
         .single();
       data = res.data;
@@ -891,14 +891,14 @@ export async function fireTestEventFromRule(
     if (error) {
       const fallback = await supabaseBrowser
         .from("ntj_alert_events")
-        .insert({
+        .upsert({
           user_id: userId,
           rule_id: ruleId,
           date,
           status: "active",
           triggered_at: now.toISOString(),
           payload: nextPayload,
-        })
+        }, { onConflict: "user_id,rule_id,date" })
         .select("id")
         .single();
       data = fallback.data;

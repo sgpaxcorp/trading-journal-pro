@@ -4329,7 +4329,7 @@ export default function DailyJournalPage() {
         </div>
 
         {/* Wizard */}
-        <div className="sticky top-3 z-30 mb-3">
+        <div className="mb-3">
           <div className="bg-slate-900/95 border border-slate-800 rounded-2xl p-3 backdrop-blur supports-[backdrop-filter]:bg-slate-900/80 shadow-[0_18px_40px_rgba(2,6,23,0.35)]">
             <div className="flex flex-col xl:flex-row xl:items-start xl:justify-between gap-3">
               <div className="min-w-0 flex-1">

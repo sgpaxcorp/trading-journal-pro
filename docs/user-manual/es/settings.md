@@ -5,6 +5,9 @@
 
 Estos ajustes controlan interfaz, seguridad y notificaciones.
 
+## Cuentas de trading
+Cada cuenta de trading se clasifica como **Personal** o **Funded**. Las cuentas personales usan capital propiedad del trader. Crea una cuenta Funded separada por cada credencial de prop firm, usando un nombre único junto con la firma, programa o categoría exacta, tamaño nominal y etapa actual. Su perfil confirmado también incluye equity actual, meta, límite de pérdida diaria, drawdown, términos de payout y restricciones de trading. Las cuentas de una misma firma y programa permanecen independientes. El tipo y la identidad seleccionados acompañan la cuenta en el Plan Empresarial, Dashboard, alarmas de protección, AI Coach y app móvil. Cuando ya existen ejecuciones, el tipo queda bloqueado para preservar el significado histórico; crea otra cuenta en vez de reclasificar el historial.
+
 Separacion por plataforma:
 1. La web maneja alta de acceso, eleccion de plan y billing.
 2. Mobile settings se enfoca en perfil, seguridad, notificaciones, idioma, apariencia e inicio/cierre de sesion para usuarios existentes.

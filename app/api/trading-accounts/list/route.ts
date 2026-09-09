@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 import { requirePlatformAccess } from "@/lib/serverPlatformAccess";
+import { normalizeFundedAccountProfile, normalizeTradingAccountType } from "@/lib/fundedAccounts";
 
 export const runtime = "nodejs";
 
@@ -13,7 +14,17 @@ export async function GET(req: NextRequest) {
 
     const { data: accounts, error: listErr } = await supabaseAdmin
       .from("trading_accounts")
-      .select("id, user_id, name, broker, is_default, created_at, updated_at")
+      .select(`
+        id,
+        user_id,
+        name,
+        broker,
+        account_type,
+        is_default,
+        created_at,
+        updated_at,
+        funded_profile:funded_account_profiles(*)
+      `)
       .eq("user_id", userId)
       .order("created_at", { ascending: true });
 
@@ -31,7 +42,11 @@ export async function GET(req: NextRequest) {
       .maybeSingle();
 
     return NextResponse.json({
-      accounts: accounts ?? [],
+      accounts: (accounts ?? []).map((account: any) => ({
+        ...account,
+        account_type: normalizeTradingAccountType(account?.account_type),
+        funded_profile: normalizeFundedAccountProfile(account?.funded_profile),
+      })),
       activeAccountId: (prefs as any)?.active_account_id ?? null,
     });
   } catch (err: any) {

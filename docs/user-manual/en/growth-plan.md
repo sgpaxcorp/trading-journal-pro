@@ -5,10 +5,17 @@
 
 The Growth Plan is the control center of the platform. It defines your pace, risk limits, and target timeline. Every progress widget and goal calculation references this plan.
 
+## Account type: Personal or Funded
+Every trading account must have one operating type before its plan is built:
+1. **Personal** means the operator owns the capital. Starting balance, target, contributions, withdrawals, leverage, and internal risk policy are configured in the plan.
+2. **Funded** means the account is governed by external program rules. Configure the firm and program, current stage, nominal size, current equity, profit target, official daily-loss limit, maximum drawdown and method, deadline, minimum days, consistency rule, position limits, payout terms, and holding restrictions on the Account page.
+
+A Funded profile must be complete and explicitly confirmed before its Business Plan can be evaluated. The current equity and stage target become read-only plan inputs. NeuroTrader calculates a stricter internal daily stop and risk-per-trade ceiling from the remaining drawdown; the nominal account size is never treated as owned risk capital. Personal contributions are disabled and withdrawals are presented as payouts. When firm rules change, update and reconfirm the account profile before continuing.
+
 ## Before you start
 Have these inputs ready:
-1. Your real account balance today.
-2. Your target balance (total equity, not just profit).
+1. Your real account balance today, or the current equity shown by the funded program.
+2. Your target balance (total equity, not just profit), or the active funded-stage target.
 3. The runway you want to evaluate (days, weeks, months, or years).
 4. The primary instrument you operate: stocks/ETFs, listed options, futures, forex, crypto, or another market.
 5. The return model you want to evaluate: conservative, moderate, aggressive, or manual.

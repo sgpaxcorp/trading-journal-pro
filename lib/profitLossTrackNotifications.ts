@@ -404,28 +404,31 @@ async function dispatchCandidate(
       const nowIso = new Date().toISOString();
       const { data: eventRow, error: eventErr } = await supabaseAdmin
         .from("ntj_alert_events")
-        .insert({
-          user_id: candidate.userId,
-          rule_id: ruleId,
-          date: toIso(new Date()),
-          status: "active",
-          triggered_at: nowIso,
-          dismissed_until: null,
-          acknowledged_at: null,
-          payload: {
-            title: candidate.title,
-            message: candidate.message,
-            severity: candidate.severity,
-            channels: ["inapp", "popup"],
-            kind: "alarm",
-            category: "profit_loss_track",
-            alert_kind: candidate.alertKind,
-            alert_key: candidate.alertKey,
-            route: "/performance/profit-loss-track",
-            account_id: candidate.accountId ?? null,
-            ...candidate.metadata,
+        .upsert(
+          {
+            user_id: candidate.userId,
+            rule_id: ruleId,
+            date: toIso(new Date()),
+            status: "active",
+            triggered_at: nowIso,
+            dismissed_until: null,
+            acknowledged_at: null,
+            payload: {
+              title: candidate.title,
+              message: candidate.message,
+              severity: candidate.severity,
+              channels: ["inapp", "popup"],
+              kind: "alarm",
+              category: "profit_loss_track",
+              alert_kind: candidate.alertKind,
+              alert_key: candidate.alertKey,
+              route: "/performance/profit-loss-track",
+              account_id: candidate.accountId ?? null,
+              ...candidate.metadata,
+            },
           },
-        })
+          { onConflict: "user_id,rule_id,date" }
+        )
         .select("id")
         .single();
 

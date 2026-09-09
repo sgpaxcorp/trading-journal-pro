@@ -32,6 +32,10 @@ import { buildAnnualMotivationMessage } from "@/lib/annualMotivation";
 import { resolveLocale } from "@/lib/i18n";
 import { useTradingAccounts } from "@/hooks/useTradingAccounts";
 import type { BusinessMilestoneProgress } from "@/lib/businessMilestones";
+import {
+  calculateFundedAccountMetrics,
+  type TradingAccountType,
+} from "@/lib/fundedAccounts";
 
 import TopNav from "@/app/components/TopNav";
 
@@ -1187,6 +1191,8 @@ export default function DashboardPage() {
   const L = (en: string, es: string) => (isEs ? es : en);
 
   const [plan, setPlan] = useState<GrowthPlan | null>(null);
+  const activeTradingAccount =
+    accounts.find((account) => account.id === activeAccountId) ?? null;
   const [entries, setEntries] = useState<JournalEntry[]>([]);
   const [cashflows, setCashflows] = useState<Cashflow[]>([]);
   const [serverSeries, setServerSeries] = useState<Array<{ date: string; value: number }> | null>(null);
@@ -1213,6 +1219,7 @@ export default function DashboardPage() {
   const [showAccountCreate, setShowAccountCreate] = useState(false);
   const [newAccountName, setNewAccountName] = useState("");
   const [newAccountBroker, setNewAccountBroker] = useState("");
+  const [newAccountType, setNewAccountType] = useState<TradingAccountType>("personal");
   const [creatingAccount, setCreatingAccount] = useState(false);
   const [accountMessage, setAccountMessage] = useState<string | null>(null);
   const [dailyCoachMessage, setDailyCoachMessage] = useState<MotivationMessageRow | null>(null);
@@ -2064,6 +2071,17 @@ export default function DashboardPage() {
       progressPct: progressPctLocal,
     };
   }, [plan, cashflowNet, sortedServerSeries, totalTradingPnl]);
+
+  const fundedAccountMetrics = useMemo(
+    () =>
+      activeTradingAccount?.account_type === "funded"
+        ? calculateFundedAccountMetrics(
+            activeTradingAccount.funded_profile ?? null,
+            currentBalance > 0 ? currentBalance : null
+          )
+        : null,
+    [activeTradingAccount, currentBalance]
+  );
 
   const planStartStr = useMemo(() => getPlanStartDateStr(plan) || "", [plan]);
   const targetDateStr = useMemo(
@@ -4363,7 +4381,7 @@ export default function DashboardPage() {
                           >
                             <div className="font-medium">{acc.name}</div>
                             <div className="text-[10px] text-slate-400">
-                              {acc.broker || L("Broker not set", "Broker no definido")}
+                              {acc.broker || L("Broker not set", "Broker no definido")} · {acc.account_type === "funded" ? "Funded" : L("Personal", "Personal")}
                             </div>
                           </button>
                         );
@@ -4391,12 +4409,95 @@ export default function DashboardPage() {
 
         {renderBusinessMilestones()}
 
+        {activeTradingAccount?.account_type === "funded" ? (
+          <section className="mb-5 border-y border-cyan-300/20 bg-cyan-300/5 px-4 py-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-cyan-200">
+                    {L("Funded account control", "Control de cuenta funded")}
+                  </p>
+                  <span className="rounded-full border border-cyan-300/30 px-2 py-0.5 text-[9px] font-semibold uppercase text-cyan-100">
+                    {activeTradingAccount.funded_profile?.stage ?? L("Setup required", "Configuración requerida")}
+                  </span>
+                  {fundedAccountMetrics?.configured ? (
+                    <span className={`rounded-full border px-2 py-0.5 text-[9px] font-semibold uppercase ${
+                      fundedAccountMetrics.status === "stop"
+                        ? "border-rose-300/40 bg-rose-300/10 text-rose-100"
+                        : fundedAccountMetrics.status === "reduce_risk"
+                          ? "border-amber-300/40 bg-amber-300/10 text-amber-100"
+                          : "border-emerald-300/30 bg-emerald-300/10 text-emerald-100"
+                    }`}>
+                      {fundedAccountMetrics.status === "stop"
+                        ? L("Stop", "Detener")
+                        : fundedAccountMetrics.status === "reduce_risk"
+                          ? L("Reduce risk", "Reducir riesgo")
+                          : L("Within limits", "Dentro de límites")}
+                    </span>
+                  ) : null}
+                </div>
+                <p className="mt-1 text-sm font-semibold text-slate-100">
+                  {activeTradingAccount.funded_profile?.firmName || activeTradingAccount.name}
+                  {activeTradingAccount.funded_profile?.programName
+                    ? ` · ${activeTradingAccount.funded_profile.programName}`
+                    : ""}
+                </p>
+              </div>
+              <Link href="/account#trading-accounts" className="text-xs font-semibold text-cyan-100 hover:text-white">
+                {L("Manage rules", "Administrar reglas")}
+              </Link>
+            </div>
+            {fundedAccountMetrics?.configured ? (
+              <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-5">
+                {[
+                  [L("Current equity", "Equity actual"), formatCurrency(fundedAccountMetrics.currentEquity)],
+                  [L("Target remaining", "Meta restante"), formatCurrency(fundedAccountMetrics.remainingProfitTarget)],
+                  [L("Drawdown buffer", "Colchón de drawdown"), formatCurrency(fundedAccountMetrics.remainingDrawdown)],
+                  [L("Daily operating stop", "Stop diario operativo"), formatCurrency(fundedAccountMetrics.operatingDailyStop)],
+                  [L("Risk per trade", "Riesgo por trade"), formatCurrency(fundedAccountMetrics.recommendedRiskPerTrade)],
+                ].map(([label, value]) => (
+                  <div key={label}>
+                    <p className="text-[9px] uppercase tracking-[0.12em] text-slate-500">{label}</p>
+                    <p className="mt-1 text-sm font-semibold text-slate-100">{value}</p>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-amber-300/20 pt-3">
+                <p className="text-xs text-amber-100">
+                  {L(
+                    "Complete and confirm the official program limits before building the Business Plan.",
+                    "Completa y confirma los límites oficiales del programa antes de construir el Business Plan."
+                  )}
+                </p>
+                <Link href="/account#trading-accounts" className="rounded-lg bg-amber-200 px-3 py-1.5 text-xs font-semibold text-slate-950">
+                  {L("Complete setup", "Completar configuración")}
+                </Link>
+              </div>
+            )}
+          </section>
+        ) : null}
+
         {showAccountCreate && (
           <section className="mb-6 rounded-xl border border-slate-800 bg-slate-950/70 p-4 max-w-md">
             <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400 mb-2">
               {L("New account", "Nueva cuenta")}
             </p>
             <div className="space-y-2">
+              <div className="inline-flex rounded-lg border border-slate-700 bg-slate-950 p-1">
+                {(["personal", "funded"] as TradingAccountType[]).map((type) => (
+                  <button
+                    key={type}
+                    type="button"
+                    onClick={() => setNewAccountType(type)}
+                    className={`rounded-md px-3 py-1.5 text-[11px] font-semibold transition ${
+                      newAccountType === type ? "bg-emerald-400 text-slate-950" : "text-slate-300"
+                    }`}
+                  >
+                    {type === "personal" ? L("Personal", "Personal") : "Funded"}
+                  </button>
+                ))}
+              </div>
               <input
                 value={newAccountName}
                 onChange={(e) => setNewAccountName(e.target.value)}
@@ -4409,17 +4510,32 @@ export default function DashboardPage() {
                 placeholder={L("Broker (optional)", "Broker (opcional)")}
                 className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-1.5 text-[12px] text-slate-200"
               />
+              {newAccountType === "funded" ? (
+                <p className="text-[11px] leading-5 text-cyan-100">
+                  {L(
+                    "Funded accounts require the firm's drawdown, daily loss, target, and stage. Continue in Account Center so NeuroTrader can build the correct plan.",
+                    "Las cuentas funded requieren drawdown, pérdida diaria, meta y etapa de la firma. Continúa en Account Center para que NeuroTrader construya el plan correcto."
+                  )}
+                </p>
+              ) : null}
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  disabled={creatingAccount || !newAccountName.trim()}
+                  disabled={newAccountType === "personal" && (creatingAccount || !newAccountName.trim())}
                   onClick={async () => {
+                    if (newAccountType === "funded") {
+                      router.push("/account#trading-accounts");
+                      return;
+                    }
                     try {
                       setCreatingAccount(true);
                       setAccountMessage(null);
-                      await createAccount(newAccountName.trim(), newAccountBroker.trim() || undefined);
+                      await createAccount(newAccountName.trim(), newAccountBroker.trim() || undefined, {
+                        accountType: "personal",
+                      });
                       setNewAccountName("");
                       setNewAccountBroker("");
+                      setNewAccountType("personal");
                       setShowAccountCreate(false);
                     } catch (err: any) {
                       setAccountMessage(err?.message || L("Could not create account.", "No se pudo crear la cuenta."));
@@ -4429,7 +4545,11 @@ export default function DashboardPage() {
                   }}
                   className="rounded-lg bg-emerald-400 px-3 py-1.5 text-[12px] font-semibold text-slate-950 hover:bg-emerald-300 transition disabled:opacity-60"
                 >
-                  {creatingAccount ? L("Creating…", "Creando…") : L("Create", "Crear")}
+                  {newAccountType === "funded"
+                    ? L("Configure funded account", "Configurar cuenta funded")
+                    : creatingAccount
+                      ? L("Creating…", "Creando…")
+                      : L("Create", "Crear")}
                 </button>
                 <button
                   type="button"

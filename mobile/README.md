@@ -73,6 +73,11 @@ The project includes a config plugin (`plugins/with-device-debug-bundling.js`) s
 
 For App Store/TestFlight distribution, build with Archive from `ios/NeuroTrader.xcworkspace` (Release), then upload in Xcode Organizer.
 
+The generated Xcode project also includes a Release archive phase that creates
+and UUID-validates `hermes.framework.dSYM`. If the Hermes binary and dSYM ever
+diverge, Archive fails before upload instead of leaving App Store crashes
+without usable Hermes symbols.
+
 ## Android / Google Play Store
 
 The Android package id is:

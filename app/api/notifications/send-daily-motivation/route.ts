@@ -201,24 +201,29 @@ async function insertInAppEvent(params: {
   const ruleId = await ensureRule(params.userId, params.title, params.message);
   const nowIso = new Date().toISOString();
 
-  const { error: eventErr } = await supabaseAdmin.from("ntj_alert_events").insert({
-    user_id: params.userId,
-    rule_id: ruleId,
-    date: params.deliveryDate,
-    status: "active",
-    triggered_at: nowIso,
-    dismissed_until: null,
-    acknowledged_at: null,
-    payload: {
-      title: params.title,
-      message: params.message,
-      severity: "info",
-      channels: ["inapp"],
-      kind: "reminder",
-      category: "motivation",
-      message_id: params.messageId,
-    },
-  });
+  const { error: eventErr } = await supabaseAdmin
+    .from("ntj_alert_events")
+    .upsert(
+      {
+        user_id: params.userId,
+        rule_id: ruleId,
+        date: params.deliveryDate,
+        status: "active",
+        triggered_at: nowIso,
+        dismissed_until: null,
+        acknowledged_at: null,
+        payload: {
+          title: params.title,
+          message: params.message,
+          severity: "info",
+          channels: ["inapp"],
+          kind: "reminder",
+          category: "motivation",
+          message_id: params.messageId,
+        },
+      },
+      { onConflict: "user_id,rule_id,date" }
+    );
 
   if (eventErr) throw new Error(eventErr.message);
 

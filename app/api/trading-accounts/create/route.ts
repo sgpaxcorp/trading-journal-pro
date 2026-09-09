@@ -4,6 +4,13 @@ import { isActiveEntitlementStatus, PLATFORM_ACCESS_ENTITLEMENT } from "@/lib/ac
 import { normalizePlanTier, planFromProfile } from "@/lib/planAccess";
 import { requirePlatformAccess } from "@/lib/serverPlatformAccess";
 import { getClientIp, rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
+import {
+  defaultFundedAccountProfile,
+  fundedProfileToDatabase,
+  getFundedProfileMissingFields,
+  normalizeFundedAccountProfile,
+  normalizeTradingAccountType,
+} from "@/lib/fundedAccounts";
 
 export const runtime = "nodejs";
 
@@ -36,9 +43,24 @@ export async function POST(req: NextRequest) {
     const body = await req.json().catch(() => ({}));
     const name = String(body?.name || "").trim().slice(0, MAX_ACCOUNT_NAME_LENGTH);
     const broker = String(body?.broker || "").trim().slice(0, MAX_BROKER_NAME_LENGTH) || null;
+    const accountType = normalizeTradingAccountType(body?.accountType ?? body?.account_type);
+    const requestedFundedProfile = accountType === "funded"
+      ? normalizeFundedAccountProfile(body?.fundedProfile ?? body?.funded_profile) ??
+        defaultFundedAccountProfile()
+      : null;
 
     if (!name) {
       return NextResponse.json({ error: "Missing account name" }, { status: 400 });
+    }
+    const missingFundedFields = getFundedProfileMissingFields(requestedFundedProfile);
+    if (accountType === "funded" && missingFundedFields.length) {
+      return NextResponse.json(
+        {
+          error: "Complete and confirm the funded-account rules before creating the account.",
+          fields: missingFundedFields,
+        },
+        { status: 400 }
+      );
     }
 
     const entitlementRows = access.context.entitlements;
@@ -78,12 +100,42 @@ export async function POST(req: NextRequest) {
         user_id: userId,
         name,
         broker,
+        account_type: accountType,
         is_default: isDefault,
       })
-      .select("id, user_id, name, broker, is_default, created_at, updated_at")
+      .select("id, user_id, name, broker, account_type, is_default, created_at, updated_at")
       .single();
 
     if (createErr) throw createErr;
+
+    let fundedProfile = null;
+    if (accountType === "funded" && created?.id) {
+      const normalized = requestedFundedProfile ?? defaultFundedAccountProfile();
+      const profileRow = {
+        account_id: created.id,
+        user_id: userId,
+        ...fundedProfileToDatabase({ ...normalized, rulesVersion: 1 }),
+        rules_version: 1,
+      };
+      const { data: profile, error: profileErr } = await supabaseAdmin
+        .from("funded_account_profiles")
+        .insert(profileRow)
+        .select("*")
+        .single();
+      if (profileErr) {
+        await supabaseAdmin.from("trading_accounts").delete().eq("id", created.id).eq("user_id", userId);
+        throw profileErr;
+      }
+      fundedProfile = normalizeFundedAccountProfile(profile);
+      await supabaseAdmin.from("funded_account_events").insert({
+        account_id: created.id,
+        user_id: userId,
+        event_type: "created",
+        to_stage: fundedProfile?.stage ?? "evaluation",
+        rules_version: 1,
+        snapshot: profileRow,
+      });
+    }
 
     if (isDefault && created?.id) {
       await supabaseAdmin
@@ -94,7 +146,13 @@ export async function POST(req: NextRequest) {
         );
     }
 
-    return NextResponse.json({ account: created });
+    return NextResponse.json({
+      account: {
+        ...created,
+        account_type: accountType,
+        funded_profile: fundedProfile,
+      },
+    });
   } catch (err: any) {
     console.error("[trading-accounts/create] error:", err);
     return NextResponse.json(

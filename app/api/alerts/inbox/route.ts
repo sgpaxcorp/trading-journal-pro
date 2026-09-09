@@ -62,23 +62,28 @@ export async function POST(req: Request) {
     }
 
     const now = new Date();
-    const { error: eventErr } = await supabaseAdmin.from("ntj_alert_events").insert({
-      user_id: auth.userId,
-      rule_id: ruleId,
-      date: isoDate(now),
-      status: "active",
-      triggered_at: now.toISOString(),
-      dismissed_until: null,
-      acknowledged_at: null,
-      payload: {
-        title,
-        message,
-        severity: "info",
-        channels: ["inapp"],
-        kind: "reminder",
-        category,
-      },
-    });
+    const { error: eventErr } = await supabaseAdmin
+      .from("ntj_alert_events")
+      .upsert(
+        {
+          user_id: auth.userId,
+          rule_id: ruleId,
+          date: isoDate(now),
+          status: "active",
+          triggered_at: now.toISOString(),
+          dismissed_until: null,
+          acknowledged_at: null,
+          payload: {
+            title,
+            message,
+            severity: "info",
+            channels: ["inapp"],
+            kind: "reminder",
+            category,
+          },
+        },
+        { onConflict: "user_id,rule_id,date" }
+      );
 
     if (eventErr) {
       return NextResponse.json({ error: eventErr.message }, { status: 500 });

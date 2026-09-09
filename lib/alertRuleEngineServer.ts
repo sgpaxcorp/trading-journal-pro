@@ -1,6 +1,11 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
+import {
+  calculateFundedAccountMetrics,
+  normalizeFundedAccountProfile,
+  normalizeTradingAccountType,
+} from "@/lib/fundedAccounts";
 
 type AlertKind = "reminder" | "alarm";
 type AlertSeverity = "info" | "success" | "warning" | "critical";
@@ -159,6 +164,13 @@ function addDaysToDateStr(dateStr: string, days: number): string | null {
 
 function safeObj(v: any): Record<string, any> {
   return v && typeof v === "object" && !Array.isArray(v) ? v : {};
+}
+
+function isUniqueViolation(error: unknown): boolean {
+  const value = safeObj(error);
+  const code = String(value.code ?? "").trim();
+  const message = String(value.message ?? "").toLowerCase();
+  return code === "23505" || message.includes("duplicate key value") || message.includes("unique constraint");
 }
 
 function safeArr<T = any>(v: any): T[] {
@@ -374,13 +386,47 @@ function inferPnl(row: any): number {
 }
 
 async function fetchPlanLimits(db: DbClient, userId: string) {
-  const defaults = { daily_goal: 0, max_loss: 0, max_gain: 0 };
+  const defaults = { daily_goal: 0, max_loss: 0, max_gain: 0, is_funded: false };
   const planTables = ["ntj_growth_plans", "growth_plans"];
   let data: any[] | null = null;
   let error: any = null;
+  const { data: preferences } = await db
+    .from("user_preferences")
+    .select("active_account_id")
+    .eq("user_id", userId)
+    .maybeSingle();
+  const activeAccountId = safeStr((preferences as any)?.active_account_id).trim();
+  let fundedMaxLoss: number | null = null;
+  if (activeAccountId) {
+    const { data: account } = await db
+      .from("trading_accounts")
+      .select("account_type")
+      .eq("id", activeAccountId)
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (normalizeTradingAccountType((account as any)?.account_type) === "funded") {
+      const { data: profile } = await db
+        .from("funded_account_profiles")
+        .select("*")
+        .eq("account_id", activeAccountId)
+        .eq("user_id", userId)
+        .maybeSingle();
+      fundedMaxLoss =
+        calculateFundedAccountMetrics(normalizeFundedAccountProfile(profile))?.operatingDailyStop ?? 0;
+    }
+  }
 
   for (const table of planTables) {
-    const res = await db.from(table).select("*").eq("user_id", userId).order("created_at", { ascending: false }).limit(1);
+    let query = db
+      .from(table)
+      .select("*")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false })
+      .limit(1);
+    if (activeAccountId && table === "growth_plans") {
+      query = query.eq("account_id", activeAccountId);
+    }
+    const res = await query;
     if (!res.error && res.data && res.data.length > 0) {
       data = res.data as any[];
       error = null;
@@ -389,7 +435,13 @@ async function fetchPlanLimits(db: DbClient, userId: string) {
     if (!error && res.error) error = res.error;
   }
 
-  if (error || !data || data.length === 0) return defaults;
+  if (error || !data || data.length === 0) {
+    return {
+      ...defaults,
+      max_loss: fundedMaxLoss ?? defaults.max_loss,
+      is_funded: fundedMaxLoss != null,
+    };
+  }
 
   const row: any = data[0];
   const dailyPct = pickNumber(row, ["daily_target_pct", "daily_goal_percent", "dailyTargetPct", "dailyGoalPercent"], 0);
@@ -399,10 +451,16 @@ async function fetchPlanLimits(db: DbClient, userId: string) {
   const maxLossRaw = pickNumber(row, ["max_loss", "daily_max_loss", "loss_limit", "daily_loss_limit", "max_daily_loss"], 0);
   const maxGainRaw = pickNumber(row, ["max_gain", "daily_max_gain", "gain_limit", "daily_gain_limit", "max_daily_gain", "profit_cap", "daily_profit_cap"], 0);
 
+  const planMaxLoss = maxLossRaw ||
+    (maxLossPct > 0 && startingBalance > 0 ? (startingBalance * maxLossPct) / 100 : 0);
   return {
     daily_goal: dailyGoalRaw || (dailyPct > 0 && startingBalance > 0 ? (startingBalance * dailyPct) / 100 : 0),
-    max_loss: maxLossRaw || (maxLossPct > 0 && startingBalance > 0 ? (startingBalance * maxLossPct) / 100 : 0),
+    max_loss:
+      fundedMaxLoss != null && planMaxLoss > 0
+        ? Math.min(fundedMaxLoss, planMaxLoss)
+        : fundedMaxLoss ?? planMaxLoss,
     max_gain: maxGainRaw,
+    is_funded: fundedMaxLoss != null,
   };
 }
 
@@ -653,7 +711,7 @@ async function fetchDailyStats(db: DbClient, userId: string, dayISO: string): Pr
 
   const plan = await fetchPlanLimits(db, userId);
   base.daily_goal = plan.daily_goal || base.daily_goal;
-  base.max_loss = plan.max_loss || base.max_loss;
+  base.max_loss = plan.is_funded ? plan.max_loss : plan.max_loss || base.max_loss;
   base.max_gain = plan.max_gain || base.max_gain;
 
   try {
@@ -1043,8 +1101,13 @@ export async function evaluateAlertRulesForUser(userId: string, opts?: { db?: Db
 
     const ins1 = await db.from("ntj_alert_events").insert(fullRow);
     if (ins1.error) {
+      // Another evaluator may have inserted the same daily event after our
+      // lookup. That is a successful idempotent outcome, not an engine error.
+      if (isUniqueViolation(ins1.error)) continue;
+
       const ins2 = await db.from("ntj_alert_events").insert(minimalRow);
       if (ins2.error) {
+        if (isUniqueViolation(ins2.error)) continue;
         console.error("[alertRuleEngineServer] insert event failed", ins2.error);
         continue;
       }

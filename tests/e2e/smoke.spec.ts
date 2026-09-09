@@ -4,7 +4,9 @@ test.describe("Smoke tests", () => {
   test("home page loads", async ({ page }) => {
     await page.goto("/");
     await expect(
-      page.locator("header").getByText("Neuro Trader Journal", { exact: true })
+      page.getByRole("heading", {
+        name: /start your trading business|comienza tu empresa de trading/i,
+      })
     ).toBeVisible();
     await expect(page.getByRole("link", { name: /sign in|ingresar/i })).toBeVisible();
   });
@@ -20,7 +22,7 @@ test.describe("Smoke tests", () => {
 
   test("signup page renders stepper", async ({ page }) => {
     await page.goto("/signup");
-    await expect(page.getByText(/1\.\s*create account|1\.\s*crear cuenta/i)).toBeVisible();
+    await expect(page.getByText(/1\.\s*business account|1\.\s*cuenta empresarial/i)).toBeVisible();
     await expect(page.getByText(/2\.\s*verify email|2\.\s*verificar email/i)).toBeVisible();
   });
 

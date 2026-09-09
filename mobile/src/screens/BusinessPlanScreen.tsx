@@ -158,6 +158,7 @@ type AdaptivePlan = {
 
 type MobileGrowthPlanResponse = {
   accountId?: string | null;
+  account?: MobileAccountContext | null;
   plan?: MobileGrowthPlan | null;
   projection?: {
     requiredGoalPct?: number;
@@ -166,6 +167,34 @@ type MobileGrowthPlanResponse = {
     targetReached?: boolean;
     adaptivePlan?: AdaptivePlan | null;
   };
+};
+
+type MobileFundedMetrics = {
+  configured?: boolean;
+  currentEquity?: number;
+  targetBalance?: number;
+  remainingProfitTarget?: number;
+  remainingDrawdown?: number;
+  operatingDailyStop?: number;
+  recommendedRiskPerTrade?: number;
+  operatingDailyStopPercent?: number;
+  recommendedRiskPerTradePercent?: number;
+  status?: "incomplete" | "safe" | "reduce_risk" | "stop";
+};
+
+type MobileAccountContext = {
+  id?: string;
+  name?: string;
+  broker?: string | null;
+  accountType?: "personal" | "funded";
+  fundedProfile?: {
+    stage?: "evaluation" | "verification" | "funded";
+    firmName?: string;
+    programName?: string;
+    nominalAccountSize?: number;
+  } | null;
+  fundedMetrics?: MobileFundedMetrics | null;
+  fundedMissingFields?: string[];
 };
 
 const RETURN_MODELS = {
@@ -295,6 +324,7 @@ export function BusinessPlanScreen() {
   const [error, setError] = useState<string | null>(null);
   const [savedMessage, setSavedMessage] = useState<string | null>(null);
   const [accountId, setAccountId] = useState<string | null>(null);
+  const [accountContext, setAccountContext] = useState<MobileAccountContext | null>(null);
   const [lastProjection, setLastProjection] = useState<MobileGrowthPlanResponse["projection"] | null>(null);
   const [adaptivePlan, setAdaptivePlan] = useState<AdaptivePlan | null>(null);
   const [activeAdaptivePlan, setActiveAdaptivePlan] = useState<AdaptivePlan | null>(null);
@@ -331,9 +361,11 @@ export function BusinessPlanScreen() {
   const [doRules, setDoRules] = useState(DEFAULT_DO_RULES.join("\n"));
   const [dontRules, setDontRules] = useState(DEFAULT_DONT_RULES.join("\n"));
   const [orderRules, setOrderRules] = useState(DEFAULT_ORDER_RULES.join("\n"));
+  const isFundedAccount = accountContext?.accountType === "funded";
+  const fundedMetrics = accountContext?.fundedMetrics ?? null;
 
   const hydrateForm = useCallback(
-    (plan: MobileGrowthPlan | null | undefined) => {
+    (plan: MobileGrowthPlan | null | undefined, account?: MobileAccountContext | null) => {
       if (!plan) {
         setAdaptivePlan(null);
         setStartingBalance("");
@@ -366,6 +398,23 @@ export function BusinessPlanScreen() {
         setDoRules(DEFAULT_DO_RULES.join("\n"));
         setDontRules(DEFAULT_DONT_RULES.join("\n"));
         setOrderRules(DEFAULT_ORDER_RULES.join("\n"));
+        if (account?.accountType === "funded" && account.fundedMetrics) {
+          const metrics = account.fundedMetrics;
+          setStartingBalance(formatMoneyValue(Number(metrics.currentEquity ?? 0)));
+          setTargetBalance(formatMoneyValue(Number(metrics.targetBalance ?? 0)));
+          setMaxDailyLossPercent(Number(metrics.operatingDailyStopPercent ?? 0).toFixed(4));
+          setMaxRiskPerTradePercent(Number(metrics.recommendedRiskPerTradePercent ?? 0).toFixed(4));
+          setReturnModelMode("conservative");
+          setSelectedPlanId("conservative");
+          setPolicyScenarioId("conservative");
+          setOperatingGoalDayPct(getReturnModel("conservative").goal.toFixed(2));
+          setExpectedLossDayPct(
+            Math.min(
+              getReturnModel("conservative").loss,
+              Number(metrics.operatingDailyStopPercent ?? 0) * 0.6
+            ).toFixed(4)
+          );
+        }
         return;
       }
 
@@ -441,7 +490,8 @@ export function BusinessPlanScreen() {
     try {
       const response = await apiGet<MobileGrowthPlanResponse>("/api/growth-plan/mobile");
       setAccountId(response.accountId ?? response.plan?.accountId ?? null);
-      hydrateForm(response.plan);
+      setAccountContext(response.account ?? null);
+      hydrateForm(response.plan, response.account);
       setActiveAdaptivePlan(response.plan?.adaptivePlan ?? null);
       setEvaluatedDraftKey(null);
       setAcceptedDisclosureKey(null);
@@ -582,10 +632,21 @@ export function BusinessPlanScreen() {
     const policy = getReturnModel(mode);
     setPolicyScenarioId(mode);
     setOperatingGoalDayPct(policy.goal.toFixed(2));
-    setExpectedLossDayPct(policy.loss.toFixed(2));
-    setMaxDailyLossPercent(policy.maxLoss.toFixed(2));
-    setMaxRiskPerTradePercent(policy.risk.toFixed(2));
-  }, []);
+    setExpectedLossDayPct(
+      Math.min(
+        policy.loss,
+        fundedMetrics?.operatingDailyStopPercent == null
+          ? policy.loss
+          : fundedMetrics.operatingDailyStopPercent * 0.6
+      ).toFixed(4)
+    );
+    setMaxDailyLossPercent(
+      Math.min(policy.maxLoss, fundedMetrics?.operatingDailyStopPercent ?? policy.maxLoss).toFixed(4)
+    );
+    setMaxRiskPerTradePercent(
+      Math.min(policy.risk, fundedMetrics?.recommendedRiskPerTradePercent ?? policy.risk).toFixed(4)
+    );
+  }, [fundedMetrics?.operatingDailyStopPercent, fundedMetrics?.recommendedRiskPerTradePercent]);
 
   const declaredReturnSummary = useMemo(() => {
     const days = Math.max(1, Math.floor(parsePercent(averageTradingDaysPerWeek) || 1));
@@ -767,6 +828,16 @@ export function BusinessPlanScreen() {
         ...planRequestPayload,
         action: "preview",
       });
+      if (response.account) {
+        setAccountContext(response.account);
+        const metrics = response.account.fundedMetrics;
+        if (response.account.accountType === "funded" && metrics) {
+          setStartingBalance(formatMoneyValue(Number(metrics.currentEquity ?? 0)));
+          setTargetBalance(formatMoneyValue(Number(metrics.targetBalance ?? 0)));
+          setMaxDailyLossPercent(Number(metrics.operatingDailyStopPercent ?? 0).toFixed(4));
+          setMaxRiskPerTradePercent(Number(metrics.recommendedRiskPerTradePercent ?? 0).toFixed(4));
+        }
+      }
       setLastProjection(response.projection ?? null);
       setAdaptivePlan(response.projection?.adaptivePlan ?? null);
       setEvaluatedDraftKey(draftEvaluationKey);
@@ -830,9 +901,10 @@ export function BusinessPlanScreen() {
         },
       });
       setAccountId(response.accountId ?? accountId);
+      setAccountContext(response.account ?? accountContext);
       const activatedRecommendedRunway =
         Boolean(response.plan?.targetDate) && response.plan?.targetDate !== targetDate;
-      hydrateForm(response.plan);
+      hydrateForm(response.plan, response.account ?? accountContext);
       setLastProjection(response.projection ?? null);
       const savedAdaptivePlan = response.projection?.adaptivePlan ?? response.plan?.adaptivePlan ?? null;
       setAdaptivePlan(savedAdaptivePlan);
@@ -884,6 +956,7 @@ export function BusinessPlanScreen() {
     draftIsEvaluated,
     formInputsComplete,
     hydrateForm,
+    accountContext,
     language,
     planRequestPayload,
     previewing,
@@ -929,7 +1002,8 @@ export function BusinessPlanScreen() {
                         confirmation: "RESET PLAN",
                       });
                       setAccountId(response.accountId ?? accountId);
-                      hydrateForm(null);
+                      setAccountContext(response.account ?? accountContext);
+                      hydrateForm(null, response.account ?? accountContext);
                       setActiveAdaptivePlan(null);
                       setEvaluatedDraftKey(null);
                       setAcceptedDisclosureKey(null);
@@ -954,7 +1028,7 @@ export function BusinessPlanScreen() {
         },
       ]
     );
-  }, [accountId, hydrateForm, language]);
+  }, [accountContext, accountId, hydrateForm, language]);
 
   const renderField = (
     label: string,
@@ -1046,6 +1120,72 @@ export function BusinessPlanScreen() {
                 {" · "}
                 {t(language, "Trading days:", "Días de trading:")}{" "}
                 <Text style={styles.savedStrong}>{lastProjection.tradingDays ?? preview.operatingDays}</Text>
+              </Text>
+            ) : null}
+          </View>
+
+          <View style={[styles.sectionCard, isFundedAccount && styles.fundedAccountCard]}>
+            <Text style={styles.eyebrow}>{t(language, "Account structure", "Estructura de cuenta")}</Text>
+            <Text style={styles.sectionTitle}>
+              {isFundedAccount
+                ? t(language, "Funded account", "Cuenta fondeada")
+                : t(language, "Personal capital account", "Cuenta de capital personal")}
+              {accountContext?.name ? ` · ${accountContext.name}` : ""}
+            </Text>
+            {isFundedAccount ? (
+              <Text style={styles.savedHint}>
+                {[
+                  accountContext?.fundedProfile?.firmName,
+                  accountContext?.fundedProfile?.programName,
+                  Number(accountContext?.fundedProfile?.nominalAccountSize ?? 0) > 0
+                    ? formatCompactCurrency(Number(accountContext?.fundedProfile?.nominalAccountSize))
+                    : null,
+                  accountContext?.fundedProfile?.stage,
+                ].filter(Boolean).join(" · ")}
+              </Text>
+            ) : null}
+            <Text style={styles.muted}>
+              {isFundedAccount
+                ? t(
+                    language,
+                    "The firm rules are authoritative. This plan automatically uses the current equity, target, drawdown buffer, operating stop, and risk-per-trade ceiling saved for this account.",
+                    "Las reglas de la firma tienen autoridad. Este plan usa automáticamente el equity actual, la meta, el margen de drawdown, el stop operativo y el límite de riesgo por trade guardados para esta cuenta."
+                  )
+                : t(
+                    language,
+                    "This plan uses your own capital, cash-flow decisions, and risk policy.",
+                    "Este plan usa tu propio capital, decisiones de flujo de efectivo y política de riesgo."
+                  )}
+            </Text>
+            {isFundedAccount && fundedMetrics ? (
+              <View style={styles.previewGrid}>
+                <View style={styles.previewCell}>
+                  <Text style={styles.previewLabel}>{t(language, "Stage", "Etapa")}</Text>
+                  <Text style={styles.previewValue}>
+                    {String(accountContext?.fundedProfile?.stage ?? "evaluation").replaceAll("_", " ")}
+                  </Text>
+                </View>
+                <View style={styles.previewCell}>
+                  <Text style={styles.previewLabel}>{t(language, "Drawdown room", "Margen de drawdown")}</Text>
+                  <Text style={styles.previewValue}>{formatCompactCurrency(Number(fundedMetrics.remainingDrawdown ?? 0))}</Text>
+                </View>
+                <View style={styles.previewCell}>
+                  <Text style={styles.previewLabel}>{t(language, "Operating stop", "Stop operativo")}</Text>
+                  <Text style={styles.previewValue}>{formatCompactCurrency(Number(fundedMetrics.operatingDailyStop ?? 0))}</Text>
+                </View>
+                <View style={styles.previewCell}>
+                  <Text style={styles.previewLabel}>{t(language, "Risk per trade", "Riesgo por trade")}</Text>
+                  <Text style={styles.previewValue}>{formatCompactCurrency(Number(fundedMetrics.recommendedRiskPerTrade ?? 0))}</Text>
+                </View>
+              </View>
+            ) : null}
+            {isFundedAccount && accountContext?.fundedMissingFields?.length ? (
+              <Text style={styles.capacityBlocked}>
+                {t(
+                  language,
+                  "Complete and confirm this account's firm rules on the web Account page before evaluating the plan.",
+                  "Completa y confirma las reglas de la firma en la página Account de la web antes de evaluar el plan."
+                )}
               </Text>
             ) : null}
           </View>
@@ -1249,6 +1389,7 @@ export function BusinessPlanScreen() {
               {renderField(t(language, "Starting balance", "Capital inicial"), startingBalance, (value) => setStartingBalance(formatMoneyDraft(value)), {
                 keyboardType: "numeric",
                 placeholder: "5,000.00",
+                editable: !isFundedAccount,
                 onBlur: () => {
                   if (startingBalance) setStartingBalance(formatMoneyValue(startingBalance));
                 },
@@ -1256,6 +1397,7 @@ export function BusinessPlanScreen() {
               {renderField(t(language, "Target balance", "Meta de balance"), targetBalance, (value) => setTargetBalance(formatMoneyDraft(value)), {
                 keyboardType: "numeric",
                 placeholder: "50,000.00",
+                editable: !isFundedAccount,
                 onBlur: () => {
                   if (targetBalance) setTargetBalance(formatMoneyValue(targetBalance));
                 },
@@ -1384,10 +1526,12 @@ export function BusinessPlanScreen() {
               {renderField(t(language, "Max daily loss %", "Max pérdida diaria %"), maxDailyLossPercent, setMaxDailyLossPercent, {
                 keyboardType: "numeric",
                 placeholder: "2",
+                editable: !isFundedAccount,
               })}
               {renderField(t(language, "Risk per trade %", "Riesgo por trade %"), maxRiskPerTradePercent, setMaxRiskPerTradePercent, {
                 keyboardType: "numeric",
                 placeholder: "1",
+                editable: !isFundedAccount,
               })}
             </View>
             <View style={styles.twoCol}>
@@ -1470,16 +1614,30 @@ export function BusinessPlanScreen() {
           <View style={styles.sectionCard}>
             <Text style={styles.sectionTitle}>{t(language, "Capital flows", "Flujos de capital")}</Text>
             <Text style={styles.muted}>
-              {t(
-                language,
-                "Contributions and withdrawals affect the account balance, but they are reported separately from trading profit.",
-                "Las aportaciones y los retiros afectan el balance, pero se reportan separados de la ganancia de trading."
-              )}
+              {isFundedAccount
+                ? t(
+                    language,
+                    "Personal contributions are disabled for funded accounts. Planned payouts remain separate from trading performance.",
+                    "Las aportaciones personales están deshabilitadas para cuentas fondeadas. Los payouts planificados permanecen separados del rendimiento de trading."
+                  )
+                : t(
+                    language,
+                    "Contributions and withdrawals affect the account balance, but they are reported separately from trading profit.",
+                    "Las aportaciones y los retiros afectan el balance, pero se reportan separados de la ganancia de trading."
+                  )}
             </Text>
 
             <View style={styles.flowBlock}>
               <Text style={styles.flowTitle}>{t(language, "Future contributions", "Aportaciones futuras")}</Text>
-              <View style={styles.optionRow}>
+              {isFundedAccount ? (
+                <Text style={styles.savedHint}>
+                  {t(
+                    language,
+                    "Not applicable. The nominal account size is an operating limit, not trader-owned capital.",
+                    "No aplica. El tamaño nominal de la cuenta es un límite operativo, no capital propiedad del trader."
+                  )}
+                </Text>
+              ) : <><View style={styles.optionRow}>
                 {(["none", "scheduled"] as const).map((mode) => (
                   <Pressable
                     key={mode}
@@ -1525,10 +1683,15 @@ export function BusinessPlanScreen() {
                   </View>
                 </>
               ) : null}
+              </>}
             </View>
 
             <View style={styles.flowBlock}>
-              <Text style={styles.flowTitle}>{t(language, "Planned withdrawals", "Retiros planificados")}</Text>
+              <Text style={styles.flowTitle}>
+                {isFundedAccount
+                  ? t(language, "Planned payouts", "Payouts planificados")
+                  : t(language, "Planned withdrawals", "Retiros planificados")}
+              </Text>
               <View style={styles.optionRow}>
                 {(["none", "scheduled"] as const).map((mode) => (
                   <Pressable
@@ -1779,6 +1942,10 @@ const createStyles = (colors: ThemeColors) =>
       backgroundColor: colors.surface,
       padding: 14,
       gap: 10,
+    },
+    fundedAccountCard: {
+      borderColor: colors.warning,
+      backgroundColor: colors.warningSoft,
     },
     sectionTitle: {
       color: colors.textPrimary,

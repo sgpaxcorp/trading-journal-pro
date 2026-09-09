@@ -280,31 +280,34 @@ export async function notifyGoalAchievement(params: NotifyGoalAchievementParams)
     const dateKey = scope === "day" ? params.periodKey : new Date().toISOString().slice(0, 10);
     const { data: eventRow, error: eventErr } = await supabaseAdmin
       .from("ntj_alert_events")
-      .insert({
-        user_id: params.userId,
-        rule_id: ruleId,
-        date: dateKey,
-        status: "active",
-        triggered_at: nowIso,
-        dismissed_until: null,
-        acknowledged_at: null,
-        payload: {
-          title: copy.title,
-          message: copy.body,
-          severity: "success",
-          channels: ["inapp", "popup"],
-          kind: "reminder",
-          category: "achievement",
-          goal_scope: scope,
-          period_key: params.periodKey,
-          account_id: params.accountId ?? null,
-          goal_amount: params.goalAmount ?? null,
-          actual_amount: params.actualAmount ?? null,
-          target_balance: params.targetBalance ?? null,
-          progress: params.progress ?? null,
-          ...(params.metadata ?? {}),
+      .upsert(
+        {
+          user_id: params.userId,
+          rule_id: ruleId,
+          date: dateKey,
+          status: "active",
+          triggered_at: nowIso,
+          dismissed_until: null,
+          acknowledged_at: null,
+          payload: {
+            title: copy.title,
+            message: copy.body,
+            severity: "success",
+            channels: ["inapp", "popup"],
+            kind: "reminder",
+            category: "achievement",
+            goal_scope: scope,
+            period_key: params.periodKey,
+            account_id: params.accountId ?? null,
+            goal_amount: params.goalAmount ?? null,
+            actual_amount: params.actualAmount ?? null,
+            target_balance: params.targetBalance ?? null,
+            progress: params.progress ?? null,
+            ...(params.metadata ?? {}),
+          },
         },
-      })
+        { onConflict: "user_id,rule_id,date" }
+      )
       .select("id")
       .single();
 

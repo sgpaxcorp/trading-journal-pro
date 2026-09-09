@@ -1183,6 +1183,19 @@ function buildGrowthPlanOperatingBlock(body: AiCoachRequestBody): string {
       `Risk rails: dailyTarget=${pct(dailyTargetPct)}, maxDailyLoss=${pct(maxDailyLossPercent)}, maxRiskPerTrade=${Number.isFinite(maxRiskPerTradeUsd) && maxRiskPerTradeUsd > 0 ? usd(maxRiskPerTradeUsd) : pct(maxRiskPerTradePercent)}, tradingDays=${Number.isFinite(tradingDays) ? tradingDays : "—"}, lossDaysPerWeek=${Number.isFinite(lossDaysPerWeek) ? lossDaysPerWeek : "—"}`
     );
 
+    const fundedAccount =
+      growthPlan?.fundedAccount && typeof growthPlan.fundedAccount === "object"
+        ? growthPlan.fundedAccount
+        : null;
+    if (safeString(growthPlan?.accountType).toLowerCase() === "funded" && fundedAccount) {
+      lines.push(
+        `Funded account: stage=${safeString(fundedAccount.stage) || "unknown"}, firm=${safeString(fundedAccount.firmName) || "unknown"}, nominalSize=${usd(Number(fundedAccount.nominalAccountSize))}, currentEquity=${usd(Number(fundedAccount.currentEquity))}, programTargetRemaining=${usd(Number(fundedAccount.remainingProfitTarget))}.`
+      );
+      lines.push(
+        `Funded protection: breachFloor=${usd(Number(fundedAccount.breachFloor))}, remainingDrawdown=${usd(Number(fundedAccount.remainingDrawdown))}, internalDailyStop=${usd(Number(fundedAccount.operatingDailyStop))}, internalRiskPerTrade=${usd(Number(fundedAccount.recommendedRiskPerTrade))}, status=${safeString(fundedAccount.status) || "unknown"}. Treat remaining drawdown, not nominal account size, as the usable risk budget. Never suggest exceeding either an internal rail or an official firm limit.`
+      );
+    }
+
     const businessAnalysis = growthPlan?.businessAnalysis && typeof growthPlan.businessAnalysis === "object" ? growthPlan.businessAnalysis : null;
     const operatingModel =
       businessAnalysis?.operatingModel && typeof businessAnalysis.operatingModel === "object"

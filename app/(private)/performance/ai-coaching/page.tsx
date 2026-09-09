@@ -9,6 +9,7 @@ import remarkGfm from "remark-gfm";
 
 import { useAuth } from "@/context/AuthContext";
 import { useTradingAccounts } from "@/hooks/useTradingAccounts";
+import { calculateFundedAccountMetrics } from "@/lib/fundedAccounts";
 import { useUserPlan } from "@/hooks/useUserPlan";
 import TopNav from "@/app/components/TopNav";
 import { useAppSettings } from "@/lib/appSettings";
@@ -1746,12 +1747,18 @@ function usd(n: number) {
 function AiCoachingPageInner() {
   const router = useRouter();
   const { user, loading: authLoading } = useAuth();
-  const { activeAccountId, loading: accountsLoading } = useTradingAccounts();
+  const { accounts, activeAccountId, loading: accountsLoading } = useTradingAccounts();
   const { plan, loading: planLoading } = useUserPlan();
   const { locale } = useAppSettings();
   const lang = resolveLocale(locale);
   const isEs = lang === "es";
   const L = (en: string, es: string) => (isEs ? es : en);
+  const activeTradingAccount =
+    accounts.find((account) => account.id === activeAccountId) ?? null;
+  const coachFundedMetrics =
+    activeTradingAccount?.account_type === "funded"
+      ? calculateFundedAccountMetrics(activeTradingAccount.funded_profile ?? null)
+      : null;
   const coachModeOptions = useMemo<Array<{ value: CoachMode; label: string }>>(
     () =>
       isEs
@@ -3575,6 +3582,21 @@ function AiCoachingPageInner() {
             ? {
                 startingBalance: toNum(growthPlan.starting_balance, 0),
                 targetBalance: toNum(growthPlan.target_balance, 0),
+                accountType: activeTradingAccount?.account_type ?? "personal",
+                fundedAccount:
+                  activeTradingAccount?.account_type === "funded" &&
+                  activeTradingAccount.funded_profile &&
+                  coachFundedMetrics
+                    ? {
+                        ...activeTradingAccount.funded_profile,
+                        breachFloor: coachFundedMetrics.breachFloor,
+                        remainingDrawdown: coachFundedMetrics.remainingDrawdown,
+                        remainingProfitTarget: coachFundedMetrics.remainingProfitTarget,
+                        operatingDailyStop: coachFundedMetrics.operatingDailyStop,
+                        recommendedRiskPerTrade: coachFundedMetrics.recommendedRiskPerTrade,
+                        status: coachFundedMetrics.status,
+                      }
+                    : null,
                 targetDate: growthPlan.target_date ?? null,
                 planMode: growthPlan.plan_mode ?? null,
                 dailyTargetPct: toNum(growthPlan.daily_target_pct ?? growthPlan.daily_goal_percent, 0),

@@ -60,6 +60,7 @@ async function recreateDefaultAccount(userId: string) {
       user_id: userId,
       name: "Main trading account",
       broker: null,
+      account_type: "personal",
       is_default: true,
     })
     .select("id")

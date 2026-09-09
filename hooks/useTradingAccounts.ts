@@ -3,12 +3,15 @@
 import { useCallback, useEffect, useState } from "react";
 import { supabaseBrowser } from "@/lib/supaBaseClient";
 import { useAuth } from "@/context/AuthContext";
+import type { FundedAccountProfile, TradingAccountType } from "@/lib/fundedAccounts";
 
 export type TradingAccount = {
   id: string;
   user_id: string;
   name: string;
   broker?: string | null;
+  account_type: TradingAccountType;
+  funded_profile?: FundedAccountProfile | null;
   is_default?: boolean | null;
   created_at?: string | null;
 };
@@ -67,7 +70,14 @@ export function useTradingAccounts() {
     }
   }, []);
 
-  const createAccount = useCallback(async (name: string, broker?: string) => {
+  const createAccount = useCallback(async (
+    name: string,
+    broker?: string,
+    configuration?: {
+      accountType?: TradingAccountType;
+      fundedProfile?: FundedAccountProfile | null;
+    }
+  ) => {
     const { data: sessionData } = await supabaseBrowser.auth.getSession();
     const token = sessionData?.session?.access_token;
     if (!token) throw new Error("Unauthorized");
@@ -78,10 +88,41 @@ export function useTradingAccounts() {
         "Content-Type": "application/json",
         Authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify({ name, broker }),
+      body: JSON.stringify({
+        name,
+        broker,
+        accountType: configuration?.accountType ?? "personal",
+        fundedProfile: configuration?.fundedProfile ?? null,
+      }),
     });
     const body = await res.json();
     if (!res.ok) throw new Error(body?.error || "Failed to create account");
+
+    await fetchAccounts();
+    return body.account as TradingAccount;
+  }, [fetchAccounts]);
+
+  const updateAccount = useCallback(async (input: {
+    accountId: string;
+    name: string;
+    broker?: string;
+    accountType: TradingAccountType;
+    fundedProfile?: FundedAccountProfile | null;
+  }) => {
+    const { data: sessionData } = await supabaseBrowser.auth.getSession();
+    const token = sessionData?.session?.access_token;
+    if (!token) throw new Error("Unauthorized");
+
+    const res = await fetch("/api/trading-accounts/update", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(input),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body?.error || "Failed to update account");
 
     await fetchAccounts();
     return body.account as TradingAccount;
@@ -138,6 +179,7 @@ export function useTradingAccounts() {
     error,
     refresh: fetchAccounts,
     createAccount,
+    updateAccount,
     deleteAccount,
     setActiveAccount: setActive,
   };

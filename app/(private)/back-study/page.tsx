@@ -42,6 +42,13 @@ import {
   type BackStudyTradeView,
 } from "@/lib/backStudy/tradeReconstruction";
 import {
+  findContainingCandleIndex,
+  getReplayPeriodWindow,
+  inferCandleIntervalMs,
+  timeframeIntervalMs,
+} from "@/lib/backStudy/chartTimeline";
+import type { NormalizedOrderEvent } from "@/lib/brokers/types";
+import {
   createChart,
   CandlestickSeries,
   createSeriesMarkers,
@@ -105,6 +112,7 @@ type ChartState = {
   loading: boolean;
   error: string | null;
   candles: Candle[];
+  effectiveTimeframe: TimeframeId | null;
 };
 
 type AuditTradeSequence = {
@@ -185,7 +193,7 @@ type AuditResponse = {
     matched_events: number;
     total_events_before_window: number;
   } | null;
-  events: any[];
+  events: NormalizedOrderEvent[];
   audit: AuditMetrics;
   process_review: AuditCompliance;
   execution_discipline: ExecutionDiscipline;
@@ -243,29 +251,35 @@ function shiftMsByMode(ms: number, mode: TimeMode): number {
 }
 
 /**
- * Parse "9:56 AM", "09:56", "09:56:30" → minutes of day (local time).
+ * Parse "9:56 AM", "09:56", "09:56:30" into seconds of the trading day.
  */
-function parseTimeToMinutesFlexible(t: string): number | null {
+function parseTimeToSecondsFlexible(t: string): number | null {
   if (!t) return null;
   const cleaned = t.trim().toUpperCase();
 
   const m = cleaned.match(
-    /^(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM)?$/
+    /^(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?$/
   );
   if (!m) return null;
 
   let hour = Number(m[1]);
   const minutes = Number(m[2]);
-  const ampm = m[3];
+  const seconds = Number(m[3] || 0);
+  const ampm = m[4];
 
-  if (!Number.isFinite(hour) || !Number.isFinite(minutes)) return null;
+  if (!Number.isFinite(hour) || !Number.isFinite(minutes) || !Number.isFinite(seconds)) return null;
 
   if (ampm === "AM" && hour === 12) hour = 0;
   if (ampm === "PM" && hour !== 12) hour += 12;
 
-  if (hour < 0 || hour > 23 || minutes < 0 || minutes > 59) return null;
+  if (hour < 0 || hour > 23 || minutes < 0 || minutes > 59 || seconds < 0 || seconds > 59) return null;
 
-  return hour * 60 + minutes;
+  return hour * 3600 + minutes * 60 + seconds;
+}
+
+function parseTimeToMinutesFlexible(t: string): number | null {
+  const seconds = parseTimeToSecondsFlexible(t);
+  return seconds == null ? null : Math.floor(seconds / 60);
 }
 
 function toNumber(value: string | number | null | undefined): number | null {
@@ -319,11 +333,6 @@ function formatAuditWindowTimeLabel(value: string | null | undefined, timeZone?:
 /**
  * Convert candle timestamp (Yahoo UTC) → minutes of day in local time.
  */
-function minutesFromMsWithMode(ms: number, mode: TimeMode): number {
-  const d = new Date(shiftMsByMode(ms, mode));
-  return d.getUTCHours() * 60 + d.getUTCMinutes();
-}
-
 function parseNotesTrades(notesRaw: unknown): {
   entries: EntryTradeRow[];
   exits: ExitTradeRow[];
@@ -596,17 +605,6 @@ const RANGE_DAYS: Record<ChartRangeId, number> = {
   "1Y": 365,
 };
 
-function getPeriodWindow(anchorDate: string, rangeId: ChartRangeId) {
-  if (!anchorDate) return null;
-  const base = new Date(`${anchorDate}T00:00:00Z`);
-  if (!Number.isFinite(base.getTime())) return null;
-  const days = RANGE_DAYS[rangeId] ?? 30;
-  const span = days * 86400000;
-  const period1 = Math.floor((base.getTime() - span) / 1000);
-  const period2 = Math.floor((base.getTime() + span) / 1000);
-  return { period1, period2 };
-}
-
 /* =========================
    Interactive chart
 ========================= */
@@ -616,13 +614,14 @@ type InteractiveCandleChartProps = {
   symbol: string;
   candles: Candle[];
   selectedDate: string;
+  timeframe: TimeframeId;
   entryPoints: Array<{ time: string; price?: number | null; label?: string }>;
   exitPoints: Array<{ time: string; price?: number | null; label?: string }>;
   auditPoints?: Array<{
     timestampMs: number;
     price?: number | null;
     label: string;
-    tone: "fill" | "stop" | "cancel";
+    tone: "fill" | "stop" | "cancel" | "order" | "replace";
   }>;
   timeMode: TimeMode;
   entryColor?: string;
@@ -633,6 +632,7 @@ type InteractiveCandleChartProps = {
   zoomOutLabel?: string;
   zoomResetLabel?: string;
   emptyLabel?: string;
+  dailyMarkerWarningLabel?: string;
 };
 
 function InteractiveCandleChart({
@@ -640,6 +640,7 @@ function InteractiveCandleChart({
   symbol,
   candles,
   selectedDate,
+  timeframe,
   entryPoints,
   exitPoints,
   auditPoints = [],
@@ -652,11 +653,17 @@ function InteractiveCandleChart({
   zoomOutLabel = "Zoom out",
   zoomResetLabel = "Reset zoom",
   emptyLabel = "No chart data for this symbol/timeframe.",
+  dailyMarkerWarningLabel = "Exact execution markers require intraday candles.",
 }: InteractiveCandleChartProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<any>(null);
   const seriesRef = useRef<any>(null);
   const markersPluginRef = useRef<any>(null);
+  const inferredIntervalMs = useMemo(
+    () => inferCandleIntervalMs(candles, timeframeIntervalMs(timeframe)),
+    [candles, timeframe]
+  );
+  const supportsTimedMarkers = inferredIntervalMs < 12 * 60 * 60_000;
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -757,7 +764,7 @@ function InteractiveCandleChart({
       timeScale.fitContent();
     }
 
-    // --- Markers (entry/exit) matching by local time ---
+    // --- Timed markers anchored to the candle interval that contains them ---
     const filtered = candles
       .map((c, idx) => ({ c, idx }))
       .filter(({ c }) => {
@@ -766,43 +773,39 @@ function InteractiveCandleChart({
         return isoDay === selectedDate;
       });
 
-    const findNearest = (targetMinutes: number | null) => {
-      if (targetMinutes == null) return null;
-      let bestDiff = Infinity;
-      let bestIdx: number | null = null;
-      filtered.forEach(({ c, idx }) => {
-        const mins = minutesFromMsWithMode(c.time, timeMode);
-        const diff = Math.abs(mins - targetMinutes);
-        if (diff < bestDiff) {
-          bestDiff = diff;
-          bestIdx = idx;
+    const findSessionCandle = (targetSeconds: number | null) => {
+      if (targetSeconds == null || !supportsTimedMarkers) return null;
+      const intervalSeconds = inferredIntervalMs / 1000;
+      for (const { c, idx } of filtered) {
+        const shifted = new Date(shiftMsByMode(c.time, timeMode));
+        const candleSeconds =
+          shifted.getUTCHours() * 3600 + shifted.getUTCMinutes() * 60 + shifted.getUTCSeconds();
+        if (targetSeconds >= candleSeconds && targetSeconds < candleSeconds + intervalSeconds) {
+          return idx;
         }
-      });
-      return bestIdx;
+      }
+      return null;
     };
 
-    const findNearestTimestamp = (targetMs: number | null) => {
-      if (targetMs == null || !Number.isFinite(targetMs)) return null;
-      let bestDiff = Infinity;
-      let bestIdx: number | null = null;
-      candles.forEach((c, idx) => {
-        const diff = Math.abs(c.time - targetMs);
-        if (diff < bestDiff) {
-          bestDiff = diff;
-          bestIdx = idx;
-        }
-      });
-      return bestIdx;
+    const findTimestampCandle = (targetMs: number | null) => {
+      if (targetMs == null || !supportsTimedMarkers) return null;
+      return findContainingCandleIndex(candles, targetMs, inferredIntervalMs);
     };
 
     const markers: any[] = [];
+    const markerTimes: number[] = [];
+    const pushMarker = (marker: Record<string, unknown>) => {
+      const time = Number(marker.time);
+      if (Number.isFinite(time)) markerTimes.push(time);
+      markers.push({ ...marker, __order: markers.length });
+    };
 
     entryPoints.forEach((pt, i) => {
-      const mins = parseTimeToMinutesFlexible(pt.time || "");
-      const idx = findNearest(mins);
+      const seconds = parseTimeToSecondsFlexible(pt.time || "");
+      const idx = findSessionCandle(seconds);
       if (idx == null) return;
       const c = candles[idx];
-      markers.push({
+      pushMarker({
         time: Math.floor(shiftMsByMode(c.time, timeMode) / 1000),
         position: "belowBar",
         color: entryColor,
@@ -818,11 +821,11 @@ function InteractiveCandleChart({
     });
 
     exitPoints.forEach((pt, i) => {
-      const mins = parseTimeToMinutesFlexible(pt.time || "");
-      const idx = findNearest(mins);
+      const seconds = parseTimeToSecondsFlexible(pt.time || "");
+      const idx = findSessionCandle(seconds);
       if (idx == null) return;
       const c = candles[idx];
-      markers.push({
+      pushMarker({
         time: Math.floor(shiftMsByMode(c.time, timeMode) / 1000),
         position: "aboveBar",
         color: exitColor,
@@ -838,7 +841,7 @@ function InteractiveCandleChart({
     });
 
     auditPoints.forEach((pt) => {
-      const idx = findNearestTimestamp(pt.timestampMs);
+      const idx = findTimestampCandle(pt.timestampMs);
       if (idx == null) return;
       const c = candles[idx];
       const tone =
@@ -846,8 +849,19 @@ function InteractiveCandleChart({
           ? { color: "#fb7185", shape: "square", position: "aboveBar" }
           : pt.tone === "cancel"
           ? { color: "#fbbf24", shape: "circle", position: "aboveBar" }
+          : pt.tone === "replace"
+          ? { color: "#f97316", shape: "square", position: "aboveBar" }
+          : pt.tone === "order"
+          ? { color: "#a78bfa", shape: "circle", position: "belowBar" }
           : { color: "#c084fc", shape: "circle", position: "belowBar" };
-      markers.push({
+      const eventTime = new Intl.DateTimeFormat("en-US", {
+        timeZone: timeMode === "et" ? "America/New_York" : undefined,
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false,
+      }).format(new Date(pt.timestampMs));
+      pushMarker({
         time: Math.floor(shiftMsByMode(c.time, timeMode) / 1000),
         position: tone.position,
         color: tone.color,
@@ -855,6 +869,7 @@ function InteractiveCandleChart({
         text: [
           pt.label,
           pt.price != null ? `@ ${pt.price.toFixed(2)}` : null,
+          `${eventTime}${timeMode === "et" ? " ET" : ""}`,
         ]
           .filter(Boolean)
           .join(" · "),
@@ -862,7 +877,20 @@ function InteractiveCandleChart({
     });
 
     if (markersPluginRef.current) {
-      markersPluginRef.current.setMarkers(markers);
+      const orderedMarkers = markers
+        .sort((a, b) => Number(a.time) - Number(b.time) || Number(a.__order) - Number(b.__order))
+        .map(({ __order, ...marker }) => marker);
+      markersPluginRef.current.setMarkers(orderedMarkers);
+    }
+
+    if (markerTimes.length && supportsTimedMarkers) {
+      const firstMarker = Math.min(...markerTimes);
+      const lastMarker = Math.max(...markerTimes);
+      const paddingSeconds = Math.max((inferredIntervalMs / 1000) * 8, 5 * 60);
+      timeScale.setVisibleRange({
+        from: Math.max(times[0], firstMarker - paddingSeconds),
+        to: Math.min(times[times.length - 1], lastMarker + paddingSeconds),
+      });
     }
   }, [
     candles,
@@ -873,6 +901,9 @@ function InteractiveCandleChart({
     timeMode,
     entryColor,
     exitColor,
+    timeframe,
+    inferredIntervalMs,
+    supportsTimedMarkers,
   ]);
 
   const handleZoomIn = () => {
@@ -962,10 +993,17 @@ function InteractiveCandleChart({
           {emptyLabel}
         </p>
       ) : (
-        <div
-          ref={containerRef}
-          className="w-full h-80 rounded-xl border border-slate-800 bg-slate-950"
-        />
+        <>
+          {!supportsTimedMarkers && (entryPoints.length || exitPoints.length || auditPoints.length) ? (
+            <p className="mb-3 rounded-lg border border-amber-400/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
+              {dailyMarkerWarningLabel}
+            </p>
+          ) : null}
+          <div
+            ref={containerRef}
+            className="w-full h-80 rounded-xl border border-slate-800 bg-slate-950"
+          />
+        </>
       )}
     </div>
   );
@@ -1156,8 +1194,8 @@ function BackStudyPageInner() {
 
   const [selectedDate, setSelectedDate] = useState<string>("");
   const [selectedTradeId, setSelectedTradeId] = useState<string>("");
-  const [timeframe, setTimeframe] = useState<TimeframeId>("5m");
-  const [chartRange, setChartRange] = useState<ChartRangeId>("1Y");
+  const [timeframe, setTimeframe] = useState<TimeframeId>("1m");
+  const [chartRange, setChartRange] = useState<ChartRangeId>("1D");
   const [timeMode, setTimeMode] = useState<TimeMode>("et");
   const candleCacheRef = useRef<Map<string, Candle[]>>(new Map());
 
@@ -1259,12 +1297,14 @@ function BackStudyPageInner() {
     loading: false,
     error: null,
     candles: [],
+    effectiveTimeframe: null,
   });
 
   const [contractState, setContractState] = useState<ChartState>({
     loading: false,
     error: null,
     candles: [],
+    effectiveTimeframe: null,
   });
   const [auditLoading, setAuditLoading] = useState(false);
   const [auditError, setAuditError] = useState<string | null>(null);
@@ -1281,7 +1321,9 @@ function BackStudyPageInner() {
   ): Promise<Candle[]> => {
     const { interval, range } = getYahooParams(tfId, rangeId);
     const yfSymbol = normalizeSymbolForYahoo(symbol, kind);
-    const window = anchorDate ? getPeriodWindow(anchorDate, rangeId) : null;
+    const window = anchorDate
+      ? getReplayPeriodWindow(anchorDate, RANGE_DAYS[rangeId] ?? 30, tfId)
+      : null;
 
     const cacheKey = [
       yfSymbol,
@@ -1331,41 +1373,69 @@ function BackStudyPageInner() {
     }
   };
 
+  const loadBestAvailableCandles = async (
+    symbol: string,
+    requestedTimeframe: TimeframeId,
+    rangeId: ChartRangeId,
+    kind: InstrumentType | undefined,
+    anchorDate: string
+  ): Promise<{ candles: Candle[]; effectiveTimeframe: TimeframeId }> => {
+    const fallbackOrder: Record<TimeframeId, TimeframeId[]> = {
+      "1m": ["1m", "5m", "15m", "1h", "1d"],
+      "5m": ["5m", "15m", "1h", "1d"],
+      "15m": ["15m", "1h", "1d"],
+      "1h": ["1h", "1d"],
+      "4h": ["4h", "1d"],
+      "1d": ["1d"],
+    };
+
+    for (const candidate of fallbackOrder[requestedTimeframe]) {
+      const candles = await fetchCandles(symbol, candidate, rangeId, kind, anchorDate);
+      if (candles.length) return { candles, effectiveTimeframe: candidate };
+    }
+
+    return { candles: [], effectiveTimeframe: requestedTimeframe };
+  };
+
   const loadReplay = async () => {
     if (!selectedTrade) return;
 
     const { underlyingSymbol, contractSymbol, kind } = selectedTrade;
 
-    setUnderlyingState({ loading: true, error: null, candles: [] });
+    setUnderlyingState({ loading: true, error: null, candles: [], effectiveTimeframe: null });
     setContractState({
       loading: !!contractSymbol,
       error: null,
       candles: [],
+      effectiveTimeframe: null,
     });
 
     // Underlying
     try {
-      let uc = await fetchCandles(
+      const underlyingResult = await loadBestAvailableCandles(
         underlyingSymbol,
         timeframe,
         chartRange,
         kind,
         selectedTrade.date
       );
-      let underlyingFallbackMessage: string | null = null;
-      if (!uc.length && timeframe !== "1d") {
-        uc = await fetchCandles(underlyingSymbol, "1d", chartRange, kind, selectedTrade.date);
-        if (uc.length) {
-          underlyingFallbackMessage = L(
-            "Intraday chart data was unavailable for this date/range. Showing daily context instead.",
-            "No hubo data intradía para esa fecha/rango. Mostrando contexto diario."
-          );
-        }
-      }
+      const underlyingFallbackMessage =
+        underlyingResult.candles.length && underlyingResult.effectiveTimeframe !== timeframe
+          ? underlyingResult.effectiveTimeframe === "1d"
+            ? L(
+                "Intraday candles were unavailable for this session. Showing daily context without exact-time markers.",
+                "No hubo velas intradía para esta sesión. Se muestra contexto diario sin marcadores de hora exacta."
+              )
+            : L(
+                `${timeframe} candles were unavailable. Showing the closest intraday resolution: ${underlyingResult.effectiveTimeframe}.`,
+                `No hubo velas de ${timeframe}. Se muestra la resolución intradía más cercana: ${underlyingResult.effectiveTimeframe}.`
+              )
+          : null;
       setUnderlyingState({
         loading: false,
         error: underlyingFallbackMessage,
-        candles: uc,
+        candles: underlyingResult.candles,
+        effectiveTimeframe: underlyingResult.effectiveTimeframe,
       });
     } catch (err) {
       console.warn("Underlying chart error:", err);
@@ -1373,50 +1443,60 @@ function BackStudyPageInner() {
         loading: false,
         error: "Could not load underlying chart.",
         candles: [],
+        effectiveTimeframe: null,
       });
     }
 
     // Contract (if applicable)
     if (contractSymbol) {
       try {
-        const cc = await fetchCandles(
+        const contractResult = await loadBestAvailableCandles(
           contractSymbol,
           timeframe,
           chartRange,
           "option",
           selectedTrade.date
         );
-        if (cc.length) {
+        if (contractResult.candles.length) {
           setContractState({
             loading: false,
-            error: null,
-            candles: cc,
+            error:
+              contractResult.effectiveTimeframe !== timeframe
+                ? contractResult.effectiveTimeframe === "1d"
+                  ? L(
+                      "Intraday contract candles were unavailable. Showing daily contract context without exact-time markers.",
+                      "No hubo velas intradía del contrato. Se muestra contexto diario del contrato sin marcadores de hora exacta."
+                    )
+                  : L(
+                      `${timeframe} contract candles were unavailable. Showing ${contractResult.effectiveTimeframe}.`,
+                      `No hubo velas del contrato en ${timeframe}. Se muestra ${contractResult.effectiveTimeframe}.`
+                    )
+                : null,
+            candles: contractResult.candles,
+            effectiveTimeframe: contractResult.effectiveTimeframe,
           });
         } else {
-          let fallback = await fetchCandles(
+          const proxyResult = await loadBestAvailableCandles(
             underlyingSymbol,
             timeframe,
             chartRange,
             kind,
             selectedTrade.date
           );
-          let fallbackMessage = L(
+          const fallbackMessage = proxyResult.effectiveTimeframe === "1d"
+            ? L(
+                "No intraday contract or underlying candles were available. Showing daily underlying context without exact-time markers.",
+                "No hubo velas intradía del contrato ni del underlying. Se muestra contexto diario del underlying sin marcadores de hora exacta."
+              )
+            : L(
             "No specific contract data found. Showing underlying instead.",
             "No se encontro data exacta del contrato. Mostrando el underlying."
           );
-          if (!fallback.length && timeframe !== "1d") {
-            fallback = await fetchCandles(underlyingSymbol, "1d", chartRange, kind, selectedTrade.date);
-            if (fallback.length) {
-              fallbackMessage = L(
-                "No specific contract/intraday data found. Showing daily underlying context instead.",
-                "No se encontro data exacta del contrato/intradia. Mostrando contexto diario del underlying."
-              );
-            }
-          }
           setContractState({
             loading: false,
             error: fallbackMessage,
-            candles: fallback,
+            candles: proxyResult.candles,
+            effectiveTimeframe: proxyResult.effectiveTimeframe,
           });
         }
       } catch (err) {
@@ -1425,10 +1505,11 @@ function BackStudyPageInner() {
           loading: false,
           error: "Could not load contract chart.",
           candles: [],
+          effectiveTimeframe: null,
         });
       }
     } else {
-      setContractState({ loading: false, error: null, candles: [] });
+      setContractState({ loading: false, error: null, candles: [], effectiveTimeframe: null });
     }
   };
 
@@ -1734,43 +1815,58 @@ function BackStudyPageInner() {
     }
   };
   const auditChartPoints = useMemo(() => {
-    if (!auditEvidence) return [];
+    const brokerEvents = Array.isArray(auditResult?.events) ? auditResult.events.slice(0, 60) : [];
     const points: Array<{
       timestampMs: number;
       price?: number | null;
       label: string;
-      tone: "fill" | "stop" | "cancel";
+      tone: "fill" | "stop" | "cancel" | "order" | "replace";
     }> = [];
-    auditEvidence.fills?.slice(0, 24).forEach((fill, idx) => {
-      const timestampMs = Date.parse(String(fill.ts_utc ?? ""));
+    brokerEvents.forEach((event) => {
+      const timestampMs = Date.parse(String(event.ts_utc ?? ""));
       if (!Number.isFinite(timestampMs)) return;
+
+      const eventType = String(event.event_type || "").toUpperCase();
+      const orderType = String(event.order_type || "").toUpperCase();
+      const status = String(event.status || "").toUpperCase();
+      const isStop =
+        event.stop_price != null || orderType.includes("STP") || status.includes("STOP");
+      const isEntry = String(event.pos_effect || "").toUpperCase() === "TO_OPEN";
+      let tone: "fill" | "stop" | "cancel" | "order" | "replace" = "order";
+      let label = L("Order placed", "Orden colocada");
+
+      if (isStop) {
+        tone = "stop";
+        label = eventType === "ORDER_FILLED"
+          ? L("Stop filled", "Stop ejecutado")
+          : eventType === "ORDER_CANCELED"
+          ? L("Stop canceled", "Stop cancelado")
+          : eventType === "ORDER_REPLACED"
+          ? L("Stop modified", "Stop modificado")
+          : L("Stop placed", "Stop colocado");
+      } else if (eventType === "ORDER_FILLED") {
+        tone = "fill";
+        label = isEntry
+          ? L("Broker entry fill", "Fill de entrada del broker")
+          : L("Broker exit fill", "Fill de salida del broker");
+      } else if (eventType === "ORDER_CANCELED") {
+        tone = "cancel";
+        label = L("Order canceled", "Orden cancelada");
+      } else if (eventType === "ORDER_REPLACED") {
+        tone = "replace";
+        label = L("Order modified", "Orden modificada");
+      }
+
+      const price = toNumber(event.stop_price) ?? toNumber(event.limit_price);
       points.push({
         timestampMs,
-        label: `${L("Broker fill", "Fill broker")} ${idx + 1}`,
-        tone: "fill",
-      });
-    });
-    auditEvidence.stop_events?.slice(0, 24).forEach((stop, idx) => {
-      const timestampMs = Date.parse(String(stop.ts_utc ?? ""));
-      if (!Number.isFinite(timestampMs)) return;
-      points.push({
-        timestampMs,
-        price: typeof stop.stop_price === "number" ? stop.stop_price : null,
-        label: `${L("Stop event", "Evento stop")} ${idx + 1}`,
-        tone: "stop",
-      });
-    });
-    auditEvidence.cancel_events?.slice(0, 12).forEach((cancel, idx) => {
-      const timestampMs = Date.parse(String(cancel.ts_utc ?? ""));
-      if (!Number.isFinite(timestampMs)) return;
-      points.push({
-        timestampMs,
-        label: `${L("Cancel", "Cancelacion")} ${idx + 1}`,
-        tone: "cancel",
+        price,
+        label: `${label}${orderType ? ` (${orderType})` : ""}`,
+        tone,
       });
     });
     return points.sort((a, b) => a.timestampMs - b.timestampMs);
-  }, [auditEvidence, lang]);
+  }, [auditResult, lang]);
   const auditWindowHasNoMatches =
     !auditLoading &&
     !auditError &&
@@ -2588,6 +2684,7 @@ function BackStudyPageInner() {
                               )}
                               candles={underlyingState.candles}
                               selectedDate={selectedTrade.date}
+                              timeframe={underlyingState.effectiveTimeframe ?? timeframe}
                               entryPoints={entryPoints}
                               exitPoints={exitPoints}
                               auditPoints={auditChartPoints}
@@ -2600,6 +2697,10 @@ function BackStudyPageInner() {
                               zoomOutLabel={L("Zoom out", "Alejar")}
                               zoomResetLabel={L("Reset zoom", "Reiniciar zoom")}
                               emptyLabel={L("No chart data for this symbol/timeframe.", "No hay datos de chart para este símbolo/timeframe.")}
+                              dailyMarkerWarningLabel={L(
+                                "Exact event times are hidden because only daily candles are available. Choose an intraday timeframe to place each event on its real candle.",
+                                "Las horas exactas están ocultas porque solo hay velas diarias. Elige un timeframe intradía para colocar cada evento en su vela real."
+                              )}
                             />
                           )}
                         </div>
@@ -2629,6 +2730,7 @@ function BackStudyPageInner() {
                                   )}
                                   candles={contractState.candles}
                                   selectedDate={selectedTrade.date}
+                                  timeframe={contractState.effectiveTimeframe ?? timeframe}
                                   entryPoints={entryPoints}
                                   exitPoints={exitPoints}
                                   auditPoints={auditChartPoints}
@@ -2641,6 +2743,10 @@ function BackStudyPageInner() {
                                   zoomOutLabel={L("Zoom out", "Alejar")}
                                   zoomResetLabel={L("Reset zoom", "Reiniciar zoom")}
                                   emptyLabel={L("No chart data for this symbol/timeframe.", "No hay datos de chart para este símbolo/timeframe.")}
+                                  dailyMarkerWarningLabel={L(
+                                    "Exact event times are hidden because only daily candles are available. Choose an intraday timeframe to place each event on its real candle.",
+                                    "Las horas exactas están ocultas porque solo hay velas diarias. Elige un timeframe intradía para colocar cada evento en su vela real."
+                                  )}
                                 />
                               </div>
                             ) : contractState.error ? (

@@ -28,6 +28,12 @@ import {
 import { getClientIp, rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
 import { requirePlatformAccess } from "@/lib/serverPlatformAccess";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
+import {
+  calculateFundedAccountMetrics,
+  getFundedProfileMissingFields,
+  normalizeFundedAccountProfile,
+  normalizeTradingAccountType,
+} from "@/lib/fundedAccounts";
 
 export const runtime = "nodejs";
 
@@ -481,6 +487,7 @@ async function resolveActiveAccountId(userId: string, requestedAccountId?: strin
       user_id: userId,
       name: "Main trading account",
       broker: null,
+      account_type: "personal",
       is_default: true,
     })
     .select("id")
@@ -494,6 +501,48 @@ async function resolveActiveAccountId(userId: string, requestedAccountId?: strin
   return String(created.id);
 }
 
+async function getTradingAccountContext(userId: string, accountId: string) {
+  const { data: account, error: accountError } = await supabaseAdmin
+    .from("trading_accounts")
+    .select("id,name,broker,account_type")
+    .eq("user_id", userId)
+    .eq("id", accountId)
+    .single();
+  if (accountError) throw accountError;
+
+  const accountType = normalizeTradingAccountType(account?.account_type);
+  if (accountType === "personal") {
+    return {
+      id: String(account.id),
+      name: String(account.name ?? "Trading account"),
+      broker: account.broker ? String(account.broker) : null,
+      accountType,
+      fundedProfile: null,
+      fundedMetrics: null,
+      fundedMissingFields: [] as string[],
+    };
+  }
+
+  const { data: rawProfile, error: profileError } = await supabaseAdmin
+    .from("funded_account_profiles")
+    .select("*")
+    .eq("user_id", userId)
+    .eq("account_id", accountId)
+    .maybeSingle();
+  if (profileError) throw profileError;
+
+  const fundedProfile = normalizeFundedAccountProfile(rawProfile);
+  return {
+    id: String(account.id),
+    name: String(account.name ?? "Funded account"),
+    broker: account.broker ? String(account.broker) : null,
+    accountType,
+    fundedProfile,
+    fundedMetrics: calculateFundedAccountMetrics(fundedProfile),
+    fundedMissingFields: getFundedProfileMissingFields(fundedProfile),
+  };
+}
+
 async function getPlanRow(userId: string, accountId: string) {
   const { data, error } = await supabaseAdmin
     .from("growth_plans")
@@ -502,18 +551,7 @@ async function getPlanRow(userId: string, accountId: string) {
     .eq("account_id", accountId)
     .maybeSingle();
   if (error) throw error;
-  if (data) return data as GrowthPlanRow;
-
-  const fallback = await supabaseAdmin
-    .from("growth_plans")
-    .select("*")
-    .eq("user_id", userId)
-    .order("updated_at", { ascending: false })
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (fallback.error) throw fallback.error;
-  return (fallback.data as GrowthPlanRow | null) ?? null;
+  return (data as GrowthPlanRow | null) ?? null;
 }
 
 function summarize(row: GrowthPlanRow | null) {
@@ -613,8 +651,9 @@ export async function GET(req: NextRequest) {
     const userId = access.context.userId;
     const accountId = await resolveActiveAccountId(userId, searchParams.get("accountId"));
     const row = await getPlanRow(userId, accountId);
+    const account = await getTradingAccountContext(userId, accountId);
 
-    return NextResponse.json({ accountId, plan: normalizePlan(row) });
+    return NextResponse.json({ accountId, account, plan: normalizePlan(row) });
   } catch (err: any) {
     console.error("[growth-plan/mobile] GET error:", err);
     return NextResponse.json({ error: err?.message ?? "Unknown error" }, { status: 500 });
@@ -641,6 +680,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json().catch(() => ({}));
     const accountId = await resolveActiveAccountId(userId, cleanText(body?.accountId, 80) || null);
     const current = await getPlanRow(userId, accountId);
+    const account = await getTradingAccountContext(userId, accountId);
     const action = cleanText(body?.action, 40).toLowerCase();
 
     if (action === "reset") {
@@ -649,7 +689,38 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: "Reset confirmation phrase is required." }, { status: 400 });
       }
       await resetPlanData(userId, accountId, current);
-      return NextResponse.json({ ok: true, accountId, plan: null });
+      return NextResponse.json({ ok: true, accountId, account, plan: null });
+    }
+
+    if (account.accountType === "funded" && account.fundedMissingFields.length) {
+      return NextResponse.json(
+        {
+          error: "Complete and confirm the funded-account rules before building its Business Plan.",
+          code: "FUNDED_RULES_INCOMPLETE",
+          account,
+        },
+        { status: 409 }
+      );
+    }
+    if (account.fundedMetrics?.status === "stop") {
+      return NextResponse.json(
+        {
+          error: "This funded account has no remaining drawdown room. Trading-plan activation is blocked.",
+          code: "FUNDED_BREACH_FLOOR_REACHED",
+          account,
+        },
+        { status: 409 }
+      );
+    }
+    if (account.fundedMetrics && account.fundedMetrics.remainingProfitTarget <= 0) {
+      return NextResponse.json(
+        {
+          error: "This funded stage target is complete. Update the stage or next payout target before building another plan.",
+          code: "FUNDED_STAGE_TARGET_REACHED",
+          account,
+        },
+        { status: 409 }
+      );
     }
 
     const disclosure = body?.disclosure && typeof body.disclosure === "object" ? body.disclosure : {};
@@ -669,8 +740,13 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const startingBalance = clampNumber(body?.startingBalance, 1, 100_000_000, 0);
-    const targetBalance = clampNumber(body?.targetBalance, 1, 1_000_000_000, 0);
+    const fundedMetrics = account.fundedMetrics;
+    const startingBalance = fundedMetrics
+      ? fundedMetrics.currentEquity
+      : clampNumber(body?.startingBalance, 1, 100_000_000, 0);
+    const targetBalance = fundedMetrics
+      ? fundedMetrics.targetBalance
+      : clampNumber(body?.targetBalance, 1, 1_000_000_000, 0);
     const planStartDate = cleanDate(body?.planStartDate) || isoToday();
     const currentBusinessAnalysis =
       current?.steps?.business_analysis && typeof current.steps.business_analysis === "object"
@@ -768,10 +844,16 @@ export async function POST(req: NextRequest) {
       ? ((returnModelMode === "manual" ? existingScenarioId : returnModelMode) as GrowthPlanScenarioId)
       : "moderate";
     const basePolicy = getGrowthPlanOperatingPolicy(policyId);
-    const maxDailyLossPercent =
+    const selectedMaxDailyLossPercent =
       returnModelMode === "manual" ? requestedMaxDailyLossPercent : basePolicy.maxDailyLossPct;
-    const maxRiskPerTradePercent =
+    const selectedMaxRiskPerTradePercent =
       returnModelMode === "manual" ? requestedMaxRiskPerTradePercent : basePolicy.riskPerTradePct;
+    const maxDailyLossPercent = fundedMetrics
+      ? Math.min(selectedMaxDailyLossPercent, fundedMetrics.operatingDailyStopPercent)
+      : selectedMaxDailyLossPercent;
+    const maxRiskPerTradePercent = fundedMetrics
+      ? Math.min(selectedMaxRiskPerTradePercent, fundedMetrics.recommendedRiskPerTradePercent)
+      : selectedMaxRiskPerTradePercent;
     const existingSelectedScenario = currentBusinessAnalysis?.selectedScenario ?? {};
     const declaredGoalDayPct =
       returnModelMode === "manual"
@@ -786,24 +868,31 @@ export async function POST(req: NextRequest) {
       returnModelMode === "manual"
         ? clampNumber(
             body?.expectedLossDayPct ?? existingSelectedScenario?.expectedLossDayPct,
-            0.01,
-            Math.max(0.01, maxDailyLossPercent),
-            Math.min(basePolicy.expectedLossDayPct, Math.max(0.01, maxDailyLossPercent))
+            0.0001,
+            Math.max(0.0001, maxDailyLossPercent),
+            Math.min(basePolicy.expectedLossDayPct, Math.max(0.0001, maxDailyLossPercent))
           )
-        : basePolicy.expectedLossDayPct;
+        : fundedMetrics
+          ? Math.min(
+              basePolicy.expectedLossDayPct,
+              Math.max(0.0001, maxDailyLossPercent * 0.6)
+            )
+          : basePolicy.expectedLossDayPct;
     const existingDepositSettings = normalizeDepositSettings(
       currentOperatingModel?.plannedDepositSettings
     );
     const existingWithdrawalSettings =
       normalizeWithdrawalSettings(currentOperatingModel?.plannedWithdrawalSettings) ??
       normalizeWithdrawalSettings(current?.planned_withdrawal_settings);
-    const plannedDepositSettings = resolveCapitalFlowSettings({
-      mode: body?.plannedDepositMode,
-      frequency: body?.plannedDepositFrequency,
-      amount: body?.plannedDepositAmount,
-      startPeriodIndex: body?.plannedDepositStartPeriod,
-      existing: existingDepositSettings,
-    });
+    const plannedDepositSettings = fundedMetrics
+      ? { enabled: false, frequency: "monthly" as const, amount: 0, startPeriodIndex: 1 }
+      : resolveCapitalFlowSettings({
+          mode: body?.plannedDepositMode,
+          frequency: body?.plannedDepositFrequency,
+          amount: body?.plannedDepositAmount,
+          startPeriodIndex: body?.plannedDepositStartPeriod,
+          existing: existingDepositSettings,
+        });
     const plannedWithdrawalSettings = resolveCapitalFlowSettings({
       mode: body?.plannedWithdrawalMode,
       frequency: body?.plannedWithdrawalFrequency,
@@ -814,7 +903,9 @@ export async function POST(req: NextRequest) {
     const operatingPolicy = {
       id: policyId,
       goalDayReturnPct: basePolicy.goalDayReturnPct,
-      expectedLossDayPct: basePolicy.expectedLossDayPct,
+      expectedLossDayPct: fundedMetrics
+        ? Math.min(basePolicy.expectedLossDayPct, Math.max(0.0001, maxDailyLossPercent * 0.6))
+        : basePolicy.expectedLossDayPct,
       maxDailyLossPct: maxDailyLossPercent,
       riskPerTradePct: maxRiskPerTradePercent,
       lossDaysPerWeek,
@@ -952,6 +1043,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({
         ok: true,
         accountId,
+        account,
         projection: {
           requiredGoalPct: Number(projection.requiredGoalPct.toFixed(4)),
           tradingDays: projection.tradingDays.length,
@@ -1086,6 +1178,13 @@ export async function POST(req: NextRequest) {
           plannedDepositSettings,
           plannedWithdrawalMode: plannedWithdrawalSettings?.enabled ? "scheduled" : "none",
           plannedWithdrawalSettings,
+          accountType: account.accountType,
+          fundedAccount: account.fundedProfile && fundedMetrics
+            ? {
+                ...account.fundedProfile,
+                metrics: fundedMetrics,
+              }
+            : null,
           tradingInstrument,
           runway: {
             amount: effectiveRunway.amount,
@@ -1277,6 +1376,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       ok: true,
       accountId,
+      account,
       plan: normalizePlan(data as GrowthPlanRow),
       protectionSync,
       projection: {
