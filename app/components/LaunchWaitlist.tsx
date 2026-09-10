@@ -319,7 +319,7 @@ export default function LaunchWaitlist({ source = "homepage" }: { source?: strin
               </label>
 
               <label className="hidden">
-                Company
+                {L("Company", "Empresa")}
                 <input
                   value={company}
                   onChange={(event) => setCompany(event.target.value)}

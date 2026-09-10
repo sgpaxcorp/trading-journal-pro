@@ -495,7 +495,9 @@ export default function AdminEmailAutomations({ lang }: Props) {
                   </p>
                 </div>
                 <div>
-                  <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Promo code</p>
+                  <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
+                    {L("Promo code", "Código promocional")}
+                  </p>
                   <p className={`mt-1 break-all text-sm font-semibold ${waitlistLaunch.promotionConfigured ? "text-emerald-300" : "text-amber-300"}`}>
                     {waitlistLaunch.promoCode || L("Not configured", "No configurado")}
                   </p>

@@ -470,7 +470,7 @@ export default function CommunityFeedPage() {
             <div className="p-4 space-y-3">
               <div className="grid grid-cols-1 md:grid-cols-[1fr,1fr] gap-2">
                 <div>
-                  <label className="block text-xs text-slate-400 mb-1">Category</label>
+                  <label className="block text-xs text-slate-400 mb-1">{L("Category", "Categoría")}</label>
                   <select
                     value={newCategoryId}
                     onChange={(e) => setNewCategoryId(e.target.value)}

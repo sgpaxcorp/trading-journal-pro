@@ -85,7 +85,7 @@ export default function FundedAccountFields({ profile, onChange, lang, idPrefix 
           >
             <option value="evaluation">{L("Evaluation", "Evaluación")}</option>
             <option value="verification">{L("Verification", "Verificación")}</option>
-            <option value="funded">Funded</option>
+            <option value="funded">{L("Funded", "Fondeada")}</option>
           </select>
         </label>
 

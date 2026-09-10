@@ -1217,7 +1217,9 @@ export default function NeuroAnalysisPage() {
         <TopNav />
         <div className="mx-auto max-w-3xl px-6 py-16">
           <div className="rounded-xl border border-sky-500/30 bg-sky-500/5 p-6">
-            <p className="text-xs font-semibold uppercase text-sky-300">Smart Tools BETA</p>
+            <p className="text-xs font-semibold uppercase text-sky-300">
+              {L("Smart Tools BETA", "Herramientas inteligentes BETA")}
+            </p>
             <h1 className="mt-3 text-2xl font-semibold">{L("Closed beta", "Beta cerrada")}</h1>
             <p className="mt-3 text-sm leading-6 text-slate-300">
               {L(
@@ -1241,7 +1243,7 @@ export default function NeuroAnalysisPage() {
             <div className="max-w-5xl">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="rounded-full border border-sky-400/40 bg-sky-500/10 px-3 py-1 text-[11px] font-semibold uppercase text-sky-200">
-                  Smart Tools Beta
+                  {L("Smart Tools Beta", "Herramientas inteligentes Beta")}
                 </span>
                 <span className="rounded-full border border-emerald-400/40 bg-emerald-500/10 px-3 py-1 text-[11px] font-semibold uppercase text-emerald-200">
                   {L("Research desk", "Mesa de research")}
@@ -1417,7 +1419,7 @@ export default function NeuroAnalysisPage() {
                 <table className="w-full min-w-[820px] text-left text-sm">
                   <thead className="bg-slate-950/55 text-xs text-slate-500">
                     <tr>
-                      <th className="px-3 py-2">Ticker</th>
+                      <th className="px-3 py-2">{L("Ticker", "Símbolo")}</th>
                       <th className="px-3 py-2">{L("Shares", "Acciones")}</th>
                       <th className="px-3 py-2">{L("Avg. cost", "Costo prom.")}</th>
                       <th className="px-3 py-2">{L("Current price", "Precio actual")}</th>
@@ -1832,8 +1834,8 @@ export default function NeuroAnalysisPage() {
                       <YAxis tick={{ fontSize: 10, fill: "#94a3b8" }} tickFormatter={(value) => formatCompactNumber(Number(value), localeTag)} />
                       <Tooltip formatter={(value: any) => formatCompactCurrency(Number(value), localeTag)} labelStyle={{ color: "#0f172a" }} />
                       <Legend wrapperStyle={{ fontSize: 11 }} />
-                      <Bar dataKey="totalRevenue" name="Revenue" fill="#38bdf8" radius={[4, 4, 0, 0]} />
-                      <Bar dataKey="netIncome" name="Net income" fill="#34d399" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="totalRevenue" name={L("Revenue", "Ingresos")} fill="#38bdf8" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="netIncome" name={L("Net income", "Ingreso neto")} fill="#34d399" radius={[4, 4, 0, 0]} />
                       <Bar dataKey="freeCashFlow" name="FCF" fill="#fbbf24" radius={[4, 4, 0, 0]} />
                     </RechartsBarChart>
                   </ResponsiveContainer>
@@ -1856,9 +1858,9 @@ export default function NeuroAnalysisPage() {
                       <YAxis tick={{ fontSize: 10, fill: "#94a3b8" }} tickFormatter={(value) => formatPercent(Number(value), localeTag)} />
                       <Tooltip formatter={(value: any) => formatPercent(Number(value), localeTag)} labelStyle={{ color: "#0f172a" }} />
                       <Legend wrapperStyle={{ fontSize: 11 }} />
-                      <Line type="monotone" dataKey="operatingMargin" name="Op margin" stroke="#38bdf8" strokeWidth={2} dot={false} />
-                      <Line type="monotone" dataKey="netMargin" name="Net margin" stroke="#34d399" strokeWidth={2} dot={false} />
-                      <Line type="monotone" dataKey="fcfMargin" name="FCF margin" stroke="#fbbf24" strokeWidth={2} dot={false} />
+                      <Line type="monotone" dataKey="operatingMargin" name={L("Operating margin", "Margen operativo")} stroke="#38bdf8" strokeWidth={2} dot={false} />
+                      <Line type="monotone" dataKey="netMargin" name={L("Net margin", "Margen neto")} stroke="#34d399" strokeWidth={2} dot={false} />
+                      <Line type="monotone" dataKey="fcfMargin" name={L("FCF margin", "Margen FCF")} stroke="#fbbf24" strokeWidth={2} dot={false} />
                     </RechartsLineChart>
                   </ResponsiveContainer>
                 ) : (
@@ -1881,7 +1883,7 @@ export default function NeuroAnalysisPage() {
                       <XAxis dataKey="date" tick={{ fontSize: 10, fill: "#94a3b8" }} minTickGap={24} />
                       <YAxis tick={{ fontSize: 10, fill: "#94a3b8" }} tickFormatter={(value) => formatCurrency(Number(value), localeTag)} />
                       <Tooltip formatter={(value: any) => formatCurrency(Number(value), localeTag)} labelStyle={{ color: "#0f172a" }} />
-                      <Line type="monotone" dataKey="close" name="Close" stroke="#38bdf8" strokeWidth={2} dot={false} />
+                      <Line type="monotone" dataKey="close" name={L("Close", "Cierre")} stroke="#38bdf8" strokeWidth={2} dot={false} />
                     </RechartsLineChart>
                   </ResponsiveContainer>
                 ) : (
@@ -2027,7 +2029,7 @@ export default function NeuroAnalysisPage() {
               <table className="w-full min-w-[760px] text-left text-sm">
                 <thead className="bg-slate-950/55 text-xs text-slate-500">
                   <tr>
-                    <th className="px-3 py-2">Ticker</th>
+                    <th className="px-3 py-2">{L("Ticker", "Símbolo")}</th>
                     <th className="px-3 py-2">{L("Verdict", "Veredicto")}</th>
                     <th className="px-3 py-2">{L("Current weight", "Peso actual")}</th>
                     <th className="px-3 py-2">{L("Target weight", "Peso sugerido")}</th>

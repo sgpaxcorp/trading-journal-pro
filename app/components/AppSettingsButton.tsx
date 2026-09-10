@@ -2,6 +2,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useAppSettings, type AppLocale } from "@/lib/appSettings";
 import { resolveLocale, t as translate } from "@/lib/i18n";
 
@@ -32,6 +33,7 @@ function GearIcon() {
 }
 
 export default function AppSettingsButton() {
+  const router = useRouter();
   const { theme, locale, setTheme, setLocale } = useAppSettings();
   const lang = resolveLocale(locale);
   const t = (key: string, fallback?: string) => translate(key, lang, fallback);
@@ -148,6 +150,7 @@ export default function AppSettingsButton() {
                     const v = e.target.value;
                     if (v === "auto" || v === "en" || v === "es") {
                       setLocale(v);
+                      router.refresh();
                     }
                   }}
                 >

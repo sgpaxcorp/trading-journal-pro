@@ -225,7 +225,7 @@ export default function DashboardGrid({
   if (!ready) {
     return (
       <div className="w-full min-h-[200px] rounded-2xl border border-slate-800 bg-slate-900/60 flex items-center justify-center text-slate-400 text-sm">
-        Loading layout...
+        {L("Loading layout...", "Cargando diseño...")}
       </div>
     );
   }

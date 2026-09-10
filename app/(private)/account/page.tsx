@@ -1022,7 +1022,7 @@ export default function AccountPage() {
                 )}
               </p>
               <p className="text-[11px] text-rose-200/70 mt-2">
-                {L("Type DELETE to confirm.", "Escribe DELETE para confirmar.")}
+                {L("Type DELETE to confirm.", "Escribe ELIMINAR para confirmar.")}
               </p>
             </div>
           </div>
@@ -1031,11 +1031,11 @@ export default function AccountPage() {
               value={deleteConfirm}
               onChange={(e) => setDeleteConfirm(e.target.value)}
               className="w-full rounded-md bg-slate-950 border border-rose-500/40 px-3 py-2 text-xs text-slate-100 outline-none focus:border-rose-300"
-              placeholder="DELETE"
+              placeholder={isEs ? "ELIMINAR" : "DELETE"}
             />
             <button
               type="button"
-              disabled={deleteConfirm.trim().toUpperCase() !== "DELETE" || deletingAccount}
+              disabled={deleteConfirm.trim().toUpperCase() !== (isEs ? "ELIMINAR" : "DELETE") || deletingAccount}
               onClick={async () => {
                 const ok = window.confirm(
                   L(

@@ -382,9 +382,9 @@ export default function AiCostControlPanel({ lang }: Props) {
             <table className="w-full text-sm">
               <thead className="text-left text-[10px] uppercase tracking-[0.16em] text-slate-500">
                 <tr className="border-b border-slate-800">
-                  <th className="pb-3 pr-4">Feature</th>
+                  <th className="pb-3 pr-4">{L("Feature", "Función")}</th>
                   <th className="pb-3 pr-4">{L("Category", "Categoría")}</th>
-                  <th className="pb-3 pr-4 text-right">Requests</th>
+                  <th className="pb-3 pr-4 text-right">{L("Requests", "Solicitudes")}</th>
                   <th className="pb-3 text-right">{L("Cost", "Costo")}</th>
                 </tr>
               </thead>
@@ -428,9 +428,9 @@ export default function AiCostControlPanel({ lang }: Props) {
                   <p className="font-semibold text-cyan-200">{money(row.estimated_cost_usd, 4)}</p>
                 </div>
                 <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
-                  <span>{compact(row.input_tokens)} in</span>
-                  <span>{compact(row.output_tokens)} out</span>
-                  <span>{compact(row.requests)} requests</span>
+                  <span>{compact(row.input_tokens)} {L("in", "entrada")}</span>
+                  <span>{compact(row.output_tokens)} {L("out", "salida")}</span>
+                  <span>{compact(row.requests)} {L("requests", "solicitudes")}</span>
                   <span className={row.pricing_matched ? "text-emerald-300" : "text-rose-300"}>{row.pricing_matched ? L("Rate matched", "Tarifa reconocida") : L("Rate missing", "Falta tarifa")}</span>
                 </div>
               </div>
@@ -464,7 +464,7 @@ export default function AiCostControlPanel({ lang }: Props) {
                   <p className="font-semibold capitalize text-slate-200">{row.plan_tier}</p>
                   <p className="font-semibold text-emerald-200">{money(row.estimated_cost_usd, 4)}</p>
                 </div>
-                <p className="mt-2 text-xs text-slate-500">{compact(row.active_users)} {L("users", "usuarios")} · {compact(row.requests)} requests</p>
+                <p className="mt-2 text-xs text-slate-500">{compact(row.active_users)} {L("users", "usuarios")} · {compact(row.requests)} {L("requests", "solicitudes")}</p>
               </div>
             ))}
             {!data.usage?.byPlan?.length ? <p className="text-sm text-slate-500">{L("No plan usage yet.", "Aún no hay uso por plan.")}</p> : null}
@@ -479,9 +479,9 @@ export default function AiCostControlPanel({ lang }: Props) {
               <thead className="text-left text-[10px] uppercase tracking-[0.16em] text-slate-500">
                 <tr className="border-b border-slate-800">
                   <th className="pb-3 pr-4">{L("User", "Usuario")}</th>
-                  <th className="pb-3 pr-4">Plan</th>
-                  <th className="pb-3 pr-4 text-right">Requests</th>
-                  <th className="pb-3 pr-4 text-right">Tokens</th>
+                  <th className="pb-3 pr-4">{L("Plan", "Plan")}</th>
+                  <th className="pb-3 pr-4 text-right">{L("Requests", "Solicitudes")}</th>
+                  <th className="pb-3 pr-4 text-right">{L("Tokens", "Tokens")}</th>
                   <th className="pb-3 text-right">{L("Estimated", "Estimado")}</th>
                 </tr>
               </thead>

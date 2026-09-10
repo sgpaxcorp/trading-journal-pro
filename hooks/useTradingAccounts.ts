@@ -50,17 +50,19 @@ export function useTradingAccounts() {
 
       const rows: TradingAccount[] = Array.isArray(body?.accounts) ? body.accounts : [];
       setAccounts(rows);
-      const nextActive = body?.activeAccountId ?? null;
-      setActiveAccountId(nextActive);
+      const savedActive = typeof body?.activeAccountId === "string" ? body.activeAccountId : null;
+      const savedAccount = savedActive ? rows.find((row) => row.id === savedActive) : null;
+      const preferred = savedAccount ?? rows.find((row) => row.is_default) ?? rows[0] ?? null;
+
+      // Make the usable account available immediately so dependent pages can
+      // hydrate while the preference is being repaired on the server.
+      setActiveAccountId(preferred?.id ?? null);
 
       if (rows.length === 0) {
         // create a default account
         await createAccount("Primary", "");
-      } else if (!nextActive) {
-        const preferred = rows.find((r: TradingAccount) => r.is_default) ?? rows[0];
-        if (preferred?.id) {
-          await setActive(preferred.id);
-        }
+      } else if (preferred?.id && preferred.id !== savedActive) {
+        await setActive(preferred.id);
       }
     } catch (err: any) {
       console.warn("[useTradingAccounts] load error:", err);

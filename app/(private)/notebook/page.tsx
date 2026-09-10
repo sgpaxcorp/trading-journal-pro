@@ -1,3220 +1,869 @@
-// app/notebook/page.tsx
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { motion, AnimatePresence } from "framer-motion";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import {
+  BookOpen,
+  BrainCircuit,
+  BriefcaseBusiness,
+  CalendarDays,
+  CheckCircle2,
+  ChevronRight,
+  ExternalLink,
+  FileSearch,
+  FolderPlus,
+  History,
+  Layers3,
+  LoaderCircle,
+  Menu,
+  NotebookPen,
+  Paperclip,
+  Pin,
+  Plus,
+  RotateCcw,
+  Search,
+  Send,
+  ShieldCheck,
+  Sparkles,
+  Target,
+  Trash2,
+  Upload,
+  X,
+} from "lucide-react";
 
-import { useAuth } from "@/context/AuthContext";
-import { useUserPlan } from "@/hooks/useUserPlan";
+import NotebookInkField from "@/app/components/NotebookInkField";
 import TopNav from "@/app/components/TopNav";
+import { useAuth } from "@/context/AuthContext";
 import { useTradingAccounts } from "@/hooks/useTradingAccounts";
+import { useUserPlan } from "@/hooks/useUserPlan";
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
-import { supabaseBrowser } from "@/lib/supaBaseClient";
-import type { JournalEntry } from "@/lib/journalTypes";
-import { getAllJournalEntries } from "@/lib/journalSupabase";
-import NotebookInkField from "@/app/components/NotebookInkField";
+import { createNotebookEditableContent, type NotebookEditableContent } from "@/lib/notebookInk";
+import { notebookApi, NotebookApiError, notebookWorkspaceAction } from "@/lib/notebookClient";
 import {
-  createNotebookBook,
-  createNotebookPage,
-  createNotebookSection,
-  deleteNotebookBook,
-  deleteNotebookPage,
-  deleteNotebookSection,
-  listNotebookData,
-  updateNotebookBook,
-  updateNotebookPage,
-  updateNotebookSection,
-  type NotebookBookRow,
-  type NotebookPageRow,
-  type NotebookSectionRow,
-  type NotebookStorage,
-} from "@/lib/notebookSupabase";
-import {
-  getFreeNotebookNote,
-  listFreeNotebookNotes,
-  upsertFreeNotebookNote,
-  type FreeNotebookNoteRow,
-} from "@/lib/notebookFreeNotesSupabase";
-import {
-  createNotebookEditableContent,
-  getNotebookInkMode,
-  type NotebookEditableContent,
-  type NotebookInkPayload,
-} from "@/lib/notebookInk";
+  NOTEBOOK_PAGE_STATUSES,
+  NOTEBOOK_PAGE_TYPES,
+  NOTEBOOK_TEMPLATES,
+  stripNotebookHtml,
+  type NotebookAsset,
+  type NotebookBook,
+  type NotebookLibrary,
+  type NotebookPageDetail,
+  type NotebookPageStatus,
+  type NotebookPageSummary,
+  type NotebookPageType,
+  type NotebookScope,
+  type NotebookSection,
+  type NotebookVersion,
+} from "@/lib/notebookKnowledge";
 
-/* =========================
-   Types & helpers
-========================= */
+type WorkspaceView = "overview" | "daily" | "library" | "trash";
+type SaveState = "idle" | "dirty" | "saving" | "saved" | "error" | "conflict";
 
-type ViewMode = "notebook" | "calendar";
-type NotebookSubView = "journal" | "custom";
+type DailyFacts = {
+  executionRecords: number;
+  pnl: number;
+  outcome: "profit" | "loss" | "flat" | "no_activity";
+  planRespected: number;
+  planViolated: number;
+  noteBlocks: { premarket: boolean; live: boolean; post: boolean };
+  instruments: string[];
+};
 
-type Holiday = {
-  date: string; // YYYY-MM-DD
+type DailyNote = {
+  id?: string;
+  content?: string | null;
+  ink?: unknown;
+  version?: number;
+  updated_at?: string | null;
+};
+
+type SearchHit = {
+  id: string;
+  sourceType: "page" | "daily_review" | "journal";
   label: string;
-  marketClosed?: boolean;
+  excerpt: string;
+  href: string;
+  date?: string | null;
 };
 
-type LocalNotebook = NotebookBookRow;
-type LocalNotebookSection = NotebookSectionRow;
-type LocalNotebookPage = NotebookPageRow;
-type CreateMode = "book" | "section" | "page";
-type ManageTarget =
-  | { kind: "book"; book: LocalNotebook }
-  | { kind: "section"; section: LocalNotebookSection }
-  | { kind: "page"; page: LocalNotebookPage };
-type NotebookSelection = {
-  notebookId?: string | null;
-  sectionId?: string | null;
-  pageId?: string | null;
+type TrashData = {
+  books: NotebookBook[];
+  pages: NotebookPageSummary[];
+  available: boolean;
 };
 
-type NotebookSurfaceMeta = {
-  kind: "blank" | "text" | "ink" | "ios-ink";
-  words: number;
-  strokes: number;
+const PAGE_TYPE_ICONS: Record<NotebookPageType, typeof NotebookPen> = {
+  general: NotebookPen,
+  daily_review: CalendarDays,
+  lesson: Sparkles,
+  setup_playbook: Target,
+  risk_rule: ShieldCheck,
+  research: FileSearch,
+  decision: CheckCircle2,
+  funded_program: BriefcaseBusiness,
 };
 
-const NOTEBOOK_PAGES_TABLE = "ntj_notebook_pages";
-const NOTEBOOK_SECTIONS_TABLE = "ntj_notebook_sections";
-const UNASSIGNED_SECTION_KEY = "__unassigned__";
-
-function toYMD(date: Date): string {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, "0");
-  const d = String(date.getDate()).padStart(2, "0");
-  return `${y}-${m}-${d}`;
+function todayYmd() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
 }
 
-function formatShortDate(dateStr: string, locale?: string) {
-  const d = new Date(`${dateStr}T00:00:00`);
-  return d.toLocaleDateString(locale, {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
-}
-
-function formatSavedTime(ts?: number, locale?: string) {
-  if (!ts) return "";
-  return new Date(ts).toLocaleTimeString(locale, {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
-function formatShortDateTime(value?: string | null, locale?: string) {
+function formatDate(value: string | null | undefined, locale: string) {
   if (!value) return "";
-  const date = new Date(value);
+  const date = new Date(value.length === 10 ? `${value}T12:00:00` : value);
   if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleString(locale, {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  return date.toLocaleDateString(locale, { month: "short", day: "numeric", year: "numeric" });
 }
 
-// Evita mostrar JSON crudo como notas
-function getNotebookPreview(raw: any, fallbackText: string): string | null {
-  if (!raw) return null;
+function money(value: number, locale: string) {
+  return new Intl.NumberFormat(locale, { style: "currency", currency: "USD", maximumFractionDigits: 2 }).format(value || 0);
+}
 
-  const previewFromStructured = (value: any): string | null => {
-    const candidates = [
-      value?.premarket,
-      value?.live,
-      value?.post,
-      value?.after_review?.notes?.didWell,
-      value?.after_review?.notes?.improve,
-    ];
-
-    for (const candidate of candidates) {
-      const clean = clampText(stripHtml(typeof candidate === "string" ? candidate : ""), 140);
-      if (clean) return clean;
-    }
-
-    return null;
+function pageTypeLabel(type: NotebookPageType, isEs: boolean) {
+  const labels: Record<NotebookPageType, [string, string]> = {
+    general: ["General note", "Nota general"],
+    daily_review: ["Daily review", "Revisión diaria"],
+    lesson: ["Lesson", "Lección"],
+    setup_playbook: ["Setup playbook", "Playbook de setup"],
+    risk_rule: ["Risk rule", "Regla de riesgo"],
+    research: ["Research", "Investigación"],
+    decision: ["Decision", "Decisión"],
+    funded_program: ["Funded program", "Programa fondeado"],
   };
-
-  if (typeof raw === "string") {
-    const trimmed = raw.trim();
-    if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
-      try {
-        const parsed = JSON.parse(trimmed);
-        return previewFromStructured(parsed) || fallbackText;
-      } catch {
-        return fallbackText;
-      }
-    }
-    return trimmed;
-  }
-
-  if (typeof raw === "object") {
-    return previewFromStructured(raw) || fallbackText;
-  }
-
-  return null;
+  return labels[type][isEs ? 1 : 0];
 }
 
-function stripHtml(input?: string | null): string {
-  if (!input) return "";
-  return String(input).replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
-}
-
-function clampText(input: string, max = 900): string {
-  if (!input) return "";
-  if (input.length <= max) return input;
-  return `${input.slice(0, max).trim()}…`;
-}
-
-function parseTimeToMinutes(raw?: string | null): number | null {
-  const value = String(raw ?? "").trim();
-  if (!value) return null;
-
-  const match = value.match(/^(\d{1,2}):(\d{2})(?:\s*([AaPp])\.?\s*[Mm]\.?)?$/);
-  if (!match) return null;
-
-  let hours = Number(match[1]);
-  const minutes = Number(match[2]);
-  const meridiem = match[3]?.toLowerCase() ?? null;
-
-  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return null;
-  if (minutes < 0 || minutes > 59) return null;
-
-  if (meridiem) {
-    if (hours < 1 || hours > 12) return null;
-    if (meridiem === "p" && hours < 12) hours += 12;
-    if (meridiem === "a" && hours === 12) hours = 0;
-  } else if (hours < 0 || hours > 23) {
-    return null;
-  }
-
-  return hours * 60 + minutes;
-}
-
-function getNotebookBodyPreview(
-  content: string | null | undefined,
-  ink: NotebookInkPayload | null | undefined,
-  messages: {
-    empty: string;
-    sketch: string;
-    iosSketch: string;
-  }
-): string {
-  const textPreview = clampText(stripHtml(content), 90);
-  if (textPreview) return textPreview;
-
-  if (ink?.mode === "ink") {
-    if (ink.drawing?.engine === "pencilkit") {
-      return messages.iosSketch;
-    }
-    return messages.sketch;
-  }
-
-  return messages.empty;
-}
-
-function countNotebookWords(content?: string | null): number {
-  const text = stripHtml(content);
-  if (!text) return 0;
-  return text.split(/\s+/).filter(Boolean).length;
-}
-
-function getNotebookStrokeCount(ink?: NotebookInkPayload | null): number {
-  if (ink?.drawing?.engine === "skia") {
-    return ink.drawing.strokes.length;
-  }
-  if (ink?.drawing?.engine === "pencilkit") {
-    return 1;
-  }
-  return 0;
-}
-
-function getNotebookSurfaceMeta(
-  content: string | null | undefined,
-  ink: NotebookInkPayload | null | undefined
-): NotebookSurfaceMeta {
-  const words = countNotebookWords(content);
-  const strokes = getNotebookStrokeCount(ink);
-
-  if (ink?.mode === "ink" && ink.drawing?.engine === "pencilkit") {
-    return {
-      kind: "ios-ink",
-      words,
-      strokes,
-    };
-  }
-
-  if (ink?.mode === "ink") {
-    return {
-      kind: "ink",
-      words,
-      strokes,
-    };
-  }
-
-  if (words > 0) {
-    return {
-      kind: "text",
-      words,
-      strokes,
-    };
-  }
-
-  return {
-    kind: "blank",
-    words,
-    strokes,
+function statusLabel(status: NotebookPageStatus, isEs: boolean) {
+  const labels: Record<NotebookPageStatus, [string, string]> = {
+    draft: ["Draft", "Borrador"],
+    candidate: ["Candidate", "Candidata"],
+    validated: ["Validated", "Validada"],
+    active: ["Active", "Activa"],
+    retired: ["Retired", "Retirada"],
+    archived: ["Archived", "Archivada"],
   };
+  return labels[status][isEs ? 1 : 0];
 }
 
-function parseNotesJson(raw: unknown): Record<string, any> | null {
-  if (!raw) return null;
-  if (typeof raw === "object") return raw as Record<string, any>;
-  if (typeof raw !== "string") return null;
-  try {
-    const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === "object" ? (parsed as Record<string, any>) : null;
-  } catch {
-    return null;
-  }
+function sourceHref(page: NotebookPageDetail) {
+  if (!page.source_type || !page.source_id) return "";
+  if (page.source_type === "journal_day") return `/journal/${page.source_id}`;
+  if (page.source_type === "back_study" || page.source_type === "trade") return `/back-study?trade=${encodeURIComponent(page.source_id)}`;
+  if (page.source_type === "business_plan") return "/growth-plan";
+  if (page.source_type === "ai_coaching") return "/performance/ai-coaching";
+  return "";
 }
 
-// IDs generados por Supabase
-
-// localStorage eliminado; persistimos en Supabase
-
-/** Helpers de holidays */
-
-function getNthWeekdayOfMonth(
-  year: number,
-  month: number,
-  weekday: number,
-  n: number
-): Date {
-  const firstOfMonth = new Date(year, month, 1);
-  const firstWeekdayOffset =
-    (7 + weekday - firstOfMonth.getDay()) % 7;
-  const day = 1 + firstWeekdayOffset + 7 * (n - 1);
-  return new Date(year, month, day);
-}
-
-function getLastWeekdayOfMonth(
-  year: number,
-  month: number,
-  weekday: number
-): Date {
-  const lastOfMonth = new Date(year, month + 1, 0);
-  const offsetBack = (7 + lastOfMonth.getDay() - weekday) % 7;
-  const day = lastOfMonth.getDate() - offsetBack;
-  return new Date(year, month, day);
-}
-
-function observedDate(date: Date): Date {
-  const day = date.getDay();
-  if (day === 6) {
-    return new Date(date.getFullYear(), date.getMonth(), date.getDate() - 1);
-  }
-  if (day === 0) {
-    return new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1);
-  }
-  return date;
-}
-
-function getUsFederalHolidays(year: number, lang: "en" | "es"): Holiday[] {
-  const holidays: Holiday[] = [];
-  const label = (en: string, es: string) => (lang === "es" ? es : en);
-
-  // Fixed-date
-  holidays.push(
-    {
-      date: toYMD(observedDate(new Date(year, 0, 1))),
-      label: label("New Year's Day", "Año Nuevo"),
-      marketClosed: true,
-    },
-    {
-      date: toYMD(observedDate(new Date(year, 5, 19))),
-      label: label("Juneteenth National Independence Day", "Juneteenth"),
-      marketClosed: true,
-    },
-    {
-      date: toYMD(observedDate(new Date(year, 6, 4))),
-      label: label("Independence Day", "Día de la Independencia"),
-      marketClosed: true,
-    },
-    {
-      date: toYMD(observedDate(new Date(year, 10, 11))),
-      label: label("Veterans Day", "Día de los Veteranos"),
-      marketClosed: false,
-    },
-    {
-      date: toYMD(observedDate(new Date(year, 11, 25))),
-      label: label("Christmas Day", "Navidad"),
-      marketClosed: true,
-    }
+function PageRow({ page, active, isEs, onClick }: { page: NotebookPageSummary; active?: boolean; isEs: boolean; onClick: () => void }) {
+  const Icon = PAGE_TYPE_ICONS[page.page_type];
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`w-full border-b border-slate-800 px-3 py-3 text-left transition last:border-b-0 ${active ? "bg-emerald-400/10" : "hover:bg-slate-900"}`}
+    >
+      <div className="flex items-start gap-3">
+        <Icon size={16} className={active ? "mt-0.5 text-emerald-300" : "mt-0.5 text-slate-500"} />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <p className="truncate text-sm font-semibold text-slate-100">{page.title}</p>
+            {page.is_pinned ? <Pin size={12} className="shrink-0 text-amber-300" /> : null}
+          </div>
+          <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-500">
+            {page.summary || pageTypeLabel(page.page_type, isEs)}
+          </p>
+          <div className="mt-2 flex items-center gap-2 text-[10px] font-semibold uppercase text-slate-500">
+            <span>{statusLabel(page.status, isEs)}</span>
+            {page.tags[0] ? <span>#{page.tags[0]}</span> : null}
+          </div>
+        </div>
+      </div>
+    </button>
   );
-
-  // MLK – 3rd Monday Jan
-  holidays.push({
-    date: toYMD(getNthWeekdayOfMonth(year, 0, 1, 3)),
-    label: label("Martin Luther King Jr. Day", "Día de Martin Luther King Jr."),
-    marketClosed: true,
-  });
-
-  // Presidents – 3rd Monday Feb
-  holidays.push({
-    date: toYMD(getNthWeekdayOfMonth(year, 1, 1, 3)),
-    label: label("Presidents' Day", "Día de los Presidentes"),
-    marketClosed: true,
-  });
-
-  // Memorial – last Monday May
-  holidays.push({
-    date: toYMD(getLastWeekdayOfMonth(year, 4, 1)),
-    label: label("Memorial Day", "Memorial Day"),
-    marketClosed: true,
-  });
-
-  // Labor – 1st Monday Sep
-  holidays.push({
-    date: toYMD(getNthWeekdayOfMonth(year, 8, 1, 1)),
-    label: label("Labor Day", "Día del Trabajo"),
-    marketClosed: true,
-  });
-
-  // Columbus / Indigenous – 2nd Monday Oct
-  holidays.push({
-    date: toYMD(getNthWeekdayOfMonth(year, 9, 1, 2)),
-    label: label("Columbus / Indigenous Peoples' Day", "Día de Colón / Pueblos Indígenas"),
-    marketClosed: false,
-  });
-
-  // Thanksgiving – 4th Thursday Nov
-  holidays.push({
-    date: toYMD(getNthWeekdayOfMonth(year, 10, 4, 4)),
-    label: label("Thanksgiving Day", "Día de Acción de Gracias"),
-    marketClosed: true,
-  });
-
-  holidays.sort((a, b) => a.date.localeCompare(b.date));
-  return holidays;
 }
-
-/* =========================
-   Component
-========================= */
 
 export default function NotebookPage() {
-  const router = useRouter();
   const { user, loading: authLoading } = useAuth();
-  const { activeAccountId, loading: accountsLoading } = useTradingAccounts();
   const { plan, loading: planLoading } = useUserPlan();
+  const { accounts, activeAccountId, loading: accountsLoading, setActiveAccount } = useTradingAccounts();
   const { locale } = useAppSettings();
   const lang = resolveLocale(locale);
   const isEs = lang === "es";
-  const L = (en: string, es: string) => (isEs ? es : en);
-  const userId = useMemo(() => (user as any)?.id || (user as any)?.uid || "", [user]);
-  const notebookAccountId = activeAccountId ?? null;
-  const describeSurface = (surface: NotebookSurfaceMeta) => {
-    if (surface.kind === "ios-ink") {
-      return {
-        label: L("iPad ink", "Ink iPad"),
-        detail: surface.words
-          ? `${surface.words} ${L(
-              surface.words === 1 ? "word" : "words",
-              surface.words === 1 ? "palabra" : "palabras"
-            )}`
-          : L("Apple Pencil sketch", "Sketch Apple Pencil"),
-        badgeClass:
-          "border-sky-400/40 bg-sky-500/10 text-sky-100",
-      };
-    }
+  const L = useCallback((en: string, es: string) => (isEs ? es : en), [isEs]);
 
-    if (surface.kind === "ink") {
-      const strokeLabel =
-        surface.strokes > 0
-          ? `${surface.strokes} ${L(
-              surface.strokes === 1 ? "stroke" : "strokes",
-              surface.strokes === 1 ? "trazo" : "trazos"
-            )}`
-          : L("Ready to sketch", "Listo para dibujar");
-      return {
-        label: L("Ink", "Ink"),
-        detail: surface.words
-          ? `${strokeLabel} · ${surface.words} ${L(
-              surface.words === 1 ? "word" : "words",
-              surface.words === 1 ? "palabra" : "palabras"
-            )}`
-          : strokeLabel,
-        badgeClass:
-          "border-emerald-400/40 bg-emerald-500/10 text-emerald-100",
-      };
-    }
+  const [scope, setScope] = useState<NotebookScope>("account");
+  const [view, setView] = useState<WorkspaceView>("overview");
+  const [library, setLibrary] = useState<NotebookLibrary | null>(null);
+  const [libraryLoading, setLibraryLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [selectedBookId, setSelectedBookId] = useState<string | null>(null);
+  const [selectedSectionId, setSelectedSectionId] = useState<string>("all");
+  const [selectedPageId, setSelectedPageId] = useState<string | null>(null);
+  const [page, setPage] = useState<NotebookPageDetail | null>(null);
+  const [pageLoading, setPageLoading] = useState(false);
+  const [pageSaveState, setPageSaveState] = useState<SaveState>("idle");
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
-    if (surface.kind === "text") {
-      return {
-        label: L("Text", "Texto"),
-        detail: `${surface.words} ${L(
-          surface.words === 1 ? "word" : "words",
-          surface.words === 1 ? "palabra" : "palabras"
-        )}`,
-        badgeClass:
-          "border-slate-600 bg-slate-800/70 text-slate-100",
-      };
-    }
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchHits, setSearchHits] = useState<SearchHit[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
 
-    return {
-      label: L("Blank", "Vacío"),
-      detail: L("Start writing or sketching", "Empieza a escribir o dibujar"),
-      badgeClass:
-        "border-slate-700 bg-slate-900/60 text-slate-400",
-    };
-  };
-
-  // NOTE: We gate rendering below after hooks to avoid hook-order issues.
-
-  // Journal entries desde Supabase
-  const [entries, setEntries] = useState<JournalEntry[]>([]);
-  const [entriesLoading, setEntriesLoading] = useState<boolean>(true);
-
-  // Sin localStorage: dependemos de Supabase
-
-  // Proteger ruta si no hay user
-  useEffect(() => {
-    if (!authLoading && !user) {
-      router.push("/signin");
-    }
-  }, [authLoading, user, router]);
-
-  // Cargar entries desde Supabase
-  useEffect(() => {
-    if (planLoading || plan !== "advanced") return;
-    if (authLoading || !userId || accountsLoading) return;
-
-    const load = async () => {
-      try {
-        setEntriesLoading(true);
-        if (!userId) {
-          setEntries([]);
-        } else {
-          const all = await getAllJournalEntries(userId, notebookAccountId);
-          setEntries(all);
-        }
-      } catch (err) {
-        console.error("[Notebook] Error loading entries:", err);
-        setEntries([]);
-      } finally {
-        setEntriesLoading(false);
-      }
-    };
-
-    void load();
-  }, [planLoading, plan, authLoading, userId, accountsLoading, notebookAccountId]);
-
-  const sorted = useMemo(
-    () =>
-      [...entries].sort((a: any, b: any) =>
-        String(b.date || "").localeCompare(String(a.date || ""))
-      ),
-    [entries]
-  );
-
-  const [view, setView] = useState<ViewMode>("notebook");
-  const [subView, setSubView] = useState<NotebookSubView>("journal");
-
-  const [selectedJournalDate, setSelectedJournalDate] =
-    useState<string | null>(null);
-
-  useEffect(() => {
-    if (!selectedJournalDate && sorted.length > 0) {
-      setSelectedJournalDate(sorted[0].date);
-    }
-  }, [sorted, selectedJournalDate]);
-
-  const selectedJournalEntry = useMemo(() => {
-    if (!selectedJournalDate) return null;
-    return (
-      sorted.find((e: any) => e.date === selectedJournalDate) ?? null
-    );
-  }, [sorted, selectedJournalDate]);
-
-  const parsedNotes = useMemo(() => {
-    if (!selectedJournalEntry) return null;
-    const raw = (selectedJournalEntry as any)?.notes;
-    if (!raw || typeof raw !== "string") return null;
-    try {
-      const parsed = JSON.parse(raw);
-      return parsed && typeof parsed === "object" ? (parsed as Record<string, any>) : null;
-    } catch {
-      return null;
-    }
-  }, [selectedJournalEntry]);
-
-  const premarketText = useMemo(
-    () => stripHtml((parsedNotes as any)?.premarket),
-    [parsedNotes]
-  );
-  const liveText = useMemo(
-    () => stripHtml((parsedNotes as any)?.live),
-    [parsedNotes]
-  );
-  const postText = useMemo(
-    () => stripHtml((parsedNotes as any)?.post),
-    [parsedNotes]
-  );
-
-  const entriesFromNotes = useMemo(
-    () =>
-      Array.isArray((parsedNotes as any)?.entries)
-        ? ((parsedNotes as any)?.entries as any[])
-        : [],
-    [parsedNotes]
-  );
-  const exitsFromNotes = useMemo(
-    () =>
-      Array.isArray((parsedNotes as any)?.exits)
-        ? ((parsedNotes as any)?.exits as any[])
-        : [],
-    [parsedNotes]
-  );
-
-  const combinedTags = useMemo(() => {
-    const base = Array.isArray((selectedJournalEntry as any)?.tags)
-      ? ((selectedJournalEntry as any).tags as string[])
-      : [];
-    const fromNotes = Array.isArray((parsedNotes as any)?.tags)
-      ? ((parsedNotes as any).tags as string[])
-      : [];
-    const merged = [...base, ...fromNotes].map((t) => String(t).trim()).filter(Boolean);
-    return Array.from(new Set(merged));
-  }, [selectedJournalEntry, parsedNotes]);
-
-  // ---- Estado de notas (premarket / live / post), para resumen UI y AI ----
-  const notesStatus = useMemo(() => {
-    if (!selectedJournalEntry) return null;
-    const anyEntry = selectedJournalEntry as any;
-    const notes = anyEntry.notes || {};
-
-    const hasPremarket = Boolean(
-      notes.premarket ||
-        notes.preMarket ||
-        notes.pre ||
-        anyEntry.premarket
-    );
-    const hasLive = Boolean(
-      notes.live ||
-        notes.session ||
-        notes.during ||
-        anyEntry.live
-    );
-    const hasPost = Boolean(
-      notes.post ||
-        notes.postMarket ||
-        notes.after ||
-        anyEntry.post
-    );
-
-    return {
-      premarket: hasPremarket,
-      live: hasLive,
-      post: hasPost,
-    };
-  }, [selectedJournalEntry]);
-
-  // Custom notebooks (Supabase)
-  const [nbData, setNbData] = useState<NotebookStorage>({
-    notebooks: [],
-    sections: [],
-    pages: [],
-  });
-  const nbDataRef = useRef<NotebookStorage>({
-    notebooks: [],
-    sections: [],
-    pages: [],
-  });
-  const [nbLoading, setNbLoading] = useState(true);
-  const [activeNotebookId, setActiveNotebookId] =
-    useState<string | null>(null);
-  const [activeSectionId, setActiveSectionId] =
-    useState<string | null>(null);
-  const [activePageId, setActivePageId] =
-    useState<string | null>(null);
-  const [sectionExpanded, setSectionExpanded] = useState<Record<string, boolean>>({});
-  const pageSaveTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
-  const freeNotesSaveTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
-  const loadedFreeNotesRef = useRef<Record<string, boolean>>({});
-  const activeNotebookIdRef = useRef<string | null>(null);
-  const activeSectionIdRef = useRef<string | null>(null);
-  const activePageIdRef = useRef<string | null>(null);
-  const [createMode, setCreateMode] = useState<CreateMode | null>(null);
-  const [createName, setCreateName] = useState("");
-  const [createNotebookId, setCreateNotebookId] = useState<string | null>(null);
-  const [createSectionId, setCreateSectionId] = useState<string | null>(null);
-  const [createError, setCreateError] = useState<string | null>(null);
+  const [createPageOpen, setCreatePageOpen] = useState(false);
+  const [templateKey, setTemplateKey] = useState("blank");
+  const [newPageTitle, setNewPageTitle] = useState("");
   const [creating, setCreating] = useState(false);
-  const [manageTarget, setManageTarget] = useState<ManageTarget | null>(null);
-  const [manageName, setManageName] = useState("");
-  const [manageNotebookId, setManageNotebookId] = useState<string | null>(null);
-  const [manageSectionId, setManageSectionId] = useState<string | null>(null);
-  const [manageError, setManageError] = useState<string | null>(null);
-  const [managing, setManaging] = useState(false);
-  const [pageSaveState, setPageSaveState] = useState<Record<string, { state: "idle" | "saving" | "saved" | "error"; ts?: number }>>({});
-  const [freeNotesSaveState, setFreeNotesSaveState] = useState<Record<string, { state: "idle" | "saving" | "saved" | "error"; ts?: number }>>({});
+  const [simpleDialog, setSimpleDialog] = useState<"book" | "section" | "rename_book" | null>(null);
+  const [simpleValue, setSimpleValue] = useState("");
 
-  useEffect(() => {
-    activeNotebookIdRef.current = activeNotebookId;
-  }, [activeNotebookId]);
+  const [selectedDate, setSelectedDate] = useState(todayYmd());
+  const [dailyFacts, setDailyFacts] = useState<DailyFacts | null>(null);
+  const [dailyNote, setDailyNote] = useState<DailyNote | null>(null);
+  const [dailyDraft, setDailyDraft] = useState<NotebookEditableContent>(() => createNotebookEditableContent());
+  const [dailyLoading, setDailyLoading] = useState(false);
+  const [dailySaveState, setDailySaveState] = useState<SaveState>("idle");
 
-  useEffect(() => {
-    activeSectionIdRef.current = activeSectionId;
-  }, [activeSectionId]);
+  const [trash, setTrash] = useState<TrashData | null>(null);
+  const [aiOpen, setAiOpen] = useState(false);
+  const [aiQuestion, setAiQuestion] = useState("");
+  const [aiAnswer, setAiAnswer] = useState("");
+  const [aiCitations, setAiCitations] = useState<SearchHit[]>([]);
+  const [aiLoading, setAiLoading] = useState(false);
 
-  useEffect(() => {
-    activePageIdRef.current = activePageId;
-  }, [activePageId]);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const bootstrapRef = useRef(new Set<string>());
+  const initialUrlRef = useRef(false);
+  const pageEditSeq = useRef(0);
+  const dailyEditSeq = useRef(0);
 
-  useEffect(() => {
-    nbDataRef.current = nbData;
-  }, [nbData]);
-
-  function applyNotebookWorkspaceData(
-    data: NotebookStorage,
-    selection?: NotebookSelection
-  ) {
-    const desiredNotebookId = selection?.notebookId ?? activeNotebookIdRef.current;
-    const nextNotebookId =
-      desiredNotebookId && data.notebooks.some((notebook) => notebook.id === desiredNotebookId)
-        ? desiredNotebookId
-        : data.notebooks[0]?.id ?? null;
-
-    const notebookSections = nextNotebookId
-      ? data.sections.filter((section) => section.notebook_id === nextNotebookId)
-      : [];
-    const notebookPages = nextNotebookId
-      ? data.pages.filter((page) => page.notebook_id === nextNotebookId)
-      : [];
-
-    const desiredSectionId = selection?.sectionId ?? activeSectionIdRef.current;
-    let nextSectionId: string | null = null;
-
-    if (desiredSectionId === UNASSIGNED_SECTION_KEY) {
-      nextSectionId = notebookPages.some((page) => !page.section_id)
-        ? UNASSIGNED_SECTION_KEY
-        : null;
-    } else if (
-      desiredSectionId &&
-      notebookSections.some((section) => section.id === desiredSectionId)
-    ) {
-      nextSectionId = desiredSectionId;
-    } else if (notebookSections.length > 0) {
-      nextSectionId = notebookSections[0].id;
-    } else if (notebookPages.some((page) => !page.section_id)) {
-      nextSectionId = UNASSIGNED_SECTION_KEY;
-    }
-
-    const sectionPages = notebookPages.filter((page) =>
-      nextSectionId === UNASSIGNED_SECTION_KEY
-        ? !page.section_id
-        : page.section_id === nextSectionId
-    );
-
-    const desiredPageId = selection?.pageId ?? activePageIdRef.current;
-    const nextPageId =
-      desiredPageId && sectionPages.some((page) => page.id === desiredPageId)
-        ? desiredPageId
-        : sectionPages[0]?.id ?? null;
-
-    nbDataRef.current = data;
-    setNbData(data);
-    setActiveNotebookId(nextNotebookId);
-    setActiveSectionId(nextSectionId);
-    setActivePageId(nextPageId);
-    setSectionExpanded((prev) => {
-      const next = { ...prev };
-      data.sections.forEach((section) => {
-        if (next[section.id] === undefined) next[section.id] = true;
-      });
-      return next;
-    });
-  }
-
-  async function reloadNotebookWorkspace(selection?: NotebookSelection) {
-    if (!userId) return;
-    setNbLoading(true);
-    try {
-      const data = await listNotebookData(userId, notebookAccountId);
-      applyNotebookWorkspaceData(data, selection);
-    } finally {
-      setNbLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    if (planLoading || plan !== "advanced") return;
-    if (authLoading || !userId || accountsLoading) return;
-
-    let alive = true;
-    const load = async () => {
-      setNbLoading(true);
-      try {
-        const data = await listNotebookData(userId, notebookAccountId);
-        if (!alive) return;
-        applyNotebookWorkspaceData(data);
-      } finally {
-        if (alive) setNbLoading(false);
-      }
-    };
-    void load();
-    return () => {
-      alive = false;
-    };
-  }, [
-    planLoading,
-    plan,
-    authLoading,
-    userId,
-    accountsLoading,
-    notebookAccountId,
-  ]);
-
-  // Free notes por fecha (Supabase)
-  const [freeNotesByDate, setFreeNotesByDate] =
-    useState<Record<string, NotebookEditableContent>>({});
-  const [allFreeNotes, setAllFreeNotes] = useState<FreeNotebookNoteRow[]>([]);
-
-  useEffect(() => {
-    // reset cache when switching accounts
-    setFreeNotesByDate({});
-    loadedFreeNotesRef.current = {};
-    setAllFreeNotes([]);
-  }, [activeAccountId]);
-
-  useEffect(() => {
-    if (planLoading || plan !== "advanced") return;
-    if (authLoading || !userId || accountsLoading) return;
-
-    let alive = true;
-    const loadAll = async () => {
-      const rows = await listFreeNotebookNotes(userId, notebookAccountId);
-      if (!alive) return;
-      setAllFreeNotes(rows);
-    };
-
-    void loadAll();
-    return () => {
-      alive = false;
-    };
-  }, [planLoading, plan, authLoading, userId, accountsLoading, notebookAccountId]);
-
-  useEffect(() => {
-    if (!selectedJournalDate) return;
-    if (authLoading || !userId || accountsLoading) return;
-    if (loadedFreeNotesRef.current[selectedJournalDate]) return;
-
-    let alive = true;
-    const loadFreeNotes = async () => {
-      const content = await getFreeNotebookNote(
-        userId,
-        notebookAccountId,
-        selectedJournalDate
-      );
-      if (!alive) return;
-      loadedFreeNotesRef.current[selectedJournalDate] = true;
-      const nextNote = createNotebookEditableContent(
-        content?.content,
-        content?.ink
-      );
-      setFreeNotesByDate((prev) => {
-        return {
-          ...prev,
-          [selectedJournalDate]: nextNote,
-        };
-      });
-    };
-
-    void loadFreeNotes();
-    return () => {
-      alive = false;
-    };
-  }, [selectedJournalDate, authLoading, userId, accountsLoading, notebookAccountId]);
-
-  const todayStr = useMemo(() => toYMD(new Date()), []);
-  const currentYear = useMemo(() => new Date().getFullYear(), []);
-  const holidays = useMemo(
-    () => getUsFederalHolidays(currentYear, lang),
-    [currentYear, lang]
+  const activeAccount = useMemo(
+    () => accounts.find((account) => account.id === activeAccountId) ?? null,
+    [accounts, activeAccountId]
   );
-
-  const monthLabels = useMemo(() => {
-    const fmt = new Intl.DateTimeFormat(lang, { month: "long" });
-    return Array.from({ length: 12 }, (_, i) => fmt.format(new Date(2020, i, 1)));
-  }, [lang]);
-
-  const holidaysByMonth = useMemo(() => {
-    const byMonth: Record<number, Holiday[]> = {};
-    for (const h of holidays) {
-      const d = new Date(`${h.date}T00:00:00`);
-      const month = d.getMonth();
-      if (!byMonth[month]) byMonth[month] = [];
-      byMonth[month].push(h);
-    }
-    return byMonth;
-  }, [holidays]);
-
-  const activeNotebookSections = useMemo(() => {
-    if (!activeNotebookId) return [] as LocalNotebookSection[];
-    return nbData.sections.filter((s) => s.notebook_id === activeNotebookId);
-  }, [nbData.sections, activeNotebookId]);
-
-  const activeNotebookPages = useMemo(() => {
-    if (!activeNotebookId) return [] as LocalNotebookPage[];
-    return nbData.pages.filter((p) => p.notebook_id === activeNotebookId);
-  }, [nbData.pages, activeNotebookId]);
-
-  const activeNotebook = useMemo(() => {
-    if (!activeNotebookId) return null as LocalNotebook | null;
-    return (
-      nbData.notebooks.find((n) => n.id === activeNotebookId) ||
-      null
-    );
-  }, [activeNotebookId, nbData.notebooks]);
-
-  useEffect(() => {
-    if (!activeNotebookId) {
-      setActiveSectionId(null);
-      return;
-    }
-    const firstSection = activeNotebookSections[0];
-    const hasLoosePages = activeNotebookPages.some((page) => !page.section_id);
-    const stillValid =
-      activeSectionId === UNASSIGNED_SECTION_KEY
-        ? hasLoosePages
-        : activeNotebookSections.some((section) => section.id === activeSectionId);
-    if (!stillValid) {
-      if (firstSection?.id) {
-        setActiveSectionId(firstSection.id);
-      } else if (hasLoosePages) {
-        setActiveSectionId(UNASSIGNED_SECTION_KEY);
-      } else {
-        setActiveSectionId(null);
-      }
-    }
-  }, [activeNotebookId, activeNotebookSections, activeNotebookPages, activeSectionId]);
-
-  useEffect(() => {
-    if (!activeNotebookSections.length) return;
-    setSectionExpanded((prev) => {
-      const next = { ...prev };
-      activeNotebookSections.forEach((s) => {
-        if (next[s.id] === undefined) next[s.id] = true;
-      });
-      return next;
-    });
-  }, [activeNotebookSections]);
-
-  const pagesBySection = useMemo(() => {
-    const map: Record<string, LocalNotebookPage[]> = {};
-    activeNotebookPages.forEach((p) => {
-      const key = p.section_id || UNASSIGNED_SECTION_KEY;
-      if (!map[key]) map[key] = [];
-      map[key].push(p);
-    });
-    Object.values(map).forEach((list) =>
-      list.sort((a, b) => String(b.updated_at || "").localeCompare(String(a.updated_at || "")))
-    );
-    return map;
-  }, [activeNotebookPages]);
-
-  const activeSectionPages = useMemo(() => {
-    if (!activeSectionId) return [] as LocalNotebookPage[];
-    if (activeSectionId === UNASSIGNED_SECTION_KEY) {
-      return pagesBySection[UNASSIGNED_SECTION_KEY] || [];
-    }
-    return pagesBySection[activeSectionId] || [];
-  }, [pagesBySection, activeSectionId]);
-
-  const activeLoosePages = useMemo(
-    () => pagesBySection[UNASSIGNED_SECTION_KEY] || [],
-    [pagesBySection]
-  );
-
-  const activePage = useMemo(() => {
-    if (!activeNotebookId) return null as LocalNotebookPage | null;
-    if (activeSectionPages.length === 0) return null;
-    const found = activePageId
-      ? activeSectionPages.find((p) => p.id === activePageId)
-      : null;
-    return found || activeSectionPages[0];
-  }, [activeNotebookId, activeSectionPages, activePageId]);
-
-  useEffect(() => {
-    if (!activeSectionPages.length) {
-      setActivePageId(null);
-      return;
-    }
-    if (!activePageId || !activeSectionPages.some((p) => p.id === activePageId)) {
-      setActivePageId(activeSectionPages[0].id);
-    }
-  }, [activeSectionPages, activePageId]);
-
-  const freeNotesByDateFromRows = useMemo(() => {
-    const map: Record<string, NotebookEditableContent> = {};
-    allFreeNotes.forEach((row) => {
-      map[row.entry_date] = createNotebookEditableContent(row.content, row.ink);
-    });
-    return map;
-  }, [allFreeNotes]);
-  const dailyNotebookByDate = useMemo(
-    () => ({
-      ...freeNotesByDateFromRows,
-      ...freeNotesByDate,
-    }),
-    [freeNotesByDateFromRows, freeNotesByDate]
-  );
-  const selectedFreeNote =
-    (selectedJournalDate && freeNotesByDate[selectedJournalDate]) ||
-    (selectedJournalDate && dailyNotebookByDate[selectedJournalDate]) ||
-    createNotebookEditableContent();
-  const selectedFreeNoteSurface = describeSurface(
-    getNotebookSurfaceMeta(selectedFreeNote.content, selectedFreeNote.ink)
-  );
-  const freeNotesStatus =
-    (selectedJournalDate && freeNotesSaveState[selectedJournalDate]) || null;
-  const activePageStatus =
-    (activePage?.id && pageSaveState[activePage.id]) || null;
-  const selectedJournalPnl = Number((selectedJournalEntry as any)?.pnl || 0);
-  const selectedJournalLabel = selectedJournalDate
-    ? formatShortDate(selectedJournalDate, lang)
-    : "";
-  const selectedJournalPreview = selectedJournalEntry
-    ? getNotebookPreview(
-        (selectedJournalEntry as any).notes,
-        L(
-          "This day has structured notes saved in the journal blocks.",
-          "Este día tiene notas estructuradas guardadas en los bloques del journal."
-        )
-      )
-    : null;
-  const writtenJournalBlocks = [notesStatus?.premarket, notesStatus?.live, notesStatus?.post].filter(Boolean).length;
-  const selectedJournalCards = [
-    {
-      title: L("Premarket notes", "Notas premarket"),
-      body: premarketText,
-    },
-    {
-      title: L("Inside trade notes", "Notas en sesión"),
-      body: liveText,
-    },
-    {
-      title: L("After market notes", "Notas post-market"),
-      body: postText,
-    },
-  ];
-  const sortedEntriesForDay = [...entriesFromNotes].sort((a: any, b: any) => {
-    const aMinutes = parseTimeToMinutes(a?.time);
-    const bMinutes = parseTimeToMinutes(b?.time);
-    if (aMinutes == null && bMinutes == null) return 0;
-    if (aMinutes == null) return 1;
-    if (bMinutes == null) return -1;
-    return aMinutes - bMinutes;
+  const accountId = scope === "account" ? activeAccountId : null;
+  const books = library?.books.filter((book) => !book.archived_at) ?? [];
+  const selectedBook = books.find((book) => book.id === selectedBookId) ?? books[0] ?? null;
+  const sections = (library?.sections ?? []).filter((section) => section.notebook_id === selectedBook?.id);
+  const pages = (library?.pages ?? []).filter((item) => {
+    if (item.notebook_id !== selectedBook?.id) return false;
+    if (selectedSectionId === "all") return true;
+    if (selectedSectionId === "loose") return !item.section_id;
+    return item.section_id === selectedSectionId;
   });
-  const sortedExitsForDay = [...exitsFromNotes].sort((a: any, b: any) => {
-    const aMinutes = parseTimeToMinutes(a?.time);
-    const bMinutes = parseTimeToMinutes(b?.time);
-    if (aMinutes == null && bMinutes == null) return 0;
-    if (aMinutes == null) return 1;
-    if (bMinutes == null) return -1;
-    return aMinutes - bMinutes;
-  });
-  const firstEntryForDay = sortedEntriesForDay[0] ?? null;
-  const lastExitForDay = sortedExitsForDay[sortedExitsForDay.length - 1] ?? null;
-  const firstEntryMinutes = parseTimeToMinutes(firstEntryForDay?.time);
-  const lastExitMinutes = parseTimeToMinutes(lastExitForDay?.time);
-  const marketWindowMinutes =
-    firstEntryMinutes != null &&
-    lastExitMinutes != null &&
-    lastExitMinutes >= firstEntryMinutes
-      ? lastExitMinutes - firstEntryMinutes
-      : null;
-  const tradedSymbols = Array.from(
-    new Set(
-      [...entriesFromNotes, ...exitsFromNotes]
-        .map((row: any) => String(row?.symbol ?? "").trim().toUpperCase())
-        .filter(Boolean)
-    )
-  );
-  const timelineRows = [...entriesFromNotes, ...exitsFromNotes]
-    .map((row: any, index) => ({
-      id: `${row?.id ?? row?.symbol ?? "row"}-${index}`,
-      type: entriesFromNotes.includes(row) ? "entry" : "exit",
-      symbol: String(row?.symbol ?? "").trim().toUpperCase(),
-      time: String(row?.time ?? "").trim(),
-      quantity: String(row?.quantity ?? "").trim(),
-      side: String(row?.side ?? "").trim(),
-      sortMinutes: parseTimeToMinutes(row?.time),
-    }))
-    .sort((a, b) => {
-      if (a.sortMinutes == null && b.sortMinutes == null) return 0;
-      if (a.sortMinutes == null) return 1;
-      if (b.sortMinutes == null) return -1;
-      return a.sortMinutes - b.sortMinutes;
-    });
-  const dayOutcomeLabel =
-    selectedJournalPnl > 0
-      ? L("Green day", "Día verde")
-      : selectedJournalPnl < 0
-      ? L("Learning day", "Día de aprendizaje")
-      : L("Flat day", "Día flat");
-  const timeInMarketLabel =
-    marketWindowMinutes == null
-      ? L("No full trade window logged", "No hay ventana completa de trade registrada")
-      : marketWindowMinutes >= 60
-      ? L(
-          `${Math.floor(marketWindowMinutes / 60)}h ${marketWindowMinutes % 60}m in market`,
-          `${Math.floor(marketWindowMinutes / 60)}h ${marketWindowMinutes % 60}m en mercado`
-        )
-      : L(`${marketWindowMinutes}m in market`, `${marketWindowMinutes}m en mercado`);
-  const dayBriefItems = [
-    {
-      label: L("Started with", "Empezaste con"),
-      detail: firstEntryForDay
-        ? `${String(firstEntryForDay.symbol ?? "").toUpperCase()}${firstEntryForDay.time ? ` · ${firstEntryForDay.time}` : ""}`
-        : L("No entry fills logged yet", "Todavía no hay fills de entrada"),
-    },
-    {
-      label: L("Closed with", "Cerraste con"),
-      detail: lastExitForDay
-        ? `${String(lastExitForDay.symbol ?? "").toUpperCase()}${lastExitForDay.time ? ` · ${lastExitForDay.time}` : ""}`
-        : L("No exit fills logged yet", "Todavía no hay fills de salida"),
-    },
-    {
-      label: L("Time window", "Ventana del trade"),
-      detail: timeInMarketLabel,
-    },
-    {
-      label: L("Result", "Resultado"),
-      detail: `${selectedJournalPnl > 0 ? "+" : ""}$${selectedJournalPnl.toFixed(2)} · ${dayOutcomeLabel}`,
-    },
-  ];
-  const notebookPrompts = [
-    L(
-      "What changed between your premarket idea and the live trade once you had real price action?",
-      "¿Qué cambió entre tu idea de premarket y el trade en vivo cuando ya tenías acción real del precio?"
-    ),
-    selectedJournalPnl >= 0
-      ? L(
-          "What part of today's execution was repeatable skill and what part might have been market gift?",
-          "¿Qué parte de la ejecución de hoy fue habilidad repetible y qué parte pudo haber sido regalo del mercado?"
-        )
-      : L(
-          "Where did today's damage come from first: setup quality, timing, sizing, or behavior?",
-          "¿De dónde vino primero el daño de hoy: calidad del setup, timing, sizing o comportamiento?"
-        ),
-    L(
-      "Write the one sentence tomorrow's version of you needs to read before the open.",
-      "Escribe la única frase que tu versión de mañana necesita leer antes de la apertura."
-    ),
-  ];
-  const openCoachingHref = selectedJournalDate
-    ? `/performance/ai-coaching?date=${encodeURIComponent(selectedJournalDate)}`
-    : "/performance/ai-coaching";
-  const createNotebookSections = useMemo(
-    () =>
-      createNotebookId
-        ? nbData.sections.filter((section) => section.notebook_id === createNotebookId)
-        : [],
-    [nbData.sections, createNotebookId]
-  );
-  const manageNotebookSections = useMemo(
-    () =>
-      manageNotebookId
-        ? nbData.sections.filter((section) => section.notebook_id === manageNotebookId)
-        : [],
-    [nbData.sections, manageNotebookId]
-  );
-  const activeSectionLabel =
-    activeSectionId === UNASSIGNED_SECTION_KEY
-      ? L("Loose pages", "Páginas sueltas")
-      : activeNotebookSections.find((section) => section.id === activeSectionId)?.name ||
-        L("No section selected", "Sin sección seleccionada");
-  const activePageUpdatedAt = activePage?.updated_at ?? activePage?.created_at ?? null;
-  const activePageMode = getNotebookInkMode(activePage?.ink);
-  const activePageSurface = describeSurface(
-    getNotebookSurfaceMeta(activePage?.content, activePage?.ink)
-  );
+  const reviewPages = (library?.pages ?? []).filter((item) => item.status === "candidate" || (item.review_due_at && item.review_due_at.slice(0, 10) <= todayYmd()));
+  const recentPages = [...(library?.pages ?? [])]
+    .sort((a, b) => String(b.updated_at || b.created_at).localeCompare(String(a.updated_at || a.created_at)))
+    .slice(0, 6);
 
-  const handleFreeNotesChange = (nextValue: NotebookEditableContent) => {
-    if (!selectedJournalDate || !userId) return;
-    setFreeNotesSaveState((prev) => ({
-      ...prev,
-      [selectedJournalDate]: { state: "saving" },
-    }));
-    setFreeNotesByDate((prev) => {
-      return {
-        ...prev,
-        [selectedJournalDate]: nextValue,
-      };
-    });
-
-    if (freeNotesSaveTimers.current[selectedJournalDate]) {
-      clearTimeout(freeNotesSaveTimers.current[selectedJournalDate]);
-    }
-    freeNotesSaveTimers.current[selectedJournalDate] = setTimeout(() => {
-      void (async () => {
-        const ok = await upsertFreeNotebookNote(
-          userId,
-          notebookAccountId,
-          selectedJournalDate,
-          nextValue.content,
-          nextValue.ink
-        );
-        setFreeNotesSaveState((prev) => ({
-          ...prev,
-          [selectedJournalDate]: {
-            state: ok ? "saved" : "error",
-            ts: Date.now(),
-          },
-        }));
-      })();
-    }, 400);
-  };
-
-  // acciones para custom notebooks (Supabase)
-  const handleAddNotebook = () => {
-    setSubView("custom");
-    setCreateMode("book");
-    setCreateName("");
-    setCreateNotebookId(activeNotebookId ?? nbData.notebooks[0]?.id ?? null);
-    setCreateSectionId(null);
-    setCreateError(null);
-  };
-
-  const handleAddSection = (targetNotebookId?: string | null) => {
-    const nextNotebookId = targetNotebookId ?? activeNotebookId ?? nbData.notebooks[0]?.id ?? null;
-    setSubView("custom");
-    setCreateMode("section");
-    setCreateName("");
-    setCreateNotebookId(nextNotebookId);
-    setCreateSectionId(null);
-    setCreateError(null);
-  };
-
-  const handleAddPage = (targetSectionId?: string | null, targetNotebookId?: string | null) => {
-    const nextNotebookId = targetNotebookId ?? activeNotebookId ?? nbData.notebooks[0]?.id ?? null;
-    const nextSectionId =
-      targetSectionId === undefined
-        ? activeSectionId
-        : targetSectionId;
-    setSubView("custom");
-    setCreateMode("page");
-    setCreateName("");
-    setCreateNotebookId(nextNotebookId);
-    setCreateSectionId(nextSectionId ?? null);
-    setCreateError(null);
-  };
-
-  const closeCreateModal = () => {
-    setCreateMode(null);
-    setCreateName("");
-    setCreateError(null);
-  };
-
-  const openManageModal = (target: ManageTarget) => {
-    setManageTarget(target);
-    setManageError(null);
-    if (target.kind === "book") {
-      setManageName(target.book.name);
-      setManageNotebookId(target.book.id);
-      setManageSectionId(null);
-      return;
-    }
-    if (target.kind === "section") {
-      setManageName(target.section.name);
-      setManageNotebookId(target.section.notebook_id);
-      setManageSectionId(target.section.id);
-      return;
-    }
-    setManageName(target.page.title);
-    setManageNotebookId(target.page.notebook_id);
-    setManageSectionId(target.page.section_id ?? UNASSIGNED_SECTION_KEY);
-  };
-
-  const closeManageModal = () => {
-    setManageTarget(null);
-    setManageError(null);
-  };
-
-  const handleCreateNotebookItem = async () => {
-    if (!userId || !createMode) return;
-
-    const trimmed = createName.trim();
-    const untitledNotebook = L("Untitled notebook", "Notebook sin título");
-    const untitledPage = L("Untitled page", "Página sin título");
-
-    if (createMode === "section" && !trimmed) {
-      setCreateError(L("Section name is required.", "El nombre de la sección es requerido."));
-      return;
-    }
-
-    if ((createMode === "section" || createMode === "page") && !createNotebookId) {
-      setCreateError(L("Select a notebook first.", "Selecciona primero un notebook."));
-      return;
-    }
-
-    setCreating(true);
-    setCreateError(null);
-
+  const loadLibrary = useCallback(async (preferredPageId?: string | null) => {
+    if (plan !== "advanced" || (scope === "account" && !activeAccountId)) return;
+    setLibraryLoading(true);
+    setError("");
     try {
-      if (createMode === "book") {
-        const created = await createNotebookBook(
-          userId,
-          notebookAccountId,
-          trimmed || untitledNotebook
-        );
-        if (!created) {
-          throw new Error(L("We couldn't create the notebook.", "No pudimos crear el notebook."));
+      const params = new URLSearchParams({ view: "library", scope });
+      if (scope === "account" && activeAccountId) params.set("accountId", activeAccountId);
+      let result = await notebookApi<{ library: NotebookLibrary }>(`/api/notebook/workspace?${params}`);
+      if (result.library.books.length === 0) {
+        const key = `${scope}:${activeAccountId || "business"}`;
+        if (!bootstrapRef.current.has(key)) {
+          bootstrapRef.current.add(key);
+          await notebookWorkspaceAction("create_book", {
+            scope,
+            accountId: scope === "account" ? activeAccountId : null,
+            name: scope === "business" ? L("Business Knowledge", "Conocimiento del negocio") : L("Account Playbook", "Playbook de la cuenta"),
+          });
+          result = await notebookApi<{ library: NotebookLibrary }>(`/api/notebook/workspace?${params}`);
         }
-        closeCreateModal();
-        await reloadNotebookWorkspace({
-          notebookId: created.id,
-          sectionId: null,
-          pageId: null,
-        });
-        return;
       }
-
-      if (createMode === "section") {
-        const createdSection = await createNotebookSection(userId, createNotebookId!, trimmed);
-        if (!createdSection) {
-          throw new Error(L("We couldn't create the section.", "No pudimos crear la sección."));
-        }
-        closeCreateModal();
-        await reloadNotebookWorkspace({
-          notebookId: createNotebookId,
-          sectionId: createdSection.id,
-          pageId: null,
-        });
-        return;
-      }
-
-      const sectionId =
-        createSectionId && createSectionId !== UNASSIGNED_SECTION_KEY
-          ? createSectionId
+      setLibrary(result.library);
+      setSelectedBookId((current) => {
+        const preferred = preferredPageId
+          ? result.library.pages.find((item) => item.id === preferredPageId)?.notebook_id
           : null;
-      const createdPage = await createNotebookPage(
-        userId,
-        createNotebookId!,
-        sectionId,
-        trimmed || untitledPage
-      );
-      if (!createdPage) {
-        throw new Error(L("We couldn't create the page.", "No pudimos crear la página."));
-      }
-      closeCreateModal();
-      await reloadNotebookWorkspace({
-        notebookId: createNotebookId,
-        sectionId: sectionId ?? UNASSIGNED_SECTION_KEY,
-        pageId: createdPage.id,
+        return preferred || (current && result.library.books.some((book) => book.id === current) ? current : result.library.books[0]?.id ?? null);
       });
-    } catch (err: any) {
-      setCreateError(
-        err?.message ??
-          L("We couldn't create this notebook item.", "No pudimos crear este elemento del notebook.")
-      );
+      setSelectedPageId((current) => preferredPageId || (current && result.library.pages.some((item) => item.id === current) ? current : null));
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : L("Unable to load the notebook.", "No se pudo cargar el notebook."));
+    } finally {
+      setLibraryLoading(false);
+    }
+  }, [L, activeAccountId, plan, scope]);
+
+  useEffect(() => {
+    if (!accountsLoading && !activeAccountId && scope === "account") setScope("business");
+  }, [accountsLoading, activeAccountId, scope]);
+
+  useEffect(() => {
+    void loadLibrary();
+  }, [loadLibrary]);
+
+  useEffect(() => {
+    if (initialUrlRef.current || typeof window === "undefined") return;
+    initialUrlRef.current = true;
+    const params = new URLSearchParams(window.location.search);
+    const linkedPage = params.get("page");
+    const linkedDate = params.get("date");
+    if (linkedPage) {
+      setView("library");
+      setSelectedPageId(linkedPage);
+    } else if (linkedDate) {
+      setView("daily");
+      setSelectedDate(linkedDate);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!selectedPageId) {
+      setPage(null);
+      return;
+    }
+    let active = true;
+    setPageLoading(true);
+    notebookApi<{ page: NotebookPageDetail }>(`/api/notebook/workspace?view=page&pageId=${encodeURIComponent(selectedPageId)}`)
+      .then((result) => {
+        if (!active) return;
+        setPage(result.page);
+        setPageSaveState("idle");
+        const pageMeta = library?.pages.find((item) => item.id === selectedPageId);
+        if (pageMeta) setSelectedBookId(pageMeta.notebook_id);
+      })
+      .catch((caught) => active && setError(caught instanceof Error ? caught.message : "Unable to load page."))
+      .finally(() => active && setPageLoading(false));
+    return () => { active = false; };
+  }, [library?.pages, selectedPageId]);
+
+  const updatePageDraft = useCallback((patch: Partial<NotebookPageDetail>) => {
+    pageEditSeq.current += 1;
+    setPage((current) => current ? { ...current, ...patch } : current);
+    setPageSaveState("dirty");
+  }, []);
+
+  const savePage = useCallback(async () => {
+    if (!page || pageSaveState === "saving") return;
+    const seq = pageEditSeq.current;
+    setPageSaveState("saving");
+    try {
+      const result = await notebookWorkspaceAction<{ page: NotebookPageDetail }>("update_page", {
+        pageId: page.id,
+        title: page.title,
+        content: page.content,
+        ink: page.ink,
+        sectionId: page.section_id,
+        pageType: page.page_type,
+        status: page.status,
+        tags: page.tags,
+        isPinned: page.is_pinned,
+        reviewDueAt: page.review_due_at,
+        expectedVersion: page.version,
+      });
+      setPage((current) => current ? {
+        ...(pageEditSeq.current === seq ? result.page : current),
+        links: current.links,
+        assets: current.assets,
+        versions: current.versions,
+        version: result.page.version,
+      } : current);
+      if (pageEditSeq.current === seq) setPageSaveState("saved");
+      else setPageSaveState("dirty");
+      setLibrary((current) => current ? {
+        ...current,
+        pages: current.pages.map((item) => item.id === result.page.id ? { ...item, ...result.page } : item),
+      } : current);
+    } catch (caught) {
+      setPageSaveState(caught instanceof NotebookApiError && caught.code === "version_conflict" ? "conflict" : "error");
+      setError(caught instanceof Error ? caught.message : L("Unable to save the page.", "No se pudo guardar la página."));
+    }
+  }, [L, page, pageSaveState]);
+
+  useEffect(() => {
+    if (pageSaveState !== "dirty") return;
+    const timeout = window.setTimeout(() => void savePage(), 1500);
+    return () => window.clearTimeout(timeout);
+  }, [page, pageSaveState, savePage]);
+
+  const loadDaily = useCallback(async () => {
+    if (scope !== "account" || !activeAccountId || view !== "daily") return;
+    setDailyLoading(true);
+    setError("");
+    try {
+      const params = new URLSearchParams({ view: "daily", accountId: activeAccountId, date: selectedDate });
+      const result = await notebookApi<{ daily: { note: DailyNote | null; facts: DailyFacts } }>(`/api/notebook/workspace?${params}`);
+      setDailyNote(result.daily.note);
+      setDailyFacts(result.daily.facts);
+      setDailyDraft(createNotebookEditableContent(result.daily.note?.content ?? "", result.daily.note?.ink));
+      setDailySaveState("idle");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : L("Unable to load this review.", "No se pudo cargar esta revisión."));
+    } finally {
+      setDailyLoading(false);
+    }
+  }, [L, activeAccountId, scope, selectedDate, view]);
+
+  useEffect(() => { void loadDaily(); }, [loadDaily]);
+
+  const saveDaily = useCallback(async () => {
+    if (!activeAccountId || dailySaveState === "saving") return;
+    const seq = dailyEditSeq.current;
+    setDailySaveState("saving");
+    try {
+      const result = await notebookWorkspaceAction<{ note: DailyNote }>("upsert_daily", {
+        accountId: activeAccountId,
+        date: selectedDate,
+        content: dailyDraft.content,
+        ink: dailyDraft.ink,
+        expectedVersion: dailyNote?.version,
+      });
+      setDailyNote(result.note);
+      setDailySaveState(dailyEditSeq.current === seq ? "saved" : "dirty");
+    } catch (caught) {
+      setDailySaveState(caught instanceof NotebookApiError && caught.code === "version_conflict" ? "conflict" : "error");
+      setError(caught instanceof Error ? caught.message : L("Unable to save the review.", "No se pudo guardar la revisión."));
+    }
+  }, [L, activeAccountId, dailyDraft, dailyNote?.version, dailySaveState, selectedDate]);
+
+  useEffect(() => {
+    if (dailySaveState !== "dirty") return;
+    const timeout = window.setTimeout(() => void saveDaily(), 1500);
+    return () => window.clearTimeout(timeout);
+  }, [dailyDraft, dailySaveState, saveDaily]);
+
+  useEffect(() => {
+    if (searchQuery.trim().length < 2) {
+      setSearchHits([]);
+      setSearching(false);
+      return;
+    }
+    const timeout = window.setTimeout(async () => {
+      setSearching(true);
+      try {
+        const params = new URLSearchParams({ q: searchQuery.trim(), scope });
+        if (accountId) params.set("accountId", accountId);
+        const result = await notebookApi<{ citations: SearchHit[] }>(`/api/notebook/search?${params}`);
+        setSearchHits(result.citations);
+      } catch {
+        setSearchHits([]);
+      } finally {
+        setSearching(false);
+      }
+    }, 300);
+    return () => window.clearTimeout(timeout);
+  }, [accountId, scope, searchQuery]);
+
+  const openSearchHit = useCallback((hit: SearchHit) => {
+    setSearchOpen(false);
+    setSearchQuery("");
+    if (hit.sourceType === "page") {
+      const pageId = hit.id.replace(/^page:/, "");
+      setView("library");
+      setSelectedPageId(pageId);
+      const meta = library?.pages.find((item) => item.id === pageId);
+      if (meta) setSelectedBookId(meta.notebook_id);
+    } else if (hit.sourceType === "daily_review") {
+      const date = hit.href.match(/date=(\d{4}-\d{2}-\d{2})/)?.[1];
+      if (date) setSelectedDate(date);
+      setView("daily");
+    }
+  }, [library?.pages]);
+
+  const createPage = useCallback(async () => {
+    if (!selectedBook) return;
+    setCreating(true);
+    setError("");
+    try {
+      const result = await notebookWorkspaceAction<{ page: NotebookPageSummary }>("create_page", {
+        notebookId: selectedBook.id,
+        sectionId: selectedSectionId === "all" || selectedSectionId === "loose" ? null : selectedSectionId,
+        templateKey,
+        title: newPageTitle,
+        language: isEs ? "es" : "en",
+      });
+      setCreatePageOpen(false);
+      setNewPageTitle("");
+      setTemplateKey("blank");
+      await loadLibrary(result.page.id);
+      setSelectedPageId(result.page.id);
+      setView("library");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : L("Unable to create the page.", "No se pudo crear la página."));
     } finally {
       setCreating(false);
     }
-  };
+  }, [L, isEs, loadLibrary, newPageTitle, selectedBook, selectedSectionId, templateKey]);
 
-  const handleManageNotebookItem = async () => {
-    if (!userId || !manageTarget) return;
-
-    const trimmed = manageName.trim();
-    if (!trimmed) {
-      setManageError(L("Name is required.", "El nombre es requerido."));
-      return;
-    }
-
-    setManaging(true);
-    setManageError(null);
-
+  const submitSimpleDialog = useCallback(async () => {
+    if (!simpleDialog || !simpleValue.trim()) return;
+    setCreating(true);
     try {
-      if (manageTarget.kind === "book") {
-        const ok = await updateNotebookBook(userId, manageTarget.book.id, { name: trimmed });
-        if (!ok) {
-          throw new Error(L("We couldn't update the notebook.", "No pudimos actualizar el notebook."));
-        }
-        closeManageModal();
-        await reloadNotebookWorkspace({
-          notebookId: manageTarget.book.id,
-          sectionId: activeSectionIdRef.current,
-          pageId: activePageIdRef.current,
-        });
-        return;
+      if (simpleDialog === "book") {
+        const result = await notebookWorkspaceAction<{ book: NotebookBook }>("create_book", { scope, accountId, name: simpleValue });
+        await loadLibrary();
+        setSelectedBookId(result.book.id);
+      } else if (simpleDialog === "section" && selectedBook) {
+        const result = await notebookWorkspaceAction<{ section: NotebookSection }>("create_section", { notebookId: selectedBook.id, name: simpleValue });
+        await loadLibrary();
+        setSelectedSectionId(result.section.id);
+      } else if (simpleDialog === "rename_book" && selectedBook) {
+        await notebookWorkspaceAction("update_book", { bookId: selectedBook.id, name: simpleValue });
+        await loadLibrary();
       }
-
-      if (!manageNotebookId) {
-        throw new Error(L("Select a notebook first.", "Selecciona primero un notebook."));
-      }
-
-      if (manageTarget.kind === "section") {
-        const movedNotebook = manageNotebookId !== manageTarget.section.notebook_id;
-        const ok = await updateNotebookSection(userId, manageTarget.section.id, {
-          name: trimmed,
-          notebook_id: manageNotebookId,
-        });
-        if (!ok) {
-          throw new Error(L("We couldn't update the section.", "No pudimos actualizar la sección."));
-        }
-
-        if (movedNotebook) {
-          const { error } = await supabaseBrowser
-            .from(NOTEBOOK_PAGES_TABLE)
-            .update({
-              notebook_id: manageNotebookId,
-              updated_at: new Date().toISOString(),
-            })
-            .eq("section_id", manageTarget.section.id)
-            .eq("user_id", userId);
-          if (error) throw error;
-        }
-
-        closeManageModal();
-        await reloadNotebookWorkspace({
-          notebookId: manageNotebookId,
-          sectionId: manageTarget.section.id,
-          pageId: null,
-        });
-        return;
-      }
-
-      const nextSectionId =
-        manageSectionId && manageSectionId !== UNASSIGNED_SECTION_KEY
-          ? manageSectionId
-          : null;
-      const ok = await updateNotebookPage(userId, manageTarget.page.id, {
-        title: trimmed,
-        notebook_id: manageNotebookId,
-        section_id: nextSectionId,
-      });
-      if (!ok) {
-        throw new Error(L("We couldn't update the page.", "No pudimos actualizar la página."));
-      }
-
-      closeManageModal();
-      await reloadNotebookWorkspace({
-        notebookId: manageNotebookId,
-        sectionId: nextSectionId ?? UNASSIGNED_SECTION_KEY,
-        pageId: manageTarget.page.id,
-      });
-    } catch (err: any) {
-      setManageError(
-        err?.message ??
-          L("We couldn't update this notebook item.", "No pudimos actualizar este elemento del notebook.")
-      );
+      setSimpleDialog(null);
+      setSimpleValue("");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Unable to save.");
     } finally {
-      setManaging(false);
+      setCreating(false);
     }
-  };
+  }, [accountId, loadLibrary, scope, selectedBook, simpleDialog, simpleValue]);
 
-  const handleDeleteNotebookItem = async () => {
-    if (!userId || !manageTarget) return;
+  const trashPage = useCallback(async () => {
+    if (!page || !window.confirm(L("Move this page to trash?", "¿Mover esta página a la papelera?"))) return;
+    await notebookWorkspaceAction("trash_page", { pageId: page.id });
+    setSelectedPageId(null);
+    setPage(null);
+    await loadLibrary();
+  }, [L, loadLibrary, page]);
 
-    const title =
-      manageTarget.kind === "book"
-        ? manageTarget.book.name
-        : manageTarget.kind === "section"
-        ? manageTarget.section.name
-        : manageTarget.page.title;
-
-    const confirmed = window.confirm(
-      manageTarget.kind === "book"
-        ? `${title}\n\n${L(
-            "This deletes the notebook, every section, and every page inside it.",
-            "Esto borra el notebook, todas sus secciones y todas sus páginas."
-          )}`
-        : manageTarget.kind === "section"
-        ? `${title}\n\n${L(
-            "This deletes the section and leaves its pages as loose pages.",
-            "Esto borra la sección y deja sus páginas como páginas sueltas."
-          )}`
-        : `${title}\n\n${L(
-            "This deletes the page permanently.",
-            "Esto borra la página permanentemente."
-          )}`
-    );
-
-    if (!confirmed) return;
-
-    setManaging(true);
-    setManageError(null);
-
+  const convertDailyToLesson = useCallback(async () => {
+    if (!selectedBook || !dailyFacts) return;
+    setCreating(true);
     try {
-      if (manageTarget.kind === "book") {
-        const { error: pagesError } = await supabaseBrowser
-          .from(NOTEBOOK_PAGES_TABLE)
-          .delete()
-          .eq("notebook_id", manageTarget.book.id)
-          .eq("user_id", userId);
-        if (pagesError) throw pagesError;
-
-        const { error: sectionsError } = await supabaseBrowser
-          .from(NOTEBOOK_SECTIONS_TABLE)
-          .delete()
-          .eq("notebook_id", manageTarget.book.id)
-          .eq("user_id", userId);
-        if (sectionsError) throw sectionsError;
-
-        const ok = await deleteNotebookBook(userId, manageTarget.book.id);
-        if (!ok) {
-          throw new Error(L("We couldn't delete the notebook.", "No pudimos borrar el notebook."));
-        }
-      } else if (manageTarget.kind === "section") {
-        const { error: releaseError } = await supabaseBrowser
-          .from(NOTEBOOK_PAGES_TABLE)
-          .update({
-            section_id: null,
-            updated_at: new Date().toISOString(),
-          })
-          .eq("section_id", manageTarget.section.id)
-          .eq("user_id", userId);
-        if (releaseError) throw releaseError;
-
-        const ok = await deleteNotebookSection(userId, manageTarget.section.id);
-        if (!ok) {
-          throw new Error(L("We couldn't delete the section.", "No pudimos borrar la sección."));
-        }
-      } else {
-        const ok = await deleteNotebookPage(userId, manageTarget.page.id);
-        if (!ok) {
-          throw new Error(L("We couldn't delete the page.", "No pudimos borrar la página."));
-        }
-      }
-
-      closeManageModal();
-      await reloadNotebookWorkspace({
-        notebookId:
-          manageTarget.kind === "book"
-            ? nbData.notebooks.find((notebook) => notebook.id !== manageTarget.book.id)?.id ?? null
-            : manageTarget.kind === "section"
-            ? manageTarget.section.notebook_id
-            : manageTarget.page.notebook_id,
-        sectionId:
-          manageTarget.kind === "section"
-            ? UNASSIGNED_SECTION_KEY
-            : manageTarget.kind === "page"
-            ? manageTarget.page.section_id ?? UNASSIGNED_SECTION_KEY
-            : null,
-        pageId: null,
-      });
-    } catch (err: any) {
-      setManageError(
-        err?.message ??
-          L("We couldn't delete this notebook item.", "No pudimos borrar este elemento del notebook.")
+      const facts = L(
+        `<h2>Observed facts</h2><p>${dailyFacts.executionRecords} execution records; outcome: ${dailyFacts.outcome}; recorded P/L: ${money(dailyFacts.pnl, lang)}.</p>`,
+        `<h2>Hechos observados</h2><p>${dailyFacts.executionRecords} registros de ejecución; resultado: ${dailyFacts.outcome}; P/L registrado: ${money(dailyFacts.pnl, lang)}.</p>`
       );
+      const template = NOTEBOOK_TEMPLATES.find((item) => item.key === "lesson")!;
+      const result = await notebookWorkspaceAction<{ page: NotebookPageSummary }>("create_page", {
+        notebookId: selectedBook.id,
+        templateKey: "lesson",
+        pageType: "lesson",
+        status: "candidate",
+        title: L(`Lesson from ${selectedDate}`, `Lección del ${selectedDate}`),
+        content: `${facts}${template.content[isEs ? "es" : "en"]}${dailyDraft.content}`,
+        sourceType: "journal_day",
+        sourceId: selectedDate,
+        language: isEs ? "es" : "en",
+      });
+      await loadLibrary(result.page.id);
+      setSelectedPageId(result.page.id);
+      setView("library");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Unable to create lesson.");
     } finally {
-      setManaging(false);
+      setCreating(false);
     }
-  };
+  }, [L, dailyDraft.content, dailyFacts, isEs, lang, loadLibrary, selectedBook, selectedDate]);
 
-  const updateActivePage = (patch: Partial<LocalNotebookPage>) => {
-    if (!activePage || !userId) return;
-    const id = activePage.id;
-    const now = new Date().toISOString();
-    const currentPage =
-      nbDataRef.current.pages.find((page) => page.id === id) ?? activePage;
-    const nextPage = {
-      ...currentPage,
-      ...patch,
-      updated_at: now,
-    };
-    setNbData((prev) => {
-      const next = {
-        notebooks: prev.notebooks,
-        sections: prev.sections,
-        pages: prev.pages.map((page) =>
-          page.id === id ? nextPage : page
-        ),
-      };
-      nbDataRef.current = next;
-      return next;
-    });
-
-    if (pageSaveTimers.current[id]) {
-      clearTimeout(pageSaveTimers.current[id]);
+  const askNotebook = useCallback(async () => {
+    if (!aiQuestion.trim()) return;
+    setAiLoading(true);
+    setAiAnswer("");
+    setAiCitations([]);
+    try {
+      const result = await notebookApi<{ answer: string; citations: SearchHit[] }>("/api/notebook-ai", {
+        method: "POST",
+        body: JSON.stringify({
+          question: aiQuestion,
+          scope,
+          accountId,
+          selectedPageId,
+          selectedDate: view === "daily" ? selectedDate : null,
+          language: isEs ? "es" : "en",
+        }),
+      });
+      setAiAnswer(result.answer);
+      setAiCitations(result.citations);
+    } catch (caught) {
+      setAiAnswer(caught instanceof Error ? caught.message : L("Analysis failed.", "El análisis falló."));
+    } finally {
+      setAiLoading(false);
     }
-    setPageSaveState((prev) => ({ ...prev, [id]: { state: "saving" } }));
-    pageSaveTimers.current[id] = setTimeout(() => {
-      void (async () => {
-        try {
-          const ok = await updateNotebookPage(userId, id, {
-            title: nextPage.title,
-            content: nextPage.content,
-            section_id: nextPage.section_id ?? null,
-            notebook_id: nextPage.notebook_id,
-            ink: nextPage.ink,
-          });
-          if (!ok) {
-            throw new Error("Notebook page save failed");
-          }
-          setPageSaveState((prev) => ({
-            ...prev,
-            [id]: { state: "saved", ts: Date.now() },
-          }));
-        } catch {
-          setPageSaveState((prev) => ({
-            ...prev,
-            [id]: { state: "error", ts: Date.now() },
-          }));
-        }
-      })();
-    }, 400);
-  };
+  }, [L, accountId, aiQuestion, isEs, scope, selectedDate, selectedPageId, view]);
 
-  if (planLoading) {
-    return (
-      <main className="min-h-screen bg-slate-950 text-slate-50">
-        <TopNav />
-        <div className="max-w-4xl mx-auto px-6 py-16">
-          <p className="text-sm text-slate-400">{L("Loading…", "Cargando…")}</p>
-        </div>
-      </main>
-    );
+  const uploadAsset = useCallback(async (file: File) => {
+    if (!page) return;
+    const form = new FormData();
+    form.set("pageId", page.id);
+    form.set("file", file);
+    try {
+      const result = await notebookApi<{ asset: NotebookAsset }>("/api/notebook/assets", { method: "POST", body: form });
+      setPage((current) => current ? { ...current, assets: [...(current.assets ?? []), result.asset] } : current);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Upload failed.");
+    }
+  }, [page]);
+
+  const loadTrash = useCallback(async () => {
+    const params = new URLSearchParams({ view: "trash", scope });
+    if (accountId) params.set("accountId", accountId);
+    const result = await notebookApi<{ trash: TrashData }>(`/api/notebook/workspace?${params}`);
+    setTrash(result.trash);
+  }, [accountId, scope]);
+
+  useEffect(() => {
+    if (view === "trash") void loadTrash().catch((caught) => setError(caught instanceof Error ? caught.message : "Unable to load trash."));
+  }, [loadTrash, view]);
+
+  if (authLoading || planLoading || accountsLoading) {
+    return <main className="min-h-screen bg-[#020617] text-slate-100"><TopNav /><div className="grid min-h-[70vh] place-items-center"><LoaderCircle className="animate-spin text-emerald-300" /></div></main>;
   }
+
+  if (!user) return null;
 
   if (plan !== "advanced") {
     return (
-      <main className="min-h-screen bg-slate-950 text-slate-50">
+      <main className="min-h-screen bg-[#020617] text-slate-100">
         <TopNav />
-        <div className="max-w-4xl mx-auto px-6 py-16">
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
-            <p className="text-emerald-300 text-[11px] uppercase tracking-[0.3em]">
-              {L("Advanced feature", "Función Advanced")}
-            </p>
-            <h1 className="text-xl font-semibold mt-2">
-              {L(
-                "Notebook is included in Advanced",
-                "El Notebook está incluido en Advanced"
-              )}
-            </h1>
-            <p className="text-sm text-slate-400 mt-2">
-              {L(
-                "Upgrade to Advanced to unlock the full notebook experience, custom pages, and richer execution context.",
-                "Actualiza a Advanced para desbloquear el notebook completo, páginas personalizadas y contexto de ejecución más profundo."
-              )}
-            </p>
-            <div className="mt-4 flex flex-wrap gap-3">
-              <Link
-                href="/billing"
-                className="px-4 py-2 rounded-xl bg-emerald-400 text-slate-950 text-xs font-semibold hover:bg-emerald-300 transition"
-              >
-                {L("Upgrade to Advanced", "Actualizar a Advanced")}
-              </Link>
-              <Link
-                href="/plans-comparison"
-                className="px-4 py-2 rounded-xl border border-slate-700 text-slate-200 text-xs hover:border-emerald-400 transition"
-              >
-                {L("Compare plans", "Comparar planes")}
-              </Link>
-            </div>
+        <section className="mx-auto max-w-3xl px-5 py-20">
+          <div className="rounded-lg border border-emerald-400/30 bg-slate-950 p-8">
+            <BookOpen className="text-emerald-300" />
+            <h1 className="mt-5 text-3xl font-bold">Business Notebook</h1>
+            <p className="mt-3 leading-7 text-slate-400">{L("Build a searchable operating memory from reviews, lessons, research, rules, and playbooks.", "Construye una memoria operativa consultable con revisiones, lecciones, investigación, reglas y playbooks.")}</p>
+            <Link href="/plans" className="mt-6 inline-flex rounded-md bg-emerald-400 px-4 py-2 font-semibold text-slate-950">{L("View Advanced", "Ver Advanced")}</Link>
           </div>
-        </div>
+        </section>
       </main>
     );
   }
 
-  // Loading global
-  if (authLoading || accountsLoading || entriesLoading || nbLoading) {
-    return (
-      <main className="min-h-screen bg-slate-950 text-slate-50">
-        <TopNav />
-        <div className="px-6 md:px-10 py-8">
-          <h1 className="text-3xl font-semibold tracking-tight">
-            {L("Daily notebook", "Notebook diario")}
-          </h1>
-          <p className="text-slate-400 mt-2 text-sm">
-            {L("Loading your notebook…", "Cargando tu notebook…")}
-          </p>
-        </div>
-      </main>
-    );
-  }
+  const navItems: { id: WorkspaceView; label: string; icon: typeof BookOpen }[] = [
+    { id: "overview", label: L("Overview", "Resumen"), icon: Layers3 },
+    { id: "daily", label: L("Daily reviews", "Revisiones diarias"), icon: CalendarDays },
+    { id: "library", label: L("Knowledge", "Conocimiento"), icon: BookOpen },
+    { id: "trash", label: L("Trash", "Papelera"), icon: Trash2 },
+  ];
 
   return (
-    <main className="min-h-screen bg-slate-950 text-slate-50">
+    <main className="min-h-screen bg-[#020617] text-slate-100">
       <TopNav />
-      <div className="px-6 md:px-10 py-8">
-      {/* Header */}
-      <header className="flex flex-col gap-3">
-        <div className="flex items-center justify-between gap-3">
-          <button
-            type="button"
-            onClick={() => router.back()}
-            className="inline-flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900/80 px-3 py-1.5 text-xs text-slate-200 hover:border-emerald-400/60 hover:text-emerald-100 transition"
-          >
-            ← {L("Back", "Volver")}
-          </button>
-
-          <Link
-            href={`/journal/${todayStr}`}
-            className="inline-flex items-center gap-2 rounded-full border border-emerald-400/60 bg-emerald-500/10 px-4 py-2 text-sm font-medium text-emerald-100 hover:bg-emerald-500/20 transition"
-          >
-            {L("Open today's journal page", "Abrir la página del journal de hoy")}
-            <span className="text-xs text-emerald-200/80">
-              ({formatShortDate(todayStr, lang)})
-            </span>
-          </Link>
-        </div>
-
-        <div>
-          <h1 className="text-3xl font-semibold tracking-tight">
-            {L("Daily notebook", "Notebook diario")}
-          </h1>
-          <p className="text-slate-400 mt-1">
-            {L(
-              "Your journal in notebook format – free space for trading, study and life notes.",
-              "Tu journal en formato notebook – espacio libre para trading, estudio y notas de vida."
-            )}
-          </p>
-        </div>
-      </header>
-
-      {/* Tabs principales */}
-      <div className="mt-6 inline-flex rounded-full bg-slate-900/80 border border-slate-800 p-1">
-        <button
-          type="button"
-          onClick={() => setView("notebook")}
-          className={`px-4 py-1.5 text-sm rounded-full transition ${
-            view === "notebook"
-              ? "bg-slate-800 text-slate-50 shadow-sm"
-              : "text-slate-400 hover:text-slate-100"
-          }`}
-        >
-          {L("Notebook pages", "Páginas del notebook")}
-        </button>
-        <button
-          type="button"
-          onClick={() => setView("calendar")}
-          className={`px-4 py-1.5 text-sm rounded-full transition ${
-            view === "calendar"
-              ? "bg-slate-800 text-slate-50 shadow-sm"
-              : "text-slate-400 hover:text-slate-100"
-          }`}
-        >
-          {L("Calendar & holidays", "Calendario y feriados")}
-        </button>
-      </div>
-
-      {view === "notebook" ? (
-        <section className="mt-6 space-y-6">
-          {/* Sub-tabs */}
-          <div className="inline-flex rounded-full bg-slate-900/70 border border-slate-800 p-1">
-            <button
-              type="button"
-              onClick={() => setSubView("journal")}
-              className={`px-4 py-1.5 text-xs md:text-sm rounded-full transition ${
-                subView === "journal"
-                  ? "bg-slate-800 text-slate-50 shadow-sm"
-                  : "text-slate-400 hover:text-slate-100"
-              }`}
-            >
-              {L("Journal notebook", "Notebook del journal")}
-            </button>
-            <button
-              type="button"
-              onClick={() => setSubView("custom")}
-              className={`px-4 py-1.5 text-xs md:text-sm rounded-full transition ${
-                subView === "custom"
-                  ? "bg-slate-800 text-slate-50 shadow-sm"
-                  : "text-slate-400 hover:text-slate-100"
-              }`}
-            >
-              {L("Custom notebooks", "Notebooks personalizados")}
-            </button>
+      <div className="border-b border-slate-800 bg-slate-950/95 px-4 py-3">
+        <div className="mx-auto flex max-w-[1680px] flex-wrap items-center gap-3">
+          <button type="button" onClick={() => setMobileNavOpen((value) => !value)} className="grid h-9 w-9 place-items-center rounded-md border border-slate-700 lg:hidden" title={L("Open navigation", "Abrir navegación")}><Menu size={17} /></button>
+          <div className="mr-auto min-w-[180px]">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-300">{L("Operating memory", "Memoria operativa")}</p>
+            <h1 className="text-lg font-bold">Business Notebook</h1>
           </div>
 
-          {/* ===== JOURNAL NOTEBOOK VIEW ===== */}
-          {subView === "journal" && (
-            <div className="space-y-4">
-              <div className="rounded-3xl border border-slate-800 bg-linear-to-br from-slate-950 via-slate-900 to-sky-950/20 p-5 md:p-6">
-                <div className="flex flex-col xl:flex-row xl:items-start xl:justify-between gap-4">
-                  <div className="max-w-2xl">
-                    <p className="text-[11px] uppercase tracking-[0.22em] text-sky-300">
-                      {L("Daily flow", "Flujo diario")}
-                    </p>
-                    <h2 className="mt-2 text-2xl font-semibold text-slate-50">
-                      {selectedJournalLabel ||
-                        L(
-                          "Daily pages with summaries and notebook space",
-                          "Páginas diarias con resúmenes y espacio de notebook"
-                        )}
-                    </h2>
-                    <p className="mt-2 text-sm leading-7 text-slate-300">
-                      {selectedJournalPreview ||
-                        L(
-                          "Review your execution blocks, then use the notebook space to write the context that does not fit inside the structured execution record.",
-                          "Revisa tus bloques de ejecución y luego usa el espacio del notebook para escribir el contexto que no cabe dentro del registro estructurado."
-                        )}
-                    </p>
-                  </div>
+          <div data-tour="notebook-scope" className="inline-flex h-9 rounded-md border border-slate-700 bg-slate-900 p-0.5" aria-label={L("Notebook scope", "Alcance del notebook")}>
+            <button type="button" onClick={() => { setScope("business"); setSelectedPageId(null); }} className={`rounded px-3 text-xs font-semibold ${scope === "business" ? "bg-emerald-400 text-slate-950" : "text-slate-300"}`}>{L("Business-wide", "Todo el negocio")}</button>
+            <button type="button" disabled={!activeAccountId} onClick={() => { setScope("account"); setSelectedPageId(null); }} className={`rounded px-3 text-xs font-semibold disabled:opacity-40 ${scope === "account" ? "bg-emerald-400 text-slate-950" : "text-slate-300"}`}>{L("Specific account", "Cuenta específica")}</button>
+          </div>
 
-                  {selectedJournalEntry ? (
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Link
-                        href={`/journal/${(selectedJournalEntry as any).date}`}
-                        className="rounded-full bg-sky-400 px-3 py-1.5 text-xs font-semibold text-slate-950 hover:bg-sky-300 transition"
-                      >
-                        {L("Open full execution record", "Abrir registro completo")}
-                      </Link>
-                      <Link
-                        href={`/journal/${todayStr}`}
-                        className="rounded-full border border-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:border-sky-400/60 hover:text-sky-100 transition"
-                      >
-                        {L("Jump to today", "Ir a hoy")}
-                      </Link>
-                    </div>
-                  ) : null}
+          {scope === "account" ? (
+            <select
+              value={activeAccountId ?? ""}
+              onChange={(event) => void setActiveAccount(event.target.value)}
+              className="h-9 min-w-[180px] rounded-md border border-slate-700 bg-slate-900 px-3 text-sm text-slate-100"
+              aria-label={L("Trading account", "Cuenta de trading")}
+            >
+              {accounts.map((account) => <option key={account.id} value={account.id}>{account.name} · {account.account_type === "funded" ? L("Funded", "Fondeada") : L("Personal", "Personal")}</option>)}
+            </select>
+          ) : null}
+
+          <div data-tour="notebook-search" className="relative w-full sm:w-[300px]">
+            <Search size={15} className="pointer-events-none absolute left-3 top-2.5 text-slate-500" />
+            <input value={searchQuery} onFocus={() => setSearchOpen(true)} onChange={(event) => { setSearchQuery(event.target.value); setSearchOpen(true); }} placeholder={L("Search your operating memory", "Buscar en tu memoria operativa")} className="h-9 w-full rounded-md border border-slate-700 bg-slate-900 pl-9 pr-9 text-sm outline-none focus:border-emerald-400" />
+            {searching ? <LoaderCircle size={15} className="absolute right-3 top-2.5 animate-spin text-emerald-300" /> : null}
+            {searchOpen && searchQuery.trim().length >= 2 ? (
+              <div className="absolute right-0 top-11 z-40 max-h-[420px] w-full overflow-auto rounded-md border border-slate-700 bg-slate-950 shadow-2xl sm:w-[520px]">
+                {searchHits.length ? searchHits.map((hit) => (
+                  <button type="button" key={hit.id} onClick={() => openSearchHit(hit)} className="block w-full border-b border-slate-800 px-4 py-3 text-left last:border-0 hover:bg-slate-900">
+                    <p className="text-sm font-semibold text-slate-100">{hit.label}</p>
+                    <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-400">{hit.excerpt}</p>
+                  </button>
+                )) : !searching ? <p className="p-4 text-sm text-slate-500">{L("No matching evidence found.", "No se encontró evidencia coincidente.")}</p> : null}
+              </div>
+            ) : null}
+          </div>
+
+          <button data-tour="notebook-analyze" type="button" onClick={() => setAiOpen(true)} className="inline-flex h-9 items-center gap-2 rounded-md bg-cyan-400 px-3 text-sm font-bold text-slate-950"><BrainCircuit size={16} />{L("Analyze", "Analizar")}</button>
+        </div>
+      </div>
+
+      <div className="mx-auto flex max-w-[1680px]">
+        <aside className={`${mobileNavOpen ? "block" : "hidden"} fixed inset-x-0 z-30 border-b border-slate-800 bg-slate-950 p-3 lg:static lg:block lg:min-h-[calc(100vh-130px)] lg:w-56 lg:shrink-0 lg:border-b-0 lg:border-r`}>
+          <nav className="space-y-1">
+            {navItems.map((item) => {
+              const Icon = item.icon;
+              return <button key={item.id} type="button" onClick={() => { setView(item.id); setMobileNavOpen(false); }} className={`flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-sm font-semibold ${view === item.id ? "bg-emerald-400/15 text-emerald-200" : "text-slate-400 hover:bg-slate-900 hover:text-slate-100"}`}><Icon size={17} />{item.label}</button>;
+            })}
+          </nav>
+          <div className="mt-6 border-t border-slate-800 pt-5">
+            <p className="px-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-600">{L("Current context", "Contexto actual")}</p>
+            <p className="mt-2 px-3 text-sm font-semibold text-slate-200">{scope === "business" ? L("Entire trading business", "Todo el negocio de trading") : activeAccount?.name}</p>
+            {scope === "account" ? <p className="mt-1 px-3 text-xs text-slate-500">{activeAccount?.account_type === "funded" ? L("Funded account", "Cuenta fondeada") : L("Personal account", "Cuenta personal")}</p> : null}
+          </div>
+        </aside>
+
+        <section className="min-w-0 flex-1 p-4 md:p-6">
+          {error ? <div className="mb-4 flex items-start justify-between rounded-md border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-100"><span>{error}</span><button type="button" onClick={() => setError("")} title={L("Dismiss", "Cerrar")}><X size={16} /></button></div> : null}
+          {libraryLoading && !library ? <div className="grid min-h-[55vh] place-items-center"><LoaderCircle className="animate-spin text-emerald-300" /></div> : null}
+
+          {view === "overview" && library ? (
+            <div className="space-y-6">
+              <header data-tour="notebook-capture" className="flex flex-col gap-4 border-b border-slate-800 pb-5 md:flex-row md:items-end md:justify-between">
+                <div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-300">{L("Business knowledge system", "Sistema de conocimiento del negocio")}</p><h2 className="mt-2 text-2xl font-bold">{L("Turn evidence into better operating decisions", "Convierte evidencia en mejores decisiones operativas")}</h2></div>
+                <button type="button" onClick={() => setCreatePageOpen(true)} className="inline-flex items-center justify-center gap-2 rounded-md bg-emerald-400 px-4 py-2 text-sm font-bold text-slate-950"><Plus size={16} />{L("Quick capture", "Captura rápida")}</button>
+              </header>
+
+              <div className="grid gap-px overflow-hidden rounded-lg border border-slate-800 bg-slate-800 sm:grid-cols-3">
+                <div className="bg-slate-950 p-4"><p className="text-xs uppercase text-slate-500">{L("Knowledge pages", "Páginas")}</p><p className="mt-2 text-2xl font-bold">{library.pages.length}</p></div>
+                <div className="bg-slate-950 p-4"><p className="text-xs uppercase text-slate-500">{L("Needs review", "Requiere revisión")}</p><p className="mt-2 text-2xl font-bold text-amber-200">{reviewPages.length}</p></div>
+                <div className="bg-slate-950 p-4"><p className="text-xs uppercase text-slate-500">{L("Validated or active", "Validada o activa")}</p><p className="mt-2 text-2xl font-bold text-emerald-200">{library.pages.filter((item) => item.status === "validated" || item.status === "active").length}</p></div>
+              </div>
+
+              <div className="grid gap-6 xl:grid-cols-2">
+                <div className="rounded-lg border border-slate-800 bg-slate-950">
+                  <div className="flex items-center justify-between border-b border-slate-800 px-4 py-3"><div><h3 className="font-bold">{L("Needs review", "Requiere revisión")}</h3><p className="mt-1 text-xs text-slate-500">{L("Candidate insights and scheduled checks", "Ideas candidatas y revisiones programadas")}</p></div><button type="button" onClick={() => setView("library")} className="text-xs font-semibold text-emerald-300">{L("Open library", "Abrir biblioteca")}</button></div>
+                  {reviewPages.length ? reviewPages.slice(0, 5).map((item) => <PageRow key={item.id} page={item} isEs={isEs} onClick={() => { setSelectedPageId(item.id); setSelectedBookId(item.notebook_id); setView("library"); }} />) : <div className="p-8 text-center"><CheckCircle2 className="mx-auto text-emerald-300" /><p className="mt-3 text-sm font-semibold">{L("Nothing waiting for review", "Nada pendiente de revisión")}</p></div>}
                 </div>
+                <div className="rounded-lg border border-slate-800 bg-slate-950">
+                  <div className="border-b border-slate-800 px-4 py-3"><h3 className="font-bold">{L("Recently worked", "Trabajo reciente")}</h3><p className="mt-1 text-xs text-slate-500">{L("Continue where your thinking last changed", "Continúa donde cambió tu razonamiento")}</p></div>
+                  {recentPages.length ? recentPages.map((item) => <PageRow key={item.id} page={item} isEs={isEs} onClick={() => { setSelectedPageId(item.id); setSelectedBookId(item.notebook_id); setView("library"); }} />) : <div className="p-8 text-center text-sm text-slate-500">{L("Create the first lesson, rule, or playbook.", "Crea la primera lección, regla o playbook.")}</div>}
+                </div>
+              </div>
 
-                {selectedJournalEntry ? (
-                  <div className="mt-5 grid gap-3 md:grid-cols-4">
-                    <div className="rounded-2xl border border-slate-800 bg-slate-950/70 p-3">
-                      <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
-                        {L("Day P&L", "P&L del día")}
-                      </p>
-                      <p
-                        className={`mt-2 text-2xl font-semibold tabular-nums ${
-                          selectedJournalPnl >= 0 ? "text-emerald-300" : "text-sky-300"
-                        }`}
-                      >
-                        {selectedJournalPnl >= 0 ? "+" : ""}${selectedJournalPnl.toFixed(2)}
-                      </p>
+              <div data-tour="notebook-operating-loop" className="rounded-lg border border-slate-800 bg-slate-950 p-5">
+                <h3 className="font-bold">{L("Operating loop", "Ciclo operativo")}</h3>
+                <div className="mt-4 grid gap-3 md:grid-cols-4">
+                  {[L("Capture evidence", "Captura evidencia"), L("Review objectively", "Revisa objetivamente"), L("Validate a lesson", "Valida una lección"), L("Promote to the plan", "Llévala al plan")].map((label, index) => <div key={label} className="flex items-center gap-3 border-l-2 border-emerald-400 px-3 py-2"><span className="text-xs font-bold text-emerald-300">0{index + 1}</span><span className="text-sm font-semibold">{label}</span></div>)}
+                </div>
+              </div>
+            </div>
+          ) : null}
+
+          {view === "daily" ? (
+            scope !== "account" || !activeAccountId ? (
+              <div className="rounded-lg border border-slate-800 bg-slate-950 p-10 text-center"><CalendarDays className="mx-auto text-slate-500" /><h2 className="mt-4 text-xl font-bold">{L("Choose a specific account", "Selecciona una cuenta específica")}</h2><p className="mt-2 text-sm text-slate-400">{L("Daily reviews stay attached to the account that produced the evidence.", "Las revisiones diarias permanecen ligadas a la cuenta que produjo la evidencia.")}</p><button type="button" disabled={!activeAccountId} onClick={() => setScope("account")} className="mt-5 rounded-md bg-emerald-400 px-4 py-2 text-sm font-bold text-slate-950 disabled:opacity-40">{L("Use active account", "Usar cuenta activa")}</button></div>
+            ) : (
+              <div className="space-y-5">
+                <header className="flex flex-col gap-4 border-b border-slate-800 pb-5 md:flex-row md:items-end md:justify-between"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-300">{activeAccount?.name}</p><h2 className="mt-2 text-2xl font-bold">{L("Daily execution review", "Revisión diaria de ejecución")}</h2></div><div className="flex items-center gap-2"><input type="date" value={selectedDate} onChange={(event) => setSelectedDate(event.target.value)} className="h-10 rounded-md border border-slate-700 bg-slate-900 px-3 text-sm" /><Link href={`/journal/${selectedDate}`} className="inline-flex h-10 items-center gap-2 rounded-md border border-slate-700 px-3 text-sm font-semibold">{L("Open journal", "Abrir journal")}<ExternalLink size={14} /></Link></div></header>
+                {dailyLoading ? <div className="grid min-h-[360px] place-items-center"><LoaderCircle className="animate-spin text-emerald-300" /></div> : (
+                  <>
+                    <div className="grid gap-px overflow-hidden rounded-lg border border-slate-800 bg-slate-800 sm:grid-cols-2 xl:grid-cols-4">
+                      <div className="bg-slate-950 p-4"><p className="text-xs uppercase text-slate-500">{L("Execution records", "Registros de ejecución")}</p><p className="mt-2 text-2xl font-bold">{dailyFacts?.executionRecords ?? 0}</p></div>
+                      <div className="bg-slate-950 p-4"><p className="text-xs uppercase text-slate-500">{L("Recorded outcome", "Resultado registrado")}</p><p className={`mt-2 text-2xl font-bold ${(dailyFacts?.pnl ?? 0) < 0 ? "text-rose-300" : "text-emerald-200"}`}>{money(dailyFacts?.pnl ?? 0, lang)}</p><p className="mt-1 text-xs text-slate-500">{dailyFacts?.outcome === "loss" ? L("Loss day", "Día de pérdida") : dailyFacts?.outcome === "profit" ? L("Profit day", "Día de ganancia") : dailyFacts?.outcome === "flat" ? L("Flat day", "Día neutral") : L("No activity", "Sin actividad")}</p></div>
+                      <div className="bg-slate-950 p-4"><p className="text-xs uppercase text-slate-500">{L("Plan alignment", "Alineación al plan")}</p><p className="mt-2 text-2xl font-bold">{dailyFacts?.planRespected ?? 0}/{(dailyFacts?.planRespected ?? 0) + (dailyFacts?.planViolated ?? 0)}</p><p className="mt-1 text-xs text-slate-500">{L("Records marked compliant", "Registros marcados en cumplimiento")}</p></div>
+                      <div className="bg-slate-950 p-4"><p className="text-xs uppercase text-slate-500">{L("Journal coverage", "Cobertura del journal")}</p><p className="mt-2 text-2xl font-bold">{dailyFacts ? Object.values(dailyFacts.noteBlocks).filter(Boolean).length : 0}/3</p><p className="mt-1 text-xs text-slate-500">{L("Pre, live, and post-session", "Pre, durante y post-sesión")}</p></div>
                     </div>
-                    <div className="rounded-2xl border border-slate-800 bg-slate-950/70 p-3">
-                      <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
-                        {L("Journal blocks", "Bloques del journal")}
-                      </p>
-                      <p className="mt-2 text-2xl font-semibold text-slate-50">
-                        {writtenJournalBlocks}/3
-                      </p>
+                    <div className="rounded-lg border border-slate-800 bg-slate-950 p-4 md:p-5">
+                      <div className="mb-4 flex flex-wrap items-center justify-between gap-3"><div><h3 className="font-bold">{L("Context and reflection", "Contexto y reflexión")}</h3><p className="mt-1 text-xs text-slate-500">{L("The journal supplies facts; use this space for meaning, patterns, and the next test.", "El journal aporta hechos; usa este espacio para significado, patrones y la próxima prueba.")}</p></div><div className="flex items-center gap-3"><span className="text-xs text-slate-500">{dailySaveState === "saving" ? L("Saving...", "Guardando...") : dailySaveState === "saved" ? L("Saved", "Guardado") : dailySaveState === "conflict" ? L("Reload required", "Requiere recargar") : ""}</span><button type="button" disabled={!dailyFacts || creating} onClick={() => void convertDailyToLesson()} className="inline-flex items-center gap-2 rounded-md border border-amber-400/40 px-3 py-2 text-xs font-bold text-amber-100"><Sparkles size={14} />{L("Create lesson candidate", "Crear lección candidata")}</button></div></div>
+                      <NotebookInkField label={L("Daily review", "Revisión diaria")} value={dailyDraft} onChange={(next) => { dailyEditSeq.current += 1; setDailyDraft(next); setDailySaveState("dirty"); }} placeholder={L("What happened, what does the evidence support, and what will you test next?", "¿Qué ocurrió, qué sostiene la evidencia y qué vas a probar después?")} minHeight={360} />
                     </div>
-                    <div className="rounded-2xl border border-slate-800 bg-slate-950/70 p-3">
-                      <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
-                        {L("Trades tracked", "Trades registrados")}
-                      </p>
-                      <p className="mt-2 text-2xl font-semibold text-slate-50">
-                        {entriesFromNotes.length + exitsFromNotes.length}
-                      </p>
+                  </>
+                )}
+              </div>
+            )
+          ) : null}
+
+          {view === "library" && library ? (
+            <div className="overflow-hidden rounded-lg border border-slate-800 bg-slate-950 xl:grid xl:min-h-[680px] xl:grid-cols-[220px_300px_minmax(0,1fr)]">
+              <aside className="border-b border-slate-800 p-3 xl:border-b-0 xl:border-r">
+                <div className="flex items-center justify-between px-1 pb-3"><p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">{L("Notebooks", "Notebooks")}</p><button type="button" title={L("New notebook", "Nuevo notebook")} onClick={() => { setSimpleValue(""); setSimpleDialog("book"); }} className="grid h-7 w-7 place-items-center rounded-md text-slate-400 hover:bg-slate-800 hover:text-emerald-300"><FolderPlus size={15} /></button></div>
+                <div className="space-y-1">{books.map((book) => <button key={book.id} type="button" onClick={() => { setSelectedBookId(book.id); setSelectedSectionId("all"); setSelectedPageId(null); }} className={`flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm font-semibold ${selectedBook?.id === book.id ? "bg-emerald-400/15 text-emerald-100" : "text-slate-400 hover:bg-slate-900"}`}><BookOpen size={15} /><span className="truncate">{book.name}</span></button>)}</div>
+                {selectedBook ? (
+                  <div className="mt-5 border-t border-slate-800 pt-4">
+                    <div className="flex items-center justify-between px-1"><p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">{L("Sections", "Secciones")}</p><button type="button" title={L("New section", "Nueva sección")} onClick={() => { setSimpleValue(""); setSimpleDialog("section"); }} className="grid h-7 w-7 place-items-center rounded-md text-slate-400 hover:bg-slate-800"><Plus size={14} /></button></div>
+                    <div className="mt-2 space-y-1">
+                      <button type="button" onClick={() => setSelectedSectionId("all")} className={`w-full rounded-md px-2.5 py-2 text-left text-xs font-semibold ${selectedSectionId === "all" ? "bg-slate-800 text-slate-100" : "text-slate-500"}`}>{L("All pages", "Todas las páginas")}</button>
+                      {sections.map((section) => <div key={section.id} className={`flex items-center rounded-md ${selectedSectionId === section.id ? "bg-slate-800" : ""}`}><button type="button" onClick={() => setSelectedSectionId(section.id)} className={`min-w-0 flex-1 truncate px-2.5 py-2 text-left text-xs font-semibold ${selectedSectionId === section.id ? "text-slate-100" : "text-slate-500"}`}>{section.name}</button><button type="button" title={L("Delete section", "Eliminar sección")} onClick={async () => { if (!window.confirm(L("Delete this section? Its pages will remain unfiled.", "¿Eliminar esta sección? Sus páginas quedarán sin archivar."))) return; await notebookWorkspaceAction("delete_section", { sectionId: section.id }); setSelectedSectionId("all"); await loadLibrary(); }} className="mr-1 grid h-6 w-6 place-items-center rounded text-slate-600 hover:text-rose-300"><X size={12} /></button></div>)}
+                      <button type="button" onClick={() => setSelectedSectionId("loose")} className={`w-full rounded-md px-2.5 py-2 text-left text-xs font-semibold ${selectedSectionId === "loose" ? "bg-slate-800 text-slate-100" : "text-slate-500"}`}>{L("Unfiled", "Sin archivar")}</button>
                     </div>
-                    <div className="rounded-2xl border border-slate-800 bg-slate-950/70 p-3">
-                      <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
-                        {L("Notebook state", "Estado del notebook")}
-                      </p>
-                      <p className="mt-2 text-sm font-semibold text-slate-100">
-                        {freeNotesStatus?.state === "saving"
-                          ? L("Saving…", "Guardando…")
-                          : freeNotesStatus?.state === "error"
-                          ? L("Save failed", "Error al guardar")
-                          : freeNotesStatus?.state === "saved"
-                          ? `${L("Saved", "Guardado")} ${formatSavedTime(freeNotesStatus.ts, lang)}`
-                          : L("Autosave ready", "Autosave listo")}
-                      </p>
+                    <div className="mt-4 flex items-center gap-1 px-1">
+                      <button type="button" title={L("Rename notebook", "Renombrar notebook")} onClick={() => { setSimpleValue(selectedBook.name); setSimpleDialog("rename_book"); }} className="inline-flex items-center gap-2 rounded-md px-2 py-1.5 text-xs text-slate-500 hover:bg-slate-900 hover:text-slate-200"><NotebookPen size={13} />{L("Rename", "Renombrar")}</button>
+                      <button type="button" title={L("Move notebook to trash", "Mover notebook a papelera")} onClick={async () => { if (!window.confirm(L("Move this notebook and its pages to trash?", "¿Mover este notebook y sus páginas a la papelera?"))) return; await notebookWorkspaceAction("trash_book", { bookId: selectedBook.id }); setSelectedPageId(null); await loadLibrary(); }} className="grid h-7 w-7 place-items-center rounded-md text-slate-600 hover:bg-rose-500/10 hover:text-rose-300"><Trash2 size={13} /></button>
                     </div>
                   </div>
                 ) : null}
+              </aside>
+
+              <div className="border-b border-slate-800 xl:border-b-0 xl:border-r">
+                <div className="flex h-14 items-center justify-between border-b border-slate-800 px-3"><div><p className="text-xs font-bold text-slate-200">{selectedBook?.name}</p><p className="text-[10px] text-slate-500">{pages.length} {L("pages", "páginas")}</p></div><button type="button" title={L("Create page", "Crear página")} onClick={() => setCreatePageOpen(true)} className="grid h-8 w-8 place-items-center rounded-md bg-emerald-400 text-slate-950"><Plus size={16} /></button></div>
+                <div className="max-h-[360px] overflow-y-auto xl:max-h-[calc(100vh-220px)]">{pages.length ? pages.map((item) => <PageRow key={item.id} page={item} active={item.id === selectedPageId} isEs={isEs} onClick={() => setSelectedPageId(item.id)} />) : <div className="p-8 text-center"><NotebookPen className="mx-auto text-slate-600" /><p className="mt-3 text-sm text-slate-500">{L("No pages in this section.", "No hay páginas en esta sección.")}</p></div>}</div>
               </div>
 
-              {sorted.length === 0 ? (
-                <p className="text-slate-500 text-sm mt-3">
-                  {L(
-                    "You don't have journal pages yet. Create your first entry from the journal to see it here.",
-                    "Aún no tienes páginas del journal. Crea tu primera entrada en el journal para verla aquí."
-                  )}
-                </p>
-              ) : (
-                <div className="grid gap-4 xl:grid-cols-[320px_minmax(0,1fr)]">
-                  <aside className="rounded-3xl border border-slate-800 bg-slate-950/80 p-4 space-y-3">
-                    <div>
-                      <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
-                        {L("Daily note explorer", "Explorador de notas diarias")}
-                      </p>
-                      <h3 className="mt-1 text-sm font-semibold text-slate-100">
-                        {L("Recent journal days", "Días recientes del journal")}
-                      </h3>
-                      <p className="mt-1 text-xs leading-6 text-slate-400">
-                        {L(
-                          "Move across your recent daily notes without leaving the notebook workspace.",
-                          "Muévete entre tus notas diarias recientes sin salir del workspace del notebook."
-                        )}
-                      </p>
+              <div className="min-w-0">
+                {pageLoading ? <div className="grid min-h-[560px] place-items-center"><LoaderCircle className="animate-spin text-emerald-300" /></div> : page ? (
+                  <div className="p-4 md:p-5">
+                    <div className="flex flex-wrap items-start gap-3 border-b border-slate-800 pb-4">
+                      <input value={page.title} onChange={(event) => updatePageDraft({ title: event.target.value })} className="min-w-[220px] flex-1 bg-transparent text-xl font-bold outline-none placeholder:text-slate-600" placeholder={L("Untitled page", "Página sin título")} />
+                      <select value={page.page_type} onChange={(event) => updatePageDraft({ page_type: event.target.value as NotebookPageType })} className="h-9 rounded-md border border-slate-700 bg-slate-900 px-2 text-xs font-semibold">{NOTEBOOK_PAGE_TYPES.map((type) => <option key={type} value={type}>{pageTypeLabel(type, isEs)}</option>)}</select>
+                      <select value={page.status} onChange={(event) => updatePageDraft({ status: event.target.value as NotebookPageStatus })} className="h-9 rounded-md border border-slate-700 bg-slate-900 px-2 text-xs font-semibold">{NOTEBOOK_PAGE_STATUSES.filter((status) => status !== "active" || page.status === "active").map((status) => <option key={status} value={status}>{statusLabel(status, isEs)}</option>)}</select>
+                      <button type="button" title={page.is_pinned ? L("Unpin", "Desfijar") : L("Pin", "Fijar")} onClick={() => updatePageDraft({ is_pinned: !page.is_pinned })} className={`grid h-9 w-9 place-items-center rounded-md border ${page.is_pinned ? "border-amber-400/60 bg-amber-400/10 text-amber-200" : "border-slate-700 text-slate-400"}`}><Pin size={15} /></button>
+                      <button type="button" title={L("Move to trash", "Mover a papelera")} onClick={() => void trashPage()} className="grid h-9 w-9 place-items-center rounded-md border border-slate-700 text-slate-400 hover:border-rose-400 hover:text-rose-200"><Trash2 size={15} /></button>
                     </div>
-
-                    <div className="space-y-2 max-h-[840px] overflow-y-auto pr-1">
-                      {sorted.map((entry: any) => {
-                        const isSelected = selectedJournalDate === entry.date;
-                        const preview = getNotebookPreview(
-                          entry.notes,
-                          L(
-                            "This day has structured notes saved in the journal blocks.",
-                            "Este día tiene notas estructuradas guardadas en los bloques del journal."
-                          )
-                        );
-                        const dailyLayer =
-                          dailyNotebookByDate[entry.date] ??
-                          createNotebookEditableContent();
-                        const dailyLayerSurface = describeSurface(
-                          getNotebookSurfaceMeta(
-                            dailyLayer.content,
-                            dailyLayer.ink
-                          )
-                        );
-
-                        return (
-                          <motion.button
-                            key={entry.date}
-                            type="button"
-                            whileHover={{ scale: 1.01 }}
-                            whileTap={{ scale: 0.985 }}
-                            onClick={() => setSelectedJournalDate(entry.date)}
-                            className={`w-full rounded-2xl border px-3 py-3 text-left transition ${
-                              isSelected
-                                ? "border-sky-400/60 bg-sky-500/10 text-sky-50"
-                                : "border-slate-800 bg-slate-900/60 text-slate-200 hover:border-sky-400/40 hover:bg-slate-900"
-                            }`}
-                          >
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="text-sm font-semibold">
-                                {formatShortDate(entry.date, lang)}
-                              </span>
-                              <span
-                                className={`text-[11px] font-medium tabular-nums ${
-                                  Number(entry.pnl || 0) >= 0 ? "text-emerald-300" : "text-sky-300"
-                                }`}
-                              >
-                                {Number(entry.pnl || 0) >= 0 ? "+" : ""}${Number(entry.pnl || 0).toFixed(0)}
-                              </span>
-                            </div>
-                            <div className="mt-2 flex flex-wrap items-center gap-2">
-                              <span
-                                className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${dailyLayerSurface.badgeClass}`}
-                              >
-                                {dailyLayerSurface.label}
-                              </span>
-                              <span className="text-[10px] text-slate-500">
-                                {dailyLayerSurface.detail}
-                              </span>
-                            </div>
-                            {preview ? (
-                              <p className="mt-2 text-[11px] leading-5 text-slate-400 line-clamp-3">
-                                {preview}
-                              </p>
-                            ) : null}
-                          </motion.button>
-                        );
-                      })}
+                    <div className="mt-3 flex flex-wrap items-center gap-3">
+                      <input value={page.tags.join(", ")} onChange={(event) => updatePageDraft({ tags: event.target.value.split(",").map((tag) => tag.trim().toLowerCase()).filter(Boolean).slice(0, 20) })} placeholder={L("Tags separated by commas", "Tags separados por comas")} className="h-8 min-w-[220px] flex-1 rounded-md border border-slate-800 bg-slate-900 px-3 text-xs outline-none focus:border-emerald-400" />
+                      <input type="date" value={page.review_due_at?.slice(0, 10) ?? ""} onChange={(event) => updatePageDraft({ review_due_at: event.target.value || null })} title={L("Review date", "Fecha de revisión")} className="h-8 rounded-md border border-slate-800 bg-slate-900 px-2 text-xs" />
+                      <span className={`text-xs ${pageSaveState === "error" || pageSaveState === "conflict" ? "text-rose-300" : "text-slate-500"}`}>{pageSaveState === "saving" ? L("Saving...", "Guardando...") : pageSaveState === "dirty" ? L("Unsaved changes", "Cambios sin guardar") : pageSaveState === "saved" ? L("Saved", "Guardado") : pageSaveState === "conflict" ? L("Changed elsewhere. Reload.", "Cambió en otra sesión. Recarga.") : `v${page.version}`}</span>
+                      {pageSaveState === "conflict" ? <button type="button" onClick={() => { const id = page.id; setSelectedPageId(null); window.setTimeout(() => setSelectedPageId(id), 0); }} className="text-xs font-bold text-emerald-300">{L("Reload", "Recargar")}</button> : null}
+                      {sourceHref(page) ? <Link href={sourceHref(page)} className="inline-flex items-center gap-1 text-xs font-semibold text-cyan-300"><ExternalLink size={12} />{L("Open source evidence", "Abrir evidencia fuente")}</Link> : null}
+                      {(page.status === "validated" || page.status === "active") && ["lesson", "setup_playbook", "risk_rule"].includes(page.page_type) ? <button type="button" onClick={async () => { if (!window.confirm(L("Promote this validated knowledge into the operating system?", "¿Llevar este conocimiento validado al sistema operativo?"))) return; const result = await notebookWorkspaceAction<{ page: NotebookPageDetail; targetHref: string }>("promote_page", { pageId: page.id }); setPage((current) => current ? { ...current, ...result.page } : current); window.location.href = result.targetHref; }} className="inline-flex items-center gap-1 rounded-md border border-emerald-400/40 px-2.5 py-1.5 text-xs font-bold text-emerald-200"><ChevronRight size={13} />{page.page_type === "risk_rule" ? L("Promote to protection", "Llevar a protección") : L("Promote to plan", "Llevar al plan")}</button> : null}
                     </div>
-                  </aside>
-
-                  <section className="space-y-4">
-                    {selectedJournalEntry ? (
-                      <>
-                        <div className="rounded-3xl border border-slate-800 bg-slate-900/80 p-4 md:p-6 space-y-4">
-                          <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
-                            <div>
-                              <p className="text-[11px] uppercase tracking-[0.18em] text-sky-300">
-                                {L("Daily notebook", "Notebook diario")}
-                              </p>
-                              <h3 className="mt-1 text-2xl font-semibold text-slate-50">
-                                {selectedJournalLabel}
-                              </h3>
-                              <p className="mt-1 text-sm text-slate-400">
-                                {L(
-                                  "Use this as the free-form layer on top of your journal: context, psychology, ideas, preparation, and meaning.",
-                                  "Usa esto como la capa libre encima de tu journal: contexto, psicología, ideas, preparación y significado."
-                                )}
-                              </p>
-                              <div className="mt-3 flex flex-wrap items-center gap-2">
-                                <span
-                                  className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${selectedFreeNoteSurface.badgeClass}`}
-                                >
-                                  {selectedFreeNoteSurface.label}
-                                </span>
-                                <span className="text-[11px] text-slate-500">
-                                  {selectedFreeNoteSurface.detail}
-                                </span>
-                              </div>
-                            </div>
-
-                            {freeNotesStatus?.state ? (
-                              <span
-                                className={`text-[11px] font-medium ${
-                                  freeNotesStatus.state === "saving"
-                                    ? "text-amber-300"
-                                    : freeNotesStatus.state === "error"
-                                    ? "text-rose-300"
-                                    : "text-emerald-300"
-                                }`}
-                              >
-                                {freeNotesStatus.state === "saving" &&
-                                  L("Saving…", "Guardando…")}
-                                {freeNotesStatus.state === "error" &&
-                                  L("Save failed", "Error al guardar")}
-                                {freeNotesStatus.state === "saved" &&
-                                  `${L("Saved", "Guardado")} ${formatSavedTime(
-                                    freeNotesStatus.ts,
-                                    lang
-                                  )}`}
-                              </span>
-                            ) : (
-                              <span className="text-[11px] text-slate-500">
-                                {L("Autosave on edit", "Autosave al editar")}
-                              </span>
-                            )}
-                          </div>
-
-                          <NotebookInkField
-                            label={L("Daily notebook surface", "Superficie del notebook diario")}
-                            value={selectedFreeNote}
-                            onChange={handleFreeNotesChange}
-                            placeholder={L(
-                              "Write anything here: study notes, psychology reflections, execution notes, and ideas connected to this day.",
-                              "Escribe aquí: notas de estudio, reflexiones de psicología, notas de ejecución e ideas conectadas con este día."
-                            )}
-                            minHeight={340}
-                          />
-                        </div>
-
-                        <div className="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
-                          <div className="rounded-3xl border border-slate-800 bg-slate-900/80 p-4 md:p-6 space-y-4">
-                            <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
-                              <div>
-                                <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
-                                  {L("Journal snapshot", "Snapshot del journal")}
-                                </p>
-                                <h3 className="mt-1 text-lg font-semibold text-slate-50">
-                                  {L(
-                                    "Structured context for this day",
-                                    "Contexto estructurado de este día"
-                                  )}
-                                </h3>
-                              </div>
-                              <div className="flex flex-wrap gap-2">
-                                {combinedTags.length > 0 ? (
-                                  combinedTags.map((tag) => (
-                                    <span
-                                      key={tag}
-                                      className="rounded-full border border-emerald-400/40 bg-emerald-500/10 px-2 py-0.5 text-[11px] text-emerald-200"
-                                    >
-                                      {tag}
-                                    </span>
-                                  ))
-                                ) : (
-                                  <span className="text-[11px] text-slate-500">
-                                    {L("No tags yet", "Aún sin tags")}
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-
-                            <div className="grid gap-3 md:grid-cols-3">
-                              <div className="rounded-2xl border border-slate-800 bg-slate-950/70 p-3">
-                                <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
-                                  {L("Entries", "Entradas")}
-                                </p>
-                                <p className="mt-2 text-xl font-semibold text-slate-50">
-                                  {entriesFromNotes.length}
-                                </p>
-                              </div>
-                              <div className="rounded-2xl border border-slate-800 bg-slate-950/70 p-3">
-                                <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
-                                  {L("Exits", "Salidas")}
-                                </p>
-                                <p className="mt-2 text-xl font-semibold text-slate-50">
-                                  {exitsFromNotes.length}
-                                </p>
-                              </div>
-                              <div className="rounded-2xl border border-slate-800 bg-slate-950/70 p-3">
-                                <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
-                                  {L("Written blocks", "Bloques escritos")}
-                                </p>
-                                <p className="mt-2 text-xl font-semibold text-slate-50">
-                                  {writtenJournalBlocks}
-                                </p>
-                              </div>
-                            </div>
-
-                            <div className="grid gap-3 md:grid-cols-3">
-                              {selectedJournalCards.map((card) => (
-                                <div
-                                  key={card.title}
-                                  className="rounded-2xl border border-slate-800 bg-slate-950/70 p-3"
-                                >
-                                  <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
-                                    {card.title}
-                                  </p>
-                                  <p className="mt-2 text-sm leading-6 text-slate-200 line-clamp-6">
-                                    {card.body ||
-                                      L(
-                                        "No notes saved yet for this block.",
-                                        "Aún no hay notas guardadas para este bloque."
-                                      )}
-                                  </p>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-
-                          <div className="rounded-3xl border border-emerald-500/40 bg-linear-to-br from-slate-950 via-slate-950 to-emerald-900/30 p-4 md:p-5 space-y-4">
-                            <div>
-                              <p className="text-[11px] uppercase tracking-[0.18em] text-emerald-300">
-                                {L("Day brief", "Resumen del día")}
-                              </p>
-                              <h3 className="mt-1 text-lg font-semibold text-emerald-50">
-                                {L(
-                                  "Everything you need before you start writing",
-                                  "Todo lo que necesitas antes de empezar a escribir"
-                                )}
-                              </h3>
-                              <p className="mt-1 text-sm leading-6 text-emerald-50/80">
-                                {L(
-                                  "Notebook is your thinking layer. Keep the facts visible here, write the meaning in your note, and move to Business AI Coaching only when you want deeper pattern analysis.",
-                                  "Notebook es tu capa de pensamiento. Mantén los hechos visibles aquí, escribe el significado en tu nota y ve al Business AI Coaching solo cuando quieras análisis más profundo de patrones."
-                                )}
-                              </p>
-                            </div>
-
-                            <div className="grid gap-3 md:grid-cols-2">
-                              {dayBriefItems.map((item) => (
-                                <div
-                                  key={item.label}
-                                  className="rounded-2xl border border-emerald-500/20 bg-slate-950/60 p-3"
-                                >
-                                  <p className="text-[11px] uppercase tracking-[0.18em] text-emerald-200/80">
-                                    {item.label}
-                                  </p>
-                                  <p className="mt-2 text-sm font-medium leading-6 text-emerald-50">
-                                    {item.detail}
-                                  </p>
-                                </div>
-                              ))}
-                            </div>
-
-                            <div className="rounded-2xl border border-white/10 bg-slate-950/70 p-3">
-                              <div className="flex items-center justify-between gap-3">
-                                <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
-                                  {L("Trade timeline", "Timeline del trade")}
-                                </p>
-                                <p className="text-[11px] text-slate-400">
-                                  {tradedSymbols.length > 0
-                                    ? tradedSymbols.join(", ")
-                                    : L("No symbols yet", "Aún sin símbolos")}
-                                </p>
-                              </div>
-                              <div className="mt-3 space-y-2">
-                                {timelineRows.length > 0 ? (
-                                  timelineRows.slice(0, 6).map((row) => (
-                                    <div
-                                      key={row.id}
-                                      className="flex items-start justify-between gap-3 rounded-xl border border-slate-800 bg-slate-900/60 px-3 py-2"
-                                    >
-                                      <div>
-                                        <p className="text-xs font-semibold text-slate-100">
-                                          {row.type === "entry"
-                                            ? L("Entry", "Entrada")
-                                            : L("Exit", "Salida")}{" "}
-                                          · {row.symbol || L("No symbol", "Sin símbolo")}
-                                        </p>
-                                        <p className="mt-1 text-[11px] text-slate-400">
-                                          {[row.side, row.quantity ? `${row.quantity} ${L("qty", "cant.")}` : ""]
-                                            .filter(Boolean)
-                                            .join(" · ")}
-                                        </p>
-                                      </div>
-                                      <span className="text-[11px] font-medium text-slate-300">
-                                        {row.time || "—"}
-                                      </span>
-                                    </div>
-                                  ))
-                                ) : (
-                                  <p className="text-xs leading-6 text-slate-400">
-                                    {L(
-                                      "No trade timeline yet. As you log entries and exits in Journal, this day summary becomes more useful.",
-                                      "Todavía no hay timeline de trades. A medida que registres entradas y salidas en Journal, este resumen del día se vuelve más útil."
-                                    )}
-                                  </p>
-                                )}
-                              </div>
-                            </div>
-
-                            <div className="rounded-2xl border border-sky-400/20 bg-sky-500/10 p-3">
-                              <p className="text-[11px] uppercase tracking-[0.18em] text-sky-200">
-                                {L("Write from here", "Escribe desde aquí")}
-                              </p>
-                              <div className="mt-3 space-y-2">
-                                {notebookPrompts.map((prompt) => (
-                                  <div
-                                    key={prompt}
-                                    className="rounded-xl border border-sky-400/20 bg-slate-950/60 px-3 py-2 text-xs leading-6 text-sky-50"
-                                  >
-                                    {prompt}
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-
-                            <div className="flex flex-wrap items-center gap-2">
-                              <Link
-                                href={openCoachingHref}
-                                className="inline-flex items-center justify-center rounded-full bg-emerald-500 px-3 py-1.5 text-xs font-semibold text-slate-950 hover:bg-emerald-400 transition"
-                              >
-                                {L("Open full coaching", "Abrir coaching completo")}
-                              </Link>
-                              <Link
-                                href={`/journal/${(selectedJournalEntry as any).date}`}
-                                className="inline-flex items-center justify-center rounded-full border border-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:border-emerald-400/50 hover:text-emerald-100 transition"
-                              >
-                                {L("Return to journal execution", "Volver a la ejecución del journal")}
-                              </Link>
-                            </div>
-                          </div>
-                        </div>
-                      </>
-                    ) : (
-                      <div className="rounded-2xl border border-dashed border-slate-800 bg-slate-950/50 p-6 text-sm text-slate-400">
-                        {L(
-                          "Select a day from the explorer to open its journal notebook.",
-                          "Selecciona un día en el explorador para abrir su notebook del journal."
-                        )}
-                      </div>
-                    )}
-                  </section>
-                </div>
-              )}
+                    <div className="mt-5"><NotebookInkField label={pageTypeLabel(page.page_type, isEs)} value={createNotebookEditableContent(page.content, page.ink)} onChange={(next) => updatePageDraft({ content: next.content, ink: next.ink })} placeholder={L("Record evidence, reasoning, invalidation, and the next test...", "Registra evidencia, razonamiento, invalidación y la próxima prueba...")} minHeight={420} /></div>
+                    <div className="mt-6 grid gap-5 border-t border-slate-800 pt-5 lg:grid-cols-2">
+                      <div><div className="flex items-center justify-between"><h3 className="text-sm font-bold">{L("Evidence and attachments", "Evidencia y adjuntos")}</h3><button type="button" onClick={() => fileInputRef.current?.click()} className="inline-flex items-center gap-2 rounded-md border border-slate-700 px-2.5 py-1.5 text-xs font-semibold"><Upload size={13} />{L("Attach", "Adjuntar")}</button><input ref={fileInputRef} type="file" accept="image/png,image/jpeg,image/webp,application/pdf" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadAsset(file); event.currentTarget.value = ""; }} /></div><div className="mt-3 space-y-2">{page.assets?.length ? page.assets.map((asset) => <div key={asset.id} className="flex items-center gap-2"><a href={asset.signed_url ?? "#"} target="_blank" rel="noreferrer" className="flex min-w-0 flex-1 items-center gap-3 rounded-md border border-slate-800 px-3 py-2 text-sm hover:border-emerald-400/40"><Paperclip size={14} className="shrink-0 text-slate-500" /><span className="truncate">{asset.file_name}</span><span className="ml-auto shrink-0 text-[10px] text-slate-600">{Math.ceil(asset.size_bytes / 1024)} KB</span></a><button type="button" title={L("Remove attachment", "Eliminar adjunto")} onClick={async () => { if (!window.confirm(L("Remove this attachment?", "¿Eliminar este adjunto?"))) return; await notebookApi("/api/notebook/assets", { method: "DELETE", body: JSON.stringify({ assetId: asset.id }) }); setPage((current) => current ? { ...current, assets: current.assets?.filter((item) => item.id !== asset.id) } : current); }} className="grid h-8 w-8 shrink-0 place-items-center rounded-md border border-slate-800 text-slate-500 hover:border-rose-400 hover:text-rose-200"><X size={13} /></button></div>) : <p className="text-xs text-slate-500">{L("No attachments on this page. Private storage limit: 250 MB.", "Esta página no tiene adjuntos. Límite privado: 250 MB.")}</p>}</div></div>
+                      <div><h3 className="flex items-center gap-2 text-sm font-bold"><History size={15} />{L("Version history", "Historial de versiones")}</h3><div className="mt-3 max-h-40 space-y-2 overflow-auto">{page.versions?.length ? page.versions.map((version: NotebookVersion) => <div key={version.id} className="flex items-center gap-3 rounded-md border border-slate-800 px-3 py-2"><div className="min-w-0 flex-1"><p className="truncate text-xs font-semibold">v{version.version} · {version.title}</p><p className="mt-1 text-[10px] text-slate-500">{formatDate(version.created_at, lang)}</p></div><button type="button" title={L("Restore version", "Restaurar versión")} onClick={async () => { const result = await notebookWorkspaceAction<{ page: NotebookPageDetail }>("restore_version", { pageId: page.id, versionId: version.id }); setPage((current) => current ? { ...current, ...result.page } : current); }} className="grid h-7 w-7 place-items-center rounded-md border border-slate-700"><RotateCcw size={13} /></button></div>) : <p className="text-xs text-slate-500">{L("Version snapshots appear as the page evolves.", "Las versiones aparecen a medida que evoluciona la página.")}</p>}</div></div>
+                    </div>
+                  </div>
+                ) : <div className="grid min-h-[560px] place-items-center p-8 text-center"><div><BookOpen className="mx-auto text-slate-600" /><h3 className="mt-4 font-bold">{L("Choose a page or capture a new idea", "Elige una página o captura una idea nueva")}</h3><button type="button" onClick={() => setCreatePageOpen(true)} className="mt-4 rounded-md bg-emerald-400 px-3 py-2 text-sm font-bold text-slate-950">{L("Create page", "Crear página")}</button></div></div>}
+              </div>
             </div>
-          )}
+          ) : null}
 
-          {/* ===== CUSTOM NOTEBOOKS VIEW ===== */}
-          {subView === "custom" && (
-            <div className="space-y-4">
-              <div className="rounded-3xl border border-slate-800 bg-linear-to-br from-slate-950 via-slate-900 to-emerald-950/20 p-5 md:p-6">
-                <div className="flex flex-col xl:flex-row xl:items-start xl:justify-between gap-4">
-                  <div className="max-w-2xl">
-                    <p className="text-[11px] uppercase tracking-[0.22em] text-emerald-300">
-                      {L("Custom workspace", "Workspace personalizado")}
-                    </p>
-                    <h2 className="mt-2 text-2xl font-semibold text-slate-50">
-                      {L(
-                        "Notebook > section > page, with desktop-level editing",
-                        "Notebook > sección > página, con edición a nivel desktop"
-                      )}
-                    </h2>
-                    <p className="mt-2 text-sm leading-7 text-slate-300">
-                      {L(
-                        "This workspace keeps the stronger structure from mobile and adds the richer web editor, autosave, and longer-form writing flow.",
-                        "Este workspace mantiene la estructura más fuerte del mobile y le suma el editor más rico de web, autosave y una experiencia mejor para escribir en profundidad."
-                      )}
-                    </p>
-                  </div>
-
-                  <div className="flex flex-wrap items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={handleAddNotebook}
-                      className="rounded-full bg-emerald-400 px-3 py-1.5 text-xs font-semibold text-slate-950 hover:bg-emerald-300 transition"
-                    >
-                      {L("New notebook", "Nuevo notebook")}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleAddSection()}
-                      disabled={!activeNotebookId}
-                      className="rounded-full border border-emerald-500/60 px-3 py-1.5 text-xs font-semibold text-emerald-200 hover:bg-emerald-500/10 disabled:opacity-40 disabled:cursor-not-allowed transition"
-                    >
-                      {L("New section", "Nueva sección")}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleAddPage()}
-                      disabled={!activeNotebookId}
-                      className="rounded-full border border-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-100 hover:border-emerald-400/60 hover:text-emerald-100 disabled:opacity-40 disabled:cursor-not-allowed transition"
-                    >
-                      {L("New page", "Nueva página")}
-                    </button>
-                  </div>
+          {view === "trash" ? (
+            <div className="space-y-5">
+              <header className="border-b border-slate-800 pb-5">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{L("Recovery", "Recuperación")}</p>
+                <h2 className="mt-2 text-2xl font-bold">{L("Trash", "Papelera")}</h2>
+              </header>
+              {trash?.available === false ? <p className="rounded-md border border-slate-800 bg-slate-950 p-5 text-sm text-slate-400">{L("Trash recovery will activate with the database update.", "La recuperación de papelera se activará con la actualización de base de datos.")}</p> : null}
+              {trash?.books.length ? (
+                <div className="rounded-lg border border-slate-800 bg-slate-950">
+                  <p className="border-b border-slate-800 px-4 py-3 text-xs font-bold uppercase tracking-[0.15em] text-slate-500">{L("Notebooks", "Notebooks")}</p>
+                  {trash.books.map((book) => <div key={book.id} className="flex flex-wrap items-center gap-3 border-b border-slate-800 px-4 py-3 last:border-0"><BookOpen size={15} className="text-slate-600" /><div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold">{book.name}</p><p className="mt-1 text-xs text-slate-500">{formatDate(book.deleted_at, lang)}</p></div><button type="button" onClick={async () => { await notebookWorkspaceAction("restore_book", { bookId: book.id }); await loadTrash(); await loadLibrary(); }} className="rounded-md border border-emerald-400/40 px-3 py-1.5 text-xs font-bold text-emerald-200">{L("Restore", "Restaurar")}</button><button type="button" title={L("Delete forever", "Eliminar para siempre")} onClick={async () => { if (!window.confirm(L("Delete this notebook and every page forever?", "¿Eliminar este notebook y todas sus páginas para siempre?"))) return; await notebookWorkspaceAction("delete_book_forever", { bookId: book.id }); await loadTrash(); }} className="grid h-8 w-8 place-items-center rounded-md border border-rose-500/40 text-rose-200"><X size={14} /></button></div>)}
                 </div>
-
-                <div className="mt-5 grid gap-3 md:grid-cols-3">
-                  <div className="rounded-2xl border border-slate-800 bg-slate-950/70 p-3">
-                    <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
-                      {L("Notebooks", "Notebooks")}
-                    </p>
-                    <p className="mt-2 text-2xl font-semibold text-slate-50">
-                      {nbData.notebooks.length}
-                    </p>
-                  </div>
-                  <div className="rounded-2xl border border-slate-800 bg-slate-950/70 p-3">
-                    <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
-                      {L("Sections", "Secciones")}
-                    </p>
-                    <p className="mt-2 text-2xl font-semibold text-slate-50">
-                      {activeNotebookSections.length}
-                    </p>
-                  </div>
-                  <div className="rounded-2xl border border-slate-800 bg-slate-950/70 p-3">
-                    <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
-                      {L("Pages in focus", "Páginas en foco")}
-                    </p>
-                    <p className="mt-2 text-2xl font-semibold text-slate-50">
-                      {activeNotebookPages.length}
-                    </p>
-                  </div>
-                </div>
+              ) : null}
+              <div className="rounded-lg border border-slate-800 bg-slate-950">
+                <p className="border-b border-slate-800 px-4 py-3 text-xs font-bold uppercase tracking-[0.15em] text-slate-500">{L("Pages", "Páginas")}</p>
+                {trash?.pages.length ? trash.pages.map((item) => <div key={item.id} className="flex flex-wrap items-center gap-3 border-b border-slate-800 px-4 py-3 last:border-0"><Trash2 size={15} className="text-slate-600" /><div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold">{item.title}</p><p className="mt-1 text-xs text-slate-500">{formatDate(item.deleted_at, lang)}</p></div><button type="button" onClick={async () => { await notebookWorkspaceAction("restore_page", { pageId: item.id }); await loadTrash(); await loadLibrary(); }} className="rounded-md border border-emerald-400/40 px-3 py-1.5 text-xs font-bold text-emerald-200">{L("Restore", "Restaurar")}</button><button type="button" title={L("Delete forever", "Eliminar para siempre")} onClick={async () => { if (!window.confirm(L("Delete this page forever?", "¿Eliminar esta página para siempre?"))) return; await notebookWorkspaceAction("delete_page_forever", { pageId: item.id }); await loadTrash(); }} className="grid h-8 w-8 place-items-center rounded-md border border-rose-500/40 text-rose-200"><X size={14} /></button></div>) : <div className="p-8 text-center text-sm text-slate-500">{L("No deleted pages.", "No hay páginas eliminadas.")}</div>}
               </div>
-
-              <div className="grid gap-4 xl:grid-cols-[260px_360px_minmax(0,1fr)]">
-                <aside className="rounded-3xl border border-slate-800 bg-slate-950/80 p-4 space-y-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <div>
-                      <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
-                        {L("Workspace map", "Mapa del workspace")}
-                      </p>
-                      <h3 className="mt-1 text-sm font-semibold text-slate-100">
-                        {L("Notebooks", "Notebooks")}
-                      </h3>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={handleAddNotebook}
-                      className="rounded-full border border-emerald-500/60 px-2.5 py-1 text-[11px] font-semibold text-emerald-200 hover:bg-emerald-500/10"
-                    >
-                      {L("+ Notebook", "+ Notebook")}
-                    </button>
-                  </div>
-
-                  {nbLoading ? (
-                    <p className="text-xs text-slate-500">{L("Loading…", "Cargando…")}</p>
-                  ) : nbData.notebooks.length === 0 ? (
-                    <div className="rounded-2xl border border-dashed border-slate-800 bg-slate-900/40 p-4 text-sm text-slate-400">
-                      {L(
-                        "Create your first notebook to start organizing playbooks, reviews, and research.",
-                        "Crea tu primer notebook para empezar a organizar playbooks, reviews e investigación."
-                      )}
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      {nbData.notebooks.map((notebook) => {
-                        const isActive = notebook.id === activeNotebookId;
-                        const notebookSections = nbData.sections.filter(
-                          (section) => section.notebook_id === notebook.id
-                        );
-                        const notebookPages = nbData.pages.filter(
-                          (page) => page.notebook_id === notebook.id
-                        );
-                        return (
-                          <div
-                            key={notebook.id}
-                            className={`rounded-2xl border p-3 transition ${
-                              isActive
-                                ? "border-emerald-400/60 bg-emerald-500/10"
-                                : "border-slate-800 bg-slate-900/60"
-                            }`}
-                          >
-                            <div className="flex items-start justify-between gap-2">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setActiveNotebookId(notebook.id);
-                                  setActivePageId(null);
-                                }}
-                                className="flex-1 text-left"
-                              >
-                                <p className="text-sm font-semibold text-slate-100">
-                                  {notebook.name}
-                                </p>
-                                <p className="mt-1 text-[11px] text-slate-400">
-                                  {notebookPages.length} {L("pages", "páginas")} · {notebookSections.length} {L("sections", "secciones")}
-                                </p>
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => openManageModal({ kind: "book", book: notebook })}
-                                className="rounded-full border border-slate-700 px-2 py-1 text-[10px] font-semibold text-slate-300 hover:border-emerald-400/50 hover:text-emerald-100"
-                              >
-                                {L("Manage", "Gestionar")}
-                              </button>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </aside>
-
-                <aside className="rounded-3xl border border-slate-800 bg-slate-950/80 p-4 space-y-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <div>
-                      <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
-                        {L("Workspace explorer", "Explorador del workspace")}
-                      </p>
-                      <h3 className="mt-1 text-sm font-semibold text-slate-100">
-                        {activeNotebook?.name || L("Select a notebook", "Selecciona un notebook")}
-                      </h3>
-                    </div>
-                    {activeNotebook ? (
-                      <button
-                        type="button"
-                        onClick={() => handleAddSection(activeNotebook.id)}
-                        className="rounded-full border border-emerald-500/60 px-2.5 py-1 text-[11px] font-semibold text-emerald-200 hover:bg-emerald-500/10"
-                      >
-                        {L("+ Section", "+ Sección")}
-                      </button>
-                    ) : null}
-                  </div>
-
-                  {!activeNotebook ? (
-                    <div className="rounded-2xl border border-dashed border-slate-800 bg-slate-900/40 p-4 text-sm text-slate-400">
-                      {L(
-                        "Pick a notebook to reveal its sections, loose pages, and writing context.",
-                        "Elige un notebook para ver sus secciones, páginas sueltas y contexto de escritura."
-                      )}
-                    </div>
-                  ) : (
-                    <div className="space-y-3">
-                      <div className={`rounded-2xl border p-3 transition ${
-                        activeSectionId === UNASSIGNED_SECTION_KEY
-                          ? "border-emerald-400/60 bg-emerald-500/10"
-                          : "border-slate-800 bg-slate-900/60"
-                      }`}>
-                        <div className="flex items-center justify-between gap-2">
-                          <button
-                            type="button"
-                            onClick={() => setActiveSectionId(UNASSIGNED_SECTION_KEY)}
-                            className="flex-1 text-left"
-                          >
-                            <p className="text-sm font-semibold text-slate-100">
-                              {L("Loose pages", "Páginas sueltas")}
-                            </p>
-                            <p className="mt-1 text-[11px] text-slate-400">
-                              {activeLoosePages.length} {L("pages outside sections", "páginas fuera de secciones")}
-                            </p>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleAddPage(UNASSIGNED_SECTION_KEY, activeNotebook.id)}
-                            className="rounded-full border border-slate-700 px-2 py-1 text-[10px] font-semibold text-slate-300 hover:border-emerald-400/50 hover:text-emerald-100"
-                          >
-                            {L("+ Page", "+ Página")}
-                          </button>
-                        </div>
-
-                        {activeLoosePages.length > 0 ? (
-                          <div className="mt-3 space-y-2">
-                            {activeLoosePages.map((page) => {
-                              const isActive = page.id === activePage?.id;
-                              const pageSurface = describeSurface(
-                                getNotebookSurfaceMeta(page.content, page.ink)
-                              );
-                              return (
-                                <div
-                                  key={page.id}
-                                  className={`rounded-xl border p-2 transition ${
-                                    isActive
-                                      ? "border-emerald-400/60 bg-emerald-500/10"
-                                      : "border-slate-800 bg-slate-950/70"
-                                  }`}
-                                >
-                                  <div className="flex items-start justify-between gap-2">
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        setActiveSectionId(UNASSIGNED_SECTION_KEY);
-                                        setActivePageId(page.id);
-                                      }}
-                                      className="flex-1 text-left"
-                                    >
-                                      <p className="text-xs font-semibold text-slate-100">
-                                        {page.title}
-                                      </p>
-                                      <div className="mt-1 flex flex-wrap items-center gap-2">
-                                        <span
-                                          className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${pageSurface.badgeClass}`}
-                                        >
-                                          {pageSurface.label}
-                                        </span>
-                                        <span className="text-[10px] text-slate-500">
-                                          {pageSurface.detail}
-                                        </span>
-                                      </div>
-                                      <p className="mt-1 text-[10px] text-slate-400 line-clamp-2">
-                                        {getNotebookBodyPreview(page.content, page.ink, {
-                                          empty: L("No notes yet.", "Sin notas aún."),
-                                          sketch: L("Ink sketch saved.", "Sketch en ink guardado."),
-                                          iosSketch: L("iPad sketch saved.", "Sketch de iPad guardado."),
-                                        })}
-                                      </p>
-                                      <p className="mt-1 text-[10px] text-slate-500">
-                                        {formatShortDateTime(
-                                          page.updated_at ?? page.created_at,
-                                          lang
-                                        ) || L("No update yet", "Sin actualización todavía")}
-                                      </p>
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => openManageModal({ kind: "page", page })}
-                                      className="rounded-full border border-slate-700 px-2 py-1 text-[10px] font-semibold text-slate-300 hover:border-emerald-400/50 hover:text-emerald-100"
-                                    >
-                                      {L("Manage", "Gestionar")}
-                                    </button>
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        ) : (
-                          <p className="mt-3 text-[11px] text-slate-500">
-                            {L("No loose pages yet.", "Todavía no hay páginas sueltas.")}
-                          </p>
-                        )}
-                      </div>
-
-                      {activeNotebookSections.length === 0 ? (
-                        <p className="rounded-2xl border border-dashed border-slate-800 bg-slate-900/40 p-4 text-sm text-slate-400">
-                          {L("Create a section or start with a loose page.", "Crea una sección o empieza con una página suelta.")}
-                        </p>
-                      ) : (
-                        activeNotebookSections.map((section) => {
-                          const isOpen = sectionExpanded[section.id] ?? true;
-                          const isActive = activeSectionId === section.id;
-                          const sectionPages = pagesBySection[section.id] || [];
-                          return (
-                            <div
-                              key={section.id}
-                              className={`rounded-2xl border p-3 transition ${
-                                isActive
-                                  ? "border-emerald-400/60 bg-emerald-500/10"
-                                  : "border-slate-800 bg-slate-900/60"
-                              }`}
-                            >
-                              <div className="flex items-start justify-between gap-2">
-                                <button
-                                  type="button"
-                                  onClick={() => setActiveSectionId(section.id)}
-                                  className="flex-1 text-left"
-                                >
-                                  <p className="text-sm font-semibold text-slate-100">
-                                    {section.name}
-                                  </p>
-                                  <p className="mt-1 text-[11px] text-slate-400">
-                                    {sectionPages.length} {L("pages", "páginas")}
-                                  </p>
-                                </button>
-                                <div className="flex items-center gap-2">
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      setSectionExpanded((prev) => ({
-                                        ...prev,
-                                        [section.id]: !isOpen,
-                                      }))
-                                    }
-                                    className="rounded-full border border-slate-700 px-2 py-1 text-[10px] font-semibold text-slate-300 hover:border-emerald-400/50 hover:text-emerald-100"
-                                  >
-                                    {isOpen ? L("Collapse", "Colapsar") : L("Open", "Abrir")}
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleAddPage(section.id, activeNotebook.id)}
-                                    className="rounded-full border border-slate-700 px-2 py-1 text-[10px] font-semibold text-slate-300 hover:border-emerald-400/50 hover:text-emerald-100"
-                                  >
-                                    {L("+ Page", "+ Página")}
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => openManageModal({ kind: "section", section })}
-                                    className="rounded-full border border-slate-700 px-2 py-1 text-[10px] font-semibold text-slate-300 hover:border-emerald-400/50 hover:text-emerald-100"
-                                  >
-                                    {L("Manage", "Gestionar")}
-                                  </button>
-                                </div>
-                              </div>
-
-                              <AnimatePresence initial={false}>
-                                {isOpen && (
-                                  <motion.div
-                                    initial={{ height: 0, opacity: 0 }}
-                                    animate={{ height: "auto", opacity: 1 }}
-                                    exit={{ height: 0, opacity: 0 }}
-                                    transition={{ duration: 0.2 }}
-                                    className="overflow-hidden"
-                                  >
-                                    <div className="mt-3 space-y-2">
-                                      {sectionPages.length === 0 ? (
-                                        <p className="text-[11px] text-slate-500">
-                                          {L("No pages in this section yet.", "Todavía no hay páginas en esta sección.")}
-                                        </p>
-                                      ) : (
-                                        sectionPages.map((page) => {
-                                          const isCurrentPage = page.id === activePage?.id;
-                                          const pageSurface = describeSurface(
-                                            getNotebookSurfaceMeta(page.content, page.ink)
-                                          );
-                                          return (
-                                            <div
-                                              key={page.id}
-                                              className={`rounded-xl border p-2 transition ${
-                                                isCurrentPage
-                                                  ? "border-emerald-400/60 bg-emerald-500/10"
-                                                  : "border-slate-800 bg-slate-950/70"
-                                              }`}
-                                            >
-                                              <div className="flex items-start justify-between gap-2">
-                                                <button
-                                                  type="button"
-                                                  onClick={() => {
-                                                    setActiveSectionId(section.id);
-                                                    setActivePageId(page.id);
-                                                  }}
-                                                  className="flex-1 text-left"
-                                                >
-                                                  <p className="text-xs font-semibold text-slate-100">
-                                                    {page.title}
-                                                  </p>
-                                                  <div className="mt-1 flex flex-wrap items-center gap-2">
-                                                    <span
-                                                      className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${pageSurface.badgeClass}`}
-                                                    >
-                                                      {pageSurface.label}
-                                                    </span>
-                                                    <span className="text-[10px] text-slate-500">
-                                                      {pageSurface.detail}
-                                                    </span>
-                                                  </div>
-                                                  <p className="mt-1 text-[10px] text-slate-400 line-clamp-2">
-                                                    {getNotebookBodyPreview(page.content, page.ink, {
-                                                      empty: L("No notes yet.", "Sin notas aún."),
-                                                      sketch: L("Ink sketch saved.", "Sketch en ink guardado."),
-                                                      iosSketch: L("iPad sketch saved.", "Sketch de iPad guardado."),
-                                                    })}
-                                                  </p>
-                                                  <p className="mt-1 text-[10px] text-slate-500">
-                                                    {formatShortDateTime(
-                                                      page.updated_at ?? page.created_at,
-                                                      lang
-                                                    ) || L("No update yet", "Sin actualización todavía")}
-                                                  </p>
-                                                </button>
-                                                <button
-                                                  type="button"
-                                                  onClick={() => openManageModal({ kind: "page", page })}
-                                                  className="rounded-full border border-slate-700 px-2 py-1 text-[10px] font-semibold text-slate-300 hover:border-emerald-400/50 hover:text-emerald-100"
-                                                >
-                                                  {L("Manage", "Gestionar")}
-                                                </button>
-                                              </div>
-                                            </div>
-                                          );
-                                        })
-                                      )}
-                                    </div>
-                                  </motion.div>
-                                )}
-                              </AnimatePresence>
-                            </div>
-                          );
-                        })
-                      )}
-                    </div>
-                  )}
-                </aside>
-
-                <section className="rounded-3xl border border-slate-800 bg-slate-900/80 p-4 md:p-6 space-y-4">
-                  {activeNotebook ? (
-                    <>
-                      <div className="rounded-2xl border border-slate-800 bg-slate-950/70 p-4">
-                        <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
-                          <div>
-                            <p className="text-[11px] uppercase tracking-[0.18em] text-emerald-300">
-                              {L("Workspace", "Workspace")}
-                            </p>
-                            <h3 className="mt-1 text-2xl font-semibold text-slate-50">
-                              {activeNotebook.name}
-                            </h3>
-                            <p className="mt-1 text-sm text-slate-400">
-                              {L("Current lane:", "Carril actual:")}{" "}
-                              <span className="font-medium text-slate-200">{activeSectionLabel}</span>
-                            </p>
-                          </div>
-
-                          <div className="flex flex-wrap items-center gap-2">
-                            <button
-                              type="button"
-                              onClick={() => openManageModal({ kind: "book", book: activeNotebook })}
-                              className="rounded-full border border-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:border-emerald-400/50 hover:text-emerald-100"
-                            >
-                              {L("Manage notebook", "Gestionar notebook")}
-                            </button>
-                            {activeSectionId && activeSectionId !== UNASSIGNED_SECTION_KEY ? (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  const currentSection = activeNotebookSections.find(
-                                    (section) => section.id === activeSectionId
-                                  );
-                                  if (currentSection) {
-                                    openManageModal({ kind: "section", section: currentSection });
-                                  }
-                                }}
-                                className="rounded-full border border-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:border-emerald-400/50 hover:text-emerald-100"
-                              >
-                                {L("Manage section", "Gestionar sección")}
-                              </button>
-                            ) : null}
-                            {activePage ? (
-                              <button
-                                type="button"
-                                onClick={() => openManageModal({ kind: "page", page: activePage })}
-                                className="rounded-full border border-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:border-emerald-400/50 hover:text-emerald-100"
-                              >
-                                {L("Manage page", "Gestionar página")}
-                              </button>
-                            ) : null}
-                          </div>
-                        </div>
-
-                        <div className="mt-4 grid gap-3 md:grid-cols-4">
-                          <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-3">
-                            <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
-                              {L("Page mode", "Modo de la página")}
-                            </p>
-                            <p className="mt-2 text-sm font-semibold text-slate-100">
-                              {activePageMode === "ink"
-                                ? L("Ink canvas", "Canvas de ink")
-                                : L("Rich text editor", "Editor enriquecido")}
-                            </p>
-                          </div>
-                          <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-3">
-                            <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
-                              {L("Last update", "Última actualización")}
-                            </p>
-                            <p className="mt-2 text-sm font-semibold text-slate-100">
-                              {activePageUpdatedAt
-                                ? formatShortDateTime(activePageUpdatedAt, lang)
-                                : "—"}
-                            </p>
-                          </div>
-                          <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-3">
-                            <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
-                              {L("Surface", "Superficie")}
-                            </p>
-                            <p className="mt-2 text-sm font-semibold text-slate-100">
-                              {activePageSurface.label}
-                            </p>
-                            <p className="mt-1 text-[11px] text-slate-500">
-                              {activePageSurface.detail}
-                            </p>
-                          </div>
-                          <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-3">
-                            <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
-                              {L("Focus", "Enfoque")}
-                            </p>
-                            <p className="mt-2 text-sm font-semibold text-slate-100">
-                              {activePage ? activePage.title : L("Select a page", "Selecciona una página")}
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-
-                      {activePage ? (
-                        <div className="space-y-3">
-                          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                            <div className="flex-1">
-                              <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
-                                {L("Page title", "Título de la página")}
-                              </p>
-                              <input
-                                type="text"
-                                value={activePage.title}
-                                onChange={(e) => updateActivePage({ title: e.target.value })}
-                                className="mt-2 w-full rounded-2xl border border-slate-800 bg-slate-950/80 px-4 py-3 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-emerald-400/60"
-                              />
-                            </div>
-                            {activePageStatus?.state ? (
-                              <span
-                                className={`text-[11px] font-medium ${
-                                  activePageStatus.state === "saving"
-                                    ? "text-amber-300"
-                                    : activePageStatus.state === "error"
-                                    ? "text-rose-300"
-                                    : "text-emerald-300"
-                                }`}
-                              >
-                                {activePageStatus.state === "saving" &&
-                                  L("Saving…", "Guardando…")}
-                                {activePageStatus.state === "error" &&
-                                  L("Save failed", "Error al guardar")}
-                                {activePageStatus.state === "saved" &&
-                                  `${L("Saved", "Guardado")} ${formatSavedTime(
-                                    activePageStatus.ts,
-                                    lang
-                                  )}`}
-                              </span>
-                            ) : null}
-                          </div>
-
-                          <NotebookInkField
-                            label={L("Page body", "Cuerpo de la página")}
-                            value={createNotebookEditableContent(
-                              activePage.content,
-                              activePage.ink
-                            )}
-                            onChange={(nextValue) =>
-                              updateActivePage({
-                                content: nextValue.content,
-                                ink: nextValue.ink,
-                              })
-                            }
-                            placeholder={L(
-                              "Write your page here. Use this as a real knowledge workspace: process notes, playbooks, post-trade reviews, or research.",
-                              "Escribe tu página aquí. Úsalo como un workspace real de conocimiento: notas de proceso, playbooks, reviews post-trade o investigación."
-                            )}
-                            minHeight={520}
-                          />
-                        </div>
-                      ) : (
-                        <div className="rounded-2xl border border-dashed border-slate-800 bg-slate-950/50 p-6 text-sm text-slate-400">
-                          <p className="text-base font-semibold text-slate-200">
-                            {L("Pick a page or create a new one.", "Elige una página o crea una nueva.")}
-                          </p>
-                          <p className="mt-2">
-                            {L(
-                              "This workspace is ready. What is missing is the page you want to work on.",
-                              "Este workspace ya está listo. Lo que falta es la página en la que quieres trabajar."
-                            )}
-                          </p>
-                          <div className="mt-4 flex flex-wrap gap-2">
-                            <button
-                              type="button"
-                              onClick={() => handleAddPage()}
-                              className="rounded-full bg-emerald-400 px-3 py-1.5 text-xs font-semibold text-slate-950 hover:bg-emerald-300 transition"
-                            >
-                              {L("Create page", "Crear página")}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleAddSection()}
-                              className="rounded-full border border-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:border-emerald-400/50 hover:text-emerald-100 transition"
-                            >
-                              {L("Create section", "Crear sección")}
-                            </button>
-                          </div>
-                        </div>
-                      )}
-                    </>
-                  ) : (
-                    <div className="rounded-2xl border border-dashed border-slate-800 bg-slate-950/50 p-6 text-sm text-slate-400">
-                      {L(
-                        "Select or create a notebook to start building your web workspace.",
-                        "Selecciona o crea un notebook para empezar a construir tu workspace web."
-                      )}
-                    </div>
-                  )}
-                </section>
-              </div>
-
-              {createMode && (
-                <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/80 px-4">
-                  <div className="w-full max-w-2xl rounded-3xl border border-slate-800 bg-slate-950 p-6 shadow-2xl shadow-slate-950/60">
-                    <div className="flex items-start justify-between gap-4">
-                      <div>
-                        <p className="text-[11px] uppercase tracking-[0.18em] text-emerald-300">
-                          {L("Create", "Crear")}
-                        </p>
-                        <h3 className="mt-1 text-xl font-semibold text-slate-50">
-                          {createMode === "book"
-                            ? L("New notebook", "Nuevo notebook")
-                            : createMode === "section"
-                            ? L("New section", "Nueva sección")
-                            : L("New page", "Nueva página")}
-                        </h3>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={closeCreateModal}
-                        className="rounded-full border border-slate-700 px-3 py-1 text-xs text-slate-300 hover:border-slate-500"
-                      >
-                        {L("Close", "Cerrar")}
-                      </button>
-                    </div>
-
-                    <div className="mt-5 space-y-4">
-                      {createMode !== "book" && (
-                        <div>
-                          <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
-                            {L("Notebook", "Notebook")}
-                          </p>
-                          <div className="mt-2 flex flex-wrap gap-2">
-                            {nbData.notebooks.map((notebook) => {
-                              const isSelected = notebook.id === createNotebookId;
-                              return (
-                                <button
-                                  key={notebook.id}
-                                  type="button"
-                                  onClick={() => {
-                                    setCreateNotebookId(notebook.id);
-                                    if (
-                                      createMode === "page" &&
-                                      createSectionId &&
-                                      createSectionId !== UNASSIGNED_SECTION_KEY &&
-                                      !nbData.sections.some(
-                                        (section) =>
-                                          section.id === createSectionId &&
-                                          section.notebook_id === notebook.id
-                                      )
-                                    ) {
-                                      setCreateSectionId(UNASSIGNED_SECTION_KEY);
-                                    }
-                                  }}
-                                  className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
-                                    isSelected
-                                      ? "border-emerald-400/60 bg-emerald-500/10 text-emerald-100"
-                                      : "border-slate-700 text-slate-300 hover:border-emerald-400/40 hover:text-emerald-100"
-                                  }`}
-                                >
-                                  {notebook.name}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      )}
-
-                      {createMode === "page" && (
-                        <div>
-                          <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
-                            {L("Target section", "Sección destino")}
-                          </p>
-                          <div className="mt-2 flex flex-wrap gap-2">
-                            <button
-                              type="button"
-                              onClick={() => setCreateSectionId(UNASSIGNED_SECTION_KEY)}
-                              className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
-                                createSectionId === UNASSIGNED_SECTION_KEY
-                                  ? "border-emerald-400/60 bg-emerald-500/10 text-emerald-100"
-                                  : "border-slate-700 text-slate-300 hover:border-emerald-400/40 hover:text-emerald-100"
-                              }`}
-                            >
-                              {L("Loose page", "Página suelta")}
-                            </button>
-                            {createNotebookSections.map((section) => {
-                              const isSelected = section.id === createSectionId;
-                              return (
-                                <button
-                                  key={section.id}
-                                  type="button"
-                                  onClick={() => setCreateSectionId(section.id)}
-                                  className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
-                                    isSelected
-                                      ? "border-emerald-400/60 bg-emerald-500/10 text-emerald-100"
-                                      : "border-slate-700 text-slate-300 hover:border-emerald-400/40 hover:text-emerald-100"
-                                  }`}
-                                >
-                                  {section.name}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      )}
-
-                      <div>
-                        <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
-                          {createMode === "page"
-                            ? L("Page title", "Título de la página")
-                            : L("Name", "Nombre")}
-                        </p>
-                        <input
-                          type="text"
-                          value={createName}
-                          onChange={(e) => setCreateName(e.target.value)}
-                          placeholder={
-                            createMode === "book"
-                              ? L("My trading notebook", "Mi notebook de trading")
-                              : createMode === "section"
-                              ? L("Execution reviews", "Reviews de ejecución")
-                              : L("Post CPI checklist", "Checklist post CPI")
-                          }
-                          className="mt-2 w-full rounded-2xl border border-slate-800 bg-slate-900/80 px-4 py-3 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-emerald-400/60"
-                        />
-                      </div>
-
-                      {createError ? (
-                        <p className="text-sm text-rose-300">{createError}</p>
-                      ) : null}
-                    </div>
-
-                    <div className="mt-6 flex flex-wrap items-center justify-end gap-2">
-                      <button
-                        type="button"
-                        onClick={closeCreateModal}
-                        className="rounded-full border border-slate-700 px-4 py-2 text-xs font-semibold text-slate-300 hover:border-slate-500"
-                      >
-                        {L("Cancel", "Cancelar")}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handleCreateNotebookItem}
-                        disabled={creating}
-                        className="rounded-full bg-emerald-400 px-4 py-2 text-xs font-semibold text-slate-950 hover:bg-emerald-300 disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        {creating ? L("Creating…", "Creando…") : L("Create", "Crear")}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {manageTarget && (
-                <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/80 px-4">
-                  <div className="w-full max-w-2xl rounded-3xl border border-slate-800 bg-slate-950 p-6 shadow-2xl shadow-slate-950/60">
-                    <div className="flex items-start justify-between gap-4">
-                      <div>
-                        <p className="text-[11px] uppercase tracking-[0.18em] text-amber-300">
-                          {L("Manage", "Gestionar")}
-                        </p>
-                        <h3 className="mt-1 text-xl font-semibold text-slate-50">
-                          {manageTarget.kind === "book"
-                            ? L("Notebook", "Notebook")
-                            : manageTarget.kind === "section"
-                            ? L("Section", "Sección")
-                            : L("Page", "Página")}
-                        </h3>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={closeManageModal}
-                        className="rounded-full border border-slate-700 px-3 py-1 text-xs text-slate-300 hover:border-slate-500"
-                      >
-                        {L("Close", "Cerrar")}
-                      </button>
-                    </div>
-
-                    <div className="mt-5 space-y-4">
-                      <div>
-                        <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
-                          {manageTarget.kind === "page"
-                            ? L("Page title", "Título de la página")
-                            : L("Name", "Nombre")}
-                        </p>
-                        <input
-                          type="text"
-                          value={manageName}
-                          onChange={(e) => setManageName(e.target.value)}
-                          className="mt-2 w-full rounded-2xl border border-slate-800 bg-slate-900/80 px-4 py-3 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-emerald-400/60"
-                        />
-                      </div>
-
-                      {manageTarget.kind !== "book" && (
-                        <div>
-                          <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
-                            {L("Notebook", "Notebook")}
-                          </p>
-                          <div className="mt-2 flex flex-wrap gap-2">
-                            {nbData.notebooks.map((notebook) => {
-                              const isSelected = notebook.id === manageNotebookId;
-                              return (
-                                <button
-                                  key={notebook.id}
-                                  type="button"
-                                  onClick={() => {
-                                    setManageNotebookId(notebook.id);
-                                    if (
-                                      manageTarget.kind === "page" &&
-                                      manageSectionId &&
-                                      manageSectionId !== UNASSIGNED_SECTION_KEY &&
-                                      !nbData.sections.some(
-                                        (section) =>
-                                          section.id === manageSectionId &&
-                                          section.notebook_id === notebook.id
-                                      )
-                                    ) {
-                                      setManageSectionId(UNASSIGNED_SECTION_KEY);
-                                    }
-                                  }}
-                                  className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
-                                    isSelected
-                                      ? "border-emerald-400/60 bg-emerald-500/10 text-emerald-100"
-                                      : "border-slate-700 text-slate-300 hover:border-emerald-400/40 hover:text-emerald-100"
-                                  }`}
-                                >
-                                  {notebook.name}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      )}
-
-                      {manageTarget.kind === "page" && (
-                        <div>
-                          <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
-                            {L("Section", "Sección")}
-                          </p>
-                          <div className="mt-2 flex flex-wrap gap-2">
-                            <button
-                              type="button"
-                              onClick={() => setManageSectionId(UNASSIGNED_SECTION_KEY)}
-                              className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
-                                manageSectionId === UNASSIGNED_SECTION_KEY
-                                  ? "border-emerald-400/60 bg-emerald-500/10 text-emerald-100"
-                                  : "border-slate-700 text-slate-300 hover:border-emerald-400/40 hover:text-emerald-100"
-                              }`}
-                            >
-                              {L("Loose page", "Página suelta")}
-                            </button>
-                            {manageNotebookSections.map((section) => {
-                              const isSelected = section.id === manageSectionId;
-                              return (
-                                <button
-                                  key={section.id}
-                                  type="button"
-                                  onClick={() => setManageSectionId(section.id)}
-                                  className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
-                                    isSelected
-                                      ? "border-emerald-400/60 bg-emerald-500/10 text-emerald-100"
-                                      : "border-slate-700 text-slate-300 hover:border-emerald-400/40 hover:text-emerald-100"
-                                  }`}
-                                >
-                                  {section.name}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      )}
-
-                      {manageTarget.kind === "section" ? (
-                        <p className="text-xs leading-6 text-slate-400">
-                          {L(
-                            "If you move this section to another notebook, every page inside it moves too.",
-                            "Si mueves esta sección a otro notebook, todas sus páginas se mueven con ella."
-                          )}
-                        </p>
-                      ) : null}
-
-                      {manageError ? (
-                        <p className="text-sm text-rose-300">{manageError}</p>
-                      ) : null}
-                    </div>
-
-                    <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
-                      <button
-                        type="button"
-                        onClick={handleDeleteNotebookItem}
-                        disabled={managing}
-                        className="rounded-full border border-rose-500/50 px-4 py-2 text-xs font-semibold text-rose-200 hover:bg-rose-500/10 disabled:opacity-50"
-                      >
-                        {L("Delete", "Borrar")}
-                      </button>
-
-                      <div className="flex flex-wrap items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={closeManageModal}
-                          className="rounded-full border border-slate-700 px-4 py-2 text-xs font-semibold text-slate-300 hover:border-slate-500"
-                        >
-                          {L("Cancel", "Cancelar")}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={handleManageNotebookItem}
-                          disabled={managing}
-                          className="rounded-full bg-emerald-400 px-4 py-2 text-xs font-semibold text-slate-950 hover:bg-emerald-300 disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                          {managing ? L("Saving…", "Guardando…") : L("Save changes", "Guardar cambios")}
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
             </div>
-          )}
+          ) : null}
         </section>
-      ) : (
-        /* ===== CALENDAR VIEW ===== */
-        <section className="mt-6">
-          <div className="rounded-3xl border border-slate-800 bg-slate-900/70 p-5 md:px-6 md:py-6 shadow-sm shadow-slate-950/40">
-            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-              <div>
-                <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                  {L("Calendar page", "Página de calendario")}
-                </p>
-                <h2 className="text-2xl font-semibold mt-1">
-                  {L(`${currentYear} holidays`, `Feriados ${currentYear}`)}
-                </h2>
-                <p className="text-slate-400 text-sm mt-1 max-w-xl">
-                  {L(
-                    "Overview of all U.S. federal holidays. Market-closed days are labeled so you can plan around them.",
-                    "Resumen de todos los feriados federales de EE. UU. Los días con mercado cerrado están marcados para que puedas planificar."
-                  )}
-                </p>
-              </div>
-            </div>
-
-            <div className="mt-5 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-              {monthLabels.map((label, monthIndex) => {
-                const monthHolidays = holidaysByMonth[monthIndex] || [];
-                if (monthHolidays.length === 0) return null;
-
-                return (
-                  <div
-                    key={monthIndex}
-                    className="rounded-2xl border border-slate-800/80 bg-slate-950/60 p-4"
-                  >
-                    <p className="text-sm font-semibold text-slate-100">
-                      {label}
-                    </p>
-                    <ul className="mt-2 space-y-1.5 text-sm text-slate-300">
-                      {monthHolidays.map((h) => (
-                        <li
-                          key={h.date}
-                          className="flex items-baseline justify-between gap-3"
-                        >
-                          <div className="leading-snug">
-                            <div className="flex items-center gap-2">
-                              <span>{h.label}</span>
-                              {h.marketClosed ? (
-                                <span className="text-[10px] uppercase tracking-wide text-amber-200">
-                                  {L("Market closed", "Mercado cerrado")}
-                                </span>
-                              ) : null}
-                            </div>
-                          </div>
-                          <span className="text-xs tabular-nums text-slate-400">
-                            {formatShortDate(h.date, lang)}
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                );
-              })}
-            </div>
-
-            <p className="text-[11px] text-slate-500 mt-4">
-              {L(
-                `Note: This page shows major U.S. federal holidays for ${currentYear}. If you need to add custom holidays (for your country, broker, or family events), you can note them directly in your daily notebook pages.`,
-                `Nota: esta página muestra los principales feriados federales de EE. UU. de ${currentYear}. Si necesitas agregar feriados personalizados (tu país, broker o eventos familiares), puedes anotarlos en tus páginas diarias.`
-              )}
-            </p>
-          </div>
-        </section>
-      )}
       </div>
+
+      {createPageOpen ? (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/80 p-4" onMouseDown={(event) => { if (event.currentTarget === event.target) setCreatePageOpen(false); }}>
+          <div className="max-h-[90vh] w-full max-w-3xl overflow-auto rounded-lg border border-slate-700 bg-slate-950 p-5 shadow-2xl">
+            <div className="flex items-start justify-between"><div><h2 className="text-xl font-bold">{L("Capture with purpose", "Captura con propósito")}</h2><p className="mt-1 text-sm text-slate-400">{L("Choose the structure that matches the decision you are documenting.", "Elige la estructura que corresponde a la decisión que documentas.")}</p></div><button type="button" title={L("Close", "Cerrar")} onClick={() => setCreatePageOpen(false)}><X /></button></div>
+            <div className="mt-5 grid gap-2 sm:grid-cols-2">{NOTEBOOK_TEMPLATES.map((template) => { const Icon = PAGE_TYPE_ICONS[template.pageType]; return <button key={template.key} type="button" onClick={() => setTemplateKey(template.key)} className={`flex items-start gap-3 rounded-md border p-3 text-left ${templateKey === template.key ? "border-emerald-400 bg-emerald-400/10" : "border-slate-800 hover:border-slate-600"}`}><Icon size={17} className="mt-0.5 text-emerald-300" /><span><span className="block text-sm font-bold">{template.title[isEs ? "es" : "en"]}</span><span className="mt-1 block text-xs leading-5 text-slate-500">{template.description[isEs ? "es" : "en"]}</span></span></button>; })}</div>
+            <label className="mt-5 block text-xs font-bold uppercase text-slate-500">{L("Page title", "Título de la página")}</label><input autoFocus value={newPageTitle} onChange={(event) => setNewPageTitle(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void createPage(); }} placeholder={NOTEBOOK_TEMPLATES.find((item) => item.key === templateKey)?.title[isEs ? "es" : "en"]} className="mt-2 h-11 w-full rounded-md border border-slate-700 bg-slate-900 px-3 outline-none focus:border-emerald-400" />
+            <div className="mt-5 flex justify-end gap-2"><button type="button" onClick={() => setCreatePageOpen(false)} className="rounded-md border border-slate-700 px-4 py-2 text-sm font-semibold">{L("Cancel", "Cancelar")}</button><button type="button" disabled={creating || !selectedBook} onClick={() => void createPage()} className="rounded-md bg-emerald-400 px-4 py-2 text-sm font-bold text-slate-950 disabled:opacity-40">{creating ? L("Creating...", "Creando...") : L("Create page", "Crear página")}</button></div>
+          </div>
+        </div>
+      ) : null}
+
+      {simpleDialog ? (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/80 p-4" onMouseDown={(event) => { if (event.currentTarget === event.target) setSimpleDialog(null); }}><div className="w-full max-w-md rounded-lg border border-slate-700 bg-slate-950 p-5"><h2 className="font-bold">{simpleDialog === "book" ? L("New notebook", "Nuevo notebook") : simpleDialog === "section" ? L("New section", "Nueva sección") : L("Rename notebook", "Renombrar notebook")}</h2><input autoFocus value={simpleValue} onChange={(event) => setSimpleValue(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void submitSimpleDialog(); }} className="mt-4 h-11 w-full rounded-md border border-slate-700 bg-slate-900 px-3 outline-none focus:border-emerald-400" /><div className="mt-4 flex justify-end gap-2"><button type="button" onClick={() => setSimpleDialog(null)} className="rounded-md border border-slate-700 px-3 py-2 text-sm">{L("Cancel", "Cancelar")}</button><button type="button" disabled={!simpleValue.trim() || creating} onClick={() => void submitSimpleDialog()} className="rounded-md bg-emerald-400 px-3 py-2 text-sm font-bold text-slate-950 disabled:opacity-40">{L("Save", "Guardar")}</button></div></div></div>
+      ) : null}
+
+      {aiOpen ? (
+        <div className="fixed inset-0 z-50 bg-slate-950/70" onMouseDown={(event) => { if (event.currentTarget === event.target) setAiOpen(false); }}>
+          <aside className="ml-auto flex h-full w-full max-w-xl flex-col border-l border-slate-700 bg-slate-950 shadow-2xl">
+            <div className="flex items-start justify-between border-b border-slate-800 p-5"><div><p className="text-xs font-bold uppercase tracking-[0.18em] text-cyan-300">{L("Evidence analysis", "Análisis de evidencia")}</p><h2 className="mt-2 text-xl font-bold">{L("Ask your Business Notebook", "Consulta tu Business Notebook")}</h2><p className="mt-1 text-xs text-slate-500">{scope === "business" ? L("Entire trading business", "Todo el negocio") : activeAccount?.name}</p></div><button type="button" onClick={() => setAiOpen(false)} title={L("Close", "Cerrar")}><X /></button></div>
+            <div className="flex-1 overflow-y-auto p-5">
+              {!aiAnswer && !aiLoading ? <div className="rounded-md border border-slate-800 p-4"><p className="text-sm font-semibold">{L("Useful questions", "Preguntas útiles")}</p><div className="mt-3 flex flex-wrap gap-2">{[L("What patterns are supported by my evidence?", "¿Qué patrones sostiene mi evidencia?"), L("Which candidate lesson is ready to validate?", "¿Qué lección candidata está lista para validar?"), L("Where does my evidence contradict a current rule?", "¿Dónde contradice mi evidencia una regla actual?")].map((prompt) => <button type="button" key={prompt} onClick={() => setAiQuestion(prompt)} className="rounded-md border border-slate-700 px-3 py-2 text-left text-xs text-slate-300 hover:border-cyan-400">{prompt}</button>)}</div></div> : null}
+              {aiLoading ? <div className="grid min-h-[280px] place-items-center"><LoaderCircle className="animate-spin text-cyan-300" /></div> : null}
+              {aiAnswer ? <div className="prose prose-invert max-w-none text-sm leading-7 text-slate-200"><ReactMarkdown>{aiAnswer}</ReactMarkdown></div> : null}
+              {aiCitations.length ? <div className="mt-6 border-t border-slate-800 pt-4"><p className="text-xs font-bold uppercase tracking-[0.15em] text-slate-500">{L("Evidence used", "Evidencia utilizada")}</p><div className="mt-3 space-y-2">{aiCitations.map((citation, index) => <button type="button" key={citation.id} onClick={() => openSearchHit(citation)} className="block w-full rounded-md border border-slate-800 p-3 text-left hover:border-cyan-400/50"><p className="text-xs font-bold text-cyan-200">S{index + 1} · {citation.label}</p><p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-500">{citation.excerpt}</p></button>)}</div></div> : null}
+            </div>
+            <div className="border-t border-slate-800 p-4"><textarea value={aiQuestion} onChange={(event) => setAiQuestion(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void askNotebook(); } }} rows={3} placeholder={L("Ask for an objective evaluation of the evidence...", "Pide una evaluación objetiva de la evidencia...")} className="w-full resize-none rounded-md border border-slate-700 bg-slate-900 p-3 text-sm outline-none focus:border-cyan-400" /><button type="button" disabled={!aiQuestion.trim() || aiLoading} onClick={() => void askNotebook()} className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-md bg-cyan-400 px-4 py-2.5 text-sm font-bold text-slate-950 disabled:opacity-40"><Send size={15} />{L("Send", "Enviar")}</button></div>
+          </aside>
+        </div>
+      ) : null}
     </main>
   );
 }

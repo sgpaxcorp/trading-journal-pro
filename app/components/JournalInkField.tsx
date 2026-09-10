@@ -6,6 +6,8 @@ import { PencilLine, RotateCcw, Trash2, TriangleAlert, Type } from "lucide-react
 
 import type { RichTextEditorProps } from "@/app/components/RichTextEditor";
 import NotebookInkCanvas from "@/app/components/NotebookInkCanvas";
+import { useAppSettings } from "@/lib/appSettings";
+import { resolveLocale } from "@/lib/i18n";
 import {
   buildNotebookInkPayload,
   getNotebookInkMode,
@@ -58,6 +60,9 @@ export default function JournalInkField({
   minHeight = 220,
   onReady,
 }: JournalInkFieldProps) {
+  const { locale } = useAppSettings();
+  const lang = resolveLocale(locale);
+  const L = (en: string, es: string) => (lang === "es" ? es : en);
   const [inkColor, setInkColor] = useState(PALETTE[0].value);
 
   const ink = normalizeNotebookInkPayload(value.ink);
@@ -119,7 +124,7 @@ export default function JournalInkField({
             }`}
           >
             <Type size={14} />
-            Text
+            {L("Text", "Texto")}
           </button>
           <button
             type="button"
@@ -131,7 +136,7 @@ export default function JournalInkField({
             }`}
           >
             <PencilLine size={14} />
-            Ink
+            {L("Ink", "Tinta")}
           </button>
         </div>
       </div>
@@ -140,7 +145,7 @@ export default function JournalInkField({
         <div className="flex flex-col gap-3 rounded-2xl border border-slate-800 bg-slate-950/60 p-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
-              Ink color
+              {L("Ink color", "Color de tinta")}
             </span>
             {PALETTE.map((item) => (
               <button
@@ -153,7 +158,7 @@ export default function JournalInkField({
                     : "border-slate-700"
                 }`}
                 style={{ backgroundColor: item.value }}
-                aria-label={`Use color ${item.id}`}
+                aria-label={`${L("Use color", "Usar color")} ${item.id}`}
               />
             ))}
           </div>
@@ -166,7 +171,7 @@ export default function JournalInkField({
               className="inline-flex items-center gap-2 rounded-full border border-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:border-emerald-400/50 hover:text-emerald-100 disabled:cursor-not-allowed disabled:opacity-40 transition"
             >
               <RotateCcw size={14} />
-              Undo
+              {L("Undo", "Deshacer")}
             </button>
             <button
               type="button"
@@ -175,7 +180,7 @@ export default function JournalInkField({
               className="inline-flex items-center gap-2 rounded-full border border-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:border-rose-400/50 hover:text-rose-100 disabled:cursor-not-allowed disabled:opacity-40 transition"
             >
               <Trash2 size={14} />
-              Clear
+              {L("Clear", "Limpiar")}
             </button>
           </div>
         </div>
@@ -197,11 +202,16 @@ export default function JournalInkField({
             </div>
             <div className="min-w-0 flex-1">
               <p className="text-sm font-semibold text-amber-100">
-                This drawing was created with PencilKit on iPhone or iPad.
+                {L(
+                  "This drawing was created with PencilKit on iPhone or iPad.",
+                  "Este dibujo fue creado con PencilKit en iPhone o iPad."
+                )}
               </p>
               <p className="mt-2 text-sm leading-7 text-amber-50/85">
-                The journal keeps this drawing saved, but the web app cannot render that native Apple format yet. Open
-                the entry on mobile to edit it, or replace it here with a new web sketch.
+                {L(
+                  "The journal keeps this drawing saved, but the web app cannot render that native Apple format yet. Open the entry on mobile to edit it, or replace it here with a new web sketch.",
+                  "El journal conserva este dibujo, pero la aplicación web todavía no puede mostrar ese formato nativo de Apple. Abre la entrada en mobile para editarla o reemplázala aquí con un nuevo dibujo web."
+                )}
               </p>
               <button
                 type="button"
@@ -209,7 +219,7 @@ export default function JournalInkField({
                 className="mt-4 inline-flex items-center gap-2 rounded-full bg-amber-300 px-3 py-1.5 text-xs font-semibold text-slate-950 hover:bg-amber-200 transition"
               >
                 <PencilLine size={14} />
-                Replace with web sketch
+                {L("Replace with web sketch", "Reemplazar con dibujo web")}
               </button>
             </div>
           </div>
@@ -220,8 +230,11 @@ export default function JournalInkField({
           onChange={updateDrawing}
           height={minHeight}
           strokeColor={inkColor}
-          emptyTitle="Draw with mouse, trackpad, or stylus"
-          emptySubtitle="This sketch stays inside the journal entry and saves with the rest of the day."
+          emptyTitle={L("Draw with mouse, trackpad, or stylus", "Dibuja con mouse, trackpad o lápiz digital")}
+          emptySubtitle={L(
+            "This sketch stays inside the journal entry and saves with the rest of the day.",
+            "Este dibujo permanece dentro de la entrada del journal y se guarda con el resto del día."
+          )}
         />
       )}
     </div>

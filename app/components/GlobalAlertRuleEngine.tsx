@@ -141,8 +141,8 @@ export default function GlobalAlertRuleEngine() {
             : "border-rose-900/60 bg-rose-950/30 text-rose-200"
         }`}
       >
-        <div className="font-semibold">Rules engine</div>
-        <div>Last: {lastRunAt ? new Date(lastRunAt).toLocaleTimeString() : "—"}</div>
+        <div className="font-semibold">{L("Rules engine", "Motor de reglas")}</div>
+        <div>{L("Last", "Última ejecución")}: {lastRunAt ? new Date(lastRunAt).toLocaleTimeString() : "—"}</div>
         <div>{lastRunNote}</div>
       </div>
     </div>

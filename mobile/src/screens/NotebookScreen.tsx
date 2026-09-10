@@ -22,7 +22,7 @@ import type { ThemeColors } from "../theme";
 import { supabaseMobile } from "../lib/supabase";
 import { useSupabaseUser } from "../lib/useSupabaseUser";
 import { usePlanAccess } from "../lib/usePlanAccess";
-import { apiGet } from "../lib/api";
+import { apiGet, apiPost } from "../lib/api";
 
 const BOOKS_TABLE = "ntj_notebook_books";
 const FREE_NOTES_TABLE = "ntj_notebook_free_notes";
@@ -44,6 +44,11 @@ type JournalEntryDateRow = {
 
 type AccountsResponse = {
   activeAccountId: string | null;
+  accounts?: {
+    id: string;
+    name: string;
+    account_type?: "personal" | "funded";
+  }[];
 };
 
 type ShelfMode = "journal" | "custom";
@@ -70,15 +75,6 @@ function formatEntryDateWeekday(value: string) {
   });
 }
 
-async function fetchActiveAccountId(): Promise<string | null> {
-  try {
-    const res = await apiGet<AccountsResponse>("/api/trading-accounts/list");
-    return res.activeAccountId ?? null;
-  } catch {
-    return null;
-  }
-}
-
 export function NotebookScreen() {
   const { language } = useLanguage();
   const { colors } = useTheme();
@@ -88,6 +84,8 @@ export function NotebookScreen() {
   const planAccess = usePlanAccess();
 
   const [books, setBooks] = useState<NotebookBook[]>([]);
+  const [accounts, setAccounts] = useState<NonNullable<AccountsResponse["accounts"]>>([]);
+  const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
   const [freeNotes, setFreeNotes] = useState<FreeNote[]>([]);
   const [journalDates, setJournalDates] = useState<string[]>([]);
   const [activeShelf, setActiveShelf] = useState<ShelfMode>("journal");
@@ -103,7 +101,7 @@ export function NotebookScreen() {
   const [manageBookBusy, setManageBookBusy] = useState(false);
   const [manageBookError, setManageBookError] = useState<string | null>(null);
 
-  async function reloadNotebookData(options?: { showLoading?: boolean }) {
+  async function reloadNotebookData(options?: { showLoading?: boolean; accountId?: string | null }) {
     if (!planAccess.hasNotebook) return;
     if (!supabaseMobile || !user?.id) return;
 
@@ -112,7 +110,14 @@ export function NotebookScreen() {
     setError(null);
 
     try {
-      const accountId = await fetchActiveAccountId();
+      const accountResponse = await apiGet<AccountsResponse>("/api/trading-accounts/list");
+      const availableAccounts = Array.isArray(accountResponse.accounts) ? accountResponse.accounts : [];
+      const requestedAccountId = options && "accountId" in options ? options.accountId : selectedAccountId;
+      const accountId = requestedAccountId && availableAccounts.some((account) => account.id === requestedAccountId)
+        ? requestedAccountId
+        : accountResponse.activeAccountId ?? availableAccounts[0]?.id ?? null;
+      setAccounts(availableAccounts);
+      setSelectedAccountId(accountId);
 
       let bookQuery = supabaseMobile
         .from(BOOKS_TABLE)
@@ -257,24 +262,26 @@ export function NotebookScreen() {
   async function openDailyNote(entryDate: string) {
     if (!supabaseMobile || !user?.id) return;
     try {
-      const accountId = await fetchActiveAccountId();
-      const { error: upsertErr } = await supabaseMobile.from(FREE_NOTES_TABLE).upsert(
-        {
-          user_id: user.id,
-          account_id: accountId ?? null,
-          entry_date: entryDate,
+      const accountId = selectedAccountId;
+      if (!accountId) throw new Error(t(language, "Choose an account first.", "Selecciona una cuenta primero."));
+      const existing = freeNotes.find((note) => note.entry_date === entryDate);
+      if (!existing) {
+        await apiPost("/api/notebook/workspace", {
+          action: "upsert_daily",
+          accountId,
+          date: entryDate,
           content: "",
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: "user_id,account_id,entry_date" }
-      );
-      if (upsertErr) throw upsertErr;
+          ink: null,
+        });
+      }
 
       await reloadNotebookData();
       navigation.navigate("NotebookEditor", {
         kind: "free",
         id: entryDate,
         title: `${t(language, "Daily note", "Nota diaria")} · ${entryDate}`,
+        accountId,
+        accountName: accounts.find((account) => account.id === accountId)?.name ?? "",
       });
     } catch (err: any) {
       setError(
@@ -295,13 +302,13 @@ export function NotebookScreen() {
     setInlineBookBusy(true);
     setInlineBookError(null);
     try {
-      const accountId = await fetchActiveAccountId();
-      const { error: insertErr } = await supabaseMobile.from(BOOKS_TABLE).insert({
-        user_id: user.id,
-        account_id: accountId ?? null,
+      const accountId = selectedAccountId;
+      await apiPost("/api/notebook/workspace", {
+        action: "create_book",
+        scope: "account",
+        accountId,
         name: trimmed,
       });
-      if (insertErr) throw insertErr;
 
       setInlineBookOpen(false);
       setInlineBookName("");
@@ -328,12 +335,11 @@ export function NotebookScreen() {
     setManageBookBusy(true);
     setManageBookError(null);
     try {
-      const { error: updateErr } = await supabaseMobile
-        .from(BOOKS_TABLE)
-        .update({ name: trimmed, updated_at: new Date().toISOString() })
-        .eq("id", manageBook.id)
-        .eq("user_id", user.id);
-      if (updateErr) throw updateErr;
+      await apiPost("/api/notebook/workspace", {
+        action: "update_book",
+        bookId: manageBook.id,
+        name: trimmed,
+      });
 
       await reloadNotebookData();
       closeManageBook();
@@ -352,26 +358,10 @@ export function NotebookScreen() {
     setManageBookBusy(true);
     setManageBookError(null);
     try {
-      const { error: deletePagesError } = await supabaseMobile
-        .from("ntj_notebook_pages")
-        .delete()
-        .eq("notebook_id", manageBook.id)
-        .eq("user_id", user.id);
-      if (deletePagesError) throw deletePagesError;
-
-      const { error: deleteSectionsError } = await supabaseMobile
-        .from("ntj_notebook_sections")
-        .delete()
-        .eq("notebook_id", manageBook.id)
-        .eq("user_id", user.id);
-      if (deleteSectionsError) throw deleteSectionsError;
-
-      const { error: deleteBookError } = await supabaseMobile
-        .from(BOOKS_TABLE)
-        .delete()
-        .eq("id", manageBook.id)
-        .eq("user_id", user.id);
-      if (deleteBookError) throw deleteBookError;
+      await apiPost("/api/notebook/workspace", {
+        action: "trash_book",
+        bookId: manageBook.id,
+      });
 
       await reloadNotebookData();
       closeManageBook();
@@ -388,16 +378,16 @@ export function NotebookScreen() {
   function confirmDeleteBook() {
     if (!manageBook) return;
     Alert.alert(
-      t(language, "Delete notebook", "Borrar notebook"),
+      t(language, "Move notebook to trash", "Mover notebook a papelera"),
       `${manageBook.name}\n\n${t(
         language,
-        "This deletes the notebook, its sections, and all pages inside it.",
-        "Esto borra el notebook, sus secciones y todas las páginas dentro."
+        "The notebook and its pages can be recovered from Trash on the web app.",
+        "El notebook y sus páginas pueden recuperarse desde Papelera en la web."
       )}`,
       [
         { text: t(language, "Cancel", "Cancelar"), style: "cancel" },
         {
-          text: t(language, "Delete", "Borrar"),
+          text: t(language, "Move to trash", "Mover a papelera"),
           style: "destructive",
           onPress: () => {
             void executeDeleteBook();
@@ -429,7 +419,50 @@ export function NotebookScreen() {
       ) : error ? (
         <Text style={styles.errorText}>{error}</Text>
       ) : (
-        <View style={styles.sectionList}>
+      <View style={styles.sectionList}>
+          <View style={styles.accountContextCard}>
+            <View style={styles.accountContextHeader}>
+              <View style={styles.accountContextCopy}>
+                <Text style={styles.accountContextLabel}>{t(language, "ACCOUNT CONTEXT", "CONTEXTO DE CUENTA")}</Text>
+                <Text style={styles.accountContextTitle}>
+                  {accounts.find((account) => account.id === selectedAccountId)?.name ?? t(language, "Choose an account", "Selecciona una cuenta")}
+                </Text>
+              </View>
+              <Ionicons name="swap-horizontal-outline" size={20} color={colors.primary} />
+            </View>
+            <View style={styles.accountPills}>
+              {accounts.map((account) => {
+                const selected = account.id === selectedAccountId;
+                return (
+                  <Pressable
+                    key={account.id}
+                    style={[styles.accountPill, selected && styles.accountPillActive]}
+                    onPress={async () => {
+                      if (selected) return;
+                      setSelectedAccountId(account.id);
+                      setLoading(true);
+                      try {
+                        await apiPost("/api/trading-accounts/set-active", { accountId: account.id });
+                        await reloadNotebookData({ accountId: account.id });
+                      } catch (err: any) {
+                        setError(err?.message ?? t(language, "We couldn't switch accounts.", "No pudimos cambiar de cuenta."));
+                      } finally {
+                        setLoading(false);
+                      }
+                    }}
+                  >
+                    <Text style={[styles.accountPillText, selected && styles.accountPillTextActive]} numberOfLines={1}>
+                      {account.name}
+                    </Text>
+                    <Text style={[styles.accountPillMeta, selected && styles.accountPillMetaActive]}>
+                      {account.account_type === "funded" ? t(language, "Funded", "Fondeada") : t(language, "Personal", "Personal")}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+
           <View style={styles.shelfRow}>
             <Pressable
               style={({ pressed }) => [
@@ -608,6 +641,7 @@ export function NotebookScreen() {
                       navigation.navigate("NotebookWorkspace", {
                         notebookId: book.id,
                         title: book.name,
+                        accountId: selectedAccountId,
                       })
                     }
                     onLongPress={() => openManageBook(book)}
@@ -706,6 +740,69 @@ const createStyles = (colors: ThemeColors) =>
     },
     sectionList: {
       gap: 14,
+    },
+    accountContextCard: {
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.card,
+      padding: 14,
+      gap: 12,
+    },
+    accountContextHeader: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+    },
+    accountContextCopy: {
+      flex: 1,
+      gap: 3,
+    },
+    accountContextLabel: {
+      color: colors.primary,
+      fontSize: 9,
+      fontWeight: "800",
+      letterSpacing: 1.4,
+    },
+    accountContextTitle: {
+      color: colors.textPrimary,
+      fontSize: 15,
+      fontWeight: "800",
+    },
+    accountPills: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: 8,
+    },
+    accountPill: {
+      minWidth: 112,
+      maxWidth: 170,
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+      paddingHorizontal: 11,
+      paddingVertical: 8,
+    },
+    accountPillActive: {
+      borderColor: colors.primary,
+      backgroundColor: colors.successSoft,
+    },
+    accountPillText: {
+      color: colors.textMuted,
+      fontSize: 12,
+      fontWeight: "700",
+    },
+    accountPillTextActive: {
+      color: colors.textPrimary,
+    },
+    accountPillMeta: {
+      color: colors.textMuted,
+      fontSize: 9,
+      marginTop: 2,
+    },
+    accountPillMetaActive: {
+      color: colors.primary,
     },
     shelfRow: {
       flexDirection: "row",

@@ -493,10 +493,14 @@ function ConfirmedPageClient() {
 }
 
 function ConfirmedFallback() {
+  const { locale } = useAppSettings();
+  const lang = resolveLocale(locale);
   return (
     <main className="relative min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center px-4">
       <div className="rounded-2xl border border-emerald-500/30 bg-slate-900/90 px-6 py-4 text-center shadow-[0_0_60px_rgba(16,185,129,0.18)]">
-        <p className="text-sm font-semibold text-emerald-300">Loading confirmation...</p>
+        <p className="text-sm font-semibold text-emerald-300">
+          {lang === "es" ? "Cargando confirmación..." : "Loading confirmation..."}
+        </p>
       </div>
     </main>
   );

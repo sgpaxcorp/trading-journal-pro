@@ -1,37 +1,52 @@
-# Notebook
-## Acceso
-- Navegación lateral → Notebook.
+# Business Notebook
+## Propósito
+Business Notebook es la memoria operativa del negocio de trading. Conserva evidencia, razonamiento, lecciones, investigación, decisiones, reglas y playbooks que deben sobrevivir una sola sesión.
 
-El Notebook es tu workspace de conocimiento. Guarda reglas, patrones, lecciones, sketches visuales y mejoras que quieres repetir.
+No sustituye el Execution Journal. El Journal registra lo que ocurrió. Business Notebook convierte ese registro en conocimiento reutilizable.
 
-## Cómo se organiza
-- **Notebooks**: contenedores principales (ej.: “Mi Playbook”, “Reglas de riesgo”).
-- **Secciones**: categorías dentro del notebook (ej.: “Entradas”, “Salidas”).
-- **Páginas**: notas individuales con contenido completo.
+## Elige primero el alcance
+- **Todo el negocio**: estándares y conocimiento que aplican a todas las cuentas.
+- **Cuenta específica**: revisiones diarias y conocimiento exclusivo de la cuenta Personal o Fondeada seleccionada.
 
-## Daily Notebook vs Custom Notebooks
-- **Daily Notebook** está atado a los días del journal. Úsalo para contexto libre, psicología, preparación e interpretación de un día específico.
-- **Custom Notebooks** son workspaces estructurados para playbooks, documentación de proceso, research, reviews y reglas reutilizables.
+El alcance y la cuenta actual siempre están visibles. Una revisión diaria no puede guardarse sin una cuenta específica.
 
-## Text e Ink
-- Cada superficie del notebook puede usarse en modo **Text** o **Ink**.
-- **Text** funciona mejor para escritura larga, explicaciones estructuradas y reviews detallados.
-- **Ink** funciona mejor para sketches, diagramas de flujo, revisiones visuales, layouts y markups rápidos.
-- La plataforma web ahora permite dibujar directo en el notebook con mouse, trackpad o stylus.
+## El ciclo operativo
+1. Captura evidencia de una sesión, estudio o decisión empresarial.
+2. Revisa la evidencia y separa hechos de interpretación.
+3. Guarda el hallazgo como borrador o lección candidata.
+4. Valídalo con una muestra apropiada y registra evidencia contradictoria.
+5. Lleva una lección validada a un playbook, regla de riesgo, checklist o cambio del Business Plan.
+6. Retira o archiva el conocimiento que ya no describe la operación.
 
-## Comportamiento web y mobile
-- El Notebook web conserva toda la estructura del notebook y añade un editor desktop más fuerte para escribir en profundidad.
-- El mobile app mantiene un flujo nativo muy rápido y es especialmente fuerte para captura ágil y dibujo en iPhone/iPad.
-- Si un dibujo fue creado con Apple Pencil / PencilKit en iPhone o iPad, la web lo conserva sin romperlo. La plataforma puede mostrarlo como un estado de dibujo iOS hasta que lo abras otra vez en mobile o lo reemplaces por un sketch web nuevo.
+El sistema nunca cambia una regla operativa silenciosamente. La promoción siempre es una decisión deliberada del usuario.
 
-## Explorer y workspace
-- Usa el **Daily note explorer** para moverte entre días recientes del journal sin salir del workspace del notebook.
-- Usa el **Workspace map** y el **Workspace explorer** para navegar notebooks, secciones, páginas sueltas y previews de páginas.
-- El workspace ahora muestra si una página está vacía, si es principalmente texto o si es principalmente ink, junto con una huella simple como palabras o trazos.
+## Tipos de página
+- **Nota general** para contexto operativo flexible.
+- **Revisión diaria** para hechos, calidad de decisión, cumplimiento de reglas y próxima acción.
+- **Lección** para una observación verificable y la evidencia que la apoya o refuta.
+- **Playbook de setup** para contexto, condiciones, entrada, invalidación, riesgo y manejo.
+- **Regla de riesgo** para un control propuesto, trigger, respuesta, evidencia y excepciones.
+- **Investigación** para tesis, evidencia a favor y en contra, catalizadores e invalidación.
+- **Decisión** para una decisión del negocio, alternativas, evidencia, resultado esperado y trigger de revisión.
+- **Programa fondeado** para reglas confirmadas del programa y sus implicaciones operativas.
 
-## Mejores prácticas
-1. Reglas cortas y accionables.
-2. Usa Daily Notebook para contexto y Custom Notebooks para conocimiento duradero.
-3. Añade sketches en ink cuando una explicación visual sea más rápida que escribirla.
-4. Actualiza después de las revisiones para que el notebook se vuelva un playbook refinado, no un dump.
-5. Documenta el “por qué” de cada regla.
+## Estado del conocimiento
+Las páginas avanzan por **Borrador**, **Candidata**, **Validada**, **Activa**, **Retirada** y **Archivada**. Una fecha de revisión puede devolver la página a la cola Requiere revisión.
+
+## Revisiones diarias
+Cada revisión diaria pertenece a la cuenta y fecha seleccionadas. La pantalla muestra cantidad de registros de ejecución, P/L registrado, marcas de cumplimiento del plan y cobertura del Journal. “Registros de ejecución” describe las filas guardadas con precisión; no se presenta como un conteo reconstruido de trades.
+
+Usa **Crear lección candidata** para conservar los hechos del día y continuar el razonamiento como conocimiento duradero.
+
+## Búsqueda y análisis de evidencia
+La búsqueda recupera páginas y revisiones diarias del alcance actual. Análisis de Evidencia lee registros obtenidos por el servidor, separa hechos de interpretación, cita las fuentes utilizadas e identifica evidencia insuficiente o contradictoria. No garantiza resultados ni ofrece asesoría financiera individualizada.
+
+## Edición, recuperación y archivos
+- Texto permite contenido enriquecido; Ink permite sketches con mouse, trackpad, stylus o la superficie móvil.
+- Los cambios se guardan automáticamente tras una pausa corta. El control de versión evita que una sesión abierta sobrescriba otra silenciosamente.
+- El historial conserva snapshots recuperables sin crear uno por cada tecla.
+- Las páginas eliminadas pasan por Papelera antes de su eliminación permanente.
+- Se permiten adjuntos privados PNG, JPEG, WebP y PDF de hasta 10 MB cada uno.
+
+## Web y móvil
+Web ofrece el workspace completo. Móvil muestra la cuenta Personal o Fondeada actual, permite cambiar el contexto y fija esa cuenta en cada editor diario para que un cambio posterior no redirija el guardado.

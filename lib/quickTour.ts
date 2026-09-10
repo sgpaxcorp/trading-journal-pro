@@ -26,7 +26,7 @@ type QuickTourBuilder = {
 
 export const QUICK_TOUR_OPEN_EVENT = "ntj_quick_tour_open";
 export const QUICK_TOUR_FORCE_KEY = "ntj_quick_tour_force";
-export const QUICK_TOUR_SEEN_VERSION = 1;
+export const QUICK_TOUR_SEEN_VERSION = 2;
 export const QUICK_TOUR_USER_METADATA_KEY = `operating_tour_seen_v${QUICK_TOUR_SEEN_VERSION}`;
 
 function startsWithAny(path: string, prefixes: string[]) {
@@ -561,25 +561,61 @@ const BUILDERS: QuickTourBuilder[] = [
     guideHref: "/help/notebook",
     match: (path) => path.startsWith("/notebook"),
     build: (L) => ({
-      title: L("Operating Playbook", "Playbook Operativo"),
+      title: L("Business Operating Memory", "Memoria Operativa del Negocio"),
       summary: L(
-        "Notebook is the memory of the business. Store rules, setups, screenshots, lessons, decisions, and standards that deserve to be repeated.",
-        "Notebook es la memoria de la empresa. Guarda reglas, setups, screenshots, lecciones, decisiones y estándares que merecen repetirse."
+        "Business Notebook turns daily evidence into searchable lessons, validated playbooks, risk rules, research, and operating decisions.",
+        "Business Notebook convierte evidencia diaria en lecciones consultables, playbooks validados, reglas de riesgo, investigación y decisiones operativas."
       ),
       bullets: [
-        L("Keep evidence-backed notes instead of vague motivation.", "Guarda notas con evidencia en vez de motivación vaga."),
-        L("Turn repeated lessons into rules, checklists, or alarms.", "Convierte lecciones repetidas en reglas, checklists o alarmas."),
-        L("Use it to make the business smarter every month.", "Úsalo para hacer la empresa más inteligente cada mes."),
+        L("Use Business-wide for standards shared by the whole operation and Specific account for account-level evidence.", "Usa Todo el negocio para estándares compartidos y Cuenta específica para evidencia de una cuenta."),
+        L("Move knowledge deliberately from draft to candidate, validated, active, retired, or archived.", "Mueve el conocimiento deliberadamente de borrador a candidato, validado, activo, retirado o archivado."),
+        L("The coach analyzes saved evidence and cites its sources; it never changes a rule silently.", "El coach analiza evidencia guardada y cita sus fuentes; nunca cambia una regla silenciosamente."),
       ],
       steps: [
         {
-          id: "notebook-header",
-          title: L("Institutional memory", "Memoria institucional"),
+          id: "notebook-scope",
+          title: L("Choose the correct scope", "Elige el alcance correcto"),
           body: L(
-            "Use Notebook for reusable knowledge. If it improves execution, risk control, or decision quality, it belongs in the playbook.",
-            "Usa Notebook para conocimiento reutilizable. Si mejora ejecución, control de riesgo o calidad de decisión, pertenece en el playbook."
+            "Business-wide holds standards that apply across the operation. Specific account holds daily reviews and knowledge that only belongs to the selected Personal or Funded account.",
+            "Todo el negocio guarda estándares aplicables a toda la operación. Cuenta específica guarda revisiones diarias y conocimiento exclusivo de la cuenta Personal o Fondeada seleccionada."
           ),
-          selector: "main h1",
+          selector: '[data-tour="notebook-scope"]',
+        },
+        {
+          id: "notebook-capture",
+          title: L("Capture with a purpose", "Captura con propósito"),
+          body: L(
+            "Start with the page type that matches the decision: lesson, setup playbook, risk rule, research thesis, decision record, or funded-program note.",
+            "Empieza con el tipo de página que corresponde a la decisión: lección, playbook de setup, regla de riesgo, tesis de investigación, decisión o nota de programa fondeado."
+          ),
+          selector: '[data-tour="notebook-capture"]',
+        },
+        {
+          id: "notebook-loop",
+          title: L("Use the operating loop", "Usa el ciclo operativo"),
+          body: L(
+            "Capture evidence, review it objectively, validate the lesson over a meaningful sample, and only then promote it into the operating plan or protection system.",
+            "Captura evidencia, revísala objetivamente, valida la lección con una muestra útil y solo entonces llévala al plan o al sistema de protección."
+          ),
+          selector: '[data-tour="notebook-operating-loop"]',
+        },
+        {
+          id: "notebook-search",
+          title: L("Retrieve the record", "Recupera el registro"),
+          body: L(
+            "Search across pages and account reviews instead of relying on memory. Results open the exact source used by the business.",
+            "Busca entre páginas y revisiones de cuenta en vez de depender de la memoria. Cada resultado abre la fuente exacta utilizada por el negocio."
+          ),
+          selector: '[data-tour="notebook-search"]',
+        },
+        {
+          id: "notebook-analysis",
+          title: L("Analyze saved evidence", "Analiza evidencia guardada"),
+          body: L(
+            "Ask for patterns, contradictions, or validation readiness. The answer stays grounded in your saved records, separates fact from interpretation, and shows the evidence used.",
+            "Pregunta por patrones, contradicciones o preparación para validar. La respuesta usa tus registros, separa hechos de interpretación y muestra la evidencia utilizada."
+          ),
+          selector: '[data-tour="notebook-analyze"]',
         },
       ],
     }),

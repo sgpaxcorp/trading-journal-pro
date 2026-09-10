@@ -37,7 +37,9 @@ export default function AccountPreferencesPage() {
 
   function onLocaleChange(next: AppLocale) {
     setLocale(next);
-    setMsg(t("prefs.hint.saved", lang));
+    const nextLang = resolveLocale(next);
+    setMsg(t("prefs.hint.saved", nextLang));
+    router.refresh();
     window.setTimeout(() => setMsg(null), 1800);
   }
 
@@ -63,7 +65,15 @@ export default function AccountPreferencesPage() {
           <div className="flex items-center gap-3">
             <button
               type="button"
-              aria-label={theme === "light" ? "Switch to Neuro mode" : "Switch to Light mode"}
+              aria-label={
+                theme === "light"
+                  ? lang === "es"
+                    ? "Cambiar a modo Neuro"
+                    : "Switch to Neuro mode"
+                  : lang === "es"
+                    ? "Cambiar a modo claro"
+                    : "Switch to Light mode"
+              }
               onClick={() => onThemeChange(theme === "light" ? "neuro" : "light")}
               className="inline-flex items-center justify-center w-10 h-10 rounded-full border border-slate-700 bg-slate-900/70 text-slate-200 hover:border-emerald-400 hover:text-emerald-200 transition"
               disabled={!ready}
@@ -220,8 +230,8 @@ export default function AccountPreferencesPage() {
 
               <p className="mt-2 text-[11px] text-slate-500">
                 {lang === "es"
-                  ? "Nota: esta preferencia se aplicará progresivamente en toda la interfaz. Por ahora también la usaremos como señal de idioma para el AI Coach."
-                  : "Note: this preference will be rolled out progressively across the UI. For now, we also use it as a language hint for the AI Coach."}
+                  ? "El idioma se aplica inmediatamente en toda la plataforma y también guía el idioma del AI Coach."
+                  : "The language applies immediately across the platform and also guides the AI Coach language."}
               </p>
             </div>
           </div>

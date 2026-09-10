@@ -14,7 +14,7 @@ export default function ThemeInitScript() {
 (function () {
   try {
     var theme = localStorage.getItem("nt_theme") || "neuro";
-    var locale = localStorage.getItem("nt_locale") || "en";
+    var locale = localStorage.getItem("nt_locale") || "auto";
     var resolvedLocale = locale === "auto"
       ? ((navigator.language || "en").toLowerCase().startsWith("es") ? "es" : "en")
       : locale;

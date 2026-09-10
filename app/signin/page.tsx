@@ -1,6 +1,7 @@
 // app/signin/page.tsx
 import { Suspense } from "react";
 import SignInClient from "./SignInClient";
+import { getRequestLocale } from "@/lib/requestLocale";
 
 type SearchParams = {
   [key: string]: string | string[] | undefined;
@@ -12,6 +13,7 @@ export default async function SignInPage({
   searchParams: Promise<SearchParams>;
 }) {
   const sp = await searchParams;
+  const lang = await getRequestLocale();
 
   const rawNext = Array.isArray(sp.next) ? sp.next[0] : sp.next;
   const rawConfirmed = Array.isArray(sp.confirmed) ? sp.confirmed[0] : sp.confirmed;
@@ -26,8 +28,9 @@ export default async function SignInPage({
     <Suspense
       fallback={
         <main className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center px-4">
-          <p className="text-xs text-slate-400">Loading sign in...</p>
-          <p className="text-xs text-slate-400">Cargando inicio de sesión...</p>
+          <p className="text-xs text-slate-400">
+            {lang === "es" ? "Cargando inicio de sesión..." : "Loading sign in..."}
+          </p>
         </main>
       }
     >

@@ -19,18 +19,14 @@ import { useLanguage } from "../lib/LanguageContext";
 import { t } from "../lib/i18n";
 import { useTheme } from "../lib/ThemeContext";
 import type { ThemeColors } from "../theme";
-import { supabaseMobile } from "../lib/supabase";
 import { useSupabaseUser } from "../lib/useSupabaseUser";
 import { usePlanAccess } from "../lib/usePlanAccess";
-import { apiGet } from "../lib/api";
-
-const BOOKS_TABLE = "ntj_notebook_books";
-const SECTIONS_TABLE = "ntj_notebook_sections";
-const PAGES_TABLE = "ntj_notebook_pages";
+import { apiGet, apiPost } from "../lib/api";
 
 type RouteParams = {
   notebookId: string;
   title?: string;
+  accountId?: string | null;
 };
 
 type NotebookBook = {
@@ -50,7 +46,8 @@ type NotebookPage = {
   notebook_id: string;
   section_id: string | null;
   title: string;
-  content: string;
+  content?: string;
+  summary?: string | null;
   updated_at: string | null;
   created_at: string;
 };
@@ -59,19 +56,6 @@ type ManageTarget =
   | { kind: "book"; book: NotebookBook }
   | { kind: "section"; section: NotebookSection }
   | { kind: "page"; page: NotebookPage };
-
-type AccountsResponse = {
-  activeAccountId: string | null;
-};
-
-async function fetchActiveAccountId(): Promise<string | null> {
-  try {
-    const res = await apiGet<AccountsResponse>("/api/trading-accounts/list");
-    return res.activeAccountId ?? null;
-  } catch {
-    return null;
-  }
-}
 
 function stripHtml(input?: string | null) {
   if (!input) return "";
@@ -93,7 +77,7 @@ export function NotebookWorkspaceScreen() {
   const planAccess = usePlanAccess();
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
-  const { notebookId, title } = (route.params ?? {}) as RouteParams;
+  const { notebookId, title, accountId } = (route.params ?? {}) as RouteParams;
 
   const [book, setBook] = useState<NotebookBook | null>(null);
   const [sections, setSections] = useState<NotebookSection[]>([]);
@@ -119,7 +103,7 @@ export function NotebookWorkspaceScreen() {
   const loadWorkspace = useCallback(
     async (options?: { showLoading?: boolean; isRefresh?: boolean }) => {
       if (!planAccess.hasNotebook) return;
-      if (!supabaseMobile || !user?.id || !notebookId) return;
+      if (!user?.id || !notebookId || !accountId) return;
 
       const showLoading = options?.showLoading ?? false;
       const isRefresh = options?.isRefresh ?? false;
@@ -128,44 +112,24 @@ export function NotebookWorkspaceScreen() {
       setError(null);
 
       try {
-        const accountId = await fetchActiveAccountId();
-        let bookQuery = supabaseMobile
-          .from(BOOKS_TABLE)
-          .select("id, name, account_id")
-          .eq("id", notebookId)
-          .eq("user_id", user.id);
-
-        if (accountId) bookQuery = bookQuery.eq("account_id", accountId);
-
-        const { data: bookRow, error: bookErr } = await bookQuery.maybeSingle();
-        if (bookErr) throw bookErr;
+        const params = new URLSearchParams({ view: "library", scope: "account", accountId });
+        const workspace = await apiGet<{
+          library: {
+            books: NotebookBook[];
+            sections: NotebookSection[];
+            pages: NotebookPage[];
+          };
+        }>(`/api/notebook/workspace?${params.toString()}`);
+        const bookRow = workspace.library.books.find((candidate) => candidate.id === notebookId) ?? null;
         if (!bookRow) {
           throw new Error(
             t(language, "We couldn't find this notebook.", "No pudimos encontrar este notebook.")
           );
         }
 
-        const [sectionResult, pageResult] = await Promise.all([
-          supabaseMobile
-            .from(SECTIONS_TABLE)
-            .select("id, name, notebook_id")
-            .eq("user_id", user.id)
-            .eq("notebook_id", notebookId)
-            .order("created_at", { ascending: true }),
-          supabaseMobile
-            .from(PAGES_TABLE)
-            .select("id, notebook_id, section_id, title, content, created_at, updated_at")
-            .eq("user_id", user.id)
-            .eq("notebook_id", notebookId)
-            .order("updated_at", { ascending: false }),
-        ]);
-
-        if (sectionResult.error) throw sectionResult.error;
-        if (pageResult.error) throw pageResult.error;
-
         setBook(bookRow as NotebookBook);
-        setSections(Array.isArray(sectionResult.data) ? (sectionResult.data as NotebookSection[]) : []);
-        setPages(Array.isArray(pageResult.data) ? (pageResult.data as NotebookPage[]) : []);
+        setSections(workspace.library.sections.filter((section) => section.notebook_id === notebookId));
+        setPages(workspace.library.pages.filter((page) => page.notebook_id === notebookId));
       } catch (err: any) {
         setError(
           err?.message ??
@@ -180,7 +144,7 @@ export function NotebookWorkspaceScreen() {
         if (isRefresh) setRefreshing(false);
       }
     },
-    [language, notebookId, planAccess.hasNotebook, user?.id]
+    [accountId, language, notebookId, planAccess.hasNotebook, user?.id]
   );
 
   useFocusEffect(
@@ -254,7 +218,7 @@ export function NotebookWorkspaceScreen() {
   }
 
   async function handleInlineSectionCreate() {
-    if (!supabaseMobile || !user?.id || !book) return;
+    if (!user?.id || !book) return;
     const trimmed = inlineSectionValue.trim();
     if (!trimmed) {
       setSectionError(t(language, "Name is required.", "El nombre es requerido."));
@@ -264,21 +228,16 @@ export function NotebookWorkspaceScreen() {
     setSectionBusy(true);
     setSectionError(null);
     try {
-      const { data, error: sectionError } = await supabaseMobile
-        .from(SECTIONS_TABLE)
-        .insert({
-          user_id: user.id,
-          notebook_id: book.id,
-          name: trimmed,
-        })
-        .select("id")
-        .single();
-      if (sectionError) throw sectionError;
+      const result = await apiPost<{ section: { id: string } }>("/api/notebook/workspace", {
+        action: "create_section",
+        notebookId: book.id,
+        name: trimmed,
+      });
 
       setInlineSectionOpen(false);
       setInlineSectionValue("");
       await loadWorkspace();
-      if (data?.id) setSelectedSectionId(data.id as string);
+      if (result.section?.id) setSelectedSectionId(result.section.id);
     } catch (err: any) {
       setSectionError(
         err?.message ??
@@ -290,7 +249,7 @@ export function NotebookWorkspaceScreen() {
   }
 
   async function handleInlinePageCreate() {
-    if (!supabaseMobile || !user?.id || !book) return;
+    if (!user?.id || !book) return;
     const trimmed = inlinePageValue.trim();
     if (!trimmed) {
       setPageError(t(language, "Name is required.", "El nombre es requerido."));
@@ -300,14 +259,14 @@ export function NotebookWorkspaceScreen() {
     setPageBusy(true);
     setPageError(null);
     try {
-      const { error: pageInsertError } = await supabaseMobile.from(PAGES_TABLE).insert({
-        user_id: user.id,
-        notebook_id: book.id,
-        section_id: selectedSectionId,
+      await apiPost("/api/notebook/workspace", {
+        action: "create_page",
+        notebookId: book.id,
+        sectionId: selectedSectionId,
         title: trimmed,
-        content: "",
+        templateKey: "blank",
+        language: language === "es" ? "es" : "en",
       });
-      if (pageInsertError) throw pageInsertError;
 
       setInlinePageOpen(false);
       setInlinePageValue("");
@@ -323,7 +282,7 @@ export function NotebookWorkspaceScreen() {
   }
 
   async function handleManageSave() {
-    if (!supabaseMobile || !user?.id || !manageTarget) return;
+    if (!user?.id || !manageTarget) return;
     const trimmed = manageName.trim();
     if (!trimmed) {
       setManageError(t(language, "Name is required.", "El nombre es requerido."));
@@ -334,30 +293,11 @@ export function NotebookWorkspaceScreen() {
     setManageError(null);
     try {
       if (manageTarget.kind === "book") {
-        const { error: bookError } = await supabaseMobile
-          .from(BOOKS_TABLE)
-          .update({ name: trimmed, updated_at: new Date().toISOString() })
-          .eq("id", manageTarget.book.id)
-          .eq("user_id", user.id);
-        if (bookError) throw bookError;
+        await apiPost("/api/notebook/workspace", { action: "update_book", bookId: manageTarget.book.id, name: trimmed });
       } else if (manageTarget.kind === "section") {
-        const { error: sectionError } = await supabaseMobile
-          .from(SECTIONS_TABLE)
-          .update({ name: trimmed, updated_at: new Date().toISOString() })
-          .eq("id", manageTarget.section.id)
-          .eq("user_id", user.id);
-        if (sectionError) throw sectionError;
+        await apiPost("/api/notebook/workspace", { action: "update_section", sectionId: manageTarget.section.id, name: trimmed });
       } else {
-        const { error: pageError } = await supabaseMobile
-          .from(PAGES_TABLE)
-          .update({
-            title: trimmed,
-            section_id: manageSectionId,
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", manageTarget.page.id)
-          .eq("user_id", user.id);
-        if (pageError) throw pageError;
+        await apiPost("/api/notebook/workspace", { action: "update_page", pageId: manageTarget.page.id, title: trimmed, sectionId: manageSectionId });
       }
 
       closeManage();
@@ -373,31 +313,12 @@ export function NotebookWorkspaceScreen() {
   }
 
   async function executeDeleteTarget() {
-    if (!supabaseMobile || !user?.id || !manageTarget) return;
+    if (!user?.id || !manageTarget) return;
     setManaging(true);
     setManageError(null);
     try {
       if (manageTarget.kind === "book") {
-        const { error: deletePagesError } = await supabaseMobile
-          .from(PAGES_TABLE)
-          .delete()
-          .eq("notebook_id", manageTarget.book.id)
-          .eq("user_id", user.id);
-        if (deletePagesError) throw deletePagesError;
-
-        const { error: deleteSectionsError } = await supabaseMobile
-          .from(SECTIONS_TABLE)
-          .delete()
-          .eq("notebook_id", manageTarget.book.id)
-          .eq("user_id", user.id);
-        if (deleteSectionsError) throw deleteSectionsError;
-
-        const { error: deleteBookError } = await supabaseMobile
-          .from(BOOKS_TABLE)
-          .delete()
-          .eq("id", manageTarget.book.id)
-          .eq("user_id", user.id);
-        if (deleteBookError) throw deleteBookError;
+        await apiPost("/api/notebook/workspace", { action: "trash_book", bookId: manageTarget.book.id });
 
         closeManage();
         navigation.goBack();
@@ -405,31 +326,14 @@ export function NotebookWorkspaceScreen() {
       }
 
       if (manageTarget.kind === "section") {
-        const { error: releasePagesError } = await supabaseMobile
-          .from(PAGES_TABLE)
-          .update({ section_id: null, updated_at: new Date().toISOString() })
-          .eq("section_id", manageTarget.section.id)
-          .eq("user_id", user.id);
-        if (releasePagesError) throw releasePagesError;
-
-        const { error: deleteSectionError } = await supabaseMobile
-          .from(SECTIONS_TABLE)
-          .delete()
-          .eq("id", manageTarget.section.id)
-          .eq("user_id", user.id);
-        if (deleteSectionError) throw deleteSectionError;
+        await apiPost("/api/notebook/workspace", { action: "delete_section", sectionId: manageTarget.section.id });
 
         closeManage();
         await loadWorkspace();
         return;
       }
 
-      const { error: deletePageError } = await supabaseMobile
-        .from(PAGES_TABLE)
-        .delete()
-        .eq("id", manageTarget.page.id)
-        .eq("user_id", user.id);
-      if (deletePageError) throw deletePageError;
+      await apiPost("/api/notebook/workspace", { action: "trash_page", pageId: manageTarget.page.id });
 
       closeManage();
       await loadWorkspace();
@@ -456,8 +360,8 @@ export function NotebookWorkspaceScreen() {
       manageTarget.kind === "book"
         ? t(
             language,
-            "This deletes the notebook, all sections, and every page inside it.",
-            "Esto borra el notebook, todas las secciones y cada página dentro."
+            "This moves the notebook and its pages to recoverable Trash.",
+            "Esto mueve el notebook y sus páginas a la Papelera recuperable."
           )
         : manageTarget.kind === "section"
         ? t(
@@ -465,15 +369,17 @@ export function NotebookWorkspaceScreen() {
             "This deletes the section and keeps its pages as loose pages.",
             "Esto borra la sección y deja sus páginas como páginas sueltas."
           )
-        : t(language, "This deletes the page permanently.", "Esto borra la página permanentemente.");
+        : t(language, "This moves the page to recoverable Trash.", "Esto mueve la página a la Papelera recuperable.");
 
     Alert.alert(
-      t(language, "Delete item", "Borrar elemento"),
+      manageTarget.kind === "section"
+        ? t(language, "Delete section", "Borrar sección")
+        : t(language, "Move to trash", "Mover a papelera"),
       `${entityName}\n\n${message}`,
       [
         { text: t(language, "Cancel", "Cancelar"), style: "cancel" },
         {
-          text: t(language, "Delete", "Borrar"),
+          text: manageTarget.kind === "section" ? t(language, "Delete", "Borrar") : t(language, "Move", "Mover"),
           style: "destructive",
           onPress: () => {
             void executeDeleteTarget();
@@ -668,6 +574,7 @@ export function NotebookWorkspaceScreen() {
                       kind: "page",
                       id: page.id,
                       title: page.title,
+                      accountId,
                     })
                   }
                   onLongPress={() => openManage({ kind: "page", page })}
@@ -684,7 +591,7 @@ export function NotebookWorkspaceScreen() {
                     {formatDate(page.updated_at ?? page.created_at)}
                   </Text>
                   <Text style={styles.libraryTilePreview} numberOfLines={2}>
-                    {stripHtml(page.content) ||
+                    {stripHtml(page.summary ?? page.content) ||
                       t(language, "Empty page ready for notes.", "Página vacía lista para notas.")}
                   </Text>
                 </Pressable>

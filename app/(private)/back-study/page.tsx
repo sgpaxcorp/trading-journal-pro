@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import TopNav from "@/app/components/TopNav";
+import NotebookCaptureButton from "@/app/components/NotebookCaptureButton";
 import { useAuth } from "@/context/AuthContext";
 import { useTradingAccounts } from "@/hooks/useTradingAccounts";
 import { useUserPlan } from "@/hooks/useUserPlan";
@@ -628,6 +629,7 @@ type InteractiveCandleChartProps = {
   exitColor?: string;
   entryLabel?: string;
   exitLabel?: string;
+  auditLabel?: string;
   zoomInLabel?: string;
   zoomOutLabel?: string;
   zoomResetLabel?: string;
@@ -649,6 +651,7 @@ function InteractiveCandleChart({
   exitColor = "#38bdf8",
   entryLabel = "Entry",
   exitLabel = "Exit",
+  auditLabel = "Broker",
   zoomInLabel = "Zoom in",
   zoomOutLabel = "Zoom out",
   zoomResetLabel = "Reset zoom",
@@ -954,7 +957,7 @@ function InteractiveCandleChart({
             {auditPoints.length ? (
               <div className="flex items-center gap-1">
                 <span className="inline-block h-2 w-4 rounded bg-violet-400" />
-                <span className="text-slate-300">Broker</span>
+                <span className="text-slate-300">{auditLabel}</span>
               </div>
             ) : null}
           </div>
@@ -1918,13 +1921,25 @@ function BackStudyPageInner() {
               </p>
             </div>
 
-            <button
-              type="button"
-              onClick={() => router.push("/dashboard")}
-              className="self-start md:self-center px-4 py-2 rounded-xl border border-slate-700 text-slate-200 text-sm hover:border-emerald-400 hover:text-emerald-300 transition"
-            >
-              ← {L("Back to dashboard", "Volver al dashboard")}
-            </button>
+            <div className="flex flex-wrap items-start gap-2 md:self-center">
+              {selectedTrade ? (
+                <NotebookCaptureButton
+                  accountId={activeAccountId}
+                  sourceType="back_study"
+                  sourceId={selectedTrade.id}
+                  pageType="lesson"
+                  title={L(`Trade review · ${selectedTrade.underlyingSymbol} · ${selectedTrade.date}`, `Revisión de trade · ${selectedTrade.underlyingSymbol} · ${selectedTrade.date}`)}
+                  content={`${L("<h2>Trade evidence</h2>", "<h2>Evidencia del trade</h2>")}<p>${selectedTrade.underlyingSymbol} · ${selectedTrade.date} · ${selectedTrade.kind}</p>${L("<h2>Observed execution window</h2>", "<h2>Ventana de ejecución observada</h2>")}<p>${selectedTrade.entryTime || "—"} - ${selectedTrade.exitTime || "—"}</p>${L("<h2>Review conclusion</h2><p></p><h2>What would disprove the lesson?</h2><p></p><h2>Next test</h2><p></p>", "<h2>Conclusión del review</h2><p></p><h2>¿Qué refutaría la lección?</h2><p></p><h2>Próxima prueba</h2><p></p>")}`}
+                />
+              ) : null}
+              <button
+                type="button"
+                onClick={() => router.push("/dashboard")}
+                className="px-4 py-2 rounded-xl border border-slate-700 text-slate-200 text-sm hover:border-emerald-400 hover:text-emerald-300 transition"
+              >
+                ← {L("Back to dashboard", "Volver al dashboard")}
+              </button>
+            </div>
           </header>
 
           <div className="flex flex-wrap items-center gap-2">
@@ -2693,6 +2708,7 @@ function BackStudyPageInner() {
                               exitColor="#38bdf8"
                               entryLabel={L("Entry", "Entrada")}
                               exitLabel={L("Exit", "Salida")}
+                              auditLabel={L("Broker", "Bróker")}
                               zoomInLabel={L("Zoom in", "Acercar")}
                               zoomOutLabel={L("Zoom out", "Alejar")}
                               zoomResetLabel={L("Reset zoom", "Reiniciar zoom")}
@@ -2739,6 +2755,7 @@ function BackStudyPageInner() {
                                   exitColor="#38bdf8"
                                   entryLabel={L("Entry", "Entrada")}
                                   exitLabel={L("Exit", "Salida")}
+                                  auditLabel={L("Broker", "Bróker")}
                                   zoomInLabel={L("Zoom in", "Acercar")}
                                   zoomOutLabel={L("Zoom out", "Alejar")}
                                   zoomResetLabel={L("Reset zoom", "Reiniciar zoom")}
@@ -3199,13 +3216,17 @@ function BackStudyPageInner() {
 }
 
 export default function BackStudyPage() {
+  const { locale } = useAppSettings();
+  const lang = resolveLocale(locale);
   return (
     <Suspense
       fallback={
         <main className="min-h-screen bg-slate-950 text-slate-50">
           <TopNav />
           <div className="flex min-h-[60vh] items-center justify-center px-6">
-            <p className="text-slate-400 text-sm">Loading back-study…</p>
+            <p className="text-slate-400 text-sm">
+              {lang === "es" ? "Cargando revisión estratégica…" : "Loading back-study…"}
+            </p>
           </div>
         </main>
       }

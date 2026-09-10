@@ -185,6 +185,17 @@ export async function getJournalEntryByDate(
 ): Promise<JournalEntry | null> {
   if (!userId || !date) return null;
 
+  // Prefer the authenticated server route. This avoids a blank journal during
+  // the short window after sign-in while the browser RLS session settles.
+  const serverRows = await fetchJournalEntriesViaApi({
+    accountId: accountId ?? null,
+    fromDate: date,
+    toDate: date,
+  });
+  if (serverRows?.length) {
+    return rowToJournalEntry(serverRows[0]);
+  }
+
   let query = supabaseBrowser
     .from(TABLE_NAME)
     .select(

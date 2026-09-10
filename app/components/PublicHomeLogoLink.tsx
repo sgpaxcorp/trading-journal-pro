@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { useAuth } from "@/context/AuthContext";
+import { useAppSettings } from "@/lib/appSettings";
+import { resolveLocale } from "@/lib/i18n";
 
 type PublicHomeLogoLinkProps = {
   compact?: boolean;
@@ -17,6 +19,8 @@ export default function PublicHomeLogoLink({
   className = "",
 }: PublicHomeLogoLinkProps) {
   const { user } = useAuth() as any;
+  const { locale } = useAppSettings();
+  const lang = resolveLocale(locale);
   const href = user ? "/dashboard" : "/";
   const imgClass =
     size === "lg"
@@ -31,7 +35,7 @@ export default function PublicHomeLogoLink({
     <Link
       href={href}
       className={`inline-flex items-center gap-3 rounded-xl border border-slate-700 bg-slate-900/75 px-3 py-2 hover:border-emerald-400 transition shadow-[0_0_28px_rgba(16,185,129,0.12)] ${className}`}
-      aria-label="Go to home"
+      aria-label={lang === "es" ? "Ir al inicio" : "Go to home"}
     >
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
@@ -41,7 +45,7 @@ export default function PublicHomeLogoLink({
       />
       {showLabel && !compact ? (
         <span className="text-xs text-slate-300">
-          {user ? "Business" : "Home"}
+          {user ? (lang === "es" ? "Empresa" : "Business") : (lang === "es" ? "Inicio" : "Home")}
         </span>
       ) : null}
     </Link>

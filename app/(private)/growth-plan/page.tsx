@@ -869,6 +869,10 @@ const STEP_TITLES_ES: Record<WizardStep, string> = {
   4: "Estrategia y reglas",
 };
 
+function withoutLeadingStepNumber(title: string) {
+  return title.replace(/^\d+\.\s*/, "");
+}
+
 type GrowthPlanLocale = "en" | "es";
 
 type PlannedWithdrawal = PlannedWithdrawalEvent;
@@ -2256,7 +2260,12 @@ export default function GrowthPlanPage() {
         {
           id: "forecast_review",
           label: L("Confirm the curve and sequence", "Confirma la curva y la secuencia"),
-          done: Boolean(selectedPlanId && autoPhasesGenerated),
+          done: Boolean(
+            selectedPlanId &&
+            autoPhasesGenerated &&
+            suggestedRows.length > 0 &&
+            projection.targetReached
+          ),
           anchor: "gp-forecast-review",
         },
       ],
@@ -2353,6 +2362,7 @@ export default function GrowthPlanPage() {
     businessAnalysisComplete,
     returnModelConfigured,
     selectedPlanId,
+    projection.targetReached,
     weeklyOutcomePlanComplete,
   ]);
 
@@ -2371,6 +2381,7 @@ export default function GrowthPlanPage() {
   }, [stepCompletion]);
 
   const currentTasks = guidedTasksByStep[step] ?? [];
+  const nextRequiredTask = currentTasks.find((t) => !t.done && !t.optional);
   const nextTask = currentTasks.find((t) => !t.done && !t.optional) ?? currentTasks.find((t) => !t.done);
 
   const buildAutoPhasesPreview = () => {
@@ -6417,7 +6428,10 @@ export default function GrowthPlanPage() {
           </div>
           <div className="rounded-2xl border border-violet-300/20 bg-violet-300/5 p-4">
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-violet-200">
-              {L("Next: select the scenario", "Próximo: escoge el escenario")}
+              {L(
+                "After this analysis: choose the scenario",
+                "Después de este análisis: escoge el escenario"
+              )}
             </p>
             <p className="mt-2 text-sm leading-6 text-slate-300">
               {L(
@@ -6752,17 +6766,80 @@ export default function GrowthPlanPage() {
   const step0Current = step0Stages[safeStage];
   const step0CanNext = !!step0Current?.isComplete;
   const step0CanBack = safeStage > 0;
+  const step0PreviousTitle = safeStage > 0
+    ? withoutLeadingStepNumber(step0Stages[safeStage - 1].title)
+    : "";
+  const step0NextTitle = safeStage < step0Total - 1
+    ? withoutLeadingStepNumber(step0Stages[safeStage + 1].title)
+    : stepTitles[1];
+  const step0IncompleteMessage = (() => {
+    switch (step0Current?.id) {
+      case "starting_balance":
+        return L("Enter starting capital greater than $0.", "Ingresa un capital inicial mayor de $0.");
+      case "target_balance":
+        return L(
+          "Enter a business target above the starting capital.",
+          "Ingresa una meta empresarial mayor que el capital inicial."
+        );
+      case "timeline":
+        return L(
+          "Choose a valid start, timeframe, and market calendar.",
+          "Escoge un inicio, plazo y calendario de mercado válidos."
+        );
+      case "weekly_schedule":
+        return L(
+          "Winning days plus losing days must equal your trading days per week.",
+          "Los días ganadores más los perdedores deben sumar tus días de trading por semana."
+        );
+      case "capital_flows":
+        return L(
+          "Confirm whether you expect contributions and withdrawals.",
+          "Confirma si esperas aportaciones y retiros."
+        );
+      case "forecast_analysis":
+        return L(
+          "Complete the prior assumptions so the mathematical analysis can be calculated.",
+          "Completa los supuestos anteriores para calcular el análisis matemático."
+        );
+      case "scenario_selection":
+        return L(
+          "Select a standard mode or calculate and select a manual plan.",
+          "Selecciona un modo estándar o calcula y selecciona un plan manual."
+        );
+      case "forecast_review":
+        return L(
+          "Select a forecast that reaches the target, then review its curve and sequence.",
+          "Selecciona un forecast que alcance la meta y revisa su curva y secuencia."
+        );
+      default:
+        return L("Complete this step to continue.", "Completa este paso para continuar.");
+    }
+  })();
+
+  function scrollToWizardPanel(targetStep: WizardStep) {
+    if (typeof window === "undefined") return;
+    window.setTimeout(() => {
+      document.getElementById(`gp-step-${targetStep}`)?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    }, 80);
+  }
+
   const goStep0Next = () => {
     if (!step0CanNext) return;
     if (safeStage >= step0Total - 1) {
       setStep(1);
+      scrollToWizardPanel(1);
       return;
     }
     setStep0Stage((prev) => Math.min(prev + 1, step0Total - 1));
+    scrollToWizardPanel(0);
   };
   const goStep0Back = () => {
     if (!step0CanBack) return;
     setStep0Stage((prev) => Math.max(0, prev - 1));
+    scrollToWizardPanel(0);
   };
 
   const step0AnchorIndex = step0Stages.reduce<Record<string, number>>((acc, stage, idx) => {
@@ -6885,23 +6962,28 @@ export default function GrowthPlanPage() {
   }
 
 
-  const canGoNext = useMemo(() => {
-    if (step !== 0) return true;
-    const required = (guidedTasksByStep[0] ?? []).filter((t) => !t.optional);
-    return required.every((t) => t.done);
-  }, [step, guidedTasksByStep]);
+  const canGoNext = step < 4 && stepCompletion[step];
+  const previousSectionTitle = step > 0 ? stepTitles[(step - 1) as WizardStep] : "";
+  const nextSectionTitle = step < 4 ? stepTitles[(step + 1) as WizardStep] : "";
 
   async function goNext() {
     setError("");
+    if (step >= 4) return;
     if (!canGoNext) {
-      setError(L("Complete required fields before continuing.", "Completa los campos requeridos antes de continuar."));
-      const required = (guidedTasksByStep[0] ?? []).filter((t) => !t.optional);
-      const firstMissing = required.find((t) => !t.done);
-      if (firstMissing?.anchor) scrollToAnchor(firstMissing.anchor);
+      setError(
+        nextRequiredTask
+          ? L(
+              `Complete this requirement before continuing: ${nextRequiredTask.label}.`,
+              `Completa este requisito antes de continuar: ${nextRequiredTask.label}.`
+            )
+          : L("Complete required fields before continuing.", "Completa los campos requeridos antes de continuar.")
+      );
+      if (nextRequiredTask?.anchor) scrollToAnchor(nextRequiredTask.anchor);
       return;
     }
     const next = (Math.min(4, step + 1) as WizardStep);
     setStep(next);
+    scrollToWizardPanel(next);
     const t =
       (await neuroReact("wizard_step_next", lang, { to: stepTitles[next] })) ||
       (isEs ? `Siguiente: ${stepTitles[next]}.` : `Next: ${stepTitles[next]}.`);
@@ -6910,8 +6992,10 @@ export default function GrowthPlanPage() {
 
   async function goBack() {
     setError("");
+    if (step <= 0) return;
     const prev = (Math.max(0, step - 1) as WizardStep);
     setStep(prev);
+    scrollToWizardPanel(prev);
     const t =
       (await neuroReact("wizard_step_back", lang, { to: stepTitles[prev] })) ||
       (isEs ? `Volver a: ${stepTitles[prev]}.` : `Back to: ${stepTitles[prev]}.`);
@@ -6932,10 +7016,12 @@ export default function GrowthPlanPage() {
         const firstIncomplete = step0Stages.findIndex((stage) => !stage.isComplete);
         setStep0Stage(Math.max(0, firstIncomplete));
       }
+      scrollToWizardPanel(blockedBy);
       return;
     }
     setError("");
     setStep(s);
+    scrollToWizardPanel(s);
     const t =
       (await neuroReact("wizard_step_clicked", lang, { to: stepTitles[s] })) ||
       (isEs ? `Abierto: ${stepTitles[s]}.` : `Opened: ${stepTitles[s]}.`);
@@ -7685,22 +7771,21 @@ export default function GrowthPlanPage() {
               <button
                 type="button"
                 onClick={() => scrollToAnchor(nextTask.anchor)}
-                className={`flex items-center justify-between gap-2 rounded-lg border px-2.5 py-1.5 text-left text-xs transition ${
-                  nextTask.done
-                    ? "border-cyan-300/40 bg-cyan-300/10 text-cyan-100"
-                    : "border-slate-800 bg-slate-950/40 text-slate-300 hover:border-cyan-300/60"
-                }`}
+                className="flex items-center justify-between gap-3 rounded-lg border border-slate-800 bg-slate-950/40 px-3 py-2 text-left text-xs text-slate-300 transition hover:border-cyan-300/60"
               >
                 <span>
-                  {nextTask.done ? "✓ " : "• "} {nextTask.label}
+                  <span className="block text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+                    {L("Requirement to review", "Requisito por revisar")}
+                  </span>
+                  <span className="mt-1 block">{nextTask.label}</span>
                   {nextTask.optional ? (
                     <span className="ml-2 text-[10px] uppercase tracking-[0.2em] text-slate-500">
                       {L("Optional", "Opcional")}
                     </span>
                   ) : null}
                 </span>
-                <span className="text-[11px] text-slate-500">
-                  {nextTask.done ? L("Done", "Listo") : L("Go", "Ir")}
+                <span className="shrink-0 text-[11px] font-semibold text-cyan-200">
+                  {L("Review", "Revisar")} →
                 </span>
               </button>
             ) : (
@@ -7708,38 +7793,6 @@ export default function GrowthPlanPage() {
                 {L("All items complete for this step.", "Todos los items están completos en este paso.")}
               </p>
             )}
-
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  if (nextTask?.anchor) {
-                    scrollToAnchor(nextTask.anchor);
-                    return;
-                  }
-                  const nextStep = (Math.min(4, step + 1) as WizardStep);
-                  setStep(nextStep);
-                  scrollToAnchor(`gp-step-${nextStep}`);
-                }}
-                className="rounded-xl bg-cyan-300 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-cyan-200"
-              >
-                {nextTask?.anchor
-                  ? L("Go to next item", "Ir al siguiente item")
-                  : step < 4
-                    ? L("Continue to next step", "Continuar al próximo paso")
-                    : L("Ready to save", "Listo para guardar")}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setStep(0);
-                  setStep0Stage(0);
-                }}
-                className="rounded-xl border border-slate-700 px-4 py-2 text-sm text-slate-300 hover:border-cyan-300 hover:text-cyan-200"
-              >
-                {L("Back to numbers", "Volver a números")}
-              </button>
-            </div>
           </div>
         ) : (
           <button
@@ -7751,34 +7804,87 @@ export default function GrowthPlanPage() {
           </button>
         )}
 
-        {/* Stepper (FIXED: numeric array to avoid "01/11/21") */}
-        <div className="flex flex-wrap gap-2">
-          {STEP_ORDER.map((s, idx) => (
-            <button
-              key={s}
-              type="button"
-              onClick={() => onStepClick(s)}
-              className={`px-3 py-1.5 rounded-full border text-xs transition ${
-                step === s
-                  ? "border-emerald-400 bg-emerald-400/10 text-emerald-200"
-                  : "border-slate-700 text-slate-300 hover:border-emerald-400/60"
-              }`}
-            >
-              {idx + 1}. {stepTitles[s]}
-            </button>
-          ))}
-        </div>
+        <nav
+          aria-label={L("Trading Business Plan sections", "Secciones del Plan de Empresa de Trading")}
+          className="rounded-2xl border border-slate-800 bg-slate-950/45 p-3"
+        >
+          <div className="mb-3 flex flex-wrap items-end justify-between gap-2 px-1">
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-500">
+                {L("Plan sections", "Secciones del plan")}
+              </p>
+              <p className="mt-1 text-xs text-slate-400">
+                {L(
+                  "Complete each section in order. The active section is highlighted.",
+                  "Completa cada sección en orden. La sección activa está resaltada."
+                )}
+              </p>
+            </div>
+            <span className="text-xs font-semibold text-emerald-200">
+              {L("Section", "Sección")} {STEP_ORDER.indexOf(step) + 1}/{STEP_ORDER.length}
+            </span>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+            {STEP_ORDER.map((s, idx) => {
+              const isActive = step === s;
+              const isComplete = stepCompletion[s];
+              const isLocked = STEP_ORDER.some((candidate) => candidate < s && !stepCompletion[candidate]);
+              return (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => onStepClick(s)}
+                  aria-current={isActive ? "step" : undefined}
+                  data-testid={`growth-plan-section-${s}`}
+                  className={`flex min-h-12 items-center gap-2 rounded-xl border px-3 py-2 text-left text-xs transition ${
+                    isActive
+                      ? "border-emerald-300 bg-emerald-300/10 text-emerald-100 shadow-[0_0_0_1px_rgba(110,231,183,0.08)]"
+                      : isLocked
+                        ? "border-slate-800 bg-slate-950/30 text-slate-500 hover:border-slate-700"
+                        : "border-slate-700 bg-slate-950/50 text-slate-300 hover:border-emerald-400/60"
+                  }`}
+                >
+                  <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-[11px] font-semibold ${
+                    isActive
+                      ? "border-emerald-300 bg-emerald-300 text-slate-950"
+                      : isComplete
+                        ? "border-cyan-300/40 bg-cyan-300/10 text-cyan-200"
+                        : "border-slate-700 text-slate-500"
+                  }`}>
+                    {isComplete && !isActive ? "✓" : idx + 1}
+                  </span>
+                  <span className="min-w-0 leading-4">{stepTitles[s]}</span>
+                  {isLocked ? <span className="ml-auto text-[10px]" aria-label={L("Locked", "Bloqueada")}>🔒</span> : null}
+                </button>
+              );
+            })}
+          </div>
+        </nav>
 
         {/* ================= STEP 0 ================= */}
         {step === 0 && (
           <div id="gp-step-0" className="space-y-5">
             <div className="rounded-2xl border border-slate-800 bg-slate-950/40 p-4">
+              <div className="mb-4 grid grid-cols-8 gap-1" aria-hidden="true">
+                {step0Stages.map((stage, index) => (
+                  <span
+                    key={stage.id}
+                    className={`h-1.5 rounded-full transition-colors ${
+                      index === safeStage
+                        ? "bg-emerald-300"
+                        : index < safeStage
+                          ? "bg-cyan-400/70"
+                          : "bg-slate-800"
+                    }`}
+                  />
+                ))}
+              </div>
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">
-                    {L("Step", "Paso")} {safeStage + 1}/{step0Total}
+                    {L("Goal forecast setup", "Configuración del forecast")} · {L("Step", "Paso")} {safeStage + 1}/{step0Total}
                   </p>
-                  <p className="text-lg font-semibold text-slate-100">{step0Current.title}</p>
+                  <p className="mt-1 text-lg font-semibold text-slate-100">{withoutLeadingStepNumber(step0Current.title)}</p>
                   <p className="text-sm text-slate-400">{step0Current.description}</p>
                 </div>
                 <span className="text-[11px] text-slate-500">{L("Required", "Requerido")}</span>
@@ -7788,33 +7894,56 @@ export default function GrowthPlanPage() {
                 {step0Current.content}
               </div>
 
-              <div className="mt-4 flex items-center justify-between">
-                <button
-                  type="button"
-                  onClick={goStep0Back}
-                  disabled={!step0CanBack}
-                  className={`rounded-xl border px-4 py-2 text-sm ${
-                    step0CanBack
-                      ? "border-slate-700 text-slate-300 hover:border-emerald-400 hover:text-emerald-300"
-                      : "border-slate-800 text-slate-600 cursor-not-allowed"
+              <div
+                data-testid="growth-plan-stage-navigation"
+                className="mt-5 border-t border-slate-800 pt-4"
+              >
+                <div
+                  id="gp-stage-navigation-status"
+                  role="status"
+                  className={`mb-3 rounded-xl border px-3 py-2 text-xs leading-5 ${
+                    step0CanNext
+                      ? "border-emerald-300/20 bg-emerald-300/5 text-emerald-100"
+                      : "border-amber-300/20 bg-amber-300/5 text-amber-100"
                   }`}
                 >
-                  {L("Back", "Atrás")}
-                </button>
+                  <span className="font-semibold">
+                    {step0CanNext ? L("Ready to continue.", "Listo para continuar.") : L("Before continuing:", "Antes de continuar:")}
+                  </span>{" "}
+                  {step0CanNext
+                    ? `${L("Up next", "A continuación")}: ${step0NextTitle}`
+                    : step0IncompleteMessage}
+                </div>
+                <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  {step0CanBack ? (
+                    <button
+                      type="button"
+                      onClick={goStep0Back}
+                      data-testid="growth-plan-stage-back"
+                      className="w-full rounded-xl border border-slate-700 px-4 py-2.5 text-sm text-slate-300 transition hover:border-emerald-400 hover:text-emerald-300 sm:w-auto"
+                    >
+                      ← {isEs ? `Volver a ${step0PreviousTitle}` : `Back to ${step0PreviousTitle}`}
+                    </button>
+                  ) : <span aria-hidden="true" />}
                 <button
                   type="button"
                   onClick={goStep0Next}
                   disabled={!step0CanNext}
-                  className={`rounded-xl px-4 py-2 text-sm font-semibold ${
+                  aria-describedby="gp-stage-navigation-status"
+                  data-testid="growth-plan-stage-next"
+                  className={`w-full rounded-xl px-4 py-2.5 text-sm font-semibold transition sm:w-auto sm:min-w-56 ${
                     step0CanNext
                       ? "bg-emerald-400 text-slate-950 hover:bg-emerald-300"
-                      : "bg-slate-800 text-slate-600 cursor-not-allowed"
+                      : "cursor-not-allowed border border-slate-800 bg-slate-900 text-slate-500"
                   }`}
                 >
                   {safeStage >= step0Total - 1
-                    ? L("Continue to Operating System", "Continuar al Sistema Operativo")
-                    : L("Next", "Siguiente")}
+                    ? L("Continue to Operating System →", "Continuar al Sistema Operativo →")
+                    : isEs
+                      ? `Continuar: ${step0NextTitle} →`
+                      : `Continue: ${step0NextTitle} →`}
                 </button>
+                </div>
               </div>
             </div>
           </div>
@@ -8387,34 +8516,72 @@ export default function GrowthPlanPage() {
           </div>
         )}
 
-        {/* Footer nav */}
-        <div className="flex items-center justify-between pt-2">
-          <button
-            type="button"
-            onClick={goBack}
-            disabled={step === 0}
-            className={`px-4 py-2 rounded-xl border transition ${
-              step === 0
-                ? "border-slate-800 text-slate-600 cursor-not-allowed"
-                : "border-slate-700 text-slate-300 hover:border-emerald-400 hover:text-emerald-300"
-            }`}
+        {/* One contextual navigation bar for sections 2–5. Step 1 has its own 8-stage navigation. */}
+        {step > 0 ? (
+          <div
+            data-testid="growth-plan-section-navigation"
+            className="rounded-2xl border border-slate-800 bg-slate-950/55 p-4"
           >
-            {L("Back", "Atrás")}
-          </button>
+            <div
+              id="gp-section-navigation-status"
+              role="status"
+              className={`mb-3 text-xs leading-5 ${
+                step === 4 || canGoNext ? "text-slate-300" : "text-amber-200"
+              }`}
+            >
+              {step === 4 ? (
+                <>
+                  <span className="font-semibold text-emerald-200">{L("Final section.", "Sección final.")}</span>{" "}
+                  {L(
+                    "Complete the requirements above, then use Approve & Save. This is the last step.",
+                    "Completa los requisitos de arriba y luego usa Aprobar y guardar. Este es el último paso."
+                  )}
+                </>
+              ) : nextRequiredTask ? (
+                <>
+                  <span className="font-semibold">{L("Before continuing:", "Antes de continuar:")}</span>{" "}
+                  {nextRequiredTask.label}
+                </>
+              ) : (
+                <>
+                  <span className="font-semibold text-emerald-200">{L("Section complete.", "Sección completada.")}</span>{" "}
+                  {L("Up next", "A continuación")}: {nextSectionTitle}
+                </>
+              )}
+            </div>
+            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <button
+                type="button"
+                onClick={goBack}
+                data-testid="growth-plan-section-back"
+                className="w-full rounded-xl border border-slate-700 px-4 py-2.5 text-sm text-slate-300 transition hover:border-emerald-400 hover:text-emerald-300 sm:w-auto"
+              >
+                ← {isEs ? `Volver a ${previousSectionTitle}` : `Back to ${previousSectionTitle}`}
+              </button>
 
-          <button
-            type="button"
-            onClick={goNext}
-            disabled={step === 4}
-            className={`px-4 py-2 rounded-xl border transition ${
-              step === 4
-                ? "border-slate-800 text-slate-600 cursor-not-allowed"
-                : "border-emerald-400 text-emerald-300 hover:bg-emerald-400/10"
-            }`}
-          >
-            {L("Next", "Siguiente")}
-          </button>
-        </div>
+              {step < 4 ? (
+                <button
+                  type="button"
+                  onClick={goNext}
+                  disabled={!canGoNext}
+                  aria-describedby="gp-section-navigation-status"
+                  data-testid="growth-plan-section-next"
+                  className={`w-full rounded-xl px-4 py-2.5 text-sm font-semibold transition sm:w-auto sm:min-w-56 ${
+                    canGoNext
+                      ? "bg-emerald-400 text-slate-950 hover:bg-emerald-300"
+                      : "cursor-not-allowed border border-slate-800 bg-slate-900 text-slate-500"
+                  }`}
+                >
+                  {isEs ? `Continuar: ${nextSectionTitle} →` : `Continue: ${nextSectionTitle} →`}
+                </button>
+              ) : (
+                <span className="text-right text-xs text-slate-500">
+                  {L("Save action is directly above.", "La acción de guardar está justo arriba.")}
+                </span>
+              )}
+            </div>
+          </div>
+        ) : null}
 
         <style jsx>{`
           @keyframes gpStepIn {

@@ -108,7 +108,7 @@ export default function WaitlistPage() {
     <main className="min-h-screen bg-[#050814] text-slate-50 overflow-x-hidden">
       <header className="relative z-20 px-4 pt-4 md:px-8">
         <div className="mx-auto flex w-full max-w-7xl flex-col gap-3 rounded-lg border border-white/10 bg-[#050814]/88 px-4 py-3 shadow-[0_18px_60px_rgba(0,0,0,0.32)] backdrop-blur-xl md:flex-row md:items-center md:justify-between md:px-5">
-          <Link href="/" className="flex items-center gap-3" aria-label="NeuroTrader home">
+          <Link href="/" className="flex items-center gap-3" aria-label={L("NeuroTrader home", "Inicio de NeuroTrader")}>
             <img
               src="/neurotrader-logo-web.png"
               alt="NeuroTrader"

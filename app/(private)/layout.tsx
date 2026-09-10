@@ -13,6 +13,8 @@ import GlobalAlertPopups from "@/app/components/GlobalAlertPopups";
 import GlobalAlertRuleEngine from "@/app/components/GlobalAlertRuleEngine";
 import LegalAcceptanceGate from "@/app/components/LegalAcceptanceGate";
 import NeuroGuideAssistant from "@/app/components/NeuroGuideAssistant";
+import { useAppSettings } from "@/lib/appSettings";
+import { resolveLocale } from "@/lib/i18n";
 
 type PrivateLayoutProps = {
   children: React.ReactNode;
@@ -66,6 +68,9 @@ function FullscreenStatus({
 export default function PrivateLayout({ children }: PrivateLayoutProps) {
   const router = useRouter();
   const pathname = usePathname();
+  const { locale } = useAppSettings();
+  const lang = resolveLocale(locale);
+  const L = (en: string, es: string) => (lang === "es" ? es : en);
   const { user, loading } = useAuth() as any;
   const sessionIdRef = useRef<string | null>(null);
 
@@ -84,9 +89,9 @@ export default function PrivateLayout({ children }: PrivateLayoutProps) {
   /* 1) Si no hay usuario y ya terminó de cargar → mandar a /signin */
   useEffect(() => {
     if (!loading && !user && !isSessionlessAllowedRoute) {
-      router.replace("/signin");
+      router.replace(`/signin?next=${encodeURIComponent(pathname || "/dashboard")}`);
     }
-  }, [isSessionlessAllowedRoute, loading, user, router]);
+  }, [isSessionlessAllowedRoute, loading, pathname, user, router]);
 
   useEffect(() => {
     setRefreshAttempts(0);
@@ -257,10 +262,13 @@ export default function PrivateLayout({ children }: PrivateLayoutProps) {
   if (loading) {
     return (
       <FullscreenStatus
-        title="Loading your workspace…"
-        message="If loading takes longer than expected, reload the workspace securely."
+        title={L("Loading your workspace…", "Cargando tu espacio de trabajo…")}
+        message={L(
+          "If loading takes longer than expected, reload the workspace securely.",
+          "Si la carga tarda más de lo esperado, recarga el espacio de trabajo de forma segura."
+        )}
         actionHref={pathname || "/dashboard"}
-        actionLabel="Reload workspace"
+        actionLabel={L("Reload workspace", "Recargar espacio de trabajo")}
       />
     );
   }
@@ -268,8 +276,11 @@ export default function PrivateLayout({ children }: PrivateLayoutProps) {
   if (!user) {
     return (
       <FullscreenStatus
-        title="Redirecting to sign in…"
-        message="Private pages require an active account session."
+        title={L("Redirecting to sign in…", "Redirigiendo al inicio de sesión…")}
+        message={L(
+          "Private pages require an active account session.",
+          "Las páginas privadas requieren una sesión activa."
+        )}
       />
     );
   }
@@ -278,8 +289,11 @@ export default function PrivateLayout({ children }: PrivateLayoutProps) {
   if (isVerifyingSubscription) {
     return (
       <FullscreenStatus
-        title="Verifying your access…"
-        message="We’re syncing your access status. This usually takes just a few seconds."
+        title={L("Verifying your access…", "Verificando tu acceso…")}
+        message={L(
+          "We’re syncing your access status. This usually takes just a few seconds.",
+          "Estamos sincronizando tu acceso. Esto suele tardar solo unos segundos."
+        )}
       />
     );
   }

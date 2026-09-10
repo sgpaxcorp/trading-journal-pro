@@ -3,8 +3,10 @@ import "./globals.css";
 import type { ReactNode } from "react";
 import { AuthProvider } from "@/context/AuthContext";
 import Footer from "@/app/components/Footer";
+import ThemeInitScript from "@/app/components/ThemeInitScript";
 import type { Metadata } from "next";
 import { connection } from "next/server";
+import { getRequestLocale } from "@/lib/requestLocale";
 
 export const metadata: Metadata = {
   icons: {
@@ -17,10 +19,12 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
   // A fresh CSP nonce is created in proxy.ts for every request. Dynamic rendering
   // lets Next.js attach that same nonce to its bootstrap and framework scripts.
   await connection();
+  const lang = await getRequestLocale();
 
   return (
-    <html lang="en">
+    <html lang={lang} suppressHydrationWarning>
       <body className="bg-slate-950 text-slate-50 overflow-x-hidden">
+        <ThemeInitScript />
         <AuthProvider>
           {/* Wrapper para mantener el footer al fondo */}
           <div className="min-h-screen flex flex-col">

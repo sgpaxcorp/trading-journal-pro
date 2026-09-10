@@ -21,27 +21,20 @@ import { t } from "../lib/i18n";
 import type { AppLanguage } from "../lib/i18n";
 import { useTheme } from "../lib/ThemeContext";
 import type { ThemeColors } from "../theme";
-import { supabaseMobile } from "../lib/supabase";
-import { useSupabaseUser } from "../lib/useSupabaseUser";
 import { usePlanAccess } from "../lib/usePlanAccess";
-import { apiGet } from "../lib/api";
-
-const PAGES_TABLE = "ntj_notebook_pages";
-const FREE_NOTES_TABLE = "ntj_notebook_free_notes";
+import { apiGet, apiPost } from "../lib/api";
 
 type RouteParams = {
   kind: "page" | "free";
   id: string;
   title?: string;
+  accountId?: string | null;
+  accountName?: string;
 };
 
 type NotebookInkPayload = {
   mode?: "text" | "ink";
   drawing?: InkDrawing | null;
-};
-
-type AccountsResponse = {
-  activeAccountId: string | null;
 };
 
 type PageRow = {
@@ -51,6 +44,7 @@ type PageRow = {
   ink: NotebookInkPayload | null;
   updated_at: string | null;
   created_at?: string | null;
+  version?: number;
 };
 
 type FreeNoteRow = {
@@ -58,16 +52,8 @@ type FreeNoteRow = {
   content: string | null;
   ink: NotebookInkPayload | null;
   updated_at: string | null;
+  version?: number;
 };
-
-async function fetchActiveAccountId(): Promise<string | null> {
-  try {
-    const res = await apiGet<AccountsResponse>("/api/trading-accounts/list");
-    return res.activeAccountId ?? null;
-  } catch {
-    return null;
-  }
-}
 
 function formatDateTime(value?: string | null) {
   if (!value) return "—";
@@ -84,11 +70,10 @@ export function NotebookEditorScreen() {
   const { language } = useLanguage();
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const user = useSupabaseUser();
   const planAccess = usePlanAccess();
   const route = useRoute<any>();
   const params = (route?.params ?? {}) as RouteParams;
-  const { kind, id, title } = params;
+  const { kind, id, title, accountId, accountName } = params;
   const { height: screenHeight } = useWindowDimensions();
   const editorFieldHeight = Math.max(620, Math.min(920, Math.round(screenHeight * 0.78)));
 
@@ -100,29 +85,23 @@ export function NotebookEditorScreen() {
   const [ink, setInk] = useState<InkDrawing | null>(null);
   const [currentTitle, setCurrentTitle] = useState(title ?? "");
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
+  const [version, setVersion] = useState(1);
   const [renameOpen, setRenameOpen] = useState(false);
   const [renameValue, setRenameValue] = useState("");
   const [renaming, setRenaming] = useState(false);
 
   const loadData = useCallback(async () => {
     if (!planAccess.hasNotebook) return;
-    if (!supabaseMobile || !user?.id || !kind || !id) return;
+    if (!kind || !id) return;
     setLoading(true);
     setError(null);
 
     try {
-      const accountId = await fetchActiveAccountId();
-
       if (kind === "page") {
-        const pageResult = await supabaseMobile
-          .from(PAGES_TABLE)
-          .select("id, title, content, ink, updated_at, created_at")
-          .eq("id", id)
-          .eq("user_id", user.id)
-          .maybeSingle();
-
-        if (pageResult.error) throw pageResult.error;
-        const page = pageResult.data as PageRow | null;
+        const pageResult = await apiGet<{ page: PageRow }>(
+          `/api/notebook/workspace?view=page&pageId=${encodeURIComponent(id)}`
+        );
+        const page = pageResult.page;
         if (!page) throw new Error(t(language, "Page not found.", "No encontramos la página."));
 
         setCurrentTitle(page.title);
@@ -131,24 +110,13 @@ export function NotebookEditorScreen() {
         setMode(page.ink?.mode === "ink" ? "ink" : "text");
         setInk(page.ink?.drawing ?? null);
         setLastUpdated(page.updated_at ?? page.created_at ?? null);
+        setVersion(page.version ?? 1);
       } else {
-        const noteResult = accountId
-          ? await supabaseMobile
-              .from(FREE_NOTES_TABLE)
-              .select("entry_date, content, ink, updated_at")
-              .eq("entry_date", id)
-              .eq("user_id", user.id)
-              .eq("account_id", accountId)
-              .maybeSingle()
-          : await supabaseMobile
-              .from(FREE_NOTES_TABLE)
-              .select("entry_date, content, ink, updated_at")
-              .eq("entry_date", id)
-              .eq("user_id", user.id)
-              .maybeSingle();
-
-        if (noteResult.error) throw noteResult.error;
-        const note = noteResult.data as FreeNoteRow | null;
+        if (!accountId) throw new Error(t(language, "Account context is missing.", "Falta el contexto de cuenta."));
+        const noteResult = await apiGet<{ daily: { note: FreeNoteRow | null } }>(
+          `/api/notebook/workspace?view=daily&accountId=${encodeURIComponent(accountId)}&date=${encodeURIComponent(id)}`
+        );
+        const note = noteResult.daily.note;
         if (!note) throw new Error(t(language, "Note not found.", "No encontramos la nota."));
 
         setCurrentTitle(buildDailyTitle(language, note.entry_date));
@@ -157,13 +125,14 @@ export function NotebookEditorScreen() {
         setMode(note.ink?.mode === "ink" ? "ink" : "text");
         setInk(note.ink?.drawing ?? null);
         setLastUpdated(note.updated_at ?? null);
+        setVersion(note.version ?? 1);
       }
     } catch (err: any) {
       setError(err?.message ?? t(language, "Failed to load notebook.", "No pudimos cargar el notebook."));
     } finally {
       setLoading(false);
     }
-  }, [id, kind, language, planAccess.hasNotebook, user?.id]);
+  }, [accountId, id, kind, language, planAccess.hasNotebook]);
 
   useEffect(() => {
     if (!planAccess.hasNotebook) return;
@@ -172,49 +141,35 @@ export function NotebookEditorScreen() {
 
   async function handleSave() {
     if (!planAccess.hasNotebook) return;
-    if (!supabaseMobile || !user?.id || !kind || !id) return;
+    if (!kind || !id) return;
     setSaving(true);
     setError(null);
     try {
-      const accountId = await fetchActiveAccountId();
       const inkPayload: NotebookInkPayload = {
         mode,
         drawing: mode === "ink" ? ink : null,
       };
 
       if (kind === "page") {
-        const updateResult = await supabaseMobile
-          .from(PAGES_TABLE)
-          .update({
-            content,
-            ink: inkPayload,
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", id)
-          .eq("user_id", user.id);
-        if (updateResult.error) throw updateResult.error;
+        const updateResult = await apiPost<{ page: PageRow }>("/api/notebook/workspace", {
+          action: "update_page",
+          pageId: id,
+          content,
+          ink: inkPayload,
+          expectedVersion: version,
+        });
+        setVersion(updateResult.page.version ?? version);
       } else {
-        const updateResult = accountId
-          ? await supabaseMobile
-              .from(FREE_NOTES_TABLE)
-              .update({
-                content,
-                ink: inkPayload,
-                updated_at: new Date().toISOString(),
-              })
-              .eq("entry_date", id)
-              .eq("user_id", user.id)
-              .eq("account_id", accountId)
-          : await supabaseMobile
-              .from(FREE_NOTES_TABLE)
-              .update({
-                content,
-                ink: inkPayload,
-                updated_at: new Date().toISOString(),
-              })
-              .eq("entry_date", id)
-              .eq("user_id", user.id);
-        if (updateResult.error) throw updateResult.error;
+        if (!accountId) throw new Error(t(language, "Account context is missing.", "Falta el contexto de cuenta."));
+        const updateResult = await apiPost<{ note: FreeNoteRow }>("/api/notebook/workspace", {
+          action: "upsert_daily",
+          accountId,
+          date: id,
+          content,
+          ink: inkPayload,
+          expectedVersion: version,
+        });
+        setVersion(updateResult.note.version ?? version);
       }
 
       setLastUpdated(new Date().toISOString());
@@ -227,7 +182,7 @@ export function NotebookEditorScreen() {
 
   async function handleRename() {
     if (!planAccess.hasNotebook) return;
-    if (!supabaseMobile || !user?.id || kind !== "page") {
+    if (kind !== "page") {
       setRenameOpen(false);
       return;
     }
@@ -237,15 +192,13 @@ export function NotebookEditorScreen() {
     setRenaming(true);
     setError(null);
     try {
-      const updateResult = await supabaseMobile
-        .from(PAGES_TABLE)
-        .update({
-          title: nextTitle,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", id)
-        .eq("user_id", user.id);
-      if (updateResult.error) throw updateResult.error;
+      const updateResult = await apiPost<{ page: PageRow }>("/api/notebook/workspace", {
+        action: "update_page",
+        pageId: id,
+        title: nextTitle,
+        expectedVersion: version,
+      });
+      setVersion(updateResult.page.version ?? version);
       setCurrentTitle(nextTitle);
       setRenameOpen(false);
       setLastUpdated(new Date().toISOString());
@@ -257,8 +210,9 @@ export function NotebookEditorScreen() {
   }
 
   const screenTitle = currentTitle || title || t(language, "Business Notebook page", "Página del Notebook Empresarial");
-  const screenSubtitle =
-    kind === "page"
+  const screenSubtitle = accountName
+    ? accountName
+    : kind === "page"
       ? t(
           language,
           "Write, format, or sketch on this page without the extra workspace chrome.",

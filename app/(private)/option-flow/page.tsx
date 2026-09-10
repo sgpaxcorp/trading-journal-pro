@@ -3798,7 +3798,7 @@ export default function OptionFlowPage() {
           <div className="mt-2 grid grid-cols-3 gap-2">
             {pastedShots.map((shot) => (
               <div key={shot.id} className="relative rounded-xl border border-slate-800 bg-slate-950/60">
-                <img src={shot.preview} alt="Screenshot preview" className="h-20 w-full rounded-xl object-cover" />
+                <img src={shot.preview} alt={isEs ? "Vista previa de la captura" : "Screenshot preview"} className="h-20 w-full rounded-xl object-cover" />
                 <button
                   type="button"
                   onClick={() => removeShot(shot.id)}
@@ -4003,7 +4003,7 @@ export default function OptionFlowPage() {
             {outcomePreview && (
               <img
                 src={outcomePreview}
-                alt="Outcome preview"
+                alt={isEs ? "Vista previa del resultado" : "Outcome preview"}
                 className="h-12 w-20 rounded-lg border border-slate-800 object-cover"
               />
             )}
@@ -4244,7 +4244,7 @@ export default function OptionFlowPage() {
               <div className="flex items-center justify-between mb-4">
                 <div>
                   <p className="text-[10px] uppercase tracking-[0.35em] text-emerald-300">
-                    Option Flows Analysis
+                    {isEs ? "Análisis de flujo de opciones" : "Option Flows Analysis"}
                   </p>
                   <h2 className="text-2xl font-semibold mt-2">
                     {isEs ? "Modo enfoque" : "Focus mode"}
@@ -4265,10 +4265,10 @@ export default function OptionFlowPage() {
         <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <p className="text-[11px] uppercase tracking-[0.35em] text-emerald-300">
-              Option Flows Analysis
+              {isEs ? "Análisis de flujo de opciones" : "Option Flows Analysis"}
             </p>
             <h1 className="text-xl sm:text-2xl font-semibold mt-2">
-              Option Flows Analysis
+              {isEs ? "Análisis de flujo de opciones" : "Option Flows Analysis"}
             </h1>
             <p className="text-[12px] sm:text-[13px] text-slate-400 mt-2 max-w-3xl">
               {isEs

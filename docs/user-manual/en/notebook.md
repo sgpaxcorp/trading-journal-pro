@@ -1,37 +1,52 @@
-# Notebook
-## Access
-- Left navigation → Notebook.
+# Business Notebook
+## Purpose
+Business Notebook is the operating memory of the trading business. It preserves the evidence, reasoning, lessons, research, decisions, rules, and playbooks that should outlive one session.
 
-The Notebook is your workspace for trading knowledge. It stores rules, patterns, lessons, visual sketches, and improvements you want to repeat.
+It does not replace the Execution Journal. The Journal records what happened. Business Notebook turns that record into reusable knowledge.
 
-## How the Notebook is organized
-- **Notebooks**: high‑level containers (e.g., “My Playbook”, “Risk Rules”).
-- **Sections**: categories inside a notebook (e.g., “Entries”, “Exits”).
-- **Pages**: individual notes with full content.
+## Choose the scope first
+- **Business-wide**: standards and knowledge that apply across every account.
+- **Specific account**: daily reviews and knowledge that belong only to the selected Personal or Funded account.
 
-## Daily Notebook vs Custom Notebooks
-- **Daily Notebook** is tied to your journal days. Use it for free-form context, psychology notes, preparation, and meaning around a specific trading day.
-- **Custom Notebooks** are structured workspaces for playbooks, process docs, research, reviews, and reusable operating rules.
+The current scope and account are always visible. A daily review cannot be saved without a specific account.
 
-## Text and Ink
-- Every notebook surface can be used in **Text** or **Ink** mode.
-- **Text** is best for long-form writing, structured explanations, and detailed reviews.
-- **Ink** is best for sketches, flow diagrams, visual reviews, layouts, and quick markups.
-- The web app supports drawing with mouse, trackpad, or stylus directly inside the notebook.
+## The operating loop
+1. Capture evidence from a session, study, or business decision.
+2. Review the evidence and separate fact from interpretation.
+3. Save the insight as a draft or candidate lesson.
+4. Validate it over an appropriate sample and record contradicting evidence.
+5. Promote a validated lesson into a playbook, risk rule, checklist, or Business Plan update.
+6. Retire or archive knowledge that no longer describes the operation.
 
-## Web and Mobile behavior
-- The web Notebook keeps the full notebook structure and adds a richer desktop editor for long-form writing.
-- The mobile app keeps the native note flow and is especially strong for fast capture and iPad/iPhone drawing.
-- If a drawing was created in Apple Pencil / PencilKit format on iPhone or iPad, the web app preserves it safely. The web may show it as an iOS drawing state until you open it again on mobile or replace it with a new web sketch.
+The system never changes an operating rule silently. Promotion remains a deliberate user decision.
 
-## Explorer and workspace
-- Use the **Daily note explorer** to jump across recent journal days without leaving the notebook workspace.
-- Use the **Workspace map** and **Workspace explorer** to move through notebooks, sections, loose pages, and page previews.
-- The workspace now shows whether a page is blank, text-first, or ink-first, plus a simple footprint such as words or sketch strokes.
+## Page types
+- **General note** for flexible operating context.
+- **Daily review** for facts, decision quality, rule adherence, and the next session action.
+- **Lesson** for a testable observation and the evidence that supports or refutes it.
+- **Setup playbook** for market context, required conditions, entry, invalidation, risk, and management.
+- **Risk rule** for a proposed control, its trigger, response, evidence, and exceptions.
+- **Research** for a thesis, supporting and contradicting evidence, catalysts, and invalidation.
+- **Decision** for a business decision, alternatives, evidence, expected result, and review trigger.
+- **Funded program** for confirmed program rules and their operating implications.
 
-## Best practices
-1. Keep rules short and actionable.
-2. Use Daily Notebook for context and Custom Notebooks for durable knowledge.
-3. Add quick ink sketches when a visual explanation is faster than writing.
-4. Update after reviews so the notebook becomes a refined playbook, not a dump.
-5. Use the Notebook to document the “why” behind your rules.
+## Knowledge status
+Pages move through **Draft**, **Candidate**, **Validated**, **Active**, **Retired**, and **Archived**. A review date can bring a page back into the Needs Review queue.
+
+## Daily reviews
+Daily reviews are tied to the selected account and date. The screen shows recorded execution count, recorded P/L, plan-alignment marks, and Journal coverage. “Execution records” describes the stored rows accurately; it is not presented as a reconstructed trade count.
+
+Use **Create lesson candidate** to preserve a day's facts and continue the reasoning in durable knowledge.
+
+## Search and evidence analysis
+Search retrieves matching pages and daily reviews in the current scope. Evidence Analysis reads server-retrieved records, separates facts from interpretation, cites the records used, and identifies missing or conflicting evidence. It does not guarantee results or provide individualized financial advice.
+
+## Editing, recovery, and files
+- Text mode supports structured rich text; Ink supports sketches with mouse, trackpad, stylus, or the mobile drawing surface.
+- Changes autosave after a short pause. Version checks prevent one open session from silently overwriting another.
+- Version history keeps recoverable snapshots while avoiding a new snapshot for every keystroke.
+- Deleted pages go to Trash before permanent deletion.
+- Private PNG, JPEG, WebP, and PDF attachments can be added up to 10 MB each.
+
+## Web and mobile
+Web provides the complete knowledge workspace. Mobile displays the current Personal or Funded account, lets the user change account context, and freezes that account on every daily editor so a later account switch cannot redirect the save.

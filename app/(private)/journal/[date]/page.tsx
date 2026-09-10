@@ -10,6 +10,7 @@ import type { JournalWidgetId, JournalWidgetDef } from "@/app/components/Journal
 
 import TopNav from "@/app/components/TopNav";
 import JournalInkField from "@/app/components/JournalInkField";
+import NotebookCaptureButton from "@/app/components/NotebookCaptureButton";
 
 import type { JournalEntry } from "@/lib/journalTypes";
 import { getAllJournalEntries, getJournalEntryByDate, saveJournalEntry } from "@/lib/journalSupabase";
@@ -1006,7 +1007,12 @@ export default function DailyJournalPage() {
   const params = useParams();
   const router = useRouter();
   const { user, loading: authLoading } = useAuth();
-  const { activeAccountId, loading: accountsLoading } = useTradingAccounts();
+  const {
+    activeAccountId,
+    loading: accountsLoading,
+    error: accountsError,
+    refresh: refreshAccounts,
+  } = useTradingAccounts();
   const { locale } = useAppSettings();
   const lang = resolveLocale(locale);
   const isEs = lang === "es";
@@ -1735,7 +1741,7 @@ export default function DailyJournalPage() {
     try {
       const [y, m, d] = dateParam.split("-").map(Number);
       const dt = new Date(Date.UTC(y, m - 1, d));
-      return new Intl.DateTimeFormat("en-US", {
+      return new Intl.DateTimeFormat(isEs ? "es-PR" : "en-US", {
         year: "numeric",
         month: "long",
         day: "2-digit",
@@ -1744,7 +1750,7 @@ export default function DailyJournalPage() {
     } catch {
       return dateParam;
     }
-  }, [dateParam]);
+  }, [dateParam, isEs]);
 
   const prevDateIso = useMemo(() => (dateParam ? nextJournalDate(dateParam, -1) : null), [dateParam]);
   const nextDateIso = useMemo(() => (dateParam ? nextJournalDate(dateParam, 1) : null), [dateParam]);
@@ -2424,8 +2430,20 @@ export default function DailyJournalPage() {
   };
 
   const handleSyncFromImport = async () => {
-    if (!userId || !dateParam || !activeAccountId) {
-      setMsg(L("Cannot sync: missing user/date.", "No se puede sincronizar: falta usuario/fecha."));
+    if (authLoading || accountsLoading) {
+      setMsg(L("Your account is still loading. Please wait a moment.", "Tu cuenta todavía está cargando. Espera un momento."));
+      return;
+    }
+    if (!userId) {
+      setMsg(L("Cannot sync: your session is not ready.", "No se puede sincronizar: tu sesión no está lista."));
+      return;
+    }
+    if (!dateParam) {
+      setMsg(L("Cannot sync: the journal date is missing.", "No se puede sincronizar: falta la fecha del journal."));
+      return;
+    }
+    if (!activeAccountId) {
+      setMsg(L("Cannot sync: no active trading account is available.", "No se puede sincronizar: no hay una cuenta de trading activa."));
       return;
     }
 
@@ -4274,6 +4292,14 @@ export default function DailyJournalPage() {
             </p>
           </div>
           <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2">
+            <NotebookCaptureButton
+              accountId={activeAccountId}
+              sourceType="journal_day"
+              sourceId={dateParam}
+              pageType="lesson"
+              title={L(`Session lesson · ${dateParam}`, `Lección de sesión · ${dateParam}`)}
+              content={`${L("<h2>Recorded outcome</h2>", "<h2>Resultado registrado</h2>")}<p>${L("P/L", "P/L")}: ${Number(entry.pnl || 0).toFixed(2)} · ${L("Plan respected", "Plan respetado")}: ${entry.respectedPlan ? L("Yes", "Sí") : L("No", "No")}</p>${L("<h2>Premarket evidence</h2>", "<h2>Evidencia premarket</h2>")}${premarketHtml || "<p></p>"}${L("<h2>Live evidence</h2>", "<h2>Evidencia durante sesión</h2>")}${insideHtml || "<p></p>"}${L("<h2>Post-session evidence</h2>", "<h2>Evidencia post-sesión</h2>")}${afterHtml || "<p></p>"}`}
+            />
             <div className="mr-0 sm:mr-2">
               <span
                 className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[11px] ${
@@ -4386,7 +4412,7 @@ export default function DailyJournalPage() {
               <button
                 type="button"
                 onClick={handleSyncFromImport}
-                disabled={syncing}
+                disabled={syncing || authLoading || accountsLoading || !userId || !dateParam || !activeAccountId}
                 className="px-3 py-1.5 rounded-lg border border-slate-700 text-slate-200 text-[11px] hover:border-amber-400 hover:text-amber-300 transition disabled:opacity-50"
               >
                 {syncing ? L("Syncing…", "Sincronizando…") : L("Sync", "Sincronizar")}
@@ -4432,6 +4458,24 @@ export default function DailyJournalPage() {
                   ))}
                 </div>
               ) : null}
+            </div>
+          ) : null}
+
+          {accountsError && !activeAccountId ? (
+            <div className="mt-2 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-400/30 bg-amber-400/10 px-3 py-2.5 text-xs text-amber-100">
+              <span>
+                {L(
+                  "We could not load your trading account, so the saved journal is temporarily unavailable.",
+                  "No pudimos cargar tu cuenta de trading, por eso el journal guardado no está disponible temporalmente."
+                )}
+              </span>
+              <button
+                type="button"
+                onClick={() => void refreshAccounts()}
+                className="rounded-lg border border-amber-300/40 px-3 py-1.5 font-semibold hover:bg-amber-300/10"
+              >
+                {L("Try again", "Reintentar")}
+              </button>
             </div>
           ) : null}
 

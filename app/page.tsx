@@ -30,8 +30,10 @@ type ProductPreviewKind = "dashboard" | "growth" | "coach";
 
 function LaunchTicker({
   message,
+  joinLabel,
 }: {
   message: string;
+  joinLabel: string;
 }) {
   const tickerItems = Array.from({ length: 4 }, (_, index) => index);
   const tickerGroup = (group: "primary" | "secondary") => (
@@ -40,7 +42,7 @@ function LaunchTicker({
         <span key={`${group}-${item}`} className="inline-flex items-center gap-3">
           <span className="h-1.5 w-1.5 rounded-full bg-emerald-300 shadow-[0_0_18px_rgba(52,211,153,0.8)]" />
           {message}
-          <span className="text-emerald-300">Join the 60-day launch waitlist</span>
+          <span className="text-emerald-300">{joinLabel}</span>
         </span>
       ))}
     </div>
@@ -362,7 +364,7 @@ export default function Home() {
     <main className="min-h-screen bg-[#050814] text-slate-50 overflow-x-hidden">
       <header className="absolute inset-x-0 top-0 z-30">
         <div className="mx-auto mt-4 flex w-[calc(100%-2rem)] max-w-7xl flex-col gap-3 rounded-lg border border-white/10 bg-[#050814]/78 px-4 py-3 shadow-[0_18px_60px_rgba(0,0,0,0.32)] backdrop-blur-xl md:flex-row md:items-center md:justify-between md:px-5">
-          <Link href="/" className="flex items-center gap-3" aria-label="NeuroTrader home">
+          <Link href="/" className="flex items-center gap-3" aria-label={L("NeuroTrader home", "Inicio de NeuroTrader")}>
             <img
               src="/neurotrader-logo-web.png"
               alt="NeuroTrader"
@@ -466,6 +468,7 @@ export default function Home() {
               `${WAITLIST_CAMPAIGN.discountPercent}% off annual for the first ${WAITLIST_CAMPAIGN.discountLimit} waitlist members`,
               `${WAITLIST_CAMPAIGN.discountPercent}% de descuento anual para los primeros ${WAITLIST_CAMPAIGN.discountLimit} en la lista`
             )}
+            joinLabel={L("Join the 60-day launch waitlist", "Únete a la lista de espera de lanzamiento de 60 días")}
           />
           <div className="max-w-3xl">
             <div className="mb-5 flex flex-col items-start gap-3">

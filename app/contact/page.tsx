@@ -182,7 +182,7 @@ export default function ContactPage() {
             <h2 className="text-lg font-semibold">{L("Send a message", "Enviar mensaje")}</h2>
             <form onSubmit={handleSubmit} className="mt-4 space-y-4">
               <div className="hidden" aria-hidden="true">
-                <label className="block text-[11px] text-slate-400 mb-1">Company</label>
+                <label className="block text-[11px] text-slate-400 mb-1">{L("Company", "Empresa")}</label>
                 <input
                   value={company}
                   onChange={(e) => setCompany(e.target.value)}

@@ -30,9 +30,7 @@ export default function SignUpLoading() {
 
         <div className="space-y-3">
           <div className="h-11 rounded-xl bg-emerald-400/85" />
-          <p className="text-center text-xs text-slate-400">
-            Loading sign up... / Cargando registro...
-          </p>
+          <div className="mx-auto h-3 w-32 rounded bg-slate-800/80" aria-hidden="true" />
         </div>
       </div>
     </main>

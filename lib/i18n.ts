@@ -239,8 +239,7 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     "footer.links.privacy": "Privacy Policy",
     "footer.links.terms": "Terms & Conditions",
     "footer.links.about": "About Us",
-    "footer.copyright":
-      "Build the trading business plan. Protect it with one operating loop.",
+    "footer.copyright": "SG PAX Corp.",
 
     // Older aliases (footer.link.*)
     "footer.link.login": "Log In",
@@ -490,8 +489,7 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     "footer.links.privacy": "Política de privacidad",
     "footer.links.terms": "Términos y condiciones",
     "footer.links.about": "Sobre nosotros",
-    "footer.copyright":
-      "Construye el plan de empresa de trading. Protégelo con un solo ciclo operativo.",
+    "footer.copyright": "SG PAX Corp.",
 
     // Aliases
     "footer.link.login": "Iniciar sesión",

@@ -1227,7 +1227,9 @@ export default function ImportPage() {
         <div className="mx-auto max-w-6xl px-4 py-8">
           <div className="mb-6 flex items-start justify-between gap-3">
             <div>
-              <div className="text-[11px] uppercase tracking-[0.28em] text-emerald-300/80">Import</div>
+              <div className="text-[11px] uppercase tracking-[0.28em] text-emerald-300/80">
+                {L("Import", "Importar")}
+              </div>
 
               <h1 className="mt-2 text-3xl font-semibold leading-tight">
                 {L("Import trades", "Importar operaciones")}
