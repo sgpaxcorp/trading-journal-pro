@@ -167,6 +167,27 @@ type MobileGrowthPlanResponse = {
     targetReached?: boolean;
     adaptivePlan?: AdaptivePlan | null;
   };
+  progress?: MobilePlanProgress | null;
+};
+
+type MobilePlanContinuation = {
+  status?: "qualification" | "controlled_growth" | "scale_ready";
+  evidenceDepth?: "none" | "limited" | "developing" | "established";
+  nextStartingBalance?: number;
+  nextTargetBalance?: number;
+  targetGrowthPct?: number;
+  nextPlanStartDate?: string;
+  nextTargetDate?: string;
+  runwayMonths?: number;
+  maxRiskPerTradePct?: number;
+  maxDailyLossPct?: number;
+};
+
+type MobilePlanProgress = {
+  currentBalance?: number;
+  targetBalance?: number;
+  targetReached?: boolean;
+  continuation?: MobilePlanContinuation | null;
 };
 
 type MobileFundedMetrics = {
@@ -328,6 +349,8 @@ export function BusinessPlanScreen() {
   const [lastProjection, setLastProjection] = useState<MobileGrowthPlanResponse["projection"] | null>(null);
   const [adaptivePlan, setAdaptivePlan] = useState<AdaptivePlan | null>(null);
   const [activeAdaptivePlan, setActiveAdaptivePlan] = useState<AdaptivePlan | null>(null);
+  const [planProgress, setPlanProgress] = useState<MobilePlanProgress | null>(null);
+  const [isContinuationDraft, setIsContinuationDraft] = useState(false);
   const [evaluatedDraftKey, setEvaluatedDraftKey] = useState<string | null>(null);
   const [acceptedDisclosureKey, setAcceptedDisclosureKey] = useState<string | null>(null);
 
@@ -493,6 +516,8 @@ export function BusinessPlanScreen() {
       setAccountContext(response.account ?? null);
       hydrateForm(response.plan, response.account);
       setActiveAdaptivePlan(response.plan?.adaptivePlan ?? null);
+      setPlanProgress(response.progress ?? null);
+      setIsContinuationDraft(false);
       setEvaluatedDraftKey(null);
       setAcceptedDisclosureKey(null);
       setLastProjection(null);
@@ -502,6 +527,37 @@ export function BusinessPlanScreen() {
       setLoading(false);
     }
   }, [hydrateForm]);
+
+  const prepareRecommendedCycle = useCallback(() => {
+    const recommendation = planProgress?.continuation;
+    if (!recommendation?.nextStartingBalance || !recommendation.nextTargetBalance) return;
+
+    setStartingBalance(formatMoneyValue(recommendation.nextStartingBalance));
+    setTargetBalance(formatMoneyValue(recommendation.nextTargetBalance));
+    setPlanStartDate(recommendation.nextPlanStartDate || today);
+    setTargetDate(recommendation.nextTargetDate || addDaysIso(today, 365));
+    setRunwayAmount(String(recommendation.runwayMonths || 6));
+    setRunwayUnit("months");
+    setMaxRiskPerTradePercent(String(recommendation.maxRiskPerTradePct ?? 0.5));
+    setMaxDailyLossPercent(String(recommendation.maxDailyLossPct ?? 1));
+    setPlannedDepositMode("none");
+    setPlannedDepositAmount("");
+    setPlannedWithdrawalMode("none");
+    setPlannedWithdrawalAmount("");
+    setAdaptivePlan(null);
+    setLastProjection(null);
+    setEvaluatedDraftKey(null);
+    setAcceptedDisclosureKey(null);
+    setIsContinuationDraft(true);
+    setError(null);
+    setSavedMessage(
+      t(
+        language,
+        "Next-cycle draft prepared from your completed balance and execution record. Evaluate it before saving.",
+        "Borrador del próximo ciclo preparado desde tu balance completado e historial de ejecución. Evalúalo antes de guardar."
+      )
+    );
+  }, [language, planProgress?.continuation, today]);
 
   useEffect(() => {
     void loadPlan();
@@ -894,6 +950,7 @@ export function BusinessPlanScreen() {
     try {
       const response = await apiPost<MobileGrowthPlanResponse>("/api/growth-plan/mobile", {
         ...planRequestPayload,
+        planCycle: isContinuationDraft ? "continuation" : "current",
         disclosure: {
           version: GROWTH_PLAN_DISCLOSURE_VERSION,
           acceptedAt: new Date().toISOString(),
@@ -909,6 +966,8 @@ export function BusinessPlanScreen() {
       const savedAdaptivePlan = response.projection?.adaptivePlan ?? response.plan?.adaptivePlan ?? null;
       setAdaptivePlan(savedAdaptivePlan);
       setActiveAdaptivePlan(savedAdaptivePlan);
+      setPlanProgress(null);
+      setIsContinuationDraft(false);
       setEvaluatedDraftKey(draftEvaluationKey);
       setAcceptedDisclosureKey(draftEvaluationKey);
       setSavedMessage(
@@ -962,6 +1021,7 @@ export function BusinessPlanScreen() {
     previewing,
     resetting,
     saving,
+    isContinuationDraft,
     targetDate,
   ]);
 
@@ -1123,6 +1183,54 @@ export function BusinessPlanScreen() {
               </Text>
             ) : null}
           </View>
+
+          {planProgress?.targetReached && planProgress.continuation && !isContinuationDraft ? (
+            <View style={[styles.sectionCard, styles.completedCycleCard]}>
+              <Text style={styles.eyebrow}>{t(language, "Cycle completed", "Ciclo completado")}</Text>
+              <Text style={styles.sectionTitle}>
+                {t(language, "Your next operating cycle is ready", "Tu próximo ciclo operativo está listo")}
+              </Text>
+              <Text style={styles.muted}>
+                {t(
+                  language,
+                  `Based on the execution record, the next controlled objective is ${formatCompactCurrency(Number(planProgress.continuation.nextTargetBalance ?? 0))} over ${planProgress.continuation.runwayMonths ?? 0} months. Risk per trade will not increase.`,
+                  `Según el historial de ejecución, el próximo objetivo controlado es ${formatCompactCurrency(Number(planProgress.continuation.nextTargetBalance ?? 0))} en ${planProgress.continuation.runwayMonths ?? 0} meses. El riesgo por trade no aumentará.`
+                )}
+              </Text>
+              <View style={styles.previewGrid}>
+                <View style={styles.previewCell}>
+                  <Text style={styles.previewLabel}>{t(language, "Opening balance", "Balance inicial")}</Text>
+                  <Text style={styles.previewValue}>{formatCompactCurrency(Number(planProgress.continuation.nextStartingBalance ?? 0))}</Text>
+                </View>
+                <View style={styles.previewCell}>
+                  <Text style={styles.previewLabel}>{t(language, "Next objective", "Próximo objetivo")}</Text>
+                  <Text style={styles.previewValue}>{formatCompactCurrency(Number(planProgress.continuation.nextTargetBalance ?? 0))}</Text>
+                </View>
+                <View style={styles.previewCell}>
+                  <Text style={styles.previewLabel}>{t(language, "Risk per trade", "Riesgo por trade")}</Text>
+                  <Text style={styles.previewValue}>{Number(planProgress.continuation.maxRiskPerTradePct ?? 0).toFixed(2)}%</Text>
+                </View>
+              </View>
+              <Pressable style={[styles.button, styles.primaryButton]} onPress={prepareRecommendedCycle}>
+                <Text style={styles.primaryButtonText}>
+                  {t(language, "Prepare recommended cycle", "Preparar ciclo recomendado")}
+                </Text>
+              </Pressable>
+            </View>
+          ) : null}
+
+          {isContinuationDraft ? (
+            <View style={[styles.sectionCard, styles.completedCycleCard]}>
+              <Text style={styles.eyebrow}>{t(language, "Next-cycle draft", "Borrador del próximo ciclo")}</Text>
+              <Text style={styles.muted}>
+                {t(
+                  language,
+                  "The completed cycle remains in history. Review and evaluate these progressive settings before activating the next one.",
+                  "El ciclo completado permanece en el historial. Revisa y evalúa estos ajustes progresivos antes de activar el próximo."
+                )}
+              </Text>
+            </View>
+          ) : null}
 
           <View style={[styles.sectionCard, isFundedAccount && styles.fundedAccountCard]}>
             <Text style={styles.eyebrow}>{t(language, "Account structure", "Estructura de cuenta")}</Text>
@@ -1869,6 +1977,9 @@ const createStyles = (colors: ThemeColors) =>
       padding: 16,
       alignItems: "center",
       gap: 8,
+    },
+    completedCycleCard: {
+      borderColor: colors.success,
     },
     muted: {
       color: colors.textMuted,

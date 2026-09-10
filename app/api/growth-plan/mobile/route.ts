@@ -34,6 +34,9 @@ import {
   normalizeFundedAccountProfile,
   normalizeTradingAccountType,
 } from "@/lib/fundedAccounts";
+import { endingBalanceFromJournalNotes } from "@/lib/accountBalanceSnapshot";
+import { recommendGrowthPlanContinuation } from "@/lib/growthPlanContinuation";
+import type { GrowthPlanEvidence } from "@/lib/growthPlanFeasibility";
 
 export const runtime = "nodejs";
 
@@ -481,7 +484,7 @@ async function resolveActiveAccountId(userId: string, requestedAccountId?: strin
     return String(existing.id);
   }
 
-  const { data: created, error: createErr } = await supabaseAdmin
+  let { data: created, error: createErr } = await supabaseAdmin
     .from("trading_accounts")
     .insert({
       user_id: userId,
@@ -492,7 +495,22 @@ async function resolveActiveAccountId(userId: string, requestedAccountId?: strin
     })
     .select("id")
     .single();
+  if (createErr && isIgnorableDbError(createErr)) {
+    const retry = await supabaseAdmin
+      .from("trading_accounts")
+      .insert({
+        user_id: userId,
+        name: "Main trading account",
+        broker: null,
+        is_default: true,
+      })
+      .select("id")
+      .single();
+    created = retry.data;
+    createErr = retry.error;
+  }
   if (createErr) throw createErr;
+  if (!created?.id) throw new Error("Trading account could not be created.");
 
   await supabaseAdmin
     .from("user_preferences")
@@ -504,7 +522,7 @@ async function resolveActiveAccountId(userId: string, requestedAccountId?: strin
 async function getTradingAccountContext(userId: string, accountId: string) {
   const { data: account, error: accountError } = await supabaseAdmin
     .from("trading_accounts")
-    .select("id,name,broker,account_type")
+    .select("*")
     .eq("user_id", userId)
     .eq("id", accountId)
     .single();
@@ -552,6 +570,104 @@ async function getPlanRow(userId: string, accountId: string) {
     .maybeSingle();
   if (error) throw error;
   return (data as GrowthPlanRow | null) ?? null;
+}
+
+async function getPlanProgress(userId: string, accountId: string, row: GrowthPlanRow | null) {
+  if (!row) return null;
+
+  const [{ data: journals, error: journalError }, { data: cashflows, error: cashflowError }, tradeCountResult] =
+    await Promise.all([
+      supabaseAdmin
+        .from("journal_entries")
+        .select("date,pnl,notes")
+        .eq("user_id", userId)
+        .eq("account_id", accountId)
+        .order("date", { ascending: true }),
+      supabaseAdmin
+        .from("cashflows")
+        .select("date,type,amount")
+        .eq("user_id", userId)
+        .eq("account_id", accountId)
+        .order("date", { ascending: true }),
+      supabaseAdmin
+        .from("journal_trades")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", userId)
+        .eq("account_id", accountId),
+    ]);
+  if (journalError) throw journalError;
+  if (cashflowError && !isIgnorableDbError(cashflowError)) throw cashflowError;
+
+  const pnlByDate = new Map<string, number>();
+  const endingBalanceByDate = new Map<string, number>();
+  const sessionPnls: number[] = [];
+  for (const journal of journals ?? []) {
+    const date = cleanDate((journal as any)?.date);
+    if (!date) continue;
+    const pnl = num((journal as any)?.pnl, 0);
+    sessionPnls.push(pnl);
+    pnlByDate.set(date, (pnlByDate.get(date) ?? 0) + pnl);
+    const endingBalance = endingBalanceFromJournalNotes((journal as any)?.notes, date);
+    if (endingBalance != null) endingBalanceByDate.set(date, endingBalance);
+  }
+
+  const cashflowByDate = new Map<string, number>();
+  for (const cashflow of cashflows ?? []) {
+    const date = cleanDate((cashflow as any)?.date);
+    if (!date) continue;
+    const amount = Math.abs(num((cashflow as any)?.amount, 0));
+    const signed = String((cashflow as any)?.type ?? "").toLowerCase().includes("with")
+      ? -amount
+      : amount;
+    cashflowByDate.set(date, (cashflowByDate.get(date) ?? 0) + signed);
+  }
+
+  const dates = Array.from(new Set([...pnlByDate.keys(), ...cashflowByDate.keys()])).sort();
+  let currentBalance = num(row.starting_balance, 0);
+  let peakBalance = currentBalance;
+  let maxDrawdownPct = 0;
+  for (const date of dates) {
+    currentBalance += (pnlByDate.get(date) ?? 0) + (cashflowByDate.get(date) ?? 0);
+    const endingBalance = endingBalanceByDate.get(date);
+    if (endingBalance != null) currentBalance = endingBalance;
+    peakBalance = Math.max(peakBalance, currentBalance);
+    if (peakBalance > 0) {
+      maxDrawdownPct = Math.max(maxDrawdownPct, ((peakBalance - currentBalance) / peakBalance) * 100);
+    }
+  }
+
+  const grossProfit = sessionPnls.filter((value) => value > 0).reduce((sum, value) => sum + value, 0);
+  const grossLoss = Math.abs(sessionPnls.filter((value) => value < 0).reduce((sum, value) => sum + value, 0));
+  const wins = sessionPnls.filter((value) => value > 0).length;
+  const totalPnl = sessionPnls.reduce((sum, value) => sum + value, 0);
+  const evidence: GrowthPlanEvidence = {
+    updatedAtIso: dates.at(-1) ?? null,
+    totalSessions: sessionPnls.length,
+    totalTrades: tradeCountResult.error ? sessionPnls.length : tradeCountResult.count ?? sessionPnls.length,
+    winRate: sessionPnls.length ? (wins / sessionPnls.length) * 100 : null,
+    profitFactor: grossLoss > 0 ? grossProfit / grossLoss : null,
+    expectancy: sessionPnls.length ? totalPnl / sessionPnls.length : null,
+    avgNetPerSession: sessionPnls.length ? totalPnl / sessionPnls.length : null,
+    netPnl: totalPnl,
+    maxDrawdownPct,
+  };
+  const targetBalance = num(row.target_balance, 0);
+  const balance = Number(currentBalance.toFixed(2));
+
+  return {
+    currentBalance: balance,
+    targetBalance,
+    targetReached: targetBalance > 0 && balance >= targetBalance,
+    evidence,
+    continuation: recommendGrowthPlanContinuation({
+      currentBalance: balance,
+      completedTargetBalance: targetBalance,
+      currentMaxRiskPerTradePct: num(row.max_risk_per_trade_percent, 0.5),
+      currentMaxDailyLossPct: num(row.max_daily_loss_percent, 1),
+      evidence,
+      asOfDate: isoToday(),
+    }),
+  };
 }
 
 function summarize(row: GrowthPlanRow | null) {
@@ -652,8 +768,9 @@ export async function GET(req: NextRequest) {
     const accountId = await resolveActiveAccountId(userId, searchParams.get("accountId"));
     const row = await getPlanRow(userId, accountId);
     const account = await getTradingAccountContext(userId, accountId);
+    const progress = await getPlanProgress(userId, accountId, row);
 
-    return NextResponse.json({ accountId, account, plan: normalizePlan(row) });
+    return NextResponse.json({ accountId, account, plan: normalizePlan(row), progress });
   } catch (err: any) {
     console.error("[growth-plan/mobile] GET error:", err);
     return NextResponse.json({ error: err?.message ?? "Unknown error" }, { status: 500 });
@@ -1354,7 +1471,12 @@ export async function POST(req: NextRequest) {
       accountId,
       before: current,
       after: data as GrowthPlanRow,
-      reason: current ? "mobile_plan_updated" : "mobile_plan_created",
+      reason:
+        cleanText(body?.planCycle, 40).toLowerCase() === "continuation"
+          ? "next_cycle_plan"
+          : current
+            ? "mobile_plan_updated"
+            : "mobile_plan_created",
     });
 
     let protectionSync: { created: number; updated: number; disabled: number } | null = null;

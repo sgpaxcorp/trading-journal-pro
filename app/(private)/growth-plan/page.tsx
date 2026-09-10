@@ -84,6 +84,7 @@ import {
   meetsGrowthPlanDeadlineApproximately,
   selectIdealDeadlineOption,
 } from "@/lib/growthPlanIdealScenario";
+import { recommendGrowthPlanContinuation } from "@/lib/growthPlanContinuation";
 
 /* ================= Helpers ================= */
 const GROWTH_PLAN_DISCLOSURE_VERSION = "growth-plan-discipline-v1";
@@ -802,13 +803,6 @@ function calendarDaysBetween(startIso: string, endIso: string): number {
   if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime())) return 0;
   const diff = end.getTime() - start.getTime();
   return Math.max(0, Math.round(diff / 86_400_000));
-}
-
-function scaleFollowOnRisk(riskPct: number, mode: "same" | "lower" | "higher"): number {
-  if (!Number.isFinite(riskPct) || riskPct <= 0) return 0;
-  if (mode === "lower") return Math.max(0.25, Number((riskPct * 0.8).toFixed(2)));
-  if (mode === "higher") return Math.min(10, Number((riskPct * 1.2).toFixed(2)));
-  return Number(riskPct.toFixed(2));
 }
 
 function resolveAverageTradingDaysPerWeek(
@@ -2914,29 +2908,34 @@ export default function GrowthPlanPage() {
     Number.isFinite(liveCurrentBalance) &&
     liveCurrentBalance >= targetBalance;
 
-  const handleStartFollowOnPlan = useCallback(
-    (riskMode: "same" | "lower" | "higher") => {
-      const sourceBalance =
-        liveCurrentBalance !== null && Number.isFinite(liveCurrentBalance) && liveCurrentBalance > 0
-          ? liveCurrentBalance
-          : targetBalance;
+  const continuationRecommendation = useMemo(
+    () =>
+      recommendGrowthPlanContinuation({
+        currentBalance: liveCurrentBalance ?? 0,
+        completedTargetBalance: targetBalance,
+        currentMaxRiskPerTradePct: riskPerTradePct,
+        currentMaxDailyLossPct: maxDailyLossPercent,
+        evidence: performanceEvidence,
+        asOfDate: isoToday(),
+      }),
+    [liveCurrentBalance, maxDailyLossPercent, performanceEvidence, riskPerTradePct, targetBalance]
+  );
 
-      if (!sourceBalance || sourceBalance <= 0) {
+  const handleStartFollowOnPlan = useCallback(
+    () => {
+      const sourceBalance = continuationRecommendation?.nextStartingBalance ?? 0;
+
+      if (!continuationRecommendation || sourceBalance <= 0) {
         setError(L("We could not determine the balance for the next cycle yet.", "Todavía no pudimos determinar el balance para el próximo ciclo."));
         return;
       }
 
-      const today = isoToday();
-      const originalSpanDays =
-        planStartDate && targetDateStr ? Math.max(1, calendarDaysBetween(planStartDate, targetDateStr)) : 90;
-      const nextDate = addCalendarDays(today, originalSpanDays);
-      const sourceMultiple = targetMultiple > 1 ? targetMultiple : 1.25;
-      const nextTarget = Number((sourceBalance * sourceMultiple).toFixed(2));
-      const nextRiskPct = scaleFollowOnRisk(riskPerTradePct || 2, riskMode);
+      const today = continuationRecommendation.nextPlanStartDate;
+      const nextDate = continuationRecommendation.nextTargetDate;
 
       const nextRunway = inferTradingRunway(today, nextDate);
       setStartingBalanceStr(formatMoneyInputValue(sourceBalance));
-      setTargetBalanceStr(formatMoneyInputValue(nextTarget));
+      setTargetBalanceStr(formatMoneyInputValue(continuationRecommendation.nextTargetBalance));
       setTargetDateStr(nextDate);
       setRunwayAmountStr(String(nextRunway.amount));
       setRunwayUnit(nextRunway.unit);
@@ -2947,7 +2946,8 @@ export default function GrowthPlanPage() {
       setPlannedWithdrawals([]);
       setPlanPhases([]);
       setAutoPhasesGenerated(false);
-      setRiskPerTradePctStr(nextRiskPct.toFixed(2));
+      setRiskPerTradePctStr(continuationRecommendation.maxRiskPerTradePct.toFixed(2));
+      setMaxDailyLossPercentStr(continuationRecommendation.maxDailyLossPct.toFixed(2));
       setCommitted(false);
       setCommittedDraftKey(null);
       setIsFollowOnDraft(true);
@@ -2956,30 +2956,15 @@ export default function GrowthPlanPage() {
       setStep0Stage(0);
 
       pushNeuroMessage(
-        riskMode === "same"
-          ? L(
-              "Next-cycle draft ready. We kept the same risk settings and rolled the plan forward from your live balance.",
-              "El borrador del próximo ciclo está listo. Mantuvimos los mismos ajustes de riesgo y reiniciamos el plan desde tu balance real."
-            )
-          : riskMode === "lower"
-            ? L(
-                "Next-cycle draft ready with lower risk. Review the new numbers, then save when the pacing feels sustainable.",
-                "El borrador del próximo ciclo está listo con menos riesgo. Revisa los nuevos números y guarda cuando el ritmo se sienta sostenible."
-              )
-            : L(
-                "Next-cycle draft ready with higher risk. Review the pacing carefully before saving.",
-                "El borrador del próximo ciclo está listo con más riesgo. Revisa el ritmo con cuidado antes de guardar."
-              )
+        L(
+          "Your next cycle was built from the completed balance and execution evidence. The capital objective progresses while risk stays flat or moves lower. Review it before saving.",
+          "Tu próximo ciclo se creó desde el balance completado y la evidencia de ejecución. La meta de capital progresa mientras el riesgo se mantiene o baja. Revísalo antes de guardar."
+        )
       );
     },
     [
       L,
-      liveCurrentBalance,
-      planStartDate,
-      riskPerTradePct,
-      targetBalance,
-      targetDateStr,
-      targetMultiple,
+      continuationRecommendation,
     ]
   );
 
@@ -5974,28 +5959,22 @@ export default function GrowthPlanPage() {
                         {L("Original target:", "Meta original:")}{" "}
                         <span className="text-slate-100">{currency(targetBalance)}</span>
                       </p>
+                      {continuationRecommendation ? (
+                        <p className="mt-2 text-[12px] leading-5 text-slate-200">
+                          {L("Recommended next cycle", "Próximo ciclo recomendado")}: {currency(continuationRecommendation.nextStartingBalance)} →{" "}
+                          <span className="text-emerald-300">{currency(continuationRecommendation.nextTargetBalance)}</span>{" "}
+                          {L("in", "en")} {continuationRecommendation.runwayMonths} {L("months", "meses")}. {L("Risk per trade", "Riesgo por trade")}: {continuationRecommendation.maxRiskPerTradePct.toFixed(2)}%.
+                        </p>
+                      ) : null}
                     </div>
-                    <div className="flex flex-wrap gap-2">
+                    <div>
                       <button
                         type="button"
-                        onClick={() => handleStartFollowOnPlan("same")}
+                        onClick={handleStartFollowOnPlan}
+                        disabled={!continuationRecommendation}
                         className="rounded-xl bg-emerald-400 px-3 py-1.5 text-sm font-semibold text-slate-950 transition hover:bg-emerald-300"
                       >
-                        {L("New plan · same risk", "Nuevo plan · mismo riesgo")}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleStartFollowOnPlan("lower")}
-                        className="rounded-xl border border-slate-700 px-3 py-1.5 text-sm text-slate-100 transition hover:border-cyan-400 hover:text-cyan-200"
-                      >
-                        {L("Lower risk", "Menos riesgo")}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleStartFollowOnPlan("higher")}
-                        className="rounded-xl border border-slate-700 px-3 py-1.5 text-sm text-slate-100 transition hover:border-amber-400 hover:text-amber-200"
-                      >
-                        {L("Higher risk", "Más riesgo")}
+                        {L("Build recommended cycle", "Crear ciclo recomendado")}
                       </button>
                     </div>
                   </div>

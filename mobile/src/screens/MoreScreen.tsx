@@ -39,6 +39,9 @@ export function SettingsScreen() {
   const [eraseEmail, setEraseEmail] = useState("");
   const [eraseConfirmation, setEraseConfirmation] = useState("");
   const [eraseLoading, setEraseLoading] = useState(false);
+  const [deleteEmail, setDeleteEmail] = useState("");
+  const [deleteConfirmation, setDeleteConfirmation] = useState("");
+  const [deleteLoading, setDeleteLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const mountedRef = useRef(true);
 
@@ -519,6 +522,73 @@ export function SettingsScreen() {
     );
   }
 
+  const canDeleteAccount =
+    !deleteLoading &&
+    String(deleteEmail).trim().toLowerCase() === String(user?.email ?? "").trim().toLowerCase() &&
+    String(deleteConfirmation).trim().toUpperCase() === "DELETE";
+
+  function handleDeleteAccount() {
+    if (!canDeleteAccount) return;
+
+    Alert.alert(
+      t(language, "Permanently delete account?", "¿Eliminar la cuenta permanentemente?"),
+      t(
+        language,
+        "This permanently deletes your account, trading records, plans, notebooks, AI conversations, connected services, and access. Any billing attached to this account is canceled. This cannot be undone.",
+        "Esto elimina permanentemente tu cuenta, registros de trading, planes, notebooks, conversaciones de IA, servicios conectados y acceso. Cualquier facturación vinculada a esta cuenta se cancela. Esta acción no se puede deshacer."
+      ),
+      [
+        { text: t(language, "Cancel", "Cancelar"), style: "cancel" },
+        {
+          text: t(language, "Continue", "Continuar"),
+          style: "destructive",
+          onPress: () => {
+            Alert.alert(
+              t(language, "Final confirmation", "Confirmación final"),
+              t(
+                language,
+                "Delete this account and all associated data now?",
+                "¿Eliminar ahora esta cuenta y toda la data asociada?"
+              ),
+              [
+                { text: t(language, "Keep account", "Conservar cuenta"), style: "cancel" },
+                {
+                  text: t(language, "Delete account", "Eliminar cuenta"),
+                  style: "destructive",
+                  onPress: async () => {
+                    setDeleteLoading(true);
+                    try {
+                      await apiPost("/api/account/delete", {
+                        email: deleteEmail.trim().toLowerCase(),
+                        confirmation: "DELETE",
+                      });
+                      await supabaseMobile?.auth.signOut({ scope: "local" });
+                      Alert.alert(
+                        t(language, "Account deleted", "Cuenta eliminada"),
+                        t(
+                          language,
+                          "Your account and associated data were permanently deleted.",
+                          "Tu cuenta y la data asociada fueron eliminadas permanentemente."
+                        )
+                      );
+                    } catch (err: any) {
+                      Alert.alert(
+                        t(language, "Deletion failed", "No se pudo eliminar"),
+                        err?.message ?? "Error"
+                      );
+                    } finally {
+                      setDeleteLoading(false);
+                    }
+                  },
+                },
+              ]
+            );
+          },
+        },
+      ]
+    );
+  }
+
 
   const styles = useMemo(() => createStyles(colors), [colors]);
   const handleRefresh = useCallback(async () => {
@@ -729,8 +799,8 @@ export function SettingsScreen() {
         <Text style={styles.dangerHint}>
           {t(
             language,
-            "Erase all platform data only if you want to start completely fresh. This keeps your login and paid access, but removes your trading workspace data.",
-            "Borra toda la data de la plataforma solo si quieres comenzar completamente desde cero. Esto mantiene tu login y acceso pago, pero elimina la data de tu workspace de trading."
+            "Reset workspace data only if you want to start fresh. This keeps your login and account access, but removes your trading workspace data.",
+            "Reinicia la data del workspace solo si quieres comenzar desde cero. Esto mantiene tu login y acceso a la cuenta, pero elimina la data de tu workspace de trading."
           )}
         </Text>
         <TextInput
@@ -756,7 +826,43 @@ export function SettingsScreen() {
           disabled={!canEraseAllData}
         >
           <Text style={styles.eraseButtonText}>
-            {eraseLoading ? t(language, "Erasing…", "Borrando…") : t(language, "Erase all the data", "Borrar toda la data")}
+            {eraseLoading ? t(language, "Erasing…", "Borrando…") : t(language, "Reset workspace data", "Reiniciar data del workspace")}
+          </Text>
+        </Pressable>
+
+        <View style={styles.dangerDivider} />
+        <Text style={styles.dangerTitle}>{t(language, "Delete account", "Eliminar cuenta")}</Text>
+        <Text style={styles.dangerHint}>
+          {t(
+            language,
+            "Permanently deletes the account and all associated data. Enter your email and DELETE to enable this action.",
+            "Elimina permanentemente la cuenta y toda la data asociada. Escribe tu email y DELETE para habilitar esta acción."
+          )}
+        </Text>
+        <TextInput
+          style={styles.input}
+          placeholder={t(language, "Type your account email", "Escribe tu email de cuenta")}
+          placeholderTextColor={colors.textMuted}
+          autoCapitalize="none"
+          keyboardType="email-address"
+          value={deleteEmail}
+          onChangeText={setDeleteEmail}
+        />
+        <TextInput
+          style={styles.input}
+          placeholder="DELETE"
+          placeholderTextColor={colors.textMuted}
+          autoCapitalize="characters"
+          value={deleteConfirmation}
+          onChangeText={setDeleteConfirmation}
+        />
+        <Pressable
+          style={[styles.eraseButton, !canDeleteAccount && styles.saveButtonDisabled]}
+          onPress={handleDeleteAccount}
+          disabled={!canDeleteAccount}
+        >
+          <Text style={styles.eraseButtonText}>
+            {deleteLoading ? t(language, "Deleting…", "Eliminando…") : t(language, "Delete account permanently", "Eliminar cuenta permanentemente")}
           </Text>
         </Pressable>
       </View>
@@ -884,6 +990,11 @@ const createStyles = (colors: ThemeColors) => {
       backgroundColor: colors.dangerSoft,
       padding: 12,
       gap: 8,
+    },
+    dangerDivider: {
+      height: 1,
+      backgroundColor: colors.dangerBorder,
+      marginVertical: 8,
     },
     dangerTitle: {
       color: colors.dangerText,
