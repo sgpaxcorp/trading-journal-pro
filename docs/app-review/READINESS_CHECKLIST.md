@@ -9,6 +9,8 @@
 - [x] Unit, lint, TypeScript, web build, Expo Doctor, iOS export, dependency audit, and browser E2E gates pass.
 - [x] Baseline Release build compiles, installs, and launches in an iOS 26.5 simulator.
 - [x] Current iOS JavaScript bundle exports successfully after the navigation and legal-acceptance updates.
+- [x] Final iOS 1.0.0 build 5 compiles for a physical device and produces an Xcode archive.
+- [x] EAS production contains the public API, authentication, notification-project, and broker-feature variables required by the submitted binary.
 - [x] Main review account login succeeds in the Release build.
 - [x] Main review account opens the preloaded Business Center and Business Plan.
 - [x] Completed Business Plan shows an objective next-cycle recommendation.
@@ -19,8 +21,8 @@
 - [x] No signup, price, checkout, subscription-purchase, or external purchase control appears in the iOS build.
 - [x] Broker connections remain disabled in the submitted iOS build.
 - [x] Updated backend and legal pages are deployed to the production domain.
-- [ ] Generate and install the final signed iOS build after the global Back/Business Center navigation update.
-- [ ] Complete Apple authentication and upload the final iOS build to App Store Connect.
+- [ ] Create or validate the Apple Distribution certificate and App Store provisioning profile using the Apple account owner authentication.
+- [ ] Export, install, and upload the final signed iOS build after the global Back/Business Center navigation update.
 - [ ] App Store Connect Support URL and Privacy Policy URL are current.
 - [ ] App Privacy answers match actual collection and third-party processing.
 - [ ] Physical-device recording is attached in Resolution Center.
