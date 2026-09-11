@@ -1,5 +1,7 @@
 # App Review Notes
 
+Submission candidate: Neuro Trader iOS `1.0.0` build `5`, submitted by SG PAX Corp.
+
 ## Review access
 
 - The submitted iOS app does not offer account registration or payments.
@@ -45,9 +47,11 @@ All preloaded trades, balances, journal records, and results are simulated solel
 - Vercel: hosts the authenticated application API used by the mobile client.
 - OpenAI API: generates educational AI Coach responses from the authenticated user's selected records and plan context.
 - Expo Notifications and Apple Push Notification service: device registration and optional business reminders.
+- Promotional push notifications are off by default and require a separate explicit opt-in in Settings. They can be disabled without disabling operational business reminders.
 - Resend: sends account, security, support, and other service-related email messages outside the iOS app.
 - Stripe: manages memberships initiated outside the submitted iOS app. The iOS app does not display pricing, create subscriptions, process payments, or link users to a purchase flow.
 - Direct broker connections are disabled in the submitted iOS build while provider approvals are completed. The app does not execute or route trades.
+- SnapTrade and Webull integration code supports planned broker connectivity, but neither direct connection is enabled in the submitted iOS build.
 
 ## 5. Regional behavior
 

@@ -33,6 +33,11 @@ export default async function SignUpPage({ searchParams }: SignUpPageProps) {
     .slice(0, 24);
   const initialEmail = firstParam(params.email).trim().toLowerCase();
   const initialVerify = firstParam(params.verify) === "1";
+  const initialPromoCode = firstParam(params.promo)
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9_-]/g, "")
+    .slice(0, 64);
 
   return (
     <SignUpClient
@@ -41,6 +46,7 @@ export default async function SignUpPage({ searchParams }: SignUpPageProps) {
       initialPartnerCode={initialPartnerCode}
       initialEmail={initialEmail}
       initialVerify={initialVerify}
+      initialPromoCode={initialPromoCode}
     />
   );
 }

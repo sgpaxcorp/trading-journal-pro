@@ -6,7 +6,7 @@ import { isAdminAccount } from "@/lib/adminAuth";
 import { getClientIp, rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 import { buildUserManualContext } from "@/lib/userManualServer";
-import { recordAiUsage } from "@/lib/aiUsageServer";
+import { recordAiUsage, requireAiBudget } from "@/lib/aiUsageServer";
 
 export const runtime = "nodejs";
 
@@ -269,6 +269,11 @@ export async function POST(req: NextRequest) {
 
     const conversationText = `${ticket.subject || ""}\n${thread.map((message) => message.message).join("\n")}`;
     const language = detectLanguage(conversationText);
+    const budgetGate = await requireAiBudget({
+      userId: (ticket as SupportTicketRow).user_id,
+      category: "support",
+    });
+    if (budgetGate) return budgetGate;
     const decision = await createAgentDecision({
       ticket: ticket as SupportTicketRow,
       messages: thread,

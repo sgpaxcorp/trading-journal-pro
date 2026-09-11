@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import OpenAI from "openai";
 import Stripe from "stripe";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 import { getClientIp, rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
@@ -75,6 +76,47 @@ async function deleteSupportData(userId: string) {
     .delete()
     .eq("user_id", userId);
   if (ticketDeleteError && ticketDeleteError.code !== "42P01") throw ticketDeleteError;
+}
+
+function isMissingOpenAiResource(error: unknown) {
+  return Number((error as { status?: number })?.status) === 404;
+}
+
+async function deleteOpenAiUserData(userId: string) {
+  const { data, error } = await supabaseAdmin
+    .from("neuro_analysis_filings")
+    .select("openai_file_id,vector_store_id")
+    .eq("user_id", userId);
+  if (error && error.code !== "42P01") throw error;
+
+  const fileIds = new Set(
+    (data ?? []).map((row: any) => String(row?.openai_file_id ?? "").trim()).filter(Boolean)
+  );
+  const vectorStoreIds = new Set(
+    (data ?? []).map((row: any) => String(row?.vector_store_id ?? "").trim()).filter(Boolean)
+  );
+  if (fileIds.size === 0 && vectorStoreIds.size === 0) return;
+
+  const apiKey = String(process.env.OPENAI_API_KEY ?? "").trim();
+  if (!apiKey) {
+    throw new Error("AI data cleanup is temporarily unavailable. The account was not deleted.");
+  }
+
+  const openai = new OpenAI({ apiKey });
+  for (const vectorStoreId of vectorStoreIds) {
+    try {
+      await openai.vectorStores.delete(vectorStoreId);
+    } catch (cleanupError) {
+      if (!isMissingOpenAiResource(cleanupError)) throw cleanupError;
+    }
+  }
+  for (const fileId of fileIds) {
+    try {
+      await openai.files.delete(fileId);
+    } catch (cleanupError) {
+      if (!isMissingOpenAiResource(cleanupError)) throw cleanupError;
+    }
+  }
 }
 
 export async function POST(req: NextRequest) {
@@ -154,6 +196,7 @@ export async function POST(req: NextRequest) {
       await stripe.subscriptions.cancel(subId);
     }
 
+    await deleteOpenAiUserData(userId);
     await Promise.all([
       removeStoragePrefix("avatars", userId).catch(() => 0),
       removeStoragePrefix("support_attachments", userId).catch(() => 0),

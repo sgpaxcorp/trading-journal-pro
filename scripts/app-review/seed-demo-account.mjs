@@ -29,7 +29,7 @@ const reviewEmail = (process.env.APP_REVIEW_DEMO_EMAIL || "appreview@neurotrader
 const deletionEmail = (process.env.APP_REVIEW_DELETE_EMAIL || "appreview-delete@neurotrader-journal.com").toLowerCase();
 const password = process.env.APP_REVIEW_DEMO_PASSWORD;
 const currentTermsVersion = "2026-09-03";
-const currentPrivacyVersion = "2026-09-03";
+const currentPrivacyVersion = "2026-09-10";
 
 if (!supabaseUrl || !serviceRoleKey || !password) {
   throw new Error(
@@ -540,6 +540,7 @@ function buildPlan({ id, userId, accountId, starting, target, start, end, dailyP
 async function resetDemoWorkspace(userId) {
   const ordered = [
     "ai_coach_messages", "ai_coach_threads", "business_milestones", "ntj_alert_events", "ntj_alert_rules",
+    "legal_acceptance_events",
     "analytics_edges", "analytics_snapshots", "journal_trades", "journal_entries", "daily_snapshots",
     "cashflows", "growth_plan_history", "growth_plans", "ntj_notebook_free_notes", "ntj_notebook_pages",
     "ntj_notebook_sections", "ntj_notebook_books", "user_preferences", "trading_accounts",
@@ -566,6 +567,11 @@ async function seedReviewer() {
     legal_terms_version: currentTermsVersion, legal_privacy_version: currentPrivacyVersion,
     legal_accepted_at: legalAcceptedAt,
   }, "id");
+  await insertRows("legal_acceptance_events", [{
+    id: randomUUID(), user_id: user.id, terms_version: currentTermsVersion,
+    privacy_version: currentPrivacyVersion, source: "in_app_update", accepted_at: legalAcceptedAt,
+    metadata: { purpose: "app_review", seeded: true },
+  }]);
   await upsertRow("user_entitlements", {
     user_id: user.id, entitlement_key: "platform_access", status: "active", source: "demo",
     started_at: new Date().toISOString(), ends_at: null,
@@ -635,6 +641,7 @@ async function seedReviewer() {
 
 async function seedDeletionReviewer() {
   const user = await ensureAuthUser(deletionEmail, "Delete", "Reviewer");
+  await deleteByUser("legal_acceptance_events", user.id);
   const legalAcceptedAt = new Date().toISOString();
   await upsertRow("profiles", {
     id: user.id, email: deletionEmail, first_name: "Delete", last_name: "Reviewer",
@@ -642,6 +649,11 @@ async function seedDeletionReviewer() {
     legal_terms_version: currentTermsVersion, legal_privacy_version: currentPrivacyVersion,
     legal_accepted_at: legalAcceptedAt,
   }, "id");
+  await insertRows("legal_acceptance_events", [{
+    id: randomUUID(), user_id: user.id, terms_version: currentTermsVersion,
+    privacy_version: currentPrivacyVersion, source: "in_app_update", accepted_at: legalAcceptedAt,
+    metadata: { purpose: "account_deletion_review", seeded: true },
+  }]);
   await upsertRow("user_entitlements", {
     user_id: user.id, entitlement_key: "platform_access", status: "active", source: "demo",
     started_at: new Date().toISOString(), metadata: { plan: "advanced", purpose: "account_deletion_review" },

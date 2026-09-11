@@ -8,7 +8,7 @@ import {
 } from "@/lib/growthPlanAiReview";
 import { getClientIp, rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
 import { requirePlatformAccess } from "@/lib/serverPlatformAccess";
-import { countResponseFileSearchCalls, recordAiUsage } from "@/lib/aiUsageServer";
+import { countResponseFileSearchCalls, recordAiUsage, requireAiBudget } from "@/lib/aiUsageServer";
 
 export const runtime = "nodejs";
 
@@ -345,6 +345,9 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       );
     }
+
+    const budgetGate = await requireAiBudget({ userId: access.context.userId, category: "advanced" });
+    if (budgetGate) return budgetGate;
 
     const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
     const vectorStoreId = String(process.env.NEURO_ANALYSIS_CFA_VECTOR_STORE_ID ?? "").trim();

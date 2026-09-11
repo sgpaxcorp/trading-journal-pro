@@ -4,7 +4,7 @@ import { getOptionFlowBetaApiPayload, resolveOptionFlowLang } from "@/lib/option
 import { getAuthUser } from "@/lib/authServer";
 import { getClientIp, rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
 import { isSmartToolsOwner } from "@/lib/smartToolsAccess";
-import { recordAiUsage } from "@/lib/aiUsageServer";
+import { recordAiUsage, requireAiBudget } from "@/lib/aiUsageServer";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -74,6 +74,9 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       );
     }
+
+    const budgetGate = await requireAiBudget({ userId: auth.userId, category: "market_intelligence" });
+    if (budgetGate) return budgetGate;
 
     const wantsSingleLevel =
       /nivel(es)?\s+mas\s+importante|nivel\s+clave|most\s+important\s+level|key\s+level/i.test(

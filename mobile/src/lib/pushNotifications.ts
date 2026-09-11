@@ -9,6 +9,7 @@ export type PushRegistrationResult = {
   status: "granted" | "denied" | "undetermined";
   pushToken: string | null;
   dailyReminderEnabled: boolean | null;
+  marketingPushEnabled: boolean | null;
 };
 
 async function ensureAndroidChannel() {
@@ -35,6 +36,7 @@ export async function registerDeviceForPush(options: {
   locale: string;
   promptIfNeeded?: boolean;
   dailyReminderEnabled?: boolean;
+  marketingPushEnabled?: boolean;
 }): Promise<PushRegistrationResult> {
   await ensureAndroidChannel();
 
@@ -51,6 +53,7 @@ export async function registerDeviceForPush(options: {
       status,
       pushToken: null,
       dailyReminderEnabled: null,
+      marketingPushEnabled: null,
     };
   }
 
@@ -65,12 +68,16 @@ export async function registerDeviceForPush(options: {
       status,
       pushToken: null,
       dailyReminderEnabled: null,
+      marketingPushEnabled: null,
     };
   }
 
   const res = await apiPost<{
     ok: boolean;
-    token?: { daily_reminder_enabled?: boolean | null };
+    token?: {
+      daily_reminder_enabled?: boolean | null;
+      marketing_push_enabled?: boolean | null;
+    };
   }>("/api/notifications/register", {
     expoPushToken: pushToken,
     platform: Platform.OS,
@@ -81,6 +88,9 @@ export async function registerDeviceForPush(options: {
     ...(typeof options.dailyReminderEnabled === "boolean"
       ? { dailyReminderEnabled: options.dailyReminderEnabled }
       : {}),
+    ...(typeof options.marketingPushEnabled === "boolean"
+      ? { marketingPushEnabled: options.marketingPushEnabled }
+      : {}),
   });
 
   return {
@@ -89,6 +99,10 @@ export async function registerDeviceForPush(options: {
     dailyReminderEnabled:
       typeof res?.token?.daily_reminder_enabled === "boolean"
         ? res.token.daily_reminder_enabled
+        : null,
+    marketingPushEnabled:
+      typeof res?.token?.marketing_push_enabled === "boolean"
+        ? res.token.marketing_push_enabled
         : null,
   };
 }

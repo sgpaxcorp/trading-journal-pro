@@ -7,6 +7,7 @@ type BillingPageProps = {
   searchParams?: Promise<{
     plan?: string;
     partner?: string;
+    promo?: string;
   }>;
 };
 
@@ -18,11 +19,22 @@ export default async function BillingPage({ searchParams }: BillingPageProps) {
     .toUpperCase()
     .replace(/[^A-Z0-9_-]/g, "")
     .slice(0, 24);
+  const promoCode = String(params?.promo ?? "")
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9_-]/g, "")
+    .slice(0, 64);
 
   // Solo permitimos "core" o "advanced". Cualquier otra cosa → "core".
   let initialPlan: "core" | "advanced" = "core";
   if (planParam === "advanced") initialPlan = "advanced";
   if (planParam === "core") initialPlan = "core";
 
-  return <BillingClient initialPlan={initialPlan} initialPartnerCode={partnerCode} />;
+  return (
+    <BillingClient
+      initialPlan={initialPlan}
+      initialPartnerCode={partnerCode}
+      initialPromoCode={promoCode}
+    />
+  );
 }

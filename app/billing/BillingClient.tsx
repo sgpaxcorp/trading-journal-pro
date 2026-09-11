@@ -35,6 +35,7 @@ import {
 type BillingClientProps = {
   initialPlan: PlanId; // "core" | "advanced"
   initialPartnerCode?: string;
+  initialPromoCode?: string;
 };
 
 type SubscriptionInfo = {
@@ -51,7 +52,11 @@ type SubscriptionInfo = {
   plan: PlanId | null;
 };
 
-export default function BillingClient({ initialPlan, initialPartnerCode = "" }: BillingClientProps) {
+export default function BillingClient({
+  initialPlan,
+  initialPartnerCode = "",
+  initialPromoCode = "",
+}: BillingClientProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { user, loading: authLoading } = useAuth();
@@ -79,6 +84,13 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
       .replace(/[^A-Z0-9_-]/g, "")
       .slice(0, 24)
   );
+  const [promoCode, setPromoCode] = useState(
+    String(initialPromoCode || "")
+      .trim()
+      .toUpperCase()
+      .replace(/[^A-Z0-9_-]/g, "")
+      .slice(0, 64)
+  );
   const [subscriptionInfo, setSubscriptionInfo] = useState<SubscriptionInfo | null>(null);
   const [subscriptionLoading, setSubscriptionLoading] = useState(false);
   const [autoRenewEnabled, setAutoRenewEnabled] = useState(true);
@@ -99,6 +111,12 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
       .replace(/[^A-Z0-9_-]/g, "")
       .slice(0, 24);
     if (partner) setPartnerCode(partner);
+    const promo = String(searchParams?.get("promo") ?? "")
+      .trim()
+      .toUpperCase()
+      .replace(/[^A-Z0-9_-]/g, "")
+      .slice(0, 64);
+    if (promo) setPromoCode(promo);
   }, [searchParams]);
 
   const normalizePlan = (raw: unknown): PlanId | "none" => {
@@ -265,6 +283,7 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
           addonBrokerSync: brokerConnectionsEnabled && !hasActivePlan && brokerAddonSelected,
           billingCycle,
           partnerCode: partnerCode || undefined,
+          couponCode: promoCode || undefined,
           legalAccepted: true,
           termsVersion: CURRENT_TERMS_VERSION,
           privacyVersion: CURRENT_PRIVACY_VERSION,
@@ -456,11 +475,14 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
                 <button
                   type="button"
                   onClick={() => setBillingCycle("monthly")}
+                  disabled={Boolean(promoCode)}
+                  title={promoCode ? L("Annual launch offer applied", "Oferta anual de lanzamiento aplicada") : undefined}
                   className={[
                     "px-4 py-1.5 rounded-full transition",
                     billingCycle === "monthly"
                       ? "bg-emerald-400 text-slate-950 font-semibold"
                       : "text-slate-300 hover:text-slate-50",
+                    promoCode && "cursor-not-allowed opacity-45",
                   ].join(" ")}
                 >
                   {L("Monthly", "Mensual")}
@@ -483,6 +505,20 @@ export default function BillingClient({ initialPlan, initialPartnerCode = "" }: 
                 <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-[11px] text-emerald-200">
                   {L("Partner referral applied:", "Referido partner aplicado:")}{" "}
                   <span className="font-semibold">{partnerCode}</span>
+                </div>
+              ) : null}
+
+              {promoCode ? (
+                <div className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-[11px] text-emerald-100">
+                  <span className="font-semibold">
+                    {L("Annual launch offer applied", "Oferta anual de lanzamiento aplicada")}
+                  </span>
+                  <span className="ml-2 text-emerald-200/75">
+                    {L(
+                      "Your waitlist eligibility will be verified before secure payment.",
+                      "Tu elegibilidad en la lista de espera se verificará antes del pago seguro."
+                    )}
+                  </span>
                 </div>
               ) : null}
 

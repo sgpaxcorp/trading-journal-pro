@@ -5,11 +5,13 @@ import { requireCronSecret } from "@/lib/cronAuth";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 
 export const runtime = "nodejs";
+export const maxDuration = 300;
 
 type PushRow = {
+  id: string;
   expo_push_token: string;
   locale: string | null;
-  user_id?: string | null;
+  user_id: string;
 };
 
 type MotivationRow = {
@@ -26,7 +28,6 @@ type MotivationRow = {
 };
 
 const NY_TZ = "America/New_York";
-const MOTIVATION_RULE_KEY = "daily_motivation";
 const DEFAULT_HOUR_NY = 8;
 const DEFAULT_MINUTE_NY = 30;
 
@@ -89,7 +90,7 @@ function shouldSendNowNY(targetHour: number, targetMinute: number, now = new Dat
   const currentMinuteOfDay = hour * 60 + minute;
   const targetMinuteOfDay = targetHour * 60 + targetMinute;
   const diff = currentMinuteOfDay - targetMinuteOfDay;
-  return diff >= 0 && diff < 60;
+  return diff >= 0 && diff < 4 * 60;
 }
 
 async function sendExpoMessages(messages: Array<Record<string, unknown>>) {
@@ -100,14 +101,19 @@ async function sendExpoMessages(messages: Array<Record<string, unknown>>) {
   }
 
   const results: Array<{ ok: boolean; status: number; body: unknown }> = [];
-  for (const chunk of chunks) {
-    const res = await fetch("https://exp.host/--/api/v2/push/send", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(chunk),
-    });
-    const body = await res.json().catch(() => ({}));
-    results.push({ ok: res.ok, status: res.status, body });
+  for (let index = 0; index < chunks.length; index += 10) {
+    const groupResults = await Promise.all(
+      chunks.slice(index, index + 10).map(async (chunk) => {
+        const res = await fetch("https://exp.host/--/api/v2/push/send", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(chunk),
+        });
+        const body = await res.json().catch(() => ({}));
+        return { ok: res.ok, status: res.status, body };
+      })
+    );
+    results.push(...groupResults);
   }
   return results;
 }
@@ -128,39 +134,6 @@ function collectExpoTickets(results: Array<{ ok: boolean; status: number; body: 
   return tickets;
 }
 
-async function ensureRule(userId: string, title: string, message: string) {
-  const { data: existingRule, error: ruleErr } = await supabaseAdmin
-    .from("ntj_alert_rules")
-    .select("id")
-    .eq("user_id", userId)
-    .eq("key", MOTIVATION_RULE_KEY)
-    .maybeSingle();
-
-  if (ruleErr) throw new Error(ruleErr.message);
-
-  let ruleId = (existingRule as any)?.id ? String((existingRule as any).id) : "";
-  if (ruleId) return ruleId;
-
-  const { data: createdRule, error: createErr } = await supabaseAdmin
-    .from("ntj_alert_rules")
-    .insert({
-      user_id: userId,
-      key: MOTIVATION_RULE_KEY,
-      trigger_type: "daily_motivation",
-      title,
-      message,
-      severity: "info",
-      enabled: true,
-      channels: ["inapp"],
-      config: { source: "system", core: true, kind: "reminder", category: "motivation" },
-    })
-    .select("id")
-    .single();
-
-  if (createErr) throw new Error(createErr.message);
-  return String((createdRule as any)?.id || "");
-}
-
 async function getMotivationScheduleNy() {
   const { data, error } = await supabaseAdmin
     .from("admin_settings")
@@ -178,65 +151,6 @@ async function getMotivationScheduleNy() {
     return { hour, minute: DEFAULT_MINUTE_NY };
   }
   return { hour, minute };
-}
-
-async function insertInAppEvent(params: {
-  userId: string;
-  title: string;
-  message: string;
-  messageId: string;
-  deliveryDate: string;
-}) {
-  const { data: existing } = await supabaseAdmin
-    .from("motivational_message_deliveries")
-    .select("id")
-    .eq("message_id", params.messageId)
-    .eq("user_id", params.userId)
-    .eq("delivery_date", params.deliveryDate)
-    .eq("channel", "inapp")
-    .maybeSingle();
-
-  if (existing?.id) return;
-
-  const ruleId = await ensureRule(params.userId, params.title, params.message);
-  const nowIso = new Date().toISOString();
-
-  const { error: eventErr } = await supabaseAdmin
-    .from("ntj_alert_events")
-    .upsert(
-      {
-        user_id: params.userId,
-        rule_id: ruleId,
-        date: params.deliveryDate,
-        status: "active",
-        triggered_at: nowIso,
-        dismissed_until: null,
-        acknowledged_at: null,
-        payload: {
-          title: params.title,
-          message: params.message,
-          severity: "info",
-          channels: ["inapp"],
-          kind: "reminder",
-          category: "motivation",
-          message_id: params.messageId,
-        },
-      },
-      { onConflict: "user_id,rule_id,date" }
-    );
-
-  if (eventErr) throw new Error(eventErr.message);
-
-  const { error: deliveryErr } = await supabaseAdmin.from("motivational_message_deliveries").insert({
-    message_id: params.messageId,
-    user_id: params.userId,
-    delivery_date: params.deliveryDate,
-    channel: "inapp",
-  });
-
-  if (deliveryErr && deliveryErr.code !== "23505") {
-    throw new Error(deliveryErr.message);
-  }
 }
 
 async function ensureFallbackMessage(localeCode: string, targetHour: number, dayOfYear: number) {
@@ -327,15 +241,12 @@ async function handleRequest(req: NextRequest) {
       return NextResponse.json({ ok: true, sent: 0, detail: `Outside ${label} delivery window.` });
     }
 
-    let query = supabaseAdmin
-      .from("push_tokens")
-      .select("expo_push_token, locale, user_id")
-      .eq("daily_reminder_enabled", true);
-    if (userId) {
-      query = query.eq("user_id", userId);
-    }
-
-    const { data, error } = await query;
+    const deliveryDate = getNyDateString();
+    const { data, error } = await supabaseAdmin.rpc("claim_daily_motivation_tokens", {
+      p_delivery_date: deliveryDate,
+      p_limit: 750,
+      p_user_id: userId || null,
+    });
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
@@ -345,42 +256,42 @@ async function handleRequest(req: NextRequest) {
       return NextResponse.json({ ok: true, sent: 0, detail: "No tokens available." });
     }
 
-    const deliveryDate = getNyDateString();
+    const [englishMessage, spanishMessage] = await Promise.all([
+      fetchMessage("en", targetSchedule.hour),
+      fetchMessage("es", targetSchedule.hour),
+    ]);
+    const messageByLocale = new Map<string, MotivationRow>([
+      ["en", englishMessage],
+      ["es", spanishMessage],
+    ]);
     const messages: Array<Record<string, unknown>> = [];
-    const pendingPushDeliveries: Array<{ userId: string; messageId: string }> = [];
+    const pendingPushDeliveries: Array<{ tokenId: string; userId: string; messageId: string }> = [];
+    const inAppDeliveries: Array<{
+      user_id: string;
+      message_id: string;
+      title: string;
+      message: string;
+    }> = [];
     let pushCount = 0;
     let inAppCount = 0;
 
     for (const row of rows) {
-      if (!row.user_id) continue;
-      const motivation = await fetchMessage(row.locale, targetSchedule.hour);
+      const localeCode = String(row.locale || "en").toLowerCase().startsWith("es") ? "es" : "en";
+      const motivation = messageByLocale.get(localeCode) || englishMessage;
       const title = String(motivation.title || "Neuro Trader");
       const bodyText = String(motivation.body || "").trim();
       if (!bodyText) continue;
 
       if (motivation.inapp_enabled !== false) {
-        await insertInAppEvent({
-          userId: row.user_id,
+        inAppDeliveries.push({
+          user_id: row.user_id,
+          message_id: motivation.id,
           title,
           message: bodyText,
-          messageId: motivation.id,
-          deliveryDate,
         });
-        inAppCount += 1;
       }
 
       if (!isExpoPushToken(row.expo_push_token) || motivation.push_enabled === false) continue;
-
-      const { data: existingPush } = await supabaseAdmin
-        .from("motivational_message_deliveries")
-        .select("id")
-        .eq("message_id", motivation.id)
-        .eq("user_id", row.user_id)
-        .eq("delivery_date", deliveryDate)
-        .eq("channel", "push")
-        .maybeSingle();
-
-      if (existingPush?.id) continue;
 
       messages.push({
         to: row.expo_push_token,
@@ -389,7 +300,19 @@ async function handleRequest(req: NextRequest) {
         sound: "default",
         data: { screen: "Messages", type: "daily_motivation", category: "motivation", messageId: motivation.id },
       });
-      pendingPushDeliveries.push({ userId: row.user_id, messageId: motivation.id });
+      pendingPushDeliveries.push({ tokenId: row.id, userId: row.user_id, messageId: motivation.id });
+    }
+
+    if (inAppDeliveries.length) {
+      const uniqueInApp = Array.from(
+        new Map(inAppDeliveries.map((item) => [item.user_id, item])).values()
+      );
+      const { data: inserted, error: inAppError } = await supabaseAdmin.rpc(
+        "record_daily_motivation_inapp",
+        { p_deliveries: uniqueInApp, p_delivery_date: deliveryDate }
+      );
+      if (inAppError) throw new Error(inAppError.message);
+      inAppCount = Number(inserted ?? 0);
     }
 
     if (!messages.length) {
@@ -404,27 +327,52 @@ async function handleRequest(req: NextRequest) {
     const results = await sendExpoMessages(messages);
     const okTickets = collectExpoTickets(results);
 
+    const acceptedTokenIds = new Set<string>();
+    const acceptedDeliveries: Array<{
+      message_id: string;
+      user_id: string;
+      delivery_date: string;
+      channel: "push";
+    }> = [];
     for (const ticket of okTickets) {
       const pending = pendingPushDeliveries[ticket.messageIndex];
       if (!pending) continue;
-      const { error: deliveryErr } = await supabaseAdmin.from("motivational_message_deliveries").insert({
+      acceptedTokenIds.add(pending.tokenId);
+      acceptedDeliveries.push({
         message_id: pending.messageId,
         user_id: pending.userId,
         delivery_date: deliveryDate,
         channel: "push",
       });
-
-      if (deliveryErr && deliveryErr.code !== "23505") {
-        throw new Error(deliveryErr.message);
-      }
       pushCount += 1;
+    }
+
+    if (acceptedDeliveries.length) {
+      const { error: deliveryErr } = await supabaseAdmin
+        .from("motivational_message_deliveries")
+        .upsert(acceptedDeliveries, {
+          onConflict: "message_id,user_id,delivery_date,channel",
+          ignoreDuplicates: true,
+        });
+      if (deliveryErr) throw new Error(deliveryErr.message);
+    }
+
+    const failedTokenIds = pendingPushDeliveries
+      .filter((delivery) => !acceptedTokenIds.has(delivery.tokenId))
+      .map((delivery) => delivery.tokenId);
+    if (failedTokenIds.length) {
+      await supabaseAdmin.rpc("release_daily_motivation_tokens", {
+        p_ids: failedTokenIds,
+        p_delivery_date: deliveryDate,
+      });
     }
 
     return NextResponse.json({
       ok: true,
       sent: pushCount,
       inbox: inAppCount,
-      results,
+      attempted: messages.length,
+      failed: failedTokenIds.length,
     });
   } catch (err: any) {
     return NextResponse.json({ error: err?.message || "Unknown error" }, { status: 500 });

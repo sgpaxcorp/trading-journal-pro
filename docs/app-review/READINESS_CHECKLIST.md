@@ -2,6 +2,11 @@
 
 - [x] Production backend exposes account deletion and plan continuation.
 - [x] Baseline iOS Release build 4 was generated and installed on the physical iPhone `Steven` running iOS 26.6.1.
+- [x] Final submission candidate is version 1.0.0 build 5.
+- [x] Native privacy manifest declares collected-data categories, required-reason APIs, and no tracking.
+- [x] Promotional push is disabled by default and controlled independently from operational reminders.
+- [x] Production database migrations are aligned and a pre-release backup was created.
+- [x] Unit, lint, TypeScript, web build, Expo Doctor, iOS export, dependency audit, and browser E2E gates pass.
 - [x] Baseline Release build compiles, installs, and launches in an iOS 26.5 simulator.
 - [x] Current iOS JavaScript bundle exports successfully after the navigation and legal-acceptance updates.
 - [x] Main review account login succeeds in the Release build.

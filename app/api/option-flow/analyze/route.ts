@@ -3,7 +3,7 @@ import OpenAI from "openai";
 import { getOptionFlowBetaApiPayload, hasOptionFlowBetaAccess, resolveOptionFlowLang } from "@/lib/optionFlowBeta";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 import { getClientIp, rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
-import { recordAiUsage } from "@/lib/aiUsageServer";
+import { recordAiUsage, requireAiBudget } from "@/lib/aiUsageServer";
 
 export const runtime = "nodejs";
 
@@ -627,6 +627,9 @@ export async function POST(req: NextRequest) {
         { status: 429, headers: rateLimitHeaders(limiter) }
       );
     }
+
+    const budgetGate = await requireAiBudget({ userId, category: "market_intelligence" });
+    if (budgetGate) return budgetGate;
 
     const body = await req.json();
     const {

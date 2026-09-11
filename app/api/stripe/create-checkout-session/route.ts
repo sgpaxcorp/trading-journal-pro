@@ -6,6 +6,7 @@ import { getClientIp, rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
 import { BROKER_SYNC_ADDON, PLAN_PRICES } from "@/lib/planCatalog";
 import { FREE_TRIAL_DAYS, isCurrentLegalAcceptancePayload } from "@/lib/legalConsent";
 import { recordLegalAcceptance } from "@/lib/serverLegalAcceptance";
+import { WAITLIST_CAMPAIGN } from "@/lib/waitlistCampaign";
 import {
   isMissingStripePriceError,
   resolveStripePriceId,
@@ -91,6 +92,8 @@ type ResolvedDiscount = {
   normalizedCode: string;
   isTesterAllAccess: boolean;
   isFree: boolean;
+  percentOff: number;
+  duration: Stripe.Coupon.Duration | null;
 };
 
 async function resolveStripeDiscount(inputCode: string) {
@@ -134,6 +137,8 @@ async function resolveStripeDiscount(inputCode: string) {
       normalizedCode,
       isTesterAllAccess: TESTER_PROMO_CODES.has(normalizedCode) || promoTesterFlag,
       isFree: isFreeCoupon(promoCoupon),
+      percentOff: Number(promoCoupon.percent_off ?? 0),
+      duration: promoCoupon.duration ?? null,
     } as ResolvedDiscount;
   }
 
@@ -154,7 +159,34 @@ async function resolveStripeDiscount(inputCode: string) {
     normalizedCode,
     isTesterAllAccess: TESTER_PROMO_CODES.has(normalizedCode) || couponTesterFlag,
     isFree: isFreeCoupon(coupon),
+    percentOff: Number(coupon.percent_off ?? 0),
+    duration: coupon.duration ?? null,
   } as ResolvedDiscount;
+}
+
+function isWaitlistLaunchCode(code: string) {
+  const configured = normalizePromoCode(process.env.WAITLIST_ANNUAL_PROMO_CODE);
+  return Boolean(configured && code === configured);
+}
+
+async function verifyWaitlistLaunchEligibility(email: string, billingCycle: BillingCycle) {
+  if (billingCycle !== "annual") {
+    throw new Error("This launch discount is available only with annual billing.");
+  }
+  const normalizedEmail = email.trim().toLowerCase();
+  if (!normalizedEmail) throw new Error("A verified account email is required for this launch discount.");
+
+  const { data, error } = await supabaseAdmin
+    .from("launch_waitlist")
+    .select("id,position,discount_reserved,accepted_marketing")
+    .eq("email_normalized", normalizedEmail)
+    .eq("discount_reserved", true)
+    .eq("accepted_marketing", true)
+    .maybeSingle();
+  if (error) throw new Error("Could not verify launch discount eligibility.");
+  if (!data?.id || Number(data.position) > WAITLIST_CAMPAIGN.discountLimit) {
+    throw new Error("This account is not eligible for the launch waitlist discount.");
+  }
 }
 
 export async function POST(req: NextRequest) {
@@ -314,8 +346,20 @@ export async function POST(req: NextRequest) {
     const couponCode = normalizePromoCode(couponCodeRaw);
     if (couponCode) {
       try {
+        const waitlistLaunchCode = isWaitlistLaunchCode(couponCode);
+        if (waitlistLaunchCode) {
+          await verifyWaitlistLaunchEligibility(email, finalBillingCycle);
+        }
         promoDiscountInfo = await resolveStripeDiscount(couponCode);
         discounts = promoDiscountInfo?.discounts;
+
+        if (
+          waitlistLaunchCode &&
+          (promoDiscountInfo?.percentOff !== WAITLIST_CAMPAIGN.discountPercent ||
+            promoDiscountInfo?.duration !== "once")
+        ) {
+          throw new Error("The launch discount is not configured correctly.");
+        }
 
         if (promoDiscountInfo?.isTesterAllAccess) {
           if (!promoDiscountInfo.isFree) {
@@ -431,7 +475,9 @@ export async function POST(req: NextRequest) {
       customer: customerId, // ✅ usamos solo customer
       line_items: lineItems,
       discounts,
-      allow_promotion_codes: true,
+      // Promotion codes are validated in this API so restricted offers cannot be
+      // entered directly on Stripe Checkout without eligibility verification.
+      allow_promotion_codes: false,
       payment_method_collection: shouldApplyTrial ? "always" : "if_required",
       success_url: `${origin}/confirmed?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${origin}/pricing`,

@@ -17,7 +17,7 @@ import {
 import { rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
 import { requireSmartToolsOwner } from "@/lib/smartToolsAccess";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
-import { countResponseFileSearchCalls, recordAiUsage } from "@/lib/aiUsageServer";
+import { countResponseFileSearchCalls, recordAiUsage, requireAiBudget } from "@/lib/aiUsageServer";
 
 export const runtime = "nodejs";
 
@@ -262,6 +262,9 @@ export async function POST(req: Request) {
         { status: 429 }
       );
     }
+
+    const budgetGate = await requireAiBudget({ userId: authUser.userId, category: "market_intelligence" });
+    if (budgetGate) return budgetGate;
 
     const savedFilings = await loadSavedFilingLibrary(authUser.userId, payload.holdings);
     const payloadWithLibrary: NeuroAnalysisRequest = {

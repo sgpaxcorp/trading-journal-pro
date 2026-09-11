@@ -1,12 +1,8 @@
 {
   "crons": [
     {
-      "path": "/api/notifications/send-daily",
-      "schedule": "*/30 * * * 1-5"
-    },
-    {
       "path": "/api/notifications/send-daily-motivation",
-      "schedule": "*/30 * * * *"
+      "schedule": "*/5 * * * *"
     },
     {
       "path": "/api/notifications/send-daily-goal",

@@ -5,7 +5,7 @@ import { getClientIp, rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
 import { requirePlatformAccess } from "@/lib/serverPlatformAccess";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 import { buildUserManualContext, type UserManualLocale } from "@/lib/userManualServer";
-import { recordAiUsage } from "@/lib/aiUsageServer";
+import { recordAiUsage, requireAiBudget } from "@/lib/aiUsageServer";
 
 export const runtime = "nodejs";
 
@@ -337,6 +337,9 @@ export async function POST(req: NextRequest) {
         { status: 429, headers: { "Retry-After": String(retryAfter), ...rateLimitHeaders(dailyLimit) } }
       );
     }
+
+    const budgetGate = await requireAiBudget({ userId: access.context.userId, category: "shared" });
+    if (budgetGate) return budgetGate;
 
     const manual = buildUserManualContext({
       locale,

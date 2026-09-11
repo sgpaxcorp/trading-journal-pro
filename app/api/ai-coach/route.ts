@@ -14,7 +14,7 @@ import { auditOrderEvents } from "@/lib/audit/auditEngine";
 import type { NormalizedOrderEvent } from "@/lib/brokers/types";
 import { requireAdvancedPlan } from "@/lib/serverFeatureAccess";
 import { after } from "next/server";
-import { recordAiUsage } from "@/lib/aiUsageServer";
+import { recordAiUsage, requireAiBudget } from "@/lib/aiUsageServer";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -2184,6 +2184,9 @@ export async function POST(req: Request) {
         }
       );
     }
+
+    const budgetGate = await requireAiBudget({ userId: authUser.userId, category: "advanced" });
+    if (budgetGate) return budgetGate;
 
     const apiKey =
       process.env.OPENAI_API_KEY ||

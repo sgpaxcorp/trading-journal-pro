@@ -5,7 +5,7 @@ import {
   BROKER_SYNC_ADDON,
   PLAN_PRICES,
 } from "@/lib/planCatalog";
-import { recordAiUsage } from "@/lib/aiUsageServer";
+import { recordAiUsage, requireAiBudget } from "@/lib/aiUsageServer";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -63,6 +63,12 @@ export async function POST(req: Request) {
         { status: 400, headers: { "Content-Type": "application/json" } }
       );
     }
+
+    const budgetGate = await requireAiBudget({
+      userId: authUser?.userId ?? null,
+      category: "sales",
+    });
+    if (budgetGate) return budgetGate;
 
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",

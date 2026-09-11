@@ -22,6 +22,7 @@ type SignUpClientProps = {
   initialPartnerCode: string;
   initialEmail?: string;
   initialVerify?: boolean;
+  initialPromoCode?: string;
 };
 
 function Stepper({
@@ -71,6 +72,7 @@ export default function SignUpClient({
   initialPartnerCode,
   initialEmail = "",
   initialVerify = false,
+  initialPromoCode = "",
 }: SignUpClientProps) {
   const router = useRouter();
   const { locale } = useAppSettings();
@@ -214,6 +216,7 @@ export default function SignUpClient({
       q.set("plan", initialPlan);
       q.set("cycle", initialBillingCycle);
       if (initialPartnerCode) q.set("partner", initialPartnerCode);
+      if (initialPromoCode) q.set("promo", initialPromoCode);
       router.push(`/billing?${q.toString()}`);
     } catch (err: any) {
       setError(err?.message || L("Could not verify the code.", "No se pudo verificar el código."));

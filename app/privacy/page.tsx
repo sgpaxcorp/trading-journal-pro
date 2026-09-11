@@ -34,6 +34,7 @@ const CONTENT = {
           "Process subscriptions, payments, and account authentication.",
           "Import and synchronize data from integrations you authorize.",
           "Provide customer support, respond to requests, and send service-related messages.",
+          "Send optional promotional push notifications only to devices where the user has expressly enabled marketing notifications. This preference can be disabled at any time without disabling operational business alerts.",
           "Improve and maintain the Service, including debugging, monitoring, and analytics.",
           "Enforce our Terms of Service, prevent fraud, and protect the security of the Service.",
         ],
@@ -93,7 +94,7 @@ const CONTENT = {
       {
         title: "9. Your Choices and Rights",
         body:
-          "Depending on your location, you may have rights to access, correct, delete, or export certain information, and to object to or restrict certain processing. You may also opt out of non-essential marketing communications, disconnect supported integrations, and request deletion of imported broker data or account data where required by law. To request action, contact us at support@neurotrader-journal.com.",
+          "Depending on your location, you may have rights to access, correct, delete, or export certain information, and to object to or restrict certain processing. You may opt out of non-essential marketing email and promotional push notifications, disconnect supported integrations, and request deletion of imported broker data or account data where required by law. Promotional push notifications can be disabled independently in the mobile app without disabling operational business alerts. To request action, contact us at support@neurotrader-journal.com.",
       },
       {
         title: "10. International Transfers",
@@ -145,6 +146,7 @@ const CONTENT = {
           "Procesar suscripciones, pagos y autenticación de cuenta.",
           "Importar y sincronizar datos desde integraciones autorizadas por ti.",
           "Brindar soporte, responder solicitudes y enviar mensajes relacionados con el servicio.",
+          "Enviar notificaciones push promocionales opcionales solamente a dispositivos donde el usuario haya habilitado expresamente las notificaciones de marketing. Esta preferencia puede desactivarse en cualquier momento sin desactivar las alertas empresariales operacionales.",
           "Mejorar y mantener el Servicio, incluyendo depuración, monitoreo y analítica.",
           "Hacer cumplir nuestros Términos de Servicio, prevenir fraude y proteger la seguridad del Servicio.",
         ],
@@ -204,7 +206,7 @@ const CONTENT = {
       {
         title: "9. Tus opciones y derechos",
         body:
-          "Dependiendo de tu ubicación, puedes tener derechos para acceder, corregir, eliminar o exportar cierta información, y para objetar o restringir ciertos tratamientos. También puedes darte de baja de comunicaciones de marketing no esenciales, desconectar integraciones soportadas y solicitar eliminación de data importada del broker o data de cuenta cuando la ley lo requiera. Para solicitar acciones, contáctanos en support@neurotrader-journal.com.",
+          "Dependiendo de tu ubicación, puedes tener derechos para acceder, corregir, eliminar o exportar cierta información, y para objetar o restringir ciertos tratamientos. Puedes darte de baja de emails de marketing y notificaciones push promocionales, desconectar integraciones soportadas y solicitar eliminación de data importada del broker o data de cuenta cuando la ley lo requiera. Las notificaciones push promocionales pueden desactivarse por separado en la app móvil sin desactivar las alertas empresariales operacionales. Para solicitar acciones, contáctanos en support@neurotrader-journal.com.",
       },
       {
         title: "10. Transferencias internacionales",
@@ -256,8 +258,8 @@ export default function PrivacyPolicyPage() {
             </h1>
             <p className="text-sm text-slate-400 mt-2">
               {isEs
-                ? "Última actualización: 3 de septiembre de 2026."
-                : "Last updated: September 3, 2026."}
+                ? "Última actualización: 10 de septiembre de 2026."
+                : "Last updated: September 10, 2026."}
             </p>
           </div>
 

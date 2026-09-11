@@ -14,9 +14,11 @@ type RegisterBody = {
   locale?: string;
   timezone?: string;
   dailyReminderEnabled?: boolean;
+  marketingPushEnabled?: boolean;
 };
 
 const MAX_PUSH_TOKENS_PER_USER = 12;
+const MARKETING_PUSH_CONSENT_VERSION = "2026-09-10";
 const EXPO_PUSH_TOKEN_PATTERN = /^Expo(?:nent)?PushToken\[[A-Za-z0-9._:-]+\]$/;
 
 function cleanText(value: unknown, maxLength: number) {
@@ -61,7 +63,7 @@ export async function POST(req: NextRequest) {
 
     const { data: existing } = await supabaseAdmin
       .from("push_tokens")
-      .select("id, user_id, daily_reminder_enabled")
+      .select("id, user_id, daily_reminder_enabled, marketing_push_enabled, marketing_push_consent_at, marketing_push_consent_version")
       .eq("expo_push_token", expoPushToken)
       .maybeSingle();
 
@@ -91,6 +93,16 @@ export async function POST(req: NextRequest) {
         : existingBelongsToUser
           ? existing?.daily_reminder_enabled ?? true
           : true;
+    const marketingPushEnabled =
+      typeof body?.marketingPushEnabled === "boolean"
+        ? body.marketingPushEnabled
+        : existingBelongsToUser
+          ? existing?.marketing_push_enabled ?? false
+          : false;
+    const priorMarketingConsentAt = existingBelongsToUser ? existing?.marketing_push_consent_at ?? null : null;
+    const priorMarketingConsentVersion = existingBelongsToUser
+      ? existing?.marketing_push_consent_version ?? null
+      : null;
 
     const payload = {
       user_id: access.context.userId,
@@ -101,6 +113,15 @@ export async function POST(req: NextRequest) {
       locale: cleanText(body?.locale, 16),
       timezone: cleanText(body?.timezone, 64),
       daily_reminder_enabled: dailyReminderEnabled,
+      marketing_push_enabled: marketingPushEnabled,
+      marketing_push_consent_at: marketingPushEnabled
+        ? typeof body?.marketingPushEnabled === "boolean"
+          ? now
+          : priorMarketingConsentAt ?? now
+        : priorMarketingConsentAt,
+      marketing_push_consent_version: marketingPushEnabled
+        ? MARKETING_PUSH_CONSENT_VERSION
+        : priorMarketingConsentVersion,
       updated_at: now,
       last_registered_at: now,
     };
@@ -108,7 +129,7 @@ export async function POST(req: NextRequest) {
     const { data, error } = await supabaseAdmin
       .from("push_tokens")
       .upsert(payload, { onConflict: "expo_push_token" })
-      .select("expo_push_token, daily_reminder_enabled, locale, timezone, platform, device_name")
+      .select("expo_push_token, daily_reminder_enabled, marketing_push_enabled, locale, timezone, platform, device_name")
       .maybeSingle();
 
     if (error) {

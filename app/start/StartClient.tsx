@@ -64,6 +64,11 @@ export default function StartClient({ initialPlan }: StartClientProps) {
   const skipInfo = searchParams.get("skipInfo");
   const cameFromConfirmed = skipInfo === "1";
   const emailFromQuery = String(searchParams.get("email") ?? "").trim().toLowerCase();
+  const promoCodeFromQuery = String(searchParams.get("promo") ?? "")
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9_-]/g, "")
+    .slice(0, 64);
 
   const initialStep: Step =
     stepFromQuery === "3" || cameFromConfirmed
@@ -377,6 +382,7 @@ export default function StartClient({ initialPlan }: StartClientProps) {
         body: JSON.stringify({
           planId: selectedPlan,
           billingCycle: billingCycleFromQuery,
+          couponCode: promoCodeFromQuery || undefined,
           legalAccepted: true,
           termsVersion: CURRENT_TERMS_VERSION,
           privacyVersion: CURRENT_PRIVACY_VERSION,
@@ -718,8 +724,8 @@ export default function StartClient({ initialPlan }: StartClientProps) {
           </h2>
           <p className="text-xs text-slate-400 mb-4">
             {L(
-              "Step 4 of 5 - You will be redirected to Stripe to complete secure payment. You can enter a promotion code directly on the Stripe payment page.",
-              "Paso 4 de 5 - Serás redirigido a Stripe para completar el pago seguro. Puedes introducir un código de promoción directamente en Stripe."
+              "Step 4 of 5 - Your eligible offer is verified before you are redirected to Stripe for secure payment.",
+              "Paso 4 de 5 - Tu oferta elegible se verifica antes de redirigirte a Stripe para completar el pago seguro."
             )}
           </p>
 

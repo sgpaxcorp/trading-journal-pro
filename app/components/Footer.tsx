@@ -2,12 +2,6 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import {
-  FaInstagram,
-  FaLinkedinIn,
-  FaFacebookF,
-} from "react-icons/fa";
-import { FaXTwitter } from "react-icons/fa6";
 
 import { useAppSettings } from "@/lib/appSettings";
 import { useAuth } from "@/context/AuthContext";
@@ -27,11 +21,7 @@ export default function Footer() {
     ? "w-full bg-slate-50/90 text-slate-600 px-6 md:px-10 lg:px-16 py-8 border-t border-slate-200 mt-auto"
     : "w-full bg-[#0b0c14] text-slate-300 px-6 md:px-10 lg:px-16 py-8 border-t border-slate-800 mt-auto";
 
-  const socialBtnClass = isLight
-    ? "p-2 rounded-md bg-white border border-slate-200 text-slate-500 hover:bg-slate-100 hover:border-slate-300 transition"
-    : "p-2 rounded-md bg-slate-900 hover:bg-slate-800 transition";
-
-  const brandLogoSrc = "/neurotrader%20logo%20for%20Web.png";
+  const brandLogoSrc = "/neurotrader-logo.svg";
 
   useEffect(() => {
     let cancelled = false;
@@ -65,7 +55,7 @@ export default function Footer() {
 
   return (
     <footer className={footerClass}>
-      <div className="w-full grid grid-cols-1 md:grid-cols-3 gap-10">
+      <div className="w-full grid grid-cols-1 md:grid-cols-2 gap-10">
         {/* Col 1: Logo + description */}
         <div className="space-y-3">
           <div className="flex items-center gap-2">
@@ -99,9 +89,6 @@ export default function Footer() {
             <Link href="/pricing" className={isLight ? "hover:text-emerald-600 transition" : "hover:text-emerald-400 transition"}>
               {t("footer.links.pricing", lang)}
             </Link>
-            <Link href="/partners" className={isLight ? "hover:text-emerald-600 transition" : "hover:text-emerald-400 transition"}>
-              {t("footer.links.partner", lang)}
-            </Link>
           </div>
 
           <div className="flex flex-col gap-2">
@@ -120,23 +107,6 @@ export default function Footer() {
           </div>
         </div>
 
-        {/* Col 3: Socials */}
-        <div className="flex flex-col gap-4 md:items-end">
-          <div className={isLight ? "flex gap-3" : "flex gap-3 text-slate-400"}>
-            <a href="#" className={socialBtnClass} aria-label="X">
-              <FaXTwitter className="text-[16px]" />
-            </a>
-            <a href="#" className={socialBtnClass} aria-label="Instagram">
-              <FaInstagram className="text-[16px]" />
-            </a>
-            <a href="#" className={socialBtnClass} aria-label="LinkedIn">
-              <FaLinkedinIn className="text-[16px]" />
-            </a>
-            <a href="#" className={socialBtnClass} aria-label="Facebook">
-              <FaFacebookF className="text-[16px]" />
-            </a>
-          </div>
-        </div>
       </div>
 
       <div className={isLight ? "mt-8 border-t border-slate-200 pt-4 text-[11px] text-slate-500 text-center" : "mt-8 border-t border-slate-800 pt-4 text-[11px] text-slate-500 text-center"}>

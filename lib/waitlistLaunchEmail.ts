@@ -42,6 +42,8 @@ function resolveAnnualDiscountUrl() {
   const url = new URL("/pricing", APP_URL);
   url.searchParams.set("billing", "annual");
   url.searchParams.set("waitlist", "annual30");
+  const promoCode = getWaitlistLaunchPromoCode();
+  if (promoCode) url.searchParams.set("promo", promoCode);
   return url.toString();
 }
 

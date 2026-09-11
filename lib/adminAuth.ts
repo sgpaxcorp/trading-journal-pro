@@ -91,7 +91,12 @@ export async function requireAdminUser(
 
 export function requireAdminActionSecret(req: NextRequest, body: any) {
   const expected = String(process.env.ADMIN_ACTION_SECRET || "").trim();
-  if (!expected) return null;
+  if (!expected) {
+    return NextResponse.json(
+      { error: "Admin step-up verification is not configured." },
+      { status: 503 }
+    );
+  }
 
   const provided = String(
     req.headers.get("x-admin-action-secret") || body?.adminActionSecret || ""

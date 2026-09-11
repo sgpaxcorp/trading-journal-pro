@@ -40,6 +40,7 @@ export default function PricingPage() {
   const [error, setError] = useState<string | null>(null);
   const [billingCycle, setBillingCycle] = useState<"monthly" | "annual">("monthly");
   const [partnerCode, setPartnerCode] = useState("");
+  const [promoCode, setPromoCode] = useState("");
   const [checkoutLegalAccepted, setCheckoutLegalAccepted] = useState(false);
 
   useEffect(() => {
@@ -51,6 +52,14 @@ export default function PricingPage() {
       .replace(/[^A-Z0-9_-]/g, "")
       .slice(0, 24);
     setPartnerCode(code);
+    const billing = params.get("billing") ?? params.get("cycle");
+    if (billing === "annual") setBillingCycle("annual");
+    const promo = String(params.get("promo") ?? "")
+      .trim()
+      .toUpperCase()
+      .replace(/[^A-Z0-9_-]/g, "")
+      .slice(0, 64);
+    setPromoCode(promo);
   }, []);
 
   const priceFor = (planId: PlanId) =>
@@ -91,6 +100,7 @@ export default function PricingPage() {
       q.set("plan", planId);
       q.set("cycle", billingCycle);
       if (partnerCode) q.set("partner", partnerCode);
+      if (promoCode) q.set("promo", promoCode);
       router.push(`/signup?${q.toString()}`);
       return;
     }
@@ -125,6 +135,7 @@ export default function PricingPage() {
           planId,
           billingCycle,
           partnerCode: partnerCode || undefined,
+          couponCode: promoCode || undefined,
           legalAccepted: true,
           termsVersion: CURRENT_TERMS_VERSION,
           privacyVersion: CURRENT_PRIVACY_VERSION,
@@ -191,11 +202,14 @@ export default function PricingPage() {
               <button
                 type="button"
                 onClick={() => setBillingCycle("monthly")}
+                disabled={Boolean(promoCode)}
+                title={promoCode ? L("Annual launch offer applied", "Oferta anual de lanzamiento aplicada") : undefined}
                 className={[
                   "px-4 py-1.5 rounded-full transition",
                   billingCycle === "monthly"
                     ? "bg-emerald-400 text-slate-950 font-semibold"
                     : "text-slate-300 hover:text-slate-50",
+                  promoCode && "cursor-not-allowed opacity-45",
                 ].join(" ")}
               >
                 {L("Monthly", "Mensual")}
@@ -221,6 +235,20 @@ export default function PricingPage() {
             </Link>
           </div>
         </header>
+
+        {promoCode ? (
+          <div className="mb-5 w-full max-w-5xl rounded-md border border-emerald-400/40 bg-emerald-500/10 px-4 py-3 text-xs text-emerald-100">
+            <span className="font-semibold">
+              {L("Annual launch offer applied", "Oferta anual de lanzamiento aplicada")}
+            </span>
+            <span className="ml-2 text-emerald-200/80">
+              {L(
+                "Eligibility will be verified securely with your account email before checkout.",
+                "La elegibilidad se verificará de forma segura con el email de tu cuenta antes del pago."
+              )}
+            </span>
+          </div>
+        ) : null}
 
         {/* Copy */}
         <div className="w-full max-w-5xl mb-4 text-[10px] md:text-xs text-slate-400">

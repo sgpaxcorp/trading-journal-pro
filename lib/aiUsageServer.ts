@@ -10,6 +10,54 @@ export type AiCostCategory =
   | "sales"
   | "market_intelligence";
 
+function positiveNumber(value: string | undefined, fallback: number) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+export async function requireAiBudget(params: {
+  userId?: string | null;
+  category: AiCostCategory;
+}) {
+  const enabled = process.env.AI_BUDGETS_ENABLED !== "false" && (
+    process.env.NODE_ENV === "production" || process.env.AI_BUDGETS_ENABLED === "true"
+  );
+  if (!enabled) return null;
+
+  const userDailyLimit = positiveNumber(process.env.AI_BUDGET_USER_DAILY_USD, 3);
+  const globalDailyLimit = positiveNumber(process.env.AI_BUDGET_GLOBAL_DAILY_USD, 75);
+  const globalMonthlyLimit = positiveNumber(process.env.AI_BUDGET_GLOBAL_MONTHLY_USD, 1_500);
+  const categoryDailyLimit = params.category === "sales"
+    ? positiveNumber(process.env.AI_BUDGET_SALES_DAILY_USD, 10)
+    : 0;
+
+  const { data, error } = await supabaseAdmin.rpc("check_ai_usage_budget", {
+    p_user_id: params.userId ?? null,
+    p_category: params.category,
+    p_user_daily_limit: userDailyLimit,
+    p_global_daily_limit: globalDailyLimit,
+    p_global_monthly_limit: globalMonthlyLimit,
+    p_category_daily_limit: categoryDailyLimit,
+  });
+
+  if (error) {
+    console.error("[ai-budget] Budget check failed:", error.message);
+    return Response.json(
+      { error: "AI service is temporarily unavailable." },
+      { status: 503, headers: { "Retry-After": "60" } }
+    );
+  }
+
+  if ((data as { allowed?: boolean } | null)?.allowed === false) {
+    return Response.json(
+      { error: "AI usage limit reached. Please try again later." },
+      { status: 429, headers: { "Retry-After": "3600" } }
+    );
+  }
+
+  return null;
+}
+
 export async function recordAiUsage(params: {
   userId?: string | null;
   requestId?: string | null;

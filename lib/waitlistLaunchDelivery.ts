@@ -181,7 +181,8 @@ async function sendMobilePush(userId: string) {
   const { data, error } = await supabaseAdmin
     .from("push_tokens")
     .select("expo_push_token")
-    .eq("user_id", userId);
+    .eq("user_id", userId)
+    .eq("marketing_push_enabled", true);
   if (error) throw new Error(error.message);
 
   const tokens = Array.from(
@@ -358,7 +359,7 @@ export async function dispatchWaitlistLaunch(args: {
         try {
           const pushResult = await sendMobilePush(linkedUserId);
           if (!pushResult.available) {
-            await setChannelStatus(row.id, "push", "unavailable", "No registered mobile device has push notifications enabled.");
+            await setChannelStatus(row.id, "push", "unavailable", "No registered mobile device has marketing notifications enabled.");
             result.unavailable += 1;
           } else {
             await setChannelStatus(row.id, "push", "sent");

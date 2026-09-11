@@ -4,7 +4,7 @@ import { getOptionFlowBetaApiPayload, resolveOptionFlowLang } from "@/lib/option
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 import { getClientIp, rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
 import { isSmartToolsOwner } from "@/lib/smartToolsAccess";
-import { recordAiUsage } from "@/lib/aiUsageServer";
+import { recordAiUsage, requireAiBudget } from "@/lib/aiUsageServer";
 
 export const runtime = "nodejs";
 
@@ -98,6 +98,9 @@ Keep it structured with headings and bullet points.
       notes: safeNotes,
       tradeIntent,
     };
+
+    const budgetGate = await requireAiBudget({ userId, category: "market_intelligence" });
+    if (budgetGate) return budgetGate;
 
     const completion = await openai.chat.completions.create({
       model: DEFAULT_MODEL,

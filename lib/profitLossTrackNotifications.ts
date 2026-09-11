@@ -488,8 +488,8 @@ async function dispatchCandidate(
       const accepted = await sendExpoMessages(
         targets.map((row) => ({
           to: row.expo_push_token,
-          title: candidate.title,
-          body: candidate.message,
+          title: "NeuroTrader business alert",
+          body: "Open NeuroTrader to review a private business alert.",
           sound: "default",
           data: {
             screen: "Messages",

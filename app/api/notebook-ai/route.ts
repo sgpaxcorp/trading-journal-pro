@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import OpenAI from "openai";
 
-import { recordAiUsage } from "@/lib/aiUsageServer";
+import { recordAiUsage, requireAiBudget } from "@/lib/aiUsageServer";
 import { getAuthUser } from "@/lib/authServer";
 import { getNotebookAiEvidence } from "@/lib/notebookRetrievalServer";
 import { rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
@@ -55,6 +55,9 @@ export async function POST(req: Request) {
         citations: [],
       });
     }
+
+    const budgetGate = await requireAiBudget({ userId: auth.userId, category: "advanced" });
+    if (budgetGate) return budgetGate;
 
     const sources = evidence.citations.map((citation, index) => ({
       source: `S${index + 1}`,

@@ -31,11 +31,10 @@ export function SettingsScreen({ onAccountDeleted }: { onAccountDeleted?: () => 
   const [passwordLoading, setPasswordLoading] = useState(false);
   const [notificationReady, setNotificationReady] = useState(false);
   const [notificationEnabled, setNotificationEnabled] = useState(true);
+  const [marketingPushEnabled, setMarketingPushEnabled] = useState(false);
   const [notificationLoading, setNotificationLoading] = useState(false);
   const [notificationStatus, setNotificationStatus] = useState<"granted" | "denied" | "undetermined">("undetermined");
   const [pushToken, setPushToken] = useState<string | null>(null);
-  const [testNotifLoading, setTestNotifLoading] = useState(false);
-  const [serverNotifLoading, setServerNotifLoading] = useState(false);
   const [eraseEmail, setEraseEmail] = useState("");
   const [eraseConfirmation, setEraseConfirmation] = useState("");
   const [eraseLoading, setEraseLoading] = useState(false);
@@ -129,6 +128,7 @@ export function SettingsScreen({ onAccountDeleted }: { onAccountDeleted?: () => 
         setPushToken(result.pushToken);
         const enabled = result.dailyReminderEnabled;
         setNotificationEnabled(typeof enabled === "boolean" ? enabled : true);
+        setMarketingPushEnabled(result.marketingPushEnabled === true);
         setNotificationReady(true);
       } catch (err) {
         if (!active) return;
@@ -308,138 +308,47 @@ export function SettingsScreen({ onAccountDeleted }: { onAccountDeleted?: () => 
     }
   }
 
-  async function handleTestNotification() {
-    if (notificationLoading || testNotifLoading) return;
-    if (notificationStatus !== "granted") {
-      Alert.alert(
-        t(language, "Enable notifications", "Habilita notificaciones"),
-        t(
-          language,
-          "Please allow notifications in Settings to receive business briefings.",
-          "Activa notificaciones en Ajustes para recibir briefings empresariales."
-        )
-      );
-      return;
-    }
+  async function handleToggleMarketingPush(nextValue: boolean) {
+    if (notificationLoading) return;
+
     try {
-      setTestNotifLoading(true);
-      let tokenToUse = pushToken;
-      if (!tokenToUse) {
-        const result = await registerDeviceForPush({
-          locale: language,
-          promptIfNeeded: true,
-        });
-        setNotificationStatus(result.status);
-        tokenToUse = result.pushToken;
-        setPushToken(result.pushToken);
-      }
-      if (!tokenToUse) {
-        Alert.alert(
-          t(language, "Notification setup required", "Configuración necesaria"),
-          t(
-            language,
-            "We could not register this device for business briefings yet.",
-            "No pudimos registrar este dispositivo para briefings empresariales."
-          )
-        );
-        return;
-      }
-      const res = await apiPost<{
-        ok?: boolean;
-        sent?: number;
-        results?: Array<{ ok: boolean; status: number; body?: any }>;
-        receipts?: { ok: boolean; status: number; body?: any };
-      }>("/api/notifications/send-daily?force=1", {
-        expoPushToken: tokenToUse,
+      setNotificationLoading(true);
+      const result = await registerDeviceForPush({
         locale: language,
+        promptIfNeeded: nextValue,
+        dailyReminderEnabled: notificationEnabled,
+        marketingPushEnabled: nextValue,
       });
-      const resultItems =
-        res?.results?.flatMap((r) => (Array.isArray(r?.body?.data) ? r.body.data : [])) ?? [];
-      const firstError = resultItems.find((item: any) => item?.status === "error");
-      if (firstError) {
-        Alert.alert(
-          t(language, "Push error", "Error de notificación"),
-          firstError?.message ? String(firstError.message) : JSON.stringify(firstError)
-        );
+      setNotificationStatus(result.status);
+      setPushToken(result.pushToken);
+
+      if (result.status !== "granted" || !result.pushToken) {
+        setMarketingPushEnabled(false);
+        if (nextValue) {
+          Alert.alert(
+            t(language, "Enable notifications", "Habilita notificaciones"),
+            t(
+              language,
+              "Allow notifications in iOS Settings before opting in to launch offers and promotions.",
+              "Permite notificaciones en Ajustes de iOS antes de aceptar ofertas de lanzamiento y promociones."
+            ),
+            [
+              { text: t(language, "Cancel", "Cancelar"), style: "cancel" },
+              { text: t(language, "Open Settings", "Abrir ajustes"), onPress: () => Linking.openSettings() },
+            ]
+          );
+        }
         return;
       }
 
-      const receiptData = res?.receipts?.body?.data ?? null;
-      if (receiptData && typeof receiptData === "object") {
-        const receiptEntries = Object.values(receiptData) as Array<{ status?: string; message?: string }>;
-        const receiptError = receiptEntries.find((entry) => entry?.status === "error");
-        if (receiptError) {
-          Alert.alert(
-            t(language, "Push receipt error", "Error en el recibo"),
-            receiptError?.message ? String(receiptError.message) : JSON.stringify(receiptError)
-          );
-          return;
-        }
-      }
-
-      const detail =
-        typeof res?.sent === "number"
-          ? `${t(language, "Sent", "Enviadas")}: ${res.sent}`
-          : "";
-      Alert.alert(
-        t(language, "Test sent", "Prueba enviada"),
-        detail ||
-          t(
-            language,
-            "If notifications are enabled, it should arrive shortly.",
-            "Si están activas, llegará en breve."
-          )
-      );
+      setMarketingPushEnabled(result.marketingPushEnabled === true);
     } catch (err: any) {
       Alert.alert(
-        t(language, "Test failed", "Prueba fallida"),
+        t(language, "Notification update failed", "Error al actualizar notificaciones"),
         err?.message ?? "Error"
       );
     } finally {
-      setTestNotifLoading(false);
-    }
-  }
-
-  async function handleServerDailyNotification() {
-    if (notificationLoading || serverNotifLoading) return;
-    if (notificationStatus !== "granted") {
-      Alert.alert(
-        t(language, "Enable notifications", "Habilita notificaciones"),
-        t(
-          language,
-          "Please allow notifications in Settings to receive business briefings.",
-          "Activa notificaciones en Ajustes para recibir briefings empresariales."
-        )
-      );
-      return;
-    }
-    try {
-      setServerNotifLoading(true);
-      const res = await apiPost<{ ok?: boolean; sent?: number; detail?: string }>(
-        "/api/notifications/send-daily?force=1",
-        {}
-      );
-      const sent = typeof res?.sent === "number" ? res.sent : 0;
-      const detail = res?.detail || "";
-      Alert.alert(
-        t(language, "Business briefing sent", "Briefing empresarial enviado"),
-        detail
-          ? detail
-          : sent > 0
-            ? `${t(language, "Sent", "Enviadas")}: ${sent}`
-            : t(
-                language,
-                "No tokens available or business briefings disabled.",
-                "No hay tokens disponibles o los briefings empresariales están desactivados."
-              )
-      );
-    } catch (err: any) {
-      Alert.alert(
-        t(language, "Push error", "Error de notificación"),
-        err?.message ?? "Error"
-      );
-    } finally {
-      setServerNotifLoading(false);
+      setNotificationLoading(false);
     }
   }
 
@@ -734,28 +643,26 @@ export function SettingsScreen({ onAccountDeleted }: { onAccountDeleted?: () => 
             )}
           </Text>
         ) : null}
-        <Pressable
-          style={[styles.saveButton, testNotifLoading && styles.saveButtonDisabled]}
-          onPress={handleTestNotification}
-          disabled={testNotifLoading || serverNotifLoading}
-        >
-          <Text style={styles.saveButtonText}>
-            {testNotifLoading
-              ? t(language, "Sending…", "Enviando…")
-              : t(language, "Send test business briefing", "Enviar briefing empresarial de prueba")}
+        <View style={styles.notificationDivider} />
+        <View style={styles.toggleRow}>
+          <Text style={styles.toggleLabel}>
+            {t(language, "Launch offers and promotions", "Ofertas de lanzamiento y promociones")}
           </Text>
-        </Pressable>
-        <Pressable
-          style={[styles.saveButtonSecondary, serverNotifLoading && styles.saveButtonDisabled]}
-          onPress={handleServerDailyNotification}
-          disabled={serverNotifLoading || testNotifLoading}
-        >
-          <Text style={styles.saveButtonSecondaryText}>
-            {serverNotifLoading
-              ? t(language, "Sending…", "Enviando…")
-              : t(language, "Send 8:30 briefing", "Enviar briefing 8:30")}
-          </Text>
-        </Pressable>
+          <Switch
+            value={marketingPushEnabled}
+            onValueChange={handleToggleMarketingPush}
+            disabled={!notificationReady || notificationLoading}
+            trackColor={{ false: colors.border, true: colors.primary }}
+            thumbColor={marketingPushEnabled ? colors.card : colors.border}
+          />
+        </View>
+        <Text style={styles.sectionHint}>
+          {t(
+            language,
+            "Optional marketing notifications. Turn this off at any time without affecting business alerts.",
+            "Notificaciones de marketing opcionales. Desactívalas cuando quieras sin afectar las alertas empresariales."
+          )}
+        </Text>
       </View>
 
       <View style={styles.sectionCard}>
@@ -995,15 +902,22 @@ const createStyles = (colors: ThemeColors) => {
       justifyContent: "space-between",
       marginTop: 6,
     },
+    notificationDivider: {
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: colors.border,
+      marginTop: 6,
+    },
     themeHeader: {
       flexDirection: "row",
       alignItems: "center",
       justifyContent: "space-between",
     },
     toggleLabel: {
+      flex: 1,
       color: colors.textPrimary,
       fontSize: 13,
       fontWeight: "600",
+      paddingRight: 12,
     },
     input: {
       borderRadius: 10,

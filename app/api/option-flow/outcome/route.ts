@@ -5,7 +5,7 @@ import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 import { getAuthUser } from "@/lib/authServer";
 import { getClientIp, rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
 import { isSmartToolsOwner } from "@/lib/smartToolsAccess";
-import { recordAiUsage } from "@/lib/aiUsageServer";
+import { recordAiUsage, requireAiBudget } from "@/lib/aiUsageServer";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -81,6 +81,9 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       );
     }
+
+    const budgetGate = await requireAiBudget({ userId: auth.userId, category: "market_intelligence" });
+    if (budgetGate) return budgetGate;
 
     let chartPath: string | null = null;
     if (chartDataUrl) {

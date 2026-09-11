@@ -370,8 +370,8 @@ export async function notifyGoalAchievement(params: NotifyGoalAchievementParams)
 
   const messages = pushTargets.map((row) => ({
     to: row.expo_push_token,
-    title: copy.title,
-    body: copy.body,
+    title: "NeuroTrader business update",
+    body: "Open NeuroTrader to review a private business update.",
     sound: "default",
     data: {
       screen: "Messages",
