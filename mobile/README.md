@@ -22,7 +22,6 @@ It does **not** modify or replace the web app.
 3. Fill Supabase values in `.env`:
    - `EXPO_PUBLIC_SUPABASE_URL`
    - `EXPO_PUBLIC_SUPABASE_ANON_KEY`
-   - `EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY`
    - `EXPO_PUBLIC_API_URL` (default: `https://www.neurotrader-journal.com`)
 4. Regenerate native iOS project from config:
    - `npm run ios:prebuild`

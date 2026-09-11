@@ -6,17 +6,6 @@ import { supabaseBrowser } from "@/lib/supaBaseClient";
  */
 export type JournalUiSettings = {
   /**
-   * Active widget ids (matches your JournalGrid widget ids).
-   * Example: ["pnl","premarket","inside",...]
-   */
-  activeWidgets?: string[];
-
-  /**
-   * react-grid-layout layout object as JSON (whatever your JournalGrid stores in localStorage).
-   */
-  layout?: any;
-
-  /**
    * Customizable journal checklist presets (per user).
    */
   checklists?: {

@@ -6,8 +6,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 
-import type { JournalWidgetId, JournalWidgetDef } from "@/app/components/JournalGrid";
-
 import TopNav from "@/app/components/TopNav";
 import JournalInkField from "@/app/components/JournalInkField";
 import NotebookCaptureButton from "@/app/components/NotebookCaptureButton";
@@ -93,6 +91,21 @@ const KIND_LABELS: Record<InstrumentType, { en: string; es: string }> = {
 };
 
 type SideType = "long" | "short";
+
+type JournalWidgetId =
+  | "pnl"
+  | "premarket"
+  | "inside"
+  | "after"
+  | "entries"
+  | "exits"
+  | "emotional"
+  | "templates";
+
+type JournalWidgetDef = {
+  id: JournalWidgetId;
+  render: () => React.ReactNode;
+};
 
 type PremiumSide = "none" | "debit" | "credit";
 
@@ -2936,8 +2949,6 @@ export default function DailyJournalPage() {
   const WIDGETS: JournalWidgetDef[] = [
     {
       id: "premarket",
-      title: L("Premarket Prep", "Preparación premarket"),
-      defaultLayout: { i: "premarket", x: 0, y: 0, w: 7, h: 8, minW: 4, minH: 6 },
       render: () => (
         <WidgetCard
           title={L("Premarket Prep", "Preparación premarket")}
@@ -3119,8 +3130,6 @@ export default function DailyJournalPage() {
 
     {
       id: "pnl",
-      title: L("Day P&L", "P&L del día"),
-      defaultLayout: { i: "pnl", x: 7, y: 0, w: 5, h: 3, minW: 3, minH: 2 },
       render: () => (
         <WidgetCard title={L("Day P&L", "P&L del día")} compact>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
@@ -3175,8 +3184,6 @@ export default function DailyJournalPage() {
 
     {
       id: "entries",
-      title: L("Entries", "Entradas"),
-      defaultLayout: { i: "entries", x: 7, y: 3, w: 5, h: 7, minW: 4, minH: 6 },
       render: () => (
         <WidgetCard
           title={L("Entries", "Entradas")}
@@ -3420,8 +3427,6 @@ export default function DailyJournalPage() {
 
     {
       id: "exits",
-      title: L("Exits", "Salidas"),
-      defaultLayout: { i: "exits", x: 7, y: 10, w: 5, h: 6, minW: 4, minH: 5 },
       render: () => (
         <WidgetCard
           title={L("Exits", "Salidas")}
@@ -3571,8 +3576,6 @@ export default function DailyJournalPage() {
 
     {
       id: "inside",
-      title: L("Inside the Trade", "Dentro del trade"),
-      defaultLayout: { i: "inside", x: 0, y: 8, w: 7, h: 8, minW: 4, minH: 6 },
       render: () => (
         <WidgetCard
           title={L("Inside the Trade", "Dentro del trade")}
@@ -3715,8 +3718,6 @@ export default function DailyJournalPage() {
 
     {
       id: "after",
-      title: L("After-trade Analysis", "Análisis post‑trade"),
-      defaultLayout: { i: "after", x: 0, y: 16, w: 7, h: 8, minW: 4, minH: 6 },
       render: () => (
         <WidgetCard
           title={L("After-trade Analysis", "Análisis post‑trade")}
@@ -3934,8 +3935,6 @@ export default function DailyJournalPage() {
 
     {
       id: "emotional",
-      title: L("Neuro Layer", "Neuro Layer"),
-      defaultLayout: { i: "emotional", x: 7, y: 16, w: 5, h: 6, minW: 3, minH: 4 },
       render: () => (
         <WidgetCard
           title={L("Neuro Layer", "Neuro Layer")}
@@ -4124,8 +4123,6 @@ export default function DailyJournalPage() {
 
     {
       id: "templates",
-      title: L("Templates", "Plantillas"),
-      defaultLayout: { i: "templates", x: 0, y: 30, w: 12, h: 5, minW: 6, minH: 4 },
       render: () => (
         <WidgetCard title={L("Templates (Premarket + Inside + After)", "Plantillas (Premarket + Dentro + Post)")}>
           <div className="space-y-1 max-h-40 overflow-y-auto pr-1 mb-3">

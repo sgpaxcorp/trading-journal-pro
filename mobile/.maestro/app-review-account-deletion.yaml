@@ -1,0 +1,55 @@
+appId: com.sgpax.neurotraderjournal
+name: App Review account deletion
+---
+- launchApp:
+    clearState: true
+- assertVisible: "Sign in"
+- tapOn:
+    text: "Email"
+- inputText: ${DEMO_EMAIL}
+- hideKeyboard
+- tapOn:
+    text: "Password"
+- inputText: ${DEMO_PASSWORD}
+- hideKeyboard
+- tapOn:
+    text: "Sign in"
+    index: 1
+- extendedWaitUntil:
+    visible: "Business Center"
+    timeout: 45000
+- tapOn: "Open app settings"
+- extendedWaitUntil:
+    visible: "Settings"
+    timeout: 15000
+- scrollUntilVisible:
+    element:
+      text: "Delete account permanently"
+    direction: DOWN
+    timeout: 30000
+    speed: 60
+- tapOn:
+    text: "Email for account deletion"
+- inputText: ${DEMO_EMAIL}
+- pressKey: ENTER
+- inputText: "DELETE"
+- pressKey: ENTER
+- scrollUntilVisible:
+    element:
+      text: "Delete account permanently"
+    direction: DOWN
+    timeout: 10000
+    speed: 50
+- tapOn: "Delete account permanently"
+- assertVisible: "Permanently delete account?"
+- tapOn: "Continue"
+- assertVisible: "Final confirmation"
+- tapOn:
+    point: "50%,54%"
+- extendedWaitUntil:
+    visible: "Account deleted"
+    timeout: 30000
+- tapOn: "OK"
+- extendedWaitUntil:
+    visible: "Sign in"
+    timeout: 15000

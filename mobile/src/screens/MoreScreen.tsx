@@ -1,4 +1,4 @@
-import { Alert, Linking, Platform, Pressable, StyleSheet, Switch, Text, TextInput, View } from "react-native";
+import { Alert, Keyboard, Linking, Platform, Pressable, StyleSheet, Switch, Text, TextInput, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -13,7 +13,7 @@ import { supabaseMobile } from "../lib/supabase";
 import { type ThemeColors } from "../theme";
 import { useTheme } from "../lib/ThemeContext";
 
-export function SettingsScreen() {
+export function SettingsScreen({ onAccountDeleted }: { onAccountDeleted?: () => void }) {
   const { language, setLanguage } = useLanguage();
   const { colors, mode: themeMode, setMode } = useTheme();
   const user = useSupabaseUser();
@@ -43,6 +43,7 @@ export function SettingsScreen() {
   const [deleteConfirmation, setDeleteConfirmation] = useState("");
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const deleteConfirmationRef = useRef<TextInput>(null);
   const mountedRef = useRef(true);
 
   useEffect(() => {
@@ -569,7 +570,13 @@ export function SettingsScreen() {
                           language,
                           "Your account and associated data were permanently deleted.",
                           "Tu cuenta y la data asociada fueron eliminadas permanentemente."
-                        )
+                        ),
+                        [
+                          {
+                            text: "OK",
+                            onPress: onAccountDeleted,
+                          },
+                        ]
                       );
                     } catch (err: any) {
                       Alert.alert(
@@ -791,6 +798,22 @@ export function SettingsScreen() {
         </View>
       </View>
 
+      <View style={styles.sectionCard}>
+        <Text style={styles.sectionTitle}>{t(language, "Legal and support", "Legal y soporte")}</Text>
+        <Pressable style={styles.legalRow} onPress={() => void Linking.openURL("https://www.neurotrader-journal.com/privacy")}>
+          <Text style={styles.legalText}>{t(language, "Privacy Policy", "Política de Privacidad")}</Text>
+          <Ionicons name="open-outline" size={17} color={colors.primary} />
+        </Pressable>
+        <Pressable style={styles.legalRow} onPress={() => void Linking.openURL("https://www.neurotrader-journal.com/terms")}>
+          <Text style={styles.legalText}>{t(language, "Terms and Conditions", "Términos y Condiciones")}</Text>
+          <Ionicons name="open-outline" size={17} color={colors.primary} />
+        </Pressable>
+        <Pressable style={styles.legalRow} onPress={() => void Linking.openURL("https://www.neurotrader-journal.com/contact")}>
+          <Text style={styles.legalText}>{t(language, "Contact support", "Contactar soporte")}</Text>
+          <Ionicons name="open-outline" size={17} color={colors.primary} />
+        </Pressable>
+      </View>
+
       <View style={styles.dangerZone}>
         <View style={styles.themeHeader}>
           <Text style={styles.dangerTitle}>{t(language, "Danger zone", "Zona peligrosa")}</Text>
@@ -805,7 +828,16 @@ export function SettingsScreen() {
         </Text>
         <TextInput
           style={styles.input}
-          placeholder={t(language, "Type your account email", "Escribe tu email de cuenta")}
+          placeholder={t(
+            language,
+            "Type your email to reset the workspace",
+            "Escribe tu email para reiniciar el workspace"
+          )}
+          accessibilityLabel={t(
+            language,
+            "Email for workspace reset",
+            "Email para reiniciar el workspace"
+          )}
           placeholderTextColor={colors.textMuted}
           autoCapitalize="none"
           keyboardType="email-address"
@@ -816,6 +848,11 @@ export function SettingsScreen() {
           style={styles.input}
           placeholder="ERASE ALL DATA"
           placeholderTextColor={colors.textMuted}
+          accessibilityLabel={t(
+            language,
+            "Workspace reset confirmation",
+            "Confirmación para reiniciar el workspace"
+          )}
           autoCapitalize="characters"
           value={eraseConfirmation}
           onChangeText={setEraseConfirmation}
@@ -841,18 +878,38 @@ export function SettingsScreen() {
         </Text>
         <TextInput
           style={styles.input}
-          placeholder={t(language, "Type your account email", "Escribe tu email de cuenta")}
+          placeholder={t(
+            language,
+            "Type your email to delete the account",
+            "Escribe tu email para eliminar la cuenta"
+          )}
+          accessibilityLabel={t(
+            language,
+            "Email for account deletion",
+            "Email para eliminar la cuenta"
+          )}
           placeholderTextColor={colors.textMuted}
           autoCapitalize="none"
           keyboardType="email-address"
+          returnKeyType="next"
+          blurOnSubmit={false}
+          onSubmitEditing={() => deleteConfirmationRef.current?.focus()}
           value={deleteEmail}
           onChangeText={setDeleteEmail}
         />
         <TextInput
+          ref={deleteConfirmationRef}
           style={styles.input}
           placeholder="DELETE"
           placeholderTextColor={colors.textMuted}
+          accessibilityLabel={t(
+            language,
+            "Account deletion confirmation",
+            "Confirmación para eliminar la cuenta"
+          )}
           autoCapitalize="characters"
+          returnKeyType="done"
+          onSubmitEditing={Keyboard.dismiss}
           value={deleteConfirmation}
           onChangeText={setDeleteConfirmation}
         />
@@ -911,6 +968,20 @@ const createStyles = (colors: ThemeColors) => {
     sectionHint: {
       color: colors.textMuted,
       fontSize: 12,
+    },
+    legalRow: {
+      minHeight: 44,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: colors.border,
+      paddingVertical: 9,
+    },
+    legalText: {
+      color: colors.textPrimary,
+      fontSize: 13,
+      fontWeight: "600",
     },
     helperText: {
       color: colors.textMuted,

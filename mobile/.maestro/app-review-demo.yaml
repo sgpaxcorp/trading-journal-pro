@@ -1,0 +1,33 @@
+appId: com.sgpax.neurotraderjournal
+name: App Review demo account
+---
+- launchApp:
+    clearState: true
+- assertVisible: "Sign in"
+- tapOn:
+    text: "Email"
+- inputText: ${DEMO_EMAIL}
+- hideKeyboard
+- tapOn:
+    text: "Password"
+- inputText: ${DEMO_PASSWORD}
+- hideKeyboard
+- tapOn:
+    text: "Sign in"
+    index: 1
+- extendedWaitUntil:
+    visible: "Business Center"
+    timeout: 45000
+- assertVisible: "$250,007.28"
+- tapOn:
+    point: "26%,85%"
+- extendedWaitUntil:
+    visible: ".*250,000.*"
+    timeout: 30000
+- assertVisible: ".*312,509.*"
+- assertVisible: "Return to Business Center"
+- takeScreenshot: app-review-business-plan
+- tapOn: "Return to Business Center"
+- extendedWaitUntil:
+    visible: "Business Center"
+    timeout: 15000

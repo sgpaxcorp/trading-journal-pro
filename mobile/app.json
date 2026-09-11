@@ -25,7 +25,7 @@
         "CFBundleDisplayName": "Neuro Trader",
         "ITSAppUsesNonExemptEncryption": false
       },
-      "buildNumber": "3"
+      "buildNumber": "4"
     },
     "android": {
       "package": "com.sgpax.neurotraderjournal",
@@ -58,7 +58,7 @@
           ]
         }
       ],
-      "versionCode": 3
+      "versionCode": 4
     },
     "web": {
       "favicon": "./assets/favicon.png"

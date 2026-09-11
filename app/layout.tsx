@@ -3,6 +3,7 @@ import "./globals.css";
 import type { ReactNode } from "react";
 import { AuthProvider } from "@/context/AuthContext";
 import Footer from "@/app/components/Footer";
+import PageNavigationControls from "@/app/components/PageNavigationControls";
 import ThemeInitScript from "@/app/components/ThemeInitScript";
 import type { Metadata } from "next";
 import { connection } from "next/server";
@@ -26,6 +27,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
       <body className="bg-slate-950 text-slate-50 overflow-x-hidden">
         <ThemeInitScript />
         <AuthProvider>
+          <PageNavigationControls />
           {/* Wrapper para mantener el footer al fondo */}
           <div className="min-h-screen flex flex-col">
             {/* Contenido de cada página */}

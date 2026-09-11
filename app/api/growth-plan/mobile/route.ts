@@ -12,6 +12,7 @@ import {
 import {
   buildAdaptiveGrowthPlan,
   getGrowthPlanOperatingPolicy,
+  type GrowthPlanEvidence,
   type GrowthPlanFinancialCapacity,
   type GrowthPlanScenarioId,
 } from "@/lib/growthPlanFeasibility";
@@ -36,7 +37,6 @@ import {
 } from "@/lib/fundedAccounts";
 import { endingBalanceFromJournalNotes } from "@/lib/accountBalanceSnapshot";
 import { recommendGrowthPlanContinuation } from "@/lib/growthPlanContinuation";
-import type { GrowthPlanEvidence } from "@/lib/growthPlanFeasibility";
 
 export const runtime = "nodejs";
 
@@ -591,7 +591,7 @@ async function getPlanProgress(userId: string, accountId: string, row: GrowthPla
         .order("date", { ascending: true }),
       supabaseAdmin
         .from("journal_trades")
-        .select("id", { count: "exact", head: true })
+        .select("journal_date,symbol,strategy")
         .eq("user_id", userId)
         .eq("account_id", accountId),
     ]);
@@ -640,10 +640,15 @@ async function getPlanProgress(userId: string, accountId: string, row: GrowthPla
   const grossLoss = Math.abs(sessionPnls.filter((value) => value < 0).reduce((sum, value) => sum + value, 0));
   const wins = sessionPnls.filter((value) => value > 0).length;
   const totalPnl = sessionPnls.reduce((sum, value) => sum + value, 0);
+  const distinctTrades = new Set(
+    (tradeCountResult.data ?? []).map(
+      (trade: any) => `${trade?.journal_date ?? ""}:${trade?.symbol ?? ""}:${trade?.strategy ?? ""}`
+    )
+  ).size;
   const evidence: GrowthPlanEvidence = {
     updatedAtIso: dates.at(-1) ?? null,
     totalSessions: sessionPnls.length,
-    totalTrades: tradeCountResult.error ? sessionPnls.length : tradeCountResult.count ?? sessionPnls.length,
+    totalTrades: tradeCountResult.error ? sessionPnls.length : distinctTrades || sessionPnls.length,
     winRate: sessionPnls.length ? (wins / sessionPnls.length) * 100 : null,
     profitFactor: grossLoss > 0 ? grossProfit / grossLoss : null,
     expectancy: sessionPnls.length ? totalPnl / sessionPnls.length : null,

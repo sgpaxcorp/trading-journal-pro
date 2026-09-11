@@ -2189,6 +2189,8 @@ export function DashboardScreen({ onOpenJournalDate, onOpenBusinessPlan, onOpenN
               <Pressable
                 key={action.key}
                 accessibilityRole="button"
+                accessibilityLabel={action.label}
+                testID={`dashboard-quick-action-${action.key}`}
                 onPress={action.onPress}
                 style={styles.quickAction}
               >

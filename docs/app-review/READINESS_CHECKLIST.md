@@ -1,0 +1,23 @@
+# App Review Readiness Checklist
+
+- [x] Production backend exposes account deletion and plan continuation.
+- [x] Baseline iOS Release build 4 was generated and installed on the physical iPhone `Steven` running iOS 26.6.1.
+- [x] Baseline Release build compiles, installs, and launches in an iOS 26.5 simulator.
+- [x] Current iOS JavaScript bundle exports successfully after the navigation and legal-acceptance updates.
+- [x] Main review account login succeeds in the Release build.
+- [x] Main review account opens the preloaded Business Center and Business Plan.
+- [x] Completed Business Plan shows an objective next-cycle recommendation.
+- [x] Disposable account deletion succeeds and returns to Sign in.
+- [x] Demo seed was rerun after automated deletion testing.
+- [x] Privacy Policy, Terms and Conditions, and Contact support links are present in Settings.
+- [x] Mobile blocks private access when legal versions change and records affirmative acceptance, including the AI-data disclosure.
+- [x] No signup, price, checkout, subscription-purchase, or external purchase control appears in the iOS build.
+- [x] Broker connections remain disabled in the submitted iOS build.
+- [x] Updated backend and legal pages are deployed to the production domain.
+- [ ] Generate and install the final signed iOS build after the global Back/Business Center navigation update.
+- [ ] Complete Apple authentication and upload the final iOS build to App Store Connect.
+- [ ] App Store Connect Support URL and Privacy Policy URL are current.
+- [ ] App Privacy answers match actual collection and third-party processing.
+- [ ] Physical-device recording is attached in Resolution Center.
+- [ ] `APP_REVIEW_NOTES.md` content and credentials are added to App Review Information > Notes.
+- [ ] The same requested information is included in the Resolution Center reply.

@@ -1,0 +1,22 @@
+appId: com.sgpax.neurotraderjournal
+name: Shared navigation controls
+---
+- launchApp
+- runFlow:
+    when:
+      visible: "Return to Business Center"
+    commands:
+      - tapOn: "Return to Business Center"
+- extendedWaitUntil:
+    visible: "Business Center"
+    timeout: 30000
+- tapOn:
+    id: "dashboard-quick-action-plan"
+- extendedWaitUntil:
+    visible: "Return to Business Center"
+    timeout: 15000
+- assertVisible: "Back"
+- tapOn: "Return to Business Center"
+- extendedWaitUntil:
+    visible: "Business Center"
+    timeout: 15000

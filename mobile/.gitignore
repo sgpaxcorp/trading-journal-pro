@@ -32,6 +32,7 @@ yarn-error.*
 
 # local env files
 .env*.local
+.xcode.env.local
 
 # typescript
 *.tsbuildinfo
@@ -39,3 +40,7 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# local Xcode build artifacts
+/build/
+/artifacts/

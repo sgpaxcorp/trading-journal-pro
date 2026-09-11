@@ -40,7 +40,7 @@ import { PlanGate } from "./src/components/PlanGate";
 import { t } from "./src/lib/i18n";
 import type { ModuleRouteOptions, ModuleRouteParams } from "./src/lib/moduleNavigation";
 import { usePlanAccess } from "./src/lib/usePlanAccess";
-import { apiGet } from "./src/lib/api";
+import { apiGet, apiPost } from "./src/lib/api";
 
 enableScreens(true);
 enableFreeze(true);
@@ -66,6 +66,7 @@ type MainTabParamList = {
 type RootStackParamList = {
   Auth: undefined;
   Tabs: NavigatorScreenParams<MainTabParamList> | undefined;
+  LegalAcceptance: undefined;
   PaymentRequired: undefined;
   ResetPassword: undefined;
   Module: ModuleRouteParams;
@@ -83,6 +84,13 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
 const navigationRef = createNavigationContainerRef<RootStackParamList>();
 type AccessStatusResponse = {
   hasAppAccess?: boolean;
+};
+
+type LegalAcceptanceStatus = {
+  accepted?: boolean;
+  requiresAcceptance?: boolean;
+  termsVersion?: string;
+  privacyVersion?: string;
 };
 
 function MainTabs() {
@@ -231,6 +239,252 @@ function MainTabs() {
   );
 }
 
+function AppHomeButton({ onPress }: { onPress: () => void }) {
+  const { colors } = useTheme();
+  const { language } = useLanguage();
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={t(language, "Return to Business Center", "Volver al Centro Empresarial")}
+      hitSlop={10}
+      onPress={onPress}
+      style={styles.homeButton}
+    >
+      <Ionicons name="home-outline" size={22} color={colors.textPrimary} />
+    </Pressable>
+  );
+}
+
+function LegalAcceptanceScreen({
+  status,
+  checking,
+  error,
+  onAccept,
+  onRetry,
+  onSignOut,
+}: {
+  status: LegalAcceptanceStatus | null;
+  checking: boolean;
+  error: string | null;
+  onAccept: () => Promise<void>;
+  onRetry: () => void;
+  onSignOut: () => void;
+}) {
+  const { colors } = useTheme();
+  const { language } = useLanguage();
+  const [accepted, setAccepted] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const styles = useMemo(
+    () =>
+      StyleSheet.create({
+        root: {
+          flex: 1,
+          justifyContent: "center",
+          backgroundColor: colors.background,
+          padding: 22,
+        },
+        card: {
+          gap: 14,
+          borderWidth: 1,
+          borderColor: colors.border,
+          borderRadius: 12,
+          backgroundColor: colors.surface,
+          padding: 20,
+        },
+        kicker: {
+          color: colors.primary,
+          fontSize: 11,
+          fontWeight: "800",
+          letterSpacing: 1.2,
+          textTransform: "uppercase",
+        },
+        title: {
+          color: colors.textPrimary,
+          fontSize: 24,
+          fontWeight: "800",
+        },
+        body: {
+          color: colors.textMuted,
+          fontSize: 14,
+          lineHeight: 21,
+        },
+        links: {
+          flexDirection: "row",
+          flexWrap: "wrap",
+          gap: 10,
+        },
+        linkButton: {
+          minHeight: 42,
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 7,
+          borderWidth: 1,
+          borderColor: colors.border,
+          borderRadius: 8,
+          paddingHorizontal: 12,
+        },
+        linkText: {
+          color: colors.primary,
+          fontSize: 13,
+          fontWeight: "700",
+        },
+        consentRow: {
+          flexDirection: "row",
+          alignItems: "flex-start",
+          gap: 10,
+          borderWidth: 1,
+          borderColor: accepted ? colors.primary : colors.border,
+          borderRadius: 8,
+          backgroundColor: colors.card,
+          padding: 12,
+        },
+        consentText: {
+          flex: 1,
+          color: colors.textPrimary,
+          fontSize: 13,
+          lineHeight: 19,
+        },
+        error: {
+          color: colors.dangerText,
+          fontSize: 13,
+          lineHeight: 18,
+        },
+        primaryButton: {
+          minHeight: 48,
+          alignItems: "center",
+          justifyContent: "center",
+          borderRadius: 8,
+          backgroundColor: colors.primary,
+          paddingHorizontal: 16,
+        },
+        primaryButtonDisabled: {
+          opacity: 0.45,
+        },
+        primaryText: {
+          color: colors.onPrimary,
+          fontSize: 14,
+          fontWeight: "800",
+        },
+        secondaryButton: {
+          minHeight: 44,
+          flexDirection: "row",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 8,
+          borderWidth: 1,
+          borderColor: colors.border,
+          borderRadius: 8,
+        },
+        secondaryText: {
+          color: colors.textMuted,
+          fontSize: 13,
+          fontWeight: "700",
+        },
+      }),
+    [accepted, colors]
+  );
+
+  const handleAccept = async () => {
+    if (!accepted || saving || checking) return;
+    setSaving(true);
+    try {
+      await onAccept();
+    } catch {
+      // The parent exposes the server message in the screen-level error state.
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <View style={styles.root}>
+      <View style={styles.card}>
+        <Text style={styles.kicker}>{t(language, "Account terms update", "Actualizacion de terminos")}</Text>
+        <Text style={styles.title}>{t(language, "Review and accept to continue", "Revisa y acepta para continuar")}</Text>
+        <Text style={styles.body}>
+          {t(
+            language,
+            "NeuroTrader is an educational planning and accountability tool. Its analytics, simulations, projections, and AI outputs are not financial advice and do not guarantee income, profit, capital growth, or trading results.",
+            "NeuroTrader es una herramienta educativa de planificacion y accountability. Sus analiticas, simulaciones, proyecciones y resultados de IA no son asesoria financiera ni garantizan ingresos, ganancias, crecimiento de capital o resultados de trading."
+          )}
+        </Text>
+        <View style={styles.links}>
+          <Pressable
+            accessibilityRole="link"
+            accessibilityLabel={t(language, "Read Terms and Conditions", "Leer Terminos y Condiciones")}
+            onPress={() => void Linking.openURL("https://www.neurotrader-journal.com/terms")}
+            style={styles.linkButton}
+          >
+            <Ionicons name="document-text-outline" size={18} color={colors.primary} />
+            <Text style={styles.linkText}>{t(language, "Terms", "Terminos")}</Text>
+          </Pressable>
+          <Pressable
+            accessibilityRole="link"
+            accessibilityLabel={t(language, "Read Privacy Policy", "Leer Politica de Privacidad")}
+            onPress={() => void Linking.openURL("https://www.neurotrader-journal.com/privacy")}
+            style={styles.linkButton}
+          >
+            <Ionicons name="shield-checkmark-outline" size={18} color={colors.primary} />
+            <Text style={styles.linkText}>{t(language, "Privacy", "Privacidad")}</Text>
+          </Pressable>
+        </View>
+        <Pressable
+          accessibilityRole="checkbox"
+          accessibilityState={{ checked: accepted }}
+          accessibilityLabel={t(language, "Accept current legal terms and AI data processing", "Aceptar terminos vigentes y procesamiento de datos por IA")}
+          onPress={() => setAccepted((value) => !value)}
+          style={styles.consentRow}
+        >
+          <Ionicons
+            name={accepted ? "checkbox" : "square-outline"}
+            size={23}
+            color={accepted ? colors.primary : colors.textMuted}
+          />
+          <Text style={styles.consentText}>
+            {t(
+              language,
+              "I accept the current Terms and Privacy Policy. When I choose an AI feature, I also consent to NeuroTrader sending the selected plans, journal records, trades, analytics, notes, and screenshots needed for that request to OpenAI or another disclosed AI service provider.",
+              "Acepto los Terminos y la Politica de Privacidad vigentes. Cuando elijo una funcion de IA, tambien autorizo a NeuroTrader a enviar a OpenAI u otro proveedor de IA divulgado los planes, registros del journal, trades, analiticas, notas y screenshots seleccionados que sean necesarios para esa solicitud."
+            )}
+          </Text>
+        </Pressable>
+        {status?.termsVersion && status?.privacyVersion ? (
+          <Text style={styles.body}>
+            {t(language, "Versions", "Versiones")}: {status.termsVersion} / {status.privacyVersion}
+          </Text>
+        ) : null}
+        {error ? <Text style={styles.error}>{error}</Text> : null}
+        {error && !status ? (
+          <Pressable style={styles.secondaryButton} onPress={onRetry} disabled={checking}>
+            <Ionicons name="refresh" size={18} color={colors.textMuted} />
+            <Text style={styles.secondaryText}>
+              {checking ? t(language, "Checking...", "Verificando...") : t(language, "Try again", "Intentar de nuevo")}
+            </Text>
+          </Pressable>
+        ) : null}
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={t(language, "Accept and continue", "Aceptar y continuar")}
+          style={[styles.primaryButton, (!accepted || saving || checking || !status) && styles.primaryButtonDisabled]}
+          onPress={() => void handleAccept()}
+          disabled={!accepted || saving || checking || !status}
+        >
+          {saving ? (
+            <ActivityIndicator color={colors.onPrimary} />
+          ) : (
+            <Text style={styles.primaryText}>{t(language, "Accept and continue", "Aceptar y continuar")}</Text>
+          )}
+        </Pressable>
+        <Pressable style={styles.secondaryButton} onPress={onSignOut}>
+          <Ionicons name="arrow-back" size={18} color={colors.textMuted} />
+          <Text style={styles.secondaryText}>{t(language, "Return to sign in", "Volver a iniciar sesion")}</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
 function PaymentRequiredScreen({
   checking,
   error,
@@ -323,6 +577,12 @@ function PaymentRequiredScreen({
           fontSize: 13,
           fontWeight: "700",
         },
+        returnRow: {
+          flexDirection: "row",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 8,
+        },
       }),
     [colors]
   );
@@ -362,7 +622,10 @@ function PaymentRequiredScreen({
         </Text>
       </Pressable>
       <Pressable style={[styles.button, styles.dangerButton]} onPress={onSignOut}>
-        <Text style={styles.dangerText}>{t(language, "Sign out", "Cerrar sesion")}</Text>
+        <View style={styles.returnRow}>
+          <Ionicons name="arrow-back" size={18} color={colors.textMuted} />
+          <Text style={styles.dangerText}>{t(language, "Return to sign in", "Volver a iniciar sesion")}</Text>
+        </View>
       </Pressable>
     </View>
   );
@@ -374,6 +637,9 @@ function AppShell() {
   const [accessReady, setAccessReady] = useState(!hasSupabaseConfig);
   const [hasAppAccess, setHasAppAccess] = useState(!hasSupabaseConfig);
   const [accessError, setAccessError] = useState<string | null>(null);
+  const [legalReady, setLegalReady] = useState(!hasSupabaseConfig);
+  const [legalStatus, setLegalStatus] = useState<LegalAcceptanceStatus | null>(null);
+  const [legalError, setLegalError] = useState<string | null>(null);
   const [navReady, setNavReady] = useState(false);
   const [recoverySessionReady, setRecoverySessionReady] = useState(false);
   const [recoveryError, setRecoveryError] = useState<string | null>(null);
@@ -452,6 +718,7 @@ function AppShell() {
     }
 
     setAccessReady(false);
+    setLegalReady(false);
     setAccessError(null);
     try {
       const access = await apiGet<AccessStatusResponse>("/api/access/status");
@@ -474,6 +741,41 @@ function AppShell() {
       active = false;
     };
   }, [refreshAccessStatus]);
+
+  const refreshLegalAcceptance = useCallback(async () => {
+    if (!hasSupabaseConfig) {
+      setLegalStatus({ accepted: true, requiresAcceptance: false });
+      setLegalReady(true);
+      setLegalError(null);
+      return;
+    }
+    if (!session?.user?.id || !hasAppAccess) {
+      setLegalStatus(null);
+      setLegalReady(true);
+      setLegalError(null);
+      return;
+    }
+
+    setLegalReady(false);
+    setLegalError(null);
+    try {
+      const status = await apiGet<LegalAcceptanceStatus>("/api/legal/acceptance");
+      setLegalStatus(status);
+    } catch (err) {
+      setLegalStatus(null);
+      setLegalError(
+        err instanceof Error
+          ? err.message
+          : t(language, "Unable to verify the current terms.", "No se pudieron verificar los terminos vigentes.")
+      );
+    } finally {
+      setLegalReady(true);
+    }
+  }, [hasAppAccess, language, session?.access_token, session?.user?.id]);
+
+  useEffect(() => {
+    void refreshLegalAcceptance();
+  }, [refreshLegalAcceptance]);
 
   useEffect(() => {
     if (!supabaseMobile) return;
@@ -579,11 +881,20 @@ function AppShell() {
     return () => subscription.remove();
   }, [hasAppAccess, navReady, session?.user?.id]);
 
-  const shouldShowMainTabs = !hasSupabaseConfig || (Boolean(session) && hasAppAccess);
+  const requiresLegalAcceptance = Boolean(legalStatus?.requiresAcceptance) || Boolean(legalError);
+  const shouldShowMainTabs =
+    !hasSupabaseConfig || (Boolean(session) && hasAppAccess && legalReady && !requiresLegalAcceptance);
+  const shouldShowLegalAcceptance =
+    hasSupabaseConfig && Boolean(session) && hasAppAccess && legalReady && requiresLegalAcceptance;
   const shouldShowPaymentRequired = hasSupabaseConfig && Boolean(session) && accessReady && !hasAppAccess;
-  const shouldShowLoading = !authReady || (hasSupabaseConfig && Boolean(session) && !accessReady);
-  const postAuthRoute: "Tabs" | "PaymentRequired" | "Auth" = shouldShowMainTabs
+  const shouldShowLoading =
+    !authReady ||
+    (hasSupabaseConfig && Boolean(session) && !accessReady) ||
+    (hasSupabaseConfig && Boolean(session) && hasAppAccess && !legalReady);
+  const postAuthRoute: "Tabs" | "LegalAcceptance" | "PaymentRequired" | "Auth" = shouldShowMainTabs
     ? "Tabs"
+    : shouldShowLegalAcceptance
+    ? "LegalAcceptance"
     : shouldShowPaymentRequired
     ? "PaymentRequired"
     : "Auth";
@@ -594,6 +905,9 @@ function AppShell() {
     setHasAppAccess(false);
     setAccessReady(true);
     setAccessError(null);
+    setLegalStatus(null);
+    setLegalReady(false);
+    setLegalError(null);
     if (navigationRef.isReady()) {
       navigationRef.reset({
         index: 0,
@@ -601,6 +915,33 @@ function AppShell() {
       });
     }
   }, []);
+
+  const handleLegalAccept = useCallback(async () => {
+    if (!legalStatus?.termsVersion || !legalStatus?.privacyVersion) {
+      throw new Error(
+        t(language, "Current legal versions are unavailable. Try again.", "Las versiones legales no estan disponibles. Intenta de nuevo.")
+      );
+    }
+    try {
+      await apiPost("/api/legal/acceptance", {
+        legalAccepted: true,
+        termsVersion: legalStatus.termsVersion,
+        privacyVersion: legalStatus.privacyVersion,
+        source: "in_app_update",
+        disclosureVersion: "mobile-ai-data-v1",
+        location: "mobile_workspace_gate",
+      });
+      setLegalStatus((current) => ({ ...current, accepted: true, requiresAcceptance: false }));
+      setLegalError(null);
+    } catch (err) {
+      const message =
+        err instanceof Error
+          ? err.message
+          : t(language, "Could not record acceptance.", "No se pudo guardar la aceptacion.");
+      setLegalError(message);
+      throw err;
+    }
+  }, [language, legalStatus?.privacyVersion, legalStatus?.termsVersion]);
 
   const handleResetPasswordDone = useCallback(() => {
     setRecoveryError(null);
@@ -624,6 +965,14 @@ function AppShell() {
     });
   }, [postAuthRoute]);
 
+  const handleReturnHome = useCallback(() => {
+    if (!navigationRef.isReady()) return;
+    navigationRef.reset({
+      index: 0,
+      routes: [{ name: "Tabs", params: { screen: "Dashboard" } }],
+    });
+  }, []);
+
   return (
     <NavigationContainer ref={navigationRef} onReady={() => setNavReady(true)}>
       <StatusBar style={themeMode === "light" ? "dark" : "light"} />
@@ -637,12 +986,29 @@ function AppShell() {
           screenOptions={{
             headerStyle: { backgroundColor: colors.surface },
             headerTintColor: colors.textPrimary,
+            headerBackTitle: t(language, "Back", "Atrás"),
             contentStyle: { backgroundColor: colors.background },
+            headerRight: shouldShowMainTabs
+              ? () => <AppHomeButton onPress={handleReturnHome} />
+              : undefined,
           }}
         >
           {shouldShowMainTabs ? (
             <Stack.Screen name="Tabs" options={{ headerShown: false }}>
               {() => <MainTabs />}
+            </Stack.Screen>
+          ) : shouldShowLegalAcceptance ? (
+            <Stack.Screen name="LegalAcceptance" options={{ headerShown: false }}>
+              {() => (
+                <LegalAcceptanceScreen
+                  status={legalStatus}
+                  checking={!legalReady}
+                  error={legalError}
+                  onAccept={handleLegalAccept}
+                  onRetry={() => void refreshLegalAcceptance()}
+                  onSignOut={handleSignOut}
+                />
+              )}
             </Stack.Screen>
           ) : shouldShowPaymentRequired ? (
             <Stack.Screen name="PaymentRequired" options={{ headerShown: false }}>
@@ -676,11 +1042,9 @@ function AppShell() {
             component={ModulePlaceholderScreen}
             options={({ route }) => ({ title: route.params.title })}
           />
-          <Stack.Screen
-            name="Settings"
-            component={SettingsScreen}
-            options={{ title: t(language, "Settings", "Ajustes") }}
-          />
+          <Stack.Screen name="Settings" options={{ title: t(language, "Settings", "Ajustes") }}>
+            {() => <SettingsScreen onAccountDeleted={handleSignOut} />}
+          </Stack.Screen>
           <Stack.Screen
             name="JournalDate"
             component={JournalDateScreen}
@@ -738,6 +1102,13 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     marginRight: 6,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  homeButton: {
+    width: 42,
+    height: 42,
+    marginRight: 2,
     alignItems: "center",
     justifyContent: "center",
   },

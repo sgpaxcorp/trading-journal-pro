@@ -438,6 +438,38 @@ function parseNotes(notes?: string | null): NotesPayload {
   }
 }
 
+function formatMoney(value?: number | null) {
+  if (value == null || !Number.isFinite(Number(value))) return "—";
+  const numeric = Number(value);
+  const absolute = Math.abs(numeric).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return `${numeric < 0 ? "-" : ""}$${absolute}`;
+}
+
+function formatTradePrice(trade: JournalTradeRow) {
+  if (trade.price == null || !Number.isFinite(Number(trade.price))) return "—";
+  const digits = trade.kind === "forex" && trade.symbol !== "USD/JPY" ? 5 : 2;
+  return Number(trade.price).toFixed(digits);
+}
+
+function instrumentKindLabel(kind: string | null | undefined, language: "en" | "es") {
+  const labels: Record<string, { en: string; es: string }> = {
+    stock: { en: "Stock", es: "Acción" },
+    option: { en: "Option", es: "Opción" },
+    crypto: { en: "Crypto", es: "Cripto" },
+    forex: { en: "Forex", es: "Forex" },
+    future: { en: "Future", es: "Futuro" },
+    other: { en: "Other", es: "Otro" },
+  };
+  const normalized = String(kind ?? "other").toLowerCase();
+  return labels[normalized]?.[language] ?? labels.other[language];
+}
+
+function tradeStrategyLabel(strategy: string | null | undefined, language: "en" | "es") {
+  if (!strategy) return null;
+  if (strategy === "single") return language === "es" ? "Contrato simple" : "Single contract";
+  return strategy;
+}
+
 export function JournalDateScreen() {
   const { language } = useLanguage();
   const { colors } = useTheme();
@@ -681,7 +713,7 @@ export function JournalDateScreen() {
     return () => {
       active = false;
     };
-  }, [isoDate]);
+  }, [isoDate, user?.id]);
 
   async function handleRefresh() {
     setRefreshing(true);
@@ -844,28 +876,28 @@ export function JournalDateScreen() {
         <View style={styles.summaryRow}>
           <View style={styles.summaryItem}>
             <Text style={styles.summaryLabel}>{t(language, "Net P&L", "P&L neto")}</Text>
-            <Text style={styles.summaryValue}>{summary.net ?? "—"}</Text>
+            <Text style={styles.summaryValue}>{formatMoney(summary.net)}</Text>
           </View>
           <View style={styles.summaryItem}>
             <Text style={styles.summaryLabel}>{t(language, "Gross", "Bruto")}</Text>
-            <Text style={styles.summaryValue}>{summary.gross ?? "—"}</Text>
+            <Text style={styles.summaryValue}>{formatMoney(summary.gross)}</Text>
           </View>
         </View>
         <View style={styles.summaryRow}>
           <View style={styles.summaryItem}>
             <Text style={styles.summaryLabel}>{t(language, "Commissions", "Comisiones")}</Text>
-            <Text style={styles.summaryValue}>{summary.commissions ?? "—"}</Text>
+            <Text style={styles.summaryValue}>{formatMoney(summary.commissions)}</Text>
           </View>
           <View style={styles.summaryItem}>
             <Text style={styles.summaryLabel}>{t(language, "Fees", "Fees")}</Text>
-            <Text style={styles.summaryValue}>{summary.fees ?? "—"}</Text>
+            <Text style={styles.summaryValue}>{formatMoney(summary.fees)}</Text>
           </View>
         </View>
         <View style={styles.summaryRow}>
           <View style={styles.summaryItem}>
             <Text style={styles.summaryLabel}>{t(language, "Ending balance", "Balance final")}</Text>
             <Text style={styles.summaryValue}>
-              {summary.endingBalance == null ? "—" : `$${summary.endingBalance.toFixed(2)}`}
+              {formatMoney(summary.endingBalance)}
             </Text>
           </View>
         </View>
@@ -880,13 +912,27 @@ export function JournalDateScreen() {
           <View style={styles.tradeList}>
             {trades.map((trade, idx) => (
               <View key={`${trade.leg}-${trade.symbol}-${idx}`} style={styles.tradeCard}>
-                <Text style={styles.tradeTitle}>
-                  {trade.leg === "entry" ? t(language, "Entry", "Entrada") : t(language, "Exit", "Salida")} ·{" "}
-                  {trade.symbol}
-                </Text>
+                <View style={styles.tradeHeader}>
+                  <Text style={styles.tradeTitle}>
+                    {trade.leg === "entry" ? t(language, "Entry", "Entrada") : t(language, "Exit", "Salida")} ·{" "}
+                    {trade.symbol}
+                  </Text>
+                  <View style={styles.instrumentBadge}>
+                    <Text style={styles.instrumentBadgeText}>{instrumentKindLabel(trade.kind, language)}</Text>
+                  </View>
+                </View>
                 <Text style={styles.tradeMeta}>
-                  {trade.side ?? "—"} · {trade.quantity ?? "—"} @ {trade.price ?? "—"} · {trade.time ?? "—"}
+                  {String(trade.side ?? "—").toUpperCase()} · {trade.quantity ?? "—"} @ {formatTradePrice(trade)} · {trade.time ?? "—"}
                 </Text>
+                {trade.strategy || trade.premium || trade.dte != null ? (
+                  <Text style={styles.tradeDetail}>
+                    {[
+                      tradeStrategyLabel(trade.strategy, language),
+                      trade.kind === "option" && trade.premium && trade.premium !== "—" ? trade.premium : null,
+                      trade.dte != null ? `${trade.dte} DTE` : null,
+                    ].filter(Boolean).join(" · ")}
+                  </Text>
+                ) : null}
               </View>
             ))}
           </View>
@@ -1509,14 +1555,38 @@ const createStyles = (colors: ThemeColors) =>
       padding: 10,
       gap: 4,
     },
+    tradeHeader: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: 8,
+    },
     tradeTitle: {
+      flex: 1,
       color: colors.textPrimary,
       fontSize: 12,
       fontWeight: "700",
     },
+    instrumentBadge: {
+      borderRadius: 6,
+      borderWidth: 1,
+      borderColor: colors.primary,
+      paddingHorizontal: 7,
+      paddingVertical: 3,
+    },
+    instrumentBadgeText: {
+      color: colors.primary,
+      fontSize: 9,
+      fontWeight: "700",
+      textTransform: "uppercase",
+    },
     tradeMeta: {
       color: colors.textMuted,
       fontSize: 12,
+    },
+    tradeDetail: {
+      color: colors.textMuted,
+      fontSize: 11,
     },
     sectionHint: {
       color: colors.textMuted,
