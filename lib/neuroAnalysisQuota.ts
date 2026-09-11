@@ -2,10 +2,11 @@ import "server-only";
 
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 
-type QuotaEvent = "analysis" | "filing_upload" | "market_data" | "pdf_export";
+type QuotaEvent = "analysis" | "agent_chat" | "filing_upload" | "market_data" | "pdf_export";
 
 type QuotaConfig = {
   monthlyAnalyses: number;
+  monthlyAgentChats: number;
   monthlyFilingUploads: number;
   monthlyMarketRefreshes: number;
   monthlyPdfExports: number;
@@ -14,6 +15,7 @@ type QuotaConfig = {
 
 const DEFAULT_QUOTAS: QuotaConfig = {
   monthlyAnalyses: 50,
+  monthlyAgentChats: 300,
   monthlyFilingUploads: 100,
   monthlyMarketRefreshes: 500,
   monthlyPdfExports: 100,
@@ -28,6 +30,7 @@ function envNumber(key: string, fallback: number) {
 export function neuroQuotaConfig(): QuotaConfig {
   return {
     monthlyAnalyses: envNumber("NEURO_ANALYSIS_MONTHLY_ANALYSIS_LIMIT", DEFAULT_QUOTAS.monthlyAnalyses),
+    monthlyAgentChats: envNumber("NEURO_ANALYSIS_MONTHLY_AGENT_CHAT_LIMIT", DEFAULT_QUOTAS.monthlyAgentChats),
     monthlyFilingUploads: envNumber("NEURO_ANALYSIS_MONTHLY_FILING_LIMIT", DEFAULT_QUOTAS.monthlyFilingUploads),
     monthlyMarketRefreshes: envNumber("NEURO_ANALYSIS_MONTHLY_MARKET_LIMIT", DEFAULT_QUOTAS.monthlyMarketRefreshes),
     monthlyPdfExports: envNumber("NEURO_ANALYSIS_MONTHLY_PDF_LIMIT", DEFAULT_QUOTAS.monthlyPdfExports),
@@ -42,6 +45,7 @@ function monthStartIso() {
 
 function eventLimit(eventType: QuotaEvent, config: QuotaConfig) {
   if (eventType === "analysis") return config.monthlyAnalyses;
+  if (eventType === "agent_chat") return config.monthlyAgentChats;
   if (eventType === "filing_upload") return config.monthlyFilingUploads;
   if (eventType === "market_data") return config.monthlyMarketRefreshes;
   return config.monthlyPdfExports;

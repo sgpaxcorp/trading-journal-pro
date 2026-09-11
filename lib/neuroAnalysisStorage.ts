@@ -98,7 +98,7 @@ export async function archiveNeuroCase(userId: string, caseId: string) {
 export async function listNeuroReports(userId: string, caseId?: string | null) {
   let query = supabaseAdmin
     .from("neuro_analysis_reports")
-    .select("id,case_id,response_id,model,report_text,structured,engine,assumptions,missing_filings,requires_filings,created_at")
+    .select("id,case_id,response_id,model,report_text,structured,engine,assumptions,filings_used,missing_filings,vector_stores_used,requires_filings,created_at")
     .eq("user_id", userId)
     .order("created_at", { ascending: false })
     .limit(30);

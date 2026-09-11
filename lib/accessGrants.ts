@@ -173,10 +173,10 @@ export const ACCESS_GRANTS: AccessGrantDefinition[] = [
   {
     key: "neuro_analysis",
     group: "addons",
-    label: { en: "Neuro Analysis", es: "Neuro Analysis" },
+    label: { en: "Neuro Analysis Portal", es: "Neuro Analysis Portal" },
     description: {
-      en: "Company intelligence, evidence checklist, market research, and 2-10 year valuation scenarios.",
-      es: "Inteligencia de compañías, checklist de evidencia, research de mercado y escenarios de valuation 2-10 años.",
+      en: "Private long-term investment, dividend, company filing, portfolio thesis, and valuation portal.",
+      es: "Portal privado de inversión a largo plazo, dividendos, filings de compañías, tesis de portfolio y valuation.",
     },
     primaryPath: "/neuro-analysis",
     paths: ["/neuro-analysis"],

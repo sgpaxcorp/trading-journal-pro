@@ -16,6 +16,7 @@ export default function Footer() {
   const lang = resolveLocale(locale);
   const isLight = theme === "light";
   const [staffHref, setStaffHref] = useState("/signin?next=/admin");
+  const neuroAnalysisHref = user ? "/neuro-analysis" : "/signin?next=/neuro-analysis";
 
   const footerClass = isLight
     ? "w-full bg-slate-50/90 text-slate-600 px-6 md:px-10 lg:px-16 py-8 border-t border-slate-200 mt-auto"
@@ -82,6 +83,12 @@ export default function Footer() {
               className={isLight ? "hover:text-emerald-600 transition" : "hover:text-emerald-400 transition"}
             >
               {t("footer.links.staff", lang)}
+            </Link>
+            <Link
+              href={neuroAnalysisHref}
+              className={isLight ? "hover:text-emerald-600 transition" : "hover:text-emerald-400 transition"}
+            >
+              {t("footer.links.neuroAnalysis", lang)}
             </Link>
             <Link href="/blog" className={isLight ? "hover:text-emerald-600 transition" : "hover:text-emerald-400 transition"}>
               {t("footer.links.blog", lang)}

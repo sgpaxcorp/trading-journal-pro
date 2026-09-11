@@ -634,13 +634,6 @@ const smartTools: NavItem[] = [
     href: "/option-flow",
     badge: "BETA",
   },
-  {
-    id: "neuro-analysis",
-    titleKey: "nav.smartTools.neuroAnalysis.title",
-    descriptionKey: "nav.smartTools.neuroAnalysis.desc",
-    href: "/neuro-analysis",
-    badge: "BETA",
-  },
 ];
 
 const forum: NavItem[] = [

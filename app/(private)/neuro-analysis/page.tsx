@@ -155,6 +155,19 @@ type NeuroReportSummary = {
   created_at?: string;
 };
 
+type AgentChatItem = {
+  question: string;
+  answer: string;
+  createdAt: string;
+  groundedContext?: {
+    caseLoaded?: boolean;
+    reports?: number;
+    filings?: number;
+    vectorStores?: number;
+    priorMemory?: number;
+  };
+};
+
 const LOCALE_TAG: Record<Lang, string> = {
   en: "en-US",
   es: "es-ES",
@@ -162,35 +175,35 @@ const LOCALE_TAG: Record<Lang, string> = {
 
 const PREMIUM_OUTPUTS = [
   {
-    title: "Terminal-style profile",
-    esTitle: "Perfil tipo terminal",
-    body: "Company snapshot, business model, drivers, market position, and evidence checklist.",
-    esBody: "Snapshot de compañía, modelo de negocio, drivers, posición de mercado y checklist de evidencia.",
+    title: "Private company profile",
+    esTitle: "Perfil privado de compañía",
+    body: "Business model, durability, moat, competitors, filing evidence, and why the company matters.",
+    esBody: "Modelo de negocio, durabilidad, moat, competidores, evidencia de filings y por qué importa la compañía.",
   },
   {
-    title: "Market and competition",
-    esTitle: "Mercado y competencia",
-    body: "Industry structure, demand, competitors, substitutes, cyclicality, and regulatory risk.",
-    esBody: "Estructura de industria, demanda, competidores, sustitutos, ciclos y riesgo regulatorio.",
+    title: "Dividend and cash-flow quality",
+    esTitle: "Calidad de dividendos y cash flow",
+    body: "Dividend safety, payout pressure, free-cash-flow coverage, balance sheet risk, and reinvestment runway.",
+    esBody: "Seguridad del dividendo, presión del payout, cobertura de free cash flow, riesgo de balance y runway de reinversión.",
   },
   {
-    title: "2-10 year valuation",
-    esTitle: "Valuation 2-10 años",
-    body: "Bear/base/bull fair-value ladder with discount rate, terminal assumptions, and margin of safety.",
-    esBody: "Escalera de fair value bear/base/bull con tasa de descuento, supuestos terminales y margen de seguridad.",
+    title: "Long-term intrinsic value",
+    esTitle: "Valor intrínseco a largo plazo",
+    body: "Bear/base/bull fair-value ladder with discount rate, owner earnings logic, and margin of safety.",
+    esBody: "Escalera de fair value bear/base/bull con tasa de descuento, lógica de owner earnings y margen de seguridad.",
   },
   {
-    title: "Investment verdict",
-    esTitle: "Veredicto de inversión",
-    body: "Add now, wait, hold, reduce, avoid, or watchlist based on valuation and evidence strength.",
-    esBody: "Añadir ahora, esperar, mantener, reducir, evitar o watchlist según valuation y calidad de evidencia.",
+    title: "Living thesis verdict",
+    esTitle: "Veredicto de tesis viva",
+    body: "Add, wait, hold, reduce, exit review, or watchlist based on valuation, dividends, and future filings.",
+    esBody: "Añadir, esperar, mantener, reducir, revisar salida o watchlist según valuation, dividendos y filings futuros.",
   },
 ];
 
 function defaultResearchGoal(isEs: boolean) {
   return isEs
-    ? "Analiza objetivamente la compañía como inversión a largo plazo: perfil del negocio, mercado, competencia, documentos necesarios, valoración hoy y fair value proyectado de 2 a 10 años. Dime si parece buena inversión ahora, si conviene esperar por mejor precio/evidencia, mantener, reducir o evitar."
-    : "Objectively analyze the company as a long-term investment: business profile, market, competition, required documents, valuation today, and projected fair value from years 2 through 10. Tell me whether it looks like a good investment now, whether it is better to wait for better price/evidence, hold, reduce, or avoid.";
+    ? "Analiza objetivamente la compañía como inversión a largo plazo y posible posición de dividendos: perfil del negocio, moat, competencia, calidad de earnings, free cash flow, seguridad del dividendo, documentos necesarios, valoración hoy y fair value proyectado de 2 a 10 años. Dime si la posición debe añadirse, esperar, mantenerse, aumentarse, reducirse o entrar en revisión de salida. Define qué tendría que aparecer en futuros 10-Q/10-K para cambiar la tesis."
+    : "Objectively analyze the company as a long-term investment and possible dividend holding: business profile, moat, competition, earnings quality, free cash flow, dividend safety, required documents, valuation today, and projected fair value from years 2 through 10. Tell me whether the position should be added, waited on, held, increased, reduced, or moved into exit review. Define what future 10-Q/10-K evidence would change the thesis.";
 }
 
 function isLegacyResearchGoal(value: string) {
@@ -482,6 +495,10 @@ export default function NeuroAnalysisPage() {
   const [documentLookupLoading, setDocumentLookupLoading] = useState(false);
   const [documentLookupError, setDocumentLookupError] = useState("");
   const [activeWorkspaceTab, setActiveWorkspaceTab] = useState<WorkspaceTab>("research");
+  const [agentQuestion, setAgentQuestion] = useState("");
+  const [agentQaLoading, setAgentQaLoading] = useState(false);
+  const [agentQaError, setAgentQaError] = useState("");
+  const [agentConversation, setAgentConversation] = useState<AgentChatItem[]>([]);
 
   useEffect(() => {
     if (isLegacyResearchGoal(researchGoal)) {
@@ -718,6 +735,9 @@ export default function NeuroAnalysisPage() {
     }
     const nextReports = Array.isArray(json?.reports) ? json.reports : [];
     setReports(nextReports);
+    setAgentConversation([]);
+    setAgentQaError("");
+    setAgentQuestion("");
     const latest = nextReports[0];
     if (latest) {
       setActiveReportId(String(latest.id));
@@ -1200,6 +1220,72 @@ export default function NeuroAnalysisPage() {
     }
   }
 
+  async function askNeuroResearchAgent() {
+    const question = agentQuestion.trim();
+    if (!question) return;
+    try {
+      setAgentQaLoading(true);
+      setAgentQaError("");
+      const serializableFilings = filings.map((filing) => ({
+        id: filing.id,
+        ticker: filing.ticker,
+        form: filing.form,
+        fileName: filing.fileName,
+        fiscalYear: filing.fiscalYear,
+        period: filing.period,
+        periodEnd: filing.periodEnd,
+        fileId: filing.fileId,
+        vectorStoreId: filing.vectorStoreId,
+        bytes: filing.bytes,
+        usageBytes: filing.usageBytes,
+        expiresAt: filing.expiresAt,
+        createdAt: filing.createdAt,
+        status: filing.status,
+      }));
+      const res = await authedFetch("/api/neuro-analysis/agent", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          caseId: activeCaseId,
+          reportId: activeReportId,
+          question,
+          clientContext: {
+            focusTicker,
+            caseTitle,
+            researchGoal,
+            holdings: researchHoldings.map((holding) => ({
+              ticker: holding.ticker,
+              shares: holding.shares,
+              averageCost: holding.averageCost,
+              currentPrice: holding.currentPrice,
+              weight: holding.weight,
+              pnlPct: holding.pnlPct,
+            })),
+            marketData: marketPayload,
+            documentReadiness: documentReadinessRows,
+            engineSnapshot,
+            currentReport: agentReport,
+            filings: serializableFilings,
+          },
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.error || "Neuro Research Agent failed.");
+      const item: AgentChatItem = {
+        question,
+        answer: String(json?.answer ?? ""),
+        createdAt: new Date().toISOString(),
+        groundedContext: json?.groundedContext ?? undefined,
+      };
+      setAgentConversation((prev) => [item, ...prev].slice(0, 8));
+      setAgentQuestion("");
+    } catch (error: any) {
+      setAgentQaError(error?.message || "Neuro Research Agent failed.");
+    } finally {
+      setAgentQaLoading(false);
+    }
+  }
+
   if (accessAllowed === null) {
     return (
       <main className="min-h-screen bg-slate-950 text-slate-50">
@@ -1243,19 +1329,19 @@ export default function NeuroAnalysisPage() {
             <div className="max-w-5xl">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="rounded-full border border-sky-400/40 bg-sky-500/10 px-3 py-1 text-[11px] font-semibold uppercase text-sky-200">
-                  {L("Smart Tools Beta", "Herramientas inteligentes Beta")}
+                  {L("Private Investment Portal", "Portal privado de inversión")}
                 </span>
                 <span className="rounded-full border border-emerald-400/40 bg-emerald-500/10 px-3 py-1 text-[11px] font-semibold uppercase text-emerald-200">
-                  {L("Research desk", "Mesa de research")}
+                  {L("Long-term and dividends", "Largo plazo y dividendos")}
                 </span>
               </div>
               <h1 className="mt-3 text-2xl font-semibold tracking-normal sm:text-3xl">
-                {L("Neuro Analysis Research", "Neuro Analysis Research")}
+                {L("Neuro Analysis Investment Portal", "Neuro Analysis Investment Portal")}
               </h1>
               <p className="mt-2 max-w-4xl text-sm leading-6 text-slate-400">
                 {L(
-                  "Build a terminal-style company research profile: evidence checklist, market and competitor intelligence, financial statement review, valuation today, 2-10 year fair-value scenarios, and a long-term investment verdict.",
-                  "Construye un perfil de compañía tipo terminal: checklist de evidencia, inteligencia de mercado y competencia, revisión financiera, valuation hoy, escenarios de fair value de 2 a 10 años y veredicto de inversión a largo plazo."
+                  "Run a private investment desk for long-term decisions: record positions you bought outside the platform, track the portfolio, read 10-K/10-Q evidence, evaluate dividend durability, and keep a living thesis for when to add, hold, wait, reduce, or review an exit.",
+                  "Opera una mesa privada de inversión para decisiones a largo plazo: registra posiciones que compraste fuera de la plataforma, sigue el portfolio, lee evidencia de 10-K/10-Q, evalúa durabilidad de dividendos y mantén una tesis viva para añadir, mantener, esperar, reducir o revisar salida."
                 )}
               </p>
               <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center">
@@ -1293,14 +1379,14 @@ export default function NeuroAnalysisPage() {
             {
               id: "research" as const,
               icon: Search,
-              title: L("Research Desk", "Research Desk"),
-              body: L("Company profile, evidence checklist, market intelligence, valuation, and investment verdict.", "Perfil de compañía, checklist de evidencia, inteligencia de mercado, valuation y veredicto de inversión."),
+              title: L("Company Research", "Research de compañías"),
+              body: L("Company profile, 10-K/10-Q evidence, dividend quality, valuation, and living investment thesis.", "Perfil de compañía, evidencia 10-K/10-Q, calidad de dividendos, valuation y tesis viva de inversión."),
             },
             {
               id: "portfolio" as const,
               icon: WalletCards,
-              title: L("Portfolio Import", "Portfolio Import"),
-              body: L("Optional: include real positions later without changing the company research flow.", "Opcional: incluye posiciones reales luego sin cambiar el flujo de research."),
+              title: L("Portfolio Tracker", "Portfolio Tracker"),
+              body: L("Record what you bought outside the platform so Neuro can follow the holding, weight, P&L, and thesis.", "Registra lo que compraste fuera de la plataforma para que Neuro siga la posición, peso, P&L y tesis."),
             },
           ].map((tab) => {
             const Icon = tab.icon;
@@ -1339,12 +1425,12 @@ export default function NeuroAnalysisPage() {
                 <div>
                   <div className="flex items-center gap-2">
                     <WalletCards className="h-4 w-4 text-emerald-300" />
-                    <h2 className="text-base font-semibold">{L("Portfolio Import", "Portfolio Import")}</h2>
+                    <h2 className="text-base font-semibold">{L("Portfolio Tracker", "Portfolio Tracker")}</h2>
                   </div>
                   <p className="mt-2 text-sm leading-6 text-slate-400">
                     {L(
-                      "Maintain manual positions here, or connect a read-only broker after provider approvals are complete. These positions feed Neuro Research, but this workspace stays separate from the research report itself.",
-                      "Mantén posiciones manuales aquí, o conecta un broker solo lectura cuando terminen las aprobaciones de proveedores. Estas posiciones alimentan Neuro Research, pero este workspace queda separado del reporte de research."
+                      "Record positions after you buy them outside the platform. Neuro follows price, weight, gain/loss, dividend evidence, and future filing changes so the thesis can be reviewed over time. Read-only broker sync can be connected after provider approvals are complete.",
+                      "Registra posiciones después de comprarlas fuera de la plataforma. Neuro sigue precio, peso, ganancia/pérdida, evidencia de dividendos y cambios en filings futuros para revisar la tesis con el tiempo. El sync de broker solo lectura se podrá conectar cuando terminen las aprobaciones de proveedores."
                     )}
                   </p>
                   {!brokerConnectionsEnabled ? (
@@ -1526,12 +1612,12 @@ export default function NeuroAnalysisPage() {
                 <div>
                   <div className="flex items-center gap-2">
                     <Search className="h-4 w-4 text-sky-300" />
-                    <h2 className="text-base font-semibold">{L("Company Intelligence Profile", "Perfil de inteligencia de compañía")}</h2>
+                    <h2 className="text-base font-semibold">{L("Company Investment Profile", "Perfil de inversión de compañía")}</h2>
                   </div>
                   <p className="mt-2 text-sm leading-6 text-slate-400">
                     {L(
-                      "Choose the company Neuro should research. Market data loads automatically; 10-K, 10-Q, and company documents turn the verdict from provisional into evidence-backed.",
-                      "Escoge la compañía que Neuro debe investigar. La data de mercado carga automática; 10-K, 10-Q y documentos de compañía convierten el veredicto de provisional a respaldado por evidencia."
+                      "Choose the company Neuro should research. Market data loads automatically; 10-K, 10-Q, dividend records, and company documents turn the thesis from provisional into evidence-backed.",
+                      "Escoge la compañía que Neuro debe investigar. La data de mercado carga automática; 10-K, 10-Q, récords de dividendos y documentos de compañía convierten la tesis de provisional a respaldada por evidencia."
                     )}
                   </p>
                 </div>
@@ -1580,12 +1666,12 @@ export default function NeuroAnalysisPage() {
             <div className="rounded-xl border border-sky-500/30 bg-sky-500/5 p-5">
               <div className="flex items-center gap-2">
                 <Sparkles className="h-4 w-4 text-sky-300" />
-                <h2 className="text-base font-semibold">{L("Research Run", "Research Run")}</h2>
+                <h2 className="text-base font-semibold">{L("Investment Thesis Run", "Investment Thesis Run")}</h2>
               </div>
               <p className="mt-2 text-sm leading-6 text-slate-300">
                 {L(
-                  "Neuro reads the focus company, market layer, and uploaded documents, then builds a research profile, valuation ladder, and long-term investment verdict.",
-                  "Neuro lee la compañía foco, la capa de mercado y documentos subidos, y crea un perfil de research, escalera de valuation y veredicto de inversión a largo plazo."
+                  "Neuro reads the focus company, market layer, portfolio context, and uploaded documents, then builds a living thesis, valuation ladder, dividend review, and long-term decision support.",
+                  "Neuro lee la compañía foco, capa de mercado, contexto del portfolio y documentos subidos, y crea una tesis viva, escalera de valuation, revisión de dividendos y apoyo de decisión a largo plazo."
                 )}
               </p>
 
@@ -1685,8 +1771,8 @@ export default function NeuroAnalysisPage() {
               </div>
               <p className="mt-2 text-sm leading-6 text-slate-400">
                 {L(
-                  "Upload recent annual and quarterly PDFs when you want a stronger full-company verdict.",
-                  "Sube PDFs anuales y trimestrales recientes cuando quieras un veredicto más fuerte."
+                  "Upload recent annual and quarterly PDFs so future thesis reviews can compare the latest business evidence against the original buy/hold reason.",
+                  "Sube PDFs anuales y trimestrales recientes para que futuras revisiones de tesis comparen la evidencia más nueva contra la razón original de compra o hold."
                 )}
               </p>
 
@@ -2087,6 +2173,102 @@ export default function NeuroAnalysisPage() {
           </section>
         ) : null}
 
+        <section className={activeWorkspaceTab === "research" ? "rounded-xl border border-violet-500/25 bg-slate-900/80 p-5" : "hidden"}>
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div className="max-w-3xl">
+              <div className="flex items-center gap-2">
+                <Sparkles className="h-4 w-4 text-violet-300" />
+                <h2 className="text-base font-semibold">{L("Neuro Research Agent", "Neuro Research Agent")}</h2>
+              </div>
+              <p className="mt-2 text-sm leading-6 text-slate-400">
+                {L(
+                  "Ask objective questions about the active case, portfolio thesis, dividend safety, valuation, or what future 10-Q/10-K evidence would change the decision. The agent must say when evidence is missing instead of guessing.",
+                  "Haz preguntas objetivas sobre el caso activo, tesis del portfolio, seguridad del dividendo, valuation o qué evidencia futura de 10-Q/10-K cambiaría la decisión. El agente debe decir cuando falta evidencia en vez de adivinar."
+                )}
+              </p>
+              {!activeCaseId ? (
+                <p className="mt-2 rounded-lg border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-xs leading-5 text-amber-100">
+                  {L(
+                    "Save or run a research case to give the agent durable memory. Unsaved screen context is still included for this answer.",
+                    "Guarda o corre un caso de research para darle memoria durable al agente. El contexto no guardado de esta pantalla todavía se incluye para esta respuesta."
+                  )}
+                </p>
+              ) : null}
+            </div>
+            <div className="grid grid-cols-2 gap-2 text-xs lg:min-w-[360px]">
+              <Readout label={L("Case memory", "Memoria caso")} value={activeCaseId ? L("Saved", "Guardada") : L("Local", "Local")} />
+              <Readout label={L("Indexed docs", "Docs indexados")} value={indexedDocuments.length} />
+            </div>
+          </div>
+
+          <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-[1fr_auto]">
+            <textarea
+              value={agentQuestion}
+              onChange={(event) => setAgentQuestion(event.target.value)}
+              rows={3}
+              placeholder={L(
+                "Example: Based on the current 10-K/10-Q evidence, should this position stay in hold mode or move to exit review?",
+                "Ejemplo: Según la evidencia actual de 10-K/10-Q, ¿esta posición debe mantenerse en hold o pasar a revisión de salida?"
+              )}
+              className="min-h-[92px] w-full resize-none rounded-lg border border-slate-800 bg-slate-950/70 px-3 py-2 text-sm leading-6 text-slate-100 outline-none focus:border-violet-400"
+            />
+            <button
+              type="button"
+              onClick={() => void askNeuroResearchAgent()}
+              disabled={agentQaLoading || !agentQuestion.trim()}
+              className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg border border-violet-400/60 bg-violet-500/10 px-4 py-2 text-sm font-semibold text-violet-100 hover:bg-violet-500/20 disabled:opacity-50 lg:self-end"
+            >
+              {agentQaLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+              {agentQaLoading ? L("Thinking", "Pensando") : L("Ask agent", "Preguntar")}
+            </button>
+          </div>
+
+          <div className="mt-3 flex flex-wrap gap-2">
+            {[
+              L("What evidence would trigger exit review?", "¿Qué evidencia activaría revisión de salida?"),
+              L("Is the dividend thesis supported?", "¿La tesis de dividendos está respaldada?"),
+              L("What must remain true for a long-term hold?", "¿Qué debe seguir siendo cierto para mantener a largo plazo?"),
+            ].map((question) => (
+              <button
+                key={question}
+                type="button"
+                onClick={() => setAgentQuestion(question)}
+                className="rounded-full border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:border-violet-400 hover:text-violet-100"
+              >
+                {question}
+              </button>
+            ))}
+          </div>
+
+          {agentQaError ? <p className="mt-3 text-sm text-rose-300">{agentQaError}</p> : null}
+
+          {agentConversation.length > 0 ? (
+            <div className="mt-5 space-y-4">
+              {agentConversation.map((item) => (
+                <article key={`${item.createdAt}-${item.question}`} className="rounded-xl border border-slate-800 bg-slate-950/55 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-violet-300">
+                    {L("Question", "Pregunta")}
+                  </p>
+                  <p className="mt-2 text-sm font-semibold text-slate-100">{item.question}</p>
+                  <pre className="mt-3 max-h-[520px] overflow-auto whitespace-pre-wrap rounded-lg border border-slate-800 bg-slate-950/80 p-4 text-sm leading-6 text-slate-200">
+                    {item.answer}
+                  </pre>
+                  {item.groundedContext ? (
+                    <p className="mt-3 text-[11px] text-slate-500">
+                      {L("Grounded on", "Basado en")}{" "}
+                      {[
+                        `${item.groundedContext.reports ?? 0} ${L("reports", "reportes")}`,
+                        `${item.groundedContext.filings ?? 0} ${L("filings", "filings")}`,
+                        `${item.groundedContext.priorMemory ?? 0} ${L("memory items", "memorias")}`,
+                      ].join(" / ")}
+                    </p>
+                  ) : null}
+                </article>
+              ))}
+            </div>
+          ) : null}
+        </section>
+
         <section className={activeWorkspaceTab === "research" ? "grid grid-cols-1 gap-4 lg:grid-cols-4" : "hidden"}>
           {PREMIUM_OUTPUTS.map((item) => (
             <div key={item.title} className="rounded-xl border border-slate-800 bg-slate-900/75 p-5">
@@ -2102,8 +2284,8 @@ export default function NeuroAnalysisPage() {
             <ChevronRight className="mt-0.5 h-3.5 w-3.5 text-sky-300" />
             <p>
               {L(
-                "Output is analysis and simulation support. Neuro does not execute trades and this research portfolio stays separate from trading accounts.",
-                "La salida es apoyo de análisis y simulación. Neuro no ejecuta trades y este research portfolio se mantiene separado de las cuentas de trading."
+                "Output is analysis and simulation support for long-term investment decisions. Neuro does not execute trades, custody funds, or guarantee returns; the research portfolio is a private replica of positions you manage outside the platform.",
+                "La salida es apoyo de análisis y simulación para decisiones de inversión a largo plazo. Neuro no ejecuta trades, no custodia fondos ni garantiza retornos; el research portfolio es una réplica privada de posiciones que manejas fuera de la plataforma."
               )}
             </p>
           </div>
