@@ -180,3 +180,28 @@ export async function insertNeuroSnapshot(input: {
     throw error;
   }
 }
+
+export async function listNeuroSnapshots(input: {
+  userId: string;
+  caseId?: string | null;
+  snapshotTypes?: string[];
+  limit?: number;
+}) {
+  let query = supabaseAdmin
+    .from("neuro_analysis_snapshots")
+    .select("id,case_id,snapshot_type,payload,created_at")
+    .eq("user_id", input.userId)
+    .order("created_at", { ascending: false })
+    .limit(Math.min(Math.max(input.limit ?? 30, 1), 100));
+
+  if (input.caseId) query = query.eq("case_id", input.caseId);
+  else query = query.is("case_id", null);
+
+  if (input.snapshotTypes?.length) {
+    query = query.in("snapshot_type", input.snapshotTypes);
+  }
+
+  const { data, error } = await query;
+  if (error) throw new Error(error.message);
+  return data ?? [];
+}

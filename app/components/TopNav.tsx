@@ -6,6 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { MessageSquare } from "lucide-react";
 
 import { useAuth } from "@/context/AuthContext";
+import PageNavigationControls from "@/app/components/PageNavigationControls";
 import { supabaseBrowser } from "@/lib/supaBaseClient";
 
 import { useAppSettings, type Theme } from "@/lib/appSettings";
@@ -686,15 +687,16 @@ export default function TopNav() {
 
   const navClass = isLight
     ? "nt-topnav sticky top-0 z-50 w-full border-b border-slate-200 bg-white/80 backdrop-blur"
-    : "sticky top-0 z-50 w-full border-b border-slate-800 bg-slate-950/90 backdrop-blur";
+    : "nt-topnav sticky top-0 z-50 w-full border-b border-slate-800 bg-slate-950/90 backdrop-blur";
 
   const linkClass = isLight
     ? "rounded-lg px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-200/70 hover:text-slate-900 transition-colors"
     : "rounded-lg px-3 py-1.5 text-sm font-medium text-slate-200 hover:bg-slate-800 hover:text-slate-50 transition-colors";
 
   return (
-    <nav className={navClass}>
-      <div className="flex flex-wrap items-center px-4 py-2.5 md:px-6 gap-x-5 gap-y-2 w-full">
+    <>
+      <nav className={navClass}>
+        <div className="flex flex-wrap items-center px-4 py-2.5 md:px-6 gap-x-5 gap-y-2 w-full">
         {/* Brand */}
         <Link
           href="/dashboard"
@@ -763,7 +765,9 @@ export default function TopNav() {
           <HelpMenu theme={theme} lang={lang} />
           <AccountMenu theme={theme} lang={lang} />
         </div>
-      </div>
-    </nav>
+        </div>
+      </nav>
+      <PageNavigationControls placement="header" />
+    </>
   );
 }

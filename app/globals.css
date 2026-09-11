@@ -159,3 +159,8 @@ body {
   margin-left: 0;
   margin-right: 0;
 }
+
+/* TopNav owns the in-app navigation strip so it sits directly below the header. */
+body:has(.nt-topnav) [data-page-navigation-placement="global"] {
+  display: none;
+}

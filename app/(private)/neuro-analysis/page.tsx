@@ -47,7 +47,7 @@ import { resolveLocale } from "@/lib/i18n";
 import { supabaseBrowser } from "@/lib/supaBaseClient";
 
 type Lang = "en" | "es";
-type WorkspaceTab = "research" | "portfolio";
+type WorkspaceTab = "research" | "portfolio" | "screener" | "fund_plan";
 
 type Holding = {
   id: string;
@@ -168,6 +168,88 @@ type AgentChatItem = {
   };
 };
 
+type SectorScreenerRow = {
+  ticker: string;
+  name: string;
+  sector?: string | null;
+  industry?: string | null;
+  marketCap?: number | null;
+  price?: number | null;
+  trailingPE?: number | null;
+  forwardPE?: number | null;
+  priceToBook?: number | null;
+  dividendYield?: number | null;
+  fcfYield?: number | null;
+  earningsYield?: number | null;
+  revenueCagr?: number | null;
+  fcfCagr?: number | null;
+  operatingMargin?: number | null;
+  fcfMargin?: number | null;
+  debtToEquity?: number | null;
+  fiveYearReturn?: number | null;
+  valueScore: number;
+  qualityScore: number;
+  dividendScore: number;
+  momentumScore: number;
+  potentialScore: number;
+  verdict: string;
+  dataWarnings?: string[];
+};
+
+type SectorScreenerResult = {
+  sector: string;
+  sectorLabel: string;
+  sectors: Array<{ key: string; label: string }>;
+  summary: Record<string, any>;
+  rows: SectorScreenerRow[];
+  generatedAt?: string;
+};
+
+type ThesisNote = {
+  id: string;
+  snapshot_type: "thesis_context" | "thesis_update";
+  created_at: string;
+  payload?: {
+    ticker?: string;
+    note?: string;
+    sourceType?: string;
+    sourceLabel?: string;
+    impact?: string;
+    happenedAt?: string;
+    evidenceLevel?: string;
+  };
+};
+
+type FundShareholder = {
+  id: string;
+  name: string;
+  ownershipPct: number;
+  payoutMode: "reinvest" | "withdraw";
+  annualWithdrawalPct: number;
+};
+
+type FundProjectionYear = {
+  year: number;
+  beginValue: number;
+  monthlyContributions: number;
+  capitalBeforeReturn: number;
+  grossReturn: number;
+  shareholderPayouts: number;
+  reinvestedProfit: number;
+  endValue: number;
+  cumulativeContributions: number;
+  cumulativePayouts: number;
+  shareholderRows: Array<{
+    shareholderId: string;
+    name: string;
+    ownershipPct: number;
+    payoutMode: "reinvest" | "withdraw";
+    profitShare: number;
+    payout: number;
+    reinvested: number;
+  }>;
+};
+
 const LOCALE_TAG: Record<Lang, string> = {
   en: "en-US",
   es: "es-ES",
@@ -228,6 +310,10 @@ function toNumber(value: unknown) {
   return 0;
 }
 
+function clampNumber(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
+
 function pickFirst(...values: unknown[]) {
   for (const value of values) {
     if (value === null || value === undefined) continue;
@@ -274,6 +360,74 @@ function formatCompactNumber(value: number | null | undefined, localeTag: string
     notation: "compact",
     maximumFractionDigits: 1,
   }).format(parsed);
+}
+
+function buildFundProjection(input: {
+  initialCapital: number;
+  monthlyGoal: number;
+  annualReturnPct: number;
+  shareholders: FundShareholder[];
+  years?: number;
+}) {
+  const years = Math.max(1, Math.min(30, Math.round(input.years ?? 30)));
+  const annualRate = clampNumber(toNumber(input.annualReturnPct), -100, 100) / 100;
+  const monthlyContributions = Math.max(0, toNumber(input.monthlyGoal)) * 12;
+  const shareholders = input.shareholders.map((shareholder) => ({
+    ...shareholder,
+    ownershipPct: clampNumber(toNumber(shareholder.ownershipPct), 0, 100),
+    annualWithdrawalPct:
+      shareholder.payoutMode === "withdraw"
+        ? clampNumber(toNumber(shareholder.annualWithdrawalPct), 0, 100)
+        : 0,
+  }));
+
+  const rows: FundProjectionYear[] = [];
+  let beginValue = Math.max(0, toNumber(input.initialCapital));
+  let cumulativeContributions = 0;
+  let cumulativePayouts = 0;
+
+  for (let year = 1; year <= years; year += 1) {
+    const capitalBeforeReturn = beginValue + monthlyContributions;
+    const grossReturn = capitalBeforeReturn * annualRate;
+    const shareholderRows = shareholders.map((shareholder) => {
+      const profitShare = grossReturn * (shareholder.ownershipPct / 100);
+      const payout = shareholder.payoutMode === "withdraw"
+        ? Math.max(0, profitShare) * (shareholder.annualWithdrawalPct / 100)
+        : 0;
+      return {
+        shareholderId: shareholder.id,
+        name: shareholder.name || "Shareholder",
+        ownershipPct: shareholder.ownershipPct,
+        payoutMode: shareholder.payoutMode,
+        profitShare,
+        payout,
+        reinvested: profitShare - payout,
+      };
+    });
+    const shareholderPayouts = shareholderRows.reduce((sum, row) => sum + row.payout, 0);
+    const reinvestedProfit = grossReturn - shareholderPayouts;
+    const endValue = capitalBeforeReturn + reinvestedProfit;
+    cumulativeContributions += monthlyContributions;
+    cumulativePayouts += shareholderPayouts;
+
+    rows.push({
+      year,
+      beginValue,
+      monthlyContributions,
+      capitalBeforeReturn,
+      grossReturn,
+      shareholderPayouts,
+      reinvestedProfit,
+      endValue,
+      cumulativeContributions,
+      cumulativePayouts,
+      shareholderRows,
+    });
+
+    beginValue = Math.max(0, endValue);
+  }
+
+  return rows;
 }
 
 function formatFileSize(bytes: number | undefined, localeTag: string) {
@@ -499,6 +653,39 @@ export default function NeuroAnalysisPage() {
   const [agentQaLoading, setAgentQaLoading] = useState(false);
   const [agentQaError, setAgentQaError] = useState("");
   const [agentConversation, setAgentConversation] = useState<AgentChatItem[]>([]);
+  const [thesisNotes, setThesisNotes] = useState<ThesisNote[]>([]);
+  const [thesisContextNote, setThesisContextNote] = useState("");
+  const [thesisSourceType, setThesisSourceType] = useState("news");
+  const [thesisImpact, setThesisImpact] = useState("uncertain");
+  const [thesisSourceLabel, setThesisSourceLabel] = useState("");
+  const [thesisSaving, setThesisSaving] = useState(false);
+  const [thesisStatus, setThesisStatus] = useState("");
+  const [thesisError, setThesisError] = useState("");
+  const [screenerSector, setScreenerSector] = useState("technology");
+  const [screenerCustomTickers, setScreenerCustomTickers] = useState("");
+  const [screenerLoading, setScreenerLoading] = useState(false);
+  const [screenerError, setScreenerError] = useState("");
+  const [screenerResult, setScreenerResult] = useState<SectorScreenerResult | null>(null);
+  const [fundInitialCapital, setFundInitialCapital] = useState(100000);
+  const [fundMonthlyGoal, setFundMonthlyGoal] = useState(5000);
+  const [fundAnnualReturnPct, setFundAnnualReturnPct] = useState(10);
+  const [fundSelectedYear, setFundSelectedYear] = useState(10);
+  const [fundShareholders, setFundShareholders] = useState<FundShareholder[]>([
+    {
+      id: "shareholder-founder",
+      name: "Founder",
+      ownershipPct: 60,
+      payoutMode: "reinvest",
+      annualWithdrawalPct: 0,
+    },
+    {
+      id: "shareholder-investor-1",
+      name: "Investor 1",
+      ownershipPct: 40,
+      payoutMode: "withdraw",
+      annualWithdrawalPct: 100,
+    },
+  ]);
 
   useEffect(() => {
     if (isLegacyResearchGoal(researchGoal)) {
@@ -522,6 +709,26 @@ export default function NeuroAnalysisPage() {
       },
     });
   }
+
+  async function loadThesisContext(caseId: string | null = activeCaseId) {
+    if (!caseId) {
+      setThesisNotes([]);
+      return;
+    }
+    const res = await authedFetch(`/api/neuro-analysis/thesis?caseId=${encodeURIComponent(caseId)}`).catch(() => null);
+    const json = res ? await res.json().catch(() => ({})) : {};
+    if (res?.ok && Array.isArray(json?.notes)) {
+      setThesisNotes(json.notes);
+    }
+  }
+
+  useEffect(() => {
+    if (!activeCaseId) {
+      setThesisNotes([]);
+      return;
+    }
+    void loadThesisContext(activeCaseId);
+  }, [activeCaseId]);
 
   const portfolio = useMemo(() => {
     const rows = holdings
@@ -554,6 +761,28 @@ export default function NeuroAnalysisPage() {
       largest,
     };
   }, [holdings]);
+  const fundProjection = useMemo(
+    () =>
+      buildFundProjection({
+        initialCapital: fundInitialCapital,
+        monthlyGoal: fundMonthlyGoal,
+        annualReturnPct: fundAnnualReturnPct,
+        shareholders: fundShareholders,
+        years: 30,
+      }),
+    [fundAnnualReturnPct, fundInitialCapital, fundMonthlyGoal, fundShareholders]
+  );
+  const fundMilestones = [10, 15, 20, 25, 30]
+    .map((year) => fundProjection.find((row) => row.year === year))
+    .filter(Boolean) as FundProjectionYear[];
+  const selectedFundProjection =
+    fundProjection.find((row) => row.year === fundSelectedYear) ??
+    fundProjection[fundProjection.length - 1] ??
+    null;
+  const shareholderOwnershipTotal = fundShareholders.reduce(
+    (sum, shareholder) => sum + clampNumber(toNumber(shareholder.ownershipPct), 0, 100),
+    0
+  );
   const researchHoldings = useMemo(() => {
     if (portfolio.rows.length > 0) return portfolio.rows;
     const ticker = focusTicker.trim().toUpperCase();
@@ -738,6 +967,7 @@ export default function NeuroAnalysisPage() {
     setAgentConversation([]);
     setAgentQaError("");
     setAgentQuestion("");
+    await loadThesisContext(String(researchCase.id));
     const latest = nextReports[0];
     if (latest) {
       setActiveReportId(String(latest.id));
@@ -1266,6 +1496,7 @@ export default function NeuroAnalysisPage() {
             engineSnapshot,
             currentReport: agentReport,
             filings: serializableFilings,
+            thesisNotes,
           },
         }),
       });
@@ -1284,6 +1515,135 @@ export default function NeuroAnalysisPage() {
     } finally {
       setAgentQaLoading(false);
     }
+  }
+
+  async function saveThesisContext() {
+    const note = thesisContextNote.trim();
+    if (!note) return;
+    if (!activeCaseId) {
+      setThesisError(L(
+        "Save or run the research case first so this thesis context has durable memory.",
+        "Guarda o corre el caso de research primero para que este contexto de tesis tenga memoria durable."
+      ));
+      return;
+    }
+    try {
+      setThesisSaving(true);
+      setThesisError("");
+      setThesisStatus("");
+      const res = await authedFetch("/api/neuro-analysis/thesis", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          caseId: activeCaseId,
+          ticker: focusTicker,
+          note,
+          sourceType: thesisSourceType,
+          sourceLabel: thesisSourceLabel,
+          impact: thesisImpact,
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.error || "Could not save thesis context.");
+      setThesisNotes(Array.isArray(json?.notes) ? json.notes : []);
+      setThesisContextNote("");
+      setThesisSourceLabel("");
+      setThesisStatus(L("Thesis context saved.", "Contexto de tesis guardado."));
+    } catch (error: any) {
+      setThesisError(error?.message || "Could not save thesis context.");
+    } finally {
+      setThesisSaving(false);
+    }
+  }
+
+  function stageThesisUpdateQuestion() {
+    const freshContext = thesisContextNote.trim();
+    const contextLine = freshContext
+      ? L(
+          `New user-provided context to consider: ${freshContext}`,
+          `Nuevo contexto provisto por el usuario a considerar: ${freshContext}`
+        )
+      : L(
+          "Use the saved user-provided thesis context for this case.",
+          "Usa el contexto de tesis guardado por el usuario para este caso."
+        );
+    setAgentQuestion(
+      [
+        L(
+          "Help me update the living investment thesis objectively.",
+          "Ayúdame a actualizar objetivamente la tesis viva de inversión."
+        ),
+        contextLine,
+        L(
+          "Separate verified evidence from user-provided context. Tell me whether this changes the long-term thesis, dividend thesis, valuation view, watch items, or exit-review triggers. Do not guess.",
+          "Separa evidencia verificada de contexto provisto por el usuario. Dime si esto cambia la tesis a largo plazo, tesis de dividendos, visión de valuation, puntos a vigilar o triggers de revisión de salida. No adivines."
+        ),
+      ].join("\n\n")
+    );
+  }
+
+  async function runSectorScreener() {
+    try {
+      setScreenerLoading(true);
+      setScreenerError("");
+      const params = new URLSearchParams({ sector: screenerSector });
+      if (screenerCustomTickers.trim()) params.set("tickers", screenerCustomTickers.trim());
+      const res = await authedFetch(`/api/neuro-analysis/sector-screener?${params.toString()}`);
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.error || "Sector screener failed.");
+      setScreenerResult(json as SectorScreenerResult);
+      if (json?.sector) setScreenerSector(String(json.sector));
+    } catch (error: any) {
+      setScreenerError(error?.message || "Sector screener failed.");
+    } finally {
+      setScreenerLoading(false);
+    }
+  }
+
+  function openScreenerTicker(ticker: string) {
+    const nextTicker = ticker.trim().toUpperCase();
+    if (!nextTicker) return;
+    setFocusTicker(nextTicker);
+    setResearchGoal(defaultResearchGoal(isEs));
+    setActiveWorkspaceTab("research");
+  }
+
+  function updateFundShareholder(id: string, patch: Partial<FundShareholder>) {
+    setFundShareholders((prev) =>
+      prev.map((shareholder) =>
+        shareholder.id === id
+          ? {
+              ...shareholder,
+              ...patch,
+              ownershipPct:
+                patch.ownershipPct === undefined
+                  ? shareholder.ownershipPct
+                  : clampNumber(toNumber(patch.ownershipPct), 0, 100),
+              annualWithdrawalPct:
+                patch.annualWithdrawalPct === undefined
+                  ? shareholder.annualWithdrawalPct
+                  : clampNumber(toNumber(patch.annualWithdrawalPct), 0, 100),
+            }
+          : shareholder
+      )
+    );
+  }
+
+  function addFundShareholder() {
+    setFundShareholders((prev) => [
+      ...prev,
+      {
+        id: makeId("shareholder"),
+        name: `Investor ${prev.length + 1}`,
+        ownershipPct: 0,
+        payoutMode: "reinvest",
+        annualWithdrawalPct: 0,
+      },
+    ]);
+  }
+
+  function removeFundShareholder(id: string) {
+    setFundShareholders((prev) => prev.filter((shareholder) => shareholder.id !== id));
   }
 
   if (accessAllowed === null) {
@@ -1373,7 +1733,7 @@ export default function NeuroAnalysisPage() {
 
         <nav
           aria-label={L("Neuro Analysis workspaces", "Workspaces de Neuro Analysis")}
-          className="grid grid-cols-1 gap-3 rounded-xl border border-slate-800 bg-slate-900/70 p-2 sm:grid-cols-2"
+          className="grid grid-cols-1 gap-3 rounded-xl border border-slate-800 bg-slate-900/70 p-2 sm:grid-cols-2 xl:grid-cols-4"
         >
           {[
             {
@@ -1387,6 +1747,18 @@ export default function NeuroAnalysisPage() {
               icon: WalletCards,
               title: L("Portfolio Tracker", "Portfolio Tracker"),
               body: L("Record what you bought outside the platform so Neuro can follow the holding, weight, P&L, and thesis.", "Registra lo que compraste fuera de la plataforma para que Neuro siga la posición, peso, P&L y tesis."),
+            },
+            {
+              id: "fund_plan" as const,
+              icon: BriefcaseBusiness,
+              title: L("Fund Business Plan", "Business Plan del fondo"),
+              body: L("Project monthly capital goals, annual compounding, and shareholder withdrawals or reinvestment.", "Proyecta metas mensuales, interés compuesto anual y retiros o reinversión de accionistas."),
+            },
+            {
+              id: "screener" as const,
+              icon: BarChart3,
+              title: L("Sector Screener", "Screener por sector"),
+              body: L("Compare companies inside a market sector and surface potential value candidates.", "Compara compañías dentro de un sector de mercado y detecta candidatas con valor potencial."),
             },
           ].map((tab) => {
             const Icon = tab.icon;
@@ -1414,12 +1786,399 @@ export default function NeuroAnalysisPage() {
 
         <section
           className={
-            activeWorkspaceTab === "portfolio"
+            activeWorkspaceTab !== "research"
               ? "space-y-5"
               : "grid grid-cols-1 gap-5 xl:grid-cols-[1.08fr_0.92fr]"
           }
         >
           <div className="space-y-5">
+            <div className={`${activeWorkspaceTab === "fund_plan" ? "" : "hidden"} space-y-5`}>
+              <section className="rounded-xl border border-slate-800 bg-slate-900/75 p-5">
+                <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                  <div className="max-w-4xl">
+                    <div className="flex items-center gap-2">
+                      <BriefcaseBusiness className="h-4 w-4 text-emerald-300" />
+                      <h2 className="text-base font-semibold">{L("Fund Business Plan", "Business Plan del fondo")}</h2>
+                    </div>
+                    <p className="mt-2 text-sm leading-6 text-slate-400">
+                      {L(
+                        "Model the fund with a monthly capital goal and annual compound return. Shareholders can withdraw a percentage of their annual profit share or reinvest it back into the fund projection.",
+                        "Modela el fondo con una meta mensual de capital y retorno anual compuesto. Los accionistas pueden retirar un porcentaje de su ganancia anual o reinvertirla dentro de la proyección del fondo."
+                      )}
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-xs xl:min-w-[420px]">
+                    <Readout
+                      label={L("Year 30 value", "Valor año 30")}
+                      value={formatCompactCurrency(fundProjection.at(-1)?.endValue, localeTag)}
+                      hint={L("After payouts", "Luego de pagos")}
+                    />
+                    <Readout
+                      label={L("Cumulative payouts", "Pagos acumulados")}
+                      value={formatCompactCurrency(fundProjection.at(-1)?.cumulativePayouts, localeTag)}
+                      hint={L("Annual withdrawals", "Retiros anuales")}
+                    />
+                  </div>
+                </div>
+
+                <div className="mt-5 grid grid-cols-1 gap-3 md:grid-cols-4">
+                  <label className="block">
+                    <span className="text-[11px] font-semibold uppercase text-slate-500">{L("Initial fund capital", "Capital inicial")}</span>
+                    <input
+                      type="number"
+                      value={fundInitialCapital}
+                      onChange={(event) => setFundInitialCapital(toNumber(event.target.value))}
+                      className="mt-1 h-10 w-full rounded-lg border border-slate-800 bg-slate-950 px-3 text-sm text-slate-100 outline-none"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="text-[11px] font-semibold uppercase text-slate-500">{L("Monthly goal", "Meta mensual")}</span>
+                    <input
+                      type="number"
+                      value={fundMonthlyGoal}
+                      onChange={(event) => setFundMonthlyGoal(toNumber(event.target.value))}
+                      className="mt-1 h-10 w-full rounded-lg border border-slate-800 bg-slate-950 px-3 text-sm text-slate-100 outline-none"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="text-[11px] font-semibold uppercase text-slate-500">{L("Annual return %", "Retorno anual %")}</span>
+                    <input
+                      type="number"
+                      value={fundAnnualReturnPct}
+                      onChange={(event) => setFundAnnualReturnPct(toNumber(event.target.value))}
+                      className="mt-1 h-10 w-full rounded-lg border border-slate-800 bg-slate-950 px-3 text-sm text-slate-100 outline-none"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="text-[11px] font-semibold uppercase text-slate-500">{L("Shareholder view year", "Año de vista")}</span>
+                    <select
+                      value={fundSelectedYear}
+                      onChange={(event) => setFundSelectedYear(toNumber(event.target.value))}
+                      className="mt-1 h-10 w-full rounded-lg border border-slate-800 bg-slate-950 px-3 text-sm text-slate-100 outline-none"
+                    >
+                      {[1, 5, 10, 15, 20, 25, 30].map((year) => (
+                        <option key={year} value={year}>
+                          {L(`Year ${year}`, `Año ${year}`)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+
+                {shareholderOwnershipTotal > 100 ? (
+                  <p className="mt-3 rounded-lg border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-xs leading-5 text-amber-100">
+                    {L(
+                      "Shareholder ownership is above 100%. Payouts may exceed the modeled profit allocation.",
+                      "La participación de accionistas está por encima de 100%. Los pagos pueden exceder la asignación de ganancias modelada."
+                    )}
+                  </p>
+                ) : null}
+              </section>
+
+              <section className="grid grid-cols-1 gap-5 xl:grid-cols-[1fr_0.75fr]">
+                <div className="rounded-xl border border-slate-800 bg-slate-900/75 p-5">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <h3 className="text-sm font-semibold text-slate-100">{L("Fund growth projection", "Proyección de crecimiento del fondo")}</h3>
+                      <p className="mt-1 text-xs text-slate-500">
+                        {L("Annual compounding, annual payouts, monthly capital goal added each year.", "Interés anual compuesto, pagos anuales y meta mensual añadida cada año.")}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="mt-5 h-80">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <RechartsLineChart data={fundProjection}>
+                        <CartesianGrid stroke="#1f2937" strokeDasharray="3 3" />
+                        <XAxis dataKey="year" tick={{ fontSize: 10, fill: "#94a3b8" }} />
+                        <YAxis tick={{ fontSize: 10, fill: "#94a3b8" }} tickFormatter={(value) => formatCompactCurrency(Number(value), localeTag)} />
+                        <Tooltip
+                          formatter={(value: any) => formatCurrency(Number(value), localeTag)}
+                          labelFormatter={(value) => L(`Year ${value}`, `Año ${value}`)}
+                          labelStyle={{ color: "#0f172a" }}
+                        />
+                        <Legend wrapperStyle={{ fontSize: 11 }} />
+                        <Line type="monotone" dataKey="endValue" name={L("Fund value", "Valor fondo")} stroke="#34d399" strokeWidth={2.5} dot={false} />
+                        <Line type="monotone" dataKey="cumulativePayouts" name={L("Cumulative payouts", "Pagos acumulados")} stroke="#fbbf24" strokeWidth={2} dot={false} />
+                        <Line type="monotone" dataKey="cumulativeContributions" name={L("Contributions", "Contribuciones")} stroke="#38bdf8" strokeWidth={2} dot={false} />
+                      </RechartsLineChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-slate-800 bg-slate-900/75 p-5">
+                  <h3 className="text-sm font-semibold text-slate-100">{L("Milestones", "Milestones")}</h3>
+                  <div className="mt-4 space-y-3">
+                    {fundMilestones.map((row) => (
+                      <div key={row.year} className="rounded-lg border border-slate-800 bg-slate-950/55 p-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <p className="text-sm font-semibold text-slate-100">{L(`Year ${row.year}`, `Año ${row.year}`)}</p>
+                          <p className="text-sm font-semibold text-emerald-300">{formatCompactCurrency(row.endValue, localeTag)}</p>
+                        </div>
+                        <div className="mt-2 grid grid-cols-2 gap-2 text-[11px] text-slate-500">
+                          <span>{L("Annual payouts", "Pagos anuales")}: {formatCompactCurrency(row.shareholderPayouts, localeTag)}</span>
+                          <span>{L("Gross return", "Retorno bruto")}: {formatCompactCurrency(row.grossReturn, localeTag)}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </section>
+
+              <section className="rounded-xl border border-slate-800 bg-slate-900/75 p-5">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <h3 className="text-sm font-semibold text-slate-100">{L("Shareholder annual payout plan", "Plan anual de pagos a accionistas")}</h3>
+                    <p className="mt-1 text-xs leading-5 text-slate-500">
+                      {L(
+                        "Choose who withdraws annually and what percentage of that shareholder's annual profit share is paid out. Reinvested profit stays in the fund projection.",
+                        "Escoge quién retira anualmente y qué porcentaje de su parte de ganancia anual se paga. La ganancia reinvertida se queda en la proyección del fondo."
+                      )}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={addFundShareholder}
+                    className="inline-flex items-center gap-2 rounded-lg border border-slate-700 px-3 py-2 text-xs font-semibold text-slate-200 hover:border-emerald-400 hover:text-emerald-200"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    {L("Add shareholder", "Añadir accionista")}
+                  </button>
+                </div>
+
+                <div className="mt-4 overflow-x-auto rounded-lg border border-slate-800">
+                  <table className="w-full min-w-[980px] text-left text-sm">
+                    <thead className="bg-slate-950/55 text-xs text-slate-500">
+                      <tr>
+                        <th className="px-3 py-2">{L("Shareholder", "Accionista")}</th>
+                        <th className="px-3 py-2">{L("Ownership %", "Participación %")}</th>
+                        <th className="px-3 py-2">{L("Annual policy", "Política anual")}</th>
+                        <th className="px-3 py-2">{L("Withdraw %", "Retiro %")}</th>
+                        <th className="px-3 py-2">{L("Projected payout", "Pago proyectado")}</th>
+                        <th className="px-3 py-2">{L("Reinvested", "Reinvertido")}</th>
+                        <th className="px-3 py-2" aria-label={L("Actions", "Acciones")} />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {fundShareholders.map((shareholder) => {
+                        const projectionRow = selectedFundProjection?.shareholderRows.find(
+                          (row) => row.shareholderId === shareholder.id
+                        );
+                        return (
+                          <tr key={shareholder.id} className="border-t border-slate-800">
+                            <td className="px-3 py-2">
+                              <input
+                                value={shareholder.name}
+                                onChange={(event) => updateFundShareholder(shareholder.id, { name: event.target.value })}
+                                className="h-9 w-44 rounded-lg border border-slate-800 bg-slate-950/70 px-2 text-slate-100 outline-none"
+                              />
+                            </td>
+                            <td className="px-3 py-2">
+                              <input
+                                type="number"
+                                value={shareholder.ownershipPct}
+                                onChange={(event) => updateFundShareholder(shareholder.id, { ownershipPct: toNumber(event.target.value) })}
+                                className="h-9 w-24 rounded-lg border border-slate-800 bg-slate-950/70 px-2 text-slate-100 outline-none"
+                              />
+                            </td>
+                            <td className="px-3 py-2">
+                              <select
+                                value={shareholder.payoutMode}
+                                onChange={(event) =>
+                                  updateFundShareholder(shareholder.id, {
+                                    payoutMode: event.target.value === "withdraw" ? "withdraw" : "reinvest",
+                                    annualWithdrawalPct:
+                                      event.target.value === "withdraw"
+                                        ? shareholder.annualWithdrawalPct || 100
+                                        : 0,
+                                  })
+                                }
+                                className="h-9 w-36 rounded-lg border border-slate-800 bg-slate-950/70 px-2 text-slate-100 outline-none"
+                              >
+                                <option value="reinvest">{L("Reinvest", "Reinvertir")}</option>
+                                <option value="withdraw">{L("Withdraw", "Retirar")}</option>
+                              </select>
+                            </td>
+                            <td className="px-3 py-2">
+                              <input
+                                type="number"
+                                value={shareholder.annualWithdrawalPct}
+                                disabled={shareholder.payoutMode === "reinvest"}
+                                onChange={(event) => updateFundShareholder(shareholder.id, { annualWithdrawalPct: toNumber(event.target.value) })}
+                                className="h-9 w-24 rounded-lg border border-slate-800 bg-slate-950/70 px-2 text-slate-100 outline-none disabled:opacity-50"
+                              />
+                            </td>
+                            <td className="px-3 py-2 font-semibold text-amber-300">
+                              {formatCurrency(projectionRow?.payout, localeTag)}
+                            </td>
+                            <td className="px-3 py-2 text-emerald-300">
+                              {formatCurrency(projectionRow?.reinvested, localeTag)}
+                            </td>
+                            <td className="px-3 py-2">
+                              <button
+                                type="button"
+                                onClick={() => removeFundShareholder(shareholder.id)}
+                                className="rounded-lg border border-slate-800 p-2 text-slate-400 hover:border-rose-400 hover:text-rose-200"
+                                aria-label={L("Remove shareholder", "Eliminar accionista")}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                {selectedFundProjection ? (
+                  <div className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
+                    <Readout label={L("Selected year", "Año seleccionado")} value={selectedFundProjection.year} />
+                    <Readout label={L("Fund value", "Valor fondo")} value={formatCompactCurrency(selectedFundProjection.endValue, localeTag)} />
+                    <Readout label={L("Annual payouts", "Pagos anuales")} value={formatCompactCurrency(selectedFundProjection.shareholderPayouts, localeTag)} />
+                    <Readout label={L("Annual reinvested", "Reinvertido anual")} value={formatCompactCurrency(selectedFundProjection.reinvestedProfit, localeTag)} />
+                  </div>
+                ) : null}
+              </section>
+            </div>
+
+            <div className={`${activeWorkspaceTab === "screener" ? "" : "hidden"} rounded-xl border border-slate-800 bg-slate-900/75 p-5`}>
+              <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                <div className="max-w-4xl">
+                  <div className="flex items-center gap-2">
+                    <BarChart3 className="h-4 w-4 text-sky-300" />
+                    <h2 className="text-base font-semibold">{L("Sector Value Screener", "Screener de valor por sector")}</h2>
+                  </div>
+                  <p className="mt-2 text-sm leading-6 text-slate-400">
+                    {L(
+                      "Pull market and fundamental data for a sector universe, calculate sector valuation medians, and rank companies by value, quality, dividends, momentum, and relative potential.",
+                      "Trae data de mercado y fundamentales para un universo sectorial, calcula medianas de valuation del sector y rankea compañías por valor, calidad, dividendos, momentum y potencial relativo."
+                    )}
+                  </p>
+                </div>
+                <div className="grid grid-cols-1 gap-2 text-xs sm:grid-cols-2 xl:min-w-[360px]">
+                  <Readout label={L("Market", "Mercado")} value="US" />
+                  <Readout label={L("Companies", "Compañías")} value={screenerResult?.rows?.length ?? "-"} />
+                </div>
+              </div>
+
+              <div className="mt-5 grid grid-cols-1 gap-3 lg:grid-cols-[220px_1fr_auto]">
+                <label className="block">
+                  <span className="text-[11px] font-semibold uppercase text-slate-500">{L("Sector", "Sector")}</span>
+                  <select
+                    value={screenerSector}
+                    onChange={(event) => setScreenerSector(event.target.value)}
+                    className="mt-1 h-10 w-full rounded-lg border border-slate-800 bg-slate-950 px-3 text-sm text-slate-100 outline-none"
+                  >
+                    {(screenerResult?.sectors ?? [
+                      { key: "technology", label: "Technology" },
+                      { key: "communication", label: "Communication Services" },
+                      { key: "consumer_discretionary", label: "Consumer Discretionary" },
+                      { key: "consumer_staples", label: "Consumer Staples" },
+                      { key: "healthcare", label: "Healthcare" },
+                      { key: "financials", label: "Financials" },
+                      { key: "industrials", label: "Industrials" },
+                      { key: "energy", label: "Energy" },
+                      { key: "utilities", label: "Utilities" },
+                      { key: "real_estate", label: "Real Estate" },
+                      { key: "materials", label: "Materials" },
+                    ]).map((sector) => (
+                      <option key={sector.key} value={sector.key}>
+                        {sector.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="block">
+                  <span className="text-[11px] font-semibold uppercase text-slate-500">
+                    {L("Custom tickers optional", "Tickers custom opcional")}
+                  </span>
+                  <input
+                    value={screenerCustomTickers}
+                    onChange={(event) => setScreenerCustomTickers(event.target.value.toUpperCase())}
+                    placeholder="AAPL,MSFT,NVDA"
+                    className="mt-1 h-10 w-full rounded-lg border border-slate-800 bg-slate-950 px-3 text-sm text-slate-100 outline-none"
+                  />
+                </label>
+                <button
+                  type="button"
+                  onClick={() => void runSectorScreener()}
+                  disabled={screenerLoading}
+                  className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-sky-400/60 bg-sky-500/10 px-4 text-sm font-semibold text-sky-100 hover:bg-sky-500/20 disabled:opacity-50 lg:self-end"
+                >
+                  {screenerLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                  {screenerLoading ? L("Screening", "Analizando") : L("Run screener", "Correr screener")}
+                </button>
+              </div>
+
+              {screenerError ? <p className="mt-3 text-sm text-rose-300">{screenerError}</p> : null}
+
+              {screenerResult ? (
+                <>
+                  <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
+                    <Readout label={L("Sector", "Sector")} value={screenerResult.sectorLabel} />
+                    <Readout label={L("Median FCF yield", "FCF yield mediana")} value={formatPercent(screenerResult.summary?.medianFcfYield, localeTag)} />
+                    <Readout label={L("Median forward P/E", "Forward P/E mediana")} value={formatCompactNumber(screenerResult.summary?.medianForwardPE, localeTag)} />
+                    <Readout label={L("High potential", "Alto potencial")} value={screenerResult.summary?.highPotentialCount ?? 0} />
+                  </div>
+
+                  <div className="mt-5 overflow-x-auto rounded-lg border border-slate-800">
+                    <table className="w-full min-w-[1180px] text-left text-sm">
+                      <thead className="bg-slate-950/55 text-xs text-slate-500">
+                        <tr>
+                          <th className="px-3 py-2">{L("Company", "Compañía")}</th>
+                          <th className="px-3 py-2">{L("Potential", "Potencial")}</th>
+                          <th className="px-3 py-2">{L("Value", "Valor")}</th>
+                          <th className="px-3 py-2">{L("Quality", "Calidad")}</th>
+                          <th className="px-3 py-2">{L("Dividend", "Dividendo")}</th>
+                          <th className="px-3 py-2">{L("FCF yield", "FCF yield")}</th>
+                          <th className="px-3 py-2">{L("Forward P/E", "Forward P/E")}</th>
+                          <th className="px-3 py-2">{L("Revenue CAGR", "Revenue CAGR")}</th>
+                          <th className="px-3 py-2">{L("FCF margin", "Margen FCF")}</th>
+                          <th className="px-3 py-2">{L("Verdict", "Veredicto")}</th>
+                          <th className="px-3 py-2"></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {screenerResult.rows.map((row) => (
+                          <tr key={row.ticker} className="border-t border-slate-800">
+                            <td className="px-3 py-2">
+                              <p className="font-semibold text-slate-100">{row.ticker}</p>
+                              <p className="max-w-[240px] truncate text-xs text-slate-500">{row.name}</p>
+                            </td>
+                            <td className="px-3 py-2 font-semibold text-emerald-300">{row.potentialScore}</td>
+                            <td className="px-3 py-2 text-slate-300">{row.valueScore}</td>
+                            <td className="px-3 py-2 text-slate-300">{row.qualityScore}</td>
+                            <td className="px-3 py-2 text-slate-300">{row.dividendScore}</td>
+                            <td className="px-3 py-2 text-slate-300">{formatPercent(row.fcfYield, localeTag)}</td>
+                            <td className="px-3 py-2 text-slate-300">{formatCompactNumber(row.forwardPE ?? row.trailingPE, localeTag)}</td>
+                            <td className="px-3 py-2 text-slate-300">{formatPercent(row.revenueCagr, localeTag)}</td>
+                            <td className="px-3 py-2 text-slate-300">{formatPercent(row.fcfMargin, localeTag)}</td>
+                            <td className="px-3 py-2 text-slate-300">{row.verdict.replace(/_/g, " ")}</td>
+                            <td className="px-3 py-2">
+                              <button
+                                type="button"
+                                onClick={() => openScreenerTicker(row.ticker)}
+                                className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:border-emerald-400 hover:text-emerald-200"
+                              >
+                                {L("Research", "Investigar")}
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <p className="mt-3 text-xs leading-5 text-slate-500">
+                    {L(
+                      "This screener is a first-pass ranking. A high score means the company deserves deeper research, not that it should be bought. Confirm with filings, thesis context, valuation, and risk review.",
+                      "Este screener es un ranking inicial. Un score alto significa que la compañía merece research más profundo, no que se debe comprar. Confirma con filings, contexto de tesis, valuation y revisión de riesgo."
+                    )}
+                  </p>
+                </>
+              ) : null}
+            </div>
+
             <div className={`${activeWorkspaceTab === "portfolio" ? "" : "hidden"} rounded-xl border border-slate-800 bg-slate-900/75 p-5`}>
               <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                 <div>
@@ -2199,6 +2958,124 @@ export default function NeuroAnalysisPage() {
               <Readout label={L("Case memory", "Memoria caso")} value={activeCaseId ? L("Saved", "Guardada") : L("Local", "Local")} />
               <Readout label={L("Indexed docs", "Docs indexados")} value={indexedDocuments.length} />
             </div>
+          </div>
+
+          <div className="mt-5 rounded-xl border border-slate-800 bg-slate-950/45 p-4">
+            <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+              <div className="max-w-3xl">
+                <p className="text-sm font-semibold text-slate-100">{L("Thesis Co-Builder", "Constructor de tesis")}</p>
+                <p className="mt-1 text-xs leading-5 text-slate-500">
+                  {L(
+                    "Add news, events, observations, and questions you want the AI to consider. These notes stay labeled as user-provided context until verified by filings or durable evidence.",
+                    "Añade noticias, eventos, observaciones y preguntas que quieres que la AI considere. Estas notas quedan marcadas como contexto provisto por el usuario hasta verificarse con filings o evidencia durable."
+                  )}
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2 text-xs">
+                <span className="rounded-full border border-slate-700 px-3 py-1 text-slate-400">
+                  {thesisNotes.length} {L("context notes", "notas")}
+                </span>
+                <span className="rounded-full border border-amber-400/40 bg-amber-400/10 px-3 py-1 text-amber-100">
+                  {L("User context", "Contexto usuario")}
+                </span>
+              </div>
+            </div>
+
+            <div className="mt-4 grid grid-cols-1 gap-3 xl:grid-cols-[1fr_260px]">
+              <textarea
+                value={thesisContextNote}
+                onChange={(event) => setThesisContextNote(event.target.value)}
+                rows={4}
+                placeholder={L(
+                  "Example: Management announced a product delay, but demand still looks strong. I want to know if this weakens the long-term thesis or only changes the timeline.",
+                  "Ejemplo: La gerencia anunció un retraso de producto, pero la demanda todavía se ve fuerte. Quiero saber si esto debilita la tesis a largo plazo o solo cambia el timeline."
+                )}
+                className="min-h-[120px] w-full resize-none rounded-lg border border-slate-800 bg-slate-950/70 px-3 py-2 text-sm leading-6 text-slate-100 outline-none focus:border-violet-400"
+              />
+              <div className="space-y-3">
+                <label className="block">
+                  <span className="text-[11px] font-semibold uppercase text-slate-500">{L("Context type", "Tipo de contexto")}</span>
+                  <select
+                    value={thesisSourceType}
+                    onChange={(event) => setThesisSourceType(event.target.value)}
+                    className="mt-1 h-10 w-full rounded-lg border border-slate-800 bg-slate-950 px-3 text-sm text-slate-100 outline-none"
+                  >
+                    <option value="news">{L("News / event", "Noticia / evento")}</option>
+                    <option value="earnings">{L("Earnings", "Earnings")}</option>
+                    <option value="management">{L("Management", "Gerencia")}</option>
+                    <option value="competition">{L("Competition", "Competencia")}</option>
+                    <option value="macro">{L("Macro", "Macro")}</option>
+                    <option value="personal_observation">{L("Observation", "Observación")}</option>
+                  </select>
+                </label>
+                <label className="block">
+                  <span className="text-[11px] font-semibold uppercase text-slate-500">{L("Impact", "Impacto")}</span>
+                  <select
+                    value={thesisImpact}
+                    onChange={(event) => setThesisImpact(event.target.value)}
+                    className="mt-1 h-10 w-full rounded-lg border border-slate-800 bg-slate-950 px-3 text-sm text-slate-100 outline-none"
+                  >
+                    <option value="uncertain">{L("Uncertain", "Incierto")}</option>
+                    <option value="positive">{L("Positive", "Positivo")}</option>
+                    <option value="negative">{L("Negative", "Negativo")}</option>
+                    <option value="mixed">{L("Mixed", "Mixto")}</option>
+                  </select>
+                </label>
+                <label className="block">
+                  <span className="text-[11px] font-semibold uppercase text-slate-500">{L("Source / title", "Fuente / título")}</span>
+                  <input
+                    value={thesisSourceLabel}
+                    onChange={(event) => setThesisSourceLabel(event.target.value)}
+                    placeholder={L("Optional", "Opcional")}
+                    className="mt-1 h-10 w-full rounded-lg border border-slate-800 bg-slate-950 px-3 text-sm text-slate-100 outline-none"
+                  />
+                </label>
+              </div>
+            </div>
+
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => void saveThesisContext()}
+                disabled={thesisSaving || !thesisContextNote.trim()}
+                className="inline-flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-950/60 px-3 py-2 text-xs font-semibold text-slate-200 hover:border-emerald-400 hover:text-emerald-200 disabled:opacity-50"
+              >
+                {thesisSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+                {thesisSaving ? L("Saving", "Guardando") : L("Save thesis context", "Guardar contexto")}
+              </button>
+              <button
+                type="button"
+                onClick={stageThesisUpdateQuestion}
+                className="inline-flex items-center gap-2 rounded-lg border border-violet-400/50 bg-violet-500/10 px-3 py-2 text-xs font-semibold text-violet-100 hover:bg-violet-500/20"
+              >
+                <Sparkles className="h-3.5 w-3.5" />
+                {L("Prepare thesis update question", "Preparar pregunta de tesis")}
+              </button>
+            </div>
+
+            {thesisStatus ? <p className="mt-3 text-xs text-emerald-300">{thesisStatus}</p> : null}
+            {thesisError ? <p className="mt-3 text-xs text-rose-300">{thesisError}</p> : null}
+
+            {thesisNotes.length > 0 ? (
+              <div className="mt-4 grid grid-cols-1 gap-2 lg:grid-cols-2">
+                {thesisNotes.slice(0, 4).map((note) => (
+                  <div key={note.id} className="rounded-lg border border-slate-800 bg-slate-950/55 p-3">
+                    <div className="flex flex-wrap items-center gap-2 text-[10px] uppercase tracking-[0.16em] text-slate-500">
+                      <span>{String(note.payload?.sourceType ?? "context").replace(/_/g, " ")}</span>
+                      <span className="text-slate-700">/</span>
+                      <span>{String(note.payload?.impact ?? "uncertain")}</span>
+                    </div>
+                    <p className="mt-2 line-clamp-3 text-xs leading-5 text-slate-300">
+                      {String(note.payload?.note ?? "")}
+                    </p>
+                    <p className="mt-2 text-[11px] text-slate-600">
+                      {note.created_at ? new Date(note.created_at).toLocaleString(localeTag) : ""}
+                      {note.payload?.sourceLabel ? ` / ${note.payload.sourceLabel}` : ""}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            ) : null}
           </div>
 
           <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-[1fr_auto]">

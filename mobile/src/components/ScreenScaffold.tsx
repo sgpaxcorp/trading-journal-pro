@@ -1,5 +1,7 @@
 import { PropsWithChildren, useMemo, useState } from "react";
-import { ActivityIndicator, Image, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
+import { useNavigation, useRoute } from "@react-navigation/native";
+import { ActivityIndicator, Image, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { useLanguage } from "../lib/LanguageContext";
 import { useTheme } from "../lib/ThemeContext";
@@ -18,6 +20,7 @@ type ScreenScaffoldProps = PropsWithChildren<{
   showBrand?: boolean;
   compactHeader?: boolean;
   contentPadding?: number;
+  showPageNavigation?: boolean;
 }>;
 
 export function ScreenScaffold({
@@ -30,12 +33,32 @@ export function ScreenScaffold({
   showBrand = true,
   compactHeader = false,
   contentPadding = 16,
+  showPageNavigation = true,
 }: ScreenScaffoldProps) {
   const { language } = useLanguage();
   const { colors } = useTheme();
+  const navigation = useNavigation<any>();
+  const route = useRoute();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const [fallbackRefreshing, setFallbackRefreshing] = useState(false);
   const activeRefreshing = refreshing || fallbackRefreshing;
+  const isBusinessCenter = route.name === "Dashboard";
+
+  const returnToBusinessCenter = () => {
+    let rootNavigation = navigation;
+    while (rootNavigation.getParent?.()) {
+      rootNavigation = rootNavigation.getParent();
+    }
+    rootNavigation.navigate("Tabs", { screen: "Dashboard" });
+  };
+
+  const goBack = () => {
+    if (navigation.canGoBack()) {
+      navigation.goBack();
+      return;
+    }
+    returnToBusinessCenter();
+  };
 
   const handleRefresh = onRefresh
     ? onRefresh
@@ -46,6 +69,30 @@ export function ScreenScaffold({
       };
   const content = (
     <>
+      {showPageNavigation && !isBusinessCenter ? (
+        <View style={styles.pageNavigation}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t(language, "Back", "Atrás")}
+            onPress={goBack}
+            style={({ pressed }) => [styles.pageNavigationButton, pressed && styles.buttonPressed]}
+          >
+            <Ionicons name="arrow-back" size={18} color={colors.info} />
+            <Text style={styles.pageNavigationButtonText}>{t(language, "Back", "Atrás")}</Text>
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t(language, "Return to Business Center", "Volver al Centro Empresarial")}
+            onPress={returnToBusinessCenter}
+            style={({ pressed }) => [styles.businessCenterButton, pressed && styles.buttonPressed]}
+          >
+            <Ionicons name="grid-outline" size={17} color={colors.onPrimary} />
+            <Text style={styles.businessCenterButtonText}>
+              {t(language, "Business Center", "Centro Empresarial")}
+            </Text>
+          </Pressable>
+        </View>
+      ) : null}
       {showBrand ? (
         <View style={styles.brandRow}>
           <Image source={brandLogo} style={styles.brandLogo} resizeMode="contain" />
@@ -107,6 +154,62 @@ const createStyles = (colors: ThemeColors) =>
     contentCompact: {
       paddingTop: 12,
       gap: 10,
+    },
+    pageNavigation: {
+      minHeight: 52,
+      padding: 5,
+      gap: 7,
+      flexDirection: "row",
+      alignItems: "center",
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 8,
+      backgroundColor: colors.surface,
+      shadowColor: colors.background,
+      shadowOpacity: 0.2,
+      shadowRadius: 8,
+      shadowOffset: { width: 0, height: 3 },
+      elevation: 2,
+    },
+    pageNavigationButton: {
+      minHeight: 40,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 6,
+      borderWidth: 1,
+      borderColor: colors.info,
+      borderRadius: 7,
+      backgroundColor: colors.infoSoft,
+      paddingHorizontal: 13,
+    },
+    pageNavigationButtonText: {
+      color: colors.textPrimary,
+      fontSize: 13,
+      fontWeight: "700",
+    },
+    businessCenterButton: {
+      minHeight: 40,
+      flex: 1,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 6,
+      borderWidth: 1,
+      borderColor: colors.primary,
+      borderRadius: 7,
+      backgroundColor: colors.primary,
+      paddingHorizontal: 10,
+    },
+    businessCenterButtonText: {
+      color: colors.onPrimary,
+      fontSize: 13,
+      fontWeight: "800",
+      flexShrink: 1,
+      textAlign: "center",
+    },
+    buttonPressed: {
+      opacity: 0.78,
     },
     brandRow: {
       alignItems: "center",

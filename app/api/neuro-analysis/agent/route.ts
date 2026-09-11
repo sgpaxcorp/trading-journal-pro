@@ -10,7 +10,7 @@ import {
   sanitizeNeuroAnalysisOutput,
 } from "@/lib/neuroAnalysisAgent";
 import { checkNeuroQuota, recordNeuroUsage } from "@/lib/neuroAnalysisQuota";
-import { getNeuroCase, insertNeuroSnapshot, listNeuroReports } from "@/lib/neuroAnalysisStorage";
+import { getNeuroCase, insertNeuroSnapshot, listNeuroReports, listNeuroSnapshots } from "@/lib/neuroAnalysisStorage";
 import { rateLimit, rateLimitHeaders } from "@/lib/rateLimit";
 import { requireSmartToolsOwner } from "@/lib/smartToolsAccess";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
@@ -72,23 +72,24 @@ async function loadFilingMetadata(userId: string, tickers: string[]) {
 }
 
 async function loadPriorAgentMemory(userId: string, caseId?: string | null) {
-  let query = supabaseAdmin
-    .from("neuro_analysis_snapshots")
-    .select("snapshot_type,payload,created_at")
-    .eq("user_id", userId)
-    .eq("snapshot_type", "agent_qa")
-    .order("created_at", { ascending: false })
-    .limit(8);
+  const data = await listNeuroSnapshots({
+    userId,
+    caseId,
+    snapshotTypes: ["agent_qa", "thesis_context", "thesis_update"],
+    limit: 16,
+  }).catch(() => []);
 
-  if (caseId) query = query.eq("case_id", caseId);
-  else query = query.is("case_id", null);
-
-  const { data, error } = await query;
-  if (error || !Array.isArray(data)) return [];
   return data.map((row: any) => ({
+    type: row.snapshot_type,
     createdAt: row.created_at,
     question: row.payload?.question ?? null,
     answer: row.payload?.answer ?? null,
+    note: row.payload?.note ?? null,
+    sourceType: row.payload?.sourceType ?? null,
+    sourceLabel: row.payload?.sourceLabel ?? null,
+    impact: row.payload?.impact ?? null,
+    happenedAt: row.payload?.happenedAt ?? null,
+    evidenceLevel: row.payload?.evidenceLevel ?? null,
   }));
 }
 

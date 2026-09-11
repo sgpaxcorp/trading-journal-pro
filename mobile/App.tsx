@@ -239,23 +239,6 @@ function MainTabs() {
   );
 }
 
-function AppHomeButton({ onPress }: { onPress: () => void }) {
-  const { colors } = useTheme();
-  const { language } = useLanguage();
-
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={t(language, "Return to Business Center", "Volver al Centro Empresarial")}
-      hitSlop={10}
-      onPress={onPress}
-      style={styles.homeButton}
-    >
-      <Ionicons name="home-outline" size={22} color={colors.textPrimary} />
-    </Pressable>
-  );
-}
-
 function LegalAcceptanceScreen({
   status,
   checking,
@@ -965,14 +948,6 @@ function AppShell() {
     });
   }, [postAuthRoute]);
 
-  const handleReturnHome = useCallback(() => {
-    if (!navigationRef.isReady()) return;
-    navigationRef.reset({
-      index: 0,
-      routes: [{ name: "Tabs", params: { screen: "Dashboard" } }],
-    });
-  }, []);
-
   return (
     <NavigationContainer ref={navigationRef} onReady={() => setNavReady(true)}>
       <StatusBar style={themeMode === "light" ? "dark" : "light"} />
@@ -987,10 +962,8 @@ function AppShell() {
             headerStyle: { backgroundColor: colors.surface },
             headerTintColor: colors.textPrimary,
             headerBackTitle: t(language, "Back", "Atrás"),
+            headerBackVisible: !shouldShowMainTabs,
             contentStyle: { backgroundColor: colors.background },
-            headerRight: shouldShowMainTabs
-              ? () => <AppHomeButton onPress={handleReturnHome} />
-              : undefined,
           }}
         >
           {shouldShowMainTabs ? (
@@ -1102,13 +1075,6 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     marginRight: 6,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  homeButton: {
-    width: 42,
-    height: 42,
-    marginRight: 2,
     alignItems: "center",
     justifyContent: "center",
   },

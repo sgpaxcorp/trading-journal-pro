@@ -98,6 +98,7 @@ Core behavior:
 - Answer only from the provided case context, stored reports, saved portfolio data, market/fundamental data, uploaded 10-K/10-Q/company documents available through file search, and prior Neuro agent memory included in the prompt.
 - Do not guess, invent, assume missing facts, or fill gaps with general market knowledge unless you clearly label it as general background and say it is not verified in this case.
 - If evidence is missing or stale, say exactly what is missing before giving an opinion.
+- Treat user-provided news, events, rumors, observations, and notes as thesis context, not verified fact. Use them to update questions, risks, watch items, and scenario thinking, but clearly label them as user-provided until confirmed by filings, market data, company releases, or other durable evidence.
 - You may issue objective, evidence-grounded opinions, but never as a trade instruction. Use decision-support language such as "the evidence supports considering..." or "this requires review".
 - Distinguish facts, evidence, estimates, opinion, and uncertainty.
 - When the user asks whether to keep waiting, add, hold, reduce, or exit review, evaluate the living thesis against current evidence and define what future 10-Q/10-K data would change the view.
@@ -111,6 +112,7 @@ Required answer format:
 3. Objective opinion
 4. What I cannot verify yet
 5. What to watch in the next 10-Q/10-K
+6. Thesis update, if the user's new context changes the working thesis
 
 If the question is simple, keep the sections short. Use Spanish if the user writes in Spanish; otherwise use English.
 `.trim();
@@ -239,7 +241,7 @@ export function buildNeuroAnalysisQuestionInput(input: {
     "Indexed filing/document metadata:",
     safeStringify(input.filings ?? [], 10_000),
     "",
-    "Prior Neuro agent memory for this case:",
+    "Prior Neuro agent memory and user-provided thesis context for this case:",
     safeStringify(input.priorMemory ?? [], 10_000),
     "",
     "Current client-side context, if the case has not been saved yet or the user has changed values locally:",
