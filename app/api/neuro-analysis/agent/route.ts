@@ -4,8 +4,12 @@ import OpenAI from "openai";
 import { getAuthUser } from "@/lib/authServer";
 import { countResponseFileSearchCalls, recordAiUsage, requireAiBudget } from "@/lib/aiUsageServer";
 import {
+  appendNeuroWebSources,
   buildNeuroAnalysisQuestionInput,
+  extractNeuroWebSources,
   neuroResponseTokenUsage,
+  neuroReasoningConfig,
+  neuroWebSearchTool,
   NEURO_ANALYSIS_QA_SYSTEM_PROMPT,
   sanitizeNeuroAnalysisOutput,
 } from "@/lib/neuroAnalysisAgent";
@@ -21,7 +25,7 @@ const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const MODEL =
   process.env.OPENAI_NEURO_AGENT_MODEL ||
   process.env.OPENAI_NEURO_ANALYSIS_MODEL ||
-  "gpt-4.1";
+  "gpt-5.5";
 
 function cleanQuestion(value: unknown) {
   return String(value ?? "").trim().slice(0, 3_000);
@@ -177,7 +181,7 @@ export async function POST(req: Request) {
       loadPriorAgentMemory(authUser.userId, caseId),
     ]);
     const vectorStoreIds = vectorStoreIdsFrom(filings, reports);
-    const tools =
+    const fileSearchTools =
       vectorStoreIds.length > 0
         ? [
             {
@@ -187,9 +191,16 @@ export async function POST(req: Request) {
             },
           ]
         : [];
+    const webSearchTool = neuroWebSearchTool();
+    const tools = [...fileSearchTools, ...(webSearchTool ? [webSearchTool] : [])] as any[];
+    const include = [
+      ...(fileSearchTools.length > 0 ? ["file_search_call.results"] : []),
+      ...(webSearchTool ? ["web_search_call.action.sources"] : []),
+    ];
 
     const response = await client.responses.create({
       model: MODEL,
+      reasoning: neuroReasoningConfig(MODEL) as any,
       instructions: NEURO_ANALYSIS_QA_SYSTEM_PROMPT,
       input: buildNeuroAnalysisQuestionInput({
         question,
@@ -200,7 +211,7 @@ export async function POST(req: Request) {
         clientContext,
       }),
       tools,
-      include: tools.length > 0 ? ["file_search_call.results"] : undefined,
+      include: include.length > 0 ? (include as any) : undefined,
       max_output_tokens: 2200,
       metadata: {
         feature: "neuro_analysis_agent",
@@ -209,7 +220,8 @@ export async function POST(req: Request) {
       },
     });
 
-    const answer = sanitizeNeuroAnalysisOutput(response.output_text);
+    const webSources = extractNeuroWebSources(response);
+    const answer = appendNeuroWebSources(sanitizeNeuroAnalysisOutput(response.output_text), webSources);
     const tokenUsage = neuroResponseTokenUsage(response);
 
     await insertNeuroSnapshot({
@@ -223,6 +235,8 @@ export async function POST(req: Request) {
         model: String((response as any)?.model || MODEL),
         tickers,
         vectorStoreCount: vectorStoreIds.length,
+        webSearchEnabled: Boolean(webSearchTool),
+        webSourceCount: webSources.length,
         reportCount: reports.length,
         filingCount: filings.length,
         usage: tokenUsage,
@@ -241,6 +255,8 @@ export async function POST(req: Request) {
         vectorStoreCount: vectorStoreIds.length,
         reportCount: reports.length,
         filingCount: filings.length,
+        webSearchEnabled: Boolean(webSearchTool),
+        webSourceCount: webSources.length,
       },
     });
 
@@ -258,6 +274,8 @@ export async function POST(req: Request) {
         responseId: response.id,
         caseId,
         vectorStoreCount: vectorStoreIds.length,
+        webSearchEnabled: Boolean(webSearchTool),
+        webSourceCount: webSources.length,
       },
     });
 
@@ -265,6 +283,7 @@ export async function POST(req: Request) {
       answer,
       responseId: response.id,
       model: String((response as any)?.model || MODEL),
+      webSources,
       groundedContext: {
         caseLoaded: Boolean(researchCase),
         reports: reports.length,

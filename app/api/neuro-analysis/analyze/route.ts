@@ -2,8 +2,12 @@ import { NextResponse } from "next/server";
 import OpenAI from "openai";
 
 import {
+  appendNeuroWebSources,
   buildNeuroAnalysisInput,
+  extractNeuroWebSources,
   NEURO_ANALYSIS_SYSTEM_PROMPT,
+  neuroReasoningConfig,
+  neuroWebSearchTool,
   type NeuroAnalysisRequest,
 } from "@/lib/neuroAnalysisAgent";
 import { getAuthUser } from "@/lib/authServer";
@@ -22,7 +26,7 @@ import { countResponseFileSearchCalls, recordAiUsage, requireAiBudget } from "@/
 export const runtime = "nodejs";
 
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-const MODEL = process.env.OPENAI_NEURO_ANALYSIS_MODEL || "gpt-4.1";
+const MODEL = process.env.OPENAI_NEURO_ANALYSIS_MODEL || "gpt-5.5";
 
 type FilingMetadata = NonNullable<NeuroAnalysisRequest["uploadedFilings"]>[number];
 
@@ -55,6 +59,12 @@ function marketItemForTicker(marketData: unknown, ticker: string) {
   }
   if (normalizeTicker(raw?.ticker) === ticker) return raw;
   return null;
+}
+
+function isFundLikeMarketItem(item: any) {
+  const instrumentType = String(item?.instrumentType ?? "").toLowerCase();
+  const quoteType = String(item?.company?.quoteType ?? "").toUpperCase();
+  return instrumentType === "etf" || instrumentType === "fund" || quoteType.includes("ETF") || quoteType.includes("FUND");
 }
 
 function buildEffectiveHoldings(payload: NeuroAnalysisRequest) {
@@ -157,6 +167,7 @@ function missingIndexedFilingTickers(payload: NeuroAnalysisRequest, form: "10-K"
   const tickers = Array.from(new Set((payload.holdings ?? []).map((holding) => normalizeTicker(holding.ticker)).filter(Boolean)));
   return tickers.filter(
     (ticker) =>
+      !isFundLikeMarketItem(marketItemForTicker(payload.marketData, ticker)) &&
       !(payload.uploadedFilings ?? []).some(
         (filing) =>
           normalizeTicker(filing.ticker) === ticker &&
@@ -301,7 +312,7 @@ export async function POST(req: Request) {
     const caseId = savedCase?.id ? String(savedCase.id) : null;
 
     const vectorStoreIds = cleanVectorStoreIds(payloadWithLibrary.uploadedFilings ?? []);
-    const tools =
+    const fileSearchTools =
       vectorStoreIds.length > 0
         ? [
             {
@@ -311,9 +322,16 @@ export async function POST(req: Request) {
             },
           ]
         : [];
+    const webSearchTool = neuroWebSearchTool();
+    const tools = [...fileSearchTools, ...(webSearchTool ? [webSearchTool] : [])] as any[];
+    const include = [
+      ...(fileSearchTools.length > 0 ? ["file_search_call.results"] : []),
+      ...(webSearchTool ? ["web_search_call.action.sources"] : []),
+    ];
 
     const response = await client.responses.create({
       model: MODEL,
+      reasoning: neuroReasoningConfig(MODEL) as any,
       instructions: NEURO_ANALYSIS_SYSTEM_PROMPT,
       input: [
         buildNeuroAnalysisInput(payloadWithLibrary),
@@ -322,7 +340,7 @@ export async function POST(req: Request) {
         JSON.stringify(engine, null, 2),
       ].join("\n"),
       tools,
-      include: tools.length > 0 ? ["file_search_call.results"] : undefined,
+      include: include.length > 0 ? (include as any) : undefined,
       max_output_tokens: 3500,
       metadata: {
         feature: "neuro_analysis",
@@ -339,7 +357,8 @@ export async function POST(req: Request) {
         : typeof parsedAgent?.report === "string"
         ? parsedAgent.report
         : response.output_text;
-    const report = sanitizeAgentReport(rawReport);
+    const webSources = extractNeuroWebSources(response);
+    const report = appendNeuroWebSources(sanitizeAgentReport(rawReport), webSources);
     const tokenUsage = responseTokenUsage(response);
     const structured = {
       agent: parsedAgent ?? { reportMarkdown: report },
@@ -385,6 +404,8 @@ export async function POST(req: Request) {
         responseId: response.id,
         reportId: savedReport?.id ?? null,
         vectorStoreCount: vectorStoreIds.length,
+        webSearchEnabled: Boolean(webSearchTool),
+        webSourceCount: webSources.length,
         holdings: payloadWithLibrary.holdings.length,
       },
     });
@@ -401,6 +422,8 @@ export async function POST(req: Request) {
       metadata: {
         responseId: response.id,
         vectorStoreCount: vectorStoreIds.length,
+        webSearchEnabled: Boolean(webSearchTool),
+        webSourceCount: webSources.length,
       },
     });
 
@@ -411,6 +434,7 @@ export async function POST(req: Request) {
       caseId,
       reportId: savedReport?.id ?? null,
       responseId: response.id,
+      webSources,
       vectorStoresUsed: vectorStoreIds,
       filingsUsed: payloadWithLibrary.uploadedFilings,
       missingFilings: { "10-K": missing10k, "10-Q": missing10q },

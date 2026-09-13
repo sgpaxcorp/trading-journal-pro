@@ -77,19 +77,7 @@ export function ScreenScaffold({
             onPress={goBack}
             style={({ pressed }) => [styles.pageNavigationButton, pressed && styles.buttonPressed]}
           >
-            <Ionicons name="arrow-back" size={18} color={colors.info} />
-            <Text style={styles.pageNavigationButtonText}>{t(language, "Back", "Atrás")}</Text>
-          </Pressable>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={t(language, "Return to Business Center", "Volver al Centro Empresarial")}
-            onPress={returnToBusinessCenter}
-            style={({ pressed }) => [styles.businessCenterButton, pressed && styles.buttonPressed]}
-          >
-            <Ionicons name="grid-outline" size={17} color={colors.onPrimary} />
-            <Text style={styles.businessCenterButtonText}>
-              {t(language, "Business Center", "Centro Empresarial")}
-            </Text>
+            <Ionicons name="chevron-back" size={22} color={colors.primary} />
           </Pressable>
         </View>
       ) : null}
@@ -156,57 +144,20 @@ const createStyles = (colors: ThemeColors) =>
       gap: 10,
     },
     pageNavigation: {
-      minHeight: 52,
-      padding: 5,
-      gap: 7,
+      minHeight: 40,
       flexDirection: "row",
       alignItems: "center",
-      borderWidth: 1,
-      borderColor: colors.border,
-      borderRadius: 8,
-      backgroundColor: colors.surface,
-      shadowColor: colors.background,
-      shadowOpacity: 0.2,
-      shadowRadius: 8,
-      shadowOffset: { width: 0, height: 3 },
-      elevation: 2,
     },
     pageNavigationButton: {
-      minHeight: 40,
+      width: 38,
+      height: 38,
       flexDirection: "row",
       alignItems: "center",
       justifyContent: "center",
-      gap: 6,
-      borderWidth: 1,
-      borderColor: colors.info,
-      borderRadius: 7,
-      backgroundColor: colors.infoSoft,
-      paddingHorizontal: 13,
-    },
-    pageNavigationButtonText: {
-      color: colors.textPrimary,
-      fontSize: 13,
-      fontWeight: "700",
-    },
-    businessCenterButton: {
-      minHeight: 40,
-      flex: 1,
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "center",
-      gap: 6,
       borderWidth: 1,
       borderColor: colors.primary,
       borderRadius: 7,
-      backgroundColor: colors.primary,
-      paddingHorizontal: 10,
-    },
-    businessCenterButtonText: {
-      color: colors.onPrimary,
-      fontSize: 13,
-      fontWeight: "800",
-      flexShrink: 1,
-      textAlign: "center",
+      backgroundColor: colors.surface,
     },
     buttonPressed: {
       opacity: 0.78,

@@ -629,7 +629,7 @@ const rules: NavItem[] = [
 
 const smartTools: NavItem[] = [
   {
-    id: "option-flow-intelligence",
+    id: "option-flows-analysis",
     titleKey: "nav.smartTools.optionFlow.title",
     descriptionKey: "nav.smartTools.optionFlow.desc",
     href: "/option-flow",

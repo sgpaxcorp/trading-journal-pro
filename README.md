@@ -26,7 +26,7 @@ cp .env.example .env.local
 cp mobile/.env.example mobile/.env
 ```
 
-3. Fill the Supabase, Stripe, OpenAI, Resend, hCaptcha, broker, and cron values.
+3. Fill the Supabase, Stripe, OpenAI, Resend, hCaptcha, market-data, broker, and cron values.
 
 4. Start the web app:
 

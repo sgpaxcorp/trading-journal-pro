@@ -80,8 +80,6 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     ------------------ */
     "nav.smartTools.optionFlow.title": "Option Flows Analysis",
     "nav.smartTools.optionFlow.desc": "Options flow reports, premarket plans, and outcome review for the business.",
-    "nav.smartTools.neuroAnalysis.title": "Neuro Analysis Portal",
-    "nav.smartTools.neuroAnalysis.desc": "Private long-term investing, dividends, company filings, portfolio thesis, and valuation portal.",
 
     /* -----------------
        Performance dropdown items
@@ -232,7 +230,11 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
       "NeuroTrader is the Trading Business Operating System for Trader Entrepreneurs. It connects the Trading Business Plan, execution records, risk controls, business performance, financial management, audits, and AI-guided accountability in one platform.",
     "footer.links.login": "Log In",
     "footer.links.staff": "Staff login",
-    "footer.links.neuroAnalysis": "Neuro Analysis Login",
+    "footer.groups.privateResearch": "Private research",
+    "footer.groups.company": "Company",
+    "footer.links.neuroAnalysis": "Neuro Analysis",
+    "footer.neuroAnalysisHint": "Private research portal",
+    "footer.corePromise": "Build the trading business plan. Protect it with one operating loop.",
     "footer.links.blog": "Blog",
     "footer.links.pricing": "Pricing",
     "footer.links.partner": "Partner login",
@@ -333,8 +335,6 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     ------------------ */
     "nav.smartTools.optionFlow.title": "Option Flows Analysis",
     "nav.smartTools.optionFlow.desc": "Reportes de options flow, planes premarket y revisión de resultados para el negocio.",
-    "nav.smartTools.neuroAnalysis.title": "Neuro Analysis Portal",
-    "nav.smartTools.neuroAnalysis.desc": "Portal privado de inversión a largo plazo, dividendos, filings de compañías, tesis de portfolio y valuation.",
 
     /* -----------------
        Performance dropdown items
@@ -483,7 +483,11 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
       "NeuroTrader es el Sistema Operativo de Empresa de Trading para Empresarios Traders. Conecta el Plan de Empresa de Trading, registros de ejecución, controles de riesgo, rendimiento empresarial, gestión financiera, auditorías y accountability guiada por IA en una sola plataforma.",
     "footer.links.login": "Iniciar sesión",
     "footer.links.staff": "Staff login",
-    "footer.links.neuroAnalysis": "Neuro Analysis Login",
+    "footer.groups.privateResearch": "Investigación privada",
+    "footer.groups.company": "Compañía",
+    "footer.links.neuroAnalysis": "Neuro Analysis",
+    "footer.neuroAnalysisHint": "Portal privado de investigación",
+    "footer.corePromise": "Construye el plan del negocio de trading. Protégelo con un solo ciclo operativo.",
     "footer.links.blog": "Blog",
     "footer.links.pricing": "Precios",
     "footer.links.partner": "Partner login",

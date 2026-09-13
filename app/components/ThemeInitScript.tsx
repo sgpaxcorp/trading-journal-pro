@@ -9,7 +9,11 @@ import Script from "next/script";
  * - nt_theme: "neuro" | "light"
  * - nt_locale: "en" | "es" | ...
  */
-export default function ThemeInitScript() {
+type ThemeInitScriptProps = {
+  nonce?: string;
+};
+
+export default function ThemeInitScript({ nonce }: ThemeInitScriptProps) {
   const js = `
 (function () {
   try {
@@ -35,6 +39,7 @@ export default function ThemeInitScript() {
   return (
     <Script
       id="nt-theme-locale-init"
+      nonce={nonce}
       strategy="beforeInteractive"
       dangerouslySetInnerHTML={{ __html: js }}
     />

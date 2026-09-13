@@ -3,6 +3,7 @@ export type NeuroHoldingInput = {
   shares: number;
   averageCost: number;
   currentPrice?: number | null;
+  openedAt?: string | null;
 };
 
 export type NeuroAssumptions = {
@@ -15,11 +16,13 @@ export type NeuroAssumptions = {
 
 export type NeuroMarketDataItem = {
   ticker?: string;
+  instrumentType?: "equity" | "etf" | "fund" | "unknown" | string;
   company?: {
     name?: string | null;
     sector?: string | null;
     industry?: string | null;
     exchange?: string | null;
+    quoteType?: string | null;
   };
   market?: {
     regularMarketPrice?: number | null;
@@ -27,7 +30,16 @@ export type NeuroMarketDataItem = {
     marketCap?: number | null;
     trailingPE?: number | null;
     forwardPE?: number | null;
+    dividendYield?: number | null;
   };
+  fund?: {
+    categoryName?: string | null;
+    annualReportExpenseRatio?: number | null;
+    netAssets?: number | null;
+    yield?: number | null;
+    topHoldings?: Array<{ symbol?: string | null; holdingName?: string | null; holdingPercent?: number | null }>;
+    sectorWeightings?: Record<string, number | null>;
+  } | null;
   annualFundamentals?: Array<{
     year: number;
     totalRevenue?: number | null;
@@ -124,6 +136,12 @@ function normalizeMarketMap(marketData: unknown): Record<string, NeuroMarketData
   return out;
 }
 
+function isFundLikeMarketItem(item?: NeuroMarketDataItem | null) {
+  const instrumentType = String(item?.instrumentType ?? "").toLowerCase();
+  const quoteType = String(item?.company?.quoteType ?? "").toUpperCase();
+  return instrumentType === "etf" || instrumentType === "fund" || quoteType.includes("ETF") || quoteType.includes("FUND");
+}
+
 function latestFundamentals(item?: NeuroMarketDataItem | null) {
   const rows = Array.isArray(item?.annualFundamentals) ? item.annualFundamentals : [];
   return [...rows].sort((a, b) => Number(a.year) - Number(b.year)).at(-1) ?? null;
@@ -132,6 +150,20 @@ function latestFundamentals(item?: NeuroMarketDataItem | null) {
 function cagr(first: number | null, last: number | null, years: number) {
   if (!first || !last || first <= 0 || last <= 0 || years <= 0) return null;
   const value = Math.pow(last / first, 1 / years) - 1;
+  return Number.isFinite(value) ? value : null;
+}
+
+function daysSince(value?: string | null) {
+  if (!value) return null;
+  const started = Date.parse(value);
+  if (!Number.isFinite(started)) return null;
+  return Math.max(1, Math.round((Date.now() - started) / (24 * 60 * 60 * 1000)));
+}
+
+function annualizedReturn(currentValue: number, invested: number, openedAt?: string | null) {
+  const days = daysSince(openedAt);
+  if (!days || days < 30 || currentValue <= 0 || invested <= 0) return null;
+  const value = Math.pow(currentValue / invested, 365 / days) - 1;
   return Number.isFinite(value) ? value : null;
 }
 
@@ -221,10 +253,28 @@ function verdictFromMargin(marginOfSafety: number | null, missingFilings: boolea
 
 export function computeDocumentReadiness(
   holdings: NeuroHoldingInput[],
-  filings: NeuroFilingMetadata[] = []
+  filings: NeuroFilingMetadata[] = [],
+  marketData?: unknown
 ) {
   const tickers = uniqueTickers(holdings);
+  const marketMap = normalizeMarketMap(marketData);
   return tickers.map((ticker) => {
+    const marketItem = marketMap[ticker];
+    if (isFundLikeMarketItem(marketItem)) {
+      return {
+        ticker,
+        has10k: false,
+        has10q: false,
+        ready: true,
+        latest10k: null,
+        latest10q: null,
+        missing: [],
+        requiresCompanyFilings: false,
+        evidenceModel: "fund_profile",
+        note: "ETF/fund analysis uses holdings, strategy, fees, yield, liquidity, and market history instead of issuer 10-K/10-Q documents.",
+      };
+    }
+
     const tickerFilings = filings.filter((filing) => normalizeNeuroTicker(filing.ticker) === ticker);
     const has10k = tickerFilings.some((filing) => filing.form === "10-K" && filing.vectorStoreId);
     const has10q = tickerFilings.some((filing) => filing.form === "10-Q" && filing.vectorStoreId);
@@ -250,6 +300,8 @@ export function computeDocumentReadiness(
         ...(!has10k ? ["10-K"] : []),
         ...(!has10q ? ["10-Q"] : []),
       ],
+      requiresCompanyFilings: true,
+      evidenceModel: "company_filings",
     };
   });
 }
@@ -269,7 +321,7 @@ export function buildNeuroAnalysisEngine(input: {
   const terminalGrowth = clamp(finiteNumber(assumptions.terminalGrowthPct, 2.5) / 100, -0.02, 0.06);
   const marginOfSafetyTarget = clamp(finiteNumber(assumptions.marginOfSafetyPct, 25) / 100, 0, 0.75);
   const marketMap = normalizeMarketMap(input.marketData);
-  const documentReadiness = computeDocumentReadiness(input.holdings, input.filings ?? []);
+  const documentReadiness = computeDocumentReadiness(input.holdings, input.filings ?? [], input.marketData);
 
   const positions = input.holdings
     .map((holding) => {
@@ -285,6 +337,7 @@ export function buildNeuroAnalysisEngine(input: {
       const invested = shares * averageCost;
       const currentValue = shares * price;
       const pnl = currentValue - invested;
+      const positionAnnualizedReturn = annualizedReturn(currentValue, invested, holding.openedAt);
       const latest = latestFundamentals(market);
       const baseCashFlow =
         maybeNumber(latest?.freeCashFlow) ??
@@ -348,6 +401,8 @@ export function buildNeuroAnalysisEngine(input: {
         currentValue,
         pnl,
         pnlPct: invested > 0 ? pnl / invested : null,
+        openedAt: holding.openedAt ?? null,
+        annualizedReturn: positionAnnualizedReturn,
         marketCap,
         latestFundamentals: latest,
         derived: {
@@ -378,6 +433,17 @@ export function buildNeuroAnalysisEngine(input: {
 
   const totalValue = positions.reduce((sum, row) => sum + row.currentValue, 0);
   const totalInvested = positions.reduce((sum, row) => sum + row.invested, 0);
+  const annualizedCostBase = positions.reduce(
+    (sum, row) => sum + (row.annualizedReturn != null ? row.invested : 0),
+    0
+  );
+  const portfolioAnnualizedReturn =
+    annualizedCostBase > 0
+      ? positions.reduce(
+          (sum, row) => sum + (row.annualizedReturn != null ? row.annualizedReturn * row.invested : 0),
+          0
+        ) / annualizedCostBase
+      : null;
   const enrichedPositions = positions.map((position) => ({
     ...position,
     weight: totalValue > 0 ? position.currentValue / totalValue : 0,
@@ -473,6 +539,7 @@ export function buildNeuroAnalysisEngine(input: {
       totalInvested,
       totalPnl: totalValue - totalInvested,
       totalPnlPct: totalInvested > 0 ? (totalValue - totalInvested) / totalInvested : null,
+      annualizedReturn: portfolioAnnualizedReturn,
       concentration,
       currentExpectedReturn,
       suggestedExpectedReturn: expectedReturn,

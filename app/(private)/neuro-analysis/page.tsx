@@ -7,11 +7,9 @@ import {
   BriefcaseBusiness,
   CheckCircle2,
   ChevronRight,
-  Cloud,
   Download,
   FileText,
   History,
-  Link2,
   Loader2,
   Play,
   Plus,
@@ -22,7 +20,6 @@ import {
   Sparkles,
   Trash2,
   UploadCloud,
-  WalletCards,
 } from "lucide-react";
 import {
   Bar,
@@ -39,15 +36,11 @@ import {
 
 import TopNav from "@/app/components/TopNav";
 import { useAppSettings } from "@/lib/appSettings";
-import {
-  areBrokerConnectionsEnabledFromEnv,
-  brokerConnectionsUnavailableMessage,
-} from "@/lib/brokerConnections";
 import { resolveLocale } from "@/lib/i18n";
 import { supabaseBrowser } from "@/lib/supaBaseClient";
 
 type Lang = "en" | "es";
-type WorkspaceTab = "research" | "portfolio" | "screener" | "fund_plan";
+type WorkspaceTab = "research" | "screener" | "fund_plan";
 
 type Holding = {
   id: string;
@@ -55,7 +48,7 @@ type Holding = {
   shares: number;
   averageCost: number;
   currentPrice: number;
-  source?: "manual" | "broker";
+  openedAt?: string;
 };
 
 type FilingUpload = {
@@ -81,6 +74,7 @@ type FilingUpload = {
 type MarketData = {
   source: string;
   ticker: string;
+  instrumentType?: "equity" | "etf" | "fund" | "unknown" | string;
   company: {
     name?: string | null;
     shortName?: string | null;
@@ -99,7 +93,26 @@ type MarketData = {
     marketCap?: number | null;
     trailingPE?: number | null;
     forwardPE?: number | null;
+    dividendYield?: number | null;
   };
+  fund?: {
+    categoryName?: string | null;
+    family?: string | null;
+    legalType?: string | null;
+    annualReportExpenseRatio?: number | null;
+    netAssets?: number | null;
+    yield?: number | null;
+    ytdReturn?: number | null;
+    threeYearAverageReturn?: number | null;
+    fiveYearAverageReturn?: number | null;
+    beta3Year?: number | null;
+    topHoldings?: Array<{
+      symbol?: string | null;
+      holdingName?: string | null;
+      holdingPercent?: number | null;
+    }>;
+    sectorWeightings?: Record<string, number | null>;
+  } | null;
   annualFundamentals: Array<{
     year: number;
     totalRevenue?: number | null;
@@ -117,18 +130,14 @@ type MarketData = {
   }>;
   priceHistory: Array<{ date: string; close: number }>;
   yearlyPrice: Array<{ year: number; firstClose: number; lastClose: number; returnPct?: number | null }>;
+  dataQuality?: {
+    degraded?: boolean;
+    profileSource?: string | null;
+    priceSource?: string | null;
+    fundamentalsSource?: string | null;
+    messages?: string[];
+  };
   errors?: Record<string, string | null>;
-};
-
-type BrokerAccount = {
-  id?: string;
-  accountId?: string;
-  account_id?: string;
-  name?: string;
-  number?: string;
-  institution_name?: string;
-  institutionName?: string;
-  brokerage_authorization?: { name?: string };
 };
 
 type NeuroCaseSummary = {
@@ -255,37 +264,12 @@ const LOCALE_TAG: Record<Lang, string> = {
   es: "es-ES",
 };
 
-const PREMIUM_OUTPUTS = [
-  {
-    title: "Private company profile",
-    esTitle: "Perfil privado de compañía",
-    body: "Business model, durability, moat, competitors, filing evidence, and why the company matters.",
-    esBody: "Modelo de negocio, durabilidad, moat, competidores, evidencia de filings y por qué importa la compañía.",
-  },
-  {
-    title: "Dividend and cash-flow quality",
-    esTitle: "Calidad de dividendos y cash flow",
-    body: "Dividend safety, payout pressure, free-cash-flow coverage, balance sheet risk, and reinvestment runway.",
-    esBody: "Seguridad del dividendo, presión del payout, cobertura de free cash flow, riesgo de balance y runway de reinversión.",
-  },
-  {
-    title: "Long-term intrinsic value",
-    esTitle: "Valor intrínseco a largo plazo",
-    body: "Bear/base/bull fair-value ladder with discount rate, owner earnings logic, and margin of safety.",
-    esBody: "Escalera de fair value bear/base/bull con tasa de descuento, lógica de owner earnings y margen de seguridad.",
-  },
-  {
-    title: "Living thesis verdict",
-    esTitle: "Veredicto de tesis viva",
-    body: "Add, wait, hold, reduce, exit review, or watchlist based on valuation, dividends, and future filings.",
-    esBody: "Añadir, esperar, mantener, reducir, revisar salida o watchlist según valuation, dividendos y filings futuros.",
-  },
-];
+const BENCHMARK_TICKER = "SPY";
 
 function defaultResearchGoal(isEs: boolean) {
   return isEs
-    ? "Analiza objetivamente la compañía como inversión a largo plazo y posible posición de dividendos: perfil del negocio, moat, competencia, calidad de earnings, free cash flow, seguridad del dividendo, documentos necesarios, valoración hoy y fair value proyectado de 2 a 10 años. Dime si la posición debe añadirse, esperar, mantenerse, aumentarse, reducirse o entrar en revisión de salida. Define qué tendría que aparecer en futuros 10-Q/10-K para cambiar la tesis."
-    : "Objectively analyze the company as a long-term investment and possible dividend holding: business profile, moat, competition, earnings quality, free cash flow, dividend safety, required documents, valuation today, and projected fair value from years 2 through 10. Tell me whether the position should be added, waited on, held, increased, reduced, or moved into exit review. Define what future 10-Q/10-K evidence would change the thesis.";
+    ? "Analiza objetivamente esta acción o ETF como inversión a largo plazo y posible posición de dividendos. Si es acción, evalúa perfil del negocio, moat, competencia, calidad de earnings, free cash flow, seguridad del dividendo, documentos necesarios, valoración hoy y fair value proyectado de 2 a 10 años. Si es ETF, evalúa estrategia, holdings, concentración, costo, yield, liquidez, tracking risk y rol dentro de una tesis de largo plazo. Dime si el profile debe añadirse, esperar, mantenerse, aumentarse, reducirse o entrar en revisión de salida."
+    : "Objectively analyze this stock or ETF as a long-term investment and possible dividend holding. If it is a stock, evaluate business profile, moat, competition, earnings quality, free cash flow, dividend safety, required documents, valuation today, and projected fair value from years 2 through 10. If it is an ETF, evaluate strategy, holdings, concentration, cost, yield, liquidity, tracking risk, and role inside a long-term thesis. Tell me whether the profile should be added, waited on, held, increased, reduced, or moved into exit review.";
 }
 
 function isLegacyResearchGoal(value: string) {
@@ -308,6 +292,12 @@ function toNumber(value: unknown) {
     return Number.isFinite(parsed) ? parsed : 0;
   }
   return 0;
+}
+
+function isFundLikeMarketData(item?: MarketData | null) {
+  const instrumentType = String(item?.instrumentType ?? "").toLowerCase();
+  const quoteType = String(item?.company?.quoteType ?? "").toUpperCase();
+  return instrumentType === "etf" || instrumentType === "fund" || quoteType.includes("ETF") || quoteType.includes("FUND");
 }
 
 function clampNumber(value: number, min: number, max: number) {
@@ -360,6 +350,47 @@ function formatCompactNumber(value: number | null | undefined, localeTag: string
     notation: "compact",
     maximumFractionDigits: 1,
   }).format(parsed);
+}
+
+function scoreFromBoolean(value: boolean, points: number) {
+  return value ? points : 0;
+}
+
+function scoreTone(score: number) {
+  if (score >= 75) return "text-emerald-300";
+  if (score >= 50) return "text-amber-300";
+  return "text-rose-300";
+}
+
+function annualizedPriceReturn(rows?: Array<{ date: string; close: number }> | null) {
+  const clean = (rows ?? [])
+    .filter((row) => row.date && Number.isFinite(Number(row.close)) && Number(row.close) > 0)
+    .sort((a, b) => a.date.localeCompare(b.date));
+  const first = clean[0];
+  const last = clean[clean.length - 1];
+  if (!first || !last || first.date === last.date) return null;
+  const firstTime = Date.parse(first.date);
+  const lastTime = Date.parse(last.date);
+  if (!Number.isFinite(firstTime) || !Number.isFinite(lastTime) || lastTime <= firstTime) return null;
+  const years = (lastTime - firstTime) / (365.25 * 24 * 60 * 60 * 1000);
+  if (years <= 0) return null;
+  const value = Math.pow(Number(last.close) / Number(first.close), 1 / years) - 1;
+  return Number.isFinite(value) ? value : null;
+}
+
+function aggregateByKey<T>(
+  rows: T[],
+  getKey: (row: T) => string,
+  getValue: (row: T) => number
+) {
+  const map = new Map<string, number>();
+  for (const row of rows) {
+    const key = getKey(row) || "Unknown";
+    map.set(key, (map.get(key) ?? 0) + getValue(row));
+  }
+  return Array.from(map.entries())
+    .map(([name, value]) => ({ name, value }))
+    .sort((a, b) => b.value - a.value);
 }
 
 function buildFundProjection(input: {
@@ -440,145 +471,59 @@ function guessFiscalYear(fileName: string) {
   return match ? Number(match[1]) : new Date().getFullYear();
 }
 
-function makeHolding(ticker = "", shares = 0, averageCost = 0, currentPrice = 0, source: Holding["source"] = "manual"): Holding {
+function todayInputDate() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function oneYearAgoInputDate() {
+  const date = new Date();
+  date.setFullYear(date.getFullYear() - 1);
+  return date.toISOString().slice(0, 10);
+}
+
+function makeHolding(ticker = "", shares = 0, averageCost = 0, currentPrice = 0): Holding {
   return {
-    id: makeId(ticker || "holding"),
+    id: makeId(ticker || "position"),
     ticker,
     shares,
     averageCost,
     currentPrice,
-    source,
+    openedAt: oneYearAgoInputDate(),
   };
 }
 
-function accountIdOf(account: BrokerAccount) {
-  return String(account?.id ?? account?.accountId ?? account?.account_id ?? "");
+const INITIAL_PORTFOLIO_HOLDINGS: Holding[] = [
+  {
+    id: "position-aapl-initial",
+    ticker: "AAPL",
+    shares: 0,
+    averageCost: 0,
+    currentPrice: 0,
+    openedAt: "",
+  },
+];
+
+function daysSince(value?: string | null) {
+  if (!value) return null;
+  const started = Date.parse(value);
+  if (!Number.isFinite(started)) return null;
+  const days = Math.max(1, Math.round((Date.now() - started) / (24 * 60 * 60 * 1000)));
+  return days;
 }
 
-function accountLabel(account: BrokerAccount) {
-  return String(
-    pickFirst(
-      account?.name,
-      account?.institution_name,
-      account?.institutionName,
-      account?.brokerage_authorization?.name,
-      account?.number,
-      accountIdOf(account)
-    ) ?? "Research account"
-  );
-}
-
-function extractPositions(raw: any): any[] {
-  if (!raw) return [];
-  if (Array.isArray(raw)) {
-    return raw.flatMap((item) => {
-      if (Array.isArray(item?.positions)) return item.positions;
-      if (Array.isArray(item?.holdings)) return item.holdings;
-      return item ? [item] : [];
-    });
-  }
-  if (Array.isArray(raw?.positions)) return raw.positions;
-  if (Array.isArray(raw?.holdings)) return raw.holdings;
-  if (Array.isArray(raw?.accounts)) {
-    return raw.accounts.flatMap((account: any) => account?.positions ?? account?.holdings ?? []);
-  }
-  return [];
-}
-
-function normalizeBrokerHoldings(raw: any): Holding[] {
-  const positions = extractPositions(raw);
-  return positions
-    .map((position, index) => {
-      const ticker = String(
-        pickFirst(
-          position?.symbol?.symbol,
-          position?.symbol?.ticker,
-          position?.instrument?.symbol,
-          position?.instrument?.ticker,
-          position?.security?.symbol,
-          position?.ticker,
-          position?.symbol
-        ) ?? ""
-      )
-        .toUpperCase()
-        .replace(/[^A-Z0-9.-]/g, "")
-        .slice(0, 12);
-      if (!ticker) return null;
-
-      const shares = toNumber(
-        pickFirst(position?.quantity, position?.qty, position?.units, position?.shares, position?.open_quantity)
-      );
-      if (shares <= 0) return null;
-
-      const marketValue = toNumber(
-        pickFirst(position?.market_value, position?.marketValue, position?.value, position?.marketValueUsd)
-      );
-      const currentPrice =
-        toNumber(pickFirst(position?.price, position?.market_price, position?.last_price, position?.lastPrice)) ||
-        (marketValue > 0 ? marketValue / shares : 0);
-      const averageCost =
-        toNumber(
-          pickFirst(
-            position?.average_purchase_price,
-            position?.averagePurchasePrice,
-            position?.average_price,
-            position?.avg_price,
-            position?.avgCost,
-            position?.cost_basis_price
-          )
-        ) || currentPrice;
-
-      return {
-        id: makeId(`${ticker}-${index}`),
-        ticker,
-        shares,
-        averageCost,
-        currentPrice,
-        source: "broker" as const,
-      };
-    })
-    .filter(Boolean) as Holding[];
-}
-
-function normalizeSavedHoldings(raw: any): Holding[] {
-  const rows = Array.isArray(raw) ? raw : [];
-  return rows
-    .map((holding, index) => {
-      if (holding?.researchOnly) return null;
-      const ticker = String(holding?.ticker ?? "")
-        .toUpperCase()
-        .replace(/[^A-Z0-9.-]/g, "")
-        .slice(0, 12);
-      if (!ticker) return null;
-      return {
-        id: String(holding?.id ?? makeId(`${ticker}-${index}`)),
-        ticker,
-        shares: toNumber(holding?.shares),
-        averageCost: toNumber(holding?.averageCost),
-        currentPrice: toNumber(holding?.currentPrice),
-        source: holding?.source === "broker" ? ("broker" as const) : ("manual" as const),
-      };
-    })
-    .filter(Boolean) as Holding[];
-}
-
-function pickBalanceObject(raw: any) {
-  if (!raw) return null;
-  if (Array.isArray(raw)) return raw[0] ?? null;
-  if (Array.isArray(raw?.data)) return raw.data[0] ?? null;
-  if (Array.isArray(raw?.balances)) return raw.balances[0] ?? null;
-  if (raw?.balances && typeof raw.balances === "object") return raw.balances;
-  if (raw?.data && typeof raw.data === "object") return raw.data;
-  if (raw?.balance && typeof raw.balance === "object") return raw.balance;
-  return raw;
+function annualizedReturn(currentValue: number, invested: number, openedAt?: string | null) {
+  const days = daysSince(openedAt);
+  if (!days || days < 30 || currentValue <= 0 || invested <= 0) return null;
+  const value = Math.pow(currentValue / invested, 365 / days) - 1;
+  return Number.isFinite(value) ? value : null;
 }
 
 function Readout({ label, value, hint }: { label: string; value: string | number; hint?: string }) {
   return (
-    <div className="rounded-lg border border-slate-800 bg-slate-950/55 p-3">
+    <div className="min-w-0 rounded-lg border border-slate-800/80 bg-slate-950/60 p-3 shadow-sm shadow-slate-950/20">
       <p className="text-[11px] font-semibold uppercase text-slate-500">{label}</p>
-      <p className="mt-1 text-lg font-semibold text-slate-50">{value}</p>
-      {hint ? <p className="mt-1 text-xs text-slate-500">{hint}</p> : null}
+      <p className="mt-1 truncate text-base font-semibold text-slate-50">{value}</p>
+      {hint ? <p className="mt-1 truncate text-xs text-slate-500">{hint}</p> : null}
     </div>
   );
 }
@@ -593,16 +538,37 @@ function StatusItem({
   body: string;
 }) {
   return (
-    <div className="flex gap-3 rounded-lg border border-slate-800 bg-slate-950/45 p-3">
+    <div className="flex gap-3 rounded-lg border border-slate-800/80 bg-slate-950/45 p-3">
       {done ? (
         <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" />
       ) : (
         <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-300" />
       )}
-      <div>
+      <div className="min-w-0">
         <p className="text-sm font-semibold text-slate-100">{title}</p>
         <p className="mt-1 text-xs leading-5 text-slate-500">{body}</p>
       </div>
+    </div>
+  );
+}
+
+function ScoreBar({ label, score, hint }: { label: string; score: number; hint?: string }) {
+  const safeScore = clampNumber(Math.round(score), 0, 100);
+  return (
+    <div className="rounded-lg border border-slate-800 bg-slate-950/45 p-3">
+      <div className="flex items-center justify-between gap-3">
+        <p className="truncate text-xs font-semibold text-slate-200">{label}</p>
+        <p className={`text-xs font-bold ${scoreTone(safeScore)}`}>{safeScore}</p>
+      </div>
+      <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-800">
+        <div
+          className={`h-full rounded-full ${
+            safeScore >= 75 ? "bg-emerald-400" : safeScore >= 50 ? "bg-amber-300" : "bg-rose-400"
+          }`}
+          style={{ width: `${safeScore}%` }}
+        />
+      </div>
+      {hint ? <p className="mt-2 line-clamp-2 text-[11px] leading-4 text-slate-500">{hint}</p> : null}
     </div>
   );
 }
@@ -613,10 +579,7 @@ export default function NeuroAnalysisPage() {
   const isEs = lang === "es";
   const localeTag = LOCALE_TAG[lang];
   const L = (en: string, es: string) => (isEs ? es : en);
-  const brokerConnectionsEnabled = areBrokerConnectionsEnabledFromEnv();
-  const brokerUnavailableMessage = brokerConnectionsUnavailableMessage(lang);
 
-  const [holdings, setHoldings] = useState<Holding[]>([]);
   const [focusTicker, setFocusTicker] = useState("AAPL");
   const [researchGoal, setResearchGoal] = useState(defaultResearchGoal(isEs));
   const [filings, setFilings] = useState<FilingUpload[]>([]);
@@ -625,6 +588,7 @@ export default function NeuroAnalysisPage() {
   const [marketDataByTicker, setMarketDataByTicker] = useState<Record<string, MarketData>>({});
   const [marketLoading, setMarketLoading] = useState(false);
   const [marketError, setMarketError] = useState("");
+  const [marketRefreshNonce, setMarketRefreshNonce] = useState(0);
   const [accessAllowed, setAccessAllowed] = useState<boolean | null>(null);
   const [agentReport, setAgentReport] = useState("");
   const [engineSnapshot, setEngineSnapshot] = useState<any | null>(null);
@@ -637,14 +601,6 @@ export default function NeuroAnalysisPage() {
   const [caseStatus, setCaseStatus] = useState("");
   const [agentError, setAgentError] = useState("");
   const [agentLoading, setAgentLoading] = useState(false);
-  const [brokerAccounts, setBrokerAccounts] = useState<BrokerAccount[]>([]);
-  const [brokerAccountId, setBrokerAccountId] = useState("");
-  const [brokerLoading, setBrokerLoading] = useState(false);
-  const [brokerConnecting, setBrokerConnecting] = useState(false);
-  const [brokerStatus, setBrokerStatus] = useState("");
-  const [brokerError, setBrokerError] = useState("");
-  const [brokerBalances, setBrokerBalances] = useState<any | null>(null);
-  const [lastPortfolioImportAt, setLastPortfolioImportAt] = useState<string | null>(null);
   const [documentLookup, setDocumentLookup] = useState<any[]>([]);
   const [documentLookupLoading, setDocumentLookupLoading] = useState(false);
   const [documentLookupError, setDocumentLookupError] = useState("");
@@ -670,6 +626,7 @@ export default function NeuroAnalysisPage() {
   const [fundMonthlyGoal, setFundMonthlyGoal] = useState(5000);
   const [fundAnnualReturnPct, setFundAnnualReturnPct] = useState(10);
   const [fundSelectedYear, setFundSelectedYear] = useState(10);
+  const [portfolioHoldings, setPortfolioHoldings] = useState<Holding[]>(INITIAL_PORTFOLIO_HOLDINGS);
   const [fundShareholders, setFundShareholders] = useState<FundShareholder[]>([
     {
       id: "shareholder-founder",
@@ -730,37 +687,6 @@ export default function NeuroAnalysisPage() {
     void loadThesisContext(activeCaseId);
   }, [activeCaseId]);
 
-  const portfolio = useMemo(() => {
-    const rows = holdings
-      .filter((holding) => holding.ticker.trim())
-      .map((holding) => {
-        const invested = holding.shares * holding.averageCost;
-        const value = holding.shares * holding.currentPrice;
-        const pnl = value - invested;
-        const pnlPct = invested > 0 ? pnl / invested : 0;
-        return { ...holding, invested, value, pnl, pnlPct };
-      });
-    const totalValue = rows.reduce((sum, row) => sum + row.value, 0);
-    const totalInvested = rows.reduce((sum, row) => sum + row.invested, 0);
-    const totalPnl = totalValue - totalInvested;
-    const weightedRows = rows.map((row) => ({
-      ...row,
-      weight: totalValue > 0 ? row.value / totalValue : 0,
-    }));
-    const largest = weightedRows.reduce<(typeof weightedRows)[number] | null>(
-      (current, row) => (!current || row.value > current.value ? row : current),
-      null
-    );
-
-    return {
-      rows: weightedRows,
-      totalValue,
-      totalInvested,
-      totalPnl,
-      totalPnlPct: totalInvested > 0 ? totalPnl / totalInvested : 0,
-      largest,
-    };
-  }, [holdings]);
   const fundProjection = useMemo(
     () =>
       buildFundProjection({
@@ -783,8 +709,107 @@ export default function NeuroAnalysisPage() {
     (sum, shareholder) => sum + clampNumber(toNumber(shareholder.ownershipPct), 0, 100),
     0
   );
+  const portfolioPositions = useMemo(() => {
+    const rows = portfolioHoldings
+      .map((holding) => {
+        const ticker = holding.ticker.trim().toUpperCase();
+        if (!ticker) return null;
+        const marketItem = marketDataByTicker[ticker];
+        const currentPrice =
+          toNumber(marketItem?.market?.regularMarketPrice) ||
+          toNumber(marketItem?.market?.previousClose) ||
+          toNumber(holding.currentPrice);
+        const shares = Math.max(0, toNumber(holding.shares));
+        const averageCost = Math.max(0, toNumber(holding.averageCost));
+        const invested = shares * averageCost;
+        const value = shares * currentPrice;
+        const pnl = value - invested;
+        const annualized = annualizedReturn(value, invested, holding.openedAt);
+        return {
+          ...holding,
+          ticker,
+          shares,
+          averageCost,
+          currentPrice,
+          invested,
+          value,
+          pnl,
+          pnlPct: invested > 0 ? pnl / invested : null,
+          annualizedReturn: annualized,
+          dividendYield: marketItem?.fund?.yield ?? marketItem?.market?.dividendYield ?? null,
+          companyName: marketItem?.company?.shortName || marketItem?.company?.name || ticker,
+          sector: marketItem?.company?.sector || marketItem?.fund?.categoryName || marketItem?.company?.quoteType || null,
+        };
+      })
+      .filter(Boolean) as Array<
+      Holding & {
+        invested: number;
+        value: number;
+        pnl: number;
+        pnlPct: number | null;
+        annualizedReturn: number | null;
+        dividendYield: number | null;
+        companyName: string;
+        sector: string | null;
+      }
+    >;
+    const totalValue = rows.reduce((sum, row) => sum + row.value, 0);
+    return rows.map((row) => ({
+      ...row,
+      weight: totalValue > 0 ? row.value / totalValue : null,
+    }));
+  }, [marketDataByTicker, portfolioHoldings]);
+  const portfolioSummary = useMemo(() => {
+    const activeRows = portfolioPositions.filter((row) => row.shares > 0 && row.ticker);
+    const totalValue = activeRows.reduce((sum, row) => sum + row.value, 0);
+    const totalInvested = activeRows.reduce((sum, row) => sum + row.invested, 0);
+    const totalPnl = totalValue - totalInvested;
+    const annualizedWeightBase = activeRows.reduce(
+      (sum, row) => sum + (row.annualizedReturn != null ? row.invested : 0),
+      0
+    );
+    const annualized =
+      annualizedWeightBase > 0
+        ? activeRows.reduce(
+            (sum, row) => sum + (row.annualizedReturn != null ? row.annualizedReturn * row.invested : 0),
+            0
+          ) / annualizedWeightBase
+        : null;
+    const incomeYield =
+      totalValue > 0
+        ? activeRows.reduce((sum, row) => sum + row.value * (toNumber(row.dividendYield) || 0), 0) / totalValue
+        : null;
+    return {
+      count: activeRows.length,
+      totalValue,
+      totalInvested,
+      totalPnl,
+      totalPnlPct: totalInvested > 0 ? totalPnl / totalInvested : null,
+      annualizedReturn: annualized,
+      incomeYield,
+      largestPosition: activeRows
+        .slice()
+        .sort((a, b) => b.value - a.value)[0] ?? null,
+    };
+  }, [portfolioPositions]);
   const researchHoldings = useMemo(() => {
-    if (portfolio.rows.length > 0) return portfolio.rows;
+    const activePortfolioRows = portfolioPositions.filter((row) => row.ticker && row.shares > 0);
+    if (activePortfolioRows.length) {
+      return activePortfolioRows.map((row) => ({
+        id: row.id,
+        ticker: row.ticker,
+        shares: row.shares,
+        averageCost: row.averageCost,
+        currentPrice: row.currentPrice,
+        openedAt: row.openedAt,
+        invested: row.invested,
+        value: row.value,
+        pnl: row.pnl,
+        pnlPct: row.pnlPct,
+        annualizedReturn: row.annualizedReturn,
+        weight: row.weight ?? 0,
+      }));
+    }
     const ticker = focusTicker.trim().toUpperCase();
     if (!ticker) return [];
     const price =
@@ -794,17 +819,19 @@ export default function NeuroAnalysisPage() {
       toNumber(marketDataByTicker[ticker]?.market?.previousClose);
     return [
       {
-        id: `research-${ticker}`,
+        id: `profile-${ticker}`,
         ticker,
         shares: 1,
         averageCost: price,
         currentPrice: price,
-        source: "manual" as const,
+        openedAt: null,
         invested: price,
         value: price,
         pnl: 0,
         pnlPct: 0,
+        annualizedReturn: null,
         weight: 1,
+        researchOnly: true,
       },
     ];
   }, [
@@ -812,20 +839,21 @@ export default function NeuroAnalysisPage() {
     marketData?.market?.previousClose,
     marketData?.market?.regularMarketPrice,
     marketDataByTicker,
-    portfolio.rows,
+    portfolioPositions,
   ]);
 
   const indexedDocuments = filings.filter((filing) => Boolean(filing.vectorStoreId));
   const pendingDocuments = filings.filter((filing) => !filing.vectorStoreId);
-  const portfolioTickers = useMemo(
+  const profileTickers = useMemo(
     () =>
       Array.from(
         new Set([
-          ...portfolio.rows.map((holding) => holding.ticker.trim().toUpperCase()).filter(Boolean),
           focusTicker.trim().toUpperCase(),
+          BENCHMARK_TICKER,
+          ...portfolioHoldings.map((holding) => holding.ticker.trim().toUpperCase()),
         ])
       ).filter(Boolean),
-    [portfolio.rows, focusTicker]
+    [focusTicker, portfolioHoldings]
   );
   const marketPayload = useMemo(
     () => ({
@@ -835,9 +863,22 @@ export default function NeuroAnalysisPage() {
     }),
     [focusTicker, marketDataByTicker]
   );
+  const focusInstrumentIsFundLike = isFundLikeMarketData(marketData);
   const localDocumentReadiness = useMemo(
     () =>
-      portfolioTickers.map((ticker) => {
+      profileTickers.map((ticker) => {
+        const marketItem = marketDataByTicker[ticker];
+        if (isFundLikeMarketData(marketItem)) {
+          return {
+            ticker,
+            has10k: false,
+            has10q: false,
+            ready: true,
+            missing: [],
+            requiresCompanyFilings: false,
+            evidenceModel: "fund_profile",
+          };
+        }
         const docs = filings.filter((filing) => (filing.ticker || focusTicker).toUpperCase() === ticker);
         const tickerHas10k = docs.some((filing) => filing.form === "10-K" && filing.vectorStoreId);
         const tickerHas10q = docs.some((filing) => filing.form === "10-Q" && filing.vectorStoreId);
@@ -847,49 +888,247 @@ export default function NeuroAnalysisPage() {
           has10q: tickerHas10q,
           ready: tickerHas10k && tickerHas10q,
           missing: [...(!tickerHas10k ? ["10-K"] : []), ...(!tickerHas10q ? ["10-Q"] : [])],
+          requiresCompanyFilings: true,
+          evidenceModel: "company_filings",
         };
       }),
-    [filings, focusTicker, portfolioTickers]
+    [filings, focusTicker, marketDataByTicker, profileTickers]
   );
   const documentReadinessRows = Array.isArray(engineSnapshot?.documentReadiness)
     ? engineSnapshot.documentReadiness
     : localDocumentReadiness;
   const annualFundamentals = marketData?.annualFundamentals ?? [];
   const latestFundamentals = annualFundamentals[annualFundamentals.length - 1] ?? null;
-  const selectedAccountLabel =
-    brokerAccounts.find((account) => accountIdOf(account) === brokerAccountId) ?? brokerAccounts[0] ?? null;
-  const balanceObject = pickBalanceObject(brokerBalances);
-  const externalEquity = toNumber(
-    pickFirst(
-      balanceObject?.equity,
-      balanceObject?.total_equity,
-      balanceObject?.net_liquidation_value,
-      balanceObject?.market_value
-    )
+  const marketLayerReady = Boolean(
+    marketData &&
+      (marketData.market?.regularMarketPrice != null ||
+        marketData.market?.previousClose != null ||
+        marketData.priceHistory?.length ||
+        marketData.annualFundamentals?.length ||
+        marketData.fund)
   );
   const readinessItems = [
     {
       done: researchHoldings.length > 0,
-      title: L("Company selected", "Compañía seleccionada"),
+      title: L("Profile selected", "Profile seleccionado"),
       body: L(
-        "Pick the ticker you want Neuro to evaluate as a long-term investment.",
-        "Escoge el ticker que quieres que Neuro evalúe como inversión a largo plazo."
+        "Pick the stock or ETF ticker you want Neuro to evaluate as a long-term investment profile.",
+        "Escoge el ticker de acción o ETF que quieres que Neuro evalúe como profile de inversión a largo plazo."
       ),
     },
     {
-      done: Boolean(marketData),
+      done: marketLayerReady,
       title: L("Market layer ready", "Capa de mercado lista"),
-      body: L("Price and annual metrics are loaded automatically for the focus company.", "Precio y métricas anuales se cargan automáticamente para la compañía activa."),
+      body: L("Price, history, company fundamentals, or ETF/fund data load automatically for the active profile.", "Precio, historial, fundamentales de compañía o data de ETF/fondo cargan automáticamente para el profile activo."),
     },
     {
       done: documentReadinessRows.length > 0 && documentReadinessRows.every((row: any) => row.ready),
-      title: L("Company documents ready", "Documentos listos"),
-      body: L("A full verdict is stronger when recent 10-K and 10-Q documents are indexed.", "El veredicto completo mejora cuando hay 10-K y 10-Q recientes indexados."),
+      title: focusInstrumentIsFundLike ? L("Fund evidence ready", "Evidencia de fondo lista") : L("Company documents ready", "Documentos listos"),
+      body: focusInstrumentIsFundLike
+        ? L("ETF/fund profiles use fund strategy, holdings, fees, yield, liquidity, and market history instead of company 10-K/10-Q documents.", "Los profiles de ETF/fondo usan estrategia, holdings, costos, yield, liquidez e historial de mercado en vez de 10-K/10-Q corporativos.")
+        : L("A full stock verdict is stronger when recent 10-K and 10-Q documents are indexed.", "El veredicto completo de una acción mejora cuando hay 10-K y 10-Q recientes indexados."),
     },
   ];
   const readinessScore = Math.round(
     (readinessItems.filter((item) => item.done).length / readinessItems.length) * 100
   );
+  const benchmarkData = marketDataByTicker[BENCHMARK_TICKER] ?? null;
+  const benchmarkAnnualizedReturn = useMemo(
+    () => annualizedPriceReturn(benchmarkData?.priceHistory),
+    [benchmarkData?.priceHistory]
+  );
+  const portfolioAlpha =
+    portfolioSummary.annualizedReturn != null && benchmarkAnnualizedReturn != null
+      ? portfolioSummary.annualizedReturn - benchmarkAnnualizedReturn
+      : null;
+  const activePortfolioPositions = portfolioPositions.filter((row) => row.ticker && row.shares > 0);
+  const topPortfolioMovers = activePortfolioPositions
+    .slice()
+    .sort((a, b) => Math.abs(b.pnl) - Math.abs(a.pnl))
+    .slice(0, 4);
+  const researchQueue = documentReadinessRows.filter((row: any) => !row.ready).slice(0, 5);
+  const commandCenterAlerts = [
+    ...(portfolioSummary.largestPosition?.weight && portfolioSummary.largestPosition.weight > 0.35
+      ? [
+          L(
+            `${portfolioSummary.largestPosition.ticker} is above 35% of mirrored portfolio value.`,
+            `${portfolioSummary.largestPosition.ticker} está sobre 35% del valor de la cartera espejo.`
+          ),
+        ]
+      : []),
+    ...(researchQueue.length
+      ? [
+          L(
+            `${researchQueue.length} profile(s) need current 10-K/10-Q evidence.`,
+            `${researchQueue.length} profile(s) necesitan evidencia 10-K/10-Q actual.`
+          ),
+        ]
+      : []),
+    ...(marketData?.dataQuality?.degraded
+      ? [L("Market data is degraded for the active profile.", "La data de mercado está degradada para el profile activo.")]
+      : []),
+    ...(agentReport ? [] : [L("No current Neuro report has been generated for this profile.", "Aún no hay reporte Neuro generado para este profile.")]),
+  ].slice(0, 4);
+  const portfolioXray = useMemo(() => {
+    const sectorRows = aggregateByKey(
+      activePortfolioPositions,
+      (row) => row.sector || "Unclassified",
+      (row) => row.value
+    );
+    const instrumentRows = aggregateByKey(
+      activePortfolioPositions,
+      (row) => {
+        const item = marketDataByTicker[row.ticker];
+        if (isFundLikeMarketData(item)) return "ETF / fund";
+        return item?.company?.quoteType || item?.instrumentType || "Stock";
+      },
+      (row) => row.value
+    );
+    const topHoldings = new Map<string, { name: string; value: number; funds: string[] }>();
+    for (const row of activePortfolioPositions) {
+      const item = marketDataByTicker[row.ticker];
+      for (const holding of item?.fund?.topHoldings ?? []) {
+        const symbol = String(holding.symbol ?? holding.holdingName ?? "").trim().toUpperCase();
+        if (!symbol) continue;
+        const holdingWeight = toNumber(holding.holdingPercent);
+        const contribution = row.value * (holdingWeight > 1 ? holdingWeight / 100 : holdingWeight);
+        if (contribution <= 0) continue;
+        const existing = topHoldings.get(symbol) ?? {
+          name: String(holding.holdingName ?? symbol),
+          value: 0,
+          funds: [],
+        };
+        existing.value += contribution;
+        if (!existing.funds.includes(row.ticker)) existing.funds.push(row.ticker);
+        topHoldings.set(symbol, existing);
+      }
+    }
+    const overlapRows = Array.from(topHoldings.entries())
+      .map(([symbol, row]) => ({
+        symbol,
+        name: row.name,
+        value: row.value,
+        weight: portfolioSummary.totalValue > 0 ? row.value / portfolioSummary.totalValue : null,
+        funds: row.funds,
+      }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 6);
+    return { sectorRows, instrumentRows, overlapRows };
+  }, [activePortfolioPositions, marketDataByTicker, portfolioSummary.totalValue]);
+  const focusEnginePosition = Array.isArray(engineSnapshot?.positions)
+    ? engineSnapshot.positions.find((position: any) => String(position?.ticker ?? "").toUpperCase() === focusTicker.toUpperCase()) ??
+      engineSnapshot.positions[0]
+    : null;
+  const focusProfile360 = useMemo(() => {
+    const latest = latestFundamentals;
+    const documentRow = documentReadinessRows.find((row: any) => String(row?.ticker ?? "").toUpperCase() === focusTicker.toUpperCase());
+    const marginOfSafety = Number(focusEnginePosition?.derived?.marginOfSafety);
+    const fcfMargin = Number(latest?.fcfMargin ?? focusEnginePosition?.derived?.fcfMargin);
+    const debtToEquity = Number(latest?.debtToEquity ?? focusEnginePosition?.derived?.debtToEquity);
+    const dividendYield = toNumber(marketData?.fund?.yield ?? marketData?.market?.dividendYield);
+    const qualityScore =
+      scoreFromBoolean(annualFundamentals.length >= 3 || Boolean(marketData?.fund), 20) +
+      scoreFromBoolean(Number.isFinite(fcfMargin) && fcfMargin > 0.05, 25) +
+      scoreFromBoolean(!Number.isFinite(debtToEquity) || debtToEquity < 1.5, 20) +
+      scoreFromBoolean(Boolean(marketData?.priceHistory?.length), 15) +
+      scoreFromBoolean(!marketData?.dataQuality?.degraded, 20);
+    const valuationScore =
+      Number.isFinite(marginOfSafety)
+        ? clampNumber(50 + marginOfSafety * 140, 0, 100)
+        : focusEnginePosition?.derived?.valuationStatus === "undervalued"
+        ? 75
+        : focusEnginePosition?.derived?.valuationStatus === "overvalued"
+        ? 35
+        : 50;
+    const dividendScore =
+      scoreFromBoolean(dividendYield > 0, 30) +
+      scoreFromBoolean(dividendYield > 0.015 && dividendYield < 0.08, 30) +
+      scoreFromBoolean(Number.isFinite(fcfMargin) && fcfMargin > 0, 25) +
+      scoreFromBoolean(!Number.isFinite(debtToEquity) || debtToEquity < 2, 15);
+    const evidenceScore =
+      scoreFromBoolean(Boolean(marketLayerReady), 25) +
+      scoreFromBoolean(Boolean(documentRow?.ready), 35) +
+      scoreFromBoolean(Boolean(agentReport), 25) +
+      scoreFromBoolean(thesisNotes.length > 0, 15);
+    const riskScore =
+      scoreFromBoolean(!(portfolioSummary.largestPosition?.weight && portfolioSummary.largestPosition.weight > 0.35), 25) +
+      scoreFromBoolean(!marketData?.dataQuality?.degraded, 20) +
+      scoreFromBoolean(!researchQueue.length, 20) +
+      scoreFromBoolean(!(Number.isFinite(debtToEquity) && debtToEquity > 2), 20) +
+      scoreFromBoolean(Boolean(marketData?.priceHistory?.length), 15);
+    const overall = Math.round((qualityScore + valuationScore + dividendScore + evidenceScore + riskScore) / 5);
+    return {
+      overall,
+      qualityScore,
+      valuationScore,
+      dividendScore,
+      evidenceScore,
+      riskScore,
+      verdict: String(focusEnginePosition?.derived?.verdict ?? (documentRow?.ready ? "watchlist" : "provisional")).replace(/_/g, " "),
+      valuationStatus: String(focusEnginePosition?.derived?.valuationStatus ?? "unknown").replace(/_/g, " "),
+      missingEvidence: documentRow?.missing ?? [],
+    };
+  }, [
+    agentReport,
+    annualFundamentals.length,
+    documentReadinessRows,
+    focusEnginePosition,
+    focusTicker,
+    latestFundamentals,
+    marketData,
+    marketLayerReady,
+    portfolioSummary.largestPosition?.weight,
+    researchQueue.length,
+    thesisNotes.length,
+  ]);
+  const thesisMonitor = useMemo(() => {
+    const impactCounts = thesisNotes.reduce<Record<string, number>>((out, note) => {
+      const key = String(note.payload?.impact ?? "uncertain");
+      out[key] = (out[key] ?? 0) + 1;
+      return out;
+    }, {});
+    const riskFlags = Array.isArray(engineSnapshot?.riskFlags) ? engineSnapshot.riskFlags : [];
+    const watchItems = [
+      ...riskFlags.map((flag: any) => ({
+        title: String(flag.type ?? "Risk").replace(/_/g, " "),
+        body: String(flag.message ?? ""),
+        tone: String(flag.severity ?? "medium"),
+      })),
+      ...researchQueue.map((row: any) => ({
+        title: `${row.ticker} ${L("evidence gap", "brecha de evidencia")}`,
+        body: `${L("Missing", "Falta")}: ${(row.missing ?? []).join(", ")}`,
+        tone: "medium",
+      })),
+      ...(marketData?.dataQuality?.degraded
+        ? [
+            {
+              title: L("Market data quality", "Calidad de data"),
+              body: (marketData.dataQuality.messages ?? []).join(" ") || L("Provider data is degraded.", "La data del proveedor está degradada."),
+              tone: "medium",
+            },
+          ]
+        : []),
+    ].slice(0, 6);
+    return {
+      impactCounts,
+      watchItems,
+      lastNote: thesisNotes[0] ?? null,
+      verifiedReports: reports.length,
+    };
+  }, [L, engineSnapshot?.riskFlags, marketData?.dataQuality, reports.length, researchQueue, thesisNotes]);
+  const investorReportingRows = useMemo(() => {
+    return fundShareholders.map((shareholder) => {
+      const selected = selectedFundProjection?.shareholderRows.find((row) => row.shareholderId === shareholder.id);
+      const year30 = fundProjection.at(-1)?.shareholderRows.find((row) => row.shareholderId === shareholder.id);
+      return {
+        ...shareholder,
+        selectedPayout: selected?.payout ?? 0,
+        selectedReinvested: selected?.reinvested ?? 0,
+        year30Payout: year30?.payout ?? 0,
+        policy: shareholder.payoutMode === "withdraw" ? `${shareholder.annualWithdrawalPct}% withdraw` : "Reinvest",
+      };
+    });
+  }, [fundProjection, fundShareholders, selectedFundProjection]);
 
   async function loadCaseList(caseId?: string | null) {
     const suffix = caseId ? `?caseId=${encodeURIComponent(caseId)}` : "";
@@ -917,14 +1156,14 @@ export default function NeuroAnalysisPage() {
           title,
           focusTicker,
           researchGoal,
-          holdings,
-          selectedAccountId: brokerAccountId || null,
-          brokerSnapshot: {
-            accounts: brokerAccounts,
-            accountId: brokerAccountId,
-            balances: brokerBalances,
-            importedAt: lastPortfolioImportAt,
-          },
+          holdings: researchHoldings.map((holding) => ({
+            ticker: holding.ticker,
+            shares: holding.shares,
+            averageCost: holding.averageCost,
+            currentPrice: holding.currentPrice,
+            openedAt: holding.openedAt,
+            researchOnly: Boolean((holding as any).researchOnly),
+          })),
           marketData: marketPayload,
           readiness: { documentReadiness: documentReadinessRows, readinessScore },
         }),
@@ -952,10 +1191,18 @@ export default function NeuroAnalysisPage() {
     setCaseTitle(String(researchCase.title ?? ""));
     setFocusTicker(String(researchCase.focus_ticker ?? focusTicker));
     setResearchGoal(String(researchCase.research_goal ?? researchGoal));
-    setHoldings(normalizeSavedHoldings(researchCase.holdings));
-    setBrokerAccountId(String(researchCase.selected_account_id ?? ""));
-    setBrokerAccounts(Array.isArray(researchCase.broker_snapshot?.accounts) ? researchCase.broker_snapshot.accounts : []);
-    setBrokerBalances(researchCase.broker_snapshot?.balances ?? null);
+    if (Array.isArray(researchCase.holdings) && researchCase.holdings.length > 0) {
+      setPortfolioHoldings(
+        researchCase.holdings.map((holding: any, index: number) => ({
+          id: makeId(`${holding?.ticker ?? "position"}-${index}`),
+          ticker: String(holding?.ticker ?? "").toUpperCase().replace(/[^A-Z0-9.-]/g, "").slice(0, 12),
+          shares: Math.max(0, toNumber(holding?.shares)),
+          averageCost: Math.max(0, toNumber(holding?.averageCost)),
+          currentPrice: Math.max(0, toNumber(holding?.currentPrice)),
+          openedAt: String(holding?.openedAt ?? holding?.opened_at ?? oneYearAgoInputDate()).slice(0, 10),
+        }))
+      );
+    }
     const savedMarket = researchCase.market_data;
     if (savedMarket?.items && typeof savedMarket.items === "object") {
       setMarketDataByTicker(savedMarket.items);
@@ -1092,11 +1339,11 @@ export default function NeuroAnalysisPage() {
   useEffect(() => {
     let alive = true;
     async function loadMarketData() {
-      if (accessAllowed !== true || portfolioTickers.length === 0) return;
+      if (accessAllowed !== true || profileTickers.length === 0) return;
       setMarketLoading(true);
       setMarketError("");
 
-      const res = await authedFetch(`/api/neuro-analysis/market-data?tickers=${encodeURIComponent(portfolioTickers.join(","))}`).catch(
+      const res = await authedFetch(`/api/neuro-analysis/market-data?tickers=${encodeURIComponent(profileTickers.join(","))}`).catch(
         () => null
       );
       const json = res ? await res.json().catch(() => ({})) : {};
@@ -1106,7 +1353,24 @@ export default function NeuroAnalysisPage() {
         const items = json?.items && typeof json.items === "object" ? json.items : { [focusTicker]: json };
         setMarketDataByTicker(items as Record<string, MarketData>);
         const typedItems = items as Record<string, MarketData>;
-        setMarketData(typedItems[focusTicker] ?? Object.values(typedItems)[0] ?? null);
+        const nextMarketData = typedItems[focusTicker] ?? Object.values(typedItems)[0] ?? null;
+        setMarketData(nextMarketData);
+        const messages = nextMarketData?.dataQuality?.messages ?? [];
+        const requestError = nextMarketData?.errors?.request;
+        if (requestError) {
+          setMarketError(String(requestError));
+        } else if (messages.length) {
+          setMarketError(messages.join(" "));
+        } else if (
+          nextMarketData &&
+          nextMarketData.market?.regularMarketPrice == null &&
+          nextMarketData.market?.previousClose == null &&
+          !nextMarketData.priceHistory?.length &&
+          !nextMarketData.annualFundamentals?.length &&
+          !nextMarketData.fund
+        ) {
+          setMarketError(L("Market data returned no usable price, history, fundamentals, or fund profile.", "La data de mercado no devolvió precio, historial, fundamentales ni profile de fondo utilizable."));
+        }
       } else {
         setMarketData(null);
         setMarketError(String(json?.error || L("Could not load market data.", "No se pudo cargar la data de mercado.")));
@@ -1119,36 +1383,7 @@ export default function NeuroAnalysisPage() {
       alive = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [accessAllowed, portfolioTickers.join(",")]);
-
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get("portfolio") === "connected") {
-      setActiveWorkspaceTab("portfolio");
-      if (!brokerConnectionsEnabled) {
-        setBrokerError(brokerUnavailableMessage);
-        window.history.replaceState({}, "", window.location.pathname);
-        return;
-      }
-      void loadResearchPortfolio(false);
-      window.history.replaceState({}, "", window.location.pathname);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  function updateHolding(id: string, patch: Partial<Holding>) {
-    setHoldings((prev) =>
-      prev.map((holding) => (holding.id === id ? { ...holding, ...patch } : holding))
-    );
-  }
-
-  function addHolding() {
-    setHoldings((prev) => [...prev, makeHolding("", 0, 0, 0)]);
-  }
-
-  function removeHolding(id: string) {
-    setHoldings((prev) => prev.filter((holding) => holding.id !== id));
-  }
+  }, [accessAllowed, profileTickers.join(","), marketRefreshNonce]);
 
   function handleDocumentFiles(form: "10-K" | "10-Q", fileList: FileList | null) {
     const files = Array.from(fileList ?? []);
@@ -1201,102 +1436,6 @@ export default function NeuroAnalysisPage() {
       await authedFetch(`/api/neuro-analysis/filings?id=${encodeURIComponent(id)}`, {
         method: "DELETE",
       }).catch(() => null);
-    }
-  }
-
-  async function connectResearchPortfolio() {
-    if (!brokerConnectionsEnabled) {
-      setBrokerError(brokerUnavailableMessage);
-      return;
-    }
-    try {
-      setBrokerError("");
-      setBrokerStatus("");
-      setBrokerConnecting(true);
-      const res = await authedFetch("/api/neuro-analysis/research-portfolio/snaptrade-connect", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          connectionType: "read",
-          immediateRedirect: true,
-          darkMode: true,
-          customRedirect: `${window.location.origin}/neuro-analysis?portfolio=connected`,
-        }),
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json?.detail || json?.error || "Broker connection failed.");
-      const url = String(json?.url ?? "");
-      if (!url) throw new Error(L("Missing secure connection URL.", "Falta el enlace seguro de conexión."));
-      const win = window.open(url, "_blank", "noopener,noreferrer");
-      if (!win) {
-        window.location.href = url;
-        return;
-      }
-      setBrokerStatus(
-        L(
-          "Secure connection opened. Complete it, then return and import the research portfolio.",
-          "Conexión segura abierta. Complétala, vuelve aquí e importa el research portfolio."
-        )
-      );
-    } catch (error: any) {
-      setBrokerError(error?.message || "Broker connection failed.");
-    } finally {
-      setBrokerConnecting(false);
-    }
-  }
-
-  async function loadResearchPortfolio(importHoldings = true) {
-    if (!brokerConnectionsEnabled) {
-      setBrokerError(brokerUnavailableMessage);
-      return;
-    }
-    try {
-      setBrokerError("");
-      setBrokerStatus("");
-      setBrokerLoading(true);
-      const accountParam = brokerAccountId ? `?accountId=${encodeURIComponent(brokerAccountId)}` : "";
-      const res = await authedFetch(`/api/neuro-analysis/research-portfolio/snaptrade${accountParam}`);
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json?.detail || json?.error || "Could not load research portfolio.");
-
-      const accounts = Array.isArray(json?.accounts) ? json.accounts : [];
-      setBrokerAccounts(accounts);
-      const nextAccountId = String(json?.accountId || accountIdOf(accounts[0] ?? {}));
-      if (nextAccountId) setBrokerAccountId(nextAccountId);
-      setBrokerBalances(json?.balances ?? null);
-
-      if (!json?.connected) {
-        setBrokerStatus(
-          L(
-            "No secure portfolio connection found yet. Connect once, then Neuro can import holdings for research.",
-            "Todavía no hay conexión segura. Conecta una vez y Neuro podrá importar posiciones para research."
-          )
-        );
-        return;
-      }
-
-      const imported = normalizeBrokerHoldings(json?.holdings);
-      if (importHoldings && imported.length) {
-        setHoldings(imported);
-        setFocusTicker(imported[0].ticker);
-        setLastPortfolioImportAt(new Date().toISOString());
-        setBrokerStatus(
-          L(
-            `Imported ${imported.length} positions into the research portfolio.`,
-            `Importadas ${imported.length} posiciones al research portfolio.`
-          )
-        );
-      } else {
-        setBrokerStatus(
-          accounts.length
-            ? L("Research account loaded. Choose an account and import positions.", "Cuenta de research cargada. Escoge una cuenta e importa posiciones.")
-            : L("Connected, but no accounts were returned yet.", "Conectado, pero todavía no aparecen cuentas.")
-        );
-      }
-    } catch (error: any) {
-      setBrokerError(error?.message || "Could not load research portfolio.");
-    } finally {
-      setBrokerLoading(false);
     }
   }
 
@@ -1405,19 +1544,13 @@ export default function NeuroAnalysisPage() {
             shares: holding.shares,
             averageCost: holding.averageCost,
             currentPrice: holding.currentPrice,
+            openedAt: holding.openedAt,
           })),
           caseId: activeCaseId,
           caseTitle:
             caseTitle.trim() ||
             marketData?.company?.name ||
             (focusTicker ? `${focusTicker} research` : "Research case"),
-          selectedAccountId: brokerAccountId || null,
-          brokerSnapshot: {
-            accounts: brokerAccounts,
-            accountId: brokerAccountId,
-            balances: brokerBalances,
-            importedAt: lastPortfolioImportAt,
-          },
           readiness: {
             readinessScore,
             documentReadiness: documentReadinessRows,
@@ -1490,6 +1623,8 @@ export default function NeuroAnalysisPage() {
               currentPrice: holding.currentPrice,
               weight: holding.weight,
               pnlPct: holding.pnlPct,
+              openedAt: holding.openedAt,
+              annualizedReturn: holding.annualizedReturn,
             })),
             marketData: marketPayload,
             documentReadiness: documentReadinessRows,
@@ -1608,6 +1743,38 @@ export default function NeuroAnalysisPage() {
     setActiveWorkspaceTab("research");
   }
 
+  function updatePortfolioHolding(id: string, patch: Partial<Holding>) {
+    setPortfolioHoldings((prev) =>
+      prev.map((holding) =>
+        holding.id === id
+          ? {
+              ...holding,
+              ...patch,
+              ticker:
+                patch.ticker === undefined
+                  ? holding.ticker
+                  : String(patch.ticker).toUpperCase().replace(/[^A-Z0-9.-]/g, "").slice(0, 12),
+              shares: patch.shares === undefined ? holding.shares : Math.max(0, toNumber(patch.shares)),
+              averageCost:
+                patch.averageCost === undefined ? holding.averageCost : Math.max(0, toNumber(patch.averageCost)),
+              currentPrice:
+                patch.currentPrice === undefined ? holding.currentPrice : Math.max(0, toNumber(patch.currentPrice)),
+              openedAt: patch.openedAt === undefined ? holding.openedAt : patch.openedAt || todayInputDate(),
+            }
+          : holding
+      )
+    );
+  }
+
+  function addPortfolioHolding(ticker = focusTicker) {
+    const nextTicker = ticker.trim().toUpperCase().replace(/[^A-Z0-9.-]/g, "").slice(0, 12);
+    setPortfolioHoldings((prev) => [...prev, makeHolding(nextTicker, 0, 0, 0)]);
+  }
+
+  function removePortfolioHolding(id: string) {
+    setPortfolioHoldings((prev) => prev.filter((holding) => holding.id !== id));
+  }
+
   function updateFundShareholder(id: string, patch: Partial<FundShareholder>) {
     setFundShareholders((prev) =>
       prev.map((shareholder) =>
@@ -1683,33 +1850,33 @@ export default function NeuroAnalysisPage() {
     <main className="min-h-screen bg-slate-950 text-slate-50">
       <TopNav />
 
-      <div className="mx-auto w-full max-w-none space-y-5 px-4 py-6 sm:px-6 md:px-12 xl:px-16">
-        <header className="rounded-xl border border-slate-800 bg-slate-900/75 p-5">
-          <div className="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
-            <div className="max-w-5xl">
+      <div className="mx-auto w-full max-w-none space-y-4 px-4 py-5 sm:px-6 md:px-10 xl:px-14">
+        <header className="rounded-xl border border-slate-800 bg-slate-900/80 p-4 shadow-lg shadow-slate-950/20 sm:p-5">
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px] xl:items-end">
+            <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="rounded-full border border-sky-400/40 bg-sky-500/10 px-3 py-1 text-[11px] font-semibold uppercase text-sky-200">
                   {L("Private Investment Portal", "Portal privado de inversión")}
                 </span>
                 <span className="rounded-full border border-emerald-400/40 bg-emerald-500/10 px-3 py-1 text-[11px] font-semibold uppercase text-emerald-200">
-                  {L("Long-term and dividends", "Largo plazo y dividendos")}
+                  {L("Long-term / dividends", "Largo plazo / dividendos")}
                 </span>
               </div>
               <h1 className="mt-3 text-2xl font-semibold tracking-normal sm:text-3xl">
                 {L("Neuro Analysis Investment Portal", "Neuro Analysis Investment Portal")}
               </h1>
-              <p className="mt-2 max-w-4xl text-sm leading-6 text-slate-400">
+              <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">
                 {L(
-                  "Run a private investment desk for long-term decisions: record positions you bought outside the platform, track the portfolio, read 10-K/10-Q evidence, evaluate dividend durability, and keep a living thesis for when to add, hold, wait, reduce, or review an exit.",
-                  "Opera una mesa privada de inversión para decisiones a largo plazo: registra posiciones que compraste fuera de la plataforma, sigue el portfolio, lee evidencia de 10-K/10-Q, evalúa durabilidad de dividendos y mantén una tesis viva para añadir, mantener, esperar, reducir o revisar salida."
+                  "Private research profiles for stocks, ETFs, dividend decisions, valuation, and living thesis reviews.",
+                  "Profiles privados para acciones, ETFs, decisiones de dividendos, valoración y revisión de tesis viva."
                 )}
               </p>
-              <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center">
+              <div className="mt-4 grid gap-2 sm:grid-cols-[minmax(0,420px)_auto] sm:items-center">
                 <input
                   value={caseTitle}
                   onChange={(event) => setCaseTitle(event.target.value)}
                   placeholder={L("Research case name", "Nombre del caso de research")}
-                  className="h-10 w-full rounded-lg border border-slate-800 bg-slate-950/70 px-3 text-sm text-slate-100 outline-none sm:max-w-md"
+                  className="h-10 w-full rounded-lg border border-slate-800 bg-slate-950/70 px-3 text-sm text-slate-100 outline-none focus:border-sky-400"
                 />
                 <button
                   type="button"
@@ -1724,7 +1891,7 @@ export default function NeuroAnalysisPage() {
               {caseStatus ? <p className="mt-2 text-xs text-emerald-300">{caseStatus}</p> : null}
             </div>
 
-            <div className="grid grid-cols-2 gap-2 text-sm xl:w-[360px]">
+            <div className="grid grid-cols-2 gap-2 text-sm">
               <Readout label={L("Readiness", "Preparación")} value={`${readinessScore}%`} />
               <Readout label={L("Focus", "Foco")} value={focusTicker || "-"} />
             </div>
@@ -1733,32 +1900,23 @@ export default function NeuroAnalysisPage() {
 
         <nav
           aria-label={L("Neuro Analysis workspaces", "Workspaces de Neuro Analysis")}
-          className="grid grid-cols-1 gap-3 rounded-xl border border-slate-800 bg-slate-900/70 p-2 sm:grid-cols-2 xl:grid-cols-4"
+          className="flex flex-wrap gap-2 rounded-xl border border-slate-800 bg-slate-900/70 p-2"
         >
           {[
             {
               id: "research" as const,
               icon: Search,
-              title: L("Company Research", "Research de compañías"),
-              body: L("Company profile, 10-K/10-Q evidence, dividend quality, valuation, and living investment thesis.", "Perfil de compañía, evidencia 10-K/10-Q, calidad de dividendos, valuation y tesis viva de inversión."),
-            },
-            {
-              id: "portfolio" as const,
-              icon: WalletCards,
-              title: L("Portfolio Tracker", "Portfolio Tracker"),
-              body: L("Record what you bought outside the platform so Neuro can follow the holding, weight, P&L, and thesis.", "Registra lo que compraste fuera de la plataforma para que Neuro siga la posición, peso, P&L y tesis."),
+              title: L("Profiles", "Profiles"),
             },
             {
               id: "fund_plan" as const,
               icon: BriefcaseBusiness,
               title: L("Fund Business Plan", "Business Plan del fondo"),
-              body: L("Project monthly capital goals, annual compounding, and shareholder withdrawals or reinvestment.", "Proyecta metas mensuales, interés compuesto anual y retiros o reinversión de accionistas."),
             },
             {
               id: "screener" as const,
               icon: BarChart3,
               title: L("Sector Screener", "Screener por sector"),
-              body: L("Compare companies inside a market sector and surface potential value candidates.", "Compara compañías dentro de un sector de mercado y detecta candidatas con valor potencial."),
             },
           ].map((tab) => {
             const Icon = tab.icon;
@@ -1768,27 +1926,368 @@ export default function NeuroAnalysisPage() {
                 key={tab.id}
                 type="button"
                 onClick={() => setActiveWorkspaceTab(tab.id)}
-                className={`flex items-start gap-3 rounded-lg border p-4 text-left transition ${
+                className={`inline-flex min-h-10 items-center gap-2 rounded-lg border px-4 py-2 text-sm font-semibold transition ${
                   active
                     ? "border-emerald-400/70 bg-emerald-400/10 text-emerald-50"
                     : "border-slate-800 bg-slate-950/45 text-slate-300 hover:border-sky-400/70 hover:text-sky-100"
                 }`}
               >
-                <Icon className={`mt-0.5 h-4 w-4 shrink-0 ${active ? "text-emerald-300" : "text-sky-300"}`} />
-                <span>
-                  <span className="block text-sm font-semibold">{tab.title}</span>
-                  <span className="mt-1 block text-xs leading-5 text-slate-500">{tab.body}</span>
-                </span>
+                <Icon className={`h-4 w-4 shrink-0 ${active ? "text-emerald-300" : "text-sky-300"}`} />
+                <span className="truncate">{tab.title}</span>
               </button>
             );
           })}
         </nav>
 
+        <section className={activeWorkspaceTab === "research" ? "grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(360px,0.65fr)]" : "hidden"}>
+          <div className="rounded-xl border border-emerald-500/25 bg-slate-900/85 p-5 shadow-lg shadow-slate-950/20">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-emerald-300">
+                  {L("Investment Command Center", "Investment Command Center")}
+                </p>
+                <h2 className="mt-2 text-lg font-semibold text-slate-50">
+                  {L("Portfolio, benchmark, thesis risk, and research queue", "Cartera, benchmark, riesgo de tesis y cola de research")}
+                </h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setMarketRefreshNonce((value) => value + 1)}
+                disabled={marketLoading}
+                className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-700 bg-slate-950/60 px-3 py-2 text-xs font-semibold text-slate-200 hover:border-emerald-400 hover:text-emerald-200 disabled:opacity-50"
+              >
+                <RefreshCw className={`h-3.5 w-3.5 ${marketLoading ? "animate-spin" : ""}`} />
+                {L("Refresh market layer", "Refrescar data")}
+              </button>
+            </div>
+
+            <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-6">
+              <Readout label={L("Mirror NAV", "NAV espejo")} value={formatCompactCurrency(portfolioSummary.totalValue, localeTag)} />
+              <Readout label={L("Annualized", "Anualizado")} value={formatPercent(portfolioSummary.annualizedReturn, localeTag)} />
+              <Readout label={BENCHMARK_TICKER} value={formatPercent(benchmarkAnnualizedReturn, localeTag)} hint={L("Benchmark", "Benchmark")} />
+              <Readout label={L("Alpha", "Alpha")} value={formatPercent(portfolioAlpha, localeTag)} />
+              <Readout label={L("Income yield", "Yield ingreso")} value={formatPercent(portfolioSummary.incomeYield, localeTag)} />
+              <Readout label={L("Readiness", "Preparación")} value={`${readinessScore}%`} />
+            </div>
+
+            <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-[0.95fr_1.05fr]">
+              <div className="rounded-lg border border-slate-800 bg-slate-950/45 p-4">
+                <p className="text-xs font-semibold uppercase text-slate-500">{L("Top movement", "Movimiento principal")}</p>
+                <div className="mt-3 space-y-2">
+                  {topPortfolioMovers.length ? (
+                    topPortfolioMovers.map((row) => (
+                      <div key={row.id} className="grid grid-cols-[76px_1fr_auto] items-center gap-3 text-xs">
+                        <span className="font-semibold text-slate-100">{row.ticker}</span>
+                        <div className="h-1.5 overflow-hidden rounded-full bg-slate-800">
+                          <div
+                            className={row.pnl >= 0 ? "h-full rounded-full bg-emerald-400" : "h-full rounded-full bg-rose-400"}
+                            style={{
+                              width: `${Math.min(100, Math.max(6, Math.abs(row.pnlPct ?? 0) * 100))}%`,
+                            }}
+                          />
+                        </div>
+                        <span className={row.pnl >= 0 ? "font-semibold text-emerald-300" : "font-semibold text-rose-300"}>
+                          {formatPercent(row.pnlPct, localeTag)}
+                        </span>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="text-xs text-slate-500">{L("Add real position sizes to activate movement tracking.", "Añade tamaños reales para activar tracking de movimiento.")}</p>
+                  )}
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-slate-800 bg-slate-950/45 p-4">
+                <p className="text-xs font-semibold uppercase text-slate-500">{L("Command alerts", "Alertas del command center")}</p>
+                <div className="mt-3 space-y-2">
+                  {commandCenterAlerts.map((alert) => (
+                    <div key={alert} className="flex items-start gap-2 rounded-lg border border-slate-800 bg-slate-950/60 px-3 py-2 text-xs leading-5 text-slate-300">
+                      <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-300" />
+                      <span>{alert}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-slate-800 bg-slate-900/80 p-5 shadow-lg shadow-slate-950/20">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-sky-300">
+                  {L("Research Queue", "Cola de research")}
+                </p>
+                <h2 className="mt-2 text-base font-semibold">{L("What needs attention next", "Qué necesita atención")}</h2>
+              </div>
+              <span className="rounded-full border border-slate-700 px-3 py-1 text-xs font-semibold text-slate-300">
+                {researchQueue.length} {L("open", "abiertas")}
+              </span>
+            </div>
+            <div className="mt-4 space-y-2">
+              {researchQueue.length ? (
+                researchQueue.map((row: any) => (
+                  <div key={row.ticker} className="rounded-lg border border-amber-400/25 bg-amber-400/10 p-3 text-xs">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="font-semibold text-amber-100">{row.ticker}</span>
+                      <span className="text-amber-200">{(row.missing ?? []).join(", ")}</span>
+                    </div>
+                    <p className="mt-1 text-amber-100/75">
+                      {L("Upload or index the missing evidence before treating the verdict as high confidence.", "Sube o indexa la evidencia faltante antes de tratar el veredicto como alta confianza.")}
+                    </p>
+                  </div>
+                ))
+              ) : (
+                <div className="rounded-lg border border-emerald-400/25 bg-emerald-400/10 p-3 text-xs text-emerald-100">
+                  {L("No urgent evidence gaps detected for the active queue.", "No se detectan brechas urgentes de evidencia en la cola activa.")}
+                </div>
+              )}
+            </div>
+          </div>
+        </section>
+
+        <section className={activeWorkspaceTab === "research" ? "rounded-xl border border-slate-800 bg-slate-900/80 p-4 shadow-lg shadow-slate-950/20 sm:p-5" : "hidden"}>
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <BriefcaseBusiness className="h-4 w-4 text-emerald-300" />
+                <h2 className="text-base font-semibold">{L("Portfolio Monitor", "Monitor de cartera")}</h2>
+              </div>
+              <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">
+                {L(
+                  "Manual mirror of positions bought outside the platform. Neuro uses this for portfolio context, concentration, P&L, annualized return, and thesis review.",
+                  "Réplica manual de posiciones compradas fuera de la plataforma. Neuro usa esto para contexto de cartera, concentración, P&L, retorno anualizado y revisión de tesis."
+                )}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => addPortfolioHolding()}
+              className="inline-flex items-center justify-center gap-2 rounded-lg border border-emerald-400/50 bg-emerald-500/10 px-3 py-2 text-xs font-semibold text-emerald-100 hover:bg-emerald-500/20"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              {L("Add position", "Añadir posición")}
+            </button>
+          </div>
+
+          <div className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-5">
+            <Readout label={L("Portfolio value", "Valor cartera")} value={formatCompactCurrency(portfolioSummary.totalValue, localeTag)} />
+            <Readout
+              label={L("Unrealized P&L", "P&L no realizado")}
+              value={formatCompactCurrency(portfolioSummary.totalPnl, localeTag)}
+              hint={formatPercent(portfolioSummary.totalPnlPct, localeTag)}
+            />
+            <Readout
+              label={L("Annualized return", "Retorno anualizado")}
+              value={formatPercent(portfolioSummary.annualizedReturn, localeTag)}
+              hint={L("Cost-weighted", "Ponderado por costo")}
+            />
+            <Readout
+              label={L("Income yield", "Yield ingreso")}
+              value={formatPercent(portfolioSummary.incomeYield, localeTag)}
+              hint={L("Weighted by value", "Ponderado por valor")}
+            />
+            <Readout
+              label={L("Largest position", "Mayor posición")}
+              value={portfolioSummary.largestPosition?.ticker ?? "-"}
+              hint={formatPercent(portfolioSummary.largestPosition?.weight ?? null, localeTag)}
+            />
+          </div>
+
+          <div className="mt-4 overflow-x-auto rounded-lg border border-slate-800">
+            <table className="w-full min-w-[1040px] text-left text-sm">
+              <thead className="bg-slate-950/60 text-xs text-slate-500">
+                <tr>
+                  <th className="px-3 py-2">{L("Ticker", "Ticker")}</th>
+                  <th className="px-3 py-2">{L("Shares", "Acciones")}</th>
+                  <th className="px-3 py-2">{L("Avg cost", "Costo prom.")}</th>
+                  <th className="px-3 py-2">{L("Opened", "Entrada")}</th>
+                  <th className="px-3 py-2">{L("Last price", "Último precio")}</th>
+                  <th className="px-3 py-2">{L("Value", "Valor")}</th>
+                  <th className="px-3 py-2">{L("P&L", "P&L")}</th>
+                  <th className="px-3 py-2">{L("Annualized", "Anualizado")}</th>
+                  <th className="px-3 py-2">{L("Weight", "Peso")}</th>
+                  <th className="px-3 py-2" aria-label={L("Actions", "Acciones")} />
+                </tr>
+              </thead>
+              <tbody>
+                {portfolioPositions.map((position) => (
+                  <tr key={position.id} className="border-t border-slate-800">
+                    <td className="px-3 py-2">
+                      <input
+                        value={position.ticker}
+                        onChange={(event) => updatePortfolioHolding(position.id, { ticker: event.target.value })}
+                        className="h-9 w-24 rounded-lg border border-slate-800 bg-slate-950/70 px-2 font-semibold text-slate-100 outline-none focus:border-sky-400"
+                      />
+                      <p className="mt-1 max-w-[180px] truncate text-[11px] text-slate-500">{position.companyName}</p>
+                    </td>
+                    <td className="px-3 py-2">
+                      <input
+                        type="number"
+                        value={position.shares}
+                        onChange={(event) => updatePortfolioHolding(position.id, { shares: toNumber(event.target.value) })}
+                        className="h-9 w-24 rounded-lg border border-slate-800 bg-slate-950/70 px-2 text-slate-100 outline-none focus:border-sky-400"
+                      />
+                    </td>
+                    <td className="px-3 py-2">
+                      <input
+                        type="number"
+                        value={position.averageCost}
+                        onChange={(event) => updatePortfolioHolding(position.id, { averageCost: toNumber(event.target.value) })}
+                        className="h-9 w-28 rounded-lg border border-slate-800 bg-slate-950/70 px-2 text-slate-100 outline-none focus:border-sky-400"
+                      />
+                    </td>
+                    <td className="px-3 py-2">
+                      <input
+                        type="date"
+                        value={position.openedAt || ""}
+                        onChange={(event) => updatePortfolioHolding(position.id, { openedAt: event.target.value })}
+                        className="h-9 w-36 rounded-lg border border-slate-800 bg-slate-950/70 px-2 text-slate-100 outline-none focus:border-sky-400"
+                      />
+                    </td>
+                    <td className="px-3 py-2 font-semibold text-slate-100">{formatCurrency(position.currentPrice, localeTag)}</td>
+                    <td className="px-3 py-2 text-slate-300">{formatCompactCurrency(position.value, localeTag)}</td>
+                    <td className={`px-3 py-2 font-semibold ${position.pnl >= 0 ? "text-emerald-300" : "text-rose-300"}`}>
+                      {formatCompactCurrency(position.pnl, localeTag)}
+                      <span className="ml-1 text-xs text-slate-500">{formatPercent(position.pnlPct, localeTag)}</span>
+                    </td>
+                    <td className="px-3 py-2 text-slate-300">{formatPercent(position.annualizedReturn, localeTag)}</td>
+                    <td className="px-3 py-2 text-slate-300">{formatPercent(position.weight ?? null, localeTag)}</td>
+                    <td className="px-3 py-2">
+                      <div className="flex items-center justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setFocusTicker(position.ticker);
+                            setResearchGoal(defaultResearchGoal(isEs));
+                          }}
+                          className="rounded-lg border border-slate-700 p-2 text-slate-300 hover:border-sky-400 hover:text-sky-200"
+                          aria-label={L("Research position", "Investigar posición")}
+                        >
+                          <Search className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => removePortfolioHolding(position.id)}
+                          className="rounded-lg border border-slate-800 p-2 text-slate-400 hover:border-rose-400 hover:text-rose-200"
+                          aria-label={L("Remove position", "Quitar posición")}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {portfolioPositions.length === 0 ? (
+                  <tr>
+                    <td colSpan={10} className="px-3 py-8 text-center text-sm text-slate-500">
+                      {L("Add positions to activate portfolio monitoring.", "Añade posiciones para activar el monitoreo de cartera.")}
+                    </td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section className={activeWorkspaceTab === "research" ? "rounded-xl border border-slate-800 bg-slate-900/80 p-5 shadow-lg shadow-slate-950/20" : "hidden"}>
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <div className="flex items-center gap-2">
+                <BarChart3 className="h-4 w-4 text-sky-300" />
+                <h2 className="text-base font-semibold">{L("Portfolio X-Ray", "Portfolio X-Ray")}</h2>
+              </div>
+              <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">
+                {L(
+                  "Look-through style view of sector exposure, instrument mix, concentration, income, and ETF overlap.",
+                  "Vista tipo look-through de exposición por sector, mezcla de instrumentos, concentración, ingreso y overlap de ETFs."
+                )}
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-2 text-xs lg:min-w-[360px]">
+              <Readout label={L("Top 3 weight", "Peso top 3")} value={formatPercent(engineSnapshot?.portfolio?.concentration?.top3Weight, localeTag)} />
+              <Readout label={L("HHI", "HHI")} value={formatCompactNumber(engineSnapshot?.portfolio?.concentration?.hhi, localeTag)} />
+            </div>
+          </div>
+
+          <div className="mt-5 grid grid-cols-1 gap-4 xl:grid-cols-3">
+            <div className="rounded-lg border border-slate-800 bg-slate-950/45 p-4">
+              <p className="text-xs font-semibold uppercase text-slate-500">{L("Sector / category exposure", "Exposición sector / categoría")}</p>
+              <div className="mt-4 space-y-3">
+                {portfolioXray.sectorRows.length ? (
+                  portfolioXray.sectorRows.slice(0, 7).map((row) => {
+                    const weight = portfolioSummary.totalValue > 0 ? row.value / portfolioSummary.totalValue : 0;
+                    return (
+                      <div key={row.name}>
+                        <div className="flex items-center justify-between gap-3 text-xs">
+                          <span className="truncate text-slate-300">{row.name}</span>
+                          <span className="font-semibold text-slate-100">{formatPercent(weight, localeTag)}</span>
+                        </div>
+                        <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-slate-800">
+                          <div className="h-full rounded-full bg-sky-400" style={{ width: `${Math.min(100, weight * 100)}%` }} />
+                        </div>
+                      </div>
+                    );
+                  })
+                ) : (
+                  <p className="text-sm text-slate-500">{L("Add positions to see exposure.", "Añade posiciones para ver exposición.")}</p>
+                )}
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-slate-800 bg-slate-950/45 p-4">
+              <p className="text-xs font-semibold uppercase text-slate-500">{L("Instrument mix", "Mezcla de instrumentos")}</p>
+              <div className="mt-4 space-y-3">
+                {portfolioXray.instrumentRows.length ? (
+                  portfolioXray.instrumentRows.map((row) => {
+                    const weight = portfolioSummary.totalValue > 0 ? row.value / portfolioSummary.totalValue : 0;
+                    return (
+                      <div key={row.name} className="rounded-lg border border-slate-800 bg-slate-950/60 p-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="text-sm font-semibold text-slate-100">{row.name}</span>
+                          <span className="text-sm font-semibold text-emerald-300">{formatPercent(weight, localeTag)}</span>
+                        </div>
+                        <p className="mt-1 text-xs text-slate-500">{formatCompactCurrency(row.value, localeTag)}</p>
+                      </div>
+                    );
+                  })
+                ) : (
+                  <p className="text-sm text-slate-500">{L("Instrument classification will appear after market data loads.", "La clasificación aparecerá cuando cargue la data de mercado.")}</p>
+                )}
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-slate-800 bg-slate-950/45 p-4">
+              <p className="text-xs font-semibold uppercase text-slate-500">{L("ETF overlap / look-through", "Overlap ETF / look-through")}</p>
+              <div className="mt-4 space-y-2">
+                {portfolioXray.overlapRows.length ? (
+                  portfolioXray.overlapRows.map((row) => (
+                    <div key={row.symbol} className="rounded-lg border border-slate-800 bg-slate-950/60 p-3">
+                      <div className="flex items-center justify-between gap-3 text-xs">
+                        <span className="font-semibold text-slate-100">{row.symbol}</span>
+                        <span className="font-semibold text-slate-100">{formatPercent(row.weight, localeTag)}</span>
+                      </div>
+                      <p className="mt-1 truncate text-[11px] text-slate-500">{row.name}</p>
+                      <p className="mt-1 text-[11px] text-slate-600">{row.funds.join(" / ")}</p>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-sm leading-6 text-slate-500">
+                    {L(
+                      "ETF holding overlap will appear when ETF holdings are available from market providers.",
+                      "El overlap de holdings aparecerá cuando los proveedores traigan holdings de ETFs."
+                    )}
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        </section>
+
         <section
           className={
             activeWorkspaceTab !== "research"
               ? "space-y-5"
-              : "grid grid-cols-1 gap-5 xl:grid-cols-[1.08fr_0.92fr]"
+              : "grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_380px]"
           }
         >
           <div className="space-y-5">
@@ -2039,6 +2538,82 @@ export default function NeuroAnalysisPage() {
                   </div>
                 ) : null}
               </section>
+
+              <section className="rounded-xl border border-emerald-500/25 bg-slate-900/75 p-5">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <FileText className="h-4 w-4 text-emerald-300" />
+                      <h3 className="text-sm font-semibold text-slate-100">{L("Investor Reporting Packet", "Paquete de reporte para inversionistas")}</h3>
+                    </div>
+                    <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">
+                      {L(
+                        "A Morningstar-style fund summary for NAV, annual payouts, reinvestment policy, ownership, and long-horizon projections.",
+                        "Resumen estilo Morningstar para NAV, pagos anuales, política de reinversión, participación y proyecciones de largo plazo."
+                      )}
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-xs lg:min-w-[420px]">
+                    <Readout label={L("Ownership assigned", "Participación asignada")} value={formatPercent(shareholderOwnershipTotal / 100, localeTag)} />
+                    <Readout label={L("Selected year NAV", "NAV año seleccionado")} value={formatCompactCurrency(selectedFundProjection?.endValue, localeTag)} />
+                  </div>
+                </div>
+
+                <div className="mt-5 grid grid-cols-1 gap-4 xl:grid-cols-[0.8fr_1.2fr]">
+                  <div className="rounded-lg border border-slate-800 bg-slate-950/45 p-4">
+                    <p className="text-xs font-semibold uppercase text-slate-500">{L("Report summary", "Resumen del reporte")}</p>
+                    <div className="mt-4 space-y-3 text-sm">
+                      <div className="flex justify-between gap-3">
+                        <span className="text-slate-400">{L("Initial capital", "Capital inicial")}</span>
+                        <span className="font-semibold text-slate-100">{formatCompactCurrency(fundInitialCapital, localeTag)}</span>
+                      </div>
+                      <div className="flex justify-between gap-3">
+                        <span className="text-slate-400">{L("Annual contribution goal", "Meta anual de aportes")}</span>
+                        <span className="font-semibold text-slate-100">{formatCompactCurrency(fundMonthlyGoal * 12, localeTag)}</span>
+                      </div>
+                      <div className="flex justify-between gap-3">
+                        <span className="text-slate-400">{L("Modeled annual return", "Retorno anual modelado")}</span>
+                        <span className="font-semibold text-slate-100">{formatPercent(fundAnnualReturnPct / 100, localeTag)}</span>
+                      </div>
+                      <div className="flex justify-between gap-3">
+                        <span className="text-slate-400">{L("Year 30 NAV", "NAV año 30")}</span>
+                        <span className="font-semibold text-emerald-300">{formatCompactCurrency(fundProjection.at(-1)?.endValue, localeTag)}</span>
+                      </div>
+                      <div className="flex justify-between gap-3">
+                        <span className="text-slate-400">{L("Year 30 cumulative payouts", "Pagos acumulados año 30")}</span>
+                        <span className="font-semibold text-amber-300">{formatCompactCurrency(fundProjection.at(-1)?.cumulativePayouts, localeTag)}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="overflow-x-auto rounded-lg border border-slate-800">
+                    <table className="w-full min-w-[820px] text-left text-sm">
+                      <thead className="bg-slate-950/55 text-xs text-slate-500">
+                        <tr>
+                          <th className="px-3 py-2">{L("Investor", "Inversionista")}</th>
+                          <th className="px-3 py-2">{L("Ownership", "Participación")}</th>
+                          <th className="px-3 py-2">{L("Policy", "Política")}</th>
+                          <th className="px-3 py-2">{L("Selected payout", "Pago año seleccionado")}</th>
+                          <th className="px-3 py-2">{L("Selected reinvested", "Reinvertido seleccionado")}</th>
+                          <th className="px-3 py-2">{L("Year 30 payout", "Pago año 30")}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {investorReportingRows.map((row) => (
+                          <tr key={row.id} className="border-t border-slate-800">
+                            <td className="px-3 py-2 font-semibold text-slate-100">{row.name || "Investor"}</td>
+                            <td className="px-3 py-2 text-slate-300">{formatPercent(row.ownershipPct / 100, localeTag)}</td>
+                            <td className="px-3 py-2 text-slate-300">{row.policy}</td>
+                            <td className="px-3 py-2 font-semibold text-amber-300">{formatCompactCurrency(row.selectedPayout, localeTag)}</td>
+                            <td className="px-3 py-2 font-semibold text-emerald-300">{formatCompactCurrency(row.selectedReinvested, localeTag)}</td>
+                            <td className="px-3 py-2 text-slate-300">{formatCompactCurrency(row.year30Payout, localeTag)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </section>
             </div>
 
             <div className={`${activeWorkspaceTab === "screener" ? "" : "hidden"} rounded-xl border border-slate-800 bg-slate-900/75 p-5`}>
@@ -2179,225 +2754,44 @@ export default function NeuroAnalysisPage() {
               ) : null}
             </div>
 
-            <div className={`${activeWorkspaceTab === "portfolio" ? "" : "hidden"} rounded-xl border border-slate-800 bg-slate-900/75 p-5`}>
-              <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <WalletCards className="h-4 w-4 text-emerald-300" />
-                    <h2 className="text-base font-semibold">{L("Portfolio Tracker", "Portfolio Tracker")}</h2>
-                  </div>
-                  <p className="mt-2 text-sm leading-6 text-slate-400">
-                    {L(
-                      "Record positions after you buy them outside the platform. Neuro follows price, weight, gain/loss, dividend evidence, and future filing changes so the thesis can be reviewed over time. Read-only broker sync can be connected after provider approvals are complete.",
-                      "Registra posiciones después de comprarlas fuera de la plataforma. Neuro sigue precio, peso, ganancia/pérdida, evidencia de dividendos y cambios en filings futuros para revisar la tesis con el tiempo. El sync de broker solo lectura se podrá conectar cuando terminen las aprobaciones de proveedores."
-                    )}
-                  </p>
-                  {!brokerConnectionsEnabled ? (
-                    <p className="mt-2 rounded-lg border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-xs leading-5 text-amber-100">
-                      {brokerUnavailableMessage}
-                    </p>
-                  ) : null}
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={() => void connectResearchPortfolio()}
-                    disabled={brokerConnecting || !brokerConnectionsEnabled}
-                    className="inline-flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-950/60 px-3 py-2 text-xs font-semibold text-slate-200 hover:border-sky-400 disabled:opacity-60"
-                  >
-                    {brokerConnecting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Link2 className="h-3.5 w-3.5" />}
-                    {brokerConnectionsEnabled
-                      ? L("Connect broker", "Conectar broker")
-                      : L("Coming soon", "Proximamente")}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void loadResearchPortfolio(true)}
-                    disabled={brokerLoading || !brokerConnectionsEnabled}
-                    className="inline-flex items-center gap-2 rounded-lg bg-emerald-400 px-3 py-2 text-xs font-semibold text-slate-950 hover:bg-emerald-300 disabled:opacity-60"
-                  >
-                    {brokerLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Cloud className="h-3.5 w-3.5" />}
-                    {L("Import portfolio", "Importar portfolio")}
-                  </button>
-                </div>
-              </div>
-
-              {brokerAccounts.length > 0 ? (
-                <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center">
-                  <label className="text-xs font-semibold text-slate-400">{L("Import account", "Cuenta para importar")}</label>
-                  <select
-                    value={brokerAccountId}
-                    onChange={(event) => setBrokerAccountId(event.target.value)}
-                    className="h-9 rounded-lg border border-slate-800 bg-slate-950/70 px-3 text-sm text-slate-100 outline-none"
-                  >
-                    {brokerAccounts.map((account) => (
-                      <option key={accountIdOf(account)} value={accountIdOf(account)}>
-                        {accountLabel(account)}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              ) : null}
-
-              {brokerStatus ? <p className="mt-3 text-xs text-emerald-300">{brokerStatus}</p> : null}
-              {brokerError ? <p className="mt-3 text-xs text-rose-300">{brokerError}</p> : null}
-
-              <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
-                <Readout
-                  label={L("Imported", "Importado")}
-                  value={lastPortfolioImportAt ? new Date(lastPortfolioImportAt).toLocaleTimeString(localeTag) : "-"}
-                  hint={selectedAccountLabel ? accountLabel(selectedAccountLabel) : L("Manual or broker", "Manual o broker")}
-                />
-                <Readout
-                  label={L("External equity", "Equity externo")}
-                  value={externalEquity > 0 ? formatCurrency(externalEquity, localeTag) : "-"}
-                  hint={L("Read-only", "Solo lectura")}
-                />
-                <Readout
-                  label={L("Largest position", "Mayor posición")}
-                  value={portfolio.largest?.ticker ?? "-"}
-                  hint={portfolio.largest ? formatPercent(portfolio.largest.weight, localeTag) : ""}
-                />
-              </div>
-
-              <div className="mt-4 overflow-x-auto rounded-lg border border-slate-800">
-                <table className="w-full min-w-[820px] text-left text-sm">
-                  <thead className="bg-slate-950/55 text-xs text-slate-500">
-                    <tr>
-                      <th className="px-3 py-2">{L("Ticker", "Símbolo")}</th>
-                      <th className="px-3 py-2">{L("Shares", "Acciones")}</th>
-                      <th className="px-3 py-2">{L("Avg. cost", "Costo prom.")}</th>
-                      <th className="px-3 py-2">{L("Current price", "Precio actual")}</th>
-                      <th className="px-3 py-2">{L("Value", "Valor")}</th>
-                      <th className="px-3 py-2">P&L</th>
-                      <th className="px-3 py-2">{L("Weight", "Peso")}</th>
-                      <th className="px-3 py-2">{L("Focus", "Foco")}</th>
-                      <th className="px-3 py-2" aria-label={L("Actions", "Acciones")} />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {portfolio.rows.length === 0 ? (
-                      <tr>
-                        <td colSpan={9} className="px-3 py-8 text-center text-sm text-slate-500">
-                          {L(
-                            "Import a read-only portfolio or add positions manually to create research inputs.",
-                            "Importa un portfolio solo lectura o añade posiciones manualmente para crear los insumos de research."
-                          )}
-                        </td>
-                      </tr>
-                    ) : (
-                      portfolio.rows.map((holding) => (
-                        <tr key={holding.id} className="border-t border-slate-800">
-                          <td className="px-3 py-2">
-                            <input
-                              value={holding.ticker}
-                              onChange={(event) =>
-                                updateHolding(holding.id, { ticker: event.target.value.toUpperCase().replace(/[^A-Z0-9.-]/g, "") })
-                              }
-                              className="h-9 w-24 rounded-lg border border-slate-800 bg-slate-950/70 px-2 font-semibold text-slate-100 outline-none"
-                            />
-                          </td>
-                          <td className="px-3 py-2">
-                            <input
-                              type="number"
-                              value={holding.shares}
-                              onChange={(event) => updateHolding(holding.id, { shares: toNumber(event.target.value) })}
-                              className="h-9 w-24 rounded-lg border border-slate-800 bg-slate-950/70 px-2 text-slate-100 outline-none"
-                            />
-                          </td>
-                          <td className="px-3 py-2">
-                            <input
-                              type="number"
-                              value={holding.averageCost}
-                              onChange={(event) => updateHolding(holding.id, { averageCost: toNumber(event.target.value) })}
-                              className="h-9 w-28 rounded-lg border border-slate-800 bg-slate-950/70 px-2 text-slate-100 outline-none"
-                            />
-                          </td>
-                          <td className="px-3 py-2">
-                            <input
-                              type="number"
-                              value={holding.currentPrice}
-                              onChange={(event) => updateHolding(holding.id, { currentPrice: toNumber(event.target.value) })}
-                              className="h-9 w-28 rounded-lg border border-slate-800 bg-slate-950/70 px-2 text-slate-100 outline-none"
-                            />
-                          </td>
-                          <td className="px-3 py-2 text-slate-300">{formatCurrency(holding.value, localeTag)}</td>
-                          <td className={`px-3 py-2 font-semibold ${holding.pnl >= 0 ? "text-emerald-300" : "text-rose-300"}`}>
-                            {formatPercent(holding.pnlPct, localeTag)}
-                          </td>
-                          <td className="px-3 py-2 text-slate-300">{formatPercent(holding.weight, localeTag)}</td>
-                          <td className="px-3 py-2">
-                            <button
-                              type="button"
-                              onClick={() => setFocusTicker(holding.ticker)}
-                              className={`rounded-lg border px-2 py-1 text-[11px] font-semibold ${
-                                focusTicker === holding.ticker
-                                  ? "border-sky-400 bg-sky-500/15 text-sky-200"
-                                  : "border-slate-700 text-slate-400 hover:border-sky-400"
-                              }`}
-                            >
-                              {focusTicker === holding.ticker ? L("Active", "Activo") : L("Analyze", "Analizar")}
-                            </button>
-                          </td>
-                          <td className="px-3 py-2">
-                            <button
-                              type="button"
-                              onClick={() => removeHolding(holding.id)}
-                              className="rounded-lg border border-slate-800 p-2 text-slate-400 hover:border-rose-400 hover:text-rose-200"
-                              aria-label={L("Remove holding", "Eliminar posición")}
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </button>
-                          </td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-
-              <button
-                type="button"
-                onClick={addHolding}
-                className="mt-4 inline-flex items-center gap-2 rounded-lg border border-slate-700 px-3 py-2 text-xs font-semibold text-slate-200 hover:border-emerald-400 hover:text-emerald-200"
-              >
-                <Plus className="h-3.5 w-3.5" />
-                {L("Add position manually", "Añadir posición manual")}
-              </button>
-            </div>
-
-            <div className={`${activeWorkspaceTab === "research" ? "" : "hidden"} rounded-xl border border-slate-800 bg-slate-900/75 p-5`}>
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                <div>
+            <div className={`${activeWorkspaceTab === "research" ? "" : "hidden"} rounded-xl border border-slate-800 bg-slate-900/75 p-5 shadow-lg shadow-slate-950/20`}>
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div className="min-w-0">
                   <div className="flex items-center gap-2">
                     <Search className="h-4 w-4 text-sky-300" />
-                    <h2 className="text-base font-semibold">{L("Company Investment Profile", "Perfil de inversión de compañía")}</h2>
+                    <h2 className="text-base font-semibold">{L("Stock / ETF Investment Profile", "Profile de inversión de acción / ETF")}</h2>
                   </div>
                   <p className="mt-2 text-sm leading-6 text-slate-400">
                     {L(
-                      "Choose the company Neuro should research. Market data loads automatically; 10-K, 10-Q, dividend records, and company documents turn the thesis from provisional into evidence-backed.",
-                      "Escoge la compañía que Neuro debe investigar. La data de mercado carga automática; 10-K, 10-Q, récords de dividendos y documentos de compañía convierten la tesis de provisional a respaldada por evidencia."
+                      "Create one profile at a time. Neuro loads market data automatically and uses filings or ETF evidence to support the thesis.",
+                      "Crea un profile a la vez. Neuro carga data de mercado automáticamente y usa filings o evidencia ETF para respaldar la tesis."
                     )}
                   </p>
                 </div>
-                <label className="block">
+                <label className="block lg:w-40">
                   <span className="text-[11px] font-semibold uppercase text-slate-500">{L("Focus ticker", "Ticker foco")}</span>
                   <input
                     value={focusTicker}
                     onChange={(event) => setFocusTicker(event.target.value.toUpperCase().replace(/[^A-Z0-9.-]/g, "").slice(0, 12))}
-                    className="mt-1 h-10 w-36 rounded-lg border border-slate-800 bg-slate-950/70 px-3 text-sm font-semibold text-slate-100 outline-none"
+                    className="mt-1 h-10 w-full rounded-lg border border-slate-800 bg-slate-950/70 px-3 text-sm font-semibold text-slate-100 outline-none focus:border-sky-400"
                   />
                 </label>
               </div>
 
-              <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-4">
-                <div className="rounded-lg border border-slate-800 bg-slate-950/50 p-4 md:col-span-2">
+              <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1.45fr)_minmax(0,0.78fr)_minmax(0,0.78fr)]">
+                <div className="min-w-0 rounded-lg border border-slate-800 bg-slate-950/50 p-4">
                   <p className="text-xs text-slate-500">{L("Company", "Empresa")}</p>
-                  <p className="mt-2 text-lg font-semibold text-slate-50">
+                  <p className="mt-2 truncate text-lg font-semibold text-slate-50">
                     {marketData?.company?.name || focusTicker}
                   </p>
                   <p className="mt-2 text-sm leading-6 text-slate-400">
-                    {[marketData?.company?.sector, marketData?.company?.industry, marketData?.company?.exchange]
+                    {[
+                      focusInstrumentIsFundLike ? L("ETF / fund", "ETF / fondo") : marketData?.company?.quoteType,
+                      marketData?.fund?.categoryName,
+                      marketData?.company?.sector,
+                      marketData?.company?.industry,
+                      marketData?.company?.exchange,
+                    ]
                       .filter(Boolean)
                       .join(" / ") || (marketLoading ? L("Loading data...", "Cargando data...") : L("Waiting for market data.", "Esperando data de mercado."))}
                   </p>
@@ -2412,16 +2806,95 @@ export default function NeuroAnalysisPage() {
                   }
                 />
                 <Readout
-                  label={L("Latest fiscal year", "Último año fiscal")}
-                  value={latestFundamentals?.year ?? "-"}
-                  hint={`Rev ${formatCompactCurrency(latestFundamentals?.totalRevenue, localeTag)} / FCF ${formatCompactCurrency(latestFundamentals?.freeCashFlow, localeTag)}`}
+                  label={focusInstrumentIsFundLike ? L("Fund profile", "Profile del fondo") : L("Latest fiscal year", "Último año fiscal")}
+                  value={focusInstrumentIsFundLike ? marketData?.fund?.categoryName || marketData?.company?.quoteType || "ETF" : latestFundamentals?.year ?? "-"}
+                  hint={
+                    focusInstrumentIsFundLike
+                      ? `${L("Yield", "Yield")} ${formatPercent(marketData?.fund?.yield ?? marketData?.market?.dividendYield, localeTag)} / ${L("Fee", "Costo")} ${formatPercent(marketData?.fund?.annualReportExpenseRatio, localeTag)}`
+                      : `Rev ${formatCompactCurrency(latestFundamentals?.totalRevenue, localeTag)} / FCF ${formatCompactCurrency(latestFundamentals?.freeCashFlow, localeTag)}`
+                  }
                 />
               </div>
               {marketError ? <p className="mt-3 text-xs text-amber-300">{marketError}</p> : null}
+              {focusInstrumentIsFundLike ? (
+                <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
+                  <Readout
+                    label={L("Net assets", "Activos netos")}
+                    value={formatCompactCurrency(marketData?.fund?.netAssets, localeTag)}
+                    hint={marketData?.fund?.family ?? ""}
+                  />
+                  <Readout
+                    label={L("5Y avg return", "Retorno prom. 5Y")}
+                    value={formatPercent(marketData?.fund?.fiveYearAverageReturn, localeTag)}
+                    hint={L("When available", "Cuando esté disponible")}
+                  />
+                  <Readout
+                    label={L("Liquidity", "Liquidez")}
+                    value={formatCompactNumber(marketData?.market?.regularMarketVolume, localeTag)}
+                    hint={L("Latest volume", "Volumen reciente")}
+                  />
+                </div>
+              ) : null}
+            </div>
+
+            <div className={`${activeWorkspaceTab === "research" ? "" : "hidden"} rounded-xl border border-sky-500/25 bg-slate-900/75 p-5 shadow-lg shadow-slate-950/20`}>
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <ShieldCheck className="h-4 w-4 text-sky-300" />
+                    <h2 className="text-base font-semibold">{L("Company / ETF Profile 360", "Company / ETF Profile 360")}</h2>
+                  </div>
+                  <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">
+                    {L(
+                      "Fast research card for quality, valuation, dividends, evidence, and portfolio risk.",
+                      "Tarjeta rápida de research para calidad, valoración, dividendos, evidencia y riesgo de cartera."
+                    )}
+                  </p>
+                </div>
+                <div className="rounded-lg border border-slate-800 bg-slate-950/55 px-4 py-3 text-right">
+                  <p className="text-[11px] font-semibold uppercase text-slate-500">{L("Overall score", "Score general")}</p>
+                  <p className={`mt-1 text-2xl font-bold ${scoreTone(focusProfile360.overall)}`}>{focusProfile360.overall}</p>
+                </div>
+              </div>
+
+              <div className="mt-5 grid grid-cols-1 gap-3 md:grid-cols-5">
+                <ScoreBar
+                  label={L("Quality", "Calidad")}
+                  score={focusProfile360.qualityScore}
+                  hint={L("Margins, balance sheet, history, and data quality.", "Márgenes, balance, historial y calidad de data.")}
+                />
+                <ScoreBar
+                  label={L("Valuation", "Valoración")}
+                  score={focusProfile360.valuationScore}
+                  hint={L("Margin of safety or valuation status from the model.", "Margen de seguridad o estado de valoración del modelo.")}
+                />
+                <ScoreBar
+                  label={L("Dividend", "Dividendo")}
+                  score={focusProfile360.dividendScore}
+                  hint={L("Yield, coverage, and balance-sheet pressure.", "Yield, cobertura y presión de balance.")}
+                />
+                <ScoreBar
+                  label={L("Evidence", "Evidencia")}
+                  score={focusProfile360.evidenceScore}
+                  hint={L("Market data, filings, report, and thesis memory.", "Data de mercado, filings, reporte y memoria de tesis.")}
+                />
+                <ScoreBar
+                  label={L("Risk", "Riesgo")}
+                  score={focusProfile360.riskScore}
+                  hint={L("Concentration, data quality, filings, leverage, and history.", "Concentración, calidad de data, filings, deuda e historial.")}
+                />
+              </div>
+
+              <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
+                <Readout label={L("Decision state", "Estado decisión")} value={focusProfile360.verdict} />
+                <Readout label={L("Valuation", "Valuation")} value={focusProfile360.valuationStatus} />
+                <Readout label={L("Evidence gaps", "Brechas evidencia")} value={focusProfile360.missingEvidence.length || "-"} />
+                <Readout label={L("Latest report", "Último reporte")} value={agentReport ? L("Available", "Disponible") : L("Pending", "Pendiente")} />
+              </div>
             </div>
           </div>
 
-          <aside className={activeWorkspaceTab === "research" ? "space-y-5" : "hidden"}>
+          <aside className={activeWorkspaceTab === "research" ? "space-y-5 xl:sticky xl:top-24 xl:self-start" : "hidden"}>
             <div className="rounded-xl border border-sky-500/30 bg-sky-500/5 p-5">
               <div className="flex items-center gap-2">
                 <Sparkles className="h-4 w-4 text-sky-300" />
@@ -2429,8 +2902,8 @@ export default function NeuroAnalysisPage() {
               </div>
               <p className="mt-2 text-sm leading-6 text-slate-300">
                 {L(
-                  "Neuro reads the focus company, market layer, portfolio context, and uploaded documents, then builds a living thesis, valuation ladder, dividend review, and long-term decision support.",
-                  "Neuro lee la compañía foco, capa de mercado, contexto del portfolio y documentos subidos, y crea una tesis viva, escalera de valuation, revisión de dividendos y apoyo de decisión a largo plazo."
+                  "Run the current profile through market data, evidence, valuation, dividends, and thesis review.",
+                  "Corre el profile actual con data de mercado, evidencia, valoración, dividendos y revisión de tesis."
                 )}
               </p>
 
@@ -2457,9 +2930,145 @@ export default function NeuroAnalysisPage() {
                 className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-sky-400 px-4 py-3 text-sm font-semibold text-slate-950 hover:bg-sky-300 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {agentLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-                {agentLoading ? L("Running research...", "Corriendo research...") : L("Run company intelligence", "Correr inteligencia de compañía")}
+                {agentLoading ? L("Running research...", "Corriendo research...") : L("Run profile intelligence", "Correr inteligencia del profile")}
               </button>
               {agentError ? <p className="mt-3 text-xs text-rose-300">{agentError}</p> : null}
+            </div>
+
+            <div className="rounded-xl border border-slate-800 bg-slate-900/75 p-5">
+              <div className="flex items-center gap-2">
+                <FileText className="h-4 w-4 text-emerald-300" />
+                <h2 className="text-base font-semibold">
+                  {focusInstrumentIsFundLike ? L("Fund Evidence", "Evidencia del fondo") : L("Company Documents", "Documentos de compañía")}
+                </h2>
+              </div>
+              <p className="mt-2 text-sm leading-6 text-slate-400">
+                {focusInstrumentIsFundLike
+                  ? L(
+                      "ETF/fund profiles use strategy, holdings, costs, yield, liquidity, and market history.",
+                      "Los profiles de ETF/fondo usan estrategia, holdings, costos, yield, liquidez e historial de mercado."
+                    )
+                  : L(
+                      "Add recent annual and quarterly PDFs to strengthen future thesis reviews.",
+                      "Añade PDFs anuales y trimestrales recientes para fortalecer futuras revisiones de tesis."
+                    )}
+              </p>
+
+              {!focusInstrumentIsFundLike ? (
+                <button
+                  type="button"
+                  onClick={() => void findCompanyDocuments()}
+                  disabled={documentLookupLoading || !focusTicker.trim()}
+                  className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-lg border border-slate-700 bg-slate-950/60 px-3 py-2 text-xs font-semibold text-slate-200 hover:border-sky-400 hover:text-sky-200 disabled:opacity-50"
+                >
+                  {documentLookupLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
+                  {documentLookupLoading ? L("Searching", "Buscando") : L("Find recent documents", "Buscar documentos recientes")}
+                </button>
+              ) : null}
+              {documentLookupError ? <p className="mt-2 text-xs text-rose-300">{documentLookupError}</p> : null}
+              {documentLookup.length > 0 ? (
+                <div className="mt-3 max-h-40 space-y-2 overflow-auto rounded-lg border border-slate-800 bg-slate-950/45 p-2">
+                  {documentLookup.slice(0, 6).map((doc: any) => (
+                    <a
+                      key={`${doc.accessionNumber}-${doc.form}`}
+                      href={doc.documentUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="block rounded-lg border border-slate-800 px-3 py-2 text-xs text-slate-300 hover:border-sky-400 hover:text-sky-200"
+                    >
+                      <span className="font-semibold">{doc.form}</span>
+                      <span className="ml-2 text-slate-500">{doc.periodEnd || doc.filingDate || "-"}</span>
+                    </a>
+                  ))}
+                </div>
+              ) : null}
+
+              <div className="mt-4 space-y-2">
+                {documentReadinessRows.map((row: any) => (
+                  <div key={row.ticker} className="flex items-center justify-between rounded-lg border border-slate-800 bg-slate-950/45 px-3 py-2 text-xs">
+                    <span className="font-semibold text-slate-200">{row.ticker}</span>
+                    <span className={row.ready ? "text-emerald-300" : "text-amber-300"}>
+                      {row.ready
+                        ? row.evidenceModel === "fund_profile"
+                          ? L("Fund evidence ready", "Evidencia de fondo lista")
+                          : L("Documents ready", "Documentos listos")
+                        : `${L("Missing", "Falta")}: ${(row.missing ?? []).join(", ")}`}
+                    </span>
+                  </div>
+                ))}
+              </div>
+
+              {!focusInstrumentIsFundLike ? (
+              <div className="mt-4 grid grid-cols-2 gap-3">
+                <label className="rounded-lg border border-slate-800 bg-slate-950/50 p-3 text-xs text-slate-300 hover:border-sky-400">
+                  <UploadCloud className="mb-2 h-4 w-4 text-sky-300" />
+                  <span className="font-semibold">10-K PDFs</span>
+                  <input
+                    type="file"
+                    accept="application/pdf"
+                    multiple
+                    onChange={(event) => handleDocumentFiles("10-K", event.target.files)}
+                    className="sr-only"
+                  />
+                </label>
+                <label className="rounded-lg border border-slate-800 bg-slate-950/50 p-3 text-xs text-slate-300 hover:border-sky-400">
+                  <UploadCloud className="mb-2 h-4 w-4 text-sky-300" />
+                  <span className="font-semibold">10-Q PDFs</span>
+                  <input
+                    type="file"
+                    accept="application/pdf"
+                    multiple
+                    onChange={(event) => handleDocumentFiles("10-Q", event.target.files)}
+                    className="sr-only"
+                  />
+                </label>
+              </div>
+              ) : null}
+
+              <div className="mt-4 max-h-72 overflow-auto rounded-lg border border-slate-800 bg-slate-950/45">
+                {filingsLoading ? (
+                  <p className="p-3 text-xs text-slate-400">{L("Loading library...", "Cargando biblioteca...")}</p>
+                ) : filings.length === 0 ? (
+                  <p className="p-3 text-xs text-slate-400">
+                    {L("No documents added for this ticker yet.", "Aún no hay documentos para este ticker.")}
+                  </p>
+                ) : (
+                  <div className="divide-y divide-slate-800">
+                    {filings.map((filing) => (
+                      <div key={filing.id} className="grid grid-cols-[auto_1fr_auto] gap-3 p-3 text-xs">
+                        <span className="rounded-full border border-slate-700 px-2 py-1 font-semibold text-slate-300">
+                          {filing.form}
+                        </span>
+                        <div className="min-w-0">
+                          <p className="truncate font-semibold text-slate-200" title={filing.fileName}>
+                            {filing.fileName}
+                          </p>
+                          <p className="mt-1 text-slate-500">
+                            {filing.fiscalYear ?? "-"} / {filing.period || "-"} / {formatFileSize(filing.usageBytes || filing.bytes, localeTag)}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => void removeDocument(filing.id)}
+                          className="rounded-lg border border-slate-800 p-2 text-slate-400 hover:border-rose-400 hover:text-rose-200"
+                          aria-label={L("Remove document", "Quitar documento")}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {pendingDocuments.length ? (
+                <p className="mt-3 text-xs text-amber-300">
+                  {L(
+                    `${pendingDocuments.length} document(s) will be indexed when you run Neuro.`,
+                    `${pendingDocuments.length} documento(s) se indexarán cuando corras Neuro.`
+                  )}
+                </p>
+              ) : null}
             </div>
 
             <div className="rounded-xl border border-slate-800 bg-slate-900/75 p-5">
@@ -2522,129 +3131,6 @@ export default function NeuroAnalysisPage() {
                 </div>
               ) : null}
             </div>
-
-            <div className="rounded-xl border border-slate-800 bg-slate-900/75 p-5">
-              <div className="flex items-center gap-2">
-                <FileText className="h-4 w-4 text-emerald-300" />
-                <h2 className="text-base font-semibold">{L("Company Documents", "Documentos de compañía")}</h2>
-              </div>
-              <p className="mt-2 text-sm leading-6 text-slate-400">
-                {L(
-                  "Upload recent annual and quarterly PDFs so future thesis reviews can compare the latest business evidence against the original buy/hold reason.",
-                  "Sube PDFs anuales y trimestrales recientes para que futuras revisiones de tesis comparen la evidencia más nueva contra la razón original de compra o hold."
-                )}
-              </p>
-
-              <button
-                type="button"
-                onClick={() => void findCompanyDocuments()}
-                disabled={documentLookupLoading || !focusTicker.trim()}
-                className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-lg border border-slate-700 bg-slate-950/60 px-3 py-2 text-xs font-semibold text-slate-200 hover:border-sky-400 hover:text-sky-200 disabled:opacity-50"
-              >
-                {documentLookupLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
-                {documentLookupLoading ? L("Searching", "Buscando") : L("Find recent documents", "Buscar documentos recientes")}
-              </button>
-              {documentLookupError ? <p className="mt-2 text-xs text-rose-300">{documentLookupError}</p> : null}
-              {documentLookup.length > 0 ? (
-                <div className="mt-3 max-h-40 space-y-2 overflow-auto rounded-lg border border-slate-800 bg-slate-950/45 p-2">
-                  {documentLookup.slice(0, 6).map((doc: any) => (
-                    <a
-                      key={`${doc.accessionNumber}-${doc.form}`}
-                      href={doc.documentUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="block rounded-lg border border-slate-800 px-3 py-2 text-xs text-slate-300 hover:border-sky-400 hover:text-sky-200"
-                    >
-                      <span className="font-semibold">{doc.form}</span>
-                      <span className="ml-2 text-slate-500">{doc.periodEnd || doc.filingDate || "-"}</span>
-                    </a>
-                  ))}
-                </div>
-              ) : null}
-
-              <div className="mt-4 space-y-2">
-                {documentReadinessRows.map((row: any) => (
-                  <div key={row.ticker} className="flex items-center justify-between rounded-lg border border-slate-800 bg-slate-950/45 px-3 py-2 text-xs">
-                    <span className="font-semibold text-slate-200">{row.ticker}</span>
-                    <span className={row.ready ? "text-emerald-300" : "text-amber-300"}>
-                      {row.ready
-                        ? L("Documents ready", "Documentos listos")
-                        : `${L("Missing", "Falta")}: ${(row.missing ?? []).join(", ")}`}
-                    </span>
-                  </div>
-                ))}
-              </div>
-
-              <div className="mt-4 grid grid-cols-2 gap-3">
-                <label className="rounded-lg border border-slate-800 bg-slate-950/50 p-3 text-xs text-slate-300 hover:border-sky-400">
-                  <UploadCloud className="mb-2 h-4 w-4 text-sky-300" />
-                  <span className="font-semibold">10-K PDFs</span>
-                  <input
-                    type="file"
-                    accept="application/pdf"
-                    multiple
-                    onChange={(event) => handleDocumentFiles("10-K", event.target.files)}
-                    className="sr-only"
-                  />
-                </label>
-                <label className="rounded-lg border border-slate-800 bg-slate-950/50 p-3 text-xs text-slate-300 hover:border-sky-400">
-                  <UploadCloud className="mb-2 h-4 w-4 text-sky-300" />
-                  <span className="font-semibold">10-Q PDFs</span>
-                  <input
-                    type="file"
-                    accept="application/pdf"
-                    multiple
-                    onChange={(event) => handleDocumentFiles("10-Q", event.target.files)}
-                    className="sr-only"
-                  />
-                </label>
-              </div>
-
-              <div className="mt-4 max-h-72 overflow-auto rounded-lg border border-slate-800 bg-slate-950/45">
-                {filingsLoading ? (
-                  <p className="p-3 text-xs text-slate-400">{L("Loading library...", "Cargando biblioteca...")}</p>
-                ) : filings.length === 0 ? (
-                  <p className="p-3 text-xs text-slate-400">
-                    {L("No documents added for this ticker yet.", "Aún no hay documentos para este ticker.")}
-                  </p>
-                ) : (
-                  <div className="divide-y divide-slate-800">
-                    {filings.map((filing) => (
-                      <div key={filing.id} className="grid grid-cols-[auto_1fr_auto] gap-3 p-3 text-xs">
-                        <span className="rounded-full border border-slate-700 px-2 py-1 font-semibold text-slate-300">
-                          {filing.form}
-                        </span>
-                        <div className="min-w-0">
-                          <p className="truncate font-semibold text-slate-200" title={filing.fileName}>
-                            {filing.fileName}
-                          </p>
-                          <p className="mt-1 text-slate-500">
-                            {filing.fiscalYear ?? "-"} / {filing.period || "-"} / {formatFileSize(filing.usageBytes || filing.bytes, localeTag)}
-                          </p>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => void removeDocument(filing.id)}
-                          className="rounded-lg border border-slate-800 p-2 text-slate-400 hover:border-rose-400 hover:text-rose-200"
-                          aria-label={L("Remove document", "Quitar documento")}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {pendingDocuments.length ? (
-                <p className="mt-3 text-xs text-amber-300">
-                  {L(
-                    `${pendingDocuments.length} document(s) will be indexed when you run Neuro.`,
-                    `${pendingDocuments.length} documento(s) se indexarán cuando corras Neuro.`
-                  )}
-                </p>
-              ) : null}
-            </div>
           </aside>
         </section>
 
@@ -2656,11 +3142,11 @@ export default function NeuroAnalysisPage() {
             </div>
             <button
               type="button"
-              onClick={() => setFocusTicker((value) => value)}
-              className="inline-flex items-center gap-2 rounded-lg border border-slate-800 px-3 py-2 text-xs text-slate-300"
-              disabled
+              onClick={() => setMarketRefreshNonce((value) => value + 1)}
+              className="inline-flex items-center gap-2 rounded-lg border border-slate-800 px-3 py-2 text-xs text-slate-300 hover:border-sky-400 hover:text-sky-200 disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={marketLoading}
             >
-              <RefreshCw className="h-3.5 w-3.5" />
+              <RefreshCw className={`h-3.5 w-3.5 ${marketLoading ? "animate-spin" : ""}`} />
               {marketLoading ? L("Loading", "Cargando") : marketData?.source ?? L("Market data", "Data de mercado")}
             </button>
           </div>
@@ -2668,10 +3154,53 @@ export default function NeuroAnalysisPage() {
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
             <div className="rounded-xl border border-slate-800 bg-slate-900/75 p-5 xl:col-span-2">
               <h3 className="text-sm font-semibold text-slate-100">
-                {L("Revenue, net income, and free cash flow", "Revenue, net income y free cash flow")}
+                {focusInstrumentIsFundLike
+                  ? L("ETF / fund evidence snapshot", "Snapshot de evidencia ETF / fondo")
+                  : L("Revenue, net income, and free cash flow", "Revenue, net income y free cash flow")}
               </h3>
-              <div className="mt-4 h-72">
-                {annualFundamentals.length ? (
+              <div className="mt-4 h-60">
+                {focusInstrumentIsFundLike ? (
+                  <div className="grid h-full grid-cols-1 gap-3 md:grid-cols-2">
+                    <div className="rounded-lg border border-slate-800 bg-slate-950/50 p-4">
+                      <p className="text-xs font-semibold uppercase text-slate-500">{L("Fund checks", "Checks del fondo")}</p>
+                      <div className="mt-4 space-y-3 text-sm text-slate-300">
+                        <div className="flex justify-between gap-4">
+                          <span>{L("Expense ratio", "Expense ratio")}</span>
+                          <span className="font-semibold text-slate-100">{formatPercent(marketData?.fund?.annualReportExpenseRatio, localeTag)}</span>
+                        </div>
+                        <div className="flex justify-between gap-4">
+                          <span>{L("Yield", "Yield")}</span>
+                          <span className="font-semibold text-slate-100">{formatPercent(marketData?.fund?.yield ?? marketData?.market?.dividendYield, localeTag)}</span>
+                        </div>
+                        <div className="flex justify-between gap-4">
+                          <span>{L("Net assets", "Activos netos")}</span>
+                          <span className="font-semibold text-slate-100">{formatCompactCurrency(marketData?.fund?.netAssets, localeTag)}</span>
+                        </div>
+                        <div className="flex justify-between gap-4">
+                          <span>{L("Beta 3Y", "Beta 3Y")}</span>
+                          <span className="font-semibold text-slate-100">{formatCompactNumber(marketData?.fund?.beta3Year, localeTag)}</span>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="rounded-lg border border-slate-800 bg-slate-950/50 p-4">
+                      <p className="text-xs font-semibold uppercase text-slate-500">{L("Top holdings", "Top holdings")}</p>
+                      {marketData?.fund?.topHoldings?.length ? (
+                        <div className="mt-4 space-y-2">
+                          {marketData.fund.topHoldings.slice(0, 6).map((holding, index) => (
+                            <div key={`${holding.symbol ?? holding.holdingName ?? index}`} className="flex justify-between gap-3 text-xs text-slate-300">
+                              <span className="truncate">{holding.symbol || holding.holdingName || "-"}</span>
+                              <span className="font-semibold text-slate-100">{formatPercent(holding.holdingPercent, localeTag)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="mt-4 text-sm leading-6 text-slate-500">
+                          {L("Holdings breakdown was not available from the current market data response.", "El desglose de holdings no estuvo disponible en la respuesta actual de data de mercado.")}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                ) : annualFundamentals.length ? (
                   <ResponsiveContainer width="100%" height="100%">
                     <RechartsBarChart data={annualFundamentals}>
                       <CartesianGrid stroke="#1f2937" strokeDasharray="3 3" />
@@ -2686,7 +3215,7 @@ export default function NeuroAnalysisPage() {
                   </ResponsiveContainer>
                 ) : (
                   <div className="flex h-full items-center justify-center text-sm text-slate-500">
-                    {marketLoading ? L("Loading fundamentals...", "Cargando fundamentales...") : L("No annual fundamentals available.", "Sin fundamentales anuales disponibles.")}
+                    {marketLoading ? L("Loading fundamentals...", "Cargando fundamentales...") : L("No annual company fundamentals available.", "Sin fundamentales anuales de compañía disponibles.")}
                   </div>
                 )}
               </div>
@@ -2694,7 +3223,7 @@ export default function NeuroAnalysisPage() {
 
             <div className="rounded-xl border border-slate-800 bg-slate-900/75 p-5">
               <h3 className="text-sm font-semibold text-slate-100">{L("Margins by year", "Márgenes por año")}</h3>
-              <div className="mt-4 h-72">
+              <div className="mt-4 h-60">
                 {annualFundamentals.length ? (
                   <ResponsiveContainer width="100%" height="100%">
                     <RechartsLineChart data={annualFundamentals}>
@@ -2710,7 +3239,9 @@ export default function NeuroAnalysisPage() {
                   </ResponsiveContainer>
                 ) : (
                   <div className="flex h-full items-center justify-center text-sm text-slate-500">
-                    {L("No margin data.", "Sin data de márgenes.")}
+                    {focusInstrumentIsFundLike
+                      ? L("Margin data applies to operating companies, not ETF/fund profiles.", "La data de márgenes aplica a compañías operativas, no a profiles de ETF/fondo.")
+                      : L("No margin data.", "Sin data de márgenes.")}
                   </div>
                 )}
               </div>
@@ -2720,7 +3251,7 @@ export default function NeuroAnalysisPage() {
               <h3 className="text-sm font-semibold text-slate-100">
                 {L("Monthly price history", "Precio histórico mensual")}
               </h3>
-              <div className="mt-4 h-64">
+              <div className="mt-4 h-56">
                 {marketData?.priceHistory?.length ? (
                   <ResponsiveContainer width="100%" height="100%">
                     <RechartsLineChart data={marketData.priceHistory}>
@@ -2934,6 +3465,78 @@ export default function NeuroAnalysisPage() {
 
         <section className={activeWorkspaceTab === "research" ? "rounded-xl border border-violet-500/25 bg-slate-900/80 p-5" : "hidden"}>
           <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <div className="flex items-center gap-2">
+                <Sparkles className="h-4 w-4 text-violet-300" />
+                <h2 className="text-base font-semibold">{L("Living Thesis Monitor", "Monitor de tesis viva")}</h2>
+              </div>
+              <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">
+                {L(
+                  "Tracks open risks, user-provided thesis context, evidence gaps, and what should be checked in the next filing or fund update.",
+                  "Monitorea riesgos abiertos, contexto de tesis provisto por ti, brechas de evidencia y qué revisar en el próximo filing o update del fondo."
+                )}
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-2 text-xs lg:min-w-[420px]">
+              <Readout label={L("Thesis notes", "Notas tesis")} value={thesisNotes.length} />
+              <Readout label={L("Reports", "Reportes")} value={thesisMonitor.verifiedReports} />
+            </div>
+          </div>
+
+          <div className="mt-5 grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(340px,0.8fr)]">
+            <div className="rounded-lg border border-slate-800 bg-slate-950/45 p-4">
+              <p className="text-xs font-semibold uppercase text-slate-500">{L("Open watch items", "Puntos abiertos")}</p>
+              <div className="mt-4 grid grid-cols-1 gap-2 lg:grid-cols-2">
+                {thesisMonitor.watchItems.length ? (
+                  thesisMonitor.watchItems.map((item, index) => (
+                    <div
+                      key={`${item.title}-${index}`}
+                      className={`rounded-lg border p-3 text-xs ${
+                        item.tone === "high"
+                          ? "border-rose-400/30 bg-rose-400/10 text-rose-100"
+                          : "border-amber-400/30 bg-amber-400/10 text-amber-100"
+                      }`}
+                    >
+                      <p className="font-semibold capitalize">{item.title}</p>
+                      <p className="mt-1 line-clamp-3 leading-5 opacity-80">{item.body}</p>
+                    </div>
+                  ))
+                ) : (
+                  <div className="rounded-lg border border-emerald-400/25 bg-emerald-400/10 p-3 text-xs text-emerald-100">
+                    {L("No open risk flags yet. Run profile intelligence to generate monitored items.", "Aún no hay risk flags abiertas. Corre inteligencia del profile para generar puntos monitoreados.")}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-slate-800 bg-slate-950/45 p-4">
+              <p className="text-xs font-semibold uppercase text-slate-500">{L("Thesis signal mix", "Mezcla de señales de tesis")}</p>
+              <div className="mt-4 grid grid-cols-2 gap-2">
+                {["positive", "negative", "mixed", "uncertain"].map((key) => (
+                  <div key={key} className="rounded-lg border border-slate-800 bg-slate-950/60 p-3">
+                    <p className="text-[11px] font-semibold uppercase text-slate-500">{key}</p>
+                    <p className="mt-1 text-lg font-semibold text-slate-100">{thesisMonitor.impactCounts[key] ?? 0}</p>
+                  </div>
+                ))}
+              </div>
+              {thesisMonitor.lastNote ? (
+                <div className="mt-4 rounded-lg border border-slate-800 bg-slate-950/60 p-3">
+                  <p className="text-[11px] font-semibold uppercase text-slate-500">{L("Latest context", "Contexto más reciente")}</p>
+                  <p className="mt-2 line-clamp-4 text-xs leading-5 text-slate-300">
+                    {String(thesisMonitor.lastNote.payload?.note ?? "")}
+                  </p>
+                </div>
+              ) : (
+                <p className="mt-4 text-xs leading-5 text-slate-500">
+                  {L("Add news, observations, or questions below so the agent can maintain a living thesis trail.", "Añade noticias, observaciones o preguntas abajo para que el agente mantenga una tesis viva.")}
+                </p>
+              )}
+            </div>
+          </div>
+        </section>
+
+        <section className={activeWorkspaceTab === "research" ? "rounded-xl border border-violet-500/25 bg-slate-900/80 p-5" : "hidden"}>
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
             <div className="max-w-3xl">
               <div className="flex items-center gap-2">
                 <Sparkles className="h-4 w-4 text-violet-300" />
@@ -2941,8 +3544,8 @@ export default function NeuroAnalysisPage() {
               </div>
               <p className="mt-2 text-sm leading-6 text-slate-400">
                 {L(
-                  "Ask objective questions about the active case, portfolio thesis, dividend safety, valuation, or what future 10-Q/10-K evidence would change the decision. The agent must say when evidence is missing instead of guessing.",
-                  "Haz preguntas objetivas sobre el caso activo, tesis del portfolio, seguridad del dividendo, valuation o qué evidencia futura de 10-Q/10-K cambiaría la decisión. El agente debe decir cuando falta evidencia en vez de adivinar."
+                  "Ask objective questions about the active profile, thesis, dividend safety, valuation, ETF exposure, or what future evidence would change the decision. The agent must say when evidence is missing instead of guessing.",
+                  "Haz preguntas objetivas sobre el profile activo, tesis, seguridad del dividendo, valuation, exposición ETF o qué evidencia futura cambiaría la decisión. El agente debe decir cuando falta evidencia en vez de adivinar."
                 )}
               </p>
               {!activeCaseId ? (
@@ -3146,23 +3749,13 @@ export default function NeuroAnalysisPage() {
           ) : null}
         </section>
 
-        <section className={activeWorkspaceTab === "research" ? "grid grid-cols-1 gap-4 lg:grid-cols-4" : "hidden"}>
-          {PREMIUM_OUTPUTS.map((item) => (
-            <div key={item.title} className="rounded-xl border border-slate-800 bg-slate-900/75 p-5">
-              <BriefcaseBusiness className="h-4 w-4 text-emerald-300" />
-              <p className="mt-3 text-sm font-semibold text-slate-100">{isEs ? item.esTitle : item.title}</p>
-              <p className="mt-2 text-xs leading-5 text-slate-500">{isEs ? item.esBody : item.body}</p>
-            </div>
-          ))}
-        </section>
-
         <div className={activeWorkspaceTab === "research" ? "rounded-xl border border-slate-800 bg-slate-900/75 p-4 text-xs leading-5 text-slate-500" : "hidden"}>
           <div className="flex items-start gap-2">
             <ChevronRight className="mt-0.5 h-3.5 w-3.5 text-sky-300" />
             <p>
               {L(
-                "Output is analysis and simulation support for long-term investment decisions. Neuro does not execute trades, custody funds, or guarantee returns; the research portfolio is a private replica of positions you manage outside the platform.",
-                "La salida es apoyo de análisis y simulación para decisiones de inversión a largo plazo. Neuro no ejecuta trades, no custodia fondos ni garantiza retornos; el research portfolio es una réplica privada de posiciones que manejas fuera de la plataforma."
+                "Output is analysis and simulation support for long-term investment decisions. Neuro does not execute trades, custody funds, or guarantee returns; each profile is private research for decisions you manage outside the platform.",
+                "La salida es apoyo de análisis y simulación para decisiones de inversión a largo plazo. Neuro no ejecuta trades, no custodia fondos ni garantiza retornos; cada profile es research privado para decisiones que manejas fuera de la plataforma."
               )}
             </p>
           </div>

@@ -6,6 +6,7 @@ import Footer from "@/app/components/Footer";
 import PageNavigationControls from "@/app/components/PageNavigationControls";
 import ThemeInitScript from "@/app/components/ThemeInitScript";
 import type { Metadata } from "next";
+import { headers } from "next/headers";
 import { connection } from "next/server";
 import { getRequestLocale } from "@/lib/requestLocale";
 
@@ -20,12 +21,13 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
   // A fresh CSP nonce is created in proxy.ts for every request. Dynamic rendering
   // lets Next.js attach that same nonce to its bootstrap and framework scripts.
   await connection();
+  const nonce = (await headers()).get("x-nonce") ?? undefined;
   const lang = await getRequestLocale();
 
   return (
     <html lang={lang} suppressHydrationWarning>
       <body className="bg-slate-950 text-slate-50 overflow-x-hidden">
-        <ThemeInitScript />
+        <ThemeInitScript nonce={nonce} />
         <AuthProvider>
           <PageNavigationControls />
           {/* Wrapper para mantener el footer al fondo */}
