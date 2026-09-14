@@ -8,6 +8,7 @@ import { useAppSettings } from "@/lib/appSettings";
 import { useAuth } from "@/context/AuthContext";
 import { getAdminStatus } from "@/lib/adminStatus";
 import { resolveLocale, t } from "@/lib/i18n";
+import { supabaseBrowser } from "@/lib/supaBaseClient";
 
 export default function Footer() {
   const year = new Date().getFullYear();
@@ -17,6 +18,7 @@ export default function Footer() {
   const lang = resolveLocale(locale);
   const isLight = theme === "light";
   const [staffHref, setStaffHref] = useState("/signin?next=/admin");
+  const [neuroAnalysisAllowed, setNeuroAnalysisAllowed] = useState(false);
   const neuroAnalysisHref = user ? "/neuro-analysis" : "/signin?next=/neuro-analysis";
 
   const footerClass = isLight
@@ -61,6 +63,38 @@ export default function Footer() {
     };
   }, [authLoading, user?.id]);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    async function checkNeuroAnalysisAccess() {
+      if (authLoading || !user) {
+        if (!cancelled) setNeuroAnalysisAllowed(false);
+        return;
+      }
+
+      try {
+        const { data } = await supabaseBrowser.auth.getSession();
+        const token = data?.session?.access_token;
+        if (!token) {
+          if (!cancelled) setNeuroAnalysisAllowed(false);
+          return;
+        }
+        const res = await fetch("/api/smart-tools/access", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const json = await res.json().catch(() => ({}));
+        if (!cancelled) setNeuroAnalysisAllowed(Boolean(res.ok && json?.allowed));
+      } catch {
+        if (!cancelled) setNeuroAnalysisAllowed(false);
+      }
+    }
+
+    void checkNeuroAnalysisAccess();
+    return () => {
+      cancelled = true;
+    };
+  }, [authLoading, user?.id]);
+
   return (
     <footer className={footerClass}>
       <div className="mx-auto w-full max-w-[1440px] px-6 py-8 md:px-10 lg:px-12">
@@ -85,35 +119,43 @@ export default function Footer() {
           </div>
 
           <div>
-            <p className={sectionLabelClass}>{t("footer.groups.privateResearch", lang)}</p>
-            <Link
-              href={neuroAnalysisHref}
-              className={`group mt-3 flex items-center gap-3 border-l-2 px-3 py-2 transition-colors ${
-                isLight
-                  ? "border-emerald-600 bg-emerald-50/80 hover:bg-emerald-100"
-                  : "border-emerald-400 bg-emerald-400/5 hover:bg-emerald-400/10"
-              }`}
-            >
-              <BrainCircuit
-                aria-hidden="true"
-                size={20}
-                className={isLight ? "shrink-0 text-emerald-700" : "shrink-0 text-emerald-300"}
-              />
-              <span className="min-w-0 flex-1">
-                <span className={`block text-[13px] font-bold ${isLight ? "text-slate-900" : "text-slate-100"}`}>
-                  {t("footer.links.neuroAnalysis", lang)}
+            <p className={sectionLabelClass}>
+              {neuroAnalysisAllowed
+                ? t("footer.groups.privateResearch", lang)
+                : lang === "es"
+                  ? "Plataforma"
+                  : "Platform"}
+            </p>
+            {neuroAnalysisAllowed ? (
+              <Link
+                href={neuroAnalysisHref}
+                className={`group mt-3 flex items-center gap-3 border-l-2 px-3 py-2 transition-colors ${
+                  isLight
+                    ? "border-emerald-600 bg-emerald-50/80 hover:bg-emerald-100"
+                    : "border-emerald-400 bg-emerald-400/5 hover:bg-emerald-400/10"
+                }`}
+              >
+                <BrainCircuit
+                  aria-hidden="true"
+                  size={20}
+                  className={isLight ? "shrink-0 text-emerald-700" : "shrink-0 text-emerald-300"}
+                />
+                <span className="min-w-0 flex-1">
+                  <span className={`block text-[13px] font-bold ${isLight ? "text-slate-900" : "text-slate-100"}`}>
+                    {t("footer.links.neuroAnalysis", lang)}
+                  </span>
+                  <span className={isLight ? "block text-[11px] text-slate-500" : "block text-[11px] text-slate-400"}>
+                    {t("footer.neuroAnalysisHint", lang)}
+                  </span>
                 </span>
-                <span className={isLight ? "block text-[11px] text-slate-500" : "block text-[11px] text-slate-400"}>
-                  {t("footer.neuroAnalysisHint", lang)}
-                </span>
-              </span>
-              <ArrowUpRight
-                aria-hidden="true"
-                size={16}
-                className={isLight ? "shrink-0 text-emerald-700" : "shrink-0 text-emerald-300"}
-              />
-            </Link>
-            <div className="mt-4 grid grid-cols-2 gap-x-5 gap-y-2">
+                <ArrowUpRight
+                  aria-hidden="true"
+                  size={16}
+                  className={isLight ? "shrink-0 text-emerald-700" : "shrink-0 text-emerald-300"}
+                />
+              </Link>
+            ) : null}
+            <div className={`${neuroAnalysisAllowed ? "mt-4" : "mt-3"} grid grid-cols-2 gap-x-5 gap-y-2`}>
               <Link href="/signin" className={linkClass}>{t("footer.links.login", lang)}</Link>
               <Link href="/pricing" className={linkClass}>{t("footer.links.pricing", lang)}</Link>
               <Link href="/blog" className={linkClass}>{t("footer.links.blog", lang)}</Link>

@@ -7,7 +7,9 @@ import {
   BriefcaseBusiness,
   CheckCircle2,
   ChevronRight,
+  CloudDownload,
   Download,
+  ExternalLink,
   FileText,
   History,
   Loader2,
@@ -69,6 +71,19 @@ type FilingUpload = {
   expiresAfterDays?: number;
   status: "idle" | "uploading" | "ready" | "error";
   error?: string;
+};
+
+type CompanyDocumentLookup = {
+  ticker: string;
+  companyName: string;
+  cik: string;
+  form: "10-K" | "10-Q";
+  accessionNumber: string;
+  filingDate: string;
+  periodEnd: string | null;
+  primaryDocument: string;
+  documentUrl: string;
+  filingDetailUrl: string;
 };
 
 type MarketData = {
@@ -601,9 +616,12 @@ export default function NeuroAnalysisPage() {
   const [caseStatus, setCaseStatus] = useState("");
   const [agentError, setAgentError] = useState("");
   const [agentLoading, setAgentLoading] = useState(false);
-  const [documentLookup, setDocumentLookup] = useState<any[]>([]);
+  const [documentLookup, setDocumentLookup] = useState<CompanyDocumentLookup[]>([]);
   const [documentLookupLoading, setDocumentLookupLoading] = useState(false);
   const [documentLookupError, setDocumentLookupError] = useState("");
+  const [documentImporting, setDocumentImporting] = useState<Record<string, boolean>>({});
+  const [documentBatchImporting, setDocumentBatchImporting] = useState(false);
+  const [documentImportError, setDocumentImportError] = useState("");
   const [activeWorkspaceTab, setActiveWorkspaceTab] = useState<WorkspaceTab>("research");
   const [agentQuestion, setAgentQuestion] = useState("");
   const [agentQaLoading, setAgentQaLoading] = useState(false);
@@ -649,6 +667,12 @@ export default function NeuroAnalysisPage() {
       setResearchGoal(defaultResearchGoal(isEs));
     }
   }, [isEs, researchGoal]);
+
+  useEffect(() => {
+    setDocumentLookup([]);
+    setDocumentLookupError("");
+    setDocumentImportError("");
+  }, [focusTicker]);
 
   const authToken = async () => {
     const { data } = await supabaseBrowser.auth.getSession();
@@ -1420,6 +1444,108 @@ export default function NeuroAnalysisPage() {
       setDocumentLookupError(error?.message || "Could not find recent company documents.");
     } finally {
       setDocumentLookupLoading(false);
+    }
+  }
+
+  function companyDocumentKey(document: CompanyDocumentLookup) {
+    return `${document.form}-${document.accessionNumber}`;
+  }
+
+  function companyDocumentIsImported(document: CompanyDocumentLookup) {
+    const accession = document.accessionNumber.replace(/-/g, "");
+    return filings.some(
+      (filing) =>
+        Boolean(filing.vectorStoreId) &&
+        String(filing.ticker ?? focusTicker).toUpperCase() === document.ticker &&
+        (filing.fileName.includes(accession) ||
+          (filing.form === document.form &&
+            Boolean(document.periodEnd) &&
+            filing.periodEnd === document.periodEnd))
+    );
+  }
+
+  function latestCompanyDocuments() {
+    return (["10-K", "10-Q"] as const)
+      .map((form) => documentLookup.find((document) => document.form === form))
+      .filter((document): document is CompanyDocumentLookup => Boolean(document));
+  }
+
+  async function importCompanyDocument(document: CompanyDocumentLookup) {
+    const key = companyDocumentKey(document);
+    setDocumentImportError("");
+    if (document.ticker !== focusTicker) {
+      setDocumentImportError(
+        L(
+          "Search for documents again for the active company.",
+          "Busca nuevamente los documentos de la compañía activa."
+        )
+      );
+      return null;
+    }
+    setDocumentImporting((prev) => ({ ...prev, [key]: true }));
+    try {
+      const res = await authedFetch("/api/neuro-analysis/import-filing", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ticker: document.ticker,
+          form: document.form,
+          accessionNumber: document.accessionNumber,
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.error || "Company document import failed.");
+
+      const ready: FilingUpload = {
+        id: String(json.id ?? key),
+        ticker: String(json.ticker ?? focusTicker),
+        form: json.form === "10-Q" ? "10-Q" : "10-K",
+        fileName: String(json.fileName ?? document.primaryDocument),
+        fiscalYear: json.fiscalYear == null ? null : Number(json.fiscalYear),
+        period: json.period ?? null,
+        periodEnd: json.periodEnd ?? document.periodEnd ?? null,
+        fileId: String(json.fileId ?? ""),
+        vectorStoreId: String(json.vectorStoreId ?? ""),
+        bytes: Number(json.bytes ?? 0),
+        usageBytes: Number(json.usageBytes ?? 0),
+        expiresAt: json.expiresAt ?? null,
+        createdAt: json.createdAt ?? null,
+        expiresAfterDays: Number(json.expiresAfterDays ?? 0),
+        status: "ready",
+        error: "",
+      };
+      setFilings((prev) => {
+        const existingIndex = prev.findIndex((item) => item.id === ready.id);
+        if (existingIndex < 0) return [ready, ...prev];
+        return prev.map((item, index) => (index === existingIndex ? ready : item));
+      });
+      return ready;
+    } catch (error: any) {
+      setDocumentImportError(error?.message || "Company document import failed.");
+      return null;
+    } finally {
+      setDocumentImporting((prev) => {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+    }
+  }
+
+  async function importLatestCompanyDocuments() {
+    const latest = latestCompanyDocuments()
+      .filter((document) => !companyDocumentIsImported(document));
+    if (!latest.length) return;
+
+    setDocumentBatchImporting(true);
+    setDocumentImportError("");
+    try {
+      for (const document of latest) {
+        const imported = await importCompanyDocument(document);
+        if (!imported) break;
+      }
+    } finally {
+      setDocumentBatchImporting(false);
     }
   }
 
@@ -2949,8 +3075,8 @@ export default function NeuroAnalysisPage() {
                       "Los profiles de ETF/fondo usan estrategia, holdings, costos, yield, liquidez e historial de mercado."
                     )
                   : L(
-                      "Add recent annual and quarterly PDFs to strengthen future thesis reviews.",
-                      "Añade PDFs anuales y trimestrales recientes para fortalecer futuras revisiones de tesis."
+                      "Import official annual and quarterly filings here, or upload your own PDFs.",
+                      "Importa aquí los reportes anuales y trimestrales oficiales, o sube tus propios PDFs."
                     )}
               </p>
 
@@ -2967,21 +3093,79 @@ export default function NeuroAnalysisPage() {
               ) : null}
               {documentLookupError ? <p className="mt-2 text-xs text-rose-300">{documentLookupError}</p> : null}
               {documentLookup.length > 0 ? (
-                <div className="mt-3 max-h-40 space-y-2 overflow-auto rounded-lg border border-slate-800 bg-slate-950/45 p-2">
-                  {documentLookup.slice(0, 6).map((doc: any) => (
-                    <a
-                      key={`${doc.accessionNumber}-${doc.form}`}
-                      href={doc.documentUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="block rounded-lg border border-slate-800 px-3 py-2 text-xs text-slate-300 hover:border-sky-400 hover:text-sky-200"
+                <div className="mt-3 rounded-lg border border-slate-800 bg-slate-950/45 p-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2 px-1 pb-2">
+                    <p className="text-[11px] font-semibold uppercase text-slate-500">
+                      {L("Official documents found", "Documentos oficiales encontrados")}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => void importLatestCompanyDocuments()}
+                      disabled={
+                        documentBatchImporting ||
+                        latestCompanyDocuments().every((document) => companyDocumentIsImported(document))
+                      }
+                      className="inline-flex items-center gap-1.5 rounded-md border border-emerald-500/50 bg-emerald-500/10 px-2.5 py-1.5 text-[11px] font-semibold text-emerald-200 hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      <span className="font-semibold">{doc.form}</span>
-                      <span className="ml-2 text-slate-500">{doc.periodEnd || doc.filingDate || "-"}</span>
-                    </a>
-                  ))}
+                      {documentBatchImporting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CloudDownload className="h-3.5 w-3.5" />}
+                      {documentBatchImporting
+                        ? L("Importing...", "Importando...")
+                        : L("Import latest 10-K + 10-Q", "Importar últimos 10-K + 10-Q")}
+                    </button>
+                  </div>
+                  <div className="max-h-56 space-y-2 overflow-auto">
+                    {documentLookup.slice(0, 8).map((doc) => {
+                      const key = companyDocumentKey(doc);
+                      const importing = Boolean(documentImporting[key]);
+                      const imported = companyDocumentIsImported(doc);
+                      return (
+                        <div
+                          key={key}
+                          className="flex items-center justify-between gap-3 rounded-lg border border-slate-800 px-3 py-2 text-xs text-slate-300"
+                        >
+                          <div className="min-w-0">
+                            <span className="font-semibold text-slate-200">{doc.form}</span>
+                            <span className="ml-2 text-slate-500">{doc.periodEnd || doc.filingDate || "-"}</span>
+                            <p className="mt-1 truncate text-[10px] text-slate-600">{doc.filingDate}</p>
+                          </div>
+                          <div className="flex shrink-0 items-center gap-1.5">
+                            <a
+                              href={doc.documentUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              title={L("Open original document", "Abrir documento original")}
+                              aria-label={L("Open original document", "Abrir documento original")}
+                              className="rounded-md border border-slate-800 p-1.5 text-slate-400 hover:border-sky-400 hover:text-sky-200"
+                            >
+                              <ExternalLink className="h-3.5 w-3.5" />
+                            </a>
+                            <button
+                              type="button"
+                              onClick={() => void importCompanyDocument(doc)}
+                              disabled={importing || imported || documentBatchImporting}
+                              className={`inline-flex min-w-20 items-center justify-center gap-1.5 rounded-md border px-2.5 py-1.5 font-semibold disabled:cursor-not-allowed ${
+                                imported
+                                  ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
+                                  : "border-slate-700 text-slate-200 hover:border-sky-400 hover:text-sky-200 disabled:opacity-50"
+                              }`}
+                            >
+                              {importing ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              ) : imported ? (
+                                <CheckCircle2 className="h-3.5 w-3.5" />
+                              ) : (
+                                <CloudDownload className="h-3.5 w-3.5" />
+                              )}
+                              {importing ? L("Importing", "Importando") : imported ? L("Imported", "Importado") : L("Import", "Importar")}
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               ) : null}
+              {documentImportError ? <p className="mt-2 text-xs text-rose-300">{documentImportError}</p> : null}
 
               <div className="mt-4 space-y-2">
                 {documentReadinessRows.map((row: any) => (

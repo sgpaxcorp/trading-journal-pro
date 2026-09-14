@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
-import { useRoute } from "@react-navigation/native";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
+import { useNavigation, usePreventRemove, useRoute } from "@react-navigation/native";
 
 import { ScreenScaffold } from "../components/ScreenScaffold";
 import { InkField } from "../components/InkField";
@@ -419,11 +419,12 @@ function shiftDateSkippingSaturday(date: Date, delta: number) {
 
 async function resolveActiveAccountId(userId: string): Promise<string | null> {
   if (!supabaseMobile || !userId) return null;
-  const { data } = await supabaseMobile
+  const { data, error } = await supabaseMobile
     .from("user_preferences")
     .select("active_account_id")
     .eq("user_id", userId)
     .maybeSingle();
+  if (error) throw error;
   return (data as any)?.active_account_id ?? null;
 }
 
@@ -475,6 +476,7 @@ export function JournalDateScreen() {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const user = useSupabaseUser();
+  const navigation = useNavigation<any>();
   const route = useRoute<any>();
   const [date, setDate] = useState(() => new Date());
   const [premarket, setPremarket] = useState("");
@@ -516,6 +518,8 @@ export function JournalDateScreen() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
+  const [savedDraftSignature, setSavedDraftSignature] = useState<string | null>(null);
+  const [captureLoadedDraft, setCaptureLoadedDraft] = useState(true);
   const isoDate = toYmd(date);
   const { width, height: screenHeight } = useWindowDimensions();
   const pageWidth = Math.max(width - 24, 300);
@@ -528,6 +532,72 @@ export function JournalDateScreen() {
   const journalFieldHeight = Math.max(620, Math.min(920, Math.round(screenHeight * 0.78)));
   const reviewFieldHeight = Math.max(360, Math.min(520, Math.round(screenHeight * 0.46)));
   const [sectionIndex, setSectionIndex] = useState(0);
+  const promptOpenRef = useRef(false);
+  const saveActionRef = useRef<() => Promise<boolean>>(async () => false);
+
+  const draftSnapshot = useMemo(
+    () => ({
+      premarket,
+      live,
+      post,
+      premarketMode,
+      liveMode,
+      postMode,
+      premarketInk,
+      liveInk,
+      postInk,
+      afterDidWellMode,
+      afterImproveMode,
+      afterDidWellInk,
+      afterImproveInk,
+      mindset,
+      checklists,
+      afterReview,
+      instrument,
+      direction,
+      size,
+      entryPrice,
+      exitPrice,
+      emotion,
+      respectedPlan,
+      exitEvidenceTags,
+    }),
+    [
+      afterDidWellInk,
+      afterDidWellMode,
+      afterImproveInk,
+      afterImproveMode,
+      afterReview,
+      checklists,
+      direction,
+      emotion,
+      entryPrice,
+      exitEvidenceTags,
+      exitPrice,
+      instrument,
+      live,
+      liveInk,
+      liveMode,
+      mindset,
+      post,
+      postInk,
+      postMode,
+      premarket,
+      premarketInk,
+      premarketMode,
+      respectedPlan,
+      size,
+    ]
+  );
+  const draftSignature = useMemo(() => JSON.stringify(draftSnapshot), [draftSnapshot]);
+  const hasUnsavedChanges =
+    !loading && savedDraftSignature !== null && draftSignature !== savedDraftSignature;
+
+  useEffect(() => {
+    if (loading || !captureLoadedDraft) return;
+    setSavedDraftSignature(draftSignature);
+    setCaptureLoadedDraft(false);
+  }, [captureLoadedDraft, draftSignature, loading]);
 
   useEffect(() => {
     const dateParam = route?.params?.date;
@@ -666,37 +736,46 @@ export function JournalDateScreen() {
     let active = true;
 
     async function loadNotes(isRefresh = false) {
-      if (!isRefresh) setLoading(true);
+      if (!isRefresh) {
+        setLoading(true);
+        setSavedDraftSignature(null);
+        setCaptureLoadedDraft(true);
+      }
       setError(null);
       setStatus(null);
       try {
         if (!supabaseMobile || !user?.id) return;
         const accountId = await resolveActiveAccountId(user.id);
+        if (!accountId) {
+          throw new Error(t(language, "No active trading account was found.", "No se encontró una cuenta de trading activa."));
+        }
 
-        let entryQuery = supabaseMobile
+        const { data: entryData, error: entryError } = await supabaseMobile
           .from("journal_entries")
           .select("date, pnl, notes, emotion, tags, respected_plan, instrument, direction, size, entry_price, exit_price, account_id")
           .eq("user_id", user.id)
-          .eq("date", isoDate);
-        if (accountId) entryQuery = entryQuery.eq("account_id", accountId);
-        const { data: entryData } = await entryQuery.maybeSingle();
+          .eq("date", isoDate)
+          .eq("account_id", accountId)
+          .maybeSingle();
+        if (entryError) throw entryError;
         const entry = entryData as JournalEntryRow | null;
         const parsed = parseNotes(entry?.notes ?? "");
-        const { data: uiData } = await supabaseMobile
+        const { data: uiData, error: uiError } = await supabaseMobile
           .from("journal_ui_settings")
           .select("settings")
           .eq("user_id", user.id)
           .eq("page_key", "journal")
           .maybeSingle();
+        if (uiError) throw uiError;
 
-        let tradesQuery = supabaseMobile
+        const { data: tradeRows, error: tradesError } = await supabaseMobile
           .from("journal_trades")
           .select("id, leg, symbol, side, premium, price, quantity, time, kind, dte, strategy, account_id")
           .eq("user_id", user.id)
           .eq("journal_date", isoDate)
+          .eq("account_id", accountId)
           .order("time", { ascending: true });
-        if (accountId) tradesQuery = tradesQuery.eq("account_id", accountId);
-        const { data: tradeRows } = await tradesQuery;
+        if (tradesError) throw tradesError;
 
         if (!active) return;
         applyLoadedJournal(entry, tradeRows as JournalTradeRow[] | null | undefined, parsed, (uiData as any)?.settings);
@@ -713,39 +792,46 @@ export function JournalDateScreen() {
     return () => {
       active = false;
     };
-  }, [isoDate, user?.id]);
+  }, [isoDate, language, user?.id]);
 
-  async function handleRefresh() {
+  async function performRefresh() {
     setRefreshing(true);
     try {
       if (!supabaseMobile || !user?.id) return;
       const accountId = await resolveActiveAccountId(user.id);
-      let entryQuery = supabaseMobile
+      if (!accountId) {
+        throw new Error(t(language, "No active trading account was found.", "No se encontró una cuenta de trading activa."));
+      }
+      const { data: entryData, error: entryError } = await supabaseMobile
         .from("journal_entries")
         .select("date, pnl, notes, emotion, tags, respected_plan, instrument, direction, size, entry_price, exit_price, account_id")
         .eq("user_id", user.id)
-        .eq("date", isoDate);
-      if (accountId) entryQuery = entryQuery.eq("account_id", accountId);
-      const { data: entryData } = await entryQuery.maybeSingle();
+        .eq("date", isoDate)
+        .eq("account_id", accountId)
+        .maybeSingle();
+      if (entryError) throw entryError;
       const entry = entryData as JournalEntryRow | null;
       const parsed = parseNotes(entry?.notes ?? "");
-      const { data: uiData } = await supabaseMobile
+      const { data: uiData, error: uiError } = await supabaseMobile
         .from("journal_ui_settings")
         .select("settings")
         .eq("user_id", user.id)
         .eq("page_key", "journal")
         .maybeSingle();
+      if (uiError) throw uiError;
 
-      let tradesQuery = supabaseMobile
+      const { data: tradeRows, error: tradesError } = await supabaseMobile
         .from("journal_trades")
         .select("id, leg, symbol, side, premium, price, quantity, time, kind, dte, strategy, account_id")
         .eq("user_id", user.id)
         .eq("journal_date", isoDate)
+        .eq("account_id", accountId)
         .order("time", { ascending: true });
-      if (accountId) tradesQuery = tradesQuery.eq("account_id", accountId);
-      const { data: tradeRows } = await tradesQuery;
+      if (tradesError) throw tradesError;
 
       applyLoadedJournal(entry, tradeRows as JournalTradeRow[] | null | undefined, parsed, (uiData as any)?.settings);
+      setSavedDraftSignature(null);
+      setCaptureLoadedDraft(true);
       setStatus(null);
       setError(null);
     } catch (err: any) {
@@ -755,20 +841,26 @@ export function JournalDateScreen() {
     }
   }
 
-  async function handleSave() {
+  async function handleSave(): Promise<boolean> {
     setSaving(true);
     setStatus(null);
     setError(null);
     try {
-      if (!supabaseMobile || !user?.id) return;
+      if (!supabaseMobile || !user?.id) {
+        throw new Error(t(language, "Your session is not ready. Sign in again and retry.", "Tu sesión no está lista. Inicia sesión nuevamente e inténtalo otra vez."));
+      }
       const accountId = await resolveActiveAccountId(user.id);
-      let entryQuery = supabaseMobile
+      if (!accountId) {
+        throw new Error(t(language, "No active trading account was found.", "No se encontró una cuenta de trading activa."));
+      }
+      const { data: entryData, error: entryError } = await supabaseMobile
         .from("journal_entries")
         .select("notes, tags")
         .eq("user_id", user.id)
-        .eq("date", isoDate);
-      if (accountId) entryQuery = entryQuery.eq("account_id", accountId);
-      const { data: entryData } = await entryQuery.maybeSingle();
+        .eq("date", isoDate)
+        .eq("account_id", accountId)
+        .maybeSingle();
+      if (entryError) throw entryError;
       const existingNotes = parseNotes((entryData as any)?.notes ?? "");
       const latestPremarketInk = await premarketFieldRef.current?.getCurrentInk();
       const latestLiveInk = await liveFieldRef.current?.getCurrentInk();
@@ -836,7 +928,7 @@ export function JournalDateScreen() {
           .from("journal_entries")
           .insert({
             user_id: user.id,
-            account_id: accountId ?? null,
+            account_id: accountId,
             date: isoDate,
             notes: nextNotes,
             emotion: entryPatch.emotion,
@@ -852,22 +944,128 @@ export function JournalDateScreen() {
           });
         if (insErr) throw insErr;
       } else {
-        let updQuery = supabaseMobile
+        const { error: updErr } = await supabaseMobile
           .from("journal_entries")
           .update(entryPatch)
           .eq("user_id", user.id)
-          .eq("date", isoDate);
-        if (accountId) updQuery = updQuery.eq("account_id", accountId);
-        const { error: updErr } = await updQuery;
+          .eq("date", isoDate)
+          .eq("account_id", accountId);
         if (updErr) throw updErr;
       }
+      setSavedDraftSignature(
+        JSON.stringify({
+          ...draftSnapshot,
+          premarketInk: latestPremarketInk ?? premarketInk,
+          liveInk: latestLiveInk ?? liveInk,
+          postInk: latestPostInk ?? postInk,
+          afterDidWellInk: latestAfterDidWellInk ?? afterDidWellInk,
+          afterImproveInk: latestAfterImproveInk ?? afterImproveInk,
+        })
+      );
       setStatus(t(language, "Saved", "Guardado"));
+      return true;
     } catch (err: any) {
-      setError(err?.message ?? "Failed to save.");
+      const message = err?.message ?? t(language, "Failed to save.", "No se pudo guardar.");
+      setError(message);
+      Alert.alert(t(language, "Journal not saved", "Journal no guardado"), message);
+      return false;
     } finally {
       setSaving(false);
     }
   }
+  saveActionRef.current = handleSave;
+
+  const showUnsavedPrompt = (onContinue: () => void) => {
+    if (promptOpenRef.current) return;
+    promptOpenRef.current = true;
+
+    Alert.alert(
+      t(language, "Unsaved journal changes", "Cambios del journal sin guardar"),
+      t(
+        language,
+        "Save your work before continuing so you do not lose it.",
+        "Guarda tu trabajo antes de continuar para que no lo pierdas."
+      ),
+      [
+        {
+          text: t(language, "Cancel", "Cancelar"),
+          style: "cancel",
+          onPress: () => {
+            promptOpenRef.current = false;
+          },
+        },
+        {
+          text: t(language, "Discard", "Descartar"),
+          style: "destructive",
+          onPress: () => {
+            promptOpenRef.current = false;
+            setSavedDraftSignature(draftSignature);
+            setTimeout(onContinue, 0);
+          },
+        },
+        {
+          text: t(language, "Save", "Guardar"),
+          onPress: () => {
+            void (async () => {
+              const saved = await handleSave();
+              promptOpenRef.current = false;
+              if (saved) setTimeout(onContinue, 0);
+            })();
+          },
+        },
+      ]
+    );
+  };
+
+  usePreventRemove(hasUnsavedChanges, ({ data }) => {
+    showUnsavedPrompt(() => navigation.dispatch(data.action));
+  });
+
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      headerRight: () => (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={t(language, "Save journal", "Guardar journal")}
+          disabled={saving || loading}
+          onPress={() => void saveActionRef.current()}
+          style={({ pressed }) => [
+            styles.headerSaveButton,
+            hasUnsavedChanges && styles.headerSaveButtonPending,
+            (pressed || saving || loading) && styles.headerSaveButtonPressed,
+          ]}
+        >
+          <Text style={styles.headerSaveButtonText}>
+            {saving ? t(language, "Saving...", "Guardando...") : t(language, "Save", "Guardar")}
+          </Text>
+        </Pressable>
+      ),
+    });
+  }, [hasUnsavedChanges, language, loading, navigation, saving, styles]);
+
+  const commitDateChange = (nextDate: Date) => {
+    setLoading(true);
+    setSavedDraftSignature(null);
+    setCaptureLoadedDraft(true);
+    setDate(nextDate);
+  };
+
+  const requestDateShift = (delta: number) => {
+    const nextDate = shiftDateSkippingSaturday(date, delta);
+    if (hasUnsavedChanges) {
+      showUnsavedPrompt(() => commitDateChange(nextDate));
+      return;
+    }
+    commitDateChange(nextDate);
+  };
+
+  const requestRefresh = () => {
+    if (hasUnsavedChanges) {
+      showUnsavedPrompt(() => void performRefresh());
+      return;
+    }
+    void performRefresh();
+  };
 
   const overviewSection = (
     <>
@@ -1362,23 +1560,43 @@ export function JournalDateScreen() {
         "Registra ejecución, checklists, notas e ink dentro de un solo workspace móvil."
       )}
       refreshing={refreshing}
-      onRefresh={handleRefresh}
+      onRefresh={requestRefresh}
       showBrand={false}
       compactHeader
       contentPadding={12}
     >
       <View style={styles.dateRow}>
-        <Pressable style={styles.dateButton} onPress={() => setDate((d) => shiftDateSkippingSaturday(d, -1))}>
+        <Pressable style={styles.dateButton} onPress={() => requestDateShift(-1)}>
           <Text style={styles.dateButtonText}>←</Text>
         </Pressable>
         <View style={styles.dateCard}>
           <Text style={styles.dateLabel}>{formatDateLabel(date, language)}</Text>
           <Text style={styles.dateSub}>{isoDate}</Text>
         </View>
-        <Pressable style={styles.dateButton} onPress={() => setDate((d) => shiftDateSkippingSaturday(d, 1))}>
+        <Pressable style={styles.dateButton} onPress={() => requestDateShift(1)}>
           <Text style={styles.dateButtonText}>→</Text>
         </Pressable>
       </View>
+
+      {!loading ? (
+        <View style={[styles.saveStatusBar, hasUnsavedChanges && styles.saveStatusBarPending]}>
+          <View style={[styles.saveStatusDot, hasUnsavedChanges && styles.saveStatusDotPending]} />
+          <Text style={[styles.saveStatusText, hasUnsavedChanges && styles.saveStatusTextPending]}>
+            {hasUnsavedChanges
+              ? t(language, "Unsaved changes. Tap Save before leaving.", "Cambios sin guardar. Toca Guardar antes de salir.")
+              : t(language, "Journal saved", "Journal guardado")}
+          </Text>
+          <Pressable
+            disabled={saving}
+            onPress={() => void handleSave()}
+            style={({ pressed }) => [styles.inlineSaveButton, (pressed || saving) && styles.saveButtonDisabled]}
+          >
+            <Text style={styles.inlineSaveButtonText}>
+              {saving ? t(language, "Saving...", "Guardando...") : t(language, "Save", "Guardar")}
+            </Text>
+          </Pressable>
+        </View>
+      ) : null}
 
       {loading ? (
         <View style={styles.loadingRow}>
@@ -1424,7 +1642,11 @@ export function JournalDateScreen() {
               </View>
             ))}
           </ScrollView>
-          <Pressable style={[styles.saveButton, saving && styles.saveButtonDisabled]} onPress={handleSave}>
+          <Pressable
+            disabled={saving}
+            style={[styles.saveButton, saving && styles.saveButtonDisabled]}
+            onPress={() => void handleSave()}
+          >
             <Text style={styles.saveButtonText}>
               {saving ? t(language, "Saving…", "Guardando…") : t(language, "Save execution record", "Guardar registro de ejecución")}
             </Text>
@@ -1476,6 +1698,76 @@ const createStyles = (colors: ThemeColors) =>
     dateSub: {
       color: colors.textMuted,
       fontSize: 12,
+    },
+    headerSaveButton: {
+      minWidth: 70,
+      minHeight: 34,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+      alignItems: "center",
+      justifyContent: "center",
+      paddingHorizontal: 12,
+    },
+    headerSaveButtonPending: {
+      borderColor: colors.primary,
+      backgroundColor: colors.successSoft,
+    },
+    headerSaveButtonPressed: {
+      opacity: 0.65,
+    },
+    headerSaveButtonText: {
+      color: colors.primary,
+      fontSize: 12,
+      fontWeight: "800",
+    },
+    saveStatusBar: {
+      minHeight: 46,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 9,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.card,
+      paddingHorizontal: 12,
+      paddingVertical: 7,
+    },
+    saveStatusBarPending: {
+      borderColor: colors.warning,
+      backgroundColor: colors.warningSoft,
+    },
+    saveStatusDot: {
+      width: 8,
+      height: 8,
+      borderRadius: 4,
+      backgroundColor: colors.success,
+    },
+    saveStatusDotPending: {
+      backgroundColor: colors.warning,
+    },
+    saveStatusText: {
+      flex: 1,
+      color: colors.textMuted,
+      fontSize: 11,
+      fontWeight: "600",
+    },
+    saveStatusTextPending: {
+      color: colors.textPrimary,
+    },
+    inlineSaveButton: {
+      minHeight: 32,
+      borderRadius: 9,
+      backgroundColor: colors.primary,
+      alignItems: "center",
+      justifyContent: "center",
+      paddingHorizontal: 13,
+    },
+    inlineSaveButtonText: {
+      color: colors.onPrimary,
+      fontSize: 11,
+      fontWeight: "800",
     },
     loadingRow: {
       flexDirection: "row",

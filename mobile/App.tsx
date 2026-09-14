@@ -12,7 +12,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { enableFreeze, enableScreens } from "react-native-screens";
 import type { Session } from "@supabase/supabase-js";
-import { ActivityIndicator, InteractionManager, Linking, Platform, Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
+import { ActivityIndicator, InteractionManager, Linking, Pressable, StyleSheet, Text, View } from "react-native";
 import * as Notifications from "expo-notifications";
 
 import { DashboardScreen } from "./src/screens/DashboardScreen";
@@ -97,9 +97,7 @@ function MainTabs() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { colors } = useTheme();
   const { language } = useLanguage();
-  const { width } = useWindowDimensions();
   const planAccess = usePlanAccess();
-  const useTabletNavigation = Platform.OS === "ios" ? Platform.isPad : width >= 768;
   const tabTitles = useMemo(
     () => ({
       Dashboard: t(language, "Business Center", "Centro Empresarial"),
@@ -181,10 +179,9 @@ function MainTabs() {
             </Pressable>
           ),
           tabBarStyle: { backgroundColor: colors.surface, borderTopColor: colors.border },
-          tabBarPosition: useTabletNavigation ? "left" : "bottom",
-          tabBarVariant: useTabletNavigation ? "material" : "uikit",
-          tabBarLabelPosition: useTabletNavigation ? "beside-icon" : "below-icon",
-          tabBarItemStyle: useTabletNavigation ? { minHeight: 58 } : undefined,
+          tabBarPosition: "bottom",
+          tabBarVariant: "uikit",
+          tabBarLabelPosition: "below-icon",
           tabBarActiveTintColor: colors.primary,
           tabBarInactiveTintColor: colors.textMuted,
           tabBarLabelStyle: { fontSize: 11, fontWeight: "600" },
