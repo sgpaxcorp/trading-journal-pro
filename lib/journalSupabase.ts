@@ -1,6 +1,7 @@
 // lib/journalSupabase.ts
 import { supabaseBrowser } from "@/lib/supaBaseClient";
 import type { JournalEntry } from "@/lib/journalTypes";
+import type { StoredTradeRow, TradesPayload } from "@/lib/journalNotes";
 
 const TABLE_NAME = "journal_entries" as const;
 const LOG_PREFIX = "[journalSupabase]";
@@ -79,6 +80,46 @@ function normalizeEntry(entry: JournalEntry): JournalEntry {
     emotion: entry.emotion ?? "",
     respectedPlan:
       typeof entry.respectedPlan === "boolean" ? entry.respectedPlan : true,
+  };
+}
+
+function journalEntryToRow(userId: string, entry: JournalEntry, accountId?: string | null) {
+  const normalized = normalizeEntry(entry);
+  return {
+    user_id: userId,
+    account_id: accountId ?? null,
+    date: normalized.date,
+    pnl: normalized.pnl,
+    instrument: normalized.instrument ?? null,
+    direction: normalized.direction ?? null,
+    entry_price: normalized.entryPrice ?? null,
+    exit_price: normalized.exitPrice ?? null,
+    size: normalized.size ?? null,
+    screenshots: normalized.screenshots ?? [],
+    notes: normalized.notes ?? "",
+    emotion: normalized.emotion ?? "",
+    tags: normalized.tags ?? [],
+    respected_plan: normalized.respectedPlan ?? true,
+    updated_at: new Date().toISOString(),
+  };
+}
+
+function journalTradeToRpcRow(leg: "entry" | "exit", trade: StoredTradeRow) {
+  const value = trade as StoredTradeRow & Record<string, unknown>;
+  return {
+    leg,
+    symbol: String(value.symbol ?? "").trim(),
+    kind: value.kind ?? null,
+    side: value.side ?? null,
+    premium: value.premiumSide ?? value.premium ?? null,
+    strategy: value.optionStrategy ?? value.strategy ?? null,
+    price: value.price ?? null,
+    quantity: value.quantity ?? null,
+    time: value.time ?? null,
+    dte: value.dte ?? null,
+    emotions: value.emotions ?? value.emotion ?? null,
+    strategy_checklist:
+      value.strategyChecklist ?? value.strategy_checklist ?? value.checklist ?? null,
   };
 }
 
@@ -226,29 +267,7 @@ export async function saveJournalEntry(userId: string, entry: JournalEntry, acco
   if (!userId) throw new Error("Missing userId in saveJournalEntry");
   if (!entry?.date) throw new Error("Missing entry.date in saveJournalEntry");
 
-  const normalized = normalizeEntry(entry);
-
-  const row = {
-    user_id: userId,
-    account_id: accountId ?? null,
-    date: normalized.date,
-    pnl: normalized.pnl,
-
-    instrument: normalized.instrument ?? null,
-    direction: normalized.direction ?? null,
-
-    entry_price: normalized.entryPrice ?? null,
-    exit_price: normalized.exitPrice ?? null,
-    size: normalized.size ?? null,
-
-    screenshots: normalized.screenshots ?? [],
-    notes: normalized.notes ?? "",
-    emotion: normalized.emotion ?? "",
-    tags: normalized.tags ?? [],
-    respected_plan: normalized.respectedPlan ?? true,
-
-    updated_at: new Date().toISOString(),
-  };
+  const row = journalEntryToRow(userId, entry, accountId);
 
   const { error } = await supabaseBrowser.from(TABLE_NAME).upsert(row, {
     onConflict: "user_id,date,account_id",
@@ -256,6 +275,34 @@ export async function saveJournalEntry(userId: string, entry: JournalEntry, acco
 
   if (error) {
     console.error(`${LOG_PREFIX} saveJournalEntry error:`, error);
+    throw error;
+  }
+}
+
+export async function saveJournalDay(
+  userId: string,
+  entry: JournalEntry,
+  trades: TradesPayload,
+  accountId?: string | null
+): Promise<void> {
+  if (!userId) throw new Error("Missing userId in saveJournalDay");
+  if (!entry?.date) throw new Error("Missing entry.date in saveJournalDay");
+
+  const tradeRows = [
+    ...(trades.entries ?? []).map((trade) => journalTradeToRpcRow("entry", trade)),
+    ...(trades.exits ?? []).map((trade) => journalTradeToRpcRow("exit", trade)),
+  ].filter((trade) => trade.symbol);
+
+  const { error } = await supabaseBrowser.rpc("ntj_save_journal_day", {
+    p_user_id: userId,
+    p_account_id: accountId ?? null,
+    p_date: entry.date.slice(0, 10),
+    p_entry: journalEntryToRow(userId, entry, accountId),
+    p_trades: tradeRows,
+  });
+
+  if (error) {
+    console.error(`${LOG_PREFIX} saveJournalDay error:`, error);
     throw error;
   }
 }

@@ -544,20 +544,7 @@ export async function POST(req: NextRequest) {
     totalFees = Number(totalFees.toFixed(2));
     const pnlNet = Number((pnlGross - totalCommissions - totalFees).toFixed(2));
 
-    /* ---------- persist journal_trades (so UI shows entries/exits immediately) ---------- */
-    // 1) delete day rows
-    let delQuery = supabaseAdmin
-      .from("journal_trades")
-      .delete()
-      .eq("user_id", userId)
-      .eq("journal_date", date);
-    delQuery = accountId ? delQuery.eq("account_id", accountId) : delQuery.is("account_id", null);
-
-    const { error: delJT } = await delQuery;
-
-    if (delJT) return NextResponse.json({ error: delJT.message }, { status: 500 });
-
-    // 2) insert new rows
+    /* ---------- prepare journal_trades ---------- */
     const jtRows = [
       ...entries.map((r) => ({
         user_id: userId,
@@ -595,11 +582,6 @@ export async function POST(req: NextRequest) {
       })),
     ].filter((x) => x.symbol);
 
-    if (jtRows.length > 0) {
-      const { error: insJT } = await supabaseAdmin.from("journal_trades").insert(jtRows);
-      if (insJT) return NextResponse.json({ error: insJT.message }, { status: 500 });
-    }
-
     /* ---------- write notes (keep the same shape the UI uses) ---------- */
     const entriesWithStrategy = restoreStrategyAssignments(
       entries,
@@ -632,13 +614,14 @@ export async function POST(req: NextRequest) {
       synced_at: new Date().toISOString(),
     });
 
-    /* ---------- upsert journal_entries ---------- */
-    // ✅ IMPORTANT: store NET PnL in journal_entries.pnl so analytics & summaries match the broker.
-    // Gross is still preserved in notes.pnl.gross for display if you want it.
-    const { error: journalEntryError } = await supabaseAdmin
-      .from("journal_entries")
-      .upsert(
-        {
+    /* ---------- persist the summary and fills atomically ---------- */
+    // Store NET PnL in journal_entries.pnl so analytics & summaries match the broker.
+    // The database function replaces the journal summary and fill rows in one transaction.
+    const { error: journalEntryError } = await supabaseAdmin.rpc("ntj_save_journal_day", {
+      p_user_id: userId,
+      p_account_id: accountId ?? null,
+      p_date: date,
+      p_entry: {
           user_id: userId,
           account_id: accountId ?? null,
           date,
@@ -651,8 +634,8 @@ export async function POST(req: NextRequest) {
           notes,
           respected_plan: true,
         },
-        { onConflict: "user_id,date,account_id" }
-      );
+      p_trades: jtRows,
+    });
     if (journalEntryError) {
       return NextResponse.json({ error: journalEntryError.message }, { status: 500 });
     }

@@ -11,9 +11,9 @@ import JournalInkField from "@/app/components/JournalInkField";
 import NotebookCaptureButton from "@/app/components/NotebookCaptureButton";
 
 import type { JournalEntry } from "@/lib/journalTypes";
-import { getAllJournalEntries, getJournalEntryByDate, saveJournalEntry } from "@/lib/journalSupabase";
+import { getAllJournalEntries, getJournalEntryByDate, saveJournalDay } from "@/lib/journalSupabase";
 
-import { getJournalTradesForDay, saveJournalTradesForDay } from "@/lib/journalTradesSupabase";
+import { getJournalTradesForDay } from "@/lib/journalTradesSupabase";
 
 import type { StoredTradeRow } from "@/lib/journalNotes";
 import { type InstrumentType } from "@/lib/journalNotes";
@@ -54,6 +54,10 @@ import {
   type StrategySnapshot,
 } from "@/lib/strategyReview";
 import { normalizeJournalSyncDates } from "@/lib/journalSync";
+import {
+  getJournalPersistenceErrorMessage,
+  getJournalWizardPrimaryAction,
+} from "@/lib/journalWorkflow";
 import {
   DEFAULT_NEURO_LAYER,
   NEURO_AFTER_EXIT_REASON_OPTIONS,
@@ -1774,7 +1778,17 @@ export default function DailyJournalPage() {
 
   const handleAddEntryTrade = () => {
     const symbol = newEntryTrade.symbol.trim().toUpperCase();
-    if (!symbol || !newEntryTrade.price.trim()) return;
+    const price = Number(newEntryTrade.price);
+    const quantity = Number(newEntryTrade.quantity);
+    if (!symbol || !Number.isFinite(price) || price <= 0 || !Number.isFinite(quantity) || quantity <= 0) {
+      setMsg(
+        L(
+          "Complete the symbol, price, and quantity before adding the entry.",
+          "Completa el símbolo, el precio y la cantidad antes de agregar la entrada."
+        )
+      );
+      return;
+    }
 
     // User manually changed trades → switch PnL to auto mode (computed from Entries/Exits)
     setPnlMode("auto");
@@ -1912,7 +1926,17 @@ export default function DailyJournalPage() {
 
   const handleAddExitTrade = () => {
     const symbol = newExitTrade.symbol.trim().toUpperCase();
-    if (!symbol || !newExitTrade.price.trim()) return;
+    const price = Number(newExitTrade.price);
+    const quantity = Number(newExitTrade.quantity);
+    if (!symbol || !Number.isFinite(price) || price <= 0 || !Number.isFinite(quantity) || quantity <= 0) {
+      setMsg(
+        L(
+          "Select a position and complete a valid exit price and quantity.",
+          "Selecciona una posición y completa un precio de salida y una cantidad válidos."
+        )
+      );
+      return;
+    }
 
     // User manually changed trades → switch PnL to auto mode (computed from Entries/Exits)
     setPnlMode("auto");
@@ -2239,9 +2263,32 @@ export default function DailyJournalPage() {
   ========================================================= */
 
   const handleSave = async (opts?: { silent?: boolean }): Promise<boolean> => {
+    if (authLoading || accountsLoading) {
+      if (!opts?.silent) {
+        setMsg(L("Your account is still loading. Please wait a moment.", "Tu cuenta todavía está cargando. Espera un momento."));
+      }
+      return false;
+    }
     if (!userId) {
       if (!opts?.silent) {
         setMsg(L("Cannot save: no user.", "No se puede guardar: sin usuario."));
+      }
+      return false;
+    }
+    if (!dateParam) {
+      if (!opts?.silent) {
+        setMsg(L("Cannot save: the journal date is missing.", "No se puede guardar: falta la fecha del journal."));
+      }
+      return false;
+    }
+    if (!activeAccountId) {
+      if (!opts?.silent) {
+        setMsg(
+          L(
+            "Cannot save: select an active trading account first.",
+            "No se puede guardar: primero selecciona una cuenta de trading activa."
+          )
+        );
       }
       return false;
     }
@@ -2339,12 +2386,10 @@ export default function DailyJournalPage() {
     };
 
     try {
-      await saveJournalEntry(userId, entryToSave as any, activeAccountId);
-
       const storedEntries = entryTrades.map(entryRowToStored);
       const storedExits = exitTrades.map(exitRowToStored);
 
-      await saveJournalTradesForDay(userId, dateParam, {
+      await saveJournalDay(userId, entryToSave as any, {
         entries: storedEntries,
         exits: storedExits,
       } as any, activeAccountId);
@@ -2375,7 +2420,7 @@ export default function DailyJournalPage() {
       console.error(err);
       setAutoSaveState("error");
       if (!opts?.silent) {
-        setMsg(err?.message ?? L("Save failed", "Error al guardar"));
+        setMsg(getJournalPersistenceErrorMessage(err, isEs ? "es" : "en"));
       }
       return false;
     } finally {
@@ -2491,7 +2536,11 @@ export default function DailyJournalPage() {
       const { response: res, payload: json } = await requestSync(dateParam);
 
       if (!res.ok) {
-        setMsg(json?.error ? `${L("Sync error:", "Error de sync:")} ${json.error}` : L("Sync error.", "Error de sync."));
+        setMsg(
+          json?.error
+            ? getJournalPersistenceErrorMessage(json.error, isEs ? "es" : "en")
+            : L("The journal could not be synchronized.", "No se pudo sincronizar el journal.")
+        );
         return;
       }
 
@@ -2844,7 +2893,8 @@ export default function DailyJournalPage() {
           <button
             type="button"
             onClick={() => addNeuroOption(groupKey)}
-            className="rounded-xl bg-emerald-500 px-3 py-2 text-sm font-semibold text-slate-950 hover:bg-emerald-400"
+            disabled={!newNeuroOption[groupKey].trim()}
+            className="rounded-xl bg-emerald-500 px-3 py-2 text-sm font-semibold text-slate-950 hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {L("Add", "Añadir")}
           </button>
@@ -2904,7 +2954,11 @@ export default function DailyJournalPage() {
             {editProcess ? (
               <button
                 type="button"
-                onClick={() => removeChecklistItem(section, item)}
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  removeChecklistItem(section, item);
+                }}
                 className="ml-1 text-slate-500 hover:text-rose-400"
                 title={L("Remove", "Eliminar")}
               >
@@ -2929,7 +2983,8 @@ export default function DailyJournalPage() {
           <button
             type="button"
             onClick={() => addChecklistItem(section)}
-            className="rounded-xl bg-emerald-500 px-3 py-2 text-sm font-semibold text-slate-950 hover:bg-emerald-400"
+            disabled={!newChecklistItem[section].trim()}
+            className="rounded-xl bg-emerald-500 px-3 py-2 text-sm font-semibold text-slate-950 hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {L("Add", "Añadir")}
           </button>
@@ -3312,7 +3367,14 @@ export default function DailyJournalPage() {
           <button
             type="button"
             onClick={handleAddEntryTrade}
-            className="mt-3 px-3 py-1.5 rounded-lg bg-emerald-400 text-slate-950 text-xs font-semibold hover:bg-emerald-300 transition"
+            disabled={
+              !newEntryTrade.symbol.trim() ||
+              !Number.isFinite(Number(newEntryTrade.price)) ||
+              Number(newEntryTrade.price) <= 0 ||
+              !Number.isFinite(Number(newEntryTrade.quantity)) ||
+              Number(newEntryTrade.quantity) <= 0
+            }
+            className="mt-3 px-3 py-1.5 rounded-lg bg-emerald-400 text-slate-950 text-xs font-semibold hover:bg-emerald-300 transition disabled:cursor-not-allowed disabled:opacity-50"
           >
             {L("Add entry", "Agregar entrada")}
           </button>
@@ -3511,7 +3573,18 @@ export default function DailyJournalPage() {
             </div>
           </div>
 
-          <button type="button" onClick={handleAddExitTrade} className="mt-3 px-3 py-1.5 rounded-lg bg-emerald-400 text-slate-950 text-xs font-semibold hover:bg-emerald-300 transition">
+          <button
+            type="button"
+            onClick={handleAddExitTrade}
+            disabled={
+              !newExitTrade.symbol.trim() ||
+              !Number.isFinite(Number(newExitTrade.price)) ||
+              Number(newExitTrade.price) <= 0 ||
+              !Number.isFinite(Number(newExitTrade.quantity)) ||
+              Number(newExitTrade.quantity) <= 0
+            }
+            className="mt-3 px-3 py-1.5 rounded-lg bg-emerald-400 text-slate-950 text-xs font-semibold hover:bg-emerald-300 transition disabled:cursor-not-allowed disabled:opacity-50"
+          >
             {L("Add exit", "Agregar salida")}
           </button>
 
@@ -4111,7 +4184,8 @@ export default function DailyJournalPage() {
               <button
                 type="button"
                 onClick={addNeuroCustomTag}
-                className="rounded-xl bg-emerald-500 px-3 py-2 text-sm font-semibold text-slate-950 hover:bg-emerald-400"
+                disabled={!newNeuroCustomTag.trim()}
+                className="rounded-xl bg-emerald-500 px-3 py-2 text-sm font-semibold text-slate-950 hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {L("Add", "Añadir")}
               </button>
@@ -4161,7 +4235,12 @@ export default function DailyJournalPage() {
               placeholder={L("Template name", "Nombre de la plantilla")}
               className="w-full px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-xs text-slate-100 focus:outline-none focus:border-emerald-400"
             />
-            <button type="button" onClick={handleSaveTemplate} className="px-4 py-1.5 rounded-lg bg-emerald-400 text-slate-950 text-xs font-semibold hover:bg-emerald-300 transition">
+            <button
+              type="button"
+              onClick={handleSaveTemplate}
+              disabled={!newTemplateName.trim()}
+              className="px-4 py-1.5 rounded-lg bg-emerald-400 text-slate-950 text-xs font-semibold hover:bg-emerald-300 transition disabled:cursor-not-allowed disabled:opacity-50"
+            >
               {L("Save current as template", "Guardar actual como plantilla")}
             </button>
           </div>
@@ -4224,6 +4303,14 @@ export default function DailyJournalPage() {
 
   const goPrevStep = () => setCurrentStep((s) => Math.max(0, s - 1));
   const goNextStep = () => setCurrentStep((s) => Math.min(stepCount - 1, s + 1));
+  const primaryWizardAction = getJournalWizardPrimaryAction(currentStep, stepCount);
+  const handlePrimaryWizardAction = () => {
+    if (primaryWizardAction === "finish") {
+      void handleSaveAndBack();
+      return;
+    }
+    goNextStep();
+  };
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -4409,7 +4496,7 @@ export default function DailyJournalPage() {
               <button
                 type="button"
                 onClick={handleSyncFromImport}
-                disabled={syncing || authLoading || accountsLoading || !userId || !dateParam || !activeAccountId}
+                disabled={syncing}
                 className="px-3 py-1.5 rounded-lg border border-slate-700 text-slate-200 text-[11px] hover:border-amber-400 hover:text-amber-300 transition disabled:opacity-50"
               >
                 {syncing ? L("Syncing…", "Sincronizando…") : L("Sync", "Sincronizar")}
@@ -4420,7 +4507,7 @@ export default function DailyJournalPage() {
                 disabled={saving}
                 className="px-3 py-1.5 rounded-lg border border-slate-700 text-slate-200 text-[11px] hover:border-emerald-400 hover:text-emerald-300 transition disabled:opacity-50"
               >
-                {L("Save", "Guardar")}
+                {saving ? L("Saving…", "Guardando…") : L("Save", "Guardar")}
               </button>
               <button
                 type="button"
@@ -4428,7 +4515,9 @@ export default function DailyJournalPage() {
                 disabled={saving}
                 className="px-4 py-1.5 rounded-lg bg-emerald-400 text-slate-950 text-[12px] font-semibold hover:bg-emerald-300 transition disabled:opacity-50"
               >
-                {L("Save & return to dashboard", "Guardar y volver al dashboard")}
+                {saving
+                  ? L("Saving…", "Guardando…")
+                  : L("Save & return to dashboard", "Guardar y volver al dashboard")}
               </button>
             </div>
           </div>
@@ -4651,11 +4740,20 @@ export default function DailyJournalPage() {
           </span>
           <button
             type="button"
-            onClick={goNextStep}
-            disabled={currentStep >= stepCount - 1}
+            onClick={handlePrimaryWizardAction}
+            disabled={saving}
+            aria-label={
+              primaryWizardAction === "finish"
+                ? L("Finish and save journal", "Finalizar y guardar journal")
+                : L("Go to next journal step", "Ir al siguiente paso del journal")
+            }
             className="px-4 py-2 rounded-xl bg-emerald-400 text-slate-950 text-sm font-semibold hover:bg-emerald-300 transition disabled:opacity-50"
           >
-            {currentStep >= stepCount - 1 ? L("Done", "Listo") : L("Next →", "Siguiente →")}
+            {saving && primaryWizardAction === "finish"
+              ? L("Saving…", "Guardando…")
+              : primaryWizardAction === "finish"
+                ? L("Done", "Listo")
+                : L("Next →", "Siguiente →")}
           </button>
         </div>
       </div>
