@@ -596,6 +596,7 @@ export default function NeuroAnalysisPage() {
   const L = (en: string, es: string) => (isEs ? es : en);
 
   const [focusTicker, setFocusTicker] = useState("AAPL");
+  const [focusTickerDraft, setFocusTickerDraft] = useState("AAPL");
   const [researchGoal, setResearchGoal] = useState(defaultResearchGoal(isEs));
   const [filings, setFilings] = useState<FilingUpload[]>([]);
   const [filingsLoading, setFilingsLoading] = useState(false);
@@ -616,6 +617,7 @@ export default function NeuroAnalysisPage() {
   const [caseStatus, setCaseStatus] = useState("");
   const [agentError, setAgentError] = useState("");
   const [agentLoading, setAgentLoading] = useState(false);
+  const [agentElapsedSeconds, setAgentElapsedSeconds] = useState(0);
   const [documentLookup, setDocumentLookup] = useState<CompanyDocumentLookup[]>([]);
   const [documentLookupLoading, setDocumentLookupLoading] = useState(false);
   const [documentLookupError, setDocumentLookupError] = useState("");
@@ -667,6 +669,13 @@ export default function NeuroAnalysisPage() {
       setResearchGoal(defaultResearchGoal(isEs));
     }
   }, [isEs, researchGoal]);
+
+  useEffect(() => {
+    if (!agentLoading) return;
+    setAgentElapsedSeconds(0);
+    const interval = window.setInterval(() => setAgentElapsedSeconds((seconds) => seconds + 1), 1000);
+    return () => window.clearInterval(interval);
+  }, [agentLoading]);
 
   useEffect(() => {
     setDocumentLookup([]);
@@ -1213,7 +1222,9 @@ export default function NeuroAnalysisPage() {
     const researchCase = json?.case;
     setActiveCaseId(String(researchCase.id));
     setCaseTitle(String(researchCase.title ?? ""));
-    setFocusTicker(String(researchCase.focus_ticker ?? focusTicker));
+    const loadedFocusTicker = String(researchCase.focus_ticker ?? focusTicker).toUpperCase();
+    setFocusTicker(loadedFocusTicker);
+    setFocusTickerDraft(loadedFocusTicker);
     setResearchGoal(String(researchCase.research_goal ?? researchGoal));
     if (Array.isArray(researchCase.holdings) && researchCase.holdings.length > 0) {
       setPortfolioHoldings(
@@ -1691,6 +1702,7 @@ export default function NeuroAnalysisPage() {
           uploadedFilings,
           question: `${researchGoal}\n\n${isEs ? "No reveles nombres de proveedores, fuentes privadas ni metodologías internas." : "Do not reveal provider names, private sources, or internal methodologies."}`,
         }),
+        signal: AbortSignal.timeout(180_000),
       });
 
       const json = await res.json().catch(() => ({}));
@@ -1703,7 +1715,15 @@ export default function NeuroAnalysisPage() {
       if (json?.reportId) setActiveReportId(String(json.reportId));
       await loadCaseList(json?.caseId ? String(json.caseId) : activeCaseId);
     } catch (error: any) {
-      setAgentError(error?.message || "Neuro Analysis failed.");
+      const timedOut = error?.name === "TimeoutError" || error?.name === "AbortError";
+      setAgentError(
+        timedOut
+          ? L(
+              "The analysis took longer than three minutes and was stopped. Your data is safe; please run it again.",
+              "El análisis tomó más de tres minutos y se detuvo. Tu data está segura; vuelve a correrlo."
+            )
+          : error?.message || "Neuro Analysis failed."
+      );
     } finally {
       setAgentLoading(false);
     }
@@ -1760,6 +1780,7 @@ export default function NeuroAnalysisPage() {
             thesisNotes,
           },
         }),
+        signal: AbortSignal.timeout(120_000),
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json?.error || "Neuro Research Agent failed.");
@@ -1865,8 +1886,16 @@ export default function NeuroAnalysisPage() {
     const nextTicker = ticker.trim().toUpperCase();
     if (!nextTicker) return;
     setFocusTicker(nextTicker);
+    setFocusTickerDraft(nextTicker);
     setResearchGoal(defaultResearchGoal(isEs));
     setActiveWorkspaceTab("research");
+  }
+
+  function applyFocusTicker(ticker = focusTickerDraft) {
+    const nextTicker = ticker.trim().toUpperCase().replace(/[^A-Z0-9.-]/g, "").slice(0, 12);
+    if (!nextTicker) return;
+    setFocusTicker(nextTicker);
+    setFocusTickerDraft(nextTicker);
   }
 
   function updatePortfolioHolding(id: string, patch: Partial<Holding>) {
@@ -1997,13 +2026,41 @@ export default function NeuroAnalysisPage() {
                   "Profiles privados para acciones, ETFs, decisiones de dividendos, valoración y revisión de tesis viva."
                 )}
               </p>
-              <div className="mt-4 grid gap-2 sm:grid-cols-[minmax(0,420px)_auto] sm:items-center">
+              <div className="mt-4 grid gap-2 sm:grid-cols-3 sm:items-end">
                 <input
                   value={caseTitle}
                   onChange={(event) => setCaseTitle(event.target.value)}
                   placeholder={L("Research case name", "Nombre del caso de research")}
                   className="h-10 w-full rounded-lg border border-slate-800 bg-slate-950/70 px-3 text-sm text-slate-100 outline-none focus:border-sky-400"
                 />
+                <label className="block">
+                  <span className="sr-only">{L("Active ticker", "Ticker activo")}</span>
+                  <div className="flex h-10 overflow-hidden rounded-lg border border-sky-500/40 bg-slate-950/70 focus-within:border-sky-300">
+                    <input
+                      value={focusTickerDraft}
+                      onChange={(event) =>
+                        setFocusTickerDraft(event.target.value.toUpperCase().replace(/[^A-Z0-9.-]/g, "").slice(0, 12))
+                      }
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          applyFocusTicker();
+                        }
+                      }}
+                      aria-label={L("Active ticker", "Ticker activo")}
+                      className="min-w-0 flex-1 bg-transparent px-3 text-sm font-semibold text-slate-100 outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => applyFocusTicker()}
+                      aria-label={L("Load company profile", "Cargar profile de compañía")}
+                      title={L("Load company profile", "Cargar profile de compañía")}
+                      className="inline-flex w-10 shrink-0 items-center justify-center border-l border-slate-800 text-sky-300 hover:bg-sky-400/10 hover:text-sky-100"
+                    >
+                      <Search className="h-4 w-4" />
+                    </button>
+                  </div>
+                </label>
                 <button
                   type="button"
                   onClick={() => void saveResearchCase()}
@@ -2284,6 +2341,7 @@ export default function NeuroAnalysisPage() {
                           type="button"
                           onClick={() => {
                             setFocusTicker(position.ticker);
+                            setFocusTickerDraft(position.ticker);
                             setResearchGoal(defaultResearchGoal(isEs));
                           }}
                           className="rounded-lg border border-slate-700 p-2 text-slate-300 hover:border-sky-400 hover:text-sky-200"
@@ -2894,14 +2952,10 @@ export default function NeuroAnalysisPage() {
                     )}
                   </p>
                 </div>
-                <label className="block lg:w-40">
-                  <span className="text-[11px] font-semibold uppercase text-slate-500">{L("Focus ticker", "Ticker foco")}</span>
-                  <input
-                    value={focusTicker}
-                    onChange={(event) => setFocusTicker(event.target.value.toUpperCase().replace(/[^A-Z0-9.-]/g, "").slice(0, 12))}
-                    className="mt-1 h-10 w-full rounded-lg border border-slate-800 bg-slate-950/70 px-3 text-sm font-semibold text-slate-100 outline-none focus:border-sky-400"
-                  />
-                </label>
+                <div className="min-w-[140px] rounded-lg border border-sky-500/30 bg-sky-500/5 px-3 py-2 lg:text-right">
+                  <span className="text-[11px] font-semibold uppercase text-slate-500">{L("Active profile", "Profile activo")}</span>
+                  <p className="mt-1 text-sm font-semibold text-sky-200">{focusTicker}</p>
+                </div>
               </div>
 
               <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1.45fr)_minmax(0,0.78fr)_minmax(0,0.78fr)]">
@@ -3056,8 +3110,21 @@ export default function NeuroAnalysisPage() {
                 className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-sky-400 px-4 py-3 text-sm font-semibold text-slate-950 hover:bg-sky-300 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {agentLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-                {agentLoading ? L("Running research...", "Corriendo research...") : L("Run profile intelligence", "Correr inteligencia del profile")}
+                {agentLoading
+                  ? agentElapsedSeconds < 15
+                    ? L("Preparing evidence...", "Preparando evidencia...")
+                    : agentElapsedSeconds < 45
+                      ? L("Reviewing documents...", "Revisando documentos...")
+                      : agentElapsedSeconds < 90
+                        ? L("Testing valuation...", "Validando valoración...")
+                        : L("Finalizing report...", "Finalizando informe...")
+                  : L("Run profile intelligence", "Correr inteligencia del profile")}
               </button>
+              {agentLoading ? (
+                <p className="mt-2 text-center text-xs tabular-nums text-slate-500">
+                  {L("Evidence-backed analysis", "Análisis con evidencia")} · {agentElapsedSeconds}s
+                </p>
+              ) : null}
               {agentError ? <p className="mt-3 text-xs text-rose-300">{agentError}</p> : null}
             </div>
 

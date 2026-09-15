@@ -63,8 +63,8 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     "nav.backStudy": "Strategy Review Lab",
     "nav.rules": "Business Protection System",
     "nav.forum": "Forum",
-    "nav.optionFlow": "Market Intelligence Tools",
-    "nav.smartTools": "Market Intelligence Tools",
+    "nav.optionFlow": "Smart Tools",
+    "nav.smartTools": "Smart Tools",
 
     // Backwards-compatible aliases (older patches)
     "nav.performance.title": "Business Performance",
@@ -72,14 +72,16 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     "nav.backStudy.title": "Strategy Review Lab",
     "nav.rules.title": "Business Protection System",
     "nav.forum.title": "Forum",
-    "nav.optionFlow.title": "Market Intelligence Tools",
-    "nav.smartTools.title": "Market Intelligence Tools",
+    "nav.optionFlow.title": "Smart Tools",
+    "nav.smartTools.title": "Smart Tools",
 
     /* -----------------
        Smart Tools dropdown items
     ------------------ */
     "nav.smartTools.optionFlow.title": "Option Flows Analysis",
     "nav.smartTools.optionFlow.desc": "Options flow reports, premarket plans, and outcome review for the business.",
+    "nav.smartTools.neuroAnalysis.title": "Neuro Analysis",
+    "nav.smartTools.neuroAnalysis.desc": "Private investment portal for profiles, filings, valuation, thesis, dividends, and portfolio review.",
 
     /* -----------------
        Performance dropdown items
@@ -233,6 +235,8 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     "footer.groups.privateResearch": "Private research",
     "footer.groups.company": "Company",
     "footer.links.neuroAnalysis": "Neuro Analysis",
+    "footer.links.neuroAnalysisLogin": "Neuro Analysis login",
+    "footer.links.optionFlowLogin": "Option Flow login",
     "footer.neuroAnalysisHint": "Private research portal",
     "footer.corePromise": "Build the trading business plan. Protect it with one operating loop.",
     "footer.links.blog": "Blog",
@@ -318,8 +322,8 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     "nav.backStudy": "Laboratorio de Revisión",
     "nav.rules": "Sistema de Protección Empresarial",
     "nav.forum": "Foro",
-    "nav.optionFlow": "Herramientas de Inteligencia de Mercado",
-    "nav.smartTools": "Herramientas de Inteligencia de Mercado",
+    "nav.optionFlow": "Smart Tools",
+    "nav.smartTools": "Smart Tools",
 
     // Aliases
     "nav.performance.title": "Rendimiento Empresarial",
@@ -327,14 +331,16 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     "nav.backStudy.title": "Laboratorio de Revisión",
     "nav.rules.title": "Sistema de Protección Empresarial",
     "nav.forum.title": "Foro",
-    "nav.optionFlow.title": "Herramientas de Inteligencia de Mercado",
-    "nav.smartTools.title": "Herramientas de Inteligencia de Mercado",
+    "nav.optionFlow.title": "Smart Tools",
+    "nav.smartTools.title": "Smart Tools",
 
     /* -----------------
        Smart Tools dropdown items
     ------------------ */
     "nav.smartTools.optionFlow.title": "Option Flows Analysis",
     "nav.smartTools.optionFlow.desc": "Reportes de options flow, planes premarket y revisión de resultados para el negocio.",
+    "nav.smartTools.neuroAnalysis.title": "Neuro Analysis",
+    "nav.smartTools.neuroAnalysis.desc": "Portal privado para perfiles, filings, valuation, tesis, dividendos y revisión de portfolio.",
 
     /* -----------------
        Performance dropdown items
@@ -486,6 +492,8 @@ const DICT: Record<Exclude<Locale, "auto">, Record<string, string>> = {
     "footer.groups.privateResearch": "Investigación privada",
     "footer.groups.company": "Compañía",
     "footer.links.neuroAnalysis": "Neuro Analysis",
+    "footer.links.neuroAnalysisLogin": "Neuro Analysis login",
+    "footer.links.optionFlowLogin": "Option Flow login",
     "footer.neuroAnalysisHint": "Portal privado de investigación",
     "footer.corePromise": "Construye el plan del negocio de trading. Protégelo con un solo ciclo operativo.",
     "footer.links.blog": "Blog",

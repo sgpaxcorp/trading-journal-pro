@@ -90,19 +90,9 @@ async function countRows(params: {
 }
 
 async function ensureInboxRule(userId: string) {
-  const { data: existing } = await supabaseAdmin
+  const { data: rule, error } = await supabaseAdmin
     .from("ntj_alert_rules")
-    .select("id")
-    .eq("user_id", userId)
-    .eq("key", SYSTEM_RULE_KEY)
-    .maybeSingle();
-
-  const id = text((existing as any)?.id);
-  if (id) return id;
-
-  const { data: created, error } = await supabaseAdmin
-    .from("ntj_alert_rules")
-    .insert({
+    .upsert({
       user_id: userId,
       key: SYSTEM_RULE_KEY,
       trigger_type: "system_notice",
@@ -112,12 +102,12 @@ async function ensureInboxRule(userId: string) {
       enabled: true,
       channels: ["inapp"],
       config: { source: "system", core: true, kind: "reminder", category: "business_milestone" },
-    })
+    }, { onConflict: "user_id,key" })
     .select("id")
     .single();
 
   if (error) throw error;
-  return text((created as any)?.id);
+  return text((rule as any)?.id);
 }
 
 async function notifyMilestone(params: {

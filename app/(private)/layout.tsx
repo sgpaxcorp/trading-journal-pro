@@ -1,20 +1,22 @@
 "use client";
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { supabaseBrowser } from "@/lib/supaBaseClient";
 import { isActiveProfileStatus, shouldAllowLocalProfileAccessFallback } from "@/lib/accessControl";
 import { fetchAccessStatus } from "@/lib/accessStatusClient";
 import { canAccessPrivatePath, firstAccessiblePrivatePath } from "@/lib/accessGrants";
-import RouteQuickTour from "@/app/components/RouteQuickTour";
-import PageIntro from "@/app/components/PageIntro";
-import GlobalAlertPopups from "@/app/components/GlobalAlertPopups";
-import GlobalAlertRuleEngine from "@/app/components/GlobalAlertRuleEngine";
 import LegalAcceptanceGate from "@/app/components/LegalAcceptanceGate";
-import NeuroGuideAssistant from "@/app/components/NeuroGuideAssistant";
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
+
+const PageIntro = dynamic(() => import("@/app/components/PageIntro"), { ssr: false });
+const RouteQuickTour = dynamic(() => import("@/app/components/RouteQuickTour"), { ssr: false });
+const NeuroGuideAssistant = dynamic(() => import("@/app/components/NeuroGuideAssistant"), { ssr: false });
+const GlobalAlertRuleEngine = dynamic(() => import("@/app/components/GlobalAlertRuleEngine"), { ssr: false });
+const GlobalAlertPopups = dynamic(() => import("@/app/components/GlobalAlertPopups"), { ssr: false });
 
 type PrivateLayoutProps = {
   children: React.ReactNode;

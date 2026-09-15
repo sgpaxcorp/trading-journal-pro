@@ -74,6 +74,7 @@ import {
 import { listCashflows, signedCashflowAmount } from "@/lib/cashflowsSupabase";
 import { syncGrowthPlanProtectionRules } from "@/lib/alertsSupabase";
 import { useTradingAccounts } from "@/hooks/useTradingAccounts";
+import { useUserPlan } from "@/hooks/useUserPlan";
 import {
   calculateFundedAccountMetrics,
   getFundedProfileMissingFields,
@@ -1633,6 +1634,7 @@ function historyReasonLabel(reason: string | null | undefined, L: (en: string, e
 export default function GrowthPlanPage() {
   const { user, loading } = useAuth();
   const { accounts, activeAccountId, loading: accountsLoading } = useTradingAccounts();
+  const { plan: userPlan } = useUserPlan();
   const router = useRouter();
   const { locale } = useAppSettings();
   const lang = resolveLocale(locale) as GrowthPlanLocale;
@@ -7464,7 +7466,11 @@ export default function GrowthPlanPage() {
         });
       }
       setIsFollowOnDraft(false);
-            router.push("/dashboard");
+      router.push(
+        userPlan === "advanced"
+          ? "/performance/profit-loss-track#trading-business-expenses"
+          : "/dashboard"
+      );
     } catch (e) {
       console.error("[GrowthPlan] save error", e);
       const msg = String((e as any)?.message ?? "");

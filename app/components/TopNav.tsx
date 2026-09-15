@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { MessageSquare } from "lucide-react";
+import { Menu, MessageSquare, X } from "lucide-react";
 
 import { useAuth } from "@/context/AuthContext";
 import PageNavigationControls from "@/app/components/PageNavigationControls";
@@ -635,6 +635,13 @@ const smartTools: NavItem[] = [
     href: "/option-flow",
     badge: "BETA",
   },
+  {
+    id: "neuro-analysis",
+    titleKey: "nav.smartTools.neuroAnalysis.title",
+    descriptionKey: "nav.smartTools.neuroAnalysis.desc",
+    href: "/neuro-analysis",
+    badge: "BETA",
+  },
 ];
 
 const forum: NavItem[] = [
@@ -651,9 +658,15 @@ const forum: NavItem[] = [
 export default function TopNav() {
   const { user } = useAuth() as any;
   const { theme, locale } = useAppSettings();
+  const pathname = usePathname();
   const lang = resolveLocale(locale);
   const L = (en: string, es: string) => (lang === "es" ? es : en);
   const [smartToolsAllowed, setSmartToolsAllowed] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  useEffect(() => {
+    setMobileMenuOpen(false);
+  }, [pathname]);
 
   useEffect(() => {
     let alive = true;
@@ -692,80 +705,128 @@ export default function TopNav() {
   const linkClass = isLight
     ? "rounded-lg px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-200/70 hover:text-slate-900 transition-colors"
     : "rounded-lg px-3 py-1.5 text-sm font-medium text-slate-200 hover:bg-slate-800 hover:text-slate-50 transition-colors";
+  const smartToolsVisible = Boolean(user?.id) || smartToolsAllowed;
 
   return (
     <>
       <nav className={navClass}>
-        <div className="flex flex-wrap items-center px-4 py-2.5 md:px-6 gap-x-5 gap-y-2 w-full">
-        {/* Brand */}
-        <Link
-          href="/dashboard"
-          className="shrink-0 flex items-center"
-          aria-label={L("Go to dashboard", "Ir al dashboard")}
-          data-tour="nav-brand"
-        >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src="/neurotrader-logo.svg"
-            alt="Neuro Trader"
-            className="h-14 md:h-16 lg:h-20 w-auto object-contain"
-            draggable={false}
-          />
-        </Link>
-
-        {/* Nav row */}
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-[13px] flex-1 min-w-0">
-          <Dropdown
-            titleKey="nav.performance"
-            items={performance}
-            theme={theme}
-            lang={lang}
-            dataTour="nav-performance"
-          />
-
-          <Link href="/notebook" className={linkClass} data-tour="nav-notebook">
-            {t("nav.notebook", lang)}
-          </Link>
-
-          <Link href="/back-study" className={linkClass} data-tour="nav-back-study">
-            {t("nav.backStudy", lang)}
-          </Link>
-
-          {smartToolsAllowed ? (
-            <Dropdown
-              titleKey="nav.smartTools"
-              titleBadge="BETA"
-              items={smartTools}
-              theme={theme}
-              lang={lang}
-              dataTour="nav-option-flow"
+        <div className="flex min-h-16 w-full items-center gap-3 px-4 py-2 md:px-6 lg:min-h-20 lg:gap-5 lg:py-2.5">
+          <Link
+            href="/dashboard"
+            className="flex shrink-0 items-center"
+            aria-label={L("Go to dashboard", "Ir al dashboard")}
+            data-tour="nav-brand"
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/neurotrader-logo.svg"
+              alt="Neuro Trader"
+              className="h-12 w-auto object-contain md:h-14 lg:h-20"
+              draggable={false}
             />
-          ) : null}
+          </Link>
 
-          <Dropdown
-            titleKey="nav.rules"
-            items={rules}
-            theme={theme}
-            lang={lang}
-            dataTour="nav-rules"
-          />
-          <Dropdown
-            titleKey="nav.forum"
-            items={forum}
-            theme={theme}
-            lang={lang}
-            dataTour="nav-forum"
-          />
+          <div className="hidden min-w-0 flex-1 lg:block">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-[13px]">
+              <Dropdown
+                titleKey="nav.performance"
+                items={performance}
+                theme={theme}
+                lang={lang}
+                dataTour="nav-performance"
+              />
 
+              <Link href="/notebook" className={linkClass} data-tour="nav-notebook">
+                {t("nav.notebook", lang)}
+              </Link>
+
+              <Link href="/back-study" className={linkClass} data-tour="nav-back-study">
+                {t("nav.backStudy", lang)}
+              </Link>
+
+              {smartToolsVisible ? (
+                <Dropdown
+                  titleKey="nav.smartTools"
+                  titleBadge="BETA"
+                  items={smartTools}
+                  theme={theme}
+                  lang={lang}
+                  dataTour="nav-smart-tools"
+                />
+              ) : null}
+
+              <Dropdown
+                titleKey="nav.rules"
+                items={rules}
+                theme={theme}
+                lang={lang}
+                dataTour="nav-rules"
+              />
+              <Dropdown
+                titleKey="nav.forum"
+                items={forum}
+                theme={theme}
+                lang={lang}
+                dataTour="nav-forum"
+              />
+            </div>
+          </div>
+
+          <div className="ml-auto flex shrink-0 items-center gap-2 sm:gap-3">
+            <SupportCenterButton theme={theme} lang={lang} />
+            <HelpMenu theme={theme} lang={lang} />
+            <AccountMenu theme={theme} lang={lang} />
+            <button
+              type="button"
+              onClick={() => setMobileMenuOpen((open) => !open)}
+              aria-expanded={mobileMenuOpen}
+              aria-label={mobileMenuOpen ? L("Close navigation", "Cerrar navegación") : L("Open navigation", "Abrir navegación")}
+              className={`flex h-10 w-10 items-center justify-center rounded-full border transition lg:hidden ${
+                isLight
+                  ? "border-slate-300 bg-white text-slate-700 hover:border-emerald-400 hover:text-emerald-700"
+                  : "border-slate-700 bg-slate-900 text-slate-300 hover:border-emerald-400 hover:text-emerald-300"
+              }`}
+            >
+              {mobileMenuOpen ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
+            </button>
+          </div>
         </div>
 
-        {/* Right side: Help + Account */}
-        <div className="flex items-center gap-3 shrink-0">
-          <SupportCenterButton theme={theme} lang={lang} />
-          <HelpMenu theme={theme} lang={lang} />
-          <AccountMenu theme={theme} lang={lang} />
-        </div>
-        </div>
+        {mobileMenuOpen ? (
+          <div
+            className={`max-h-[70vh] overflow-y-auto border-t px-4 py-3 lg:hidden ${
+              isLight ? "border-slate-200 bg-white" : "border-slate-800 bg-slate-950"
+            }`}
+          >
+            <div className="flex flex-col items-start gap-1">
+              <Dropdown
+                titleKey="nav.performance"
+                items={performance}
+                theme={theme}
+                lang={lang}
+                dataTour="nav-performance"
+              />
+              <Link href="/notebook" className={linkClass} data-tour="nav-notebook">
+                {t("nav.notebook", lang)}
+              </Link>
+              <Link href="/back-study" className={linkClass} data-tour="nav-back-study">
+                {t("nav.backStudy", lang)}
+              </Link>
+              {smartToolsVisible ? (
+                <Dropdown
+                  titleKey="nav.smartTools"
+                  titleBadge="BETA"
+                  items={smartTools}
+                  theme={theme}
+                  lang={lang}
+                  dataTour="nav-smart-tools"
+                />
+              ) : null}
+              <Dropdown titleKey="nav.rules" items={rules} theme={theme} lang={lang} dataTour="nav-rules" />
+              <Dropdown titleKey="nav.forum" items={forum} theme={theme} lang={lang} dataTour="nav-forum" />
+            </div>
+          </div>
+        ) : null}
       </nav>
       <PageNavigationControls placement="header" />
     </>

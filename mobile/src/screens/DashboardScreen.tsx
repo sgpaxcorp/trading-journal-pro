@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useFocusEffect } from "@react-navigation/native";
-import { Ionicons } from "@expo/vector-icons";
+import Ionicons from "@expo/vector-icons/Ionicons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   ActivityIndicator,
   Image,
@@ -108,6 +109,7 @@ type GrowthPlanSummary = {
 };
 
 type AccountSeriesResponse = {
+  accountId?: string | null;
   plan?: GrowthPlanSummary;
   totals: {
     tradingPnl: number;
@@ -127,6 +129,12 @@ type JournalEntry = {
 
 type JournalListResponse = {
   entries: JournalEntry[];
+};
+
+type DashboardCachePayload = {
+  savedAt: number;
+  series: AccountSeriesResponse | null;
+  journalEntries: JournalEntry[];
 };
 
 type MotivationMessageRow = {
@@ -159,6 +167,9 @@ type DashboardCoachActionPlan = {
 type DashboardCoachReminder = {
   summary: string | null;
   updatedAt: string | null;
+  sourceDate: string | null;
+  referencedDates: string[];
+  stale: boolean;
   actionPlan: DashboardCoachActionPlan | null;
 };
 
@@ -274,6 +285,47 @@ type BusinessProgressSummary = {
 };
 
 const DASHBOARD_TITLE_STOPS = ["#7CF7CF", "#63D6FF", "#9A7CFF", "#2BE3A7"] as const;
+const DASHBOARD_CACHE_PREFIX = "ntj:dashboard:v1:";
+const DASHBOARD_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const dashboardMemoryCache = new Map<string, DashboardCachePayload>();
+
+function dashboardCacheKey(userId: string) {
+  return `${DASHBOARD_CACHE_PREFIX}${userId}`;
+}
+
+function isUsableDashboardCache(value: DashboardCachePayload | null | undefined) {
+  return Boolean(
+    value &&
+      Number.isFinite(value.savedAt) &&
+      Date.now() - value.savedAt <= DASHBOARD_CACHE_MAX_AGE_MS &&
+      value.series
+  );
+}
+
+async function readDashboardCache(userId: string): Promise<DashboardCachePayload | null> {
+  const memory = dashboardMemoryCache.get(userId);
+  if (isUsableDashboardCache(memory)) return memory ?? null;
+  try {
+    const raw = await AsyncStorage.getItem(dashboardCacheKey(userId));
+    const parsed = raw ? (JSON.parse(raw) as DashboardCachePayload) : null;
+    if (!isUsableDashboardCache(parsed)) return null;
+    dashboardMemoryCache.set(userId, parsed!);
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function persistDashboardCache(
+  userId: string,
+  series: AccountSeriesResponse | null,
+  journalEntries: JournalEntry[]
+) {
+  if (!userId || !series) return;
+  const payload: DashboardCachePayload = { savedAt: Date.now(), series, journalEntries };
+  dashboardMemoryCache.set(userId, payload);
+  void AsyncStorage.setItem(dashboardCacheKey(userId), JSON.stringify(payload)).catch(() => null);
+}
 
 function hexToRgb(hex: string) {
   const normalized = hex.replace("#", "");
@@ -1065,23 +1117,68 @@ export function DashboardScreen({ onOpenJournalDate, onOpenBusinessPlan, onOpenN
   }, []);
 
   useEffect(() => {
+    if (!user?.id) return;
     let active = true;
+    const userId = user.id;
 
-    async function load(isRefresh = false) {
+    const applyDashboardData = (
+      nextSeries: AccountSeriesResponse | null,
+      nextEntries: JournalEntry[]
+    ) => {
+      setSeries(nextSeries);
+      setJournalEntries(nextEntries);
+
+      const availableDates = nextEntries
+        .map((entry) => String(entry?.date ?? "").slice(0, 10))
+        .filter((value) => value.length === 10)
+        .sort();
+      const today = new Date().toISOString().slice(0, 10);
+      setSelectedDate((current) => {
+        if (current && availableDates.includes(current)) return current;
+        if (availableDates.includes(today)) return today;
+        return availableDates[availableDates.length - 1] ?? null;
+      });
+    };
+
+    async function load() {
+      const today = new Date();
+      const toDate = today.toISOString().slice(0, 10);
+      const from = new Date(today);
+      from.setDate(today.getDate() - 45);
+      const fromDate = from.toISOString().slice(0, 10);
+      const freshRequest = Promise.all([
+        apiGet<AccountSeriesResponse>(ACCOUNT_SERIES_PATH),
+        apiGet<JournalListResponse>(`/api/journal/list?fromDate=${fromDate}&toDate=${toDate}`),
+      ]);
+
+      const cached = await readDashboardCache(userId);
+      if (!active) return;
+      if (cached) {
+        applyDashboardData(cached.series, cached.journalEntries);
+        setLoading(false);
+        setJournalLoading(false);
+        setRefreshing(true);
+      } else {
+        setLoading(true);
+        setJournalLoading(true);
+      }
+      setError(null);
+
       try {
-        if (isRefresh) setRefreshing(true);
-        else setLoading(true);
-        setError(null);
-        const seriesRes = await apiGet<AccountSeriesResponse>(ACCOUNT_SERIES_PATH);
+        const [seriesRes, journalRes] = await freshRequest;
         if (!active) return;
-        setSeries(seriesRes ?? null);
+        const nextSeries = seriesRes ?? null;
+        const nextEntries = journalRes?.entries ?? [];
+        applyDashboardData(nextSeries, nextEntries);
+        persistDashboardCache(userId, nextSeries, nextEntries);
       } catch (err: any) {
-        if (!active) return;
+        if (!active || cached) return;
         setError(err?.message ?? "Failed to load data.");
       } finally {
         if (!active) return;
-        if (isRefresh) setRefreshing(false);
-        else setLoading(false);
+        setLoading(false);
+        setJournalLoading(false);
+        setRefreshing(false);
       }
     }
 
@@ -1089,7 +1186,7 @@ export function DashboardScreen({ onOpenJournalDate, onOpenBusinessPlan, onOpenN
     return () => {
       active = false;
     };
-  }, []);
+  }, [user?.id]);
 
   useEffect(() => {
     let active = true;
@@ -1137,31 +1234,23 @@ export function DashboardScreen({ onOpenJournalDate, onOpenBusinessPlan, onOpenN
     let active = true;
 
     async function loadLatestCoachReminder() {
-      if (!supabaseMobile || !user?.id) {
+      const accountId = String(series?.accountId ?? "").trim();
+      if (!user?.id || !accountId) {
         if (active) setCoachReminder(null);
         return;
       }
 
       try {
-        const { data, error } = await supabaseMobile
-          .from("ai_coach_threads")
-          .select("summary, metadata, updated_at")
-          .eq("user_id", user.id)
-          .order("updated_at", { ascending: false })
-          .limit(1)
-          .maybeSingle();
-
+        const params = new URLSearchParams({
+          accountId,
+          language: language === "es" ? "es" : "en",
+        });
+        const body = await apiGet<any>(`/api/ai-coach/dashboard-plan?${params.toString()}`);
         if (!active) return;
-        if (error) {
-          console.warn("[mobile dashboard] latest ai coach thread fetch error:", error);
-          setCoachReminder(null);
-          return;
-        }
-
-        const metadata = data?.metadata && typeof data.metadata === "object" ? (data.metadata as any) : {};
-        const actionPlan = metadata?.latestActionPlan ?? null;
+        const dashboardPlan = body?.plan && typeof body.plan === "object" ? body.plan : null;
+        const actionPlan = dashboardPlan?.actionPlan ?? null;
         const hasReminder =
-          String(data?.summary || "").trim() ||
+          String(dashboardPlan?.summary || "").trim() ||
           String(actionPlan?.whatISee || "").trim() ||
           String(actionPlan?.whatIsDrifting || "").trim() ||
           String(actionPlan?.whatToProtect || "").trim() ||
@@ -1178,12 +1267,19 @@ export function DashboardScreen({ onOpenJournalDate, onOpenBusinessPlan, onOpenN
 
         setCoachReminder({
           summary:
-            typeof data?.summary === "string" && data.summary.trim()
-              ? data.summary.trim()
+            typeof dashboardPlan?.summary === "string" && dashboardPlan.summary.trim()
+              ? dashboardPlan.summary.trim()
               : typeof actionPlan?.summary === "string" && actionPlan.summary.trim()
                 ? actionPlan.summary.trim()
                 : null,
-          updatedAt: data?.updated_at ?? null,
+          updatedAt:
+            typeof dashboardPlan?.generatedAt === "string" ? dashboardPlan.generatedAt : null,
+          sourceDate:
+            typeof dashboardPlan?.sourceDate === "string" ? dashboardPlan.sourceDate : null,
+          referencedDates: Array.isArray(dashboardPlan?.referencedDates)
+            ? dashboardPlan.referencedDates.filter((date: unknown) => typeof date === "string")
+            : [],
+          stale: body?.stale === true,
           actionPlan,
         });
       } catch (err) {
@@ -1197,7 +1293,7 @@ export function DashboardScreen({ onOpenJournalDate, onOpenBusinessPlan, onOpenN
     return () => {
       active = false;
     };
-  }, [user?.id]);
+  }, [language, series?.accountId, user?.id]);
 
   useEffect(() => {
     const fallbackChecklist = [
@@ -1230,47 +1326,6 @@ export function DashboardScreen({ onOpenJournalDate, onOpenBusinessPlan, onOpenN
     };
   }, [language, series?.plan, todayStr]);
 
-  useEffect(() => {
-    let active = true;
-
-    async function loadJournalEntries(isRefresh = false) {
-      try {
-        if (!isRefresh) setJournalLoading(true);
-        const today = new Date();
-        const toDate = today.toISOString().slice(0, 10);
-        const from = new Date(today);
-        from.setDate(today.getDate() - 45);
-        const fromDate = from.toISOString().slice(0, 10);
-        const res = await apiGet<JournalListResponse>(`/api/journal/list?fromDate=${fromDate}&toDate=${toDate}`);
-        if (!active) return;
-        const entries = res?.entries ?? [];
-        setJournalEntries(entries);
-
-        const availableDates = entries
-          .map((entry) => String(entry?.date ?? "").slice(0, 10))
-          .filter((value) => value.length === 10)
-          .sort();
-
-        const todayStr = today.toISOString().slice(0, 10);
-        if (!selectedDate || !availableDates.includes(selectedDate)) {
-          if (availableDates.includes(todayStr)) setSelectedDate(todayStr);
-          else setSelectedDate(availableDates[availableDates.length - 1] ?? null);
-        }
-      } catch {
-        if (!active) return;
-        setJournalEntries([]);
-      } finally {
-        if (!active) return;
-        if (!isRefresh) setJournalLoading(false);
-      }
-    }
-
-    void loadJournalEntries();
-    return () => {
-      active = false;
-    };
-  }, []);
-
   const dailyMap = useMemo(() => new Map(series?.daily?.map((d) => [d.date, d.value]) ?? []), [series]);
   const accountSeries = useMemo(
     () => [...(series?.series ?? [])].sort((a, b) => a.date.localeCompare(b.date)),
@@ -1279,6 +1334,30 @@ export function DashboardScreen({ onOpenJournalDate, onOpenBusinessPlan, onOpenN
 
   const currentBalance = Number(series?.totals?.currentBalance ?? 0);
   const plan = series?.plan ?? null;
+  const todayPnl = Number(dailyMap.get(todayStr) ?? 0);
+  const dailyGoal = useMemo(() => {
+    const percent = Number(plan?.dailyTargetPct ?? 0);
+    const startBalance = Math.max(0, currentBalance - todayPnl);
+    const targetUsd = percent > 0 ? startBalance * (percent / 100) : 0;
+    const hasActivity = journalEntries.some(
+      (entry) => String(entry?.date ?? "").slice(0, 10) === todayStr
+    );
+    const status =
+      targetUsd <= 0
+        ? "not_configured"
+        : !hasActivity
+          ? "no_activity"
+          : todayPnl >= targetUsd
+            ? "met"
+            : "in_progress";
+    return {
+      targetUsd,
+      status,
+      remainingUsd: Math.max(0, targetUsd - todayPnl),
+      aboveUsd: Math.max(0, todayPnl - targetUsd),
+      progress: targetUsd > 0 ? Math.max(0, Math.min(1, todayPnl / targetUsd)) : 0,
+    };
+  }, [currentBalance, journalEntries, plan?.dailyTargetPct, todayPnl, todayStr]);
   const adjustedTargetBalance = Number(plan?.adjustedTargetBalance ?? plan?.targetBalance ?? 0);
   const targetDateStr = toDateOnlyStr(plan?.targetDate);
   const adaptivePlanSummary = plan?.steps?.business_analysis?.adaptivePlan ?? null;
@@ -1798,12 +1877,13 @@ export function DashboardScreen({ onOpenJournalDate, onOpenBusinessPlan, onOpenN
         if (availableDates.includes(todayStr)) return todayStr;
         return availableDates[availableDates.length - 1] ?? null;
       });
+      if (user?.id) persistDashboardCache(user.id, seriesRes ?? null, entries);
     } catch (err: any) {
       setError(err?.message ?? "Failed to refresh.");
     } finally {
       setRefreshing(false);
     }
-  }, []);
+  }, [user?.id]);
 
   useFocusEffect(
     useCallback(() => {
@@ -2038,7 +2118,9 @@ export function DashboardScreen({ onOpenJournalDate, onOpenBusinessPlan, onOpenN
       !equalsText(row.value, aiPlanAlignedTo) &&
       !aiCoachReadoutRows.some((item) => equalsText(item.value, row.value))
   );
-  const latestCoachDate = coachReminder?.updatedAt ? String(coachReminder.updatedAt).slice(0, 10) : null;
+  const latestCoachDate = coachReminder?.sourceDate
+    ? String(coachReminder.sourceDate).slice(0, 10)
+    : null;
 
   const renderSystemRuleSection = (
     label: string,
@@ -2633,6 +2715,84 @@ export function DashboardScreen({ onOpenJournalDate, onOpenBusinessPlan, onOpenN
               </View>
             </View>
 
+            <View style={styles.dailyGoalBand}>
+              <View style={styles.dailyGoalHeadingRow}>
+                <Text style={styles.dailyGoalEyebrow}>
+                  {t(language, "Today's money goal", "Meta de hoy en dinero")}
+                </Text>
+                <View
+                  style={[
+                    styles.dailyGoalStatus,
+                    dailyGoal.status === "met"
+                      ? styles.dailyGoalStatusMet
+                      : dailyGoal.status === "in_progress"
+                        ? styles.dailyGoalStatusPending
+                        : styles.dailyGoalStatusNeutral,
+                  ]}
+                >
+                  <Text style={styles.dailyGoalStatusText}>
+                    {dailyGoal.status === "met"
+                      ? t(language, "Goal met", "Meta cumplida")
+                      : dailyGoal.status === "in_progress"
+                        ? t(language, "Not reached yet", "Aún no alcanzada")
+                        : dailyGoal.status === "no_activity"
+                          ? t(language, "No activity yet", "Sin actividad todavía")
+                          : t(language, "Set daily goal", "Configurar meta diaria")}
+                  </Text>
+                </View>
+              </View>
+
+              <View style={styles.dailyGoalMetrics}>
+                <View style={styles.dailyGoalMetric}>
+                  <Text style={styles.dailyGoalMetricLabel}>{t(language, "Goal", "Meta")}</Text>
+                  <Text style={styles.dailyGoalMetricValue}>
+                    {dailyGoal.status === "not_configured" ? "—" : formatCurrency(dailyGoal.targetUsd)}
+                  </Text>
+                </View>
+                <View style={styles.dailyGoalMetric}>
+                  <Text style={styles.dailyGoalMetricLabel}>{t(language, "Today P&L", "P&L de hoy")}</Text>
+                  <Text
+                    style={[
+                      styles.dailyGoalMetricValue,
+                      todayPnl >= 0 ? styles.dailyGoalPositive : styles.dailyGoalNegative,
+                    ]}
+                  >
+                    {dailyGoal.status === "not_configured" ? "—" : formatSigned(todayPnl)}
+                  </Text>
+                </View>
+                <View style={styles.dailyGoalMetric}>
+                  <Text style={styles.dailyGoalMetricLabel}>
+                    {dailyGoal.status === "met"
+                      ? t(language, "Above goal", "Sobre la meta")
+                      : t(language, "Remaining", "Falta")}
+                  </Text>
+                  <Text style={styles.dailyGoalMetricValue}>
+                    {dailyGoal.status === "not_configured"
+                      ? "—"
+                      : formatCurrency(dailyGoal.status === "met" ? dailyGoal.aboveUsd : dailyGoal.remainingUsd)}
+                  </Text>
+                </View>
+              </View>
+
+              {dailyGoal.status !== "not_configured" ? (
+                <View style={styles.dailyGoalTrack}>
+                  <View
+                    style={[
+                      styles.dailyGoalProgress,
+                      dailyGoal.status === "met" && styles.dailyGoalProgressMet,
+                      { width: `${dailyGoal.progress * 100}%` },
+                    ]}
+                  />
+                </View>
+              ) : (
+                <Pressable onPress={onOpenBusinessPlan}>
+                  <Text style={styles.dailyGoalConfigure}>
+                    {t(language, "Configure it in your Trading Business Plan", "Configúrala en tu Plan de Empresa de Trading")}
+                  </Text>
+                </Pressable>
+              )}
+            </View>
+
             <View style={styles.systemTabs}>
               {systemTabs.map((tab) => {
                 const active = systemPanelTab === tab.id;
@@ -2788,7 +2948,11 @@ export function DashboardScreen({ onOpenJournalDate, onOpenBusinessPlan, onOpenN
                   <Text style={styles.aiPlanEyebrow}>
                     {t(language, "Latest Business AI plan", "Último plan del Coach Empresarial IA")}
                   </Text>
-                  {latestCoachDate ? <Text style={styles.aiPlanDate}>{latestCoachDate}</Text> : null}
+                  {latestCoachDate ? (
+                    <Text style={styles.aiPlanDate}>
+                      {t(language, `Data through ${latestCoachDate}`, `Datos hasta ${latestCoachDate}`)}
+                    </Text>
+                  ) : null}
                 </View>
 
                 <Text style={styles.aiPlanTitle}>{aiPlanTitle}</Text>
@@ -3109,6 +3273,99 @@ const createStyles = (colors: ThemeColors) => {
     systemDate: {
       color: colors.textMuted,
       fontSize: 11,
+    },
+    dailyGoalBand: {
+      borderTopWidth: 1,
+      borderBottomWidth: 1,
+      borderColor: isDark ? "#205A53" : "#B9DDD2",
+      backgroundColor: isDark ? "#0A211F" : "#F0FBF7",
+      paddingVertical: 11,
+      paddingHorizontal: 2,
+      gap: 9,
+    },
+    dailyGoalHeadingRow: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: 8,
+    },
+    dailyGoalEyebrow: {
+      color: isDark ? "#9CF6D8" : colors.primary,
+      fontSize: 10,
+      fontWeight: "900",
+      textTransform: "uppercase",
+      letterSpacing: 0,
+    },
+    dailyGoalStatus: {
+      borderRadius: 999,
+      borderWidth: 1,
+      paddingHorizontal: 9,
+      paddingVertical: 4,
+    },
+    dailyGoalStatusMet: {
+      borderColor: isDark ? "#45D8A7" : colors.primary,
+      backgroundColor: isDark ? "#123D35" : "#DDF7EE",
+    },
+    dailyGoalStatusPending: {
+      borderColor: isDark ? "#B28A35" : colors.warning,
+      backgroundColor: isDark ? "#2D2514" : colors.warningSoft,
+    },
+    dailyGoalStatusNeutral: {
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+    },
+    dailyGoalStatusText: {
+      color: colors.textPrimary,
+      fontSize: 10,
+      fontWeight: "800",
+    },
+    dailyGoalMetrics: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: 8,
+    },
+    dailyGoalMetric: {
+      flexGrow: 1,
+      minWidth: 92,
+      gap: 2,
+    },
+    dailyGoalMetricLabel: {
+      color: colors.textMuted,
+      fontSize: 9,
+      fontWeight: "700",
+      textTransform: "uppercase",
+      letterSpacing: 0,
+    },
+    dailyGoalMetricValue: {
+      color: colors.textPrimary,
+      fontSize: 15,
+      fontWeight: "900",
+    },
+    dailyGoalPositive: {
+      color: colors.success,
+    },
+    dailyGoalNegative: {
+      color: colors.danger,
+    },
+    dailyGoalTrack: {
+      height: 5,
+      overflow: "hidden",
+      borderRadius: 999,
+      backgroundColor: isDark ? "#1D3040" : "#D9E6EA",
+    },
+    dailyGoalProgress: {
+      height: "100%",
+      borderRadius: 999,
+      backgroundColor: colors.warning,
+    },
+    dailyGoalProgressMet: {
+      backgroundColor: colors.success,
+    },
+    dailyGoalConfigure: {
+      color: colors.primary,
+      fontSize: 11,
+      fontWeight: "800",
     },
     systemTabs: {
       flexDirection: "row",

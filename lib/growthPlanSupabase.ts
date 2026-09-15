@@ -598,6 +598,23 @@ export async function getGrowthPlanSupabaseByAccount(accountId?: string | null):
   return normalizePlan(data, userId);
 }
 
+/** Lists every account plan so consolidated business tools can use one audited capital source. */
+export async function listGrowthPlansSupabase(): Promise<GrowthPlan[]> {
+  const userId = await getAuthedUserId();
+  const { data, error } = await supabaseBrowser
+    .from(TABLE)
+    .select("*")
+    .eq("user_id", userId)
+    .order("updated_at", { ascending: false });
+
+  if (error) {
+    console.error(LOG, "listGrowthPlansSupabase error", error);
+    throw error;
+  }
+
+  return (data ?? []).map((row) => normalizePlan(row, userId));
+}
+
 /** Crea/actualiza (upsert) el Growth Plan del usuario */
 export async function upsertGrowthPlanSupabase(
   plan: Partial<GrowthPlan>,

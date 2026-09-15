@@ -184,7 +184,7 @@ export async function getAllJournalEntries(
     fromDate: opts.fromDate,
     toDate: opts.toDate,
   });
-  if (serverRows && serverRows.length > 0) {
+  if (serverRows !== null) {
     return serverRows.map(rowToJournalEntry);
   }
 

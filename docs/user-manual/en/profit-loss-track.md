@@ -33,6 +33,21 @@ Have these numbers ready:
 
 If you do not know exact values yet, start with honest estimates. You can refine them later.
 
+## Trading Business Expenses setup
+Advanced users are taken to this setup after approving a Trading Business Plan. You can also reopen it from `Business setup` by selecting `Review plan-linked setup`.
+
+The setup has three parts:
+1. `Capital base`: choose one trading account or all trading accounts. Each amount is imported from that account's approved plan when available. If an account has no approved plan, verify and enter its opening capital yourself.
+2. `Operating rhythm`: choose the approved account plan that controls the business assumptions. Confirm the trader profile, trading days per month, average trades per month, education treatment, and owner compensation.
+3. `Expense budget`: set a monthly spending limit for each category.
+
+Important distinctions:
+- Initial capital is the operating base of the business. It is never counted as an expense.
+- The all-accounts option adds each displayed opening balance once. Review every amount before continuing.
+- Monthly category amounts in this setup are budgets, not real charges.
+- Add actual charges by vendor under `Stack & expenses`. This prevents a budget and a vendor bill from being counted twice.
+- If the Trading Business Plan has a scheduled withdrawal, the setup converts that cadence into a monthly owner-compensation target for review.
+
 ## Period filters
 At the top of the page, choose:
 - `Week`
@@ -73,7 +88,8 @@ Why it matters:
 - it is used for runway and business context
 
 What to enter:
-- the real capital base you are willing to treat as business capital
+- use `Review plan-linked setup` to choose one account or a consolidated total
+- verify the opening capital imported from each approved account plan
 
 Important:
 - this is not treated as an expense
@@ -205,13 +221,32 @@ What it is:
 Why it matters:
 - it helps estimate renewals and period spend
 
+#### Next renewal date
+This appears for recurring expenses.
+
+What it is:
+- the next date the vendor expects to charge the business
+
+How it works:
+- enter the next known charge date when you have it
+- if you leave it empty, the platform calculates the anniversary from the start date and billing cycle
+- annual items are identified as renewing next month as soon as the calendar enters the prior month, even when the date is more than 30 days away
+
+#### Renews automatically
+Keep this on when the vendor will charge the business again unless you cancel.
+
+Turn it off when:
+- the subscription is ending
+- the date entered is an expiration date instead of another charge
+
+The platform shows an expiration reminder instead of a renewal reminder when this setting is off.
+
 #### End date
 Use this when:
-- the item stops on a known date
-- a trial ends
-- a program has a fixed duration
+- an automatically renewing contract stops on a known date
+- a cancellation has already been scheduled
 
-If it is ongoing, you can leave the end date empty.
+This is not the next charge date. If the subscription is ongoing, leave the end date empty.
 
 #### Amortization months
 This appears for one-time items.
@@ -354,6 +389,9 @@ Use this list to see:
 - what will renew next
 - when it will renew
 - how much it costs
+- which non-renewing subscriptions expire next
+
+The platform creates an advance alert when a renewal or expiration falls in the next calendar month. It creates a closer critical reminder according to the alert window selected in Controls. Enabled in-app, push, and email channels receive the corresponding reminder once per alert stage.
 
 ### Vendor center
 This groups your active stack by vendor.

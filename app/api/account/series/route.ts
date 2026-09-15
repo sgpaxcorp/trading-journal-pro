@@ -6,8 +6,8 @@ import {
   normalizePlannedWithdrawals,
   normalizeWithdrawalSettings,
 } from "@/lib/growthPlanProjection";
-import { getServerPlanForUser } from "@/lib/serverFeatureAccess";
 import { requirePlatformAccess } from "@/lib/serverPlatformAccess";
+import { planFromEntitlements, planFromProfile } from "@/lib/planAccess";
 import { isTradingSessionDate, normalizeTradingInstrument } from "@/lib/tradingCalendar";
 import {
   advanceActualAccountBalance,
@@ -431,13 +431,23 @@ export async function GET(req: NextRequest) {
       Number.isFinite(requestedSeriesDays) && requestedSeriesDays > 0
         ? Math.min(2000, Math.max(1, Math.floor(requestedSeriesDays)))
         : 0;
-    const { data: pref } = await supabaseAdmin
-      .from("user_preferences")
-      .select("active_account_id")
-      .eq("user_id", userId)
-      .maybeSingle();
+    const pref = requestedAccountId
+      ? null
+      : (
+          await supabaseAdmin
+            .from("user_preferences")
+            .select("active_account_id")
+            .eq("user_id", userId)
+            .maybeSingle()
+        ).data;
     const accountId = requestedAccountId || (pref as any)?.active_account_id || null;
-    const plan = await getGrowthPlanRow(userId, email, accountId);
+
+    const [plan, journalRows, cashflows, latestImportedBalance] = await Promise.all([
+      getGrowthPlanRow(userId, email, accountId),
+      listJournalEntries(userId, email, accountId, fromDate, toDate),
+      listCashflowsForUser(userId, email, accountId, fromDate, toDate),
+      latestImportedEndingBalance(userId, accountId),
+    ]);
     const startingBalance = toNum(plan?.starting_balance ?? 0, 0);
     const targetBalance = toNum(plan?.target_balance ?? 0, 0);
     const dailyTargetPct = toNum(plan?.daily_target_pct ?? plan?.daily_goal_percent ?? 0, 0);
@@ -506,10 +516,6 @@ export async function GET(req: NextRequest) {
             startPeriodIndex: plannedWithdrawals[0]?.periodIndex ?? 1,
           }
         : null);
-
-    const journalRows = await listJournalEntries(userId, email, accountId, fromDate, toDate);
-    const cashflows = await listCashflowsForUser(userId, email, accountId, fromDate, toDate);
-    const latestImportedBalance = await latestImportedEndingBalance(userId, accountId);
 
     const pnlByDate: Record<string, number> = {};
     const endingBalanceByDate: Record<string, number> = {};
@@ -662,7 +668,11 @@ export async function GET(req: NextRequest) {
       (sum, [date, amount]) => sum + (!planStartIso || date >= planStartIso ? amount : 0),
       0
     );
-    const userPlan = await getServerPlanForUser(userId);
+    const entitlementPlan = planFromEntitlements(access.context.entitlements);
+    const userPlan =
+      entitlementPlan !== "none"
+        ? entitlementPlan
+        : planFromProfile(access.context.profile);
     const canSeeCashflow = userPlan === "advanced";
     const visibleCashflowNet = canSeeCashflow ? totalCashflowNet : 0;
     const calculatedCurrentBalance = startingBalance + totalTradingPnl + visibleCashflowNet;
@@ -673,6 +683,7 @@ export async function GET(req: NextRequest) {
     const trimPoints = (points: SeriesPoint[]) => (seriesDays > 0 ? points.slice(-seriesDays) : points);
 
     return NextResponse.json({
+      accountId,
       plan: {
         startingBalance,
         targetBalance,

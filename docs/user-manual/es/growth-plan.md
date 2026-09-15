@@ -5,6 +5,8 @@
 
 El Growth Plan es el centro de control de la plataforma. Define tu ritmo, límites de riesgo y fecha objetivo. Todos los widgets de progreso se calculan a partir de este plan.
 
+Cuando un usuario Advanced aprueba y guarda el plan completo, la plataforma abre `Gastos del Negocio de Trading`. Ese setup lleva el capital inicial y el ritmo operativo aprobados a Profit & Loss Track, donde el usuario decide si la vista del negocio representa una cuenta o todas las cuentas de trading.
+
 ## Tipo de cuenta: Personal o Funded
 Cada cuenta de trading debe tener un tipo operativo antes de crear su plan:
 1. **Personal** significa que el operador es dueño del capital. El balance inicial, la meta, aportaciones, retiros, apalancamiento y política interna de riesgo se configuran en el plan.

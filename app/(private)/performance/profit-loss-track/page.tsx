@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   ResponsiveContainer,
@@ -16,6 +16,9 @@ import {
 } from "recharts";
 
 import TopNav from "@/app/components/TopNav";
+import TradingBusinessExpensesSetup, {
+  type TradingBusinessExpensesSetupValue,
+} from "@/app/components/TradingBusinessExpensesSetup";
 import { useAuth } from "@/context/AuthContext";
 import { useAppSettings } from "@/lib/appSettings";
 import { resolveLocale } from "@/lib/i18n";
@@ -28,6 +31,7 @@ import {
   updateProfitLossCost,
   getProfitLossProfile,
   upsertProfitLossProfile,
+  deactivateConsolidatedProfitLossProfile,
   listProfitLossBudgets,
   listNormalizedTradeCosts,
   upsertProfitLossBudget,
@@ -48,6 +52,14 @@ import {
 import { listDailySnapshots, type DailySnapshotRow } from "@/lib/snapshotSupabase";
 import { getAllJournalEntries } from "@/lib/journalSupabase";
 import type { JournalEntry } from "@/lib/journalTypes";
+import { listGrowthPlansSupabase, type GrowthPlan } from "@/lib/growthPlanSupabase";
+import {
+  calendarDateToIso,
+  calendarDaysUntil,
+  getNextBillingEvent,
+  getRenewalNoticeStage,
+  type BillingEvent,
+} from "@/lib/profitLossRenewals";
 
 type RangeKey = "week" | "month" | "quarter" | "semiannual" | "annual";
 type TabKey = "summary" | "income" | "runway" | "stack" | "vendors" | "budget" | "controls";
@@ -60,7 +72,9 @@ type CostFormState = {
   amount: string;
   vendor: string;
   startsAt: string;
+  nextRenewalAt: string;
   endsAt: string;
+  autoRenews: boolean;
   notes: string;
   includeInBreakEven: boolean;
   isActive: boolean;
@@ -319,7 +333,9 @@ function blankCostForm(): CostFormState {
     amount: "",
     vendor: "",
     startsAt: "",
+    nextRenewalAt: "",
     endsAt: "",
+    autoRenews: true,
     notes: "",
     includeInBreakEven: true,
     isActive: true,
@@ -351,7 +367,9 @@ function formFromCost(cost: ProfitLossCost): CostFormState {
     amount: String(cost.amount ?? ""),
     vendor: cost.vendor ?? "",
     startsAt: cost.starts_at ?? "",
+    nextRenewalAt: cost.next_renewal_at ?? "",
     endsAt: cost.ends_at ?? "",
+    autoRenews: cost.auto_renews ?? true,
     notes: cost.notes ?? "",
     includeInBreakEven: cost.include_in_break_even ?? true,
     isActive: cost.is_active ?? true,
@@ -434,57 +452,41 @@ function costCountsInBreakEven(cost: ProfitLossCost, profile: ProfitLossProfile)
   return true;
 }
 
-function addBillingStep(date: Date, billingCycle: BillingCycle) {
-  const next = new Date(date);
-  switch (billingCycle) {
-    case "weekly":
-      next.setDate(next.getDate() + 7);
-      return next;
-    case "monthly":
-      next.setMonth(next.getMonth() + 1);
-      return next;
-    case "quarterly":
-      next.setMonth(next.getMonth() + 3);
-      return next;
-    case "semiannual":
-      next.setMonth(next.getMonth() + 6);
-      return next;
-    case "annual":
-      next.setFullYear(next.getFullYear() + 1);
-      return next;
-    default:
-      return null;
-  }
-}
-
 function nextRenewalDate(cost: ProfitLossCost, today: Date) {
-  if ((cost.is_active ?? true) === false) return null;
-  if (cost.billing_cycle === "one_time") return null;
-
-  const endDate = parseDate(cost.ends_at);
-  const baseDate = parseDate(cost.starts_at) ?? parseDate(cost.created_at);
-  if (!baseDate) return null;
-  if (endDate && endDate < today) return null;
-
-  let next = new Date(baseDate);
-  let guard = 0;
-  while (next < today && guard < 500) {
-    const stepped = addBillingStep(next, cost.billing_cycle);
-    if (!stepped) return null;
-    next = stepped;
-    guard += 1;
-  }
-
-  if (endDate && next > endDate) return null;
-  return next;
+  return getNextBillingEvent(cost, today)?.date ?? null;
 }
 
 function daysUntil(date: Date, today: Date) {
-  const target = new Date(date);
-  target.setHours(0, 0, 0, 0);
-  const current = new Date(today);
-  current.setHours(0, 0, 0, 0);
-  return Math.round((target.getTime() - current.getTime()) / (1000 * 60 * 60 * 24));
+  return calendarDaysUntil(date, today);
+}
+
+function billingEventLabel(
+  event: BillingEvent,
+  today: Date,
+  alertDays: number,
+  lang: "en" | "es"
+) {
+  const stage = getRenewalNoticeStage(event, today, alertDays);
+  const dateLabel = event.date.toLocaleDateString(lang === "es" ? "es-PR" : "en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+  const renewal = event.kind === "renewal";
+  if (stage === "next_month") {
+    return lang === "es"
+      ? `${renewal ? "Se renueva" : "Vence"} el mes que viene · ${dateLabel}`
+      : `${renewal ? "Renews" : "Expires"} next month · ${dateLabel}`;
+  }
+  if (stage === "due_soon") {
+    const days = calendarDaysUntil(event.date, today);
+    return lang === "es"
+      ? `${renewal ? "Se renueva" : "Vence"} en ${days} dia${days === 1 ? "" : "s"} · ${dateLabel}`
+      : `${renewal ? "Renews" : "Expires"} in ${days} day${days === 1 ? "" : "s"} · ${dateLabel}`;
+  }
+  return lang === "es"
+    ? `${renewal ? "Proxima renovacion" : "Vencimiento"} · ${dateLabel}`
+    : `${renewal ? "Next renewal" : "Expiration"} · ${dateLabel}`;
 }
 
 function downloadTextFile(filename: string, content: string) {
@@ -519,7 +521,7 @@ export default function ProfitLossTrackPage() {
   const { locale } = useAppSettings();
   const lang = resolveLocale(locale);
   const L = (en: string, es: string) => (lang === "es" ? es : en);
-  const { activeAccountId } = useTradingAccounts();
+  const { accounts, activeAccountId } = useTradingAccounts();
 
   const [rangeKey, setRangeKey] = useState<RangeKey>("month");
   const [tab, setTab] = useState<TabKey>("summary");
@@ -539,6 +541,12 @@ export default function ProfitLossTrackPage() {
   const [form, setForm] = useState<CostFormState>(blankCostForm());
   const [budgetForm, setBudgetForm] = useState<BudgetFormState>(blankBudgetForm());
   const [presetBusyKey, setPresetBusyKey] = useState<string | null>(null);
+  const [growthPlans, setGrowthPlans] = useState<GrowthPlan[]>([]);
+  const [businessSetupOpen, setBusinessSetupOpen] = useState(false);
+  const [businessSetupSaving, setBusinessSetupSaving] = useState(false);
+  const [businessSetupError, setBusinessSetupError] = useState<string | null>(null);
+  const [dataScopeRevision, setDataScopeRevision] = useState(0);
+  const businessSetupAutoOpenHandled = useRef(false);
 
   const today = useMemo(() => {
     const now = new Date();
@@ -565,15 +573,20 @@ export default function ProfitLossTrackPage() {
         setError(null);
         const nextDay = new Date(range.end);
         nextDay.setDate(nextDay.getDate() + 1);
-        const [costRows, profileRow, budgetRows, snapRows, entryRows, tradeRows] = await Promise.all([
-          listProfitLossCosts(user.id, activeAccountId),
+        const [profileRow, planRows] = await Promise.all([
           getProfitLossProfile(user.id, activeAccountId),
-          listProfitLossBudgets(user.id, activeAccountId),
-          listDailySnapshots(user.id, toIso(range.start), toIso(range.end), activeAccountId),
-          getAllJournalEntries(user.id, activeAccountId),
+          listGrowthPlansSupabase(),
+        ]);
+        const consolidated = profileRow.capital_scope === "all_accounts";
+        const scopedAccountId = consolidated ? null : activeAccountId;
+        const [costRows, budgetRows, snapRows, entryRows, tradeRows] = await Promise.all([
+          listProfitLossCosts(user.id, scopedAccountId, { allAccounts: consolidated }),
+          listProfitLossBudgets(user.id, scopedAccountId, { allAccounts: consolidated }),
+          listDailySnapshots(user.id, toIso(range.start), toIso(range.end), scopedAccountId),
+          getAllJournalEntries(user.id, scopedAccountId),
           listNormalizedTradeCosts({
             userId: user.id,
-            accountId: activeAccountId,
+            accountId: scopedAccountId,
             fromIso: `${toIso(range.start)}T00:00:00.000Z`,
             toIso: `${toIso(nextDay)}T00:00:00.000Z`,
           }),
@@ -586,6 +599,7 @@ export default function ProfitLossTrackPage() {
         setSnapshots(snapRows);
         setEntries(entryRows);
         setTradeCostRows(tradeRows);
+        setGrowthPlans(planRows);
       } catch (err: any) {
         if (cancelled) return;
         setError(err?.message || "Failed to load data");
@@ -598,11 +612,29 @@ export default function ProfitLossTrackPage() {
     return () => {
       cancelled = true;
     };
-  }, [user?.id, activeAccountId, range.start, range.end]);
+  }, [user?.id, activeAccountId, range.start, range.end, dataScopeRevision]);
 
   useEffect(() => {
     setBudgetForm(formFromBudgets(budgets));
   }, [budgets]);
+
+  useEffect(() => {
+    if (
+      businessSetupAutoOpenHandled.current ||
+      loading ||
+      plan !== "advanced" ||
+      !profile ||
+      accounts.length === 0
+    ) {
+      return;
+    }
+
+    businessSetupAutoOpenHandled.current = true;
+    const requestedFromPlan = window.location.hash === "#trading-business-expenses";
+    if (requestedFromPlan || !profile.setup_completed_at) {
+      setBusinessSetupOpen(true);
+    }
+  }, [accounts.length, loading, plan, profile]);
 
   const activeProfile = profile ?? buildDefaultProfitLossProfile(user?.id ?? "", activeAccountId);
   const periodTitle = periodLabel(rangeKey, L);
@@ -783,14 +815,18 @@ export default function ProfitLossTrackPage() {
   const upcomingRenewals = useMemo(() => {
     return costs
       .filter((cost) => (cost.is_active ?? true) !== false)
-      .map((cost) => ({
-        id: cost.id,
-        name: cost.name,
-        vendor: cost.vendor?.trim() || cost.name,
-        billingCycle: cost.billing_cycle,
-        amount: cost.amount,
-        renewal: nextRenewalDate(cost, today),
-      }))
+      .map((cost) => {
+        const event = getNextBillingEvent(cost, today);
+        return {
+          id: cost.id,
+          name: cost.name,
+          vendor: cost.vendor?.trim() || cost.name,
+          billingCycle: cost.billing_cycle,
+          amount: cost.amount,
+          event,
+          renewal: event?.date ?? null,
+        };
+      })
       .filter((row) => row.renewal)
       .sort((a, b) => a.renewal!.getTime() - b.renewal!.getTime());
   }, [costs, today]);
@@ -1072,19 +1108,25 @@ export default function ProfitLossTrackPage() {
     }
 
     upcomingRenewals.forEach((row) => {
-      if (!row.renewal) return;
-      const days = daysUntil(row.renewal, today);
-      if (days <= activeProfile.renewal_alert_days) {
+      if (!row.event) return;
+      const stage = getRenewalNoticeStage(row.event, today, activeProfile.renewal_alert_days);
+      if (stage === "due_soon") {
         alerts.push({
           level: "high",
-          title: L("Renewal within alert window", "Renovacion dentro de la ventana de alerta"),
-          detail: `${row.name} · ${currency(row.amount)} · ${toIso(row.renewal)}`,
+          title: L(
+            row.event.kind === "renewal" ? "Renewal within alert window" : "Expiration within alert window",
+            row.event.kind === "renewal" ? "Renovacion dentro de la ventana de alerta" : "Vencimiento dentro de la ventana de alerta"
+          ),
+          detail: `${row.name} · ${currency(row.amount)} · ${calendarDateToIso(row.event.date)}`,
         });
-      } else if (days <= 30) {
+      } else if (stage === "next_month" || stage === "upcoming") {
         alerts.push({
           level: "medium",
-          title: L("Renewal due within 30 days", "Renovacion dentro de 30 dias"),
-          detail: `${row.name} · ${currency(row.amount)} · ${toIso(row.renewal)}`,
+          title: L(
+            row.event.kind === "renewal" ? "Renewal due next month" : "Subscription expires next month",
+            row.event.kind === "renewal" ? "Renovacion el mes que viene" : "La suscripcion vence el mes que viene"
+          ),
+          detail: `${row.name} · ${currency(row.amount)} · ${calendarDateToIso(row.event.date)}`,
         });
       }
     });
@@ -1145,7 +1187,7 @@ export default function ProfitLossTrackPage() {
     const checklist = [
       {
         label: L("Business setup saved", "Setup del negocio guardado"),
-        done: !!profile,
+        done: !!profile?.setup_completed_at,
       },
       {
         label: L("Monthly budget exists", "Existe presupuesto mensual"),
@@ -1258,13 +1300,23 @@ export default function ProfitLossTrackPage() {
 
   async function reloadCosts() {
     if (!user?.id) return;
-    const refreshed = await listProfitLossCosts(user.id, activeAccountId);
+    const consolidated = activeProfile.capital_scope === "all_accounts";
+    const refreshed = await listProfitLossCosts(
+      user.id,
+      consolidated ? null : activeAccountId,
+      { allAccounts: consolidated }
+    );
     setCosts(refreshed);
   }
 
   async function reloadBudgets() {
     if (!user?.id) return;
-    const refreshed = await listProfitLossBudgets(user.id, activeAccountId);
+    const consolidated = activeProfile.capital_scope === "all_accounts";
+    const refreshed = await listProfitLossBudgets(
+      user.id,
+      consolidated ? null : activeAccountId,
+      { allAccounts: consolidated }
+    );
     setBudgets(refreshed);
   }
 
@@ -1276,13 +1328,84 @@ export default function ProfitLossTrackPage() {
       const saved = await upsertProfitLossProfile({
         ...profile,
         user_id: user.id,
-        account_id: activeAccountId ?? null,
+        account_id: profile.capital_scope === "all_accounts" ? null : activeAccountId ?? null,
       });
       setProfile(saved);
     } catch (err: any) {
       setError(err?.message || L("Failed to save setup", "No se pudo guardar el setup"));
     } finally {
       setProfileSaving(false);
+    }
+  }
+
+  async function saveTradingBusinessSetup(value: TradingBusinessExpensesSetupValue) {
+    if (!user?.id) return;
+    try {
+      setBusinessSetupSaving(true);
+      setBusinessSetupError(null);
+      setError(null);
+
+      const saved = await upsertProfitLossProfile({
+        ...activeProfile,
+        user_id: user.id,
+        account_id: value.capitalScope === "all_accounts" ? null : activeAccountId ?? null,
+        trader_type: value.traderType,
+        initial_capital: value.initialCapital,
+        capital_scope: value.capitalScope,
+        capital_account_ids: value.capitalAccountIds,
+        capital_allocation: value.capitalAllocation,
+        source_plan_account_id: value.sourcePlanAccountId,
+        setup_completed_at: new Date().toISOString(),
+        setup_version: 2,
+        trading_days_per_month: value.tradingDaysPerMonth,
+        avg_trades_per_month: value.averageTradesPerMonth,
+        include_education_in_break_even: value.includeEducationInBreakEven,
+        include_owner_pay_in_break_even: value.includeOwnerPayInBreakEven,
+        owner_pay_target_monthly: value.ownerPayTargetMonthly,
+      });
+
+      if (value.capitalScope === "single_account") {
+        await deactivateConsolidatedProfitLossProfile(user.id);
+      }
+
+      for (const [category, amount] of Object.entries(value.monthlyBudgets)) {
+        // Keep planned limits separate from actual vendor charges.
+        // eslint-disable-next-line no-await-in-loop
+        await upsertProfitLossBudget({
+          userId: user.id,
+          accountId: value.capitalScope === "all_accounts" ? null : activeAccountId,
+          category: category as CostCategory,
+          monthlyAmount: Number(amount ?? 0),
+        });
+      }
+
+      const refreshedBudgets = await listProfitLossBudgets(
+        user.id,
+        value.capitalScope === "all_accounts" ? null : activeAccountId,
+        { allAccounts: value.capitalScope === "all_accounts" }
+      );
+      setProfile(saved);
+      setBudgets(refreshedBudgets);
+      setBusinessSetupOpen(false);
+      setTab("stack");
+      setDataScopeRevision((current) => current + 1);
+      if (window.location.hash === "#trading-business-expenses") {
+        window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
+      }
+    } catch (err: any) {
+      const message = err?.message || L("Failed to save business setup", "No se pudo guardar el setup del negocio");
+      setBusinessSetupError(message);
+      setError(message);
+    } finally {
+      setBusinessSetupSaving(false);
+    }
+  }
+
+  function closeTradingBusinessSetup() {
+    setBusinessSetupOpen(false);
+    setBusinessSetupError(null);
+    if (window.location.hash === "#trading-business-expenses") {
+      window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
     }
   }
 
@@ -1298,7 +1421,7 @@ export default function ProfitLossTrackPage() {
         // eslint-disable-next-line no-await-in-loop
         await upsertProfitLossBudget({
           userId: user.id,
-          accountId: activeAccountId,
+          accountId: activeProfile.capital_scope === "all_accounts" ? null : activeAccountId,
           category,
           monthlyAmount: Number.isFinite(amount) ? amount : 0,
         });
@@ -1593,7 +1716,9 @@ export default function ProfitLossTrackPage() {
         amount,
         vendor: form.vendor || null,
         starts_at: form.startsAt || null,
-        ends_at: form.endsAt || null,
+        next_renewal_at: form.billingCycle === "one_time" ? null : form.nextRenewalAt || null,
+        ends_at: form.billingCycle !== "one_time" && form.autoRenews ? form.endsAt || null : null,
+        auto_renews: form.billingCycle !== "one_time" && form.autoRenews,
         notes: form.notes || null,
         preset_key: form.presetKey || null,
         is_active: form.isActive,
@@ -1616,7 +1741,9 @@ export default function ProfitLossTrackPage() {
           amount: patch.amount,
           vendor: patch.vendor,
           startsAt: patch.starts_at,
+          nextRenewalAt: patch.next_renewal_at,
           endsAt: patch.ends_at,
+          autoRenews: patch.auto_renews,
           notes: patch.notes,
           presetKey: patch.preset_key,
           isActive: patch.is_active,
@@ -1763,6 +1890,20 @@ export default function ProfitLossTrackPage() {
   return (
     <main className="min-h-screen bg-slate-950 text-slate-50">
       <TopNav />
+      <TradingBusinessExpensesSetup
+        open={businessSetupOpen}
+        lang={lang as "en" | "es"}
+        accounts={accounts}
+        plans={growthPlans}
+        activeAccountId={activeAccountId}
+        profile={activeProfile}
+        budgets={budgets}
+        currentExpenseCount={costs.filter((cost) => (cost.is_active ?? true) !== false).length}
+        saving={businessSetupSaving}
+        error={businessSetupError}
+        onClose={closeTradingBusinessSetup}
+        onSave={saveTradingBusinessSetup}
+      />
       <div className="max-w-7xl mx-auto px-6 md:px-10 py-10">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
@@ -1834,14 +1975,26 @@ export default function ProfitLossTrackPage() {
                   )}
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={saveProfile}
-                disabled={profileSaving || !profile}
-                className="rounded-xl bg-emerald-400 px-4 py-2 text-xs font-semibold text-slate-950 hover:bg-emerald-300 disabled:opacity-60"
-              >
-                {profileSaving ? L("Saving...", "Guardando...") : L("Save setup", "Guardar setup")}
-              </button>
+              <div className="flex flex-wrap justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setBusinessSetupError(null);
+                    setBusinessSetupOpen(true);
+                  }}
+                  className="rounded-xl border border-cyan-300/40 bg-cyan-300/10 px-4 py-2 text-xs font-semibold text-cyan-100 transition hover:border-cyan-200"
+                >
+                  {L("Review plan-linked setup", "Revisar setup conectado al plan")}
+                </button>
+                <button
+                  type="button"
+                  onClick={saveProfile}
+                  disabled={profileSaving || !profile}
+                  className="rounded-xl bg-emerald-400 px-4 py-2 text-xs font-semibold text-slate-950 hover:bg-emerald-300 disabled:opacity-60"
+                >
+                  {profileSaving ? L("Saving...", "Guardando...") : L("Save setup", "Guardar setup")}
+                </button>
+              </div>
             </div>
 
             <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -1867,16 +2020,18 @@ export default function ProfitLossTrackPage() {
 
               <label className="space-y-1 text-xs">
                 <span className="text-slate-400">{L("Initial business capital", "Capital inicial del negocio")}</span>
-                <input
-                  value={String(activeProfile.initial_capital ?? 0)}
-                  onChange={(e) =>
-                    setProfile((prev) => ({
-                      ...(prev ?? buildDefaultProfitLossProfile(user?.id ?? "", activeAccountId)),
-                      initial_capital: Number(e.target.value || 0),
-                    }))
-                  }
-                  className="w-full rounded-lg border border-slate-700 bg-slate-950/70 px-3 py-2 text-sm"
-                />
+                <button
+                  type="button"
+                  onClick={() => setBusinessSetupOpen(true)}
+                  className="w-full rounded-lg border border-slate-700 bg-slate-950/70 px-3 py-2 text-left text-sm transition hover:border-cyan-300/60"
+                >
+                  <span className="block font-semibold">{currency(activeProfile.initial_capital)}</span>
+                  <span className="mt-0.5 block text-[10px] text-slate-500">
+                    {activeProfile.capital_scope === "all_accounts"
+                      ? L(`${activeProfile.capital_account_ids.length} accounts consolidated`, `${activeProfile.capital_account_ids.length} cuentas consolidadas`)
+                      : L("One selected account", "Una cuenta seleccionada")}
+                  </span>
+                </button>
               </label>
 
               <label className="space-y-1 text-xs">
@@ -2329,6 +2484,37 @@ export default function ProfitLossTrackPage() {
                                 ? ` · ${L("Amortization", "Amortizacion")}: ${defaultAmortizationMonths(cost)}`
                                 : ""}
                             </p>
+                            {cost.billing_cycle !== "one_time" && (() => {
+                              const event = getNextBillingEvent(cost, today);
+                              if (!event) {
+                                return (
+                                  <p className="mt-2 text-[11px] text-amber-200/80">
+                                    {L(
+                                      "Add the next renewal date to activate reminders.",
+                                      "Anade la proxima fecha de renovacion para activar avisos."
+                                    )}
+                                  </p>
+                                );
+                              }
+                              const stage = getRenewalNoticeStage(
+                                event,
+                                today,
+                                activeProfile.renewal_alert_days
+                              );
+                              return (
+                                <p
+                                  className={`mt-2 text-[11px] font-semibold ${
+                                    stage === "due_soon"
+                                      ? "text-rose-300"
+                                      : stage === "next_month"
+                                        ? "text-amber-200"
+                                        : "text-cyan-200"
+                                  }`}
+                                >
+                                  {billingEventLabel(event, today, activeProfile.renewal_alert_days, lang)}
+                                </p>
+                              );
+                            })()}
                           </div>
                           <div className="text-right">
                             <p className="text-sm font-semibold">{currency(cost.amount)}</p>
@@ -2416,7 +2602,19 @@ export default function ProfitLossTrackPage() {
                     </select>
                     <select
                       value={form.billingCycle}
-                      onChange={(e) => setForm((prev) => ({ ...prev, billingCycle: e.target.value as BillingCycle }))}
+                      onChange={(e) => {
+                        const billingCycle = e.target.value as BillingCycle;
+                        setForm((prev) => ({
+                          ...prev,
+                          billingCycle,
+                          autoRenews:
+                            billingCycle === "one_time"
+                              ? false
+                              : prev.billingCycle === "one_time"
+                                ? true
+                                : prev.autoRenews,
+                        }));
+                      }}
                       className="rounded-lg border border-slate-700 bg-slate-950/70 px-3 py-2 text-sm"
                     >
                       {(Object.keys(CYCLE_LABELS) as BillingCycle[]).map((key) => (
@@ -2440,20 +2638,71 @@ export default function ProfitLossTrackPage() {
                       className="rounded-lg border border-slate-700 bg-slate-950/70 px-3 py-2 text-sm"
                     />
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <input
-                      type="date"
-                      value={form.startsAt}
-                      onChange={(e) => setForm((prev) => ({ ...prev, startsAt: e.target.value }))}
-                      className="rounded-lg border border-slate-700 bg-slate-950/70 px-3 py-2 text-sm"
-                    />
-                    <input
-                      type="date"
-                      value={form.endsAt}
-                      onChange={(e) => setForm((prev) => ({ ...prev, endsAt: e.target.value }))}
-                      className="rounded-lg border border-slate-700 bg-slate-950/70 px-3 py-2 text-sm"
-                    />
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <label className="space-y-1.5">
+                      <span className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
+                        {form.billingCycle === "one_time"
+                          ? L("Purchase date", "Fecha de compra")
+                          : L("Subscription start date", "Inicio de la suscripcion")}
+                      </span>
+                      <input
+                        type="date"
+                        value={form.startsAt}
+                        onChange={(e) => setForm((prev) => ({ ...prev, startsAt: e.target.value }))}
+                        className="w-full rounded-lg border border-slate-700 bg-slate-950/70 px-3 py-2 text-sm"
+                      />
+                    </label>
+                    {form.billingCycle !== "one_time" && (
+                      <label className="space-y-1.5">
+                        <span className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
+                          {form.autoRenews
+                            ? L("Next renewal date", "Proxima fecha de renovacion")
+                            : L("Expiration date", "Fecha de vencimiento")}
+                        </span>
+                        <input
+                          type="date"
+                          value={form.nextRenewalAt}
+                          onChange={(e) => setForm((prev) => ({ ...prev, nextRenewalAt: e.target.value }))}
+                          className="w-full rounded-lg border border-slate-700 bg-slate-950/70 px-3 py-2 text-sm"
+                        />
+                      </label>
+                    )}
                   </div>
+                  {form.billingCycle !== "one_time" && (
+                    <div className="rounded-xl border border-cyan-400/20 bg-cyan-400/5 px-4 py-3 space-y-3">
+                      <label className="flex items-center justify-between gap-3">
+                        <span>
+                          <span className="block text-sm font-semibold text-slate-200">
+                            {L("Renews automatically", "Se renueva automaticamente")}
+                          </span>
+                          <span className="mt-0.5 block text-[11px] text-slate-500">
+                            {L(
+                              "The platform will calculate future renewals and warn you before the next charge.",
+                              "La plataforma calculara futuras renovaciones y te avisara antes del proximo cobro."
+                            )}
+                          </span>
+                        </span>
+                        <input
+                          type="checkbox"
+                          checked={form.autoRenews}
+                          onChange={(e) => setForm((prev) => ({ ...prev, autoRenews: e.target.checked }))}
+                        />
+                      </label>
+                      {form.autoRenews && (
+                        <label className="block space-y-1.5">
+                          <span className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
+                            {L("Contract end or cancellation date (optional)", "Fin de contrato o cancelacion (opcional)")}
+                          </span>
+                          <input
+                            type="date"
+                            value={form.endsAt}
+                            onChange={(e) => setForm((prev) => ({ ...prev, endsAt: e.target.value }))}
+                            className="w-full rounded-lg border border-slate-700 bg-slate-950/70 px-3 py-2 text-sm"
+                          />
+                        </label>
+                      )}
+                    </div>
+                  )}
                   {form.billingCycle === "one_time" && (
                     <input
                       value={form.amortizationMonths}
@@ -2524,8 +2773,8 @@ export default function ProfitLossTrackPage() {
                   hint: L("Grouped from your active stack", "Agrupados desde tu stack activo"),
                 },
                 {
-                  label: L("Next renewal", "Proxima renovacion"),
-                  value: upcomingRenewals[0]?.renewal ? toIso(upcomingRenewals[0].renewal) : "--",
+                  label: L("Next billing event", "Proximo evento de cobro"),
+                  value: upcomingRenewals[0]?.event ? calendarDateToIso(upcomingRenewals[0].event.date) : "--",
                   hint: upcomingRenewals[0]?.name ?? L("No recurring renewals", "No hay renovaciones recurrentes"),
                 },
                 {
@@ -2584,7 +2833,18 @@ export default function ProfitLossTrackPage() {
                           </div>
                           <div className="text-right">
                             <p className="text-sm font-semibold">{currency(row.amount)}</p>
-                            <p className="text-[11px] text-slate-500 mt-1">{row.renewal ? toIso(row.renewal) : "--"}</p>
+                            <p
+                              className={`mt-1 text-[11px] ${
+                                row.event &&
+                                getRenewalNoticeStage(row.event, today, activeProfile.renewal_alert_days) === "next_month"
+                                  ? "font-semibold text-amber-200"
+                                  : "text-slate-500"
+                              }`}
+                            >
+                              {row.event
+                                ? billingEventLabel(row.event, today, activeProfile.renewal_alert_days, lang)
+                                : "--"}
+                            </p>
                           </div>
                         </div>
                       </div>

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import OpenAI from "openai";
+import { createHash } from "node:crypto";
 
 import { getAuthUser } from "@/lib/authServer";
 import { countResponseFileSearchCalls, recordAiUsage, requireAiBudget } from "@/lib/aiUsageServer";
@@ -29,6 +30,23 @@ const MODEL =
 
 function cleanQuestion(value: unknown) {
   return String(value ?? "").trim().slice(0, 3_000);
+}
+
+function normalizedQuestion(value: unknown) {
+  return cleanQuestion(value).replace(/\s+/g, " ").toLocaleLowerCase();
+}
+
+function contextSignature(value: unknown) {
+  return createHash("sha256").update(JSON.stringify(value ?? {})).digest("hex");
+}
+
+function emptyResponseReason(response: any) {
+  const reason = String(response?.incomplete_details?.reason ?? response?.status ?? "unknown").trim();
+  return reason || "unknown";
+}
+
+function responseNeedsRetry(response: any) {
+  return !String(response?.output_text ?? "").trim() || response?.status === "incomplete";
 }
 
 function normalizeTicker(value: unknown) {
@@ -88,6 +106,8 @@ async function loadPriorAgentMemory(userId: string, caseId?: string | null) {
     createdAt: row.created_at,
     question: row.payload?.question ?? null,
     answer: row.payload?.answer ?? null,
+    reportId: row.payload?.reportId ?? null,
+    contextSignature: row.payload?.contextSignature ?? null,
     note: row.payload?.note ?? null,
     sourceType: row.payload?.sourceType ?? null,
     sourceLabel: row.payload?.sourceLabel ?? null,
@@ -158,17 +178,6 @@ export async function POST(req: Request) {
     const caseId = String(body?.caseId ?? "").trim() || null;
     const clientContext = body?.clientContext && typeof body.clientContext === "object" ? body.clientContext : {};
 
-    const quota = await checkNeuroQuota(authUser.userId, "agent_chat");
-    if (!quota.allowed) {
-      return NextResponse.json(
-        { error: "Monthly Neuro agent question quota exceeded.", quota },
-        { status: 429 }
-      );
-    }
-
-    const budgetGate = await requireAiBudget({ userId: authUser.userId, category: "market_intelligence" });
-    if (budgetGate) return budgetGate;
-
     const researchCase = caseId ? await getNeuroCase(authUser.userId, caseId) : null;
     if (caseId && !researchCase) {
       return NextResponse.json({ error: "Case not found." }, { status: 404 });
@@ -180,6 +189,43 @@ export async function POST(req: Request) {
       loadFilingMetadata(authUser.userId, tickers),
       loadPriorAgentMemory(authUser.userId, caseId),
     ]);
+    const reportId = String(body?.reportId ?? "").trim() || null;
+    const clientContextSignature = contextSignature(clientContext);
+    const cachedAnswer = priorMemory.find(
+      (memory: any) =>
+        normalizedQuestion(memory?.question) === normalizedQuestion(question) &&
+        String(memory?.answer ?? "").trim() &&
+        (memory?.reportId ?? null) === reportId &&
+        memory?.contextSignature === clientContextSignature
+    );
+    if (cachedAnswer) {
+      return NextResponse.json({
+        answer: cachedAnswer.answer,
+        responseId: null,
+        model: MODEL,
+        webSources: [],
+        cached: true,
+        groundedContext: {
+          caseLoaded: Boolean(researchCase),
+          reports: reports.length,
+          filings: filings.length,
+          vectorStores: vectorStoreIdsFrom(filings, reports).length,
+          priorMemory: priorMemory.length,
+        },
+      });
+    }
+
+    const quota = await checkNeuroQuota(authUser.userId, "agent_chat");
+    if (!quota.allowed) {
+      return NextResponse.json(
+        { error: "Monthly Neuro agent question quota exceeded.", quota },
+        { status: 429 }
+      );
+    }
+
+    const budgetGate = await requireAiBudget({ userId: authUser.userId, category: "market_intelligence" });
+    if (budgetGate) return budgetGate;
+
     const vectorStoreIds = vectorStoreIdsFrom(filings, reports);
     const fileSearchTools =
       vectorStoreIds.length > 0
@@ -198,30 +244,44 @@ export async function POST(req: Request) {
       ...(webSearchTool ? ["web_search_call.action.sources"] : []),
     ];
 
-    const response = await client.responses.create({
-      model: MODEL,
-      reasoning: neuroReasoningConfig(MODEL) as any,
-      instructions: NEURO_ANALYSIS_QA_SYSTEM_PROMPT,
-      input: buildNeuroAnalysisQuestionInput({
+    const responseInput = buildNeuroAnalysisQuestionInput({
         question,
         caseContext: researchCase,
         latestReports: reports,
         filings,
         priorMemory,
         clientContext,
-      }),
-      tools,
-      include: include.length > 0 ? (include as any) : undefined,
-      max_output_tokens: 2200,
-      metadata: {
-        feature: "neuro_analysis_agent",
-        user_id: authUser.userId,
-        case_id: caseId ?? "",
-      },
-    });
+      });
+    const createResponse = (reasoningEffort?: string) =>
+      client.responses.create({
+        model: MODEL,
+        reasoning: neuroReasoningConfig(MODEL, reasoningEffort) as any,
+        instructions: NEURO_ANALYSIS_QA_SYSTEM_PROMPT,
+        input: responseInput,
+        tools,
+        include: include.length > 0 ? (include as any) : undefined,
+        max_output_tokens: 3500,
+        metadata: {
+          feature: "neuro_analysis_agent",
+          user_id: authUser.userId,
+          case_id: caseId ?? "",
+        },
+      });
+
+    let response = await createResponse();
+    if (responseNeedsRetry(response)) {
+      console.warn(
+        `[neuro-analysis/agent] Unusable model output (${emptyResponseReason(response)}); retrying with low reasoning.`
+      );
+      response = await createResponse("low");
+    }
+    if (responseNeedsRetry(response)) {
+      throw new Error(`The research agent did not produce a final answer (${emptyResponseReason(response)}).`);
+    }
 
     const webSources = extractNeuroWebSources(response);
     const answer = appendNeuroWebSources(sanitizeNeuroAnalysisOutput(response.output_text), webSources);
+    if (!answer.trim()) throw new Error("The research agent produced an empty answer.");
     const tokenUsage = neuroResponseTokenUsage(response);
 
     await insertNeuroSnapshot({
@@ -231,6 +291,8 @@ export async function POST(req: Request) {
       payload: {
         question,
         answer,
+        reportId,
+        contextSignature: clientContextSignature,
         responseId: response.id,
         model: String((response as any)?.model || MODEL),
         tickers,

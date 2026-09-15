@@ -9,6 +9,7 @@ import {
 import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
 import TopNav from "@/app/components/TopNav";
+import SubscriptionSummaryCard from "@/app/components/SubscriptionSummaryCard";
 import { useAuth } from "@/context/AuthContext";
 import { supabaseBrowser } from "@/lib/supaBaseClient";
 import { useAppSettings } from "@/lib/appSettings";
@@ -233,21 +234,6 @@ export default function AccountPage() {
     );
   }
 
-  const planRaw =
-    (user as any).plan ||
-    (user as any).subscriptionPlan ||
-    user.user_metadata?.plan ||
-    "standard";
-
-  const planLabel =
-    typeof planRaw === "string"
-      ? planRaw.toLowerCase() === "standard"
-        ? L("Standard", "Estándar")
-        : planRaw.toLowerCase() === "advanced"
-        ? "Advance"
-        : planRaw.charAt(0).toUpperCase() + planRaw.slice(1)
-      : L("Standard", "Estándar");
-
   const initials =
     (profile.firstName || profile.email || user.email || "T")
       .split(" ")
@@ -425,7 +411,7 @@ export default function AccountPage() {
     <main className="min-h-screen bg-slate-950 text-slate-50">
       <TopNav />
 
-      <div className="max-w-5xl mx-auto px-6 md:px-8 py-8 space-y-6">
+      <div className="mx-auto max-w-[1400px] space-y-6 px-4 py-8 sm:px-6 md:px-8">
         {/* Header */}
         <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
@@ -442,8 +428,9 @@ export default function AccountPage() {
           </div>
 
           <div className="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-4 py-2 text-xs text-emerald-200">
-            <span className="font-semibold text-emerald-100">{L("Current plan:", "Plan actual:")}</span>{" "}
-            {planLabel}
+            <span className="font-semibold text-emerald-100">
+              {L("Profile, membership & billing", "Perfil, membresía y facturación")}
+            </span>
           </div>
         </header>
 
@@ -502,6 +489,8 @@ export default function AccountPage() {
             {L("Billing history", "Historial de facturación")}
           </a>
         </nav>
+
+        <SubscriptionSummaryCard />
 
         {/* Layout: profile form + business milestones card */}
         <div className="grid gap-6 md:grid-cols-[minmax(0,1.25fr)_minmax(0,0.9fr)] mt-2">
@@ -630,10 +619,10 @@ export default function AccountPage() {
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between pt-2 border-t border-slate-800 mt-2 gap-3">
                 <div className="text-[11px] text-slate-500 space-y-1">
                   <p>
-                    {L("Current plan:", "Plan actual:")}{" "}
-                    <span className="text-emerald-300 font-medium">
-                      {planLabel}
-                    </span>
+                    {L(
+                      "Subscription details are consolidated above and secured by Stripe.",
+                      "Los detalles de la suscripción están consolidados arriba y protegidos por Stripe."
+                    )}
                   </p>
                 </div>
                 <button

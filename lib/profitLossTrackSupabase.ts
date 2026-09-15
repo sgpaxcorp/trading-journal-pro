@@ -27,6 +27,12 @@ export type ProfitLossProfile = {
   account_id?: string | null;
   trader_type: TraderType;
   initial_capital: number;
+  capital_scope: "single_account" | "all_accounts";
+  capital_account_ids: string[];
+  capital_allocation: Record<string, number>;
+  source_plan_account_id?: string | null;
+  setup_completed_at?: string | null;
+  setup_version: number;
   trading_days_per_month: number;
   avg_trades_per_month: number;
   include_education_in_break_even: boolean;
@@ -65,7 +71,9 @@ export type ProfitLossCost = {
   amount: number;
   currency?: string | null;
   starts_at?: string | null;
+  next_renewal_at?: string | null;
   ends_at?: string | null;
+  auto_renews?: boolean;
   notes?: string | null;
   preset_key?: string | null;
   is_active?: boolean;
@@ -114,7 +122,9 @@ function mapCostRow(row: any): ProfitLossCost {
     amount: toNumber(row.amount),
     currency: row.currency ?? "USD",
     starts_at: row.starts_at ?? null,
+    next_renewal_at: row.next_renewal_at ?? null,
     ends_at: row.ends_at ?? null,
+    auto_renews: row.auto_renews ?? true,
     notes: row.notes ?? null,
     preset_key: row.preset_key ?? null,
     is_active: row.is_active ?? true,
@@ -126,12 +136,26 @@ function mapCostRow(row: any): ProfitLossCost {
 }
 
 function mapProfileRow(row: any, userId: string, accountId?: string | null): ProfitLossProfile {
+  const rawAllocation =
+    row?.capital_allocation && typeof row.capital_allocation === "object"
+      ? row.capital_allocation
+      : {};
   return {
     id: row?.id,
     user_id: row?.user_id ?? userId,
     account_id: row?.account_id ?? accountId ?? null,
     trader_type: normalizeTraderType(row?.trader_type),
     initial_capital: toNumber(row?.initial_capital),
+    capital_scope: row?.capital_scope === "all_accounts" ? "all_accounts" : "single_account",
+    capital_account_ids: Array.isArray(row?.capital_account_ids)
+      ? row.capital_account_ids.map(String).filter(Boolean)
+      : [],
+    capital_allocation: Object.fromEntries(
+      Object.entries(rawAllocation).map(([key, value]) => [key, Math.max(0, toNumber(value))])
+    ),
+    source_plan_account_id: row?.source_plan_account_id ?? null,
+    setup_completed_at: row?.setup_completed_at ?? null,
+    setup_version: Math.max(1, Math.round(toNumber(row?.setup_version, 1))),
     trading_days_per_month: Math.max(1, Math.round(toNumber(row?.trading_days_per_month, 20))),
     avg_trades_per_month: Math.max(1, Math.round(toNumber(row?.avg_trades_per_month, 40))),
     include_education_in_break_even: row?.include_education_in_break_even ?? true,
@@ -166,6 +190,12 @@ export function buildDefaultProfitLossProfile(userId: string, accountId?: string
     account_id: accountId ?? null,
     trader_type: "minimal",
     initial_capital: 0,
+    capital_scope: "single_account",
+    capital_account_ids: accountId ? [accountId] : [],
+    capital_allocation: {},
+    source_plan_account_id: accountId ?? null,
+    setup_completed_at: null,
+    setup_version: 1,
     trading_days_per_month: 20,
     avg_trades_per_month: 40,
     include_education_in_break_even: true,
@@ -182,6 +212,20 @@ export function buildDefaultProfitLossProfile(userId: string, accountId?: string
 
 export async function getProfitLossProfile(userId: string, accountId?: string | null) {
   if (!userId) return buildDefaultProfitLossProfile("", accountId ?? null);
+
+  if (accountId) {
+    const { data: consolidated, error: consolidatedError } = await supabaseBrowser
+      .from(PROFILE_TABLE)
+      .select("*")
+      .eq("user_id", userId)
+      .is("account_id", null)
+      .eq("capital_scope", "all_accounts")
+      .limit(1)
+      .maybeSingle();
+
+    if (consolidatedError) throw consolidatedError;
+    if (consolidated) return mapProfileRow(consolidated, userId, null);
+  }
 
   let specificQuery = supabaseBrowser
     .from(PROFILE_TABLE)
@@ -221,6 +265,12 @@ export async function upsertProfitLossProfile(profile: ProfitLossProfile) {
     account_id: profile.account_id ?? null,
     trader_type: profile.trader_type,
     initial_capital: profile.initial_capital,
+    capital_scope: profile.capital_scope,
+    capital_account_ids: profile.capital_account_ids,
+    capital_allocation: profile.capital_allocation,
+    source_plan_account_id: profile.source_plan_account_id ?? null,
+    setup_completed_at: profile.setup_completed_at ?? null,
+    setup_version: profile.setup_version,
     trading_days_per_month: profile.trading_days_per_month,
     avg_trades_per_month: profile.avg_trades_per_month,
     include_education_in_break_even: profile.include_education_in_break_even,
@@ -272,12 +322,39 @@ export async function upsertProfitLossProfile(profile: ProfitLossProfile) {
   return mapProfileRow(data, profile.user_id, profile.account_id ?? null);
 }
 
-export async function listProfitLossBudgets(userId: string, accountId?: string | null) {
+export async function deactivateConsolidatedProfitLossProfile(userId: string) {
+  if (!userId) return;
+  const { error } = await supabaseBrowser
+    .from(PROFILE_TABLE)
+    .update({
+      capital_scope: "single_account",
+      capital_account_ids: [],
+      capital_allocation: {},
+      source_plan_account_id: null,
+      initial_capital: 0,
+      setup_completed_at: null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("user_id", userId)
+    .is("account_id", null)
+    .eq("capital_scope", "all_accounts");
+
+  if (error) throw error;
+}
+
+export async function listProfitLossBudgets(
+  userId: string,
+  accountId?: string | null,
+  options?: { allAccounts?: boolean }
+) {
   if (!userId) return [] as ProfitLossBudget[];
 
   let query = supabaseBrowser.from(BUDGETS_TABLE).select("*").eq("user_id", userId);
 
-  if (accountId) {
+  if (options?.allAccounts) {
+    // A consolidated business budget can be stored globally. Account budgets
+    // are summed only when no global category override exists.
+  } else if (accountId) {
     query = query.or(`account_id.eq.${accountId},account_id.is.null`);
   } else {
     query = query.is("account_id", null);
@@ -293,10 +370,29 @@ export async function listProfitLossBudgets(userId: string, accountId?: string |
   });
 
   const byCategory = new Map<CostCategory, ProfitLossBudget>();
-  ordered.forEach((row: any) => {
-    const mapped = mapBudgetRow(row);
-    byCategory.set(mapped.category, mapped);
-  });
+  if (options?.allAccounts) {
+    const grouped = new Map<CostCategory, ProfitLossBudget[]>();
+    ordered.forEach((row: any) => {
+      const mapped = mapBudgetRow(row);
+      grouped.set(mapped.category, [...(grouped.get(mapped.category) ?? []), mapped]);
+    });
+    grouped.forEach((rows, category) => {
+      const globalBudget = rows.find((row) => !row.account_id);
+      byCategory.set(
+        category,
+        globalBudget ?? {
+          ...rows[0],
+          account_id: null,
+          monthly_amount: rows.reduce((sum, row) => sum + row.monthly_amount, 0),
+        }
+      );
+    });
+  } else {
+    ordered.forEach((row: any) => {
+      const mapped = mapBudgetRow(row);
+      byCategory.set(mapped.category, mapped);
+    });
+  }
 
   return Array.from(byCategory.values());
 }
@@ -359,11 +455,17 @@ export async function upsertProfitLossBudget(params: {
   return mapBudgetRow(data);
 }
 
-export async function listProfitLossCosts(userId: string, accountId?: string | null) {
+export async function listProfitLossCosts(
+  userId: string,
+  accountId?: string | null,
+  options?: { allAccounts?: boolean }
+) {
   if (!userId) return [] as ProfitLossCost[];
   let query = supabaseBrowser.from(COSTS_TABLE).select("*").eq("user_id", userId);
 
-  if (accountId) {
+  if (options?.allAccounts) {
+    // Consolidated mode intentionally includes global and account-specific costs.
+  } else if (accountId) {
     query = query.or(`account_id.eq.${accountId},account_id.is.null`);
   } else {
     query = query.is("account_id", null);
@@ -384,7 +486,9 @@ export async function createProfitLossCost(params: {
   amount: number;
   currency?: string | null;
   startsAt?: string | null;
+  nextRenewalAt?: string | null;
   endsAt?: string | null;
+  autoRenews?: boolean;
   notes?: string | null;
   presetKey?: string | null;
   isActive?: boolean;
@@ -403,7 +507,9 @@ export async function createProfitLossCost(params: {
       amount: params.amount,
       currency: params.currency ?? "USD",
       starts_at: params.startsAt ?? null,
+      next_renewal_at: params.nextRenewalAt ?? null,
       ends_at: params.endsAt ?? null,
+      auto_renews: params.autoRenews ?? true,
       notes: params.notes ?? null,
       preset_key: params.presetKey ?? null,
       is_active: params.isActive ?? true,
@@ -438,7 +544,9 @@ export async function updateProfitLossCost(userId: string, id: string, patch: Pa
       amount: patch.amount,
       currency: patch.currency,
       starts_at: patch.starts_at,
+      next_renewal_at: patch.next_renewal_at,
       ends_at: patch.ends_at,
+      auto_renews: patch.auto_renews,
       notes: patch.notes,
       preset_key: patch.preset_key,
       is_active: patch.is_active,

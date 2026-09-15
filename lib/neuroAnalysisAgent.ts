@@ -47,52 +47,9 @@ Output style:
 - Be direct, structured, and concise.
 - Prefer tables for portfolio and scenario summaries.
 - Use Spanish if the request is in Spanish; otherwise English.
-- Return only valid JSON. Do not wrap it in markdown fences.
-- The JSON must use this shape:
-{
-  "reportMarkdown": "complete user-facing report in markdown",
-  "investmentVerdict": {
-    "headline": "short verdict",
-    "action": "add_now | wait | hold | reduce | avoid | watchlist | provisional",
-    "valuationStatus": "undervalued | fairly_valued | overvalued | unknown",
-    "confidence": "high | medium | low",
-    "summary": "brief explanation"
-  },
-  "requiredEvidence": ["specific document or data needed next"],
-  "terminalProfile": {
-    "ticker": "AAPL",
-    "companyName": "Company name",
-    "instrumentType": "stock | ETF | fund",
-    "sector": "sector",
-    "industry": "industry",
-    "businessModel": "short summary",
-    "keyDrivers": ["driver"]
-  },
-  "companyVerdicts": [
-    {
-      "ticker": "AAPL",
-      "verdict": "add_now | wait | hold | reduce | avoid | watchlist | provisional",
-      "confidence": "high | medium | low",
-      "valuationStatus": "undervalued | fairly_valued | overvalued | unknown",
-      "rationale": ["evidence-based point"],
-      "missingEvidence": ["10-K", "10-Q"]
-    }
-  ],
-  "valuationLadder": [
-    {
-      "ticker": "AAPL",
-      "year": 2,
-      "bearIntrinsicValue": 0,
-      "baseIntrinsicValue": 0,
-      "bullIntrinsicValue": 0,
-      "baseUpsideToMarket": 0
-    }
-  ],
-  "riskFlags": [
-    { "type": "valuation | quality | documents | market | competition | balance_sheet | cash_flow", "severity": "low | medium | high", "message": "..." }
-  ],
-  "followUps": ["specific document or data needed next"]
-}
+- Return only the finished user-facing report in Markdown. Do not wrap it in JSON or code fences.
+- Keep the report under 1,800 words. Prioritize decision-relevant evidence over repetition.
+- Use no more than six of the strongest public sources when recent web evidence is needed.
 `.trim();
 
 export const NEURO_ANALYSIS_QA_SYSTEM_PROMPT = `
@@ -259,7 +216,7 @@ export function appendNeuroWebSources(report: string, sources: NeuroWebSource[])
   return `${report.trim()}\n\n## Public Web Sources\n${lines.join("\n")}`;
 }
 
-export function neuroReasoningConfig(model?: string) {
+export function neuroReasoningConfig(model?: string, requestedEffort?: string) {
   const modelName = String(model ?? "").toLowerCase();
   const supportsReasoning =
     modelName.startsWith("gpt-5") ||
@@ -267,7 +224,9 @@ export function neuroReasoningConfig(model?: string) {
     /^o\d/.test(modelName) ||
     modelName.startsWith("o-");
   if (!supportsReasoning) return undefined;
-  const effort = String(process.env.NEURO_ANALYSIS_REASONING_EFFORT ?? "high").trim().toLowerCase();
+  const effort = String(requestedEffort ?? process.env.NEURO_ANALYSIS_REASONING_EFFORT ?? "medium")
+    .trim()
+    .toLowerCase();
   if (!["low", "medium", "high", "xhigh"].includes(effort)) return undefined;
   return { effort };
 }

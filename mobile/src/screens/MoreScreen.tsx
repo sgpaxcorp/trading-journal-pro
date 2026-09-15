@@ -1,5 +1,5 @@
 import { Alert, Keyboard, Linking, Platform, Pressable, StyleSheet, Switch, Text, TextInput, View } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import Ionicons from "@expo/vector-icons/Ionicons";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { ScreenScaffold } from "../components/ScreenScaffold";

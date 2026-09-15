@@ -33,6 +33,21 @@ Ten listos estos números:
 
 Si todavía no conoces los valores exactos, empieza con estimados honestos. Luego los ajustas.
 
+## Setup de Trading Business Expenses
+Los usuarios Advanced pasan a este setup después de aprobar un Plan de Empresa de Trading. También puedes abrirlo desde `Business setup` seleccionando `Revisar setup conectado al plan`.
+
+El setup tiene tres partes:
+1. `Base de capital`: escoge una cuenta de trading o todas las cuentas. Cada monto se importa del plan aprobado de esa cuenta cuando está disponible. Si una cuenta no tiene un plan aprobado, verifica e ingresa tú mismo su capital inicial.
+2. `Ritmo operativo`: escoge el plan aprobado que controla los supuestos del negocio. Confirma el perfil operativo, días de trading al mes, promedio de trades al mes, tratamiento de educación y compensación del dueño.
+3. `Presupuesto de gastos`: define un límite mensual por categoría.
+
+Diferencias importantes:
+- El capital inicial es la base operativa del negocio. Nunca cuenta como gasto.
+- La opción de todas las cuentas suma una sola vez cada balance inicial mostrado. Verifica cada monto antes de continuar.
+- Los montos mensuales de este setup son presupuestos, no cargos reales.
+- Añade los cargos reales por proveedor en `Stack y gastos`. Así se evita contar dos veces un presupuesto y una factura.
+- Si el Plan de Empresa de Trading tiene un retiro programado, el setup convierte esa frecuencia en una meta mensual de compensación del dueño para que la revises.
+
 ## Filtros de periodo
 Arriba de la página puedes elegir:
 - `Week`
@@ -73,7 +88,8 @@ Por qué importa:
 - se usa para el runway y para el contexto financiero del negocio
 
 Qué debes poner:
-- la base real de capital que estás dispuesto a tratar como capital del negocio
+- usa `Revisar setup conectado al plan` para escoger una cuenta o un total consolidado
+- verifica el capital inicial importado desde cada plan aprobado
 
 Importante:
 - esto no se trata como gasto
@@ -205,13 +221,32 @@ Qué es:
 Por qué importa:
 - ayuda a estimar renovaciones y gasto por periodo
 
+#### Próxima fecha de renovación
+Esto aparece para gastos recurrentes.
+
+Qué es:
+- la próxima fecha en que el proveedor espera cobrarle al negocio
+
+Cómo funciona:
+- introduce la próxima fecha de cobro conocida cuando la tengas
+- si la dejas vacía, la plataforma calcula el aniversario usando la fecha de inicio y el ciclo de cobro
+- una suscripción anual se identifica como próxima a renovar desde que comienza el mes anterior, aunque falten más de 30 días
+
+#### Se renueva automáticamente
+Déjalo encendido cuando el proveedor volverá a cobrarle al negocio salvo que canceles.
+
+Apágalo cuando:
+- la suscripción va a terminar
+- la fecha introducida representa un vencimiento y no otro cobro
+
+Cuando está apagado, la plataforma muestra un aviso de vencimiento en vez de un aviso de renovación.
+
 #### End date
 Úsalo cuando:
-- el item termina en una fecha conocida
-- una prueba termina
-- un programa tiene duración fija
+- un contrato con renovación automática termina en una fecha conocida
+- ya programaste su cancelación
 
-Si sigue abierto, puedes dejar la fecha vacía.
+Esta no es la próxima fecha de cobro. Si la suscripción continúa, deja la fecha final vacía.
 
 #### Amortization months
 Esto aparece para gastos de una sola vez.
@@ -354,6 +389,9 @@ Esta pestaña te ayuda a controlar a quién le pagas y qué renovaciones se acer
 - qué se renueva primero
 - cuándo se renueva
 - cuánto cuesta
+- qué suscripciones sin renovación automática vencen próximamente
+
+La plataforma crea una alerta anticipada cuando una renovación o vencimiento cae durante el próximo mes calendario. Luego crea un recordatorio crítico más cercano según la ventana configurada en Controls. Los canales habilitados de aviso dentro de la plataforma, push y email reciben el recordatorio correspondiente una sola vez por etapa.
 
 ### Vendor center
 Agrupa tu stack activo por vendor.

@@ -5,6 +5,8 @@
 
 The Growth Plan is the control center of the platform. It defines your pace, risk limits, and target timeline. Every progress widget and goal calculation references this plan.
 
+After an Advanced user approves and saves the completed plan, the platform opens `Trading Business Expenses`. That setup carries the approved starting capital and operating rhythm into Profit & Loss Track, where the user chooses whether the business view represents one account or all trading accounts.
+
 ## Account type: Personal or Funded
 Every trading account must have one operating type before its plan is built:
 1. **Personal** means the operator owns the capital. Starting balance, target, contributions, withdrawals, leverage, and internal risk policy are configured in the plan.

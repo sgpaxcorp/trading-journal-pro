@@ -12,21 +12,28 @@ export async function GET(req: NextRequest) {
 
     const userId = access.context.userId;
 
-    const { data: accounts, error: listErr } = await supabaseAdmin
-      .from("trading_accounts")
-      .select(`
-        id,
-        user_id,
-        name,
-        broker,
-        account_type,
-        is_default,
-        created_at,
-        updated_at,
-        funded_profile:funded_account_profiles(*)
-      `)
-      .eq("user_id", userId)
-      .order("created_at", { ascending: true });
+    const [{ data: accounts, error: listErr }, { data: prefs }] = await Promise.all([
+      supabaseAdmin
+        .from("trading_accounts")
+        .select(`
+          id,
+          user_id,
+          name,
+          broker,
+          account_type,
+          is_default,
+          created_at,
+          updated_at,
+          funded_profile:funded_account_profiles(*)
+        `)
+        .eq("user_id", userId)
+        .order("created_at", { ascending: true }),
+      supabaseAdmin
+        .from("user_preferences")
+        .select("active_account_id")
+        .eq("user_id", userId)
+        .maybeSingle(),
+    ]);
 
     if (listErr) {
       if ((listErr as any)?.code === "42P01") {
@@ -34,12 +41,6 @@ export async function GET(req: NextRequest) {
       }
       throw listErr;
     }
-
-    const { data: prefs } = await supabaseAdmin
-      .from("user_preferences")
-      .select("active_account_id")
-      .eq("user_id", userId)
-      .maybeSingle();
 
     return NextResponse.json({
       accounts: (accounts ?? []).map((account: any) => ({

@@ -8,7 +8,7 @@ import {
 } from "@react-navigation/native";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { createNativeStackNavigator, type NativeStackNavigationProp } from "@react-navigation/native-stack";
-import { Ionicons } from "@expo/vector-icons";
+import Ionicons from "@expo/vector-icons/Ionicons";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { enableFreeze, enableScreens } from "react-native-screens";
 import type { Session } from "@supabase/supabase-js";
@@ -84,6 +84,11 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
 const navigationRef = createNavigationContainerRef<RootStackParamList>();
 type AccessStatusResponse = {
   hasAppAccess?: boolean;
+};
+
+type WorkspaceBootstrapResponse = {
+  access?: AccessStatusResponse;
+  legal?: LegalAcceptanceStatus;
 };
 
 type LegalAcceptanceStatus = {
@@ -683,45 +688,6 @@ function AppShell() {
     };
   }, []);
 
-  const refreshAccessStatus = useCallback(async () => {
-    if (!hasSupabaseConfig) {
-      setHasAppAccess(true);
-      setAccessReady(true);
-      setAccessError(null);
-      return;
-    }
-    if (!session?.user?.id) {
-      setHasAppAccess(false);
-      setAccessReady(true);
-      setAccessError(null);
-      return;
-    }
-
-    setAccessReady(false);
-    setLegalReady(false);
-    setAccessError(null);
-    try {
-      const access = await apiGet<AccessStatusResponse>("/api/access/status");
-      setHasAppAccess(Boolean(access?.hasAppAccess));
-    } catch (err) {
-      setHasAppAccess(false);
-      setAccessError(err instanceof Error ? err.message : "Unable to verify account access.");
-    } finally {
-      setAccessReady(true);
-    }
-  }, [session?.user?.id, session?.access_token]);
-
-  useEffect(() => {
-    let active = true;
-    (async () => {
-      await refreshAccessStatus();
-      if (!active) return;
-    })();
-    return () => {
-      active = false;
-    };
-  }, [refreshAccessStatus]);
-
   const refreshLegalAcceptance = useCallback(async () => {
     if (!hasSupabaseConfig) {
       setLegalStatus({ accepted: true, requiresAcceptance: false });
@@ -753,9 +719,58 @@ function AppShell() {
     }
   }, [hasAppAccess, language, session?.access_token, session?.user?.id]);
 
+  const refreshWorkspaceStatus = useCallback(async () => {
+    if (!hasSupabaseConfig) {
+      setHasAppAccess(true);
+      setAccessReady(true);
+      setAccessError(null);
+      setLegalStatus({ accepted: true, requiresAcceptance: false });
+      setLegalReady(true);
+      setLegalError(null);
+      return;
+    }
+    if (!session?.user?.id) {
+      setHasAppAccess(false);
+      setAccessReady(true);
+      setAccessError(null);
+      setLegalStatus(null);
+      setLegalReady(true);
+      setLegalError(null);
+      return;
+    }
+
+    setAccessReady(false);
+    setLegalReady(false);
+    setAccessError(null);
+    setLegalError(null);
+
+    try {
+      const bootstrap = await apiGet<WorkspaceBootstrapResponse>("/api/mobile/bootstrap");
+      const nextHasAppAccess = Boolean(bootstrap?.access?.hasAppAccess);
+      setHasAppAccess(nextHasAppAccess);
+      setAccessError(null);
+
+      if (nextHasAppAccess && bootstrap?.legal) {
+        setLegalStatus(bootstrap.legal);
+        setLegalError(null);
+      } else {
+        setLegalStatus(null);
+        setLegalError(null);
+      }
+    } catch (err) {
+      setHasAppAccess(false);
+      setAccessError(err instanceof Error ? err.message : "Unable to verify account access.");
+      setLegalStatus(null);
+      setLegalError(null);
+    }
+
+    setAccessReady(true);
+    setLegalReady(true);
+  }, [session?.access_token, session?.user?.id]);
+
   useEffect(() => {
-    void refreshLegalAcceptance();
-  }, [refreshLegalAcceptance]);
+    void refreshWorkspaceStatus();
+  }, [refreshWorkspaceStatus]);
 
   useEffect(() => {
     if (!supabaseMobile) return;
@@ -926,14 +941,14 @@ function AppShell() {
   const handleResetPasswordDone = useCallback(() => {
     setRecoveryError(null);
     setRecoverySessionReady(false);
-    void refreshAccessStatus();
+    void refreshWorkspaceStatus();
     if (navigationRef.isReady()) {
       navigationRef.reset({
         index: 0,
         routes: [{ name: postAuthRoute }],
       });
     }
-  }, [postAuthRoute, refreshAccessStatus]);
+  }, [postAuthRoute, refreshWorkspaceStatus]);
 
   const handleResetPasswordCancel = useCallback(() => {
     setRecoveryError(null);
@@ -986,7 +1001,7 @@ function AppShell() {
                 <PaymentRequiredScreen
                   checking={!accessReady}
                   error={accessError}
-                  onRetry={refreshAccessStatus}
+                  onRetry={refreshWorkspaceStatus}
                   onSignOut={handleSignOut}
                 />
               )}

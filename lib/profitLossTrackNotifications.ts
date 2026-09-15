@@ -1,4 +1,10 @@
 import { sendProfitLossAlertEmail } from "@/lib/email";
+import {
+  calendarDateToIso,
+  calendarDaysUntil,
+  getNextBillingEvent,
+  getRenewalNoticeStage,
+} from "@/lib/profitLossRenewals";
 import { supabaseAdmin } from "@/lib/supaBaseAdmin";
 
 type AlertSeverity = "warning" | "critical";
@@ -32,7 +38,9 @@ type CostRow = {
   billing_cycle: "weekly" | "monthly" | "quarterly" | "semiannual" | "annual" | "one_time";
   amount: number | null;
   starts_at: string | null;
+  next_renewal_at: string | null;
   ends_at: string | null;
+  auto_renews: boolean | null;
   is_active: boolean | null;
   include_in_break_even: boolean | null;
   amortization_months: number | null;
@@ -210,56 +218,6 @@ function expenseForRange(cost: CostRow, rangeStart: Date, rangeEnd: Date) {
   const overlap = clampRange(rangeStart, rangeEnd, startDate, costEnd);
   if (!overlap) return 0;
   return amount * (daysBetween(overlap.start, overlap.end) / Math.max(1, billingDays(cost.billing_cycle)));
-}
-
-function addBillingStep(date: Date, cycle: CostRow["billing_cycle"]) {
-  const next = new Date(date);
-  switch (cycle) {
-    case "weekly":
-      next.setDate(next.getDate() + 7);
-      return next;
-    case "monthly":
-      next.setMonth(next.getMonth() + 1);
-      return next;
-    case "quarterly":
-      next.setMonth(next.getMonth() + 3);
-      return next;
-    case "semiannual":
-      next.setMonth(next.getMonth() + 6);
-      return next;
-    case "annual":
-      next.setFullYear(next.getFullYear() + 1);
-      return next;
-    default:
-      return null;
-  }
-}
-
-function nextRenewalDate(cost: CostRow, today: Date) {
-  if ((cost.is_active ?? true) === false || cost.billing_cycle === "one_time") return null;
-  const endDate = parseDate(cost.ends_at);
-  const baseDate = parseDate(cost.starts_at) ?? parseDate(cost.created_at);
-  if (!baseDate) return null;
-  if (endDate && endDate < today) return null;
-
-  let next = new Date(baseDate);
-  let guard = 0;
-  while (next < today && guard < 500) {
-    const stepped = addBillingStep(next, cost.billing_cycle);
-    if (!stepped) return null;
-    next = stepped;
-    guard += 1;
-  }
-  if (endDate && next > endDate) return null;
-  return next;
-}
-
-function daysUntil(target: Date, base: Date) {
-  const t = new Date(target);
-  t.setHours(0, 0, 0, 0);
-  const b = new Date(base);
-  b.setHours(0, 0, 0, 0);
-  return Math.round((t.getTime() - b.getTime()) / 86400000);
 }
 
 function costCountsInBreakEven(cost: CostRow, profile: ProfileRow) {
@@ -489,7 +447,10 @@ async function dispatchCandidate(
         targets.map((row) => ({
           to: row.expo_push_token,
           title: "NeuroTrader business alert",
-          body: "Open NeuroTrader to review a private business alert.",
+          body:
+            candidate.alertKind === "renewal"
+              ? "A business subscription renewal or expiration is approaching. Open NeuroTrader to review it."
+              : "Open NeuroTrader to review a private business alert.",
           sound: "default",
           data: {
             screen: "Messages",
@@ -590,7 +551,7 @@ async function collectCandidatesForProfile(profile: ProfileRow, today: Date) {
   let costsQuery = supabaseAdmin
     .from("profit_loss_costs")
     .select(
-      "id,user_id,account_id,name,category,vendor,billing_cycle,amount,starts_at,ends_at,is_active,include_in_break_even,amortization_months,created_at"
+      "id,user_id,account_id,name,category,vendor,billing_cycle,amount,starts_at,next_renewal_at,ends_at,auto_renews,is_active,include_in_break_even,amortization_months,created_at"
     )
     .eq("user_id", profile.user_id);
   costsQuery = applyNullableAccountFilter(costsQuery, profile.account_id);
@@ -661,31 +622,33 @@ async function collectCandidatesForProfile(profile: ProfileRow, today: Date) {
   const variableCostAlertRatio = Math.max(0, safeNumber(profile.variable_cost_alert_ratio, 0.25));
 
   for (const cost of activeCosts) {
-    const renewal = nextRenewalDate(cost, today);
-    if (!renewal) continue;
-    const days = daysUntil(renewal, today);
-    if (days > 30) continue;
+    const event = getNextBillingEvent(cost, today);
+    if (!event) continue;
+    const stage = getRenewalNoticeStage(event, today, renewalAlertDays);
+    if (!stage) continue;
+    const days = calendarDaysUntil(event.date, today);
     const vendor = cost.vendor?.trim() || cost.name;
-    const renewalIso = toIso(renewal);
-    const severity: AlertSeverity = days <= renewalAlertDays ? "critical" : "warning";
+    const renewalIso = calendarDateToIso(event.date);
+    const severity: AlertSeverity = stage === "due_soon" ? "critical" : "warning";
+    const renews = event.kind === "renewal";
+    const timing = stage === "next_month" ? "next month" : `in ${days} day${days === 1 ? "" : "s"}`;
     candidates.push({
       userId: profile.user_id,
       accountId: profile.account_id ?? null,
       alertKind: "renewal",
-      alertKey: `renewal:${cost.id}:${renewalIso}:${severity}`,
+      alertKey: `renewal:${cost.id}:${renewalIso}:${event.kind}:${severity}`,
       severity,
       title:
         severity === "critical"
-          ? `Renewal due soon: ${vendor}`
-          : `Upcoming renewal: ${vendor}`,
-      message:
-        severity === "critical"
-          ? `${vendor} renews on ${renewalIso} for ${formatMoney(safeNumber(cost.amount))}. Review it before the charge hits.`
-          : `${vendor} renews on ${renewalIso} for ${formatMoney(safeNumber(cost.amount))}. Keep it visible in your stack planning.`,
+          ? `${renews ? "Renewal" : "Expiration"} due soon: ${vendor}`
+          : `${renews ? "Renewal" : "Expiration"} ${timing}: ${vendor}`,
+      message: `${vendor} ${renews ? "renews" : "expires"} on ${renewalIso} for ${formatMoney(
+        safeNumber(cost.amount)
+      )}. Review it before the ${renews ? "charge hits" : "service ends"}.`,
       detailLines: [
         `Cycle: ${cost.billing_cycle}`,
         `Amount: ${formatMoney(safeNumber(cost.amount))}`,
-        `Days until renewal: ${days}`,
+        `Days until ${event.kind}: ${days}`,
       ],
       inAppEnabled: profile.finance_alerts_inapp_enabled !== false,
       pushEnabled: profile.finance_alerts_push_enabled !== false,
@@ -695,6 +658,8 @@ async function collectCandidatesForProfile(profile: ProfileRow, today: Date) {
         cost_id: cost.id,
         renewal_date: renewalIso,
         days_until: days,
+        billing_event_kind: event.kind,
+        notice_stage: stage,
       },
     });
   }

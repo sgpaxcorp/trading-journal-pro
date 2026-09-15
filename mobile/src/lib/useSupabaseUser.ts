@@ -11,18 +11,16 @@ export function useSupabaseUser() {
 
     let active = true;
 
-    supabaseMobile.auth.getUser().then(({ data }) => {
+    supabaseMobile.auth.getSession().then(({ data }) => {
       if (!active) return;
-      setUser(data.user ?? null);
+      setUser(data.session?.user ?? null);
     });
 
     const {
       data: { subscription },
-    } = supabaseMobile.auth.onAuthStateChange(() => {
-      supabaseMobile?.auth.getUser().then(({ data }) => {
-        if (!active) return;
-        setUser(data.user ?? null);
-      });
+    } = supabaseMobile.auth.onAuthStateChange((_event, session) => {
+      if (!active) return;
+      setUser(session?.user ?? null);
     });
 
     return () => {

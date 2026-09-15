@@ -123,6 +123,7 @@ async function loadSavedFilingLibrary(userId: string, holdings: NeuroAnalysisReq
     .select("ticker,form,fiscal_year,period,period_end,file_name,openai_file_id,vector_store_id,bytes,usage_bytes")
     .eq("user_id", userId)
     .in("ticker", tickers)
+    .is("deleted_at", null)
     .not("vector_store_id", "is", null)
     .order("fiscal_year", { ascending: false, nullsFirst: false })
     .order("created_at", { ascending: false })
@@ -217,6 +218,15 @@ function responseTokenUsage(response: any) {
   };
 }
 
+function emptyResponseReason(response: any) {
+  const reason = String(response?.incomplete_details?.reason ?? response?.status ?? "unknown").trim();
+  return reason || "unknown";
+}
+
+function responseNeedsRetry(response: any) {
+  return !String(response?.output_text ?? "").trim() || response?.status === "incomplete";
+}
+
 export async function POST(req: Request) {
   try {
     const authUser = await getAuthUser(req);
@@ -289,6 +299,76 @@ export async function POST(req: Request) {
       assumptions: payloadWithLibrary.assumptions,
     });
 
+    const vectorStoreIds = cleanVectorStoreIds(payloadWithLibrary.uploadedFilings ?? []);
+    const fileSearchTools =
+      vectorStoreIds.length > 0
+        ? [
+            {
+              type: "file_search" as const,
+              vector_store_ids: vectorStoreIds,
+              max_num_results: 20,
+            },
+          ]
+        : [];
+    const webSearchTool = neuroWebSearchTool();
+    const tools = [...fileSearchTools, ...(webSearchTool ? [webSearchTool] : [])] as any[];
+    const include = [
+      ...(fileSearchTools.length > 0 ? ["file_search_call.results"] : []),
+      ...(webSearchTool ? ["web_search_call.action.sources"] : []),
+    ];
+
+    const responseInput = [
+      buildNeuroAnalysisInput(payloadWithLibrary),
+      "",
+      "Deterministic engine snapshot:",
+      JSON.stringify(engine, null, 2),
+    ].join("\n");
+    const createResponse = (reasoningEffort?: string) =>
+      client.responses.create({
+        model: MODEL,
+        reasoning: neuroReasoningConfig(MODEL, reasoningEffort) as any,
+        instructions: NEURO_ANALYSIS_SYSTEM_PROMPT,
+        input: responseInput,
+        tools,
+        include: include.length > 0 ? (include as any) : undefined,
+        max_output_tokens: 6000,
+        metadata: {
+          feature: "neuro_analysis",
+          user_id: authUser.userId,
+        },
+      });
+
+    let response = await createResponse();
+    if (responseNeedsRetry(response)) {
+      console.warn(
+        `[neuro-analysis/analyze] Unusable model output (${emptyResponseReason(response)}); retrying with low reasoning.`
+      );
+      response = await createResponse("low");
+    }
+    if (responseNeedsRetry(response)) {
+      throw new Error(`The analysis engine did not produce a final report (${emptyResponseReason(response)}).`);
+    }
+
+    const missing10k = missingIndexedFilingTickers(payloadWithLibrary, "10-K");
+    const missing10q = missingIndexedFilingTickers(payloadWithLibrary, "10-Q");
+    const parsedAgent = parseAgentJson(response.output_text);
+    const rawReport =
+      typeof parsedAgent?.reportMarkdown === "string"
+        ? parsedAgent.reportMarkdown
+        : typeof parsedAgent?.report === "string"
+        ? parsedAgent.report
+        : response.output_text;
+    const webSources = extractNeuroWebSources(response);
+    const report = appendNeuroWebSources(sanitizeAgentReport(rawReport), webSources);
+    if (!report.trim()) {
+      throw new Error("The analysis engine produced an empty report.");
+    }
+    const tokenUsage = responseTokenUsage(response);
+    const structured = {
+      agent: parsedAgent ?? { reportMarkdown: report },
+      engine,
+    };
+
     const savedCase = await upsertNeuroCase({
       userId: authUser.userId,
       caseId: payload.caseId ?? null,
@@ -310,60 +390,6 @@ export async function POST(req: Request) {
       },
     });
     const caseId = savedCase?.id ? String(savedCase.id) : null;
-
-    const vectorStoreIds = cleanVectorStoreIds(payloadWithLibrary.uploadedFilings ?? []);
-    const fileSearchTools =
-      vectorStoreIds.length > 0
-        ? [
-            {
-              type: "file_search" as const,
-              vector_store_ids: vectorStoreIds,
-              max_num_results: 20,
-            },
-          ]
-        : [];
-    const webSearchTool = neuroWebSearchTool();
-    const tools = [...fileSearchTools, ...(webSearchTool ? [webSearchTool] : [])] as any[];
-    const include = [
-      ...(fileSearchTools.length > 0 ? ["file_search_call.results"] : []),
-      ...(webSearchTool ? ["web_search_call.action.sources"] : []),
-    ];
-
-    const response = await client.responses.create({
-      model: MODEL,
-      reasoning: neuroReasoningConfig(MODEL) as any,
-      instructions: NEURO_ANALYSIS_SYSTEM_PROMPT,
-      input: [
-        buildNeuroAnalysisInput(payloadWithLibrary),
-        "",
-        "Deterministic engine snapshot:",
-        JSON.stringify(engine, null, 2),
-      ].join("\n"),
-      tools,
-      include: include.length > 0 ? (include as any) : undefined,
-      max_output_tokens: 3500,
-      metadata: {
-        feature: "neuro_analysis",
-        user_id: authUser.userId,
-      },
-    });
-
-    const missing10k = missingIndexedFilingTickers(payloadWithLibrary, "10-K");
-    const missing10q = missingIndexedFilingTickers(payloadWithLibrary, "10-Q");
-    const parsedAgent = parseAgentJson(response.output_text);
-    const rawReport =
-      typeof parsedAgent?.reportMarkdown === "string"
-        ? parsedAgent.reportMarkdown
-        : typeof parsedAgent?.report === "string"
-        ? parsedAgent.report
-        : response.output_text;
-    const webSources = extractNeuroWebSources(response);
-    const report = appendNeuroWebSources(sanitizeAgentReport(rawReport), webSources);
-    const tokenUsage = responseTokenUsage(response);
-    const structured = {
-      agent: parsedAgent ?? { reportMarkdown: report },
-      engine,
-    };
 
     const savedReport = await insertNeuroReport({
       userId: authUser.userId,

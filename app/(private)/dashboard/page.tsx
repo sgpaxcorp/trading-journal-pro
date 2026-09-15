@@ -36,6 +36,7 @@ import {
   calculateFundedAccountMetrics,
   type TradingAccountType,
 } from "@/lib/fundedAccounts";
+import { resolveDailyGoalStatus } from "@/lib/dashboardCoachPlan";
 
 import TopNav from "@/app/components/TopNav";
 
@@ -77,6 +78,9 @@ type DashboardCoachAudit = {
 type DashboardCoachReminder = {
   summary: string | null;
   updatedAt: string | null;
+  sourceDate: string | null;
+  referencedDates: string[];
+  stale: boolean;
   actionPlan: DashboardCoachActionPlan | null;
   audit: DashboardCoachAudit | null;
 };
@@ -1180,7 +1184,6 @@ export default function DashboardPage() {
     activeAccountId,
     setActiveAccount,
     createAccount,
-    loading: accountsLoading,
     error: accountsError,
   } = useTradingAccounts();
   const router = useRouter();
@@ -1224,6 +1227,8 @@ export default function DashboardPage() {
   const [accountMessage, setAccountMessage] = useState<string | null>(null);
   const [dailyCoachMessage, setDailyCoachMessage] = useState<MotivationMessageRow | null>(null);
   const [coachReminder, setCoachReminder] = useState<DashboardCoachReminder | null>(null);
+  const [coachReminderRefreshing, setCoachReminderRefreshing] = useState(false);
+  const [dashboardDataRefreshVersion, setDashboardDataRefreshVersion] = useState(0);
   const [businessMilestones, setBusinessMilestones] = useState<BusinessMilestoneProgress[]>([]);
   const [milestoneCount, setMilestoneCount] = useState({ completed: 0, total: 0 });
   const [systemPanelTab, setSystemPanelTab] = useState<SystemPanelTab>("focus");
@@ -1410,37 +1415,49 @@ export default function DashboardPage() {
   }, [coachDayKey, loading, user, isEs]);
 
   useEffect(() => {
-    if (loading || !user) return;
+    if (loading || !user || !activeAccountId) return;
     let cancelled = false;
+    let requestInFlight = false;
+    let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+    let lastRequestedAt = 0;
+    let lastDataRefreshAt = 0;
+    const userId = (user as any)?.uid || (user as any)?.id || "";
 
-    const loadLatestCoachReminder = async () => {
+    setCoachReminder(null);
+
+    const loadLatestCoachReminder = async (force = false) => {
+      const now = Date.now();
+      if (requestInFlight || (!force && now - lastRequestedAt < 15_000)) return;
+      requestInFlight = true;
+      lastRequestedAt = now;
+      if (!cancelled) setCoachReminderRefreshing(true);
       try {
-        const userId = (user as any)?.uid || (user as any)?.id || "";
         if (!userId) {
           setCoachReminder(null);
           return;
         }
 
-        const { data, error } = await supabaseBrowser
-          .from("ai_coach_threads")
-          .select("summary, metadata, updated_at")
-          .eq("user_id", userId)
-          .order("updated_at", { ascending: false })
-          .limit(1)
-          .maybeSingle();
+        const { data: sessionData } = await supabaseBrowser.auth.getSession();
+        const token = sessionData?.session?.access_token;
+        if (!token) return;
+        const params = new URLSearchParams({
+          accountId: activeAccountId,
+          language: isEs ? "es" : "en",
+        });
+        const response = await fetch(`/api/ai-coach/dashboard-plan?${params.toString()}`, {
+          headers: { Authorization: `Bearer ${token}` },
+          cache: "no-store",
+        });
+        const body = await response.json().catch(() => ({}));
 
         if (cancelled) return;
-        if (error) {
-          console.warn("[dashboard] latest ai coach thread fetch error:", error);
-          setCoachReminder(null);
-          return;
-        }
+        if (!response.ok) throw new Error(body?.error || `HTTP ${response.status}`);
 
-        const metadata = data?.metadata && typeof data.metadata === "object" ? (data.metadata as any) : {};
-        const actionPlan = metadata?.latestActionPlan ?? null;
-        const audit = metadata?.latestAudit ?? null;
+        const dashboardPlan = body?.plan && typeof body.plan === "object" ? body.plan : null;
+        const actionPlan = dashboardPlan?.actionPlan ?? null;
+        const audit = dashboardPlan?.audit ?? null;
         const hasReminder =
-          String(data?.summary || "").trim() ||
+          String(dashboardPlan?.summary || "").trim() ||
           String(actionPlan?.whatISee || "").trim() ||
           String(actionPlan?.whatIsDrifting || "").trim() ||
           String(actionPlan?.whatToProtect || "").trim() ||
@@ -1457,31 +1474,95 @@ export default function DashboardPage() {
 
         setCoachReminder({
           summary:
-            typeof data?.summary === "string" && data.summary.trim()
-              ? data.summary.trim()
+            typeof dashboardPlan?.summary === "string" && dashboardPlan.summary.trim()
+              ? dashboardPlan.summary.trim()
               : typeof actionPlan?.summary === "string" && actionPlan.summary.trim()
                 ? actionPlan.summary.trim()
                 : null,
-          updatedAt: typeof data?.updated_at === "string" ? data.updated_at : null,
+          updatedAt: typeof dashboardPlan?.generatedAt === "string" ? dashboardPlan.generatedAt : null,
+          sourceDate: typeof dashboardPlan?.sourceDate === "string" ? dashboardPlan.sourceDate : null,
+          referencedDates: Array.isArray(dashboardPlan?.referencedDates)
+            ? dashboardPlan.referencedDates.filter((date: unknown) => typeof date === "string")
+            : [],
+          stale: body?.stale === true,
           actionPlan,
           audit,
         });
       } catch (err) {
         if (cancelled) return;
-        console.warn("[dashboard] latest ai coach thread exception:", err);
-        setCoachReminder(null);
+        console.warn("[dashboard] latest ai coach plan exception:", err);
+      } finally {
+        requestInFlight = false;
+        if (!cancelled) setCoachReminderRefreshing(false);
       }
     };
 
-    loadLatestCoachReminder();
+    const scheduleRefresh = () => {
+      if (refreshTimer) clearTimeout(refreshTimer);
+      refreshTimer = setTimeout(() => {
+        setDashboardDataRefreshVersion((version) => version + 1);
+        void loadLatestCoachReminder(true);
+      }, 900);
+    };
+    const refreshOnReturn = () => {
+      const now = Date.now();
+      if (now - lastDataRefreshAt >= 15_000) {
+        lastDataRefreshAt = now;
+        setDashboardDataRefreshVersion((version) => version + 1);
+      }
+      void loadLatestCoachReminder();
+    };
+    const handleFocus = () => refreshOnReturn();
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") refreshOnReturn();
+    };
+
+    void loadLatestCoachReminder(true);
+    window.addEventListener("focus", handleFocus);
+    document.addEventListener("visibilitychange", handleVisibility);
+
+    const channel = supabaseBrowser
+      .channel(`dashboard-coach-plan-${activeAccountId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "journal_entries",
+          filter: `user_id=eq.${userId}`,
+        },
+        (payload: any) => {
+          const changedAccountId = String(payload?.new?.account_id ?? payload?.old?.account_id ?? "");
+          if (!changedAccountId || changedAccountId === activeAccountId) scheduleRefresh();
+        }
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "growth_plans",
+          filter: `user_id=eq.${userId}`,
+        },
+        (payload: any) => {
+          const changedAccountId = String(payload?.new?.account_id ?? payload?.old?.account_id ?? "");
+          if (!changedAccountId || changedAccountId === activeAccountId) scheduleRefresh();
+        }
+      )
+      .subscribe();
+
     return () => {
       cancelled = true;
+      if (refreshTimer) clearTimeout(refreshTimer);
+      window.removeEventListener("focus", handleFocus);
+      document.removeEventListener("visibilitychange", handleVisibility);
+      void supabaseBrowser.removeChannel(channel);
     };
-  }, [loading, user, activeAccountId]);
+  }, [loading, user, activeAccountId, isEs]);
 
   // Load plan + journal + checklist + cashflows (rolling day for checklist)
   useEffect(() => {
-    if (loading || !user || accountsLoading || !activeAccountId) return;
+    if (loading || !user || !activeAccountId) return;
 
     const journalUserId = (user as any)?.uid || (user as any)?.id || "";
     const cashflowUserIdPrimary = (user as any)?.id || (user as any)?.uid || "";
@@ -1573,13 +1654,13 @@ export default function DashboardPage() {
     return () => {
       cancelled = true;
     };
-  }, [loading, user, rollingTodayStr, accountsLoading, activeAccountId]);
+  }, [loading, user, rollingTodayStr, activeAccountId, dashboardDataRefreshVersion]);
 
   // Authoritative balance series (server-side)
   useEffect(() => {
     let alive = true;
     async function loadSeries() {
-      if (loading || !user || accountsLoading || !activeAccountId) return;
+      if (loading || !user || !activeAccountId) return;
       try {
         const { data: sessionData } = await supabaseBrowser.auth.getSession();
         const token = sessionData?.session?.access_token;
@@ -1602,7 +1683,7 @@ export default function DashboardPage() {
     return () => {
       alive = false;
     };
-  }, [activeAccountId, accountsLoading, loading, user]);
+  }, [activeAccountId, loading, user]);
 
   // Rebuild calendar
   useEffect(() => {
@@ -1667,7 +1748,7 @@ export default function DashboardPage() {
   }, [entries, viewDate, user, activeAccountId]);
 
   useEffect(() => {
-    if (!user || accountsLoading || !activeAccountId) return;
+    if (!user || !activeAccountId) return;
     let alive = true;
     const milestoneAccountId = activeAccountId;
     async function loadBusinessMilestones() {
@@ -1696,7 +1777,7 @@ export default function DashboardPage() {
     return () => {
       alive = false;
     };
-  }, [user, accountsLoading, activeAccountId, isEs]);
+  }, [user, activeAccountId, isEs]);
 
   const weekRows = useMemo(() => {
     const rows: Array<{ rowIndex: number; weekOfYear: number }> = [];
@@ -3430,6 +3511,38 @@ export default function DashboardPage() {
           !equalsText(row.value, aiPlanAlignedTo) &&
           !aiCoachReadoutRows.some((item) => equalsText(item.value, row.value))
       );
+      const hasTodaySession = filteredEntries.some(
+        (entry) => String((entry as any)?.date ?? "").slice(0, 10) === sessionDateStr
+      );
+      const dailyGoalStatus = resolveDailyGoalStatus({
+        hasPlan: Boolean(plan),
+        isTradingDay: dailyCalcs.isTradingDay,
+        expectedUsd: dailyCalcs.expectedSessionUSD,
+        actualUsd: dailyCalcs.actualSessionUSD,
+        hasSession: hasTodaySession,
+      });
+      const dailyGoalStatusView = {
+        not_configured: {
+          label: L("Set daily goal", "Configurar meta diaria"),
+          className: "border-slate-700 bg-slate-900 text-slate-300",
+        },
+        paused: {
+          label: L("Goal paused", "Meta pausada"),
+          className: "border-cyan-300/30 bg-cyan-400/10 text-cyan-100",
+        },
+        no_activity: {
+          label: L("No activity yet", "Sin actividad todavía"),
+          className: "border-slate-600 bg-slate-800 text-slate-200",
+        },
+        in_progress: {
+          label: L("Not reached yet", "Aún no alcanzada"),
+          className: "border-amber-300/30 bg-amber-400/10 text-amber-100",
+        },
+        met: {
+          label: L("Goal met", "Meta cumplida"),
+          className: "border-emerald-300/40 bg-emerald-400/15 text-emerald-100",
+        },
+      }[dailyGoalStatus];
 
       const renderRuleCard = (label: string, items: any[], accentClass: string, bulletClass: string) => (
         <div className="rounded-xl border border-slate-800 bg-slate-950/35 p-3">
@@ -3501,6 +3614,65 @@ export default function DashboardPage() {
           {checklistSaveError ? (
             <p className="text-[12px] text-rose-300 mt-2">{checklistSaveError}</p>
           ) : null}
+
+          <div className="mt-3 border-y border-emerald-300/20 bg-emerald-400/5 py-3">
+            <div className="grid gap-3 px-1 sm:grid-cols-[minmax(0,1.25fr)_repeat(2,minmax(110px,0.7fr))_auto] sm:items-center">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-emerald-200">
+                    {L("Today's money goal", "Meta de hoy en dinero")}
+                  </p>
+                  <span className={`rounded-full border px-2.5 py-1 text-[10px] font-semibold ${dailyGoalStatusView.className}`}>
+                    {dailyGoalStatusView.label}
+                  </span>
+                </div>
+                {dailyGoalStatus === "not_configured" ? (
+                  <p className="mt-1 text-[12px] text-slate-400">
+                    {L("Define the daily percentage in your Trading Business Plan.", "Define el porcentaje diario en tu Plan de Empresa de Trading.")} {" "}
+                    <Link href="/growth-plan" className="font-semibold text-emerald-300 hover:text-emerald-200">
+                      {L("Configure", "Configurar")}
+                    </Link>
+                  </p>
+                ) : dailyGoalStatus === "paused" ? (
+                  <p className="mt-1 text-[12px] text-slate-400">
+                    {dailyCalcs.holidayLabel || L("Non-trading day", "Día sin mercado")}
+                  </p>
+                ) : (
+                  <div className="mt-2 h-1.5 w-full max-w-sm overflow-hidden rounded-full bg-slate-800">
+                    <div
+                      className={`h-full ${dailyGoalStatus === "met" ? "bg-emerald-300" : "bg-amber-300"}`}
+                      style={{ width: `${Math.min(100, dailyCalcs.progressToGoal)}%` }}
+                    />
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <p className="text-[10px] uppercase tracking-[0.16em] text-slate-500">{L("Goal", "Meta")}</p>
+                <p className="mt-0.5 text-[17px] font-semibold text-slate-50">
+                  {dailyGoalStatus === "not_configured" ? "—" : formatCurrency(dailyCalcs.expectedSessionUSD)}
+                </p>
+              </div>
+
+              <div>
+                <p className="text-[10px] uppercase tracking-[0.16em] text-slate-500">{L("Today P&L", "P&L de hoy")}</p>
+                <p className={`mt-0.5 text-[17px] font-semibold ${dailyCalcs.actualSessionUSD >= 0 ? "text-emerald-300" : "text-rose-300"}`}>
+                  {dailyGoalStatus === "not_configured" ? "—" : formatCurrency(dailyCalcs.actualSessionUSD)}
+                </p>
+              </div>
+
+              <div className="sm:text-right">
+                <p className="text-[10px] uppercase tracking-[0.16em] text-slate-500">
+                  {dailyGoalStatus === "met" ? L("Above goal", "Sobre la meta") : L("Remaining", "Falta")}
+                </p>
+                <p className={`mt-0.5 text-[15px] font-semibold ${dailyGoalStatus === "met" ? "text-emerald-300" : "text-slate-200"}`}>
+                  {dailyGoalStatus === "not_configured" || dailyGoalStatus === "paused"
+                    ? "—"
+                    : formatCurrency(dailyGoalStatus === "met" ? dailyCalcs.aboveGoal : dailyCalcs.remainingToGoal)}
+                </p>
+              </div>
+            </div>
+          </div>
 
           {systemPanelTab === "focus" ? (
             <div className="mt-3 grid gap-3 xl:grid-cols-[minmax(0,1.1fr)_minmax(280px,0.9fr)]">
@@ -3630,12 +3802,22 @@ export default function DashboardPage() {
                 <p className="text-[11px] uppercase tracking-[0.2em] text-violet-200">
                   {L("Latest Business AI plan", "Último plan del Coach Empresarial IA")}
                 </p>
-                {coachReminder?.updatedAt ? (
+                {coachReminder?.sourceDate ? (
                   <span className="rounded-full border border-violet-300/20 bg-violet-400/10 px-2.5 py-1 text-[10px] text-violet-100">
-                    {new Date(coachReminder.updatedAt).toLocaleDateString(localeTag, {
+                    {L("Data through", "Datos hasta")} {new Date(`${coachReminder.sourceDate}T12:00:00`).toLocaleDateString(localeTag, {
                       month: "short",
                       day: "numeric",
                     })}
+                  </span>
+                ) : null}
+                {coachReminderRefreshing ? (
+                  <span className="text-[10px] font-medium text-violet-200/70">
+                    {L("Checking for new data…", "Buscando data nueva…")}
+                  </span>
+                ) : null}
+                {!coachReminderRefreshing && coachReminder?.stale ? (
+                  <span className="text-[10px] font-medium text-amber-200">
+                    {L("Update pending", "Actualización pendiente")}
                   </span>
                 ) : null}
               </div>

@@ -128,13 +128,20 @@ function rawNumber(value: any) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-async function fetchJson(url: string, headers: Record<string, string> = MARKET_HEADERS) {
+async function fetchJson(
+  url: string,
+  headers: Record<string, string> = MARKET_HEADERS,
+  options: { cache?: "force-cache" | "no-store"; revalidate?: number } = {}
+) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), MARKET_FETCH_TIMEOUT_MS);
+  const cacheOptions =
+    options.cache === "no-store"
+      ? ({ cache: "no-store" as const })
+      : ({ cache: "force-cache" as const, next: { revalidate: options.revalidate ?? 300 } });
   const res = await fetch(url, {
     headers,
-    cache: "force-cache",
-    next: { revalidate: 300 },
+    ...cacheOptions,
     signal: controller.signal,
   }).finally(() => clearTimeout(timer));
   const text = await res.text();
@@ -533,7 +540,11 @@ async function fetchSecCompanyFallback(ticker: string) {
   const entry = index[ticker];
   if (!entry?.cik) throw new Error("SEC ticker not found.");
   const cik = String(entry.cik).padStart(10, "0");
-  const facts = await fetchJson(`https://data.sec.gov/api/xbrl/companyfacts/CIK${cik}.json`, SEC_HEADERS);
+  const facts = await fetchJson(
+    `https://data.sec.gov/api/xbrl/companyfacts/CIK${cik}.json`,
+    SEC_HEADERS,
+    { cache: "no-store" }
+  );
   return {
     company: {
       name: facts?.entityName ?? entry.name ?? ticker,

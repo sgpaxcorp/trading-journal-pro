@@ -17,6 +17,7 @@
     "release:test-deletion": "node scripts/release/test-account-deletion.mjs",
     "release:create-launch-coupon": "node scripts/release/create-launch-coupon.mjs",
     "release:check-config": "node scripts/release/check-config.mjs",
+    "neuro:smoke-live": "node scripts/neuro-analysis/smoke-live.mjs",
     "neuro:upload-corpus": "node scripts/neuro-analysis/upload-cfa-corpus.mjs",
     "admin:bootstrap": "node supabase/manual/bootstrap_admin_user.mjs",
     "audit:prod": "npm audit --omit=dev --audit-level=high",

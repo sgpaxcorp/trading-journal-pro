@@ -16,6 +16,38 @@ export type TradingAccount = {
   created_at?: string | null;
 };
 
+const ACTIVE_ACCOUNT_STORAGE_PREFIX = "ntj-active-account:";
+const accountMemoryCache = new Map<
+  string,
+  { accounts: TradingAccount[]; activeAccountId: string | null }
+>();
+
+function readStoredActiveAccountId(userId: string): string | null {
+  if (typeof window === "undefined" || !userId) return null;
+  try {
+    return window.localStorage.getItem(`${ACTIVE_ACCOUNT_STORAGE_PREFIX}${userId}`);
+  } catch {
+    return null;
+  }
+}
+
+function rememberAccounts(
+  userId: string,
+  accounts: TradingAccount[],
+  activeAccountId: string | null
+) {
+  if (!userId) return;
+  accountMemoryCache.set(userId, { accounts, activeAccountId });
+  if (typeof window === "undefined") return;
+  try {
+    const key = `${ACTIVE_ACCOUNT_STORAGE_PREFIX}${userId}`;
+    if (activeAccountId) window.localStorage.setItem(key, activeAccountId);
+    else window.localStorage.removeItem(key);
+  } catch {
+    // Storage can be unavailable in privacy-restricted browser contexts.
+  }
+}
+
 export function useTradingAccounts() {
   const { user } = useAuth() as any;
   const [accounts, setAccounts] = useState<TradingAccount[]>([]);
@@ -57,6 +89,7 @@ export function useTradingAccounts() {
       // Make the usable account available immediately so dependent pages can
       // hydrate while the preference is being repaired on the server.
       setActiveAccountId(preferred?.id ?? null);
+      rememberAccounts(String(user?.id ?? ""), rows, preferred?.id ?? null);
 
       if (rows.length === 0) {
         // create a default account
@@ -70,7 +103,7 @@ export function useTradingAccounts() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [user?.id]);
 
   const createAccount = useCallback(async (
     name: string,
@@ -166,12 +199,25 @@ export function useTradingAccounts() {
     const body = await res.json();
     if (!res.ok) throw new Error(body?.error || "Failed to set active account");
 
-    setActiveAccountId(body?.activeAccountId ?? accountId);
-  }, []);
+    const nextActiveAccountId = body?.activeAccountId ?? accountId;
+    setActiveAccountId(nextActiveAccountId);
+    const userId = String(user?.id ?? "");
+    const cachedAccounts = accountMemoryCache.get(userId)?.accounts ?? accounts;
+    rememberAccounts(userId, cachedAccounts, nextActiveAccountId);
+  }, [accounts, user?.id]);
 
   useEffect(() => {
     if (!user?.id) return;
-    fetchAccounts();
+    const userId = String(user.id);
+    const memory = accountMemoryCache.get(userId);
+    if (memory) {
+      setAccounts(memory.accounts);
+      setActiveAccountId(memory.activeAccountId);
+    } else {
+      const storedActiveAccountId = readStoredActiveAccountId(userId);
+      if (storedActiveAccountId) setActiveAccountId(storedActiveAccountId);
+    }
+    void fetchAccounts();
   }, [user?.id, fetchAccounts]);
 
   return {

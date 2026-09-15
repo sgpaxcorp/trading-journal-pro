@@ -24,6 +24,9 @@ type ProfileRow = {
   subscription_status?: string | null;
   onboarding_completed?: boolean | null;
   plan?: string | null;
+  legal_terms_version?: string | null;
+  legal_privacy_version?: string | null;
+  legal_accepted_at?: string | null;
 };
 
 export type AuthenticatedApiUser = {
@@ -85,7 +88,9 @@ export async function loadPlatformAccessForUser(user: User): Promise<Omit<Platfo
   const [{ data: profile }, { data: entitlements }] = await Promise.all([
     supabaseAdmin
       .from("profiles")
-      .select("id, subscription_status, onboarding_completed, plan, email")
+      .select(
+        "id, subscription_status, onboarding_completed, plan, email, legal_terms_version, legal_privacy_version, legal_accepted_at"
+      )
       .eq("id", userId)
       .maybeSingle(),
     supabaseAdmin
@@ -98,9 +103,11 @@ export async function loadPlatformAccessForUser(user: User): Promise<Omit<Platfo
   const allowLocalFallback = shouldAllowLocalProfileAccessFallback();
 
   if (!profile && allowLocalFallback && user.email) {
-    const { data: emailProfiles } = await supabaseAdmin
-      .from("profiles")
-      .select("id, subscription_status, onboarding_completed, plan, email")
+      const { data: emailProfiles } = await supabaseAdmin
+        .from("profiles")
+        .select(
+          "id, subscription_status, onboarding_completed, plan, email, legal_terms_version, legal_privacy_version, legal_accepted_at"
+        )
       .ilike("email", user.email)
       .order("created_at", { ascending: false })
       .limit(1);
